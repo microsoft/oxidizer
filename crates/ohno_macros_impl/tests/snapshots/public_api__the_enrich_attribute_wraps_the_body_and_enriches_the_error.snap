@@ -149,7 +149,12 @@ fn load(&self) -> Result<(), MyError> {
 // ======== the signature survives untouched ========
 
 #[enrich_err]
-pub(crate) fn load<A: Clone>(path: &str, count: usize) -> Result<A, MyError>
+/// Documented.
+pub(crate) unsafe extern "C" fn load<A: Clone>(
+    &mut self,
+    path: &str,
+    count: usize,
+) -> Result<A, MyError>
 where
     A: Send,
 {
@@ -157,7 +162,12 @@ where
 }
 // ---- expands to ----
 
-pub(crate) fn load<A: Clone>(path: &str, count: usize) -> Result<A, MyError>
+/// Documented.
+pub(crate) unsafe extern "C" fn load<A: Clone>(
+    &mut self,
+    path: &str,
+    count: usize,
+) -> Result<A, MyError>
 where
     A: Send,
 {

@@ -754,8 +754,17 @@ fn the_enrich_attribute_wraps_the_body_and_enriches_the_error() {
             "the signature survives untouched",
             enriched(
                 TokenStream::new(),
+                // Deliberately loaded with the rarer signature components. The wrapper re-emits
+                // the whole `syn::Signature` and only swaps the block, so an omission anywhere in
+                // it — a dropped `unsafe`, ABI, receiver or doc attribute — is a silent
+                // regression unless the snapshot carries one of each.
                 quote! {
-                    pub(crate) fn load<A: Clone>(path: &str, count: usize) -> Result<A, MyError>
+                    /// Documented.
+                    pub(crate) unsafe extern "C" fn load<A: Clone>(
+                        &mut self,
+                        path: &str,
+                        count: usize,
+                    ) -> Result<A, MyError>
                     where
                         A: Send,
                     {
