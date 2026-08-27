@@ -193,8 +193,12 @@ function Get-InternalToolchainMinorVersion {
 
     foreach ($value in $values) {
         $channel = $value.Groups[1].Value
+        $channelMatch = [regex]::Match(
+            $channel,
+            '^(?<quote>[''"]?)ms-prod-(?<minor>\d+\.\d+)(?:@[a-z0-9_-]+)?\k<quote>$'
+        )
 
-        if ($channel -notmatch '^ms-prod-(\d+\.\d+)(?:@[a-z0-9_-]+)?$') {
+        if (-not $channelMatch.Success) {
             throw (
                 "MSRUSTUP_TOOLCHAIN channel '$channel' in '$FilePath' has an invalid format. " +
                 "Choose a production short name such as 'ms-prod-1.95' by running " +
@@ -203,7 +207,7 @@ function Get-InternalToolchainMinorVersion {
             )
         }
 
-        $versions += $Matches[1]
+        $versions += $channelMatch.Groups["minor"].Value
     }
 
     $uniqueVersions = @($versions | Sort-Object -Unique)
