@@ -4,16 +4,19 @@
 
 <#
 .SYNOPSIS
-    Updates Rust toolchain versions in constants.env.
+    Updates Rust toolchain versions in constants.env and rust-toolchain.toml.
 
 .DESCRIPTION
     This script automatically updates the Rust toolchain configuration to the latest versions:
-    - Queries the latest stable Rust version and updates RUST_LATEST in constants.env
+    - Queries the latest stable Rust version and updates RUST_LATEST in constants.env and rust-toolchain.toml
     - Calculates yesterday's nightly build date and updates RUST_NIGHTLY in constants.env
     - Fetches the latest cargo-check-external-types release to determine the tested nightly version for RUST_NIGHTLY_EXTERNAL_TYPES
 
 .PARAMETER ConstantsFile
     Path to the constants.env file. Defaults to ../constants.env relative to script location.
+
+.PARAMETER ToolchainFile
+    Path to the rust-toolchain.toml file. Defaults to ../rust-toolchain.toml relative to script location.
 
 .PARAMETER DryRun
     If specified, shows what would be updated without actually modifying the files.
@@ -27,10 +30,12 @@
 
 param(
     [string]$ConstantsFile = (Join-Path $PSScriptRoot ".." "constants.env"),
+    [string]$ToolchainFile = (Join-Path $PSScriptRoot ".." "rust-toolchain.toml"),
     [switch]$DryRun
 )
 
 $ErrorActionPreference = "Stop"
+$ToolchainChannelPattern = '(?m)^(channel[ \t]*=[ \t]*)"([^"]*)"'
 
 function Get-LatestStableRustVersion {
     <#
@@ -146,6 +151,18 @@ function Update-ConstantsEnv {
     return $content
 }
 
+function Update-RustToolchain {
+    param(
+        [string]$FilePath,
+        [string]$Version
+    )
+    $content = Get-Content $FilePath -Raw
+    $content = Get-Content $FilePath -Raw
+    $replacement = '${1}"' + $Version + '"'
+
+    return $content -replace $ToolchainChannelPattern, $replacement
+}
+
 # Main script execution
 Write-Host "Fetching latest Rust versions..."
 Write-Host ""
@@ -156,12 +173,27 @@ if (-not (Test-Path $ConstantsFile)) {
     exit 1
 }
 
+if (-not (Test-Path $ToolchainFile)) {
+    Write-Host "Error: Rust toolchain file not found at '$ToolchainFile'"
+    exit 1
+}
+
 # Get current versions
 $constantsContent = Get-Content $ConstantsFile
 
 $currentRustLatest = ($constantsContent | Select-String '^RUST_LATEST=(.+)$').Matches.Groups[1].Value
 $currentRustNightly = ($constantsContent | Select-String '^RUST_NIGHTLY=(.+)$').Matches.Groups[1].Value
 $currentRustNightlyExternal = ($constantsContent | Select-String '^RUST_NIGHTLY_EXTERNAL_TYPES=(.+)$').Matches.Groups[1].Value
+
+$toolchainContent = Get-Content $ToolchainFile -Raw
+$toolchainMatch = [regex]::Match($toolchainContent, $ToolchainChannelPattern)
+
+if (-not $toolchainMatch.Success) {
+    Write-Host "Error: Rust toolchain channel not found in '$ToolchainFile'"
+    exit 1
+}
+
+$currentToolchain = $toolchainMatch.Groups[2].Value
 
 # Fetch new versions
 $stableResult = Get-LatestStableRustVersion
@@ -177,12 +209,14 @@ $externalTypesResult = Get-ExternalTypesTestedNightly
 
 Write-Host "Current versions:"
 Write-Host "  RUST_LATEST                : $currentRustLatest"
+Write-Host "  rust-toolchain.toml channel: $currentToolchain"
 Write-Host "  RUST_NIGHTLY               : $currentRustNightly"
 Write-Host "  RUST_NIGHTLY_EXTERNAL_TYPES: $currentRustNightlyExternal"
 Write-Host ""
 
 Write-Host "New versions:"
 Write-Host "  RUST_LATEST                : $newStableVersion"
+Write-Host "  rust-toolchain.toml channel: $newStableVersion"
 Write-Host "  RUST_NIGHTLY               : $yesterdayNightly"
 
 if ($externalTypesResult.Success) {
@@ -210,7 +244,9 @@ if ($externalTypesResult.Success -and $currentRustNightlyExternal -ne $externalT
     $constantsUpdates["RUST_NIGHTLY_EXTERNAL_TYPES"] = $externalTypesResult.Version
 }
 
-if ($constantsUpdates.Count -eq 0) {
+$toolchainNeedsUpdate = $currentToolchain -ne $newStableVersion
+
+if ($constantsUpdates.Count -eq 0 -and -not $toolchainNeedsUpdate) {
     exit 0
 }
 
@@ -222,4 +258,9 @@ if ($DryRun) {
 if ($constantsUpdates.Count -gt 0) {
     $newConstantsContent = Update-ConstantsEnv -FilePath $ConstantsFile -Updates $constantsUpdates
     Set-Content -Path $ConstantsFile -Value $newConstantsContent -NoNewline
+}
+
+if ($toolchainNeedsUpdate) {
+    $newToolchainContent = Update-RustToolchain -FilePath $ToolchainFile -Version $newStableVersion
+    Set-Content -Path $ToolchainFile -Value $newToolchainContent -NoNewline
 }

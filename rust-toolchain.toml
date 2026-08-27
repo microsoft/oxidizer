@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 [toolchain]
 # Must match RUST_LATEST in constants.env so local and CI diagnostics use the same compiler.
 channel = "1.96.1"
