@@ -62,9 +62,13 @@
     // with the regular toolchain. This enables those capabilities.
     //
     // The pinned nightly must match `RUST_NIGHTLY` in `constants.env`, which is what CI's
-    // format check runs; a different nightly can format the same file differently. Update
-    // both together. Install it with
-    // `rustup toolchain install nightly-2026-05-30 --component rustfmt`, or run `just install-tools`.
+    // format check runs; a different nightly can format the same file differently.
+    // `scripts/update_rust_toolchain.ps1` rewrites both, so a routine bump keeps them in step.
+    //
+    // Your own copy of this file does not move with a bump: after `RUST_NIGHTLY` changes,
+    // re-copy this line into `.vscode/settings.json` and install the new toolchain with
+    // `rustup toolchain install <RUST_NIGHTLY> --component rustfmt` (or re-run `just install-tools`),
+    // otherwise format-on-save fails on a toolchain you no longer have.
     "rust-analyzer.rustfmt.extraArgs": ["+nightly-2026-05-30", "--config-path", "${workspaceFolder}/unstable-rustfmt.toml"],
 
     // Clippy is extremely slow when used on our large workspace, so you may want to use

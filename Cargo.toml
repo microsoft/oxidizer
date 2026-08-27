@@ -291,6 +291,11 @@ rust.unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(miri_race_coverage)',
     'cfg(miri_strict_provenance)',
     'cfg(miri_tree_borrows)',
+    # Set when the codegen backend cannot give a type the `#[repr(align(N))]` it asks for,
+    # which makes `multitude`'s over-aligned test types fail to compile. Nothing in-tree sets
+    # it; a build using such a backend passes `--cfg align_capped_backend` itself. It is
+    # all-or-nothing: it drops every over-aligned case (32 KiB, 64 KiB and 128 KiB), so a
+    # backend that supports some of them still loses that coverage.
     'cfg(align_capped_backend)',
 ] }
 # <<< anvil-managed: anvil-workspace-lints
