@@ -12,5 +12,5 @@ mod builtin;
 mod tests;
 
 pub use arc::Arc;
-pub use builtin::{PerCore, PerNuma, PerProcess};
+pub use builtin::{PerNumaNode, PerProcess, PerThread};
 pub(crate) use storage::Strategy;

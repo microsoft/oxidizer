@@ -37,7 +37,7 @@
 //! and cross-NUMA memory access. Like `Clone`, the relocation itself should be mostly transparent and predictable
 //! to users.
 //!
-//! ## Implementing [`ThreadAware`], and `Arc<T, PerCore>`
+//! ## Implementing [`ThreadAware`], and `Arc<T, PerThread>`
 //!
 //! In most cases [`ThreadAware`] should be implemented via the provided derive macro.
 //! As thread-awareness of a type usually involves letting all contained fields know of an ongoing
@@ -49,7 +49,7 @@
 //! combines an upstream [`alloc::sync::Arc`] with a relocation [`Strategy`](storage::Strategy), and
 //! implements [`ThreadAware`] for it. For
 //! example, while an `Arc<Foo, PerProcess>` effectively acts as vanilla `Arc`, an
-//! `Arc<Foo, PerCore>` ensures a separate `Foo` is available any time the types moves a core boundary.
+//! `Arc<Foo, PerThread>` ensures a separate `Foo` is available any time the types moves a core boundary.
 //!
 //!
 //! ## Relation to [`Send`]
@@ -166,14 +166,14 @@
 //! ```rust
 //! # fn main() {
 //! # #[cfg(feature = "std")] {
-//! use thread_aware::{Arc, PerCore, ThreadAware};
+//! use thread_aware::{Arc, PerThread, ThreadAware};
 //! # #[derive(Debug, Default)]
 //! # struct Client;
 //!
 //! #[derive(Debug, Clone, ThreadAware)]
 //! struct Service {
 //!     name: String,
-//!     client: Arc<Client, PerCore>,
+//!     client: Arc<Client, PerThread>,
 //! }
 //!
 //! impl Service {
@@ -200,22 +200,13 @@ extern crate std;
 #[cfg(feature = "std")]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 mod cell;
-mod core;
-mod impls;
-mod third_party;
 mod wrappers;
 
 pub mod closure;
 
-#[cfg(feature = "threads")]
-pub mod registry;
-
-#[doc(hidden)]
-pub mod __private;
-pub mod affinity;
 
 #[doc(inline)]
-pub use core::ThreadAware;
+pub use thread_aware_core::{NumaNode, Owner, Thread, ThreadAware};
 
 // Re-export the derive macro (behind the `derive` feature) so users can
 // simply `use thread_aware::ThreadAware;`. Disable the feature to avoid the
@@ -281,7 +272,7 @@ pub use core::ThreadAware;
 ///     raw_len: usize,
 /// }
 ///
-/// fn demo(a1: Option<Affinity>, a2: Affinity, mut w: Wrapper) {
+/// fn demo(a1: Option<&Thread>, a2: Affinity, mut w: Wrapper) {
 ///     // Move the wrapper from a1 to a2.
 ///     w.relocate(a1, a2);
 /// }
@@ -290,5 +281,5 @@ pub use core::ThreadAware;
 pub use ::thread_aware_macros::ThreadAware;
 #[cfg(feature = "std")]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-pub use cell::{Arc, PerCore, PerNuma, PerProcess, storage};
+pub use cell::{Arc, PerThread, PerNumaNode, PerProcess, storage};
 pub use wrappers::{Unaware, unaware};

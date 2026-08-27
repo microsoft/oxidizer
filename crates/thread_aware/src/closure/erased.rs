@@ -7,7 +7,7 @@ use core::any::type_name;
 use core::fmt;
 
 use crate::ThreadAware;
-use crate::affinity::Affinity;
+use thread_aware_core::Thread;
 use crate::closure::ThreadAwareFnOnce;
 
 /// A closure with erased bounds.
@@ -44,7 +44,7 @@ impl<T> ThreadAwareFnOnce<T> for ErasedClosureOnce<T> {
 }
 
 impl<T> ThreadAware for ErasedClosureOnce<T> {
-    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         self.inner.transfer_boxed_mut(source, destination);
     }
 }
@@ -60,7 +60,7 @@ impl<T> Clone for ErasedClosureOnce<T> {
 trait Erased<T>: Sync + Send {
     fn call_boxed_once(self: Box<Self>) -> T;
     fn clone_boxed(&self) -> Box<dyn Erased<T>>;
-    fn transfer_boxed_mut(&mut self, source: Option<Affinity>, destination: Affinity);
+    fn transfer_boxed_mut(&mut self, source: Option<&Thread>, destination: &Thread);
 }
 
 struct Wrapper<C> {
@@ -81,7 +81,7 @@ where
         })
     }
 
-    fn transfer_boxed_mut(&mut self, source: Option<Affinity>, destination: Affinity) {
+    fn transfer_boxed_mut(&mut self, source: Option<&Thread>, destination: &Thread) {
         self.closure.relocate(source, destination);
     }
 }
@@ -125,7 +125,7 @@ mod tests {
     struct Tracker(bool);
 
     impl crate::ThreadAware for Tracker {
-        fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
             self.0 = true;
         }
     }

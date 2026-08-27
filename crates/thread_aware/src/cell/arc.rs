@@ -11,9 +11,9 @@ use std::sync::{self};
 use std::{cell::RefCell, rc::Rc};
 
 use super::factory::Factory;
-use super::storage::{Storage, Strategy, report_out_of_range_affinity};
+use super::storage::{Storage, Strategy};
 use crate::ThreadAware;
-use crate::affinity::Affinity;
+use thread_aware_core::Thread;
 use crate::closure::{ErasedClosureOnce, ThreadAwareFnOnce, closure_once};
 
 /// Adapter that wraps a `ThreadAwareFnOnce<T>` to produce `Box<T>` instead.
@@ -26,7 +26,7 @@ impl<F: Clone> Clone for BoxedRelocate<F> {
 }
 
 impl<F: ThreadAware> ThreadAware for BoxedRelocate<F> {
-    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         self.0.relocate(source, destination);
     }
 }
@@ -125,7 +125,7 @@ pub(super) fn run_after_factory_update_hook() {
 /// documentation for the [`trait@ThreadAware`] trait.
 ///
 /// ```rust
-/// # use thread_aware::{Arc, ThreadAware, PerCore};
+/// # use thread_aware::{Arc, ThreadAware, PerThread};
 /// # use thread_aware::affinity::*;
 /// # use std::sync::atomic::{AtomicI32, Ordering};
 /// # let affinities = pinned_affinities(&[2]);
@@ -153,14 +153,14 @@ pub(super) fn run_after_factory_update_hook() {
 /// # }
 /// #
 /// # impl ThreadAware for Counter {
-/// #     fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+/// #     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
 /// #         // Initialize a new value in the destination affinity independent
 /// #         // of the source affinity.
 /// #         self.value = std::sync::Arc::new(AtomicI32::new(0));
 /// #     }
 /// # }
 ///
-/// let mut arc_affinity1 = Arc::<_, PerCore>::new(Counter::new);
+/// let mut arc_affinity1 = Arc::<_, PerThread>::new(Counter::new);
 /// let arc_affinity1_clone = arc_affinity1.clone();
 ///
 /// arc_affinity1.increment_by(42);
@@ -252,7 +252,7 @@ where
     /// can be used with `new` by passing the constructor function (note the absence of `()`):
     ///
     /// ```rust
-    /// # use thread_aware::{Arc, ThreadAware, PerCore};
+    /// # use thread_aware::{Arc, ThreadAware, PerThread};
     /// # use thread_aware::affinity::*;
     /// # use std::sync::atomic::{AtomicI32, Ordering};
     /// # use std::sync;
@@ -277,14 +277,14 @@ where
     /// #     }
     /// # }
     /// # impl ThreadAware for Counter {
-    /// #     fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+    /// #     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
     /// #         // Initialize a new value in the destination affinity independent
     /// #         // of the source affinity.
     /// #         self.value = sync::Arc::new(AtomicI32::new(0));
     /// #     }
     /// # }
     ///
-    /// let container = Arc::<_, PerCore>::new(Counter::new);
+    /// let container = Arc::<_, PerThread>::new(Counter::new);
     /// let container_clone = container.clone();
     /// container.increment_by(42);
     /// assert_eq!(container.value(), 42);
@@ -304,7 +304,7 @@ where
         }
 
         impl<T> ThreadAware for Ctor<T> {
-            fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
+            fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
         }
 
         impl<T> ThreadAwareFnOnce<Box<T>> for Ctor<T> {
@@ -335,8 +335,8 @@ where
     /// initialization restriction documented on [`Arc`].
     ///
     /// ```rust
-    /// # use thread_aware::{Arc, ThreadAware, PerCore};
-    /// let arc = Arc::<dyn ThreadAware, PerCore>::new_boxed(|| Box::new(42u32));
+    /// # use thread_aware::{Arc, ThreadAware, PerThread};
+    /// let arc = Arc::<dyn ThreadAware, PerThread>::new_boxed(|| Box::new(42u32));
     /// ```
     pub fn new_boxed(ctor: fn() -> Box<T>) -> Self {
         struct Ctor<T: ?Sized> {
@@ -350,7 +350,7 @@ where
         }
 
         impl<T: ?Sized> ThreadAware for Ctor<T> {
-            fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
+            fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
         }
 
         impl<T: ?Sized> ThreadAwareFnOnce<Box<T>> for Ctor<T> {
@@ -384,7 +384,7 @@ where
     ///
     /// ```rust
     /// # use std::sync::{self, Mutex};
-    /// # use thread_aware::{Arc, PerCore};
+    /// # use thread_aware::{Arc, PerThread};
     /// struct MyStruct {
     ///     inner: sync::Arc<Mutex<i32>>,
     /// }
@@ -397,14 +397,14 @@ where
     ///     }
     /// }
     ///
-    /// let container = Arc::<_, PerCore>::new_with((), |_| MyStruct::new());
+    /// let container = Arc::<_, PerThread>::new_with((), |_| MyStruct::new());
     /// ```
     ///
     /// The constructor can depend on other values that implement [`trait@ThreadAware`] (this example uses the Counter
     /// defined in [`trait@ThreadAware`] documentation):
     ///
     /// ```rust
-    /// # use thread_aware::{ThreadAware, Arc, PerCore};
+    /// # use thread_aware::{ThreadAware, Arc, PerThread};
     /// # use thread_aware::affinity::*;
     /// # use std::sync::atomic::{AtomicI32, Ordering};
     /// # use std::sync;
@@ -430,7 +430,7 @@ where
     /// # }
     /// #
     /// # impl ThreadAware for Counter {
-    /// #     fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+    /// #     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
     /// #         // Initialize a new value in the destination affinity independent
     /// #         // of the source affinity.
     /// #         self.value = sync::Arc::new(AtomicI32::new(0));
@@ -446,7 +446,7 @@ where
     /// }
     ///
     /// let counter = Counter::new();
-    /// let container = Arc::<_, PerCore>::new_with(counter, |counter| MyStruct::new(counter.value()));
+    /// let container = Arc::<_, PerThread>::new_with(counter, |counter| MyStruct::new(counter.value()));
     /// ```
     pub fn new_with<D>(data: D, f: fn(D) -> T) -> Self
     where
@@ -503,7 +503,7 @@ where
     /// can be used with new:
     ///
     /// ```rust
-    /// # use thread_aware::{Arc, PerCore};
+    /// # use thread_aware::{Arc, PerThread};
     /// # use std::sync::atomic::{AtomicI32, Ordering};
     /// # use std::sync;
     /// # #[derive(Clone)]
@@ -527,7 +527,7 @@ where
     /// #     }
     /// # }
     ///
-    /// let arc = Arc::<_, PerCore>::new(Counter::new);
+    /// let arc = Arc::<_, PerThread>::new(Counter::new);
     /// let arc_clone = arc.clone();
     /// arc.increment_by(42);
     /// assert_eq!(arc.value(), 42);
@@ -562,7 +562,7 @@ where
     /// documented on [`Arc`].
     ///
     /// ```rust
-    /// # use thread_aware::{Arc, PerCore, ThreadAware};
+    /// # use thread_aware::{Arc, PerThread, ThreadAware};
     /// # #[derive(Clone)]
     /// # struct Foo(u32);
     /// # impl ThreadAware for Foo {
@@ -571,7 +571,7 @@ where
     /// trait MyPlugin: ThreadAware {}
     /// impl MyPlugin for Foo {}
     ///
-    /// let arc = Arc::<dyn MyPlugin, PerCore>::with_clone_fn(Foo(42), |v: &Foo| Box::new(v.clone()));
+    /// let arc = Arc::<dyn MyPlugin, PerThread>::with_clone_fn(Foo(42), |v: &Foo| Box::new(v.clone()));
     /// ```
     pub fn with_clone_fn<V: Send + Sync + 'static>(value: V, clone_fn: fn(&V) -> Box<T>) -> Self {
         // In a canonical case, we might have `V = u32`, `T = dyn Foo`, and `clone_fn = |&u32| -> Box<dyn Foo>`.
@@ -632,21 +632,21 @@ where
     ///
     /// use thread_aware::affinity::pinned_affinities;
     /// use thread_aware::storage::Storage;
-    /// use thread_aware::{Arc, PerCore};
+    /// use thread_aware::{Arc, PerThread};
     ///
     /// let affinity = pinned_affinities(&[2])[0];
     ///
     /// let storage = Storage::new();
     /// storage.insert(affinity, StdArc::new(42)).unwrap();
     ///
-    /// let arc = Arc::<_, PerCore>::from_storage(StdArc::new(storage), affinity);
+    /// let arc = Arc::<_, PerThread>::from_storage(StdArc::new(storage), affinity);
     /// assert_eq!(*arc, 42);
     /// ```
     ///
     /// [`Storage`]: crate::storage::Storage
     /// [`Storage::insert`]: crate::storage::Storage::insert
-    pub fn from_storage(storage: sync::Arc<Storage<T, S>>, current_affinity: Affinity) -> Self {
-        let value = storage.get(current_affinity).expect("No data found for the current affinity");
+    pub fn from_storage(storage: sync::Arc<Storage<T, S>>, current_thread: &Thread) -> Self {
+        let value = storage.get(current_thread).expect("No data found for the current thread");
 
         Self {
             storage,
@@ -671,9 +671,9 @@ impl<T, S: Strategy> Arc<T, S> {
     /// # Examples
     ///
     /// ```
-    /// use thread_aware::{Arc, PerCore};
+    /// use thread_aware::{Arc, PerThread};
     ///
-    /// let arc = Arc::<_, PerCore>::new(|| 42);
+    /// let arc = Arc::<_, PerThread>::new(|| 42);
     /// assert_eq!(Arc::strong_count(&arc), 1);
     ///
     /// let arc2 = arc.clone();
@@ -701,35 +701,34 @@ impl<T, S: Strategy> Arc<T, S> {
 }
 
 impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> Arc<T, S> {
-    /// Records the original source affinity in a closure factory once it is known.
+    /// Records the original source thread in a closure factory once it is known.
     ///
     /// This is deterministic and runs no caller code. Only the closure factory carries source
     /// state; the other factory kinds are stateless. An unknown `source` records nothing, allowing a
-    /// later relocation with a known source to establish the original affinity.
-    fn record_factory_source(&mut self, source: Option<Affinity>) {
+    /// later relocation with a known source to establish the original thread.
+    fn record_factory_source(&mut self, source: Option<&Thread>) {
         if let (Factory::Closure(_, recorded @ None), Some(source)) = (&mut self.factory, source) {
-            *recorded = Some(source);
+            *recorded = Some(source.clone());
         }
     }
 
     /// Produces the value `destination` will hold by running the configured factory.
     ///
-    /// This runs caller-supplied code while the destination cell is in
-    /// [`OnceLock::get_or_init`](std::sync::OnceLock::get_or_init)'s initializing state. Across all
-    /// racing relocations into the same empty cell, the factory runs at most once and every racer
-    /// adopts the one published value — the closure's documented "once per strategy partition"
-    /// contract. The factory must not reenter that cell or create cyclic cell-initialization
-    /// dependencies. If it panics, the panic propagates and the destination cell is left empty for
-    /// the next relocation into that partition to re-materialize; there is no poisonable lock.
-    fn materialize_value(&self, source: Option<Affinity>, destination: Affinity) -> sync::Arc<T> {
+    /// This runs caller-supplied code while the destination partition's entry is held for writing.
+    /// Across all racing relocations into the same empty partition, the factory runs at most once
+    /// and every racer adopts the one published value — the closure's documented "once per strategy
+    /// partition" contract. The factory must not reenter this storage, which would deadlock on that
+    /// entry. If it panics, the panic propagates and the partition is left empty for the next
+    /// relocation into it to re-materialize.
+    fn materialize_value(&self, source: Option<&Thread>, destination: &Thread) -> sync::Arc<T> {
         match &self.factory {
-            Factory::Closure(factory, factory_source_affinity) => {
+            Factory::Closure(factory, factory_source_thread) => {
                 let mut factory_clone = (**factory).clone();
 
-                // Prefer the source affinity already recorded in the factory: it is set on the first
-                // relocation and is the affinity the factory was originally built for. Fall back to
+                // Prefer the source thread already recorded in the factory: it is set on the first
+                // relocation and is the thread the factory was originally built for. Fall back to
                 // `source` on that first relocation, when nothing has been recorded yet.
-                let factory_source = factory_source_affinity.or(source);
+                let factory_source = factory_source_thread.as_ref().or(source);
 
                 factory_clone.relocate(factory_source, destination);
                 sync::Arc::from(factory_clone.call_once())
@@ -747,54 +746,47 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> Arc<T, S> {
 }
 
 impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, S> {
-    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         // Record the original source before any fast path can return. A clone whose first relocation
         // hits an existing destination value or stays within one strategy partition still needs that
         // source when a later relocation materializes a new value.
         // Ref: docs/implementation.md, "Relocation and publication".
         self.record_factory_source(source);
 
-        // Relocation reads the destination's write-once cell with a plain acquire load. The steady
-        // state of any affinity is "already materialized", so this hit is the overwhelmingly common
-        // outcome and carries no cell or table lock-word contention. Cloning the stored `sync::Arc`
-        // and dropping the previously carried value still update their strong counts, which can
-        // contend when callers share either allocation.
+        // Relocation reads the destination's partition with a shard read. The steady state of any
+        // thread is "already materialized", so this hit is the overwhelmingly common outcome.
+        // Cloning the stored `sync::Arc` and dropping the previously carried value still update
+        // their strong counts, which can contend when callers share either allocation.
         // Ref: docs/implementation.md, "Relocation and publication".
-        if let Some(value) = self.storage.probe(destination) {
+        if let Some(value) = self.storage.get(destination) {
             self.value = value;
             return;
         }
 
-        // Miss: reach the destination cell. No cell means the destination affinity is out of range —
-        // outside the coordinate space this storage was sized for — so the relocation is a no-op: the
-        // `Arc` keeps the value it already carries rather than reaching into an unrelated slot, and
-        // the anomaly is recorded via the `thread_aware_arc_oob` metric.
-        // Ref: docs/implementation.md, "Relocation and publication".
-        let Some(destination_slot) = self.storage.slot(destination) else {
-            report_out_of_range_affinity();
-            return;
+        // When the source resolves to the destination's own partition there is no cross-partition
+        // move: the carried value already belongs to that partition. A single-partition strategy is
+        // the same case even without a source — the carried value provably belongs to the one
+        // partition — which is the whole of relocation under `PerProcess`. Seed the empty partition
+        // with the carried value and keep it, rather than materializing a fresh value that would
+        // diverge from the shared one.
+        //
+        // Only `SINGLE_PARTITION` strategies take that shortcut. Keyed storage cannot tell "this
+        // machine happens to have one thread" from "a partition I have not seen yet", so a
+        // source-less relocation under `PerThread` or `PerNumaNode` always materializes.
+        let same_partition = match source {
+            Some(source) => S::key(source) == S::key(destination),
+            None => S::SINGLE_PARTITION,
         };
-
-        // When the source resolves to the destination's own slot there is no cross-slot move: the
-        // carried value already belongs to that slot. A single-slot table is the same case even
-        // without a source — the carried value provably belongs to the one slot — which is the whole
-        // of relocation under `PerProcess`. Seed the empty cell with the carried value and keep it,
-        // rather than materializing a fresh value that would diverge from the shared one.
-        let same_slot = match source {
-            Some(source) => S::index(source) == S::index(destination),
-            // Without a source, a single-slot table provably maps the carried value to its one slot.
-            None => S::count(destination).get() == 1,
-        };
-        if same_slot {
-            // If a racer published first, `get_or_init` returns its value; adopt it so every clone
+        if same_partition {
+            // If a racer published first, the entry already holds its value; adopt it so every clone
             // converges on one identity.
-            let published = destination_slot.get_or_init(|| sync::Arc::<T>::clone(&self.value));
-            self.value = sync::Arc::<T>::clone(published);
+            let published = self.storage.get_or_insert_with(destination, || sync::Arc::<T>::clone(&self.value));
+            self.value = published;
             return;
         }
 
         // The test checkpoint pauses an adopting racer only after its per-clone factory state is
-        // current, allowing the publisher to finish before this racer reaches `get_or_init`.
+        // current, allowing the publisher to finish before this racer reaches the entry.
         // Production builds execute no additional logic here.
         #[cfg(test)]
         run_after_factory_update_hook();
@@ -803,29 +795,23 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
         let old_value = sync::Arc::<T>::clone(&self.value);
 
         // Publish the destination value, running the caller's factory at most once across all racers:
-        // `get_or_init` serializes materialization on this cell and hands every racer the single
+        // the entry is held for writing while materialization runs and hands every racer the single
         // published value, so the closure's documented "once per strategy partition" contract holds
-        // even under a concurrent first relocation. The destination cell remains in its initializing
-        // state while the factory runs, so the factory must not reenter it or create a cyclic
-        // initialization dependency. A panic propagates and leaves the cell empty for the next relocation to retry;
-        // there is no poisonable lock.
+        // even under a concurrent first relocation. The factory must not reenter this storage, which
+        // would deadlock on that entry. A panic propagates and leaves the partition empty for the
+        // next relocation to retry.
         // Ref: docs/implementation.md, "Relocation and publication".
-        let published = destination_slot.get_or_init(|| self.materialize_value(source, destination));
-        self.value = sync::Arc::<T>::clone(published);
+        let published = self.storage.get_or_insert_with(destination, || self.materialize_value(source, destination));
+        self.value = published;
 
-        // Record the value the `Arc` moved away from into the source cell, so a later relocation
-        // back into it finds the original instead of materializing a fresh one. Reached only on a
-        // cross-slot miss — the same-slot case returned above — so the source cell is distinct from
-        // the destination just published. An out-of-range source has no cell to record into, so the
-        // recording is skipped and the anomaly recorded. `set` leaves an already-populated source
-        // cell untouched; another thread may have recorded it with the same value, so leaving it in
-        // place is correct.
+        // Record the value the `Arc` moved away from into the source partition, so a later
+        // relocation back into it finds the original instead of materializing a fresh one. Reached
+        // only on a cross-partition miss — the same-partition case returned above — so the source
+        // partition is distinct from the destination just published. `insert` leaves an
+        // already-populated source partition untouched; another thread may have recorded it with the
+        // same value, so leaving it in place is correct.
         if let Some(source) = source {
-            if let Some(source_slot) = self.storage.slot(source) {
-                let _ = source_slot.set(old_value);
-            } else {
-                report_out_of_range_affinity();
-            }
+            let _ = self.storage.insert(source, old_value);
         }
     }
 }

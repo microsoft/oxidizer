@@ -15,7 +15,7 @@ use core::pin::Pin;
 pub(crate) use erased::ErasedClosureOnce;
 
 use crate::ThreadAware;
-use crate::affinity::Affinity;
+use thread_aware_core::Thread;
 
 /// A boxed, pinned, `Send` future - the return type of async closure calls.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -120,7 +120,7 @@ impl<T, D> ThreadAware for Closure<T, D>
 where
     D: ThreadAware,
 {
-    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         self.data.relocate(source, destination);
     }
 }
@@ -159,7 +159,7 @@ impl<T, D> ThreadAware for ClosureOnce<T, D>
 where
     D: ThreadAware,
 {
-    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         self.data.relocate(source, destination);
     }
 }
@@ -207,7 +207,7 @@ impl<T, D> ThreadAware for ClosureMut<T, D>
 where
     D: ThreadAware,
 {
-    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         self.data.relocate(source, destination);
     }
 }
@@ -249,7 +249,7 @@ where
 /// struct Transferable;
 /// impl ThreadAware for Transferable {
 ///     // ...
-///     # fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
+///     # fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
 /// }
 ///
 /// let closure = closure_once(Transferable, |transferable| {
@@ -329,7 +329,7 @@ where
 }
 
 impl<T, D: ThreadAware> ThreadAware for AsyncClosure<T, D> {
-    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         self.data.relocate(source, destination);
     }
 }
@@ -373,7 +373,7 @@ impl<T, D: ThreadAware> ThreadAwareAsyncFnOnce<T> for AsyncClosureOnce<T, D> {
 }
 
 impl<T, D: ThreadAware> ThreadAware for AsyncClosureOnce<T, D> {
-    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         self.data.relocate(source, destination);
     }
 }
@@ -426,7 +426,7 @@ where
 }
 
 impl<T, D: ThreadAware> ThreadAware for AsyncClosureMut<T, D> {
-    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         self.data.relocate(source, destination);
     }
 }
@@ -813,12 +813,12 @@ mod tests {
     struct Tracker(bool);
 
     impl ThreadAware for Tracker {
-        fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
             self.0 = true;
         }
     }
 
-    fn affinities() -> (Option<Affinity>, Affinity) {
+    fn affinities() -> (Option<&Thread>, Affinity) {
         let a = pinned_affinities(&[2]);
         (Some(a[0]), a[1])
     }

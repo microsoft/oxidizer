@@ -12,7 +12,7 @@ use alloc::boxed::Box;
 use std::{fmt, sync};
 
 use crate::ThreadAware;
-use crate::affinity::Affinity;
+use thread_aware_core::Thread;
 
 /// A type-erased clonable value that pairs `sync::Arc<T>` with a
 /// [`CloneAdapter`] storing the concrete `V` and its clone function.
@@ -45,7 +45,7 @@ impl<T: ThreadAware + ?Sized + 'static> ErasedCloneFn<T> {
 impl<T: ?Sized> ErasedCloneFn<T> {
     /// Clones the inner value, relocates the clone, and returns a new
     /// `sync::Arc<T>` backed by the relocated clone.
-    pub(crate) fn clone_and_relocate(&self, source: Option<Affinity>, destination: Affinity) -> sync::Arc<T> {
+    pub(crate) fn clone_and_relocate(&self, source: Option<&Thread>, destination: &Thread) -> sync::Arc<T> {
         // In a canonical case, we might have `V = u32`, `T = dyn Foo`. This will have called the erased
         // clone_fn, and returned us a new, relocated instance of `Box<dyn Foo>`, which we return as a new `Arc<dyn Foo>`, which
         // will essentially become the new instance after relocation on the new thread. The implication here is
@@ -78,7 +78,7 @@ impl<T: ?Sized> Clone for ErasedCloneFn<T> {
 
 /// Object-safe trait for cloning a stored concrete value into `Box<T>`.
 trait ErasedClone<T: ?Sized>: Send + Sync {
-    fn clone_and_relocate(&self, source: Option<Affinity>, destination: Affinity) -> Box<T>;
+    fn clone_and_relocate(&self, source: Option<&Thread>, destination: &Thread) -> Box<T>;
 }
 
 /// Stores the concrete `V` alongside the user-provided clone function.
@@ -91,7 +91,7 @@ struct CloneAdapter<V, T: ?Sized> {
 }
 
 impl<V: Send + Sync + 'static, T: ThreadAware + ?Sized + 'static> ErasedClone<T> for CloneAdapter<V, T> {
-    fn clone_and_relocate(&self, source: Option<Affinity>, destination: Affinity) -> Box<T> {
+    fn clone_and_relocate(&self, source: Option<&Thread>, destination: &Thread) -> Box<T> {
         // In a canonical case, we might have `V = u32`, `T = dyn Foo`, and `clone_fn = |&u32| -> Box<dyn Foo>`.
         // This will invoke the clone function on the last known `V` produced by the clone_fn. On the first
         // relocate this will produce a new `Box<dyn Foo>` based on that value, then relocate and return it.
@@ -109,14 +109,14 @@ impl<V, T: ?Sized> fmt::Debug for CloneAdapter<V, T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Arc, PerCore, ThreadAware};
+    use crate::{Arc, PerThread, ThreadAware};
 
     // Previously this would have been UB (casting `&dyn ThreadAware` to `&u32`
     // when the concrete type was `String`). Now safe: clones come from the
     // stored `u32`, not from the `Arc<dyn ThreadAware>`.
     #[test]
     fn mismatched_clone_fn_return_type_is_safe() {
-        let arc = Arc::<dyn ThreadAware, PerCore>::with_clone_fn(1_u32, |_x| Box::new(String::new()));
+        let arc = Arc::<dyn ThreadAware, PerThread>::with_clone_fn(1_u32, |_x| Box::new(String::new()));
         let _clone = arc.clone();
     }
 

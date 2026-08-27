@@ -1,58 +1,58 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::num::NonZero;
+use std::thread::ThreadId;
 
-use crate::affinity::Affinity;
+use thread_aware_core::{NumaNode, Thread};
+
 use crate::cell::Strategy;
+use crate::cell::storage::sealed;
 
-/// Defines one strategy partition per processor core.
+/// Defines one strategy partition per thread.
 ///
-/// Affinities with the same processor index map to the same partition. This is the default strategy
-/// used by [`Arc`](crate::Arc).
+/// Threads with the same id map to the same partition. This is the default strategy used by
+/// [`Arc`](crate::Arc).
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct PerCore;
+pub struct PerThread;
 
-impl Strategy for PerCore {
-    fn index(affinity: Affinity) -> usize {
-        affinity.processor_index()
-    }
+impl sealed::Sealed for PerThread {}
 
-    fn count(affinity: Affinity) -> NonZero<usize> {
-        // A machine always has at least one processor, so the count is never zero.
-        NonZero::new(affinity.processor_count()).expect("a machine always reports at least one processor")
+impl Strategy for PerThread {
+    type Key = ThreadId;
+
+    fn key(thread: &Thread) -> Self::Key {
+        thread.id()
     }
 }
 
-/// Defines one strategy partition per memory region (NUMA node).
+/// Defines one strategy partition per NUMA node.
 ///
-/// Affinities with the same memory-region index map to the same partition.
+/// Threads near the same memory map to the same partition.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct PerNuma;
+pub struct PerNumaNode;
 
-impl Strategy for PerNuma {
-    fn index(affinity: Affinity) -> usize {
-        affinity.memory_region_index()
-    }
+impl sealed::Sealed for PerNumaNode {}
 
-    fn count(affinity: Affinity) -> NonZero<usize> {
-        // A machine always has at least one memory region, so the count is never zero.
-        NonZero::new(affinity.memory_region_count()).expect("a machine always reports at least one memory region")
+impl Strategy for PerNumaNode {
+    type Key = NumaNode;
+
+    fn key(thread: &Thread) -> Self::Key {
+        thread.numa_node()
     }
 }
 
 /// Defines one strategy partition for the entire process.
 ///
-/// All affinities map to the same partition.
+/// All threads map to the same partition.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct PerProcess;
 
-impl Strategy for PerProcess {
-    fn index(_affinity: Affinity) -> usize {
-        0
-    }
+impl sealed::Sealed for PerProcess {}
 
-    fn count(_affinity: Affinity) -> NonZero<usize> {
-        NonZero::<usize>::MIN
-    }
+impl Strategy for PerProcess {
+    type Key = ();
+
+    const SINGLE_PARTITION: bool = true;
+
+    fn key(_thread: &Thread) -> Self::Key {}
 }

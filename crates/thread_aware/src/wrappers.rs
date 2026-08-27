@@ -5,7 +5,7 @@ use alloc::sync::Arc;
 use core::ops::{Deref, DerefMut};
 
 use crate::ThreadAware;
-use crate::affinity::Affinity;
+use thread_aware_core::Thread;
 
 /// Allows transferring a value that doesn't implement [`trait@ThreadAware`].
 ///
@@ -23,7 +23,7 @@ use crate::affinity::Affinity;
 ///
 /// In addition, if the wrapped value contains an [`alloc::sync::Arc`] with interior mutability
 /// somewhere inside, this wrapper should not be used. With the `std` feature, a thread-aware
-/// [`Arc`](crate::Arc) using [`PerCore`](crate::PerCore) or [`PerNuma`](crate::PerNuma) with
+/// [`Arc`](crate::Arc) using [`PerThread`](crate::PerThread) or [`PerNumaNode`](crate::PerNumaNode) with
 /// independent initialization per strategy partition is a better option.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Default)]
 #[repr(transparent)]
@@ -52,7 +52,7 @@ impl<T> DerefMut for Unaware<T> {
 }
 
 impl<T: Send> ThreadAware for Unaware<T> {
-    fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
 }
 
 impl<T> Unaware<T> {
