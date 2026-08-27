@@ -376,19 +376,26 @@ As with the linker, an explicit `CARGO_TARGET_DIR` is respected rather
 than overridden. If the directory cannot be created the build proceeds
 in place with a warning, since a probe must never abort a release.
 
-The relocation is otherwise unconditional, and deliberately so: it
-applies even to a repository whose own path would have fitted. Skipping
-it there would mean predicting the 216 above, and that figure is not a
-constant anyone here controls — it moves with crate and target names,
-dependency versions and hash widths, so a threshold fitted to today's
-measurement would quietly stop covering the case it exists for. Applying
-it always also keeps one code path in use on every Windows release run,
-rather than reserving it for the deepest checkouts, which are the
-configurations least likely to be exercised before a release.
+A checkout that already has room is left where it is. Before relocating,
+the scripts project the build path from the repository root, the 216
+above, and the name of the package being checked — the nesting embeds
+that name once, so `http_client_api_with_templated_uri` reaches 29
+characters further than `fetch` did. If the projection fits within
+`MAX_PATH` with a margin to spare, the default target directory stands.
+A Dev Drive checkout such as `D:\oxidizer` therefore keeps its build
+output inside the repository, where `cargo clean` and `git clean` can
+still reach it, and only the checkouts that need the relocation get it.
 
-Note that these artifacts live outside the repository, so `cargo clean`
-and `git clean` do not remove them; delete `<volume>\oxi-sc` to reclaim
-the space.
+The margin exists because the 216 is one measurement rather than a
+bound. The package name is projected for explicitly, but the version
+string and the depth of a dependency's own build output are not ours to
+predict, and a dependency upgrade can lengthen either. If the projection
+is wrong the build still fails the way it did before, and the error
+names `CARGO_TARGET_DIR` as the lever to set by hand.
+
+Note that when the relocation does apply, those artifacts live outside
+the repository, so `cargo clean` and `git clean` do not remove them;
+delete `<volume>\oxi-sc` to reclaim the space.
 
 #### Proc-macro-only packages require manual SemVer review
 

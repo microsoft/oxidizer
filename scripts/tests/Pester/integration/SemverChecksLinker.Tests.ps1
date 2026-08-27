@@ -153,7 +153,8 @@ Describe 'relocated target directory' {
             $deepResult.Output | Should -Match 'C1083'
 
             # Now the same compile beneath the directory the release scripts pick.
-            $shortRoot = Get-SemverChecksTargetDirPath -RepoRoot $root
+            $shortRoot = Get-SemverChecksTargetDirPath -RepoRoot $root -PackageName 'fetch'
+            $shortRoot | Should -Not -BeNullOrEmpty -Because 'the temp root is long enough to call for relocation'
             $shortDir = Join-Path $shortRoot 'probe'
             $null = New-Item -ItemType Directory -Path $shortDir -Force
             try {

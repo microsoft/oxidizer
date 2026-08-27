@@ -1005,6 +1005,28 @@ function Get-SemverChecksLinkerEnvName {
 # Kept terse on purpose: every character here is one the MAX_PATH budget loses.
 $script:SemverChecksTargetDirName = 'oxi-sc'
 
+# Longest path a baseline build has been observed to nest below the repository
+# root: 216 characters, from the failure in AB#7790786. docs/releasing.md
+# breaks it down segment by segment.
+$script:SemverChecksNestingLength = 216
+
+# The package that measurement was taken for. The nesting embeds the package
+# name once, so checking a longer-named package shifts the projection by the
+# difference in name length.
+$script:SemverChecksNestingPackage = 'fetch'
+
+# Longest path Windows accepts without the \\?\ prefix, which the tools in
+# question do not use.
+$script:MaxPathLength = 259
+
+# Held back from the budget because the 216 is one measurement, not a bound.
+# The package name is projected for explicitly, but the version string and the
+# depth of a dependency's own build output are not ours to predict, and a
+# dependency upgrade can lengthen either. Sized to absorb that drift while
+# still leaving a Dev Drive or other short checkout on its default target
+# directory.
+$script:SemverChecksNestingSlack = 24
+
 # Returns a short, per-clone target directory for baseline builds on Windows,
 # or $null where the default target directory should stand.
 #
@@ -1023,13 +1045,20 @@ $script:SemverChecksTargetDirName = 'oxi-sc'
 # directory. The result is a fixed 18 characters, in place of a repository path
 # that is unbounded.
 #
+# A checkout that already has room is left alone: relocating puts build output
+# outside the repository, where neither cargo clean nor git clean will reach
+# it, and that is not a cost worth imposing on a short path such as a Dev Drive
+# root. The projection below decides, and it is deliberately pessimistic --
+# guessing wrong means an opaque C1083 partway through a release.
+#
 # The path is deterministic rather than unique so that consecutive runs reuse
 # the baseline rustdoc they just built; concurrent runs are safe because cargo
 # locks the target directory exactly as it does for target/.
 function Get-SemverChecksTargetDirPath {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)][string]$RepoRoot
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string]$PackageName
     )
 
     if (-not $IsWindows) {
@@ -1044,8 +1073,20 @@ function Get-SemverChecksTargetDirPath {
     # A UNC root has no drive letter to anchor to and would keep the very
     # length this function exists to shed, so fall back to the system drive.
     $volume = [System.IO.Path]::GetPathRoot($full)
-    if ([string]::IsNullOrWhiteSpace($volume) -or $volume.StartsWith('\\')) {
+    $isUnc = $volume.StartsWith('\\')
+    if ([string]::IsNullOrWhiteSpace($volume) -or $isUnc) {
         $volume = "$env:SystemDrive\"
+    }
+
+    # UNC has already lost the argument -- its own prefix is long enough that
+    # the projection below is not worth consulting.
+    if (-not $isUnc) {
+        $nameShift = $PackageName.Length - $script:SemverChecksNestingPackage.Length
+        $projected = $full.Length + $script:SemverChecksNestingLength + $nameShift
+        if (($projected + $script:SemverChecksNestingSlack) -le $script:MaxPathLength) {
+            Write-Verbose "Baseline build projects to about $projected characters; leaving it under the repository's own target directory."
+            return $null
+        }
     }
 
     $sha = [System.Security.Cryptography.SHA256]::Create()
@@ -1105,7 +1146,7 @@ function Invoke-SemverChecksCli {
         }
 
         $targetDirApplied = $false
-        $targetDir = Get-SemverChecksTargetDirPath -RepoRoot $RepoRoot
+        $targetDir = Get-SemverChecksTargetDirPath -RepoRoot $RepoRoot -PackageName $PackageName
         if ($targetDir) {
             if (Test-Path 'Env:\CARGO_TARGET_DIR') {
                 # As with the linker, an explicit choice wins: whoever set this
@@ -1233,7 +1274,7 @@ function ConvertFrom-SemverChecksOutput {
     }
 
     $pathHint = if ($IsWindows) {
-        " If the output contains LNK1104, C1083 or a path-length error, a MAX_PATH-bound tool was reached. Build artifacts can nest over 200 characters below the target directory, so setting CARGO_TARGET_DIR to a short path (for example ${env:SystemDrive}\$script:SemverChecksTargetDirName), or moving the repository closer to the volume root, buys back the characters needed."
+        " If the output contains LNK1104, C1083 or a path-length error, a MAX_PATH-bound tool was reached. Build artifacts can nest over 200 characters below the target directory, and these scripts relocate the build to a short path only when the repository path looks long enough to need it. Set CARGO_TARGET_DIR to a short path (for example ${env:SystemDrive}\$script:SemverChecksTargetDirName) to force that, or move the repository closer to the volume root."
     } else {
         ''
     }

@@ -78,8 +78,14 @@ LLVM version: 20.1.0
 }
 
 Describe 'Get-SemverChecksTargetDirPath' {
+    BeforeAll {
+        # Long enough that the projected build path clears MAX_PATH, which is
+        # what puts the relocation in play at all.
+        $script:deepRoot = 'C:\Source\oxidizer.worktrees\some-long-branch-name'
+    }
+
     It 'roots the build at the volume of the repository on Windows' -Skip:(-not $IsWindows) {
-        $path = Get-SemverChecksTargetDirPath -RepoRoot 'C:\Source\oxidizer.worktrees\some-long-branch-name'
+        $path = Get-SemverChecksTargetDirPath -RepoRoot $script:deepRoot -PackageName 'fetch'
 
         $path | Should -BeLike 'C:\oxi-sc\*'
     }
@@ -88,32 +94,56 @@ Describe 'Get-SemverChecksTargetDirPath' {
         # The observed worst case nests ~209 characters of cargo-semver-checks
         # and aws-lc-sys build output beneath the target directory, so the root
         # has to stay well clear of 260.
-        $path = Get-SemverChecksTargetDirPath -RepoRoot 'C:\Source\oxidizer'
+        $path = Get-SemverChecksTargetDirPath -RepoRoot $script:deepRoot -PackageName 'fetch'
 
         $path.Length | Should -BeLessOrEqual 20
     }
 
+    It 'leaves a checkout that already has room on its own target directory' -Skip:(-not $IsWindows) {
+        # Relocating puts build output where cargo clean and git clean cannot
+        # reach it, so a Dev Drive checkout should not pay for a problem it
+        # does not have.
+        Get-SemverChecksTargetDirPath -RepoRoot 'D:\oxidizer' -PackageName 'fetch' |
+            Should -BeNullOrEmpty
+    }
+
+    It 'relocates a short checkout when the package name is long enough to overflow' -Skip:(-not $IsWindows) {
+        # The nesting embeds the package name, so the decision cannot rest on
+        # the repository path alone.
+        Get-SemverChecksTargetDirPath -RepoRoot 'D:\oxidizer' -PackageName 'http_client_api_with_templated_uri' |
+            Should -BeLike 'D:\oxi-sc\*'
+    }
+
     It 'keeps separate clones in separate directories' -Skip:(-not $IsWindows) {
-        $first = Get-SemverChecksTargetDirPath -RepoRoot 'C:\Source\oxidizer'
-        $second = Get-SemverChecksTargetDirPath -RepoRoot 'C:\Source\oxidizer-two'
+        $first = Get-SemverChecksTargetDirPath -RepoRoot $script:deepRoot -PackageName 'fetch'
+        $second = Get-SemverChecksTargetDirPath -RepoRoot "$script:deepRoot-two" -PackageName 'fetch'
 
         $first | Should -Not -Be $second
     }
 
     It 'returns the same directory for the same clone across runs' -Skip:(-not $IsWindows) {
         # Determinism is what lets a rerun reuse the baseline rustdoc it just built.
-        $first = Get-SemverChecksTargetDirPath -RepoRoot 'C:\Source\oxidizer'
-        $second = Get-SemverChecksTargetDirPath -RepoRoot 'C:\Source\oxidizer'
+        $first = Get-SemverChecksTargetDirPath -RepoRoot $script:deepRoot -PackageName 'fetch'
+        $second = Get-SemverChecksTargetDirPath -RepoRoot $script:deepRoot -PackageName 'fetch'
+
+        $first | Should -Be $second
+    }
+
+    It 'gives one clone one directory whichever package is checked' -Skip:(-not $IsWindows) {
+        # The package name steers the decision, not the destination: a release
+        # walks many packages and they should share the baseline artifacts.
+        $first = Get-SemverChecksTargetDirPath -RepoRoot $script:deepRoot -PackageName 'fetch'
+        $second = Get-SemverChecksTargetDirPath -RepoRoot $script:deepRoot -PackageName 'cachet'
 
         $first | Should -Be $second
     }
 
     It 'treats equivalent spellings of one root as the same clone' -Skip:(-not $IsWindows) {
         # Windows does not distinguish these, so the digest must not either.
-        $plain = Get-SemverChecksTargetDirPath -RepoRoot 'C:\Source\oxidizer'
-        $trailing = Get-SemverChecksTargetDirPath -RepoRoot 'C:\Source\oxidizer\'
-        $cased = Get-SemverChecksTargetDirPath -RepoRoot 'C:\SOURCE\Oxidizer'
-        $relative = Get-SemverChecksTargetDirPath -RepoRoot 'C:\Source\other\..\oxidizer'
+        $plain = Get-SemverChecksTargetDirPath -RepoRoot $script:deepRoot -PackageName 'fetch'
+        $trailing = Get-SemverChecksTargetDirPath -RepoRoot "$script:deepRoot\" -PackageName 'fetch'
+        $cased = Get-SemverChecksTargetDirPath -RepoRoot $script:deepRoot.ToUpperInvariant() -PackageName 'fetch'
+        $relative = Get-SemverChecksTargetDirPath -RepoRoot 'C:\Source\other\..\oxidizer.worktrees\some-long-branch-name' -PackageName 'fetch'
 
         $trailing | Should -Be $plain
         $cased    | Should -Be $plain
@@ -122,21 +152,23 @@ Describe 'Get-SemverChecksTargetDirPath' {
 
     It 'follows the repository to another volume' -Skip:(-not $IsWindows) {
         # Staying on the developer's chosen filesystem avoids a cross-volume copy.
-        $path = Get-SemverChecksTargetDirPath -RepoRoot 'D:\oxidizer'
+        $path = Get-SemverChecksTargetDirPath -RepoRoot "D$($script:deepRoot.Substring(1))" -PackageName 'fetch'
 
         $path | Should -BeLike 'D:\oxi-sc\*'
     }
 
     It 'falls back to the system drive for a UNC root' -Skip:(-not $IsWindows) {
         # A UNC root has no drive letter to shorten to and would keep the very
-        # length the relocation exists to shed.
-        $path = Get-SemverChecksTargetDirPath -RepoRoot '\\server\share\oxidizer'
+        # length the relocation exists to shed, so it relocates regardless of
+        # how short the share path reads.
+        $path = Get-SemverChecksTargetDirPath -RepoRoot '\\server\share\oxidizer' -PackageName 'fetch'
 
         $path | Should -BeLike "$env:SystemDrive\oxi-sc\*"
     }
 
     It 'leaves the default target directory in place off Windows' -Skip:$IsWindows {
-        Get-SemverChecksTargetDirPath -RepoRoot '/home/user/oxidizer' | Should -BeNullOrEmpty
+        Get-SemverChecksTargetDirPath -RepoRoot '/home/user/oxidizer' -PackageName 'fetch' |
+            Should -BeNullOrEmpty
     }
 }
 
