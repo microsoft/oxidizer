@@ -366,6 +366,60 @@ mod tests {
         assert_eq!(twelve, (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12));
     }
 
+    /// `impl_transfer_tuple!` recurses by peeling one element off the head, so the
+    /// 1-tuple is the last impl it generates before the `()` base case. That arm is
+    /// the one where a missing comma would silently change meaning: `let (A) = self`
+    /// is a parenthesized pattern binding the whole tuple, which sends the impl back
+    /// into itself instead of reaching the element. `Tracker` makes the visit
+    /// observable, so this pins the head, the tail and the 12-element maximum.
+    #[test]
+    fn every_tuple_element_is_relocated() {
+        let threads = sample_threads();
+        let source = Some(&threads[0]);
+        let destination = &threads[1];
+
+        let mut one = (Tracker(false),);
+        one.relocate(source, destination);
+        assert_eq!(one, (Tracker(true),));
+
+        let mut two = (Tracker(false), Tracker(false));
+        two.relocate(source, destination);
+        assert_eq!(two, (Tracker(true), Tracker(true)));
+
+        let mut twelve = (
+            Tracker(false),
+            Tracker(false),
+            Tracker(false),
+            Tracker(false),
+            Tracker(false),
+            Tracker(false),
+            Tracker(false),
+            Tracker(false),
+            Tracker(false),
+            Tracker(false),
+            Tracker(false),
+            Tracker(false),
+        );
+        twelve.relocate(source, destination);
+        assert_eq!(
+            twelve,
+            (
+                Tracker(true),
+                Tracker(true),
+                Tracker(true),
+                Tracker(true),
+                Tracker(true),
+                Tracker(true),
+                Tracker(true),
+                Tracker(true),
+                Tracker(true),
+                Tracker(true),
+                Tracker(true),
+                Tracker(true),
+            )
+        );
+    }
+
     #[test]
     fn test_function_pointers() {
         // Helper functions for testing
