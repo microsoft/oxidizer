@@ -91,19 +91,15 @@ impl AllocError {
 
     /// Report whether the request exceeded the arena's supported alignment.
     ///
-    /// Such a request can never
-    /// succeed, regardless of how much memory is available.
+    /// Such a request can never succeed, regardless of how much memory is
+    /// available. The arena rejects any value whose alignment reaches half
+    /// the chunk alignment, because smart pointers recover their chunk
+    /// header by masking the value pointer and such a value can fall
+    /// outside the chunk's first tile.
     ///
-    /// ```
-    /// #[repr(align(32768))]
-    /// struct OverAligned;
-    ///
-    /// let arena = multitude::Arena::new();
-    /// let Some(error) = arena.try_alloc(OverAligned).err() else {
-    ///     panic!("over-aligned values must be rejected");
-    /// };
-    /// assert!(error.is_alignment_too_large());
-    /// ```
+    /// No example: naming a type aligned that far does not compile on every
+    /// supported codegen backend. The behaviour is covered by the arena's
+    /// alignment-guard unit tests.
     #[must_use]
     pub fn is_alignment_too_large(self) -> bool {
         matches!(self.kind, ErrorKind::AlignmentTooLarge)
