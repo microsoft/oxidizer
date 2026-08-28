@@ -209,9 +209,7 @@ impl CapturedEvent {
 /// # struct TestEvent { #[unredacted] value: i64 }
 /// emit!(sink, TestEvent { value: 1 });
 ///
-/// let expected = ExpectedEvent::new("test.event", Severity::Info)
-///     .dimension("value", 1i64)
-///     .log();
+/// let expected = ExpectedEvent::new("test.event", Severity::Info).dimension("value", 1i64);
 /// assert_eq!(processor.single_event(), expected);
 /// ```
 #[derive(Clone)]
@@ -364,14 +362,14 @@ fn passthrough_redaction_engine() -> data_privacy::RedactionEngine {
 }
 
 // ---------------------------------------------------------------------------
-// ExpectedEvent - partial-match builder for test assertions
+// ExpectedEvent - exact-match builder for test assertions
 // ---------------------------------------------------------------------------
 
-/// A partial-match event specification for test assertions.
+/// An exact-match event specification for test assertions.
 ///
-/// Construct with [`ExpectedEvent::new`] and chain builder methods for the fields
-/// you want to verify. Only specified fields are checked - unspecified fields are
-/// ignored during comparison.
+/// Construct with [`ExpectedEvent::new`] and chain builder methods for the
+/// fields and signals the event must carry. Omitted body and dimensions are
+/// expected to be absent, and metric and disabled flags default to `false`.
 ///
 /// # Example
 ///
@@ -382,7 +380,6 @@ fn passthrough_redaction_engine() -> data_privacy::RedactionEngine {
 /// let expected = ExpectedEvent::new("http.request", Severity::Info)
 ///     .body("Request handled")
 ///     .dimension("status", 200i64)
-///     .log()
 ///     .metric();
 /// ```
 #[derive(Debug)]
@@ -399,9 +396,10 @@ pub struct ExpectedEvent {
 impl ExpectedEvent {
     /// Creates a new expected **log** event with the given name and severity.
     ///
-    /// All other fields are unchecked by default. Use builder methods to add
-    /// constraints. For an event with no log signal - a metric-only or
-    /// signal-less event - use [`without_severity`](Self::without_severity).
+    /// Omitted body and dimensions are expected to be absent, the metric and
+    /// disabled flags default to `false`, and the log signal is expected. For an
+    /// event with no log signal - a metric-only or signal-less event - use
+    /// [`without_severity`](Self::without_severity).
     #[must_use]
     pub fn new(name: impl Into<String>, severity: Severity) -> Self {
         Self {
@@ -409,7 +407,7 @@ impl ExpectedEvent {
             severity: Some(severity),
             body: None,
             sorted_dimensions: Vec::new(),
-            expect_log: false,
+            expect_log: true,
             expect_metric: false,
             expect_disabled: false,
         }
@@ -690,7 +688,7 @@ impl PartialEq<EventDescription> for ExpectedEventDescription {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod coverage_tests {
-    use observed::{Event, emit};
+    use observed::{Event, emit, event};
 
     use super::*;
     use crate::events::ProbeEvent;
@@ -711,7 +709,7 @@ mod coverage_tests {
 
         // `ExpectedEvent == CapturedEvent` (reverse direction) agrees with the
         // forward direction it delegates to.
-        let expected_event = ExpectedEvent::new("test.probe", Severity::Info).dimension("value", 42i64).log();
+        let expected_event = ExpectedEvent::new("test.probe", Severity::Info).dimension("value", 42i64);
         assert_eq!(expected_event == captured, captured == expected_event);
 
         // `ExpectedEnrichmentEntry == EnrichmentEntry` (reverse direction).
@@ -722,5 +720,18 @@ mod coverage_tests {
         // `ExpectedEventDescription == EventDescription` (reverse direction).
         let expected_desc = ExpectedEventDescription::new("test.probe", Severity::Info).log();
         assert_eq!(expected_desc, ProbeEvent::DESCRIPTION);
+    }
+
+    #[event("fieldless.log")]
+    #[info]
+    struct FieldlessLog;
+
+    #[test]
+    fn expected_event_new_matches_fieldless_log_without_log_builder() {
+        let (sink, processor) = test_emitter(observed::SinkId::new("fieldless_log"));
+
+        emit!(sink, FieldlessLog);
+
+        assert_eq!(processor.single_event(), ExpectedEvent::new("fieldless.log", Severity::Info));
     }
 }

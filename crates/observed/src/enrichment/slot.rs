@@ -69,6 +69,10 @@ impl Slot {
 
     /// Pushes entries onto the enrichment chain and returns a guard.
     pub(crate) fn push(&self, entries: Arc<[EnrichmentEntry]>) -> Guard {
+        if entries.is_empty() {
+            return Guard::empty();
+        }
+
         let prev = {
             let cell = self.0.get_or(|| RefCell::new(None));
             let next = Arc::new(EnrichmentNode {
@@ -100,6 +104,10 @@ pub(crate) struct Guard {
 }
 
 impl Guard {
+    pub(crate) fn empty() -> Self {
+        Self { slots: SmallVec::new() }
+    }
+
     /// Flattens several guards into one. Each input guard is consumed and its
     /// `Drop` is disarmed (`mem::take` empties its slots), so the merged guard
     /// owns the restoration responsibility.
@@ -171,25 +179,29 @@ impl EnrichmentTransfer {
     /// Broadcast within the transfer's known slots; transfers with no
     /// captured slots are left unchanged.
     pub(crate) fn push(&mut self, additional_enrichment: impl Enrichment) {
-        self.push_entries(&Arc::from(additional_enrichment.into_entries()));
+        let entries = additional_enrichment.into_entries();
+        if entries.is_empty() {
+            return;
+        }
+
+        self.push_entries(&Arc::from(entries));
     }
 
     /// Same as [`push`](Self::push), but marks every entry as targeted at
     /// `target`, so only that sink observes it. Mirrors the `with_target`
     /// mapping that `EnrichFutureExt::enrich_for` applies.
     pub(crate) fn push_for(&mut self, target: SinkId, additional_enrichment: impl Enrichment) {
-        self.push_entries(
-            &additional_enrichment
-                .into_entries()
-                .into_iter()
-                .map(|entry| entry.with_target(target))
-                .collect(),
-        );
+        let entries: Arc<[EnrichmentEntry]> = additional_enrichment
+            .into_entries()
+            .into_iter()
+            .map(|entry| entry.with_target(target))
+            .collect();
+        self.push_entries(&entries);
     }
 
     /// Layers `entries` onto every captured chain as a single new node.
     fn push_entries(&mut self, entries: &Arc<[EnrichmentEntry]>) {
-        if self.slots.is_empty() {
+        if self.slots.is_empty() || entries.is_empty() {
             return;
         }
 
@@ -218,6 +230,14 @@ mod coverage_tests {
     impl Enrichment for TestEnrichment {
         fn into_entries(self) -> Vec<EnrichmentEntry> {
             vec![EnrichmentEntry::unclassified(self.0, 1_i64)]
+        }
+    }
+
+    struct EmptyEnrichment;
+
+    impl Enrichment for EmptyEnrichment {
+        fn into_entries(self) -> Vec<EnrichmentEntry> {
+            Vec::new()
         }
     }
 
@@ -256,6 +276,20 @@ mod coverage_tests {
     }
 
     #[test]
+    fn empty_push_returns_noop_guard_without_touching_the_slot() {
+        let slot = Slot::new();
+        let empty_guard = slot.push(Arc::from(Vec::new()));
+        assert!(slot.current().is_none());
+
+        let real_guard = slot.push(Arc::from(vec![EnrichmentEntry::unclassified("k", 1_i64)]));
+        let merged = Guard::merge([empty_guard, real_guard]);
+        assert!(slot.current().is_some());
+
+        drop(merged);
+        assert!(slot.current().is_none());
+    }
+
+    #[test]
     fn transfer_captures_a_slot_and_layers_further_enrichment_onto_it() {
         let slot = Slot::new();
         let mut transfer = EnrichmentTransfer::default();
@@ -276,6 +310,22 @@ mod coverage_tests {
             entries.iter().any(|entry| entry.target() == Some(SinkId::new("target"))),
             "`push_for` must mark its entry as targeted"
         );
+
+        drop(guard);
+        assert!(slot.current().is_none());
+    }
+
+    #[test]
+    fn transfer_ignores_empty_enrichment_layers() {
+        let slot = Slot::new();
+        let mut transfer = EnrichmentTransfer::default();
+        transfer.add_slot(&slot);
+
+        transfer.push(EmptyEnrichment);
+        transfer.push_for(SinkId::new("target"), EmptyEnrichment);
+
+        let guard = transfer.apply();
+        assert!(slot.current().is_none());
 
         drop(guard);
         assert!(slot.current().is_none());

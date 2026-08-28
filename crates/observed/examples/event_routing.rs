@@ -163,10 +163,6 @@ impl EventProcessor for LogProcessor {
             .expect("lock is not poisoned")
             .push(format!("[LOG] {}", event.name()));
     }
-
-    fn flush(&self) -> Result<(), observed::FlushError> {
-        Ok(())
-    }
 }
 
 /// Accepts metric events and records instruments from both metadata paths:
@@ -213,10 +209,6 @@ impl EventProcessor for MetricProcessor {
             ));
         }
     }
-
-    fn flush(&self) -> Result<(), observed::FlushError> {
-        Ok(())
-    }
 }
 
 /// An audit processor that opts in to specific disabled events by name.
@@ -236,9 +228,5 @@ impl EventProcessor for AuditProcessor {
             .lock()
             .expect("lock is not poisoned")
             .push(format!("[AUDIT] {}", event.name()));
-    }
-
-    fn flush(&self) -> Result<(), observed::FlushError> {
-        Ok(())
     }
 }

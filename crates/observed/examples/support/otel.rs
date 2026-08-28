@@ -31,9 +31,6 @@ const CODE_FILE_PATH: &str = "code.file.path";
 /// `OTel` attribute key for the source line a call site came from.
 const CODE_LINE_NUMBER: &str = "code.line.number";
 
-/// `OTel` attribute key for the crate a call site came from.
-const CODE_NAMESPACE: &str = "code.namespace";
-
 /// Converts a [`Text`] into an `OTel` string, preserving the borrowed-versus-
 /// shared distinction so neither representation copies.
 ///
@@ -142,12 +139,5 @@ pub(crate) fn populate_log_record(record: &mut impl LogRecord, event: &EventView
             AnyValue::Int(i64::from(line)),
         );
     }
-    if let Some(crate_name) = event.source_crate() {
-        record.add_attribute(
-            opentelemetry::Key::from_static_str(CODE_NAMESPACE),
-            AnyValue::String(crate_name.into()),
-        );
-    }
-
     true
 }
