@@ -1,0 +1,36 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "msvc_spectre_libs_build"
+description = "Build-time policy and MSVC toolchain resolution behind the msvc_spectre_libs build script."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["spectre", "msvc", "mitigated", "crt", "build"]
+categories = ["development-tools::build-utils"]
+
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/msvc_spectre_libs_build"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["ohno::*"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+cc = { workspace = true }
+ohno = { workspace = true, features = ["app-err"] }
+
+[dev-dependencies]
+mutants = { workspace = true }
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

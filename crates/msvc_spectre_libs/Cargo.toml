@@ -1,0 +1,49 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "msvc_spectre_libs"
+description = "Link against the Spectre-mitigated CRT import libraries for Windows MSVC targets; a no-op on every other target."
+version = "0.2.0"
+readme = "README.md"
+keywords = ["spectre", "msvc", "mitigated", "crt", "oxidizer"]
+categories = ["development-tools::build-utils"]
+
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/msvc_spectre_libs"
+build = "build.rs"
+
+[package.metadata.docs.rs]
+all-features = true
+
+# `msvc_spectre_libs_build` is used only by `build.rs`. cargo-machete does not
+# scan build scripts, so it reports a false positive; ignore it here.
+[package.metadata.cargo-machete]
+ignored = ["msvc_spectre_libs_build"]
+
+# The library target is documentation only -- every executable body lives in the
+# build script, which coverage instrumentation never observes -- so this package
+# legitimately produces no coverage data. Opt out of the gate.
+[package.metadata.coverage-gate]
+min-lines-percent = 0
+
+[features]
+# Turn the "libraries not found" build warning into a hard build error.
+error = []
+
+# The policy crate must be an unconditional build-dependency, not a
+# target-scoped one: `[target.'cfg(...)'.build-dependencies]` is evaluated
+# against the *host*, so a non-Windows host cross-compiling to a Windows MSVC
+# target would not select it.
+[build-dependencies]
+msvc_spectre_libs_build = { workspace = true }
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints
