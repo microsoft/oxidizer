@@ -291,9 +291,11 @@ API - `MockBindings` is `cfg(test)`-only and unreachable from a benchmark
 target, and exposing it through a published feature would put test scaffolding in
 the public surface. Scenarios are therefore designed to be read by **differencing**
 neighbours within a group: `get_headers_high` minus `get_minimal` is header
-translation, `get_body_high` minus `get_body_low` is the per-byte read path,
-`post_unknown_high` minus `post_known_high` is automatic chunking, and
-`first_request` minus `get_minimal` is session creation plus connection setup.
+translation, `get_known_high` minus `get_known_low` is the per-byte read path,
+`get_unknown_high` minus `get_known_high` is reading a body whose length the
+headers never declared, `post_unknown_high` minus `post_known_high` is automatic
+chunking, and `first_request` minus `get_minimal` is session creation plus
+connection setup.
 Each leg is parameterized with one low and one high value only, which is enough to
 separate the fixed cost from the scaling cost.
 

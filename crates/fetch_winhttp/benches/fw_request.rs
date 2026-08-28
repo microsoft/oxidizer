@@ -5,8 +5,14 @@
 //!
 //! The transport's own work is not separable from WinHTTP's through the public API, so each
 //! scenario is read by differencing it against a neighbour in the same group: subtracting
-//! `get_minimal` from `get_headers_high` isolates header translation, subtracting `get_body_low`
-//! from `get_body_high` isolates the per-byte response read path, and so on.
+//! `get_minimal` from `get_headers_high` isolates header translation, subtracting `get_known_low`
+//! from `get_known_high` isolates the per-byte response read path, and so on.
+//!
+//! Request and response bodies are each covered in both of the shapes the transport treats
+//! differently: a declared `Content-Length` and an undeclared length. The two are separate paths on
+//! both sides - a declared request length is written in one pass while an undeclared one is
+//! chunked, and a declared response length sizes the transport's reads while an undeclared one
+//! leaves it reading whatever has arrived.
 //!
 //! Only the benchmark thread is measured. WinHTTP completes I/O on its own worker threads and the
 //! fixture serves on its own runtime threads, so neither appears in the processor-time or
@@ -48,12 +54,14 @@ mod windows {
     use all_the_time::Session as TimeSession;
     use alloc_tracker::Session as AllocSession;
     use benchmarking::time_sample_async;
+    use bytes::Bytes;
     use bytesbuf::BytesView;
     use criterion::measurement::WallTime;
     use criterion::{BenchmarkGroup, Criterion};
     use fetch_winhttp::WinHttpTlsConfig;
     use fetch_winhttp_impl::testing::{Http3Server, ResponsePlan, TestClient, TestServer, client};
     use futures::executor::{LocalPool, block_on};
+    use http::header::{CONTENT_ENCODING, CONTENT_LENGTH, TRANSFER_ENCODING};
     use http::{HeaderName, HeaderValue, Version};
     use http_extensions::HttpBodyOptions;
     use tick::Clock;
@@ -80,6 +88,19 @@ mod windows {
     /// set of tracing, authentication and routing metadata.
     const HIGH_HEADER_COUNT: usize = 32;
 
+    /// Chunk size the undeclared-length download fixture serves its payload in.
+    ///
+    /// The payload must span more than one chunk, which is what makes `hyper` pick chunked
+    /// transfer-encoding and withhold a `Content-Length`. Beyond that the chunk should be no
+    /// smaller than the transport's own preferred read size, because an undeclared-length read
+    /// takes whatever has arrived rather than waiting for a full region: smaller chunks let the
+    /// fixture's write granularity decide how many reads the transfer costs, which measures the
+    /// fixture rather than the transport. Serving in chunks this size keeps the fixture from
+    /// forcing extra reads, leaving a saturated comparison against the declared-length scenario.
+    /// How a fragmented arrival pattern performs is a separate question this scenario does not
+    /// answer.
+    const RESPONSE_CHUNK_LEN: usize = 256 * 1024;
+
     pub(crate) fn entrypoint(c: &mut Criterion) {
         let allocs = AllocSession::new();
         let time = TimeSession::new();
@@ -104,8 +125,10 @@ mod windows {
         headers(&mut group, allocs, time, "get_headers_low", LOW_HEADER_COUNT);
         headers(&mut group, allocs, time, "get_headers_high", HIGH_HEADER_COUNT);
 
-        download(&mut group, allocs, time, "get_body_low", LOW_BODY_LEN);
-        download(&mut group, allocs, time, "get_body_high", HIGH_BODY_LEN);
+        download(&mut group, allocs, time, "get_known_low", LOW_BODY_LEN);
+        download(&mut group, allocs, time, "get_known_high", HIGH_BODY_LEN);
+
+        chunked_download(&mut group, allocs, time, "get_unknown_high", HIGH_BODY_LEN);
 
         known_length_upload(&mut group, allocs, time, "post_known_low", LOW_BODY_LEN);
         known_length_upload(&mut group, allocs, time, "post_known_high", HIGH_BODY_LEN);
@@ -185,10 +208,13 @@ mod windows {
         drop(server.finish());
     }
 
+    /// Downloads a response whose length the headers declare, which lets the transport size each
+    /// read from the remaining count and demand a full buffer.
     fn download(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &AllocSession, time: &TimeSession, name: &'static str, len: usize) {
         let server = TestServer::http_repeating(ResponsePlan::ok(vec![b'r'; len]));
         let url = server.url("/download");
         let test_client = warmed_client(&[Version::HTTP_11], WinHttpTlsConfig::default(), &url);
+        assert_response_shape(&test_client, &url, true, len);
 
         measure(group, allocs, time, name, |_| async {
             let response = test_client.client.get(url.as_str()).fetch().await.unwrap();
@@ -197,6 +223,85 @@ mod windows {
         drop(server.finish());
     }
 
+    /// The undeclared-length counterpart of [`download`], covering the response read path that has
+    /// no declared remainder to size its reads from.
+    ///
+    /// A chunked response withholds `Content-Length`, so each read takes whatever has already
+    /// arrived instead of waiting for a full buffer. Differencing this against [`download`] at the
+    /// same payload size therefore isolates what reading an undeclared body costs. Only the high
+    /// leg is measured: a payload at the low size fits within a single chunk, and a single-frame
+    /// response is served with a declared length, so a low leg could not express this shape.
+    fn chunked_download(
+        group: &mut BenchmarkGroup<'_, WallTime>,
+        allocs: &AllocSession,
+        time: &TimeSession,
+        name: &'static str,
+        len: usize,
+    ) {
+        // One buffer sliced per chunk rather than one allocation per chunk; `Bytes` slices share
+        // the same storage.
+        let payload = Bytes::from(vec![b'r'; RESPONSE_CHUNK_LEN]);
+        let mut chunks = Vec::new();
+        let mut remaining = len;
+        while remaining > 0 {
+            let take = remaining.min(RESPONSE_CHUNK_LEN);
+            chunks.push(payload.slice(0..take));
+            remaining -= take;
+        }
+        assert!(chunks.len() > 1, "a single-frame response is served with a declared length");
+
+        let server = TestServer::http_repeating(ResponsePlan::chunks(chunks));
+        let url = server.url("/chunked-download");
+        let test_client = warmed_client(&[Version::HTTP_11], WinHttpTlsConfig::default(), &url);
+        assert_response_shape(&test_client, &url, false, len);
+
+        measure(group, allocs, time, name, |_| async {
+            let response = test_client.client.get(url.as_str()).fetch().await.unwrap();
+            black_box(response.into_body().into_bytes().await.unwrap());
+        });
+        drop(server.finish());
+    }
+
+    /// Confirms the fixture serves the response body shape its scenario is named for.
+    ///
+    /// Whether a response declares its length is decided by `hyper` from the frames the plan
+    /// scripts, not stated by the plan, so a change to either could quietly turn the undeclared
+    /// scenario into a second measurement of the declared one. Checking here fails the benchmark
+    /// instead, and runs outside the measured region. The request side needs no counterpart: which
+    /// shape the transport sends follows directly from the body the caller hands it.
+    ///
+    /// The transport takes a length as declared only when the response carries one and carries
+    /// neither a content nor a transfer encoding, so all three are checked rather than just the
+    /// length. An undeclared body is additionally required to be chunked, because a body delimited
+    /// by connection close would also present no length but would cost the following iteration a
+    /// new connection. Asserting the delivered size catches a fixture that serves the right shape
+    /// at the wrong scale.
+    fn assert_response_shape(test_client: &TestClient, url: &str, declared: bool, len: usize) {
+        let response = block_on(test_client.client.get(url).fetch()).unwrap();
+        let headers = response.headers().clone();
+        // Drained rather than dropped, so the pooled connection survives for the measured
+        // iterations instead of being reset mid-body.
+        let body = block_on(response.into_body().into_bytes()).unwrap();
+
+        assert_eq!(
+            headers.contains_key(CONTENT_LENGTH),
+            declared,
+            "the fixture at {url} no longer serves the scripted body shape"
+        );
+        assert_eq!(
+            headers.contains_key(TRANSFER_ENCODING),
+            !declared,
+            "the fixture at {url} no longer frames the scripted body shape"
+        );
+        assert!(
+            !headers.contains_key(CONTENT_ENCODING),
+            "the fixture at {url} encodes the body, which withholds the length from the transport"
+        );
+        assert_eq!(body.len(), len, "the fixture at {url} no longer serves the scripted payload size");
+    }
+
+    /// Uploads a body whose length is known up front, which the transport declares with a
+    /// `Content-Length` and writes in a single pass.
     fn known_length_upload(
         group: &mut BenchmarkGroup<'_, WallTime>,
         allocs: &AllocSession,
