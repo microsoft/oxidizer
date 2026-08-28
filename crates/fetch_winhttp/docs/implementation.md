@@ -73,7 +73,10 @@ pub(crate) unsafe trait Bindings: Send + Sync + 'static {
 - **Production impl** (`RealBindings`) wraps the `windows`-crate calls one-to-one
   with `// SAFETY:` notes, like `oxidizer_io`'s build-target bindings. Every
   referenced symbol exists in `windows` `0.62.2`. `open` always uses
-  `WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY`; proxy mode is not configurable in v1.
+  `WINHTTP_ACCESS_TYPE_NO_PROXY`, which is the sole reason the transport never
+  reaches a proxy (design.md §2.3). Because the access type is baked into
+  `RealBindings` rather than passed through the `Bindings` trait, mock tests
+  cannot observe it; only a live request can.
 - **Test impl** is `mockall`'s generated `MockBindings`, wrapped in a
   `BindingsFacade` enum (`Real` / `Mock(Arc<MockBindings>)`), matching
   `oxidizer_io`'s bindings facade.
@@ -743,9 +746,9 @@ step S2) with mask
 `DISPATCHED_COMPLETIONS | SECURE_FAILURE | HANDLES | CONNECT_TO_SERVER`, and
 every request handle inherits it. `DISPATCHED_COMPLETIONS` is narrower than the
 native all-completions flag: it omits the proxy-resolution completions, which
-the transport can never receive because it resolves proxies through automatic
-detection configured on the session rather than through the proxy-resolution
-APIs. `CONNECT_TO_SERVER` covers the connection-progress
+the transport can never receive because it opens its session with
+`WINHTTP_ACCESS_TYPE_NO_PROXY` and calls no proxy-resolution API.
+`CONNECT_TO_SERVER` covers the connection-progress
 notifications used by cold-connect telemetry (§12). The only per-request handoff
 is installing the context pointer via
 `WinHttpSetOption(WINHTTP_OPTION_CONTEXT_VALUE, ptr)`.
@@ -1457,7 +1460,7 @@ and relocates per processor with the rest of the config; the transport emits its
 through it (§12). There is no
 `anyspawn::Spawner`: no WinHTTP call the transport makes can block (§2.1).
 
-Session creation uses automatic proxy discovery and applies every required session
+Session creation opens a direct-connection session and applies every required session
 option without an old-Windows capability-probing or degradation path. Because the
 custom-transport factory is infallible, a session that cannot be opened or configured
 produces a permanently failed handler. Every request to that handler returns a fresh

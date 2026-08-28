@@ -25,10 +25,9 @@
 //! - Generic TLS configuration, finite connection limits, and bounded
 //!   connection lifetimes are accepted and ignored rather than rejected, so a
 //!   client that sets them still builds.
-//! - Proxy selection follows automatic Windows proxy policy, including
-//!   automatic discovery and proxy auto-configuration scripts. Callers cannot
-//!   override that policy, and it may route a request through a proxy or
-//!   send it directly to the origin.
+//! - Requests always connect directly to the origin. Proxies are not supported,
+//!   Windows proxy configuration is not consulted, and there is no setting that
+//!   changes this.
 //! - Redirects are not followed, no cookie store is kept, and authentication
 //!   challenges are not answered. Those responses are returned to the caller to
 //!   act on, and none of this can be re-enabled.

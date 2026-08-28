@@ -30,12 +30,11 @@ const TRUE_BYTES: [u8; size_of::<i32>()] = 1_i32.to_ne_bytes();
 ///
 /// The completion set is narrower than the native
 /// `WINHTTP_CALLBACK_FLAG_ALL_COMPLETIONS`, which also covers the
-/// proxy-resolution completions. The transport resolves proxies through
-/// automatic detection configured on the session rather than through
-/// `WinHttpGetProxyForUrlEx` or `WinHttpGetProxySettingsEx`, so those
-/// notifications can never arrive and the callback has no handling for them.
-/// Subscribing to them would describe a protocol the transport does not
-/// implement.
+/// proxy-resolution completions. The session is opened for direct connections
+/// and the transport calls neither `WinHttpGetProxyForUrlEx` nor
+/// `WinHttpGetProxySettingsEx`, so those notifications can never arrive and the
+/// callback has no handling for them. Subscribing to them would describe a
+/// protocol the transport does not implement.
 ///
 /// Every operand below is a distinct bit, so `|` and `^` compute the same
 /// value here and a mutation between them is equivalent rather than a defect.
@@ -66,7 +65,7 @@ pub(crate) const SESSION_OPTIONS_WITHOUT_KEEP_ALIVE: usize = 3;
 /// Defines the OS connection-pool boundary for one transport instance.
 ///
 /// The custom transport factory creates one session for each materialized core
-/// and pool slot. The session configures automatic proxy discovery, native
+/// and pool slot. The session configures direct connections, native
 /// timeout policy, keep-alive behavior, and the callback inherited by all child
 /// request handles. Disabling WinHTTP global pooling keeps independently built
 /// clients from sharing connections through process-wide OS state.

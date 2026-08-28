@@ -21,14 +21,13 @@ Why a WinHTTP transport:
   TLS stack. (Client certificates are a Schannel capability but are not exposed in
   v1; see §4.1.)
 - **OS-managed protocol stack.** HTTP/1.1, HTTP/2 and HTTP/3 negotiation,
-  connection pooling, keep-alive, proxy discovery and automatic gzip/deflate
-  decompression are handled by the OS.
+  connection pooling, keep-alive and automatic gzip/deflate decompression are
+  handled by the OS.
 - **Smaller dependency surface.** No rustls/aws-lc-rs/native-tls/hyper on the
   request path.
 
 Out of scope: any non-Windows platform (the crate is `#[cfg(windows)]` in its
-entirety); WebSocket upgrades; proxy auto-config scripting beyond what WinHTTP
-does natively.
+entirety); WebSocket upgrades; proxies (§2.3).
 
 ### 1.1 Constructing a client
 
@@ -175,12 +174,19 @@ Unsupported generic connection options are ignored without runtime diagnostics. 
 fidelity is documented here so callers can select transport-specific configuration
 knowingly.
 
-### 2.3 Proxy discovery
+### 2.3 Proxy support
 
-The transport follows the current automatic Windows proxy policy, including automatic
-discovery and PAC handling. v1 exposes no proxy configuration or direct-connection
-override. This is a v1 design choice and may be revisited if future requirements call
-for explicit proxy control.
+Requests always connect directly to the origin. The transport does not use a proxy,
+consult Windows proxy configuration, or run proxy auto-configuration scripts, and it
+offers no setting that changes this.
+
+The target scenario is service-to-service traffic, which reaches its peers directly.
+Against that, proxy support costs every request: discovery is per-destination work
+that a client doing nothing else of note pays on the request path. Declining it
+outright is both simpler and faster than configuring it away.
+
+A caller who needs a proxy is not served by this transport. Supporting one would be a
+feature in its own right, with its own configuration surface, and is not planned.
 
 ## 3. HTTP protocol negotiation
 
@@ -312,8 +318,8 @@ spans it along with the rest of connection establishment (§6.2).
 
 ### 6.2 Connect timeout scope
 
-The deadline spans name resolution, proxy discovery, TCP/TLS connection establishment,
-and sending the request line and headers. The request body lies outside this deadline but
+The deadline spans name resolution, TCP/TLS connection establishment, and sending the
+request line and headers. The request body lies outside this deadline but
 remains inside the per-request `ResponseTimeout`, which continues through the complete
 upload and response headers (§6.1).
 

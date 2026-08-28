@@ -7,7 +7,7 @@ use std::ptr::{NonNull, null, null_mut};
 use widestring::U16CStr;
 use windows::Win32::Foundation::{ERROR_IO_PENDING, ERROR_SUCCESS, GetLastError};
 use windows::Win32::Networking::WinHttp::{
-    WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_OPEN_REQUEST_FLAGS, WinHttpCloseHandle, WinHttpConnect, WinHttpOpen, WinHttpOpenRequest,
+    WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_OPEN_REQUEST_FLAGS, WinHttpCloseHandle, WinHttpConnect, WinHttpOpen, WinHttpOpenRequest,
     WinHttpQueryHeaders, WinHttpQueryOption, WinHttpReadDataEx, WinHttpReceiveResponse, WinHttpSendRequest, WinHttpSetOption,
     WinHttpSetStatusCallback, WinHttpSetTimeouts, WinHttpWriteData,
 };
@@ -86,11 +86,14 @@ impl RealBindings {
 unsafe impl Bindings for RealBindings {
     unsafe fn open(&self, user_agent: &U16CStr, flags: u32) -> Result<RawHandle> {
         // SAFETY: all string pointers are NUL-terminated for the duration of
-        // the call; proxy and bypass are intentionally null.
+        // the call; the proxy name and bypass list must be null under
+        // WINHTTP_ACCESS_TYPE_NO_PROXY.
         let handle = unsafe {
             WinHttpOpen(
                 PCWSTR(user_agent.as_ptr()),
-                WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+                // Requests always connect directly. Proxy support is not a
+                // feature of this transport (design.md, "Proxy support").
+                WINHTTP_ACCESS_TYPE_NO_PROXY,
                 PCWSTR::null(),
                 PCWSTR::null(),
                 flags,
