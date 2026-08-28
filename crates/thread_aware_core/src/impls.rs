@@ -277,7 +277,7 @@ mod tests {
         let owner = Owner::new(2);
         let thread = std::thread::current().id();
         [
-            Thread::new(owner, thread, NumaNode::new(0)),
+            Thread::new(owner.clone(), thread, NumaNode::new(0)),
             Thread::new(owner, thread, NumaNode::new(1)),
         ]
     }

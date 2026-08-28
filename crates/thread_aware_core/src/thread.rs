@@ -31,6 +31,9 @@ static NEXT_OWNER: AtomicUsize = AtomicUsize::new(0);
 /// Two owners are the same runtime exactly when their identities match; the thread count
 /// plays no part in equality or hashing.
 ///
+/// An owner names one live runtime, so it is `Clone` but not `Copy`, and
+/// [`Thread::owner`] lends it rather than handing out duplicates.
+///
 /// # Examples
 ///
 /// ```
@@ -46,7 +49,7 @@ static NEXT_OWNER: AtomicUsize = AtomicUsize::new(0);
 /// assert_ne!(pool, Owner::new(4));
 /// assert_ne!(elastic, Owner::new(0));
 /// ```
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct Owner {
     id: usize,
     min_threads: usize,
@@ -188,9 +191,9 @@ impl NumaNode {
 ///
 /// let here = thread::current().id();
 /// let owner = Owner::new(1);
-/// let mine = Thread::new(owner, here, NumaNode::new(1));
+/// let mine = Thread::new(owner.clone(), here, NumaNode::new(1));
 ///
-/// assert_eq!(mine.owner(), owner);
+/// assert_eq!(mine.owner(), &owner);
 /// assert_eq!(mine.id(), here);
 ///
 /// // The same OS thread under a different runtime is a different `Thread`...
@@ -232,9 +235,9 @@ impl Thread {
     /// use thread_aware_core::{NumaNode, Owner, Thread};
     ///
     /// let owner = Owner::new(1);
-    /// let mine = Thread::new(owner, thread::current().id(), NumaNode::new(0));
+    /// let mine = Thread::new(owner.clone(), thread::current().id(), NumaNode::new(0));
     ///
-    /// assert_eq!(mine.owner(), owner);
+    /// assert_eq!(mine.owner(), &owner);
     /// ```
     #[cfg(any(test, feature = "std"))]
     #[inline]
@@ -258,16 +261,16 @@ impl Thread {
     /// use thread_aware_core::{NumaNode, Owner, Thread};
     ///
     /// let owner = Owner::new(7);
-    /// let mine = Thread::new(owner, thread::current().id(), NumaNode::new(0));
+    /// let mine = Thread::new(owner.clone(), thread::current().id(), NumaNode::new(0));
     ///
-    /// assert_eq!(mine.owner(), owner);
+    /// assert_eq!(mine.owner(), &owner);
     /// # }
     /// # }
     /// ```
     #[inline]
     #[must_use]
-    pub const fn owner(&self) -> Owner {
-        self.owner
+    pub const fn owner(&self) -> &Owner {
+        &self.owner
     }
 
     /// Returns the [`ThreadId`](std::thread::ThreadId) of the OS thread this `Thread` names.
@@ -332,11 +335,14 @@ mod tests {
     use std::hash::DefaultHasher;
     use std::thread;
 
-    use static_assertions::assert_impl_all;
+    use static_assertions::{assert_impl_all, assert_not_impl_any};
 
     use super::{Hash, Hasher, NumaNode, Owner, Thread};
 
     assert_impl_all!(Owner: Send, Sync, Unpin, UnwindSafe, RefUnwindSafe);
+    // An owner names one live runtime, so handing out silent duplicates is not something the
+    // type should make effortless; `Clone` keeps it deliberate.
+    assert_not_impl_any!(Owner: Copy);
     assert_impl_all!(NumaNode: Send, Sync, Unpin, UnwindSafe, RefUnwindSafe);
     assert_impl_all!(Thread: Send, Sync, Unpin, UnwindSafe, RefUnwindSafe);
 
@@ -344,9 +350,9 @@ mod tests {
     fn exposes_components() {
         let id = thread::current().id();
         let owner = Owner::new(3);
-        let mine = Thread::new(owner, id, NumaNode::new(2));
+        let mine = Thread::new(owner.clone(), id, NumaNode::new(2));
 
-        assert_eq!(mine.owner(), owner);
+        assert_eq!(mine.owner(), &owner);
         assert_eq!(mine.owner().min_threads(), 3, "the owner survives intact, count included");
         assert_eq!(mine.id(), id);
         assert_eq!(mine.numa_node(), NumaNode::new(2));
@@ -367,7 +373,7 @@ mod tests {
         let id = thread::current().id();
         // One owner, so the NUMA node is the only thing that differs.
         let owner = Owner::new(1);
-        let first = Thread::new(owner, id, NumaNode::new(0));
+        let first = Thread::new(owner.clone(), id, NumaNode::new(0));
         let second = Thread::new(owner, id, NumaNode::new(1));
 
         assert_ne!(first, second);
@@ -377,7 +383,7 @@ mod tests {
     fn different_thread_compares_unequal() {
         let owner = Owner::new(0);
         let numa_node = NumaNode::new(0);
-        let here = Thread::new(owner, thread::current().id(), numa_node);
+        let here = Thread::new(owner.clone(), thread::current().id(), numa_node);
         let there = thread::spawn(move || Thread::new(owner, thread::current().id(), numa_node))
             .join()
             .unwrap();
@@ -402,7 +408,7 @@ mod tests {
 
         assert_ne!(first, second, "each owner takes its own identity");
         assert_eq!(first, first, "an owner equals itself");
-        assert_eq!(first, first.clone(), "a copy keeps the same identity");
+        assert_eq!(first, first.clone(), "a clone keeps the same identity");
     }
 
     #[test]
@@ -413,7 +419,7 @@ mod tests {
         let other = Owner { id: 7, min_threads: 99 };
 
         assert_eq!(one, other, "identity alone decides equality");
-        assert_eq!(hash_of(one), hash_of(other), "equal owners must hash equally");
+        assert_eq!(hash_of(&one), hash_of(&other), "equal owners must hash equally");
     }
 
     #[test]
@@ -424,7 +430,7 @@ mod tests {
         // Equal counts, so only the identity tells these apart. Hashing has to carry it, or
         // every owner would land in one bucket.
         assert_ne!(one, other);
-        assert_ne!(hash_of(one), hash_of(other), "distinct owners must hash apart");
+        assert_ne!(hash_of(&one), hash_of(&other), "distinct owners must hash apart");
     }
 
     #[test]
@@ -434,14 +440,15 @@ mod tests {
     }
 
     #[test]
-    fn owner_copy_preserves_the_thread_count() {
+    fn owner_clone_preserves_the_thread_count() {
         let owner = Owner::new(4);
-        let copy = owner;
+        let clone = owner.clone();
 
-        assert_eq!(copy.min_threads(), 4, "a copy keeps the count, not just the identity");
+        assert_eq!(clone, owner, "a clone keeps the identity");
+        assert_eq!(clone.min_threads(), 4, "a clone keeps the count, not just the identity");
     }
 
-    fn hash_of(owner: Owner) -> u64 {
+    fn hash_of(owner: &Owner) -> u64 {
         let mut hasher = DefaultHasher::new();
         owner.hash(&mut hasher);
         hasher.finish()

@@ -15,7 +15,7 @@ use static_assertions::assert_impl_all;
 use thread_aware_core::{NumaNode, Owner, Thread};
 
 assert_impl_all!(Thread: Clone, Eq, Send, Sync);
-assert_impl_all!(Owner: Copy, Eq, Send, Sync);
+assert_impl_all!(Owner: Clone, Eq, Send, Sync);
 assert_impl_all!(NumaNode: Copy, Eq, Send, Sync);
 
 fn hash_of<T>(value: &T) -> u64
@@ -70,13 +70,13 @@ fn with_std_every_component_takes_part_in_equality() {
     let id = thread::current().id();
     let owner = Owner::new(1);
     let numa_node = NumaNode::new(0);
-    let mine = Thread::new(owner, id, numa_node);
+    let mine = Thread::new(owner.clone(), id, numa_node);
 
-    assert_eq!(mine, Thread::new(owner, id, numa_node));
-    assert_eq!(hash_of(&mine), hash_of(&Thread::new(owner, id, numa_node)));
+    assert_eq!(mine, Thread::new(owner.clone(), id, numa_node));
+    assert_eq!(hash_of(&mine), hash_of(&Thread::new(owner.clone(), id, numa_node)));
 
     assert_ne!(mine, Thread::new(Owner::new(1), id, numa_node), "the owner counts");
-    assert_ne!(mine, Thread::new(owner, id, NumaNode::new(1)), "the NUMA node counts");
+    assert_ne!(mine, Thread::new(owner.clone(), id, NumaNode::new(1)), "the NUMA node counts");
 
     let elsewhere = thread::spawn(move || Thread::new(owner, thread::current().id(), numa_node))
         .join()

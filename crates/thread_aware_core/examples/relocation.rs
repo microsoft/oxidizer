@@ -33,7 +33,7 @@ fn main() {
         .expect("the spawned thread cannot panic");
 
     let owner = Owner::new(2);
-    let first = Thread::new(owner, here, NumaNode::new(0));
+    let first = Thread::new(owner.clone(), here, NumaNode::new(0));
     let second = Thread::new(owner, there, NumaNode::new(0));
 
     // Relocate a sample object between them.
