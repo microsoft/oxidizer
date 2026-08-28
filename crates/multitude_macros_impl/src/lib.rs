@@ -1523,64 +1523,14 @@ fn enum_tokens(
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Deref;
-
     use super::*;
 
-    struct Generated(String);
-
-    impl Generated {
-        fn new(value: &str) -> Self {
-            let mut compact = String::with_capacity(value.len());
-            let mut in_string = false;
-            let mut escaped = false;
-            for ch in value.chars() {
-                if in_string {
-                    compact.push(ch);
-                    if escaped {
-                        escaped = false;
-                    } else if ch == '\\' {
-                        escaped = true;
-                    } else if ch == '"' {
-                        in_string = false;
-                    }
-                } else if ch == '"' {
-                    in_string = true;
-                    compact.push(ch);
-                } else if !ch.is_whitespace() {
-                    compact.push(ch);
-                }
-            }
-            Self(compact)
-        }
-
-        fn contains(&self, expected: &str) -> bool {
-            self.0.contains(expected) || self.0.contains(&Self::new(expected).0)
-        }
-
-        fn match_count(&self, expected: &str) -> usize {
-            self.0.matches(&Self::new(expected).0).count()
-        }
-    }
-
-    impl Deref for Generated {
-        type Target = str;
-
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-
-    fn expand(source: &str) -> Generated {
+    fn expand(source: &str) -> String {
         let input: DeriveInput = syn::parse_str(source).unwrap();
         let root: Path = parse_quote!(::multitude::de);
         let generated = super::expand(&input, &root).unwrap();
-
-        #[cfg(not(miri))]
-        syn::parse2::<syn::File>(generated.clone()).unwrap();
-        let rendered = generated.to_string();
-
-        Generated::new(&rendered)
+        let file: syn::File = syn::parse2(generated).unwrap();
+        prettyplease::unparse(&file)
     }
 
     #[test]
@@ -1651,7 +1601,7 @@ mod tests {
         assert!(enumeration.contains("variant index 0 <= i < 2"));
         assert!(enumeration.contains("Variant2"));
         assert!(!enumeration.contains("Variant1,"));
-        assert!(compact_enumeration.contains("1u64=>::core::result::Result::Ok(__MultitudeVariantForE::Variant2)"));
+        assert!(compact_enumeration.contains("1u64=>{::core::result::Result::Ok(__MultitudeVariantForE::Variant2)"));
         assert!(!compact_enumeration.contains("2u64=>"));
     }
 
@@ -1816,7 +1766,7 @@ mod tests {
         assert!(!variant.contains("T: ::multitude::de::DeserializeIn"));
 
         let compact: String = variant.split_whitespace().collect();
-        assert_eq!(variant.match_count("let _: () = __value;"), 3);
+        assert_eq!(compact.matches("let_:()=__value;").count(), 3);
         let single_named_constructor = ["E::Single", "{", "value:__value", "}"].concat();
         assert!(compact.contains(&single_named_constructor));
         for constructor in [
@@ -1946,7 +1896,7 @@ mod tests {
         let shapes = expand("enum Shapes { New(u8), OneSkipped(#[serde(skip)] u8), Unit, Named { value: u8 } }");
         let compact: String = shapes.split_whitespace().collect();
         assert!(compact.contains("__MultitudeVariantForShapes::Variant0=>{let__value=__Serde::de::VariantAccess::newtype_variant_seed"));
-        assert!(compact.contains("__MultitudeVariantForShapes::Variant1=>__Serde::de::VariantAccess::tuple_variant(__access,0usize,"));
+        assert!(compact.contains("__MultitudeVariantForShapes::Variant1=>{__Serde::de::VariantAccess::tuple_variant(__access,0usize,"));
         assert!(shapes.contains("tuple_variant"));
         assert!(shapes.contains("struct_variant"));
         assert!(shapes.contains("unit_variant"));

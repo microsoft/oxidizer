@@ -28,6 +28,19 @@ _anvil-miri-test:
     if ($env:ANVIL_INCLUDE_AFFECTED -eq '--skip') { exit 0 }
 
     $packageArgs = @(if ($env:ANVIL_INCLUDE_AFFECTED) { -split $env:ANVIL_INCLUDE_AFFECTED } else { '--workspace' })
+    # These crates generate code rather than execute it. Their emitted unsafe
+    # code remains covered through consuming crates, while their own tests only
+    # parse and compare generated token streams.
+    $packageArgs += @(
+        '--exclude', 'data_privacy_macros_impl',
+        '--exclude', 'fundle_macros_impl',
+        '--exclude', 'internity_macros_impl',
+        '--exclude', 'multitude_macros_impl',
+        '--exclude', 'observed_macros_impl',
+        '--exclude', 'ohno_macros_impl',
+        '--exclude', 'templated_uri_macros_impl',
+        '--exclude', 'thread_aware_macros_impl'
+    )
     $logRoot = Join-Path ([IO.Path]::GetTempPath()) "anvil-miri-$PID-$([guid]::NewGuid())"
     New-Item -ItemType Directory -Path $logRoot | Out-Null
     try {
@@ -66,9 +79,7 @@ _anvil-miri-test:
                     # so they do not extend the tail after short artifacts finish.
                     switch -Regex ($name) {
                         '^routerama_build-' { $priority = 0; break }
-                        '^multitude_macros_impl-' { $priority = 1; break }
                         '^rest_over_grpc-' { $priority = 2; break }
-                        '^internity_macros_impl-' { $priority = 3; break }
                         '^arena-' { $priority = 4; break }
                         '^enrich_err-' { $priority = 5; break }
                         '^routerama-' { $priority = 6; break }
