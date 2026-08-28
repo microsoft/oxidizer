@@ -7,7 +7,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 
 use super::construct;
-use crate::derive_error::model::Model;
+use crate::derive_error::model::{Conversion, Model};
 use crate::paths;
 
 /// Every conversion the derive owes.
@@ -30,29 +30,19 @@ pub(crate) fn generate(model: &Model) -> TokenStream {
 /// written. One tuple rather than one local per field, so that no generated name is in scope while
 /// a later initializer is evaluated: an initializer naming an outer item cannot be captured by a
 /// binding the derive introduced.
-fn from_type(model: &Model, conversion: &crate::derive_error::model::Conversion) -> TokenStream {
+fn from_type(model: &Model, conversion: &Conversion) -> TokenStream {
     let (impl_generics, ty_generics, where_clause) = model.generics.split_for_impl();
     let ident = &model.ident;
     let source = &conversion.source;
     let core_path = paths::ohno_core();
-    let core_member = &model.shape.core().member;
     let values = conversion.initializers();
 
-    let mut data = (0..values.len()).map(syn::Index::from);
-    let initializers: Vec<TokenStream> = model
-        .shape
-        .all()
-        .map(|field| {
-            if field.member == *core_member {
-                quote!(#core_path::from(error))
-            } else {
-                let index = data.next().expect("one tuple element per non-core field");
-                quote!(__ohno_fields.#index)
-            }
-        })
-        .collect();
-
-    let body = construct(&model.shape, &initializers);
+    // The tuple is laid out in `Shape::data` order, which is the order `construct` numbers the
+    // non-core fields in, so the position it hands out is the element that initializes the field.
+    let body = construct(&model.shape, &quote!(#core_path::from(error)), |_, position| {
+        let index = syn::Index::from(position);
+        quote!(__ohno_fields.#index)
+    });
 
     quote! {
         #[automatically_derived]

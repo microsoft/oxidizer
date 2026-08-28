@@ -133,6 +133,12 @@ fn every_struct_shape_generates_its_items() {
             }),
         ),
         (
+            "a tuple core in the middle keeps declaration order",
+            derived(quote! {
+                struct T(String, ohno::OhnoCore, u32);
+            }),
+        ),
+        (
             "a marked core need not be named OhnoCore",
             derived(quote! {
                 struct T { path: String, #[error] mine: Renamed }
@@ -485,6 +491,27 @@ fn a_from_attribute_generates_its_conversions() {
                 struct T { path: String, other: u32, inner: ohno::OhnoCore }
             }),
         ),
+        (
+            "a parenthesized source type is not an override list",
+            derived(quote! {
+                #[from((std::io::Error))]
+                struct T { path: String, inner: ohno::OhnoCore }
+            }),
+        ),
+        (
+            "a tuple source type is not an override list",
+            derived(quote! {
+                #[from((u8, u16))]
+                struct T { path: String, inner: ohno::OhnoCore }
+            }),
+        ),
+        (
+            "a parenthesized source type still takes overrides",
+            derived(quote! {
+                #[from((std::io::Error)(path: "unknown".to_owned()))]
+                struct T { path: String, inner: ohno::OhnoCore }
+            }),
+        ),
     ]);
     insta::assert_snapshot!(output);
 }
@@ -538,6 +565,27 @@ fn a_faulty_from_attribute_is_reported() {
             "a key naming the core",
             derived(quote! {
                 #[from(std::io::Error(inner: 1))]
+                struct T { path: String, inner: ohno::OhnoCore }
+            }),
+        ),
+        (
+            "the unit type is not a source an error can convert from",
+            derived(quote! {
+                #[from(())]
+                struct T { path: String, inner: ohno::OhnoCore }
+            }),
+        ),
+        (
+            "a parenthesized unit type is the same type",
+            derived(quote! {
+                #[from((()))]
+                struct T { path: String, inner: ohno::OhnoCore }
+            }),
+        ),
+        (
+            "a rejected unit entry does not swallow the entries beside it",
+            derived(quote! {
+                #[from((), std::io::Error(missing: 1))]
                 struct T { path: String, inner: ohno::OhnoCore }
             }),
         ),

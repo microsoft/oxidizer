@@ -11,8 +11,8 @@ use proc_macro2::Span;
 use quote::format_ident;
 use syn::{Expr, Generics, Ident, Member, Type};
 
-use super::ast::Style;
-use super::parse::member_name;
+use super::ast::{FromOverride, Style};
+use super::member_name;
 use crate::diagnostics::Errors;
 use crate::message::Message;
 
@@ -79,9 +79,30 @@ impl Shape {
         &self.core
     }
 
+    /// Every field, in declaration order, each with its [`Position`]. This is what generation walks.
+    ///
+    /// Pairing each field with its position here is what keeps "which field holds the core" a fact
+    /// of the shape. A generator that recovered it by comparing members would be re-deciding, at
+    /// every use, something the split around the core already settled.
+    pub(crate) fn positions(&self) -> impl Iterator<Item = (&ModelField, Position)> {
+        let after = self.before.len();
+
+        self.before
+            .iter()
+            .enumerate()
+            .map(|(index, field)| (field, Position::Data(index)))
+            .chain(std::iter::once((&self.core, Position::Core)))
+            .chain(
+                self.after
+                    .iter()
+                    .enumerate()
+                    .map(move |(index, field)| (field, Position::Data(after + index))),
+            )
+    }
+
     /// Every field, in declaration order. What `Debug` prints.
     pub(crate) fn all(&self) -> impl Iterator<Item = &ModelField> {
-        self.before.iter().chain(std::iter::once(&self.core)).chain(self.after.iter())
+        self.positions().map(|(field, _)| field)
     }
 
     /// Every field but the core, in declaration order.
@@ -91,6 +112,15 @@ impl Shape {
         self.before.iter().chain(self.after.iter())
     }
 }
+/// Where a field sits in a [`Shape`].
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Position {
+    /// The field holding the `OhnoCore`.
+    Core,
+    /// A field other than the core, numbered as [`Shape::data`] yields it.
+    Data(usize),
+}
+
 /// One field of a validated error type.
 #[derive(Debug)]
 pub(crate) struct ModelField {
@@ -135,27 +165,30 @@ impl Conversion {
     /// replaces. It is established here instead, once, where the field list is in hand.
     ///
     /// Returns `None` when an override names no non-core field, in which case a fault has been
-    /// recorded.
-    pub(crate) fn new(shape: &Shape, source: Type, overrides: &[(Member, Expr)], errors: &mut Errors) -> Option<Self> {
-        let mut initializers: Vec<Expr> = Vec::new();
-
-        for field in shape.data() {
-            let found = overrides.iter().find(|(key, _)| member_name(key) == member_name(&field.member));
-            initializers.push(match found {
-                Some((_, value)) => value.clone(),
-                None => syn::parse_quote!(::core::default::Default::default()),
-            });
-        }
-
+    /// recorded. The keys are checked before anything is built, so a rejected conversion costs no
+    /// initializer that is then thrown away.
+    pub(crate) fn new(shape: &Shape, source: Type, overrides: &[FromOverride], errors: &mut Errors) -> Option<Self> {
         let mut usable = true;
-        for (key, _) in overrides {
-            if !shape.data().any(|field| member_name(&field.member) == member_name(key)) {
-                errors.add(key, unknown_key(shape, key));
+        for entry in overrides {
+            if !shape.data().any(|field| field.member == entry.key) {
+                errors.add(&entry.key, unknown_key(shape, &entry.key));
                 usable = false;
             }
         }
 
-        usable.then_some(Self { source, initializers })
+        usable.then(|| {
+            let initializers = shape
+                .data()
+                .map(|field| {
+                    overrides.iter().find(|entry| entry.key == field.member).map_or_else(
+                        || syn::parse_quote!(::core::default::Default::default()),
+                        |entry| entry.value.clone(),
+                    )
+                })
+                .collect();
+
+            Self { source, initializers }
+        })
     }
 
     /// The initializers, in the order [`Shape::data`] yields its fields.
@@ -173,7 +206,7 @@ fn unknown_key(shape: &Shape, key: &Member) -> String {
         return format!("`#[from(...)]` field keys for a tuple struct are field indexes, not names, so `{name}:` names no field");
     }
 
-    if member_name(&shape.core().member) == name {
+    if shape.core().member == *key {
         return format!("`#[from(...)]` cannot initialize `{name}`, which holds the OhnoCore and is built from the source error");
     }
 

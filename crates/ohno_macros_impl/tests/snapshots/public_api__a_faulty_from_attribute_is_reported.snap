@@ -91,3 +91,48 @@ struct T {
 ::core::compile_error! {
     "`#[from(...)]` cannot initialize `inner`, which holds the OhnoCore and is built from the source error"
 }
+
+// ======== the unit type is not a source an error can convert from ========
+
+#[derive(Error)]
+#[from(())]
+struct T {
+    path: String,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "`#[from(...)]` cannot convert from `()`, which is not an error type. Name the type the conversion converts from, such as `#[from(std::io::Error)]`"
+}
+
+// ======== a parenthesized unit type is the same type ========
+
+#[derive(Error)]
+#[from((()))]
+struct T {
+    path: String,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "`#[from(...)]` cannot convert from `()`, which is not an error type. Name the type the conversion converts from, such as `#[from(std::io::Error)]`"
+}
+
+// ======== a rejected unit entry does not swallow the entries beside it ========
+
+#[derive(Error)]
+#[from((), std::io::Error(missing:1))]
+struct T {
+    path: String,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "`#[from(...)]` cannot convert from `()`, which is not an error type. Name the type the conversion converts from, such as `#[from(std::io::Error)]`"
+}
+::core::compile_error! {
+    "unknown field `missing` in `#[from(...)]`, available fields: `path`"
+}

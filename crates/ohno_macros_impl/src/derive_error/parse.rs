@@ -7,11 +7,9 @@
 //! reported here and left out of the `Ast`, so validation has nothing to check for it and reports
 //! only faults it can actually see.
 
-use proc_macro2::{Delimiter, Spacing};
-use syn::buffer::Cursor;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
-use syn::{Attribute, Data, DeriveInput, Expr, Fields, Index, Member, Meta, Token, Type};
+use syn::{Attribute, Data, DeriveInput, Expr, Field, Fields, Index, Member, Meta, Token, Type, token};
 
 use super::ast::{Ast, AstField, DisplayAttr, FromAttr, FromOverride, Style};
 use crate::diagnostics::Errors;
@@ -52,30 +50,43 @@ pub(crate) fn parse(input: DeriveInput, errors: &mut Errors) -> Option<Ast> {
 }
 
 /// Reads the struct's own attributes into `ast`.
+///
+/// An attribute the crate does not own is left alone, whatever it says.
 fn parse_struct_attribute(attr: &Attribute, ast: &mut Ast, errors: &mut Errors) {
-    if attr.path().is_ident("display") {
-        if ast.display.is_some() {
-            errors.add(&attr.meta, "only one `#[display(...)]` may be given, and this is the second");
-            return;
-        }
+    let Some(name) = attr.path().get_ident() else {
+        return;
+    };
 
-        match attr.parse_args::<FormatArgs>() {
-            Ok(args) => {
-                ast.display = Some(DisplayAttr {
-                    template: args.template,
-                    arguments: args.arguments,
-                });
-            }
-            Err(error) => errors.combine(error),
+    match name.to_string().as_str() {
+        "display" => parse_display_attribute(attr, ast, errors),
+        "from" => parse_from_attribute(attr, ast, errors),
+        "no_debug" => {
+            check_bare_marker(attr, "no_debug", errors);
+            ast.no_debug = true;
         }
-    } else if attr.path().is_ident("from") {
-        parse_from_attribute(attr, ast, errors);
-    } else if attr.path().is_ident("no_debug") {
-        check_bare_marker(attr, "no_debug", errors);
-        ast.no_debug = true;
-    } else if attr.path().is_ident("no_constructors") {
-        check_bare_marker(attr, "no_constructors", errors);
-        ast.no_constructors = true;
+        "no_constructors" => {
+            check_bare_marker(attr, "no_constructors", errors);
+            ast.no_constructors = true;
+        }
+        _ => {}
+    }
+}
+
+/// Reads one `#[display(...)]`, of which there may be only one.
+fn parse_display_attribute(attr: &Attribute, ast: &mut Ast, errors: &mut Errors) {
+    if ast.display.is_some() {
+        errors.add(&attr.meta, "only one `#[display(...)]` may be given, and this is the second");
+        return;
+    }
+
+    match attr.parse_args::<FormatArgs>() {
+        Ok(args) => {
+            ast.display = Some(DisplayAttr {
+                template: args.template,
+                arguments: args.arguments,
+            });
+        }
+        Err(error) => errors.combine(error),
     }
 }
 
@@ -89,81 +100,76 @@ fn parse_from_attribute(attr: &Attribute, ast: &mut Ast, errors: &mut Errors) {
         return;
     }
 
-    match attr.parse_args_with(Punctuated::<FromEntry, Token![,]>::parse_terminated) {
+    match attr.parse_args_with(Punctuated::<FromAttr, Token![,]>::parse_terminated) {
         Ok(entries) if entries.is_empty() => errors.add(
             &attr.meta,
             "`#[from(...)]` needs at least one type, such as `#[from(std::io::Error)]`",
         ),
-        Ok(entries) => ast.conversions.extend(entries.into_iter().map(|entry| entry.0)),
+        Ok(entries) => ast.conversions.extend(entries),
         Err(error) => errors.combine(error),
     }
 }
 
-/// One entry of a `#[from(...)]` list: a type, optionally followed by field expressions.
-struct FromEntry(FromAttr);
-
-impl Parse for FromEntry {
+impl Parse for FromAttr {
+    /// One entry of a `#[from(...)]` list: a type, optionally followed by field overrides.
+    ///
+    /// `syn` decides where the type ends, so a generic argument list keeps its commas and a type
+    /// macro keeps its parentheses. Only an entry that *opens* with an override list has to be
+    /// rejected here, because a type is what an entry has to start with.
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
-        let source = source_type(input)?;
+        if opens_overrides(input) {
+            return Err(input.error("expected a type"));
+        }
 
-        let overrides = if input.peek(syn::token::Paren) {
-            let content;
-            _ = syn::parenthesized!(content in input);
-            Punctuated::<FromOverrideSyntax, Token![,]>::parse_terminated(&content)?
-                .into_iter()
-                .map(|entry| entry.0)
-                .collect()
+        let source = input.parse::<Type>()?;
+        let overrides = if input.peek(token::Paren) {
+            input.parse::<Overrides>()?.0
         } else {
             Vec::new()
         };
 
-        Ok(Self(FromAttr { source, overrides }))
+        Ok(Self { source, overrides })
     }
 }
 
-/// The source type of one `#[from(...)]` entry.
+/// Whether an override list, rather than a parenthesized type, opens at `input`.
 ///
-/// `syn` decides where the type ends, so a generic argument list keeps its commas, a type macro
-/// keeps its parentheses, and a following `(member: expression)` override list is left for the
-/// caller. Only an entry that opens with that override list has to be rejected here, because a
-/// type is what an entry has to start with.
-fn source_type(input: ParseStream<'_>) -> syn::Result<Type> {
-    if holds_overrides(input) {
-        return Err(input.error("expected a type"));
+/// A parenthesized type such as `(std::io::Error)` opens with the same token, so the contents
+/// decide. Parsing them on a fork is what asks that question: an override list is exactly what
+/// [`Overrides`] accepts, and `(std::io::Error)` is not, because the `:` of a path leaves an
+/// expression that cannot be parsed behind it.
+///
+/// An *empty* list is excluded, so `()` reads as the unit type. It is a type an entry may not use,
+/// but that is a rule, and [`validate`](super::validate) reports it against the `()` itself. Read
+/// here as an empty override list instead, it would fail as "expected a type" — and because the
+/// entries of one attribute parse as a single list, that failure would take every other entry in
+/// the attribute with it.
+fn opens_overrides(input: ParseStream<'_>) -> bool {
+    input.peek(token::Paren) && input.fork().parse::<Overrides>().is_ok_and(|overrides| !overrides.0.is_empty())
+}
+
+/// The parenthesized `member: expression` list a `#[from(...)]` entry may end with.
+struct Overrides(Vec<FromOverride>);
+
+impl Parse for Overrides {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        let content;
+        _ = syn::parenthesized!(content in input);
+
+        Ok(Self(
+            Punctuated::<FromOverride, Token![,]>::parse_terminated(&content)?
+                .into_iter()
+                .collect(),
+        ))
     }
-
-    input.parse::<Type>()
 }
 
-/// Whether a parenthesis group opens at `input` and holds field overrides rather than type syntax.
-///
-/// An override list opens with a member and a `:`. The `:` has to stand alone, so the `std` of a
-/// parenthesized `(std::io::Error)` does not read as a member.
-fn holds_overrides(input: ParseStream<'_>) -> bool {
-    let Some((inner, ..)) = input.cursor().group(Delimiter::Parenthesis) else {
-        return false;
-    };
-
-    let after_key = inner
-        .ident()
-        .map(|(_, rest)| rest)
-        .or_else(|| inner.literal().map(|(_, rest)| rest));
-
-    matches!(
-        after_key.and_then(Cursor::punct),
-        Some((punct, _)) if punct.as_char() == ':' && punct.spacing() == Spacing::Alone
-    )
-}
-
-/// One `key: expression` pair inside a `#[from(...)]` entry.
-struct FromOverrideSyntax(FromOverride);
-
-impl Parse for FromOverrideSyntax {
+impl Parse for FromOverride {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         let key = input.parse::<Member>()?;
         _ = input.parse::<Token![:]>()?;
         let value = input.parse::<Expr>()?;
-        Ok(Self(FromOverride { key, value }))
+        Ok(Self { key, value })
     }
 }
 
@@ -200,33 +206,35 @@ fn parse_fields(ident: &syn::Ident, data: Data, errors: &mut Errors) -> Option<(
     let parsed = fields
         .into_iter()
         .enumerate()
-        .map(|(index, field)| {
-            let member = field
-                .ident
-                .clone()
-                .map_or_else(|| Member::Unnamed(Index::from(index)), Member::Named);
-
-            let mut marks = Vec::new();
-            let mut generated = false;
-            for attr in field.attrs {
-                if attr.path().is_ident("error") {
-                    check_bare_marker(&attr, "error", errors);
-                    marks.push(attr);
-                } else if marker::is_generated_marker(&attr) {
-                    generated = true;
-                }
-            }
-
-            AstField {
-                member,
-                ty: field.ty,
-                marks,
-                generated,
-            }
-        })
+        .map(|(index, field)| parse_field(index, field, errors))
         .collect();
 
     Some((style, parsed))
+}
+
+/// Reads one field, keeping every marker that may designate it as the error field.
+fn parse_field(index: usize, field: Field, errors: &mut Errors) -> AstField {
+    let Field { attrs, ident, ty, .. } = field;
+    let member = ident.map_or_else(|| Member::Unnamed(Index::from(index)), Member::Named);
+
+    let mut marks = Vec::new();
+    let mut generated = false;
+
+    for attr in attrs {
+        if attr.path().is_ident("error") {
+            check_bare_marker(&attr, "error", errors);
+            marks.push(attr);
+        } else if marker::is_generated_marker(&attr) {
+            generated = true;
+        }
+    }
+
+    AstField {
+        member,
+        ty,
+        marks,
+        generated,
+    }
 }
 
 /// Reports a bare marker attribute that carries anything beyond the bare word.
@@ -237,26 +245,4 @@ fn check_bare_marker(attr: &Attribute, name: &str, errors: &mut Errors) {
     if !matches!(attr.meta, Meta::Path(_)) {
         errors.add(&attr.meta, format!("`#[{name}]` takes no arguments"));
     }
-}
-
-/// Renders a member the way a diagnostic spells it: `path`, or `0`.
-#[must_use]
-pub(crate) fn member_name(member: &Member) -> String {
-    match member {
-        Member::Named(ident) => ident.to_string(),
-        Member::Unnamed(index) => index.index.to_string(),
-    }
-}
-
-/// Whether the last segment of the type's path is `OhnoCore`.
-///
-/// Nothing is resolved, so a core reached through a type alias or a renamed import is invisible
-/// here and has to be marked.
-#[must_use]
-pub(crate) fn is_ohno_core(ty: &Type) -> bool {
-    let Type::Path(path) = ty else {
-        return false;
-    };
-
-    path.qself.is_none() && path.path.segments.last().is_some_and(|segment| segment.ident == "OhnoCore")
 }

@@ -18,7 +18,7 @@ pub(crate) mod parse;
 pub(crate) mod validate;
 
 use proc_macro2::TokenStream;
-use syn::DeriveInput;
+use syn::{DeriveInput, Member};
 
 use crate::diagnostics::Errors;
 
@@ -33,4 +33,16 @@ pub(crate) fn expand(input: DeriveInput) -> TokenStream {
         .map(|model| generate::generate(&model));
 
     expanded.unwrap_or_else(|| errors.into_compile_error())
+}
+
+/// Renders a member the way a diagnostic spells it, and the way `Debug` labels it: `path`, or `0`.
+///
+/// Shared by all three phases: a member reaches the user as text in a diagnostic, in a template
+/// resolution and in a `Debug` label, and the three have to agree on how it is spelled.
+#[must_use]
+pub(crate) fn member_name(member: &Member) -> String {
+    match member {
+        Member::Named(ident) => ident.to_string(),
+        Member::Unnamed(index) => index.index.to_string(),
+    }
 }

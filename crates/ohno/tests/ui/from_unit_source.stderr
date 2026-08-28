@@ -1,0 +1,17 @@
+error: `#[from(...)]` cannot convert from `()`, which is not an error type. Name the type the conversion converts from, such as `#[from(std::io::Error)]`
+  --> tests/ui/from_unit_source.rs:11:8
+   |
+11 | #[from(())]
+   |        ^^
+
+error: `#[from(...)]` cannot convert from `()`, which is not an error type. Name the type the conversion converts from, such as `#[from(std::io::Error)]`
+  --> tests/ui/from_unit_source.rs:18:8
+   |
+18 | #[from((), std::io::Error(missing: 1))]
+   |        ^^
+
+error: unknown field `missing` in `#[from(...)]`, available fields: `path`
+  --> tests/ui/from_unit_source.rs:18:27
+   |
+18 | #[from((), std::io::Error(missing: 1))]
+   |                           ^^^^^^^

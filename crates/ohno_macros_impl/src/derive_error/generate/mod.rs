@@ -17,7 +17,7 @@ use quote::quote;
 use syn::Member;
 
 use super::ast::Style;
-use super::model::{Model, Shape};
+use super::model::{Model, ModelField, Position, Shape};
 
 /// Generates every item the derive owes for `model`.
 #[must_use]
@@ -41,20 +41,37 @@ pub(crate) fn generate(model: &Model) -> TokenStream {
     }
 }
 
-/// Builds a `Self { .. }` or `Self(..)` literal from one initializer per field.
+/// Builds a `Self { .. }` or `Self(..)` literal.
 ///
-/// The initializers arrive in declaration order, so they line up with [`Shape::all`].
+/// `core` initializes the field holding the core. `data` is called once per other field, in
+/// declaration order, and is given the field together with its position among the non-core ones —
+/// the order in which a caller that laid its values out in advance holds them.
+///
+/// Taking the core's initializer apart from the rest is what keeps a generator from having to find
+/// the core again: [`Shape`] already knows which field it is, so no caller compares members and
+/// none carries an index of its own that could drift out of step with the field list.
 #[must_use]
-pub(crate) fn construct(shape: &Shape, initializers: &[TokenStream]) -> TokenStream {
+pub(crate) fn construct(shape: &Shape, core: &TokenStream, mut data: impl FnMut(&ModelField, usize) -> TokenStream) -> TokenStream {
+    // One walk, so the members and their values cannot be paired by two iterators that only happen
+    // to agree.
+    let initialized = shape.positions().map(|(field, position)| {
+        let value = match position {
+            Position::Core => core.clone(),
+            Position::Data(index) => data(field, index),
+        };
+
+        (&field.member, value)
+    });
+
     match shape.style {
         Style::Named => {
-            let assignments = shape.all().zip(initializers).map(|(field, value)| {
-                let member = &field.member;
-                quote!(#member: #value)
-            });
+            let assignments = initialized.map(|(member, value)| quote!(#member: #value));
             quote!(Self { #(#assignments,)* })
         }
-        Style::Tuple => quote!(Self(#(#initializers,)*)),
+        Style::Tuple => {
+            let values = initialized.map(|(_, value)| value);
+            quote!(Self(#(#values,)*))
+        }
     }
 }
 

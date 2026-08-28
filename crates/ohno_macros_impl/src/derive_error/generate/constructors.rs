@@ -12,7 +12,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 
 use super::construct;
-use crate::derive_error::model::Model;
+use crate::derive_error::model::{Model, ModelField};
 use crate::paths;
 
 /// The constructors, unless `#[no_constructors]` was written.
@@ -33,8 +33,8 @@ pub(crate) fn generate(model: &Model) -> TokenStream {
     });
     let parameters = parameters.collect::<Vec<_>>();
 
-    let new_body = construct(&model.shape, &initializers(model, &quote!(#core::default())));
-    let caused_by_body = construct(&model.shape, &initializers(model, &quote!(#core::from(error))));
+    let new_body = construct(&model.shape, &quote!(#core::default()), parameter_value);
+    let caused_by_body = construct(&model.shape, &quote!(#core::from(error)), parameter_value);
 
     quote! {
         #[automatically_derived]
@@ -57,20 +57,8 @@ pub(crate) fn generate(model: &Model) -> TokenStream {
     }
 }
 
-/// One initializer per field in declaration order, with `core` used for the error field.
-fn initializers(model: &Model, core: &TokenStream) -> Vec<TokenStream> {
-    let core_member = &model.shape.core().member;
-
-    model
-        .shape
-        .all()
-        .map(|field| {
-            if field.member == *core_member {
-                core.clone()
-            } else {
-                let binding = &field.binding;
-                quote!(#binding.into())
-            }
-        })
-        .collect()
+/// One non-core field's initializer: the parameter bound to it, converted into the field's type.
+fn parameter_value(field: &ModelField, _position: usize) -> TokenStream {
+    let binding = &field.binding;
+    quote!(#binding.into())
 }
