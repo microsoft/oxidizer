@@ -17,6 +17,9 @@ homepage = { workspace = true }
 include = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fundle_macros_impl"
 
+[package.metadata.anvil.miri]
+exclude = true
+
 [package.metadata.cargo_check_external_types]
 allowed_external_types = ["proc_macro2::*", "syn::error::*"]
 

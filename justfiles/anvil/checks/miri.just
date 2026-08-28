@@ -27,20 +27,49 @@ _anvil-miri-test:
     $ErrorActionPreference = 'Stop'
     if ($env:ANVIL_INCLUDE_AFFECTED -eq '--skip') { exit 0 }
 
-    $packageArgs = @(if ($env:ANVIL_INCLUDE_AFFECTED) { -split $env:ANVIL_INCLUDE_AFFECTED } else { '--workspace' })
-    # These crates generate code rather than execute it. Their emitted unsafe
-    # code remains covered through consuming crates, while their own tests only
-    # parse and compare generated token streams.
-    $packageArgs += @(
-        '--exclude', 'data_privacy_macros_impl',
-        '--exclude', 'fundle_macros_impl',
-        '--exclude', 'internity_macros_impl',
-        '--exclude', 'multitude_macros_impl',
-        '--exclude', 'observed_macros_impl',
-        '--exclude', 'ohno_macros_impl',
-        '--exclude', 'templated_uri_macros_impl',
-        '--exclude', 'thread_aware_macros_impl'
-    )
+    $metadata = & cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $excludedPackages = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $packageDirectories = @{}
+    foreach ($package in $metadata.packages) {
+        $packageDirectories[[string]$package.id] = Split-Path -Parent ([string]$package.manifest_path)
+        # Opted-out packages still compile as dependencies of selected consumers;
+        # only their own test targets are omitted from Miri.
+        if ($package.metadata.anvil.miri.exclude -eq $true) {
+            [void]$excludedPackages.Add([string]$package.name)
+        }
+    }
+
+    if ($env:ANVIL_INCLUDE_AFFECTED) {
+        $tokens = @(-split $env:ANVIL_INCLUDE_AFFECTED)
+        $filtered = [System.Collections.Generic.List[string]]::new()
+        for ($i = 0; $i -lt $tokens.Count; $i++) {
+            if ($tokens[$i] -eq '--package') {
+                if (($i + 1) -ge $tokens.Count) {
+                    Write-Error 'anvil miri: --package is missing its package spec'
+                    exit 1
+                }
+                $packageSpec = $tokens[++$i]
+                $packageName = ($packageSpec -split '@', 2)[0]
+                if ($excludedPackages.Contains($packageName)) { continue }
+                $filtered.Add('--package')
+                $filtered.Add($packageSpec)
+            } else {
+                $filtered.Add($tokens[$i])
+            }
+        }
+        $packageArgs = $filtered.ToArray()
+        if (-not ($packageArgs -contains '--package')) {
+            Write-Host 'anvil miri: all affected packages are excluded; nothing to test'
+            exit 0
+        }
+    } else {
+        $packageArgs = @('--workspace')
+        foreach ($packageName in $excludedPackages) {
+            $packageArgs += @('--exclude', $packageName)
+        }
+    }
+
     $logRoot = Join-Path ([IO.Path]::GetTempPath()) "anvil-miri-$PID-$([guid]::NewGuid())"
     New-Item -ItemType Directory -Path $logRoot | Out-Null
     try {
@@ -48,13 +77,6 @@ _anvil-miri-test:
         $toolchain = '+{{ rust_nightly }}'
         & cargo $toolchain miri test --all-features --tests --no-run --message-format=json-render-diagnostics @packageArgs 1> $artifactManifest
         $buildExitCode = $LASTEXITCODE
-
-        $metadata = & cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        $packageDirectories = @{}
-        foreach ($package in $metadata.packages) {
-            $packageDirectories[[string]$package.id] = Split-Path -Parent ([string]$package.manifest_path)
-        }
 
         $artifacts = [System.Collections.Generic.List[object]]::new()
         $seenArtifacts = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
@@ -66,7 +88,7 @@ _anvil-miri-test:
             $message = $line | ConvertFrom-Json -ErrorAction Stop
             if ($message.reason -eq 'compiler-message' -and $message.message.rendered) {
                 [Console]::Error.Write($message.message.rendered)
-            } elseif ($message.reason -eq 'compiler-artifact' -and $message.executable) {
+            } elseif ($message.reason -eq 'compiler-artifact' -and $message.executable -and $message.profile.test -eq $true) {
                 if ($seenArtifacts.Add([string]$message.executable)) {
                     $packageId = [string]$message.package_id
                     if (-not $packageDirectories.ContainsKey($packageId)) {

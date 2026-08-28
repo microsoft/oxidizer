@@ -17,6 +17,9 @@ homepage = { workspace = true }
 include = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/templated_uri_macros_impl"
 
+[package.metadata.anvil.miri]
+exclude = true
+
 [package.metadata.docs.rs]
 all-features = true
 
