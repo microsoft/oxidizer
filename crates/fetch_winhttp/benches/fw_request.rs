@@ -267,8 +267,7 @@ mod windows {
     /// Whether a response declares its length is decided by `hyper` from the frames the plan
     /// scripts, not stated by the plan, so a change to either could quietly turn the undeclared
     /// scenario into a second measurement of the declared one. Checking here fails the benchmark
-    /// instead, and runs outside the measured region. The request side needs no counterpart: which
-    /// shape the transport sends follows directly from the body the caller hands it.
+    /// instead, and runs outside the measured region.
     ///
     /// The transport takes a length as declared only when the response carries one and carries
     /// neither a content nor a transfer encoding, so all three are checked rather than just the
@@ -300,6 +299,45 @@ mod windows {
         assert_eq!(body.len(), len, "the fixture at {url} no longer serves the scripted payload size");
     }
 
+    /// Confirms the transport sent the request body shape its scenario is named for.
+    ///
+    /// The counterpart of [`assert_response_shape`] for the upload scenarios. Which shape the
+    /// transport puts on the wire follows from the body the caller hands it, so this guards against
+    /// a change in how `fetch` derives a length from a body rather than against fixture drift.
+    ///
+    /// The fixture a scenario measures repeats one response plan, and a repeating fixture retains
+    /// no requests - it would otherwise accumulate every 1 MiB body a high leg uploads. A fixture
+    /// serving a scripted sequence does retain them, so the check sends one request to a throwaway
+    /// fixture of that kind. Its own port keeps the request off the pooled connection the measured
+    /// iterations run on.
+    fn assert_request_shape(declared: bool, len: usize, send: impl FnOnce(&str)) {
+        let server = TestServer::http([ResponsePlan::ok("")]);
+        let url = server.url("/shape");
+        send(&url);
+        let snapshot = server.finish();
+
+        let request = snapshot.requests.first().expect("the shape fixture served no request");
+        let declared_length = request
+            .headers
+            .get(CONTENT_LENGTH)
+            .map(|value| value.to_str().unwrap().parse::<usize>().unwrap());
+
+        assert_eq!(
+            declared_length.is_some(),
+            declared,
+            "the transport no longer sends the expected body shape"
+        );
+        assert_eq!(
+            request.headers.contains_key(TRANSFER_ENCODING),
+            !declared,
+            "the transport no longer frames the body as expected"
+        );
+        if let Some(declared_length) = declared_length {
+            assert_eq!(declared_length, len, "the declared length disagrees with the body sent");
+        }
+        assert_eq!(request.body.len(), len, "the transport sent a different payload size");
+    }
+
     /// Uploads a body whose length is known up front, which the transport declares with a
     /// `Content-Length` and writes in a single pass.
     fn known_length_upload(
@@ -313,6 +351,9 @@ mod windows {
         let url = server.url("/upload");
         let test_client = warmed_client(&[Version::HTTP_11], WinHttpTlsConfig::default(), &url);
         let payload = "u".repeat(len);
+        assert_request_shape(true, len, |shape_url| {
+            drop(block_on(test_client.client.post(shape_url).text(&payload).fetch_text_body()).unwrap());
+        });
 
         measure(group, allocs, time, name, |_| async {
             let request = test_client.client.post(url.as_str()).text(&payload);
@@ -339,6 +380,13 @@ mod windows {
         let url = server.url("/stream");
         let test_client = warmed_client(&[Version::HTTP_11], WinHttpTlsConfig::default(), &url);
         let payload = vec![b's'; len];
+        assert_request_shape(false, len, |shape_url| {
+            let frame = BytesView::copied_from_slice(&payload, &test_client.body_builder);
+            let body = test_client
+                .body_builder
+                .stream(futures::stream::iter([Ok(frame)]), &HttpBodyOptions::default());
+            drop(block_on(test_client.client.post(shape_url).body(body).fetch_text_body()).unwrap());
+        });
 
         measure(group, allocs, time, name, |_| async {
             let frame = BytesView::copied_from_slice(&payload, &test_client.body_builder);
