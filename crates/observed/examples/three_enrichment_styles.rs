@@ -117,6 +117,10 @@ impl observed::processing::EventProcessor for SimpleLogProcessor {
             self.logger.emit(record);
         }
     }
+
+    fn flush(&self) -> Result<(), observed::FlushError> {
+        Ok(())
+    }
 }
 
 fn init_telemetry() -> (Sink, SdkLoggerProvider) {

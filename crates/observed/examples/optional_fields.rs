@@ -147,4 +147,8 @@ impl EventProcessor for PrintProcessor {
         });
         println!();
     }
+
+    fn flush(&self) -> Result<(), observed::FlushError> {
+        Ok(())
+    }
 }

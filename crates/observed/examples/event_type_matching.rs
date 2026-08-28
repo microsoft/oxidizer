@@ -247,6 +247,10 @@ impl EventProcessor for TypeRoutingProcessor {
         let handler = self.handlers.get(&type_id).expect("is_interested guarantees a registered handler");
         handler(event, &self.engine);
     }
+
+    fn flush(&self) -> Result<(), observed::FlushError> {
+        Ok(())
+    }
 }
 
 /// A processor that only accepts `HttpRequest` events by checking the event's `TypeId` in `is_interested`.
@@ -266,6 +270,10 @@ impl EventProcessor for HttpOnlyProcessor {
             .lock()
             .expect("lock is not poisoned")
             .push(format!("HttpRequest {{{}}}", format_fields(&fields)));
+    }
+
+    fn flush(&self) -> Result<(), observed::FlushError> {
+        Ok(())
     }
 }
 
@@ -301,6 +309,10 @@ impl EventProcessor for NameRoutingProcessor {
             .lock()
             .expect("lock is not poisoned")
             .push(format!("{} {{{}}}", event.name(), format_fields(&fields)));
+    }
+
+    fn flush(&self) -> Result<(), observed::FlushError> {
+        Ok(())
     }
 }
 

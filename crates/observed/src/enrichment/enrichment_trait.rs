@@ -16,22 +16,6 @@ use crate::enrichment::EnrichmentEntry;
 ///
 /// See the [`Enrichment` derive macro](crate::Enrichment) for field attributes
 /// and usage examples.
-///
-/// # Manual implementation
-///
-/// ```
-/// use observed::enrichment::{Enrichment, EnrichmentEntry};
-///
-/// struct RequestContext {
-///     request_id: &'static str,
-/// }
-///
-/// impl Enrichment for RequestContext {
-///     fn into_entries(self) -> Vec<EnrichmentEntry> {
-///         vec![EnrichmentEntry::unclassified("request.id", self.request_id)]
-///     }
-/// }
-/// ```
 pub trait Enrichment {
     /// Converts this enrichment struct into its [`EnrichmentEntry`] items.
     ///

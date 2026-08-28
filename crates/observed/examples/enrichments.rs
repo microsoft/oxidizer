@@ -113,6 +113,10 @@ impl observed::processing::EventProcessor for SimpleLogProcessor {
             self.logger.emit(record);
         }
     }
+
+    fn flush(&self) -> Result<(), observed::FlushError> {
+        Ok(())
+    }
 }
 
 /// Simulates a database lookup inside an enrichment scope.

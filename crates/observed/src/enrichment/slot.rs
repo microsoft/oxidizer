@@ -191,12 +191,12 @@ impl EnrichmentTransfer {
     /// `target`, so only that sink observes it. Mirrors the `with_target`
     /// mapping that `EnrichFutureExt::enrich_for` applies.
     pub(crate) fn push_for(&mut self, target: SinkId, additional_enrichment: impl Enrichment) {
-        let entries: Arc<[EnrichmentEntry]> = additional_enrichment
-            .into_entries()
-            .into_iter()
-            .map(|entry| entry.with_target(target))
-            .collect();
-        self.push_entries(&entries);
+        let entries = additional_enrichment.into_entries();
+        if entries.is_empty() {
+            return;
+        }
+
+        self.push_entries(&entries.into_iter().map(|entry| entry.with_target(target)).collect());
     }
 
     /// Layers `entries` onto every captured chain as a single new node.

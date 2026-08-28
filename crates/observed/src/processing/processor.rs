@@ -60,7 +60,7 @@ pub trait EventProcessor: Send + Sync {
     /// Forces any buffered telemetry produced by this processor out to its
     /// final destination, surfacing errors. Idempotent and non-terminating -
     /// the processor remains usable after `flush()` returns. Implementors
-    /// with nothing to flush use the default no-op implementation.
+    /// with nothing to flush should return `Ok(())`.
     ///
     /// [`Sink::flush`](crate::Sink::flush) iterates all registered
     /// processors and calls this; it reports every failure, not just the first.
@@ -73,9 +73,7 @@ pub trait EventProcessor: Send + Sync {
     ///
     /// Returns a [`FlushError`] if flushing buffered telemetry to the final
     /// destination fails.
-    fn flush(&self) -> Result<(), FlushError> {
-        Ok(())
-    }
+    fn flush(&self) -> Result<(), FlushError>;
 }
 
 impl<T: EventProcessor + ?Sized> EventProcessor for Arc<T> {
