@@ -125,8 +125,8 @@ with its composition crate instead of creating a second crate with the same depe
 
 ## Hyper composition
 
-`fetch_hyper` owns the reusable HTTP engine but no TLS backend. Its connector boundary is a service
-from an endpoint to a Hyper-compatible I/O stream:
+`fetch_hyper_common` owns the reusable HTTP engine but no TLS backend. Its connector boundary is a
+service from an endpoint to a Hyper-compatible I/O stream:
 
 ```rust,ignore
 pub trait Connect<S>: Service<BaseUri, Out = Result<S>> + Clone
@@ -141,12 +141,12 @@ hands it to Hyper for pooling and HTTP dispatch. It is invoked by a composition 
 the portable requirements are final. Its construction API no longer accepts a `TlsBackend`.
 
 ```rust,ignore
-let handler = fetch_hyper::build(connector, requirements, context)?;
+let handler = fetch_hyper_common::build(connector, requirements, context)?;
 ```
 
 `fetch_hyper_rustls` and `fetch_hyper_native_tls` adapt a raw runtime connector into that final
 connector. They configure TLS backend policy, SNI, ALPN, certificate authentication, and
-backend-specific error conversion before delegating to `fetch_hyper`. Each exposes an unbuilt
+backend-specific error conversion before delegating to `fetch_hyper_common`. Each exposes an unbuilt
 transport configuration implementing `fetch::Transport`:
 
 ```rust,ignore
@@ -157,14 +157,14 @@ impl fetch::Transport for RustlsHyperTransport {
         context: TransportContext,
     ) -> Result<TransportHandler, TransportBuildError> {
         let connector = self.build_tls_connector(&requirements)?;
-        fetch_hyper::build(connector, requirements, context)
+        fetch_hyper_common::build(connector, requirements, context)
     }
 }
 ```
 
-Both composition crates materialize the same `fetch_hyper` handler; neither owns a second pool or
-HTTP implementation. Deferring this work is essential because a library may add strict HTTP/2,
-TLS-name mappings, or credential requirements after the application selects the transport.
+Both composition crates materialize the same `fetch_hyper_common` handler; neither owns a second
+pool or HTTP implementation. Deferring this work is essential because a library may add strict
+HTTP/2, TLS-name mappings, or credential requirements after the application selects the transport.
 
 ```text
 raw runtime connector
@@ -178,16 +178,16 @@ unbuilt fetch_hyper_rustls or fetch_hyper_native_tls transport
 TLS connector composition
         |
         v
-fetch_hyper connection policy and HTTP engine
+fetch_hyper_common connection policy and HTTP engine
         |
         v
 Hyper HTTP/1.1 and HTTP/2
 ```
 
-The current `fetch_hyper::HyperTransportBuilder::build(TlsBackend)` and internal TLS connector are
-split at this boundary. TLS-neutral engine construction remains in `fetch_hyper`; backend matching
-and connector wrapping move to the two composition crates. The current `fetch_tls` container is
-decomposed: portable requirements move to the portable requirement model, while
+The current `fetch_hyper` crate is renamed and split at this boundary. Its
+`HyperTransportBuilder::build(TlsBackend)` and internal TLS connector move to the two composition
+crates, while its TLS-neutral engine becomes `fetch_hyper_common`. The current `fetch_tls`
+container is decomposed: portable requirements move to the portable requirement model, while
 rustls/native-tls objects move to their respective composition crates.
 
 ## Library-facing surface

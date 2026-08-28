@@ -134,25 +134,25 @@ implement `Transport`.
 
 ## Transport composition and crate boundaries
 
-`fetch_hyper` is the reusable TLS-neutral HTTP engine. It owns Hyper HTTP/1.1 and HTTP/2 dispatch,
-pooling, connection policy, bodies, errors, and telemetry. It accepts a `Connect` service that
-already produces a usable cleartext or TLS stream.
+`fetch_hyper_common` is the reusable TLS-neutral HTTP engine. It owns Hyper HTTP/1.1 and HTTP/2
+dispatch, pooling, connection policy, bodies, errors, and telemetry. It accepts a `Connect` service
+that already produces a usable cleartext or TLS stream.
 
 TLS composition lives in accurately scoped crates:
 
 ```text
-fetch_hyper_rustls     -> fetch_hyper + hyper-rustls + rustls
-fetch_hyper_native_tls -> fetch_hyper + hyper-tls + native-tls
+fetch_hyper_rustls     -> fetch_hyper_common + hyper-rustls + rustls
+fetch_hyper_native_tls -> fetch_hyper_common + hyper-tls + native-tls
 ```
 
 Each composition crate retains an application/runtime-provided network connector and backend
 configuration in an unbuilt type implementing `fetch::Transport`. When `HttpClientBuilder::build`
 supplies the final portable requirements, the composition crate configures TLS, SNI and ALPN, then
-delegates handler construction to `fetch_hyper`. It does not duplicate the HTTP engine.
+delegates handler construction to `fetch_hyper_common`. It does not duplicate the HTTP engine.
 Backend-specific verifier, signer, identity, and provider types live with that composition crate.
 
 WinHTTP is an independent full-stack transport. `fetch_winhttp` owns its sessions, pool, SChannel
-integration, and asynchronous callback bridge; it does not use `fetch_hyper`.
+integration, and asynchronous callback bridge; it does not use `fetch_hyper_common`.
 
 Runtime integration supplies raw connectors and execution services. `fetch_m365`, for example,
 adds Oxidizer runtime integration without creating another HTTP client or TLS API.
@@ -160,7 +160,7 @@ adds Oxidizer runtime integration without creating another HTTP client or TLS AP
 | Crate | Responsibility |
 | --- | --- |
 | `fetch` | Stable client, pipeline, portable requirements, transport construction contract, and typed config registry |
-| `fetch_hyper` | Reusable TLS-neutral Hyper engine |
+| `fetch_hyper_common` | Reusable TLS-neutral Hyper engine |
 | `fetch_hyper_rustls` | Rustls connector composition and rustls-specific mechanisms |
 | `fetch_hyper_native_tls` | Native-TLS connector composition and native-tls-specific mechanisms |
 | `fetch_winhttp` | Independent WinHTTP transport and SChannel integration |
