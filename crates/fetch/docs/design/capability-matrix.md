@@ -7,7 +7,7 @@ portable `fetch` API.
 The WinHTTP column describes the design on `u/makolnek/winhttp`; implementation work must verify
 the stated guarantees.
 
-The two Hyper columns share one TLS-neutral `fetch_hyper` engine. `fetch_hyper_rustls` and
+The two Hyper columns share one TLS-neutral `fetch_hyper_common` engine. `fetch_hyper_rustls` and
 `fetch_hyper_native_tls` provide connector composition, not separate HTTP implementations.
 
 ## TLS and client authentication
