@@ -17,7 +17,6 @@ Representative requirements include:
 - required and preferred HTTP protocol versions;
 - client-certificate authentication;
 - exact TLS server-name mapping;
-- server-certificate trust and pinning policy, if a portable contract is later required;
 - cancellation and streaming guarantees.
 
 These requirements are stored separately from pipeline configuration and from the concrete
@@ -93,28 +92,103 @@ implement a library-facing baseline requirement is not a `fetch` transport. Diff
 supported values or operating-system availability remain construction-time validation because
 Rust types cannot prove those environmental facts.
 
-### Typed transport extensions
+### Transport configuration registry
 
 Erasure hides the transport from the portable API but does not make intentional backend integration
-impossible. Until `build`, the builder retains cloneable, type-indexed extension values registered
-by the selected transport:
+impossible. Until `build`, the builder retains cloneable, type-indexed configuration values
+registered by the selected transport:
 
 ```rust,ignore
-if let Some(options) = builder.transport_extension_mut::<WinHttpOptions>() {
+if let Some(options) = builder.transport_config_mut::<fetch_winhttp_config::WinHttpOptions>() {
     options.use_integrated_proxy_discovery(true);
 }
 ```
 
-Querying an extension is the supported way to identify a transport capability outside the portable
-baseline. A required extension is checked at runtime because the builder is concrete and the
-application may select its transport dynamically. Libraries using this path depend on the concrete
-transport crate and must define what absence means.
+Querying the registry is the supported way to identify optional configuration outside the portable
+baseline. A required type is checked at runtime because the builder is concrete and the application
+may select its transport dynamically. Libraries using this path depend on the configuration crate,
+not the transport implementation, and must define what absence means.
 
-Extensions contain unbuilt configuration only. They cannot expose live sockets or handlers, and
-they disappear when the builder is consumed. The type's own API defines whether contributions
-merge, replace, or conflict; transport construction validates the result. This keeps unchecked
-`Any` downcasts and string transport identifiers out of library code while preserving the simple
-non-generic builder.
+Configuration crates contain no transport engine, TLS implementation, FFI binding, or crypto
+provider. Their types are unbuilt values that disappear when the builder is consumed. Each type
+defines whether contributions merge, replace, or conflict; transport construction validates the
+result. `fetch` exposes typed accessors rather than the raw type map.
+
+The registry itself is the only stable `fetch` surface. Configuration types are independently
+versioned. A major-version mismatch creates distinct Rust types, so lookup is fallible and errors
+identify the requested type. Companion crates remain small to minimize such version churn.
+
+Transport-specific companion config is the default when one backend exposes a useful mechanism.
+A separate semantic config crate is extracted only after multiple transports implement the same
+demonstrated library-facing contract. Configuration that necessarily exposes backend types stays
+with its composition crate instead of creating a second crate with the same dependency.
+
+## Hyper composition
+
+`fetch_hyper` owns the reusable HTTP engine but no TLS backend. Its connector boundary is a service
+from an endpoint to a Hyper-compatible I/O stream:
+
+```rust,ignore
+pub trait Connect<S>: Service<BaseUri, Out = Result<S>> + Clone
+where
+    S: HyperIo,
+{
+}
+```
+
+The engine applies connection deadlines and lifetime tracking around that final connector, then
+hands it to Hyper for pooling and HTTP dispatch. It is invoked by a composition crate only after
+the portable requirements are final. Its construction API no longer accepts a `TlsBackend`.
+
+```rust,ignore
+let handler = fetch_hyper::build(connector, requirements, context)?;
+```
+
+`fetch_hyper_rustls` and `fetch_hyper_native_tls` adapt a raw runtime connector into that final
+connector. They configure TLS backend policy, SNI, ALPN, certificate authentication, and
+backend-specific error conversion before delegating to `fetch_hyper`. Each exposes an unbuilt
+transport configuration implementing `fetch::Transport`:
+
+```rust,ignore
+impl fetch::Transport for RustlsHyperTransport {
+    fn build(
+        self: Box<Self>,
+        requirements: TransportRequirements,
+        context: TransportContext,
+    ) -> Result<TransportHandler, TransportBuildError> {
+        let connector = self.build_tls_connector(&requirements)?;
+        fetch_hyper::build(connector, requirements, context)
+    }
+}
+```
+
+Both composition crates materialize the same `fetch_hyper` handler; neither owns a second pool or
+HTTP implementation. Deferring this work is essential because a library may add strict HTTP/2,
+TLS-name mappings, or credential requirements after the application selects the transport.
+
+```text
+raw runtime connector
+        |
+        v
+unbuilt fetch_hyper_rustls or fetch_hyper_native_tls transport
+        |
+        | HttpClientBuilder::build(final requirements)
+        |
+        v
+TLS connector composition
+        |
+        v
+fetch_hyper connection policy and HTTP engine
+        |
+        v
+Hyper HTTP/1.1 and HTTP/2
+```
+
+The current `fetch_hyper::HyperTransportBuilder::build(TlsBackend)` and internal TLS connector are
+split at this boundary. TLS-neutral engine construction remains in `fetch_hyper`; backend matching
+and connector wrapping move to the two composition crates. The current `fetch_tls` container is
+decomposed: portable requirements move to the portable requirement model, while
+rustls/native-tls objects move to their respective composition crates.
 
 ## Library-facing surface
 
@@ -200,12 +274,13 @@ The application supplies a certificate catalog when constructing the transport a
 identifiers to transport-native sources:
 
 ```rust,ignore
-let transport = fetch::transport::hyper(runtime)
-    .rustls(rustls)
+let transport = fetch_hyper_rustls::builder(runtime, connector)
+    .tls(rustls)
     .client_certificates(
         ClientCertificateCatalog::new()
             .bind_windows_store("service-client", service_selector),
-    );
+    )
+    .build();
 ```
 
 Concrete transport builders expose the binding forms they can consume. Rustls can bind key material,
@@ -293,8 +368,8 @@ advanced transport option.
 
 ## TLS policy
 
-TLS backend selection belongs to the concrete Hyper transport builder. WinHTTP always uses
-SChannel.
+TLS backend selection belongs to the application through its transport composition dependency.
+WinHTTP always uses SChannel.
 
 Portable security policy is configured through semantic requirements:
 
@@ -307,9 +382,11 @@ Portable security policy is configured through semantic requirements:
 Each transport either enforces the policy or rejects construction. Security policy is never
 approximated.
 
-Backend-native extension points stay on concrete builders. A raw rustls verifier, prebuilt rustls
-configuration, native-TLS connector, or SChannel option is intentionally unavailable through the
-portable builder.
+Backend-native extension points stay on composition builders. A raw rustls verifier or prebuilt
+rustls configuration belongs to `fetch_hyper_rustls`; a native-TLS connector belongs to
+`fetch_hyper_native_tls`; and SChannel mechanisms belong to `fetch_winhttp`. These types are
+intentionally unavailable through the portable builder and do not justify separate config crates,
+because their public APIs already require the backend dependency.
 
 ### Endpoint and TLS identity
 
@@ -365,8 +442,8 @@ This exact-name contract intentionally does not preserve the current TVS validat
 SAN regular expressions or subject-name allowlists. Those rules can be replaced only when the
 service supplies a concrete DNS identity present in its certificates. Flexible matching, pinning,
 and custom roots cannot be portable requirements because not every supported transport can enforce
-them before disclosing a request. A transport-bound library may configure such a policy through a
-typed extension and must reject transports that do not expose it.
+them before disclosing a request. A transport-bound library may configure such a policy through
+the supporting composition crate and must reject other transports.
 
 ## Growing the portable surface
 
@@ -375,7 +452,8 @@ maintained in the [capability matrix](capability-matrix.md).
 
 The initial surface has no capability traits. A new library-facing requirement is added to the
 portable contract only when it has precise observable semantics and every supported transport can
-implement it. Otherwise it remains transport-specific configuration, reachable by libraries only
-through typed extensions. If a future requirement is essential to transport-independent libraries
-but fundamentally unavailable on a supported transport, the supported transport set or this design
-must change; a marker trait cannot manufacture the missing behavior.
+implement it. Otherwise it remains composition-owned or is represented by an independently
+versioned, dependency-light companion configuration type when libraries demonstrate a need to
+modify it after transport erasure. If a future requirement is essential to transport-independent
+libraries but fundamentally unavailable on a supported transport, the supported transport set or
+this design must change; a marker trait cannot manufacture the missing behavior.

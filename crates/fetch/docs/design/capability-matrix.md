@@ -7,6 +7,9 @@ portable `fetch` API.
 The WinHTTP column describes the design on `u/makolnek/winhttp`; implementation work must verify
 the stated guarantees.
 
+The two Hyper columns share one TLS-neutral `fetch_hyper` engine. `fetch_hyper_rustls` and
+`fetch_hyper_native_tls` provide connector composition, not separate HTTP implementations.
+
 ## TLS and client authentication
 
 | Capability | Hyper + rustls | Hyper + native TLS | WinHTTP + SChannel | Public treatment |
@@ -15,13 +18,13 @@ the stated guarantees.
 | Named client credential | Catalog can bind key material or a signing resolver | Catalog binds a materialized native identity | Catalog can bind a store selector or imported material | Baseline |
 | Exportable certificate and private key binding | Supports common key encodings | Requires PKCS#8 through the current adapter | Planned import into a temporary certificate store | Transport construction |
 | Non-exportable Windows-store binding | Supported through a rustls signing resolver | No equivalent current API | Supported through `CERT_CONTEXT` | Transport construction |
-| Arbitrary external signing service | Supported through rustls signing traits | Unsupported | Unsupported unless it provides a compatible Windows key handle | Keep rustls-specific until a non-Windows library use exists |
-| Custom verifier callback | Supported | No equivalent current `fetch_tls` API | No userspace callback | Transport-specific |
+| Arbitrary external signing service | Supported through rustls signing traits | Unsupported | Unsupported unless it provides a compatible Windows key handle | `fetch_hyper_rustls` composition only |
+| Custom verifier callback | Supported | Unsupported | No userspace callback | `fetch_hyper_rustls` composition only |
 | Exact TLS server-name override while preserving request authority | Connector dials the request endpoint and supplies the override to rustls | Connector dials the request endpoint and supplies the override to native TLS | `WinHttpConnect` uses the TLS name, resolution override uses the endpoint, and replaced `Host` preserves authority | Baseline |
-| Custom SAN/subject server-identity policy | Enforced before application data by a verifier | No equivalent current adapter | Cannot be safely enforced before request disclosure | Explicit portable non-goal; rustls extension only |
-| Certificate or public-key pins | Implementable in a verifier | No equivalent current adapter | Cannot be safely enforced before request disclosure | Explicit portable non-goal; transport extension only |
-| Per-client custom trust roots | Expressible through custom rustls configuration | Not exposed by the current adapter | Uses Windows trust stores | Explicit portable non-goal; transport extension only |
-| TLS backend and crypto-provider selection | rustls-specific | native-TLS-specific | SChannel is fixed | Transport-specific |
+| Custom SAN/subject server-identity policy | Enforced before application data by a verifier | Unsupported | Cannot be safely enforced before request disclosure | Explicit portable non-goal; `fetch_hyper_rustls` only |
+| Certificate or public-key pins | Implementable in a verifier | Unsupported | Cannot be safely enforced before request disclosure | Explicit portable non-goal; supporting composition crate only |
+| Per-client custom trust roots | Expressible through custom rustls configuration | Not exposed by the current adapter | Uses Windows trust stores | Explicit portable non-goal; supporting composition crate only |
+| TLS backend and crypto-provider selection | `fetch_hyper_rustls` | `fetch_hyper_native_tls` | SChannel is fixed | Application selects a composition dependency |
 | Revocation | Required by the platform-verifier policy | Platform behavior | Must be enabled explicitly | Invariant, not a capability |
 
 Libraries select a stable logical client-credential identifier. Applications bind that identifier
@@ -133,17 +136,17 @@ Custom server identity remains outside the proposed surface. It would cover serv
 patterns or known subject names only if TVS cannot migrate to an exact DNS identity. Hyper/rustls
 supports that richer mechanism; the current native-TLS adapter and WinHTTP do not. It therefore
 cannot become a portable capability. A TVS library that retains it must select a supporting
-transport through a typed extension and reject the others.
+transport through `fetch_hyper_rustls` and reject the others.
 
 Named client credentials, exact TLS server-name mapping, strict HTTP/2, fixed connection lifetime,
 connect deadline, connection limits, streaming, cancellation, and ordinary HTTP/1.1/HTTP/2
 preferences belong to the baseline and do not need capability traits.
 
-Arbitrary signers, raw verifier callbacks, key encodings, detailed keep-alive controls, HTTP/3,
-proxy/WPAD, integrated authentication, phase-specific timeouts, and pool internals stay on concrete
-transport builders until a library demonstrates a portable semantic requirement. HTTP/2
-flow-control sizing, socket buffers, and initial congestion are transport-owned defaults rather
-than public options on either builder.
+Arbitrary signers, raw verifier callbacks, and backend TLS objects stay on composition builders.
+Detailed keep-alive controls, HTTP/3, proxy/WPAD, integrated authentication, phase-specific
+timeouts, and pool internals stay composition-owned unless a demonstrated library need justifies a
+dependency-light companion configuration crate. HTTP/2 flow-control sizing, socket buffers, and
+initial congestion are transport-owned defaults rather than public options on any builder.
 
 Construction remains fallible despite the uniform surface. Invalid values, missing named
 credentials, unsupported operating-system versions, and unavailable resources are environmental

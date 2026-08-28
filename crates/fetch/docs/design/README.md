@@ -4,8 +4,9 @@
 capabilities. Applications choose a transport, while libraries can configure the portable
 networking behavior they require without knowing which transport the application selected.
 
-The crate may use focused implementation crates for Hyper, TLS, and platform transports. Those
-package boundaries are hidden by the supported `fetch` API.
+The crate is independent of concrete HTTP and TLS implementations. Applications select focused
+transport composition crates; libraries that use only portable requirements depend on `fetch`
+alone.
 
 ## Configuration model
 
@@ -19,12 +20,13 @@ Configuration is classified by semantics and ownership:
    constraints, certificate authentication, and portable trust policy. Every transport must honor
    an explicit requirement or reject client construction.
 3. **Transport-specific configuration** controls mechanisms that have no portable contract.
-   Applications normally set these options on a concrete transport builder before passing it into
-   `fetch`. A library that deliberately supports a particular backend may inspect and modify its
-   registered typed transport extensions before construction. Examples include rustls verifier
-   callbacks, WinHTTP proxy discovery, and SChannel-specific options. A backend mechanism does not
-   automatically deserve a public transport option; routine flow-control, socket-buffer, and
-   congestion tuning remains transport-owned.
+   Applications normally set these options on a composition builder before passing the resulting
+   transport to `fetch`. A library that deliberately supports a particular transport setting may
+   use its independently versioned, dependency-light configuration crate through the builder's
+   typed configuration registry. Backend-typed mechanisms such as rustls verifier callbacks remain
+   on the backend composition crate. A mechanism does not automatically deserve public
+   configuration; routine flow-control, socket-buffer, and congestion tuning remains
+   transport-owned.
 
 The fact that a behavior is implemented by a transport does not make it transport-specific.
 Connection lifetime is implemented differently by Hyper and WinHTTP, but its useful contract can
@@ -83,30 +85,34 @@ A library that requires no configuration accepts a built `HttpClient`. A library
 pipeline or portable transport policy accepts an `HttpClientBuilder` and builds the concrete
 client after applying its requirements.
 
-### Typed transport extensions
+### Transport configuration registry
 
-Some libraries intentionally integrate with one or more specific transports. The erased builder
-therefore carries a type-indexed set of transport extension values until `build`. A transport
-registers its public extension types, and a library may query or mutate one by its Rust type:
+The erased builder carries a type-indexed configuration registry until `build`. A selected
+transport registers the dependency-light configuration types it supports, and a library may query
+or mutate one without depending on the transport implementation:
 
 ```rust,ignore
 let winhttp = builder
-    .transport_extension_mut::<fetch_winhttp::WinHttpOptions>()
+    .transport_config_mut::<fetch_winhttp_config::WinHttpOptions>()
     .ok_or(BuildError::WinHttpRequired)?;
 
 winhttp.use_integrated_proxy_discovery(true);
 ```
 
-The presence of an extension identifies support; transport names and string comparisons are not
-part of the contract. A library that supports several transports can branch over their extension
-types. If a transport-specific setting is required, absence is a construction error chosen by that
-library. Optional tuning may simply leave unmatched transports unchanged.
+Configuration companion crates contain data and policy types only. They do not depend on Hyper,
+WinHTTP FFI, a TLS implementation, or a crypto provider. Their versions and stability promises are
+independent of `fetch` and the transport implementation. Presence identifies support; absence is
+either ignored or reported as a construction error according to the library's requirement.
 
-Extensions are available only on the unbuilt builder. They are cloneable configuration values, not
-access to a live handler, socket, or connection pool. Each extension type defines its own mutation
-and validation rules, and the transport validates the final value during construction. Using one
-creates an intentional dependency on that transport crate and provides no guarantee for other
-transports; it does not enlarge the portable `fetch` contract.
+Registry values are available only on the unbuilt builder. They are cloneable configuration, not
+access to a live handler, socket, or connection pool. Each type defines its own merge and
+validation rules, and the selected transport consumes the final value during construction.
+
+A companion configuration crate is introduced only for a demonstrated library need. If a setting
+can be expressed with the same useful semantics across multiple transports, it may instead move to
+a separately versioned semantic configuration crate. If its API necessarily names rustls,
+native-tls, Hyper, or WinHTTP handles, it stays on the corresponding composition crate; splitting
+such a type into another crate would not isolate its dependency.
 
 ## Transport contract
 
@@ -126,17 +132,55 @@ Runtime-selected and externally supplied transports use the same erased path. An
 transport is accepted only by implementing the full portable contract; partial transports do not
 implement `Transport`.
 
-## Supported transports and runtimes
+## Transport composition and crate boundaries
 
-The supported Hyper transport combines a connector, runtime services, a TLS backend, and
-transport-specific tuning. Tokio is a supported runtime adapter in `fetch`.
+`fetch_hyper` is the reusable TLS-neutral HTTP engine. It owns Hyper HTTP/1.1 and HTTP/2 dispatch,
+pooling, connection policy, bodies, errors, and telemetry. It accepts a `Connect` service that
+already produces a usable cleartext or TLS stream.
 
-WinHTTP is a full-stack transport rather than a Hyper connector. It owns its sessions, connection
-pool, SChannel integration, and asynchronous callback bridge. It participates in the same portable
-requirements contract as Hyper while retaining its native configuration surface.
+TLS composition lives in accurately scoped crates:
 
-Other runtime crates may supply connectors and execution services to supported transports without
-creating a separate HTTP client API.
+```text
+fetch_hyper_rustls     -> fetch_hyper + hyper-rustls + rustls
+fetch_hyper_native_tls -> fetch_hyper + hyper-tls + native-tls
+```
+
+Each composition crate retains an application/runtime-provided network connector and backend
+configuration in an unbuilt type implementing `fetch::Transport`. When `HttpClientBuilder::build`
+supplies the final portable requirements, the composition crate configures TLS, SNI and ALPN, then
+delegates handler construction to `fetch_hyper`. It does not duplicate the HTTP engine.
+Backend-specific verifier, signer, identity, and provider types live with that composition crate.
+
+WinHTTP is an independent full-stack transport. `fetch_winhttp` owns its sessions, pool, SChannel
+integration, and asynchronous callback bridge; it does not use `fetch_hyper`.
+
+Runtime integration supplies raw connectors and execution services. `fetch_m365`, for example,
+adds Oxidizer runtime integration without creating another HTTP client or TLS API.
+
+| Crate | Responsibility |
+| --- | --- |
+| `fetch` | Stable client, pipeline, portable requirements, transport construction contract, and typed config registry |
+| `fetch_hyper` | Reusable TLS-neutral Hyper engine |
+| `fetch_hyper_rustls` | Rustls connector composition and rustls-specific mechanisms |
+| `fetch_hyper_native_tls` | Native-TLS connector composition and native-tls-specific mechanisms |
+| `fetch_winhttp` | Independent WinHTTP transport and SChannel integration |
+| `fetch_m365` | Oxidizer runtime connectors and execution services |
+| `*_config` companion | Introduced only when a library demonstrably needs dependency-light configuration after erasure |
+
+## Stability boundaries
+
+Stabilizing `fetch` commits to `HttpClient`, `HttpClientBuilder`, the `Transport` construction
+contract, portable requirement semantics, and the generic typed configuration-registry protocol.
+It does not stabilize or re-export Hyper, WinHTTP, rustls, native-tls, or their configuration.
+
+The Hyper engine, TLS composition crates, WinHTTP transport, and any dependency-light configuration
+companions publish and evolve independently. A library opts into their stability and dependency
+surface only by depending on them directly. Configuration that later proves useful across multiple
+transports can move into a separate semantic crate without adding transport types to `fetch`.
+
+Moving a portable requirement type into another crate does not remove its semantic commitment from
+`fetch` when the stable builder accepts it. Separate crates isolate optional configuration and
+dependencies; they do not disguise baseline behavior as unstable.
 
 ## Libraries configure outcomes, not mechanisms
 
@@ -150,7 +194,8 @@ the guarantee does not.
 
 When no faithful common contract exists, the option remains transport-specific. Coarse or partial
 support is not silently treated as success. A library that intentionally requires the mechanism
-uses a typed transport extension and reports an unsupported-transport error when it is absent.
+uses a registered companion configuration type and reports an unsupported-transport error when it
+is absent. Backend-typed configuration requires an explicit dependency on the composition crate.
 
 ## Transport-owned performance policy
 
@@ -195,9 +240,9 @@ All supported transports can provide this contract without a custom validation c
 Arbitrary SAN patterns, subject distinguished-name allowlists, certificate/public-key pins, and
 per-client custom trust roots are not portable capabilities and are explicit non-goals. WinHTTP
 and the supported native-TLS path cannot safely enforce them before request headers or credentials
-may be disclosed. A library that truly requires one must use a typed extension for a transport
-that supports it and reject other transports. If TVS cannot use a stable exact DNS identity present
-in its certificates, TVS cannot remain transport-independent under this design.
+may be disclosed. A library that truly requires one must depend on a supporting composition crate
+and reject other transports. If TVS cannot use a stable exact DNS identity present in its
+certificates, TVS cannot remain transport-independent under this design.
 
 A raw rustls verifier callback remains a rustls-specific mechanism.
 
@@ -223,14 +268,18 @@ and transport names are stable attributes supplied by their adapters.
 
 A transport does not require callers to provide a second telemetry sink or meter.
 
-## Features
+## Dependency and feature selection
 
-The core client and transport traits are available without selecting a runtime or TLS backend.
-Features add supported runtime, transport, and TLS implementations.
+`fetch` does not select a runtime, Hyper, WinHTTP, TLS backend, or crypto provider through features.
+Applications select a transport by depending on a composition crate and constructing it at the
+composition root. Libraries do not enable a concrete backend merely to express portable
+requirements.
 
-Feature selection never resolves ambiguity by order. When multiple TLS backends are enabled, the
-application selects one on the concrete transport builder or accepts a documented preset.
-Libraries do not enable a concrete backend merely to express portable requirements.
+TLS features and provider dependencies remain inside their composition crates. An application
+using WinHTTP does not acquire Hyper or rustls; one using Hyper with native TLS does not acquire
+rustls through feature unification. A rustls-specific verifier necessarily requires
+`fetch_hyper_rustls`, because hiding that real dependency behind a nominally lightweight config
+crate would not improve governance or stability.
 
 ## Public API boundary
 
@@ -238,8 +287,9 @@ Libraries do not enable a concrete backend merely to express portable requiremen
 available regardless of the selected supported transport. The builder does not contain
 transport-specific configuration or backend capability branches.
 
-Concrete transport builders contain backend selection and native tuning. The transport interface
-receives resolved portable requirements rather than a Hyper-shaped options structure.
+Composition builders contain backend selection and native tuning. The transport interface receives
+resolved portable requirements and registered dependency-light configuration rather than a
+Hyper-shaped options structure.
 
 Building returns a concrete `HttpClient` and may fail for invalid values, unresolved named
 credentials, unavailable runtime resources, or an unsupported host version. Unsupported security
