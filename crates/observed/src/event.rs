@@ -13,7 +13,7 @@ use crate::processing::FieldVisitorFn;
 /// Every event type implements this trait - typically via the `#[event(...)]`
 /// attribute macro. Default and `#[data_class(<expr>)]` fields are extracted
 /// through the processor-supplied redactor. Fields marked `#[unredacted]`,
-/// unclassified enrichment values, and values supplied by dynamic adaptors are
+/// unclassified enrichment values, and values supplied by a dynamic adaptor are
 /// caller-controlled and must already be appropriate to emit.
 ///
 /// # Attribute macro

@@ -11,8 +11,8 @@ use crate::metadata::metric::MetricDescription;
 /// Description of a telemetry event type.
 ///
 /// Available as a `const` on every type that implements [`crate::Event`],
-/// providing compile-time metadata about the event's shape. Dynamic adaptors
-/// construct the same description at runtime and may omit Rust type identity.
+/// providing compile-time metadata about the event's shape. A dynamic adaptor
+/// constructs the same description at runtime and may omit Rust type identity.
 ///
 /// The event name is shared across all signals; per-signal metadata lives
 /// in `log` / `metric`.
