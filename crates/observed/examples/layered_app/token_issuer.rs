@@ -3,10 +3,10 @@
 
 //! Authentication layer with its own telemetry events and metrics.
 //!
-//! All events in this module are emitted via `emit!()` and delivered to the
-//! token issuer sink. Global enrichments are excluded from the lib
-//! processor - only per-sink enrichments (like `token.issuer.version`)
-//! are attached.
+//! All events in this module are emitted through the token-issuer composite, so
+//! they fan out to both the application and token-issuer sink leaves. The
+//! token-issuer leaf is isolated: it ignores global enrichments and receives
+//! only targeted per-sink enrichments (like `token.issuer.version`).
 
 use data_privacy::{DataClass, classified};
 use observed::enrichment::EnrichFnExt;

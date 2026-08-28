@@ -357,7 +357,8 @@ fn bench_emit_with_body(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc
 /// owns a meter or records an instrument, so what it captures is the cost of
 /// log mapping for an event whose descriptor also carries metric metadata -
 /// the field visit yields metric descriptors the processor then skips.
-/// Comparing it against `log_4_fields` isolates that extra descriptor work.
+/// Use it as a full-pipeline log baseline for that event shape rather than as
+/// an isolated metric-descriptor comparison.
 fn bench_emit_log_of_metric_event(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
     const ID: &str = "log_of_metric_event";
     let (processor, _provider) = make_log_processor();
@@ -381,9 +382,8 @@ fn bench_emit_log_of_metric_event(group: &mut BenchmarkGroup<'_, WallTime>, allo
 
 /// Benchmarks emitting an event whose fields are classified strings.
 ///
-/// This is the redaction hot path: each field is rendered through the
-/// redaction engine and stored as a string `Value`, so the benchmark measures
-/// exactly the allocations that path costs per emit.
+/// This is a full emit-pipeline case in which each field is rendered through
+/// the redaction engine and stored as a string `Value`.
 fn bench_emit_redacted_strings(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
     const ID: &str = "log_2_redacted_strings";
     let (processor, _provider) = make_log_processor_with(replacing_engine());
@@ -733,10 +733,10 @@ fn bench_redacted_value_creation(group: &mut BenchmarkGroup<'_, WallTime>, alloc
     });
 }
 
-/// Benchmarks the full emit pipeline at enrichment depths 0 and 5 to quantify
-/// the per-enrichment allocation cost. Those two points bracket the range: the
-/// difference between them divided by five is the marginal cost of one
-/// enrichment level, which is what identifies the breakeven point for pooling.
+/// Benchmarks the full emit pipeline at enrichment depths 0 and 5, providing
+/// representative low- and higher-depth baselines for the current
+/// implementation. These endpoints show aggregate overhead for those cases,
+/// not a per-level marginal cost or a pooling breakeven point.
 fn bench_emit_varying_enrichment_depth(
     group: &mut BenchmarkGroup<'_, WallTime>,
     allocs: &alloc_tracker::Session,
