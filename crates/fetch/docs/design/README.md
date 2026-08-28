@@ -197,6 +197,18 @@ support is not silently treated as success. A library that intentionally require
 uses a registered companion configuration type and reports an unsupported-transport error when it
 is absent. Backend-typed configuration requires an explicit dependency on the composition crate.
 
+## Protocol selection
+
+Portable protocol configuration constrains the common HTTP/1.1 and HTTP/2 baseline. Its default is
+no caller-imposed constraint; each composition supplies its normal protocol set. An explicit
+portable requirement always takes precedence over a transport preference.
+
+WinHTTP may expose `prefer_http3` on its composition builder. With no portable constraint, that
+allows WinHTTP to try HTTP/3 and fall back to HTTP/2 or HTTP/1.1. An exact HTTP/2 requirement removes
+HTTP/3 from consideration rather than conflicting with the preference. There is no transport-
+specific `require_http3`; HTTP/3 becomes a portable requirement only when every supported transport
+can implement it.
+
 ## Transport-owned performance policy
 
 The stable API exposes service requirements, not copies of socket and protocol-stack knobs.
@@ -213,6 +225,29 @@ product, concurrent streams, response consumption, memory budget, and whether th
 uses adaptive flow control. Kernel send and receive buffers remain under operating-system
 autotuning. Initial congestion behavior remains operating-system policy. None is configurable
 through `HttpClientBuilder`.
+
+## Body and content semantics
+
+Request and response bodies are fallible streams of data and terminal trailers. Request APIs can
+attach an asynchronously produced `Result` of trailers and declare that possibility before any
+network I/O. A transport that cannot send request trailers rejects such a request before polling
+or transmitting its body; it never discovers the mismatch after partial disclosure. Response
+trailers are surfaced as a terminal fallible body frame.
+
+Request trailers are intentionally not part of the universal transport baseline. Their
+representation and failure semantics are stable in `fetch`, but execution remains fallible on a
+transport such as WinHTTP whose native API cannot send them.
+
+HTTP/2 transports support full-duplex streaming: response headers and body data may arrive before
+the request body completes, and upload may continue afterward. An upload or trailer failure before
+response headers fails request execution. A later upload failure remains observable through the
+response lifecycle rather than being discarded. Dropping either side cancels the shared request
+according to the normal cancellation contract.
+
+Response decompression is an invariant `fetch` layer immediately above every transport, including
+minimal and custom pipelines. Transports return wire-encoded bodies and do not enable native
+automatic decompression. `fetch` advertises only encodings it can decode, streams decompression,
+and normalizes the corresponding response headers uniformly across transports.
 
 ## TLS and credentials
 

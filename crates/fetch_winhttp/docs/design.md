@@ -17,8 +17,9 @@ Why a WinHTTP transport:
   TLS stack. (Client certificates are a Schannel capability but are not exposed in
   v1; see §4.1.)
 - **OS-managed protocol stack.** HTTP/1.1, HTTP/2 and HTTP/3 negotiation,
-  connection pooling, keep-alive, proxy discovery and automatic gzip/deflate
-  decompression are handled by the OS.
+  connection pooling, keep-alive, and proxy discovery are handled by the OS.
+  Response decompression remains in `fetch` so every transport has identical
+  content semantics.
 - **Smaller dependency surface.** No rustls/aws-lc-rs/native-tls/hyper on the
   request path.
 
@@ -189,16 +190,20 @@ overhead; it is independent of these kernel and protocol controls.
 
 ## 3. HTTP protocol negotiation
 
-The transport supports HTTP/1.1, HTTP/2, and HTTP/3, all as first-class modes. Which
-versions a request may use comes from `fetch`'s `TransportOptions.supported_http_versions`:
+The transport normally offers HTTP/1.1 and HTTP/2. Its composition builder may enable
+`prefer_http3`, which allows WinHTTP to try HTTP/3 and fall back to the normal protocols.
+This is a preference, never an HTTP/3 requirement.
 
-- The listed versions are the ones allowed. An empty list means "no preference" and uses
-  `fetch`'s default (HTTP/1.1 and HTTP/2).
-- Listing only versions newer than HTTP/1.1 (for example HTTP/2 and/or HTTP/3 without
-  HTTP/1.1) disables the HTTP/1.1 fallback: if none of the required protocols can be
-  negotiated the request fails rather than downgrading.
-- A version the transport cannot speak (`HTTP/0.9`, `HTTP/1.0`) is rejected at request
-  construction with an `invalid_request` error, never silently dropped.
+Portable `fetch` protocol requirements take precedence. With no portable constraint,
+`prefer_http3` offers HTTP/3, HTTP/2, and HTTP/1.1. An exact HTTP/2 requirement disables
+HTTP/3 and sets `WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED`; an HTTP/1.1 requirement likewise
+disables the newer protocols. A removed preference is not a conflict or construction
+error.
+
+The portable default is unconstrained rather than the closed set HTTP/1.1 and HTTP/2.
+Without `prefer_http3`, the transport's own default still produces those two protocols.
+There is no WinHTTP-specific `require_http3`; that requirement belongs in `fetch` only
+after HTTP/3 joins the baseline supported by every transport.
 
 Negotiation, including ALPN, is performed by the OS during the TLS handshake; the
 transport does not negotiate manually. The version actually negotiated is reported on the
@@ -238,14 +243,9 @@ if a concrete need appears.
 The OS handles several HTTP behaviors internally. The transport configures each so it
 behaves consistently with the rest of `fetch`:
 
-- **Automatic decompression (always on).** The transport advertises
-  `Accept-Encoding: gzip, deflate`; gzip/deflate responses are transparently decoded
-  before the body is streamed up, with `Content-Encoding`/`Content-Length` stripped, so
-  callers always see a decoded body. `fetch` itself has no content decoding, so there is
-  no double-decode risk. No opt-out is exposed in v1, since it would only hand callers an
-  encoded body nothing downstream can decode.
-- **Brotli/zstd.** Not decoded (the OS does not support them); such responses arrive
-  still-encoded with `Content-Encoding` intact and pass through verbatim.
+- **Native automatic decompression is disabled.** WinHTTP returns the encoded body and
+  its original headers. The mandatory `fetch` normalization layer advertises supported
+  encodings and performs streaming decompression uniformly for every transport.
 - **Request-body compression.** Not performed automatically; a caller that pre-encodes its
   body and sets `Content-Encoding` has it sent as-is.
 - **Redirects are not followed.** Like `fetch_hyper` (and unlike WinHTTP's own default),
@@ -257,6 +257,28 @@ behaves consistently with the rest of `fetch`:
   is thus stateless between requests.
 
 (The specific OS options behind each behavior are implementation.md §10.3.)
+
+### 5.1 Full-duplex streaming and trailers
+
+For HTTP/2, the send and receive sides progress independently. Response headers and body
+data may become available before request upload completes, and `WinHttpWriteData` may
+continue afterward. A direct experiment demonstrates both sequential interleaving and
+overlapping send/receive operations on Windows 11 build 26100; the method and compatibility
+limits are recorded in the
+[full-duplex streaming experiment](full-duplex-streaming-experiment.md).
+
+The implementation uses separate send and receive operation lanes on one request handle.
+After response headers are returned, the response retains the shared request lifetime while
+upload continues. A late upload failure remains visible through the response/request
+completion contract rather than being dropped. Compatibility coverage must include every
+supported Windows baseline because Microsoft documents concurrent send/receive support only
+for "some versions of Windows."
+
+`fetch` request bodies can declare an asynchronous, fallible terminal trailer result before
+execution. WinHTTP has no public API for sending request trailers, so such a request fails
+before its body is polled or any bytes are sent. WinHTTP can query response trailers after
+body completion on the supported Windows baseline, including HTTP/1.1; those trailers are
+returned as the terminal fallible response-body frame.
 
 ## 6. Timeouts and time
 
@@ -363,9 +385,9 @@ transport noise or a deterministic condition.
 
 HTTP status codes (4xx/5xx) never enter this mapping: they are successful
 transport outcomes carrying an error status, surfaced as `Ok(HttpResponse)`, and
-any retry policy on them lives in `seatbelt` above the transport. Automatic
-decompression handled by WinHTTP never surfaces as a transport error; only genuine
-wire/OS failures do.
+any retry policy on them lives in `seatbelt` above the transport. Response
+decompression occurs above this transport in `fetch`; only genuine wire/OS failures
+enter this mapping.
 
 [`RequestHandler`]: https://github.com/microsoft/oxidizer/tree/main/crates/http_extensions
 [WinHTTP]: https://learn.microsoft.com/en-us/windows/win32/winhttp/using-winhttp
