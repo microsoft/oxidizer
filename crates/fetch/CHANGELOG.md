@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.16.1] - 2026-08-28
+
+- 🔧 Maintenance
+
+  - Now requires `0.7.1` of `fetch_hyper`
+  - Now requires `0.2.4` of `fetch_options`
+
+- ✨ Features
+
+  - add socket tuning and HTTP/2 stream window options ([#637](https://github.com/microsoft/oxidizer/pull/637))
+
+- 🐛 Bug Fixes
+
+  - silence newly-firing clippy lints from Rust 1.98 ([#700](https://github.com/microsoft/oxidizer/pull/700))
+  - declare dependency features where the API is used ([#659](https://github.com/microsoft/oxidizer/pull/659))
+
+- ✔️ Tasks
+
+  - cascade thread_aware 0.10.0 through published dependents ([#694](https://github.com/microsoft/oxidizer/pull/694))
+
 ## [0.16.0] - 2026-08-27
 
 - ⚠️ Breaking
