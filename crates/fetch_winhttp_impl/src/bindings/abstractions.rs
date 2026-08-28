@@ -160,15 +160,14 @@ pub(crate) unsafe trait Bindings: Send + Sync + 'static {
     /// `buffer` must be writable for `*buffer_len` bytes when present.
     unsafe fn query_option(&self, handle: RawHandle, option: u32, buffer: Option<NonNull<u8>>, buffer_len: &mut u32) -> Result<()>;
 
-    /// Asks how many response-body bytes are ready to read.
-    ///
-    /// # Safety
-    ///
-    /// The caller must satisfy all trait-level safety requirements. `request`
-    /// must be live with its operation slot armed for data availability.
-    unsafe fn query_data_available(&self, request: RawHandle) -> Result<()>;
-
     /// Reads response-body bytes into a caller-owned buffer.
+    ///
+    /// `fill_buffer` selects when the read completes. When set, the completion
+    /// waits for `len` bytes or for the end of the response, whichever comes
+    /// first; a caller that knows how many bytes remain uses it to take the
+    /// whole remainder in one operation. When clear, the completion carries
+    /// whatever has arrived, which is what lets a caller who does not know the
+    /// length consume a response as its peer produces it.
     ///
     /// # Safety
     ///
@@ -182,11 +181,11 @@ pub(crate) unsafe trait Bindings: Send + Sync + 'static {
     /// A failing return obliges the implementation to have started no read and
     /// to retain no reference to `buffer`, because the caller reclaims the
     /// buffer immediately and no completion callback follows.
-    /// [`WinHttpReadData`] satisfies this by initiating no operation when it
+    /// [`WinHttpReadDataEx`] satisfies this by initiating no operation when it
     /// reports failure.
     ///
-    /// [`WinHttpReadData`]: https://learn.microsoft.com/windows/win32/api/winhttp/nf-winhttp-winhttpreaddata
-    unsafe fn read_data(&self, request: RawHandle, buffer: NonNull<u8>, len: u32) -> Result<()>;
+    /// [`WinHttpReadDataEx`]: https://learn.microsoft.com/windows/win32/api/winhttp/nf-winhttp-winhttpreaddataex
+    unsafe fn read_data_ex(&self, request: RawHandle, buffer: NonNull<u8>, len: u32, fill_buffer: bool) -> Result<()>;
 
     /// Closes a handle owned by the caller.
     ///

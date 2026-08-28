@@ -5,15 +5,15 @@ use std::ffi::c_void;
 use std::ptr::{NonNull, null, null_mut};
 
 use widestring::U16CStr;
-use windows::Win32::Foundation::GetLastError;
+use windows::Win32::Foundation::{ERROR_IO_PENDING, ERROR_SUCCESS, GetLastError};
 use windows::Win32::Networking::WinHttp::{
     WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_OPEN_REQUEST_FLAGS, WinHttpCloseHandle, WinHttpConnect, WinHttpOpen, WinHttpOpenRequest,
-    WinHttpQueryDataAvailable, WinHttpQueryHeaders, WinHttpQueryOption, WinHttpReadData, WinHttpReceiveResponse, WinHttpSendRequest,
-    WinHttpSetOption, WinHttpSetStatusCallback, WinHttpSetTimeouts, WinHttpWriteData,
+    WinHttpQueryHeaders, WinHttpQueryOption, WinHttpReadDataEx, WinHttpReceiveResponse, WinHttpSendRequest, WinHttpSetOption,
+    WinHttpSetStatusCallback, WinHttpSetTimeouts, WinHttpWriteData,
 };
 use windows::core::{Error as WindowsError, PCWSTR};
 
-use super::{Bindings, StatusCallback};
+use super::{Bindings, StatusCallback, WINHTTP_READ_DATA_EX_FLAG_FILL_BUFFER};
 use crate::error::{Result, WinHttpError, WinHttpOperation};
 use crate::handle::RawHandle;
 
@@ -63,6 +63,20 @@ impl RealBindings {
             Err(error())
         } else {
             Ok(())
+        }
+    }
+
+    /// Interprets a Win32 status code returned by value rather than through
+    /// `GetLastError`.
+    ///
+    /// `ERROR_IO_PENDING` reports that the operation was accepted and will
+    /// finish through the status callback, which on an asynchronous session is
+    /// the ordinary outcome and not a failure.
+    fn status_result(status: u32, operation: WinHttpOperation) -> Result<()> {
+        if status == ERROR_SUCCESS.0 || status == ERROR_IO_PENDING.0 {
+            Ok(())
+        } else {
+            Err(WinHttpError::new(status, operation))
         }
     }
 }
@@ -182,18 +196,15 @@ unsafe impl Bindings for RealBindings {
             .map_err(|error| Self::map_error(&error, WinHttpOperation::QueryOption))
     }
 
-    unsafe fn query_data_available(&self, request: RawHandle) -> Result<()> {
-        // SAFETY: the request handle is non-null; asynchronous sessions must
-        // use a null OUT pointer and receive the value through the callback.
-        unsafe { WinHttpQueryDataAvailable(request.as_ptr(), null_mut()) }
-            .map_err(|error| Self::map_error(&error, WinHttpOperation::QueryDataAvailable))
-    }
+    unsafe fn read_data_ex(&self, request: RawHandle, buffer: NonNull<u8>, len: u32, fill_buffer: bool) -> Result<()> {
+        let flags = if fill_buffer { WINHTTP_READ_DATA_EX_FLAG_FILL_BUFFER } else { 0 };
 
-    unsafe fn read_data(&self, request: RawHandle, buffer: NonNull<u8>, len: u32) -> Result<()> {
         // SAFETY: the caller upholds the asynchronous buffer-lifetime
-        // contract; the asynchronous OUT pointer is intentionally null.
-        unsafe { WinHttpReadData(request.as_ptr(), buffer.as_ptr().cast(), len, null_mut()) }
-            .map_err(|error| Self::map_error(&error, WinHttpOperation::ReadData))
+        // contract; the asynchronous OUT pointer is intentionally null. The
+        // reserved property parameters are passed empty as the API requires.
+        let status = unsafe { WinHttpReadDataEx(request.as_ptr(), buffer.as_ptr().cast(), len, null_mut(), flags, 0, None) };
+
+        Self::status_result(status, WinHttpOperation::ReadData)
     }
 
     unsafe fn close_handle(&self, handle: RawHandle) -> Result<()> {
@@ -211,7 +222,7 @@ mod tests {
     use std::ptr::null_mut;
 
     use static_assertions::assert_impl_all;
-    use windows::Win32::Foundation::{SetLastError, WIN32_ERROR};
+    use windows::Win32::Foundation::{ERROR_IO_PENDING, ERROR_SUCCESS, SetLastError, WIN32_ERROR};
 
     use super::RealBindings;
     use crate::bindings::StatusCallback;
@@ -236,6 +247,20 @@ mod tests {
 
         assert_eq!(error.code(), 5678);
         assert_eq!(error.operation(), WinHttpOperation::SetStatusCallback);
+    }
+
+    #[test]
+    fn a_status_returned_by_value_accepts_success_and_pending_and_preserves_any_other_code() {
+        // WinHttpReadDataEx reports its outcome in the return value instead of
+        // the last-error slot, and on an asynchronous session the ordinary
+        // outcome is a pending read that the status callback will finish.
+        RealBindings::status_result(ERROR_SUCCESS.0, WinHttpOperation::ReadData).unwrap();
+        RealBindings::status_result(ERROR_IO_PENDING.0, WinHttpOperation::ReadData).unwrap();
+
+        let error = RealBindings::status_result(1234, WinHttpOperation::ReadData).unwrap_err();
+
+        assert_eq!(error.code(), 1234);
+        assert_eq!(error.operation(), WinHttpOperation::ReadData);
     }
 
     #[test]

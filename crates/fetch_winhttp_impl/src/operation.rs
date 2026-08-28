@@ -422,8 +422,8 @@ mod tests {
     use plurality::Pool;
     use static_assertions::{assert_impl_all, assert_not_impl_any};
     use windows::Win32::Networking::WinHttp::{
-        WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, WINHTTP_CALLBACK_STATUS_READ_COMPLETE,
-        WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
+        WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, WINHTTP_CALLBACK_STATUS_READ_COMPLETE, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
+        WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
     };
 
     use super::{ContextInstallation, ContextPool, OperationFuture, RawContextOwner, RequestGuard};
@@ -698,24 +698,6 @@ mod tests {
             Ok(())
         });
         assert!(matches!(drive(headers).unwrap(), CompletionResult::HeadersAvailable));
-
-        let mut available = 17_u32;
-        let data = guard.submit(OperationKind::DataAvailable, OperationBuffer::none(), |_, _| {
-            // SAFETY: as for the send completion above, except that this
-            // notification carries a payload: the initialized local
-            // `available`, which outlives the call and which nothing else can
-            // reach while the closure borrows it.
-            unsafe {
-                complete(
-                    context,
-                    WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE,
-                    (&raw mut available).cast(),
-                    status_info_len::<u32>(),
-                );
-            }
-            Ok(())
-        });
-        assert!(matches!(drive(data).unwrap(), CompletionResult::DataAvailable(17)));
 
         let mut read_memory = [0_u8; 8];
         let read_address = read_memory.as_mut_ptr().addr();

@@ -36,7 +36,7 @@ use crate::bindings::{
     WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED, WINHTTP_OPTION_REDIRECT_POLICY, WINHTTP_OPTION_REDIRECT_POLICY_NEVER,
     WINHTTP_OPTION_SECURITY_FLAGS,
 };
-use crate::body::{RequestBodyFraming, WinHttpBodyReader, WinHttpBodyWriter, WinHttpResponseBody, send_body};
+use crate::body::{RequestBodyFraming, WinHttpBodyReader, WinHttpBodyWriter, WinHttpResponseBody, declared_body_length, send_body};
 use crate::context::{ColdConnectState, CompletionResult, OperationBuffer, OperationKind};
 use crate::convert::{
     decompression_mask, disable_feature_mask, dword_bytes, headers_to_utf16, host_to_utf16, method_to_utf16, path_to_utf16,
@@ -264,7 +264,7 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
             }
         };
 
-        let reader = WinHttpBodyReader::new(guard, bindings, self.global_pool);
+        let reader = WinHttpBodyReader::new(guard, bindings, self.global_pool, declared_body_length(&headers));
         let body = self.body_builder.body(WinHttpResponseBody::new(reader), &self.body_options);
         let mut response = HttpResponseBuilder::new(&self.body_builder)
             .status(status)
@@ -733,7 +733,7 @@ mod tests {
         );
         assert_eq!(record.write_calls.load(Ordering::SeqCst), 0, "no request body is written");
         assert_eq!(
-            record.data_available_calls.load(Ordering::SeqCst),
+            record.body_read_calls.load(Ordering::SeqCst),
             0,
             "response body reads begin only when the caller polls the body"
         );
@@ -796,7 +796,7 @@ mod tests {
         assert_eq!(response.status(), 204);
         assert_eq!(response.version(), Version::HTTP_11);
         assert_eq!(
-            record.data_available_calls.load(Ordering::SeqCst),
+            record.body_read_calls.load(Ordering::SeqCst),
             0,
             "response body reads begin only when the caller polls the body"
         );
@@ -1836,7 +1836,7 @@ mod tests {
         assert_eq!(record.request_closes.load(Ordering::SeqCst), 0);
         let error = drive(response.into_body().into_bytes()).unwrap_err();
         assert_eq!(error.label(), "body_timeout");
-        assert_eq!(record.data_available_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(record.body_read_calls.load(Ordering::SeqCst), 1);
         assert_eq!(record.request_closes.load(Ordering::SeqCst), 1);
         assert_eq!(record.connect_closes.load(Ordering::SeqCst), 0);
         assert_eq!(record.session_closes.load(Ordering::SeqCst), 0);
@@ -1924,7 +1924,7 @@ mod tests {
         // one whose status information WinHTTP filled in inconsistently - leaves
         // the stage without the answer it needs and is reported as a violation
         // of the callback contract rather than silently accepted.
-        let unexpected = expect_completion(CompletionResult::DataAvailable(4), OperationKind::SendRequest).unwrap_err();
+        let unexpected = expect_completion(CompletionResult::HeadersAvailable, OperationKind::SendRequest).unwrap_err();
         assert_eq!(unexpected.label(), "request_winhttp");
         assert!(unexpected.to_string().contains("unexpected completion for SendRequest"));
 
@@ -2080,7 +2080,7 @@ mod tests {
         end_write_calls: AtomicUsize,
         end_write_completions: AtomicUsize,
         receive_calls: AtomicUsize,
-        data_available_calls: AtomicUsize,
+        body_read_calls: AtomicUsize,
         installed_context: AtomicUsize,
         send_context: AtomicUsize,
         session_closes: AtomicUsize,
@@ -2415,13 +2415,12 @@ mod tests {
             Ok(())
         });
 
-        let data_available_record = Arc::clone(&record);
+        let body_read_record = Arc::clone(&record);
         // The lifecycle script drives requests only as far as the response
-        // headers, so it records the availability query the body reader issues
-        // and leaves it outstanding; body reads themselves belong to the
-        // reader's own tests.
-        bindings.expect_query_data_available().returning(move |_| {
-            data_available_record.data_available_calls.fetch_add(1, Ordering::SeqCst);
+        // headers, so it records the read the body reader issues and leaves it
+        // outstanding; body reads themselves belong to the reader's own tests.
+        bindings.expect_read_data_ex().returning(move |_, _, _, _| {
+            body_read_record.body_read_calls.fetch_add(1, Ordering::SeqCst);
             Ok(())
         });
 

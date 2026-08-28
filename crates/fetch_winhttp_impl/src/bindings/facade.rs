@@ -104,8 +104,7 @@ unsafe impl Bindings for BindingsFacade {
         unsafe fn receive_response(request: RawHandle) -> Result<()>;
         unsafe fn query_headers(request: RawHandle, info_level: u32, buffer: Option<NonNull<u8>>, buffer_len: &mut u32) -> Result<()>;
         unsafe fn query_option(handle: RawHandle, option: u32, buffer: Option<NonNull<u8>>, buffer_len: &mut u32) -> Result<()>;
-        unsafe fn query_data_available(request: RawHandle) -> Result<()>;
-        unsafe fn read_data(request: RawHandle, buffer: NonNull<u8>, len: u32) -> Result<()>;
+        unsafe fn read_data_ex(request: RawHandle, buffer: NonNull<u8>, len: u32, fill_buffer: bool) -> Result<()>;
         unsafe fn close_handle(handle: RawHandle) -> Result<()>;
     }
 }

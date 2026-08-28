@@ -255,13 +255,6 @@ unsafe fn decode_success(status: u32, status_info: *mut c_void, status_info_len:
             OperationBuffer::None => CompletionResult::HeadersAvailable,
             unexpected => CompletionResult::invalid_status_info(status, status_info_len, unexpected),
         },
-        // SAFETY: read_status_info requires a null or readable payload that
-        // stays unmodified for the call, which this function's contract demands
-        // of its caller verbatim.
-        WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE => match (unsafe { read_status_info::<u32>(status_info, status_info_len) }, buffer) {
-            (Some(available), OperationBuffer::None) => CompletionResult::DataAvailable(available),
-            (_, unexpected) => CompletionResult::invalid_status_info(status, status_info_len, unexpected),
-        },
         WINHTTP_CALLBACK_STATUS_READ_COMPLETE => decode_read(status, status_info, status_info_len, buffer),
         // SAFETY: read_status_info requires a null or readable payload that
         // stays unmodified for the call, which this function's contract demands

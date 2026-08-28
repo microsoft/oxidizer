@@ -511,11 +511,9 @@ mod tests {
     /// `OperationKind::ALL` then feeds it into the mask assertion.
     fn awaited_status(kind: OperationKind) -> u32 {
         match kind {
-            OperationKind::SendRequest
-            | OperationKind::HeadersAvailable
-            | OperationKind::DataAvailable
-            | OperationKind::Read
-            | OperationKind::Write => kind.callback_status(),
+            OperationKind::SendRequest | OperationKind::HeadersAvailable | OperationKind::Read | OperationKind::Write => {
+                kind.callback_status()
+            }
         }
     }
 

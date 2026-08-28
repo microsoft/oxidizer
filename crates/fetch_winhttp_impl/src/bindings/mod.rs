@@ -15,9 +15,9 @@
 //! Locating these constants here also keeps their import path honest: an
 //! import of `crate::bindings::WINHTTP_OPTION_CONTEXT_VALUE` tells the reader
 //! the value comes straight from the SDK, whereas the same name imported from
-//! a policy module would suggest the importing layer derives it. The one
-//! constant this module defines rather than re-exports carries that distinction
-//! in its own documentation.
+//! a policy module would suggest the importing layer derives it. The constants
+//! this module defines rather than re-exports carry that distinction in their
+//! own documentation.
 
 mod abstractions;
 mod facade;
@@ -69,3 +69,17 @@ pub(crate) use windows::Win32::Networking::WinHttp::{
 /// sweep and is not prompt, so the option bounds reuse rather than teardown
 /// latency.
 pub(crate) const WINHTTP_OPTION_CONNECTION_IDLE_TIMEOUT: u32 = 135;
+
+/// Makes a read complete only once its buffer is full or the response ends.
+///
+/// Not published in the `windows` crate's generated bindings, which expose only
+/// the unrelated `WINHTTP_FEATURE_*` identifiers, so this crate defines the
+/// value itself. It is `WINHTTP_READ_DATA_EX_FLAG_FILL_BUFFER` from the Windows
+/// SDK header `winhttp.h`.
+///
+/// Without the flag a read completes as soon as any data has arrived. With it,
+/// `WinHttpReadDataEx` behaves as `WinHttpReadData` does, so a read that asks
+/// for more than the peer has sent stays outstanding until the rest arrives or
+/// the response ends. Only a caller that knows the response length may set it;
+/// see [`crate::body::WinHttpBodyReader`].
+pub(crate) const WINHTTP_READ_DATA_EX_FLAG_FILL_BUFFER: u64 = 0x0000_0000_0000_0001;

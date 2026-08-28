@@ -13,8 +13,8 @@ use bytesbuf::{BytesBuf, BytesView};
 use events_once::{EmbeddedEvent, Event, RawReceiver, RawSender};
 use http_extensions::HttpError;
 use windows::Win32::Networking::WinHttp::{
-    WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, WINHTTP_CALLBACK_STATUS_READ_COMPLETE,
-    WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
+    WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, WINHTTP_CALLBACK_STATUS_READ_COMPLETE, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
+    WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
 };
 
 use crate::error::{WinHttpError, WinHttpOperation, callback_protocol_error};
@@ -39,7 +39,6 @@ const OPERATION_CLAIMED: u8 = 1;
 pub(crate) enum OperationKind {
     SendRequest = 2,
     HeadersAvailable,
-    DataAvailable,
     Read,
     Write,
 }
@@ -63,19 +62,12 @@ impl OperationKind {
     /// without an arm in `from_discriminant` - without one, `active_kind`
     /// never decodes its slot tag and no callback ever claims its payload -
     /// and adding that arm does fail the check below.
-    pub(crate) const ALL: [Self; 5] = [
-        Self::SendRequest,
-        Self::HeadersAvailable,
-        Self::DataAvailable,
-        Self::Read,
-        Self::Write,
-    ];
+    pub(crate) const ALL: [Self; 4] = [Self::SendRequest, Self::HeadersAvailable, Self::Read, Self::Write];
 
     pub(crate) const fn callback_status(self) -> u32 {
         match self {
             Self::SendRequest => WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
             Self::HeadersAvailable => WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE,
-            Self::DataAvailable => WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE,
             Self::Read => WINHTTP_CALLBACK_STATUS_READ_COMPLETE,
             Self::Write => WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
         }
@@ -85,7 +77,6 @@ impl OperationKind {
         match self {
             Self::SendRequest => WinHttpOperation::SendRequest,
             Self::HeadersAvailable => WinHttpOperation::ReceiveResponse,
-            Self::DataAvailable => WinHttpOperation::QueryDataAvailable,
             Self::Read => WinHttpOperation::ReadData,
             Self::Write => WinHttpOperation::WriteData,
         }
@@ -95,7 +86,6 @@ impl OperationKind {
         match value {
             value if value == Self::SendRequest as u8 => Some(Self::SendRequest),
             value if value == Self::HeadersAvailable as u8 => Some(Self::HeadersAvailable),
-            value if value == Self::DataAvailable as u8 => Some(Self::DataAvailable),
             value if value == Self::Read as u8 => Some(Self::Read),
             value if value == Self::Write as u8 => Some(Self::Write),
             _ => None,
@@ -118,7 +108,7 @@ const _: () = {
     let first = OperationKind::SendRequest as u8;
 
     assert!(
-        OperationKind::ALL.len() == 5,
+        OperationKind::ALL.len() == 4,
         "the element assertion below is written out per element and must grow with OperationKind::ALL"
     );
 
@@ -126,8 +116,7 @@ const _: () = {
         OperationKind::ALL[0] as u8 == first
             && OperationKind::ALL[1] as u8 == first + 1
             && OperationKind::ALL[2] as u8 == first + 2
-            && OperationKind::ALL[3] as u8 == first + 3
-            && OperationKind::ALL[4] as u8 == first + 4,
+            && OperationKind::ALL[3] as u8 == first + 3,
         "OperationKind::ALL must list every variant exactly once, in declaration order"
     );
 
@@ -209,7 +198,6 @@ pub(crate) enum CompletionBuffer {
 pub(crate) enum CompletionResult {
     SendRequestComplete,
     HeadersAvailable,
-    DataAvailable(u32),
     ReadComplete {
         buffer: BytesBuf,
         len: u32,

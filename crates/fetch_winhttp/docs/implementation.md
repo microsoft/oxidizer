@@ -143,7 +143,7 @@ crates/fetch_winhttp_impl/src/        // implementation
   convert.rs             // ConversionError + numeric/duration/UTF-16/option-value
                          //   conversions, the unlimited-timeout sentinel, keep-alive floors
   body/
-    read.rs              // response reader over WinHttpReadData + http_body adapter
+    read.rs              // response reader over WinHttpReadDataEx + http_body adapter
     write.rs             // bytesbuf_io::Write over WinHttpWriteData + request framing
     mod.rs               // module wiring only (no type definitions)
   tls.rs                 // WinHttpTlsConfig -> security flags
@@ -342,9 +342,8 @@ per request.
 | R5 | `WinHttpWriteData` (streaming body, per chunk) | async | `WRITE_COMPLETE` |
 | R6 | `WinHttpReceiveResponse` | async | `HEADERS_AVAILABLE` |
 | R7 | `WinHttpQueryHeaders` | sync (buffered) | - |
-| R8 | `WinHttpQueryDataAvailable` | async | `DATA_AVAILABLE` (n bytes) |
-| R9 | `WinHttpReadData` | async | `READ_COMPLETE` (n bytes) then loop R8/R9 until 0 |
-| R10 | `WinHttpCloseHandle` | sync | `HANDLE_CLOSING` (final callback) |
+| R8 | `WinHttpReadDataEx` | async | `READ_COMPLETE` (n bytes) then loop R8 until 0 |
+| R9 | `WinHttpCloseHandle` | sync | `HANDLE_CLOSING` (final callback) |
 
 Errors on any async step arrive as `REQUEST_ERROR` carrying a
 `WINHTTP_ASYNC_RESULT { dwResult, dwError }`. TLS validation problems may also raise
@@ -540,7 +539,6 @@ enum CompletionResult {
     SendRequestComplete,
     WriteComplete { buffer: bytesbuf::BytesView, len: u32 },
     HeadersAvailable,
-    DataAvailable(u32),
     // Ownership of the read buffer is returned to the future here. `len` is the
     // number of bytes WinHTTP appended (metadata; the buffer may have carried
     // earlier bytes, since a BytesBuf need not be empty to be appended to).
@@ -604,7 +602,7 @@ and the request guard, while the context owns the parent handles. This satisfies
 This is the subtlest part of the design and the most likely source of unsafety if
 done naively, so it gets its own chapter.
 
-**The hazard.** For `WinHttpReadData`/`WinHttpWriteData`, the caller-supplied
+**The hazard.** For `WinHttpReadDataEx`/`WinHttpWriteData`, the caller-supplied
 buffer must remain valid until the corresponding `READ_COMPLETE`/`WRITE_COMPLETE`
 callback fires; WinHTTP reads from or writes into that memory asynchronously on
 its own thread. Likewise the request context that the callback dereferences must
@@ -1024,26 +1022,25 @@ The read side is a reader over WinHTTP exposing a single inherent read operation
 ```rust,ignore
 impl WinHttpBodyReader {
     async fn read_into(&mut self, into: BytesBuf) -> Result<(usize, BytesBuf), HttpError> {
-        // 1. WinHttpQueryDataAvailable -> DATA_AVAILABLE(n)
-        // 2. choose a desired size from n, or the speculative default when
-        //    n == 0, then reserve that much capacity (§6.2.1)
-        // 3. retain `into`, the exposed region address, and its submitted
+        // 1. choose a desired size and a fill-buffer decision from the declared
+        //    remaining length, if the response declared one (§6.2.1), then
+        //    reserve that much capacity
+        // 2. retain `into`, the exposed region address, and its submitted
         //    capacity in OperationBuffer::Read
-        // 4. WinHttpReadData reads min(desired, first contiguous unfilled
+        // 3. WinHttpReadDataEx reads min(desired, first contiguous unfilled
         //    region length, u32::MAX) bytes
-        // 5. READ_COMPLETE validates the returned pointer/length against that
+        // 4. READ_COMPLETE validates the returned pointer/length against that
         //    address and capacity before returning (len, buffer), which
         //    transfers BytesBuf ownership back here; len == 0 means EOF
     }
 }
 ```
 
-EOF is taken from a **zero-length `READ_COMPLETE`**, not from
-`WinHttpQueryDataAvailable` returning 0. Both usually coincide, but WinHTTP's
-documented completion signal is the zero-length read, and reading directly avoids
-depending on `QueryDataAvailable`'s value for correctness. `QueryDataAvailable` is
-used only to size ordinary reads. The authoritative "body finished" decision is a
-`READ_COMPLETE` with `len == 0`.
+EOF is taken from a **zero-length `READ_COMPLETE`** and from nothing else. In
+particular the declared response length never ends the stream: WinHTTP decodes
+the body, and a peer may in any case send more or fewer bytes than it declared,
+so a length is only ever a sizing hint. The authoritative "body finished"
+decision is a `READ_COMPLETE` with `len == 0`.
 
 After the zero-length EOF read, the reader calls `query_raw_trailers`, implemented as
 `WinHttpQueryHeaders(WINHTTP_QUERY_RAW_HEADERS_CRLF |
@@ -1053,12 +1050,20 @@ response adapter is a custom
 `http_body::Body`, passed through `HttpBodyBuilder::body`, so it yields data frames and
 one final trailer frame instead of erasing trailers through a data-only stream conversion.
 The adapter owns the reader between reads and lends it to the in-flight read, which keeps
-that boxed future free of borrows:
+that erased future free of borrows:
 
 ```rust,ignore
 let body = WinHttpResponseBody::new(WinHttpBodyReader::new(/* .. */));
 let body = builder.body(body, &body_options);
 ```
+
+Erasing that future needs one allocation per frame, so the adapter rents it from
+a thread-local `plurality::MultiPool` and unsizes the handle to
+`plurality::Box<dyn Future<..> + Send>`. Every frame of every response served by
+a thread reuses the same slot, which keeps a streaming download's allocation
+count flat in the payload size. The pool is thread-local because it is not
+shareable, while the handles it hands out are: a body is produced on the thread
+that issued the request and may be polled and dropped on another.
 
 The resulting `HttpBody` is pull-based:
 WinHTTP reads are issued lazily as the consumer polls, so backpressure is natural and
@@ -1066,7 +1071,8 @@ there is no unbounded buffering. The request's body idle timeout
 (`http_extensions::BodyTimeout`) is copied into `body_options`.
 `HttpBodyBuilder::body` merges it with the client's response-body defaults and applies
 the Rust-side idle-timeout wrapper (§10.4). Native WinHTTP receive timers remain
-unlimited.
+unlimited. That Rust-side timeout is also what bounds a read that asked to fill
+its buffer against a peer which then stops sending.
 
 The `READ_COMPLETE` buffer WinHTTP fills is a slice reserved inside a pooled
 `BytesBuf`; it stays pinned until the callback fires (§4), then the filled prefix
@@ -1074,8 +1080,27 @@ is yielded as a zero-copy `BytesView`.
 
 #### 6.2.1 Read buffer sizing
 
-Three constraints shape how much memory a read reserves and how much of it a single
-`WinHttpReadData` call receives.
+`WinHttpReadDataEx` is the sole read entry point. Its
+`WINHTTP_READ_DATA_EX_FLAG_FILL_BUFFER` flag selects between two completion
+rules, and choosing correctly between them is what the sizing logic exists for:
+
+- **With the flag**, the call completes only once the submitted region is full or
+  the response ends - the behavior of `WinHttpReadData`. Asking for more bytes
+  than the peer will send therefore waits.
+- **Without the flag**, the call completes as soon as any bytes have been written,
+  so a trickling peer is streamed rather than waited on.
+
+The transport passes the flag exactly when the response declared how many bytes
+remain, because only then is a full region known to be owed. `declared_body_length`
+supplies that figure from `Content-Length`, and withholds it when the value is
+unparsable, when duplicate values disagree, or when a `Content-Encoding` or
+`Transfer-Encoding` header is present - WinHTTP decodes the body, so an encoded
+length counts bytes the reader never sees. The remainder is decremented by each
+completed read; once it reaches zero the reads revert to the unflagged form,
+which is what lets a body that outruns its own declaration keep streaming.
+
+Three further constraints shape how much memory a read reserves and how much of it
+a single call receives.
 
 **WinHTTP writes into one contiguous region.** A `BytesBuf` reservation may be
 segmented across several pooled blocks, so each call is given
@@ -1084,18 +1109,20 @@ segmented across several pooled blocks, so each call is given
 its first block. Nothing here assumes a particular block size: the bound is read from
 the buffer at runtime, so `GlobalPool` remains free to change its size classes.
 
-**Large reads are preferred when no better figure is known.** `PREFERRED_READ_SIZE`
-is 256 KiB, matching the default I/O size used across related projects. It caps every
-reservation and supplies the size outright when `QueryDataAvailable` reports zero and
-the read is therefore speculative. Larger submissions amortize the cost of the WinHTTP
-call and its worker-thread handoff over more bytes.
+**Large reads are preferred.** `DESIRED_READ_SIZE` is 256 KiB, matching the
+default I/O size used across related projects. It caps every reservation, and it
+is the size used outright when no declared length narrows it. Larger submissions
+amortize the cost of the WinHTTP call and its worker-thread handoff over more
+bytes.
 
 **Leftover capacity becomes a local reserve.** A reservation that exceeds the first
-contiguous region leaves the remaining blocks in the `BytesBuf`. `BytesBuf::reserve`
-is a no-op while the buffer already holds enough capacity, so subsequent reads take
-their region from that reserve and reach `GlobalPool` again only once it is spent.
-Blocks therefore are not returned to the pool and re-rented between consecutive reads
-of one body.
+contiguous region leaves the remaining blocks in the `BytesBuf`, and subsequent reads
+take their region from that reserve. A flagged read tops the buffer back up to the
+desired size, because a read that waits for a full region should be given a region
+worth waiting for. An unflagged read does not: it takes whatever spare capacity is
+there and reaches `GlobalPool` again only once the buffer has none left. Topping up
+an unflagged read would rent memory on every delivery to replace bytes the response
+may never send.
 
 **Retaining the buffer across frames is a security property, not only an
 efficiency one.** A pooled block stays rented for as long as any `BytesView` cut
@@ -1103,9 +1130,9 @@ from it is alive, so handing each emitted frame the whole buffer it was read int
 would let a peer that trickles bytes rent one block per byte delivered - retained
 memory bounded by the attacker's frame count rather than by the payload. The adapter
 instead detaches only the filled prefix and keeps the buffer, so consecutive small
-reads refill capacity the outstanding frames already pin. Combined with sizing
-ordinary reservations from the queried availability rather than from
-`PREFERRED_READ_SIZE`, retained memory tracks bytes actually delivered.
+reads refill capacity the outstanding frames already pin. A response therefore holds
+one read reserve however many frames it is delivered in, and a declared remainder
+narrows that reserve to what the peer actually owes.
 
 ### 6.3 End-to-end request lifecycle (`RequestDriver` in `request.rs`)
 
@@ -1126,8 +1153,7 @@ translate req (method/uri/headers -> UTF-16)
   -> move RequestGuard into WinHttpBodyReader
   -> build HttpResponse { parts, lazy body } through HttpResponseBuilder::body
   -> return Ok(response)
-  -> on body poll: QueryDataAvailable ->async DATA_AVAILABLE
-     -> ReadData ->async READ_COMPLETE  [repeat until zero-length completion]
+  -> on body poll: ReadDataEx ->async READ_COMPLETE  [repeat until zero-length completion]
   -> query and emit response trailers, if present
   -> close request; HANDLE_CLOSING later reclaims context and parents
 ```
@@ -1259,11 +1285,12 @@ after the table.
   `HANDLE_CLOSING` then reclaims the context, closes the connect handle, and releases
   the session owner exactly once (this runs under Miri where available).
 - **Body streaming.** The response body reader is driven with a scripted
-  `DATA_AVAILABLE`/`READ_COMPLETE` sequence: EOF is taken from a
-  zero-length `READ_COMPLETE` (not from `QueryDataAvailable`), `ReadComplete`
+  `READ_COMPLETE` sequence: EOF is taken from a zero-length `READ_COMPLETE` and
+  never from the declared length, `ReadComplete`
   returns the same pooled `BytesBuf` (ownership round-trip) with the correct appended
   length, no read is issued until the consumer polls `poll_frame`
-  (backpressure), and a mid-stream error propagates. For the writer, scripted `WRITE_COMPLETE`s
+  (backpressure), a declared length sizes reads and selects the fill-buffer flag
+  while its absence does not, and a mid-stream error propagates. For the writer, scripted `WRITE_COMPLETE`s
   across frames establish chunk-by-chunk `WinHttpWriteData` with correct
   pointers/lengths and buffer pinning, a `BytesView` larger than `u32::MAX` split
   into `u32`-sized writes, and a known body length above `u32::MAX` using
