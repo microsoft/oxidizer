@@ -200,7 +200,7 @@ The demonstrated library requirements fit one coherent builder:
 | Idle lifetime | Do not reuse a connection after the configured idle age |
 | Connection limit | Bound total concurrent connections per origin |
 | Connect deadline | Bound establishment of a usable connection |
-| HTTP versions | Express ordered preferences and strict protocol requirements |
+| HTTP versions | Constrain the common HTTP/1.1 and HTTP/2 baseline |
 | Client authentication | Select a logical credential role provisioned by the application |
 | TLS endpoint identity | Authenticate an exact DNS name for a scoped request origin |
 | Pipeline behavior | Compose routing, resilience, telemetry, redaction, and response policy |
@@ -225,7 +225,7 @@ Requirement types encode the guarantee:
 
 - `ConnectionLifetime::at_most(duration)` limits reuse by connection age;
 - `ConnectionIdleAge::at_most(duration)` limits reuse after inactivity;
-- a protocol requirement distinguishes an ordered preference from a strict minimum or prohibition;
+- a protocol requirement constrains the common HTTP/1.1 and HTTP/2 baseline;
 - security policies are always required.
 
 An implementation either establishes the guarantee or returns an error. An implementation with
@@ -233,9 +233,29 @@ coarser behavior can satisfy a requirement only when the coarse behavior still i
 guarantee. For example, retiring a connection earlier than a configured maximum lifetime is valid;
 retiring it later is not.
 
-Portable preferences are a separate concept. If introduced, construction returns a resolution
-report containing every unmet or coarsened preference. A required option never degrades through the
-preference mechanism.
+Transport preferences are composition configuration. They may use additional protocols only where
+portable requirements leave that choice open and never weaken a portable requirement.
+
+## Protocol resolution
+
+Portable protocol configuration is a constraint, not the transport's candidate list. The default
+is unconstrained. Hyper compositions and WinHTTP normally supply HTTP/1.1 and HTTP/2 candidates;
+WinHTTP's `prefer_http3` adds HTTP/3 ahead of its ordinary fallbacks.
+
+Resolution filters transport candidates through the portable constraint:
+
+| Portable requirement | WinHTTP preference | Effective protocols |
+| --- | --- | --- |
+| Unspecified | Default | HTTP/1.1 and HTTP/2 |
+| Unspecified | Prefer HTTP/3 | HTTP/3 with HTTP/2 and HTTP/1.1 fallback |
+| Exact HTTP/2 | Prefer HTTP/3 | HTTP/2 only |
+| HTTP/1.1 or HTTP/2 | Prefer HTTP/3 | HTTP/1.1 and HTTP/2 |
+| Exact HTTP/1.1 | Prefer HTTP/3 | HTTP/1.1 only |
+
+A preference removed by a requirement is not an error. WinHTTP lowers the resolved set into its
+HTTP/2/HTTP/3 enable mask and sets `WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED` only when HTTP/1.1 is
+forbidden. The portable API does not expose HTTP/3 until it joins the common baseline; applications
+cannot require it through a transport-specific setting.
 
 ## Constraint composition
 
@@ -247,7 +267,7 @@ Monotonic constraints combine naturally:
 - maximum ages and connection counts take the lowest bound;
 - minimum protocol or security constraints take the strongest compatible bound;
 - allowed sets intersect;
-- preferred orderings combine only when they do not violate requirements.
+- transport preferences apply only after portable constraints are resolved.
 
 Singleton resources require agreement. Two equivalent client-certificate sources are one
 requirement; two distinct required sources conflict unless the policy explicitly scopes selection.
@@ -326,6 +346,46 @@ rest.
 
 Fine-grained HTTP/2 PING interval, acknowledgement timeout, and pool-poisoning settings remain
 Hyper-specific because they configure mechanisms rather than portable outcomes.
+
+## Streaming and trailers
+
+The transport request contract is full duplex for HTTP/2: request upload and response reception
+make independent progress. Response headers may complete `execute` while the upload remains active.
+The response retains the shared request lifetime until upload and download complete or either side
+is cancelled.
+
+Request bodies expose whether they may produce trailers before execution. Trailer production is
+asynchronous and fallible, like data-frame production. A transport validates support and framing
+before opening or sending the request. If unsupported, execution returns an explicit error without
+polling the body. Once response headers have been returned, any subsequent upload or trailer error
+must remain observable through the response lifecycle or an explicit request-completion result.
+
+```rust,ignore
+let body = body.with_trailers(async {
+    Ok(HeaderMap::from_iter([("digest", computed_digest()?)]))
+});
+```
+
+Response bodies yield data and a terminal `Result` of trailers. A transport preserves received
+trailers for every protocol on which its platform exposes them. WinHTTP can query trailing headers
+after body completion on the supported Windows baseline; its implementation must not limit that
+path to HTTP/2 and HTTP/3.
+
+WinHTTP cannot send request trailers through its public API. A request declaring trailers therefore
+fails preflight on WinHTTP. This is an explicitly fallible request feature rather than a property
+silently omitted by the transport, and it is not part of the universal transport baseline.
+
+## Response decompression
+
+Transports preserve the wire response and leave native automatic decompression disabled. A
+mandatory `fetch` normalization layer advertises the supported content encodings, incrementally
+decodes response bodies, and removes or rewrites metadata that described the encoded
+representation. Because the layer is below pipeline selection, minimal and custom pipelines have
+the same behavior as the standard pipeline.
+
+Keeping decompression above transports prevents backend differences such as WinHTTP decoding only
+gzip/deflate while another transport supports Brotli or zstd. Request compression remains explicit
+caller behavior and is not implied by response decompression.
 
 ## Data-path tuning policy
 

@@ -35,23 +35,27 @@ modality a transport-construction concern rather than a library-facing capabilit
 
 | Capability | Hyper + either TLS backend | WinHTTP | Public treatment |
 | --- | --- | --- | --- |
-| HTTP/1.1 and HTTP/2 preference | Supported | Supported | Baseline |
+| Portable HTTP/1.1 and HTTP/2 constraints | Supported | Supported | Baseline |
 | Strictly require HTTP/2 | Supported by Hyper's HTTP/2-only mode | Supported by enabling HTTP/2 and setting `WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED` | Baseline; gRPC is a demonstrated consumer |
 | Initial HTTP/2 stream receive window | Fixed or adaptive policy | OS default; a fixed window option exists | Transport-owned default, not public configuration |
-| HTTP/3 | Unsupported | Supported on recent Windows | Transport-specific until Hyper and every supported transport implement it and a library requires it |
+| Prefer HTTP/3 | Unsupported | Supported on recent Windows with fallback | WinHTTP composition preference; portable requirements take precedence |
+| Require HTTP/3 | Unsupported | Mechanically supported | Not exposed until HTTP/3 joins the portable baseline |
 | Fine-grained HTTP/2 flow control | Supported | Different partial native controls | Internal transport policy |
 
-An ordered version preference and a protocol requirement are different APIs. A transport may honor
-an HTTP/2 preference by falling back to HTTP/1.1, but that is not sufficient for a gRPC library
-that requires HTTP/2. WinHTTP can prevent fallback by combining its HTTP/2 enable flag with
-`WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED`; no user-space emulation is needed. The option requires
-Windows 10 version 1903 or later. On an older supported host, transport construction for a strict
-HTTP/2 requirement fails.
+Portable protocol configuration constrains HTTP/1.1 and HTTP/2 rather than ordering every protocol
+a transport may implement. A gRPC library can require exact HTTP/2. WinHTTP enforces that with its
+HTTP/2 enable flag and `WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED`; no user-space emulation is needed.
+The option requires Windows 10 version 1903 or later, older than the WinHTTP transport's supported
+platform baseline.
 
 The receive window is not a protocol requirement. Its optimum depends on path bandwidth and RTT,
 active stream count, response consumption, memory budget, and adaptive-window behavior. A numeric
 cross-transport option would expose only part of that policy. Transports select and benchmark their
 own defaults.
+
+The portable default imposes no protocol constraint. A WinHTTP HTTP/3 preference expands its
+transport candidates but cannot override an exact HTTP/1.1 or HTTP/2 library requirement. Removing
+a preference is not a conflict; no transport-specific API can require HTTP/3.
 
 ## Connections
 
@@ -97,6 +101,10 @@ Application buffers remain separate implementation details.
 | Connect deadline | Wraps connector establishment | Native resolve/connect controls with different phase boundaries | Baseline after defining one observable deadline |
 | Separate resolve/send/receive timers | Not exposed by the supported Hyper path | Native controls | Transport-specific |
 | Streaming request and response bodies | Supported | Planned | Required `Transport` invariant |
+| Full-duplex HTTP/2 | Supported | Demonstrated on Windows 11 build 26100 | Required invariant; retain platform compatibility coverage |
+| Request trailers | Supported by Hyper body frames | No public WinHTTP send API | Fallible request feature; WinHTTP rejects before sending |
+| Response trailers | Supported | Queryable after body completion, including HTTP/1.1 on the supported platform | Fallible terminal response-body frame |
+| Response decompression | Can be implemented natively or above transport | Native support differs by encoding | Always implemented by `fetch`; transports return encoded bodies |
 | Cancellation when the request future is dropped | Supported | Planned through handle closure | Required `Transport` invariant |
 | Plain HTTP opt-in | Pipeline request validation plus transport support | Supported | Pipeline policy |
 | Runtime/executor selection | Hyper requires an adapter | WinHTTP owns asynchronous I/O callbacks | Transport construction |
@@ -139,8 +147,8 @@ cannot become a portable capability. A TVS library that retains it must select a
 transport through `fetch_hyper_rustls` and reject the others.
 
 Named client credentials, exact TLS server-name mapping, strict HTTP/2, fixed connection lifetime,
-connect deadline, connection limits, streaming, cancellation, and ordinary HTTP/1.1/HTTP/2
-preferences belong to the baseline and do not need capability traits.
+connect deadline, connection limits, streaming, cancellation, and HTTP/1.1/HTTP/2 constraints
+belong to the baseline and do not need capability traits.
 
 Arbitrary signers, raw verifier callbacks, and backend TLS objects stay on composition builders.
 Detailed keep-alive controls, HTTP/3, proxy/WPAD, integrated authentication, phase-specific
