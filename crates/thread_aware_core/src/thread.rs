@@ -53,6 +53,7 @@ pub struct Owner {
 }
 
 impl PartialEq for Owner {
+    #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
@@ -101,6 +102,7 @@ impl Owner {
     /// assert_eq!(Owner::new(8).min_threads(), 8);
     /// assert_eq!(Owner::new(0).min_threads(), 0);
     /// ```
+    #[inline]
     #[must_use]
     pub const fn min_threads(&self) -> usize {
         self.min_threads
@@ -142,9 +144,10 @@ impl NumaNode {
     ///
     /// assert_ne!(NumaNode::new(0), NumaNode::new(1));
     /// ```
+    #[inline]
     #[must_use]
-    pub const fn new(value: u32) -> Self {
-        Self(value)
+    pub const fn new(node: u32) -> Self {
+        Self(node)
     }
 }
 
@@ -170,12 +173,9 @@ impl NumaNode {
 ///
 /// # Without `std`
 ///
-/// The thread id is `std::thread::ThreadId`, so `new` and [`id`](Self::id) require the `std`
-/// feature. Without it a `Thread` cannot be constructed at all, and only
-/// [`owner`](Self::owner) and [`numa_node`](Self::numa_node) can be read. That is the
-/// intended split: a `no_std` library implements [`ThreadAware`](crate::ThreadAware) and
-/// reads whatever it is given, while the runtime that drives relocation requires `std`
-/// regardless.
+/// The thread id is `std::thread::ThreadId`, so without the `std` feature a `Thread` cannot
+/// be constructed and holds only [`owner`](Self::owner) and [`numa_node`](Self::numa_node).
+/// Equality and hashing then compare those two alone.
 ///
 /// # Examples
 ///
@@ -205,6 +205,11 @@ impl NumaNode {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Thread {
     owner: Owner,
+    // `test` is part of the gate so the crate's own test build compiles this field without
+    // enumerating features (see docs/optional-deps-in-test-builds.md). The cost is that no
+    // unit test can observe the `no_std` shape: `cfg(test)` puts `id` back, so a test gated
+    // on `not(feature = "std")` still sees three fields and would assert the wrong thing.
+    // `tests/no_std_surface.rs` covers that shape from outside the test build instead.
     #[cfg(any(test, feature = "std"))]
     id: ThreadId,
     numa_node: NumaNode,
@@ -232,6 +237,7 @@ impl Thread {
     /// assert_eq!(mine.owner(), owner);
     /// ```
     #[cfg(any(test, feature = "std"))]
+    #[inline]
     #[must_use]
     pub const fn new(owner: Owner, id: ThreadId, numa_node: NumaNode) -> Self {
         Self { owner, id, numa_node }
@@ -258,6 +264,7 @@ impl Thread {
     /// # }
     /// # }
     /// ```
+    #[inline]
     #[must_use]
     pub const fn owner(&self) -> Owner {
         self.owner
@@ -285,6 +292,7 @@ impl Thread {
     /// assert_eq!(mine.id(), here);
     /// ```
     #[cfg(any(test, feature = "std"))]
+    #[inline]
     #[must_use]
     pub const fn id(&self) -> ThreadId {
         self.id
@@ -310,6 +318,7 @@ impl Thread {
     /// # }
     /// # }
     /// ```
+    #[inline]
     #[must_use]
     pub const fn numa_node(&self) -> NumaNode {
         self.numa_node

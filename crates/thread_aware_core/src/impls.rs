@@ -18,8 +18,9 @@ use std::path::{Path, PathBuf};
 
 use crate::{NumaNode, Owner, Thread, ThreadAware};
 
-// To make impl_transfer(...) work
-macro_rules! impl_transfer {
+/// Implements [`ThreadAware`] for a type that holds nothing bound to a thread, so a
+/// move leaves it valid as-is and `relocate` has nothing to do.
+macro_rules! impl_thread_aware {
     ($t:ty) => {
         impl ThreadAware for $t {
             #[inline]
@@ -28,53 +29,53 @@ macro_rules! impl_transfer {
     };
 }
 
-impl_transfer!(bool);
-impl_transfer!(u8);
-impl_transfer!(u16);
-impl_transfer!(u32);
-impl_transfer!(u64);
-impl_transfer!(u128);
-impl_transfer!(i8);
-impl_transfer!(i16);
-impl_transfer!(i32);
-impl_transfer!(i64);
-impl_transfer!(i128);
-impl_transfer!(usize);
-impl_transfer!(isize);
-impl_transfer!(f32);
-impl_transfer!(f64);
-impl_transfer!(char);
+impl_thread_aware!(bool);
+impl_thread_aware!(u8);
+impl_thread_aware!(u16);
+impl_thread_aware!(u32);
+impl_thread_aware!(u64);
+impl_thread_aware!(u128);
+impl_thread_aware!(i8);
+impl_thread_aware!(i16);
+impl_thread_aware!(i32);
+impl_thread_aware!(i64);
+impl_thread_aware!(i128);
+impl_thread_aware!(usize);
+impl_thread_aware!(isize);
+impl_thread_aware!(f32);
+impl_thread_aware!(f64);
+impl_thread_aware!(char);
 
-impl_transfer!(NonZeroU8);
-impl_transfer!(NonZeroU16);
-impl_transfer!(NonZeroU32);
-impl_transfer!(NonZeroU64);
-impl_transfer!(NonZeroU128);
-impl_transfer!(NonZeroUsize);
-impl_transfer!(NonZeroI8);
-impl_transfer!(NonZeroI16);
-impl_transfer!(NonZeroI32);
-impl_transfer!(NonZeroI64);
-impl_transfer!(NonZeroI128);
-impl_transfer!(NonZeroIsize);
+impl_thread_aware!(NonZeroU8);
+impl_thread_aware!(NonZeroU16);
+impl_thread_aware!(NonZeroU32);
+impl_thread_aware!(NonZeroU64);
+impl_thread_aware!(NonZeroU128);
+impl_thread_aware!(NonZeroUsize);
+impl_thread_aware!(NonZeroI8);
+impl_thread_aware!(NonZeroI16);
+impl_thread_aware!(NonZeroI32);
+impl_thread_aware!(NonZeroI64);
+impl_thread_aware!(NonZeroI128);
+impl_thread_aware!(NonZeroIsize);
 
-impl_transfer!(String);
+impl_thread_aware!(String);
 #[cfg(any(test, feature = "std"))]
-impl_transfer!(PathBuf);
-impl_transfer!(Duration);
+impl_thread_aware!(PathBuf);
+impl_thread_aware!(Duration);
 #[cfg(any(test, feature = "std"))]
-impl_transfer!(Path);
+impl_thread_aware!(Path);
 
-impl_transfer!(str);
+impl_thread_aware!(str);
 
-impl_transfer!(Owner);
-impl_transfer!(NumaNode);
+impl_thread_aware!(Owner);
+impl_thread_aware!(NumaNode);
 #[cfg(any(test, feature = "std"))]
-impl_transfer!(std::thread::ThreadId);
-impl_transfer!(Thread);
+impl_thread_aware!(std::thread::ThreadId);
+impl_thread_aware!(Thread);
 
 // We need to implement `ThreadAware` for tuples ranging from 0 to 12 elements
-macro_rules! impl_transfer_tuple {
+macro_rules! impl_thread_aware_tuple {
     ($head:ident, $($tail:ident,)*) => {
         impl<$head, $($tail),*> ThreadAware for ($head, $($tail),*)
             where
@@ -90,26 +91,27 @@ macro_rules! impl_transfer_tuple {
                 }
 
                 // Recursively call the macro for the rest of the tuple
-                impl_transfer_tuple!($($tail,)*);
+                impl_thread_aware_tuple!($($tail,)*);
     };
 
     () => {
         impl ThreadAware for () {
+            #[inline]
             fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
         }
     };
 }
 
-impl_transfer_tuple!(A, B, C, D, E, F, G, H, I, J, K, L,);
+impl_thread_aware_tuple!(A, B, C, D, E, F, G, H, I, J, K, L,);
 
-macro_rules! impl_transfer_fn {
+macro_rules! impl_thread_aware_fn {
     ($head:ident, $($tail:ident,)*) => {
         impl<R, $head, $($tail),*> ThreadAware for fn($head, $($tail),*) -> R {
             fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
         }
 
         // Recursively call the macro for the rest of the function parameters
-        impl_transfer_fn!($($tail,)*);
+        impl_thread_aware_fn!($($tail,)*);
     };
     () => {
         impl<R> ThreadAware for fn() -> R {
@@ -118,7 +120,7 @@ macro_rules! impl_transfer_fn {
     }
 }
 
-impl_transfer_fn!(A, B, C, D, E, F, G, H, I, J, K, L,);
+impl_thread_aware_fn!(A, B, C, D, E, F, G, H, I, J, K, L,);
 
 impl<T, const N: usize> ThreadAware for [T; N]
 where
@@ -169,10 +171,9 @@ impl<T> ThreadAware for Vec<T>
 where
     T: ThreadAware,
 {
+    #[inline]
     fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
-        for value in self.iter_mut() {
-            value.relocate(source, destination);
-        }
+        self.as_mut_slice().relocate(source, destination);
     }
 }
 
@@ -209,25 +210,26 @@ where
     }
 }
 
-impl<T> ThreadAware for Cell<T>
-where
-    T: ThreadAware,
-{
-    #[inline]
-    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
-        self.get_mut().relocate(source, destination);
-    }
+/// Implements [`ThreadAware`] for a single-threaded interior-mutability wrapper.
+///
+/// `relocate` already holds `&mut self`, so the inner value is reachable through
+/// `get_mut` without a borrow flag or a `Cell` round-trip.
+macro_rules! impl_thread_aware_cell {
+    ($t:ident) => {
+        impl<T> ThreadAware for $t<T>
+        where
+            T: ThreadAware,
+        {
+            #[inline]
+            fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+                self.get_mut().relocate(source, destination);
+            }
+        }
+    };
 }
 
-impl<T> ThreadAware for RefCell<T>
-where
-    T: ThreadAware,
-{
-    #[inline]
-    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
-        self.get_mut().relocate(source, destination);
-    }
-}
+impl_thread_aware_cell!(Cell);
+impl_thread_aware_cell!(RefCell);
 
 #[cfg(any(test, feature = "std"))]
 impl<K, V, S> ThreadAware for HashMap<K, V, S>
@@ -301,7 +303,7 @@ mod tests {
     }
 
     #[test]
-    fn test_hashmap() {
+    fn hashmap_relocates_values_and_tolerates_empty() {
         let threads = sample_threads();
         let source = Some(&threads[0]);
         let destination = &threads[1];
@@ -321,7 +323,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tuples() {
+    fn tuples_of_every_supported_arity_relocate() {
         let threads = sample_threads();
         let source = Some(&threads[0]);
         let destination = &threads[1];
@@ -366,7 +368,7 @@ mod tests {
         assert_eq!(twelve, (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12));
     }
 
-    /// `impl_transfer_tuple!` recurses by peeling one element off the head, so the
+    /// `impl_thread_aware_tuple!` recurses by peeling one element off the head, so the
     /// 1-tuple is the last impl it generates before the `()` base case. That arm is
     /// the one where a missing comma would silently change meaning: `let (A) = self`
     /// is a parenthesized pattern binding the whole tuple, which sends the impl back
@@ -421,7 +423,7 @@ mod tests {
     }
 
     #[test]
-    fn test_function_pointers() {
+    fn function_pointers_stay_callable_after_relocate() {
         // Helper functions for testing
         fn no_args() -> i32 {
             42
@@ -492,7 +494,7 @@ mod tests {
     }
 
     #[test]
-    fn test_result() {
+    fn result_relocates_both_variants() {
         let threads = sample_threads();
         let source = Some(&threads[0]);
         let destination = &threads[1];
