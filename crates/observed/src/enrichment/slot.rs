@@ -201,7 +201,7 @@ impl EnrichmentTransfer {
 
     /// Layers `entries` onto every captured chain as a single new node.
     fn push_entries(&mut self, entries: &Arc<[EnrichmentEntry]>) {
-        if self.slots.is_empty() || entries.is_empty() {
+        if self.slots.is_empty() {
             return;
         }
 
