@@ -318,6 +318,85 @@ be read from `rustc -vV` the default linker stands (with a warning).
 Other hosts are unaffected — `*-windows-gnu` and non-Windows targets
 already default to linkers that handle long paths.
 
+#### Windows: baseline builds run under a short target directory
+
+Redirecting the linker clears `LNK1104`, but it does not help the C
+compilers that `-sys` crates drive through the `cc` crate. MSVC `cl.exe`
+resolves its `-Fo` argument against `MAX_PATH` and fails with `C1083`
+("Cannot open compiler generated file"), and unlike the linker there is
+no long-path-aware drop-in guaranteed to be installed — `clang-cl` is
+not part of a default Rust or Visual Studio install. So the remaining
+lever is the length of the path itself.
+
+`cargo semver-checks` nests baseline builds under the workspace target
+directory and offers no flag to move them, but it derives that location
+from cargo metadata, so `CARGO_TARGET_DIR` does reach it. On Windows the
+release scripts therefore point it at
+`<volume>\oxi-sc\<digest-of-repository-root>` for the duration of the
+call — a fixed 18 characters in place of a repository path that is
+unbounded. The volume is the repository's own, so the build stays on the
+filesystem you chose, and the digest keeps sibling clones apart. The
+path is deterministic rather than unique so that consecutive runs reuse
+the baseline rustdoc they just built; concurrent runs are safe because
+cargo locks that directory exactly as it does `target/`.
+
+The observed worst case nests 216 characters of cargo-semver-checks and
+`aws-lc-sys` build output beneath the repository root, which is why the
+repository path itself cannot be relied on to leave enough room. The
+report in AB#7790786 breaks down as:
+
+| Segment | Chars |
+| --- | ---: |
+| `\target` | 7 |
+| `\semver-checks` | 14 |
+| `\git-<40-char commit sha>` | 45 |
+| `\local-fetch-0_15_0-x86_64_pc_windows_msvc-<16 hex>` | 59 |
+| `\target\debug\build` | 19 |
+| `\aws-lc-sys-<16 hex>` | 28 |
+| `\out` | 4 |
+| `\<16 hex>-jitterentropy-health.o` | 40 |
+| **Total below the repository root** | **216** |
+
+None of those segments are ours to shorten: the nesting is chosen by
+cargo-semver-checks, and the leaf by `aws-lc-sys` and the `cc` crate. In
+the field the repository root was 56 characters
+(`C:\Source\oxidizer.worktrees\release-threadaware-fallout`), for 272
+in total — past the 260-character limit. Replacing the root and its
+`\target` with an 18-character `C:\oxi-sc\<8 hex>` brings the same build
+to 227, leaving about 32 characters of headroom.
+
+That headroom is what the relocation buys, and it is worth noting how
+little of it there is by default. A GitHub-hosted runner checks out at
+`D:\a\oxidizer\oxidizer`, which is only 22 characters, so the same build
+lands at 238 and passes today with roughly 21 characters to spare — a
+longer crate name or a dependency version bump would be enough to
+consume it.
+
+As with the linker, an explicit `CARGO_TARGET_DIR` is respected rather
+than overridden. If the directory cannot be created the build proceeds
+in place with a warning, since a probe must never abort a release.
+
+A checkout that already has room is left where it is. Before relocating,
+the scripts project the build path from the repository root, the 216
+above, and the name of the package being checked — the nesting embeds
+that name once, so `http_client_api_with_templated_uri` reaches 29
+characters further than `fetch` did. If the projection fits within
+`MAX_PATH` with a margin to spare, the default target directory stands.
+A Dev Drive checkout such as `D:\oxidizer` therefore keeps its build
+output inside the repository, where `cargo clean` and `git clean` can
+still reach it, and only the checkouts that need the relocation get it.
+
+The margin exists because the 216 is one measurement rather than a
+bound. The package name is projected for explicitly, but the version
+string and the depth of a dependency's own build output are not ours to
+predict, and a dependency upgrade can lengthen either. If the projection
+is wrong the build still fails the way it did before, and the error
+names `CARGO_TARGET_DIR` as the lever to set by hand.
+
+Note that when the relocation does apply, those artifacts live outside
+the repository, so `cargo clean` and `git clean` do not remove them;
+delete `<volume>\oxi-sc` to reclaim the space.
+
 #### Proc-macro-only packages require manual SemVer review
 
 `cargo semver-checks` deliberately supports ordinary library targets,
