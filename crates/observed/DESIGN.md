@@ -33,10 +33,10 @@ Rust services and libraries need structured telemetry that is:
    NOTE: logs and metrics ship today; the trace signal is
    [planned](#planned-not-implemented).
 
-1. **Privacy-by-construction via redaction.** All non-primitive attribute values - whether
-   defined on the event struct or added by enrichment - must pass through a **redaction engine**
-   before reaching any exporter. The type system makes it impossible to accidentally emit
-   classified data. See Appendix #1.
+1. **Privacy-by-construction via redaction.** Non-primitive attribute values should carry an
+   explicit classification decision. Default and `data_class` paths pass through a redactor
+   before reaching exporters; explicit bypasses such as `unredacted` and unclassified enrichment
+   are caller-controlled. See Appendix #1.
 
 1. **Scoped, automatic enrichment.** Attributes attach to all events within a scope and propagate
    through nested calls - including across `.await` points and thread migrations.
@@ -59,7 +59,7 @@ Rust services and libraries need structured telemetry that is:
 1. **Zero-cost when inactive.** Emitting must have zero overhead in the following scenarios:
 
 - No exporters are configured.
-- The event is disabled and no processor opts in to it.
+- The event is disabled and no processor interested in that metadata accepts it.
 - Low severity: severity pre-filtering skips event construction entirely - no field extraction, no allocation, no redaction call.
   Implemented in the processor: `EventProcessor::is_interested` runs before construction, and the `observed_destination`
   log processor answers it from the `OTel` logger's `event_enabled` check.
@@ -101,8 +101,10 @@ Rust services and libraries need structured telemetry that is:
    threads in the process.
    NOTE: We cannot guarantee that users' interceptors/callbacks will not do any of this. The only thing that is not allowed is making async calls from `emit!`.
 
-1. **No globals/statics.** Global state leads to unexpected behavior, complicates testing,
-   and breaks when multiple versions of the crate coexist in the dependency tree.
+1. **No globals/statics for telemetry configuration.** Global state leads to unexpected behavior,
+   complicates testing, and breaks when multiple versions of the crate coexist in the dependency
+   tree. The one shipped exception is a thread-local recursion guard used only while processors
+   run; it drops nested emissions thread-wide across sinks to prevent cross-sink cycles.
 
 ## *Nice-to-have* requirements
 
@@ -174,13 +176,14 @@ Rust services and libraries need structured telemetry that is:
 
 ### Privacy
 
-1. **Redaction-by-construction.** The core privacy guarantee: attribute values cannot reach an exporter without an explicit classification decision.
+1. **Redaction-by-construction.** The core privacy guarantee: attribute values should reach an exporter only after an explicit classification decision.
    Every field in `#[event(...)]` and `#[derive(Enrichment)]` follows one of three paths:
    - **Default** - the type must implement `RedactedDisplay` (e.g. via `#[classified(...)]`). If it doesn't, compilation fails.
    - **`data_class = <expr>`** - wraps the value in `Sensitive::new(value, expr)` before redaction, for types that don't carry their own classification.
-   - **`unredacted`** - bypasses redaction entirely; the type must implement `Into<Value>`. Used for primitives and other inherently non-sensitive values.
+   - **`unredacted`** - bypasses redaction entirely; the type must implement `Into<Value>`. Used for primitives and other values the caller has already deemed safe to emit.
 
-   `data_class` and `unredacted` are mutually exclusive (compile error if both specified).
+   `data_class` and `unredacted` are mutually exclusive (compile error if both specified). `EnrichmentEntry::unclassified`
+   and adaptor-provided dynamic values are also caller-controlled and are not redacted by `observed`.
 
 1. **Data classification annotations.** Attributes carrying personal or sensitive data must be labeled with an appropriate `DataClass`.
    This annotation feeds into the redaction engine's policy decisions.
@@ -257,7 +260,7 @@ Each event uses per-signal attributes at the struct level; both the severity att
 
 | Annotation | Effect |
 | --- | --- |
-| `#[event("...")]` | **Required.** Declares the canonical event name used for routing and identification. Add `disabled` (`#[event("...", disabled)]`) to mark the event as opt-in: the flag is surfaced to processors as `EventDescription::is_disabled` rather than enforced by the sink, and the processors shipped in `observed_destination` skip such events unless they explicitly opt in. |
+| `#[event("...")]` | **Required.** Declares the canonical event name used for identification and processor interest checks. Add `disabled` (`#[event("...", disabled)]`) to surface disabled metadata to processors; the sink does not enforce it, and processors normally interpret it in `EventProcessor::is_interested`. |
 | A severity attribute - `#[trace]`, `#[debug]`, `#[info]`, `#[warning]`, `#[error]`, or `#[fatal]` (optionally with a message: `#[info("...")]`) | Declares the event as a log. `name` defaults to the event name; the message is optional. |
 | One of `#[counter(...)]`, `#[updown_counter(field, ...)]`, `#[gauge(field, ...)]`, `#[histogram(field, ...)]` | Declares an event-level metric instrument. `name` defaults to the event name. A bare `#[counter]` may be fieldless and records `1` per emission; the others require a leading positional field naming the struct field that supplies the metric value. |
 
@@ -299,8 +302,8 @@ A **Sink** is a composable event dispatcher identified by a `SinkId`. It is the 
 - **Clock** - the `tick::SimpleClock` used to stamp dispatched events. All processors on one leaf see the same instant, and a frozen clock keeps
   tests deterministic.
 
-- **Enrichment isolation** - By default, a sink receives both global enrichments (from `.enrich()`) and targeted enrichments (from `.enrich_for()`).
-  When isolation is enabled, the sink only sees targeted enrichments addressed to its id.
+- **Enrichment isolation** - By default, a sink receives untargeted entries present in its own slot (from `.enrich()`) plus targeted enrichments addressed to its id (from `.enrich_for()`).
+  When isolation is enabled, the sink ignores untargeted entries and only sees targeted enrichments addressed to its id.
   This lets library authors keep their internal telemetry independent of the hosting application's enrichment context.
 
 #### Composite sinks
@@ -333,25 +336,32 @@ Sink::composite([sink_a, sink_b])
 before the future yields, which keeps it from leaking into unrelated tasks sharing the worker thread.
 
 **Contract.** An integration that adds entries of its own should carry them *inside* the transfer, with
-`Transfer::with_enrichment` (global) or `Transfer::with_enrichment_for` (visible only to one `SinkId`,
+`Transfer::with_enrichment` (untargeted within the captured sink slots) or `Transfer::with_enrichment_for` (visible only to one `SinkId`,
 mirroring `enrich_for`). Entries carried this way are independent of wrapper order, so they survive the
 future being boxed or attached again further out - both of which integrations do. Wrapping `enrich`
 *around* an attached future is supported only for a single `attach` on a plain, non-boxed future;
-other compositions are outside the guarantee and silently lose the entries.
+other compositions are outside the guarantee and may lose entries when the enrichment and transfer
+operate on the same captured sink slot.
 
 **Technical details.** Applying a transfer *replaces* each captured slot's chain rather than layering
 onto it - that is what stops a transferred scope inheriting the target thread's ambient context. So
-`Enriched<Transferred<F>>` loses its entries: the inner transfer overwrites what the outer wrapper
-pushed. The inherent `Transferred::enrich` / `enrich_for` restore the intuitive result by re-ordering
+`Enriched<Transferred<F>>` loses entries that were pushed into a slot captured by the inner transfer:
+the transfer overwrites what the outer wrapper pushed. The inherent `Transferred::enrich` / `enrich_for` restore the intuitive result by re-ordering
 the wrappers, and win over the `EnrichFutureExt` blanket impl because a type's inherent methods are
 searched before its traits. That selection is why the guarantee is narrow: it needs the receiver's
 statically-known type to be exactly `Transferred<_>`, and it re-orders one wrapper deep, so nested
 transfers, boxed or type-erased receivers, explicit trait dispatch, and generic `F: EnrichFutureExt`
-receivers all fall back to the losing shape.
+receivers all fall back to the unsupported shape for overlapping captured slots.
 
 ### Processing of emitted event
 
 In v1, processing will be done on the same thread that calls `emit!`.
+
+A thread-wide recursion guard is held while processors run. Any nested emission
+made during `EventProcessor::process` is silently dropped, even if it targets a
+different sink; processors should report their own failures through a
+non-`observed` diagnostics channel. Each loaded crate version owns a separate
+thread-local guard flag.
 
 :::mermaid
 flowchart TD
@@ -409,10 +419,10 @@ Values are exporter-neutral; each exporter maps these to its own wire format.
 | **Sink** | A named event dispatcher identified by a `SinkId`. Holds one or more `EventProcessor` values, a clock, and enrichment configuration (slot, isolation flag). |
 | **SinkId** | A `&'static str` label identifying a sink. Two ids are equal when their labels are equal. |
 | **Composite sink** | A `Sink` built by `Sink::composite` that dispatches one `emit!()` through several leaf sinks, each keeping its own id, processors, and enrichment. |
-| **Attribute** | A key-value pair on an emitted event. Attributes come from two sources: event-defined (struct fields via `#[event(...)]`) and enrichment. Both are subject to the same redaction rules and end up as key-value pairs on the exported record. |
+| **Attribute** | A key-value pair on an emitted event. Attributes come from two sources: event-defined (struct fields via `#[event(...)]`) and enrichment. Classified paths use processor-supplied redaction; explicit unredacted and unclassified paths are caller-controlled. |
 | **Enrichment** | The process of attaching attributes to all events within a scope |
 | **Event** | A Rust struct implementing the `Event` trait (via `#[event(...)]`). Represents a single telemetry occurrence with typed attributes, optional severity, and routing metadata. |
-| **EventDescription** | The compile-time metadata constant generated by `#[event(...)]`: event name, type id, log and metric signal descriptions, and the `disabled` flag. Handed to `EventProcessor::is_interested` to decide routing. |
+| **EventDescription** | Metadata describing an event: event name, optional Rust type id, log and metric signal descriptions, and the `disabled` flag. Typed events provide it as a compile-time constant; dynamic adaptors build it at runtime and usually set `type_id` to `None`. Handed to `EventProcessor::is_interested` to decide routing; match the canonical name when one processor must accept both typed and dynamic sources. |
 | **EventProcessor** | A destination-facing handler that declares interest in an event and then pulls the fields it needs from an `EventView`, redacting them through its own engine. |
 | **RedactionEngine** | The `data_privacy` crate's engine for applying data-classification-aware redaction to field values. Implements `Redactor`. |
 | **Redactor** | The `data_privacy_core` trait that applies redaction for a given data class. Field getters take `&dyn Redactor`, so any redaction strategy works, not only a full engine. |

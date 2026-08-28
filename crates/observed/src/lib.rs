@@ -17,8 +17,9 @@
 //! - Emits **structured, typed events** via `#[event(...)]` and the [`emit!`] macro
 //! - Supports **enrichment** - scoped, stackable, context-propagated entries
 //!   attached to all events in scope (via RAII guards and `#[derive(Enrichment)]` structs)
-//! - Enforces **redaction** - data-classification metadata on every field, redaction
-//!   applied through a [`RedactionEngine`](data_privacy::RedactionEngine)
+//! - Supports **redaction** - classified fields are extracted through a
+//!   [`RedactionEngine`](data_privacy::RedactionEngine), while explicit
+//!   unredacted paths remain caller-controlled
 //! - Provides **per-field routing** - one event struct can produce logs and metrics with
 //!   independent field subsets per signal
 //! - Integrates with **OpenTelemetry** through pluggable [`EventProcessor`](processing::EventProcessor) implementations
@@ -331,8 +332,8 @@ pub use observed_macros::Enrichment;
 ///
 /// | Attribute | Required | Description |
 /// |-----------|----------|-------------|
-/// | `#[event("...")]` | **yes** | Canonical event name used for routing and identification. Add `disabled` (`#[event("...", disabled)]`) to mark the event as opt-in only; processors must explicitly enable it. |
-/// | `#[<severity>]` | no | Opt into log emission, where `<severity>` is one of `trace`, `debug`, `info`, `warning`, `error`, `fatal`. At most one may be present. (The `warn` level is spelled `warning` because `warn` is a built-in attribute.) The optional positional string is the log body; an optional `name = "..."` overrides the log name (defaults to the event name). |
+/// | `#[event("...")]` | **yes** | Canonical event name used for identification and processor interest checks. Add `disabled` (`#[event("...", disabled)]`) to surface disabled metadata to processors; the sink does not enforce it. |
+/// | `#[<severity>]` | no | Opt into log emission, where `<severity>` is one of `trace`, `debug`, `info`, `warning`, `error`, `fatal`. At most one may be present. (The `warn` level is spelled `warning` because `warn` is a built-in attribute.) The optional positional string is the log body; `{key}` placeholders name effective log keys after raw-identifier normalization, `#[dimension(log = "...")]` renames, and `#[dimension(log = exclude)]` exclusions. `{{` escapes an opening brace; empty `{}` and unmatched `{` are accepted as literal text. An optional `name = "..."` overrides the log name (defaults to the event name). |
 /// | `#[<kind>(...)]` | no | Declare a metric instrument (`<kind>` = `counter`, `updown_counter`, `gauge`, or `histogram`). See [Metric instruments](#metric-instruments). |
 ///
 /// # Metric instruments

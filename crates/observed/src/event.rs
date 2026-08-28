@@ -11,12 +11,10 @@ use crate::processing::FieldVisitorFn;
 /// A structured telemetry event.
 ///
 /// Every event type implements this trait - typically via the `#[event(...)]`
-/// attribute macro. All events are processed through a single, redaction-safe
-/// pipeline: field values pass through a [`data_privacy::RedactionEngine`] for
-/// privacy-safe extraction.
-///
-/// This ensures that all emitted telemetry - whether routed to logs, metrics,
-/// or both - has consistent privacy-compliant behavior.
+/// attribute macro. Default and `#[data_class(<expr>)]` fields are extracted
+/// through the processor-supplied redactor. Fields marked `#[unredacted]`,
+/// unclassified enrichment values, and values supplied by dynamic adaptors are
+/// caller-controlled and must already be appropriate to emit.
 ///
 /// # Attribute macro
 ///

@@ -12,9 +12,10 @@ use std::{fmt, hash};
 ///
 /// Two representations cover every call site:
 ///
-/// - `Static` for compile-time literals, which is what almost every event field
-///   is - free to store and free to clone,
-/// - `Shared` for an [`Arc<str>`], cloned by bumping a refcount.
+/// - `Static` for values that reach `Text` as compile-time literals - free to
+///   store and free to clone,
+/// - `Shared` for owned, dynamic, or non-empty redacted text, cloned by bumping
+///   a refcount.
 ///
 /// Both clone in O(1), which matters because an enrichment's stored value is
 /// cloned on every event that sees it. An owned `Box<str>` variant would let a

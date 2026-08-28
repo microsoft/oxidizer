@@ -19,10 +19,11 @@ include = { workspace = true }
 # public surface intentionally re-exposes the observed/data_privacy types it is
 # a test harness for.
 #
-# This is NOT redundant with INTERNAL_CRATES membership: that list is only read
-# by scripts/check-external-types.rs (the `external-type-exposure` job). The
-# `anvil-external-types` recipe behind `pr-fast` scopes itself from cargo
-# metadata and never consults it, so without this block that job fails.
+# This is NOT redundant with INTERNAL_CRATES membership: that list suppresses
+# scripts/check-external-types.rs and is also used by mutation-test
+# orchestration. The `anvil-external-types` recipe behind `pr-fast` scopes
+# itself from cargo metadata and never consults it, so without this block that
+# job fails.
 allowed_external_types = ["*"]
 
 [dependencies]
