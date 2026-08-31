@@ -28,10 +28,11 @@ const MINIMUM_TEST_TIMEOUT_SEC: u32 = 60;
 // The two lists below name the code that must therefore be skipped per
 // platform.
 //
-// This policy applies to the merge-group run only. The Anvil-generated pull
-// request recipe (`justfiles/anvil/checks/mutants-diff.just`) has no hook for
-// expressing it and is deliberately left unmodified; AB#7802888 tracks adding
-// the capability at the Anvil level.
+// This policy applies wherever this script runs: the diff-scoped merge-group job
+// and the nightly full-workspace job. The Anvil-generated pull request recipe
+// (`justfiles/anvil/checks/mutants-diff.just`) is a separate entry point that has
+// no hook for expressing it and is deliberately left unmodified; AB#7802888
+// tracks adding the capability at the Anvil level.
 
 /// Packages whose entire implementation is gated to a single platform.
 ///
@@ -65,6 +66,11 @@ struct Args {
 // Grouping related packages (e.g., a crate and its proc macros) ensures mutations are properly
 // validated by all relevant tests. Ungrouped packages are tested individually, which may miss
 // mutations if their tests reside in dependent packages.
+//
+// A group therefore drives two distinct cargo-mutants selections: `--package` chooses
+// which code is mutated, and `--test-package` chooses which packages' tests judge each
+// mutant. Passing only the former would leave a mutant judged by its own package's tests
+// alone, which is exactly the gap grouping exists to close.
 const TEST_GROUPS: &[&[&str]] = &[
     &["bytesbuf"],
     &["data_privacy", "data_privacy_core", "data_privacy_macros", "data_privacy_macros_impl"],
@@ -207,8 +213,10 @@ fn mutate_group(group: &[String], args: &Args) -> Result<(), AppError> {
         cargo_args.push(diff.display().to_string());
     }
 
-    let package_args: Vec<_> = group.iter().map(|p| format!("--package={p}")).collect();
-    cargo_args.extend(package_args);
+    for package in group {
+        cargo_args.push(format!("--package={package}"));
+        cargo_args.push(format!("--test-package={package}"));
+    }
 
     automation::run_cargo(cargo_args.into_iter())
 }

@@ -34,8 +34,8 @@ use crate::bindings::{
     WINHTTP_QUERY_RAW_HEADERS_CRLF, WINHTTP_QUERY_STATUS_CODE, WINHTTP_QUERY_VERSION,
 };
 use crate::convert::{
-    ConversionError, InteriorZeroCodeUnitError, InvalidUtf16Error, ReturnedLengthOutOfBoundsError, UnexpectedByteLengthError,
-    dword_to_usize, header_buffer_units, parse_protocol_used,
+    ConversionError, ReturnedLengthOutOfBoundsError, UnexpectedByteLengthError, dword_to_usize, header_buffer_units, parse_header_buffer,
+    parse_protocol_used,
 };
 use crate::error::WinHttpError;
 use crate::handle::RawHandle;
@@ -165,9 +165,29 @@ pub(crate) fn query_protocol_used(bindings: &BindingsFacade, request: RawHandle)
 }
 
 fn query_header_string(bindings: &BindingsFacade, request: RawHandle, info_level: u32, value: &'static str) -> Result<String, QueryError> {
-    let buffer = query_header_units(bindings, request, info_level, value)?;
+    let mut required_bytes = 0_u32;
 
-    String::from_utf16(&buffer).map_err(|_invalid_utf16| QueryError::from(ConversionError::from(InvalidUtf16Error::new(value))))
+    // SAFETY: callers query only a live request while its RequestGuard owns the
+    // handle and no asynchronous operation is outstanding. A null buffer with
+    // zero capacity is the documented sizing query.
+    match unsafe { bindings.query_headers(request, info_level, None, &mut required_bytes) } {
+        Err(error) if error.code() == ERROR_INSUFFICIENT_BUFFER.0 => {}
+        Err(error) => return Err(error.into()),
+        Ok(()) if required_bytes == 0 => return Ok(String::new()),
+        Ok(()) => {}
+    }
+
+    let units = header_buffer_units(required_bytes)?;
+    let mut buffer = vec![0_u16; units];
+    let output = NonNull::new(buffer.as_mut_ptr().cast::<u8>()).expect("Vec::as_mut_ptr is guaranteed to be nonnull");
+    let mut returned_bytes = required_bytes;
+
+    // SAFETY: the request remains live with no asynchronous operation
+    // outstanding. output points to a writable buffer of required_bytes and
+    // remains valid for the duration of this synchronous query.
+    unsafe { bindings.query_headers(request, info_level, Some(output), &mut returned_bytes) }?;
+
+    Ok(parse_header_buffer(&buffer, returned_bytes, value)?)
 }
 
 fn query_header_bytes(bindings: &BindingsFacade, request: RawHandle, info_level: u32) -> Result<Vec<u8>, QueryError> {
@@ -203,47 +223,6 @@ fn query_header_bytes(bindings: &BindingsFacade, request: RawHandle, info_level:
         .into());
     }
     buffer.truncate(returned_bytes);
-
-    Ok(buffer)
-}
-
-fn query_header_units(bindings: &BindingsFacade, request: RawHandle, info_level: u32, value: &'static str) -> Result<Vec<u16>, QueryError> {
-    let mut required_bytes = 0_u32;
-
-    // SAFETY: callers query only a live request while its RequestGuard owns the
-    // handle and no asynchronous operation is outstanding. A null buffer with
-    // zero capacity is the documented sizing query.
-    match unsafe { bindings.query_headers(request, info_level, None, &mut required_bytes) } {
-        Err(error) if error.code() == ERROR_INSUFFICIENT_BUFFER.0 => {}
-        Err(error) => return Err(error.into()),
-        Ok(()) if required_bytes == 0 => return Ok(Vec::new()),
-        Ok(()) => {}
-    }
-
-    let units = header_buffer_units(required_bytes)?;
-    let mut buffer = vec![0_u16; units];
-    let output = NonNull::new(buffer.as_mut_ptr().cast::<u8>()).expect("Vec::as_mut_ptr is guaranteed to be nonnull");
-    let mut returned_bytes = required_bytes;
-
-    // SAFETY: the request remains live with no asynchronous operation
-    // outstanding. output points to a writable buffer of required_bytes and
-    // remains valid for the duration of this synchronous query.
-    unsafe { bindings.query_headers(request, info_level, Some(output), &mut returned_bytes) }?;
-
-    let returned_units = header_buffer_units(returned_bytes)?;
-    if returned_units > buffer.len() {
-        return Err(ConversionError::from(ReturnedLengthOutOfBoundsError::new(
-            value,
-            buffer.len() * size_of::<u16>(),
-            dword_to_usize(returned_bytes),
-        ))
-        .into());
-    }
-    buffer.truncate(returned_units);
-
-    if buffer.contains(&0) {
-        return Err(ConversionError::from(InteriorZeroCodeUnitError::new(value)).into());
-    }
 
     Ok(buffer)
 }

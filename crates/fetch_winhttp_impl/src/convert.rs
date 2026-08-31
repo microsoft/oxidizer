@@ -184,6 +184,11 @@ pub(crate) fn http3_keep_alive_millis(duration: Duration) -> u32 {
 /// to use and it is genuinely long: the sweep compares a 64-bit elapsed-time
 /// delta against this value, so the maximum neither overflows nor inverts, and
 /// the window it describes exceeds forty-nine days.
+///
+/// A `Limited` window longer than that maximum reaches the same value through
+/// [`dword_millis`], so the two arms converge rather than diverging at the top
+/// of the range. Both approximations are caller-visible and are stated in
+/// design.md section 2.2.
 pub(crate) fn connection_idle_timeout_millis(idle_timeout: &ConnectionIdleTimeout) -> u32 {
     match idle_timeout {
         ConnectionIdleTimeout::Unlimited => u32::MAX,
@@ -344,22 +349,30 @@ pub(crate) fn header_buffer_units(byte_len: u32) -> Result<usize, ConversionErro
     Ok(dword_to_usize(byte_len / 2))
 }
 
-#[cfg(test)]
-pub(crate) fn parse_header_buffer(buffer: &[u16], returned_bytes: u32) -> Result<String, ConversionError> {
+/// Decodes the UTF-16 region a WinHTTP header query wrote into a caller buffer.
+///
+/// WinHTTP reports the byte length it wrote rather than truncating the supplied
+/// buffer, so that length is validated against the buffer before it bounds a
+/// read. A zero code unit inside the reported region would silently truncate
+/// the text a caller then parses, so it is rejected instead of accepted.
+///
+/// `value` names the queried item so a failure identifies which query produced
+/// the malformed data.
+pub(crate) fn parse_header_buffer(buffer: &[u16], returned_bytes: u32, value: &'static str) -> Result<String, ConversionError> {
     let units = header_buffer_units(returned_bytes)?;
     let content = buffer.get(..units).ok_or_else(|| {
         ConversionError::from(ReturnedLengthOutOfBoundsError::new(
-            "header UTF-16 data",
+            value,
             size_of_val(buffer),
             dword_to_usize(returned_bytes),
         ))
     })?;
 
     if content.contains(&0) {
-        return Err(InteriorZeroCodeUnitError::new("header data").into());
+        return Err(InteriorZeroCodeUnitError::new(value).into());
     }
 
-    String::from_utf16(content).map_err(|_invalid_utf16| InvalidUtf16Error::new("header data").into())
+    String::from_utf16(content).map_err(|_invalid_utf16| InvalidUtf16Error::new(value).into())
 }
 
 pub(crate) fn dword_to_usize(value: u32) -> usize {
@@ -594,20 +607,20 @@ mod tests {
         let odd = header_buffer_units(3).unwrap_err();
         assert_eq!(odd.find_source::<HeaderByteLengthIsOddError>().unwrap().length, 3);
         assert_eq!(
-            parse_header_buffer(&"a: b\r\n".encode_utf16().collect::<Vec<_>>(), 12).unwrap(),
+            parse_header_buffer(&"a: b\r\n".encode_utf16().collect::<Vec<_>>(), 12, "header data").unwrap(),
             "a: b\r\n"
         );
 
-        let invalid_utf16 = parse_header_buffer(&[0xd800], 2).unwrap_err();
+        let invalid_utf16 = parse_header_buffer(&[0xd800], 2, "header data").unwrap_err();
         assert_eq!(invalid_utf16.find_source::<InvalidUtf16Error>().unwrap().value, "header data");
 
-        let too_small = parse_header_buffer(&[u16::from(b'a')], 4).unwrap_err();
+        let too_small = parse_header_buffer(&[u16::from(b'a')], 4, "header UTF-16 data").unwrap_err();
         let source = too_small.find_source::<ReturnedLengthOutOfBoundsError>().unwrap();
         assert_eq!(source.value, "header UTF-16 data");
         assert_eq!(source.capacity, 2);
         assert_eq!(source.returned, 4);
 
-        let embedded_nul = parse_header_buffer(&[u16::from(b'a'), 0], 4).unwrap_err();
+        let embedded_nul = parse_header_buffer(&[u16::from(b'a'), 0], 4, "header data").unwrap_err();
         assert_eq!(
             embedded_nul.find_source::<InteriorZeroCodeUnitError>().unwrap().value,
             "header data"

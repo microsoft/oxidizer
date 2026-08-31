@@ -129,7 +129,7 @@ approximate, and some ignored:
 | `multiple_pools` | Accepted; its behavior remains defined by the generic `fetch` client contract. |
 | `max_connections = usize::MAX` (default) | Honored as no caller-imposed limit. |
 | finite `max_connections` | Ignored. |
-| `connection_idle_timeout` | Honored, raised to a minimum of 5 seconds. Bounds how long an unused connection stays eligible for reuse; it does not promise prompt socket release. |
+| `connection_idle_timeout` | Honored, raised to a minimum of 5 seconds and approximated above roughly 49 days. Bounds how long an unused connection stays eligible for reuse; it does not promise prompt socket release. |
 | `connection_lifetime = Unlimited` (default) | Honored. |
 | `connection_lifetime = Fixed(_)` / `PerConnection(_)` | Ignored (§2.2). |
 | `ConnectionKeepAlive::Disabled` (default) | Uses Windows defaults. |
@@ -169,6 +169,12 @@ connection age is not part of its contract.
 eligible for reuse. It does not bound the age of a continuously busy connection,
 which is the gap a caller setting `connection_lifetime` should expect to remain
 open.
+
+Windows expresses this window as an unsigned millisecond count with no "never evict"
+encoding, so `ConnectionIdleTimeout::Unlimited` and any window longer than roughly
+49 days both become the longest window Windows can express. A caller asking for
+indefinite retention gets a window long enough that no practical deployment reaches
+it, but not a guarantee that idle eviction is disabled.
 
 Unsupported generic connection options are ignored without runtime diagnostics. Their
 fidelity is documented here so callers can select transport-specific configuration
@@ -310,9 +316,11 @@ The enforcement mechanisms are documented in implementation.md §10.4.
 
 - **Connect timeout** (`TransportOptions.connect_timeout`, default 30 s): honored as a
   total deadline on connection establishment (§6.2).
-- **Response timeout** (`http_extensions::ResponseTimeout`, read per-request from the
+- **Response timeout** (`http_extensions::ResponseTimeout`, set per-request in the
   request extensions): a *total* deadline over connection setup, sending the request, and
-  receiving the response headers. Expiration surfaces as `HttpError::timeout`.
+  receiving the response headers. Expiration surfaces as `HttpError::timeout`. The
+  `fetch` client pipeline enforces this deadline by wrapping the transport call; the
+  transport neither reads the extension nor programs a native timer for it.
 - **Body idle timeout** (`http_extensions::BodyTimeout`, read per-request from the request
   extensions): the maximum idle gap between response body frames, reset on progress.
 - **Seatbelt request timeout**: honored by the client pipeline without transport-specific
