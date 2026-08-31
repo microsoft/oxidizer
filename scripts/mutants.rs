@@ -22,6 +22,34 @@ const BUILD_TIMEOUT_SEC: u32 = 600;
 const TIMEOUT_SEC: u32 = 300;
 const MINIMUM_TEST_TIMEOUT_SEC: u32 = 60;
 
+// cargo-mutants selects mutants by parsing source text, so it does not honour
+// `cfg` gating: code the compiler strips on the running platform still yields
+// mutants, and every one of them is unbuildable and so reported as missed.
+// The two lists below name the code that must therefore be skipped per
+// platform.
+//
+// This policy applies wherever this script runs: the diff-scoped merge-group job
+// and the nightly full-workspace job. The Anvil-generated pull request recipe
+// (`justfiles/anvil/checks/mutants-diff.just`) is a separate entry point that has
+// no hook for expressing it and is deliberately left unmodified; AB#7802888
+// tracks adding the capability at the Anvil level.
+
+/// Packages whose entire implementation is gated to a single platform.
+///
+/// Mutating them anywhere else produces only unbuildable mutants, so the whole
+/// group is skipped rather than excluded by path.
+const WINDOWS_ONLY_PACKAGES: &[&str] = &["fetch_winhttp", "fetch_winhttp_impl"];
+
+/// Source files and directories that individual crates gate to a single platform.
+///
+/// Entries are globs matched against source paths, so a bare name such as
+/// `windows` matches any path component: a module directory holding
+/// platform-gated code is excluded by naming it. The file globs deliberately
+/// omit the separator before the platform name so that both `windows.rs` and
+/// `socket_windows.rs` match.
+const WINDOWS_ONLY_SOURCES: &[&str] = &["**/*windows.rs", "windows"];
+const LINUX_ONLY_SOURCES: &[&str] = &["**/*linux.rs", "linux"];
+
 /// Run mutation testing on the workspace
 #[derive(FromArgs)]
 struct Args {
@@ -38,9 +66,15 @@ struct Args {
 // Grouping related packages (e.g., a crate and its proc macros) ensures mutations are properly
 // validated by all relevant tests. Ungrouped packages are tested individually, which may miss
 // mutations if their tests reside in dependent packages.
+//
+// A group therefore drives two distinct cargo-mutants selections: `--package` chooses
+// which code is mutated, and `--test-package` chooses which packages' tests judge each
+// mutant. Passing only the former would leave a mutant judged by its own package's tests
+// alone, which is exactly the gap grouping exists to close.
 const TEST_GROUPS: &[&[&str]] = &[
     &["bytesbuf"],
     &["data_privacy", "data_privacy_core", "data_privacy_macros", "data_privacy_macros_impl"],
+    &["fetch_winhttp", "fetch_winhttp_impl"],
     &["fundle", "fundle_macros", "fundle_macros_impl"],
     &["observed", "observed_macros", "observed_macros_impl"],
     &["ohno", "ohno_macros", "ohno_macros_impl"],
@@ -116,6 +150,11 @@ fn main() {
     let mut failed_groups = Vec::new();
 
     for group in &test_groups {
+        if let Some(skipped) = platform_gated_packages(&group[..]) {
+            println!("Skipping [{}]: not built on this platform ({skipped})", group.join(", "));
+            continue;
+        }
+
         if let Err(e) = mutate_group(&group[..], &args) {
             eprintln!("❌ mutation testing failed for [{}]: {}", group.join(" "), e);
             failed_groups.push((group.clone(), e));
@@ -154,6 +193,14 @@ fn mutate_group(group: &[String], args: &Args) -> Result<(), AppError> {
         "-vV".into(),
     ];
 
+    // Layered on top of the static `exclude_globs` in `.cargo/mutants.toml`;
+    // cargo-mutants merges the two rather than replacing the config.
+    let excluded_sources = if cfg!(windows) { LINUX_ONLY_SOURCES } else { WINDOWS_ONLY_SOURCES };
+    for glob in excluded_sources {
+        cargo_args.push("--exclude".into());
+        cargo_args.push((*glob).into());
+    }
+
     if args.in_place {
         cargo_args.push("--in-place".into());
     } else {
@@ -166,8 +213,28 @@ fn mutate_group(group: &[String], args: &Args) -> Result<(), AppError> {
         cargo_args.push(diff.display().to_string());
     }
 
-    let package_args: Vec<_> = group.iter().map(|p| format!("--package={p}")).collect();
-    cargo_args.extend(package_args);
+    for package in group {
+        cargo_args.push(format!("--package={package}"));
+        cargo_args.push(format!("--test-package={package}"));
+    }
 
     automation::run_cargo(cargo_args.into_iter())
+}
+
+/// Returns the packages in `group` that this platform does not build, if any.
+///
+/// A group is only skippable as a whole, so this reports `None` unless every
+/// package in it is gated away.
+fn platform_gated_packages(group: &[String]) -> Option<String> {
+    if cfg!(windows) {
+        return None;
+    }
+
+    let gated: Vec<_> = group
+        .iter()
+        .filter(|p| WINDOWS_ONLY_PACKAGES.contains(&p.as_str()))
+        .cloned()
+        .collect();
+
+    (gated.len() == group.len()).then(|| gated.join(", "))
 }

@@ -15,20 +15,56 @@
 
 WinHTTP-based HTTP transport for the [`fetch`][__link0] HTTP client.
 
-This crate is a Windows-only custom transport that services `fetch`
-[`HttpClient`][__link1] requests through the operating system’s
-[WinHTTP][__link2]
-API, running in fully asynchronous mode.
+This Windows-only crate adds a WinHTTP transport constructor to
+[`HttpClient`][__link1]. Callers supply the clock, memory pool, and telemetry sink
+required by the transport through [`WinHttpDeps`][__link2].
 
-## Status
+WinHTTP-specific TLS configuration is available through
+[`WinHttpTlsConfig`][__link3]. Independently built clients do
+not share connections.
 
-This crate is a placeholder. Only the design exists so far; there is no
-implementation yet. See
-[`docs/design.md`][__link3]
-for the architecture, behavior, and design tenets, and
-[`docs/implementation.md`][__link4]
-for the implementation strategy (threading, cancellation and FFI ownership,
-pooling, body streaming) and the test plan.
+### Platform requirements
+
+Windows 11 (build 22000) or later, or Windows Server 2025 (build 26100) or
+later. Windows Server 2022 and earlier are not supported.
+
+### Behavior and limitations
+
+WinHTTP owns connection management and much of the HTTP protocol, so some
+generic `fetch` configuration cannot be represented and some behavior is
+fixed by the operating system.
+
+* Generic TLS configuration, finite connection limits, and bounded
+  connection lifetimes are accepted and ignored rather than rejected, so a
+  client that sets them still builds.
+* Requests always connect directly to the origin. Proxies are not supported,
+  Windows proxy configuration is not consulted, and there is no setting that
+  changes this.
+* Redirects are not followed, no cookie store is kept, and authentication
+  challenges are not answered. Those responses are returned to the caller to
+  act on, and none of this can be re-enabled.
+* Request framing is derived from the body, so a caller-supplied
+  `Transfer-Encoding` is rejected before anything is sent. Code that
+  forwards an inbound request’s headers verbatim is the common case that
+  trips on this.
+* Gzip and deflate responses are decoded transparently, with the headers
+  describing the encoded form removed and no opt-out. Brotli and zstd are
+  not decoded and arrive still encoded.
+* A request body that yields trailers fails the request, and does so after
+  the headers and preceding body data have already been sent. The request
+  body is sent in full before response reception begins.
+
+Failures carry a stable error label and retry guidance. The label is
+contractual; the retry guidance attached to any particular failure is not,
+and may change as the transport’s classification is refined.
+
+The full contract - error classification, timeout semantics, and the
+fidelity of every generic option - is documented in
+[`docs/design.md`][__link4].
+
+Requests are serviced through the operating system’s
+[WinHTTP][__link5]
+API.
 
 
 <hr/>
@@ -38,6 +74,7 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
 
  [__link0]: https://docs.rs/fetch
  [__link1]: https://docs.rs/fetch
- [__link2]: https://learn.microsoft.com/en-us/windows/win32/winhttp/using-winhttp
- [__link3]: https://github.com/microsoft/oxidizer/blob/main/crates/fetch_winhttp/docs/design.md
- [__link4]: https://github.com/microsoft/oxidizer/blob/main/crates/fetch_winhttp/docs/implementation.md
+ [__link2]: https://docs.rs/fetch_winhttp/latest/fetch_winhttp/struct.WinHttpDeps.html
+ [__link3]: https://docs.rs/fetch_winhttp/latest/fetch_winhttp/struct.WinHttpTlsConfig.html
+ [__link4]: https://github.com/microsoft/oxidizer/blob/main/crates/fetch_winhttp/docs/design.md
+ [__link5]: https://learn.microsoft.com/en-us/windows/win32/winhttp/using-winhttp

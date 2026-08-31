@@ -1,0 +1,117 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "fetch_winhttp_impl"
+description = "Implementation of the fetch_winhttp WinHTTP transport (Windows only)."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "http", "client", "winhttp", "windows"]
+categories = ["network-programming", "web-programming::http-client"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch_winhttp_impl"
+
+[package.metadata.cargo_check_external_types]
+# Implementation crate. Its public surface exists only so that the `fetch_winhttp`
+# facade can re-export the supported parts of it, and is not itself an API anyone
+# may depend on, so there is nothing here for the external-type check to protect.
+# The facade constrains the surface that actually ships.
+allowed_external_types = ["*"]
+
+[package.metadata.docs.rs]
+default-target = "x86_64-pc-windows-msvc"
+
+[features]
+# Localhost server fixtures, reached as `fetch_winhttp_impl::testing`.
+#
+# `fetch_winhttp` turns this on in its dev-dependency on this crate, which is
+# what lets the integration tests, benchmarks and examples that drive these
+# fixtures live beside the public API they exercise without the fixtures
+# themselves depending on that facade. Nothing a consumer builds ever enables it.
+# See `docs/private-test-utils.md`.
+private-test-util = [
+    "dep:bytes",
+    "dep:futures",
+    "dep:h3",
+    "dep:h3-quinn",
+    "dep:http-body-util",
+    "dep:hyper",
+    "dep:hyper-util",
+    "dep:quinn",
+    "dep:rcgen",
+    "dep:rustls",
+    "dep:rustls-pki-types",
+    "dep:tokio",
+    "dep:tokio-rustls",
+    "tick/test-util",
+]
+
+[target.'cfg(windows)'.dependencies]
+bytes = { workspace = true, optional = true }
+bytesbuf = { workspace = true }
+bytesbuf_io = { workspace = true }
+events_once = { workspace = true }
+fetch = { workspace = true }
+futures = { workspace = true, features = ["std"], optional = true }
+h3 = { workspace = true, optional = true }
+h3-quinn = { workspace = true, optional = true }
+http = { workspace = true }
+http-body = { workspace = true }
+http-body-util = { workspace = true, optional = true }
+http_extensions = { workspace = true }
+hyper = { workspace = true, features = ["http1", "http2", "server"], optional = true }
+hyper-util = { workspace = true, features = [
+    "http1",
+    "http2",
+    "server-auto",
+    "tokio",
+], optional = true }
+layered = { workspace = true }
+observed = { workspace = true }
+ohno = { workspace = true }
+plurality = { workspace = true }
+quinn = { workspace = true, features = [
+    "runtime-tokio",
+    "rustls-aws-lc-rs",
+], optional = true }
+rcgen = { workspace = true, features = ["aws_lc_rs"], optional = true }
+recoverable = { workspace = true }
+rustls = { workspace = true, features = [
+    "aws-lc-rs",
+    "std",
+    "tls12",
+], optional = true }
+rustls-pki-types = { workspace = true, features = ["std"], optional = true }
+thread_aware = { workspace = true, features = ["derive"] }
+tick = { workspace = true }
+tokio = { workspace = true, features = [
+    "macros",
+    "net",
+    "rt-multi-thread",
+    "sync",
+], optional = true }
+tokio-rustls = { workspace = true, features = ["aws_lc_rs", "tls12"], optional = true }
+widestring = { workspace = true, features = ["alloc"] }
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Networking_WinHttp",
+    "Win32_Networking_WinSock",
+] }
+
+[target.'cfg(windows)'.dev-dependencies]
+futures = { workspace = true, features = ["std"] }
+mockall = { workspace = true }
+mutants = { workspace = true }
+observed_testing = { path = "../observed_testing" }
+static_assertions = { workspace = true }
+testing_aids = { path = "../testing_aids" }
+tick = { path = "../tick", features = ["test-util"] }
+
+[lints]
+workspace = true

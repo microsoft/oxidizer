@@ -258,6 +258,7 @@ cfg
 chainable
 chrono
 chunked
+chunking
 chunkless
 clippt
 clippy
@@ -844,12 +845,18 @@ reportable
 substrings
 unrepresentable
 unterminated
+plaintext
+loopback
+UDP
+IPv4
+IPv6
 underflow
 underflowing
 initializations
 poisonable
 affinitized
 unmaterialized
+RST
 Spectre
 subdirectory
 hardcoding

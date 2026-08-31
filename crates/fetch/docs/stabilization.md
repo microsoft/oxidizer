@@ -27,8 +27,8 @@ The items below should be resolved (or consciously accepted) before stabilizatio
 There is no first-class way to plug in a downstream transport. `HttpClient` and its
 builder live in `fetch`, and the orphan rule forbids a downstream crate from adding
 inherent constructors, so `fetch_winhttp` ships an extension trait
-(`HttpClientWinHttpExt`) the caller must import to get `HttpClient::builder_winhttp`/
-`new_winhttp`. That works, but it is asymmetric: transports bundled in `fetch` get
+(`HttpClientWinHttpExt`) the caller must import to get `HttpClient::builder_winhttp`.
+That works, but it is asymmetric: transports bundled in `fetch` get
 first-class inherent methods (`HttpClient::builder_tokio`/`new_tokio`), while a
 downstream transport is reachable only through an imported trait. The extension trait is a
 workaround, not a fix - it papers over the call syntax but leaves the asymmetry, and the
@@ -133,8 +133,9 @@ timeout but has no concept for resolve or send timeouts. That absence is *not* t
 problem: different transports support different sets of fine-grained timers, measure
 them against different phase boundaries (what each timer includes or excludes), or
 cannot express some of them at all. Per the scope split above, *network-phase* timers
-(resolve, connect, send, receive) are transport-specific, which is why this transport
-exposes them as `WinHttpOptions` knobs (see fetch_winhttp design.md §6.1). The mismatch
+(resolve, connect, send, receive) are transport-specific: which of them a transport can
+express, and against which phase boundaries, is its own concern (see fetch_winhttp
+design.md §6.1). The mismatch
 today is that `fetch` reaches down to model a connect timeout while leaving the rest to
 transports - it should leave all network-phase timers to the transport and keep only
 pipeline-level deadlines.
@@ -150,10 +151,11 @@ last-resort mechanism for any deadline it cannot express natively is drop safety
 ## 5. Transport construction ergonomics
 
 Constructing a client from a transport is clumsy. Because a transport's configuration
-arrives as a single deps struct, the caller writes a struct literal -
-`HttpClient::builder_winhttp(WinHttpDeps { tls: ..., options: ..., sink: ... })` - rather
-than a fluent chain. A more natural surface would configure the transport through closures
-on the builder, e.g.
+arrives as a single deps value, the caller assembles that value separately and passes the
+result in -
+`HttpClient::builder_winhttp(WinHttpDeps::builder(clock, pool, sink).tls(cfg).build())` -
+rather than configuring the transport as part of one fluent chain. A more natural surface
+would configure the transport through closures on the builder, e.g.
 `HttpClient::builder_winhttp().tls(|tls| tls.accept_invalid_certs()).timeouts(|t| t.read(3000)).custom_pipeline(..).build()`,
 or a compositional form where the transport is itself a builder plugged into the client:
 `HttpClient::builder().transport(WinHttpTransport::builder().tls(|tls| ..).build()).build()`.
