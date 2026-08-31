@@ -43,3 +43,7 @@ bacon.toml
 # Agent files
 .claude
 CLAUDE.md
+
+# local CI log dumps
+mutants-job.log
+

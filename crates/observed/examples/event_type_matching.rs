@@ -43,7 +43,7 @@ fn main() {
                 engine: passthrough_engine(),
             }),
             Arc::new(NameRoutingProcessor::new(
-                // Accept only events whose name starts with "http."
+                // Accept only these exact event names.
                 &["http.request", "http.error"],
                 Arc::clone(&name_log),
             )),

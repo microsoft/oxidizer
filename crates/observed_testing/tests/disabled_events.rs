@@ -5,7 +5,8 @@
 //!
 //! Covers DESIGN.md requirements:
 //! - Events can be disabled by default (`#[event("...", disabled)]`)
-//! - Disabled events are not emitted unless a processor explicitly opts in
+//! - Disabled is processor-controlled metadata; the sink still delivers to
+//!   processors whose `is_interested` returns `true`
 
 use std::sync::Arc;
 

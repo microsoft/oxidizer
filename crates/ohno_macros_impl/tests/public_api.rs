@@ -754,8 +754,23 @@ fn the_enrich_attribute_wraps_the_body_and_enriches_the_error() {
             "the signature survives untouched",
             enriched(
                 TokenStream::new(),
+                // Deliberately loaded with the rarer signature components. The wrapper re-emits
+                // the whole `syn::Signature` and only swaps the block, so an omission anywhere in
+                // it — a dropped `unsafe`, ABI, receiver or doc attribute — is a silent
+                // regression unless the snapshot carries one of each.
+                //
+                // The receiver is one of those components rather than an oversight: an attribute
+                // on a method inside an `impl` block reaches the macro as an `Item::Fn` whose
+                // signature carries it, which is how `crates/ohno/tests/enrich_err.rs` applies
+                // the attribute to `fn do_something(&mut self, ..)`. Nothing else about the case
+                // needs to be a compilable free item, since the assertion is over tokens.
                 quote! {
-                    pub(crate) fn load<A: Clone>(path: &str, count: usize) -> Result<A, MyError>
+                    /// Documented.
+                    pub(crate) unsafe extern "C" fn load<A: Clone>(
+                        &mut self,
+                        path: &str,
+                        count: usize,
+                    ) -> Result<A, MyError>
                     where
                         A: Send,
                     {

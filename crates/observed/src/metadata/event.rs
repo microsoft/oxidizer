@@ -8,10 +8,11 @@ use std::any::TypeId;
 use crate::metadata::log::LogDescription;
 use crate::metadata::metric::MetricDescription;
 
-/// Static description of a telemetry event type.
+/// Description of a telemetry event type.
 ///
 /// Available as a `const` on every type that implements [`crate::Event`],
-/// providing compile-time metadata about the event's shape.
+/// providing compile-time metadata about the event's shape. A dynamic adaptor
+/// constructs the same description at runtime and may omit Rust type identity.
 ///
 /// The event name is shared across all signals; per-signal metadata lives
 /// in `log` / `metric`.
@@ -84,8 +85,9 @@ impl EventDescription {
 
     /// Returns `true` if this event is disabled by default.
     ///
-    /// Disabled events are neither logs nor metrics unless a processor
-    /// explicitly opts in via `is_interested` and/or filters in `process()`.
+    /// The sink does not enforce this flag. Processors interpret it, normally
+    /// from [`EventProcessor::is_interested`](crate::processing::EventProcessor::is_interested);
+    /// `process` can only discard an event after accepting delivery.
     #[must_use]
     #[inline]
     pub const fn is_disabled(&self) -> bool {

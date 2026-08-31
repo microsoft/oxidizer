@@ -5,8 +5,8 @@
 //!
 //! Events carry compile-time signal metadata (`is_log`, `contains_metrics`, `is_disabled`)
 //! and metric instrument descriptions in their `EventDescription`.
-//! Each `EventProcessor` inspects these in `process()` to decide whether
-//! to accept the event.
+//! Each `EventProcessor` inspects these in `is_interested()` to decide whether
+//! to accept the event; `process()` handles an already accepted delivery.
 //!
 //! This example shows:
 //!
@@ -66,7 +66,7 @@ fn main() {
         }
     );
 
-    // HttpError: LOG + METRIC -> Log processor + Metric processor (UpDownCounter)
+    // HttpError: LOG + METRIC -> Log processor + Metric processor (Counter)
     emit!(sink, HttpError { route: 1 });
 
     // MemoryUsage: METRIC only (exclude_from_logs) -> Metric processor only

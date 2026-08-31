@@ -39,7 +39,7 @@ impl std::fmt::Display for InstrumentKind {
 pub struct MetricDescription {
     /// The `OTel` instrument name (e.g. `"http.server.request.duration"`).
     instrument_name: &'static str,
-    /// The instrument kind (histogram, gauge, or counter).
+    /// The instrument kind.
     kind: InstrumentKind,
     /// Human-readable description of what the instrument measures. Empty if unset.
     description: &'static str,

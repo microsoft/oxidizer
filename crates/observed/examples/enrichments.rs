@@ -123,7 +123,7 @@ impl observed::processing::EventProcessor for SimpleLogProcessor {
 fn handle_request(sink: &Sink) {
     // Batch enrichment - adds multiple attributes to all nested events.
     (|| {
-        // Inner enrichment - stacks on top of the span.
+        // Inner enrichment - stacks on top of the outer enrichment scope.
         (|| {
             emit!(sink, DbQuery { rows_returned: 42 });
             emit!(sink, CacheHit { key_count: 3 });

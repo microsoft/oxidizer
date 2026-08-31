@@ -3,9 +3,10 @@
 
 //! Database layer with its own telemetry events and metrics.
 //!
-//! All events in this module are emitted via `emit!()` and delivered to the DB
-//! sink. Global enrichments (like `service.name`) are excluded from the lib
-//! processor - only per-sink enrichments (like `db.pool`) are attached.
+//! All events in this module are emitted through the DB composite, so they fan
+//! out to both the application and DB sink leaves. The isolated DB leaf ignores
+//! global enrichments (like `service.name`) and receives only targeted per-sink
+//! enrichments (like `db.pool`).
 
 use data_privacy::classified;
 use observed::enrichment::EnrichFnExt;
@@ -102,7 +103,8 @@ pub(crate) fn query_users(sink: &Sink, table_id: i64) -> i64 {
         let rows_returned = 42;
         let query_ms = 4.7;
 
-        // Emit the query event to the DB sink only.
+        // Emit the query event through the DB composite; targeted enrichments
+        // stay visible only to the isolated DB leaf.
         emit!(
             sink,
             DbQuery {

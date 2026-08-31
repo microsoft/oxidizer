@@ -5,7 +5,8 @@
 //!
 //! Events flow through a [`Sink`] that dispatches to one or more
 //! [`EventProcessor`]s. Each processor has its own redaction engine and
-//! receives pre-redacted events.
+//! applies it lazily while extracting only the field and enrichment values it
+//! exports.
 //!
 //! Field routing (which fields go to logs vs metric dimensions) is declared
 //! inside `#[event(...)]` attributes. Fields are log attributes by default;

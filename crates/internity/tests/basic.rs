@@ -590,6 +590,10 @@ fn foreign_sym_resolves_to_none_without_panicking() {
 /// missing — so asserting the prefix property on every mid-flight snapshot
 /// guards the cross-shard consistency of `build_reader`.
 #[cfg(not(all(miri, windows)))]
+#[cfg_attr(
+    miri_strict_provenance,
+    ignore = "parking_lot_core uses integer-to-pointer casts on Unix, which strict-provenance Miri rejects"
+)]
 #[test]
 fn freeze_races_writer_and_stays_prefix_consistent() {
     use std::collections::BTreeSet;

@@ -70,9 +70,10 @@ impl<T: Future> Transferred<T> {
     /// receiver's statically-known type is exactly `Transferred<_>` and its
     /// inner type is not itself a `Transferred<_>`.
     ///
-    /// In every other shape the blanket trait impl is selected instead, or the
-    /// re-ordering does not reach deep enough, and the entries are still
-    /// dropped on every poll:
+    /// In other wrapper shapes the blanket trait impl may be selected instead,
+    /// or the re-ordering may not reach deep enough. Entries are unsupported
+    /// there and may be lost when the enrichment and transfer operate on the
+    /// same captured sink slot:
     ///
     /// - explicit trait dispatch, `EnrichFutureExt::enrich(fut.attach(t), &sink, e)`;
     /// - generic code whose receiver is only known as `F: EnrichFutureExt`,
@@ -113,8 +114,9 @@ impl<T: Future> Transferred<T> {
     ///
     /// The escape hatch differs, though.
     /// [`Transfer::with_enrichment`](crate::context::Transfer::with_enrichment)
-    /// is **not** a substitute here: it produces global entries, so a targeted
-    /// entry routed through it would be widened to every non-isolated sink.
+    /// is **not** a substitute here: it produces untargeted entries, so a
+    /// targeted entry routed through it would be widened to every non-isolated
+    /// sink in the captured transfer.
     /// Use
     /// [`Transfer::with_enrichment_for`](crate::context::Transfer::with_enrichment_for),
     /// which preserves the target and is likewise order-independent, or enrich
