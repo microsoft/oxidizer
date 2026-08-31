@@ -4,7 +4,7 @@
 [package]
 name = "observed_utils"
 description = "Helper types and utilities shared by observed telemetry framework crates."
-version = "0.1.0"
+version = "0.2.0"
 readme = "README.md"
 keywords = ["observed", "telemetry", "helpers", "logging"]
 categories = ["development-tools::debugging"]

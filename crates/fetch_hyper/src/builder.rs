@@ -247,9 +247,24 @@ fn apply_pool_options(hyper_builder: &mut legacy::Builder, pool: &ConnectionPool
 
 #[cfg_attr(test, mutants::skip)] // cannot be verified with hyper APIs
 fn apply_http2_options(hyper_builder: &mut legacy::Builder, http_2: &Http2Options) {
+    // Order matters: hyper's `http2_adaptive_window(true)` resets the stream window to the
+    // spec default, so the explicit size has to be applied first for adaptive tuning to win
+    // when both are configured. That precedence is documented on `initial_stream_window_size`.
     hyper_builder
         .http2_initial_max_send_streams(http_2.initial_max_send_streams)
+        .http2_initial_stream_window_size(initial_stream_window_size(http_2))
         .http2_adaptive_window(http_2.adaptive_window);
+}
+
+/// RFC 9113 limits `SETTINGS_INITIAL_WINDOW_SIZE` to `2^31 - 1`.
+///
+/// Exceeding this limit is a protocol error that would surface as a connection failure far
+/// from the configuration site, so the transport clamps requests at this boundary.
+const MAX_HTTP2_STREAM_WINDOW_SIZE: u32 = i32::MAX as u32;
+
+/// Applies the HTTP/2 protocol limit before forwarding the stream window to hyper.
+fn initial_stream_window_size(http_2: &Http2Options) -> Option<u32> {
+    http_2.initial_stream_window_size.map(|size| size.min(MAX_HTTP2_STREAM_WINDOW_SIZE))
 }
 
 #[cfg_attr(test, mutants::skip)] // cannot be verified with hyper APIs
@@ -328,8 +343,28 @@ mod tests {
         options.supported_http_versions = vec![Version::HTTP_2];
         options.connect_timeout = Duration::from_secs(7);
         options.connection_pool.connection_lifetime = ConnectionLifetime::fixed(Duration::from_mins(1));
+        options.http_2 = fetch_options::Http2Options::default().initial_stream_window_size(1024 * 1024);
         let configured = make_builder_with(options).pool_index(PoolIndex::new(42));
         insta::assert_debug_snapshot!("configured", configured);
+    }
+
+    #[test]
+    fn http2_stream_window_is_clamped_at_the_transport_boundary() {
+        let mut http_2 = fetch_options::Http2Options::default();
+        assert_eq!(initial_stream_window_size(&http_2), None);
+
+        http_2.initial_stream_window_size = Some(MAX_HTTP2_STREAM_WINDOW_SIZE - 1);
+        assert_eq!(initial_stream_window_size(&http_2), Some(MAX_HTTP2_STREAM_WINDOW_SIZE - 1));
+
+        http_2.initial_stream_window_size = Some(u32::MAX);
+
+        assert_eq!(initial_stream_window_size(&http_2), Some(MAX_HTTP2_STREAM_WINDOW_SIZE));
+
+        http_2.initial_stream_window_size = Some(MAX_HTTP2_STREAM_WINDOW_SIZE);
+        assert_eq!(initial_stream_window_size(&http_2), Some(MAX_HTTP2_STREAM_WINDOW_SIZE));
+
+        http_2.initial_stream_window_size = Some(MAX_HTTP2_STREAM_WINDOW_SIZE + 1);
+        assert_eq!(initial_stream_window_size(&http_2), Some(MAX_HTTP2_STREAM_WINDOW_SIZE));
     }
 
     #[test]

@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.0] - 2026-08-27
+
+- ⚠️ Breaking
+
+  - Now requires `0.8.0` of `anyspawn`
+  - Now requires `0.6.0` of `tick`
+
+- 🐛 Bug Fixes
+
+  - declare optional dependencies as dev-dependencies ([#658](https://github.com/microsoft/oxidizer/pull/658))
+
 ## [0.2.0] - 2026-08-09
 
 - 🔧 Maintenance

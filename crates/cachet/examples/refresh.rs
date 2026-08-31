@@ -4,6 +4,12 @@
 //! Time-to-refresh: return stale data immediately, refresh in background.
 //! Keeps cache warm and avoids latency spikes from cache misses.
 
+#![allow(unknown_lints, reason = "the pinned and latest Clippy versions expose different async lints")]
+#![expect(
+    clippy::unused_async_trait_impl,
+    reason = "examples are written for a human reader, and a plain `async fn` shows the shape of a tier impl better than `impl Future` plus `std::future::ready`"
+)]
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;

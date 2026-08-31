@@ -1,13 +1,18 @@
 # Requirements
 
 What `ohno_macros` has to deliver. Written before the rewrite, from the previous
-implementation, the crate docs, and the tests in `crates/ohno`.
+implementation, the crate docs, and the tests in `crates/ohno`. It covers both
+packages: `ohno_macros`, the proc-macro crate the compiler sees, and
+`ohno_macros_impl`, the ordinary library holding the logic behind it. See the
+"Two crates" section of `design.md` for why the split exists.
 
 The authority for behavior is `crates/ohno/tests/**` (integration tests) and
-`crates/ohno/tests/ui/**` (compile-fail snapshots): they are the only tests that
-compile what the macros produce. The crate's own unit tests and expansion
-snapshots pin the shape of the tokens each phase emits, which is a regression
-net rather than a statement of what the crate owes.
+`crates/ohno/tests/ui/**` (compile-fail snapshots): they are what states, and
+pins, what the macros owe. The crate's own rustdoc examples compile expansions
+too, but they illustrate the surface rather than constrain it. The expansion
+snapshots in `crates/ohno_macros_impl/tests/public_api.rs` pin the shape of the
+tokens the three public expansion functions emit, which is a regression net
+rather than a statement of what the crate owes.
 
 ## Public surface
 
@@ -203,11 +208,3 @@ than one per compile cycle.
 
 Wherever a diagnostic covers more than one token it is spanned with
 `syn::Error::new_spanned`.
-
-## R5 — Quality gates
-
-The crate has to keep passing what the workspace already runs against it:
-`cargo check`, `clippy` at workspace lint level, `cargo doc`, `cargo fmt
---check`, `cargo machete`, license boilerplate, and `cargo mutants` on
-`validate.rs` and `display/`, where the rules live. The `ohno` crate's doc tests
-and examples exercise the macros and have to keep compiling.

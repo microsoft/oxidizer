@@ -4,7 +4,7 @@
 [package]
 name = "thread_aware_macros_impl"
 description = "Macros for the thread_aware crate."
-version = "0.7.4"
+version = "0.11.0"
 readme = "README.md"
 keywords = ["oxidizer", "thread", "aware", "macro", "derive"]
 categories = ["data-structures"]
@@ -36,7 +36,7 @@ syn = { workspace = true, features = ["full", "derive", "printing", "parsing", "
 
 [dev-dependencies]
 insta = { workspace = true }
-prettyplease = { workspace = true }
+testing_aids = { workspace = true }
 
 # >>> anvil-managed: anvil-lints
 [lints]

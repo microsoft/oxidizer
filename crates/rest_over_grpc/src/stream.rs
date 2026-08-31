@@ -388,8 +388,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use futures_util::StreamExt as _;
-
     use super::*;
     use crate::handling::Code;
 

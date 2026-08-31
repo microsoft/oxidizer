@@ -29,7 +29,7 @@ impl Placeholder<'_> {
     ///
     /// The spec is carried through as written and never inspected, so one that refers to another
     /// argument is reported by `rustc` against the derive rather than by the macro against the
-    /// template. See the limits section of `docs/design.md`.
+    /// template. See the limits section of `crates/ohno_macros/docs/design.md`.
     #[must_use]
     pub(crate) fn lowered(&self) -> String {
         self.spec.map_or_else(|| "{}".to_owned(), |spec| format!("{{:{spec}}}"))

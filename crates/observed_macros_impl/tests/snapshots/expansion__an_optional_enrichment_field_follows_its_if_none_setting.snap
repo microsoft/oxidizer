@@ -1,0 +1,62 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "expand_enrichment(r#\"\n            struct RequestContext {\n                tenant: ClassifiedString,\n                default_placeholder: Option<ClassifiedString>,\n                #[if_none(drop)]\n                dropped: Option<ClassifiedString>,\n                #[if_none(\"missing\")]\n                custom_placeholder: Option<ClassifiedString>,\n            }\n            \"#,)"
+---
+const _: () = {
+    impl ::observed::enrichment::Enrichment for RequestContext {
+        fn into_entries(
+            self,
+        ) -> ::std::vec::Vec<::observed::__private::EnrichmentEntry> {
+            let mut entries = ::std::vec::Vec::with_capacity(4usize);
+            entries
+                .push(
+                    ::observed::__private::EnrichmentEntry::new("tenant", self.tenant),
+                );
+            match self.default_placeholder {
+                ::core::option::Option::Some(__val) => {
+                    entries
+                        .push(
+                            ::observed::__private::EnrichmentEntry::new(
+                                "default_placeholder",
+                                __val,
+                            ),
+                        )
+                }
+                ::core::option::Option::None => {
+                    entries
+                        .push(
+                            ::observed::__private::EnrichmentEntry::unclassified(
+                                "default_placeholder",
+                                "n/a",
+                            ),
+                        )
+                }
+            }
+            if let ::core::option::Option::Some(__val) = self.dropped {
+                entries
+                    .push(::observed::__private::EnrichmentEntry::new("dropped", __val));
+            }
+            match self.custom_placeholder {
+                ::core::option::Option::Some(__val) => {
+                    entries
+                        .push(
+                            ::observed::__private::EnrichmentEntry::new(
+                                "custom_placeholder",
+                                __val,
+                            ),
+                        )
+                }
+                ::core::option::Option::None => {
+                    entries
+                        .push(
+                            ::observed::__private::EnrichmentEntry::unclassified(
+                                "custom_placeholder",
+                                "missing",
+                            ),
+                        )
+                }
+            }
+            entries
+        }
+    }
+};

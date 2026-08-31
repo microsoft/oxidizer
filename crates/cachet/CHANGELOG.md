@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.13.0] - 2026-08-27
+
+- ⚠️ Breaking
+
+  - Now requires `0.8.0` of `anyspawn`
+  - Now requires `0.9.0` of `bytesbuf`
+  - Now requires `0.7.0` of `cachet_memory`
+  - Now requires `0.5.0` of `cachet_service`
+  - Now requires `0.5.0` of `cachet_tier`
+  - Now requires `0.6.0` of `tick`
+  - Now requires `0.5.0` of `uniflight`
+
 ## [0.11.0] - 2026-08-09
 
 - 🔧 Maintenance

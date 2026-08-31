@@ -2,22 +2,46 @@
 source: crates/thread_aware_macros_impl/tests/derive.rs
 expression: expand(input)
 ---
-impl ::thread_aware::ThreadAware for E {
+impl ::thread_aware::ThreadAware for E
+where
+    E: ::core::marker::Send,
+{
     fn relocate(
         &mut self,
-        source: Option<::thread_aware::affinity::Affinity>,
-        destination: ::thread_aware::affinity::Affinity,
+        __thread_aware_source: ::core::option::Option<
+            ::thread_aware::affinity::Affinity,
+        >,
+        __thread_aware_destination: ::thread_aware::affinity::Affinity,
     ) {
-        match self {
-            Self::A(_v0) => {
-                ::thread_aware::ThreadAware::relocate(_v0, source, destination);
+        match *self {
+            Self::A(ref mut __thread_aware_field_0) => {
+                ::thread_aware::ThreadAware::relocate(
+                    __thread_aware_field_0,
+                    __thread_aware_source,
+                    __thread_aware_destination,
+                );
             }
-            Self::B(_v0, _v1) => {
-                ::thread_aware::ThreadAware::relocate(_v0, source, destination);
+            Self::B(ref mut __thread_aware_field_0, _) => {
+                ::thread_aware::ThreadAware::relocate(
+                    __thread_aware_field_0,
+                    __thread_aware_source,
+                    __thread_aware_destination,
+                );
             }
-            Self::C { x, y } => {
-                ::thread_aware::ThreadAware::relocate(x, source, destination);
-                ::thread_aware::ThreadAware::relocate(y, source, destination);
+            Self::C {
+                x: ref mut __thread_aware_field_0,
+                y: ref mut __thread_aware_field_1,
+            } => {
+                ::thread_aware::ThreadAware::relocate(
+                    __thread_aware_field_0,
+                    __thread_aware_source,
+                    __thread_aware_destination,
+                );
+                ::thread_aware::ThreadAware::relocate(
+                    __thread_aware_field_1,
+                    __thread_aware_source,
+                    __thread_aware_destination,
+                );
             }
         }
     }

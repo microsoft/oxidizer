@@ -4,6 +4,12 @@
 //! Stampede protection prevents multiple concurrent requests for the same key
 //! from all hitting the backend. Only one request fetches; others wait and share the result.
 
+#![allow(unknown_lints, reason = "the pinned and latest Clippy versions expose different async lints")]
+#![expect(
+    clippy::unused_async_trait_impl,
+    reason = "examples are written for a human reader, and a plain `async fn` shows the shape of a tier impl better than `impl Future` plus `std::future::ready`"
+)]
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 

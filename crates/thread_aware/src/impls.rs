@@ -7,6 +7,7 @@ use alloc::boxed::Box;
 use alloc::string::String;
 #[cfg(not(test))]
 use alloc::vec::Vec;
+use core::marker::PhantomData;
 use core::time::Duration;
 #[cfg(feature = "std")]
 use std::collections::HashMap;
@@ -140,6 +141,18 @@ where
     fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
         (**self).relocate(source, destination);
     }
+}
+
+// `PhantomData` holds no value, so relocation is a no-op. The bound is `Send`
+// rather than `ThreadAware` because `PhantomData<T>` is `Send` exactly when
+// `T` is, and `T` here is never relocated. Requiring `ThreadAware` would reject
+// legitimate marker types such as `PhantomData<std::sync::Arc<i32>>`, which is
+// `Send` but deliberately not `ThreadAware`.
+impl<T> ThreadAware for PhantomData<T>
+where
+    T: ?Sized + Send,
+{
+    fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
 }
 
 #[cfg(feature = "std")]
@@ -349,6 +362,19 @@ mod tests {
     // to correctly avoid contention rather than things just working out of the box with likely incorrect
     // behavior (shared synchronization primitives etc).
     static_assertions::assert_not_impl_any!(std::sync::Arc<i32>: ThreadAware);
+
+    // The two boundaries of the `PhantomData` impl.
+    //
+    // The bound is `Send` and not `ThreadAware` so that a marker naming a type this crate
+    // deliberately refuses can still relocate: the marker holds no value, so there is nothing
+    // to contend over.
+    static_assertions::assert_impl_all!(core::marker::PhantomData<std::sync::Arc<i32>>: ThreadAware);
+
+    // And the limit of that: a raw pointer is `!Send` whatever it points at, so the marker has
+    // no impl. A field of this type makes its owner `!Send` and therefore not `ThreadAware`
+    // either; write the payload as `PhantomData<fn(*const ())>` to keep the variance without
+    // the `!Send`.
+    static_assertions::assert_not_impl_any!(core::marker::PhantomData<*const ()>: ThreadAware);
 
     /// A type whose `relocate` visibly mutates state, so mutation tests catch
     /// no-op replacements.

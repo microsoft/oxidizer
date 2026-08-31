@@ -1,0 +1,9 @@
+---
+source: crates/fetch_options/src/socket.rs
+expression: "SocketOptions::default()"
+---
+SocketOptions {
+    no_delay: None,
+    receive_buffer_size: None,
+    send_buffer_size: None,
+}

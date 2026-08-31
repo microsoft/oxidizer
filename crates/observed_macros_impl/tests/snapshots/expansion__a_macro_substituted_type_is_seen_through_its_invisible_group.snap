@@ -1,0 +1,83 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: render_expansion(&expanded)
+---
+struct FromMacro<'a> {
+    hits: u64,
+    maybe: Option<ClassifiedString>,
+    label: &'a str,
+}
+const _: () = {
+    impl<'a> ::observed::Event for FromMacro<'a> {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "macro.built",
+            ::core::option::Option::Some(
+                ::core::any::TypeId::of::<FromMacro<'static>>(),
+            ),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "macro.built",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            true,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "hits",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("hits"),
+                    ),
+                    ::core::option::Option::Some(
+                        ::observed::metadata::MetricFieldEntry::instrument(
+                            "hits",
+                            ::observed::metadata::MetricDescription::new(
+                                "macro.built",
+                                ::observed::metadata::InstrumentKind::Counter,
+                                "",
+                                "",
+                            ),
+                        ),
+                    ),
+                );
+                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.hits.clone()))?;
+            }
+            if let ::core::option::Option::Some(__val) = self.maybe.as_ref() {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "maybe",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("maybe"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|_engine| ::observed::Value::from_redacted(__val, _engine),
+                )?;
+            }
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "label",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("label"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|_| ::observed::Value::from(
+                        ::std::sync::Arc::<str>::from(self.label),
+                    ),
+                )?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};

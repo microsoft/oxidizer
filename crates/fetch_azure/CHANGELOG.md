@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.6.1] - 2026-08-28
+
+- 🔧 Maintenance
+
+  - Now requires `0.16.1` of `fetch`
+
+- ✔️ Tasks
+
+  - cascade thread_aware 0.10.0 through published dependents ([#694](https://github.com/microsoft/oxidizer/pull/694))
+
+## [0.6.0] - 2026-08-27
+
+- ⚠️ Breaking
+
+  - Now requires `0.9.0` of `bytesbuf`
+  - Now requires `0.16.0` of `fetch`
+
 ## [0.5.0] - 2026-08-09
 
 - 🔧 Maintenance

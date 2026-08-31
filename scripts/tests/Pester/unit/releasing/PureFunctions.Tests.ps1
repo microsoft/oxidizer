@@ -313,7 +313,14 @@ Describe 'ConvertFrom-SemverChecksOutput' {
 
     It 'includes the Windows path-length hint on build failures' -Skip:(-not $IsWindows) {
         { ConvertFrom-SemverChecksOutput -Output 'LINK : fatal error LNK1104' -PackageName 'foo' } |
-            Should -Throw -ExpectedMessage '*shorten the repository path*'
+            Should -Throw -ExpectedMessage '*CARGO_TARGET_DIR*'
+    }
+
+    It 'names the compiler failure alongside the linker one in the hint' -Skip:(-not $IsWindows) {
+        # The relocated build directory removed LNK1104, which moved the ceiling
+        # onto cl.exe; a hint that named only the linker would misdirect.
+        { ConvertFrom-SemverChecksOutput -Output 'fatal error C1083' -PackageName 'foo' } |
+            Should -Throw -ExpectedMessage '*C1083*'
     }
 
 }

@@ -22,24 +22,21 @@
 use ohno_macros_impl::{derive_error, enrich_err, error};
 use proc_macro2::TokenStream;
 use quote::quote;
-
-/// Pretty-prints Rust source, falling back to the bare tokens when they do not parse as a file.
-///
-/// Several cases deliberately feed a macro something that is not an item at all. Their input is
-/// still worth showing, so it is printed as written rather than dropped.
-fn pretty(tokens: &TokenStream) -> String {
-    syn::parse_file(&tokens.to_string()).map_or_else(|_| tokens.to_string(), |file| prettyplease::unparse(&file))
-}
+use testing_aids::{render_expansion, render_tokens_lossy};
 
 /// One case body: the source a user would write, then what the macro turns it into.
 ///
 /// The input is recorded beside the expansion so a snapshot reads on its own. Reviewing a change
 /// otherwise means holding the test file open next to the snapshot to learn what produced it.
+///
+/// The source side is rendered leniently: several cases deliberately feed a macro something that
+/// is not an item at all, and that input is still worth showing. The expansion side is rendered
+/// strictly, because a macro that emits unparsable tokens is broken.
 fn case(source: &TokenStream, expanded: &TokenStream) -> String {
     format!(
         "{}\n// ---- expands to ----\n\n{}",
-        pretty(source).trim_end(),
-        pretty(expanded).trim_end()
+        render_tokens_lossy(source).trim_end(),
+        render_expansion(expanded).trim_end()
     )
 }
 
@@ -757,8 +754,23 @@ fn the_enrich_attribute_wraps_the_body_and_enriches_the_error() {
             "the signature survives untouched",
             enriched(
                 TokenStream::new(),
+                // Deliberately loaded with the rarer signature components. The wrapper re-emits
+                // the whole `syn::Signature` and only swaps the block, so an omission anywhere in
+                // it — a dropped `unsafe`, ABI, receiver or doc attribute — is a silent
+                // regression unless the snapshot carries one of each.
+                //
+                // The receiver is one of those components rather than an oversight: an attribute
+                // on a method inside an `impl` block reaches the macro as an `Item::Fn` whose
+                // signature carries it, which is how `crates/ohno/tests/enrich_err.rs` applies
+                // the attribute to `fn do_something(&mut self, ..)`. Nothing else about the case
+                // needs to be a compilable free item, since the assertion is over tokens.
                 quote! {
-                    pub(crate) fn load<A: Clone>(path: &str, count: usize) -> Result<A, MyError>
+                    /// Documented.
+                    pub(crate) unsafe extern "C" fn load<A: Clone>(
+                        &mut self,
+                        path: &str,
+                        count: usize,
+                    ) -> Result<A, MyError>
                     where
                         A: Send,
                     {

@@ -4,6 +4,12 @@
 //! Multi-tier cache with conditional promotion policies.
 //! Example: only promote "not found" results to avoid repeated backend queries.
 
+#![allow(unknown_lints, reason = "the pinned and latest Clippy versions expose different async lints")]
+#![expect(
+    clippy::unused_async_trait_impl,
+    reason = "examples are written for a human reader, and a plain `async fn` shows the shape of a tier impl better than `impl Future` plus `std::future::ready`"
+)]
+
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;

@@ -5,4 +5,5 @@ expression: "Http2Options::default()"
 Http2Options {
     initial_max_send_streams: None,
     adaptive_window: false,
+    initial_stream_window_size: None,
 }

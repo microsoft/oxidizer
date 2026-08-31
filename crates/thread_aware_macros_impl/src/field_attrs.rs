@@ -1,18 +1,17 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use syn::{Attribute, Expr, Type};
+use syn::{Attribute, Expr};
 
 /// Configuration for field attributes.
 #[derive(Default, Debug)]
-pub struct FieldAttrCfg {
+pub(crate) struct FieldAttrCfg {
     /// Whether to skip this field in thread-aware processing.
-    pub skip: bool,
+    pub(crate) skip: bool,
 }
 
 /// Parses the `thread_aware` attributes on a field.
-#[expect(clippy::missing_errors_doc, reason = "syn::internal API, no need for docs")]
-pub fn parse_field_attrs(attrs: &[Attribute]) -> syn::Result<FieldAttrCfg> {
+pub(crate) fn parse_field_attrs(attrs: &[Attribute]) -> syn::Result<FieldAttrCfg> {
     let mut cfg = FieldAttrCfg::default();
     for attr in attrs.iter().filter(|a| a.path().is_ident("thread_aware")) {
         let parsed = attr.parse_args_with(|input: syn::parse::ParseStream| {
@@ -40,17 +39,6 @@ pub fn parse_field_attrs(attrs: &[Attribute]) -> syn::Result<FieldAttrCfg> {
         }
     }
     Ok(cfg)
-}
-
-/// Checks if the given type is `PhantomData`.
-#[must_use]
-pub fn is_phantom_data(ty: &Type) -> bool {
-    if let Type::Path(tp) = ty
-        && let Some(seg) = tp.path.segments.last()
-    {
-        return seg.ident == "PhantomData";
-    }
-    false
 }
 
 #[cfg(test)]
@@ -128,75 +116,6 @@ mod tests {
         ];
         let result = parse_field_attrs(&attrs).unwrap();
         assert!(result.skip);
-    }
-
-    #[test]
-    fn test_is_phantom_data_simple() {
-        // Test with simple PhantomData type
-        let ty: Type = parse_quote! { PhantomData<T> };
-        assert!(is_phantom_data(&ty));
-    }
-
-    #[test]
-    fn test_is_phantom_data_with_std() {
-        // Test with std::marker::PhantomData
-        let ty: Type = parse_quote! { std::marker::PhantomData<T> };
-        assert!(is_phantom_data(&ty));
-    }
-
-    #[test]
-    fn test_is_phantom_data_with_core() {
-        // Test with core::marker::PhantomData
-        let ty: Type = parse_quote! { core::marker::PhantomData<T> };
-        assert!(is_phantom_data(&ty));
-    }
-
-    #[test]
-    fn test_is_phantom_data_fully_qualified() {
-        // Test with fully qualified path
-        let ty: Type = parse_quote! { ::std::marker::PhantomData<T> };
-        assert!(is_phantom_data(&ty));
-    }
-
-    #[test]
-    fn test_is_phantom_data_multiple_generics() {
-        // Test with multiple generic parameters
-        let ty: Type = parse_quote! { PhantomData<(T, U, V)> };
-        assert!(is_phantom_data(&ty));
-    }
-
-    #[test]
-    fn test_is_phantom_data_not_phantom() {
-        // Test with non-PhantomData types
-        let ty: Type = parse_quote! { String };
-        assert!(!is_phantom_data(&ty));
-
-        let ty: Type = parse_quote! { Vec<u8> };
-        assert!(!is_phantom_data(&ty));
-
-        let ty: Type = parse_quote! { Option<T> };
-        assert!(!is_phantom_data(&ty));
-    }
-
-    #[test]
-    fn test_is_phantom_data_reference() {
-        // Test with reference types (not a Type::Path)
-        let ty: Type = parse_quote! { &PhantomData<T> };
-        assert!(!is_phantom_data(&ty));
-    }
-
-    #[test]
-    fn test_is_phantom_data_tuple() {
-        // Test with tuple types (not a Type::Path)
-        let ty: Type = parse_quote! { (PhantomData<T>,) };
-        assert!(!is_phantom_data(&ty));
-    }
-
-    #[test]
-    fn test_is_phantom_data_array() {
-        // Test with array types (not a Type::Path)
-        let ty: Type = parse_quote! { [PhantomData<T>; 1] };
-        assert!(!is_phantom_data(&ty));
     }
 
     #[test]
