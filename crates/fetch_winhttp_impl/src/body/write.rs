@@ -28,6 +28,11 @@ use crate::operation::RequestGuard;
 /// lengths enable `WinHTTP` automatic chunking and require a final zero-length
 /// write (implementation.md section 6.1).
 ///
+/// A zero-length body encodes as the sentinel value itself, so `WinHTTP` frames
+/// it as no body rather than as a declared length of zero. Those describe the
+/// same empty payload on the wire, so the collision needs no special handling
+/// (implementation.md section 6.1).
+///
 /// Constructing the framing strategy is also the single point where the
 /// caller's framing metadata is reconciled with the framing `WinHTTP` will
 /// actually perform, before any handle is opened. A body that reports its own
@@ -477,11 +482,27 @@ mod tests {
         assert!(!small.automatic_chunking());
 
         // The largest length `dwTotalLength` can carry is still an exact length:
-        // the unknown-length sentinel is zero, so it cannot collide with one.
+        // the sentinel is zero, so only a zero-length body collides with it.
         let exact_max = RequestBodyFraming::new(&mut headers, Some(u64::from(u32::MAX))).unwrap();
         assert_eq!(exact_max.total_length(), u32::MAX);
         assert_ne!(exact_max.total_length(), WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH);
         assert!(!exact_max.automatic_chunking());
+
+        // Zero is that collision. WinHTTP reads the sentinel as "no total
+        // supplied" and frames no body, which describes the same empty payload
+        // as a declared length of zero, so no header is inserted to disambiguate.
+        headers.remove(http::header::CONTENT_LENGTH);
+        let empty = RequestBodyFraming::new(&mut headers, Some(0)).unwrap();
+        assert_eq!(empty.total_length(), WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH);
+        assert!(!empty.automatic_chunking());
+        assert!(!headers.contains_key(http::header::CONTENT_LENGTH));
+
+        // A caller-supplied zero still reconciles and survives, which is how an
+        // empty POST keeps an explicit `Content-Length: 0` on the wire.
+        headers.insert(http::header::CONTENT_LENGTH, HeaderValue::from_static("00"));
+        let declared_empty = RequestBodyFraming::new(&mut headers, Some(0)).unwrap();
+        assert_eq!(declared_empty.total_length(), WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH);
+        assert_eq!(headers.get(http::header::CONTENT_LENGTH), Some(&HeaderValue::from_static("0")));
 
         headers.remove(http::header::CONTENT_LENGTH);
         let large_length = u64::from(u32::MAX) + 1;

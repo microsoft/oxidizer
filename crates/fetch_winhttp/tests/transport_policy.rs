@@ -137,6 +137,38 @@ fn a_caller_supplied_content_length_reaches_the_wire_exactly_once() {
 
 #[cfg_attr(miri, ignore)]
 #[test]
+fn an_empty_request_body_is_framed_as_a_zero_length() {
+    // A zero-length body is the one known length whose `dwTotalLength` encoding collides with
+    // `WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH`, which is also zero. Framing therefore cannot be
+    // read off the value the transport passes, and only a server-side observation shows whether
+    // an empty POST is framed as a zero length or as no body at all.
+    let server = TestServer::http([ResponsePlan::ok("no body received"), ResponsePlan::ok("empty body received")]);
+    let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_frozen());
+
+    let absent = futures::executor::block_on(test_client.client.post(server.url("/absent")).fetch_text_body()).unwrap();
+    let empty = futures::executor::block_on(test_client.client.post(server.url("/empty")).text("").fetch_text_body()).unwrap();
+
+    assert_eq!(absent, "no body received");
+    assert_eq!(empty, "empty body received");
+
+    let snapshot = server.finish();
+    assert_eq!(snapshot.requests.len(), 2);
+    for request in &snapshot.requests {
+        assert_eq!(request.method, Method::POST);
+        assert!(request.body.is_empty());
+        assert_eq!(
+            request.headers.get(CONTENT_LENGTH).map(|value| value.to_str().unwrap()),
+            Some("0"),
+            "expected a zero Content-Length on {}, received {:?}",
+            request.uri.path(),
+            request.headers
+        );
+        assert!(!request.headers.contains_key(TRANSFER_ENCODING));
+    }
+}
+
+#[cfg_attr(miri, ignore)]
+#[test]
 fn a_disagreeing_caller_supplied_content_length_never_reaches_the_wire() {
     // Deliberately shorter than the body rather than longer. A caller length that exceeds the
     // body would leave the server waiting for bytes that never arrive, so a regression in the

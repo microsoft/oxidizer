@@ -7,12 +7,13 @@
 //! cannot configure a Schannel-backed `WinHTTP` request, so this transport
 //! exposes its own configuration type instead (design.md section 4,
 //! design.md section 1.2). [`WinHttpTlsConfig`] is the caller-facing half and
-//! [`security_flags`] is the native half: it produces the
-//! `WINHTTP_OPTION_SECURITY_FLAGS` mask that [`crate::request`] applies to a
-//! request handle before sending (implementation.md section 10.2).
+//! [`security_flags`] and [`checks_revocation`] are the native half: together
+//! they produce the `WINHTTP_OPTION_SECURITY_FLAGS` mask and the revocation
+//! opt-in that [`crate::request`] applies to a request handle before sending
+//! (implementation.md section 10.2).
 //!
-//! Both halves live together because the flag mask is the entire meaning of
-//! the configuration - a relaxation that maps to no flag would silently do
+//! Both halves live together because those two natives are the entire meaning
+//! of the configuration - a relaxation that maps to neither would silently do
 //! nothing, and keeping the mapping next to the documentation that promises
 //! each option makes the blast radius of that option easy to review.
 
@@ -32,6 +33,9 @@ use windows::Win32::Networking::WinHttp::{
 /// both default to strict validation. The former covers an unknown authority,
 /// invalid validity period, or wrong intended usage; the latter covers a host
 /// name mismatch. Other TLS failures remain enforced.
+///
+/// Secure requests check the server certificate for revocation unless
+/// certificate-chain validation is relaxed.
 ///
 /// Client certificates, server-certificate inspection, and certificate pinning
 /// are not supported.
@@ -75,6 +79,9 @@ impl WinHttpTlsConfigBuilder {
     ///
     /// This covers an unknown CA, an invalid validity period, and an invalid
     /// intended usage. Other Schannel failures remain enforced.
+    ///
+    /// Enabling this also stops revocation checking, because a certificate
+    /// reached this way generally publishes no revocation endpoint.
     ///
     /// This is dangerous and should be limited to controlled scenarios.
     #[must_use]
@@ -122,6 +129,27 @@ pub(crate) fn security_flags(config: &WinHttpTlsConfig) -> u32 {
     flags
 }
 
+/// Reports whether a secure request should check the server certificate for
+/// revocation.
+///
+/// WinHTTP performs no revocation check unless a request asks for one, so this
+/// transport asks on every secure request whose chain it still validates
+/// (implementation.md section 10.2).
+///
+/// Accepting invalid certificates withdraws the request. That configuration
+/// exists to reach hosts presenting self-signed or privately issued
+/// certificates, which generally publish no reachable revocation endpoint, and
+/// WinHTTP exposes no security flag that forgives a failed revocation check.
+/// Asking for one could therefore only fail a request whose certificate the
+/// caller already chose to trust.
+///
+/// Accepting invalid host names is unrelated and leaves the check in place: a
+/// certificate naming the wrong host is still issued by an authority whose
+/// revocation endpoint answers.
+pub(crate) fn checks_revocation(config: &WinHttpTlsConfig) -> bool {
+    !config.accepts_invalid_certs()
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -133,7 +161,7 @@ mod tests {
 
     use super::{
         SECURITY_FLAG_IGNORE_CERT_CN_INVALID, SECURITY_FLAG_IGNORE_CERT_DATE_INVALID, SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE,
-        SECURITY_FLAG_IGNORE_UNKNOWN_CA, WinHttpTlsConfig, WinHttpTlsConfigBuilder, security_flags,
+        SECURITY_FLAG_IGNORE_UNKNOWN_CA, WinHttpTlsConfig, WinHttpTlsConfigBuilder, checks_revocation, security_flags,
     };
 
     assert_impl_all!(WinHttpTlsConfig: Send, Sync, Clone, Debug, Default, ThreadAware, UnwindSafe, RefUnwindSafe);
@@ -181,5 +209,20 @@ mod tests {
                 | SECURITY_FLAG_IGNORE_CERT_CN_INVALID
                 | SECURITY_FLAG_IGNORE_CERT_DATE_INVALID
         );
+    }
+
+    #[test]
+    fn only_certificate_relaxation_withdraws_the_revocation_check() {
+        assert!(checks_revocation(&WinHttpTlsConfig::default()));
+        assert!(checks_revocation(
+            &WinHttpTlsConfig::builder().accept_invalid_hostnames(true).build()
+        ));
+        assert!(!checks_revocation(&WinHttpTlsConfig::builder().accept_invalid_certs(true).build()));
+        assert!(!checks_revocation(
+            &WinHttpTlsConfig::builder()
+                .accept_invalid_certs(true)
+                .accept_invalid_hostnames(true)
+                .build()
+        ));
     }
 }

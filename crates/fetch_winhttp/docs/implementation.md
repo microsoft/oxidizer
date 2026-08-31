@@ -151,7 +151,7 @@ crates/fetch_winhttp_impl/src/        // implementation
     mod.rs               // module wiring only (no type definitions)
   tls.rs                 // WinHttpTlsConfig -> security flags
   options.rs             // The validated ProtocolOptions
-  telemetry.rs           // observed::Sink metrics and log events (§12)
+  telemetry.rs           // observed::Sink metrics and log events (§13)
   handle.rs              // RAII handle wrappers (Send/Sync assertions)
   error.rs               // Win32 -> HttpError mapping + the shared error constructors
   error_labels.rs        // ErrorLabel constants
@@ -749,7 +749,7 @@ native all-completions flag: it omits the proxy-resolution completions, which
 the transport can never receive because it opens its session with
 `WINHTTP_ACCESS_TYPE_NO_PROXY` and calls no proxy-resolution API.
 `CONNECT_TO_SERVER` covers the connection-progress
-notifications used by cold-connect telemetry (§12). The only per-request handoff
+notifications used by cold-connect telemetry (§13). The only per-request handoff
 is installing the context pointer via
 `WinHttpSetOption(WINHTTP_OPTION_CONTEXT_VALUE, ptr)`.
 
@@ -965,6 +965,14 @@ cancellation completion) and keeps a single body-writing path:
   request header (WinHTTP honors a caller-supplied `Content-Length` and does not
   fall back to chunked when it is present), then stream the body identically. Either
   way there is one write path.
+
+  A zero length is the one value whose `dwTotalLength` encoding is the sentinel
+  itself, so WinHTTP frames it as no body rather than as a declared length of
+  zero. This needs no special handling: RFC 9112 section 6.3 gives a request
+  carrying neither directive no body at all, which is the same empty payload a
+  zero length describes. A caller who wants the explicit header still gets it,
+  because a supplied `Content-Length: 0` reconciles and survives to the wire like
+  any other agreeing value - which is what `fetch` populates for an empty body.
 - **Unknown length** (streaming body): open the request with
   `WINHTTP_FLAG_AUTOMATIC_CHUNKING`, then call `WinHttpSendRequest` with
   `WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH` and a `NULL` optional buffer. Each
@@ -1014,8 +1022,9 @@ originates in WinHTTP:
   itself and normalizes. Values that survive are collapsed into one canonical decimal
   header, so duplicates and non-canonical spellings such as `007` never reach the wire.
 - When the caller supplied no `Content-Length` and the length fits a `DWORD`, none is
-  inserted: `WinHttpSendRequest` emits the header from `dwTotalLength`. Above `u32::MAX`
-  the header is the only framing source, so it is inserted.
+  inserted: `WinHttpSendRequest` emits the header from `dwTotalLength`, or omits both
+  directives when the length is zero. Above `u32::MAX` the header is the only framing
+  source, so it is inserted.
 
 Declared-length or framing failures that WinHTTP detects later - after this
 reconciliation, on the wire - are propagated through the ordinary request error path.
@@ -1103,6 +1112,19 @@ unparsable, when duplicate values disagree, or when a `Content-Encoding` or
 length counts bytes the reader never sees. The remainder is decremented by each
 completed read; once it reaches zero the reads revert to the unflagged form,
 which is what lets a body that outruns its own declaration keep streaming.
+
+**Waiting for a full region is intended, including when it ends in a timeout.** A
+flagged read does not surface bytes the peer has already sent until the region
+fills or the response ends, so a peer that trickles out a body whose length it
+declared can leave the body idle timeout to fire rather than produce a short
+frame. That is the intended outcome. Declared-length content is expected to
+arrive at link speed, and a peer that declares a length and then dribbles it out
+is misbehaving; treating the body as idle is the correct response, however
+briskly the peer believes it is sending. Short fills are not a supported
+delivery mode for declared-length content, so there is no case in which one
+should be produced instead. Content whose arrival rate is genuinely unknown is
+exactly the content that arrives without a declared length, and that content
+takes the unflagged path.
 
 Three further constraints shape how much memory a read reserves and how much of it
 a single call receives.
@@ -1457,7 +1479,7 @@ clock comes from `CustomContext`. Because `CustomContext` exposes only the deriv
 `HttpBodyBuilder`, not the underlying `GlobalPool`, `WinHttpDeps` also retains a pool
 clone in `Extras` for WinHTTP read buffers. The `observed::Sink` rides in the same extras
 and relocates per processor with the rest of the config; the transport emits its telemetry
-through it (§12). There is no
+through it (§13). There is no
 `anyspawn::Spawner`: no WinHTTP call the transport makes can block (§2.1).
 
 Session creation opens a direct-connection session and applies every required session
@@ -1556,7 +1578,7 @@ For draining, WinHTTP exposes only coarse controls:
 Individual pooled connections are largely opaque to us: WinHTTP exposes no
 per-connection handle, age, or close, so a graceful drain of a single connection
 is not expressible with the controls this transport uses today. It does expose
-per-connection *identity*, which §13 records as an unexploited opportunity, but
+per-connection *identity*, which §14 records as an unexploited opportunity, but
 identity alone does not make a single connection closable. The v1 transport keeps
 exactly one session for its whole lifetime and does not recycle it.
 Connection-lifetime handling under those controls is covered in design.md §2.2.
@@ -1632,6 +1654,26 @@ applied with `WinHttpSetOption` on the request handle before `WinHttpSendRequest
   `WINHTTP_OPTION_SECURITY_FLAGS` with the relevant
   `SECURITY_FLAG_IGNORE_UNKNOWN_CA | IGNORE_CERT_CN_INVALID |
   IGNORE_CERT_DATE_INVALID | IGNORE_CERT_WRONG_USAGE` bits.
+- **Revocation checking.** WinHTTP performs no revocation check unless the
+  request asks for one, so secure requests set
+  `WINHTTP_OPTION_ENABLE_FEATURE` to `WINHTTP_ENABLE_SSL_REVOCATION`. The
+  option accepts only a request handle, which is why it is applied alongside
+  the security flags rather than once on the session.
+
+  `accept_invalid_certs` suppresses the opt-in. That configuration exists to
+  reach hosts presenting self-signed or privately issued certificates, which
+  generally publish no reachable revocation endpoint, and WinHTTP has no
+  security flag that forgives a revocation check it could not complete - the
+  `SECURITY_FLAG_IGNORE_*` set covers chain, name, validity, and usage only.
+  Asking for a check could therefore only fail a request whose certificate the
+  caller already chose to trust. `accept_invalid_hostnames` is unrelated and
+  leaves the opt-in in place, because a certificate naming the wrong host is
+  still issued by an authority whose revocation endpoint answers.
+
+  Revocation checking can cost a CRL or OCSP fetch on a cold connection. That
+  is accepted: it is a per-connection cost on the connection-establishment
+  path, not a per-request cost on the steady-state path this transport
+  optimizes for.
 - **Server certificate inspection / pinning.** Not offered in v1. If needed later
   it hooks the `SECURE_FAILURE` callback and a post-handshake
   `WINHTTP_OPTION_SERVER_CERT_CONTEXT` query.
@@ -1753,7 +1795,35 @@ These mechanical conversions do not warn or reject. Body lengths are never narro
 Other DWORD-valued options are handled individually when introduced rather than through a
 generic lossy count conversion.
 
-## 11. Handling generic options the transport cannot honor
+## 11. Conformance with WinHTTP security considerations
+
+Microsoft publishes a checklist of security considerations for WinHTTP callers.
+This section records how the transport meets each item, and where it deliberately
+does otherwise. Items the transport satisfies by removing the whole feature are
+recorded as such rather than left implicit, because a later change that
+reintroduces the feature also reintroduces the obligation.
+
+| Consideration | How this transport meets it |
+|---|---|
+| Server certificates are verified once per session | The relaxations in `WinHttpTlsConfig` are fixed when the client is built (§9), so every request on a session presents the same validation criteria and no request can observe criteria cached from a stricter or looser predecessor. |
+| Auto-proxy downloads and executes scripts | Not applicable. Sessions open with `WINHTTP_ACCESS_TYPE_NO_PROXY` (design.md §2.3), so no proxy script is discovered, downloaded, or executed, in-process or otherwise. |
+| Callbacks must return promptly | The callback never blocks: it moves the completion into the request context and signals an `events_once` sender (§4). It takes no lock that a non-callback thread holds across a wait, and performs no I/O. `WINHTTP_OPTION_ASSURED_NON_BLOCKING_CALLBACKS` declares this to WinHTTP. |
+| Callbacks must be reentrant | The callback holds no static mutable state; every completion is routed through the per-request context reached from the context pointer (§4). Inline, reentrant completion during the submitting call is an explicitly tested path (§7). |
+| Pass NULL for OUT parameters in asynchronous mode | Every asynchronous entry point passes null: `WinHttpWriteData`'s `lpdwBytesWritten`, `WinHttpReadDataEx`'s `lpdwBytesRead`, `WinHttpReceiveResponse`'s reserved parameter, and `WinHttpQueryHeaders`' reserved parameter. Byte counts are taken from the completion instead. `WinHttpQueryDataAvailable` is not used at all (§6). |
+| Passport authentication is not foolproof | Not applicable. Automatic authentication is disabled through `WINHTTP_DISABLE_AUTHENTICATION` (§10.3), and Passport is off by default and never enabled. |
+| Basic authentication needs a secure connection | Not applicable. The transport never supplies credentials and never answers a challenge; a 401 is returned to the caller as an ordinary response (§10.3). |
+| A low auto-logon policy is a risk | Not applicable. The transport sets no auto-logon policy and sends no credentials, so the default policy governs and no site is authenticated against. |
+| SSL 2.0 is not used unless enabled | The transport never sets `WINHTTP_OPTION_SECURE_PROTOCOLS`, so the OS default protocol set applies and SSL 2.0 stays off. Protocol version policy is deliberately left to OS and administrator configuration. |
+| Revocation checking must be requested | Secure requests set `WINHTTP_OPTION_ENABLE_FEATURE` to `WINHTTP_ENABLE_SSL_REVOCATION` (§10.2). **Deliberate deviation:** `accept_invalid_certs` withdraws the request, because that configuration targets certificates with no reachable revocation endpoint and WinHTTP cannot forgive a check it could not complete. |
+| A session maps to a single identity | Sessions are anonymous and carry no identity: credentials are never set, automatic authentication is disabled, and cookies are disabled through `WINHTTP_DISABLE_COOKIES` (§10.3), so no state links one caller's request to another's. |
+| Operations on a request handle must be synchronized | A request handle carries at most one outstanding operation at a time, enforced by the single operation slot in the request context (§4). `RequestGuard` is the sole close authority and closes exactly once; cancellation closes the handle and waits for the final `HANDLE_CLOSING` callback rather than racing an in-flight operation. |
+| Trace files contain sensitive information | Not applicable. The transport never enables WinHTTP tracing. |
+| Avoid passing sensitive data through `WinHttpSetOption` | No credential is ever passed to `WinHttpSetOption`; every option this transport sets is a `DWORD` or a context value (§10). |
+| Automatic redirection is a risk | Redirects are disabled with `WINHTTP_OPTION_REDIRECT_POLICY_NEVER` (§10.3), so a redirect is surfaced to the caller as a response rather than followed with the original body. |
+| User-defined headers cross redirects unchanged | Not applicable, because redirects are never followed. |
+| WinHTTP is not reentrant in synchronous mode | Not applicable. Sessions open with `WINHTTP_FLAG_ASYNC` and the transport issues no synchronous request (§2). |
+
+## 12. Handling generic options the transport cannot honor
 
 `fetch`'s options arrive through its generic configuration surface, and callers set
 them transport-agnostically, so the transport routinely receives settings it cannot
@@ -1769,7 +1839,7 @@ These gaps are a symptom of `fetch`-level over-abstraction; the proper fix is
 transport-level configuration (see the fetch API stabilization feedback,
 ../../fetch/docs/stabilization.md).
 
-## 12. Telemetry
+## 13. Telemetry
 
 The transport reports through the `observed::Sink` supplied in its dependencies
 (design.md §1.1). The emitted event, counter, and field names are the contractual
@@ -1804,7 +1874,7 @@ have different remediations. This attribution is attached only to the log event;
 **not** promoted to a metric label, to keep connection-establishment noise out of the
 metric cardinality.
 
-## 13. Future opportunities
+## 14. Future opportunities
 
 Design points deliberately deferred in v1, recorded here so they are revisited when
 the `fetch` API or profiling data makes them actionable:
@@ -1848,7 +1918,7 @@ the `fetch` API or profiling data makes them actionable:
     timeout. A single rotating generation retires the whole pool at once, which is the
     synchronized-reconnect behavior `PerConnection` exists to prevent, so a faithful
     implementation needs several staggered generations rather than one.
-  - **Cold-connect attribution on success.** §12 records connection establishment only
+  - **Cold-connect attribution on success.** §13 records connection establishment only
     on the failure path, so a client that silently reconnects on every request - the
     pathology an idle window that is too short produces - looks healthy in telemetry.
     Counting distinct connection GUIDs across requests measures it directly.

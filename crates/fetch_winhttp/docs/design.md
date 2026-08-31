@@ -235,6 +235,11 @@ bundle and configures only a small set of `WinHttpTlsConfig` knobs (§1.2):
   `accept_invalid_hostnames` relaxes certificate host-name mismatch failures.
   These options do not suppress every possible Schannel or certificate failure.
   They are opt-in and documented as dangerous.
+- **Revocation checking.** Secure requests check the server certificate for
+  revocation. `accept_invalid_certs` withdraws the check, because a certificate
+  reached that way generally publishes no revocation endpoint and WinHTTP offers
+  no way to forgive a check that cannot complete. `accept_invalid_hostnames`
+  leaves it in place.
 - **Server certificate inspection / pinning.** Beyond accept/reject, not offered in v1.
 
 (How these knobs reach Schannel is implementation.md §10.2.)

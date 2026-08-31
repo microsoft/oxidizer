@@ -32,9 +32,9 @@ use tick::Clock;
 use widestring::U16CString;
 
 use crate::bindings::{
-    Bindings as _, BindingsFacade, WINHTTP_OPTION_DECOMPRESSION, WINHTTP_OPTION_DISABLE_FEATURE, WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL,
-    WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED, WINHTTP_OPTION_REDIRECT_POLICY, WINHTTP_OPTION_REDIRECT_POLICY_NEVER,
-    WINHTTP_OPTION_SECURITY_FLAGS,
+    Bindings as _, BindingsFacade, WINHTTP_ENABLE_SSL_REVOCATION, WINHTTP_OPTION_DECOMPRESSION, WINHTTP_OPTION_DISABLE_FEATURE,
+    WINHTTP_OPTION_ENABLE_FEATURE, WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL, WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED,
+    WINHTTP_OPTION_REDIRECT_POLICY, WINHTTP_OPTION_REDIRECT_POLICY_NEVER, WINHTTP_OPTION_SECURITY_FLAGS,
 };
 use crate::body::{RequestBodyFraming, WinHttpBodyReader, WinHttpBodyWriter, WinHttpResponseBody, declared_body_length, send_body};
 use crate::context::{ColdConnectState, CompletionResult, OperationBuffer, OperationKind};
@@ -49,7 +49,7 @@ use crate::options::ProtocolOptions;
 use crate::query::{query_protocol_used, query_raw_headers, query_status_code};
 use crate::response_headers::parse_response_headers;
 use crate::session::WinHttpSession;
-use crate::tls::{WinHttpTlsConfig, security_flags};
+use crate::tls::{WinHttpTlsConfig, checks_revocation, security_flags};
 
 #[derive(Debug)]
 /// Carries a request error and its log-only connection attribution.
@@ -144,6 +144,7 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
         let settings = RequestSettings {
             protocol,
             security_flags: if translated.secure { security_flags(tls) } else { 0 },
+            check_revocation: translated.secure && checks_revocation(tls),
         };
         let body_options = request
             .extensions()
@@ -434,6 +435,7 @@ fn authority_port(authority: &Authority, host: &str, default: u16) -> Result<u16
 struct RequestSettings {
     protocol: ProtocolOptions,
     security_flags: u32,
+    check_revocation: bool,
 }
 
 fn apply_request_settings(request: &RequestHandle, settings: RequestSettings) -> WinHttpResult<()> {
@@ -454,6 +456,11 @@ fn apply_request_settings(request: &RequestHandle, settings: RequestSettings) ->
     }
     if settings.security_flags != 0 {
         set_dword(bindings, raw, WINHTTP_OPTION_SECURITY_FLAGS, settings.security_flags)?;
+    }
+    if settings.check_revocation {
+        // WinHTTP checks revocation only on request handles that ask for it,
+        // and only before the request is sent.
+        set_dword(bindings, raw, WINHTTP_OPTION_ENABLE_FEATURE, WINHTTP_ENABLE_SSL_REVOCATION)?;
     }
     set_dword(bindings, raw, WINHTTP_OPTION_REDIRECT_POLICY, WINHTTP_OPTION_REDIRECT_POLICY_NEVER)?;
     set_dword(bindings, raw, WINHTTP_OPTION_DISABLE_FEATURE, disable_feature_mask())?;
@@ -629,10 +636,11 @@ mod tests {
     };
     use crate::WinHttpTlsConfig;
     use crate::bindings::{
-        BindingsFacade, MockBindings, WINHTTP_FLAG_AUTOMATIC_CHUNKING, WINHTTP_FLAG_SECURE, WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH,
-        WINHTTP_OPTION_CONTEXT_VALUE, WINHTTP_OPTION_DECOMPRESSION, WINHTTP_OPTION_DISABLE_FEATURE, WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL,
-        WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED, WINHTTP_OPTION_REDIRECT_POLICY, WINHTTP_OPTION_SECURITY_FLAGS, WINHTTP_QUERY_FLAG_NUMBER,
-        WINHTTP_QUERY_FLAG_WIRE_ENCODING, WINHTTP_QUERY_RAW_HEADERS_CRLF, WINHTTP_QUERY_STATUS_CODE, WINHTTP_QUERY_VERSION,
+        BindingsFacade, MockBindings, WINHTTP_ENABLE_SSL_REVOCATION, WINHTTP_FLAG_AUTOMATIC_CHUNKING, WINHTTP_FLAG_SECURE,
+        WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH, WINHTTP_OPTION_CONTEXT_VALUE, WINHTTP_OPTION_DECOMPRESSION, WINHTTP_OPTION_DISABLE_FEATURE,
+        WINHTTP_OPTION_ENABLE_FEATURE, WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL, WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED,
+        WINHTTP_OPTION_REDIRECT_POLICY, WINHTTP_OPTION_SECURITY_FLAGS, WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_QUERY_FLAG_WIRE_ENCODING,
+        WINHTTP_QUERY_RAW_HEADERS_CRLF, WINHTTP_QUERY_STATUS_CODE, WINHTTP_QUERY_VERSION,
     };
     use crate::context::{ColdConnectState, CompletionResult, OperationBuffer, OperationKind};
     use crate::error::{WinHttpError, WinHttpOperation};
@@ -764,6 +772,7 @@ mod tests {
             dword_options(&record),
             [
                 (WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL, 1),
+                (WINHTTP_OPTION_ENABLE_FEATURE, WINHTTP_ENABLE_SSL_REVOCATION),
                 (WINHTTP_OPTION_REDIRECT_POLICY, 0),
                 (WINHTTP_OPTION_DISABLE_FEATURE, 5),
                 (WINHTTP_OPTION_DECOMPRESSION, 3),
@@ -1004,6 +1013,58 @@ mod tests {
     }
 
     #[test]
+    fn revocation_is_requested_unless_certificate_validation_is_relaxed() {
+        for (tls, expected) in [
+            (WinHttpTlsConfig::default(), Some(WINHTTP_ENABLE_SSL_REVOCATION)),
+            (WinHttpTlsConfig::builder().accept_invalid_certs(true).build(), None),
+            // Host-name relaxation is unrelated to revocation, so the check stays.
+            (
+                WinHttpTlsConfig::builder().accept_invalid_hostnames(true).build(),
+                Some(WINHTTP_ENABLE_SSL_REVOCATION),
+            ),
+            (
+                WinHttpTlsConfig::builder()
+                    .accept_invalid_certs(true)
+                    .accept_invalid_hostnames(true)
+                    .build(),
+                None,
+            ),
+        ] {
+            let (response, record) = run_lifecycle(
+                request(Method::GET, "https://example.com/"),
+                TransportOptions::default(),
+                tls,
+                LifecycleConfig::default(),
+            );
+
+            response.unwrap();
+            let actual = dword_options(&record)
+                .into_iter()
+                .find_map(|(option, value)| (option == WINHTTP_OPTION_ENABLE_FEATURE).then_some(value));
+            assert_eq!(actual, expected);
+            assert_lifecycle_closed(&record);
+        }
+
+        // A plaintext request authenticates no certificate, so it asks for nothing.
+        let mut options = TransportOptions::default();
+        options.request_filter = RequestFilter::HttpAndHttps;
+        let (response, record) = run_lifecycle(
+            request(Method::GET, "http://example.com/"),
+            options,
+            WinHttpTlsConfig::default(),
+            LifecycleConfig::default(),
+        );
+
+        response.unwrap();
+        assert!(
+            dword_options(&record)
+                .into_iter()
+                .all(|(option, _)| option != WINHTTP_OPTION_ENABLE_FEATURE)
+        );
+        assert_lifecycle_closed(&record);
+    }
+
+    #[test]
     fn redirect_cookie_auth_and_decompression_options_are_required() {
         let (response, record) = run_lifecycle(
             request(Method::GET, "https://example.com/"),
@@ -1017,6 +1078,7 @@ mod tests {
             dword_options(&record),
             [
                 (WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL, 1),
+                (WINHTTP_OPTION_ENABLE_FEATURE, WINHTTP_ENABLE_SSL_REVOCATION),
                 (WINHTTP_OPTION_REDIRECT_POLICY, 0),
                 (WINHTTP_OPTION_DISABLE_FEATURE, 5),
                 (WINHTTP_OPTION_DECOMPRESSION, 3),
@@ -1046,6 +1108,7 @@ mod tests {
             dword_options(&record),
             [
                 (WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL, 1),
+                (WINHTTP_OPTION_ENABLE_FEATURE, WINHTTP_ENABLE_SSL_REVOCATION),
                 (WINHTTP_OPTION_REDIRECT_POLICY, 0),
                 (WINHTTP_OPTION_DISABLE_FEATURE, 5),
                 (WINHTTP_OPTION_DECOMPRESSION, 3),
