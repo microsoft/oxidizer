@@ -548,6 +548,16 @@ mod tests {
         trailer_queries: AtomicUsize,
         requested: Mutex<Vec<u32>>,
         fill_flags: Mutex<Vec<bool>>,
+        /// Addresses of the regions the reader lent to each read, recorded with
+        /// their provenance exposed.
+        ///
+        /// One test rebuilds a pointer from an entry to write the byte a real
+        /// WinHTTP would have delivered, and `with_exposed_provenance_mut` can
+        /// only carry provenance that something exposed. `addr()` is the strict
+        /// accessor and deliberately exposes nothing, so recording through it
+        /// would leave that reconstruction with no provenance for the region it
+        /// addresses. The remaining tests only compare entries, which is
+        /// unaffected by how the address was taken.
         lent_addresses: Mutex<Vec<usize>>,
         session_closes: AtomicUsize,
         connect_closes: AtomicUsize,
@@ -990,9 +1000,11 @@ mod tests {
 
         let lent = record.lent_addresses.lock().unwrap()[0];
         let lent = std::ptr::with_exposed_provenance_mut::<u8>(lent);
-        // SAFETY: the lent region belongs to the buffer the outstanding read
-        // operation owns, so it stays allocated and unaliased until that read
-        // completes, which is what this write and the completion below do.
+        // SAFETY: the mock recorded this address with its provenance exposed, so
+        // the reconstruction above carries provenance for the lent region rather
+        // than none at all. That region belongs to the buffer the outstanding
+        // read operation owns, so it stays allocated and unaliased until that
+        // read completes, which is what this write and the completion below do.
         unsafe {
             lent.write(b'q');
         }
@@ -1157,7 +1169,7 @@ mod tests {
             read_record.read_calls.fetch_add(1, Ordering::SeqCst);
             read_record.requested.lock().unwrap().push(len);
             read_record.fill_flags.lock().unwrap().push(fill_buffer);
-            read_record.lent_addresses.lock().unwrap().push(buffer.as_ptr().addr());
+            read_record.lent_addresses.lock().unwrap().push(buffer.as_ptr().expose_provenance());
             let step = read_steps.lock().unwrap().pop_front().unwrap();
             let context = recorded_context(&read_record);
 
