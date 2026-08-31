@@ -1499,9 +1499,7 @@ mod fast_path_correctness {
         }
         // Verify no two allocations overlap (each is 8 bytes)
         ptrs.sort_by_key(|&(_, addr)| addr);
-        for window in ptrs.windows(2) {
-            let (_, a) = window[0];
-            let (_, b) = window[1];
+        for &[(_, a), (_, b)] in ptrs.array_windows() {
             assert!(a + size_of::<u64>() <= b, "Allocations overlap: {a:#x} + 8 > {b:#x}");
         }
     }
@@ -1512,13 +1510,8 @@ mod fast_path_correctness {
         let handles: Vec<_> = (0..200_u64).map(|i| arena.alloc_arc(i)).collect();
         let mut addrs: Vec<usize> = handles.iter().map(|arc| &raw const **arc as usize).collect();
         addrs.sort_unstable();
-        for window in addrs.windows(2) {
-            assert!(
-                window[0] + size_of::<u64>() <= window[1],
-                "Arc allocations overlap: {:#x} + 8 > {:#x}",
-                window[0],
-                window[1]
-            );
+        for &[a, b] in addrs.array_windows() {
+            assert!(a + size_of::<u64>() <= b, "Arc allocations overlap: {a:#x} + 8 > {b:#x}");
         }
     }
 

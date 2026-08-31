@@ -466,7 +466,7 @@ fn insert_query_node<'a>(
     let node = if let Some((_, node)) = map.iter_mut().find(|(existing, _)| existing == key) {
         node
     } else {
-        map.push((
+        let (_, node) = map.push_mut((
             key.to_owned(),
             if has_more {
                 QueryNode::Map(Vec::new())
@@ -474,7 +474,7 @@ fn insert_query_node<'a>(
                 QueryNode::Leaf(SmallVec::new())
             },
         ));
-        &mut map.last_mut().expect("entry was pushed immediately above").1
+        node
     };
     if has_more {
         match node {
