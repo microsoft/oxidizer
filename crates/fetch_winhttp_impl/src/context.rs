@@ -718,8 +718,8 @@ unsafe impl Sync for RequestContext {}
 mod tests {
     use std::panic::{RefUnwindSafe, UnwindSafe};
 
-    use bytesbuf::BytesView;
     use bytesbuf::mem::GlobalPool;
+    use bytesbuf::{BytesBuf, BytesView};
     use static_assertions::{assert_impl_all, assert_not_impl_any};
     use windows::Win32::Networking::WinHttp::{
         WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER,
@@ -879,6 +879,23 @@ mod tests {
 
         drop(receiver);
         drop(slot);
+    }
+
+    #[test]
+    fn a_failing_completion_retains_the_buffer_lent_to_winhttp() {
+        // A native failure does not withdraw WinHTTP's access to the buffer it
+        // was lent, so the error completion has to keep that buffer alive until
+        // the caller drops the result. Only the operation that lent nothing may
+        // carry nothing.
+        let pool = GlobalPool::new();
+
+        assert!(OperationBuffer::none().into_completion().is_none());
+
+        let write = OperationBuffer::write(BytesView::copied_from_slice(b"lent", &pool), 4);
+        assert!(matches!(write.into_completion(), Some(CompletionBuffer::Write { .. })));
+
+        let read = OperationBuffer::read(BytesBuf::new(), 0x1000, 64);
+        assert!(matches!(read.into_completion(), Some(CompletionBuffer::Read { .. })));
     }
 
     #[test]

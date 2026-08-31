@@ -427,6 +427,10 @@ mod tests {
         assert_eq!(http2_keep_alive_millis(Duration::from_millis(5_001)), 5_001);
         assert_eq!(http3_keep_alive_millis(Duration::ZERO), 1);
         assert_eq!(http3_keep_alive_millis(Duration::from_millis(1)), 1);
+        // Above the floor both protocols must carry the caller's interval through
+        // unchanged. Without a case here, a conversion that always returned its floor
+        // would satisfy every other expectation in this test.
+        assert_eq!(http3_keep_alive_millis(Duration::from_secs(30)), 30_000);
     }
 
     /// Pins the floor recorded on [`crate::bindings::WINHTTP_OPTION_CONNECTION_IDLE_TIMEOUT`].
