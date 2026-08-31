@@ -175,11 +175,11 @@ impl BytesView {
     ///
     /// let mut view = BytesView::copied_from_slice(b"Hello", &memory);
     ///
-    /// let mut buffer: [MaybeUninit<u8>; 5] = [const { MaybeUninit::uninit() }; 5];
-    /// view.copy_to_uninit_slice(&mut buffer);
+    /// let mut buffer = MaybeUninit::<[u8; 5]>::uninit();
+    /// view.copy_to_uninit_slice(buffer.as_mut());
     ///
     /// // SAFETY: The buffer has been fully initialized by copy_to_uninit_slice.
-    /// let buffer: [u8; 5] = unsafe { std::mem::transmute(buffer) };
+    /// let buffer = unsafe { buffer.assume_init() };
     /// assert_eq!(&buffer, b"Hello");
     /// # }
     /// # }
@@ -352,11 +352,11 @@ mod tests {
         let memory = TransparentMemory::new();
         let mut view = BytesView::copied_from_slice(&[1, 2, 3, 4], &memory);
 
-        let mut dst = [MaybeUninit::<u8>::uninit(); 4];
-        view.copy_to_uninit_slice(&mut dst);
+        let mut dst = MaybeUninit::<[u8; 4]>::uninit();
+        view.copy_to_uninit_slice(dst.as_mut());
 
         // SAFETY: It has now been initialized.
-        let dst = unsafe { std::mem::transmute::<[MaybeUninit<u8>; 4], [u8; 4]>(dst) };
+        let dst = unsafe { dst.assume_init() };
 
         assert_eq!(dst, [1, 2, 3, 4]);
         assert!(view.is_empty());
@@ -367,11 +367,11 @@ mod tests {
         let memory = TransparentMemory::new();
         let mut view = BytesView::copied_from_slice(&[1, 2, 3, 4], &memory);
 
-        let mut dst = [MaybeUninit::<u8>::uninit(); 3];
-        view.copy_to_uninit_slice(&mut dst);
+        let mut dst = MaybeUninit::<[u8; 3]>::uninit();
+        view.copy_to_uninit_slice(dst.as_mut());
 
         // SAFETY: It has now been initialized.
-        let dst = unsafe { std::mem::transmute::<[MaybeUninit<u8>; 3], [u8; 3]>(dst) };
+        let dst = unsafe { dst.assume_init() };
 
         assert_eq!(dst, [1, 2, 3]);
         assert_eq!(view.len(), 1);
@@ -412,12 +412,12 @@ mod tests {
         let view_part2 = BytesView::copied_from_slice(&data_part2, &memory);
         let mut view_combined = BytesView::from_views([view_part1, view_part2]);
 
-        let mut dst = [MaybeUninit::<u8>::uninit(); 5];
-        view_combined.copy_to_uninit_slice(&mut dst);
+        let mut dst = MaybeUninit::<[u8; 5]>::uninit();
+        view_combined.copy_to_uninit_slice(dst.as_mut());
         assert!(view_combined.is_empty());
 
         // SAFETY: It has now been initialized.
-        let dst = unsafe { std::mem::transmute::<[MaybeUninit<u8>; 5], [u8; 5]>(dst) };
+        let dst = unsafe { dst.assume_init() };
 
         assert_eq!(dst, [10_u8, 20, 30, 40, 50]);
     }

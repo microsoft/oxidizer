@@ -1159,11 +1159,7 @@ fn read_string_in_section(reader: &mut Reader<'_>, section_id: u16) -> Result<St
 }
 
 fn read_bool(reader: &mut Reader<'_>, section_id: u16) -> Result<bool, Error> {
-    match reader.read_u8()? {
-        0 => Ok(false),
-        1 => Ok(true),
-        _ => Err(Error::malformed_section(section_id)),
-    }
+    bool::try_from(reader.read_u8()?).map_err(|_| Error::malformed_section(section_id))
 }
 
 fn count(value: usize) -> Result<u32, Error> {
