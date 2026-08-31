@@ -24,10 +24,9 @@
 anvil-miri-tree-borrows: anvil-miri-tree-borrows-validate-prereqs
     $ErrorActionPreference = 'Stop'
     if ($env:ANVIL_INCLUDE_AFFECTED -eq '--skip') { exit 0 }
-    $pkg = @(if ($env:ANVIL_INCLUDE_AFFECTED) { -split $env:ANVIL_INCLUDE_AFFECTED } else { '--workspace' })
     $env:MIRIFLAGS = "-Zmiri-tree-borrows $($env:MIRIFLAGS)".Trim()
     $env:RUSTFLAGS = "--cfg miri_tree_borrows $($env:RUSTFLAGS)".Trim()
-    & cargo '+{{ rust_nightly }}' miri test --all-features --tests @pkg
+    & "{{just_executable()}}" _anvil-miri-test
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # The three nightly-miri profiles share the same toolchain prereqs

@@ -148,13 +148,18 @@ mod tests {
 
     use super::*;
 
+    #[cfg(miri)]
+    const DEEP_TRIE_SEGMENTS: usize = 512;
+    #[cfg(not(miri))]
+    const DEEP_TRIE_SEGMENTS: usize = 4_096;
+
     #[test]
     fn failed_build_discards_deep_source_trie_iteratively() {
         std::thread::Builder::new()
             .stack_size(64 * 1024)
             .spawn(|| {
                 let mut path = String::new();
-                for index in 0..4_096 {
+                for index in 0..DEEP_TRIE_SEGMENTS {
                     let _ = write!(path, "/segment{index}");
                 }
 
