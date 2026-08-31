@@ -80,7 +80,7 @@ impl Sink {
     /// frozen clock (`SimpleClock::new_frozen()`) for deterministic, Miri-safe
     /// timestamps.
     ///
-    /// The sink receives both untargeted (global) and targeted enrichments.
+    /// The sink receives both untargeted and targeted enrichments.
     /// For a sink that ignores untargeted entries (the library-isolation
     /// pattern), use [`Sink::new_isolated`].
     ///
@@ -92,7 +92,7 @@ impl Sink {
     }
 
     /// Like [`Sink::new`], but configures the sink to ignore untargeted
-    /// (global) enrichments. Only entries explicitly targeted at this
+    /// enrichments. Only entries explicitly targeted at this
     /// sink's id (via `enrich_for(ID, …)`) are visible.
     ///
     /// Useful for library emitters that must not inherit application-level
@@ -293,7 +293,8 @@ impl Sink {
         }
     }
 
-    /// Builds an event via `build` and emits it to every registered processor.
+    /// Builds an event via `build` when at least one processor is interested
+    /// and dispatches it to each interested processor.
     ///
     /// Called by the [`emit!`](crate::emit!) macro with the captured
     /// [`SourceLocation`]; prefer that macro over calling this directly.

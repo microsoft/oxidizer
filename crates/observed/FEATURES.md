@@ -14,15 +14,15 @@
 
 ## Context & Enrichment
 
-- **Explicit sink passing** - `emit!(sink, event)` takes an `&Sink` as first argument; no ambient/global state
-- **Scoped enrichment** - `.enrich(&sink, entries)` on closures/futures attaches key-value context to all events in a scope
+- **Explicit sink passing** - `emit!(sink, event)` takes an `&Sink` as first argument; no ambient/global event or enrichment state
+- **Scoped enrichment** - `.enrich(&sink, entries)` on closures/futures attaches untargeted key-value context to events emitted through that sink's scope
 - **Per-sink thread-local storage** - each `Sink` owns a per-thread enrichment slot backed by `thread_local` crate;
   enrichments are pushed onto a per-thread linked list with RAII guards
 - **Typed enrichment structs** - `#[derive(Enrichment)]` converts structs into enrichment entries with the same field-level
   attributes as `Event` (`#[dimension(...)]`, `#[if_none(...)]`, `#[data_class]`, `#[unredacted]`);
   enrichment can opt into metric dimensions via `#[dimension(metric = "...")]` but cannot define a metric instrument
 - **Per-sink enrichment** - `.enrich_for(&sink, target, entries)` targets context to a specific sink
-- **Enrichment isolation** - library sinks can opt out of global enrichments via `Sink::new_isolated(ID, processors, clock)`
+- **Enrichment isolation** - library sinks can ignore untargeted enrichments via `Sink::new_isolated(ID, processors, clock)`
 - **Cross-thread context transfer** - `sink.transfer_context()` captures enrichment state for cross-thread propagation
 
 ## Sink Lifecycle
@@ -34,8 +34,8 @@
 
 ## Emission & Routing
 
-- **Processor-based dispatch** - `emit!(sink, ...)` sends to the sink's processors via `EventProcessor::process`
-- **Lazy event views** - each processor receives an `EventView` and pulls only the fields it needs; skipped fields never invoke their redaction closure (zero cost for rejected fields). Laziness past construction is per field, not per signal - see `emit!`'s "What emitting costs"
+- **Processor-based dispatch** - `emit!(sink, ...)` sends to the sink's interested processors via `EventProcessor::process`
+- **Lazy event views** - each processor receives an `EventView` and pulls only the fields it needs; skipped getters do not evaluate, convert, or redact their values, but field enumeration and visitor work still occur. Laziness past construction is per field, not per signal - see `emit!`'s "What emitting costs"
 - **Allocation-free static keys** - all field, enrichment, and interop keys are `&'static str`, so `Key`/`FieldDescriptor`/`LogFieldEntry`/`MetricFieldEntry` are `Copy` and snapshotting consumers (e.g. snapshotting/replay processors) retain keys with zero allocation. The `tracing` bridge forwards `tracing`'s `&'static` field/target/file names directly instead of cloning them.
 - **Interest-based lazy construction** - processors implement the required `is_interested(&EventDescription)`; if all return `false` the event closure is never called. It runs both as the construction gate and again while routing, so it may be called more than once per emission - keep it cheap, and keep the answer stable across those calls
 - **Per-processor filtering** - a processor that answers `false` from `is_interested` never receives the event, even when a peer accepted it
@@ -48,7 +48,7 @@
   1. **Default** - the type must implement `RedactedDisplay` (e.g. via `#[classified(...)]`). Compilation fails if it doesn't.
   2. **`data_class = <expr>`** - wraps the value in `Sensitive::new(value, expr)` before redaction, for types without built-in classification.
   3. **`unredacted`** - bypasses redaction entirely; the type must implement `Into<Value>`.
-- **Redaction** - `Sensitive<T>` + `RedactionEngine` enforce privacy-by-construction
+- **Redaction** - `Sensitive<T>` + `RedactionEngine` apply classification-aware redaction; explicit `#[unredacted]`, unclassified enrichment, and dynamic adaptor values bypass it and are caller-controlled
 - **Per-processor redaction** - each processor owns its own `RedactionEngine` privately, passing it to getter closures during `visit_fields`/`visit_enrichments`; the getters accept any `&dyn Redactor`
 
 ```text
@@ -64,7 +64,7 @@ emit!(sink, MyEvent { a: expensive() })
   │
   ├── resolve enrichments: walk per-sink TLS linked list
   │
-  ├── build EventView(event, enrichments) - zero-cost, just a pair of references
+  ├── build EventView(event, enrichments) - cheap snapshot of event and enrichment state
   │
   └── for each interested processor:
         └── processor.process(&event_view)

@@ -39,9 +39,9 @@ impl fmt::Debug for UnredactedValue {
 
 /// A single enrichment entry: a key-value pair with data classification.
 ///
-/// Every enrichment carries privacy metadata so that string values are redacted
-/// through the [`data_privacy::RedactionEngine`] at emission time, matching the
-/// privacy guarantees of event fields.
+/// Classified enrichment values are redacted through the processor-supplied
+/// redactor at extraction time. Unclassified values are stored directly,
+/// including strings, and must already be appropriate to emit.
 ///
 /// For classified newtypes (`#[classified(...)]`), use [`new()`](Self::new) -
 /// no `Into<Value>` impl required. For dynamically classified values, use
@@ -59,7 +59,8 @@ pub struct EnrichmentEntry {
     /// Metric dimensions are opt-in via `#[dimension]`, mirroring events.
     metric_key: Option<Key>,
     /// If `Some`, this entry only applies to the specified sink (targeted enrichment).
-    /// If `None`, this is a global enrichment visible to all emitters.
+    /// If `None`, this is an untargeted entry visible within the containing sink
+    /// scope, subject to the sink's isolation setting.
     target: Option<SinkId>,
 }
 

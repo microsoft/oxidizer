@@ -57,8 +57,8 @@ impl Transfer {
     /// captured by [`Transfer`], so it is visible on every thread the
     /// transfer is applied to.
     ///
-    /// The entries are **global**: every non-isolated sink that observes this
-    /// transfer sees them. Use
+    /// The entries are **untargeted**: every non-isolated captured sink slot
+    /// that observes this transfer sees them. Use
     /// [`with_enrichment_for`](Self::with_enrichment_for) to restrict them to a
     /// single sink.
     pub fn with_enrichment(mut self, additional_enrichment: impl Enrichment) -> Self {

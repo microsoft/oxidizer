@@ -5,8 +5,9 @@
 //!
 //! An [`EventView`] wraps a `&dyn DynEvent` together with a snapshot of the
 //! enrichment context active at emit time. Processors pull only the data
-//! they need - fields that are skipped never invoke their redaction
-//! closure, achieving zero cost for rejected fields.
+//! they need. Skipped getters never evaluate, convert, or redact their values
+//! and avoid the associated allocations, while field enumeration and visitor
+//! work still occur.
 //!
 //! The view does **not** retain a reference to the [`Sink`](crate::Sink) that produced
 //! it. The enrichment chain head is captured as a cheap [`Arc`] snapshot
@@ -94,8 +95,8 @@ impl EventEnrichment {
 /// A lazy, pull-based view of an event and its enrichments.
 ///
 /// Processors receive this from [`EventProcessor::process`](super::EventProcessor::process)
-/// and pull only the fields/enrichments they need. Skipped fields never
-/// invoke their redaction closure.
+/// and pull only the fields/enrichments they need. Skipped getters never
+/// evaluate, convert, or redact their values.
 ///
 /// The enrichment context is captured as a snapshot at view construction.
 /// Concurrent enrichment pushes after that point are not visible to this
@@ -149,10 +150,11 @@ impl<'a> EventView<'a> {
         }
     }
 
-    /// Returns the wall-clock timestamp captured when this view was created.
+    /// Returns the timestamp associated with this event.
     ///
-    /// All processors sharing this view see the same instant, avoiding
-    /// per-destination timestamp drift.
+    /// Live sink dispatch uses the sink clock; synthetic views return the
+    /// timestamp supplied to [`new_synthetic`](Self::new_synthetic). All
+    /// processors sharing one view see the same instant.
     #[must_use]
     #[inline]
     pub fn timestamp(&self) -> SystemTime {
@@ -166,12 +168,10 @@ impl<'a> EventView<'a> {
         self.event.name()
     }
 
-    /// Returns the event severity (only meaningful for log-producing events).
+    /// Returns the severity declared by the event's log description.
     ///
-    /// Derived from the log signal on [`description`](Self::description), which
-    /// is the single statement that decides both routing and the exported
-    /// level - an event cannot be routed as a log at one severity and exported
-    /// at another.
+    /// Processors decide how that metadata maps to their destination record and
+    /// may ignore or remap it.
     #[must_use]
     #[inline]
     pub fn severity(&self) -> Option<Severity> {
@@ -212,7 +212,11 @@ impl<'a> EventView<'a> {
         self.event.source_crate()
     }
 
-    /// Returns the compile-time event description (signals, metrics, etc.).
+    /// Returns the event description (signals, metrics, etc.).
+    ///
+    /// Typed events expose their compile-time description; dynamic events may
+    /// construct this metadata at runtime and omit Rust type identity. Match on
+    /// the canonical name when one processor must accept both sources.
     #[must_use]
     #[inline]
     pub fn description(&self) -> EventDescription {
@@ -223,7 +227,9 @@ impl<'a> EventView<'a> {
     ///
     /// For each field, the visitor receives a [`FieldDescriptor`] and a getter
     /// closure. The getter is only invoked if the processor wants the value -
-    /// it takes a `&dyn Redactor` and returns the redacted [`Value`].
+    /// it takes a `&dyn Redactor` and returns the redacted [`Value`]. Skipping
+    /// it avoids value evaluation, conversion, redaction, and their allocations,
+    /// but enumeration and visitor calls still happen until iteration stops.
     ///
     /// The visitor returns [`ControlFlow::Continue`] to keep iterating or
     /// [`ControlFlow::Break`] to stop early.
@@ -238,6 +244,8 @@ impl<'a> EventView<'a> {
     ///
     /// Same pattern as [`visit_fields`](Self::visit_fields) - the getter
     /// closure is only invoked if the processor wants the enrichment value.
+    /// Enumeration still constructs descriptors and getter closures for
+    /// surviving entries before the visitor can reject them.
     ///
     /// Entries are yielded outermost-first. Isolation and targeting rules
     /// captured at view-construction time are applied inline. If duplicate
