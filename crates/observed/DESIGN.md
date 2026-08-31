@@ -183,7 +183,10 @@ Rust services and libraries need structured telemetry that is:
    - **`unredacted`** - bypasses redaction entirely; the type must implement `Into<Value>`. Used for primitives and other values the caller has already deemed safe to emit.
 
    `data_class` and `unredacted` are mutually exclusive (compile error if both specified). `EnrichmentEntry::unclassified`
-   and adaptor-provided dynamic values are also caller-controlled and are not redacted by `observed`.
+   is a further caller-controlled bypass: the value is stored pre-converted and no redactor ever sees it. A `DynEvent` adaptor
+   is a different case - its field getters receive the same per-processor `&dyn Redactor` as typed events, so its fields are
+   redacted when it applies that redactor; what `observed` cannot do is enforce it, because the adaptor writes the getter.
+   The dynamic event *body* is the genuine exception and reaches exporters verbatim.
 
 1. **Data classification annotations.** Attributes carrying personal or sensitive data must be labeled with an appropriate `DataClass`.
    This annotation feeds into the redaction engine's policy decisions.
