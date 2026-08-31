@@ -1,13 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Verifies that `observed` works correctly with a multithreaded Tokio runtime
-//! (the default `#[tokio::main]` configuration).
+//! Demonstrates `observed` on a multithreaded Tokio runtime (the default
+//! `#[tokio::main]` configuration).
 //!
 //! This example spawns concurrent tasks that emit events with enrichment,
 //! demonstrating that context propagation via `EnrichFutureExt::enrich`
-//! (which wraps the future so enrichment is pushed on every poll) survives
-//! cross-thread `.await` points.
+//! (which wraps the future so enrichment is pushed on every poll) works on a
+//! runtime where task migration is permitted but not asserted.
 //!
 //! Run with:
 //! ```sh
@@ -85,7 +85,7 @@ async fn main() {
     );
 
     // 2. Spawn tasks inside an enrichment scope - each task wraps its future
-    //    with `.enrich()` so the enrichment survives cross-thread migrations.
+    //    with `.enrich()` so the enrichment is restored on every poll.
     let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(4));
     let mut handles = Vec::new();
 
@@ -97,7 +97,8 @@ async fn main() {
                 // Synchronize so all tasks are running concurrently.
                 b.wait().await;
 
-                // Yield several times to allow thread migration.
+                // Yield several times to exercise repeated polls; Tokio may
+                // resume the task on the same or a different worker thread.
                 for i in 0..3 {
                     tokio::task::yield_now().await;
                     emit!(task_emitter, TaskCompleted { task_id, result: i });
