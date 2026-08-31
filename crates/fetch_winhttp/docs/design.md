@@ -26,8 +26,9 @@ Why a WinHTTP transport:
 - **Smaller dependency surface.** No rustls/aws-lc-rs/native-tls/hyper on the
   request path.
 
-Out of scope: any non-Windows platform (the crate is `#[cfg(windows)]` in its
-entirety); WebSocket upgrades; proxies (§2.3).
+Out of scope: any non-Windows platform (the transport and the entire public API
+are Windows-only; on other targets the crate still compiles, exposing nothing);
+WebSocket upgrades; proxies (§2.3).
 
 ### 1.1 Constructing a client
 
