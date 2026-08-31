@@ -392,12 +392,12 @@ mod tests {
     use super::{
         CONNECTION_IDLE_TIMEOUT_MINIMUM_MS, ConnectionIdleTimeout, ConversionError, EmbeddedNulError, HeaderByteLengthIsOddError,
         InteriorZeroCodeUnitError, InvalidProtocolMaskError, InvalidProtocolVersionError, InvalidUtf16Error, RequestHeadersTooLargeError,
-        ReturnedLengthOutOfBoundsError, UnexpectedByteLengthError, UnsupportedHttpVersionError, WINHTTP_DECOMPRESSION_FLAG_DEFLATE,
-        WINHTTP_DECOMPRESSION_FLAG_GZIP, WINHTTP_DISABLE_AUTHENTICATION, WINHTTP_DISABLE_COOKIES, WINHTTP_FLAG_AUTOMATIC_CHUNKING,
-        WINHTTP_FLAG_SECURE, connection_idle_timeout_millis, context_bytes, decompression_mask, disable_feature_mask, dword_bytes,
-        dword_millis, header_buffer_units, headers_to_utf16, host_to_utf16, http2_keep_alive_millis, http3_keep_alive_millis,
-        method_to_utf16, parse_header_buffer, parse_protocol_used, path_to_utf16, protocol_options, request_open_flags,
-        validate_request_header_unit_count,
+        ReturnedLengthOutOfBoundsError, UNLIMITED_TIMEOUT, UnexpectedByteLengthError, UnsupportedHttpVersionError,
+        WINHTTP_DECOMPRESSION_FLAG_DEFLATE, WINHTTP_DECOMPRESSION_FLAG_GZIP, WINHTTP_DISABLE_AUTHENTICATION, WINHTTP_DISABLE_COOKIES,
+        WINHTTP_FLAG_AUTOMATIC_CHUNKING, WINHTTP_FLAG_SECURE, connection_idle_timeout_millis, context_bytes, decompression_mask,
+        disable_feature_mask, dword_bytes, dword_millis, header_buffer_units, headers_to_utf16, host_to_utf16, http2_keep_alive_millis,
+        http3_keep_alive_millis, method_to_utf16, parse_header_buffer, parse_protocol_used, path_to_utf16, protocol_options,
+        request_open_flags, validate_request_header_unit_count,
     };
 
     // The generated error wrappers retain user-erased source error state.
@@ -431,6 +431,17 @@ mod tests {
         // unchanged. Without a case here, a conversion that always returned its floor
         // would satisfy every other expectation in this test.
         assert_eq!(http3_keep_alive_millis(Duration::from_secs(30)), 30_000);
+    }
+
+    /// Pins the sentinel `WinHttpSetTimeouts` reads as "no timeout".
+    /// Session setup passes this constant for all four native deadlines and the session
+    /// tests compare what was written against the same constant, so both sides move
+    /// together. Only a literal expectation catches a sentinel that stopped being the
+    /// documented one: a positive value would cap every request at that many
+    /// milliseconds instead of deferring to the canonical `fetch` timeouts.
+    #[test]
+    fn unlimited_timeout_matches_the_native_sentinel() {
+        assert_eq!(UNLIMITED_TIMEOUT, -1);
     }
 
     /// Pins the floor recorded on [`crate::bindings::WINHTTP_OPTION_CONNECTION_IDLE_TIMEOUT`].
