@@ -17,9 +17,9 @@
 //! - Emits **structured, typed events** via `#[event(...)]` and the [`emit!`] macro
 //! - Supports **enrichment** - scoped, stackable, context-propagated entries
 //!   attached to all events in scope (via RAII guards and `#[derive(Enrichment)]` structs)
-//! - Supports **redaction** - classified fields are extracted through a
-//!   [`RedactionEngine`](data_privacy::RedactionEngine), while explicit
-//!   unredacted paths remain caller-controlled
+//! - Redacts **by default** - a field is extracted through a
+//!   [`RedactionEngine`](data_privacy::RedactionEngine) unless the author opts it
+//!   out field by field with the `#[unredacted]` escape hatch
 //! - Provides **per-field routing** - one event struct can produce logs and metrics with
 //!   independent field subsets per signal
 //! - Integrates with **OpenTelemetry** through pluggable [`EventProcessor`](processing::EventProcessor) implementations
@@ -229,7 +229,7 @@ pub use key::Key;
 /// | `#[dimension(metric)]` | Opt the field in as a metric dimension keyed by the field's own name. |
 /// | `#[dimension(metric = "...")]` | Opt the field in as a metric dimension under the given key. |
 /// | `#[dimension(log = "...", metric = "...")]` | Route both signals with independent keys. Either side may be omitted (but not both); `log = exclude` omits the field from logs, and a bare `metric` uses the field name. |
-/// | `#[unredacted]` | Bypass redaction; the type must implement `Into<Value>`, or be a directly spelled borrowed `&str`. |
+/// | `#[unredacted]` | Escape hatch: bypass redaction for a value that carries no user data. Never implicit. The type must implement `Into<Value>`, or be a directly spelled borrowed `&str`. |
 /// | `#[data_class(<expr>)]` | Wrap the value in `Sensitive::new(value, <expr>)` for classification. |
 /// | `#[if_none(drop)]` / `#[if_none("...")]` | Control how a `None` `Option<T>` is recorded. The default is `#[if_none("n/a")]`. |
 ///
@@ -251,8 +251,11 @@ pub use key::Key;
 ///    as a trait object and redacted at emission time.
 /// 2. **`#[data_class(<expr>)]`** - wraps the value in `Sensitive::new(value, <expr>)`
 ///    before storing, for types without built-in classification.
-/// 3. **`#[unredacted]`** - bypasses redaction entirely; the type must implement
-///    `Into<Value>`. A borrowed `&str` is the one exception: it has no
+/// 3. **`#[unredacted]`** - the escape hatch: bypasses redaction entirely, so it
+///    is reserved for values that carry no user data, such as counters, status
+///    codes and other constants. It is never applied implicitly - a field only
+///    leaves the engine when its author writes the attribute. The type must
+///    implement `Into<Value>`. A borrowed `&str` is the one exception: it has no
 ///    `Into<Value>` and is copied into an `Arc<str>` instead. Like `Option<T>`,
 ///    it is detected from the field's spelling, so an aliased `&str` is not
 ///    recognized and needs an explicit `Arc::<str>::from(s)`.
@@ -417,7 +420,7 @@ pub use observed_macros::Enrichment;
 /// | `#[dimension(metric)]` | Register the field as a metric dimension keyed by the field's own name. |
 /// | `#[dimension(metric = "...")]` | Register the field as a metric dimension with the given key. |
 /// | `#[dimension(log = "...", metric = "...")]` | Route both signals with independent keys. Either side may be omitted (but not both); `log = exclude` omits the field from logs, and a bare `metric` uses the field name. |
-/// | `#[unredacted]` | Bypass redaction; the type must implement `Into<Value>`. |
+/// | `#[unredacted]` | Escape hatch: bypass redaction for a value that carries no user data. Never implicit. The type must implement `Into<Value>`. |
 /// | `#[data_class(<expr>)]` | Wrap the value in `Sensitive::new(value, <expr>)` for classification. |
 /// | `#[if_none(drop)]` / `#[if_none("...")]` | Control how a `None` `Option<T>` is recorded. The default is `#[if_none("n/a")]`. |
 ///
