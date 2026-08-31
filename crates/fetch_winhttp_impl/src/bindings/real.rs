@@ -288,4 +288,24 @@ mod tests {
     fn ordinary_callback_result_succeeds() {
         RealBindings::callback_result_with(None, || WinHttpError::new(1, WinHttpOperation::SetStatusCallback)).unwrap();
     }
+
+    #[test]
+    fn a_rejected_callback_registration_reports_the_operating_system_failure_code() {
+        // WinHTTP reports a rejected registration by returning the sentinel
+        // address and leaving the reason in the thread's last-error slot, so
+        // that slot is the only input the production path has. The code itself
+        // is arbitrary; only its round trip matters.
+        const REGISTRATION_FAILURE: u32 = 4321;
+
+        // SAFETY: SetLastError has no preconditions and only writes the calling
+        // thread's own last-error slot, which this thread reads back below.
+        unsafe { SetLastError(WIN32_ERROR(REGISTRATION_FAILURE)) };
+
+        let error = RealBindings::callback_result(Some(usize::MAX), WinHttpOperation::SetStatusCallback).unwrap_err();
+
+        assert_eq!(error.code(), REGISTRATION_FAILURE);
+        assert_eq!(error.operation(), WinHttpOperation::SetStatusCallback);
+
+        RealBindings::callback_result(None, WinHttpOperation::SetStatusCallback).unwrap();
+    }
 }

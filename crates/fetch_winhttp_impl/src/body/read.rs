@@ -690,6 +690,16 @@ mod tests {
     }
 
     #[test]
+    fn the_read_upper_bound_holds_its_intended_size() {
+        // Every other assertion about read sizing is expressed relative to this
+        // constant and so moves with it. An absolute anchor is what keeps those
+        // assertions meaningful, because a bound that silently collapsed to a
+        // few hundred bytes would satisfy all of them while making every read
+        // of a large body cost an extra round of WinHTTP calls.
+        assert_eq!(DESIRED_READ_SIZE, 262_144);
+    }
+
+    #[test]
     fn an_undeclared_length_takes_whatever_has_arrived() {
         let mut harness = reader([ReadBehavior::data(b"z".to_vec())], TrailerBehavior::None);
 
