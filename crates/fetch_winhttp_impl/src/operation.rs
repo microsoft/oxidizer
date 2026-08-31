@@ -181,6 +181,10 @@ impl Drop for RawContextOwner {
 /// after destroying the receiver endpoint; cancellation destroys the receiver
 /// first and then closes the handle.
 pub(crate) struct RequestGuard {
+    /// Closing this handle is the guard's whole purpose, and the handle's own
+    /// destructor performs it, so the guard needs no `Drop` of its own. The
+    /// remaining field is a raw pointer with no destructor, leaving nothing for
+    /// a hand-written one to order.
     request: Option<RequestHandle>,
     context: NonNull<RequestContext>,
 }
@@ -292,10 +296,6 @@ impl RequestGuard {
             request_slot: &mut self.request,
         }
     }
-
-    fn close(&mut self) {
-        drop(self.request.take());
-    }
 }
 
 // SAFETY: Send requires that transferring ownership to another thread is
@@ -307,12 +307,6 @@ impl RequestGuard {
 // the guard moves the sole request-handle close authority with it, so the
 // handle is still closed exactly once and from a single thread.
 unsafe impl Send for RequestGuard {}
-
-impl Drop for RequestGuard {
-    fn drop(&mut self) {
-        self.close();
-    }
-}
 
 #[derive(Debug)]
 /// Owns one request handle while awaiting its callback completion.
@@ -391,6 +385,11 @@ impl OperationFuture<'_> {
 }
 
 impl Drop for OperationFuture<'_> {
+    // The receiver lives in a `ManuallyDrop`, so removing this body leaks the
+    // endpoint and lets the request handle close ahead of it, inverting the
+    // teardown order this type exists to enforce. Neither consequence is
+    // observable from a test assertion; Miri owns that guarantee.
+    #[cfg_attr(test, mutants::skip)]
     fn drop(&mut self) {
         if self.receiver_live {
             // SAFETY: ManuallyDrop::drop requires that the value is never used

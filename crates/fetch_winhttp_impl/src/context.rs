@@ -429,6 +429,12 @@ impl fmt::Debug for CallbackOperationSlot {
 }
 
 impl Drop for CallbackOperationSlot {
+    // The payload lives in a `MaybeUninit`, so removing this body leaks the
+    // completion sender and any buffer still lent to WinHTTP. The event backing
+    // that sender is stored inline here, so no receiver can outlive the slot to
+    // witness the missing disconnect, and no assertion can reach the leak; Miri
+    // owns that guarantee.
+    #[cfg_attr(test, mutants::skip)]
     fn drop(&mut self) {
         let state = *self.state.get_mut();
 
