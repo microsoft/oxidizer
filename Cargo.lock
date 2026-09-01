@@ -1761,7 +1761,7 @@ dependencies = [
 
 [[package]]
 name = "fetch_winhttp"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "all_the_time",
  "alloc_tracker",
@@ -1786,7 +1786,7 @@ dependencies = [
 
 [[package]]
 name = "fetch_winhttp_impl"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bytes",
  "bytesbuf",
