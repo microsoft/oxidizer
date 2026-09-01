@@ -10,6 +10,8 @@
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+#[cfg(feature = "std")]
+use std::thread;
 
 use static_assertions::{assert_impl_all, assert_not_impl_any};
 #[cfg(feature = "std")]
@@ -72,8 +74,6 @@ fn without_std_a_thread_carries_no_thread_id() {
 #[cfg(feature = "std")]
 #[test]
 fn with_std_every_component_takes_part_in_equality() {
-    use std::thread;
-
     let id = thread::current().id();
     let owner = new_owner();
     let numa_node = new_numa_node(0);
