@@ -20,7 +20,7 @@ use crate::zstd::{CompressionLevel, CompressorOptions, DecompressorOptions};
 ///
 /// zstd accepts 1 to 22, but the top of that range is not a sensible destination for a portable
 /// "highest quality" setting: measured on realistic JSON, level 19 is over 200 times slower than
-/// level 3 for about 17% better compression, and 22 buys nothing over 19 at all. The scale is
+/// level 3 for about `17%` better compression, and 22 buys nothing over 19 at all. The scale is
 /// therefore anchored on zstd's own default rather than stretched across the whole range, so
 /// [`Level::DEFAULT`] means what it says on every format -- a balanced trade-off.
 ///

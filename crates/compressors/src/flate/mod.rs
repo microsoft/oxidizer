@@ -4,7 +4,7 @@
 //! The deflate family: raw deflate, zlib and gzip.
 //!
 //! All three wrap the same deflate payload, differing only in framing, so the `deflate`, `zlib` and
-//! `gzip` modules share one codec implementation, parameterised by [`Wrapper`].
+//! `gzip` modules share one codec implementation, parameterized by [`Wrapper`].
 
 pub(crate) mod codec;
 
@@ -15,9 +15,9 @@ use crate::limits::FormatLimits;
 
 /// The deflate family's default bounds.
 ///
-/// Deflate cannot expand its input by more than about 1032x -- a structural property of the format,
+/// Deflate cannot expand its input by more than about `1032x` -- a structural property of the format,
 /// not a tuning choice -- so a single stream is inherently bounded. Measured worst case for 1 MiB of
-/// zeros is 1015x, so this sits just above what the format can actually produce and never rejects
+/// zeros is `1015x`, so this sits just above what the format can actually produce and never rejects
 /// data deflate could legitimately have generated. No cap on total size, so large streams decompress.
 pub(crate) const DEFAULT_LIMITS: FormatLimits = FormatLimits::new(Some(1_100), None);
 

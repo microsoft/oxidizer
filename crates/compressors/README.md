@@ -105,7 +105,7 @@ assert_eq!(
 
 ## Reusing engine state
 
-Building a compressor allocates and initialises a substantial amount of state – on a small
+Building a compressor allocates and initializes a substantial amount of state – on a small
 message, as much work as the compression itself. A service that compresses many messages should
 hold one [`Pool`][__link7], clone it into each compressor, and let the engine return to the pool when the
 compressor drops. The saving is roughly fixed per message, so it matters most for small bodies.
@@ -137,10 +137,10 @@ Use each format’s `decompress_with_limits` or [`format::Format::decompress_wit
 untrusted in-memory input.
 
 Each format declares its own default bounds, because a single portable ratio cannot serve both
-families. Deflate cannot expand by more than about 1032x – a structural property of the format –
-so the deflate family defaults to 1100x and never rejects data it could legitimately have
-produced. Brotli has no such ceiling: measured on ordinary repetitive input it reaches 9 000x
-for a repeated short string, 21 000x for a repeated sentence and 80 660x for a megabyte of
+families. Deflate cannot expand by more than about `1032x` – a structural property of the format –
+so the deflate family defaults to `1100x` and never rejects data it could legitimately have
+produced. Brotli has no such ceiling: measured on ordinary repetitive input it reaches `9 000x`
+for a repeated short string, `21 000x` for a repeated sentence and `80 660x` for a megabyte of
 zeros. It therefore has no default ratio limit; callers handling untrusted Brotli input must set
 an absolute output limit.
 
@@ -178,7 +178,7 @@ A build that needs only `brotli` or only `zstd` never compiles `flate2` at all.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/compressors">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbG9ux_ZS8yDcbS1rrcH9oMakbVFUvP3D5oGcbUqnIEIEF3JlhZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbPXapntOaTUUbXschH8PBL2cbzMTH-IVZOp4b6ursbjWBtx5hZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
  [__link0]: https://crates.io/crates/bytesbuf/0.9.0
  [__link1]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesView
  [__link10]: https://docs.rs/compressors/0.1.0/compressors/?search=format::Format::decompress

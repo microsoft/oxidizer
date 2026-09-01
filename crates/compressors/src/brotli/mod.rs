@@ -134,7 +134,7 @@ impl From<Quality> for u8 {
 ///
 /// A larger window lets the compressor find matches further back, which is what helps on large inputs.
 ///
-/// It is tempting to read this as a memory dial and shrink it to economise. Measurement says
+/// It is tempting to read this as a memory dial and shrink it to economize. Measurement says
 /// otherwise, and in more than one direction. Compressor memory and throughput do not fall off
 /// smoothly as the window shrinks: below a threshold the compressor allocates *more* and runs
 /// *slower*, so a small window can cost on every axis at once. The ratio is not monotonic either,

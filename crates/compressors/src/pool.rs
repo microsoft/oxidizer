@@ -30,7 +30,7 @@ pub(crate) struct EngineKey {
 
 /// A shared, cloneable pool of reusable compression engine state.
 ///
-/// Building a compressor allocates and initialises a substantial amount of state, and on a small
+/// Building a compressor allocates and initializes a substantial amount of state, and on a small
 /// message that setup can cost as much as the compression itself. A service that builds a fresh
 /// compressor per message therefore spends much of its compression budget getting ready to compress.
 /// Recycling engines removes that cost.
@@ -101,7 +101,7 @@ pub(crate) struct EngineKey {
 /// seen on the wire. Nothing about gzip prevents recycling: the obstacle is only that the engine's
 /// reset cannot express gzip framing. Taking over that framing here would let gzip decompressors join
 /// the pool, but it would mean owning header parsing and checksum validation permanently in order
-/// to route around someone else's API gap. That is a poor trade for a crate whose job is to stream
+/// to route around an upstream API gap. That is a poor trade for a crate whose job is to stream
 /// bytes, so the gap is left where it belongs. If the engine ever gains a reset that can express
 /// gzip framing, gzip decompressors can start being pooled with no change to calling code.
 ///

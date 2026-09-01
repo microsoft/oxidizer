@@ -92,7 +92,7 @@ pub trait Compression: sealed::Compression + fmt::Debug + Send + Sync {
     ///
     /// # Errors
     ///
-    /// Returns an error if input is still pending or end of input has been signalled.
+    /// Returns an error if input is still pending or end of input has been signaled.
     fn push(&mut self, input: BytesView) -> Result<()>;
 
     /// Signals that no further input will be supplied.

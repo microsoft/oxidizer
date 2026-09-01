@@ -166,7 +166,7 @@ fn rejects_a_bomb_before_materialising_it() {
     // fully materialised, so this test would be intolerably slow if it did not.
     //
     // The cap is set explicitly rather than relying on the default: deflate cannot expand by more
-    // than about 1032x, so its default ratio never fires on data the format could have produced.
+    // than about `1032x`, so its default ratio never fires on data the format could have produced.
     // An absolute cap is what actually protects a caller that buffers the output.
     let bomb = gzip::compress(view(&vec![0_u8; 64 * 1024 * 1024]), GlobalPool::new()).expect("compression succeeds");
     assert!(bomb.len() < 100 * 1024, "the bomb should be tiny: {} bytes", bomb.len());
@@ -195,7 +195,7 @@ fn rejects_a_bomb_before_materialising_it() {
 
 #[test]
 fn the_default_limits_accept_maximally_compressible_deflate_data() {
-    // Deflate's structural ceiling is about 1032x, so the gzip default must sit above it: data the
+    // Deflate's structural ceiling is about `1032x`, so the gzip default must sit above it: data the
     // format could legitimately have produced must never be rejected as a bomb.
     let payload = vec![0_u8; 8 * 1024 * 1024];
     let compressed = gzip::compress(view(&payload), GlobalPool::new()).expect("compression succeeds");

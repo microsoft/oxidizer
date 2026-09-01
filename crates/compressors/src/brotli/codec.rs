@@ -4,7 +4,7 @@
 //! The brotli codec.
 //!
 //! Brotli is a genuinely different engine from the deflate family: a different state type, a
-//! different way of signalling completion, and an output slice that must already be initialized.
+//! different way of signaling completion, and an output slice that must already be initialized.
 //! It is the format that proves the [`Codec`] abstraction is not just shaped around flate2.
 
 use std::mem::MaybeUninit;

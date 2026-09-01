@@ -89,7 +89,7 @@ impl Format {
 
     /// The HTTP `Content-Encoding` token for this format, if it has one.
     ///
-    /// Returns `None` for `Format::Deflate`: raw deflate has no HTTP token. Note that HTTP's
+    /// Returns `None` for `Format::Deflate`: raw deflate has no HTTP token. Note that the HTTP
     /// `deflate` token means a *zlib* stream, not raw deflate, so it maps to `Format::Zlib`.
     #[must_use]
     #[cfg_attr(
@@ -469,7 +469,7 @@ mod tests {
     #[cfg(all(feature = "deflate", feature = "zlib"))]
     #[test]
     fn http_deflate_token_means_zlib() {
-        // The most common source of confusion in this area: HTTP's `deflate` token denotes a zlib
+        // The most common source of confusion in this area: the HTTP `deflate` token denotes a zlib
         // stream, not raw deflate.
         assert_eq!(Format::from_content_encoding("deflate"), Some(Format::Zlib));
         assert_eq!(Format::Deflate.content_encoding(), None);

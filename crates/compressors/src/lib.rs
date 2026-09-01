@@ -99,7 +99,7 @@
 //!
 //! # Reusing engine state
 //!
-//! Building a compressor allocates and initialises a substantial amount of state -- on a small
+//! Building a compressor allocates and initializes a substantial amount of state -- on a small
 //! message, as much work as the compression itself. A service that compresses many messages should
 //! hold one [`Pool`], clone it into each compressor, and let the engine return to the pool when the
 //! compressor drops. The saving is roughly fixed per message, so it matters most for small bodies.
@@ -132,10 +132,10 @@
 //! untrusted in-memory input.
 //!
 //! Each format declares its own default bounds, because a single portable ratio cannot serve both
-//! families. Deflate cannot expand by more than about 1032x -- a structural property of the format --
-//! so the deflate family defaults to 1100x and never rejects data it could legitimately have
-//! produced. Brotli has no such ceiling: measured on ordinary repetitive input it reaches 9 000x
-//! for a repeated short string, 21 000x for a repeated sentence and 80 660x for a megabyte of
+//! families. Deflate cannot expand by more than about `1032x` -- a structural property of the format --
+//! so the deflate family defaults to `1100x` and never rejects data it could legitimately have
+//! produced. Brotli has no such ceiling: measured on ordinary repetitive input it reaches `9 000x`
+//! for a repeated short string, `21 000x` for a repeated sentence and `80 660x` for a megabyte of
 //! zeros. It therefore has no default ratio limit; callers handling untrusted Brotli input must set
 //! an absolute output limit.
 //!

@@ -61,7 +61,7 @@ define_format! {
 /// The portable scale is anchored on zstd's default so that [`Level::DEFAULT`] means the same
 /// thing on every format. Native negative fast modes and levels above the portable range remain
 /// reachable here. Strong levels are rarely worth it -- measured on realistic JSON, level 19 is
-/// over 200 times slower than level 3 for about 17% better compression.
+/// over 200 times slower than level 3 for about `17%` better compression.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CompressionLevel(i32);
 

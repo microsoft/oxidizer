@@ -15,7 +15,7 @@ use bytesbuf::BytesView;
 ///
 /// It is deliberately *not* `#[non_exhaustive]`. These four states describe a complete codec step,
 /// and a caller that fails to handle one has a bug. Forcing a wildcard arm would convert that bug
-/// from a compile error into silent misbehaviour, which is the opposite of what a wildcard is for.
+/// from a compile error into silent misbehavior, which is the opposite of what a wildcard is for.
 #[derive(Debug)]
 #[expect(
     clippy::large_enum_variant,

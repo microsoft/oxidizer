@@ -60,9 +60,9 @@ impl<T> Limit<T> {
 ///
 /// | Format | Default ratio bound | Why |
 /// |---|---|---|
-/// | `deflate`, `zlib`, `gzip` | 1100x | deflate cannot expand further than about 1032x; that is structural |
+/// | `deflate`, `zlib`, `gzip` | `1100x` | deflate cannot expand further than about `1032x`; that is structural |
 /// | `brotli` | none | brotli has no structural ceiling, so any ratio bound rejects sufficiently compressible legitimate data |
-/// | `zstd` | 250 000x | zstd has no structural ceiling either, so it needs the same loose bound |
+/// | `zstd` | `250 000x` | zstd has no structural ceiling either, so it needs the same loose bound |
 ///
 /// No format caps total output size or stream count by default, so a multi-gigabyte or
 /// many-member stream decompresses.
@@ -338,7 +338,7 @@ mod tests {
         // An absolute cap would reject this; a ratio guard must not.
         DEFAULTS
             .check(64 * 1024 * 1024 * 1024, 640 * 1024 * 1024 * 1024, 1)
-            .expect("a 640 GB stream at 10x expansion is legitimate");
+            .expect("a 640 GB stream at tenfold expansion is legitimate");
     }
 
     #[test]

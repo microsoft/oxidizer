@@ -63,7 +63,7 @@ pub(crate) trait Codec {
     /// bytes written to the front of `output`.
     ///
     /// `operation` is only `Flush` or `Finish` on the final slice of the currently pending input.
-    /// A [`BytesView`] is a chain of segments, so signalling either operation on an earlier segment
+    /// A [`BytesView`] is a chain of segments, so signaling either operation on an earlier segment
     /// would flush or finalize at the wrong boundary.
     fn step(&mut self, input: &[u8], output: &mut [MaybeUninit<u8>], operation: Operation) -> Result<(Step, usize, usize)>;
 
@@ -93,7 +93,7 @@ enum State {
     Open,
     /// Draining a resumable flush. `end_after` queues finalization behind it.
     Flushing { end_after: bool },
-    /// The caller signalled end of input; drain the engine.
+    /// The caller signaled end of input; drain the engine.
     Finishing,
     /// A compressed stream ended and the decoder is waiting for another one or EOF.
     BetweenStreams,
@@ -167,7 +167,7 @@ impl Pump {
                 return Err(Error::invalid_state("cannot push more input while a flush is still pending"));
             }
             State::Finishing | State::Done => {
-                return Err(Error::invalid_state("cannot push more input after end of input was signalled"));
+                return Err(Error::invalid_state("cannot push more input after end of input was signaled"));
             }
             State::Failed => {
                 return Err(Error::invalid_state("cannot push more input after the codec failed"));
@@ -188,7 +188,7 @@ impl Pump {
             | State::AwaitingEof
             | State::AtStreamLimit { .. }
             | State::Done => {
-                return Err(Error::invalid_state("cannot flush after end of input was signalled"));
+                return Err(Error::invalid_state("cannot flush after end of input was signaled"));
             }
             State::Failed => {
                 return Err(Error::invalid_state("cannot flush after the codec failed"));
@@ -650,7 +650,7 @@ mod tests {
     }
 
     #[test]
-    fn await_eof_completes_when_end_was_already_signalled() {
+    fn await_eof_completes_when_end_was_already_signaled() {
         #[derive(Debug)]
         struct StrictEnd;
 

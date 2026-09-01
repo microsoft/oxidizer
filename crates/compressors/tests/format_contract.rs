@@ -339,7 +339,7 @@ macro_rules! format_contract {
             #[test]
             fn default_limits_accept_ordinary_highly_compressible_data() {
                 // Regression guard. A single portable ratio limit was calibrated on deflate, whose
-                // structural ceiling is ~1032x. Brotli legitimately reaches tens of thousands of
+                // structural ceiling is about `1032x`. Brotli legitimately reaches tens of thousands of
                 // times expansion, so that limit rejected ordinary repetitive input -- a repeated
                 // sentence, and JSON. Each format now carries its own default.
                 let memory = GlobalPool::new();
