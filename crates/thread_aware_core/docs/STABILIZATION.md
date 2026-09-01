@@ -4,9 +4,10 @@ These notes describe the stable boundary shared by the `thread_aware` crates.
 
 ## Status
 
-`thread_aware_core` is a stand-alone crate. Nothing depends on it yet, and the
-`thread_aware` crate still ships its own `Affinity`-based API unchanged. The
-plan is to adopt the core crate later; until then the two evolve separately.
+`thread_aware_core` is a stand-alone vocabulary crate with no workspace
+dependents. The `thread_aware` crate separately exposes its `Affinity`-based
+relocation API and utility surface. The two crates therefore have independent
+public contracts.
 
 ## Stable boundary
 
