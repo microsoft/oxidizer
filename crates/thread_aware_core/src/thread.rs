@@ -12,97 +12,6 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(any(test, feature = "std"))]
 use std::thread::ThreadId;
 
-/// Hands the next identity to each [`Owner`] created in this process.
-///
-/// Pointer-width so the counter does not wrap in practice; a wrap would hand out a live
-/// identity twice.
-static NEXT_OWNER: AtomicUsize = AtomicUsize::new(0);
-
-/// An identifier for the runtime that owns a [`Thread`].
-///
-/// Every new owner is unique, so two runtimes alive at the same time never share one. That
-/// is what lets a value notice it has crossed from one runtime into another and release
-/// anything the previous one owned.
-///
-/// Two owners are the same runtime exactly when their identities match.
-///
-/// An owner names one live runtime, so it is `Clone` but not `Copy`, and
-/// [`Thread::owner`] lends it rather than handing out duplicates.
-///
-/// # Examples
-///
-/// ```
-/// use thread_aware_core::Owner;
-///
-/// fn same_runtime(first: &Owner, second: &Owner) -> bool {
-///     first == second
-/// }
-/// ```
-#[derive(Clone, Debug)]
-pub struct Owner {
-    id: usize,
-}
-
-impl PartialEq for Owner {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for Owner {}
-
-impl Hash for Owner {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
-}
-
-impl Owner {
-    /// Creates an owner for a runtime.
-    ///
-    /// The owner is unique: no other owner in this process compares equal to it.
-    #[must_use]
-    pub(crate) fn new() -> Self {
-        Self {
-            id: NEXT_OWNER.fetch_add(1, Ordering::Relaxed),
-        }
-    }
-}
-
-/// An identifier for the memory closest to a thread, usually a NUMA node.
-///
-/// On a large machine, memory is divided into regions and a thread reaches its own region
-/// fastest. Unlike the thread id, this identifier is shared: every thread near the same
-/// memory reports the same `NumaNode`, which is what makes it suitable for state that is
-/// shared within a region but not across the machine. Sharing between runtimes holds only
-/// while they all number the regions identically; see
-/// [what the ids mean](crate#what-the-ids-mean).
-///
-/// Nodes carry no meaning beyond identity, and the width is wide enough that no real
-/// machine can exhaust it.
-///
-/// # Examples
-///
-/// ```
-/// use thread_aware_core::NumaNode;
-///
-/// fn same_memory_region(first: &NumaNode, second: &NumaNode) -> bool {
-///     first == second
-/// }
-/// ```
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct NumaNode(u32);
-
-impl NumaNode {
-    /// Creates a node identifier from the number the platform reports.
-    #[inline]
-    #[must_use]
-    pub(crate) const fn new(node: u32) -> Self {
-        Self(node)
-    }
-}
-
 /// A record of where a value runs: its runtime, its OS thread, and its nearest memory.
 ///
 /// Library authors should not construct these directly. Each runtime manages construction,
@@ -226,6 +135,97 @@ impl Thread {
     #[must_use]
     pub const fn numa_node(&self) -> &NumaNode {
         &self.numa_node
+    }
+}
+
+/// Hands the next identity to each [`Owner`] created in this process.
+///
+/// Pointer-width so the counter does not wrap in practice; a wrap would hand out a live
+/// identity twice.
+static NEXT_OWNER: AtomicUsize = AtomicUsize::new(0);
+
+/// An identifier for the runtime that owns a [`Thread`].
+///
+/// Every new owner is unique, so two runtimes alive at the same time never share one. That
+/// is what lets a value notice it has crossed from one runtime into another and release
+/// anything the previous one owned.
+///
+/// Two owners are the same runtime exactly when their identities match.
+///
+/// An owner names one live runtime, so it is `Clone` but not `Copy`, and
+/// [`Thread::owner`] lends it rather than handing out duplicates.
+///
+/// # Examples
+///
+/// ```
+/// use thread_aware_core::Owner;
+///
+/// fn same_runtime(first: &Owner, second: &Owner) -> bool {
+///     first == second
+/// }
+/// ```
+#[derive(Clone, Debug)]
+pub struct Owner {
+    id: usize,
+}
+
+impl PartialEq for Owner {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for Owner {}
+
+impl Hash for Owner {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+impl Owner {
+    /// Creates an owner for a runtime.
+    ///
+    /// The owner is unique: no other owner in this process compares equal to it.
+    #[must_use]
+    pub(crate) fn new() -> Self {
+        Self {
+            id: NEXT_OWNER.fetch_add(1, Ordering::Relaxed),
+        }
+    }
+}
+
+/// An identifier for the memory closest to a thread, usually a NUMA node.
+///
+/// On a large machine, memory is divided into regions and a thread reaches its own region
+/// fastest. Unlike the thread id, this identifier is shared: every thread near the same
+/// memory reports the same `NumaNode`, which is what makes it suitable for state that is
+/// shared within a region but not across the machine. Sharing between runtimes holds only
+/// while they all number the regions identically; see
+/// [what the ids mean](crate#what-the-ids-mean).
+///
+/// Nodes carry no meaning beyond identity, and the width is wide enough that no real
+/// machine can exhaust it.
+///
+/// # Examples
+///
+/// ```
+/// use thread_aware_core::NumaNode;
+///
+/// fn same_memory_region(first: &NumaNode, second: &NumaNode) -> bool {
+///     first == second
+/// }
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct NumaNode(u32);
+
+impl NumaNode {
+    /// Creates a node identifier from the number the platform reports.
+    #[inline]
+    #[must_use]
+    pub(crate) const fn new(node: u32) -> Self {
+        Self(node)
     }
 }
 
