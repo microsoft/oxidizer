@@ -42,11 +42,6 @@ fn mark_local_reference(marker: &Cell<bool>) {
     }
 }
 
-/// Branch-layout hint for the uncommon chunk-exhaustion path. The workspace
-/// Rust 1.93 MSRV predates `core::hint::cold_path`.
-#[cold]
-fn allocation_miss() {}
-
 /// Owns one strong reference to a chunk and tracks the bump cursor.
 ///
 /// Hot-path layout stores only `chunk`, `bump`, and `end`; cold paths
@@ -228,7 +223,7 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
         // `size.max(1)` probes that byte without changing the ZST bump.
         let probe_end = aligned_addr.checked_add(size.max(1))?;
         if probe_end > limit_addr {
-            allocation_miss();
+            hint::cold_path();
             return None;
         }
         // SAFETY: `probe_end <= limit_addr`, so both `aligned_ptr`
@@ -299,7 +294,7 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
         hint_chunk_cur_addr_nonnull(cur_addr);
         let end_addr = cur_addr.checked_add(len)?;
         if end_addr > limit_addr {
-            allocation_miss();
+            hint::cold_path();
             return None;
         }
         // SAFETY: `end_addr <= limit_addr`.

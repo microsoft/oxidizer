@@ -38,11 +38,9 @@ unsafe impl<A: Allocator + Clone> Allocator for &Arena<A> {
             return Err(AllocError);
         }
         // Zero-byte allocations need a non-null, well-aligned pointer but no
-        // chunk state (mirroring `std::alloc::Global`). `without_provenance_mut`
-        // keeps it strict-provenance-clean — ZSTs are never dereferenced.
+        // chunk state (mirroring `std::alloc::Global`).
         if layout.size() == 0 {
-            // SAFETY: `layout.align()` is a non-zero power of two.
-            let dangling = unsafe { NonNull::new_unchecked(ptr::without_provenance_mut::<u8>(layout.align())) };
+            let dangling = layout.dangling_ptr();
             return Ok(NonNull::slice_from_raw_parts(dangling, 0));
         }
         // Refill / oversized hint includes one alignment slack so

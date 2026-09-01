@@ -554,8 +554,8 @@ fn emit_leaves(leaves: &[Leaf], any_verb: bool, route_enum: &Ident) -> TokenStre
         let group = if let Some((_, entries)) = groups.iter_mut().find(|(m, _)| *m == leaf.method) {
             entries
         } else {
-            groups.push((leaf.method.clone(), Vec::new()));
-            &mut groups.last_mut().expect("just pushed").1
+            let (_, entries) = groups.push_mut((leaf.method.clone(), Vec::new()));
+            entries
         };
         if !group.iter().any(|existing| existing.verb == leaf.verb) {
             group.push(leaf);
