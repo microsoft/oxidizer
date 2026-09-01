@@ -62,7 +62,6 @@ impl Owner {
     /// Creates an owner for a runtime.
     ///
     /// The owner is unique: no other owner in this process compares equal to it.
-    ///
     #[must_use]
     pub(crate) fn new() -> Self {
         Self {
@@ -97,7 +96,6 @@ pub struct NumaNode(u32);
 
 impl NumaNode {
     /// Creates a node identifier from the number the platform reports.
-    ///
     #[inline]
     #[must_use]
     pub(crate) const fn new(node: u32) -> Self {
