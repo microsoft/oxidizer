@@ -62,7 +62,7 @@ fn without_std_a_thread_carries_no_thread_id() {
     let align = align_of::<Thread>();
     let expected = (size_of::<Owner>() + size_of::<NumaNode>()).div_ceil(align) * align;
 
-    assert_eq!(size_of::<Thread>(), expected, "a no_std `Thread` is its owner and its NUMA node");
+    assert_eq!(size_of::<Thread>(), expected, "the no_std coordinate contains only its owner and NUMA node");
 }
 
 #[cfg(feature = "std")]
