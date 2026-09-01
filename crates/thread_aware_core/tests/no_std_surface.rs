@@ -8,8 +8,14 @@
 //! see the three-field `Thread`. This harness links the library as an ordinary dependency,
 //! so under `--no-default-features` the `no_std` shape is the one under test.
 
+use std::borrow::Cow;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::BTreeSet;
+#[cfg(feature = "std")]
+use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
+use std::panic::{RefUnwindSafe, UnwindSafe};
+use std::sync::Arc;
 #[cfg(feature = "std")]
 use std::thread;
 
@@ -17,12 +23,19 @@ use static_assertions::{assert_impl_all, assert_not_impl_any};
 #[cfg(feature = "std")]
 use thread_aware_core::__private::v1::new_thread;
 use thread_aware_core::__private::v1::{new_numa_node, new_owner};
-use thread_aware_core::{NumaNode, Owner, Thread};
+use thread_aware_core::{NumaNode, Owner, Thread, ThreadAware};
 
-assert_impl_all!(Thread: Clone, Eq, Send, Sync);
+assert_impl_all!(Thread: Clone, Eq, Send, Sync, Unpin, UnwindSafe, RefUnwindSafe);
+assert_not_impl_any!(Thread: Copy);
 assert_impl_all!(Owner: Clone, Eq, Send, Sync);
 assert_impl_all!(NumaNode: Clone, Eq, Send, Sync);
 assert_not_impl_any!(NumaNode: Copy);
+assert_not_impl_any!(&'static i32: ThreadAware);
+assert_not_impl_any!(BTreeSet<i32>: ThreadAware);
+assert_not_impl_any!(Cow<'static, str>: ThreadAware);
+assert_not_impl_any!(Arc<i32>: ThreadAware);
+#[cfg(feature = "std")]
+assert_not_impl_any!(HashSet<i32>: ThreadAware);
 
 fn hash_of<T>(value: &T) -> u64
 where
