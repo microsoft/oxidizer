@@ -17,7 +17,9 @@ use std::collections::HashMap;
 #[cfg(any(test, feature = "std"))]
 use std::path::{Path, PathBuf};
 #[cfg(any(test, feature = "std"))]
-use std::thread::{self, ThreadId};
+use std::thread::ThreadId;
+#[cfg(test)]
+use std::thread;
 
 use crate::{NumaNode, Owner, Thread, ThreadAware};
 
