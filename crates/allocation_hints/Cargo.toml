@@ -22,5 +22,7 @@ links = "allocation_hints_backend"
 mutants.workspace = true
 static_assertions.workspace = true
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

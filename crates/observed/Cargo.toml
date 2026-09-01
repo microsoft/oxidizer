@@ -59,10 +59,12 @@ static_assertions = { workspace = true }
 tick = { workspace = true, features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
 
-[lints]
-workspace = true
-
 [[bench]]
 name = "observed_benchmarks"
 harness = false
 required-features = ["test-util"]
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

@@ -44,5 +44,7 @@ opentelemetry = { workspace = true, features = ["logs"] }
 [dev-dependencies]
 tick = { workspace = true }
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

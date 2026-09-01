@@ -114,5 +114,7 @@ required-features = ["serde"]
 name = "bolero_internity"
 required-features = ["std"]
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

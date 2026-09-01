@@ -48,10 +48,12 @@ proc-macro2 = { workspace = true }
 quote = { workspace = true }
 syn = { workspace = true, features = ["clone-impls", "parsing", "proc-macro", "printing", "derive", "full", "visit"] }
 
-[lints]
-workspace = true
-
 [[bench]]
 name = "generator_scaling"
 harness = false
 required-features = ["codegen"]
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

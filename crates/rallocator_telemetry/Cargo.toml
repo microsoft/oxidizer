@@ -23,5 +23,7 @@ allowed_external_types = ["rallocator_wire::*"]
 [dependencies]
 rallocator_wire.workspace = true
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

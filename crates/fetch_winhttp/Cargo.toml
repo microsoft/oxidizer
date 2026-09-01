@@ -92,5 +92,7 @@ harness = false
 name = "fw_client"
 harness = false
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints
