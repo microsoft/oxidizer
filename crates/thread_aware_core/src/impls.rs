@@ -274,7 +274,7 @@ mod tests {
     }
 
     fn sample_threads() -> [Thread; 2] {
-        let owner = Owner::new(2);
+        let owner = Owner::new();
         let thread = std::thread::current().id();
         [
             Thread::new(owner.clone(), thread, NumaNode::new(0)),

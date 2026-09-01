@@ -27,10 +27,6 @@ std = []
 [dev-dependencies]
 static_assertions = { workspace = true }
 
-[[example]]
-name = "relocation"
-required-features = ["std"]
-
 # >>> anvil-managed: anvil-lints
 [lints]
 workspace = true

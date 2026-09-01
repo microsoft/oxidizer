@@ -11,12 +11,16 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
-use static_assertions::assert_impl_all;
+use static_assertions::{assert_impl_all, assert_not_impl_any};
+#[cfg(feature = "std")]
+use thread_aware_core::__private::v1::new_thread;
+use thread_aware_core::__private::v1::{new_numa_node, new_owner};
 use thread_aware_core::{NumaNode, Owner, Thread};
 
 assert_impl_all!(Thread: Clone, Eq, Send, Sync);
 assert_impl_all!(Owner: Clone, Eq, Send, Sync);
-assert_impl_all!(NumaNode: Copy, Eq, Send, Sync);
+assert_impl_all!(NumaNode: Clone, Eq, Send, Sync);
+assert_not_impl_any!(NumaNode: Copy);
 
 fn hash_of<T>(value: &T) -> u64
 where
@@ -28,23 +32,22 @@ where
 }
 
 #[test]
-fn owners_keep_their_identity_and_count() {
-    let first = Owner::new(4);
-    let second = Owner::new(4);
+fn owners_keep_their_identity() {
+    let first = new_owner();
+    let second = new_owner();
 
     assert_ne!(first, second, "each owner takes its own identity");
     assert_eq!(first, first, "an owner equals itself");
     assert_ne!(hash_of(&first), hash_of(&second), "distinct owners must hash apart");
-    assert_eq!(first.min_threads(), 4);
 }
 
 #[test]
 fn numa_nodes_compare_and_hash_by_value() {
-    assert_eq!(NumaNode::new(3), NumaNode::new(3));
-    assert_ne!(NumaNode::new(3), NumaNode::new(4));
+    assert_eq!(new_numa_node(3), new_numa_node(3));
+    assert_ne!(new_numa_node(3), new_numa_node(4));
     assert_eq!(
-        hash_of(&NumaNode::new(3)),
-        hash_of(&NumaNode::new(3)),
+        hash_of(&new_numa_node(3)),
+        hash_of(&new_numa_node(3)),
         "equal nodes must hash equally"
     );
 }
@@ -68,17 +71,17 @@ fn with_std_every_component_takes_part_in_equality() {
     use std::thread;
 
     let id = thread::current().id();
-    let owner = Owner::new(1);
-    let numa_node = NumaNode::new(0);
-    let mine = Thread::new(owner.clone(), id, numa_node);
+    let owner = new_owner();
+    let numa_node = new_numa_node(0);
+    let mine = new_thread(owner.clone(), id, numa_node.clone());
 
-    assert_eq!(mine, Thread::new(owner.clone(), id, numa_node));
-    assert_eq!(hash_of(&mine), hash_of(&Thread::new(owner.clone(), id, numa_node)));
+    assert_eq!(mine, new_thread(owner.clone(), id, numa_node.clone()));
+    assert_eq!(hash_of(&mine), hash_of(&new_thread(owner.clone(), id, numa_node.clone())));
 
-    assert_ne!(mine, Thread::new(Owner::new(1), id, numa_node), "the owner counts");
-    assert_ne!(mine, Thread::new(owner.clone(), id, NumaNode::new(1)), "the NUMA node counts");
+    assert_ne!(mine, new_thread(new_owner(), id, numa_node.clone()), "the owner counts");
+    assert_ne!(mine, new_thread(owner.clone(), id, new_numa_node(1)), "the NUMA node counts");
 
-    let elsewhere = thread::spawn(move || Thread::new(owner, thread::current().id(), numa_node))
+    let elsewhere = thread::spawn(move || new_thread(owner, thread::current().id(), numa_node))
         .join()
         .unwrap();
 

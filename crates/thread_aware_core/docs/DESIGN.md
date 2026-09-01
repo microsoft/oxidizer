@@ -51,9 +51,7 @@ nodes identically.
 
 `Owner` values are issued by runtime and integration code, never by ordinary
 data-structure authors. Every new owner is unique, so two runtimes alive at once
-cannot collide however carelessly they are set up. An owner also reports the
-smallest number of threads its runtime runs: a floor to pre-size against, which
-the runtime may exceed, and which is zero for one that spawns on demand.
+cannot collide however carelessly they are set up.
 
 Implementing `ThreadAware` also commits a type to `Send`, since that is a
 supertrait. A type holding an `Rc` or another thread-bound handle cannot
@@ -77,11 +75,11 @@ qualify; it belongs in `thread_aware`, where it can still change.
 **Borrow from `std` rather than invent.** The thread coordinate is
 `std::thread::ThreadId`, not an id of our own: a bespoke type would be one more
 thing to convert to and from, and one more thing to keep stable forever. The
-cost is that `Thread::new` and `Thread::id` need the `std` feature. With
-default features off, a `no_std` crate can still implement `ThreadAware` and
-read `Owner` and `NumaNode` from the `Thread` values it is handed; it just cannot
-construct one, which only runtimes need to do. Such a build needs `alloc` and
-pointer-width atomics, the latter because `Owner` identities come from a
+cost is that `__private::v1::new_thread` and `Thread::id` need the `std` feature.
+With default features off, a `no_std` crate can still implement `ThreadAware`
+and read `Owner` and `NumaNode` from the `Thread` values it is handed; it just
+cannot construct one, which only runtimes need to do. Such a build needs `alloc`
+and pointer-width atomics, the latter because `Owner` identities come from a
 process-wide counter.
 
 **No dependencies reach a consumer.** The manifest's only entry is a test-only
@@ -101,8 +99,9 @@ to describe a value pinned to memory but not to a processor. Both mean
 adding a coordinate, and the design makes that additive.
 
 **Ids are opaque, and take no `From<integer>`.** `NumaNode` exposes no accessor
-returning its integer, and both ids are built through inherent constructors
-rather than a `From` impl. That is a deliberate refusal, because a
+returning its integer, and its platform number enters through a typed,
+versioned construction function rather than a `From` impl. `Owner` accepts no
+caller-provided identity at all. That is a deliberate refusal, because a
 `From<integer>` on a permanent vocabulary type is a one-shot commitment. While
 one such impl exists it silently governs the width every unsuffixed literal
 infers; adding a second either breaks those call sites — `from(1)` falls back to
@@ -112,18 +111,19 @@ impl instead breaks every caller passing a typed variable. None of these are
 reported by `cargo semver-checks`, so adding one would reach a release
 unchallenged.
 
-An inherent constructor avoids the trap entirely: `u32` already exceeds any node
-count real hardware reaches, and if a wider or fallible form is ever needed it
-arrives as a second, differently named constructor, which is purely additive.
-The *stored* width remains private and may grow silently — it is not part of the
-promise, and growing it is what would reserve values no existing constructor can
+A typed construction function avoids the trap entirely: `u32` already exceeds
+any node count real hardware reaches, and if a wider or fallible form is ever
+needed it arrives as a second, differently named function. The *stored* width
+remains private and may grow silently — it is not part of the promise, and
+growing it is what would reserve values no existing construction function can
 reach.
 
 **`Thread` fields are private.** Coordinates are read through accessors, so the
 struct can gain a field without touching any existing reader, and the derived
 `Clone`, `Debug`, `PartialEq`, `Eq` and `Hash` pick it up automatically. No
 `#[non_exhaustive]` is needed: with no public fields there is nothing to
-destructure or update.
+destructure or update. Accessors lend component identifiers, so those identifiers
+do not need to be `Copy`; `NumaNode` deliberately is not.
 
 What a new field *can* silently remove is an auto trait — a coordinate that is
 not `Send`, `Sync` or unwind-safe strips that property from `Thread` without any
@@ -133,15 +133,16 @@ expected to have, so this fails the build rather than reaching a release.
 **Every coordinate has a default variant.** This is the rule that makes the rest
 work: a new coordinate must have a value meaning *unknown, or not pinned* —
 something like a `NumaNode::UNPINNED` constant that no ordinary construction can
-produce. Existing constructors keep their exact signatures and fill the new
-coordinate with that default; callers that care about it opt in through a new
-constructor.
+produce. Existing construction functions keep their exact signatures and fill
+the new coordinate with that default; callers that care about it opt in through
+a new function.
 
-Reserving such a value costs one representation state that no constructor hands
-out. Since `new` accepts the full `u32` range, a sentinel would come either from
-widening the private storage past it or from making the reserving constructor
-fallible, so that the reserved value can never be minted. A coordinate type
-introduced later can simply reserve one from the start.
+Reserving such a value costs one representation state that no construction
+function hands out. Since `new_numa_node` accepts the full `u32` range, a
+sentinel would come either from widening the private storage past it or from
+making the reserving function fallible, so that the reserved value can never be
+minted. A coordinate type introduced later can simply reserve one from the
+start.
 
 Behaviour is preserved as well as compilation. Every pre-existing construction
 path fills the new coordinate identically, so values built the old way remain
@@ -152,7 +153,7 @@ Adding a coordinate is therefore three additive steps:
 
 1. Add the private field and its accessor.
 2. Add the sentinel constant to the coordinate's type.
-3. Add a constructor that accepts it, leaving the existing one alone.
+3. Add a construction function that accepts it, leaving the existing one alone.
 
 **Trait additions stay defaulted and dyn-compatible.** `dyn ThreadAware` is part
 of the stable surface, so a default body alone is not enough. Any method added
@@ -164,10 +165,11 @@ assertion pins dyn-compatibility for the same reason the auto traits are pinned.
 ### What this does not permit
 
 The escape hatch is one-directional. Removing a coordinate, changing the
-signature of an existing constructor, adding a `From<integer>` impl, changing
-what an existing id *means*, or adding a method that breaks dyn-compatibility
-are all breaking, and no sentinel value makes them otherwise. Reserving the
-additive path for genuinely new information is what keeps it available.
+signature of an existing construction function, adding a `From<integer>` impl,
+changing what an existing id *means*, or adding a method that breaks
+dyn-compatibility are all breaking, and no sentinel value makes them otherwise.
+Reserving the additive path for genuinely new information is what keeps it
+available.
 
 ## Related documents
 

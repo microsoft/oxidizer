@@ -116,7 +116,7 @@ use crate::Thread;
 ///         // choose a node itself, so placement comes from the allocator the application
 ///         // installs; releasing here is what gives it the chance to allocate near
 ///         // `numa_node` on the next use.
-///         self.numa_node = Some(destination.numa_node());
+///         self.numa_node = Some(destination.numa_node().clone());
 ///         self.scratch = Vec::new();
 ///     }
 /// }

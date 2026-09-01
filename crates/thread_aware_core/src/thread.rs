@@ -24,12 +24,7 @@ static NEXT_OWNER: AtomicUsize = AtomicUsize::new(0);
 /// is what lets a value notice it has crossed from one runtime into another and release
 /// anything the previous one owned.
 ///
-/// An owner also reports the smallest number of threads its runtime runs, which a value can
-/// use to pre-size per-thread state before it has seen any of those threads. The runtime may
-/// run more; one that spawns threads entirely on demand promises none and reports `0`.
-///
-/// Two owners are the same runtime exactly when their identities match; the thread count
-/// plays no part in equality or hashing.
+/// Two owners are the same runtime exactly when their identities match.
 ///
 /// An owner names one live runtime, so it is `Clone` but not `Copy`, and
 /// [`Thread::owner`] lends it rather than handing out duplicates.
@@ -39,20 +34,13 @@ static NEXT_OWNER: AtomicUsize = AtomicUsize::new(0);
 /// ```
 /// use thread_aware_core::Owner;
 ///
-/// let pool = Owner::new(4);
-/// assert_eq!(pool.min_threads(), 4);
-///
-/// let elastic = Owner::new(0);
-/// assert_eq!(elastic.min_threads(), 0);
-///
-/// // Every owner is distinct, however it was built.
-/// assert_ne!(pool, Owner::new(4));
-/// assert_ne!(elastic, Owner::new(0));
+/// fn same_runtime(first: &Owner, second: &Owner) -> bool {
+///     first == second
+/// }
 /// ```
 #[derive(Clone, Debug)]
 pub struct Owner {
     id: usize,
-    min_threads: usize,
 }
 
 impl PartialEq for Owner {
@@ -71,44 +59,15 @@ impl Hash for Owner {
 }
 
 impl Owner {
-    /// Creates an owner for a runtime that runs at least `min_threads` threads.
+    /// Creates an owner for a runtime.
     ///
     /// The owner is unique: no other owner in this process compares equal to it.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use thread_aware_core::Owner;
-    ///
-    /// let owner = Owner::new(2);
-    ///
-    /// assert_eq!(owner.min_threads(), 2);
-    /// ```
     #[must_use]
-    pub fn new(min_threads: usize) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             id: NEXT_OWNER.fetch_add(1, Ordering::Relaxed),
-            min_threads,
         }
-    }
-
-    /// Returns the smallest number of threads the owning runtime runs.
-    ///
-    /// The runtime may run more, so this is a floor for pre-sizing rather than a bound to
-    /// index against. `0` means the runtime promises none and spawns on demand.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use thread_aware_core::Owner;
-    ///
-    /// assert_eq!(Owner::new(8).min_threads(), 8);
-    /// assert_eq!(Owner::new(0).min_threads(), 0);
-    /// ```
-    #[inline]
-    #[must_use]
-    pub const fn min_threads(&self) -> usize {
-        self.min_threads
     }
 }
 
@@ -129,37 +88,29 @@ impl Owner {
 /// ```
 /// use thread_aware_core::NumaNode;
 ///
-/// let node = NumaNode::new(0);
-///
-/// assert_eq!(node, NumaNode::new(0));
-/// assert_ne!(node, NumaNode::new(1));
+/// fn same_memory_region(first: &NumaNode, second: &NumaNode) -> bool {
+///     first == second
+/// }
 /// ```
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct NumaNode(u32);
 
 impl NumaNode {
     /// Creates a node identifier from the number the platform reports.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use thread_aware_core::NumaNode;
-    ///
-    /// assert_ne!(NumaNode::new(0), NumaNode::new(1));
-    /// ```
     #[inline]
     #[must_use]
-    pub const fn new(node: u32) -> Self {
+    pub(crate) const fn new(node: u32) -> Self {
         Self(node)
     }
 }
 
 /// A record of where a value runs: its runtime, its OS thread, and its nearest memory.
 ///
-/// A runtime constructs these, usually once per worker at startup, and passes them to
+/// Library authors should not construct these directly. Each runtime manages construction,
+/// usually creating one per worker at startup, and passes them to
 /// [`ThreadAware::relocate`](crate::ThreadAware::relocate). An implementation reads whichever
-/// part it depends on; [what the ids mean](crate#what-the-ids-mean) describes which to
-/// choose.
+/// part it depends on; [what the ids mean](crate#what-the-ids-mean) describes which to choose.
 ///
 /// # Relation to `std::thread::Thread`
 ///
@@ -183,27 +134,11 @@ impl NumaNode {
 /// # Examples
 ///
 /// ```
-/// # fn main() {
-/// # #[cfg(feature = "std")] {
-/// use std::thread;
+/// use thread_aware_core::Thread;
 ///
-/// use thread_aware_core::{NumaNode, Owner, Thread};
-///
-/// let here = thread::current().id();
-/// let owner = Owner::new(1);
-/// let mine = Thread::new(owner.clone(), here, NumaNode::new(1));
-///
-/// assert_eq!(mine.owner(), &owner);
-/// assert_eq!(mine.id(), here);
-///
-/// // The same OS thread under a different runtime is a different `Thread`...
-/// let elsewhere = Thread::new(Owner::new(1), here, NumaNode::new(1));
-/// assert_ne!(mine, elsewhere);
-///
-/// // ...but the thread id and its nearest memory are unchanged.
-/// assert_eq!(mine.numa_node(), elsewhere.numa_node());
-/// # }
-/// # }
+/// fn moved_between_memory_regions(source: &Thread, destination: &Thread) -> bool {
+///     source.numa_node() != destination.numa_node()
+/// }
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Thread {
@@ -221,28 +156,12 @@ pub struct Thread {
 impl Thread {
     /// Creates a `Thread` from an owner, a thread id, and a NUMA node.
     ///
-    /// Runtimes call this as they set up their workers. Tests may call it directly to
-    /// construct values without starting a runtime. A thread id is obtained from
-    /// [`thread::current`](std::thread::current).
-    ///
+    /// A thread id is obtained from [`thread::current`](std::thread::current).
     /// Requires the `std` feature.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::thread;
-    ///
-    /// use thread_aware_core::{NumaNode, Owner, Thread};
-    ///
-    /// let owner = Owner::new(1);
-    /// let mine = Thread::new(owner.clone(), thread::current().id(), NumaNode::new(0));
-    ///
-    /// assert_eq!(mine.owner(), &owner);
-    /// ```
     #[cfg(any(test, feature = "std"))]
     #[inline]
     #[must_use]
-    pub const fn new(owner: Owner, id: ThreadId, numa_node: NumaNode) -> Self {
+    pub(crate) const fn new(owner: Owner, id: ThreadId, numa_node: NumaNode) -> Self {
         Self { owner, id, numa_node }
     }
 
@@ -254,18 +173,11 @@ impl Thread {
     /// # Examples
     ///
     /// ```
-    /// # fn main() {
-    /// # #[cfg(feature = "std")] {
-    /// use std::thread;
+    /// use thread_aware_core::Thread;
     ///
-    /// use thread_aware_core::{NumaNode, Owner, Thread};
-    ///
-    /// let owner = Owner::new(7);
-    /// let mine = Thread::new(owner.clone(), thread::current().id(), NumaNode::new(0));
-    ///
-    /// assert_eq!(mine.owner(), &owner);
-    /// # }
-    /// # }
+    /// fn same_runtime(first: &Thread, second: &Thread) -> bool {
+    ///     first.owner() == second.owner()
+    /// }
     /// ```
     #[inline]
     #[must_use]
@@ -285,14 +197,11 @@ impl Thread {
     /// # Examples
     ///
     /// ```
-    /// use std::thread;
+    /// use thread_aware_core::Thread;
     ///
-    /// use thread_aware_core::{NumaNode, Owner, Thread};
-    ///
-    /// let here = thread::current().id();
-    /// let mine = Thread::new(Owner::new(1), here, NumaNode::new(0));
-    ///
-    /// assert_eq!(mine.id(), here);
+    /// fn runs_on_current_thread(thread: &Thread) -> bool {
+    ///     thread.id() == std::thread::current().id()
+    /// }
     /// ```
     #[cfg(any(test, feature = "std"))]
     #[inline]
@@ -309,22 +218,16 @@ impl Thread {
     /// # Examples
     ///
     /// ```
-    /// # fn main() {
-    /// # #[cfg(feature = "std")] {
-    /// use std::thread;
+    /// use thread_aware_core::Thread;
     ///
-    /// use thread_aware_core::{NumaNode, Owner, Thread};
-    ///
-    /// let mine = Thread::new(Owner::new(1), thread::current().id(), NumaNode::new(3));
-    ///
-    /// assert_eq!(mine.numa_node(), NumaNode::new(3));
-    /// # }
-    /// # }
+    /// fn same_memory_region(first: &Thread, second: &Thread) -> bool {
+    ///     first.numa_node() == second.numa_node()
+    /// }
     /// ```
     #[inline]
     #[must_use]
-    pub const fn numa_node(&self) -> NumaNode {
-        self.numa_node
+    pub const fn numa_node(&self) -> &NumaNode {
+        &self.numa_node
     }
 }
 
@@ -344,26 +247,26 @@ mod tests {
     // type should make effortless; `Clone` keeps it deliberate.
     assert_not_impl_any!(Owner: Copy);
     assert_impl_all!(NumaNode: Send, Sync, Unpin, UnwindSafe, RefUnwindSafe);
+    assert_not_impl_any!(NumaNode: Copy);
     assert_impl_all!(Thread: Send, Sync, Unpin, UnwindSafe, RefUnwindSafe);
 
     #[test]
     fn exposes_components() {
         let id = thread::current().id();
-        let owner = Owner::new(3);
+        let owner = Owner::new();
         let mine = Thread::new(owner.clone(), id, NumaNode::new(2));
 
         assert_eq!(mine.owner(), &owner);
-        assert_eq!(mine.owner().min_threads(), 3, "the owner survives intact, count included");
         assert_eq!(mine.id(), id);
-        assert_eq!(mine.numa_node(), NumaNode::new(2));
+        assert_eq!(mine.numa_node(), &NumaNode::new(2));
     }
 
     #[test]
     fn different_owner_compares_unequal() {
         let id = thread::current().id();
         let numa_node = NumaNode::new(0);
-        let first = Thread::new(Owner::new(1), id, numa_node);
-        let second = Thread::new(Owner::new(1), id, numa_node);
+        let first = Thread::new(Owner::new(), id, numa_node.clone());
+        let second = Thread::new(Owner::new(), id, numa_node);
 
         assert_ne!(first, second);
     }
@@ -372,7 +275,7 @@ mod tests {
     fn different_numa_compares_unequal() {
         let id = thread::current().id();
         // One owner, so the NUMA node is the only thing that differs.
-        let owner = Owner::new(1);
+        let owner = Owner::new();
         let first = Thread::new(owner.clone(), id, NumaNode::new(0));
         let second = Thread::new(owner, id, NumaNode::new(1));
 
@@ -381,9 +284,9 @@ mod tests {
 
     #[test]
     fn different_thread_compares_unequal() {
-        let owner = Owner::new(0);
+        let owner = Owner::new();
         let numa_node = NumaNode::new(0);
-        let here = Thread::new(owner.clone(), thread::current().id(), numa_node);
+        let here = Thread::new(owner.clone(), thread::current().id(), numa_node.clone());
         let there = thread::spawn(move || Thread::new(owner, thread::current().id(), numa_node))
             .join()
             .unwrap();
@@ -393,18 +296,17 @@ mod tests {
 
     #[test]
     fn clone_preserves_components() {
-        let mine = Thread::new(Owner::new(4), thread::current().id(), NumaNode::new(9));
+        let mine = Thread::new(Owner::new(), thread::current().id(), NumaNode::new(9));
         let cloned = mine.clone();
 
         assert_eq!(cloned, mine);
-        assert_eq!(cloned.owner().min_threads(), mine.owner().min_threads());
         assert_eq!(cloned.numa_node(), mine.numa_node());
     }
 
     #[test]
     fn owner_identity_is_unique_per_construction() {
-        let first = Owner::new(4);
-        let second = Owner::new(4);
+        let first = Owner::new();
+        let second = Owner::new();
 
         assert_ne!(first, second, "each owner takes its own identity");
         assert_eq!(first, first, "an owner equals itself");
@@ -412,40 +314,12 @@ mod tests {
     }
 
     #[test]
-    fn owner_equality_ignores_the_thread_count() {
-        // The public API cannot produce two owners sharing an identity, but `Eq` and `Hash`
-        // must still agree if it ever could, so build the pair directly.
-        let one = Owner { id: 7, min_threads: 1 };
-        let other = Owner { id: 7, min_threads: 99 };
-
-        assert_eq!(one, other, "identity alone decides equality");
-        assert_eq!(hash_of(&one), hash_of(&other), "equal owners must hash equally");
-    }
-
-    #[test]
     fn owner_hashes_by_identity() {
-        let one = Owner::new(4);
-        let other = Owner::new(4);
+        let one = Owner::new();
+        let other = Owner::new();
 
-        // Equal counts, so only the identity tells these apart. Hashing has to carry it, or
-        // every owner would land in one bucket.
         assert_ne!(one, other);
         assert_ne!(hash_of(&one), hash_of(&other), "distinct owners must hash apart");
-    }
-
-    #[test]
-    fn owner_reports_its_minimum() {
-        assert_eq!(Owner::new(8).min_threads(), 8);
-        assert_eq!(Owner::new(0).min_threads(), 0, "zero means the runtime promises none");
-    }
-
-    #[test]
-    fn owner_clone_preserves_the_thread_count() {
-        let owner = Owner::new(4);
-        let clone = owner.clone();
-
-        assert_eq!(clone, owner, "a clone keeps the identity");
-        assert_eq!(clone.min_threads(), 4, "a clone keeps the count, not just the identity");
     }
 
     fn hash_of(owner: &Owner) -> u64 {

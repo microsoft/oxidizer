@@ -20,6 +20,11 @@ OS thread it is on, and which memory is closest to that thread (`NumaNode`). The
 thread component is `std::thread::ThreadId` rather than an id of our own, so it
 is not re-exported; callers take it from `std`.
 
+Runtime integration code constructs these identifiers through the doc-hidden,
+versioned `__private::v1::{new_thread, new_owner, new_numa_node}` functions. The
+inherent constructors are crate-private, keeping construction plumbing out of
+the stable surface that downstream libraries expose.
+
 Nothing the crate depends on reaches a consumer build; its only manifest entry
 is a test-only dev-dependency. The `std` feature is enabled by default and adds
 implementations for standard-library types such as `HashMap`, `Path` and

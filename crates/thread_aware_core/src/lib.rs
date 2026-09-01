@@ -82,46 +82,12 @@
 //!
 //! # Runtime authors: driving relocation
 //!
-//! **Runtime authors** construct a [`Thread`] per worker and call
-//! [`relocate`](ThreadAware::relocate) after moving a value, passing where it came from and
-//! where it now runs. The example below plays the part of the runtime so the order is
-//! visible.
+//! **Runtime authors** create a list of [`Thread`] values describing their workers. How that
+//! list is constructed is a runtime implementation detail and is not relevant to runtime
+//! consumers.
 //!
-//! ```
-//! # fn main() {
-//! # #[cfg(feature = "std")] {
-//! use std::thread;
-//!
-//! use thread_aware_core::{NumaNode, Owner, Thread, ThreadAware};
-//!
-//! // What a library author writes.
-//! struct Worker {
-//!     thread: Option<thread::ThreadId>,
-//! }
-//!
-//! impl ThreadAware for Worker {
-//!     fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
-//!         self.thread = Some(destination.id());
-//!     }
-//! }
-//!
-//! // What the runtime does.
-//! let here = thread::current().id();
-//! let there = thread::spawn(|| thread::current().id()).join().unwrap();
-//!
-//! let owner = Owner::new(2);
-//! let first = Thread::new(owner.clone(), here, NumaNode::new(0));
-//! let second = Thread::new(owner, there, NumaNode::new(1));
-//!
-//! let mut worker = Worker { thread: None };
-//!
-//! worker.relocate(None, &first); // first placement, no previous `Thread`
-//! worker.relocate(Some(&first), &second); // moved to another thread
-//!
-//! assert_eq!(worker.thread, Some(there));
-//! # }
-//! # }
-//! ```
+//! After moving a value, the runtime calls [`relocate`](ThreadAware::relocate), passing where
+//! the value came from and where it now runs.
 //!
 //! # Performance, not correctness
 //!
@@ -137,32 +103,13 @@
 //!
 //! # What the ids mean
 //!
-//! - **Thread id** — a `std::thread::ThreadId`, unique among the threads alive at once, so
-//!   state keyed on it is never shared by accident, not even between two runtimes in one
-//!   process.
-//! - **[`NumaNode`]** — the memory closest to that thread. Unlike the thread id it is
-//!   *shared*: every thread near the same memory reports the same node, which is what suits
-//!   it to state shared within a region but not across the machine. That holds only while
-//!   every runtime numbers the regions identically. Nothing checks it, and runtimes that
-//!   disagree make shared state wrong rather than merely slow.
-//! - **[`Owner`]** — the runtime a [`Thread`] belongs to. Every new owner is unique, so two
-//!   live runtimes never share one. It lets a value detect that it has crossed into a
-//!   different runtime and release anything the previous one owned.
+//! - **Thread id** identifies a live OS thread.
+//! - **[`NumaNode`]** identifies nearby memory and is shared by threads in the same region.
+//!   It is meaningful across runtimes only when they number regions identically.
+//! - **[`Owner`]** uniquely identifies the runtime a [`Thread`] belongs to.
 //!
-//! An implementation reads only the ids its state depends on. A per-thread cache or a handle
-//! to a thread-local driver keys on the thread id; a buffer pool keys on [`NumaNode`] and
-//! survives a move to another thread near the same memory; anything the runtime owns compares
-//! [`Owner`].
-//!
-//! The ids carry no meaning beyond identity: they need not start at zero or run
-//! consecutively, and the [`Thread`]s in use cannot be enumerated. State keyed on any of them
-//! belongs in a map rather than an array indexed by it. [`Owner::min_threads`] is the one
-//! number on offer, and it is a floor to pre-size against, not a bound to index against.
-//!
-//! Without `std` there is no [`ThreadId`](std::thread::ThreadId): `Thread::new` and
-//! `Thread::id` are absent and only [`Owner`] and [`NumaNode`] remain. A `no_std` library can
-//! still implement [`ThreadAware`] and use whatever it is given; the runtime that drives
-//! relocation requires `std` regardless.
+//! These ids are opaque and need not be consecutive. Use only the coordinate your state
+//! depends on, and store keyed state in a map rather than an indexed array.
 //!
 //! # Relation to `Send`
 //!
@@ -172,33 +119,19 @@
 //!
 //! # Provided implementations
 //!
-//! Types with nothing tied to a thread receive an empty implementation: primitives and their
-//! non-zero variants, the thread ids, `Duration`, strings, safe function pointers of up to
-//! twelve parameters, and, with the `std` feature, paths.
+//! Values with no thread-local state use an empty implementation. Containers forward
+//! relocation to their values, while map keys remain unchanged.
 //!
-//! Containers forward the call to what they hold: [`Option`], [`Result`], arrays, slices,
-//! `Vec`, `VecDeque`, `Box`, cells, tuples of up to twelve elements, and map values.
-//!
-//! References are not [`ThreadAware`]. Relocating through one would adapt something the value
-//! only borrows, and whoever owns it is relocated on its own account.
-//!
-//! Map keys are left alone, since altering one could change its hash or ordering and corrupt
-//! the map. Sets are not implemented at all for the same reason, so a `HashSet` or
-//! `BTreeSet` field is not [`ThreadAware`].
-//!
-//! `Cow` is omitted for now: relocating a borrowed one has to clone it into owned storage
-//! first, which is a surprising amount of work to hide behind a hint.
-//!
-//! `Arc` is also omitted: whether a shared allocation should stay shared across threads or
-//! be split per thread depends on what it holds. The per-core [`Arc`][arc] in
-//! [`thread_aware`] covers the case where splitting is correct.
+//! References, sets, `Cow`, and `Arc` have no implementation because relocation would be
+//! ambiguous or could violate their invariants. [`thread_aware`] provides wrappers for cases
+//! that need an explicit policy, including its per-core [`Arc`][arc].
 //!
 //! # Features
 //!
-//! - **`std`** *(default)* - Adds [`Thread::new`] and [`Thread::id`], which need
+//! - **`std`** *(default)* - Adds runtime construction support and [`Thread::id`], which need
 //!   [`ThreadId`](std::thread::ThreadId), and implements [`ThreadAware`] for standard library
-//!   types such as `HashMap`, `Path` and `PathBuf`. Turn it off for `no_std`, which needs
-//!   only `alloc` and pointer-width atomics.
+//!   types such as `HashMap`, `Path` and `PathBuf`. Turn it off for `no_std`, which needs only
+//!   `alloc` and pointer-width atomics.
 
 extern crate alloc;
 #[cfg(any(test, feature = "std"))]
@@ -207,6 +140,9 @@ extern crate std;
 mod impls;
 mod thread;
 mod thread_aware;
+
+#[doc(hidden)]
+pub mod __private;
 
 #[doc(inline)]
 pub use thread::{NumaNode, Owner, Thread};
