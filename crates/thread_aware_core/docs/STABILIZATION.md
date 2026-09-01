@@ -9,6 +9,9 @@ dependents. The `thread_aware` crate separately exposes its `Affinity`-based
 relocation API and utility surface. The two crates therefore have independent
 public contracts.
 
+Adoption of the core contract across the package family is tracked in
+[oxidizer#719](https://github.com/microsoft/oxidizer/issues/719).
+
 ## Stable boundary
 
 `thread_aware_core` 1.0 contains the API that downstream crates may expose:
