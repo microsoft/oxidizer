@@ -1,0 +1,74 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "compressors"
+version = "0.1.0"
+description = "Streaming compression and decompression over bytesbuf byte sequences"
+readme = "README.md"
+keywords = ["compression", "gzip", "streaming", "zero-copy"]
+categories = ["compression", "network-programming"]
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/compressors"
+
+[package.metadata.coverage-gate]
+min-lines-percent = 100
+
+[package.metadata.docs.rs]
+all-features = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["bytesbuf::*", "futures_core::stream::Stream"]
+
+[features]
+brotli = ["dep:brotli"]
+# Gzip alone is the default: the most widely used format, and one dependency. Everything else is
+# opt-in, so a build that only needs brotli never compiles flate2, and vice versa.
+default = ["gzip"]
+deflate = ["dep:flate2"]
+futures-stream = ["dep:futures-core", "dep:pin-project-lite"]
+gzip = ["dep:flate2"]
+zlib = ["dep:flate2"]
+zstd = ["dep:zstd-safe"]
+
+[dependencies]
+brotli = { workspace = true, features = ["std"], optional = true }
+bytesbuf = { workspace = true, features = ["std"] }
+flate2 = { workspace = true, features = ["zlib-rs"], optional = true }
+futures-core = { workspace = true, optional = true }
+pin-project-lite = { workspace = true, optional = true }
+zstd-safe = { workspace = true, features = ["std"], optional = true }
+
+[dev-dependencies]
+alloc_tracker = { workspace = true }
+brotli = { workspace = true, features = ["std"] }
+criterion = { workspace = true }
+flate2 = { workspace = true, features = ["zlib-rs"] }
+futures = { workspace = true, features = ["executor"] }
+futures-core = { workspace = true }
+mutants = { workspace = true }
+pin-project-lite = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }
+tokio-stream = { workspace = true }
+zstd-safe = { workspace = true, features = ["std"] }
+
+[[example]]
+name = "round_trip"
+required-features = ["brotli", "deflate", "gzip", "zlib", "zstd"]
+
+[[example]]
+name = "tokio_stream"
+required-features = ["futures-stream", "gzip"]
+
+[[bench]]
+harness = false
+name = "codec"
+required-features = ["brotli", "deflate", "futures-stream", "gzip", "zlib", "zstd"]
+
+[lints]
+workspace = true
