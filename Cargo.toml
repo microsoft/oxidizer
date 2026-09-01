@@ -231,7 +231,7 @@ smallvec = { version = "1.15.1", default-features = false }
 smol = { version = "2.0.0", default-features = false }
 static_assertions = { version = "1.1.0", default-features = false }
 string-interner = { version = "0.20.0", default-features = false }
-string_cache = { version = "0.10.0", default-features = false }
+string_cache = { version = "0.11.0", default-features = false }
 symbol_table = { version = "0.5.0", default-features = false }
 syn = { version = "3.0.2", default-features = false }
 templated_uri = { path = "crates/templated_uri", default-features = false, version = "0.5.0" }
