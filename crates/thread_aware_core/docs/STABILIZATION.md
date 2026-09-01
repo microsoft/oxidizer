@@ -29,8 +29,8 @@ versioned `__private::v1::{new_thread, new_owner, new_numa_node}` functions. The
 inherent constructors are crate-private, keeping construction plumbing out of
 the stable surface that downstream libraries expose.
 
-Nothing the crate depends on reaches a consumer build; its only manifest entry
-is a test-only dev-dependency. The `std` feature is enabled by default and adds
+The crate has no normal dependencies; its only manifest dependency is test-only.
+The `std` feature is enabled by default and adds
 implementations for standard-library types such as `HashMap`, `Path` and
 `PathBuf`. Turn it off for `no_std`, where the crate needs only `alloc` and
 pointer-width atomics; a

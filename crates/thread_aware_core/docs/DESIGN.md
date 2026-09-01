@@ -31,9 +31,10 @@ That makes this crate's compatibility a shared constraint rather than a private
 matter. Two libraries interoperate only when their public APIs resolve to the
 same `thread_aware_core` instance, so an incompatible release does not
 inconvenience one crate — it splits the ecosystem until every participant has
-upgraded. A crate in that position has to be *boring*: small, dependency-free,
-and stable far longer than the code around it. The MSRV is part of the same
-bargain, and is raised deliberately rather than incidentally.
+upgraded. A crate in that position needs conservative evolution: a small surface,
+no normal dependencies, and compatibility maintained longer than the code around
+it. The MSRV is part of the same bargain, and is raised deliberately rather than
+incidentally.
 
 Splitting it out is what buys that. The volatile parts of `thread_aware` keep
 iterating pre-1.0 while the few items that appear in public signatures stabilise
@@ -49,8 +50,8 @@ including threads of a different runtime, but only while all of them number the
 nodes identically.
 
 `Owner` values are issued by runtime and integration code, never by ordinary
-data-structure authors. Every new owner is unique, so two runtimes alive at once
-cannot collide however carelessly they are set up.
+data-structure authors. Identity allocation is independent of caller configuration,
+so every new owner is distinct from every other live owner.
 
 Implementing `ThreadAware` also commits a type to `Send`, since that is a
 supertrait. A type holding an `Rc` or another thread-bound handle cannot
@@ -83,9 +84,9 @@ cannot construct one, which only runtimes need to do. Such a build needs `alloc`
 and pointer-width atomics, the latter because `Owner` identities come from a
 process-wide counter.
 
-**No dependencies reach a consumer.** The manifest's only entry is a test-only
-dev-dependency, so adopting this crate cannot introduce a version conflict or
-pull anything unexpected into a build.
+**No transitive production dependencies.** The manifest's only dependency is a
+test-only dev-dependency, so adopting this crate adds no production package beyond
+the crate itself.
 
 **Describe, do not enforce.** Nothing checks that runtimes number NUMA nodes
 alike or that implementations avoid blocking. These are documented

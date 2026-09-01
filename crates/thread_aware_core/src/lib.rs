@@ -34,9 +34,8 @@
 //! surface evolves independently.
 //!
 //! - **`thread_aware_core`** (this crate) — the vocabulary that two unrelated libraries must
-//!   agree on before either can relocate a value defined by the other. Deliberately small and
-//!   slow-moving, so naming [`ThreadAware`] or [`Thread`] in your own public API costs you
-//!   nothing later.
+//!   agree on before either can relocate a value defined by the other. It evolves
+//!   conservatively, reducing how much public APIs couple to changes in the utility crate.
 //! - **[`thread_aware`]** — the utilities that make relocation convenient: a
 //!   [`#[derive(ThreadAware)]`][derive] macro, wrappers for foreign types, a per-core
 //!   [`Arc`][arc], containers and registries. Free to evolve, and not meant to appear in a
@@ -46,9 +45,9 @@
 //! [derive]: https://docs.rs/thread_aware/latest/thread_aware/derive.ThreadAware.html
 //! [arc]: https://docs.rs/thread_aware/latest/thread_aware/struct.Arc.html
 //!
-//! Depend on this crate directly when all you need is the trait. It adds nothing to your
-//! dependency graph, and works without `std`: with default features turned off, [`Thread`]
-//! loses its thread id component and keeps [`Owner`] and [`NumaNode`].
+//! Depend on this crate directly when all you need is the trait. It has no normal dependencies
+//! and works without `std`: with default features turned off, [`Thread`] loses its thread id
+//! component and keeps [`Owner`] and [`NumaNode`].
 //!
 //! # Why relocation exists
 //!
