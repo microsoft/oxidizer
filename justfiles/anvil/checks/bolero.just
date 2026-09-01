@@ -29,7 +29,7 @@
 # repo-specific to standardize).
 
 # Run Bolero tests for affected workspace packages.
-[script("pwsh")]
+[script("pwsh", "-NoProfile")]
 anvil-bolero: anvil-bolero-validate-prereqs
     $ErrorActionPreference = 'Stop'
     if (-not $IsLinux) {

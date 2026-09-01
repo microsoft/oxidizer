@@ -22,7 +22,7 @@
 # a runner class.
 
 # Run selected Miri test artifacts with CPU-based parallelism.
-[script("pwsh")]
+[script("pwsh", "-NoProfile")]
 _anvil-miri-test:
     $ErrorActionPreference = 'Stop'
     if ($env:ANVIL_INCLUDE_AFFECTED -eq '--skip') { exit 0 }
@@ -213,7 +213,7 @@ _anvil-miri-test:
     }
 
 # Run Miri tests for affected workspace packages.
-[script("pwsh")]
+[script("pwsh", "-NoProfile")]
 anvil-miri: anvil-miri-validate-prereqs
     $ErrorActionPreference = 'Stop'
     if ($env:ANVIL_INCLUDE_AFFECTED -eq '--skip') { exit 0 }

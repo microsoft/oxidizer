@@ -14,7 +14,7 @@
 # per-seed crashes, so coverage matters more than depth-per-seed.
 
 # Run Miri tests with race coverage tracking.
-[script("pwsh")]
+[script("pwsh", "-NoProfile")]
 anvil-miri-race-coverage: anvil-miri-race-coverage-validate-prereqs
     $ErrorActionPreference = 'Stop'
     if ($env:ANVIL_INCLUDE_AFFECTED -eq '--skip') { exit 0 }

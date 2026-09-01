@@ -14,7 +14,7 @@
 # explicitly avoid for udeps/miri/careful/external-types.
 
 # Check Rust source formatting.
-[script("pwsh")]
+[script("pwsh", "-NoProfile")]
 anvil-fmt: anvil-fmt-validate-prereqs
     $ErrorActionPreference = 'Stop'
     if ($env:ANVIL_INCLUDE_MODIFIED -eq '--skip') { exit 0 }

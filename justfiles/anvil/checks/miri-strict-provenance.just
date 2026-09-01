@@ -7,7 +7,7 @@
 # See https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/checks.md
 
 # Run Miri tests with strict provenance checks.
-[script("pwsh")]
+[script("pwsh", "-NoProfile")]
 anvil-miri-strict-provenance: anvil-miri-strict-provenance-validate-prereqs
     $ErrorActionPreference = 'Stop'
     if ($env:ANVIL_INCLUDE_AFFECTED -eq '--skip') { exit 0 }

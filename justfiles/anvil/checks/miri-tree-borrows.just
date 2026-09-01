@@ -20,7 +20,7 @@
 # vars set.
 
 # Run Miri tests with the Tree Borrows model.
-[script("pwsh")]
+[script("pwsh", "-NoProfile")]
 anvil-miri-tree-borrows: anvil-miri-tree-borrows-validate-prereqs
     $ErrorActionPreference = 'Stop'
     if ($env:ANVIL_INCLUDE_AFFECTED -eq '--skip') { exit 0 }
