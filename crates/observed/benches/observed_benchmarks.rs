@@ -7,7 +7,7 @@
 //! - Full emit pipeline (event -> log record via `OTel` provider)
 //! - Enrichment resolution (context lookup + Vec building)
 //! - Metric dimension building
-//! - Context operations (enrich)
+//! - Sink operations (construction, emit through a no-op sink)
 //!
 //! Run with:
 //! ```sh

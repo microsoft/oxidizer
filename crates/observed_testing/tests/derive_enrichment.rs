@@ -302,8 +302,7 @@ fn hand_written_enrichment_is_accepted_by_enrich() {
         ExpectedEvent::new("test.probe", Severity::Info)
             .dimension("first", 0_i64)
             .dimension("second", 1_i64)
-            .dimension("value", "1")
-            .log(),
+            .dimension("value", "1"),
     );
 }
 

@@ -68,6 +68,10 @@ impl Slot {
     }
 
     /// Pushes entries onto the enrichment chain and returns a guard.
+    ///
+    /// An empty layer installs no chain node and records no restoration, so the
+    /// storage boundary holds for callers that reach it without passing through
+    /// [`Sink::push_enrichment`](crate::Sink).
     pub(crate) fn push(&self, entries: Arc<[EnrichmentEntry]>) -> Guard {
         if entries.is_empty() {
             return Guard::empty();
@@ -178,6 +182,11 @@ impl EnrichmentTransfer {
     /// Pushes an additional enrichment node onto every captured chain.
     /// Broadcast within the transfer's known slots; transfers with no
     /// captured slots are left unchanged.
+    ///
+    /// Emptiness is tested while the entries are still an owned `Vec`, so an
+    /// empty layer skips the shared-slice allocation as well as the chain
+    /// nodes. [`push_entries`](Self::push_entries) relies on this and on the
+    /// same check in [`push_for`](Self::push_for) for its non-empty input.
     pub(crate) fn push(&mut self, additional_enrichment: impl Enrichment) {
         let entries = additional_enrichment.into_entries();
         if entries.is_empty() {

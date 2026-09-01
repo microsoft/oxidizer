@@ -369,7 +369,17 @@ fn passthrough_redaction_engine() -> data_privacy::RedactionEngine {
 ///
 /// Construct with [`ExpectedEvent::new`] and chain builder methods for the
 /// fields and signals the event must carry. Omitted body and dimensions are
-/// expected to be absent, and metric and disabled flags default to `false`.
+/// expected to be absent, the metric signal is expected to be absent, and the
+/// disabled flag is expected to be unset.
+///
+/// The log signal follows the severity: [`new`](Self::new) expects one and
+/// [`without_severity`](Self::without_severity) expects none, because a
+/// captured event carries a severity exactly when it carries a log signal.
+///
+/// Exactness covers what this type models - name, severity, body, dimensions,
+/// the metric signal and the disabled flag. Source location and metric
+/// instrument metadata are outside the comparison; assert those through the
+/// [`CapturedEvent`] accessors.
 ///
 /// # Example
 ///
@@ -388,7 +398,6 @@ pub struct ExpectedEvent {
     severity: Option<Severity>,
     body: Option<String>,
     sorted_dimensions: Vec<(String, Value)>,
-    expect_log: bool,
     expect_metric: bool,
     expect_disabled: bool,
 }
@@ -396,9 +405,10 @@ pub struct ExpectedEvent {
 impl ExpectedEvent {
     /// Creates a new expected **log** event with the given name and severity.
     ///
-    /// Omitted body and dimensions are expected to be absent, the metric and
-    /// disabled flags default to `false`, and the log signal is expected. For an
-    /// event with no log signal - a metric-only or signal-less event - use
+    /// Omitted body and dimensions are expected to be absent, the metric signal
+    /// and the disabled flag are expected to be unset, and the log signal is
+    /// expected because a severity is. For an event with no log signal - a
+    /// metric-only or signal-less event - use
     /// [`without_severity`](Self::without_severity).
     #[must_use]
     pub fn new(name: impl Into<String>, severity: Severity) -> Self {
@@ -407,7 +417,6 @@ impl ExpectedEvent {
             severity: Some(severity),
             body: None,
             sorted_dimensions: Vec::new(),
-            expect_log: true,
             expect_metric: false,
             expect_disabled: false,
         }
@@ -424,7 +433,6 @@ impl ExpectedEvent {
             severity: None,
             body: None,
             sorted_dimensions: Vec::new(),
-            expect_log: false,
             expect_metric: false,
             expect_disabled: false,
         }
@@ -445,13 +453,6 @@ impl ExpectedEvent {
         self
     }
 
-    /// Expects the event to have the LOG signal.
-    #[must_use]
-    pub fn log(mut self) -> Self {
-        self.expect_log = true;
-        self
-    }
-
     /// Expects the event to have the METRIC signal.
     #[must_use]
     pub fn metric(mut self) -> Self {
@@ -459,7 +460,7 @@ impl ExpectedEvent {
         self
     }
 
-    /// Expects the event to be disabled by default.
+    /// Expects the event to carry the disabled flag.
     #[must_use]
     pub fn disabled(mut self) -> Self {
         self.expect_disabled = true;
@@ -473,7 +474,6 @@ impl PartialEq<ExpectedEvent> for CapturedEvent {
             && self.severity == other.severity
             && self.body.as_deref() == other.body.as_deref()
             && self.sorted_dimensions == other.sorted_dimensions
-            && other.expect_log == self.description.is_log()
             && other.expect_metric == self.description.contains_metrics()
             && other.expect_disabled == self.description.is_disabled()
     }
@@ -688,11 +688,15 @@ impl PartialEq<EventDescription> for ExpectedEventDescription {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod coverage_tests {
-    use observed::{Event, emit, event};
+    use observed::{Event, SinkId, emit, event};
 
     use super::*;
     use crate::events::ProbeEvent;
     use crate::test_emitter;
+
+    #[event("fieldless.log")]
+    #[info]
+    struct FieldlessLog;
 
     #[test]
     fn mock_processor_default_debug_and_flush() {
@@ -703,7 +707,7 @@ mod coverage_tests {
 
     #[test]
     fn expected_types_equal_actuals_in_reverse() {
-        let (sink, processor) = test_emitter(observed::SinkId::new("rev"));
+        let (sink, processor) = test_emitter(SinkId::new("rev"));
         emit!(sink, ProbeEvent::new(42));
         let captured = processor.single_event();
 
@@ -722,13 +726,9 @@ mod coverage_tests {
         assert_eq!(expected_desc, ProbeEvent::DESCRIPTION);
     }
 
-    #[event("fieldless.log")]
-    #[info]
-    struct FieldlessLog;
-
     #[test]
-    fn expected_event_new_matches_fieldless_log_without_log_builder() {
-        let (sink, processor) = test_emitter(observed::SinkId::new("fieldless_log"));
+    fn expected_event_new_matches_fieldless_log() {
+        let (sink, processor) = test_emitter(SinkId::new("fieldless_log"));
 
         emit!(sink, FieldlessLog);
 

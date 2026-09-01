@@ -85,9 +85,7 @@ fn generic_event_with_unredacted_field_emits() {
 
     assert_eq!(
         processor.single_event(),
-        ExpectedEvent::new("generic.unredacted", Severity::Info)
-            .dimension("value", 42_i64)
-            .log(),
+        ExpectedEvent::new("generic.unredacted", Severity::Info).dimension("value", 42_i64),
     );
 }
 
@@ -104,9 +102,7 @@ fn generic_event_with_redacted_field_emits() {
 
     assert_eq!(
         processor.single_event(),
-        ExpectedEvent::new("generic.redacted", Severity::Info)
-            .dimension("value", "hello")
-            .log(),
+        ExpectedEvent::new("generic.redacted", Severity::Info).dimension("value", "hello"),
     );
 }
 
@@ -123,9 +119,7 @@ fn generic_event_with_data_class_field_emits() {
 
     assert_eq!(
         processor.single_event(),
-        ExpectedEvent::new("generic.classified", Severity::Info)
-            .dimension("value", "secret")
-            .log(),
+        ExpectedEvent::new("generic.classified", Severity::Info).dimension("value", "secret"),
     );
 }
 
@@ -144,16 +138,12 @@ fn generic_event_with_option_field_emits_both_arms() {
     let events = processor.events();
     assert_eq!(
         events[0],
-        ExpectedEvent::new("generic.optional", Severity::Info)
-            .dimension("value", "present")
-            .log(),
+        ExpectedEvent::new("generic.optional", Severity::Info).dimension("value", "present"),
     );
     // The default `#[if_none("n/a")]` placeholder fills the missing value.
     assert_eq!(
         events[1],
-        ExpectedEvent::new("generic.optional", Severity::Info)
-            .dimension("value", "n/a")
-            .log(),
+        ExpectedEvent::new("generic.optional", Severity::Info).dimension("value", "n/a"),
     );
 }
 
@@ -173,8 +163,7 @@ fn generic_event_with_two_parameters_emits() {
         processor.single_event(),
         ExpectedEvent::new("generic.mixed", Severity::Info)
             .dimension("raw", 7_i64)
-            .dimension("classified", "mixed")
-            .log(),
+            .dimension("classified", "mixed"),
     );
 }
 
@@ -195,8 +184,7 @@ fn generic_enrichments_reach_the_record() {
         ExpectedEvent::new("generic.unredacted", Severity::Info)
             .dimension("ctx", 5_i64)
             .dimension("ctx", "99")
-            .dimension("value", 1_i64)
-            .log(),
+            .dimension("value", 1_i64),
     );
 }
 
@@ -216,8 +204,7 @@ fn generic_data_class_enrichment_reaches_the_record() {
         processor.single_event(),
         ExpectedEvent::new("generic.unredacted", Severity::Info)
             .dimension("ctx", "tenant-7")
-            .dimension("value", 1_i64)
-            .log(),
+            .dimension("value", 1_i64),
     );
 }
 
@@ -276,6 +263,6 @@ fn a_field_routed_to_no_signal_is_absent_from_the_record() {
 
     assert_eq!(
         processor.single_event(),
-        ExpectedEvent::new("generic.excluded", Severity::Info).dimension("kept", "1").log(),
+        ExpectedEvent::new("generic.excluded", Severity::Info).dimension("kept", "1"),
     );
 }

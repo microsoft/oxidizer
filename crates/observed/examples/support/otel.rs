@@ -130,6 +130,11 @@ pub(crate) fn populate_log_record(record: &mut impl LogRecord, event: &EventView
         ControlFlow::Continue(())
     });
 
+    // File and line use stable OpenTelemetry code attributes. The emitting
+    // crate is deliberately not exported: `code.namespace` is deprecated with
+    // no standalone replacement, and its successor `code.function.name` needs a
+    // fully qualified function name that the event model does not capture.
+    // https://opentelemetry.io/docs/specs/semconv/registry/attributes/code/
     if let Some(file) = event.source_file() {
         record.add_attribute(opentelemetry::Key::from_static_str(CODE_FILE_PATH), AnyValue::String(file.into()));
     }

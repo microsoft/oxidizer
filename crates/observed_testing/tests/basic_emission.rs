@@ -38,8 +38,7 @@ fn log_event() {
         ExpectedEvent::new("app.warning", Severity::Warn)
             .body("Something went wrong")
             .dimension("code", "42")
-            .dimension("recoverable", "true")
-            .log(),
+            .dimension("recoverable", "true"),
     );
 }
 
@@ -80,7 +79,6 @@ fn log_and_metric_event() {
             .dimension("method", "GET")
             .dimension("retries", "3")
             .dimension("status", "200")
-            .log()
             .metric()
     );
 }
@@ -106,7 +104,7 @@ fn event_with_custom_field_name() {
     // The field `system_id` is renamed to `db.system` via #[dimension(log = "db.system")]
     assert_eq!(
         processor.single_event(),
-        ExpectedEvent::new("db.error", Severity::Error).dimension("db.system", "5").log(),
+        ExpectedEvent::new("db.error", Severity::Error).dimension("db.system", "5"),
     );
 }
 
@@ -119,7 +117,7 @@ fn emit_already_constructed_event() {
 
     assert_eq!(
         processor.single_event(),
-        ExpectedEvent::new("test.probe", Severity::Info).dimension("value", "204").log()
+        ExpectedEvent::new("test.probe", Severity::Info).dimension("value", "204")
     );
 }
 
@@ -133,10 +131,7 @@ fn emit_event_with_no_fields() {
 
     emit!(sink, Heartbeat);
 
-    assert_eq!(
-        processor.single_event(),
-        ExpectedEvent::new("internal.heartbeat", Severity::Trace).log(),
-    );
+    assert_eq!(processor.single_event(), ExpectedEvent::new("internal.heartbeat", Severity::Trace),);
 }
 
 #[test]
@@ -200,17 +195,13 @@ fn multiple_events_accumulate() {
 
     let events = processor.events();
     assert_eq!(events.len(), 3);
-    assert_eq!(
-        events[0],
-        ExpectedEvent::new("test.probe", Severity::Info).dimension("value", "1").log()
-    );
+    assert_eq!(events[0], ExpectedEvent::new("test.probe", Severity::Info).dimension("value", "1"));
     assert_eq!(
         events[1],
         ExpectedEvent::new("app.warning", Severity::Warn)
             .body("Something went wrong")
             .dimension("code", "1")
             .dimension("recoverable", "false")
-            .log()
     );
     assert_eq!(
         events[2],
@@ -218,7 +209,6 @@ fn multiple_events_accumulate() {
             .dimension("key_hash", "42")
             .dimension("lookup_ms", 0.5f64)
             .dimension("size_bytes", "1024")
-            .log()
             .metric()
     );
 }
@@ -269,7 +259,6 @@ fn dimensions_types() {
             .dimension("f64_field", 6.14f64)
             .dimension("bool_field", true)
             .dimension("string_field", "test")
-            .log()
     );
 }
 
@@ -302,8 +291,7 @@ fn borrowed_classified_fields() {
         ExpectedEvent::new("user.action", Severity::Info)
             .dimension("count", 3i64)
             .dimension("label", "click")
-            .dimension("name", "alice")
-            .log(),
+            .dimension("name", "alice"),
     );
 }
 
