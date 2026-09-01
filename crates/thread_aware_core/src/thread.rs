@@ -140,8 +140,10 @@ impl Thread {
 
 /// Hands the next identity to each [`Owner`] created in this process.
 ///
-/// Pointer-width so the counter does not wrap in practice; a wrap would hand out a live
-/// identity twice.
+/// Concrete values and their sequence carry no meaning; a counter is simply the smallest
+/// allocator that issues distinct identities before exhaustion. Pointer-width makes exhaustion
+/// impractical. Relaxed ordering is sufficient because this atomic provides uniqueness only
+/// and neither publishes nor orders any other state.
 static NEXT_OWNER: AtomicUsize = AtomicUsize::new(0);
 
 /// An identifier for the runtime that owns a [`Thread`].
@@ -192,6 +194,7 @@ impl Owner {
     #[must_use]
     pub(crate) fn new() -> Self {
         Self {
+            // The atomic read-modify-write order makes each returned identity distinct.
             id: NEXT_OWNER.fetch_add(1, Ordering::Relaxed),
         }
     }
