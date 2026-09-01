@@ -16,10 +16,10 @@ use core::time::Duration;
 use std::collections::HashMap;
 #[cfg(any(test, feature = "std"))]
 use std::path::{Path, PathBuf};
-#[cfg(any(test, feature = "std"))]
-use std::thread::ThreadId;
 #[cfg(test)]
 use std::thread;
+#[cfg(any(test, feature = "std"))]
+use std::thread::ThreadId;
 
 use crate::{NumaNode, Owner, Thread, ThreadAware};
 
@@ -279,7 +279,8 @@ mod tests {
         NonZero, NonZeroI8, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroI128, NonZeroIsize, NonZeroU8, NonZeroU16, NonZeroU32, NonZeroU64,
         NonZeroU128, NonZeroUsize,
     };
-    use std::collections::{HashMap, hash_map::DefaultHasher};
+    use std::collections::HashMap;
+    use std::collections::hash_map::DefaultHasher;
 
     use super::thread;
     use crate::{NumaNode, Owner, Thread, ThreadAware};
