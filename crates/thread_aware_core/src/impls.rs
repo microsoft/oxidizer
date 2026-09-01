@@ -16,6 +16,8 @@ use core::time::Duration;
 use std::collections::HashMap;
 #[cfg(any(test, feature = "std"))]
 use std::path::{Path, PathBuf};
+#[cfg(any(test, feature = "std"))]
+use std::thread::{self, ThreadId};
 
 use crate::{NumaNode, Owner, Thread, ThreadAware};
 
@@ -72,7 +74,7 @@ impl_thread_aware!(str);
 impl_thread_aware!(Owner);
 impl_thread_aware!(NumaNode);
 #[cfg(any(test, feature = "std"))]
-impl_thread_aware!(std::thread::ThreadId);
+impl_thread_aware!(ThreadId);
 impl_thread_aware!(Thread);
 
 impl<T: ?Sized> ThreadAware for PhantomData<T>
@@ -277,6 +279,7 @@ mod tests {
     };
     use std::collections::{HashMap, hash_map::DefaultHasher};
 
+    use super::thread;
     use crate::{NumaNode, Owner, Thread, ThreadAware};
 
     /// A type whose `relocate` visibly mutates state, so mutation tests catch
@@ -292,7 +295,7 @@ mod tests {
 
     fn sample_threads() -> [Thread; 2] {
         let owner = Owner::new();
-        let thread = std::thread::current().id();
+        let thread = thread::current().id();
         [
             Thread::new(owner.clone(), thread, NumaNode::new(0)),
             Thread::new(owner, thread, NumaNode::new(1)),
