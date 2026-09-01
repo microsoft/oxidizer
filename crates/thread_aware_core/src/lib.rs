@@ -24,6 +24,11 @@
 //!
 //! # The `thread_aware` family
 //!
+//! Downstream libraries need one small contract they can implement and expose in public APIs
+//! without also adopting derive macros, policy wrappers, registries, or runtime integration.
+//! Keeping that contract here lets unrelated libraries interoperate while the larger utility
+//! surface evolves independently.
+//!
 //! - **`thread_aware_core`** (this crate) — the vocabulary that two unrelated libraries must
 //!   agree on before either can relocate a value defined by the other. Deliberately small and
 //!   slow-moving, so naming [`ThreadAware`] or [`Thread`] in your own public API costs you
