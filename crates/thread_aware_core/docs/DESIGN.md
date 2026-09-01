@@ -7,8 +7,7 @@ runtime moves them between threads. It exists to be depended on permanently:
 crates are meant to name `ThreadAware` and `Thread` in their own public
 signatures, and this crate's job is to make sure that never becomes a liability.
 
-It exposes one trait, one identifier and its two component ids, and nothing
-else:
+It exposes the following vocabulary and nothing else:
 
 - `ThreadAware` — the callback a value implements to be told it has moved.
 - `Thread` — where a value runs, built from `Owner`, a `std::thread::ThreadId`,
@@ -149,7 +148,7 @@ path fills the new coordinate identically, so values built the old way remain
 equal to exactly the values they were equal to before; the new coordinate can
 only tell them apart once someone deliberately sets it.
 
-Adding a coordinate is therefore three additive steps:
+Adding a coordinate therefore uses these additive steps:
 
 1. Add the private field and its accessor.
 2. Add the sentinel constant to the coordinate's type.

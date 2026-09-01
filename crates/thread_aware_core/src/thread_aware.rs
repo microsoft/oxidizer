@@ -21,7 +21,7 @@ use crate::Thread;
 ///
 /// # Implementing
 ///
-/// Implementations usually take one of four shapes.
+/// Implementations usually take the following shapes.
 ///
 /// 1. **Do nothing.** Nothing in the type depends on where it runs. An empty body is a
 ///    complete implementation, and is what the primitive types do.
