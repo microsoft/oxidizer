@@ -6,6 +6,7 @@ use alloc::collections::{BTreeMap, VecDeque};
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::{Cell, RefCell};
+use core::marker::PhantomData;
 use core::num::{
     NonZeroI8, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroI128, NonZeroIsize, NonZeroU8, NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU128,
     NonZeroUsize,
@@ -73,6 +74,14 @@ impl_thread_aware!(NumaNode);
 #[cfg(any(test, feature = "std"))]
 impl_thread_aware!(std::thread::ThreadId);
 impl_thread_aware!(Thread);
+
+impl<T: ?Sized> ThreadAware for PhantomData<T>
+where
+    Self: Send,
+{
+    #[inline]
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+}
 
 // We need to implement `ThreadAware` for tuples ranging from 0 to 12 elements
 macro_rules! impl_thread_aware_tuple {
@@ -254,6 +263,7 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
     use core::cell::{Cell, RefCell};
+    use core::marker::PhantomData;
     use core::num::{
         NonZero, NonZeroI8, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroI128, NonZeroIsize, NonZeroU8, NonZeroU16, NonZeroU32, NonZeroU64,
         NonZeroU128, NonZeroUsize,
@@ -300,6 +310,19 @@ mod tests {
         assert_thread_aware::<NonZeroIsize>();
 
         assert_thread_aware::<NonZero<u32>>();
+    }
+
+    #[test]
+    fn phantom_data_is_thread_aware_without_requiring_its_type_to_be() {
+        struct MarkerOnly;
+
+        fn assert_thread_aware<T: ThreadAware>() {}
+
+        assert_thread_aware::<PhantomData<MarkerOnly>>();
+
+        let threads = sample_threads();
+        let mut marker = PhantomData::<MarkerOnly>;
+        marker.relocate(Some(&threads[0]), &threads[1]);
     }
 
     #[test]
