@@ -106,9 +106,9 @@
 //! runtime that knows nothing about this trait. That may make things slower, but it must
 //! never cause a panic, a deadlock, or a wrong answer.
 //!
-//! Nor is it a hot path. Expect roughly one relocation per object graph per job or request,
-//! after which the value is used normally. Avoiding synchronization matters more than saving a
-//! few cycles.
+//! Call frequency is runtime-dependent. Implementations should make repeated calls with unchanged
+//! relevant coordinates cheap, while avoiding synchronization and other blocking work on every
+//! call.
 //!
 //! # What the ids mean
 //!

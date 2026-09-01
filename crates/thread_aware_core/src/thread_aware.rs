@@ -37,10 +37,10 @@ use crate::Thread;
 ///    ```
 /// 2. **Record the destination.** Store the new thread id, [`NumaNode`](crate::NumaNode) or
 ///    [`Owner`](crate::Owner) for later use.
-/// 3. **Replace a resource.** Compare the id it depends on: [`NumaNode`](crate::NumaNode)
+/// 3. **Adapt an optimization.** Compare the id it depends on: [`NumaNode`](crate::NumaNode)
 ///    for a buffer pool, the thread id for a driver handle, [`Owner`](crate::Owner) for
-///    anything the runtime owns. If it changed, release the old resource and acquire one for
-///    the new [`Thread`], moving out any real data it holds first.
+///    runtime-specific state. If it changed, an implementation may replace, detach, or retain
+///    the old resource according to what remains usable and worthwhile.
 /// 4. **Forward to fields.** A type composed of other types calls `relocate` on each field.
 ///    Prefer `#[derive(ThreadAware)]` to writing this by hand.
 ///
@@ -65,7 +65,7 @@ use crate::Thread;
 ///
 /// * **Neither panic nor block.** This runs while the runtime is placing work, so it
 ///   performs no network or disk I/O, no waiting on another worker, and takes no contended
-///   lock. Release anything that would block here and re-acquire it on first use.
+///   lock. Defer adaptation that would block; retaining usable state is acceptable.
 ///
 /// * **Tolerate repeated calls.** Relocating to the same [`Thread`], or with `source` equal to
 ///   `destination`, is harmless, and should also be cheap: compare the relevant ids and
@@ -73,13 +73,12 @@ use crate::Thread;
 ///
 /// * **Tolerate no call at all.** The value remains correct either way.
 ///
-/// * **Tolerate an unfamiliar [`Thread`].** A `destination` may name an OS thread the value has never
-///   seen and carry an [`Owner`](crate::Owner) belonging to another runtime, and this must
-///   remain sound. Release anything the previous runtime owned; state keyed on
-///   [`NumaNode`](crate::NumaNode) may remain valid, subject to the caveat in
-///   [what the ids mean](crate#what-the-ids-mean). Performance may suffer afterwards, though
-///   not permanently: once back on a [`Thread`] it can serve, the value re-acquires what it
-///   released.
+/// * **Tolerate an unfamiliar [`Thread`].** A `destination` may name an OS thread the value
+///   has never seen and carry an [`Owner`](crate::Owner) belonging to another runtime. The
+///   value must remain sound whether it retains usable state, abandons an optimization, or
+///   prepares to replace runtime-specific state later. State keyed on
+///   [`NumaNode`](crate::NumaNode) may remain useful, subject to the caveat in
+///   [what the ids mean](crate#what-the-ids-mean).
 ///
 /// A [`Thread`] may be cloned and retained, but the thread id it holds is meaningful only
 /// while that thread is alive, and an [`Owner`](crate::Owner) only while that runtime is.

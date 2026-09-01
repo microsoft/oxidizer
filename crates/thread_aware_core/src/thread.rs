@@ -75,7 +75,7 @@ impl Thread {
     /// Returns the identifier of the runtime that owns this [`Thread`].
     ///
     /// Comparing owners detects that a value has moved between runtimes. Such a move remains
-    /// sound, but resources owned by the previous runtime usually cannot follow.
+    /// sound; implementations decide whether runtime-specific state remains useful.
     ///
     /// # Examples
     ///
@@ -147,8 +147,8 @@ static NEXT_OWNER: AtomicUsize = AtomicUsize::new(0);
 /// An identifier for the runtime that owns a [`Thread`].
 ///
 /// Every new owner is unique, so two runtimes alive at the same time never share one. That
-/// is what lets a value notice it has crossed from one runtime into another and release
-/// anything the previous one owned.
+/// is what lets a value notice it has crossed from one runtime into another and adapt any
+/// runtime-specific optimization.
 ///
 /// Two owners are the same runtime exactly when their identities match.
 ///

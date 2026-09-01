@@ -65,6 +65,8 @@ runtime call `relocate` opportunistically, lets an implementation give up and
 stay slow rather than fail, and lets the method be infallible. A trait whose
 correctness depended on being called would need error reporting, ordering
 guarantees, and a way to refuse a move — none of which this crate has.
+Call frequency is runtime-dependent, so implementations keep unchanged-coordinate
+calls cheap and do not assume a workload-level cadence.
 
 **Say only what interoperability requires.** Every item here is a permanent
 commitment, so the bar for adding one is whether two independent crates must
