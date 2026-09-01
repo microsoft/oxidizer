@@ -9,9 +9,12 @@ signatures, and this crate's job is to make sure that never becomes a liability.
 
 It exposes the following vocabulary and nothing else:
 
-- `ThreadAware` — the callback a value implements to be told it has moved.
-- `Thread` — where a value runs, built from `Owner`, a `std::thread::ThreadId`,
-  and `NumaNode`.
+- `ThreadAware` — the trait a value implements when it can adapt after a move;
+  `relocate` is the trait's callback.
+- `Thread` — the coordinate where a value runs, composed of the `Owner`,
+  `std::thread::ThreadId`, and `NumaNode` identifiers.
+- `NumaNode` — the identity of a non-uniform memory access (NUMA) node, the
+  hardware locality domain whose processors have similarly local memory.
 
 Everything that makes relocation *convenient* — registries, containers,
 callbacks, derive macros, runtime integration — lives in the pre-1.0
@@ -33,8 +36,8 @@ same `thread_aware_core` instance, so an incompatible release does not
 inconvenience one crate — it splits the ecosystem until every participant has
 upgraded. A crate in that position needs conservative evolution: a small surface,
 no normal dependencies, and compatibility maintained longer than the code around
-it. The MSRV is part of the same bargain, and is raised deliberately rather than
-incidentally.
+it. The minimum supported Rust version (MSRV) is part of the same bargain, and
+is raised deliberately rather than incidentally.
 
 Splitting it out is what buys that. The volatile parts of `thread_aware` keep
 iterating pre-1.0 while the few items that appear in public signatures stabilise

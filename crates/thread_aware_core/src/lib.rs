@@ -17,9 +17,10 @@
 //!
 //! This crate contains the small API shared by thread-aware libraries:
 //!
-//! - [`ThreadAware`] notifies a value that it has moved.
-//! - [`Thread`] records where it now runs: which runtime, which OS thread, and which memory is
-//!   closest to it.
+//! - [`ThreadAware`] is the trait for values that adapt after a move; its
+//!   [`relocate`](ThreadAware::relocate) callback reports the destination.
+//! - [`Thread`] is the coordinate where a value now runs, composed of runtime, OS-thread, and
+//!   nearest-memory identifiers.
 //!
 //! [`Thread`] is a coordinate, not a handle: a runtime builds one to describe where a value
 //! is running, and it owns no operating-system resource. It is unrelated to
@@ -51,11 +52,11 @@
 //!
 //! # Why relocation exists
 //!
-//! Thread-per-core and NUMA-aware runtimes are fast because each worker keeps to itself: it
-//! uses memory close to its own thread, talks to its own I/O driver, and does not
-//! synchronize with other workers. When a value moves to another worker, what used to be
-//! close by is now in the wrong place: a cache line shared between threads, memory in a
-//! distant region, a handle to another thread's driver.
+//! Thread-per-core and non-uniform memory access (NUMA)-aware runtimes are fast because each
+//! worker keeps to itself: it uses memory close to its own thread, talks to its own I/O
+//! driver, and does not synchronize with other workers. When a value moves to another
+//! worker, what used to be close by is now in the wrong place: a cache line shared between
+//! threads, memory in a distant region, a handle to another thread's driver.
 //!
 //! [`ThreadAware`] lets that state repair itself. The runtime moves the value, then calls
 //! [`relocate`](ThreadAware::relocate) to report where it now lives. Relocation has two

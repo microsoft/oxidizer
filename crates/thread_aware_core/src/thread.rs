@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! The [`Thread`] identifier and its component id types.
+//! The [`Thread`] coordinate and its component identifier types.
 //!
 //! A [`Thread`] records where a value runs: which runtime owns it, which OS thread it names,
 //! and which memory is closest to that OS thread. See
@@ -200,13 +200,15 @@ impl Owner {
     }
 }
 
-/// An identifier for the memory closest to a thread, usually a NUMA node.
+/// An identifier for the memory closest to a thread, usually a non-uniform memory access
+/// (NUMA) node.
 ///
-/// On a large machine, memory is divided into regions and a thread reaches its own region
-/// fastest. Unlike the thread id, this identifier is shared: every thread near the same
-/// memory reports the same `NumaNode`, which is what makes it suitable for state that is
-/// shared within a region but not across the machine. Sharing between runtimes holds only
-/// while they all number the regions identically; see
+/// A NUMA node is a hardware locality domain whose processors have similarly local memory.
+/// On a large machine, a thread reaches memory in its own node fastest. Unlike the thread id,
+/// this identifier is shared: every thread near the same memory reports the same `NumaNode`,
+/// which is what makes it suitable for state that is shared within a region but not across
+/// the machine. Sharing between runtimes holds only while they all number the regions
+/// identically; see
 /// [what the ids mean](crate#what-the-ids-mean).
 ///
 /// Nodes carry no meaning beyond identity, and the width is wide enough that no real
