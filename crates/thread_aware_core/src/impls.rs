@@ -83,7 +83,6 @@ where
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
 }
 
-// We need to implement `ThreadAware` for tuples ranging from 0 to 12 elements
 macro_rules! impl_thread_aware_tuple {
     ($head:ident, $($tail:ident,)*) => {
         impl<$head, $($tail),*> ThreadAware for ($head, $($tail),*)
@@ -111,8 +110,6 @@ macro_rules! impl_thread_aware_tuple {
     };
 }
 
-impl_thread_aware_tuple!(A, B, C, D, E, F, G, H, I, J, K, L,);
-
 macro_rules! impl_thread_aware_fn {
     ($head:ident, $($tail:ident,)*) => {
         impl<R, $head, $($tail),*> ThreadAware for fn($head, $($tail),*) -> R {
@@ -129,7 +126,16 @@ macro_rules! impl_thread_aware_fn {
     }
 }
 
-impl_thread_aware_fn!(A, B, C, D, E, F, G, H, I, J, K, L,);
+macro_rules! impl_thread_aware_arities {
+    ($($parameter:ident),* $(,)?) => {
+        impl_thread_aware_tuple!($($parameter,)*);
+        impl_thread_aware_fn!($($parameter,)*);
+    };
+}
+
+// Match the established `thread_aware` boundary so compatibility code can rely on the same
+// tuple and safe function-pointer arities.
+impl_thread_aware_arities!(A, B, C, D, E, F, G, H, I, J, K, L);
 
 impl<T, const N: usize> ThreadAware for [T; N]
 where
