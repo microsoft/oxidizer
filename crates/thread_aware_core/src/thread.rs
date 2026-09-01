@@ -179,6 +179,7 @@ impl PartialEq for Owner {
 impl Eq for Owner {}
 
 impl Hash for Owner {
+    #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.id.hash(state);
     }
