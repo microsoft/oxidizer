@@ -596,12 +596,12 @@ mod tests {
         val.relocate(Some(&threads[0]), &threads[1]);
         assert!(val.iter().all(|t| t.0), "all array elements must be relocated");
 
-        let slice: &mut [Tracker] = &mut val;
-        for value in slice.iter_mut() {
+        let val: &mut [Tracker] = &mut val;
+        for value in val.iter_mut() {
             value.0 = false;
         }
-        slice.relocate(Some(&threads[0]), &threads[1]);
-        assert!(slice.iter().all(|t| t.0), "all slice elements must be relocated");
+        val.relocate(Some(&threads[0]), &threads[1]);
+        assert!(val.iter().all(|t| t.0), "all slice elements must be relocated");
     }
 
     #[test]
