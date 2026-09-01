@@ -9,10 +9,10 @@
 //! so under `--no-default-features` the `no_std` shape is the one under test.
 
 use std::borrow::Cow;
-use std::collections::hash_map::DefaultHasher;
 use std::collections::BTreeSet;
 #[cfg(feature = "std")]
 use std::collections::HashSet;
+use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::sync::Arc;
