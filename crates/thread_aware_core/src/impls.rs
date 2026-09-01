@@ -263,12 +263,13 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
     use core::cell::{Cell, RefCell};
+    use core::hash::BuildHasherDefault;
     use core::marker::PhantomData;
     use core::num::{
         NonZero, NonZeroI8, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroI128, NonZeroIsize, NonZeroU8, NonZeroU16, NonZeroU32, NonZeroU64,
         NonZeroU128, NonZeroUsize,
     };
-    use std::collections::HashMap;
+    use std::collections::{HashMap, hash_map::DefaultHasher};
 
     use crate::{NumaNode, Owner, Thread, ThreadAware};
 
@@ -640,9 +641,6 @@ mod tests {
 
     #[test]
     fn hashmap_relocates_values_without_mutating_keys() {
-        use core::hash::BuildHasherDefault;
-        use std::hash::DefaultHasher;
-
         let threads = sample_threads();
         let mut map: HashMap<Tracker, Tracker, BuildHasherDefault<DefaultHasher>> = HashMap::default();
         map.insert(Tracker(false), Tracker(false));
