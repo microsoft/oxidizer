@@ -4,8 +4,7 @@
 use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
 use std::sync::{self};
 
-use crate::test_threads;
-use crate::{Thread, ThreadAware, Unaware};
+use crate::{Thread, ThreadAware, Unaware, test_threads};
 
 // We don't use PerThread here because we want to test the raw container itself.
 type PerThreadArc<T> = crate::Arc<T, crate::PerThread>;

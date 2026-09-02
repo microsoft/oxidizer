@@ -11,8 +11,9 @@
 use alloc::boxed::Box;
 use std::{fmt, sync};
 
-use crate::ThreadAware;
 use thread_aware_core::Thread;
+
+use crate::ThreadAware;
 
 /// A type-erased clonable value that pairs `sync::Arc<T>` with a
 /// [`CloneAdapter`] storing the concrete `V` and its clone function.

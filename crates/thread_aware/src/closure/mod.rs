@@ -13,9 +13,9 @@ use core::pin::Pin;
 
 #[cfg(feature = "std")]
 pub(crate) use erased::ErasedClosureOnce;
+use thread_aware_core::Thread;
 
 use crate::ThreadAware;
-use thread_aware_core::Thread;
 
 /// A boxed, pinned, `Send` future - the return type of async closure calls.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;

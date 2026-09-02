@@ -53,7 +53,7 @@ mod linux {
                 let builder = builder.clone();
                 std::thread::spawn(move || builder.build(std::thread::current().id()))
                     .join()
-                    .unwrap()
+                    .expect("benchmark coordinate thread must finish")
             })
             .collect()
     }

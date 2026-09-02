@@ -10,11 +10,12 @@ use std::sync::{self};
 #[cfg(test)]
 use std::{cell::RefCell, rc::Rc};
 
+use thread_aware_core::{Owner, Thread};
+
 use super::factory::Factory;
 use super::storage::{Storage, Strategy};
 use crate::ThreadAware;
 use crate::closure::{ErasedClosureOnce, ThreadAwareFnOnce, closure_once};
-use thread_aware_core::{Owner, Thread};
 
 /// Adapter that wraps a `ThreadAwareFnOnce<T>` to produce `Box<T>` instead.
 struct BoxedRelocate<F>(F);
@@ -448,7 +449,8 @@ where
     /// }
     ///
     /// let counter = Counter::new();
-    /// let container = Arc::<_, PerThread>::new_with(counter, |counter| MyStruct::new(counter.value()));
+    /// let container =
+    ///     Arc::<_, PerThread>::new_with(counter, |counter| MyStruct::new(counter.value()));
     /// ```
     pub fn new_with<D>(data: D, f: fn(D) -> T) -> Self
     where
@@ -634,11 +636,11 @@ where
     /// # Examples
     ///
     /// ```
-    /// use std::thread;
     /// use std::sync::Arc as StdArc;
+    /// use std::thread;
     ///
-    /// use thread_aware::thread::ThreadBuilder;
     /// use thread_aware::storage::Storage;
+    /// use thread_aware::thread::ThreadBuilder;
     /// use thread_aware::{Arc, PerThread};
     ///
     /// let current = ThreadBuilder::default().build(thread::current().id());

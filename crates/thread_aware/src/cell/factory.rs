@@ -5,9 +5,10 @@
 use alloc::boxed::Box;
 use std::{fmt, sync};
 
+use thread_aware_core::Thread;
+
 use super::clone_fn::ErasedCloneFn;
 use crate::closure::ErasedClosureOnce;
-use thread_aware_core::Thread;
 
 /// A function that clones data and optionally relocates the clone.
 ///

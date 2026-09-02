@@ -4,8 +4,9 @@
 use alloc::sync::Arc;
 use core::ops::{Deref, DerefMut};
 
-use crate::ThreadAware;
 use thread_aware_core::Thread;
+
+use crate::ThreadAware;
 
 /// Allows transferring a value that doesn't implement [`trait@ThreadAware`].
 ///

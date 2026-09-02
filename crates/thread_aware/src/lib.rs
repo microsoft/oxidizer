@@ -180,9 +180,6 @@ pub mod closure;
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 pub mod thread;
 
-#[doc(inline)]
-pub use thread_aware_core::{NumaNode, Owner, Thread, ThreadAware};
-
 // Re-export the derive macro (behind the `derive` feature) so users can
 // simply `use thread_aware::ThreadAware;`. Disable the feature to avoid the
 // proc-macro dependency in minimal builds.
@@ -256,6 +253,8 @@ pub use ::thread_aware_macros::ThreadAware;
 #[cfg(feature = "std")]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 pub use cell::{Arc, PerNumaNode, PerProcess, PerThread, storage};
+#[doc(inline)]
+pub use thread_aware_core::{NumaNode, Owner, Thread, ThreadAware};
 pub use wrappers::{Unaware, unaware};
 
 #[cfg(test)]

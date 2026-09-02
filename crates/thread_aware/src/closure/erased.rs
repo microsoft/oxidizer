@@ -6,9 +6,10 @@ use alloc::boxed::Box;
 use core::any::type_name;
 use core::fmt;
 
+use thread_aware_core::Thread;
+
 use crate::ThreadAware;
 use crate::closure::ThreadAwareFnOnce;
-use thread_aware_core::Thread;
 
 /// A closure with erased bounds.
 pub(crate) struct ErasedClosureOnce<T: ?Sized> {
