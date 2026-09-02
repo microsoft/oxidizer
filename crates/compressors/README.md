@@ -41,7 +41,10 @@ let compressed = gzip::compress(
     resources,
 )?;
 
-assert_eq!(gzip::decompress(compressed, resources)?.to_vec(), b"hello".to_vec());
+assert_eq!(
+    gzip::decompress(compressed, resources)?.to_vec(),
+    b"hello".to_vec()
+);
 ```
 
 ## Streaming
@@ -55,13 +58,15 @@ counterpart:
 ```rust
 use bytesbuf::BytesView;
 use compressors::{CompressionStream, Resources, gzip};
-use futures::StreamExt;
-use futures::stream;
+use futures::{StreamExt, stream};
 
 let resources = Resources::global();
 let body = stream::iter(vec![
     Ok::<_, std::io::Error>(BytesView::copied_from_slice(b"a body ", resources.memory())),
-    Ok(BytesView::copied_from_slice(b"in pieces", resources.memory())),
+    Ok(BytesView::copied_from_slice(
+        b"in pieces",
+        resources.memory(),
+    )),
 ]);
 
 let chunks: Vec<_> = CompressionStream::compress(body, gzip::Compressor::new(resources))
@@ -115,7 +120,9 @@ use compressors::{Level, Resources, gzip};
 let resources = Resources::global();
 
 // Per request: cheap to build, recycles the engine on drop.
-let compressor = gzip::Compressor::builder().level(Level::DEFAULT).build(resources);
+let compressor = gzip::Compressor::builder()
+    .level(Level::DEFAULT)
+    .build(resources);
 ```
 
 Recycling is transparent – it applies to the engines that are worth it and quietly skips the
@@ -162,7 +169,7 @@ a crate that only passes operations around needs.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/compressors">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbb7vzD9i_shEbd7SJfOAf76wbMYkMwNbIehUbxJDGFpBsEAdhZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbKOT2sSODAQAbOy_IdbOlhRgbwyzwlvIC9Tkb9k-vnEIf9tRhZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
  [__link0]: https://crates.io/crates/bytesbuf/0.9.0
  [__link1]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesView
  [__link10]: https://docs.rs/compressors/0.1.0/compressors/?search=Format::decompress_with_limits
