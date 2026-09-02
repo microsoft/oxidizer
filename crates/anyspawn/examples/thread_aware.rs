@@ -3,10 +3,9 @@
 
 //! Per-core task spawning with a custom [`SpawnCustom`] implementation.
 //!
-//! Demonstrates creating a spawner where each CPU core gets its own independent
-//! state via the [`ThreadAware`] relocation system. A custom [`Scheduler`] type
-//! carries the processor index assigned during relocation, so each core's spawn
-//! function knows which core it belongs to.
+//! Demonstrates creating a spawner whose [`Scheduler`] owns the threads in its
+//! runtime. Relocation selects the destination from that thread list, so each
+//! scheduler clone knows which thread it represents.
 //!
 //! In production the data might hold a core-local work queue, metrics
 //! counter, or connection pool instead of a simple index.
@@ -18,16 +17,7 @@ use thread_aware::{Thread, ThreadAware};
 
 #[tokio::main]
 async fn main() {
-    // Build a per-core spawner. Each core gets a Scheduler with its own
-    // processor index after relocation.
-    let spawner = Spawner::new_custom("per-core", Scheduler::default());
-
-    // Before relocation the spawner uses the default (unassigned) scheduler.
-    let _default = spawner.spawn(async { 1 + 1 }).await;
-
-    // Simulate a two-node topology (1 core per NUMA node) and relocate the
-    // spawner to each core. After relocation ThreadAware::relocate runs
-    // with the destination core's processor index.
+    // Simulate a runtime with one thread on each of two NUMA nodes.
     let builder = ThreadBuilder::default();
     let thread0 = builder.build(std::thread::current().id());
     let thread1_builder = builder.with_numa_node(1);
@@ -35,34 +25,49 @@ async fn main() {
         .join()
         .expect("coordinate thread must finish");
 
-    let mut relocated0 = spawner.clone();
-    relocated0.relocate(None, &thread0);
-    let _relocated0 = relocated0.spawn(async { 1 + 1 }).await;
+    let scheduler = Scheduler::new([thread0.clone(), thread1.clone()]);
+    for thread in scheduler.threads() {
+        println!("runtime thread: {thread:?}");
+    }
 
-    let mut relocated1 = spawner.clone();
-    relocated1.relocate(None, &thread1);
-    let _relocated1 = relocated1.spawn(async { 1 + 1 }).await;
+    let spawner = Spawner::new_custom("per-thread", scheduler);
+    let _on_thread0 = spawner.spawn(async { 1 + 1 }).await;
+
+    let mut relocated = spawner.clone();
+    relocated.relocate(Some(&thread0), &thread1);
+    let _on_thread1 = relocated.spawn(async { 1 + 1 }).await;
 }
 
-/// Per-core scheduler data relocated by the [`ThreadAware`] system.
-///
-/// Before relocation the processor index is `None` (default instance). After
-/// relocation it holds the destination core's processor index.
-#[derive(Default, Clone)]
-struct Scheduler(Option<std::thread::ThreadId>);
+/// Scheduler data relocated by the [`ThreadAware`] system.
+#[derive(Clone)]
+struct Scheduler {
+    threads: [Thread; 2],
+    current: Thread,
+}
 
 impl Scheduler {
+    fn new(threads: [Thread; 2]) -> Self {
+        let current = threads[0].clone();
+        Self { threads, current }
+    }
+
+    fn threads(&self) -> &[Thread] {
+        &self.threads
+    }
+
     fn caption(&self) -> String {
-        match self.0 {
-            Some(id) => format!("Scheduler ({id:?})"),
-            None => "Scheduler (default)".to_string(),
-        }
+        format!("Scheduler ({:?})", self.current)
     }
 }
 
 impl ThreadAware for Scheduler {
     fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
-        self.0 = Some(destination.id());
+        self.current = self
+            .threads
+            .iter()
+            .find(|thread| *thread == destination)
+            .cloned()
+            .expect("destination must be one of the threads owned by Scheduler");
     }
 }
 
