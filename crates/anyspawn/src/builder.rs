@@ -99,6 +99,7 @@ struct TokioSpawner(Option<::tokio::runtime::Handle>);
 
 #[cfg(feature = "tokio")]
 impl ThreadAware for TokioSpawner {
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
 }
 

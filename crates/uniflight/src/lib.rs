@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 //! Coalesces duplicate async tasks into a single execution.
 //!
 //! This crate provides [`Merger`], a mechanism for deduplicating concurrent async operations.
@@ -312,6 +314,7 @@ where
     T: Send + Sync,
     S: Strategy + Send + Sync,
 {
+    #[cfg_attr(coverage_nightly, coverage(off))]
     #[cfg_attr(test, mutants::skip)]
     fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         self.inner.relocate(source, destination);

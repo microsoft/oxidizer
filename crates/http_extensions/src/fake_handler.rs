@@ -95,6 +95,7 @@ pub struct FakeHandler {
 }
 
 impl ThreadAware for FakeHandler {
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
         // No thread awareness needed for fake handler, we want the same behavior
         // even after relocation.

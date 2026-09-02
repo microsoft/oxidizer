@@ -35,6 +35,7 @@ pub(crate) struct EnrichmentNode {
 pub(crate) struct Slot(Arc<ThreadLocal<RefCell<OptEnrichmentNode>>>);
 
 impl thread_aware::ThreadAware for Slot {
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
         // Enrichment slot is thread local, it doesn't need to be relocated
     }

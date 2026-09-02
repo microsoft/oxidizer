@@ -123,6 +123,7 @@ pub struct HttpError {
 }
 
 impl ThreadAware for HttpError {
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
         // no thread-local state to relocate
     }

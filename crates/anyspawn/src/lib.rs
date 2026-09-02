@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![warn(missing_docs)]
 
 //! A generic task spawner compatible with any async runtime.
