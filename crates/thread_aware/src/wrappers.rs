@@ -64,8 +64,10 @@ impl<T> Unaware<T> {
 
     /// Converts an `Arc<Unaware<T>>` into an `Arc<T>`.
     pub fn into_arc(self: Arc<Self>) -> Arc<T> {
-        // SAFETY: `Unaware<T>` is `repr(transparent)` over `T`, so both `Arc` pointee layouts match.
-        unsafe { core::mem::transmute(self) }
+        let raw = Arc::into_raw(self).cast::<T>();
+        // SAFETY: `Unaware<T>` is `repr(transparent)` over `T`, so `raw` points to a valid `T`.
+        // `Arc::into_raw` transfers the consumed strong reference to this reconstruction.
+        unsafe { Arc::from_raw(raw) }
     }
 }
 
