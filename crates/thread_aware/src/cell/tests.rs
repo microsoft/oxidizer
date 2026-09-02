@@ -748,6 +748,10 @@ fn factory_closure_debug() {
 }
 
 #[test]
+#[cfg_attr(
+    all(miri, target_os = "windows"),
+    ignore = "contended DashMap locking calls GetModuleHandleA, which Windows Miri does not support"
+)]
 fn concurrent_relocation_to_same_thread_materializes_once() {
     // Races many threads into the same empty destination cell and asserts two things: the caller's
     // factory runs exactly once for that strategy partition, and every racer ends on the one value
@@ -1087,6 +1091,10 @@ fn relocation_leaves_a_populated_source_key_untouched() {
 }
 
 #[test]
+#[cfg_attr(
+    all(miri, target_os = "windows"),
+    ignore = "contended DashMap locking calls GetModuleHandleA, which Windows Miri does not support"
+)]
 fn opposite_direction_relocations_converge_without_deadlock() {
     // Two threads relocate in opposite directions across the same pair of thread coordinates. These
     // factories do not reenter another initializing cell, and source recording holds no cell across
