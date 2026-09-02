@@ -92,10 +92,12 @@ impl AllocError {
     /// Report whether the request exceeded the arena's supported alignment.
     ///
     /// Such a request can never succeed, regardless of how much memory is
-    /// available. The arena rejects any value whose alignment reaches half
-    /// the chunk alignment, because smart pointers recover their chunk
-    /// header by masking the value pointer and such a value can fall
-    /// outside the chunk's first tile.
+    /// available. There are two boundaries. Smart pointers and single values
+    /// are rejected at half the chunk alignment, because a smart pointer
+    /// recovers its chunk header by masking the value pointer and a value
+    /// aligned that far can fall outside the chunk's first tile.
+    /// Simple-reference slices hand back a plain reference with no header
+    /// recovery, so they are rejected only at the full chunk alignment.
     ///
     /// No example: naming a type aligned that far does not compile on every
     /// supported codegen backend. The behaviour is covered by the arena's

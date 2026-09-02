@@ -2226,10 +2226,6 @@ mod coverage_arena_gaps {
     #[cfg(feature = "std")]
     use crate::common;
 
-    // ============================================================================
-    // Helpers
-    // ============================================================================
-
     #[test]
     fn try_alloc_simple_ref_returns_mutable_reference() {
         let arena = Arena::<Global>::new();
@@ -3801,10 +3797,9 @@ mod refactor_coverage_gaps {
     // non-freezable, and at 32 KiB each it forces the oversized refill.
     //
     // This is the last type in the crate aligned above 8192, which some
-    // codegen backends refuse to compile (see the arena's alignment-guard
-    // unit tests for why the others were removed). It compiles only because
-    // `try_reserve` never materializes the layout. If this file ever fails to
-    // build with an alignment error, this declaration is the cause.
+    // codegen backends refuse to compile. It builds because the test never
+    // constructs an `Over`: `try_reserve` computes the layout and reserves
+    // aligned storage, but no typed value is materialized.
     #[test]
     fn non_freezable_overaligned_vec_grows_via_oversized_path() {
         #[repr(align(32768))]

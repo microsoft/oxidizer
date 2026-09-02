@@ -504,17 +504,19 @@ mod tests {
         let _ = arena.zerocopy().alloc_slice_arc::<SmartPtrOverAligned>(4);
     }
 
+    // The scalar entry points forward to `Arena::try_alloc_with`, which uses
+    // the smart-pointer cap — not the looser chunk cap the slice paths use.
     #[test]
     fn try_alloc_ref_over_aligned_returns_err() {
         let arena = capped_arena();
-        arena.zerocopy().try_alloc::<ChunkOverAligned>().unwrap_err();
+        arena.zerocopy().try_alloc::<SmartPtrOverAligned>().unwrap_err();
     }
 
     #[test]
     #[should_panic = "arena allocation failed"]
     fn alloc_ref_panics_on_over_aligned() {
         let arena = capped_arena();
-        let _ = arena.zerocopy().alloc::<ChunkOverAligned>();
+        let _ = arena.zerocopy().alloc::<SmartPtrOverAligned>();
     }
 
     #[test]

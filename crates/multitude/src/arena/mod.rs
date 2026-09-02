@@ -595,6 +595,7 @@ impl<A: Allocator + Clone> Arena<A> {
             cap <= CHUNK_ALIGN,
             "the cap may only be lowered: raising it would let the guards accept alignments no chunk can satisfy"
         );
+        assert!(cap >= 4, "alignment cap must leave room for a non-zero smart-pointer cap");
         self.align_cap.set(cap);
     }
 

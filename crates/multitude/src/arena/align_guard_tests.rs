@@ -16,7 +16,7 @@
 
 use crate::Arena;
 use crate::internal::constants::{CHUNK_ALIGN, max_smart_ptr_align};
-use crate::tests_support::{ChunkOverAligned, SmartPtrOverAligned, SmartPtrOverAlignedDrop, capped_arena};
+use crate::tests_support::{ChunkOverAligned, SmartPtrOverAligned, SmartPtrOverAlignedDrop, TEST_CHUNK_ALIGN, capped_arena};
 
 // The guards read their cap from the arena; `buffer_freezable` still reads
 // `max_smart_ptr_align()` directly. The two must agree, or a `Vec` would
@@ -31,7 +31,42 @@ fn default_caps_match_the_constants() {
 #[test]
 #[should_panic(expected = "the cap may only be lowered")]
 fn set_align_cap_rejects_raising_the_cap() {
+    // Must stay a power of two, or the earlier assert fires instead.
     Arena::new().set_align_cap(CHUNK_ALIGN * 2);
+}
+
+#[test]
+#[should_panic(expected = "alignment cap must leave room")]
+fn set_align_cap_rejects_a_degenerate_cap() {
+    Arena::new().set_align_cap(1);
+}
+
+// The guards compare `>=`, so they must reject alignments strictly above the
+// cap as well as those exactly at it. Every fixture is aligned exactly at a
+// cap, so reaching "strictly above" means lowering the cap further rather
+// than raising an alignment.
+#[test]
+fn guards_reject_alignments_above_the_cap() {
+    let arena = capped_arena();
+    arena.set_align_cap(TEST_CHUNK_ALIGN / 2);
+
+    assert!(arena.rejects_smart_ptr_align(align_of::<SmartPtrOverAligned>()));
+    assert!(arena.rejects_chunk_align(align_of::<ChunkOverAligned>()));
+
+    arena.try_alloc_with(|| SmartPtrOverAligned(0)).unwrap_err();
+
+    let src = [ChunkOverAligned(0)];
+    arena.try_alloc_slice_copy(&src[..]).unwrap_err();
+}
+
+// The counterpart to the above: an alignment strictly below the cap is
+// accepted, so the guards are not simply rejecting everything.
+#[test]
+fn guards_accept_alignments_below_the_cap() {
+    let arena = capped_arena();
+
+    assert!(!arena.rejects_smart_ptr_align(align_of::<u64>()));
+    assert!(!arena.rejects_chunk_align(align_of::<SmartPtrOverAligned>()));
 }
 
 #[test]
