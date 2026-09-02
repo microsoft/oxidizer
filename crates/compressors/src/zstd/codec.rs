@@ -9,12 +9,12 @@ use zstd_safe::zstd_sys::ZSTD_EndDirective;
 use zstd_safe::{CCtx, CParameter, DCtx, DParameter, InBuffer, OutBuffer, ResetDirective};
 
 use crate::engine::{Codec, Operation, Step, StreamEnd};
-use crate::error::{Error, Result};
+use crate::error::{BuildError, Error, Result};
 use crate::level::Level;
 use crate::limits::FormatLimits;
 use crate::pool::Pool;
 use crate::trailing::TrailingData;
-use crate::zstd::{CompressionLevel, CompressorOptions, DecompressorOptions};
+use crate::zstd::{CompressionLevel, Zstd};
 
 /// Maps the portable [`Level`] scale onto zstd's levels.
 ///
@@ -59,8 +59,8 @@ fn decompression_failed(code: usize) -> Error {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg_attr(test, mutants::skip)]
 #[cold]
-fn compression_level_rejected(level: i32, code: usize) -> Error {
-    Error::invalid_configuration(format!(
+fn compression_level_rejected(level: i32, code: usize) -> BuildError {
+    BuildError::new(format!(
         "zstd rejected compression level {level}: {}",
         zstd_safe::get_error_name(code)
     ))
@@ -72,8 +72,8 @@ fn compression_level_rejected(level: i32, code: usize) -> Error {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg_attr(test, mutants::skip)]
 #[cold]
-fn window_log_rejected(window: u32, code: usize) -> Error {
-    Error::invalid_configuration(format!(
+fn window_log_rejected(window: u32, code: usize) -> BuildError {
+    BuildError::new(format!(
         "zstd rejected maximum window log {window}: {}",
         zstd_safe::get_error_name(code)
     ))
@@ -95,32 +95,25 @@ pub(crate) struct ZstdCompress {
     /// `Some` until the context is handed back in `drop`.
     context: Option<CCtx<'static>>,
     level: i32,
-    recycle: Option<Pool>,
-    configuration_error: Option<Error>,
+    recycle: Pool,
 }
 
 impl ZstdCompress {
-    pub(crate) fn new(level: Level, options: CompressorOptions, pool: Option<Pool>) -> Self {
+    pub(crate) fn new(level: Level, options: &Zstd, pool: Pool) -> ::core::result::Result<Self, BuildError> {
         let level = options.level.map_or_else(|| compression_level(level), CompressionLevel::get);
-
-        let mut context = pool
-            .as_ref()
-            .and_then(|pool| pool.take_zstd_compressor(level))
-            .unwrap_or_else(CCtx::create);
+        let mut context = pool.take_zstd_compressor(level).unwrap_or_else(CCtx::create);
 
         // Applied unconditionally: a recycled context comes back with its parameters cleared, so
         // that a recycled compressor is indistinguishable from a fresh one.
-        let configuration_error = context
+        context
             .set_parameter(CParameter::CompressionLevel(level))
-            .err()
-            .map(|code| compression_level_rejected(level, code));
+            .map_err(|code| compression_level_rejected(level, code))?;
 
-        Self {
+        Ok(Self {
             context: Some(context),
             level,
             recycle: pool,
-            configuration_error,
-        }
+        })
     }
 
     fn engine(&mut self) -> &mut CCtx<'static> {
@@ -136,20 +129,14 @@ impl std::fmt::Debug for ZstdCompress {
 
 impl Drop for ZstdCompress {
     fn drop(&mut self) {
-        if let Some(pool) = self.recycle.take()
-            && let Some(context) = self.context.take()
-        {
-            pool.return_zstd_compressor(self.level, context);
+        if let Some(context) = self.context.take() {
+            self.recycle.return_zstd_compressor(self.level, context);
         }
     }
 }
 
 impl Codec for ZstdCompress {
     fn step(&mut self, input: &[u8], output: &mut [MaybeUninit<u8>], operation: Operation) -> Result<(Step, usize, usize)> {
-        if let Some(error) = self.configuration_error.take() {
-            return Err(error);
-        }
-
         let directive = match operation {
             Operation::Process => ZSTD_EndDirective::ZSTD_e_continue,
             Operation::Flush => ZSTD_EndDirective::ZSTD_e_flush,
@@ -186,8 +173,7 @@ pub(crate) struct ZstdDecompress {
     limits: FormatLimits,
     multi_stream: bool,
     trailing_data: TrailingData,
-    recycle: Option<Pool>,
-    configuration_error: Option<Error>,
+    recycle: Pool,
     needs_reset: bool,
 }
 
@@ -196,26 +182,25 @@ impl ZstdDecompress {
         limits: FormatLimits,
         multi_stream: bool,
         trailing_data: TrailingData,
-        options: DecompressorOptions,
-        pool: Option<Pool>,
-    ) -> Self {
-        let mut context = pool.as_ref().and_then(Pool::take_zstd_decompressor).unwrap_or_else(DCtx::create);
-        let configuration_error = options.max_window_log.and_then(|window| {
+        options: &Zstd,
+        pool: Pool,
+    ) -> ::core::result::Result<Self, BuildError> {
+        let mut context = pool.take_zstd_decompressor().unwrap_or_else(DCtx::create);
+
+        if let Some(window) = options.max_window_log {
             context
                 .set_parameter(DParameter::WindowLogMax(window.get()))
-                .err()
-                .map(|code| window_log_rejected(window.get(), code))
-        });
+                .map_err(|code| window_log_rejected(window.get(), code))?;
+        }
 
-        Self {
+        Ok(Self {
             context: Some(context),
             limits,
             multi_stream,
             trailing_data,
             recycle: pool,
-            configuration_error,
             needs_reset: false,
-        }
+        })
     }
 
     fn engine(&mut self) -> &mut DCtx<'static> {
@@ -235,20 +220,14 @@ impl std::fmt::Debug for ZstdDecompress {
 
 impl Drop for ZstdDecompress {
     fn drop(&mut self) {
-        if let Some(pool) = self.recycle.take()
-            && let Some(context) = self.context.take()
-        {
-            pool.return_zstd_decompressor(context);
+        if let Some(context) = self.context.take() {
+            self.recycle.return_zstd_decompressor(context);
         }
     }
 }
 
 impl Codec for ZstdDecompress {
     fn step(&mut self, input: &[u8], output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
-        if let Some(error) = self.configuration_error.take() {
-            return Err(error);
-        }
-
         if self.needs_reset {
             self.engine()
                 .reset(ResetDirective::SessionOnly)
@@ -338,31 +317,27 @@ mod tests {
     }
 
     #[test]
-    fn configuration_errors_surface_before_entering_native_state() {
-        let mut compressor = ZstdCompress::new(Level::DEFAULT, CompressorOptions::default(), None);
-        compressor.configuration_error = Some(Error::invalid_configuration("compressor config"));
-        let mut output = [MaybeUninit::uninit(); 8];
-        assert!(
-            compressor
-                .step(b"input", &mut output, Operation::Process)
-                .expect_err("compressor configuration fails")
-                .is_invalid_configuration()
-        );
+    fn every_expressible_configuration_is_accepted_by_the_engine() {
+        use crate::zstd::WindowLog;
 
-        let mut decompressor = ZstdDecompress::new(
-            FormatLimits::new(None, None),
-            false,
-            TrailingData::Reject,
-            DecompressorOptions::default(),
-            None,
-        );
-        decompressor.configuration_error = Some(Error::invalid_configuration("decompressor config"));
-        assert!(
-            decompressor
-                .step(b"input", &mut output, Operation::Process)
-                .expect_err("decompressor configuration fails")
-                .is_invalid_configuration()
-        );
+        let mut settings = Zstd::new();
+        for level in [CompressionLevel::min(), CompressionLevel::DEFAULT, CompressionLevel::max()] {
+            settings.level = Some(level);
+            ZstdCompress::new(Level::DEFAULT, &settings, Pool::disabled().clone()).expect("the engine accepts every native level");
+        }
+
+        for log in [WindowLog::MIN, WindowLog::DEFAULT, WindowLog::MAX] {
+            let mut settings = Zstd::new();
+            settings.max_window_log = Some(log);
+            ZstdDecompress::new(
+                FormatLimits::new(None, None),
+                false,
+                TrailingData::Reject,
+                &settings,
+                Pool::disabled().clone(),
+            )
+            .expect("the engine accepts every window log the builder can express");
+        }
     }
 
     #[test]
@@ -371,9 +346,10 @@ mod tests {
             FormatLimits::new(None, None),
             false,
             TrailingData::Reject,
-            DecompressorOptions::default(),
-            None,
-        );
+            &Zstd::new(),
+            Pool::disabled().clone(),
+        )
+        .expect("the default settings are accepted");
         let rendered = format!("{codec:?}");
 
         assert!(rendered.contains("trailing_data"));
@@ -382,7 +358,7 @@ mod tests {
 
     #[test]
     fn compressor_debug_includes_its_level() {
-        let codec = ZstdCompress::new(Level::DEFAULT, CompressorOptions::default(), None);
+        let codec = ZstdCompress::new(Level::DEFAULT, &Zstd::new(), Pool::disabled().clone()).expect("the default settings are accepted");
         let rendered = format!("{codec:?}");
 
         assert!(rendered.contains("ZstdCompress"));
@@ -394,7 +370,7 @@ mod tests {
         let pool = Pool::new();
         let level = compression_level(Level::DEFAULT);
 
-        drop(ZstdCompress::new(Level::DEFAULT, CompressorOptions::default(), Some(pool.clone())));
+        drop(ZstdCompress::new(Level::DEFAULT, &Zstd::new(), pool.clone()).expect("the default settings are accepted"));
 
         assert!(
             pool.take_zstd_compressor(level).is_some(),
@@ -406,13 +382,16 @@ mod tests {
     fn dropping_a_pooled_decompressor_returns_its_context() {
         let pool = Pool::new();
 
-        drop(ZstdDecompress::new(
-            FormatLimits::new(None, None),
-            false,
-            TrailingData::Reject,
-            DecompressorOptions::default(),
-            Some(pool.clone()),
-        ));
+        drop(
+            ZstdDecompress::new(
+                FormatLimits::new(None, None),
+                false,
+                TrailingData::Reject,
+                &Zstd::new(),
+                pool.clone(),
+            )
+            .expect("the default settings are accepted"),
+        );
 
         assert!(
             pool.take_zstd_decompressor().is_some(),
@@ -422,7 +401,8 @@ mod tests {
 
     #[test]
     fn a_flush_reports_continue_until_the_native_buffer_catches_up() {
-        let mut codec = ZstdCompress::new(Level::DEFAULT, CompressorOptions::default(), None);
+        let mut codec =
+            ZstdCompress::new(Level::DEFAULT, &Zstd::new(), Pool::disabled().clone()).expect("the default settings are accepted");
         let mut scratch = [MaybeUninit::uninit(); 4096];
 
         let payload = b"zstd flush boundary check payload, repeated so the flush has real work to do. ".repeat(64);
@@ -453,9 +433,10 @@ mod tests {
             FormatLimits::new(None, Some(100)),
             false,
             TrailingData::Reject,
-            DecompressorOptions::default(),
-            None,
-        );
+            &Zstd::new(),
+            Pool::disabled().clone(),
+        )
+        .expect("the default settings are accepted");
 
         assert_eq!(Codec::remaining_output(&codec, 40), Some(60));
         assert_eq!(Codec::remaining_output(&codec, 100), Some(0));

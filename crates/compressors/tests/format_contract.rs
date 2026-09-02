@@ -10,11 +10,13 @@
 #![cfg(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
 
 use std::num::{NonZeroU32, NonZeroU64, NonZeroUsize};
+use std::sync::OnceLock;
 
 use bytesbuf::mem::GlobalPool;
 use bytesbuf::{BytesBuf, BytesView};
+use compressors::core::{Compress, Compressing, Compression, Decompress, Decompressing};
 use compressors::format::Format;
-use compressors::{Compress, Compressing, Compression, Decompress, DecompressionLimits, Level, Output, Pool, TrailingData};
+use compressors::{CompressorBuilder, DecompressionLimits, DecompressorBuilder, Level, Output, Resources, TrailingData};
 
 fn view(bytes: &[u8]) -> BytesView {
     BytesView::copied_from_slice(bytes, &GlobalPool::new())
@@ -28,6 +30,35 @@ fn fragmented(bytes: &[u8], segment: usize) -> BytesView {
 
 fn chunk(size: usize) -> NonZeroUsize {
     NonZeroUsize::new(size).expect("test chunk sizes are never zero")
+}
+
+/// The resources every test here draws on: one memory provider, one set of recycled engines.
+///
+/// Shared for the whole file on purpose. Recycling must be invisible, so tests that would fail if
+/// an engine came back dirty are exactly the tests that should be sharing one.
+fn resources() -> &'static Resources {
+    static RESOURCES: OnceLock<Resources> = OnceLock::new();
+
+    RESOURCES.get_or_init(|| Resources::new(GlobalPool::new()))
+}
+
+/// Erases the difference between a build that can fail and one that cannot.
+///
+/// Brotli and zstd validate their configuration as they apply it, so their builders return a
+/// [`Result`]; the deflate family's cannot fail and return the codec directly. The contract below
+/// is the same either way, so it goes through this to stay one test.
+trait Built {
+    type Codec;
+
+    fn built(self) -> Self::Codec;
+}
+
+impl<T> Built for Result<T, compressors::BuildError> {
+    type Codec = T;
+
+    fn built(self) -> T {
+        self.expect("the engine accepts the configuration under test")
+    }
 }
 
 /// Drives any compression operation to completion, feeding the input in `feed` sized pieces.
@@ -75,33 +106,47 @@ macro_rules! format_contract {
 
             const FORMAT: Format = $format;
 
+            impl Built for $module::Compressor {
+                type Codec = Self;
+
+                fn built(self) -> Self {
+                    self
+                }
+            }
+
+            impl Built for $module::Decompressor {
+                type Codec = Self;
+
+                fn built(self) -> Self {
+                    self
+                }
+            }
+
             fn payload() -> Vec<u8> {
                 b"the quick brown fox jumps over the lazy dog; pack my box with five dozen liquor jugs. ".repeat(300)
             }
 
             #[test]
             fn round_trips_a_payload() {
-                let memory = GlobalPool::new();
                 let data = payload();
 
-                let compressed = $module::compress(view(&data), memory.clone()).expect("compression succeeds");
+                let compressed = $module::compress(view(&data), resources()).expect("compression succeeds");
                 assert!(compressed.len() < data.len(), "the payload should compress");
 
-                let plain = $module::decompress(compressed, memory).expect("decompression succeeds");
+                let plain = $module::decompress(compressed, resources()).expect("decompression succeeds");
                 assert_eq!(plain.to_vec(), data);
             }
 
             #[test]
             fn compress_matches_driving_the_operation_by_hand() {
                 // The convenience must be exactly the manual loop, not an approximation of it.
-                let memory = GlobalPool::new();
                 let data = payload();
 
-                let convenient = $module::Compressor::new(memory.clone())
+                let convenient = $module::Compressor::new(resources())
                     .compress(view(&data))
                     .expect("compression succeeds");
 
-                let mut by_hand = $module::Compressor::new(memory.clone());
+                let mut by_hand = $module::Compressor::new(resources());
                 by_hand.push(view(&data)).expect("push succeeds");
                 Compression::end_input(&mut by_hand);
                 let mut collected = BytesBuf::new();
@@ -116,7 +161,7 @@ macro_rules! format_contract {
 
                 assert_eq!(convenient.to_vec(), collected.consume_all().to_vec());
 
-                let plain = $module::Decompressor::new(memory)
+                let plain = $module::Decompressor::new(resources())
                     .decompress(convenient)
                     .expect("decompression succeeds");
 
@@ -126,13 +171,12 @@ macro_rules! format_contract {
             #[test]
             fn compress_and_decompress_work_through_a_trait_object() {
                 // Provided methods are easy to break for `dyn`, so reach them that way too.
-                let memory = GlobalPool::new();
                 let data = payload();
 
-                let compressor: Box<dyn Compression<Mode = Compress>> = Box::new($module::Compressor::new(memory.clone()));
+                let compressor: Box<dyn Compression<Mode = Compress>> = Box::new($module::Compressor::new(resources()));
                 let compressed = compressor.compress(view(&data)).expect("compression succeeds");
 
-                let decompressor: Box<dyn Compression<Mode = Decompress>> = Box::new($module::Decompressor::new(memory));
+                let decompressor: Box<dyn Compression<Mode = Decompress>> = Box::new($module::Decompressor::new(resources()));
 
                 assert_eq!(
                     decompressor.decompress(compressed).expect("decompression succeeds").to_vec(),
@@ -142,10 +186,8 @@ macro_rules! format_contract {
 
             #[test]
             fn round_trips_empty_input() {
-                let memory = GlobalPool::new();
-
-                let compressed = $module::compress(BytesView::new(), memory.clone()).expect("compression succeeds");
-                let plain = $module::decompress(compressed, memory).expect("decompression succeeds");
+                let compressed = $module::compress(BytesView::new(), resources()).expect("compression succeeds");
+                let plain = $module::decompress(compressed, resources()).expect("decompression succeeds");
 
                 assert!(plain.is_empty());
             }
@@ -156,10 +198,9 @@ macro_rules! format_contract {
                 // contiguous slice.
                 for (segment, repeats) in [(1_usize, 40_usize), (7, 200), (1024, 2_000)] {
                     let data = b"multi segment ".repeat(repeats);
-                    let memory = GlobalPool::new();
 
-                    let compressed = $module::compress(fragmented(&data, segment), memory.clone()).expect("compression succeeds");
-                    let plain = $module::decompress(compressed, memory).expect("decompression succeeds");
+                    let compressed = $module::compress(fragmented(&data, segment), resources()).expect("compression succeeds");
+                    let plain = $module::decompress(compressed, resources()).expect("decompression succeeds");
 
                     assert_eq!(plain.to_vec(), data, "failed at {segment} byte segments");
                 }
@@ -168,15 +209,18 @@ macro_rules! format_contract {
             #[test]
             fn round_trips_when_driven_one_byte_at_a_time() {
                 // Worst case for a push/pull codec: minimal input pieces and minimal output chunks.
-                let memory = GlobalPool::new();
                 let data = b"drip fed".repeat(20);
 
                 let mut compressor = $module::Compressor::builder()
                     .output_chunk_size(chunk(1))
-                    .build(memory.clone());
+                    .build(resources())
+                    .built();
                 let compressed = compress(&mut compressor, &view(&data), 1).expect("compression succeeds");
 
-                let mut decompressor = $module::Decompressor::builder().output_chunk_size(chunk(1)).build(memory);
+                let mut decompressor = $module::Decompressor::builder()
+                    .output_chunk_size(chunk(1))
+                    .build(resources())
+                    .built();
                 let plain = decompress(&mut decompressor, &compressed, 1).expect("decompression succeeds");
 
                 assert_eq!(plain.to_vec(), data);
@@ -184,12 +228,12 @@ macro_rules! format_contract {
 
             #[test]
             fn honours_the_output_chunk_size() {
-                let memory = GlobalPool::new();
                 let data = payload();
 
                 let mut compressor = $module::Compressor::builder()
                     .output_chunk_size(chunk(256))
-                    .build(memory.clone());
+                    .build(resources())
+                    .built();
                 compressor.push(view(&data)).expect("push succeeds");
                 Compression::end_input(&mut compressor);
 
@@ -206,7 +250,10 @@ macro_rules! format_contract {
                     }
                 }
 
-                let mut decompressor = $module::Decompressor::builder().output_chunk_size(chunk(256)).build(memory);
+                let mut decompressor = $module::Decompressor::builder()
+                    .output_chunk_size(chunk(256))
+                    .build(resources())
+                    .built();
                 decompressor.push(compressed.consume_all()).expect("push succeeds");
                 Compression::end_input(&mut decompressor);
 
@@ -232,28 +279,26 @@ macro_rules! format_contract {
 
                 for raw in 0..=Level::MAX.get() {
                     let level = Level::new(raw).expect("level is in range");
-                    let memory = GlobalPool::new();
 
-                    let mut compressor = $module::Compressor::builder().level(level).build(memory.clone());
+                    let mut compressor = $module::Compressor::builder().level(level).build(resources()).built();
                     let compressed = compress(&mut compressor, &view(&data), usize::MAX).expect("compression succeeds");
 
-                    let plain = $module::decompress(compressed, memory).expect("decompression succeeds");
+                    let plain = $module::decompress(compressed, resources()).expect("decompression succeeds");
                     assert_eq!(plain.to_vec(), data, "level {raw} did not round trip");
                 }
             }
 
             #[test]
             fn tracks_byte_counts() {
-                let memory = GlobalPool::new();
                 let data = payload();
 
-                let mut compressor = $module::Compressor::new(memory.clone());
+                let mut compressor = $module::Compressor::new(resources());
                 let compressed = compress(&mut compressor, &view(&data), usize::MAX).expect("compression succeeds");
 
                 assert_eq!(compressor.total_in(), data.len() as u64);
                 assert_eq!(compressor.total_out(), compressed.len() as u64);
 
-                let mut decompressor = $module::Decompressor::new(memory);
+                let mut decompressor = $module::Decompressor::new(resources());
                 let plain = decompress(&mut decompressor, &compressed, usize::MAX).expect("decompression succeeds");
 
                 assert_eq!(decompressor.total_in(), compressed.len() as u64);
@@ -262,11 +307,10 @@ macro_rules! format_contract {
 
             #[test]
             fn rejects_a_truncated_stream() {
-                let memory = GlobalPool::new();
-                let compressed = $module::compress(view(&payload()), memory).expect("compression succeeds");
+                let compressed = $module::compress(view(&payload()), resources()).expect("compression succeeds");
 
                 for cut in [1, compressed.len() / 3, compressed.len() - 1] {
-                    let error = $module::decompress(compressed.range(0..cut), GlobalPool::new())
+                    let error = $module::decompress(compressed.range(0..cut), resources())
                         .expect_err("a truncated stream must not decompress successfully");
 
                     assert!(
@@ -278,13 +322,13 @@ macro_rules! format_contract {
 
             #[test]
             fn rejects_input_after_end_input() {
-                let mut compressor = $module::Compressor::new(GlobalPool::new());
+                let mut compressor = $module::Compressor::new(resources());
                 Compression::end_input(&mut compressor);
 
                 let error = compressor.push(view(b"late")).expect_err("push after end_input is rejected");
                 assert!(error.is_invalid_state());
 
-                let mut decompressor = $module::Decompressor::new(GlobalPool::new());
+                let mut decompressor = $module::Decompressor::new(resources());
                 Compression::end_input(&mut decompressor);
 
                 let error = decompressor
@@ -295,7 +339,7 @@ macro_rules! format_contract {
 
             #[test]
             fn asks_for_more_input_before_end_input() {
-                let mut compressor = $module::Compressor::new(GlobalPool::new());
+                let mut compressor = $module::Compressor::new(resources());
                 compressor.push(view(b"partial")).expect("push succeeds");
 
                 let output = loop {
@@ -312,12 +356,12 @@ macro_rules! format_contract {
             fn enforces_a_configured_expansion_limit() {
                 // A ratio the data is guaranteed to exceed, so the mechanism itself is tested
                 // rather than whichever default the format happens to carry.
-                let memory = GlobalPool::new();
-                let bomb = $module::compress(view(&vec![0_u8; 16 * 1024 * 1024]), memory.clone()).expect("compression succeeds");
+                let bomb = $module::compress(view(&vec![0_u8; 16 * 1024 * 1024]), resources()).expect("compression succeeds");
 
                 let mut decompressor = $module::Decompressor::builder()
                     .limits(DecompressionLimits::new().with_max_ratio(NonZeroU32::new(4).expect("4 is not zero")))
-                    .build(memory);
+                    .build(resources())
+                    .built();
                 decompressor.push(bomb).expect("push succeeds");
                 Compression::end_input(&mut decompressor);
 
@@ -342,7 +386,6 @@ macro_rules! format_contract {
                 // structural ceiling is about `1032x`. Brotli legitimately reaches tens of thousands of
                 // times expansion, so that limit rejected ordinary repetitive input -- a repeated
                 // sentence, and JSON. Each format now carries its own default.
-                let memory = GlobalPool::new();
 
                 let cases: [(&str, Vec<u8>); 3] = [
                     ("repeated short string", b"windowed ".repeat(20_000)),
@@ -357,10 +400,10 @@ macro_rules! format_contract {
                 ];
 
                 for (label, data) in cases {
-                    let compressed = $module::compress(view(&data), memory.clone()).expect("compression succeeds");
+                    let compressed = $module::compress(view(&data), resources()).expect("compression succeeds");
                     let ratio = data.len() / compressed.len().max(1);
 
-                    let plain = $module::decompress(compressed, memory.clone())
+                    let plain = $module::decompress(compressed, resources())
                         .unwrap_or_else(|error| panic!("default limits rejected {label} at {ratio}x expansion: {error}"));
 
                     assert_eq!(plain.to_vec(), data, "{label} did not round trip");
@@ -369,12 +412,12 @@ macro_rules! format_contract {
 
             #[test]
             fn an_absolute_cap_is_enforced() {
-                let memory = GlobalPool::new();
-                let compressed = $module::compress(view(&vec![0_u8; 4 * 1024 * 1024]), memory.clone()).expect("compression succeeds");
+                let compressed = $module::compress(view(&vec![0_u8; 4 * 1024 * 1024]), resources()).expect("compression succeeds");
 
                 let mut decompressor = $module::Decompressor::builder()
                     .limits(DecompressionLimits::new().without_max_ratio().with_max_output_len(1024))
-                    .build(memory);
+                    .build(resources())
+                    .built();
                 decompressor.push(compressed).expect("push succeeds");
                 Compression::end_input(&mut decompressor);
 
@@ -391,13 +434,13 @@ macro_rules! format_contract {
 
             #[test]
             fn trusted_callers_can_opt_out_of_the_limits() {
-                let memory = GlobalPool::new();
                 let data = vec![0_u8; 4 * 1024 * 1024];
-                let compressed = $module::compress(view(&data), memory.clone()).expect("compression succeeds");
+                let compressed = $module::compress(view(&data), resources()).expect("compression succeeds");
 
                 let mut decompressor = $module::Decompressor::builder()
                     .limits(DecompressionLimits::UNLIMITED)
-                    .build(memory);
+                    .build(resources())
+                    .built();
                 let plain = decompress(&mut decompressor, &compressed, usize::MAX).expect("decompression succeeds");
 
                 assert_eq!(plain.len(), data.len());
@@ -408,16 +451,15 @@ macro_rules! format_contract {
                 // Formats with a checksum report corruption; raw deflate has none, so the honest
                 // universal guarantee is only that corrupt input does not silently reproduce the
                 // original bytes.
-                let memory = GlobalPool::new();
                 let data = payload();
-                let compressed = $module::compress(view(&data), memory).expect("compression succeeds");
+                let compressed = $module::compress(view(&data), resources()).expect("compression succeeds");
                 let original = compressed.to_vec();
 
                 for index in [0, original.len() / 2, original.len() - 1] {
                     let mut corrupted = original.clone();
                     corrupted[index] ^= 0xff;
 
-                    match $module::decompress(view(&corrupted), GlobalPool::new()) {
+                    match $module::decompress(view(&corrupted), resources()) {
                         Ok(plain) => assert_ne!(plain.to_vec(), data, "corruption at {index} went unnoticed"),
                         Err(error) => assert!(
                             error.is_corrupt_data() || error.is_unexpected_end_of_stream() || error.is_limit_exceeded(),
@@ -431,11 +473,10 @@ macro_rules! format_contract {
             fn the_runtime_factory_matches_the_module() {
                 // `Format` must produce codecs equivalent to the concrete modules, or runtime
                 // selection would silently behave differently from compile-time selection.
-                let memory = GlobalPool::new();
                 let data = payload();
 
-                let via_module = $module::compress(view(&data), memory.clone()).expect("compression succeeds");
-                let via_format = FORMAT.compress(view(&data), memory.clone()).expect("compression succeeds");
+                let via_module = $module::compress(view(&data), resources()).expect("compression succeeds");
+                let via_format = FORMAT.compress(view(&data), resources()).expect("compression succeeds");
 
                 assert_eq!(
                     via_module.to_vec(),
@@ -446,13 +487,13 @@ macro_rules! format_contract {
                 // Either output must decompress through either path.
                 assert_eq!(
                     FORMAT
-                        .decompress(via_module, memory.clone())
+                        .decompress(via_module, resources())
                         .expect("decompression succeeds")
                         .to_vec(),
                     data
                 );
                 assert_eq!(
-                    $module::decompress(via_format, memory)
+                    $module::decompress(via_format, resources())
                         .expect("decompression succeeds")
                         .to_vec(),
                     data
@@ -461,13 +502,12 @@ macro_rules! format_contract {
 
             #[test]
             fn works_through_boxed_trait_objects() {
-                let memory = GlobalPool::new();
                 let data = payload();
 
-                let mut compressor = FORMAT.compressor().build(memory.clone());
+                let mut compressor = CompressorBuilder::new().build_format(FORMAT, resources()).built();
                 let compressed = compress(&mut *compressor, &view(&data), usize::MAX).expect("compression succeeds");
 
-                let mut decompressor = FORMAT.decompressor().build(memory);
+                let mut decompressor = DecompressorBuilder::new().build_format(FORMAT, resources()).built();
                 let plain = decompress(&mut *decompressor, &compressed, usize::MAX).expect("decompression succeeds");
 
                 assert_eq!(plain.to_vec(), data);
@@ -480,12 +520,12 @@ macro_rules! format_contract {
                 // legitimately vary with input segmentation (zstd records the content size in its
                 // frame header only when the whole input arrives in one call), so a fresh view per
                 // run would compare allocator behaviour rather than pooling.
-                let pool = Pool::new();
                 let input = view(&payload());
                 let baseline = {
                     let mut compressor = $module::Compressor::builder()
                         .output_chunk_size(chunk(4096))
-                        .build(GlobalPool::new());
+                        .build(resources())
+                        .built();
                     compress(&mut compressor, &input, usize::MAX).expect("compression succeeds")
                 };
 
@@ -494,14 +534,14 @@ macro_rules! format_contract {
                 for round in 0..5 {
                     let mut compressor = $module::Compressor::builder()
                         .output_chunk_size(chunk(4096))
-                        .pool(pool.clone())
-                        .build(GlobalPool::new());
+                        .build(resources())
+                        .built();
                     let pooled = compress(&mut compressor, &input, usize::MAX).expect("compression succeeds");
                     drop(compressor);
 
                     assert_eq!(pooled.to_vec(), baseline.to_vec(), "round {round}: pooled output diverged");
 
-                    let mut decompressor = $module::Decompressor::builder().pool(pool.clone()).build(GlobalPool::new());
+                    let mut decompressor = $module::Decompressor::builder().build(resources()).built();
                     let plain = decompress(&mut decompressor, &pooled, usize::MAX).expect("decompression succeeds");
 
                     assert_eq!(plain.to_vec(), payload(), "round {round}: pooled decompressor lost data");
@@ -511,12 +551,12 @@ macro_rules! format_contract {
             #[test]
             fn an_engine_abandoned_mid_stream_is_cleaned_before_reuse() {
                 // A request cancelled part-way through returns a half-used engine.
-                let pool = Pool::new();
                 let input = view(&payload());
                 let baseline = {
                     let mut compressor = $module::Compressor::builder()
                         .output_chunk_size(chunk(4096))
-                        .build(GlobalPool::new());
+                        .build(resources())
+                        .built();
                     compress(&mut compressor, &input, usize::MAX).expect("compression succeeds")
                 };
 
@@ -524,8 +564,8 @@ macro_rules! format_contract {
                     {
                         let mut abandoned = $module::Compressor::builder()
                             .output_chunk_size(chunk(4096))
-                            .pool(pool.clone())
-                            .build(GlobalPool::new());
+                            .build(resources())
+                            .built();
                         abandoned.push(input.clone()).expect("push succeeds");
                         let _ = Compression::pull(&mut abandoned).expect("pull succeeds");
                         // Dropped without finishing, so its engine is mid-frame.
@@ -533,8 +573,8 @@ macro_rules! format_contract {
 
                     let mut compressor = $module::Compressor::builder()
                         .output_chunk_size(chunk(4096))
-                        .pool(pool.clone())
-                        .build(GlobalPool::new());
+                        .build(resources())
+                        .built();
                     let recovered = compress(&mut compressor, &input, usize::MAX).expect("compression succeeds");
 
                     assert_eq!(recovered.to_vec(), baseline.to_vec(), "round {round}: a dirty engine leaked");
@@ -543,17 +583,16 @@ macro_rules! format_contract {
 
             #[test]
             fn an_engine_left_dirty_by_a_failed_decompression_is_cleaned_before_reuse() {
-                let pool = Pool::new();
-                let compressed = $module::compress(view(&payload()), GlobalPool::new()).expect("compression succeeds");
+                let compressed = $module::compress(view(&payload()), resources()).expect("compression succeeds");
                 let garbage = view(&b"definitely not a valid stream".repeat(20));
 
                 for round in 0..4 {
                     {
-                        let mut failing = $module::Decompressor::builder().pool(pool.clone()).build(GlobalPool::new());
+                        let mut failing = $module::Decompressor::builder().build(resources()).built();
                         let _ = decompress(&mut failing, &garbage, usize::MAX);
                     }
 
-                    let mut decompressor = $module::Decompressor::builder().pool(pool.clone()).build(GlobalPool::new());
+                    let mut decompressor = $module::Decompressor::builder().build(resources()).built();
                     let plain = decompress(&mut decompressor, &compressed, usize::MAX).expect("a clean stream still decompresses");
 
                     assert_eq!(
@@ -567,7 +606,6 @@ macro_rules! format_contract {
             #[test]
             fn levels_never_share_engines() {
                 // Resetting a compressor preserves its level, so engines must be keyed by it.
-                let pool = Pool::new();
                 let input = view(&payload());
                 let levels = [Level::MIN, Level::FAST, Level::DEFAULT, Level::HIGH];
 
@@ -577,7 +615,8 @@ macro_rules! format_contract {
                         let mut compressor = $module::Compressor::builder()
                             .level(level)
                             .output_chunk_size(chunk(4096))
-                            .build(GlobalPool::new());
+                            .build(resources())
+                            .built();
                         compress(&mut compressor, &input, usize::MAX)
                             .expect("compression succeeds")
                             .to_vec()
@@ -589,8 +628,8 @@ macro_rules! format_contract {
                         let mut compressor = $module::Compressor::builder()
                             .level(level)
                             .output_chunk_size(chunk(4096))
-                            .pool(pool.clone())
-                            .build(GlobalPool::new());
+                            .build(resources())
+                            .built();
                         let pooled = compress(&mut compressor, &input, usize::MAX).expect("compression succeeds");
 
                         assert_eq!(
@@ -623,23 +662,22 @@ macro_rules! format_contract {
                     collected.consume_all().to_vec()
                 }
 
-                fn build(pool: Option<&Pool>) -> $module::Compressor {
-                    let builder = $module::Compressor::builder().output_chunk_size(chunk(4096));
-                    match pool {
-                        Some(pool) => builder.pool(pool.clone()).build(GlobalPool::new()),
-                        None => builder.build(GlobalPool::new()),
-                    }
+                fn build(resources: &Resources) -> $module::Compressor {
+                    $module::Compressor::builder()
+                        .output_chunk_size(chunk(4096))
+                        .build(resources)
+                        .built()
                 }
 
-                let pool = Pool::new();
+                let shared = Resources::new(GlobalPool::new());
                 let input = view(&payload());
-                let baseline = run(&mut build(None), &input);
+                let baseline = run(&mut build(&Resources::new(GlobalPool::new()).enable_pooling(0)), &input);
 
                 // Prime the pool so there is exactly one idle engine for two codecs to want.
-                drop(run(&mut build(Some(&pool)), &input));
+                drop(run(&mut build(&shared), &input));
 
-                let mut first = build(Some(&pool));
-                let mut second = build(Some(&pool));
+                let mut first = build(&shared);
+                let mut second = build(&shared);
 
                 // Interleave: both are live before either finishes, so they cannot be sharing.
                 first.push(input.clone()).expect("push succeeds");
@@ -672,17 +710,18 @@ macro_rules! format_contract {
                 let baseline = {
                     let mut compressor = $module::Compressor::builder()
                         .output_chunk_size(chunk(4096))
-                        .build(GlobalPool::new());
+                        .build(resources())
+                        .built();
                     compress(&mut compressor, &input, usize::MAX).expect("compression succeeds")
                 };
 
                 let mut compressor = {
-                    let pool = Pool::new();
+                    let owned = Resources::new(GlobalPool::new());
                     let compressor = $module::Compressor::builder()
                         .output_chunk_size(chunk(4096))
-                        .pool(pool.clone())
-                        .build(GlobalPool::new());
-                    drop(pool);
+                        .build(&owned)
+                        .built();
+                    drop(owned);
                     compressor
                 };
 
@@ -701,19 +740,19 @@ macro_rules! format_contract {
                 let baseline = {
                     let mut compressor = $module::Compressor::builder()
                         .output_chunk_size(chunk(4096))
-                        .build(GlobalPool::new());
+                        .build(resources())
+                        .built();
                     compress(&mut compressor, &input, usize::MAX).expect("compression succeeds")
                 };
 
                 for capacity in [0_usize, 1, 4] {
-                    let pool = Pool::with_capacity(capacity);
-                    assert_eq!(pool.capacity(), capacity);
+                    let bounded = Resources::new(GlobalPool::new()).enable_pooling(capacity);
 
                     for round in 0..12 {
                         let mut compressor = $module::Compressor::builder()
                             .output_chunk_size(chunk(4096))
-                            .pool(pool.clone())
-                            .build(GlobalPool::new());
+                            .build(&bounded)
+                            .built();
                         let pooled = compress(&mut compressor, &input, usize::MAX).expect("compression succeeds");
 
                         assert_eq!(
@@ -727,25 +766,25 @@ macro_rules! format_contract {
 
             #[test]
             fn empty_input_round_trips_through_a_pool() {
-                let pool = Pool::new();
                 let baseline = {
                     let mut compressor = $module::Compressor::builder()
                         .output_chunk_size(chunk(4096))
-                        .build(GlobalPool::new());
+                        .build(resources())
+                        .built();
                     compress(&mut compressor, &BytesView::new(), usize::MAX).expect("compression succeeds")
                 };
 
                 for round in 0..4 {
                     let mut compressor = $module::Compressor::builder()
                         .output_chunk_size(chunk(4096))
-                        .pool(pool.clone())
-                        .build(GlobalPool::new());
+                        .build(resources())
+                        .built();
                     let pooled = compress(&mut compressor, &BytesView::new(), usize::MAX).expect("compression succeeds");
                     drop(compressor);
 
                     assert_eq!(pooled.to_vec(), baseline.to_vec(), "round {round}: empty framing changed");
 
-                    let mut decompressor = $module::Decompressor::builder().pool(pool.clone()).build(GlobalPool::new());
+                    let mut decompressor = $module::Decompressor::builder().build(resources()).built();
                     let plain = decompress(&mut decompressor, &pooled, usize::MAX).expect("decompression succeeds");
 
                     assert!(plain.is_empty(), "round {round}: empty input produced bytes");
@@ -754,16 +793,15 @@ macro_rules! format_contract {
 
             #[test]
             fn truncation_is_still_detected_when_pooled() {
-                let pool = Pool::new();
-                let compressed = $module::compress(view(&payload()), GlobalPool::new()).expect("compression succeeds");
+                let compressed = $module::compress(view(&payload()), resources()).expect("compression succeeds");
 
                 for round in 0..3 {
                     // A healthy decompress first, so the next decompressor is guaranteed to be recycled.
-                    let mut healthy = $module::Decompressor::builder().pool(pool.clone()).build(GlobalPool::new());
+                    let mut healthy = $module::Decompressor::builder().build(resources()).built();
                     decompress(&mut healthy, &compressed, usize::MAX).expect("the full stream decompresses");
                     drop(healthy);
 
-                    let mut decompressor = $module::Decompressor::builder().pool(pool.clone()).build(GlobalPool::new());
+                    let mut decompressor = $module::Decompressor::builder().build(resources()).built();
                     let error = decompress(&mut decompressor, &compressed.range(0..compressed.len() - 1), usize::MAX)
                         .expect_err("a truncated stream must not decompress successfully");
 
@@ -776,9 +814,8 @@ macro_rules! format_contract {
 
             #[test]
             fn a_flush_makes_supplied_input_decompressible_without_ending_the_stream() {
-                let memory = GlobalPool::new();
                 let data = b"flush this data now ".repeat(20_000);
-                let mut compressor = $module::Compressor::new(memory.clone());
+                let mut compressor = $module::Compressor::new(resources());
                 compressor.push(view(&data)).expect("push succeeds");
                 compressor.flush().expect("flush request succeeds");
 
@@ -792,7 +829,7 @@ macro_rules! format_contract {
                     }
                 }
 
-                let mut decompressor = $module::Decompressor::new(memory);
+                let mut decompressor = $module::Decompressor::new(resources());
                 decompressor.push(compressed.consume_all()).expect("push succeeds");
 
                 let mut plain = BytesBuf::new();
@@ -810,9 +847,8 @@ macro_rules! format_contract {
 
             #[test]
             fn end_input_can_be_queued_behind_a_flush() {
-                let memory = GlobalPool::new();
                 let data = b"flush and finish ".repeat(200);
-                let mut compressor = $module::Compressor::new(memory.clone());
+                let mut compressor = $module::Compressor::new(resources());
                 compressor.push(view(&data)).expect("push succeeds");
                 compressor.flush().expect("flush request succeeds");
                 compressor.end_input();
@@ -831,7 +867,7 @@ macro_rules! format_contract {
                     }
                 }
 
-                let plain = $module::decompress(compressed.consume_all(), memory).expect("decompression succeeds");
+                let plain = $module::decompress(compressed.consume_all(), resources()).expect("decompression succeeds");
                 assert_eq!(plain.to_vec(), data);
             }
 
@@ -840,10 +876,10 @@ macro_rules! format_contract {
                 let data = b"tiny flush chunks ".repeat(100);
 
                 for size in 1..=7 {
-                    let memory = GlobalPool::new();
                     let mut compressor = $module::Compressor::builder()
                         .output_chunk_size(chunk(size))
-                        .build(memory.clone());
+                        .build(resources())
+                        .built();
                     compressor.push(view(&data)).expect("push succeeds");
                     compressor.flush().expect("flush request succeeds");
 
@@ -877,7 +913,7 @@ macro_rules! format_contract {
                         }
                     }
 
-                    let plain = $module::decompress(compressed.consume_all(), memory)
+                    let plain = $module::decompress(compressed.consume_all(), resources())
                         .unwrap_or_else(|error| panic!("chunk size {size} did not round trip: {error}"));
                     assert_eq!(plain.to_vec(), data);
                 }
@@ -885,12 +921,11 @@ macro_rules! format_contract {
 
             #[test]
             fn multi_stream_decompression_crosses_push_boundaries() {
-                let memory = GlobalPool::new();
                 let first_plain = b"first stream ".repeat(40);
                 let second_plain = b"second stream ".repeat(40);
-                let first = $module::compress(view(&first_plain), memory.clone()).expect("compress");
-                let second = $module::compress(view(&second_plain), memory.clone()).expect("compress");
-                let mut decompressor = $module::Decompressor::builder().multi_stream(true).build(memory);
+                let first = $module::compress(view(&first_plain), resources()).expect("compress");
+                let second = $module::compress(view(&second_plain), resources()).expect("compress");
+                let mut decompressor = $module::Decompressor::builder().multi_stream(true).build(resources()).built();
                 let mut plain = BytesBuf::new();
 
                 decompressor.push(first).expect("first push succeeds");
@@ -919,12 +954,14 @@ macro_rules! format_contract {
 
             #[test]
             fn single_stream_decompression_preserves_buffered_trailing_data() {
-                let memory = GlobalPool::new();
                 let data = payload();
-                let compressed = $module::compress(view(&data), memory.clone()).expect("compress");
+                let compressed = $module::compress(view(&data), resources()).expect("compress");
                 let trailing = view(b"next protocol message");
                 let joined = BytesView::from_views([compressed, trailing.clone()]);
-                let mut decompressor = $module::Decompressor::builder().multi_stream(false).build(memory);
+                let mut decompressor = $module::Decompressor::builder()
+                    .multi_stream(false)
+                    .build(resources())
+                    .built();
                 decompressor.push(joined).expect("push succeeds");
 
                 let mut plain = BytesBuf::new();
@@ -952,10 +989,9 @@ macro_rules! format_contract {
 
             #[test]
             fn an_empty_push_does_not_create_a_phantom_stream() {
-                let memory = GlobalPool::new();
                 let data = b"one member only".repeat(20);
-                let compressed = $module::compress(view(&data), memory.clone()).expect("compress");
-                let mut decompressor = $module::Decompressor::builder().multi_stream(true).build(memory);
+                let compressed = $module::compress(view(&data), resources()).expect("compress");
+                let mut decompressor = $module::Decompressor::builder().multi_stream(true).build(resources()).built();
                 decompressor.push(compressed).expect("first push succeeds");
 
                 let mut plain = BytesBuf::new();
@@ -977,17 +1013,17 @@ macro_rules! format_contract {
 
             #[test]
             fn multi_stream_end_input_handles_an_internal_member_boundary() {
-                let memory = GlobalPool::new();
                 let first_plain = b"AAAAAAAAAA";
                 let second_plain = b"BBBBBBBBBB";
-                let first = $module::compress(view(first_plain), memory.clone()).expect("compress");
-                let second = $module::compress(view(second_plain), memory.clone()).expect("compress");
+                let first = $module::compress(view(first_plain), resources()).expect("compress");
+                let second = $module::compress(view(second_plain), resources()).expect("compress");
                 let split = first.len().saturating_sub(1);
                 let joined = BytesView::from_views([first.range(0..split), first.range(split..), second]);
                 let mut decompressor = $module::Decompressor::builder()
                     .multi_stream(true)
                     .output_chunk_size(chunk(first_plain.len()))
-                    .build(memory);
+                    .build(resources())
+                    .built();
                 decompressor.push(joined).expect("push succeeds");
                 decompressor.end_input();
 
@@ -1009,12 +1045,12 @@ macro_rules! format_contract {
 
             #[test]
             fn strict_trailing_data_is_rejected_across_push_boundaries() {
-                let memory = GlobalPool::new();
-                let compressed = $module::compress(view(&payload()), memory.clone()).expect("compress");
+                let compressed = $module::compress(view(&payload()), resources()).expect("compress");
                 let mut decompressor = $module::Decompressor::builder()
                     .multi_stream(false)
                     .trailing_data(TrailingData::Reject)
-                    .build(memory);
+                    .build(resources())
+                    .built();
                 decompressor.push(compressed).expect("push succeeds");
 
                 loop {
@@ -1033,13 +1069,13 @@ macro_rules! format_contract {
 
             #[test]
             fn strict_trailing_data_is_rejected_in_the_same_push() {
-                let memory = GlobalPool::new();
-                let compressed = $module::compress(view(&payload()), memory.clone()).expect("compress");
+                let compressed = $module::compress(view(&payload()), resources()).expect("compress");
                 let joined = BytesView::from_views([compressed, view(b"trailing")]);
                 let mut decompressor = $module::Decompressor::builder()
                     .multi_stream(false)
                     .trailing_data(TrailingData::Reject)
-                    .build(memory);
+                    .build(resources())
+                    .built();
                 decompressor.push(joined).expect("push succeeds");
                 decompressor.end_input();
 
@@ -1055,10 +1091,9 @@ macro_rules! format_contract {
 
             #[test]
             fn incomplete_trailing_stream_is_corrupt_data() {
-                let memory = GlobalPool::new();
-                let compressed = $module::compress(view(&payload()), memory.clone()).expect("compress");
+                let compressed = $module::compress(view(&payload()), resources()).expect("compress");
                 let joined = BytesView::from_views([compressed, view(&[0])]);
-                let mut decompressor = $module::Decompressor::builder().multi_stream(true).build(memory);
+                let mut decompressor = $module::Decompressor::builder().multi_stream(true).build(resources()).built();
                 decompressor.push(joined).expect("push succeeds");
                 decompressor.end_input();
 
@@ -1075,14 +1110,14 @@ macro_rules! format_contract {
 
             #[test]
             fn stream_count_limit_rejects_before_decompressing_the_next_stream() {
-                let memory = GlobalPool::new();
                 let data = payload();
-                let compressed = $module::compress(view(&data), memory.clone()).expect("compress");
+                let compressed = $module::compress(view(&data), resources()).expect("compress");
                 let joined = BytesView::from_views([compressed.clone(), compressed]);
                 let mut decompressor = $module::Decompressor::builder()
                     .multi_stream(true)
                     .limits(DecompressionLimits::new().with_max_streams(NonZeroU64::new(1).expect("one is non-zero")))
-                    .build(memory);
+                    .build(resources())
+                    .built();
                 decompressor.push(joined).expect("push succeeds");
                 decompressor.end_input();
 
@@ -1102,12 +1137,12 @@ macro_rules! format_contract {
 
             #[test]
             fn stream_count_limit_rejects_a_later_push() {
-                let memory = GlobalPool::new();
-                let compressed = $module::compress(view(&payload()), memory.clone()).expect("compress");
+                let compressed = $module::compress(view(&payload()), resources()).expect("compress");
                 let mut decompressor = $module::Decompressor::builder()
                     .multi_stream(true)
                     .limits(DecompressionLimits::new().with_max_streams(NonZeroU64::new(1).expect("one is non-zero")))
-                    .build(memory);
+                    .build(resources())
+                    .built();
                 decompressor.push(compressed.clone()).expect("first push succeeds");
 
                 loop {
@@ -1124,13 +1159,12 @@ macro_rules! format_contract {
 
             #[test]
             fn absolute_output_limit_is_exact() {
-                let memory = GlobalPool::new();
                 let data = payload();
-                let compressed = $module::compress(view(&data), memory.clone()).expect("compress");
+                let compressed = $module::compress(view(&data), resources()).expect("compress");
 
                 let exact = $module::decompress_with_limits(
                     compressed.clone(),
-                    memory.clone(),
+                    resources(),
                     DecompressionLimits::new()
                         .without_max_ratio()
                         .with_max_output_len(data.len() as u64),
@@ -1141,7 +1175,7 @@ macro_rules! format_contract {
                 let maximum = data.len() as u64 - 1;
                 let error = $module::decompress_with_limits(
                     compressed,
-                    memory,
+                    resources(),
                     DecompressionLimits::new().without_max_ratio().with_max_output_len(maximum),
                 )
                 .expect_err("one byte beyond the cap is rejected");
@@ -1152,7 +1186,7 @@ macro_rules! format_contract {
 
             #[test]
             fn a_fatal_error_makes_the_decompressor_terminal() {
-                let mut decompressor = $module::Decompressor::new(GlobalPool::new());
+                let mut decompressor = $module::Decompressor::new(resources());
                 decompressor.push(view(b"not a valid stream")).expect("push succeeds");
                 decompressor.end_input();
 
@@ -1182,14 +1216,12 @@ macro_rules! format_contract {
                         .expect("decompression succeeds")
                         .to_vec()
                 }
-
-                let memory = GlobalPool::new();
                 let data = payload();
 
                 assert_eq!(
                     transcode(
-                        $module::Compressor::new(memory.clone()),
-                        $module::Decompressor::new(memory),
+                        $module::Compressor::new(resources()),
+                        $module::Decompressor::new(resources()),
                         &data
                     ),
                     data
@@ -1230,18 +1262,17 @@ fn every_compiled_format_satisfies_the_contract() {
 fn formats_produce_mutually_incompatible_streams() {
     // Each format must be genuinely distinct: decoding one format's output with another's decompressor
     // must fail rather than silently produce garbage.
-    let memory = GlobalPool::new();
     let data = b"cross format check ".repeat(200);
 
     for &produced_by in Format::ALL {
-        let compressed = produced_by.compress(view(&data), memory.clone()).expect("compression succeeds");
+        let compressed = produced_by.compress(view(&data), resources()).expect("compression succeeds");
 
         for &decompressed_by in Format::ALL {
             if produced_by == decompressed_by {
                 continue;
             }
 
-            if let Ok(plain) = decompressed_by.decompress(compressed.clone(), memory.clone()) {
+            if let Ok(plain) = decompressed_by.decompress(compressed.clone(), resources()) {
                 assert_ne!(
                     plain.to_vec(),
                     data,
@@ -1256,7 +1287,6 @@ fn formats_produce_mutually_incompatible_streams() {
 fn a_decompressor_can_be_chosen_from_a_declared_encoding() {
     // The end-to-end runtime scenario: a peer declares its encoding in a header, and the decompressor is
     // chosen from that string.
-    let memory = GlobalPool::new();
     let data = b"declared encoding ".repeat(100);
 
     for &format in Format::ALL {
@@ -1264,10 +1294,10 @@ fn a_decompressor_can_be_chosen_from_a_declared_encoding() {
             continue;
         };
 
-        let compressed = format.compress(view(&data), memory.clone()).expect("compression succeeds");
+        let compressed = format.compress(view(&data), resources()).expect("compression succeeds");
 
         let declared = Format::from_content_encoding(token).expect("the token is supported");
-        let plain = declared.decompress(compressed, memory.clone()).expect("decompression succeeds");
+        let plain = declared.decompress(compressed, resources()).expect("decompression succeeds");
 
         assert_eq!(plain.to_vec(), data, "{format:?} did not decompress via its declared token");
     }
@@ -1283,11 +1313,10 @@ mod format_specific_settings {
 
     #[test]
     fn default_limits_accept_the_compressors_own_high_ratio_output() {
-        let memory = GlobalPool::new();
         let data = vec![0_u8; 4 * 1024 * 1024];
-        let compressed = brotli::compress(view(&data), memory.clone()).expect("compression succeeds");
+        let compressed = brotli::compress(view(&data), resources()).expect("compression succeeds");
 
-        let plain = brotli::decompress(compressed, memory).expect("default limits accept valid brotli");
+        let plain = brotli::decompress(compressed, resources()).expect("default limits accept valid brotli");
 
         assert_eq!(plain.to_vec(), data);
     }
@@ -1295,7 +1324,6 @@ mod format_specific_settings {
     #[test]
     fn a_format_specific_setting_still_produces_a_conforming_stream() {
         // Whatever brotli-only knobs are set, the result must still satisfy the shared contract.
-        let memory = GlobalPool::new();
         let data = b"format specific settings ".repeat(400);
 
         let mut tuned = brotli::Compressor::builder()
@@ -1303,10 +1331,11 @@ mod format_specific_settings {
             .quality(Quality::new(3).expect("quality is in range"))
             .mode(Mode::Text)
             .window_size(WindowSize::new(20).expect("20 is in range"))
-            .build(memory.clone());
+            .build(resources())
+            .built();
 
         let compressed = compress(&mut tuned, &view(&data), usize::MAX).expect("compression succeeds");
-        let plain = brotli::decompress(compressed, memory).expect("decompression succeeds");
+        let plain = brotli::decompress(compressed, resources()).expect("decompression succeeds");
 
         assert_eq!(plain.to_vec(), data);
     }
@@ -1323,15 +1352,14 @@ mod format_specific_settings {
 
     #[test]
     fn a_smaller_window_still_round_trips() {
-        let memory = GlobalPool::new();
         let data = b"windowed ".repeat(20_000);
 
         for exponent in [10, 16, 24] {
             let window = WindowSize::new(exponent).expect("exponent is in range");
-            let mut tuned = brotli::Compressor::builder().window_size(window).build(memory.clone());
+            let mut tuned = brotli::Compressor::builder().window_size(window).build(resources()).built();
 
             let compressed = compress(&mut tuned, &view(&data), usize::MAX).expect("compression succeeds");
-            let plain = brotli::decompress(compressed, memory.clone()).expect("decompression succeeds");
+            let plain = brotli::decompress(compressed, resources()).expect("decompression succeeds");
 
             assert_eq!(plain.to_vec(), data, "window 2^{exponent} did not round trip");
         }
@@ -1342,21 +1370,19 @@ mod format_specific_settings {
         // The documented escape hatch: a runtime `Format` builder cannot carry a brotli-only
         // setting, so branch on the format, use the concrete builder, and box the result. That
         // works because a boxed compression operation is itself a `Compression`.
-        fn compressor_for(format: Format, memory: GlobalPool) -> Box<dyn Compressing> {
+        fn compressor_for(format: Format) -> Box<dyn Compressing> {
             match format {
-                Format::Brotli => Box::new(brotli::Compressor::builder().mode(Mode::Text).build(memory)),
-                other => other.compressor().build(memory),
+                Format::Brotli => Box::new(brotli::Compressor::builder().mode(Mode::Text).build(resources()).built()),
+                other => CompressorBuilder::new().build_format(other, resources()).built(),
             }
         }
-
-        let memory = GlobalPool::new();
         let data = b"escape hatch ".repeat(200);
 
         for &format in Format::ALL {
-            let mut tuned = compressor_for(format, memory.clone());
+            let mut tuned = compressor_for(format);
             let compressed = compress(&mut *tuned, &view(&data), usize::MAX).expect("compression succeeds");
 
-            let plain = format.decompress(compressed, memory.clone()).expect("decompression succeeds");
+            let plain = format.decompress(compressed, resources()).expect("decompression succeeds");
             assert_eq!(plain.to_vec(), data, "{format:?} failed through the escape hatch");
         }
     }
@@ -1364,14 +1390,13 @@ mod format_specific_settings {
     #[test]
     fn text_mode_does_not_change_the_decompressed_bytes() {
         // The mode is a compressor-side hint only: it must never alter what comes back out.
-        let memory = GlobalPool::new();
         let data = b"the quick brown fox jumps over the lazy dog ".repeat(300);
 
         for mode in [Mode::Generic, Mode::Text, Mode::Font] {
-            let mut tuned = brotli::Compressor::builder().mode(mode).build(memory.clone());
+            let mut tuned = brotli::Compressor::builder().mode(mode).build(resources()).built();
             let compressed = compress(&mut tuned, &view(&data), usize::MAX).expect("compression succeeds");
 
-            let plain = brotli::decompress(compressed, memory.clone()).expect("decompression succeeds");
+            let plain = brotli::decompress(compressed, resources()).expect("decompression succeeds");
             assert_eq!(plain.to_vec(), data, "{mode:?} changed the decompressed bytes");
         }
     }
@@ -1386,14 +1411,17 @@ mod zstd_specific_settings {
 
     #[test]
     fn native_level_and_decompressor_window_limit_are_wired() {
-        let memory = GlobalPool::new();
         let data = b"zstd format-specific settings ".repeat(400);
         let compressor = zstd::Compressor::builder()
             .compression_level(CompressionLevel::min())
-            .build(memory.clone());
+            .build(resources())
+            .built();
         let compressed = compressor.compress(view(&data)).expect("compression succeeds");
 
-        let decompressor = zstd::Decompressor::builder().max_window_log(WindowLog::DEFAULT).build(memory);
+        let decompressor = zstd::Decompressor::builder()
+            .max_window_log(WindowLog::DEFAULT)
+            .build(resources())
+            .built();
         let plain = decompressor.decompress(compressed).expect("decompression succeeds");
 
         assert_eq!(plain.to_vec(), data);
@@ -1407,15 +1435,15 @@ mod pooling {
 
     use super::*;
 
-    fn compress_with(pool: Option<Pool>, level: Level, data: &[u8]) -> BytesView {
-        let memory = GlobalPool::new();
-        let builder = gzip::Compressor::builder().level(level);
-        let builder = match pool {
-            Some(pool) => builder.pool(pool),
-            None => builder,
-        };
+    /// Resources whose engines are recycled, shared by the tests in this module.
+    fn pooled_resources() -> &'static Resources {
+        static POOLED: OnceLock<Resources> = OnceLock::new();
 
-        let mut compressor = builder.build(memory);
+        POOLED.get_or_init(|| Resources::new(GlobalPool::new()))
+    }
+
+    fn compress_with(resources: &Resources, level: Level, data: &[u8]) -> BytesView {
+        let mut compressor = gzip::Compressor::builder().level(level).build(resources).built();
         compress(&mut compressor, &view(data), usize::MAX).expect("compression succeeds")
     }
 
@@ -1423,7 +1451,6 @@ mod pooling {
     fn a_recycled_engine_produces_byte_identical_output() {
         // The whole safety argument for pooling: reset state must leave no trace of the previous
         // stream. Compare many pooled rounds against a fresh-engine baseline.
-        let pool = Pool::new();
         let payloads = [
             b"first request body".repeat(50),
             b"a completely different second body, longer".repeat(80),
@@ -1432,15 +1459,15 @@ mod pooling {
 
         for round in 0..4 {
             for payload in &payloads {
-                let pooled = compress_with(Some(pool.clone()), Level::DEFAULT, payload);
-                let fresh = compress_with(None, Level::DEFAULT, payload);
+                let pooled = compress_with(pooled_resources(), Level::DEFAULT, payload);
+                let fresh = compress_with(&Resources::new(GlobalPool::new()).enable_pooling(0), Level::DEFAULT, payload);
 
                 assert_eq!(
                     pooled.to_vec(),
                     fresh.to_vec(),
                     "round {round}: pooled output diverged from a fresh engine"
                 );
-                assert_eq!(gzip::decompress(pooled, GlobalPool::new()).expect("decompress").to_vec(), *payload);
+                assert_eq!(gzip::decompress(pooled, resources()).expect("decompress").to_vec(), *payload);
             }
         }
     }
@@ -1449,21 +1476,24 @@ mod pooling {
     fn a_compressor_abandoned_mid_stream_does_not_poison_the_pool() {
         // A request cancelled part-way through returns a dirty engine. The next user must still
         // get a clean stream.
-        let pool = Pool::new();
 
         {
-            let mut abandoned = gzip::Compressor::builder().pool(pool.clone()).build(GlobalPool::new());
+            let mut abandoned = gzip::Compressor::builder().build(resources()).built();
             abandoned.push(view(&b"half a stream ".repeat(100))).expect("push succeeds");
             let _ = Compression::pull(&mut abandoned).expect("pull succeeds");
             // Dropped without `end_input`, so its engine is mid-stream.
         }
 
-        let recovered = compress_with(Some(pool), Level::DEFAULT, b"a fresh stream");
-        let fresh = compress_with(None, Level::DEFAULT, b"a fresh stream");
+        let recovered = compress_with(pooled_resources(), Level::DEFAULT, b"a fresh stream");
+        let fresh = compress_with(
+            &Resources::new(GlobalPool::new()).enable_pooling(0),
+            Level::DEFAULT,
+            b"a fresh stream",
+        );
 
         assert_eq!(recovered.to_vec(), fresh.to_vec(), "a recycled dirty engine must be reset");
         assert_eq!(
-            gzip::decompress(recovered, GlobalPool::new()).expect("decompress").to_vec(),
+            gzip::decompress(recovered, resources()).expect("decompress").to_vec(),
             b"a fresh stream".to_vec()
         );
     }
@@ -1471,34 +1501,34 @@ mod pooling {
     #[test]
     fn levels_do_not_share_engines() {
         // Reset preserves the level, so a level-9 request must never receive a level-1 engine.
-        let pool = Pool::new();
         let payload = b"the quick brown fox jumps over the lazy dog ".repeat(200);
 
-        let fast = compress_with(Some(pool.clone()), Level::FAST, &payload);
-        let best = compress_with(Some(pool), Level::HIGH, &payload);
+        let fast = compress_with(pooled_resources(), Level::FAST, &payload);
+        let best = compress_with(pooled_resources(), Level::HIGH, &payload);
 
-        assert_eq!(fast.to_vec(), compress_with(None, Level::FAST, &payload).to_vec());
-        assert_eq!(best.to_vec(), compress_with(None, Level::HIGH, &payload).to_vec());
+        assert_eq!(
+            fast.to_vec(),
+            compress_with(&Resources::new(GlobalPool::new()).enable_pooling(0), Level::FAST, &payload).to_vec()
+        );
+        assert_eq!(
+            best.to_vec(),
+            compress_with(&Resources::new(GlobalPool::new()).enable_pooling(0), Level::HIGH, &payload).to_vec()
+        );
         assert!(best.len() <= fast.len(), "level 9 must still out-compress level 1");
     }
 
     #[test]
     fn a_pool_is_shared_across_threads() {
         // The point of the design: one handle lives in a client and is cloned per request.
-        let pool = Pool::new();
         let payload = b"concurrent body ".repeat(200);
 
         std::thread::scope(|scope| {
             for _ in 0..8 {
-                let pool = pool.clone();
                 let payload = payload.clone();
                 scope.spawn(move || {
                     for _ in 0..10 {
-                        let compressed = compress_with(Some(pool.clone()), Level::DEFAULT, &payload);
-                        assert_eq!(
-                            gzip::decompress(compressed, GlobalPool::new()).expect("decompress").to_vec(),
-                            payload
-                        );
+                        let compressed = compress_with(pooled_resources(), Level::DEFAULT, &payload);
+                        assert_eq!(gzip::decompress(compressed, resources()).expect("decompress").to_vec(), payload);
                     }
                 });
             }
@@ -1512,14 +1542,11 @@ mod pooling {
         let payloads = [b"first response body".repeat(60), b"a different second body".repeat(90)];
 
         for &format in Format::ALL {
-            let pool = Pool::new();
-            let memory = GlobalPool::new();
-
             for round in 0..4 {
                 for payload in &payloads {
-                    let compressed = format.compress(view(payload), memory.clone()).expect("compression succeeds");
+                    let compressed = format.compress(view(payload), resources()).expect("compression succeeds");
 
-                    let mut decompressor = format.decompressor().pool(pool.clone()).build(memory.clone());
+                    let mut decompressor = DecompressorBuilder::new().build_format(format, resources()).built();
                     let plain = decompress(&mut *decompressor, &compressed, usize::MAX).expect("decompression succeeds");
 
                     assert_eq!(plain.to_vec(), *payload, "{format:?} round {round} diverged when pooled");
@@ -1532,20 +1559,17 @@ mod pooling {
     #[test]
     fn a_decompressor_abandoned_mid_stream_does_not_poison_the_pool() {
         use compressors::zlib;
-
-        let pool = Pool::new();
-        let memory = GlobalPool::new();
         let payload = b"a stream that gets cut short ".repeat(200);
-        let compressed = zlib::compress(view(&payload), memory.clone()).expect("compression succeeds");
+        let compressed = zlib::compress(view(&payload), resources()).expect("compression succeeds");
 
         {
-            let mut abandoned = zlib::Decompressor::builder().pool(pool.clone()).build(memory.clone());
+            let mut abandoned = zlib::Decompressor::builder().build(resources()).built();
             abandoned.push(compressed.range(0..compressed.len() / 2)).expect("push succeeds");
             let _ = Compression::pull(&mut abandoned).expect("pull succeeds");
             // Dropped mid-stream, so its engine is dirty.
         }
 
-        let mut recovered = zlib::Decompressor::builder().pool(pool).build(memory);
+        let mut recovered = zlib::Decompressor::builder().build(resources()).built();
         let plain = decompress(&mut recovered, &compressed, usize::MAX).expect("decompression succeeds");
 
         assert_eq!(plain.to_vec(), payload, "a recycled dirty decompressor must be reset");
@@ -1556,13 +1580,11 @@ mod pooling {
         // `Decompress::reset` takes a boolean that cannot express gzip framing, so a recycled gzip
         // decompressor would silently decompress as raw deflate. It must therefore never be pooled --
         // and the caller must not be able to tell the difference.
-        let pool = Pool::new();
-        let memory = GlobalPool::new();
         let payload = b"gzip stays correct ".repeat(200);
-        let compressed = gzip::compress(view(&payload), memory.clone()).expect("compression succeeds");
+        let compressed = gzip::compress(view(&payload), resources()).expect("compression succeeds");
 
         for round in 0..5 {
-            let mut decompressor = gzip::Decompressor::builder().pool(pool.clone()).build(memory.clone());
+            let mut decompressor = gzip::Decompressor::builder().build(resources()).built();
             let plain = decompress(&mut decompressor, &compressed, usize::MAX).expect("decompression succeeds");
 
             assert_eq!(plain.to_vec(), payload, "gzip round {round} decompressed incorrectly");
@@ -1570,16 +1592,13 @@ mod pooling {
     }
 
     #[test]
-    fn a_zero_capacity_pool_still_works() {
-        let pool = Pool::with_capacity(0);
+    fn resources_without_recycling_still_work() {
+        let plain = Resources::new(GlobalPool::new()).enable_pooling(0);
         let payload = b"no recycling here".repeat(20);
 
-        let compressed = compress_with(Some(pool), Level::DEFAULT, &payload);
+        let compressed = compress_with(&plain, Level::DEFAULT, &payload);
 
-        assert_eq!(
-            gzip::decompress(compressed, GlobalPool::new()).expect("decompress").to_vec(),
-            payload
-        );
+        assert_eq!(gzip::decompress(compressed, resources()).expect("decompress").to_vec(), payload);
     }
 }
 
@@ -1588,14 +1607,16 @@ mod pooling {
 /// format. Nothing else in the suite would catch that.
 #[test]
 fn formats_never_share_pooled_engines() {
-    let pool = Pool::new();
     let data = b"interleaved through one pool ".repeat(200);
     let input = view(&data);
 
     let baselines: Vec<_> = Format::ALL
         .iter()
         .map(|&format| {
-            let mut compressor = format.compressor().output_chunk_size(chunk(4096)).build(GlobalPool::new());
+            let mut compressor = CompressorBuilder::new()
+                .output_chunk_size(chunk(4096))
+                .build_format(format, resources())
+                .built();
             let bytes = compress(&mut *compressor, &input, usize::MAX)
                 .expect("compression succeeds")
                 .to_vec();
@@ -1606,11 +1627,10 @@ fn formats_never_share_pooled_engines() {
     // Interleave, so every format has had a turn before any is asked again.
     for round in 0..6 {
         for (format, baseline) in &baselines {
-            let mut compressor = format
-                .compressor()
+            let mut compressor = CompressorBuilder::new()
                 .output_chunk_size(chunk(4096))
-                .pool(pool.clone())
-                .build(GlobalPool::new());
+                .build_format(*format, resources())
+                .built();
             let pooled = compress(&mut *compressor, &input, usize::MAX).expect("compression succeeds");
             drop(compressor);
 
@@ -1622,7 +1642,7 @@ fn formats_never_share_pooled_engines() {
 
             // And the bytes really are this format's, not a sibling's that happens to decompress.
             for (other, _) in &baselines {
-                let mut reader = other.decompressor().pool(pool.clone()).build(GlobalPool::new());
+                let mut reader = DecompressorBuilder::new().build_format(*other, resources()).built();
                 let decompressed = decompress(&mut *reader, &pooled, usize::MAX);
 
                 if other == format {
@@ -1642,14 +1662,16 @@ fn formats_never_share_pooled_engines() {
 /// One pool shared by many threads, the way a client would actually use it.
 #[test]
 fn a_shared_pool_is_correct_under_concurrency() {
-    let pool = Pool::new();
     let data = b"concurrent request body ".repeat(150);
 
     let baselines: Vec<_> = Format::ALL
         .iter()
         .map(|&format| {
             let input = view(&data);
-            let mut compressor = format.compressor().output_chunk_size(chunk(4096)).build(GlobalPool::new());
+            let mut compressor = CompressorBuilder::new()
+                .output_chunk_size(chunk(4096))
+                .build_format(format, resources())
+                .built();
             let bytes = compress(&mut *compressor, &input, usize::MAX)
                 .expect("compression succeeds")
                 .to_vec();
@@ -1659,7 +1681,6 @@ fn a_shared_pool_is_correct_under_concurrency() {
 
     std::thread::scope(|scope| {
         for _ in 0..8 {
-            let pool = pool.clone();
             let data = data.clone();
             let baselines = baselines.clone();
 
@@ -1669,17 +1690,16 @@ fn a_shared_pool_is_correct_under_concurrency() {
 
                 for round in 0..10 {
                     for (format, baseline) in &baselines {
-                        let mut compressor = format
-                            .compressor()
+                        let mut compressor = CompressorBuilder::new()
                             .output_chunk_size(chunk(4096))
-                            .pool(pool.clone())
-                            .build(GlobalPool::new());
+                            .build_format(*format, resources())
+                            .built();
                         let pooled = compress(&mut *compressor, &input, usize::MAX).expect("compression succeeds");
                         drop(compressor);
 
                         assert_eq!(&pooled.to_vec(), baseline, "{format:?} round {round}: concurrent pooling diverged");
 
-                        let mut decompressor = format.decompressor().pool(pool.clone()).build(GlobalPool::new());
+                        let mut decompressor = DecompressorBuilder::new().build_format(*format, resources()).built();
                         let plain = decompress(&mut *decompressor, &pooled, usize::MAX).expect("decompression succeeds");
 
                         assert_eq!(plain.to_vec(), data, "{format:?} round {round}: concurrent decompress lost data");
@@ -1693,7 +1713,6 @@ fn a_shared_pool_is_correct_under_concurrency() {
 /// A long run must not drift: the hundredth message has to match the first.
 #[test]
 fn pooled_output_does_not_drift_over_many_reuses() {
-    let pool = Pool::new();
     let data = b"steady state ".repeat(120);
 
     for &format in Format::ALL {
@@ -1701,11 +1720,10 @@ fn pooled_output_does_not_drift_over_many_reuses() {
         let mut first: Option<Vec<u8>> = None;
 
         for round in 0..60 {
-            let mut compressor = format
-                .compressor()
+            let mut compressor = CompressorBuilder::new()
                 .output_chunk_size(chunk(4096))
-                .pool(pool.clone())
-                .build(GlobalPool::new());
+                .build_format(format, resources())
+                .built();
             let pooled = compress(&mut *compressor, &input, usize::MAX)
                 .expect("compression succeeds")
                 .to_vec();
@@ -1716,5 +1734,159 @@ fn pooled_output_does_not_drift_over_many_reuses() {
                 Some(ref expected) => assert_eq!(&pooled, expected, "{format:?} round {round}: output drifted"),
             }
         }
+    }
+}
+
+/// The trait contract itself, exercised through one format and through a runtime-selected one.
+///
+/// These live here rather than beside the traits because driving them needs a concrete format, and
+/// `core` deliberately knows about none.
+#[cfg(feature = "gzip")]
+mod trait_contract {
+    use compressors::gzip;
+
+    use super::*;
+
+    #[test]
+    fn round_trips_through_the_trait_alone() {
+        let mut compressor: Box<dyn Compression<Mode = Compress>> = Box::new(gzip::Compressor::new(resources()));
+        Compression::push(&mut *compressor, view(b"driven through the trait")).expect("push succeeds");
+        Compression::end_input(&mut *compressor);
+
+        let mut collected = BytesBuf::new();
+        loop {
+            let output = Compression::pull(&mut *compressor).expect("pull succeeds");
+            assert!(!output.is_need_input(), "compressor requested input after end");
+            let done = output.is_done();
+            if let Some(chunk) = output.into_data() {
+                collected.put_bytes(chunk);
+            }
+            if done {
+                break;
+            }
+        }
+
+        let mut decompressor: Box<dyn Compression<Mode = Decompress>> = Box::new(gzip::Decompressor::new(resources()));
+        Compression::push(&mut *decompressor, collected.consume_all()).expect("push succeeds");
+        Compression::end_input(&mut *decompressor);
+
+        let mut plain = BytesBuf::new();
+        loop {
+            let output = Compression::pull(&mut *decompressor).expect("pull succeeds");
+            assert!(!output.is_need_input(), "decompressor requested input after end");
+            let done = output.is_done();
+            if let Some(chunk) = output.into_data() {
+                plain.put_bytes(chunk);
+            }
+            if done {
+                break;
+            }
+        }
+
+        assert_eq!(plain.consume_all().to_vec(), b"driven through the trait".to_vec());
+    }
+
+    #[test]
+    fn trait_objects_are_send_sync_and_debug() {
+        fn assert_send_sync<T: Send + Sync + ?Sized>(_: &T) {}
+        let compressor: Box<dyn Compression<Mode = Compress>> = Box::new(gzip::Compressor::new(resources()));
+        let decompressor: Box<dyn Compression<Mode = Decompress>> = Box::new(gzip::Decompressor::new(resources()));
+
+        assert_send_sync(&*compressor);
+        assert_send_sync(&*decompressor);
+        assert_send_sync(&gzip::Compressor::new(resources()));
+        assert_send_sync(&gzip::Decompressor::new(resources()));
+        assert!(format!("{compressor:?}").contains("Compressor"));
+        assert!(format!("{decompressor:?}").contains("Decompressor"));
+    }
+
+    #[test]
+    fn direction_specific_traits_work_for_concrete_and_runtime_operations() {
+        let input = view(b"direction-specific capabilities");
+
+        let mut concrete = gzip::Compressor::new(resources());
+        concrete.push(input.clone()).expect("push succeeds");
+        Compressing::flush(&mut concrete).expect("concrete flush succeeds");
+        loop {
+            let output = concrete.pull().expect("pull succeeds");
+            assert!(!output.is_done(), "flush ended the stream");
+            if output.is_need_input() {
+                break;
+            }
+        }
+
+        let mut compressor = CompressorBuilder::new()
+            .build_format(Format::Gzip, resources())
+            .expect("the default settings are accepted");
+        compressor.push(input).expect("push succeeds");
+        let mut compressed = BytesBuf::new();
+        loop {
+            let output = compressor.pull().expect("pull succeeds");
+            assert!(!output.is_done(), "flush ended the stream");
+            let need_input = output.is_need_input();
+            if let Some(chunk) = output.into_data() {
+                compressed.put_bytes(chunk);
+            }
+            if need_input {
+                break;
+            }
+        }
+
+        // The header alone is already non-empty, so the flush's contribution must be measured
+        // against this baseline rather than against emptiness.
+        let before_flush = compressed.len();
+
+        Compressing::flush(&mut compressor).expect("boxed flush succeeds");
+        loop {
+            let output = compressor.pull().expect("pull succeeds");
+            assert!(!output.is_done(), "flush ended the stream");
+            let need_input = output.is_need_input();
+            if let Some(chunk) = output.into_data() {
+                compressed.put_bytes(chunk);
+            }
+            if need_input {
+                break;
+            }
+        }
+
+        assert!(
+            compressed.len() > before_flush,
+            "boxed flush should have released a sync-flush chunk beyond the header before end_input"
+        );
+
+        compressor.end_input();
+        loop {
+            let output = compressor.pull().expect("pull succeeds");
+            assert!(!output.is_need_input(), "compressor requested input after end");
+            let done = output.is_done();
+            if let Some(chunk) = output.into_data() {
+                compressed.put_bytes(chunk);
+            }
+            if done {
+                break;
+            }
+        }
+
+        let trailing = view(b"trailing");
+        let joined = BytesView::from_views([compressed.consume_all(), trailing.clone()]);
+        let mut decompressor = DecompressorBuilder::new()
+            .multi_stream(false)
+            .build_format(Format::Gzip, resources())
+            .expect("the default settings are accepted");
+        decompressor.push(joined).expect("push succeeds");
+        loop {
+            let output = decompressor.pull().expect("pull succeeds");
+            assert!(!output.is_need_input(), "complete stream requested more input");
+            if output.is_done() {
+                break;
+            }
+        }
+
+        assert_eq!(
+            Decompressing::take_remainder(&mut decompressor)
+                .expect("boxed remainder succeeds")
+                .to_vec(),
+            trailing.to_vec()
+        );
     }
 }

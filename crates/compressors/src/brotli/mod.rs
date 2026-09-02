@@ -14,16 +14,16 @@
 //! ```
 //! use bytesbuf::BytesView;
 //! use bytesbuf::mem::GlobalPool;
-//! use compressors::brotli;
+//! use compressors::{Resources, brotli};
 //!
 //! let memory = GlobalPool::new();
 //! let compressed = brotli::compress(
 //!     BytesView::copied_from_slice(b"the quick brown fox", &memory),
-//!     memory.clone(),
+//!     &Resources::default(),
 //! )?;
 //!
 //! assert_eq!(
-//!     brotli::decompress(compressed, memory)?.to_vec(),
+//!     brotli::decompress(compressed, &Resources::default())?.to_vec(),
 //!     b"the quick brown fox".to_vec()
 //! );
 //! # Ok::<(), compressors::Error>(())
@@ -42,19 +42,44 @@ use crate::limits::FormatLimits;
 const DEFAULT_LIMITS: FormatLimits = FormatLimits::new(None, None);
 use crate::format::macros::define_format;
 
+/// Selects brotli as the format of a [`CompressorBuilder`] or [`DecompressorBuilder`], and carries
+/// the settings only brotli has.
+///
+/// Naming the format in the builder's type parameter is what gives that builder a `build` method
+/// producing this module's [`Compressor`] and [`Decompressor`], along with the setters below.
+#[derive(Debug, Clone)]
+pub struct Brotli {
+    quality: Option<Quality>,
+    mode: Mode,
+    window_size: WindowSize,
+}
+
+impl Brotli {
+    /// The settings a brotli builder starts with: brotli's own defaults, and the portable
+    /// [`Level`][crate::Level] left in charge of the quality.
+    pub(crate) const fn new() -> Self {
+        Self {
+            quality: None,
+            mode: Mode::Generic,
+            window_size: WindowSize::DEFAULT,
+        }
+    }
+}
+
 define_format! {
     name = "brotli",
+    format = Brotli,
+    build_method = build_brotli,
     compressor_codec = BrotliCompress,
-    compressor_options = CompressorOptions,
-    new_compressor = |level, options, _pool| BrotliCompress::new(level, options),
+    compressor_build = fallible,
+    new_compressor = |level, format, _pool| BrotliCompress::new(level, format),
     decompressor_codec = BrotliDecompress,
-    decompressor_options = (),
+    decompressor_build = infallible,
     default_limits = DEFAULT_LIMITS,
-    new_decompressor = |limits, multi_stream, trailing_data, (), _pool| {
+    new_decompressor = |limits, multi_stream, trailing_data, _format, _pool| {
         BrotliDecompress::new(limits, multi_stream, trailing_data)
     },
     multi_stream_default = false,
-    multi_stream_doc = "Sets whether consecutive brotli streams decompress as one logical stream.\n\nDisabled by default: brotli has an explicit end-of-stream marker and concatenation is not an established convention.",
 }
 
 /// The kind of data brotli should tune its model for.
@@ -203,53 +228,46 @@ impl From<WindowSize> for u8 {
     }
 }
 
-/// Brotli's format-specific compressor settings.
-///
-/// Held by the generated [`CompressorBuilder`] and populated by the setters below.
-#[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct CompressorOptions {
-    pub(crate) quality: Option<Quality>,
-    pub(crate) mode: Mode,
-    pub(crate) window_size: WindowSize,
-}
-
 /// Settings that only brotli has.
 ///
 /// The portable settings -- [`level`][CompressorBuilder::level] and
 /// [`output_chunk_size`][CompressorBuilder::output_chunk_size] -- are shared with every other format
-/// and are also reachable through [`Format::compressor`][crate::format::Format::compressor]. These are not: a
-/// runtime builder that might produce any format cannot honour a setting only brotli has, so
-/// reach for them through this concrete builder and box the result if you need a
-/// [`Compressing`][crate::Compressing] trait object.
+/// and are also reachable from a [`CompressorBuilder<()>`][crate::CompressorBuilder] that has not
+/// chosen a format yet. These are not: a builder that might produce any format cannot honour a
+/// setting only brotli has, so reach for them through this concrete builder and box the result if
+/// you need a [`Compressing`][crate::core::Compressing] trait object.
 ///
 /// # Examples
 ///
 /// ```
 /// use bytesbuf::mem::GlobalPool;
 /// use compressors::brotli::{Mode, Quality, WindowSize};
-/// use compressors::{Compressing, brotli};
+/// use compressors::brotli;
+/// use compressors::core::Compressing;
+/// use compressors::Resources;
 ///
 /// let compressor: Box<dyn Compressing> = Box::new(
 ///     brotli::Compressor::builder()
 ///         .quality(Quality::new(8).expect("8 is in range"))
 ///         .mode(Mode::Text)
 ///         .window_size(WindowSize::new(20).expect("20 is in range"))
-///         .build(GlobalPool::new()),
+///         .build(&Resources::default())?,
 /// );
 /// # let _ = compressor;
+/// # Ok::<(), compressors::BuildError>(())
 /// ```
 impl CompressorBuilder {
-    /// Sets brotli's native quality, overriding any portable [`Level`].
+    /// Sets brotli's native quality, overriding any portable [`Level`][crate::Level].
     #[must_use]
     pub const fn quality(mut self, quality: Quality) -> Self {
-        self.options.quality = Some(quality);
+        self.format.quality = Some(quality);
         self
     }
 
     /// Tunes the entropy model for a particular kind of input.
     #[must_use]
     pub const fn mode(mut self, mode: Mode) -> Self {
-        self.options.mode = mode;
+        self.format.mode = mode;
         self
     }
 
@@ -259,7 +277,7 @@ impl CompressorBuilder {
     /// the reader as well as the writer.
     #[must_use]
     pub const fn window_size(mut self, window_size: WindowSize) -> Self {
-        self.options.window_size = window_size;
+        self.format.window_size = window_size;
         self
     }
 }

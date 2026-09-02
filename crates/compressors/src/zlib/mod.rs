@@ -11,16 +11,16 @@
 //! ```
 //! use bytesbuf::BytesView;
 //! use bytesbuf::mem::GlobalPool;
-//! use compressors::zlib;
+//! use compressors::{Resources, zlib};
 //!
 //! let memory = GlobalPool::new();
 //! let compressed = zlib::compress(
 //!     BytesView::copied_from_slice(b"the quick brown fox", &memory),
-//!     memory.clone(),
+//!     &Resources::default(),
 //! )?;
 //!
 //! assert_eq!(
-//!     zlib::decompress(compressed, memory)?.to_vec(),
+//!     zlib::decompress(compressed, &Resources::default())?.to_vec(),
 //!     b"the quick brown fox".to_vec()
 //! );
 //! # Ok::<(), compressors::Error>(())
@@ -30,17 +30,34 @@ use crate::flate::Wrapper;
 use crate::flate::codec::{FlateCompress, FlateDecompress};
 use crate::format::macros::define_format;
 
+/// Selects zlib as the format of a [`CompressorBuilder`] or [`DecompressorBuilder`].
+///
+/// Zlib has no settings beyond the ones every format shares, so this type carries none. It exists
+/// to name the format in the builder's type parameter, which is what gives that builder a `build`
+/// method producing this module's [`Compressor`] and [`Decompressor`].
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct Zlib;
+
+impl Zlib {
+    /// The settings a zlib builder starts with. Zlib has none of its own.
+    pub(crate) const fn new() -> Self {
+        Self
+    }
+}
+
 define_format! {
     name = "zlib",
+    format = Zlib,
+    build_method = build_zlib,
     compressor_codec = FlateCompress,
-    compressor_options = (),
-    new_compressor = |level, (), pool| FlateCompress::new(Wrapper::Zlib, level, pool),
+    compressor_build = infallible,
+    new_compressor = |level, _format, pool| FlateCompress::new(Wrapper::Zlib, level, pool),
     decompressor_codec = FlateDecompress,
-    decompressor_options = (),
+    decompressor_build = infallible,
     default_limits = crate::flate::DEFAULT_LIMITS,
-    new_decompressor = |limits, multi_stream, trailing_data, (), pool| {
+    new_decompressor = |limits, multi_stream, trailing_data, _format, pool| {
         FlateDecompress::new(Wrapper::Zlib, limits, multi_stream, trailing_data, pool)
     },
     multi_stream_default = false,
-    multi_stream_doc = "Sets whether concatenated zlib streams decompress as one logical stream.\n\nDisabled by default: unlike gzip, concatenating zlib streams is not an established convention.",
 }

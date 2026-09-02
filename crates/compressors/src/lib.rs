@@ -21,16 +21,16 @@
 //! ```
 //! use bytesbuf::BytesView;
 //! use bytesbuf::mem::GlobalPool;
-//! use compressors::gzip;
+//! use compressors::{Resources, gzip};
 //!
 //! let memory = GlobalPool::new();
 //! let compressed = gzip::compress(
 //!     BytesView::copied_from_slice(b"hello", &memory),
-//!     memory.clone(),
+//!     &Resources::default(),
 //! )?;
 //!
 //! assert_eq!(
-//!     gzip::decompress(compressed, memory)?.to_vec(),
+//!     gzip::decompress(compressed, &Resources::default())?.to_vec(),
 //!     b"hello".to_vec()
 //! );
 //! # Ok::<(), compressors::Error>(())
@@ -39,18 +39,21 @@
 //! # Streaming
 //!
 //! [`gzip::Compressor`] and [`gzip::Decompressor`] are push/pull state machines rather than one-shot
-//! transforms. Each `pull` returns at most one chunk, so processing a multi-gigabyte stream never
-//! holds more than one pending input view plus one output chunk:
+//! transforms. They carry no operations of their own: everything is driven through
+//! [`Compression`], so the same loop works for any format. Each `pull` returns at most one chunk,
+//! so processing a multi-gigabyte stream never holds more than one pending input view plus one
+//! output chunk:
 //!
 //! ```
 //! use bytesbuf::mem::GlobalPool;
 //! use bytesbuf::{BytesBuf, BytesView};
-//! use compressors::{Output, gzip};
+//! use compressors::core::Compression;
+//! use compressors::{Output, Resources, gzip};
 //!
 //! # let memory = GlobalPool::new();
 //! # let source = vec![gzip::compress(
-//! #     BytesView::copied_from_slice(b"streamed", &memory), memory.clone())?];
-//! let mut decompressor = gzip::Decompressor::new(memory);
+//! #     BytesView::copied_from_slice(b"streamed", &memory), &Resources::default())?];
+//! let mut decompressor = gzip::Decompressor::new(&Resources::default());
 //! let mut chunks = source.into_iter();
 //! let mut plain = BytesBuf::new();
 //!
@@ -74,14 +77,14 @@
 //!
 //! The [`Compression`] trait describes the contract independently of the format and direction, so
 //! code can be written once and used with any implementation. When the format is only known at
-//! runtime -- from a `Content-Encoding` token, say -- [`format::Format`] resolves it and its builders
-//! produce a boxed operation, which is itself a `Compression` and so fits anywhere a concrete one
-//! does:
+//! runtime -- from a `Content-Encoding` token, say -- [`format::Format`] resolves it, and
+//! [`CompressorBuilder::build_format`] produces a boxed operation, which is itself a `Compression`
+//! and so fits anywhere a concrete one does:
 //!
 //! ```
 //! use bytesbuf::BytesView;
 //! use bytesbuf::mem::GlobalPool;
-//! use compressors::Level;
+//! use compressors::Resources;
 //! use compressors::format::Format;
 //!
 //! let format = Format::from_content_encoding("gzip").expect("this build supports gzip");
@@ -89,11 +92,11 @@
 //! let memory = GlobalPool::new();
 //! let compressed = format.compress(
 //!     BytesView::copied_from_slice(b"runtime selected", &memory),
-//!     memory.clone(),
+//!     &Resources::default(),
 //! )?;
 //!
 //! assert_eq!(
-//!     format.decompress(compressed, memory)?.to_vec(),
+//!     format.decompress(compressed, &Resources::default())?.to_vec(),
 //!     b"runtime selected".to_vec()
 //! );
 //! # Ok::<(), compressors::Error>(())
@@ -102,24 +105,27 @@
 //! # Reusing engine state
 //!
 //! Building a compressor allocates and initializes a substantial amount of state -- on a small
-//! message, as much work as the compression itself. A service that compresses many messages should
-//! hold one [`Pool`], clone it into each compressor, and let the engine return to the pool when the
-//! compressor drops. The saving is roughly fixed per message, so it matters most for small bodies.
+//! message, as much work as the compression itself. [`Resources`] recycles it: hold one, hand it to
+//! every operation, and each engine returns to it when its codec drops. The saving is roughly fixed
+//! per message, so it matters most for small bodies.
+//!
+//! Recycling is on by default, which is why every API that builds a codec asks for resources rather
+//! than for a memory provider alone. Turn it off with
+//! [`enable_pooling(0)`][Resources::enable_pooling] when there is genuinely nothing to reuse.
 //!
 //! ```
-//! use bytesbuf::mem::GlobalPool;
-//! use compressors::{Pool, gzip};
+//! use compressors::{Level, Resources, gzip};
 //!
-//! let codecs = Pool::new();
-//! let memory = GlobalPool::new();
+//! // Held once by the application, cloned into whatever needs it.
+//! let resources = Resources::global();
 //!
 //! // Per request: cheap to build, recycles the engine on drop.
-//! let compressor = gzip::Compressor::builder().pool(codecs.clone()).build(memory);
+//! let compressor = gzip::Compressor::builder().level(Level::DEFAULT).build(resources);
 //! # let _ = compressor;
 //! ```
 //!
-//! The pool is transparent -- it recycles what is worth recycling and builds the rest -- so calling
-//! code never has to know which engines benefit. See [`Pool`] for what is pooled today.
+//! Recycling is transparent -- it applies to the engines that are worth it and quietly skips the
+//! rest -- so calling code never has to know which engines benefit.
 //!
 //! # Security
 //!
@@ -171,7 +177,8 @@
 
 #[cfg(feature = "brotli")]
 pub mod brotli;
-mod compression;
+mod builder;
+pub mod core;
 #[cfg(feature = "deflate")]
 pub mod deflate;
 #[cfg(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
@@ -187,6 +194,7 @@ mod level;
 mod limits;
 mod output;
 mod pool;
+mod resources;
 mod trailing;
 #[cfg(feature = "zlib")]
 pub mod zlib;
@@ -196,12 +204,12 @@ pub mod zstd;
 #[cfg(feature = "futures-stream")]
 mod stream;
 
-pub use compression::{Compress, Compressing, Compression, Decompress, Decompressing};
-pub use error::{Error, Result};
+pub use builder::{CompressorBuilder, DecompressorBuilder};
+pub use error::{BuildError, Error, Result};
 pub use level::Level;
 pub use limits::DecompressionLimits;
 pub use output::Output;
-pub use pool::Pool;
+pub use resources::Resources;
 #[cfg(feature = "futures-stream")]
 pub use stream::CompressionStream;
 pub use trailing::TrailingData;

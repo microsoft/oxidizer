@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
-use compressors::{CompressionStream, gzip};
+use compressors::{CompressionStream, Resources, gzip};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::{Stream, StreamExt};
@@ -43,8 +43,8 @@ fn body(memory: GlobalPool) -> impl Stream<Item = Result<BytesView, std::io::Err
 async fn main() -> Result<(), compressors::Error> {
     let memory = GlobalPool::new();
 
-    let compressed = CompressionStream::compress(body(memory.clone()), gzip::Compressor::new(memory.clone()));
-    let mut plain = CompressionStream::decompress(compressed, gzip::Decompressor::new(memory));
+    let compressed = CompressionStream::compress(body(memory.clone()), gzip::Compressor::new(&Resources::default()));
+    let mut plain = CompressionStream::decompress(compressed, gzip::Decompressor::new(&Resources::default()));
 
     let mut bytes = 0;
     while let Some(chunk) = plain.next().await {

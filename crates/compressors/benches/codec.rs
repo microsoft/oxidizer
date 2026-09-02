@@ -24,8 +24,9 @@ use alloc_tracker::{Allocator, Operation, Session};
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
 use compressors::brotli::{self, WindowSize};
+use compressors::core::Compression as _;
 use compressors::format::Format;
-use compressors::{Compression as _, Level, Pool};
+use compressors::{CompressorBuilder, DecompressorBuilder, Level, Resources};
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
 #[global_allocator]
@@ -79,15 +80,8 @@ fn chunk(size: usize) -> NonZeroUsize {
 }
 
 /// Compresses a view, returning the output so the optimiser cannot discard the work.
-fn compress(
-    format: Format,
-    level: Option<Level>,
-    pool: Option<&Pool>,
-    chunk_size: Option<NonZeroUsize>,
-    input: &BytesView,
-    memory: &GlobalPool,
-) -> BytesView {
-    let builder = format.compressor();
+fn compress(format: Format, level: Option<Level>, chunk_size: Option<NonZeroUsize>, input: &BytesView, resources: &Resources) -> BytesView {
+    let builder = CompressorBuilder::new();
     let builder = match level {
         Some(level) => builder.level(level),
         None => builder,
@@ -96,32 +90,28 @@ fn compress(
         Some(size) => builder.output_chunk_size(size),
         None => builder,
     };
-    let builder = match pool {
-        Some(pool) => builder.pool(pool.clone()),
-        None => builder,
-    };
-
-    builder.build(memory.clone()).compress(input.clone()).expect("compression succeeds")
-}
-
-fn decompress(format: Format, pool: Option<&Pool>, input: &BytesView, memory: &GlobalPool) -> BytesView {
-    let builder = format.decompressor();
-    let builder = match pool {
-        Some(pool) => builder.pool(pool.clone()),
-        None => builder,
-    };
 
     builder
-        .build(memory.clone())
+        .build_format(format, resources)
+        .expect("the settings are accepted")
+        .compress(input.clone())
+        .expect("compression succeeds")
+}
+
+fn decompress(format: Format, input: &BytesView, resources: &Resources) -> BytesView {
+    DecompressorBuilder::new()
+        .build_format(format, resources)
+        .expect("the settings are accepted")
         .decompress(input.clone())
         .expect("decompression succeeds")
 }
 
 /// Compresses with an explicit brotli window, which the runtime `Format` builder cannot express.
-fn compress_brotli(window: WindowSize, input: &BytesView, memory: &GlobalPool) -> BytesView {
+fn compress_brotli(window: WindowSize, input: &BytesView, resources: &Resources) -> BytesView {
     brotli::Compressor::builder()
         .window_size(window)
-        .build(memory.clone())
+        .build(resources)
+        .expect("the window size is accepted")
         .compress(input.clone())
         .expect("compression succeeds")
 }
@@ -149,13 +139,14 @@ fn compression(criterion: &mut Criterion, session: &Session) {
 
         for &format in Format::ALL {
             let memory = GlobalPool::new();
+            let resources = Resources::new(memory.clone());
             let input = view(&bytes, &memory);
             let name = format!("{format:?}/{size}");
             let operation = session.operation(format!("compress {name}"));
 
             group.bench_function(BenchmarkId::from_parameter(&name), |bencher| {
                 measured(bencher, &operation, || {
-                    black_box(compress(format, None, None, None, &input, &memory));
+                    black_box(compress(format, None, None, &input, &resources));
                 });
             });
         }
@@ -173,13 +164,14 @@ fn decompression(criterion: &mut Criterion, session: &Session) {
 
         for &format in Format::ALL {
             let memory = GlobalPool::new();
-            let compressed = compress(format, None, None, None, &view(&bytes, &memory), &memory);
+            let resources = Resources::new(memory.clone());
+            let compressed = compress(format, None, None, &view(&bytes, &memory), &resources);
             let name = format!("{format:?}/{size}");
             let operation = session.operation(format!("decompress {name}"));
 
             group.bench_function(BenchmarkId::from_parameter(&name), |bencher| {
                 measured(bencher, &operation, || {
-                    black_box(decompress(format, None, &compressed, &memory));
+                    black_box(decompress(format, &compressed, &resources));
                 });
             });
         }
@@ -188,7 +180,7 @@ fn decompression(criterion: &mut Criterion, session: &Session) {
     group.finish();
 }
 
-/// The headline claim for [`Pool`]: recycling engine state removes per-message setup.
+/// The headline claim for [`Resources`]: recycling engine state removes per-message setup.
 ///
 /// Also the regression guard for it. If pooled stops beating unpooled, or stops allocating less,
 /// something has broken.
@@ -200,20 +192,21 @@ fn pooling(criterion: &mut Criterion, session: &Session) {
     for &format in Format::ALL {
         let memory = GlobalPool::new();
         let input = view(&bytes, &memory);
-        let pool = Pool::new();
-        let compressed = compress(format, None, None, None, &input, &memory);
+        let fresh = Resources::new(memory.clone()).enable_pooling(0);
+        let pooled = Resources::new(memory.clone());
+        let compressed = compress(format, None, None, &input, &fresh);
 
         // Warm the pool so the measured iterations all hit it.
-        drop(compress(format, None, Some(&pool), None, &input, &memory));
-        drop(decompress(format, Some(&pool), &compressed, &memory));
+        drop(compress(format, None, None, &input, &pooled));
+        drop(decompress(format, &compressed, &pooled));
 
-        for (label, pooled) in [("fresh", None), ("pooled", Some(&pool))] {
+        for (label, resources) in [("fresh", &fresh), ("pooled", &pooled)] {
             let name = format!("{format:?}/compress/{label}");
             let operation = session.operation(format!("pool {name}"));
 
             group.bench_function(BenchmarkId::from_parameter(&name), |bencher| {
                 measured(bencher, &operation, || {
-                    black_box(compress(format, None, pooled, None, &input, &memory));
+                    black_box(compress(format, None, None, &input, resources));
                 });
             });
 
@@ -222,7 +215,7 @@ fn pooling(criterion: &mut Criterion, session: &Session) {
 
             group.bench_function(BenchmarkId::from_parameter(&name), |bencher| {
                 measured(bencher, &operation, || {
-                    black_box(decompress(format, pooled, &compressed, &memory));
+                    black_box(decompress(format, &compressed, resources));
                 });
             });
         }
@@ -242,6 +235,7 @@ fn segmentation(criterion: &mut Criterion, session: &Session) {
 
     let format = *Format::ALL.first().expect("at least one format is compiled in");
     let memory = GlobalPool::new();
+    let resources = Resources::new(memory.clone());
 
     for segment in [64_usize, 1024, 16 * 1024] {
         let input = fragmented(&bytes, segment, &memory);
@@ -250,7 +244,7 @@ fn segmentation(criterion: &mut Criterion, session: &Session) {
 
         group.bench_function(BenchmarkId::from_parameter(&name), |bencher| {
             measured(bencher, &operation, || {
-                black_box(compress(format, None, None, None, &input, &memory));
+                black_box(compress(format, None, None, &input, &resources));
             });
         });
     }
@@ -259,7 +253,7 @@ fn segmentation(criterion: &mut Criterion, session: &Session) {
     let operation = session.operation("segment contiguous");
     group.bench_function(BenchmarkId::from_parameter("contiguous"), |bencher| {
         measured(bencher, &operation, || {
-            black_box(compress(format, None, None, None, &contiguous, &memory));
+            black_box(compress(format, None, None, &contiguous, &resources));
         });
     });
 
@@ -277,6 +271,7 @@ fn chunk_size(criterion: &mut Criterion, session: &Session) {
 
     let format = *Format::ALL.first().expect("at least one format is compiled in");
     let memory = GlobalPool::new();
+    let resources = Resources::new(memory.clone());
     let input = view(&bytes, &memory);
 
     for size in [1024_usize, 8 * 1024, 64 * 1024, 512 * 1024] {
@@ -285,7 +280,7 @@ fn chunk_size(criterion: &mut Criterion, session: &Session) {
 
         group.bench_function(BenchmarkId::from_parameter(&name), |bencher| {
             measured(bencher, &operation, || {
-                black_box(compress(format, None, None, Some(chunk(size)), &input, &memory));
+                black_box(compress(format, None, Some(chunk(size)), &input, &resources));
             });
         });
     }
@@ -301,6 +296,7 @@ fn levels(criterion: &mut Criterion, session: &Session) {
 
     for &format in Format::ALL {
         let memory = GlobalPool::new();
+        let resources = Resources::new(memory.clone());
         let input = view(&bytes, &memory);
 
         for level in [Level::FAST, Level::DEFAULT, Level::HIGH] {
@@ -309,7 +305,7 @@ fn levels(criterion: &mut Criterion, session: &Session) {
 
             group.bench_function(BenchmarkId::from_parameter(&name), |bencher| {
                 measured(bencher, &operation, || {
-                    black_box(compress(format, Some(level), None, None, &input, &memory));
+                    black_box(compress(format, Some(level), None, &input, &resources));
                 });
             });
         }
@@ -332,6 +328,8 @@ fn brotli_window(criterion: &mut Criterion, session: &Session) {
     group.throughput(Throughput::Bytes(bytes.len() as u64));
 
     let memory = GlobalPool::new();
+
+    let resources = Resources::new(memory.clone());
     let input = view(&bytes, &memory);
 
     for exponent in [10_u8, 16, 18, 22] {
@@ -341,18 +339,18 @@ fn brotli_window(criterion: &mut Criterion, session: &Session) {
 
         group.bench_function(BenchmarkId::from_parameter(&name), |bencher| {
             measured(bencher, &operation, || {
-                black_box(compress_brotli(window, &input, &memory));
+                black_box(compress_brotli(window, &input, &resources));
             });
         });
 
         // The decompressor side matters independently: the window is recorded in the stream, so a
         // reader inherits whatever the writer chose.
-        let compressed = compress_brotli(window, &input, &memory);
+        let compressed = compress_brotli(window, &input, &resources);
         let operation = session.operation(format!("brotli window {name} decompress"));
 
         group.bench_function(BenchmarkId::from_parameter(format!("{name}/decompress")), |bencher| {
             measured(bencher, &operation, || {
-                black_box(decompress(Format::Brotli, None, &compressed, &memory));
+                black_box(decompress(Format::Brotli, &compressed, &resources));
             });
         });
     }
@@ -367,6 +365,7 @@ fn brotli_window(criterion: &mut Criterion, session: &Session) {
 /// once rather than benchmarked.
 fn ratios() {
     let memory = GlobalPool::new();
+    let resources = Resources::new(memory.clone());
     let bytes = payload(64 * 1024);
     let input = view(&bytes, &memory);
 
@@ -376,7 +375,7 @@ fn ratios() {
 
     for &format in Format::ALL {
         for level in [Level::FAST, Level::DEFAULT, Level::HIGH] {
-            let compressed = compress(format, Some(level), None, None, &input, &memory);
+            let compressed = compress(format, Some(level), None, &input, &resources);
 
             #[expect(clippy::cast_precision_loss, reason = "a ratio needs no more precision than this")]
             let ratio = bytes.len() as f64 / compressed.len() as f64;
@@ -391,7 +390,7 @@ fn ratios() {
 
     for exponent in [10_u8, 16, 18, 22] {
         let window = WindowSize::new(exponent).expect("exponents are in range");
-        let compressed = compress_brotli(window, &input, &memory);
+        let compressed = compress_brotli(window, &input, &resources);
 
         #[expect(clippy::cast_precision_loss, reason = "a ratio needs no more precision than this")]
         let ratio = bytes.len() as f64 / compressed.len() as f64;

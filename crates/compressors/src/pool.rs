@@ -6,9 +6,9 @@
 #[cfg(any(feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::Arc;
 #[cfg(any(feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
 use std::sync::Mutex;
+use std::sync::{Arc, OnceLock};
 
 #[cfg(any(feature = "deflate", feature = "gzip", feature = "zlib"))]
 use crate::flate::Wrapper;
@@ -37,48 +37,10 @@ pub(crate) struct EngineKey {
 ///
 /// The saving is roughly fixed per compressor, so it matters most for small messages and fades as
 /// bodies grow -- which suits ordinary request and response traffic, where most bodies are small.
-/// Measure your own workload before and after: [`Pool::with_capacity`] accepts a capacity of zero,
-/// which disables recycling and gives you the baseline to compare against.
 ///
-/// Clone is cheap and every clone shares one pool, so a client holds a single pool and clones it
-/// into each request:
-///
-/// # Examples
-///
-/// ```
-/// use bytesbuf::BytesView;
-/// use bytesbuf::mem::GlobalPool;
-/// use compressors::{Compression as _, Level, Pool, gzip};
-///
-/// #[derive(Clone)]
-/// struct HttpClient {
-///     codecs: Pool,
-///     memory: GlobalPool,
-/// }
-///
-/// impl HttpClient {
-///     fn compress_body(&self, body: BytesView) -> compressors::Result<BytesView> {
-///         gzip::Compressor::builder()
-///             .level(Level::DEFAULT)
-///             .pool(self.codecs.clone())
-///             .build(self.memory.clone())
-///             .compress(body)
-///         // The compressor is dropped here, returning its engine to the pool for the next request.
-///     }
-/// }
-///
-/// let client = HttpClient {
-///     codecs: Pool::new(),
-///     memory: GlobalPool::new(),
-/// };
-/// let body = BytesView::copied_from_slice(b"a request body", &client.memory);
-///
-/// // Recycling is invisible: the second request produces exactly the first request's bytes.
-/// let first = client.compress_body(body.clone())?;
-/// let second = client.compress_body(body)?;
-/// assert_eq!(first.to_vec(), second.to_vec());
-/// # Ok::<(), compressors::Error>(())
-/// ```
+/// This is an implementation detail of [`Resources`][crate::Resources], which is how callers reach
+/// it: a pool with a capacity of zero recycles nothing and gives them the baseline to measure
+/// against.
 ///
 /// # What is actually pooled
 ///
@@ -114,7 +76,7 @@ pub(crate) struct EngineKey {
 /// concurrent requests cannot make it grow without limit. Engines beyond that are dropped when they
 /// are returned.
 #[derive(Clone)]
-pub struct Pool {
+pub(crate) struct Pool {
     inner: Arc<Inner>,
 }
 
@@ -136,7 +98,7 @@ struct Inner {
 impl Pool {
     /// Creates a pool that keeps up to 16 idle engines per configuration.
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::with_capacity(DEFAULT_CAPACITY)
     }
 
@@ -145,7 +107,7 @@ impl Pool {
     /// Size this to the number of messages you expect to be encoding at once. A capacity of zero
     /// disables recycling, which is useful for measuring what the pool is buying you.
     #[must_use]
-    pub fn with_capacity(capacity: usize) -> Self {
+    pub(crate) fn with_capacity(capacity: usize) -> Self {
         Self {
             inner: Arc::new(Inner {
                 #[cfg(any(feature = "deflate", feature = "gzip", feature = "zlib"))]
@@ -161,10 +123,37 @@ impl Pool {
         }
     }
 
+    /// A shared pool that recycles nothing.
+    ///
+    /// Every API that builds a codec asks for a pool, so that going without recycling is a
+    /// deliberate choice rather than the path of least resistance. This is that choice: one
+    /// process-wide pool of capacity zero, so passing it costs no more than cloning a handle.
+    ///
+    /// Reach for it in tests, in one-off tools, and while measuring what a real pool is worth.
+    /// Anything that compresses more than a handful of messages should hold a [`Pool::new`] instead.
+    #[must_use]
+    pub(crate) fn disabled() -> &'static Self {
+        static DISABLED: OnceLock<Pool> = OnceLock::new();
+
+        DISABLED.get_or_init(|| Self::with_capacity(0))
+    }
+
     /// The most idle engines this pool keeps per distinct configuration.
     #[must_use]
-    pub fn capacity(&self) -> usize {
+    pub(crate) fn capacity(&self) -> usize {
         self.inner.capacity
+    }
+
+    /// Whether this pool stores nothing, so that every operation on it can return without locking.
+    ///
+    /// A pool of capacity zero can neither hand an engine out nor keep one, so the locks it would
+    /// take are pure overhead on a path this crate encourages callers to use.
+    #[cfg_attr(
+        not(any(feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")),
+        expect(dead_code, reason = "only the pooled formats ask, and none of them is enabled")
+    )]
+    fn is_disabled(&self) -> bool {
+        self.capacity() == 0
     }
 
     /// Takes an idle compressor for `key`, or reports that one must be built.
@@ -173,6 +162,10 @@ impl Pool {
     /// cannot leak its state into the next user.
     #[cfg(any(feature = "deflate", feature = "gzip", feature = "zlib"))]
     pub(crate) fn take_compressor(&self, key: EngineKey) -> Option<flate2::Compress> {
+        if self.is_disabled() {
+            return None;
+        }
+
         // A poisoned pool is not worth propagating: recycling is an optimisation, so building a
         // fresh engine is always preferable to failing the caller's compression.
         let mut engine = self.inner.compressors.lock().ok()?.get_mut(&key).and_then(Vec::pop)?;
@@ -184,7 +177,7 @@ impl Pool {
     /// Returns a compressor for reuse, dropping it if the pool is already full.
     #[cfg(any(feature = "deflate", feature = "gzip", feature = "zlib"))]
     pub(crate) fn return_compressor(&self, key: EngineKey, engine: flate2::Compress) {
-        if self.inner.capacity == 0 {
+        if self.is_disabled() {
             return;
         }
 
@@ -202,6 +195,10 @@ impl Pool {
     /// [`Wrapper::reset_restores_framing`].
     #[cfg(any(feature = "deflate", feature = "zlib"))]
     pub(crate) fn take_decompressor(&self, wrapper: Wrapper) -> Option<flate2::Decompress> {
+        if self.is_disabled() {
+            return None;
+        }
+
         let mut engine = self.inner.decompressors.lock().ok()?.get_mut(&wrapper).and_then(Vec::pop)?;
 
         engine.reset(wrapper.expects_zlib_header());
@@ -211,7 +208,7 @@ impl Pool {
     /// Returns a decompressor for reuse, dropping it if the pool is already full.
     #[cfg(any(feature = "deflate", feature = "zlib"))]
     pub(crate) fn return_decompressor(&self, wrapper: Wrapper, engine: flate2::Decompress) {
-        if self.inner.capacity == 0 {
+        if self.is_disabled() {
             return;
         }
 
@@ -229,6 +226,10 @@ impl Pool {
     /// which is where the saving comes from.
     #[cfg(feature = "zstd")]
     pub(crate) fn take_zstd_compressor(&self, level: i32) -> Option<zstd_safe::CCtx<'static>> {
+        if self.is_disabled() {
+            return None;
+        }
+
         let mut context = self.inner.zstd_compressors.lock().ok()?.get_mut(&level).and_then(Vec::pop)?;
 
         context.reset(zstd_safe::ResetDirective::SessionAndParameters).ok()?;
@@ -238,7 +239,7 @@ impl Pool {
     /// Returns a zstd compressor for reuse, dropping it if the pool is already full.
     #[cfg(feature = "zstd")]
     pub(crate) fn return_zstd_compressor(&self, level: i32, context: zstd_safe::CCtx<'static>) {
-        if self.inner.capacity == 0 {
+        if self.is_disabled() {
             return;
         }
 
@@ -253,6 +254,10 @@ impl Pool {
     /// Takes an idle zstd decompressor, or reports that one must be built.
     #[cfg(feature = "zstd")]
     pub(crate) fn take_zstd_decompressor(&self) -> Option<zstd_safe::DCtx<'static>> {
+        if self.is_disabled() {
+            return None;
+        }
+
         let mut context = self.inner.zstd_decompressors.lock().ok()?.pop()?;
 
         context.reset(zstd_safe::ResetDirective::SessionAndParameters).ok()?;
@@ -262,7 +267,7 @@ impl Pool {
     /// Returns a zstd decompressor for reuse, dropping it if the pool is already full.
     #[cfg(feature = "zstd")]
     pub(crate) fn return_zstd_decompressor(&self, context: zstd_safe::DCtx<'static>) {
-        if self.inner.capacity == 0 {
+        if self.is_disabled() {
             return;
         }
 

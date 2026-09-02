@@ -4,17 +4,11 @@
 use std::mem::MaybeUninit;
 use std::num::NonZeroUsize;
 
-use bytesbuf::mem::{MemoryShared, OpaqueMemory};
+use bytesbuf::mem::OpaqueMemory;
 use bytesbuf::{BytesBuf, BytesView};
 
 use crate::error::{Error, Result};
 use crate::output::Output;
-
-/// How much output a single `pull` produces before handing control back.
-///
-/// This bounds the codec's working set: a caller streaming hundreds of gigabytes never holds more
-/// than one pending input view plus one chunk of output.
-pub(crate) const DEFAULT_CHUNK_SIZE: usize = 64 * 1024;
 
 /// Maximum input consumed by one public `pull` call.
 const MAX_INPUT_PER_PULL: usize = 1024 * 1024;
@@ -150,8 +144,7 @@ pub(crate) struct Pump {
 }
 
 impl Pump {
-    pub(crate) fn new(memory: impl MemoryShared, chunk_size: NonZeroUsize) -> Self {
-        let memory = OpaqueMemory::new(memory);
+    pub(crate) fn new(memory: OpaqueMemory, chunk_size: NonZeroUsize) -> Self {
         let output = memory.reserve(chunk_size.get());
 
         Self {
@@ -523,7 +516,7 @@ mod tests {
 
     #[test]
     fn reports_need_input_when_empty() {
-        let mut pump = Pump::new(GlobalPool::new(), chunk(64));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         let output = pump.pull(&mut Passthrough::default()).expect("pull succeeds");
 
         assert!(output.is_need_input());
@@ -531,7 +524,7 @@ mod tests {
 
     #[test]
     fn round_trips_data_through_the_codec() {
-        let mut pump = Pump::new(GlobalPool::new(), chunk(64));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.push(view(b"hello world")).expect("push succeeds");
 
         let data = pump
@@ -547,7 +540,7 @@ mod tests {
 
     #[test]
     fn bounds_each_chunk_to_the_configured_size() {
-        let mut pump = Pump::new(GlobalPool::new(), chunk(4));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(4));
         pump.push(view(b"abcdefghij")).expect("push succeeds");
 
         let data = pump
@@ -581,7 +574,7 @@ mod tests {
             }
         }
 
-        let mut pump = Pump::new(GlobalPool::new(), chunk(10));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(10));
         pump.push(view(&[0_u8; 10])).expect("push succeeds");
 
         let data = pump
@@ -621,7 +614,7 @@ mod tests {
             }
         }
 
-        let mut pump = Pump::new(GlobalPool::new(), chunk(100));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(100));
         pump.push(view(&[0_u8; 150])).expect("push succeeds");
 
         let output = pump.pull(&mut OneByteEcho).expect("pull succeeds");
@@ -646,7 +639,7 @@ mod tests {
 
         // Hardcoded literals (rather than `MAX_INPUT_PER_PULL`) so this test actually pins the
         // budget's numeric value instead of trivially matching whatever the constant is set to.
-        let mut pump = Pump::new(GlobalPool::new(), chunk(64));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.push(view(&vec![0_u8; 1_048_577])).expect("push succeeds");
 
         assert!(pump.pull(&mut SilentConsumer).expect("pull succeeds").is_progress());
@@ -683,7 +676,7 @@ mod tests {
         let large_block = NonZeroU32::new(2_000_000).expect("test block size is never zero");
         let single_block_memory = FixedBlockMemory::new(large_block);
 
-        let mut pump = Pump::new(GlobalPool::new(), chunk(64));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.push(BytesView::copied_from_slice(&vec![0_u8; 1_048_578], &single_block_memory))
             .expect("push succeeds");
 
@@ -701,7 +694,7 @@ mod tests {
 
     #[test]
     fn flush_returns_to_the_open_state() {
-        let mut pump = Pump::new(GlobalPool::new(), chunk(64));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.push(view(b"flush me")).expect("push succeeds");
         pump.flush().expect("flush request succeeds");
 
@@ -720,7 +713,7 @@ mod tests {
 
     #[test]
     fn flush_is_idempotent_while_still_pending() {
-        let mut pump = Pump::new(GlobalPool::new(), chunk(64));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.flush().expect("flush request succeeds");
         pump.flush()
             .expect("a repeated flush request while one is already pending is a no-op");
@@ -730,7 +723,7 @@ mod tests {
 
     #[test]
     fn empty_flush_completes_without_output() {
-        let mut pump = Pump::new(GlobalPool::new(), chunk(64));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.flush().expect("flush request succeeds");
 
         assert!(
@@ -743,7 +736,7 @@ mod tests {
 
     #[test]
     fn flush_with_queued_end_input_continues_to_finishing() {
-        let mut pump = Pump::new(GlobalPool::new(), chunk(64));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.flush().expect("flush request succeeds");
         pump.end_input();
 
@@ -777,7 +770,7 @@ mod tests {
             }
         }
 
-        let mut pump = Pump::new(GlobalPool::new(), chunk(4));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(4));
         pump.push(view(b"x")).expect("push succeeds");
         pump.flush().expect("flush request succeeds");
 
@@ -797,7 +790,7 @@ mod tests {
 
     #[test]
     fn rejects_input_and_final_flush_while_flushing() {
-        let mut pump = Pump::new(GlobalPool::new(), chunk(64));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.flush().expect("flush request succeeds");
 
         assert!(pump.push(view(b"late")).expect_err("push is rejected").is_invalid_state());
@@ -820,7 +813,7 @@ mod tests {
             }
         }
 
-        let mut pump = Pump::new(GlobalPool::new(), chunk(64));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         assert!(pump.pull(&mut Fails).expect_err("codec fails").is_corrupt_data());
         pump.end_input();
 
@@ -840,7 +833,7 @@ mod tests {
             }
         }
 
-        let mut pump = Pump::new(GlobalPool::new(), chunk(64));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         assert!(
             pump.pull(&mut SpuriousFlush)
                 .expect_err("unrequested completion is rejected")
@@ -863,7 +856,7 @@ mod tests {
             }
         }
 
-        let mut pump = Pump::new(GlobalPool::new(), chunk(64));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.push(view(b"input")).expect("push succeeds");
         assert!(
             pump.pull(&mut BadEnd)
@@ -887,7 +880,7 @@ mod tests {
             }
         }
 
-        let mut pump = Pump::new(GlobalPool::new(), chunk(64));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.push(view(b"input")).expect("push succeeds");
         pump.end_input();
 
@@ -911,7 +904,7 @@ mod tests {
             }
         }
 
-        let mut pump = Pump::new(GlobalPool::new(), chunk(64));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.push(view(b"member")).expect("push succeeds");
 
         assert!(pump.pull(&mut Recyclable).expect("pull succeeds").is_need_input());
@@ -945,7 +938,7 @@ mod tests {
             }
         }
 
-        let mut pump = Pump::new(GlobalPool::new(), chunk(64));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.push(view(b"firstsecond")).expect("push succeeds");
 
         assert!(pump.pull(&mut FixedFrame).expect("pull succeeds").is_need_input());
@@ -977,7 +970,7 @@ mod tests {
             }
         }
 
-        let mut pump = Pump::new(GlobalPool::new(), chunk(64));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.push(view(b"member")).expect("push succeeds");
         pump.end_input();
 
@@ -1005,7 +998,7 @@ mod tests {
             }
         }
 
-        let mut pump = Pump::new(GlobalPool::new(), chunk(64));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.push(view(b"member")).expect("push succeeds");
 
         let error = pump
@@ -1016,7 +1009,7 @@ mod tests {
 
     #[test]
     fn violating_the_input_invariant_panics_before_stepping() {
-        let mut pump = Pump::new(GlobalPool::new(), chunk(64));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         // Bypass the public API (which never leaves input pending in a non-driving state) to
         // exercise the engine's internal defensive check directly.
         pump.input = view(b"stray input");
@@ -1043,7 +1036,7 @@ mod tests {
             }
         }
 
-        let mut pump = Pump::new(GlobalPool::new(), chunk(64));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.push(view(b"input")).expect("push succeeds");
 
         assert!(pump.pull(&mut Stalled).expect_err("a stalled codec is rejected").is_invalid_state());
@@ -1051,7 +1044,7 @@ mod tests {
 
     #[test]
     fn rejects_a_second_push_while_input_is_pending() {
-        let mut pump = Pump::new(GlobalPool::new(), chunk(64));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.push(view(b"first")).expect("push succeeds");
 
         let error = pump.push(view(b"second")).expect_err("overlapping push is rejected");
@@ -1060,7 +1053,7 @@ mod tests {
 
     #[test]
     fn rejects_push_after_end_input() {
-        let mut pump = Pump::new(GlobalPool::new(), chunk(64));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.end_input();
 
         let error = pump.push(view(b"late")).expect_err("push after end_input is rejected");
@@ -1069,7 +1062,7 @@ mod tests {
 
     #[test]
     fn end_input_is_idempotent() {
-        let mut pump = Pump::new(GlobalPool::new(), chunk(64));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.end_input();
         pump.end_input();
 
@@ -1079,7 +1072,7 @@ mod tests {
 
     #[test]
     fn reports_done_after_the_stream_ends() {
-        let mut pump = Pump::new(GlobalPool::new(), chunk(64));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.push(view(b"tail")).expect("push succeeds");
         pump.end_input();
 
@@ -1103,7 +1096,7 @@ mod tests {
             }
         }
 
-        let mut pump = Pump::new(GlobalPool::new(), chunk(64));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.end_input();
 
         let error = pump.pull(&mut NeverEnds).expect_err("truncation is reported");
@@ -1130,7 +1123,7 @@ mod tests {
             }
         }
 
-        let mut pump = Pump::new(GlobalPool::new(), chunk(64));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.push(view(b"seed")).expect("push succeeds");
 
         let error = pump.pull(&mut Expanding).expect_err("limit is enforced");
@@ -1153,7 +1146,7 @@ mod tests {
             }
         }
 
-        let mut pump = Pump::new(GlobalPool::new(), chunk(64));
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.push(view(b"input")).expect("push succeeds");
 
         let error = pump.pull(&mut Overreports).expect_err("invalid output count is rejected");

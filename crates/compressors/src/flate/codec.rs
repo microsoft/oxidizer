@@ -19,27 +19,22 @@ use crate::trailing::TrailingData;
 pub(crate) struct FlateCompress {
     /// `Some` until the engine is handed back in `drop`.
     compress: Option<Compress>,
-    recycle: Option<(Pool, EngineKey)>,
+    recycle: Pool,
+    key: EngineKey,
 }
 
 impl FlateCompress {
-    pub(crate) fn new(wrapper: Wrapper, level: Level, pool: Option<Pool>) -> Self {
+    pub(crate) fn new(wrapper: Wrapper, level: Level, pool: Pool) -> Self {
         let key = EngineKey {
             wrapper,
             level: level.get(),
         };
-
-        let (compress, recycle) = match pool {
-            Some(pool) => {
-                let engine = pool.take_compressor(key).unwrap_or_else(|| wrapper.compressor(level));
-                (engine, Some((pool, key)))
-            }
-            None => (wrapper.compressor(level), None),
-        };
+        let compress = pool.take_compressor(key).unwrap_or_else(|| wrapper.compressor(level));
 
         Self {
             compress: Some(compress),
-            recycle,
+            recycle: pool,
+            key,
         }
     }
 
@@ -50,10 +45,8 @@ impl FlateCompress {
 
 impl Drop for FlateCompress {
     fn drop(&mut self) {
-        if let Some((pool, key)) = self.recycle.take()
-            && let Some(engine) = self.compress.take()
-        {
-            pool.return_compressor(key, engine);
+        if let Some(engine) = self.compress.take() {
+            self.recycle.return_compressor(self.key, engine);
         }
     }
 }
@@ -102,14 +95,18 @@ pub(crate) struct FlateDecompress {
     needs_reset: bool,
     /// Only present where some container's decompressor can actually be recycled.
     #[cfg(any(feature = "deflate", feature = "zlib"))]
-    recycle: Option<Pool>,
+    recycle: Pool,
 }
 
 impl FlateDecompress {
-    pub(crate) fn new(wrapper: Wrapper, limits: FormatLimits, multi_stream: bool, trailing_data: TrailingData, pool: Option<Pool>) -> Self {
+    pub(crate) fn new(wrapper: Wrapper, limits: FormatLimits, multi_stream: bool, trailing_data: TrailingData, pool: Pool) -> Self {
         // Only containers whose reset restores their framing can be recycled.
-        let pool = pool.filter(|_| wrapper.reset_restores_framing());
-        let decompress = Self::checkout(wrapper, pool.as_ref());
+        let pool = if wrapper.reset_restores_framing() {
+            pool
+        } else {
+            Pool::disabled().clone()
+        };
+        let decompress = Self::checkout(wrapper, &pool);
 
         #[cfg(not(any(feature = "deflate", feature = "zlib")))]
         drop(pool);
@@ -126,11 +123,9 @@ impl FlateDecompress {
         }
     }
 
-    fn checkout(wrapper: Wrapper, pool: Option<&Pool>) -> Decompress {
+    fn checkout(wrapper: Wrapper, pool: &Pool) -> Decompress {
         #[cfg(any(feature = "deflate", feature = "zlib"))]
-        if let Some(pool) = pool
-            && let Some(engine) = pool.take_decompressor(wrapper)
-        {
+        if let Some(engine) = pool.take_decompressor(wrapper) {
             return engine;
         }
 
@@ -146,10 +141,8 @@ impl FlateDecompress {
 #[cfg(any(feature = "deflate", feature = "zlib"))]
 impl Drop for FlateDecompress {
     fn drop(&mut self) {
-        if let Some(pool) = self.recycle.take()
-            && let Some(engine) = self.decompress.take()
-        {
-            pool.return_decompressor(self.wrapper, engine);
+        if let Some(engine) = self.decompress.take() {
+            self.recycle.return_decompressor(self.wrapper, engine);
         }
     }
 }
@@ -230,7 +223,7 @@ mod tests {
         let mut headers = Vec::new();
 
         for wrapper in [Wrapper::Raw, Wrapper::Zlib, Wrapper::Gzip] {
-            let mut codec = FlateCompress::new(wrapper, Level::DEFAULT, None);
+            let mut codec = FlateCompress::new(wrapper, Level::DEFAULT, Pool::disabled().clone());
             let mut out = [MaybeUninit::uninit(); 64];
             let (_, _, produced) = codec
                 .step(b"header check", &mut out, Operation::Finish)
@@ -254,7 +247,7 @@ mod tests {
             level: Level::DEFAULT.get(),
         };
 
-        drop(FlateCompress::new(Wrapper::Gzip, Level::DEFAULT, Some(pool.clone())));
+        drop(FlateCompress::new(Wrapper::Gzip, Level::DEFAULT, pool.clone()));
 
         assert!(
             pool.take_compressor(key).is_some(),
@@ -271,7 +264,7 @@ mod tests {
             FormatLimits::new(None, None),
             false,
             TrailingData::Reject,
-            Some(pool.clone()),
+            pool.clone(),
         ));
 
         assert!(
@@ -282,7 +275,7 @@ mod tests {
 
     #[test]
     fn a_flush_reports_continue_until_a_small_output_buffer_catches_up() {
-        let mut codec = FlateCompress::new(Wrapper::Gzip, Level::DEFAULT, None);
+        let mut codec = FlateCompress::new(Wrapper::Gzip, Level::DEFAULT, Pool::disabled().clone());
         let mut scratch = [MaybeUninit::uninit(); 4096];
 
         let payload = b"flush boundary check payload";
@@ -309,7 +302,13 @@ mod tests {
 
     #[test]
     fn remaining_output_delegates_to_the_configured_limits() {
-        let codec = FlateDecompress::new(Wrapper::Zlib, FormatLimits::new(None, Some(100)), false, TrailingData::Reject, None);
+        let codec = FlateDecompress::new(
+            Wrapper::Zlib,
+            FormatLimits::new(None, Some(100)),
+            false,
+            TrailingData::Reject,
+            Pool::disabled().clone(),
+        );
 
         assert_eq!(Codec::remaining_output(&codec, 40), Some(60));
         assert_eq!(Codec::remaining_output(&codec, 100), Some(0));

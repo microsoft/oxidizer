@@ -7,25 +7,22 @@
 //! known at compile time. This module is for when it is not: encoding whatever a client asked for,
 //! or decoding whatever a peer declared it sent.
 //!
-//! [`Format`] is the entry point. The builders it returns live here beside it, so they do not
-//! collide with the per-format builders such as
-//! [`gzip::CompressorBuilder`][crate::gzip::CompressorBuilder].
+//! [`Format`] is the entry point. It has no builders of its own: the shared
+//! [`CompressorBuilder`][crate::CompressorBuilder] and
+//! [`DecompressorBuilder`][crate::DecompressorBuilder] carry the settings, and their
+//! `build_format` methods -- defined here, because this is where the enum lives -- turn a `Format`
+//! into a boxed operation.
 
 #[cfg(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
 pub(crate) mod macros;
 
-use std::num::NonZeroUsize;
-
 use bytesbuf::BytesView;
-use bytesbuf::mem::MemoryShared;
 
-use crate::compression::{Compressing, Compression, Decompressing};
-use crate::engine::DEFAULT_CHUNK_SIZE;
-use crate::error::Result;
-use crate::level::Level;
+use crate::builder::{CompressorBuilder, DecompressorBuilder};
+use crate::core::{Compressing, Compression, Decompressing};
+use crate::error::{BuildError, Result};
 use crate::limits::DecompressionLimits;
-use crate::pool::Pool;
-use crate::trailing::TrailingData;
+use crate::resources::Resources;
 
 /// A compression format, selectable at runtime.
 ///
@@ -38,14 +35,17 @@ use crate::trailing::TrailingData;
 /// ```
 /// use bytesbuf::BytesView;
 /// use bytesbuf::mem::GlobalPool;
-/// use compressors::Level;
 /// use compressors::format::Format;
+/// use compressors::core::Compression;
+/// use compressors::{CompressorBuilder, Level, Resources};
 ///
 /// // The format arrives as a string, from an HTTP header.
 /// let format = Format::from_content_encoding("gzip").expect("a supported encoding");
 ///
 /// let memory = GlobalPool::new();
-/// let mut compressor = format.compressor().level(Level::HIGH).build(memory.clone());
+/// let mut compressor = CompressorBuilder::new()
+///     .level(Level::HIGH)
+///     .build_format(format, &Resources::default())?;
 ///
 /// compressor.push(BytesView::copied_from_slice(b"payload", &memory))?;
 /// # Ok::<(), compressors::Error>(())
@@ -151,33 +151,11 @@ impl Format {
         None
     }
 
-    /// Starts configuring a compressor for this format.
-    #[must_use]
-    pub const fn compressor(self) -> CompressorBuilder {
-        CompressorBuilder {
-            format: self,
-            level: Level::DEFAULT,
-            chunk_size: default_chunk_size(),
-            pool: None,
-        }
-    }
-
-    /// Starts configuring a decompressor for this format.
-    #[must_use]
-    pub const fn decompressor(self) -> DecompressorBuilder {
-        DecompressorBuilder {
-            format: self,
-            limits: DecompressionLimits::new(),
-            chunk_size: default_chunk_size(),
-            multi_stream: None,
-            trailing_data: TrailingData::Preserve,
-            pool: None,
-        }
-    }
-
     /// Compresses a complete byte sequence that is already in memory.
     ///
-    /// Uses [`Level::DEFAULT`]; for anything else, configure a compressor with [`Format::compressor`].
+    /// Uses [`Level::DEFAULT`][crate::Level::DEFAULT]; for anything else, configure a
+    /// [`CompressorBuilder`] and finish it with
+    /// [`build_format`][CompressorBuilder::build_format].
     ///
     /// # Errors
     ///
@@ -186,14 +164,15 @@ impl Format {
         clippy::trivially_copy_pass_by_ref,
         reason = "one-shot operations consistently borrow the selected runtime format"
     )]
-    pub fn compress(&self, input: BytesView, memory: impl MemoryShared) -> Result<BytesView> {
-        (*self).compressor().build(memory).compress(input)
+    pub fn compress(&self, input: BytesView, resources: &Resources) -> Result<BytesView> {
+        CompressorBuilder::new().build_format(*self, resources)?.compress(input)
     }
 
     /// Decompresses a complete stream that is already in memory.
     ///
-    /// Applies [`DecompressionLimits::new()`]; for anything else, configure a decompressor with
-    /// [`Format::decompressor`].
+    /// Applies [`DecompressionLimits::new()`]; for anything else, configure a
+    /// [`DecompressorBuilder`] and finish it with
+    /// [`build_format`][DecompressorBuilder::build_format].
     ///
     /// # Errors
     ///
@@ -202,8 +181,8 @@ impl Format {
         clippy::trivially_copy_pass_by_ref,
         reason = "one-shot operations consistently borrow the selected runtime format"
     )]
-    pub fn decompress(&self, input: BytesView, memory: impl MemoryShared) -> Result<BytesView> {
-        (*self).decompressor().build(memory).decompress(input)
+    pub fn decompress(&self, input: BytesView, resources: &Resources) -> Result<BytesView> {
+        DecompressorBuilder::new().build_format(*self, resources)?.decompress(input)
     }
 
     /// Decompresses a complete stream with explicit output limits.
@@ -215,216 +194,106 @@ impl Format {
         clippy::trivially_copy_pass_by_ref,
         reason = "one-shot operations consistently borrow the selected runtime format"
     )]
-    pub fn decompress_with_limits(&self, input: BytesView, memory: impl MemoryShared, limits: DecompressionLimits) -> Result<BytesView> {
-        (*self).decompressor().limits(limits).build(memory).decompress(input)
+    pub fn decompress_with_limits(&self, input: BytesView, resources: &Resources, limits: DecompressionLimits) -> Result<BytesView> {
+        DecompressorBuilder::new()
+            .limits(limits)
+            .build_format(*self, resources)?
+            .decompress(input)
     }
 }
 
-const fn default_chunk_size() -> NonZeroUsize {
-    // Evaluated by the compiler: if `DEFAULT_CHUNK_SIZE` were ever zero, this constant would fail
-    // to build rather than panicking at runtime, so there is no runtime branch to cover here.
-    const CHUNK_SIZE: NonZeroUsize = match NonZeroUsize::new(DEFAULT_CHUNK_SIZE) {
-        Some(size) => size,
-        None => panic!("DEFAULT_CHUNK_SIZE must not be zero"),
-    };
-
-    CHUNK_SIZE
-}
-
-/// Configures a compressor for a [`Format`] chosen at runtime.
-///
-/// Mirrors the per-format builders such as [`gzip::CompressorBuilder`][crate::gzip::CompressorBuilder],
-/// but produces a boxed [`Compressing`] operation so the format need not be known at compile time. Reach it
-/// through [`Format::compressor`] rather than naming it directly.
-#[derive(Debug, Clone)]
-pub struct CompressorBuilder {
-    format: Format,
-    level: Level,
-    chunk_size: NonZeroUsize,
-    pool: Option<Pool>,
-}
-
-impl CompressorBuilder {
-    /// Sets the compression level, mapped onto the format's native range.
-    #[must_use]
-    pub const fn level(mut self, level: Level) -> Self {
-        self.level = level;
-        self
-    }
-
-    /// Sets how much output a single `pull` produces before returning.
-    #[must_use]
-    pub const fn output_chunk_size(mut self, bytes: NonZeroUsize) -> Self {
-        self.chunk_size = bytes;
-        self
-    }
-
-    /// Recycles engine state through a shared [`Pool`].
+impl CompressorBuilder<()> {
+    /// Builds a compressor for a format chosen at runtime.
     ///
-    /// Building a compressor is not free, so a service that compresses many messages should hand every
-    /// compressor the same pool. The engine is returned when the compressor is dropped. Without a pool
-    /// each compressor builds its own engine, which is the default.
-    #[must_use]
-    pub fn pool(mut self, pool: Pool) -> Self {
-        self.pool = Some(pool);
-        self
-    }
-
-    /// Builds the compressor, drawing its output buffers from `memory`.
-    #[must_use]
-    pub fn build(self, memory: impl MemoryShared) -> Box<dyn Compressing> {
-        macro_rules! build {
-            ($module:ident) => {{
-                let builder = crate::$module::Compressor::builder()
-                    .level(self.level)
-                    .output_chunk_size(self.chunk_size);
-
-                let builder = match self.pool {
-                    Some(pool) => builder.pool(pool),
-                    None => builder,
-                };
-
-                Box::new(builder.build(memory))
-            }};
-        }
-
-        match self.format {
+    /// The result is boxed, because the concrete type is not known until `format` is. A boxed
+    /// [`Compressing`] is itself a `Compressing`, so it fits anywhere a concrete compressor does.
+    ///
+    /// Everything this builder carries means the same thing in every format. A setting only one
+    /// format has -- brotli's quality, say -- needs that format's own builder, whose result can be
+    /// boxed to the same trait object.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`BuildError`][crate::BuildError] if the chosen format's engine rejects the
+    /// configuration.
+    #[cfg_attr(
+        not(any(feature = "brotli", feature = "zstd")),
+        expect(
+            clippy::unnecessary_wraps,
+            reason = "brotli and zstd are the formats whose engines can reject a configuration, and neither is enabled"
+        )
+    )]
+    pub fn build_format(self, format: Format, resources: &Resources) -> ::core::result::Result<Box<dyn Compressing>, BuildError> {
+        Ok(match format {
             #[cfg(feature = "deflate")]
-            Format::Deflate => build!(deflate),
+            Format::Deflate => Box::new(self.build_deflate(resources)),
             #[cfg(feature = "zlib")]
-            Format::Zlib => build!(zlib),
+            Format::Zlib => Box::new(self.build_zlib(resources)),
             #[cfg(feature = "gzip")]
-            Format::Gzip => build!(gzip),
+            Format::Gzip => Box::new(self.build_gzip(resources)),
             #[cfg(feature = "brotli")]
-            Format::Brotli => build!(brotli),
+            Format::Brotli => Box::new(self.build_brotli(resources)?),
             #[cfg(feature = "zstd")]
-            Format::Zstd => build!(zstd),
-        }
+            Format::Zstd => Box::new(self.build_zstd(resources)?),
+        })
     }
 }
 
-/// Configures a decompressor for a [`Format`] chosen at runtime.
-///
-/// Mirrors the per-format builders such as [`gzip::DecompressorBuilder`][crate::gzip::DecompressorBuilder],
-/// but produces a boxed [`Decompressing`] operation so the format need not be known at compile time. Reach it
-/// through [`Format::decompressor`] rather than naming it directly.
-#[derive(Debug, Clone)]
-pub struct DecompressorBuilder {
-    format: Format,
-    limits: DecompressionLimits,
-    chunk_size: NonZeroUsize,
-    multi_stream: Option<bool>,
-    trailing_data: TrailingData,
-    pool: Option<Pool>,
-}
-
-impl DecompressorBuilder {
-    /// Overrides the bounds on how much data decompression may produce.
+impl DecompressorBuilder<()> {
+    /// Builds a decompressor for a format chosen at runtime.
     ///
-    /// Bounds left unset on the passed value keep the chosen format's own defaults, which differ by
-    /// orders of magnitude between the deflate family and brotli.
+    /// The result is boxed, because the concrete type is not known until `format` is. A boxed
+    /// [`Decompressing`] is itself a `Decompressing`, so it fits anywhere a concrete decompressor
+    /// does.
     ///
-    /// # Security
+    /// Bounds left unset on [`limits`][DecompressorBuilder::limits], and a
+    /// [`multi_stream`][DecompressorBuilder::multi_stream] left unset, keep whatever the chosen
+    /// format defaults to.
     ///
-    /// Set [`with_max_output_len`][DecompressionLimits::with_max_output_len] when the data comes
-    /// from an untrusted peer.
-    #[must_use]
-    pub const fn limits(mut self, limits: DecompressionLimits) -> Self {
-        self.limits = limits;
-        self
-    }
-
-    /// Sets how much output a single `pull` produces before returning.
-    #[must_use]
-    pub const fn output_chunk_size(mut self, bytes: NonZeroUsize) -> Self {
-        self.chunk_size = bytes;
-        self
-    }
-
-    /// Sets whether consecutive streams decompress as one logical stream.
+    /// # Errors
     ///
-    /// Left unset, each format keeps its own default: enabled for `Format::Gzip` and
-    /// `Format::Zstd`, matching `gzip(1)` and the `zstd` tool, and disabled for the rest, where
-    /// concatenation is not an established convention.
-    ///
-    /// When enabled, bytes after a complete stream must begin another valid stream. When disabled,
-    /// [`DecompressorBuilder::trailing_data`] controls how trailing bytes are handled.
-    #[must_use]
-    pub const fn multi_stream(mut self, enabled: bool) -> Self {
-        self.multi_stream = Some(enabled);
-        self
-    }
-
-    /// Sets how a single-stream decompressor handles trailing bytes.
-    ///
-    /// In multi-stream mode, subsequent bytes are always interpreted as another compressed stream.
-    #[must_use]
-    pub const fn trailing_data(mut self, trailing_data: TrailingData) -> Self {
-        self.trailing_data = trailing_data;
-        self
-    }
-
-    /// Recycles engine state through a shared [`Pool`].
-    ///
-    /// The engine is returned when the decompressor is dropped. See [`Pool`] for which engines are
-    /// actually recycled.
-    #[must_use]
-    pub fn pool(mut self, pool: Pool) -> Self {
-        self.pool = Some(pool);
-        self
-    }
-
-    /// Builds the decompressor, drawing its output buffers from `memory`.
-    #[must_use]
-    pub fn build(self, memory: impl MemoryShared) -> Box<dyn Decompressing> {
-        macro_rules! build {
-            ($module:ident) => {{
-                let builder = crate::$module::Decompressor::builder()
-                    .limits(self.limits)
-                    .output_chunk_size(self.chunk_size);
-
-                let builder = match self.multi_stream {
-                    Some(enabled) => builder.multi_stream(enabled),
-                    None => builder,
-                };
-                let builder = builder.trailing_data(self.trailing_data);
-
-                let builder = match self.pool {
-                    Some(pool) => builder.pool(pool),
-                    None => builder,
-                };
-
-                Box::new(builder.build(memory))
-            }};
-        }
-
-        match self.format {
+    /// Returns a [`BuildError`][crate::BuildError] if the chosen format's engine rejects the
+    /// configuration.
+    #[cfg_attr(
+        not(feature = "zstd"),
+        expect(
+            clippy::unnecessary_wraps,
+            reason = "zstd is the only format whose decompressor engine can reject a configuration, and it is not enabled"
+        )
+    )]
+    pub fn build_format(self, format: Format, resources: &Resources) -> ::core::result::Result<Box<dyn Decompressing>, BuildError> {
+        Ok(match format {
             #[cfg(feature = "deflate")]
-            Format::Deflate => build!(deflate),
+            Format::Deflate => Box::new(self.build_deflate(resources)),
             #[cfg(feature = "zlib")]
-            Format::Zlib => build!(zlib),
+            Format::Zlib => Box::new(self.build_zlib(resources)),
             #[cfg(feature = "gzip")]
-            Format::Gzip => build!(gzip),
+            Format::Gzip => Box::new(self.build_gzip(resources)),
             #[cfg(feature = "brotli")]
-            Format::Brotli => build!(brotli),
+            Format::Brotli => Box::new(self.build_brotli(resources)),
             #[cfg(feature = "zstd")]
-            Format::Zstd => build!(zstd),
-        }
+            Format::Zstd => Box::new(self.build_zstd(resources)?),
+        })
     }
 }
-
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroUsize;
+
     use bytesbuf::mem::GlobalPool;
 
     use super::*;
+    use crate::level::Level;
+    use crate::trailing::TrailingData;
 
     fn view(bytes: &[u8]) -> BytesView {
         BytesView::copied_from_slice(bytes, &GlobalPool::new())
     }
 
-    fn compressed_len(builder: CompressorBuilder, payload: &[u8]) -> usize {
-        let mut compressor = builder.build(GlobalPool::new());
+    fn compressed_len(builder: CompressorBuilder<()>, format: Format, payload: &[u8]) -> usize {
+        let mut compressor = builder
+            .build_format(format, &Resources::default())
+            .expect("the settings are accepted");
         compressor.push(view(payload)).expect("push succeeds");
         compressor.end_input();
 
@@ -449,9 +318,12 @@ mod tests {
         let payload = b"runtime selected format ".repeat(200);
 
         for &format in Format::ALL {
-            let memory = GlobalPool::new();
-            let compressed = format.compress(view(&payload), memory.clone()).expect("compression succeeds");
-            let plain = format.decompress(compressed, memory).expect("decompression succeeds");
+            let compressed = format
+                .compress(view(&payload), &Resources::default())
+                .expect("compression succeeds");
+            let plain = format
+                .decompress(compressed, &Resources::default())
+                .expect("decompression succeeds");
 
             assert_eq!(plain.to_vec(), payload, "{format:?} failed to round trip");
         }
@@ -515,8 +387,8 @@ mod tests {
         let payload = b"the quick brown fox jumps over the lazy dog ".repeat(400);
 
         for &format in Format::ALL {
-            let fast = compressed_len(format.compressor().level(Level::FAST), &payload);
-            let best = compressed_len(format.compressor().level(Level::HIGH), &payload);
+            let fast = compressed_len(CompressorBuilder::new().level(Level::FAST), format, &payload);
+            let best = compressed_len(CompressorBuilder::new().level(Level::HIGH), format, &payload);
 
             assert!(best <= fast, "{format:?}: best={best} should not exceed fast={fast}");
         }
@@ -527,7 +399,10 @@ mod tests {
         let bound = NonZeroUsize::new(128).expect("128 is not zero");
 
         for &format in Format::ALL {
-            let mut compressor = format.compressor().output_chunk_size(bound).build(GlobalPool::new());
+            let mut compressor = CompressorBuilder::new()
+                .output_chunk_size(bound)
+                .build_format(format, &Resources::default())
+                .expect("the settings are accepted");
             compressor.push(view(&b"chunked ".repeat(5_000))).expect("push succeeds");
             compressor.end_input();
 
@@ -548,16 +423,15 @@ mod tests {
     #[test]
     fn the_decompressor_builder_applies_its_limits() {
         for &format in Format::ALL {
-            let memory = GlobalPool::new();
             let compressed = format
-                .compress(view(&vec![0_u8; 4 * 1024 * 1024]), memory.clone())
+                .compress(view(&vec![0_u8; 4 * 1024 * 1024]), &Resources::default())
                 .expect("compression succeeds");
 
-            let mut decompressor = format
-                .decompressor()
+            let mut decompressor = DecompressorBuilder::new()
                 .limits(DecompressionLimits::new().without_max_ratio().with_max_output_len(1024))
                 .output_chunk_size(NonZeroUsize::new(64).expect("64 is not zero"))
-                .build(memory);
+                .build_format(format, &Resources::default())
+                .expect("the settings are accepted");
             decompressor.push(compressed).expect("push succeeds");
             decompressor.end_input();
 
@@ -584,12 +458,13 @@ mod tests {
         const EXPECTED_DEFAULT_CHUNK_SIZE: usize = 65_536;
 
         for &format in Format::ALL {
-            let memory = GlobalPool::new();
             let compressed = format
-                .compress(view(&vec![0_u8; 4 * 1024 * 1024]), memory.clone())
+                .compress(view(&vec![0_u8; 4 * 1024 * 1024]), &Resources::default())
                 .expect("compression succeeds");
 
-            let mut decompressor = format.decompressor().build(memory);
+            let mut decompressor = DecompressorBuilder::new()
+                .build_format(format, &Resources::default())
+                .expect("the settings are accepted");
             decompressor.push(compressed).expect("push succeeds");
             decompressor.end_input();
 
@@ -623,11 +498,13 @@ mod tests {
         let bound = NonZeroUsize::new(128).expect("128 is not zero");
 
         for &format in Format::ALL {
-            let memory = GlobalPool::new();
             let compressed = format
-                .compress(view(&b"chunked output ".repeat(5_000)), memory.clone())
+                .compress(view(&b"chunked output ".repeat(5_000)), &Resources::default())
                 .expect("compression succeeds");
-            let mut decompressor = format.decompressor().output_chunk_size(bound).build(memory);
+            let mut decompressor = DecompressorBuilder::new()
+                .output_chunk_size(bound)
+                .build_format(format, &Resources::default())
+                .expect("the settings are accepted");
             decompressor.push(compressed).expect("push succeeds");
             decompressor.end_input();
 
@@ -648,17 +525,16 @@ mod tests {
     #[test]
     fn the_decompressor_builder_applies_its_trailing_data_policy() {
         for &format in Format::ALL {
-            let memory = GlobalPool::new();
             let compressed = format
-                .compress(view(&b"payload ".repeat(4_096)), memory.clone())
+                .compress(view(&b"payload ".repeat(4_096)), &Resources::default())
                 .expect("compression succeeds");
             let joined = BytesView::from_views([compressed, view(b"trailing")]);
-            let mut decompressor = format
-                .decompressor()
+            let mut decompressor = DecompressorBuilder::new()
                 .multi_stream(false)
                 .trailing_data(TrailingData::Reject)
                 .output_chunk_size(NonZeroUsize::new(64).expect("64 is not zero"))
-                .build(memory);
+                .build_format(format, &Resources::default())
+                .expect("the settings are accepted");
             decompressor.push(joined).expect("push succeeds");
             decompressor.end_input();
 
@@ -681,14 +557,13 @@ mod tests {
     #[test]
     fn explicit_limits_are_available_on_the_one_shot_runtime_api() {
         for &format in Format::ALL {
-            let memory = GlobalPool::new();
             let compressed = format
-                .compress(view(&vec![0_u8; 4096]), memory.clone())
+                .compress(view(&vec![0_u8; 4096]), &Resources::default())
                 .expect("compression succeeds");
             let error = format
                 .decompress_with_limits(
                     compressed,
-                    memory,
+                    &Resources::default(),
                     DecompressionLimits::new().without_max_ratio().with_max_output_len(1024),
                 )
                 .expect_err("the explicit cap fires");
@@ -701,17 +576,19 @@ mod tests {
     fn multi_stream_governs_every_format() {
         // The generic half of the contract: whatever the format, setting this explicitly decides
         // whether a second stream is decompressed or ignored.
-        let memory = GlobalPool::new();
         let payload = b"member ".repeat(50);
 
         for &format in Format::ALL {
-            let compressed = format.compress(view(&payload), memory.clone()).expect("compress");
+            let compressed = format.compress(view(&payload), &Resources::default()).expect("compress");
             let joined = BytesView::from_views([compressed.clone(), compressed]);
 
-            let joined_len = decompressed_len(format.decompressor().multi_stream(true).build(memory.clone()), joined.clone());
+            let joined_len = decompressed_len(
+                decompressor_for(DecompressorBuilder::new().multi_stream(true), format),
+                joined.clone(),
+            );
             assert_eq!(joined_len, payload.len() * 2, "{format:?} should join with multi_stream(true)");
 
-            let single_len = decompressed_len(format.decompressor().multi_stream(false).build(memory.clone()), joined);
+            let single_len = decompressed_len(decompressor_for(DecompressorBuilder::new().multi_stream(false), format), joined);
             assert_eq!(single_len, payload.len(), "{format:?} should stop with multi_stream(false)");
         }
     }
@@ -721,17 +598,16 @@ mod tests {
         // The format-specific half: the runtime builder must preserve each format's own default
         // rather than flattening every format to one behaviour. Gzip and zstd join, matching
         // `gzip(1)` and the `zstd` tool; the rest stop at the first stream.
-        let memory = GlobalPool::new();
         let payload = b"member ".repeat(50);
 
         for &format in Format::ALL {
             // Matching the variant by name keeps this free of the cfg gates the variants carry.
             let joins_by_default = matches!(format!("{format:?}").as_str(), "Gzip" | "Zstd");
 
-            let compressed = format.compress(view(&payload), memory.clone()).expect("compress");
+            let compressed = format.compress(view(&payload), &Resources::default()).expect("compress");
             let joined = BytesView::from_views([compressed.clone(), compressed]);
 
-            let len = decompressed_len(format.decompressor().build(memory.clone()), joined);
+            let len = decompressed_len(decompressor_for(DecompressorBuilder::new(), format), joined);
             let expected = if joins_by_default { payload.len() * 2 } else { payload.len() };
 
             assert_eq!(len, expected, "{format:?} did not keep its documented default");
@@ -740,6 +616,12 @@ mod tests {
 
     fn decompressed_len(decompressor: Box<dyn Decompressing>, input: BytesView) -> usize {
         decompressor.decompress(input).expect("decompression succeeds").len()
+    }
+
+    fn decompressor_for(builder: DecompressorBuilder<()>, format: Format) -> Box<dyn Decompressing> {
+        builder
+            .build_format(format, &Resources::default())
+            .expect("the settings are accepted")
     }
 
     #[test]

@@ -14,17 +14,17 @@
 //! ```
 //! use bytesbuf::BytesView;
 //! use bytesbuf::mem::GlobalPool;
-//! use compressors::zstd;
+//! use compressors::{Resources, zstd};
 //!
 //! let memory = GlobalPool::new();
 //! let compressed = zstd::compress(
 //!     BytesView::copied_from_slice(b"the quick brown fox", &memory),
-//!     memory.clone(),
+//!     &Resources::default(),
 //! )?;
 //! assert_eq!(compressed.range(0..4).to_vec(), vec![0x28, 0xb5, 0x2f, 0xfd]);
 //!
 //! assert_eq!(
-//!     zstd::decompress(compressed, memory)?.to_vec(),
+//!     zstd::decompress(compressed, &Resources::default())?.to_vec(),
 //!     b"the quick brown fox".to_vec()
 //! );
 //! # Ok::<(), compressors::Error>(())
@@ -43,17 +43,40 @@ use crate::zstd::codec::{ZstdCompress, ZstdDecompress};
 /// [`DecompressionLimits`] for what actually bounds an untrusted stream.
 const DEFAULT_LIMITS: FormatLimits = FormatLimits::new(Some(250_000), None);
 
+/// Selects zstd as the format of a [`CompressorBuilder`] or [`DecompressorBuilder`], and carries
+/// the settings only zstd has.
+///
+/// Naming the format in the builder's type parameter is what gives that builder a `build` method
+/// producing this module's [`Compressor`] and [`Decompressor`], along with the setters below.
+#[derive(Debug, Clone)]
+pub struct Zstd {
+    level: Option<CompressionLevel>,
+    max_window_log: Option<WindowLog>,
+}
+
+impl Zstd {
+    /// The settings a zstd builder starts with: zstd's own defaults, and the portable
+    /// [`Level`][crate::Level] left in charge of the compression level.
+    pub(crate) const fn new() -> Self {
+        Self {
+            level: None,
+            max_window_log: None,
+        }
+    }
+}
+
 define_format! {
     name = "zstd",
+    format = Zstd,
+    build_method = build_zstd,
     compressor_codec = ZstdCompress,
-    compressor_options = CompressorOptions,
+    compressor_build = fallible,
     new_compressor = ZstdCompress::new,
     decompressor_codec = ZstdDecompress,
-    decompressor_options = DecompressorOptions,
+    decompressor_build = fallible,
     default_limits = DEFAULT_LIMITS,
     new_decompressor = ZstdDecompress::new,
     multi_stream_default = true,
-    multi_stream_doc = "Sets whether concatenated zstd frames decompress as one logical stream.\n\nEnabled by default, matching the `zstd` command line tool.",
 }
 
 /// A level on zstd's own scale, for reaching settings the portable [`Level`] does not cover.
@@ -178,40 +201,30 @@ impl TryFrom<u32> for WindowLog {
     }
 }
 
-/// Zstd's format-specific compressor settings.
-#[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct CompressorOptions {
-    pub(crate) level: Option<CompressionLevel>,
-}
-
-/// Zstd's format-specific decompressor settings.
-#[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct DecompressorOptions {
-    pub(crate) max_window_log: Option<WindowLog>,
-}
-
 /// Settings that only zstd has.
 ///
 /// # Examples
 ///
 /// ```
 /// use bytesbuf::mem::GlobalPool;
+/// use compressors::Resources;
 /// use compressors::zstd::{self, CompressionLevel};
 ///
 /// let compressor = zstd::Compressor::builder()
 ///     .compression_level(CompressionLevel::new(19).expect("19 is in range"))
-///     .build(GlobalPool::new());
+///     .build(&Resources::default())?;
 /// # let _ = compressor;
+/// # Ok::<(), compressors::BuildError>(())
 /// ```
 impl CompressorBuilder {
-    /// Sets the level on zstd's own scale, overriding any portable [`Level`].
+    /// Sets the level on zstd's own scale, overriding any portable [`Level`][crate::Level].
     ///
     /// Use this only when you need a level the portable scale does not reach; prefer
     /// [`level`][CompressorBuilder::level] otherwise, so the same configuration keeps working if the
     /// format changes.
     #[must_use]
     pub const fn compression_level(mut self, level: CompressionLevel) -> Self {
-        self.options.level = Some(level);
+        self.format.level = Some(level);
         self
     }
 }
@@ -220,7 +233,7 @@ impl DecompressorBuilder {
     /// Limits the largest frame window this decompressor accepts.
     #[must_use]
     pub const fn max_window_log(mut self, max_window_log: WindowLog) -> Self {
-        self.options.max_window_log = Some(max_window_log);
+        self.format.max_window_log = Some(max_window_log);
         self
     }
 }

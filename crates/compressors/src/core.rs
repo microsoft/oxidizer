@@ -1,6 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! The contract every compressor and decompressor implements.
+//!
+//! [`Compression`] is what makes the formats interchangeable: the same push/pull state machine
+//! whichever engine is behind it, with the [`Mode`][Compression::Mode] associated type recording
+//! which direction an implementation runs in. [`Compressing`] and [`Decompressing`] add the
+//! operations that only make sense in one direction.
+//!
+//! Everything here is re-exported at the crate root, so `compressors::core::Compression` and
+//! `compressors::core::Compression` name the same trait.
+
 use std::fmt;
 
 use bytesbuf::{BytesBuf, BytesView};
@@ -8,29 +18,12 @@ use bytesbuf::{BytesBuf, BytesView};
 use crate::error::Result;
 use crate::output::Output;
 
-mod sealed {
+pub(crate) mod sealed {
+    /// Restricts [`Compression`][super::Compression] to this crate's own implementations.
+    ///
+    /// Each format module implements this for its compressor and decompressor beside the real
+    /// implementation, so adding a format needs no edit here.
     pub trait Compression {}
-
-    #[cfg(feature = "brotli")]
-    impl Compression for crate::brotli::Compressor {}
-    #[cfg(feature = "brotli")]
-    impl Compression for crate::brotli::Decompressor {}
-    #[cfg(feature = "deflate")]
-    impl Compression for crate::deflate::Compressor {}
-    #[cfg(feature = "deflate")]
-    impl Compression for crate::deflate::Decompressor {}
-    #[cfg(feature = "gzip")]
-    impl Compression for crate::gzip::Compressor {}
-    #[cfg(feature = "gzip")]
-    impl Compression for crate::gzip::Decompressor {}
-    #[cfg(feature = "zlib")]
-    impl Compression for crate::zlib::Compressor {}
-    #[cfg(feature = "zlib")]
-    impl Compression for crate::zlib::Decompressor {}
-    #[cfg(feature = "zstd")]
-    impl Compression for crate::zstd::Compressor {}
-    #[cfg(feature = "zstd")]
-    impl Compression for crate::zstd::Decompressor {}
 
     impl<D> Compression for Box<dyn super::Compression<Mode = D>> {}
     impl Compression for Box<dyn super::Compressing> {}
@@ -66,7 +59,8 @@ pub struct Decompress;
 /// ```
 /// use bytesbuf::BytesView;
 /// use bytesbuf::mem::{GlobalPool, MemoryShared};
-/// use compressors::{Compress, Compression, Output, gzip};
+/// use compressors::core::{Compress, Compression};
+/// use compressors::{Output, Resources, gzip};
 ///
 /// fn compress(
 ///     mut compression: impl Compression<Mode = Compress>,
@@ -77,7 +71,7 @@ pub struct Decompress;
 ///
 /// let memory = GlobalPool::new();
 /// let compressed = compress(
-///     gzip::Compressor::new(memory.clone()),
+///     gzip::Compressor::new(&Resources::default()),
 ///     BytesView::copied_from_slice(b"format agnostic", &memory),
 /// )?;
 ///
@@ -104,6 +98,12 @@ pub trait Compression: sealed::Compression + fmt::Debug + Send + Sync {
     ///
     /// Returns an error if the underlying engine fails or the input is invalid.
     fn pull(&mut self) -> Result<Output>;
+
+    /// The number of bytes consumed from the input so far.
+    fn total_in(&self) -> u64;
+
+    /// The number of bytes produced so far.
+    fn total_out(&self) -> u64;
 
     /// Processes one complete input and returns the whole result.
     ///
@@ -184,70 +184,6 @@ pub trait Decompressing: Compression<Mode = Decompress> {
     fn take_remainder(&mut self) -> Result<BytesView>;
 }
 
-/// Implements the shared trait for a format module's compressor and decompressor.
-#[cfg(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
-macro_rules! impl_compression {
-    ($($module:ident),+ $(,)?) => {
-        $(
-            impl Compression for crate::$module::Compressor {
-                type Mode = Compress;
-
-                fn push(&mut self, input: BytesView) -> Result<()> {
-                    Self::push(self, input)
-                }
-
-                fn end_input(&mut self) {
-                    Self::end_input(self);
-                }
-
-                fn pull(&mut self) -> Result<Output> {
-                    Self::pull(self)
-                }
-            }
-
-            impl Compressing for crate::$module::Compressor {
-                fn flush(&mut self) -> Result<()> {
-                    Self::flush(self)
-                }
-            }
-
-            impl Compression for crate::$module::Decompressor {
-                type Mode = Decompress;
-
-                fn push(&mut self, input: BytesView) -> Result<()> {
-                    Self::push(self, input)
-                }
-
-                fn end_input(&mut self) {
-                    Self::end_input(self);
-                }
-
-                fn pull(&mut self) -> Result<Output> {
-                    Self::pull(self)
-                }
-
-            }
-
-            impl Decompressing for crate::$module::Decompressor {
-                fn take_remainder(&mut self) -> Result<BytesView> {
-                    Self::take_remainder(self)
-                }
-            }
-        )+
-    };
-}
-
-#[cfg(feature = "brotli")]
-impl_compression!(brotli);
-#[cfg(feature = "deflate")]
-impl_compression!(deflate);
-#[cfg(feature = "gzip")]
-impl_compression!(gzip);
-#[cfg(feature = "zlib")]
-impl_compression!(zlib);
-#[cfg(feature = "zstd")]
-impl_compression!(zstd);
-
 impl<D> Compression for Box<dyn Compression<Mode = D>> {
     type Mode = D;
 
@@ -261,6 +197,14 @@ impl<D> Compression for Box<dyn Compression<Mode = D>> {
 
     fn pull(&mut self) -> Result<Output> {
         (**self).pull()
+    }
+
+    fn total_in(&self) -> u64 {
+        (**self).total_in()
+    }
+
+    fn total_out(&self) -> u64 {
+        (**self).total_out()
     }
 }
 
@@ -277,6 +221,14 @@ impl Compression for Box<dyn Compressing> {
 
     fn pull(&mut self) -> Result<Output> {
         (**self).pull()
+    }
+
+    fn total_in(&self) -> u64 {
+        (**self).total_in()
+    }
+
+    fn total_out(&self) -> u64 {
+        (**self).total_out()
     }
 }
 
@@ -300,6 +252,14 @@ impl Compression for Box<dyn Decompressing> {
     fn pull(&mut self) -> Result<Output> {
         (**self).pull()
     }
+
+    fn total_in(&self) -> u64 {
+        (**self).total_in()
+    }
+
+    fn total_out(&self) -> u64 {
+        (**self).total_out()
+    }
 }
 
 impl Decompressing for Box<dyn Decompressing> {
@@ -308,23 +268,25 @@ impl Decompressing for Box<dyn Decompressing> {
     }
 }
 
-#[cfg(all(test, feature = "gzip"))]
+/// A fixture that only ever reports progress, for exercising callers that must keep polling rather
+/// than treat a progress step as output.
+#[cfg(all(test, feature = "futures-stream"))]
 #[derive(Debug)]
 pub(crate) struct ProgressCompression {
     pulls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
-#[cfg(all(test, feature = "gzip"))]
+#[cfg(all(test, feature = "futures-stream"))]
 impl ProgressCompression {
     pub(crate) fn new(pulls: std::sync::Arc<std::sync::atomic::AtomicUsize>) -> Self {
         Self { pulls }
     }
 }
 
-#[cfg(all(test, feature = "gzip"))]
+#[cfg(all(test, feature = "futures-stream"))]
 impl sealed::Compression for ProgressCompression {}
 
-#[cfg(all(test, feature = "gzip"))]
+#[cfg(all(test, feature = "futures-stream"))]
 impl Compression for ProgressCompression {
     type Mode = Compress;
 
@@ -338,18 +300,30 @@ impl Compression for ProgressCompression {
         self.pulls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Ok(Output::Progress)
     }
+
+    // No caller on the path this fixture exists for asks for the byte counters; they are here only
+    // because the trait requires them.
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn total_in(&self) -> u64 {
+        0
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn total_out(&self) -> u64 {
+        0
+    }
 }
 
 /// A fixture that always asks for input and always rejects it, for exercising callers that must
 /// propagate a `push` failure rather than the specific reasons a real codec's `push` can fail.
-#[cfg(all(test, feature = "futures-stream", feature = "gzip"))]
+#[cfg(all(test, feature = "futures-stream"))]
 #[derive(Debug)]
 pub(crate) struct RejectsPush;
 
-#[cfg(all(test, feature = "futures-stream", feature = "gzip"))]
+#[cfg(all(test, feature = "futures-stream"))]
 impl sealed::Compression for RejectsPush {}
 
-#[cfg(all(test, feature = "futures-stream", feature = "gzip"))]
+#[cfg(all(test, feature = "futures-stream"))]
 impl Compression for RejectsPush {
     type Mode = Compress;
 
@@ -362,161 +336,27 @@ impl Compression for RejectsPush {
     fn pull(&mut self) -> Result<Output> {
         Ok(Output::NeedInput)
     }
-}
 
-#[cfg(all(test, feature = "gzip"))]
+    // No caller on the path this fixture exists for asks for the byte counters; they are here only
+    // because the trait requires them.
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn total_in(&self) -> u64 {
+        0
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn total_out(&self) -> u64 {
+        0
+    }
+}
+#[cfg(test)]
 mod tests {
     use bytesbuf::mem::GlobalPool;
 
     use super::*;
-    use crate::format::Format;
-    use crate::gzip;
 
     fn view(bytes: &[u8]) -> BytesView {
         BytesView::copied_from_slice(bytes, &GlobalPool::new())
-    }
-
-    #[test]
-    fn round_trips_through_the_trait_alone() {
-        let memory = GlobalPool::new();
-
-        let mut compressor: Box<dyn Compression<Mode = Compress>> = Box::new(gzip::Compressor::new(memory.clone()));
-        Compression::push(&mut *compressor, view(b"driven through the trait")).expect("push succeeds");
-        Compression::end_input(&mut *compressor);
-
-        let mut collected = BytesBuf::new();
-        loop {
-            let output = Compression::pull(&mut *compressor).expect("pull succeeds");
-            assert!(!output.is_need_input(), "compressor requested input after end");
-            let done = output.is_done();
-            if let Some(chunk) = output.into_data() {
-                collected.put_bytes(chunk);
-            }
-            if done {
-                break;
-            }
-        }
-
-        let mut decompressor: Box<dyn Compression<Mode = Decompress>> = Box::new(gzip::Decompressor::new(memory));
-        Compression::push(&mut *decompressor, collected.consume_all()).expect("push succeeds");
-        Compression::end_input(&mut *decompressor);
-
-        let mut plain = BytesBuf::new();
-        loop {
-            let output = Compression::pull(&mut *decompressor).expect("pull succeeds");
-            assert!(!output.is_need_input(), "decompressor requested input after end");
-            let done = output.is_done();
-            if let Some(chunk) = output.into_data() {
-                plain.put_bytes(chunk);
-            }
-            if done {
-                break;
-            }
-        }
-
-        assert_eq!(plain.consume_all().to_vec(), b"driven through the trait".to_vec());
-    }
-
-    #[test]
-    fn trait_objects_are_send_sync_and_debug() {
-        fn assert_send_sync<T: Send + Sync + ?Sized>(_: &T) {}
-
-        let memory = GlobalPool::new();
-        let compressor: Box<dyn Compression<Mode = Compress>> = Box::new(gzip::Compressor::new(memory.clone()));
-        let decompressor: Box<dyn Compression<Mode = Decompress>> = Box::new(gzip::Decompressor::new(memory));
-
-        assert_send_sync(&*compressor);
-        assert_send_sync(&*decompressor);
-        assert_send_sync(&gzip::Compressor::new(GlobalPool::new()));
-        assert_send_sync(&gzip::Decompressor::new(GlobalPool::new()));
-        assert!(format!("{compressor:?}").contains("Compressor"));
-        assert!(format!("{decompressor:?}").contains("Decompressor"));
-    }
-
-    #[test]
-    fn direction_specific_traits_work_for_concrete_and_runtime_operations() {
-        let memory = GlobalPool::new();
-        let input = view(b"direction-specific capabilities");
-
-        let mut concrete = gzip::Compressor::new(memory.clone());
-        concrete.push(input.clone()).expect("push succeeds");
-        Compressing::flush(&mut concrete).expect("concrete flush succeeds");
-        loop {
-            let output = concrete.pull().expect("pull succeeds");
-            assert!(!output.is_done(), "flush ended the stream");
-            if output.is_need_input() {
-                break;
-            }
-        }
-
-        let mut compressor = Format::Gzip.compressor().build(memory.clone());
-        compressor.push(input).expect("push succeeds");
-        let mut compressed = BytesBuf::new();
-        loop {
-            let output = compressor.pull().expect("pull succeeds");
-            assert!(!output.is_done(), "flush ended the stream");
-            let need_input = output.is_need_input();
-            if let Some(chunk) = output.into_data() {
-                compressed.put_bytes(chunk);
-            }
-            if need_input {
-                break;
-            }
-        }
-
-        // The header alone is already non-empty, so the flush's contribution must be measured
-        // against this baseline rather than against emptiness.
-        let before_flush = compressed.len();
-
-        Compressing::flush(&mut compressor).expect("boxed flush succeeds");
-        loop {
-            let output = compressor.pull().expect("pull succeeds");
-            assert!(!output.is_done(), "flush ended the stream");
-            let need_input = output.is_need_input();
-            if let Some(chunk) = output.into_data() {
-                compressed.put_bytes(chunk);
-            }
-            if need_input {
-                break;
-            }
-        }
-
-        assert!(
-            compressed.len() > before_flush,
-            "boxed flush should have released a sync-flush chunk beyond the header before end_input"
-        );
-
-        compressor.end_input();
-        loop {
-            let output = compressor.pull().expect("pull succeeds");
-            assert!(!output.is_need_input(), "compressor requested input after end");
-            let done = output.is_done();
-            if let Some(chunk) = output.into_data() {
-                compressed.put_bytes(chunk);
-            }
-            if done {
-                break;
-            }
-        }
-
-        let trailing = view(b"trailing");
-        let joined = BytesView::from_views([compressed.consume_all(), trailing.clone()]);
-        let mut decompressor = Format::Gzip.decompressor().multi_stream(false).build(memory);
-        decompressor.push(joined).expect("push succeeds");
-        loop {
-            let output = decompressor.pull().expect("pull succeeds");
-            assert!(!output.is_need_input(), "complete stream requested more input");
-            if output.is_done() {
-                break;
-            }
-        }
-
-        assert_eq!(
-            Decompressing::take_remainder(&mut decompressor)
-                .expect("boxed remainder succeeds")
-                .to_vec(),
-            trailing.to_vec()
-        );
     }
 
     #[test]
@@ -545,6 +385,17 @@ mod tests {
                 self.done = true;
                 Ok(Output::Progress)
             }
+            // No caller on the path under test asks for the byte counters; they exist only because
+            // the trait requires them.
+            #[cfg_attr(coverage_nightly, coverage(off))]
+            fn total_in(&self) -> u64 {
+                0
+            }
+
+            #[cfg_attr(coverage_nightly, coverage(off))]
+            fn total_out(&self) -> u64 {
+                0
+            }
         }
 
         let result = ProgressOnceThenDone { done: false }
@@ -572,6 +423,17 @@ mod tests {
 
             fn pull(&mut self) -> Result<Output> {
                 Ok(Output::NeedInput)
+            }
+            // No caller on the path under test asks for the byte counters; they exist only because
+            // the trait requires them.
+            #[cfg_attr(coverage_nightly, coverage(off))]
+            fn total_in(&self) -> u64 {
+                0
+            }
+
+            #[cfg_attr(coverage_nightly, coverage(off))]
+            fn total_out(&self) -> u64 {
+                0
             }
         }
 

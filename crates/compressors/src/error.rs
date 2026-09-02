@@ -29,12 +29,12 @@ pub(crate) enum Kind {
 /// ```
 /// use bytesbuf::BytesView;
 /// use bytesbuf::mem::GlobalPool;
-/// use compressors::gzip;
+/// use compressors::{Resources, gzip};
 ///
 /// let memory = GlobalPool::new();
 /// let not_gzip = BytesView::copied_from_slice(b"definitely not gzip", &memory);
 ///
-/// let error = gzip::decompress(not_gzip, memory).unwrap_err();
+/// let error = gzip::decompress(not_gzip, &Resources::default()).unwrap_err();
 /// assert!(error.is_corrupt_data());
 /// ```
 #[derive(Debug)]
@@ -187,9 +187,74 @@ impl StdError for Error {
 /// A [`Result`][std::result::Result] whose error is this crate's [`Error`].
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// A compressor or decompressor could not be built from the settings it was given.
+///
+/// Most formats accept any combination the builders can express, so their `build` methods do not
+/// return this at all. The exceptions are the formats whose engines validate their own parameters
+/// -- brotli and zstd -- where building applies the configuration and can therefore be rejected.
+///
+/// This is a separate type from [`Error`] so that a failure to build is not something callers have
+/// to consider while streaming: once a codec exists, this error can no longer occur. It converts
+/// into [`Error`] for code that handles both in one place.
+///
+/// # Examples
+///
+/// ```
+/// # #[cfg(feature = "brotli")]
+/// # {
+/// use bytesbuf::mem::GlobalPool;
+/// use compressors::{Resources, brotli};
+///
+/// let compressor = brotli::Compressor::builder().build(&Resources::default())?;
+/// # let _ = compressor;
+/// # }
+/// # Ok::<(), compressors::BuildError>(())
+/// ```
+#[derive(Debug)]
+pub struct BuildError {
+    message: Cow<'static, str>,
+}
+
+#[cfg_attr(
+    all(not(test), not(any(feature = "brotli", feature = "zstd"))),
+    expect(dead_code, reason = "only the brotli and zstd engines validate a configuration")
+)]
+impl BuildError {
+    pub(crate) fn new(message: impl Into<Cow<'static, str>>) -> Self {
+        Self { message: message.into() }
+    }
+}
+
+impl fmt::Display for BuildError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl StdError for BuildError {}
+
+impl From<BuildError> for Error {
+    fn from(error: BuildError) -> Self {
+        Self::new(Kind::InvalidConfiguration, error.message)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_build_failure_renders_and_converts_to_an_invalid_configuration() {
+        let error = BuildError::new("the engine rejected the window size");
+
+        assert_eq!(error.to_string(), "the engine rejected the window size");
+        assert!(error.source().is_none(), "a build failure has no cause to report");
+        assert!(format!("{error:?}").contains("BuildError"), "the kind should be visible");
+
+        let converted = Error::from(error);
+        assert!(converted.is_invalid_configuration(), "got {converted}");
+        assert_eq!(converted.to_string(), "the engine rejected the window size");
+    }
 
     #[test]
     fn accessors_report_exactly_one_kind() {

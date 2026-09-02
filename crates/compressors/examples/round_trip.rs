@@ -8,15 +8,15 @@
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
 use compressors::format::Format;
-use compressors::{Result, gzip};
+use compressors::{Resources, Result, gzip};
 
 fn main() -> Result<()> {
     // Every output buffer is allocated from this provider.
     let memory = GlobalPool::new();
     let original = b"the quick brown fox jumps over the lazy dog. ".repeat(64);
 
-    let compressed = gzip::compress(BytesView::copied_from_slice(&original, &memory), memory.clone())?;
-    let decompressed = gzip::decompress(compressed.clone(), memory.clone())?;
+    let compressed = gzip::compress(BytesView::copied_from_slice(&original, &memory), &Resources::default())?;
+    let decompressed = gzip::decompress(compressed.clone(), &Resources::default())?;
 
     assert_eq!(decompressed.to_vec(), original);
     println!("gzip: {} -> {} bytes", original.len(), compressed.len());
@@ -24,8 +24,8 @@ fn main() -> Result<()> {
     // The same payload through a format chosen at run time.
     for &format in Format::ALL {
         let input = BytesView::copied_from_slice(&original, &memory);
-        let compressed = format.compress(input, memory.clone())?;
-        let decompressed = format.decompress(compressed.clone(), memory.clone())?;
+        let compressed = format.compress(input, &Resources::default())?;
+        let decompressed = format.decompress(compressed.clone(), &Resources::default())?;
 
         assert_eq!(decompressed.to_vec(), original);
         println!("{format:?}: {} bytes", compressed.len());
