@@ -35,7 +35,6 @@ pub(crate) struct EnrichmentNode {
 pub(crate) struct Slot(Arc<ThreadLocal<RefCell<OptEnrichmentNode>>>);
 
 impl thread_aware::ThreadAware for Slot {
-    #[cfg_attr(coverage_nightly, coverage(off))]
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
         // Enrichment slot is thread local, it doesn't need to be relocated
     }
@@ -326,6 +325,16 @@ mod coverage_tests {
     }
 
     static_assertions::assert_impl_all!(Slot: thread_aware::ThreadAware);
+
+    #[test]
+    fn slot_can_be_relocated_between_threads() {
+        let slot = Slot::new();
+        let mut relocated = slot.clone();
+        let (source, destination) = thread_aware::relocate::Relocator::between_threads().relocate(&mut relocated);
+
+        assert!(slot.ptr_eq(&relocated));
+        assert_ne!(source.unwrap().id(), destination.id());
+    }
 
     #[test]
     fn transfer_ignores_empty_enrichment_layers() {

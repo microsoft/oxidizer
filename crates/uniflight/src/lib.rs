@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
-
 //! Coalesces duplicate async tasks into a single execution.
 //!
 //! This crate provides [`Merger`], a mechanism for deduplicating concurrent async operations.
@@ -314,7 +312,6 @@ where
     T: Send + Sync,
     S: Strategy + Send + Sync,
 {
-    #[cfg_attr(coverage_nightly, coverage(off))]
     #[cfg_attr(test, mutants::skip)]
     fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         self.inner.relocate(source, destination);
@@ -495,9 +492,19 @@ impl<T> PanicAwareCell<T> {
 mod tests {
     use std::time::Duration;
 
+    use thread_aware::relocate::Relocator;
+
     use super::*;
 
     static_assertions::assert_impl_all!(Merger<String, String>: ThreadAware);
+
+    #[test]
+    fn merger_can_be_relocated_between_threads() {
+        let mut merger = Merger::<String, String, PerThread>::new();
+        let (source, destination) = Relocator::between_threads().relocate(&mut merger);
+
+        assert_ne!(source.unwrap().id(), destination.id());
+    }
 
     #[test]
     fn fast_path_returns_existing() {

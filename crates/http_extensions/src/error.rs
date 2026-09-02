@@ -123,7 +123,6 @@ pub struct HttpError {
 }
 
 impl ThreadAware for HttpError {
-    #[cfg_attr(coverage_nightly, coverage(off))]
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
         // no thread-local state to relocate
     }
@@ -311,6 +310,18 @@ mod tests {
     use crate::{FakeHandler, HttpRequestBuilder, HttpRequestBuilderExt, HttpResponseBuilder, JsonError};
 
     static_assertions::assert_impl_all!(HttpError: std::error::Error, Send, Sync, Display, Debug, ThreadAware);
+
+    #[test]
+    fn error_can_be_relocated_between_threads() {
+        let mut error = HttpError::validation("relocated");
+        let (source, destination) = thread_aware::relocate::Relocator::between_threads()
+            .source(false)
+            .relocate(&mut error);
+
+        assert_eq!(error.message(), "relocated");
+        assert!(source.is_none());
+        assert_eq!(destination.id(), std::thread::current().id());
+    }
 
     #[test]
     fn assert_size_small() {

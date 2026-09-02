@@ -34,6 +34,7 @@ all-features = true
 default = ["std", "derive"]
 std = ["dep:dashmap", "dep:rustc-hash", "thread_aware_core/std"]
 derive = ["dep:thread_aware_macros"]
+test-utils = ["std"]
 
 [dependencies]
 dashmap = { workspace = true, optional = true }

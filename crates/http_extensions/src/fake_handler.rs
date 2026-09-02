@@ -95,7 +95,6 @@ pub struct FakeHandler {
 }
 
 impl ThreadAware for FakeHandler {
-    #[cfg_attr(coverage_nightly, coverage(off))]
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
         // No thread awareness needed for fake handler, we want the same behavior
         // even after relocation.
@@ -406,6 +405,16 @@ mod tests {
     use super::*;
     use crate::HttpResponseBuilder;
     use crate::http_request_builder_ext::HttpRequestBuilderExt;
+
+    #[test]
+    fn fake_handler_can_be_relocated_between_threads() -> std::result::Result<(), ohno::AppError> {
+        let mut handler = FakeHandler::from(StatusCode::NOT_IMPLEMENTED);
+        let (source, destination) = thread_aware::relocate::Relocator::between_threads().relocate(&mut handler);
+
+        assert_ne!(source.unwrap().id(), destination.id());
+        assert_eq!(get_response(&handler)?.status(), StatusCode::NOT_IMPLEMENTED);
+        Ok(())
+    }
 
     #[test]
     fn from_status_code_ok() -> std::result::Result<(), ohno::AppError> {

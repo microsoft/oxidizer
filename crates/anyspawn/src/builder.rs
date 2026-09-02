@@ -99,7 +99,6 @@ struct TokioSpawner(Option<::tokio::runtime::Handle>);
 
 #[cfg(feature = "tokio")]
 impl ThreadAware for TokioSpawner {
-    #[cfg_attr(coverage_nightly, coverage(off))]
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
 }
 
@@ -328,6 +327,7 @@ impl<S> Debug for CustomSpawnerBuilder<S> {
 mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
 
+    use thread_aware::relocate::Relocator;
     use thread_aware::thread::ThreadBuilder;
 
     use super::*;
@@ -373,6 +373,16 @@ mod tests {
         fn call_once(self: Box<Self>) -> thread_aware::closure::BoxFuture<'static, ()> {
             Box::pin(async {})
         }
+    }
+
+    #[cfg(feature = "tokio")]
+    #[test]
+    fn tokio_spawner_can_be_relocated_between_threads() {
+        let mut spawner = TokioSpawner(None);
+        let (source, destination) = Relocator::between_threads().relocate(&mut spawner);
+
+        assert!(spawner.0.is_none());
+        assert_ne!(source.unwrap().id(), destination.id());
     }
 
     #[test]

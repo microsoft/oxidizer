@@ -27,7 +27,6 @@ pub struct ResilienceContext<In, Out> {
 }
 
 impl<In, Out> ThreadAware for ResilienceContext<In, Out> {
-    #[cfg_attr(coverage_nightly, coverage(off))]
     #[cfg_attr(test, mutants::skip)]
     fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         // Only clock is thread-aware for now. At some point, we also want
@@ -147,6 +146,15 @@ mod tests {
     use super::*;
 
     static_assertions::assert_impl_all!(ResilienceContext<(), ()>: Send, Sync, ThreadAware, Debug, Clone);
+
+    #[test]
+    fn context_can_be_relocated_between_numa_nodes() {
+        let mut ctx = ResilienceContext::<(), ()>::new(tick::Clock::new_frozen());
+        let (source, destination) = thread_aware::relocate::Relocator::between_numa_nodes().relocate(&mut ctx);
+
+        assert_ne!(source.unwrap().numa_node(), destination.numa_node());
+        let _ = ctx.get_clock().system_time();
+    }
 
     #[test]
     fn test_new_with_clock_sets_default_pipeline_name() {

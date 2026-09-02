@@ -43,6 +43,7 @@ futures = { workspace = true, features = ["executor"] }
 opentelemetry = { workspace = true, features = ["futures"] }
 smol = { workspace = true }
 static_assertions = { workspace = true }
+thread_aware = { path = "../thread_aware", features = ["test-utils"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
 
 [[test]]

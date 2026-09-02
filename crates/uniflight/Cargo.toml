@@ -36,6 +36,7 @@ criterion = { workspace = true, features = ["async_tokio"] }
 futures-util = { workspace = true, features = ["alloc", "std"] }
 mutants = { workspace = true }
 static_assertions = { workspace = true }
+thread_aware = { path = "../thread_aware", default-features = false, features = ["std", "test-utils"] }
 tokio = { workspace = true, features = [
     "macros",
     "rt",
