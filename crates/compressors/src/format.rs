@@ -159,32 +159,46 @@ impl Format {
 
     /// Decompresses a complete stream that is already in memory.
     ///
-    /// Applies [`DecompressorLimits::new()`]; for anything else, configure a
+    /// Buffers the whole result, so it applies the format's own ratio bound plus a 64 MiB output
+    /// cap and a 1024 concatenated-stream cap. For anything else, configure a
     /// [`DecompressorBuilder`] and finish it with
-    /// [`build_format`][DecompressorBuilder::build_format].
+    /// [`build_format`][DecompressorBuilder::build_format], which adds no bounds of its own.
     ///
     /// # Errors
     ///
-    /// Returns an error if the data is malformed, truncated, or exceeds the default limits.
+    /// Returns an error if the data is malformed, truncated, or exceeds those bounds.
     #[expect(
         clippy::trivially_copy_pass_by_ref,
         reason = "one-shot operations consistently borrow the selected runtime format"
     )]
     pub fn decompress(&self, input: BytesView, resources: &Resources) -> Result<BytesView> {
-        crate::decompress(input, DecompressorBuilder::new().build_format(*self, resources)?)
+        // Buffers the whole result, so it carries the same accumulation bounds as each format's own
+        // `decompress` convenience. See `DecompressorLimits::for_buffered_output`.
+        crate::decompress(
+            input,
+            DecompressorBuilder::new()
+                .limits(DecompressorLimits::new().for_buffered_output())
+                .build_format(*self, resources)?,
+        )
     }
 
     /// Decompresses a complete stream with explicit output limits.
     ///
     /// # Errors
     ///
-    /// Returns an error if the data is malformed, truncated, or exceeds `limits`.
+    /// Returns an error if the data is malformed, truncated, or exceeds `limits`. Bounds left unset
+    /// on `limits` still receive this convenience's buffering caps.
     #[expect(
         clippy::trivially_copy_pass_by_ref,
         reason = "one-shot operations consistently borrow the selected runtime format"
     )]
     pub fn decompress_with_limits(&self, input: BytesView, resources: &Resources, limits: DecompressorLimits) -> Result<BytesView> {
-        crate::decompress(input, DecompressorBuilder::new().limits(limits).build_format(*self, resources)?)
+        crate::decompress(
+            input,
+            DecompressorBuilder::new()
+                .limits(limits.for_buffered_output())
+                .build_format(*self, resources)?,
+        )
     }
 }
 
@@ -277,7 +291,33 @@ mod tests {
 
     use super::*;
     use crate::level::Level;
+    use crate::limits::FormatLimits;
     use crate::trailing::TrailingData;
+
+    /// Caps every drain loop in this module.
+    ///
+    /// A conforming operation always terminates, so exceeding this means the code under test is
+    /// spinning. A hanging test reports nothing at all, so the cap turns a hang into a failure --
+    /// which also lets mutation testing reach a verdict instead of timing out.
+    const MAX_STEPS: usize = 1_000_000;
+
+    /// Fails a spinning test instead of letting it hang.
+    ///
+    /// A conforming operation always terminates, so exceeding the cap means the code under test is
+    /// looping. A hanging test reports nothing at all, and mutation testing records a timeout rather
+    /// than a verdict, so every drain loop here counts its steps through this.
+    struct StepGuard(usize);
+
+    impl StepGuard {
+        fn new() -> Self {
+            Self(0)
+        }
+
+        fn step(&mut self) {
+            self.0 += 1;
+            assert!(self.0 < MAX_STEPS, "the operation did not finish within {MAX_STEPS} steps");
+        }
+    }
 
     fn view(bytes: &[u8]) -> BytesView {
         BytesView::copied_from_slice(bytes, &GlobalPool::new())
@@ -291,7 +331,8 @@ mod tests {
         compressor.end_input();
 
         let mut total = 0;
-        loop {
+        let mut finished = false;
+        for _ in 0..MAX_STEPS {
             let output = compressor.pull().expect("pull succeeds");
             assert!(!output.is_need_input(), "compressor requested input after end");
             let done = output.is_done();
@@ -299,9 +340,11 @@ mod tests {
                 total += chunk.len();
             }
             if done {
+                finished = true;
                 break;
             }
         }
+        assert!(finished, "compression did not finish within {MAX_STEPS} steps");
 
         total
     }
@@ -399,7 +442,8 @@ mod tests {
             compressor.push(view(&b"chunked ".repeat(5_000))).expect("push succeeds");
             compressor.end_input();
 
-            loop {
+            let mut finished = false;
+            for _ in 0..MAX_STEPS {
                 let output = compressor.pull().expect("pull succeeds");
                 assert!(!output.is_need_input(), "compressor requested input after end");
                 let done = output.is_done();
@@ -407,9 +451,11 @@ mod tests {
                     assert!(chunk.len() <= bound.get(), "{format:?} produced a {} byte chunk", chunk.len());
                 }
                 if done {
+                    finished = true;
                     break;
                 }
             }
+            assert!(finished, "{format:?} compression did not finish within {MAX_STEPS} steps");
         }
     }
 
@@ -417,7 +463,7 @@ mod tests {
     fn the_decompressor_builder_applies_its_limits() {
         for &format in Format::ALL {
             let compressed = format
-                .compress(view(&vec![0_u8; 4 * 1024 * 1024]), &Resources::default())
+                .compress(view(&vec![0_u8; 256 * 1024]), &Resources::default())
                 .expect("compression succeeds");
 
             let mut decompressor = DecompressorBuilder::new()
@@ -428,7 +474,9 @@ mod tests {
             decompressor.push(compressed).expect("push succeeds");
             decompressor.end_input();
 
+            let mut guard = StepGuard::new();
             let error = loop {
+                guard.step();
                 match decompressor.pull() {
                     Ok(output) => {
                         assert!(
@@ -452,7 +500,7 @@ mod tests {
 
         for &format in Format::ALL {
             let compressed = format
-                .compress(view(&vec![0_u8; 4 * 1024 * 1024]), &Resources::default())
+                .compress(view(&vec![0_u8; 256 * 1024]), &Resources::default())
                 .expect("compression succeeds");
 
             let mut decompressor = DecompressorBuilder::new()
@@ -462,7 +510,8 @@ mod tests {
             decompressor.end_input();
 
             let mut saw_a_full_size_chunk = false;
-            loop {
+            let mut finished = false;
+            for _ in 0..MAX_STEPS {
                 let output = decompressor.pull().expect("pull succeeds");
                 assert!(!output.is_need_input(), "decompressor requested input after end");
                 let done = output.is_done();
@@ -475,13 +524,15 @@ mod tests {
                     saw_a_full_size_chunk |= chunk_len == EXPECTED_DEFAULT_CHUNK_SIZE;
                 }
                 if done {
+                    finished = true;
                     break;
                 }
             }
+            assert!(finished, "{format:?} decompression did not finish within {MAX_STEPS} steps");
 
             assert!(
                 saw_a_full_size_chunk,
-                "{format:?}: decompressing 4 MiB of zeros never produced a full 64 KiB chunk"
+                "{format:?}: decompressing a quarter megabyte of zeros never produced a full 64 KiB chunk"
             );
         }
     }
@@ -501,7 +552,8 @@ mod tests {
             decompressor.push(compressed).expect("push succeeds");
             decompressor.end_input();
 
-            loop {
+            let mut finished = false;
+            for _ in 0..MAX_STEPS {
                 let output = decompressor.pull().expect("pull succeeds");
                 assert!(!output.is_need_input(), "decompressor requested input after end");
                 let done = output.is_done();
@@ -509,9 +561,11 @@ mod tests {
                     assert!(chunk.len() <= bound.get(), "{format:?} produced a {} byte chunk", chunk.len());
                 }
                 if done {
+                    finished = true;
                     break;
                 }
             }
+            assert!(finished, "{format:?} decompression did not finish within {MAX_STEPS} steps");
         }
     }
 
@@ -531,7 +585,9 @@ mod tests {
             decompressor.push(joined).expect("push succeeds");
             decompressor.end_input();
 
+            let mut guard = StepGuard::new();
             let error = loop {
+                guard.step();
                 match decompressor.pull() {
                     Ok(output) => {
                         assert!(
@@ -615,6 +671,28 @@ mod tests {
         builder
             .build_format(format, &Resources::default())
             .expect("the settings are accepted")
+    }
+
+    #[test]
+    fn no_format_bounds_output_or_stream_count_by_default() {
+        // A decompressor hands each chunk straight back and keeps nothing, so bounding its total
+        // output or member count would cut off long streams that never buffer more than one chunk.
+        // Cumulative bounds belong to the conveniences that accumulate, applied by
+        // `DecompressorLimits::for_buffered_output` and asserted in `limits`.
+        fn assert_uncapped(name: &str, limits: FormatLimits) {
+            const HUGE: u64 = 64 * 1024 * 1024 * 1024;
+
+            // Input matches output so the ratio guard, which differs per format, never fires here.
+            assert!(limits.check(HUGE, HUGE, 1).is_ok(), "{name} should not cap total output");
+            assert!(limits.check(1, 0, HUGE).is_ok(), "{name} should not cap stream count");
+        }
+
+        #[cfg(any(feature = "deflate", feature = "gzip", feature = "zlib"))]
+        assert_uncapped("flate", crate::flate::DEFAULT_LIMITS);
+        #[cfg(feature = "brotli")]
+        assert_uncapped("brotli", crate::brotli::DEFAULT_LIMITS);
+        #[cfg(feature = "zstd")]
+        assert_uncapped("zstd", crate::zstd::DEFAULT_LIMITS);
     }
 
     #[test]

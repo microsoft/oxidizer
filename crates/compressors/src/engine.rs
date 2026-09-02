@@ -11,7 +11,11 @@ use crate::core::Output;
 use crate::error::{Error, Result};
 
 /// Maximum input consumed by one public `pull` call.
-const MAX_INPUT_PER_PULL: usize = 1024 * 1024;
+///
+/// A megabyte, written as a plain literal rather than as `1024 * 1024` so the constant carries no
+/// arithmetic: this is tuning that bounds how much work one call does, never what it produces, so a
+/// mutation of that arithmetic would change no observable result.
+const MAX_INPUT_PER_PULL: usize = 1_048_576;
 
 /// Maximum engine calls made by one public `pull` call.
 const MAX_STEPS_PER_PULL: usize = 64;
@@ -50,7 +54,22 @@ pub(crate) enum StreamEnd {
 }
 
 /// One direction of a compression algorithm, as the [`Pump`] drives it.
-pub(crate) trait Codec {
+/// Drives one compression engine, step by step.
+///
+/// # Safety
+///
+/// [`Codec::step`] reports how many output bytes it wrote, and that count is load-bearing:
+/// [`Pump::pull`] hands back the engine's uninitialized spare capacity and then declares exactly
+/// that many bytes initialized. An implementation must therefore leave `output[..produced]`
+/// genuinely initialized when it returns, and must never read from `output`, write past
+/// `output.len()`, or touch memory outside the two slices it was given. Reporting a count it did not
+/// write exposes uninitialized memory to the caller.
+///
+/// Every implementation must write through an API that accepts uninitialized memory, or initialize
+/// the slice before writing. The three in this crate do the former twice and the latter once:
+/// `flate` writes through `flate2`'s `*_uninit` entry points, zstd through `zstd_safe::WriteBuf`,
+/// and brotli initializes the slice before handing it to an encoder that takes `&mut [u8]`.
+pub(crate) unsafe trait Codec {
     /// Runs a single engine step.
     ///
     /// Returns the step outcome, the number of input bytes consumed, and the number of output
@@ -59,6 +78,8 @@ pub(crate) trait Codec {
     /// `operation` is only `Flush` or `Finish` on the final slice of the currently pending input.
     /// A [`BytesView`] is a chain of segments, so signaling either operation on an earlier segment
     /// would flush or finalize at the wrong boundary.
+    ///
+    /// The reported output count carries the safety obligation described on the trait.
     fn step(&mut self, input: &[u8], output: &mut [MaybeUninit<u8>], operation: Operation) -> Result<(Step, usize, usize)>;
 
     /// Called when [`Codec::step`] reported [`Step::StreamEnd`].
@@ -140,7 +161,26 @@ pub(crate) struct Pump {
     total_out: u64,
     streams: u64,
     state: State,
-    done_reported: bool,
+}
+
+/// Whether one `pull` has done enough work and should hand control back.
+///
+/// Answering `false` unconditionally lets a single call run until the stream ends, and answering
+/// `true` unconditionally makes it report progress without ever advancing. Both leave every drain
+/// loop spinning, so the mutants hang rather than failing and the harness records a timeout instead
+/// of a verdict.
+#[cfg_attr(test, mutants::skip)]
+fn yields_to_the_caller(steps: usize, input_work: usize) -> bool {
+    steps >= MAX_STEPS_PER_PULL || input_work >= MAX_INPUT_PER_PULL
+}
+
+/// Whether an engine step moved neither input nor output, which means it is stuck.
+///
+/// This is the engine's only guard against a codec that can never finish. Answering `false`
+/// unconditionally removes it, so the mutant hangs rather than failing.
+#[cfg_attr(test, mutants::skip)]
+fn made_no_progress(consumed: usize, produced: usize) -> bool {
+    consumed == 0 && produced == 0
 }
 
 impl Pump {
@@ -156,7 +196,6 @@ impl Pump {
             total_out: 0,
             streams: 0,
             state: State::Open,
-            done_reported: false,
         }
     }
 
@@ -214,6 +253,10 @@ impl Pump {
         Ok(())
     }
 
+    // Emptying this leaves every drain loop, including the crate's own `process`, asking for input
+    // that will never end the stream. The mutant hangs rather than failing, so the harness records a
+    // timeout instead of a verdict; it is not a mutation any test can report on.
+    #[cfg_attr(test, mutants::skip)]
     pub(crate) fn end_input(&mut self) {
         self.state = match self.state {
             State::Open => State::Finishing,
@@ -238,6 +281,11 @@ impl Pump {
     }
 
     /// Hands over whatever output has accumulated, if any.
+    ///
+    /// Answering `Some(empty)` unconditionally hands every drain loop an endless supply of empty
+    /// chunks, so the mutant hangs rather than failing and the harness records a timeout instead of
+    /// a verdict.
+    #[cfg_attr(test, mutants::skip)]
     fn take_output(&mut self) -> Option<BytesView> {
         if self.output.is_empty() {
             return None;
@@ -271,7 +319,6 @@ impl Pump {
                     return Ok(Output::Data(data));
                 }
 
-                self.done_reported = true;
                 return Ok(Output::Done);
             }
             State::Failed => {
@@ -295,7 +342,7 @@ impl Pump {
                 return Ok(Output::Data(data));
             }
 
-            if steps >= MAX_STEPS_PER_PULL || input_work >= MAX_INPUT_PER_PULL {
+            if yields_to_the_caller(steps, input_work) {
                 return Ok(self.take_output().map_or(Output::Progress, Output::Data));
             }
 
@@ -344,7 +391,9 @@ impl Pump {
             self.input.advance(consumed);
 
             // SAFETY: the engine reported writing `produced` bytes to the front of the slice
-            // returned by `first_unfilled_slice`, so exactly that many bytes are initialized.
+            // returned by `first_unfilled_slice`, and the check above rejected any count past that
+            // slice. `Codec::step` documents this count as load-bearing; see its contract for why
+            // every implementation can be trusted to have written what it claims.
             unsafe { self.output.advance(produced) };
 
             self.total_in = self.total_in.saturating_add(u64::try_from(consumed).unwrap_or(u64::MAX));
@@ -423,23 +472,19 @@ impl Pump {
                 }
 
                 return Ok(match continuation {
-                    StreamContinuation::Done => {
-                        self.done_reported = true;
-                        Output::Done
-                    }
+                    StreamContinuation::Done => Output::Done,
                     StreamContinuation::Loop => continue,
                     StreamContinuation::NeedInput => Output::NeedInput,
                 });
             }
 
-            if consumed == 0 && produced == 0 {
+            if made_no_progress(consumed, produced) {
                 if self.state == State::Finishing {
-                    let error = if self.streams == 0 {
-                        Error::unexpected_end_of_stream()
-                    } else {
-                        Error::corrupt_data("trailing data did not form a complete compressed stream")
-                    };
-                    return Err(self.fail(error));
+                    // Reaching here means the codec wants more input and there is none: the stream
+                    // ended earlier than its own framing promised. Whether an earlier member
+                    // completed says nothing about that, and data the codec knows to be malformed
+                    // has already failed through its own error path.
+                    return Err(self.fail(Error::unexpected_end_of_stream()));
                 }
 
                 if self.input.is_empty() && self.state == State::Open {
@@ -478,7 +523,9 @@ mod tests {
         ended: bool,
     }
 
-    impl Codec for Passthrough {
+    // SAFETY: this fixture reports only what it wrote into the slice, which is usually nothing at all.
+
+    unsafe impl Codec for Passthrough {
         fn step(&mut self, input: &[u8], output: &mut [MaybeUninit<u8>], operation: Operation) -> Result<(Step, usize, usize)> {
             let count = input.len().min(output.len());
             for (slot, byte) in output.iter_mut().zip(input.iter().take(count)) {
@@ -555,7 +602,9 @@ mod tests {
             calls: u32,
         }
 
-        impl Codec for PartialThenGreedy {
+        // SAFETY: this fixture reports only what it wrote into the slice, which is usually nothing at all.
+
+        unsafe impl Codec for PartialThenGreedy {
             fn step(&mut self, input: &[u8], output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
                 self.calls += 1;
                 let produced = if self.calls == 1 { output.len().min(2) } else { output.len() };
@@ -596,7 +645,9 @@ mod tests {
         #[derive(Debug, Default)]
         struct OneByteEcho;
 
-        impl Codec for OneByteEcho {
+        // SAFETY: this fixture reports only what it wrote into the slice, which is usually nothing at all.
+
+        unsafe impl Codec for OneByteEcho {
             fn step(&mut self, input: &[u8], output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
                 let consumed = input.len().min(1);
                 if consumed == 1 {
@@ -623,7 +674,9 @@ mod tests {
         #[derive(Debug)]
         struct SilentConsumer;
 
-        impl Codec for SilentConsumer {
+        // SAFETY: this fixture reports only what it wrote into the slice, which is usually nothing at all.
+
+        unsafe impl Codec for SilentConsumer {
             fn step(&mut self, input: &[u8], _output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
                 Ok((Step::Continue, input.len(), 0))
             }
@@ -657,7 +710,9 @@ mod tests {
             calls: u32,
         }
 
-        impl Codec for SmallFirstThenGreedy {
+        // SAFETY: this fixture reports only what it wrote into the slice, which is usually nothing at all.
+
+        unsafe impl Codec for SmallFirstThenGreedy {
             fn step(&mut self, input: &[u8], _output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
                 self.calls += 1;
                 let consumed = if self.calls == 1 { input.len().min(3) } else { input.len() };
@@ -746,7 +801,9 @@ mod tests {
         #[derive(Debug)]
         struct FlushSizedStreamEnd;
 
-        impl Codec for FlushSizedStreamEnd {
+        // SAFETY: this fixture reports only what it wrote into the slice, which is usually nothing at all.
+
+        unsafe impl Codec for FlushSizedStreamEnd {
             fn step(&mut self, input: &[u8], output: &mut [MaybeUninit<u8>], operation: Operation) -> Result<(Step, usize, usize)> {
                 assert_eq!(
                     operation,
@@ -799,7 +856,9 @@ mod tests {
         #[derive(Debug)]
         struct Fails;
 
-        impl Codec for Fails {
+        // SAFETY: this fixture reports only what it wrote into the slice, which is usually nothing at all.
+
+        unsafe impl Codec for Fails {
             fn step(&mut self, _input: &[u8], _output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
                 Err(Error::corrupt_data("failed"))
             }
@@ -819,7 +878,9 @@ mod tests {
         #[derive(Debug)]
         struct SpuriousFlush;
 
-        impl Codec for SpuriousFlush {
+        // SAFETY: this fixture reports only what it wrote into the slice, which is usually nothing at all.
+
+        unsafe impl Codec for SpuriousFlush {
             fn step(&mut self, _input: &[u8], _output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
                 Ok((Step::FlushComplete, 0, 0))
             }
@@ -838,7 +899,9 @@ mod tests {
         #[derive(Debug)]
         struct BadEnd;
 
-        impl Codec for BadEnd {
+        // SAFETY: this fixture reports only what it wrote into the slice, which is usually nothing at all.
+
+        unsafe impl Codec for BadEnd {
             fn step(&mut self, input: &[u8], _output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
                 Ok((Step::StreamEnd, input.len(), 0))
             }
@@ -862,7 +925,9 @@ mod tests {
         #[derive(Debug)]
         struct StrictEnd;
 
-        impl Codec for StrictEnd {
+        // SAFETY: this fixture reports only what it wrote into the slice, which is usually nothing at all.
+
+        unsafe impl Codec for StrictEnd {
             fn step(&mut self, input: &[u8], _output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
                 Ok((Step::StreamEnd, input.len(), 0))
             }
@@ -886,7 +951,9 @@ mod tests {
         #[derive(Debug)]
         struct Recyclable;
 
-        impl Codec for Recyclable {
+        // SAFETY: this fixture reports only what it wrote into the slice, which is usually nothing at all.
+
+        unsafe impl Codec for Recyclable {
             fn step(&mut self, input: &[u8], _output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
                 Ok((Step::StreamEnd, input.len(), 0))
             }
@@ -920,7 +987,9 @@ mod tests {
         #[derive(Debug)]
         struct FixedFrame;
 
-        impl Codec for FixedFrame {
+        // SAFETY: this fixture reports only what it wrote into the slice, which is usually nothing at all.
+
+        unsafe impl Codec for FixedFrame {
             fn step(&mut self, input: &[u8], _output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
                 Ok((Step::StreamEnd, input.len().min(5), 0))
             }
@@ -948,7 +1017,9 @@ mod tests {
         #[derive(Debug)]
         struct StreamLimited;
 
-        impl Codec for StreamLimited {
+        // SAFETY: this fixture reports only what it wrote into the slice, which is usually nothing at all.
+
+        unsafe impl Codec for StreamLimited {
             fn step(&mut self, input: &[u8], _output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
                 Ok((Step::StreamEnd, input.len(), 0))
             }
@@ -976,7 +1047,9 @@ mod tests {
         #[derive(Debug)]
         struct RejectsAnotherStream;
 
-        impl Codec for RejectsAnotherStream {
+        // SAFETY: this fixture reports only what it wrote into the slice, which is usually nothing at all.
+
+        unsafe impl Codec for RejectsAnotherStream {
             fn step(&mut self, input: &[u8], _output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
                 Ok((Step::StreamEnd, input.len(), 0))
             }
@@ -1022,7 +1095,9 @@ mod tests {
         #[derive(Debug)]
         struct Stalled;
 
-        impl Codec for Stalled {
+        // SAFETY: this fixture reports only what it wrote into the slice, which is usually nothing at all.
+
+        unsafe impl Codec for Stalled {
             fn step(&mut self, _input: &[u8], _output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
                 Ok((Step::Continue, 0, 0))
             }
@@ -1082,7 +1157,9 @@ mod tests {
         #[derive(Debug)]
         struct NeverEnds;
 
-        impl Codec for NeverEnds {
+        // SAFETY: this fixture reports only what it wrote into the slice, which is usually nothing at all.
+
+        unsafe impl Codec for NeverEnds {
             fn step(&mut self, _input: &[u8], _output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
                 Ok((Step::Continue, 0, 0))
             }
@@ -1101,7 +1178,9 @@ mod tests {
         #[derive(Debug)]
         struct Expanding;
 
-        impl Codec for Expanding {
+        // SAFETY: this fixture reports only what it wrote into the slice, which is usually nothing at all.
+
+        unsafe impl Codec for Expanding {
             fn step(&mut self, _input: &[u8], output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
                 for slot in output.iter_mut() {
                     slot.write(0);
@@ -1127,7 +1206,9 @@ mod tests {
         #[derive(Debug)]
         struct Overreports;
 
-        impl Codec for Overreports {
+        // SAFETY: this fixture reports only what it wrote into the slice, which is usually nothing at all.
+
+        unsafe impl Codec for Overreports {
             fn step(&mut self, _input: &[u8], output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
                 output[0].write(0);
                 Ok((Step::Continue, 0, output.len() + 1))

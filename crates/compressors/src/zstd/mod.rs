@@ -42,9 +42,10 @@ use crate::zstd::codec::{ZstdCompress, ZstdDecompress};
 /// Zstd's default bounds.
 ///
 /// Zstd has no structural expansion ceiling, so like brotli it needs a far looser ratio than the
-/// deflate family. This is a coarse backstop rather than real protection; see
-/// [`DecompressorLimits`] for what actually bounds an untrusted stream.
-const DEFAULT_LIMITS: FormatLimits = FormatLimits::new(Some(250_000), None);
+/// deflate family. That ratio is a coarse backstop rather than real protection; what bounds
+/// untrusted zstd is the cap the buffering conveniences apply, see
+/// [`DecompressorLimits`][crate::DecompressorLimits].
+pub(crate) const DEFAULT_LIMITS: FormatLimits = FormatLimits::new(Some(250_000), None, None);
 
 /// Selects zstd as the format of a [`CompressorBuilder`][crate::CompressorBuilder] or [`DecompressorBuilder`][crate::DecompressorBuilder], and carries
 /// the settings only zstd has.

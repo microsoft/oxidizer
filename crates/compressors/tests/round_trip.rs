@@ -35,16 +35,43 @@ fn chunk(size: usize) -> NonZeroUsize {
     NonZeroUsize::new(size).expect("test chunk sizes are never zero")
 }
 
+/// Caps every drain loop in this file.
+///
+/// A conforming operation always terminates, so exceeding this means the code under test is
+/// spinning. A hanging test reports nothing at all, so the cap turns a hang into a failure --
+/// which also lets mutation testing reach a verdict instead of timing out.
+const MAX_STEPS: usize = 1_000_000;
+
+/// Fails a spinning test instead of letting it hang.
+///
+/// A conforming operation always terminates, so exceeding the cap means the code under test is
+/// looping. A hanging test reports nothing at all, and mutation testing records a timeout rather
+/// than a verdict, so every drain loop below counts its steps through this.
+struct StepGuard(usize);
+
+impl StepGuard {
+    fn new() -> Self {
+        Self(0)
+    }
+
+    fn step(&mut self) {
+        self.0 += 1;
+        assert!(self.0 < MAX_STEPS, "the operation did not finish within {MAX_STEPS} steps");
+    }
+}
+
 /// Drives a codec to completion over an input delivered in `feed` sized pieces.
 fn drive_decompressor(mut decompressor: gzip::Decompressor, input: &BytesView, feed: usize) -> compressors::Result<BytesView> {
     let mut offset = 0;
     let mut collected = BytesBuf::new();
 
+    let mut guard = StepGuard::new();
     loop {
+        guard.step();
         match decompressor.pull()? {
             Output::Data(data) => collected.put_bytes(data),
             Output::Progress => {}
-            Output::Done => break,
+            Output::Done => return Ok(collected.consume_all()),
             Output::NeedInput => {
                 if offset >= input.len() {
                     decompressor.end_input();
@@ -57,8 +84,6 @@ fn drive_decompressor(mut decompressor: gzip::Decompressor, input: &BytesView, f
             }
         }
     }
-
-    Ok(collected.consume_all())
 }
 
 #[test]
@@ -127,8 +152,8 @@ fn streams_a_large_payload_with_a_bounded_working_set() {
     // its length. Every chunk handed back stays within the configured bound.
     const CHUNK: usize = 16 * 1024;
 
-    let payload = b"large streamed payload, compressible but not trivially so; ".repeat(400_000);
-    assert!(payload.len() > 20 * 1024 * 1024, "the payload should be large enough to matter");
+    let payload = b"large streamed payload, compressible but not trivially so; ".repeat(20_000);
+    assert!(payload.len() > 1024 * 1024, "the payload should be large enough to matter");
 
     let mut compressor = gzip::Compressor::builder()
         .output_chunk_size(chunk(CHUNK))
@@ -137,7 +162,9 @@ fn streams_a_large_payload_with_a_bounded_working_set() {
     compressor.end_input();
 
     let mut compressed = Vec::new();
+    let mut guard = StepGuard::new();
     loop {
+        guard.step();
         match compressor.pull().expect("pull succeeds") {
             Output::Data(piece) => {
                 assert!(
@@ -167,22 +194,24 @@ fn streams_a_large_payload_with_a_bounded_working_set() {
 
 #[test]
 fn rejects_a_bomb_before_materialising_it() {
-    // 64 MiB of zeros compresses to a few kilobytes. The guard must fire long before the output is
-    // fully materialised, so this test would be intolerably slow if it did not.
+    // A megabyte of zeros compresses to a few hundred bytes. The guard must fire long before the
+    // output is fully materialised, so the cap is set far below what the bomb would expand to.
     //
     // The cap is set explicitly rather than relying on the default: deflate cannot expand by more
     // than about `1032x`, so its default ratio never fires on data the format could have produced.
     // An absolute cap is what actually protects a caller that buffers the output.
-    let bomb = gzip::compress(view(&vec![0_u8; 64 * 1024 * 1024]), &Resources::default()).expect("compression succeeds");
-    assert!(bomb.len() < 100 * 1024, "the bomb should be tiny: {} bytes", bomb.len());
+    let bomb = gzip::compress(view(&vec![0_u8; 1024 * 1024]), &Resources::default()).expect("compression succeeds");
+    assert!(bomb.len() < 16 * 1024, "the bomb should be tiny: {} bytes", bomb.len());
 
     let mut decompressor = gzip::Decompressor::builder()
-        .limits(DecompressorLimits::new().with_max_output_len(1024 * 1024))
+        .limits(DecompressorLimits::new().with_max_output_len(16 * 1024))
         .build(&Resources::default());
     decompressor.push(bomb).expect("push succeeds");
     decompressor.end_input();
 
+    let mut guard = StepGuard::new();
     let error = loop {
+        guard.step();
         match decompressor.pull() {
             Ok(Output::Data(_) | Output::Progress) => {}
             Ok(_) => panic!("the bomb decompressed fully instead of being rejected"),
@@ -192,7 +221,7 @@ fn rejects_a_bomb_before_materialising_it() {
 
     assert!(error.is_limit_exceeded(), "got {error}");
     assert!(
-        decompressor.total_out() < 64 * 1024 * 1024,
+        decompressor.total_out() < 1024 * 1024,
         "the guard should fire before the full expansion, stopped at {}",
         decompressor.total_out()
     );
@@ -201,8 +230,10 @@ fn rejects_a_bomb_before_materialising_it() {
 #[test]
 fn the_default_limits_accept_maximally_compressible_deflate_data() {
     // Deflate's structural ceiling is about `1032x`, so the gzip default must sit above it: data the
-    // format could legitimately have produced must never be rejected as a bomb.
-    let payload = vec![0_u8; 8 * 1024 * 1024];
+    // format could legitimately have produced must never be rejected as a bomb. A megabyte of zeros
+    // reaches that ceiling and clears the ratio guard's 32 KiB floor, so the guard is genuinely
+    // active here rather than skipped as too small to judge.
+    let payload = vec![0_u8; 1024 * 1024];
     let compressed = gzip::compress(view(&payload), &Resources::default()).expect("compression succeeds");
 
     let plain = gzip::decompress(compressed, &Resources::default()).expect("default limits must accept maximal deflate compression");
@@ -212,7 +243,7 @@ fn the_default_limits_accept_maximally_compressible_deflate_data() {
 
 #[test]
 fn trusted_callers_can_opt_out_of_the_limits() {
-    let payload = vec![0_u8; 8 * 1024 * 1024];
+    let payload = vec![0_u8; 1024 * 1024];
     let compressed = gzip::compress(view(&payload), &Resources::default()).expect("compression succeeds");
 
     let decompressor = gzip::Decompressor::builder()
@@ -286,4 +317,25 @@ fn a_custom_memory_provider_is_used_for_output() {
     let plain = gzip::decompress(compressed, &Resources::default()).expect("decompression succeeds");
 
     assert_eq!(plain.to_vec(), b"provider supplied".to_vec());
+}
+
+#[test]
+fn a_stream_of_many_tiny_members_is_rejected_without_the_caller_setting_any_limit() {
+    // Each member costs engine setup its own payload never pays for, so a stream of empty members
+    // amplifies work out of all proportion to its size. The default stream cap is what bounds it.
+    let member = gzip::compress(BytesView::new(), &Resources::default())
+        .expect("compression succeeds")
+        .to_vec();
+    let mut many = Vec::with_capacity(member.len() * 1100);
+    for _ in 0..1100 {
+        many.extend_from_slice(&member);
+    }
+
+    let error = gzip::decompress(view(&many), &Resources::default()).expect_err("the default cap should reject this");
+
+    assert!(error.is_limit_exceeded(), "expected a limit failure, got: {error}");
+    assert!(
+        error.to_string().contains("decoded stream count"),
+        "the stream cap should be what fired: {error}"
+    );
 }

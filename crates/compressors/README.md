@@ -131,14 +131,15 @@ rest – so calling code never has to know which engines benefit.
 ## Security
 
 Every one of these formats can expand its input by orders of magnitude, so a decompressor
-pointed at untrusted data is a memory-exhaustion vector. Nothing here accumulates – each chunk a
-codec hands back is bounded – so the exposure is in what the caller keeps, which makes it the
-conveniences that buffer a whole result that need bounding.
+pointed at untrusted data is a memory-exhaustion vector. A decompressor driven directly never
+accumulates – each chunk it hands back is bounded – so the exposure is in what the caller
+keeps, which makes it the conveniences that buffer a whole result that need bounding. Those add
+a 64 MiB output cap and a 1024 concatenated-stream cap to whatever the caller did not set.
 
-For untrusted input use each format’s `decompress_with_limits`, or
-[`Format::decompress_with_limits`][__link10], and set
-[`with_max_output_len`][__link11] to what you can afford to
-buffer. [`DecompressorLimits`][__link12] documents what each format bounds by default, and why a ratio
+When you buffer decompressed output yourself, set
+[`with_max_output_len`][__link10] to what you can afford. That
+guardrail is for the common case, not a substitute for bounding how many bodies you decompress
+at once. [`DecompressorLimits`][__link11] documents what each format bounds by default, and why a ratio
 alone is not protection.
 
 Decompression can yield bytes before a checksum or trailer has rejected the stream, so treat
@@ -155,12 +156,12 @@ engines it names:
 * `zlib` – the `zlib` module and `Format::Zlib`, via `flate2`.
 * `brotli` – the `brotli` module and `Format::Brotli`, via the pure-Rust `brotli` crate.
 * `zstd` – the `zstd` module and `Format::Zstd`, via `zstd-safe`.
-* `futures-stream` – [`CompressionStream`][__link13], presenting compression and decompression as a
+* `futures-stream` – [`CompressionStream`][__link12], presenting compression and decompression as a
   `futures_core::Stream` over any stream of byte sequences.
 
 The deflate-family features share one dependency, so enabling all three costs no more than one.
 A build that needs only `brotli` or only `zstd` never compiles `flate2` at all, and a build that
-names no format at all still gets [`Compression`][__link14], the builders and [`Resources`][__link15], which is what
+names no format at all still gets [`Compression`][__link13], the builders and [`Resources`][__link14], which is what
 a crate that only passes operations around needs.
 
 
@@ -169,15 +170,14 @@ a crate that only passes operations around needs.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/compressors">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbKOT2sSODAQAbOy_IdbOlhRgbwyzwlvIC9Tkb9k-vnEIf9tRhZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbp2crvA7KUgobG5bgojiayJYbh4A-pxnRc8ob9P8qMfTqrrVhZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
  [__link0]: https://crates.io/crates/bytesbuf/0.9.0
  [__link1]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesView
- [__link10]: https://docs.rs/compressors/0.1.0/compressors/?search=Format::decompress_with_limits
- [__link11]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits::with_max_output_len
- [__link12]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits
- [__link13]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressionStream
- [__link14]: https://docs.rs/compressors/0.1.0/compressors/?search=core::Compression
- [__link15]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
+ [__link10]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits::with_max_output_len
+ [__link11]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits
+ [__link12]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressionStream
+ [__link13]: https://docs.rs/compressors/0.1.0/compressors/?search=core::Compression
+ [__link14]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
  [__link2]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesBuf
  [__link3]: https://docs.rs/compressors/0.1.0/compressors/fn.compress.html
  [__link4]: https://docs.rs/compressors/0.1.0/compressors/fn.decompress.html

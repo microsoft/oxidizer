@@ -18,8 +18,9 @@ use crate::limits::FormatLimits;
 /// Deflate cannot expand its input by more than about `1032x` -- a structural property of the format,
 /// not a tuning choice -- so a single stream is inherently bounded. Measured worst case for 1 MiB of
 /// zeros is `1015x`, so this sits just above what the format can actually produce and never rejects
-/// data deflate could legitimately have generated. No cap on total size, so large streams decompress.
-pub(crate) const DEFAULT_LIMITS: FormatLimits = FormatLimits::new(Some(1_100), None);
+/// data deflate could legitimately have generated. Total output and stream count are left open, so
+/// a stream of any length passes through; the buffering conveniences bound what they accumulate.
+pub(crate) const DEFAULT_LIMITS: FormatLimits = FormatLimits::new(Some(1_100), None, None);
 
 /// The deflate window size exponent. 15 is the maximum, giving the best compression ratio.
 ///

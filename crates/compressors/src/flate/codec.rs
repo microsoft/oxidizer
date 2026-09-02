@@ -49,7 +49,9 @@ impl Drop for FlateCompress {
     }
 }
 
-impl Codec for FlateCompress {
+// SAFETY: `step` writes through `flate2`'s `*_uninit` entry points, which take the uninitialized
+// slice and report what they filled, so the count is the engine's own.
+unsafe impl Codec for FlateCompress {
     fn step(&mut self, input: &[u8], output: &mut [MaybeUninit<u8>], operation: Operation) -> Result<(Step, usize, usize)> {
         let flush = match operation {
             Operation::Process => FlushCompress::None,
@@ -143,7 +145,9 @@ impl Drop for FlateDecompress {
     }
 }
 
-impl Codec for FlateDecompress {
+// SAFETY: `step` writes through `flate2`'s `*_uninit` entry points, which take the uninitialized
+// slice and report what they filled, so the count is the engine's own.
+unsafe impl Codec for FlateDecompress {
     fn step(&mut self, input: &[u8], output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
         if self.needs_reset {
             match self.wrapper {
@@ -257,7 +261,7 @@ mod tests {
 
         drop(FlateDecompress::new(
             Wrapper::Zlib,
-            FormatLimits::new(None, None),
+            FormatLimits::new(None, None, None),
             false,
             TrailingData::Reject,
             pool.clone(),
@@ -300,7 +304,7 @@ mod tests {
     fn remaining_output_delegates_to_the_configured_limits() {
         let codec = FlateDecompress::new(
             Wrapper::Zlib,
-            FormatLimits::new(None, Some(100)),
+            FormatLimits::new(None, Some(100), None),
             false,
             TrailingData::Reject,
             Pool::disabled().clone(),

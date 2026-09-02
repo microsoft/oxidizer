@@ -110,7 +110,9 @@ impl std::fmt::Debug for BrotliCompress {
     }
 }
 
-impl Codec for BrotliCompress {
+// SAFETY: `step` initializes the whole slice through `initialize` before handing it to brotli as a
+// `&mut [u8]`, so every byte the reported count covers is initialized.
+unsafe impl Codec for BrotliCompress {
     fn step(&mut self, input: &[u8], output: &mut [MaybeUninit<u8>], operation: Operation) -> Result<(Step, usize, usize)> {
         let brotli_operation = match operation {
             Operation::Process => BrotliEncoderOperation::BROTLI_OPERATION_PROCESS,
@@ -192,7 +194,9 @@ impl std::fmt::Debug for BrotliDecompress {
     }
 }
 
-impl Codec for BrotliDecompress {
+// SAFETY: `step` initializes the whole slice through `initialize` before handing it to brotli as a
+// `&mut [u8]`, so every byte the reported count covers is initialized.
+unsafe impl Codec for BrotliDecompress {
     fn step(&mut self, input: &[u8], output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
         if self.needs_reset {
             self.state = Self::state();
@@ -308,7 +312,7 @@ mod tests {
 
     #[test]
     fn decompressor_debug_includes_its_policies() {
-        let codec = BrotliDecompress::new(FormatLimits::new(None, None), false, TrailingData::Reject);
+        let codec = BrotliDecompress::new(FormatLimits::new(None, None, None), false, TrailingData::Reject);
         let rendered = format!("{codec:?}");
 
         assert!(rendered.contains("trailing_data"));
@@ -317,7 +321,7 @@ mod tests {
 
     #[test]
     fn remaining_output_delegates_to_the_configured_limits() {
-        let codec = BrotliDecompress::new(FormatLimits::new(None, Some(100)), false, TrailingData::Reject);
+        let codec = BrotliDecompress::new(FormatLimits::new(None, Some(100), None), false, TrailingData::Reject);
 
         assert_eq!(Codec::remaining_output(&codec, 40), Some(60));
         assert_eq!(Codec::remaining_output(&codec, 100), Some(0));

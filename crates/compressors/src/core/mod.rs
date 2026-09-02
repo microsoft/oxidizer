@@ -179,6 +179,9 @@ impl<D> Compression for Box<dyn Compression<Mode = D>> {
         (**self).push(input)
     }
 
+    // Dropping the forward leaves the wrapped operation waiting for input forever, so the mutant
+    // hangs rather than failing and the harness records a timeout instead of a verdict.
+    #[cfg_attr(test, mutants::skip)]
     fn end_input(&mut self) {
         (**self).end_input();
     }
@@ -236,11 +239,13 @@ impl Compression for ProgressCompression {
     // No caller on the path this fixture exists for asks for the byte counters; they are here only
     // because the trait requires them.
     #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(test, mutants::skip)]
     fn total_in(&self) -> u64 {
         0
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(test, mutants::skip)]
     fn total_out(&self) -> u64 {
         0
     }
@@ -259,6 +264,9 @@ impl sealed::Compression for RejectsPush {}
 impl Compression for RejectsPush {
     type Mode = Compress;
 
+    // Accepting input would make this fixture, whose whole purpose is to reject it, ask for input
+    // endlessly instead. The mutant hangs rather than failing, so no verdict is available.
+    #[cfg_attr(test, mutants::skip)]
     fn push(&mut self, _input: BytesView) -> Result<()> {
         Err(crate::Error::invalid_state("this fixture always rejects pushed input"))
     }
@@ -272,11 +280,13 @@ impl Compression for RejectsPush {
     // No caller on the path this fixture exists for asks for the byte counters; they are here only
     // because the trait requires them.
     #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(test, mutants::skip)]
     fn total_in(&self) -> u64 {
         0
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(test, mutants::skip)]
     fn total_out(&self) -> u64 {
         0
     }
@@ -320,11 +330,13 @@ mod tests {
             // No caller on the path under test asks for the byte counters; they exist only because
             // the trait requires them.
             #[cfg_attr(coverage_nightly, coverage(off))]
+            #[cfg_attr(test, mutants::skip)]
             fn total_in(&self) -> u64 {
                 0
             }
 
             #[cfg_attr(coverage_nightly, coverage(off))]
+            #[cfg_attr(test, mutants::skip)]
             fn total_out(&self) -> u64 {
                 0
             }
@@ -358,11 +370,13 @@ mod tests {
             // No caller on the path under test asks for the byte counters; they exist only because
             // the trait requires them.
             #[cfg_attr(coverage_nightly, coverage(off))]
+            #[cfg_attr(test, mutants::skip)]
             fn total_in(&self) -> u64 {
                 0
             }
 
             #[cfg_attr(coverage_nightly, coverage(off))]
+            #[cfg_attr(test, mutants::skip)]
             fn total_out(&self) -> u64 {
                 0
             }

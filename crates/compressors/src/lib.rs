@@ -145,14 +145,15 @@
 //! # Security
 //!
 //! Every one of these formats can expand its input by orders of magnitude, so a decompressor
-//! pointed at untrusted data is a memory-exhaustion vector. Nothing here accumulates -- each chunk a
-//! codec hands back is bounded -- so the exposure is in what the caller keeps, which makes it the
-//! conveniences that buffer a whole result that need bounding.
+//! pointed at untrusted data is a memory-exhaustion vector. A decompressor driven directly never
+//! accumulates -- each chunk it hands back is bounded -- so the exposure is in what the caller
+//! keeps, which makes it the conveniences that buffer a whole result that need bounding. Those add
+//! a 64 MiB output cap and a 1024 concatenated-stream cap to whatever the caller did not set.
 //!
-//! For untrusted input use each format's `decompress_with_limits`, or
-//! [`Format::decompress_with_limits`], and set
-//! [`with_max_output_len`][DecompressorLimits::with_max_output_len] to what you can afford to
-//! buffer. [`DecompressorLimits`] documents what each format bounds by default, and why a ratio
+//! When you buffer decompressed output yourself, set
+//! [`with_max_output_len`][DecompressorLimits::with_max_output_len] to what you can afford. That
+//! guardrail is for the common case, not a substitute for bounding how many bodies you decompress
+//! at once. [`DecompressorLimits`] documents what each format bounds by default, and why a ratio
 //! alone is not protection.
 //!
 //! Decompression can yield bytes before a checksum or trailer has rejected the stream, so treat
@@ -193,7 +194,7 @@ mod format;
 #[cfg(feature = "gzip")]
 pub mod gzip;
 mod level;
-mod limits;
+pub(crate) mod limits;
 #[cfg(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
 mod macros;
 mod pool;
@@ -271,8 +272,10 @@ pub fn compress(input: BytesView, compressor: impl Compression<Mode = Compress>)
 ///
 /// # Security
 ///
-/// A format's default bounds are a coarse backstop. For untrusted input, build the decompressor
-/// with [`DecompressorLimits::with_max_output_len`][crate::DecompressorLimits::with_max_output_len].
+/// This adds no bounds of its own: the decompressor arrives already configured, so whatever it was
+/// built with is what applies. It does accumulate the whole result, so pass a decompressor built
+/// with [`DecompressorLimits::with_max_output_len`][crate::DecompressorLimits::with_max_output_len]
+/// when the input is untrusted. Each format's own `decompress` is the bounded convenience.
 pub fn decompress(input: BytesView, decompressor: impl Compression<Mode = Decompress>) -> Result<BytesView> {
     process(decompressor, input)
 }

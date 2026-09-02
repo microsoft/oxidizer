@@ -37,9 +37,10 @@ use crate::limits::FormatLimits;
 /// Brotli's default bounds.
 ///
 /// Brotli has no structural expansion ceiling, so a ratio bound cannot distinguish a bomb from
-/// legitimate highly-compressible data. Callers handling untrusted input should set an absolute
-/// output limit based on how much data they can afford to buffer.
-const DEFAULT_LIMITS: FormatLimits = FormatLimits::new(None, None);
+/// legitimate highly-compressible data, and brotli therefore declares none. What bounds untrusted
+/// brotli is the cap the buffering conveniences apply; see
+/// [`DecompressorLimits`][crate::DecompressorLimits].
+pub(crate) const DEFAULT_LIMITS: FormatLimits = FormatLimits::new(None, None, None);
 use crate::macros::define_format;
 
 /// Selects brotli as the format of a [`CompressorBuilder`][crate::CompressorBuilder] or [`DecompressorBuilder`][crate::DecompressorBuilder], and carries

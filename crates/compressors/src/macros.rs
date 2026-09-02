@@ -199,9 +199,20 @@ macro_rules! define_decompressor_build {
         ///
         /// # Errors
         ///
-        /// Returns an error if the data is malformed, truncated, or exceeds the default limits.
+        /// Returns an error if the data is malformed, truncated, or exceeds the bounds this convenience
+        /// applies: the format's own ratio, plus 64 MiB of output and 1024 concatenated streams because it
+        /// buffers the whole result. Use `decompress_with_limits` to choose your own.
         pub fn decompress(input: BytesView, resources: &$crate::Resources) -> Result<BytesView> {
-            $crate::decompress(input, Decompressor::new(resources))
+            // This convenience accumulates the whole result, so it is the caller's memory that a
+            // bomb would exhaust. Incremental decompressors hand each chunk straight back and are
+            // left uncapped, because a total-output bound there would cut off long streams that
+            // never buffer more than one chunk.
+            $crate::decompress(
+                input,
+                Decompressor::builder()
+                    .limits($crate::DecompressorLimits::new().for_buffered_output())
+                    .build(resources),
+            )
         }
 
         #[doc = concat!("Decompresses a complete ", $name, " stream with explicit limits.")]
@@ -210,9 +221,13 @@ macro_rules! define_decompressor_build {
         ///
         /// # Errors
         ///
-        /// Returns an error if the data is malformed, truncated, or exceeds `limits`.
+        /// Returns an error if the data is malformed, truncated, or exceeds `limits`. Bounds left unset
+        /// on `limits` still receive this convenience's buffering caps.
         pub fn decompress_with_limits(input: BytesView, resources: &$crate::Resources, limits: DecompressorLimits) -> Result<BytesView> {
-            $crate::decompress(input, Decompressor::builder().limits(limits).build(resources))
+            $crate::decompress(
+                input,
+                Decompressor::builder().limits(limits.for_buffered_output()).build(resources),
+            )
         }
     };
     (
@@ -285,9 +300,20 @@ macro_rules! define_decompressor_build {
         /// # Errors
         ///
         /// Returns an error if the decompressor cannot be built, or if the data is malformed,
-        /// truncated, or exceeds the default limits.
+        /// truncated, or exceeds the bounds this convenience applies: the format's own ratio, plus
+        /// 64 MiB of output and 1024 concatenated streams because it buffers the whole result. Use
+        /// `decompress_with_limits` to choose your own.
         pub fn decompress(input: BytesView, resources: &$crate::Resources) -> Result<BytesView> {
-            $crate::decompress(input, Decompressor::new(resources))
+            // This convenience accumulates the whole result, so it is the caller's memory that a
+            // bomb would exhaust. Incremental decompressors hand each chunk straight back and are
+            // left uncapped, because a total-output bound there would cut off long streams that
+            // never buffer more than one chunk.
+            $crate::decompress(
+                input,
+                Decompressor::builder()
+                    .limits($crate::DecompressorLimits::new().for_buffered_output())
+                    .build(resources)?,
+            )
         }
 
         #[doc = concat!("Decompresses a complete ", $name, " stream with explicit limits.")]
@@ -297,9 +323,15 @@ macro_rules! define_decompressor_build {
         /// # Errors
         ///
         /// Returns an error if the decompressor cannot be built, or if the data is malformed,
-        /// truncated, or exceeds `limits`.
+        /// truncated, or exceeds `limits`. Bounds left unset on `limits` still receive this
+        /// convenience's buffering caps.
         pub fn decompress_with_limits(input: BytesView, resources: &$crate::Resources, limits: DecompressorLimits) -> Result<BytesView> {
-            $crate::decompress(input, Decompressor::builder().limits(limits).build(resources)?)
+            $crate::decompress(
+                input,
+                Decompressor::builder()
+                    .limits(limits.for_buffered_output())
+                    .build(resources)?,
+            )
         }
     };
 }

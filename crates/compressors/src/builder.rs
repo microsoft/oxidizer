@@ -170,8 +170,9 @@ impl<T> DecompressorBuilder<T> {
 
     /// Overrides the bounds on how much data decompression may produce.
     ///
-    /// Bounds left unset on the passed value keep the chosen format's own defaults, which differ by
-    /// orders of magnitude between the deflate family and brotli.
+    /// Bounds left unset on the passed value keep the chosen format's own default, which is a ratio
+    /// and nothing else. The conveniences that buffer a whole result add their own caps on top; see
+    /// [`DecompressorLimits`].
     ///
     /// # Security
     ///

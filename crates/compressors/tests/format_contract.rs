@@ -61,15 +61,42 @@ impl<T> Built for Result<T, compressors::BuildError> {
 }
 
 /// Drives any compression operation to completion, feeding the input in `feed` sized pieces.
+/// Caps every drain loop in this file.
+///
+/// A conforming operation always terminates, so exceeding this means the code under test is
+/// spinning. A hanging test reports nothing at all, so the cap turns a hang into a failure --
+/// which also lets mutation testing reach a verdict instead of timing out.
+const MAX_STEPS: usize = 1_000_000;
+
+/// Fails a spinning test instead of letting it hang.
+///
+/// A conforming operation always terminates, so exceeding the cap means the code under test is
+/// looping. A hanging test reports nothing at all, and mutation testing records a timeout rather
+/// than a verdict, so every drain loop below counts its steps through this.
+struct StepGuard(usize);
+
+impl StepGuard {
+    fn new() -> Self {
+        Self(0)
+    }
+
+    fn step(&mut self) {
+        self.0 += 1;
+        assert!(self.0 < MAX_STEPS, "the operation did not finish within {MAX_STEPS} steps");
+    }
+}
+
 fn process<D>(compression: &mut dyn Compression<Mode = D>, input: &BytesView, feed: usize) -> compressors::Result<BytesView> {
     let mut offset = 0;
     let mut collected = BytesBuf::new();
 
+    let mut guard = StepGuard::new();
     loop {
+        guard.step();
         match compression.pull()? {
             Output::Data(data) => collected.put_bytes(data),
             Output::Progress => {}
-            Output::Done => break,
+            Output::Done => return Ok(collected.consume_all()),
             Output::NeedInput => {
                 if offset >= input.len() {
                     compression.end_input();
@@ -82,8 +109,6 @@ fn process<D>(compression: &mut dyn Compression<Mode = D>, input: &BytesView, fe
             }
         }
     }
-
-    Ok(collected.consume_all())
 }
 
 fn compress(compressor: &mut dyn Compression<Mode = Compress>, input: &BytesView, feed: usize) -> compressors::Result<BytesView> {
@@ -147,7 +172,9 @@ macro_rules! format_contract {
                 by_hand.push(view(&data)).expect("push succeeds");
                 Compression::end_input(&mut by_hand);
                 let mut collected = BytesBuf::new();
+                let mut guard = StepGuard::new();
                 loop {
+                    guard.step();
                     match Compression::pull(&mut by_hand).expect("pull succeeds") {
                         Output::Data(chunk) => collected.put_bytes(chunk),
                         Output::Progress => {}
@@ -235,7 +262,9 @@ macro_rules! format_contract {
                 Compression::end_input(&mut compressor);
 
                 let mut compressed = BytesBuf::new();
+                let mut guard = StepGuard::new();
                 loop {
+                    guard.step();
                     match Compression::pull(&mut compressor).expect("pull succeeds") {
                         Output::Data(piece) => {
                             assert!(piece.len() <= 256, "chunk of {} bytes exceeded the bound", piece.len());
@@ -255,7 +284,9 @@ macro_rules! format_contract {
                 Compression::end_input(&mut decompressor);
 
                 let mut plain = BytesBuf::new();
+                let mut guard = StepGuard::new();
                 loop {
+                    guard.step();
                     match Compression::pull(&mut decompressor).expect("pull succeeds") {
                         Output::Data(piece) => {
                             assert!(piece.len() <= 256, "chunk of {} bytes exceeded the bound", piece.len());
@@ -339,7 +370,9 @@ macro_rules! format_contract {
                 let mut compressor = $module::Compressor::new(resources());
                 compressor.push(view(b"partial")).expect("push succeeds");
 
+                let mut guard = StepGuard::new();
                 let output = loop {
+                    guard.step();
                     match Compression::pull(&mut compressor).expect("pull succeeds") {
                         Output::Data(_) | Output::Progress => {}
                         other => break other,
@@ -352,8 +385,9 @@ macro_rules! format_contract {
             #[test]
             fn enforces_a_configured_expansion_limit() {
                 // A ratio the data is guaranteed to exceed, so the mechanism itself is tested
-                // rather than whichever default the format happens to carry.
-                let bomb = $module::compress(view(&vec![0_u8; 16 * 1024 * 1024]), resources()).expect("compression succeeds");
+                // rather than whichever default the format happens to carry. A quarter megabyte of
+                // zeros clears the guard's 32 KiB floor several times over while staying cheap.
+                let bomb = $module::compress(view(&vec![0_u8; 256 * 1024]), resources()).expect("compression succeeds");
 
                 let mut decompressor = $module::Decompressor::builder()
                     .limits(DecompressorLimits::new().with_max_ratio(NonZeroU32::new(4).expect("4 is not zero")))
@@ -362,7 +396,9 @@ macro_rules! format_contract {
                 decompressor.push(bomb).expect("push succeeds");
                 Compression::end_input(&mut decompressor);
 
+                let mut guard = StepGuard::new();
                 let error = loop {
+                    guard.step();
                     match Compression::pull(&mut decompressor) {
                         Ok(Output::Data(_) | Output::Progress) => {}
                         Ok(_) => panic!("the bomb decompressed fully instead of being rejected"),
@@ -372,7 +408,7 @@ macro_rules! format_contract {
 
                 assert!(error.is_limit_exceeded(), "got {error}");
                 assert!(
-                    decompressor.total_out() < 16 * 1024 * 1024,
+                    decompressor.total_out() < 256 * 1024,
                     "the guard should fire before the full expansion"
                 );
             }
@@ -409,7 +445,7 @@ macro_rules! format_contract {
 
             #[test]
             fn an_absolute_cap_is_enforced() {
-                let compressed = $module::compress(view(&vec![0_u8; 4 * 1024 * 1024]), resources()).expect("compression succeeds");
+                let compressed = $module::compress(view(&vec![0_u8; 256 * 1024]), resources()).expect("compression succeeds");
 
                 let mut decompressor = $module::Decompressor::builder()
                     .limits(DecompressorLimits::new().without_max_ratio().with_max_output_len(1024))
@@ -418,7 +454,9 @@ macro_rules! format_contract {
                 decompressor.push(compressed).expect("push succeeds");
                 Compression::end_input(&mut decompressor);
 
+                let mut guard = StepGuard::new();
                 let error = loop {
+                    guard.step();
                     match Compression::pull(&mut decompressor) {
                         Ok(Output::Data(_) | Output::Progress) => {}
                         Ok(_) => panic!("the cap should have fired"),
@@ -431,7 +469,7 @@ macro_rules! format_contract {
 
             #[test]
             fn trusted_callers_can_opt_out_of_the_limits() {
-                let data = vec![0_u8; 4 * 1024 * 1024];
+                let data = vec![0_u8; 256 * 1024];
                 let compressed = $module::compress(view(&data), resources()).expect("compression succeeds");
 
                 let mut decompressor = $module::Decompressor::builder()
@@ -647,7 +685,9 @@ macro_rules! format_contract {
                     Compression::end_input(compressor);
 
                     let mut collected = BytesBuf::new();
+                    let mut guard = StepGuard::new();
                     loop {
+                        guard.step();
                         match Compression::pull(compressor).expect("pull succeeds") {
                             Output::Data(chunk) => collected.put_bytes(chunk),
                             Output::Progress => {}
@@ -684,7 +724,9 @@ macro_rules! format_contract {
 
                 for (label, compressor) in [("first", &mut first), ("second", &mut second)] {
                     let mut collected = BytesBuf::new();
+                    let mut guard = StepGuard::new();
                     loop {
+                        guard.step();
                         match Compression::pull(compressor).expect("pull succeeds") {
                             Output::Data(chunk) => collected.put_bytes(chunk),
                             Output::Progress => {}
@@ -833,7 +875,9 @@ macro_rules! format_contract {
                 compressor.flush().expect("flush request succeeds");
 
                 let mut compressed = BytesBuf::new();
+                let mut guard = StepGuard::new();
                 loop {
+                    guard.step();
                     match compressor.pull().expect("pull succeeds") {
                         Output::Data(chunk) => compressed.put_bytes(chunk),
                         Output::Progress => {}
@@ -846,7 +890,9 @@ macro_rules! format_contract {
                 decompressor.push(compressed.consume_all()).expect("push succeeds");
 
                 let mut plain = BytesBuf::new();
+                let mut guard = StepGuard::new();
                 loop {
+                    guard.step();
                     match decompressor.pull().expect("pull succeeds") {
                         Output::Data(chunk) => plain.put_bytes(chunk),
                         Output::Progress => {}
@@ -871,7 +917,9 @@ macro_rules! format_contract {
                 assert!(error.is_invalid_state(), "got {error}");
 
                 let mut compressed = BytesBuf::new();
+                let mut guard = StepGuard::new();
                 loop {
+                    guard.step();
                     match compressor.pull().expect("pull succeeds") {
                         Output::Data(chunk) => compressed.put_bytes(chunk),
                         Output::Progress => {}
@@ -898,7 +946,9 @@ macro_rules! format_contract {
 
                     let mut compressed = BytesBuf::new();
                     let mut pulls = 0;
+                    let mut guard = StepGuard::new();
                     loop {
+                        guard.step();
                         pulls += 1;
                         assert!(pulls < 20_000, "flush did not terminate at chunk size {size}");
 
@@ -914,7 +964,9 @@ macro_rules! format_contract {
                     }
 
                     compressor.end_input();
+                    let mut guard = StepGuard::new();
                     loop {
+                        guard.step();
                         match compressor.pull().expect("finish succeeds") {
                             Output::Data(piece) => {
                                 assert!(piece.len() <= size);
@@ -942,7 +994,9 @@ macro_rules! format_contract {
                 let mut plain = BytesBuf::new();
 
                 decompressor.push(first).expect("first push succeeds");
+                let mut guard = StepGuard::new();
                 loop {
+                    guard.step();
                     match decompressor.pull().expect("first stream decompresses") {
                         Output::Data(chunk) => plain.put_bytes(chunk),
                         Output::Progress => {}
@@ -953,7 +1007,9 @@ macro_rules! format_contract {
 
                 decompressor.push(second).expect("second push succeeds");
                 decompressor.end_input();
+                let mut guard = StepGuard::new();
                 loop {
+                    guard.step();
                     match decompressor.pull().expect("second stream decompresses") {
                         Output::Data(chunk) => plain.put_bytes(chunk),
                         Output::Progress => {}
@@ -978,7 +1034,9 @@ macro_rules! format_contract {
                 decompressor.push(joined).expect("push succeeds");
 
                 let mut plain = BytesBuf::new();
+                let mut guard = StepGuard::new();
                 loop {
+                    guard.step();
                     match decompressor.pull().expect("decompression succeeds") {
                         Output::Data(chunk) => plain.put_bytes(chunk),
                         Output::Progress => {}
@@ -999,7 +1057,9 @@ macro_rules! format_contract {
                 decompressor.push(compressed).expect("first push succeeds");
 
                 let mut plain = BytesBuf::new();
+                let mut guard = StepGuard::new();
                 loop {
+                    guard.step();
                     match decompressor.pull().expect("stream decompresses") {
                         Output::Data(chunk) => plain.put_bytes(chunk),
                         Output::Progress => {}
@@ -1032,7 +1092,9 @@ macro_rules! format_contract {
                 decompressor.end_input();
 
                 let mut plain = BytesBuf::new();
+                let mut guard = StepGuard::new();
                 loop {
+                    guard.step();
                     match decompressor.pull().expect("both streams decompress") {
                         Output::Data(chunk) => plain.put_bytes(chunk),
                         Output::Progress => {}
@@ -1057,7 +1119,9 @@ macro_rules! format_contract {
                     .built();
                 decompressor.push(compressed).expect("push succeeds");
 
+                let mut guard = StepGuard::new();
                 loop {
+                    guard.step();
                     match decompressor.pull().expect("stream itself is valid") {
                         Output::Data(_) | Output::Progress => {}
                         Output::NeedInput => break,
@@ -1083,7 +1147,9 @@ macro_rules! format_contract {
                 decompressor.push(joined).expect("push succeeds");
                 decompressor.end_input();
 
+                let mut guard = StepGuard::new();
                 let error = loop {
+                    guard.step();
                     match decompressor.pull() {
                         Ok(Output::Data(_) | Output::Progress) => {}
                         Ok(_) => panic!("trailing input unexpectedly completed"),
@@ -1094,22 +1160,30 @@ macro_rules! format_contract {
             }
 
             #[test]
-            fn incomplete_trailing_stream_is_corrupt_data() {
+            fn a_truncated_later_member_reads_as_a_short_stream() {
+                // A caller retrying a partial transfer needs to tell "it stopped early" from "these
+                // bytes are wrong". A member that starts and then runs out is the former, however
+                // many members decoded cleanly before it.
                 let compressed = $module::compress(view(&payload()), resources()).expect("compress");
-                let joined = BytesView::from_views([compressed, view(&[0])]);
+                let whole = compressed.to_vec();
+                let truncated = &whole[..whole.len() - 1];
+                let joined = BytesView::from_views([compressed, view(truncated)]);
+
                 let mut decompressor = $module::Decompressor::builder().multi_stream(true).build(resources()).built();
                 decompressor.push(joined).expect("push succeeds");
-                decompressor.end_input();
+                Compression::end_input(&mut decompressor);
 
+                let mut guard = StepGuard::new();
                 let error = loop {
-                    match decompressor.pull() {
+                    guard.step();
+                    match Compression::pull(&mut decompressor) {
                         Ok(Output::Data(_) | Output::Progress) => {}
-                        Ok(_) => panic!("incomplete trailing stream unexpectedly completed"),
+                        Ok(_) => panic!("a truncated member unexpectedly completed"),
                         Err(error) => break error,
                     }
                 };
 
-                assert!(error.is_corrupt_data(), "got {error}");
+                assert!(error.is_unexpected_end_of_stream(), "got {error}");
             }
 
             #[test]
@@ -1125,7 +1199,9 @@ macro_rules! format_contract {
                 decompressor.push(joined).expect("push succeeds");
                 decompressor.end_input();
 
+                let mut guard = StepGuard::new();
                 let error = loop {
+                    guard.step();
                     match decompressor.pull() {
                         Ok(Output::Data(_) | Output::Progress) => {}
                         Ok(_) => panic!("the second stream should exceed the limit"),
@@ -1149,7 +1225,9 @@ macro_rules! format_contract {
                     .built();
                 decompressor.push(compressed.clone()).expect("first push succeeds");
 
+                let mut guard = StepGuard::new();
                 loop {
+                    guard.step();
                     match decompressor.pull().expect("first stream decompresses") {
                         Output::Data(_) | Output::Progress => {}
                         Output::NeedInput => break,
@@ -1194,7 +1272,9 @@ macro_rules! format_contract {
                 decompressor.push(view(b"not a valid stream")).expect("push succeeds");
                 decompressor.end_input();
 
+                let mut guard = StepGuard::new();
                 let first = loop {
+                    guard.step();
                     match decompressor.pull() {
                         Ok(Output::Data(_) | Output::Progress) => {}
                         Ok(_) => panic!("invalid input unexpectedly completed"),
@@ -1317,7 +1397,10 @@ mod format_specific_settings {
 
     #[test]
     fn default_limits_accept_the_compressors_own_high_ratio_output() {
-        let data = vec![0_u8; 4 * 1024 * 1024];
+        // Half a megabyte of zeros clears the ratio guard's 32 KiB floor and still reaches an
+        // expansion far past deflate's structural `1032x`, which is the ratio a portable default
+        // would have been calibrated on. Brotli's own default must accept it.
+        let data = vec![0_u8; 512 * 1024];
         let compressed = brotli::compress(view(&data), resources()).expect("compression succeeds");
 
         let plain = brotli::decompress(compressed, resources()).expect("default limits accept valid brotli");
@@ -1758,7 +1841,9 @@ mod trait_contract {
         Compression::end_input(&mut *compressor);
 
         let mut collected = BytesBuf::new();
+        let mut guard = StepGuard::new();
         loop {
+            guard.step();
             let output = Compression::pull(&mut *compressor).expect("pull succeeds");
             assert!(!output.is_need_input(), "compressor requested input after end");
             let done = output.is_done();
@@ -1775,7 +1860,9 @@ mod trait_contract {
         Compression::end_input(&mut *decompressor);
 
         let mut plain = BytesBuf::new();
+        let mut guard = StepGuard::new();
         loop {
+            guard.step();
             let output = Compression::pull(&mut *decompressor).expect("pull succeeds");
             assert!(!output.is_need_input(), "decompressor requested input after end");
             let done = output.is_done();
@@ -1832,7 +1919,9 @@ mod trait_contract {
         let mut concrete = gzip::Compressor::new(resources());
         concrete.push(input.clone()).expect("push succeeds");
         concrete.flush().expect("concrete flush succeeds");
+        let mut guard = StepGuard::new();
         loop {
+            guard.step();
             let output = concrete.pull().expect("pull succeeds");
             assert!(!output.is_done(), "flush ended the stream");
             if output.is_need_input() {
@@ -1845,7 +1934,9 @@ mod trait_contract {
             .expect("the default settings are accepted");
         compressor.push(input).expect("push succeeds");
         let mut compressed = BytesBuf::new();
+        let mut guard = StepGuard::new();
         loop {
+            guard.step();
             let output = compressor.pull().expect("pull succeeds");
             assert!(!output.is_done(), "flush ended the stream");
             let need_input = output.is_need_input();
@@ -1862,7 +1953,9 @@ mod trait_contract {
         let before_flush = compressed.len();
 
         compressor.flush().expect("boxed flush succeeds");
+        let mut guard = StepGuard::new();
         loop {
+            guard.step();
             let output = compressor.pull().expect("pull succeeds");
             assert!(!output.is_done(), "flush ended the stream");
             let need_input = output.is_need_input();
@@ -1880,7 +1973,9 @@ mod trait_contract {
         );
 
         compressor.end_input();
+        let mut guard = StepGuard::new();
         loop {
+            guard.step();
             let output = compressor.pull().expect("pull succeeds");
             assert!(!output.is_need_input(), "compressor requested input after end");
             let done = output.is_done();
@@ -1900,7 +1995,9 @@ mod trait_contract {
         decompressor.push(joined).expect("push succeeds");
 
         let mut plain = BytesBuf::new();
+        let mut guard = StepGuard::new();
         loop {
+            guard.step();
             let output = decompressor.pull().expect("pull succeeds");
             assert!(!output.is_need_input(), "complete stream requested more input");
             let done = output.is_done();

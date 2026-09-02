@@ -20,6 +20,43 @@ use crate::error::{Error, Result};
 )]
 const RATIO_FLOOR_BYTES: u64 = 32 * 1024;
 
+/// The cap the buffering conveniences put on total decompressed output.
+///
+/// A ratio bound cannot tell a bomb from legitimate highly-compressible data, so an absolute cap is
+/// what actually bounds untrusted input. It applies where the crate accumulates a whole result --
+/// each format's `decompress` and `decompress_with_limits`, and the same pair on
+/// [`Format`][crate::Format] -- because those are the paths where a bomb exhausts the caller's
+/// memory. A decompressor driven incrementally hands every chunk straight back, so a cumulative
+/// bound there would cut off long streams that never buffer more than one chunk.
+///
+/// 64 MiB is a policy guardrail for the common case, not a universal safety guarantee: a server
+/// decompressing many bodies at once still has to bound its own concurrency. A caller who buffers
+/// more, or less, passes explicit [`DecompressorLimits`] to `decompress_with_limits`.
+#[cfg_attr(
+    all(
+        not(test),
+        not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))
+    ),
+    expect(dead_code, reason = "only the decompressors resolve and enforce bounds, and no format is enabled")
+)]
+pub(crate) const DEFAULT_MAX_OUTPUT_LEN: u64 = 64 * 1024 * 1024;
+
+/// The cap the buffering conveniences put on concatenated stream count.
+///
+/// Each stream costs engine setup that its own payload need not pay for, so a buffered input of
+/// many tiny members amplifies work out of proportion to its size. Like the output cap this binds
+/// only where output accumulates: formats that treat concatenated members as one logical stream are
+/// used incrementally for exactly the block-oriented archive workloads that run to many thousands
+/// of members, and those must keep passing through.
+#[cfg_attr(
+    all(
+        not(test),
+        not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))
+    ),
+    expect(dead_code, reason = "only the decompressors resolve and enforce bounds, and no format is enabled")
+)]
+pub(crate) const DEFAULT_MAX_STREAMS: u64 = 1024;
+
 /// One configurable bound, in one of three states.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum Limit<T> {
@@ -55,8 +92,8 @@ impl<T> Limit<T> {
 /// memory-exhaustion vector.
 ///
 /// This type carries *overrides*, not values. Each bound starts unset, meaning the format applies
-/// its own default -- there is no portable default, because the formats differ by orders of
-/// magnitude in what they can legitimately produce:
+/// its own default. The only bound a format sets is the ratio, because the formats differ by orders
+/// of magnitude in what they can legitimately produce:
 ///
 /// | Format | Default ratio bound | Why |
 /// |---|---|---|
@@ -64,16 +101,19 @@ impl<T> Limit<T> {
 /// | `brotli` | none | brotli has no structural ceiling, so any ratio bound rejects sufficiently compressible legitimate data |
 /// | `zstd` | `250 000x` | zstd has no structural ceiling either, so it needs the same loose bound |
 ///
-/// No format caps total output size or stream count by default, so a multi-gigabyte or
-/// many-member stream decompresses.
+/// Total output and stream count are not bounded by default, because a decompressor hands each
+/// chunk straight back and a stream of any length passes through it in bounded memory. The
+/// conveniences that buffer a whole result -- each format's `decompress` and
+/// `decompress_with_limits`, and the same pair on [`Format`][crate::Format] -- add a 64 MiB output
+/// cap and a 1024 stream cap to whichever of those bounds the caller left unset.
 ///
 /// # Security
 ///
 /// A ratio bound is a coarse backstop, not real protection: in a format with no structural
-/// expansion ceiling it cannot separate a bomb from legitimate highly-compressible data. For
-/// untrusted input set [`with_max_output_len`][Self::with_max_output_len] to whatever the caller
-/// can actually afford to buffer. When multi-stream decompression is enabled, also set
-/// [`with_max_streams`][Self::with_max_streams] to bound per-stream setup work.
+/// expansion ceiling it cannot separate a bomb from legitimate highly-compressible data. What
+/// bounds untrusted input is an absolute cap on what you buffer. Set
+/// [`with_max_output_len`][Self::with_max_output_len] to whatever the caller can afford whenever it
+/// accumulates decompressed output itself.
 ///
 /// # Examples
 ///
@@ -82,10 +122,10 @@ impl<T> Limit<T> {
 ///
 /// use compressors::DecompressorLimits;
 ///
-/// // Leave the format's own ratio default alone, but cap what we will buffer.
+/// // Tighten the shared 64 MiB cap to what this caller can actually buffer.
 /// let untrusted = DecompressorLimits::new().with_max_output_len(16 * 1024 * 1024);
 ///
-/// // Or override both.
+/// // Or override every bound.
 /// let strict = DecompressorLimits::new()
 ///     .with_max_ratio(NonZeroU32::new(50).unwrap())
 ///     .with_max_output_len(1024 * 1024)
@@ -117,8 +157,10 @@ impl DecompressorLimits {
     /// # Security
     ///
     /// Only use this when the compressed data comes from a source you trust to the same degree you
-    /// trust your own process. An unbounded decompressor fed a decompression bomb will consume memory
-    /// until the allocator gives up.
+    /// trust your own process. It removes the caps the buffering conveniences would otherwise apply,
+    /// so a decompression bomb passed to one of those will consume memory until the allocator gives
+    /// up. Driving a decompressor directly still hands back one bounded chunk at a time, and there
+    /// the risk is only what the consumer chooses to keep.
     pub const UNLIMITED: Self = Self {
         ratio: Limit::Unlimited,
         output_len: Limit::Unlimited,
@@ -175,6 +217,32 @@ impl DecompressorLimits {
         self
     }
 
+    /// Adds the bounds an API that buffers a whole result needs, wherever the caller left them open.
+    ///
+    /// A decompressor that hands each chunk back keeps nothing, so it carries no cumulative bounds
+    /// and a stream of any length passes through it. The conveniences that accumulate are a
+    /// different proposition: what they produce is what the caller holds, so they apply the shared
+    /// caps. Only bounds the caller left [`Limit::Unset`] are filled -- an explicit value, or an
+    /// explicit removal, is the caller's decision and survives untouched.
+    #[cfg_attr(
+        all(
+            not(test),
+            not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))
+        ),
+        expect(dead_code, reason = "only the buffering conveniences apply this, and no format is enabled")
+    )]
+    pub(crate) const fn for_buffered_output(mut self) -> Self {
+        if matches!(self.output_len, Limit::Unset) {
+            self.output_len = Limit::Value(DEFAULT_MAX_OUTPUT_LEN);
+        }
+
+        if matches!(self.streams, Limit::Unset) {
+            self.streams = Limit::Value(DEFAULT_MAX_STREAMS);
+        }
+
+        self
+    }
+
     /// Applies these overrides on top of a format's defaults.
     #[cfg_attr(
         all(
@@ -218,11 +286,11 @@ pub(crate) struct FormatLimits {
 )]
 impl FormatLimits {
     /// Declares a format's default bounds.
-    pub(crate) const fn new(max_ratio: Option<u32>, max_output_len: Option<u64>) -> Self {
+    pub(crate) const fn new(max_ratio: Option<u32>, max_output_len: Option<u64>, max_streams: Option<u64>) -> Self {
         Self {
             ratio: max_ratio,
             output_len: max_output_len,
-            streams: None,
+            streams: max_streams,
         }
     }
 
@@ -267,8 +335,64 @@ impl FormatLimits {
 mod tests {
     use super::*;
 
+    #[test]
+    fn the_shared_defaults_are_the_documented_values() {
+        // Pinned as literals rather than by reference to the constants, so moving either one is a
+        // deliberate edit here as well as there -- and so the doc table that quotes these numbers
+        // cannot drift away from them unnoticed.
+        assert_eq!(DEFAULT_MAX_OUTPUT_LEN, 64 * 1024 * 1024, "the shared output cap is 64 MiB");
+        assert_eq!(DEFAULT_MAX_STREAMS, 1024, "the shared stream cap is 1024");
+    }
+
+    #[test]
+    fn buffering_fills_only_the_bounds_the_caller_left_open() {
+        // The trap this guards: a caller who overrides one bound must not silently lose the others.
+        let ratio_only = DecompressorLimits::new().with_max_ratio(ratio(7)).for_buffered_output();
+
+        assert_eq!(ratio_only.resolve(ALL_BOUNDS).output_len, Some(DEFAULT_MAX_OUTPUT_LEN));
+        assert_eq!(ratio_only.resolve(ALL_BOUNDS).streams, Some(DEFAULT_MAX_STREAMS));
+        assert_eq!(ratio_only.resolve(ALL_BOUNDS).ratio, Some(7), "the caller's own bound survives");
+    }
+
+    #[test]
+    fn buffering_leaves_an_explicit_choice_alone() {
+        let chosen = DecompressorLimits::new()
+            .with_max_output_len(99)
+            .with_max_streams(NonZeroU64::new(3).expect("three is non-zero"))
+            .for_buffered_output();
+
+        assert_eq!(
+            chosen.resolve(ALL_BOUNDS).output_len,
+            Some(99),
+            "an explicit cap is not overwritten"
+        );
+        assert_eq!(chosen.resolve(ALL_BOUNDS).streams, Some(3), "an explicit cap is not overwritten");
+    }
+
+    #[test]
+    fn buffering_respects_an_explicit_removal() {
+        let removed = DecompressorLimits::new()
+            .without_max_output_len()
+            .without_max_streams()
+            .for_buffered_output();
+
+        assert_eq!(removed.resolve(ALL_BOUNDS).output_len, None, "opting out is the caller's decision");
+        assert_eq!(removed.resolve(ALL_BOUNDS).streams, None, "opting out is the caller's decision");
+        assert_eq!(
+            DecompressorLimits::UNLIMITED.for_buffered_output().resolve(ALL_BOUNDS),
+            FormatLimits::new(None, None, None),
+            "UNLIMITED removes every bound, buffering or not"
+        );
+    }
+
     /// Stands in for a format's declared defaults.
-    const DEFAULTS: FormatLimits = FormatLimits::new(Some(1_000), None);
+    const DEFAULTS: FormatLimits = FormatLimits::new(Some(1_000), None, None);
+
+    /// Stands in for defaults that set every bound.
+    ///
+    /// Real formats declare only a ratio, so resolving against [`DEFAULTS`] cannot tell "the caller
+    /// removed this bound" from "there was nothing to remove". Tests about removal use this instead.
+    const ALL_BOUNDS: FormatLimits = FormatLimits::new(Some(1_000), Some(4_096), Some(8));
 
     fn ratio(value: u32) -> NonZeroU32 {
         NonZeroU32::new(value).expect("test ratios are never zero")
@@ -297,25 +421,29 @@ mod tests {
 
     #[test]
     fn unlimited_removes_the_formats_defaults() {
-        let resolved = resolved(DecompressorLimits::UNLIMITED);
+        let resolved = DecompressorLimits::UNLIMITED.resolve(ALL_BOUNDS);
 
         assert_eq!(resolved.ratio, None);
         assert_eq!(resolved.output_len, None);
+        assert_eq!(resolved.streams, None);
         resolved.check(1, u64::MAX, u64::MAX).expect("unlimited never rejects");
     }
 
     #[test]
     fn each_bound_can_be_removed_independently() {
-        let no_ratio = resolved(DecompressorLimits::new().without_max_ratio());
+        let no_ratio = DecompressorLimits::new().without_max_ratio().resolve(ALL_BOUNDS);
         assert_eq!(no_ratio.ratio, None);
-        assert_eq!(no_ratio.output_len, DEFAULTS.output_len);
+        assert_eq!(no_ratio.output_len, ALL_BOUNDS.output_len, "the others are untouched");
+        assert_eq!(no_ratio.streams, ALL_BOUNDS.streams, "the others are untouched");
 
-        let no_len = resolved(DecompressorLimits::new().without_max_output_len());
-        assert_eq!(no_len.ratio, DEFAULTS.ratio);
+        let no_len = DecompressorLimits::new().without_max_output_len().resolve(ALL_BOUNDS);
+        assert_eq!(no_len.ratio, ALL_BOUNDS.ratio, "the others are untouched");
         assert_eq!(no_len.output_len, None);
+        assert_eq!(no_len.streams, ALL_BOUNDS.streams, "the others are untouched");
 
-        let no_streams = resolved(DecompressorLimits::new().without_max_streams());
-        assert_eq!(no_streams.ratio, DEFAULTS.ratio);
+        let no_streams = DecompressorLimits::new().without_max_streams().resolve(ALL_BOUNDS);
+        assert_eq!(no_streams.ratio, ALL_BOUNDS.ratio, "the others are untouched");
+        assert_eq!(no_streams.output_len, ALL_BOUNDS.output_len, "the others are untouched");
         assert_eq!(no_streams.streams, None);
     }
 

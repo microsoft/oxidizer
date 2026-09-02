@@ -33,15 +33,60 @@ fn compression_level(level: Level) -> i32 {
     MAPPING[usize::from(level.get().min(9))]
 }
 
-/// Initializes an uninitialized output slice so zstd, which writes into `&mut [u8]`, can use it.
-fn initialize(output: &mut [MaybeUninit<u8>]) -> &mut [u8] {
-    for slot in &mut *output {
-        slot.write(0);
+/// Lends zstd an output slice that is still uninitialized.
+///
+/// Zstd writes into the output without ever reading it, and `WriteBuf` is the trait zstd-safe
+/// provides to say exactly that: the capacity may be uninitialized, and the callee reports what it
+/// filled. Handing over the engine's spare capacity directly is what keeps this codec from zeroing
+/// a whole output chunk before every step, which would defeat the point of reserving uninitialized
+/// memory in the first place.
+struct UninitOutput<'a> {
+    buffer: &'a mut [MaybeUninit<u8>],
+    /// How many bytes from the front zstd has reported writing.
+    filled: usize,
+}
+
+// SAFETY: `as_mut_ptr` returns a pointer to `capacity` writable bytes that stays valid for the
+// borrow, and `as_slice` never covers more than `filled`, which only ever advances through
+// `filled_until` -- whose own contract is that the caller initialized that many bytes.
+unsafe impl zstd_safe::WriteBuf for UninitOutput<'_> {
+    fn as_slice(&self) -> &[u8] {
+        // SAFETY: `filled_until` promised these bytes are initialized, and `u8` shares its layout
+        // with `MaybeUninit<u8>`.
+        unsafe { std::slice::from_raw_parts(self.buffer.as_ptr().cast::<u8>(), self.filled) }
     }
 
-    // SAFETY: every element of the slice was just initialized by the loop above, and `u8` has the
-    // same layout as `MaybeUninit<u8>`.
-    unsafe { &mut *(std::ptr::from_mut(output) as *mut [u8]) }
+    fn capacity(&self) -> usize {
+        self.buffer.len()
+    }
+
+    fn as_mut_ptr(&mut self) -> *mut u8 {
+        self.buffer.as_mut_ptr().cast::<u8>()
+    }
+
+    unsafe fn filled_until(&mut self, n: usize) {
+        self.filled = n;
+    }
+}
+
+impl<'a> UninitOutput<'a> {
+    fn new(buffer: &'a mut [MaybeUninit<u8>]) -> Self {
+        Self { buffer, filled: 0 }
+    }
+}
+
+/// Reads zstd's "bytes still buffered" answer as a step outcome.
+///
+/// `remaining == 0` is how zstd says the epilogue is out, so treating it as anything else leaves a
+/// finish that never completes: the mutant hangs rather than failing, and the harness records a
+/// timeout instead of a verdict.
+#[cfg_attr(test, mutants::skip)]
+fn finish_step(operation: Operation, remaining: usize) -> Step {
+    match operation {
+        Operation::Finish if remaining == 0 => Step::StreamEnd,
+        Operation::Flush if remaining == 0 => Step::FlushComplete,
+        _ => Step::Continue,
+    }
 }
 
 fn compression_failed(code: usize) -> Error {
@@ -133,7 +178,9 @@ impl Drop for ZstdCompress {
     }
 }
 
-impl Codec for ZstdCompress {
+// SAFETY: `step` writes through `zstd_safe::WriteBuf`, which takes the uninitialized slice and
+// reports what zstd filled, so the count is the engine's own.
+unsafe impl Codec for ZstdCompress {
     fn step(&mut self, input: &[u8], output: &mut [MaybeUninit<u8>], operation: Operation) -> Result<(Step, usize, usize)> {
         let directive = match operation {
             Operation::Process => ZSTD_EndDirective::ZSTD_e_continue,
@@ -141,9 +188,9 @@ impl Codec for ZstdCompress {
             Operation::Finish => ZSTD_EndDirective::ZSTD_e_end,
         };
 
-        let out = initialize(output);
+        let mut out = UninitOutput::new(output);
         let mut in_buffer = InBuffer::around(input);
-        let mut out_buffer = OutBuffer::around(out);
+        let mut out_buffer = OutBuffer::around(&mut out);
 
         let remaining = self
             .engine()
@@ -151,11 +198,7 @@ impl Codec for ZstdCompress {
             .map_err(compression_failed)?;
 
         // `ZSTD_e_end` reports zero only once the frame's epilogue has been flushed.
-        let step = match operation {
-            Operation::Finish if remaining == 0 => Step::StreamEnd,
-            Operation::Flush if remaining == 0 => Step::FlushComplete,
-            _ => Step::Continue,
-        };
+        let step = finish_step(operation, remaining);
 
         Ok((step, in_buffer.pos(), out_buffer.pos()))
     }
@@ -222,7 +265,9 @@ impl Drop for ZstdDecompress {
     }
 }
 
-impl Codec for ZstdDecompress {
+// SAFETY: `step` writes through `zstd_safe::WriteBuf`, which takes the uninitialized slice and
+// reports what zstd filled, so the count is the engine's own.
+unsafe impl Codec for ZstdDecompress {
     fn step(&mut self, input: &[u8], output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
         if self.needs_reset {
             self.engine()
@@ -231,9 +276,9 @@ impl Codec for ZstdDecompress {
             self.needs_reset = false;
         }
 
-        let out = initialize(output);
+        let mut out = UninitOutput::new(output);
         let mut in_buffer = InBuffer::around(input);
-        let mut out_buffer = OutBuffer::around(out);
+        let mut out_buffer = OutBuffer::around(&mut out);
 
         let hint = self
             .engine()
@@ -300,10 +345,19 @@ mod tests {
     }
 
     #[test]
-    fn initialize_zeroes_the_whole_slice() {
+    fn the_uninit_output_only_exposes_what_zstd_reported_writing() {
+        // The adapter's whole job is to hand out uninitialized capacity while never letting anyone
+        // read past the prefix zstd said it filled.
         let mut raw = [MaybeUninit::new(0xff_u8); 8];
+        let mut out = UninitOutput::new(&mut raw);
 
-        assert_eq!(initialize(&mut raw), &[0_u8; 8]);
+        assert_eq!(zstd_safe::WriteBuf::capacity(&out), 8);
+        assert!(zstd_safe::WriteBuf::as_slice(&out).is_empty(), "nothing is initialized yet");
+
+        // SAFETY: the eight bytes were initialized when `raw` was built.
+        unsafe { zstd_safe::WriteBuf::filled_until(&mut out, 3) };
+
+        assert_eq!(zstd_safe::WriteBuf::as_slice(&out), &[0xff_u8; 3]);
     }
 
     #[test]
@@ -326,7 +380,7 @@ mod tests {
             let mut settings = Zstd::new();
             settings.max_window_log = Some(log);
             ZstdDecompress::new(
-                FormatLimits::new(None, None),
+                FormatLimits::new(None, None, None),
                 false,
                 TrailingData::Reject,
                 &settings,
@@ -339,7 +393,7 @@ mod tests {
     #[test]
     fn decompressor_debug_includes_its_policies() {
         let codec = ZstdDecompress::new(
-            FormatLimits::new(None, None),
+            FormatLimits::new(None, None, None),
             false,
             TrailingData::Reject,
             &Zstd::new(),
@@ -380,7 +434,7 @@ mod tests {
 
         drop(
             ZstdDecompress::new(
-                FormatLimits::new(None, None),
+                FormatLimits::new(None, None, None),
                 false,
                 TrailingData::Reject,
                 &Zstd::new(),
@@ -426,7 +480,7 @@ mod tests {
     #[test]
     fn remaining_output_delegates_to_the_configured_limits() {
         let codec = ZstdDecompress::new(
-            FormatLimits::new(None, Some(100)),
+            FormatLimits::new(None, Some(100), None),
             false,
             TrailingData::Reject,
             &Zstd::new(),

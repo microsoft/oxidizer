@@ -28,6 +28,11 @@ const MAX_OPERATIONS_PER_POLL: usize = 64;
 /// `finished` latches once the stream has yielded its last item. Without it, a failing codec would
 /// report the same error on every subsequent poll, and a caller that collects the stream would
 /// accumulate errors until it ran out of memory.
+/// Drives one poll of a compression stream, whichever direction it runs in.
+///
+/// Answering with data unconditionally produces a stream that never ends, so that mutant hangs
+/// rather than failing and the harness records a timeout instead of a verdict.
+#[cfg_attr(test, mutants::skip)]
 fn poll_compression<S, C, E>(
     mut source: Pin<&mut S>,
     compression: &mut C,
@@ -154,10 +159,12 @@ where
     ///
     /// # Security
     ///
-    /// A decompressor built with its format's `new` applies that format's default
-    /// [`DecompressorLimits`][crate::DecompressorLimits]. These defaults do not bound total output,
-    /// and Brotli has no default ratio bound. For an untrusted source, build the decompressor with its
-    /// `builder` and set an absolute output limit the caller can actually afford.
+    /// This adapter adds no bounds of its own; it keeps whatever the supplied decompressor was
+    /// built with, and hands every chunk straight back rather than accumulating. A decompressor
+    /// built with its format's `new` therefore carries only that format's ratio bound. If the
+    /// consumer buffers what this yields, build the decompressor with its `builder` and set
+    /// [`with_max_output_len`][crate::DecompressorLimits::with_max_output_len] to what that consumer
+    /// can afford.
     ///
     /// Output chunks are provisional until the stream ends, because a checksum or trailer can
     /// reject the compressed stream after earlier bytes have been returned.
