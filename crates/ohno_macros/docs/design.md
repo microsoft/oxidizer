@@ -278,7 +278,7 @@ error type becomes infallible.
 including the core, so it iterates the full field list and branches once on
 style, into `debug_struct` for a named struct or `debug_tuple` for a tuple one.
 
-It is the one generated item that is **not** `#[automatically_derived]`.
+It is one of the two generated items that are **not** `#[automatically_derived]`.
 Dead-code analysis ignores field reads inside a derived `Debug`, so marking this
 one would make every field that only `Debug` reads look unused in the user's own
 crate.
@@ -289,6 +289,10 @@ parameters plus a source error and builds the core from it. Both iterate the
 non-core fields, so the core is skipped and declaration order is kept, and both
 take each parameter as `impl Into<_>` of the field's type. `pub(crate)` is fixed
 by R1.4, settled by ADO 7675155.
+
+Their `impl` block is the other item that is **not** `#[automatically_derived]`,
+because that attribute is accepted only on a trait `impl` and this one is
+inherent. `rustc` warns on it today and states it will become a hard error.
 
 **`From<T>`** is emitted once per conversion, zipping the non-core fields with
 that conversion's initializers and building the core from the source error. The

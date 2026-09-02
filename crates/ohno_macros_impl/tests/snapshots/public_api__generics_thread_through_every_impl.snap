@@ -48,7 +48,6 @@ impl<A, B> ::core::fmt::Debug for T<A, B> {
             .finish()
     }
 }
-#[automatically_derived]
 impl<A, B> T<A, B> {
     /// Creates the error with no source.
     #[allow(
@@ -137,7 +136,6 @@ impl<'a> ::core::fmt::Debug for T<'a> {
             .finish()
     }
 }
-#[automatically_derived]
 impl<'a> T<'a> {
     /// Creates the error with no source.
     #[allow(
@@ -235,7 +233,6 @@ where
         f.debug_struct("T").field("a", &self.a).field("inner", &self.inner).finish()
     }
 }
-#[automatically_derived]
 impl<A> T<A>
 where
     A: Clone,

@@ -7,6 +7,9 @@
 //! convenience for the crate that owns the error, not part of its public API, so adding a field is
 //! not a breaking change for callers. An error type that needs a public constructor declares one by
 //! hand, under `#[no_constructors]`.
+//!
+//! Their `impl` block carries no `#[automatically_derived]`. That attribute is accepted only on a
+//! trait `impl`, and `rustc` warns that using it on an inherent one will become a hard error.
 
 use proc_macro2::TokenStream;
 use quote::quote;
@@ -37,7 +40,6 @@ pub(crate) fn generate(model: &Model) -> TokenStream {
     let caused_by_body = construct(&model.shape, &initializers(model, &quote!(#core::from(error))));
 
     quote! {
-        #[automatically_derived]
         impl #impl_generics #ident #ty_generics #where_clause {
             /// Creates the error with no source.
             #[allow(dead_code, reason = "generated for every error type, used at the author's discretion")]

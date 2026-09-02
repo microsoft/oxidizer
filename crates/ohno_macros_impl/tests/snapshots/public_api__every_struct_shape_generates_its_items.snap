@@ -46,7 +46,6 @@ impl ::core::fmt::Debug for T {
             .finish()
     }
 }
-#[automatically_derived]
 impl T {
     /// Creates the error with no source.
     #[allow(
@@ -123,7 +122,6 @@ impl ::core::fmt::Debug for T {
         f.debug_tuple("T").field(&self.0).field(&self.1).finish()
     }
 }
-#[automatically_derived]
 impl T {
     /// Creates the error with no source.
     #[allow(
@@ -196,7 +194,6 @@ impl ::core::fmt::Debug for T {
         f.debug_struct("T").field("inner", &self.inner).finish()
     }
 }
-#[automatically_derived]
 impl T {
     /// Creates the error with no source.
     #[allow(
@@ -278,7 +275,6 @@ impl ::core::fmt::Debug for T {
             .finish()
     }
 }
-#[automatically_derived]
 impl T {
     /// Creates the error with no source.
     #[allow(
@@ -365,7 +361,6 @@ impl ::core::fmt::Debug for T {
         f.debug_struct("T").field("path", &self.path).field("mine", &self.mine).finish()
     }
 }
-#[automatically_derived]
 impl T {
     /// Creates the error with no source.
     #[allow(

@@ -62,7 +62,6 @@ impl ::core::fmt::Debug for T {
             .finish()
     }
 }
-#[automatically_derived]
 impl T {
     /// Creates the error with no source.
     #[allow(
@@ -171,7 +170,6 @@ impl ::core::fmt::Debug for T {
             .finish()
     }
 }
-#[automatically_derived]
 impl T {
     /// Creates the error with no source.
     #[allow(
@@ -280,7 +278,6 @@ impl ::core::fmt::Debug for T {
             .finish()
     }
 }
-#[automatically_derived]
 impl T {
     /// Creates the error with no source.
     #[allow(
@@ -389,7 +386,6 @@ impl ::core::fmt::Debug for T {
             .finish()
     }
 }
-#[automatically_derived]
 impl T {
     /// Creates the error with no source.
     #[allow(
@@ -498,7 +494,6 @@ impl ::core::fmt::Debug for T {
             .finish()
     }
 }
-#[automatically_derived]
 impl T {
     /// Creates the error with no source.
     #[allow(
@@ -607,7 +602,6 @@ impl ::core::fmt::Debug for T {
             .finish()
     }
 }
-#[automatically_derived]
 impl T {
     /// Creates the error with no source.
     #[allow(
@@ -712,7 +706,6 @@ impl ::core::fmt::Debug for T {
             .finish()
     }
 }
-#[automatically_derived]
 impl T {
     /// Creates the error with no source.
     #[allow(
@@ -821,7 +814,6 @@ impl ::core::fmt::Debug for T {
             .finish()
     }
 }
-#[automatically_derived]
 impl T {
     /// Creates the error with no source.
     #[allow(
