@@ -13,6 +13,7 @@ use std::time::Duration;
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
 use compressors::{CompressionStream, Resources, gzip};
+use tick::{Clock, PeriodicTimer};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::{Stream, StreamExt};
@@ -22,10 +23,13 @@ fn body(memory: GlobalPool) -> impl Stream<Item = Result<BytesView, std::io::Err
     let (sender, receiver) = mpsc::channel(4);
 
     tokio::spawn(async move {
-        let mut clock = tokio::time::interval(Duration::from_micros(50));
+        // Time comes from a `tick::Clock` rather than the runtime directly, so a test can drive
+        // this timer instantly instead of waiting for it.
+        let clock = Clock::new_tokio();
+        let mut arrivals = PeriodicTimer::new(&clock, Duration::from_micros(50));
 
         for event in 0..200 {
-            clock.tick().await;
+            arrivals.next().await;
 
             let line = format!("{{\"event\":{event},\"message\":\"a log line\"}}\n");
             let chunk = BytesView::copied_from_slice(line.as_bytes(), &memory);

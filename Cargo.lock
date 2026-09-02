@@ -1154,6 +1154,7 @@ dependencies = [
  "futures-core",
  "mutants",
  "pin-project-lite",
+ "tick",
  "tokio",
  "tokio-stream",
  "zstd-safe",

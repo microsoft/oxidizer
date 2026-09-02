@@ -55,6 +55,7 @@ futures = { workspace = true, features = ["executor"] }
 futures-core = { workspace = true }
 mutants = { workspace = true }
 pin-project-lite = { workspace = true }
+tick = { workspace = true, features = ["tokio"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }
 tokio-stream = { workspace = true }
 zstd-safe = { workspace = true, features = ["std"] }
