@@ -35,13 +35,11 @@ default = ["std", "derive"]
 std = ["dep:dashmap", "thread_aware_core/std"]
 derive = ["dep:thread_aware_macros"]
 
-
 [dependencies]
-thread_aware_core = { workspace = true }
-
 dashmap = { workspace = true, optional = true }
-thread_aware_macros = { workspace = true, optional = true }
 
+thread_aware_core = { workspace = true }
+thread_aware_macros = { workspace = true, optional = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
@@ -49,7 +47,6 @@ futures = { workspace = true, features = ["executor"] }
 mutants = { workspace = true }
 static_assertions = { workspace = true }
 thread_aware_macros = { path = "../thread_aware_macros" }
-
 
 # These integration tests exercise `#[derive(ThreadAware)]`, so they compile only
 # when the `derive` feature is enabled. Gating them keeps every additive feature
