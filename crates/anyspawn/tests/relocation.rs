@@ -23,7 +23,7 @@ fn test_threads() -> [Thread; 2] {
     let source = builder.build(std::thread::current().id());
     let destination = std::thread::spawn(move || builder.build(std::thread::current().id()))
         .join()
-        .unwrap();
+        .expect("destination thread should finish");
     [source, destination]
 }
 
