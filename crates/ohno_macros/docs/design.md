@@ -256,11 +256,10 @@ renders.
 
 `#[automatically_derived]` follows one rule as well, with an exception on each
 side of it. The attribute marks an `impl` as machine-written, which makes
-dead-code analysis skip the field reads inside it, and `rustc` accepts it only on
-a trait `impl`. Every generated trait `impl` therefore carries it except `Debug`,
-which wants those field reads counted; and the inherent `impl` holding the
-constructors carries it on neither ground, being no trait `impl` at all — `rustc`
-warns there today and states it will become a hard error.
+dead-code analysis skip the field reads inside it, and it is accepted only on a
+trait `impl`. Every generated trait `impl` therefore carries it except `Debug`,
+which wants those field reads counted, and the inherent `impl` holding the
+constructors cannot carry it at all.
 
 **`Display`** delegates to the core, passing the lowered message as an override
 when there is one. `OhnoCore::format_error` appends `caused by:`, the enrichment

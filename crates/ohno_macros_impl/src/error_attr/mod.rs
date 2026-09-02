@@ -101,10 +101,10 @@ fn inject_core(item: &mut ItemStruct) {
         }
         Fields::Unnamed(fields) => fields.unnamed.push(unnamed_core(&marker)),
         Fields::Unit => {
-            // The synthesized delimiters take the declaration's own span, so the rewritten struct
-            // keeps the caller's syntax context. Call-site tokens would place the item in this
-            // macro's context, where `rustc` discards `dead_code` on it as external-macro code and
-            // a caller's `#[expect(dead_code)]` can never be fulfilled.
+            // Both tokens take the declaration's own span, so the rewritten struct stays in the
+            // caller's syntax context. Under call-site spans it would sit in this macro's context,
+            // where `dead_code` on it is discarded as external-macro code and a caller's
+            // `#[expect(dead_code)]` can never be fulfilled.
             let span = item.ident.span();
             let mut unnamed = FieldsUnnamed {
                 paren_token: syn::token::Paren(span),

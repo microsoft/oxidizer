@@ -7,9 +7,6 @@
 //! convenience for the crate that owns the error, not part of its public API, so adding a field is
 //! not a breaking change for callers. An error type that needs a public constructor declares one by
 //! hand, under `#[no_constructors]`.
-//!
-//! Their `impl` block carries no `#[automatically_derived]`. That attribute is accepted only on a
-//! trait `impl`, and `rustc` warns that using it on an inherent one will become a hard error.
 
 use proc_macro2::TokenStream;
 use quote::quote;
