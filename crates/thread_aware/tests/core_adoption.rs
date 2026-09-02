@@ -132,3 +132,15 @@ fn try_from_storage_reports_owner_and_partition_errors() {
         FromStorageError::ForeignOwner
     );
 }
+
+#[test]
+fn from_storage_errors_have_descriptive_messages() {
+    assert_eq!(
+        FromStorageError::ForeignOwner.to_string(),
+        "storage belongs to another runtime owner"
+    );
+    assert_eq!(
+        FromStorageError::EmptyPartition.to_string(),
+        "the selected strategy partition is empty"
+    );
+}

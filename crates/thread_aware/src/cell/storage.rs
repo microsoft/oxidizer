@@ -24,6 +24,11 @@ enum Values<T: ?Sized, S: Strategy> {
     Partitioned(PartitionMap<T, S>),
 }
 
+#[cfg_attr(test, mutants::skip)] // Returning zero early is equivalent to iterating an empty map.
+fn empty_partition_count<T: ?Sized, S: Strategy>(values: &PartitionMap<T, S>) -> Option<usize> {
+    values.is_empty().then_some(0)
+}
+
 /// Maps threads into strategy partitions for storage.
 ///
 /// A strategy names the partition a [`Thread`] belongs to. Every thread mapping to the same key
@@ -191,8 +196,9 @@ impl<T: ?Sized, S: Strategy> Storage<T, S> {
     pub(crate) fn count_where(&self, predicate: impl Fn(&sync::Arc<T>) -> bool) -> usize {
         match &self.values {
             Values::Single(cell) => usize::from(cell.get().is_some_and(predicate)),
-            Values::Partitioned(values) if values.is_empty() => 0,
-            Values::Partitioned(values) => values.iter().filter(|entry| predicate(entry.value())).count(),
+            Values::Partitioned(values) => {
+                empty_partition_count::<T, S>(values).unwrap_or_else(|| values.iter().filter(|entry| predicate(entry.value())).count())
+            }
         }
     }
 
@@ -268,5 +274,19 @@ mod tests {
 
         assert!(Arc::ptr_eq(&storage.insert(&second, Arc::clone(&rejected)).unwrap_err(), &rejected));
         assert!(storage.get(&second).is_none());
+    }
+
+    #[test]
+    fn debug_reports_published_value_count() {
+        let builder = ThreadBuilder::default();
+        let first = builder.build(thread::current().id());
+        let second_id = thread::spawn(|| thread::current().id()).join().unwrap();
+        let second = builder.build(second_id);
+        let storage = Storage::<u32, PerThread>::new();
+
+        storage.insert(&first, Arc::new(1)).unwrap();
+        storage.insert(&second, Arc::new(2)).unwrap();
+
+        assert!(format!("{storage:?}").contains("values: 2"));
     }
 }
