@@ -50,8 +50,7 @@ fn enrichment_appears_as_dimensions() {
         processor.single_event(),
         ExpectedEvent::new("test.probe", observed::Severity::Info)
             .dimension("tenant", "42")
-            .dimension("value", "1")
-            .log(),
+            .dimension("value", "1"),
     );
 }
 
@@ -83,15 +82,13 @@ fn enrichments_stack_and_unwind() {
         ExpectedEvent::new("test.probe", observed::Severity::Info)
             .dimension("request_id", "42")
             .dimension("service", "1")
-            .dimension("value", "10")
-            .log(),
+            .dimension("value", "10"),
     );
     assert_eq!(
         events[1],
         ExpectedEvent::new("test.probe", observed::Severity::Info)
             .dimension("service", "1")
-            .dimension("value", "20")
-            .log(),
+            .dimension("value", "20"),
     );
 }
 
@@ -117,8 +114,7 @@ fn multiple_enrichment_entries_in_single_call() {
             .dimension("attempt", "1")
             .dimension("is_retry", "false")
             .dimension("request_id", "7")
-            .dimension("value", "1")
-            .log(),
+            .dimension("value", "1"),
     );
 }
 
@@ -153,16 +149,13 @@ fn targeted_enrichment_visible_to_specific_emitter() {
         lib_events[0],
         ExpectedEvent::new("test.probe", observed::Severity::Info)
             .dimension("lib.version", "1")
-            .dimension("value", "2")
-            .log(),
+            .dimension("value", "2"),
     );
 
     // Targeted enrichment should NOT appear on app sink's events
     assert_eq!(
         app_events[0],
-        ExpectedEvent::new("test.probe", observed::Severity::Info)
-            .dimension("value", "1")
-            .log(),
+        ExpectedEvent::new("test.probe", observed::Severity::Info).dimension("value", "1"),
     );
 }
 
@@ -178,9 +171,7 @@ fn isolated_enrichment_excludes_global_context() {
 
     assert_eq!(
         processor.single_event(),
-        ExpectedEvent::new("test.probe", observed::Severity::Info)
-            .dimension("value", "1")
-            .log(),
+        ExpectedEvent::new("test.probe", observed::Severity::Info).dimension("value", "1"),
     );
 }
 
@@ -209,8 +200,7 @@ fn typed_enrichment_struct_adds_dimensions() {
             .dimension("request_id", "42")
             .dimension("attempt", "1")
             .dimension("is_retry", "false")
-            .dimension("value", "100")
-            .log(),
+            .dimension("value", "100"),
     );
 }
 
@@ -239,8 +229,7 @@ fn typed_enrichment_stacking() {
             .dimension("is_retry", "true")
             .dimension("request_id", "7")
             .dimension("tenant", "55")
-            .dimension("value", "200")
-            .log(),
+            .dimension("value", "200"),
     );
 }
 
@@ -280,8 +269,7 @@ fn enrichment_field_level_attributes() {
             .dimension("ctx.trace_id", "999")
             .dimension("logs_only_detail", "2")
             .dimension("metrics_only_tag", "1")
-            .dimension("value", "1")
-            .log(),
+            .dimension("value", "1"),
     );
 }
 
@@ -355,15 +343,13 @@ fn enrichment_preserved_when_future_polled() {
         events[0],
         ExpectedEvent::new("test.probe", observed::Severity::Info)
             .dimension("scope", "1")
-            .dimension("value", "1")
-            .log(),
+            .dimension("value", "1"),
     );
     assert_eq!(
         events[1],
         ExpectedEvent::new("test.probe", observed::Severity::Info)
             .dimension("scope", "2")
-            .dimension("value", "2")
-            .log(),
+            .dimension("value", "2"),
     );
 }
 
@@ -392,15 +378,13 @@ fn composite_enrich_appears_on_every_child_record() {
         app_proc.single_event(),
         ExpectedEvent::new("test.probe", observed::Severity::Info)
             .dimension("tenant", "99")
-            .dimension("value", "7")
-            .log(),
+            .dimension("value", "7"),
     );
     assert_eq!(
         audit_proc.single_event(),
         ExpectedEvent::new("test.probe", observed::Severity::Info)
             .dimension("tenant", "99")
-            .dimension("value", "7")
-            .log(),
+            .dimension("value", "7"),
     );
 }
 
@@ -448,32 +432,28 @@ fn composite_enrich_stacks_with_per_child_scope() {
         ExpectedEvent::new("test.probe", observed::Severity::Info)
             .dimension("request_id", "42")
             .dimension("service", "1")
-            .dimension("value", "100")
-            .log(),
+            .dimension("value", "100"),
     );
     // audit[0]: in nested scope, but inner was pushed only on app — sees only outer.
     assert_eq!(
         audit_events[0],
         ExpectedEvent::new("test.probe", observed::Severity::Info)
             .dimension("service", "1")
-            .dimension("value", "200")
-            .log(),
+            .dimension("value", "200"),
     );
     // app[1]: outer scope only — only outer.
     assert_eq!(
         app_events[1],
         ExpectedEvent::new("test.probe", observed::Severity::Info)
             .dimension("service", "1")
-            .dimension("value", "300")
-            .log(),
+            .dimension("value", "300"),
     );
     // audit[1]: outer scope only — only outer.
     assert_eq!(
         audit_events[1],
         ExpectedEvent::new("test.probe", observed::Severity::Info)
             .dimension("service", "1")
-            .dimension("value", "300")
-            .log(),
+            .dimension("value", "300"),
     );
 }
 
@@ -503,17 +483,14 @@ fn composite_enrich_for_targets_one_child_only() {
     // AUDIT, so app's `visit_enrichments` filters it out.
     assert_eq!(
         app_proc.single_event(),
-        ExpectedEvent::new("test.probe", observed::Severity::Info)
-            .dimension("value", "1")
-            .log(),
+        ExpectedEvent::new("test.probe", observed::Severity::Info).dimension("value", "1"),
     );
     // Audit's record: target matches its scope, so the entry is emitted.
     assert_eq!(
         audit_proc.single_event(),
         ExpectedEvent::new("test.probe", observed::Severity::Info)
             .dimension("audit_id", "7")
-            .dimension("value", "1")
-            .log(),
+            .dimension("value", "1"),
     );
 }
 
@@ -580,8 +557,7 @@ fn transfer_context_captures_every_leaf() {
         app_proc.single_event(),
         ExpectedEvent::new("test.probe", observed::Severity::Info)
             .dimension("tenant", "7")
-            .dimension("value", "3")
-            .log(),
+            .dimension("value", "3"),
     );
     assert!(app.current_enrichments().is_empty());
 }
