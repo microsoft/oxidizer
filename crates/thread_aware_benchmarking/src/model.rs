@@ -83,7 +83,6 @@ impl Leaf {
 #[derive(Debug, Clone, thread_aware::ThreadAware)]
 struct Layer {
     id: u64,
-    #[thread_aware(skip)]
     name: &'static str,
     flags: Unaware<u32>,
     shared: Arc<Leaf, PerThread>,
