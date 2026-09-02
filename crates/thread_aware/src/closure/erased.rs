@@ -87,7 +87,7 @@ where
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
     use crate::closure::closure_once;
@@ -136,12 +136,12 @@ mod tests {
         use crate::closure::ThreadAwareFnOnce;
 
         let threads = crate::test_threads(&[2]);
-        let src = Some(threads[0]);
-        let dst = threads[1];
+        let src = Some(threads[0].clone());
+        let dst = threads[1].clone();
 
         let c = closure_once(Tracker(false), |t: Tracker| t.0);
         let mut erased = ErasedClosureOnce::new(c);
-        erased.relocate(src, dst);
+        erased.relocate(src.as_ref(), &dst);
 
         let result = erased.call_once();
         assert!(result, "ErasedClosureOnce must forward relocate to inner closure");

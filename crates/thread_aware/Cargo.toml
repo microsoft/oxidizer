@@ -52,11 +52,19 @@ thread_aware_macros = { path = "../thread_aware_macros" }
 # combination (for example `--no-default-features --features std`) buildable.
 [[test]]
 name = "derive_compiles"
-required-features = ["derive"]
+required-features = ["derive", "std"]
 
 [[test]]
 name = "transfer_pass"
-required-features = ["derive"]
+required-features = ["derive", "std"]
+
+[[test]]
+name = "core_adoption"
+required-features = ["std"]
+
+[[test]]
+name = "dyn_trait"
+required-features = ["std"]
 
 # >>> anvil-managed: anvil-lints
 [lints]

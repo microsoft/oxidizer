@@ -49,13 +49,13 @@ impl ThreadAware for SourceRecorder {
 #[test]
 fn transfer_creates_new_value() {
     let threads = test_threads(&[2]);
-    let source = Some(threads[0]);
-    let destination = threads[1];
+    let source = Some(threads[0].clone());
+    let destination = threads[1].clone();
 
     let pmr = PerThreadArc::new(Counter::new);
     pmr.increment_by(10);
     let mut pmr2 = pmr.clone();
-    pmr2.relocate(source, destination);
+    pmr2.relocate(source.as_ref(), &destination);
     assert_eq!(pmr.value(), 10);
     assert_eq!(pmr2.value(), 0);
 }
@@ -82,8 +82,8 @@ fn new_with_relocate_forwards_to_data() {
     }
 
     let threads = test_threads(&[2]);
-    let source = Some(threads[0]);
-    let destination = threads[1];
+    let source = Some(threads[0].clone());
+    let destination = threads[1].clone();
 
     let mut pmr = PerThreadArc::new_with(Seed(false), |seed| {
         let c = Counter::new();
@@ -95,7 +95,7 @@ fn new_with_relocate_forwards_to_data() {
     });
     assert_eq!(pmr.value(), 0, "initial factory should see un-relocated seed");
 
-    pmr.relocate(source, destination);
+    pmr.relocate(source.as_ref(), &destination);
     assert_eq!(
         pmr.value(),
         999,
@@ -112,7 +112,7 @@ fn test_from_unaware() {
 
     // Verify it can be relocated
     let threads = test_threads(&[2]);
-    per_thread.relocate(Some(threads[0]), threads[1]);
+    per_thread.relocate(Some(&threads[0]), &threads[1]);
     assert_eq!(*per_thread, 42);
 }
 
@@ -205,8 +205,8 @@ fn test_from() {
 #[test]
 fn test_trc_relocated_with_factory_data() {
     let threads = test_threads(&[2]);
-    let thread1 = Some(threads[0]);
-    let thread2 = threads[1];
+    let thread1 = Some(threads[0].clone());
+    let thread2 = threads[1].clone();
 
     // Create a Trc with a value that implements ThreadAware + Clone
     // This will use Factory::Data
@@ -216,15 +216,15 @@ fn test_trc_relocated_with_factory_data() {
     // Relocate to another thread, which should trigger Factory::Data path
     // and call data.relocate(source, destination) at line 219
     let mut trc_thread2 = trc_thread1;
-    trc_thread2.relocate(thread1, thread2);
+    trc_thread2.relocate(thread1.as_ref(), &thread2);
     assert_eq!(*trc_thread2, 42);
 }
 
 #[test]
 fn test_trc_relocated_reuses_existing_value() {
     let threads = test_threads(&[2]);
-    let thread1 = Some(threads[0]);
-    let thread2 = threads[1];
+    let thread1 = Some(threads[0].clone());
+    let thread2 = threads[1].clone();
 
     // Create a Trc and clone it before relocating
     let trc1 = PerThreadArc::with_value(42);
@@ -233,14 +233,14 @@ fn test_trc_relocated_reuses_existing_value() {
     // Relocate the first Trc to thread2
     // This creates a new value in the destination storage
     let mut trc1_relocated = trc1;
-    trc1_relocated.relocate(thread1, thread2);
+    trc1_relocated.relocate(thread1.as_ref(), &thread2);
     assert_eq!(*trc1_relocated, 42);
 
     // Relocate the cloned Trc to the same destination
     // This should hit line 428 where it finds the existing value in storage
     // and reuses it instead of creating a new one
     let mut trc2_relocated = trc2;
-    trc2_relocated.relocate(thread1, thread2);
+    trc2_relocated.relocate(thread1.as_ref(), &thread2);
     assert_eq!(*trc2_relocated, 42);
 
     // Both relocated Trcs should point to the same sync::Arc (deduplication)
@@ -252,18 +252,18 @@ fn test_from_storage() {
     use std::sync::Arc;
 
     let threads = test_threads(&[2]);
-    let thread1 = threads[0];
+    let thread1 = threads[0].clone();
 
     // Create a storage and populate it with a value for thread1
     let storage = super::storage::Storage::new();
     let value = Arc::new(100);
-    storage.insert(thread1, Arc::clone(&value)).unwrap();
+    storage.insert(&thread1, Arc::clone(&value)).unwrap();
 
     let storage_arc = Arc::new(storage);
 
     // Create a Trc from the storage at thread1
     // This should call line 400 (from_storage method)
-    let trc = PerThreadArc::from_storage(Arc::clone(&storage_arc), thread1);
+    let trc = PerThreadArc::from_storage(Arc::clone(&storage_arc), &thread1);
 
     // Verify the value is correct
     assert_eq!(*trc, 100);
@@ -274,14 +274,14 @@ fn test_from_storage() {
 
 #[test]
 fn storage_default_is_empty_then_fillable() {
-    let thread = test_threads(&[2])[0];
+    let thread = test_threads(&[2])[0].clone();
 
     let storage = super::storage::Storage::<i32, crate::PerThread>::default();
-    assert!(storage.get(thread).is_none());
+    assert!(storage.get(&thread).is_none());
 
     let value = sync::Arc::new(7);
-    storage.insert(thread, sync::Arc::clone(&value)).unwrap();
-    assert!(sync::Arc::ptr_eq(&storage.get(thread).unwrap(), &value));
+    storage.insert(&thread, sync::Arc::clone(&value)).unwrap();
+    assert!(sync::Arc::ptr_eq(&storage.get(&thread).unwrap(), &value));
 }
 
 #[test]
@@ -289,21 +289,21 @@ fn storage_insert_is_write_once() {
     // The public `Storage::insert` is write-once: the first insert into an empty key stores the
     // value and returns `Ok(())`; a second insert leaves the stored value in place and hands the
     // rejected value back as `Err`, mirroring `OnceLock::set`.
-    let thread = test_threads(&[2])[0];
+    let thread = test_threads(&[2])[0].clone();
 
     let storage = super::storage::Storage::<i32, crate::PerThread>::default();
 
     let first = sync::Arc::new(1);
-    assert_eq!(storage.insert(thread, sync::Arc::clone(&first)), Ok(()));
+    assert_eq!(storage.insert(&thread, sync::Arc::clone(&first)), Ok(()));
 
     let second = sync::Arc::new(2);
-    let rejected = storage.insert(thread, sync::Arc::clone(&second)).unwrap_err();
+    let rejected = storage.insert(&thread, sync::Arc::clone(&second)).unwrap_err();
     assert!(
         sync::Arc::ptr_eq(&rejected, &second),
         "a rejected insert must hand back the exact value that was passed in"
     );
     assert!(
-        sync::Arc::ptr_eq(&storage.get(thread).unwrap(), &first),
+        sync::Arc::ptr_eq(&storage.get(&thread).unwrap(), &first),
         "the write-once key must keep the value from the first insert"
     );
 }
@@ -313,8 +313,8 @@ fn test_factory_clone_with_data() {
     // This test covers line 142: Self::Data(data_fn) => Self::Data(*data_fn)
     // We create a Trc with Factory::Data, clone it, and verify the factory is properly cloned
     let threads = test_threads(&[2]);
-    let thread1 = Some(threads[0]);
-    let thread2 = threads[1];
+    let thread1 = Some(threads[0].clone());
+    let thread2 = threads[1].clone();
 
     // Create a Trc with a value that uses Factory::Data (ThreadAware + Clone)
     let trc1 = PerThreadArc::with_value(42);
@@ -328,9 +328,9 @@ fn test_factory_clone_with_data() {
 
     // Relocate both to verify the cloned factory works properly
     let mut trc1_relocated = trc1;
-    trc1_relocated.relocate(thread1, thread2);
+    trc1_relocated.relocate(thread1.as_ref(), &thread2);
     let mut trc2_relocated = trc2;
-    trc2_relocated.relocate(thread1, thread2);
+    trc2_relocated.relocate(thread1.as_ref(), &thread2);
 
     assert_eq!(*trc1_relocated, 42);
     assert_eq!(*trc2_relocated, 42);
@@ -341,8 +341,8 @@ fn test_factory_clone_with_closure_boxed() {
     // This test covers line 141: Self::Closure(closure, closure_source) => Self::Closure(sync::Arc::clone(closure), *closure_source)
     // We create a Trc with Factory::Closure via with_closure, clone it, and verify the factory is properly cloned
     let threads = test_threads(&[2]);
-    let thread1 = Some(threads[0]);
-    let thread2 = threads[1];
+    let thread1 = Some(threads[0].clone());
+    let thread2 = threads[1].clone();
 
     // Create a Trc with a closure that uses Factory::Closure
     let trc1 = PerThreadArc::new(|| 100);
@@ -356,9 +356,9 @@ fn test_factory_clone_with_closure_boxed() {
 
     // Relocate both to verify the cloned factory (closure) works properly
     let mut trc1_relocated = trc1;
-    trc1_relocated.relocate(thread1, thread2);
+    trc1_relocated.relocate(thread1.as_ref(), &thread2);
     let mut trc2_relocated = trc2;
-    trc2_relocated.relocate(thread1, thread2);
+    trc2_relocated.relocate(thread1.as_ref(), &thread2);
 
     assert_eq!(*trc1_relocated, 100);
     assert_eq!(*trc2_relocated, 100);
@@ -374,17 +374,17 @@ fn test_factory_clone_with_manual() {
     use std::sync::Arc;
 
     let threads = test_threads(&[2]);
-    let thread1 = threads[0];
+    let thread1 = threads[0].clone();
 
     // Create a storage and populate it with a value for thread1
     let storage = super::storage::Storage::new();
     let value = Arc::new(200);
-    storage.insert(thread1, Arc::clone(&value)).unwrap();
+    storage.insert(&thread1, Arc::clone(&value)).unwrap();
 
     let storage_arc = Arc::new(storage);
 
     // Create a Trc from storage - this uses Factory::Manual
-    let trc1 = PerThreadArc::from_storage(Arc::clone(&storage_arc), thread1);
+    let trc1 = PerThreadArc::from_storage(Arc::clone(&storage_arc), &thread1);
 
     // Clone the Trc - this should exercise line 143 in the Factory::clone method
     let trc2 = trc1.clone();
@@ -405,25 +405,25 @@ fn test_factory_manual_relocated() {
     use std::sync::Arc;
 
     let threads = test_threads(&[2]);
-    let thread1 = threads[0];
-    let thread2 = threads[1];
+    let thread1 = threads[0].clone();
+    let thread2 = threads[1].clone();
 
     // Create a storage with a value at thread1
     let storage = super::storage::Storage::new();
     let value = Arc::new(100);
-    storage.insert(thread1, Arc::clone(&value)).unwrap();
+    storage.insert(&thread1, Arc::clone(&value)).unwrap();
 
     let storage_arc = Arc::new(storage);
 
     // Create a Trc from storage - this uses Factory::Manual
-    let trc = PerThreadArc::from_storage(Arc::clone(&storage_arc), thread1);
+    let trc = PerThreadArc::from_storage(Arc::clone(&storage_arc), &thread1);
     assert_eq!(*trc, 100);
 
     // Relocate to thread2 where no data exists
     // This should trigger line 453 (Factory::Manual branch)
     // and behave like Arc<T> by just cloning the reference
     let mut trc_relocated = trc;
-    trc_relocated.relocate(Some(thread1), thread2);
+    trc_relocated.relocate(Some(&thread1), &thread2);
 
     // The value should still be 100
     assert_eq!(*trc_relocated, 100);
@@ -438,11 +438,11 @@ fn test_relocated_unknown_source() {
     let threads = test_threads(&[2]);
 
     let source = None;
-    let destination = threads[1];
+    let destination = threads[1].clone();
 
     let mut trc = PerThreadArc::with_value(42);
 
-    trc.relocate(source, destination);
+    trc.relocate(source, &destination);
     assert_eq!(*trc, 42);
 }
 
@@ -474,8 +474,8 @@ fn test_strong_count() {
 #[test]
 fn test_strong_count_after_relocation() {
     let threads = test_threads(&[2]);
-    let thread1 = Some(threads[0]);
-    let thread2 = threads[1];
+    let thread1 = Some(threads[0].clone());
+    let thread2 = threads[1].clone();
 
     // Create an Arc with multiple strong references
     let arc1 = PerThreadArc::new(Counter::new);
@@ -484,7 +484,7 @@ fn test_strong_count_after_relocation() {
 
     // Relocate one of them
     let mut arc1_relocated = arc1;
-    arc1_relocated.relocate(thread1, thread2);
+    arc1_relocated.relocate(thread1.as_ref(), &thread2);
 
     // After relocation:
     // - arc1_relocated holds a reference to a new Arc created for thread2
@@ -502,8 +502,8 @@ fn test_strong_count_after_relocation() {
 #[test]
 fn test_strong_count_with_deduplication() {
     let threads = test_threads(&[2]);
-    let thread1 = Some(threads[0]);
-    let thread2 = threads[1];
+    let thread1 = Some(threads[0].clone());
+    let thread2 = threads[1].clone();
 
     // Create an Arc and clone it
     let arc1 = PerThreadArc::new(Counter::new);
@@ -512,9 +512,9 @@ fn test_strong_count_with_deduplication() {
     // Relocate both to the same destination
     // They should share the same underlying Arc in the destination
     let mut arc1_relocated = arc1;
-    arc1_relocated.relocate(thread1, thread2);
+    arc1_relocated.relocate(thread1.as_ref(), &thread2);
     let mut arc2_relocated = arc2;
-    arc2_relocated.relocate(thread1, thread2);
+    arc2_relocated.relocate(thread1.as_ref(), &thread2);
 
     // Both should point to the same underlying Arc (deduplication)
     // The strong count includes:
@@ -528,8 +528,8 @@ fn test_strong_count_with_deduplication() {
 #[test]
 fn test_strong_count_independent_across_threads() {
     let threads = test_threads(&[2]);
-    let thread1 = Some(threads[0]);
-    let thread2 = threads[1];
+    let thread1 = Some(threads[0].clone());
+    let thread2 = threads[1].clone();
 
     // Create an Arc on thread1 with strong_count = 1.
     let arc_a = PerThreadArc::new(Counter::new);
@@ -537,7 +537,7 @@ fn test_strong_count_independent_across_threads() {
 
     // Relocate to thread2, creating a separate instance there.
     let mut arc_b = arc_a.clone();
-    arc_b.relocate(thread1, thread2);
+    arc_b.relocate(thread1.as_ref(), &thread2);
     assert_eq!(PerThreadArc::strong_count(&arc_b), 1); // arc_b only; storage ref excluded
 
     // Clone arc_a on thread1 - this should not affect arc_b on thread2.
@@ -559,17 +559,17 @@ fn self_relocation_keeps_the_value_and_storage_consistent() {
     // agree, and a later relocation finds that same value on the shared-probe fast path rather than
     // a stale or freshly materialized one.
     let threads = test_threads(&[2]);
-    let thread = threads[0];
+    let thread = threads[0].clone();
 
     let arc = PerThreadArc::new(Counter::new);
     arc.increment_by(42);
     assert_eq!(arc.value(), 42);
 
     let mut arc = arc;
-    arc.relocate(Some(thread), thread);
+    arc.relocate(Some(&thread), &thread);
     assert_eq!(arc.value(), 42, "a same-key relocation keeps the carried value");
 
-    arc.relocate(Some(thread), thread);
+    arc.relocate(Some(&thread), &thread);
     assert_eq!(
         arc.value(),
         42,
@@ -580,8 +580,8 @@ fn self_relocation_keeps_the_value_and_storage_consistent() {
 #[test]
 fn with_clone_fn_relocates_clone() {
     let threads = test_threads(&[2]);
-    let source = Some(threads[0]);
-    let destination = threads[1];
+    let source = Some(threads[0].clone());
+    let destination = threads[1].clone();
 
     // Counter::relocated resets value to 0, so we can detect if it was called.
     let arc = super::Arc::<Counter, crate::PerThread>::with_clone_fn(Counter::new(), |c: &Counter| Box::new(c.clone()));
@@ -592,7 +592,7 @@ fn with_clone_fn_relocates_clone() {
     // Relocating should clone the Counter and call relocated() on the clone,
     // which resets the value to 0.
     let mut arc = arc;
-    arc.relocate(source, destination);
+    arc.relocate(source.as_ref(), &destination);
     assert_eq!(arc.value(), 0, "relocated() must be called on the clone");
 }
 
@@ -621,15 +621,15 @@ fn with_clone_fn_dyn_trait_relocates_correctly() {
     }
 
     let threads = test_threads(&[2]);
-    let source = Some(threads[0]);
-    let destination = threads[1];
+    let source = Some(threads[0].clone());
+    let destination = threads[1].clone();
 
     let arc = super::Arc::<dyn Plugin, crate::PerThread>::with_clone_fn(MyPlugin("orig".into()), |p: &MyPlugin| Box::new(p.clone()));
 
     assert_eq!(arc.name(), "orig");
 
     let mut arc = arc;
-    arc.relocate(source, destination);
+    arc.relocate(source.as_ref(), &destination);
     assert_eq!(arc.name(), "orig-relocated");
 }
 
@@ -638,9 +638,9 @@ fn with_clone_fn_clone_and_relocate_independently() {
     // Cloning an Arc backed by ErasedCloneFn should produce independent
     // clones that can each be relocated separately.
     let threads = test_threads(&[3]);
-    let source = Some(threads[0]);
-    let dest1 = threads[1];
-    let dest2 = threads[2];
+    let source = Some(threads[0].clone());
+    let dest1 = threads[1].clone();
+    let dest2 = threads[2].clone();
 
     let arc = super::Arc::<Counter, crate::PerThread>::with_clone_fn(Counter::new(), |c: &Counter| Box::new(c.clone()));
     arc.increment_by(10);
@@ -649,8 +649,8 @@ fn with_clone_fn_clone_and_relocate_independently() {
     #[expect(clippy::redundant_clone, reason = "testing independent clones")]
     let mut clone2 = arc.clone();
 
-    clone1.relocate(source, dest1);
-    clone2.relocate(source, dest2);
+    clone1.relocate(source.as_ref(), &dest1);
+    clone2.relocate(source.as_ref(), &dest2);
 
     // Both should have been reset by Counter::relocate
     assert_eq!(clone1.value(), 0);
@@ -668,9 +668,9 @@ fn with_clone_fn_repeated_relocations() {
 
     let mut current = arc;
     for i in 0..3 {
-        let source = Some(threads[i]);
-        let dest = threads[i + 1];
-        current.relocate(source, dest);
+        let source = Some(threads[i].clone());
+        let dest = threads[i + 1].clone();
+        current.relocate(source.as_ref(), &dest);
         // Counter resets to 0 on relocate
         assert_eq!(current.value(), 0, "relocation {i} should reset counter");
         current.increment_by(i32::try_from(i + 1).expect("loop index fits in i32"));
@@ -691,8 +691,8 @@ fn with_clone_fn_deduplication_across_clones() {
     // Two clones relocated to the same destination should share the same
     // underlying value via storage deduplication.
     let threads = test_threads(&[2]);
-    let source = Some(threads[0]);
-    let dest = threads[1];
+    let source = Some(threads[0].clone());
+    let dest = threads[1].clone();
 
     let arc = super::Arc::<Counter, crate::PerThread>::with_clone_fn(Counter::new(), |c: &Counter| Box::new(c.clone()));
     let clone1 = arc.clone();
@@ -700,9 +700,9 @@ fn with_clone_fn_deduplication_across_clones() {
     let clone2 = arc.clone();
 
     let mut r1 = clone1;
-    r1.relocate(source, dest);
+    r1.relocate(source.as_ref(), &dest);
     let mut r2 = clone2;
-    r2.relocate(source, dest);
+    r2.relocate(source.as_ref(), &dest);
 
     assert!(sync::Arc::ptr_eq(&r1.clone().into_arc(), &r2.clone().into_arc()));
 }
@@ -733,8 +733,8 @@ fn factory_manual_debug() {
 
     let threads = test_threads(&[1]);
     let storage = sync::Arc::new(super::storage::Storage::new());
-    storage.insert(threads[0], sync::Arc::new(42)).unwrap();
-    let arc = super::Arc::<i32, crate::PerThread>::from_storage(storage, threads[0]);
+    storage.insert(&threads[0], sync::Arc::new(42)).unwrap();
+    let arc = super::Arc::<i32, crate::PerThread>::from_storage(storage, &threads[0]);
     let dbg = format!("{arc:?}");
     assert!(dbg.contains("Manual"), "Debug output should mention Manual variant: {dbg}");
 }
@@ -774,8 +774,8 @@ fn concurrent_relocation_to_same_thread_materializes_once() {
     const ROUNDS: usize = 4;
 
     let threads = test_threads(&[2]);
-    let source = threads[0];
-    let destination = threads[1];
+    let source = threads[0].clone();
+    let destination = threads[1].clone();
 
     for _ in 0..ROUNDS {
         let materializations = sync::Arc::new(AtomicUsize::new(0));
@@ -800,11 +800,12 @@ fn concurrent_relocation_to_same_thread_materializes_once() {
         for _ in 0..RACERS {
             let mut racer = origin.clone();
             let barrier = sync::Arc::clone(&barrier);
-
+            let source = source.clone();
+            let destination = destination.clone();
             racers.push(std::thread::spawn(move || {
                 // Release all racers together so they contend for the same empty destination cell.
                 barrier.wait();
-                racer.relocate(Some(source), destination);
+                racer.relocate(Some(&source), &destination);
                 racer.into_arc()
             }));
         }
@@ -838,15 +839,15 @@ fn later_relocations_reproduce_the_original_source_thread() {
     // Ref: docs/implementation.md, "Relocation".
 
     let threads = test_threads(&[3]);
-    let a = threads[0];
-    let b = threads[1];
-    let c = threads[2];
+    let a = threads[0].clone();
+    let b = threads[1].clone();
+    let c = threads[2].clone();
 
     let recorded = sync::Arc::new(sync::Mutex::new(None));
     let mut arc = PerThreadArc::new_with(SourceRecorder(sync::Arc::clone(&recorded)), |_recorder: SourceRecorder| 0_i32);
 
     // First relocation A -> B: nothing is recorded yet, so the given source A is used and stored.
-    arc.relocate(Some(a), b);
+    arc.relocate(Some(&a), &b);
     assert_eq!(
         *recorded.lock().unwrap(),
         Some(a.clone()),
@@ -855,7 +856,7 @@ fn later_relocations_reproduce_the_original_source_thread() {
 
     // Relocate onward B -> C. The factory must reproduce the original source A, not the current
     // thread B.
-    arc.relocate(Some(b), c);
+    arc.relocate(Some(&b), &c);
     assert_eq!(
         *recorded.lock().unwrap(),
         Some(a.clone()),
@@ -868,22 +869,22 @@ fn hit_path_records_the_original_source_thread() {
     // Pre-materialize B with one clone, then let another clone first relocate A -> B through the hit
     // path. Its later B -> C miss must still relocate constructor state from the original source A.
     let threads = test_threads(&[3]);
-    let a = threads[0];
-    let b = threads[1];
-    let c = threads[2];
+    let a = threads[0].clone();
+    let b = threads[1].clone();
+    let c = threads[2].clone();
 
     let recorded = sync::Arc::new(sync::Mutex::new(None));
     let origin = PerThreadArc::new_with(SourceRecorder(sync::Arc::clone(&recorded)), |_recorder: SourceRecorder| 0_i32);
 
     let mut publisher = origin.clone();
-    publisher.relocate(Some(a), b);
+    publisher.relocate(Some(&a), &b);
 
     *recorded.lock().unwrap() = None;
     let mut arc = origin;
-    arc.relocate(Some(a), b);
+    arc.relocate(Some(&a), &b);
     assert_eq!(*recorded.lock().unwrap(), None, "a populated destination must not run the factory");
 
-    arc.relocate(Some(b), c);
+    arc.relocate(Some(&b), &c);
     assert_eq!(
         *recorded.lock().unwrap(),
         Some(a.clone()),
@@ -897,22 +898,22 @@ fn same_partition_path_records_the_original_source_thread() {
     // path must record A so the later cross-partition B -> C materialization still relocates
     // constructor state from the original source.
     let threads = test_threads(&[2, 1]);
-    let a = threads[0];
-    let b = threads[1];
-    let c = threads[2];
+    let a = threads[0].clone();
+    let b = threads[1].clone();
+    let c = threads[2].clone();
 
     let recorded = sync::Arc::new(sync::Mutex::new(None));
     let mut arc =
         crate::Arc::<_, crate::PerNumaNode>::new_with(SourceRecorder(sync::Arc::clone(&recorded)), |_recorder: SourceRecorder| 0_i32);
 
-    arc.relocate(Some(a), b);
+    arc.relocate(Some(&a), &b);
     assert_eq!(
         *recorded.lock().unwrap(),
         None,
         "a same-partition relocation must keep the carried value without running the factory"
     );
 
-    arc.relocate(Some(b), c);
+    arc.relocate(Some(&b), &c);
     assert_eq!(
         *recorded.lock().unwrap(),
         Some(a.clone()),
@@ -978,7 +979,7 @@ fn new_boxed_relocate() {
     // Exercises Ctor<T>::relocate (the no-op ThreadAware impl inside new_boxed)
     let threads = test_threads(&[2]);
     let mut arc = super::Arc::<Counter, crate::PerThread>::new_boxed(|| Box::new(Counter::new()));
-    arc.relocate(Some(threads[0]), threads[1]);
+    arc.relocate(Some(&threads[0]), &threads[1]);
     assert_eq!(arc.value(), 0, "new_boxed relocate should create a fresh counter");
 }
 
@@ -1003,19 +1004,19 @@ fn factory_panic_leaves_the_cell_empty() {
     }
 
     let threads = test_threads(&[2]);
-    let source = threads[0];
-    let destination = threads[1];
+    let source = threads[0].clone();
+    let destination = threads[1].clone();
 
     let arc = super::Arc::<Bomb, crate::PerThread>::with_value(Bomb);
     let mut relocated = arc.clone();
 
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| relocated.relocate(Some(source), destination)));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| relocated.relocate(Some(&source), &destination)));
     assert!(result.is_err(), "the factory panic must propagate to the caller");
 
     // The factory panicked before it could publish anything, so the destination stays empty and a
     // later relocation is free to materialize into it.
     assert!(
-        arc.storage.get(destination).is_none(),
+        arc.storage.get(&destination).is_none(),
         "a panicking factory must leave the cell empty"
     );
 }
@@ -1026,8 +1027,8 @@ fn relocation_preserves_the_source_thread_value() {
     // relocation back into that thread finds the original value instead of re-materializing a
     // fresh one. This guards the `source != destination` branch that performs that write.
     let threads = test_threads(&[2]);
-    let source = threads[0];
-    let destination = threads[1];
+    let source = threads[0].clone();
+    let destination = threads[1].clone();
 
     let mut arc = PerThreadArc::new(Counter::new);
 
@@ -1036,7 +1037,7 @@ fn relocation_preserves_the_source_thread_value() {
 
     // Relocate away from the source thread: this materializes the destination and must record
     // `source_value` under the source key.
-    arc.relocate(Some(source), destination);
+    arc.relocate(Some(&source), &destination);
     assert!(
         !sync::Arc::ptr_eq(&arc.value, &source_value),
         "relocating away must adopt the destination value"
@@ -1045,7 +1046,7 @@ fn relocation_preserves_the_source_thread_value() {
     // Relocate a clone back into the source thread. It must find the recorded original value, not
     // a freshly materialized one.
     let mut back = arc.clone();
-    back.relocate(Some(destination), source);
+    back.relocate(Some(&destination), &source);
     assert!(
         sync::Arc::ptr_eq(&back.value, &source_value),
         "relocating back into the source thread must find the preserved original value"
@@ -1058,8 +1059,8 @@ fn relocation_leaves_a_populated_source_key_untouched() {
     // already-populated source key is left as-is. Another thread may have recorded the same key
     // first; keeping the existing value is correct and must not overwrite it.
     let threads = test_threads(&[2]);
-    let source = threads[0];
-    let destination = threads[1];
+    let source = threads[0].clone();
+    let destination = threads[1].clone();
 
     let mut arc = PerThreadArc::new(Counter::new);
     arc.increment_by(11);
@@ -1068,20 +1069,20 @@ fn relocation_leaves_a_populated_source_key_untouched() {
     // already recorded there.
     let seeded = sync::Arc::new(Counter::new());
     seeded.increment_by(555);
-    let _ = arc.storage.insert(source, sync::Arc::clone(&seeded));
+    let _ = arc.storage.insert(&source, sync::Arc::clone(&seeded));
 
     // Relocate away from the source thread. The miss records the carried value under the source
     // key, but the key is already populated, so the pre-existing value must survive.
-    arc.relocate(Some(source), destination);
+    arc.relocate(Some(&source), &destination);
     assert!(
-        sync::Arc::ptr_eq(&arc.storage.get(source).unwrap(), &seeded),
+        sync::Arc::ptr_eq(&arc.storage.get(&source).unwrap(), &seeded),
         "a populated source key must keep its existing value"
     );
 
     // A relocation back into the source thread must find the pre-existing value, confirming the
     // carried value never displaced it.
     let mut back = arc.clone();
-    back.relocate(Some(destination), source);
+    back.relocate(Some(&destination), &source);
     assert_eq!(back.value(), 555, "relocating back must find the pre-existing source value");
 }
 
@@ -1096,8 +1097,8 @@ fn opposite_direction_relocations_converge_without_deadlock() {
     const ROUNDS: usize = 8;
 
     let threads = test_threads(&[2]);
-    let x = threads[0];
-    let y = threads[1];
+    let x = threads[0].clone();
+    let y = threads[1].clone();
 
     for _ in 0..ROUNDS {
         let shared = PerThreadArc::new(Counter::new);
@@ -1108,14 +1109,18 @@ fn opposite_direction_relocations_converge_without_deadlock() {
         let barrier_xy = sync::Arc::clone(&barrier);
         let barrier_yx = sync::Arc::clone(&barrier);
 
+        let source = x.clone();
+        let destination = y.clone();
         let xy = std::thread::spawn(move || {
             barrier_xy.wait();
-            to_y.relocate(Some(x), y);
+            to_y.relocate(Some(&source), &destination);
             to_y.into_arc()
         });
+        let source = y.clone();
+        let destination = x.clone();
         let yx = std::thread::spawn(move || {
             barrier_yx.wait();
-            to_x.relocate(Some(y), x);
+            to_x.relocate(Some(&source), &destination);
             to_x.into_arc()
         });
 
@@ -1124,11 +1129,11 @@ fn opposite_direction_relocations_converge_without_deadlock() {
         let landed_on_x = yx.join().unwrap();
 
         assert!(
-            sync::Arc::ptr_eq(&landed_on_y, &shared.storage.get(y).unwrap()),
+            sync::Arc::ptr_eq(&landed_on_y, &shared.storage.get(&y).unwrap()),
             "the X->Y thread must end on the value published for Y"
         );
         assert!(
-            sync::Arc::ptr_eq(&landed_on_x, &shared.storage.get(x).unwrap()),
+            sync::Arc::ptr_eq(&landed_on_x, &shared.storage.get(&x).unwrap()),
             "the Y->X thread must end on the value published for X"
         );
     }
@@ -1145,7 +1150,7 @@ fn same_key_relocation_keeps_the_carried_value() {
     arc.increment_by(5);
 
     let mut moved = arc.clone();
-    moved.relocate(Some(threads[0]), threads[1]);
+    moved.relocate(Some(&threads[0]), &threads[1]);
 
     assert!(
         sync::Arc::ptr_eq(&moved.value, &arc.value),
@@ -1166,7 +1171,7 @@ fn none_source_single_key_relocation_keeps_the_carried_value() {
     arc.increment_by(5);
 
     let mut moved = arc.clone();
-    moved.relocate(None, threads[0]);
+    moved.relocate(None, &threads[0]);
 
     assert!(
         sync::Arc::ptr_eq(&moved.value, &arc.value),
@@ -1191,7 +1196,7 @@ fn none_source_multi_key_relocation_materializes_a_fresh_value() {
     arc.increment_by(5);
 
     let mut moved = arc.clone();
-    moved.relocate(None, threads[1]);
+    moved.relocate(None, &threads[1]);
 
     assert!(
         !sync::Arc::ptr_eq(&moved.value, &arc.value),
@@ -1211,7 +1216,7 @@ fn cross_key_relocation_materializes_a_fresh_value() {
     arc.increment_by(5);
 
     let mut moved = arc.clone();
-    moved.relocate(Some(threads[0]), threads[1]);
+    moved.relocate(Some(&threads[0]), &threads[1]);
 
     assert!(
         !sync::Arc::ptr_eq(&moved.value, &arc.value),

@@ -238,10 +238,7 @@ mod tests {
     fn storage_starts_with_default_capacity() {
         let storage = Storage::<u32, PerThread>::new();
 
-        let Values::Partitioned(values) = &storage.values else {
-            panic!("per-thread storage must use partitioned values");
-        };
-        assert!(values.capacity() >= DEFAULT_PARTITION_CAPACITY);
+        assert!(matches!(&storage.values, Values::Partitioned(values) if values.capacity() >= DEFAULT_PARTITION_CAPACITY));
     }
 
     #[test]
@@ -249,6 +246,20 @@ mod tests {
         let storage = Storage::<u32, PerProcess>::new();
 
         assert!(matches!(storage.values, Values::Single(_)));
+    }
+
+    #[test]
+    fn single_partition_storage_supports_operations() {
+        let thread = ThreadBuilder::default().build(thread::current().id());
+        let storage = Storage::<u32, PerProcess>::new();
+        let first = Arc::new(1);
+        let second = Arc::new(2);
+
+        assert_eq!(storage.insert(&thread, Arc::clone(&first)), Ok(()));
+        assert_eq!(storage.insert(&thread, Arc::clone(&second)), Err(second));
+        assert_eq!(storage.count_where(|value| **value == 1), 1);
+        assert_eq!(storage.count_where(|value| **value == 2), 0);
+        assert!(format!("{storage:?}").contains("values: 1"));
     }
 
     #[test]

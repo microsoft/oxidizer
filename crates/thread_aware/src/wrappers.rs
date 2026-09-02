@@ -79,7 +79,7 @@ pub const fn unaware<T>(value: T) -> Unaware<T> {
     Unaware(value)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
 
@@ -173,17 +173,17 @@ mod tests {
         use std::collections::HashMap;
 
         let threads = crate::test_threads(&[2]);
-        let source = Some(threads[0]);
-        let destination = threads[1];
+        let source = Some(threads[0].clone());
+        let destination = threads[1].clone();
 
         // Test with simple type
         let mut value = Unaware(42);
-        value.relocate(source, destination);
+        value.relocate(source.as_ref(), &destination);
         assert_eq!(value.0, 42);
 
         // Test with String
         let mut value = Unaware("test string".to_string());
-        value.relocate(source, destination);
+        value.relocate(source.as_ref(), &destination);
         assert_eq!(value.0, "test string");
 
         // Test with complex type (HashMap)
@@ -191,7 +191,7 @@ mod tests {
         map.insert("key1", 100);
         map.insert("key2", 200);
         let mut value = Unaware(map);
-        value.relocate(source, destination);
+        value.relocate(source.as_ref(), &destination);
         assert_eq!(value.0.get("key1"), Some(&100));
         assert_eq!(value.0.get("key2"), Some(&200));
     }
@@ -242,10 +242,10 @@ mod tests {
 
         // Should work, but this is the case the docs warn about
         let threads = crate::test_threads(&[2]);
-        let source = Some(threads[0]);
-        let destination = threads[1];
+        let source = Some(threads[0].clone());
+        let destination = threads[1].clone();
 
-        unaware_wrapper.relocate(source, destination);
+        unaware_wrapper.relocate(source.as_ref(), &destination);
 
         // Both should still point to the same underlying data
         // Original + clone in wrapper = 2, relocated is a copy (since Unaware<Arc<_>> implements Copy)
@@ -289,10 +289,10 @@ mod tests {
 
         // Test with relocation
         let threads = crate::test_threads(&[2]);
-        let source = Some(threads[0]);
-        let destination = threads[1];
+        let source = Some(threads[0].clone());
+        let destination = threads[1].clone();
 
-        unaware_complex.relocate(source, destination);
+        unaware_complex.relocate(source.as_ref(), &destination);
         assert_eq!(unaware_complex.0.id, 1);
         assert_eq!(unaware_complex.0.name, "test");
     }

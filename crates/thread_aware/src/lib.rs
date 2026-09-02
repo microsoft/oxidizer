@@ -257,8 +257,8 @@ pub use cell::{Arc, FromStorageError, PerNumaNode, PerProcess, PerThread, storag
 pub use thread_aware_core::{NumaNode, Owner, Thread, ThreadAware};
 pub use wrappers::{Unaware, unaware};
 
-#[cfg(test)]
-fn test_threads(counts: &[usize]) -> Vec<&'static Thread> {
+#[cfg(all(test, feature = "std"))]
+fn test_threads(counts: &[usize]) -> Vec<Thread> {
     use std::sync::{Arc, Barrier};
     use std::thread;
 
@@ -283,6 +283,6 @@ fn test_threads(counts: &[usize]) -> Vec<&'static Thread> {
     barrier.wait();
     handles
         .into_iter()
-        .map(|handle| &*Box::leak(Box::new(handle.join().expect("test thread should finish"))))
+        .map(|handle| handle.join().expect("test thread should finish"))
         .collect()
 }

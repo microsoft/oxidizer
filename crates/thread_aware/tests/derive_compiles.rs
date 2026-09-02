@@ -13,7 +13,7 @@ use thread_aware::thread::ThreadBuilder;
 use thread_aware::{Thread, ThreadAware as _};
 use thread_aware_macros::ThreadAware;
 
-fn test_threads(counts: &[usize]) -> Vec<&'static Thread> {
+fn test_threads(counts: &[usize]) -> Vec<Thread> {
     let builder = ThreadBuilder::default();
     counts
         .iter()
@@ -24,7 +24,7 @@ fn test_threads(counts: &[usize]) -> Vec<&'static Thread> {
                 .numa_node(numa_node.try_into().expect("test NUMA node index must fit"));
             (0..*count).map(move |_| {
                 let thread_id = thread::spawn(|| thread::current().id()).join().expect("test thread should finish");
-                &*Box::leak(Box::new(builder.build(thread_id)))
+                builder.build(thread_id)
             })
         })
         .collect()
@@ -43,10 +43,10 @@ struct Container<T: thread_aware::ThreadAware> {
 #[test]
 fn derive_thread_aware_compiles_and_calls() {
     let mut addrs = test_threads(&[2]);
-    let a = Some(addrs.remove(0));
+    let a = addrs.remove(0);
     let b = addrs.remove(0);
     let mut c = Container { val: Inner(5), raw: 10 };
-    thread_aware::ThreadAware::relocate(&mut c, a, b);
+    thread_aware::ThreadAware::relocate(&mut c, Some(&a), &b);
 }
 
 /// Counts how many times it was relocated, so tests can assert which fields the
@@ -62,9 +62,9 @@ impl thread_aware::ThreadAware for Tracker {
     }
 }
 
-fn thread_pair() -> (Option<&'static Thread>, &'static Thread) {
-    let threads = test_threads(&[2]);
-    (Some(threads[0]), threads[1])
+fn thread_pair() -> (Option<Thread>, Thread) {
+    let mut threads = test_threads(&[2]);
+    (Some(threads.remove(0)), threads.remove(0))
 }
 
 /// A generic named only inside `PhantomData` must still compile.
@@ -79,7 +79,7 @@ fn phantom_only_generic_compiles_and_relocates() {
     let (source, destination) = thread_pair();
 
     let mut value = DirectPhantom::<Tracker, Tracker>(Tracker::default(), PhantomData);
-    value.relocate(source, destination);
+    value.relocate(source.as_ref(), &destination);
 
     assert_eq!(value.0.relocations, 1, "the non-phantom field must be relocated exactly once");
 }
@@ -94,7 +94,7 @@ fn nested_phantom_data_compiles_and_relocates() {
     let (source, destination) = thread_pair();
 
     let mut value = NestedPhantom::<Tracker>((PhantomData,));
-    value.relocate(source, destination);
+    value.relocate(source.as_ref(), &destination);
 }
 
 /// A concrete `PhantomData` of a type that is `Send` but not `ThreadAware`.
@@ -112,7 +112,7 @@ fn concrete_phantom_of_non_thread_aware_type_compiles() {
         tracked: Tracker::default(),
         marker: PhantomData,
     };
-    value.relocate(source, destination);
+    value.relocate(source.as_ref(), &destination);
 
     assert_eq!(value.tracked.relocations, 1);
 }
@@ -135,7 +135,7 @@ fn relocate_reaches_every_non_skipped_field_and_no_skipped_one() {
         skipped: Tracker::default(),
         marker: PhantomData,
     };
-    value.relocate(source, destination);
+    value.relocate(source.as_ref(), &destination);
 
     assert_eq!(value.tracked.relocations, 1, "non-skipped fields must be relocated");
     assert_eq!(value.skipped.relocations, 0, "#[thread_aware(skip)] fields must not be relocated");
@@ -153,14 +153,14 @@ fn enum_with_phantom_only_generic_compiles_and_relocates() {
     let (source, destination) = thread_pair();
 
     let mut tracked = PhantomEnum::<Tracker, Tracker>::Tracked(Tracker::default());
-    tracked.relocate(source, destination);
+    tracked.relocate(source.as_ref(), &destination);
     match &tracked {
         PhantomEnum::Tracked(t) => assert_eq!(t.relocations, 1),
         PhantomEnum::Marked(_) => unreachable!("constructed as Tracked"),
     }
 
     let mut marked = PhantomEnum::<Tracker, Tracker>::Marked(PhantomData);
-    marked.relocate(source, destination);
+    marked.relocate(source.as_ref(), &destination);
 }
 
 // The cases below pin what a marker payload costs. The traversal binds the parameters it
@@ -177,7 +177,7 @@ fn phantom_shared_reference_compiles_and_relocates() {
     let (source, destination) = thread_pair();
 
     let mut value = PhantomRef::<'_, Rc<()>>(Tracker::default(), PhantomData);
-    value.relocate(source, destination);
+    value.relocate(source.as_ref(), &destination);
 
     assert_eq!(value.0.relocations, 1);
 }
@@ -191,7 +191,7 @@ fn phantom_slice_compiles_and_relocates() {
     let (source, destination) = thread_pair();
 
     let mut value = PhantomSlice::<Rc<()>>(Tracker::default(), PhantomData);
-    value.relocate(source, destination);
+    value.relocate(source.as_ref(), &destination);
 
     assert_eq!(value.0.relocations, 1);
 }
@@ -206,7 +206,7 @@ fn phantom_projection_compiles_and_relocates() {
     let (source, destination) = thread_pair();
 
     let mut value = PhantomProjection::<std::vec::IntoIter<i32>>(Tracker::default(), PhantomData);
-    value.relocate(source, destination);
+    value.relocate(source.as_ref(), &destination);
 
     assert_eq!(value.0.relocations, 1);
 }
@@ -229,7 +229,7 @@ fn skipped_generic_field_needs_only_send() {
         tracked: Tracker::default(),
         skipped: Arc::new(1_i32),
     };
-    value.relocate(source, destination);
+    value.relocate(source.as_ref(), &destination);
 
     assert_eq!(value.tracked.relocations, 1);
     assert_eq!(*value.skipped, 1, "the skipped field is left untouched");
@@ -262,7 +262,7 @@ fn qualified_type_named_phantom_data_is_relocated() {
     let (source, destination) = thread_pair();
 
     let mut value = HoldsLookalike(lookalike::PhantomData { value: Tracker::default() });
-    value.relocate(source, destination);
+    value.relocate(source.as_ref(), &destination);
 
     assert_eq!(
         value.0.value.relocations, 1,
@@ -300,7 +300,7 @@ fn bare_type_named_phantom_data_is_relocated() {
     let (source, destination) = thread_pair();
 
     let mut value = bare_lookalike::HoldsBareLookalike(bare_lookalike::Marker { value: Tracker::default() });
-    value.relocate(source, destination);
+    value.relocate(source.as_ref(), &destination);
 
     assert_eq!(
         value.0.value.relocations, 1,
@@ -336,7 +336,7 @@ fn raw_pointer_variance_marker_needs_no_escape_hatch() {
         len: 3,
         marker: PhantomData,
     };
-    value.relocate(source, destination);
+    value.relocate(source.as_ref(), &destination);
 
     assert_eq!(value.len, 3);
 }
@@ -357,7 +357,7 @@ fn a_non_send_payload_still_derives_through_a_fn_marker() {
         tracked: Tracker::default(),
         marker: PhantomData,
     };
-    value.relocate(source, destination);
+    value.relocate(source.as_ref(), &destination);
 
     assert_eq!(value.tracked.relocations, 1);
 }
@@ -444,11 +444,11 @@ fn a_shadowed_prelude_name_does_not_break_the_derive() {
     let mut holder = shadowed_prelude::Holder {
         tracked: Tracker::default(),
     };
-    holder.relocate(source, destination);
+    holder.relocate(source.as_ref(), &destination);
     assert_eq!(holder.tracked.relocations, 1);
 
     let mut wrapped = shadowed_prelude::Wrapped::V(Tracker::default());
-    wrapped.relocate(source, destination);
+    wrapped.relocate(source.as_ref(), &destination);
     match &wrapped {
         shadowed_prelude::Wrapped::V(t) => assert_eq!(t.relocations, 1),
     }
@@ -493,13 +493,13 @@ fn caller_constants_do_not_collide_with_generated_parameters() {
     let mut value = colliding_parameter_names::ConstParamNamedSource::<3> {
         tracked: Tracker::default(),
     };
-    value.relocate(source, destination);
+    value.relocate(source.as_ref(), &destination);
     assert_eq!(value.tracked.relocations, 1);
 
     let mut other = colliding_parameter_names::NamedAfterConst {
         tracked: Tracker::default(),
     };
-    other.relocate(source, destination);
+    other.relocate(source.as_ref(), &destination);
     assert_eq!(other.tracked.relocations, 1);
 
     let colliding = colliding_parameter_names::destination;
@@ -511,7 +511,7 @@ fn caller_constants_do_not_collide_with_generated_bindings() {
     let (source, destination) = thread_pair();
 
     let mut tuple = ConstCapture::Tuple(Tracker::default(), Tracker::default());
-    tuple.relocate(source, destination);
+    tuple.relocate(source.as_ref(), &destination);
     match &tuple {
         ConstCapture::Tuple(a, b) => {
             assert_eq!(a.relocations, 1);
@@ -524,7 +524,7 @@ fn caller_constants_do_not_collide_with_generated_bindings() {
         first: Tracker::default(),
         second: Tracker::default(),
     };
-    named.relocate(source, destination);
+    named.relocate(source.as_ref(), &destination);
     match &named {
         ConstCapture::Named { first, second } => {
             assert_eq!(first.relocations, 1);
@@ -544,7 +544,7 @@ fn variant_fields_named_after_relocate_parameters_compile() {
         source: Tracker::default(),
         destination: Tracker::default(),
     };
-    value.relocate(source, destination);
+    value.relocate(source.as_ref(), &destination);
 
     match &value {
         ShadowingFieldNames::Both { source: a, destination: b } => {
@@ -558,7 +558,7 @@ fn variant_fields_named_after_relocate_parameters_compile() {
         __thread_aware_source: Tracker::default(),
         __thread_aware_destination: Tracker::default(),
     };
-    generated.relocate(source, destination);
+    generated.relocate(source.as_ref(), &destination);
     match &generated {
         ShadowingFieldNames::Generated {
             __thread_aware_source: a,
@@ -571,7 +571,7 @@ fn variant_fields_named_after_relocate_parameters_compile() {
     }
 
     let mut marker = ShadowingFieldNames::<i32>::Marker { source: PhantomData };
-    marker.relocate(source, destination);
+    marker.relocate(source.as_ref(), &destination);
 }
 
 /// An enum with no variants has nothing to relocate.
@@ -628,14 +628,14 @@ fn payloads_invisible_to_a_syntactic_scan_need_no_escape_hatch() {
         tracked: Tracker::default(),
         marker: PhantomData,
     };
-    value.relocate(source, destination);
+    value.relocate(source.as_ref(), &destination);
     assert_eq!(value.tracked.relocations, 1);
 
     let mut hidden = MacroHidden::<i32> {
         tracked: Tracker::default(),
         marker: PhantomData,
     };
-    hidden.relocate(source, destination);
+    hidden.relocate(source.as_ref(), &destination);
     assert_eq!(hidden.tracked.relocations, 1);
 }
 
@@ -670,7 +670,7 @@ fn user_trait_named_thread_aware_does_not_suppress_the_real_bound() {
     let (source, destination) = thread_pair();
 
     let mut value = own_thread_aware::Holder(own_thread_aware::Inner);
-    value.relocate(source, destination);
+    value.relocate(source.as_ref(), &destination);
 }
 
 /// A named enum variant carrying a skipped field.
@@ -710,7 +710,7 @@ fn enum_named_variant_bindings_do_not_warn() {
         value: Tracker::default(),
         marker: PhantomData,
     };
-    marked.relocate(source, destination);
+    marked.relocate(source.as_ref(), &destination);
     match &marked {
         NamedVariants::Marked { value, .. } => assert_eq!(value.relocations, 1),
         NamedVariants::Skipped { .. } => unreachable!("constructed as Marked"),
@@ -720,7 +720,7 @@ fn enum_named_variant_bindings_do_not_warn() {
         value: Tracker::default(),
         ignored: 7,
     };
-    skipped.relocate(source, destination);
+    skipped.relocate(source.as_ref(), &destination);
     match &skipped {
         NamedVariants::Skipped { value, ignored } => {
             assert_eq!(value.relocations, 1);
