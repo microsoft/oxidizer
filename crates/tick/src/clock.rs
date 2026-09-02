@@ -573,23 +573,13 @@ mod tests {
     use std::thread::sleep;
 
     use futures::FutureExt;
-    use thread_aware::thread::ThreadBuilder;
+    use thread_aware::Relocator;
 
     use super::*;
     use crate::ClockControl;
     use crate::runtime::InactiveClock;
 
     static_assertions::assert_impl_all!(Clock: Debug, Send, Sync, Clone, AsRef<Clock>);
-
-    fn test_threads() -> [Thread; 2] {
-        let builder = ThreadBuilder::default();
-        let source = builder.build(std::thread::current().id());
-        let destination_builder = builder.numa_node(1);
-        let destination = std::thread::spawn(move || destination_builder.build(std::thread::current().id()))
-            .join()
-            .unwrap();
-        [source, destination]
-    }
 
     #[test]
     fn assert_types() {
@@ -676,10 +666,9 @@ mod tests {
     async fn tokio_ensure_timers_advancing_after_relocate() {
         // Relocation must be a no-op for Tokio clocks: the background driver task drives a
         // shared timer set, so a relocated clone must still observe timers being advanced.
-        let threads = test_threads();
         let clock = Clock::new_tokio();
         let mut clock = clock;
-        clock.relocate(Some(&threads[0]), &threads[1]);
+        _ = Relocator::between_numa_nodes().relocate(&mut clock);
         clock.delay(Duration::from_millis(15)).await;
     }
 
@@ -769,18 +758,14 @@ mod tests {
 
     #[test]
     fn thread_aware() {
-        let threads = test_threads();
-        let source = Some(&threads[0]);
-        let thread_1 = &threads[0];
-        let thread_2 = &threads[1];
-
         // root clock
         let root = InactiveClock::default();
 
         let mut inactive_1 = root.clone();
-        inactive_1.relocate(source, thread_1);
         let mut inactive_2 = root;
-        inactive_2.relocate(source, thread_2);
+        let (source, thread_2) = Relocator::between_numa_nodes().relocate(&mut inactive_2);
+        let thread_1 = source.as_ref().unwrap();
+        inactive_1.relocate(source.as_ref(), thread_1);
 
         let (clock_1, mut driver_1) = inactive_1.activate();
         let (clock_2, mut driver_2) = inactive_2.activate();
@@ -794,7 +779,7 @@ mod tests {
         assert_eq!(driver_2.state.timers_len(), 0);
         {
             let mut relocated_clock = clock_1.clone();
-            relocated_clock.relocate(source, thread_2);
+            relocated_clock.relocate(source.as_ref(), &thread_2);
             assert_eq!(relocated_clock.state.timers_len(), 0);
         }
 
@@ -826,18 +811,14 @@ mod tests {
 
     #[test]
     fn thread_aware_clock_control() {
-        let threads = test_threads();
-        let source = Some(&threads[0]);
-        let thread_1 = &threads[0];
-        let thread_2 = &threads[1];
-
         // root clock
         let root: InactiveClock = ClockControl::default().into();
 
         let mut inactive_1 = root.clone();
-        inactive_1.relocate(source, thread_1);
         let mut inactive_2 = root;
-        inactive_2.relocate(source, thread_2);
+        let (source, _thread_2) = Relocator::between_numa_nodes().relocate(&mut inactive_2);
+        let thread_1 = source.as_ref().unwrap();
+        inactive_1.relocate(source.as_ref(), thread_1);
 
         let (clock_1, driver_1) = inactive_1.activate();
         let (clock_2, driver_2) = inactive_2.activate();
@@ -872,9 +853,8 @@ mod tests {
     #[tokio::test]
     #[cfg_attr(miri, ignore)]
     async fn debug_alive_system_clock_relocated() {
-        let threads = test_threads();
         let mut clock = Clock::new_system_frozen();
-        clock.relocate(Some(&threads[0]), &threads[1]);
+        _ = Relocator::between_numa_nodes().relocate(&mut clock);
 
         insta::assert_debug_snapshot!(clock);
     }

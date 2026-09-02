@@ -75,22 +75,13 @@ mod tests {
     use std::sync::atomic::{self, AtomicUsize};
 
     use static_assertions::assert_impl_all;
+    use thread_aware::Relocator;
     use thread_aware::Thread;
-    use thread_aware::thread::ThreadBuilder;
 
     use super::*;
     use crate::mem::GlobalPool;
 
     assert_impl_all!(OpaqueMemory: MemoryShared, ThreadAware);
-
-    fn test_threads() -> [Thread; 2] {
-        let builder = ThreadBuilder::default();
-        let source = builder.build(std::thread::current().id());
-        let destination = std::thread::spawn(move || builder.build(std::thread::current().id()))
-            .join()
-            .expect("destination thread should finish");
-        [source, destination]
-    }
 
     #[test]
     fn wraps_inner() {
@@ -139,8 +130,7 @@ mod tests {
             inner: GlobalPool::new(),
         });
 
-        let threads = test_threads();
-        memory.relocate(Some(&threads[0]), &threads[1]);
+        _ = Relocator::between_threads().relocate(&mut memory);
 
         assert_eq!(relocated.load(atomic::Ordering::SeqCst), 1);
     }

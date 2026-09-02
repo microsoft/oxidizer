@@ -136,6 +136,7 @@ fetch_tls = { path = "../fetch_tls", features = ["rustls", "native-tls"] }
 http_extensions = { path = "../http_extensions", features = ["test-util", "json"] }
 ohno = { path = "../ohno", features = ["test-util", "app-err"] }
 testing_aids = { path = "../testing_aids" }
+thread_aware = { path = "../thread_aware", features = ["test-utils"] }
 tick = { path = "../tick", features = [
     "test-util",
     "tokio",

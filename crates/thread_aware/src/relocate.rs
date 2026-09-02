@@ -20,6 +20,7 @@ static SOURCE_THREAD_ID: OnceLock<ThreadId> = OnceLock::new();
 pub struct Relocator {
     source: Thread,
     destination: Thread,
+    destination_numa_node: u32,
     include_source: bool,
 }
 
@@ -43,12 +44,21 @@ impl Relocator {
         self
     }
 
+    /// Uses an owner distinct from the source for the destination coordinate.
+    #[must_use]
+    pub fn different_owner(mut self) -> Self {
+        self.destination = ThreadBuilder::default()
+            .numa_node(self.destination_numa_node)
+            .build(self.destination.id());
+        self
+    }
+
     /// Relocates `value` and returns the source and destination coordinates.
     #[must_use]
-    pub fn relocate<T: ThreadAware>(self, value: &mut T) -> (Option<Thread>, Thread) {
-        let source = self.include_source.then_some(self.source);
+    pub fn relocate<T: ThreadAware + ?Sized>(&self, value: &mut T) -> (Option<Thread>, Thread) {
+        let source = self.include_source.then(|| self.source.clone());
         value.relocate(source.as_ref(), &self.destination);
-        (source, self.destination)
+        (source, self.destination.clone())
     }
 
     fn new(source_numa_node: u32, destination_numa_node: u32) -> Self {
@@ -60,6 +70,7 @@ impl Relocator {
                     .expect("test thread should return its ID")
             })),
             destination: builder.numa_node(destination_numa_node).build(thread::current().id()),
+            destination_numa_node,
             include_source: true,
         }
     }
@@ -126,5 +137,35 @@ mod tests {
         assert!(!relocation.crossed_numa_nodes);
         assert!(source.is_none());
         assert_eq!(destination.id(), thread::current().id());
+    }
+
+    #[test]
+    fn relocator_can_be_reused() {
+        let relocator = Relocator::between_threads();
+        let mut first = Relocation {
+            had_source: false,
+            crossed_numa_nodes: true,
+        };
+        let mut second = Relocation {
+            had_source: false,
+            crossed_numa_nodes: true,
+        };
+
+        let first_coordinates = relocator.relocate(&mut first);
+        let second_coordinates = relocator.relocate(&mut second);
+
+        assert_eq!(first_coordinates, second_coordinates);
+    }
+
+    #[test]
+    fn different_owner_uses_a_distinct_destination_owner() {
+        let mut relocation = Relocation {
+            had_source: false,
+            crossed_numa_nodes: true,
+        };
+
+        let (source, destination) = Relocator::between_threads().different_owner().relocate(&mut relocation);
+
+        assert_ne!(source.unwrap().owner(), destination.owner());
     }
 }

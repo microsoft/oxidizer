@@ -327,19 +327,9 @@ impl<S> Debug for CustomSpawnerBuilder<S> {
 mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    use thread_aware::relocate::Relocator;
-    use thread_aware::thread::ThreadBuilder;
+    use thread_aware::Relocator;
 
     use super::*;
-
-    fn test_threads() -> [Thread; 2] {
-        let builder = ThreadBuilder::default();
-        let source = builder.build(std::thread::current().id());
-        let destination = std::thread::spawn(move || builder.build(std::thread::current().id()))
-            .join()
-            .unwrap();
-        [source, destination]
-    }
 
     /// Mock spawner whose relocate sets a flag, so mutation tests catch no-ops.
     #[derive(Clone)]
@@ -357,8 +347,7 @@ mod tests {
         fn spawn(&self, _task: BoxedFuture) {}
 
         fn spawn_anywhere(&self, mut task: Box<dyn ThreadAwareAsyncFnOnce<()>>) {
-            let threads = test_threads();
-            task.relocate(Some(&threads[0]), &threads[1]);
+            _ = Relocator::between_threads().relocate(&mut *task);
         }
 
         fn spawn_blocking(&self, _task: BoxedBlockingTask) {}
@@ -390,7 +379,6 @@ mod tests {
         static RELOCATED: AtomicBool = AtomicBool::new(false);
         static BLOCKING_LAYER_RAN: AtomicBool = AtomicBool::new(false);
 
-        let threads = test_threads();
         let mut layered = Layered {
             future_layer: |task: BoxedFuture| -> BoxedFuture { task },
             blocking_layer: |task: BoxedBlockingTask| -> BoxedBlockingTask {
@@ -400,7 +388,7 @@ mod tests {
             inner: TrackingSpawner { relocated: &RELOCATED },
         };
 
-        layered.relocate(Some(&threads[0]), &threads[1]);
+        _ = Relocator::between_threads().relocate(&mut layered);
         assert!(RELOCATED.load(Ordering::SeqCst), "Layered must forward relocate to inner");
 
         // Exercise spawn + spawn_anywhere + spawn_blocking + layer closures + NoopTask::call_once
@@ -436,13 +424,12 @@ mod tests {
             }
         }
 
-        let threads = test_threads();
         let mut task = LayeredTask {
             task: Box::new(Tracker(&RELOCATED)),
             layer: |task: BoxedFuture| -> BoxedFuture { task },
         };
 
-        task.relocate(Some(&threads[0]), &threads[1]);
+        _ = Relocator::between_threads().relocate(&mut task);
         assert!(RELOCATED.load(Ordering::SeqCst), "LayeredTask must forward relocate to inner task");
 
         // Exercise layer closure to cover helper code

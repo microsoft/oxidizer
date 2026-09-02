@@ -61,6 +61,7 @@ windows-sys = { workspace = true, optional = true, features = ["Win32_System_Sys
 [dev-dependencies]
 alloc_tracker = { workspace = true }
 ohno = { path = "../ohno", features = ["app-err"] }
+thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
 
 #external
 chrono = { workspace = true, features = ["clock"] }

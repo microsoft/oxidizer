@@ -150,7 +150,7 @@ mod tests {
     #[test]
     fn context_can_be_relocated_between_numa_nodes() {
         let mut ctx = ResilienceContext::<(), ()>::new(tick::Clock::new_frozen());
-        let (source, destination) = thread_aware::relocate::Relocator::between_numa_nodes().relocate(&mut ctx);
+        let (source, destination) = thread_aware::Relocator::between_numa_nodes().relocate(&mut ctx);
 
         assert_ne!(source.unwrap().numa_node(), destination.numa_node());
         let _ = ctx.get_clock().system_time();

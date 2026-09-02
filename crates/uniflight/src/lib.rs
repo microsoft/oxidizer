@@ -492,7 +492,7 @@ impl<T> PanicAwareCell<T> {
 mod tests {
     use std::time::Duration;
 
-    use thread_aware::relocate::Relocator;
+    use thread_aware::Relocator;
 
     use super::*;
 

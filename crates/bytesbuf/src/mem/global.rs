@@ -493,21 +493,13 @@ mod tests {
     use std::thread;
 
     use static_assertions::assert_impl_all;
-    use thread_aware::Thread;
-    use thread_aware::thread::ThreadBuilder;
+    use thread_aware::Relocator;
 
     use super::*;
     use crate::mem::MemoryShared;
 
     assert_impl_all!(GlobalPool: MemoryShared);
     assert_impl_all!(GlobalPool: ThreadAware);
-
-    fn test_threads() -> [Thread; 2] {
-        let builder = ThreadBuilder::default();
-        let source = builder.build(thread::current().id());
-        let destination = thread::spawn(move || builder.build(thread::current().id())).join().unwrap();
-        [source, destination]
-    }
 
     /// Helper to assert all sub-pools are empty.
     fn assert_all_pools_empty(inner: &GlobalPoolInner) {
@@ -816,10 +808,6 @@ mod tests {
 
     #[test]
     fn relocated_pool_works() {
-        let threads = test_threads();
-        let source = Some(&threads[0]);
-        let destination = &threads[1];
-
         let mut memory = GlobalPool::new();
 
         // Allocate from the original pool.
@@ -829,7 +817,7 @@ mod tests {
         assert_eq!(view.first_slice()[0], 42);
 
         // Relocate the pool to a different thread coordinate.
-        memory.relocate(source, destination);
+        _ = Relocator::between_threads().relocate(&mut memory);
 
         // The relocated pool should work independently.
         let mut buf2 = memory.reserve(200);

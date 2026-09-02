@@ -15,17 +15,7 @@ use std::sync::{Arc, Mutex};
 
 use anyspawn::{BoxedBlockingTask, BoxedFuture, SpawnCustom, Spawner};
 use thread_aware::closure::ThreadAwareAsyncFnOnce;
-use thread_aware::thread::ThreadBuilder;
-use thread_aware::{Thread, ThreadAware};
-
-fn test_threads() -> [Thread; 2] {
-    let builder = ThreadBuilder::default();
-    let source = builder.build(std::thread::current().id());
-    let destination = std::thread::spawn(move || builder.build(std::thread::current().id()))
-        .join()
-        .expect("destination thread should finish");
-    [source, destination]
-}
+use thread_aware::{Relocator, Thread, ThreadAware};
 
 /// Per-process spawner: relocation must not change which spawn function is used.
 ///
@@ -59,10 +49,9 @@ fn per_process_relocation_preserves_spawn_function() {
 
     let spawner = Spawner::new_custom("shared", CountingSpawner(Arc::clone(&call_count)));
 
-    let threads = test_threads();
     let original = spawner.clone();
     let mut spawner = spawner;
-    spawner.relocate(Some(&threads[0]), &threads[1]);
+    _ = Relocator::between_threads().relocate(&mut spawner);
 
     let r1 = futures::executor::block_on(original.spawn(async { 1 }));
     let r2 = futures::executor::block_on(spawner.spawn(async { 2 }));
@@ -110,10 +99,9 @@ fn thread_aware_relocation_invokes_relocated_for_new_core() {
 
     let before = RELOCATE_CALLS.load(Ordering::SeqCst);
 
-    let threads = test_threads();
     let original = spawner.clone();
     let mut spawner = spawner;
-    spawner.relocate(Some(&threads[0]), &threads[1]);
+    _ = Relocator::between_threads().relocate(&mut spawner);
 
     assert!(
         RELOCATE_CALLS.load(Ordering::SeqCst) > before,
@@ -165,10 +153,9 @@ fn thread_aware_relocated_spawner_dispatches_through_destination() {
 
     let spawner = Spawner::new_custom("per-core", IdSpawner { id: 0 });
 
-    let threads = test_threads();
     let original = spawner.clone();
     let mut spawner = spawner;
-    spawner.relocate(Some(&threads[0]), &threads[1]);
+    _ = Relocator::between_threads().relocate(&mut spawner);
 
     futures::executor::block_on(original.spawn(async {}));
     futures::executor::block_on(spawner.spawn(async {}));
@@ -217,8 +204,7 @@ fn spawn_anywhere_relocates_task_data() {
         }
 
         fn spawn_anywhere(&self, mut task: Box<dyn ThreadAwareAsyncFnOnce<()>>) {
-            let threads = test_threads();
-            task.relocate(Some(&threads[0]), &threads[1]);
+            _ = Relocator::between_threads().relocate(&mut *task);
             self.spawn(task.call_once());
         }
 

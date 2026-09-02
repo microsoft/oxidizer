@@ -132,23 +132,14 @@ mod tests {
     use std::sync::atomic::{self, AtomicUsize};
 
     use static_assertions::assert_impl_all;
+    use thread_aware::Relocator;
     use thread_aware::Thread;
-    use thread_aware::thread::ThreadBuilder;
 
     use super::*;
     use crate::mem::MemoryShared;
     use crate::mem::testing::TransparentMemory;
 
     assert_impl_all!(CallbackMemory<TransparentMemory>: MemoryShared);
-
-    fn test_threads() -> [Thread; 2] {
-        let builder = ThreadBuilder::default();
-        let source = builder.build(std::thread::current().id());
-        let destination = std::thread::spawn(move || builder.build(std::thread::current().id()))
-            .join()
-            .unwrap();
-        [source, destination]
-    }
 
     /// Thread-aware callback data carrying an observable call counter alongside the wrapped provider.
     #[derive(Clone, Debug, ThreadAware)]
@@ -247,8 +238,7 @@ mod tests {
             |observer: &RelocationObserver, min_bytes| observer.inner.reserve(min_bytes),
         );
 
-        let threads = test_threads();
-        provider.relocate(Some(&threads[0]), &threads[1]);
+        _ = Relocator::between_threads().relocate(&mut provider);
 
         assert_eq!(relocations.load(atomic::Ordering::SeqCst), 1);
 

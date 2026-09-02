@@ -409,7 +409,7 @@ mod tests {
     #[test]
     fn fake_handler_can_be_relocated_between_threads() -> std::result::Result<(), ohno::AppError> {
         let mut handler = FakeHandler::from(StatusCode::NOT_IMPLEMENTED);
-        let (source, destination) = thread_aware::relocate::Relocator::between_threads().relocate(&mut handler);
+        let (source, destination) = thread_aware::Relocator::between_threads().relocate(&mut handler);
 
         assert_ne!(source.unwrap().id(), destination.id());
         assert_eq!(get_response(&handler)?.status(), StatusCode::NOT_IMPLEMENTED);

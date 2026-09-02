@@ -330,7 +330,7 @@ mod coverage_tests {
     fn slot_can_be_relocated_between_threads() {
         let slot = Slot::new();
         let mut relocated = slot.clone();
-        let (source, destination) = thread_aware::relocate::Relocator::between_threads().relocate(&mut relocated);
+        let (source, destination) = thread_aware::Relocator::between_threads().relocate(&mut relocated);
 
         assert!(slot.ptr_eq(&relocated));
         assert_ne!(source.unwrap().id(), destination.id());

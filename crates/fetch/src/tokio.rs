@@ -341,8 +341,7 @@ fn build_tls_backend(options: &TransportOptions, tls: TlsOptions) -> TlsBackend 
 mod tests {
     use http::StatusCode;
     use http_extensions::FakeHandler;
-    use thread_aware::ThreadAware;
-    use thread_aware::thread::ThreadBuilder;
+    use thread_aware::Relocator;
     use tick::Clock;
 
     use super::TokioDeps;
@@ -418,7 +417,6 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn tokio_client_works_after_relocation() {
-        let thread = ThreadBuilder::default().build(std::thread::current().id());
         let clock = Clock::new_tokio();
 
         let mut client = HttpClient::builder_tokio(TokioDeps::with_clock(&clock))
@@ -430,7 +428,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
 
         // Relocate the client to a different thread coordinate.
-        client.relocate(None, &thread);
+        _ = Relocator::between_threads().source(false).relocate(&mut client);
 
         // Verify the relocated client still serves requests correctly.
         let response = client.get("https://example.com/after-relocation").fetch().await.unwrap();

@@ -314,9 +314,7 @@ mod tests {
     #[test]
     fn error_can_be_relocated_between_threads() {
         let mut error = HttpError::validation("relocated");
-        let (source, destination) = thread_aware::relocate::Relocator::between_threads()
-            .source(false)
-            .relocate(&mut error);
+        let (source, destination) = thread_aware::Relocator::between_threads().source(false).relocate(&mut error);
 
         assert_eq!(error.message(), "relocated");
         assert!(source.is_none());
