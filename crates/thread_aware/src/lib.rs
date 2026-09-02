@@ -269,22 +269,22 @@ fn test_threads(counts: &[usize]) -> Vec<&'static Thread> {
         .flat_map(|(node, count)| std::iter::repeat_n(node, *count))
         .collect::<Vec<_>>();
     let barrier = Arc::new(Barrier::new(nodes.len() + 1));
-    let handles = nodes
-        .into_iter()
-        .map(|node| {
-            let builder = builder.clone().with_numa_node(node.try_into().unwrap());
-            let barrier = Arc::clone(&barrier);
-            thread::spawn(move || {
-                let coordinate = builder.build(thread::current().id());
-                barrier.wait();
-                coordinate
-            })
-        })
-        .collect::<Vec<_>>();
+    let mut handles = Vec::with_capacity(nodes.len());
+    for node in nodes {
+        let builder = builder
+            .clone()
+            .with_numa_node(node.try_into().expect("test NUMA node index must fit"));
+        let barrier = Arc::clone(&barrier);
+        handles.push(thread::spawn(move || {
+            let coordinate = builder.build(thread::current().id());
+            barrier.wait();
+            coordinate
+        }));
+    }
 
     barrier.wait();
     handles
         .into_iter()
-        .map(|handle| &*Box::leak(Box::new(handle.join().unwrap())))
+        .map(|handle| &*Box::leak(Box::new(handle.join().expect("test thread should finish"))))
         .collect()
 }

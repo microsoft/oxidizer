@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![allow(clippy::similar_names, reason = "relocation tests use numbered thread pairs")]
+
 use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
 use std::sync::{self};
 
