@@ -10,7 +10,7 @@
 pub enum TrailingData {
     /// Stop after the compressed stream and ignore whatever follows it.
     ///
-    /// The decoder reports [`Output::Done`][crate::Output::Done] at the end of the stream and never
+    /// The decoder reports [`Output::Done`][crate::core::Output::Done] at the end of the stream and never
     /// looks at the bytes after it.
     #[default]
     Ignore,

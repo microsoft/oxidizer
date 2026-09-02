@@ -70,7 +70,7 @@ macro_rules! define_compressor_build {
         #[doc = concat!("Compresses a complete byte sequence into ", $name, ".")]
         ///
         /// Uses [`Level::DEFAULT`][crate::Level::DEFAULT], and recycles engine state through
-        /// `pool`; pass [`Pool::disabled`][crate::Pool::disabled] to recycle nothing. Prefer
+        /// `pool`; pass [`Resources::enable_pooling(0)`][crate::Resources::enable_pooling] to recycle nothing. Prefer
         /// [`Compressor`] for data that arrives incrementally; this convenience buffers the entire
         /// result before returning.
         ///
@@ -129,7 +129,7 @@ macro_rules! define_compressor_build {
         #[doc = concat!("Compresses a complete byte sequence into ", $name, ".")]
         ///
         /// Uses [`Level::DEFAULT`][crate::Level::DEFAULT], and recycles engine state through
-        /// `pool`; pass [`Pool::disabled`][crate::Pool::disabled] to recycle nothing. Prefer
+        /// `pool`; pass [`Resources::enable_pooling(0)`][crate::Resources::enable_pooling] to recycle nothing. Prefer
         /// [`Compressor`] for data that arrives incrementally; this convenience buffers the entire
         /// result before returning.
         ///
@@ -193,7 +193,7 @@ macro_rules! define_decompressor_build {
         #[doc = concat!("Decompresses a complete ", $name, " stream that is already in memory.")]
         ///
         /// Applies this format's default bounds, and recycles engine state through `pool`; pass
-        /// [`Pool::disabled`][crate::Pool::disabled] to recycle nothing. Prefer [`Decompressor`]
+        /// [`Resources::enable_pooling(0)`][crate::Resources::enable_pooling] to recycle nothing. Prefer [`Decompressor`]
         /// for data that arrives incrementally; this convenience buffers the entire result before
         /// returning.
         ///
@@ -278,7 +278,7 @@ macro_rules! define_decompressor_build {
         #[doc = concat!("Decompresses a complete ", $name, " stream that is already in memory.")]
         ///
         /// Applies this format's default bounds, and recycles engine state through `pool`; pass
-        /// [`Pool::disabled`][crate::Pool::disabled] to recycle nothing. Prefer [`Decompressor`]
+        /// [`Resources::enable_pooling(0)`][crate::Resources::enable_pooling] to recycle nothing. Prefer [`Decompressor`]
         /// for data that arrives incrementally; this convenience buffers the entire result before
         /// returning.
         ///

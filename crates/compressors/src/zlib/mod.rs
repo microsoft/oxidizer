@@ -30,7 +30,7 @@ use crate::flate::Wrapper;
 use crate::flate::codec::{FlateCompress, FlateDecompress};
 use crate::macros::define_format;
 
-/// Selects zlib as the format of a [`CompressorBuilder`] or [`DecompressorBuilder`].
+/// Selects zlib as the format of a [`CompressorBuilder`][crate::CompressorBuilder] or [`DecompressorBuilder`][crate::DecompressorBuilder].
 ///
 /// Zlib has no settings beyond the ones every format shares, so this type carries none. It exists
 /// to name the format in the builder's type parameter, which is what gives that builder a `build`

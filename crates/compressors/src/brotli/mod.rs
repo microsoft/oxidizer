@@ -42,7 +42,7 @@ use crate::limits::FormatLimits;
 const DEFAULT_LIMITS: FormatLimits = FormatLimits::new(None, None);
 use crate::macros::define_format;
 
-/// Selects brotli as the format of a [`CompressorBuilder`] or [`DecompressorBuilder`], and carries
+/// Selects brotli as the format of a [`CompressorBuilder`][crate::CompressorBuilder] or [`DecompressorBuilder`][crate::DecompressorBuilder], and carries
 /// the settings only brotli has.
 ///
 /// Naming the format in the builder's type parameter is what gives that builder a `build` method
@@ -101,7 +101,7 @@ pub enum Mode {
 
 /// A compression quality on brotli's native `0..=11` scale.
 ///
-/// Quality zero is brotli's fastest mode; it still compresses. The portable [`Level`] scale maps
+/// Quality zero is brotli's fastest mode; it still compresses. The portable [`Level`][crate::Level] scale maps
 /// onto this range, while this type makes every native quality reachable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Quality(u8);
@@ -170,7 +170,7 @@ impl From<Quality> for u8 {
 /// The practical advice is to leave this alone unless a measurement on real payloads says
 /// otherwise.
 ///
-/// This is a newtype rather than a bare `u8` for the same reason [`Level`] is: an out-of-range
+/// This is a newtype rather than a bare `u8` for the same reason [`Level`][crate::Level] is: an out-of-range
 /// value is a configuration mistake to report, not a panic to suffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct WindowSize(u8);

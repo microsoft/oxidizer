@@ -43,7 +43,7 @@ use crate::zstd::codec::{ZstdCompress, ZstdDecompress};
 /// [`DecompressorLimits`] for what actually bounds an untrusted stream.
 const DEFAULT_LIMITS: FormatLimits = FormatLimits::new(Some(250_000), None);
 
-/// Selects zstd as the format of a [`CompressorBuilder`] or [`DecompressorBuilder`], and carries
+/// Selects zstd as the format of a [`CompressorBuilder`][crate::CompressorBuilder] or [`DecompressorBuilder`][crate::DecompressorBuilder], and carries
 /// the settings only zstd has.
 ///
 /// Naming the format in the builder's type parameter is what gives that builder a `build` method
@@ -79,9 +79,9 @@ define_format! {
     multi_stream_default = true,
 }
 
-/// A level on zstd's own scale, for reaching settings the portable [`Level`] does not cover.
+/// A level on zstd's own scale, for reaching settings the portable [`Level`][crate::Level] does not cover.
 ///
-/// The portable scale is anchored on zstd's default so that [`Level::DEFAULT`] means the same
+/// The portable scale is anchored on zstd's default so that [`Level::DEFAULT`][crate::Level::DEFAULT] means the same
 /// thing on every format. Native negative fast modes and levels above the portable range remain
 /// reachable here. Strong levels are rarely worth it -- measured on realistic JSON, level 19 is
 /// over 200 times slower than level 3 for about `17%` better compression.
@@ -89,7 +89,7 @@ define_format! {
 pub struct CompressionLevel(i32);
 
 impl CompressionLevel {
-    /// Zstd's own default, which the portable [`Level::DEFAULT`] also maps to.
+    /// Zstd's own default, which the portable [`Level::DEFAULT`][crate::Level::DEFAULT] also maps to.
     pub const DEFAULT: Self = Self(3);
 
     /// Creates a level in the range supported by the bundled zstd library.

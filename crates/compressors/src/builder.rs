@@ -33,7 +33,10 @@ pub(crate) const DEFAULT_CHUNK_SIZE: usize = 64 * 1024;
 /// Configures a compressor.
 ///
 /// The type parameter selects the format, and defaults to `()` for a builder that has not chosen
-/// one yet. See the [module documentation][self] for what that distinction buys.
+/// one yet: it carries only the settings every format shares, and gains a `build_gzip`-style method
+/// per enabled format plus [`build_format`][CompressorBuilder::build_format]. Committing to a
+/// format -- which [`gzip::Compressor::builder`][crate::gzip::Compressor::builder] does -- adds that
+/// format's own settings and a `build` returning its concrete compressor.
 ///
 /// # Examples
 ///
@@ -126,7 +129,10 @@ impl Default for CompressorBuilder<()> {
 /// Configures a decompressor.
 ///
 /// The type parameter selects the format, and defaults to `()` for a builder that has not chosen
-/// one yet. See the [module documentation][self] for what that distinction buys.
+/// one yet: it carries only the settings every format shares, and gains a `build_gzip`-style method
+/// per enabled format plus [`build_format`][CompressorBuilder::build_format]. Committing to a
+/// format -- which [`gzip::Compressor::builder`][crate::gzip::Compressor::builder] does -- adds that
+/// format's own settings and a `build` returning its concrete compressor.
 ///
 /// # Security
 ///

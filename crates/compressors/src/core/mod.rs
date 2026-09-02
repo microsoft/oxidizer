@@ -56,6 +56,17 @@ pub struct Decompress;
 /// The trait is sealed so formats and methods can be added without breaking downstream code.
 /// Every implementation is `Send + Sync`.
 ///
+/// # The methods are an internal detail
+///
+/// What this trait is *for* is naming an operation: `impl Compression<Mode = Compress>` accepts any
+/// compressor and no decompressor. Its methods are how this crate drives one, and are documented
+/// here only for the reader of this crate's own source. Treat them as internal: they are hidden
+/// from the rendered documentation, and they can change without that being a breaking change worth
+/// announcing.
+///
+/// Reach for [`compress`][crate::compress] and [`decompress`][crate::decompress] for a complete
+/// buffer, or [`CompressionStream`][crate::CompressionStream] for data that arrives over time.
+///
 /// # Examples
 ///
 /// ```
@@ -86,9 +97,11 @@ pub trait Compression: sealed::Compression + fmt::Debug + Send + Sync {
     /// # Errors
     ///
     /// Returns an error if input is still pending or end of input has been signaled.
+    #[doc(hidden)]
     fn push(&mut self, input: BytesView) -> Result<()>;
 
     /// Signals that no further input will be supplied.
+    #[doc(hidden)]
     fn end_input(&mut self);
 
     /// Produces the next output chunk.
@@ -96,12 +109,15 @@ pub trait Compression: sealed::Compression + fmt::Debug + Send + Sync {
     /// # Errors
     ///
     /// Returns an error if the underlying engine fails or the input is invalid.
+    #[doc(hidden)]
     fn pull(&mut self) -> Result<Output>;
 
     /// The number of bytes consumed from the input so far.
+    #[doc(hidden)]
     fn total_in(&self) -> u64;
 
     /// The number of bytes produced so far.
+    #[doc(hidden)]
     fn total_out(&self) -> u64;
 
     /// Requests a resumable flush of everything supplied so far.
@@ -116,6 +132,7 @@ pub trait Compression: sealed::Compression + fmt::Debug + Send + Sync {
     /// # Errors
     ///
     /// Returns an invalid-state error after end of input or a previous operation failure.
+    #[doc(hidden)]
     fn flush(&mut self) -> Result<()> {
         Ok(())
     }

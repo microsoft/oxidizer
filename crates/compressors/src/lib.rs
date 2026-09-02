@@ -225,7 +225,7 @@ use crate::core::{Compress, Compression, Decompress, process};
 
 /// Compresses one complete byte sequence that is already in memory.
 ///
-/// Takes any compressor: a concrete one such as [`gzip::Compressor`][crate::gzip::Compressor], or a
+/// Takes any compressor: a concrete one such as [`gzip::Compressor`], or a
 /// boxed one whose format was chosen at runtime. The direction is part of the bound, so a
 /// decompressor will not compile here.
 ///
