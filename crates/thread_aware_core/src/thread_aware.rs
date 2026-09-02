@@ -63,9 +63,10 @@ use crate::Thread;
 ///   must keep working even if this method is never called, so a driver handle must remain
 ///   usable from the new thread. Relocation brings it closer; it does not make it valid.
 ///
-/// * **Neither panic nor block.** This runs while the runtime is placing work, so it
-///   performs no network or disk I/O, no waiting on another worker, and takes no contended
-///   lock. Defer adaptation that would block; retaining usable state is acceptable.
+/// * **Neither panic nor perform long blocking work.** This runs while the runtime is placing work,
+///   so it performs no network or disk I/O and does not wait for external progress. Brief in-memory
+///   coordination is acceptable, but caller code must not run while a shared map or collection lock
+///   is held. Defer longer adaptation; retaining usable state is acceptable.
 ///
 /// * **Tolerate repeated calls.** Relocating to the same [`Thread`], or with `source` equal to
 ///   `destination`, is harmless, and should also be cheap: compare the relevant ids and

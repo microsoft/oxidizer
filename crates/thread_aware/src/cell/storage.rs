@@ -11,6 +11,11 @@ use dashmap::DashMap;
 use dashmap::mapref::entry::Entry;
 use thread_aware_core::{Owner, Thread};
 
+/// Covers typical worker or NUMA partition counts without allocating for unusually large runtimes.
+///
+/// Raising this trades more eager allocation in every `Storage` for less frequent map growth.
+const DEFAULT_PARTITION_CAPACITY: usize = 32;
+
 /// Maps threads into strategy partitions for storage.
 ///
 /// A strategy names the partition a [`Thread`] belongs to. Every thread mapping to the same key
@@ -66,7 +71,7 @@ pub(crate) mod sealed {
 /// dropped, so `PerThread` storage is best suited to stable worker sets.
 pub struct Storage<T: ?Sized, S: Strategy> {
     owner: sync::OnceLock<Owner>,
-    values: DashMap<S::Key, sync::Arc<T>>,
+    values: DashMap<S::Key, sync::Arc<sync::OnceLock<sync::Arc<T>>>>,
 }
 
 impl<T: ?Sized, S: Strategy> Storage<T, S> {
@@ -79,7 +84,7 @@ impl<T: ?Sized, S: Strategy> Storage<T, S> {
     pub fn new() -> Self {
         Self {
             owner: sync::OnceLock::new(),
-            values: DashMap::with_capacity(32),
+            values: DashMap::with_capacity(DEFAULT_PARTITION_CAPACITY),
         }
     }
 
@@ -107,11 +112,31 @@ impl<T: ?Sized, S: Strategy> Storage<T, S> {
             return Err(value);
         }
 
-        match self.values.entry(S::key(thread)) {
-            Entry::Occupied(_) => Err(value),
+        let cell = match self.values.entry(S::key(thread)) {
+            Entry::Occupied(occupied) => sync::Arc::clone(occupied.get()),
             Entry::Vacant(vacant) => {
-                vacant.insert(value);
-                Ok(())
+                let cell = sync::Arc::new(sync::OnceLock::new());
+                vacant.insert(sync::Arc::clone(&cell));
+                cell
+            }
+        };
+
+        cell.set(value)
+    }
+
+    /// Looks up a partition's initialization cell without retaining the map shard guard.
+    fn cell(&self, thread: &Thread) -> Option<sync::Arc<sync::OnceLock<sync::Arc<T>>>> {
+        self.values.get(&S::key(thread)).map(|cell| sync::Arc::clone(cell.value()))
+    }
+
+    /// Gets or creates a partition's initialization cell without retaining the map shard guard.
+    fn get_or_insert_cell(&self, thread: &Thread) -> sync::Arc<sync::OnceLock<sync::Arc<T>>> {
+        match self.values.entry(S::key(thread)) {
+            Entry::Occupied(occupied) => sync::Arc::clone(occupied.get()),
+            Entry::Vacant(vacant) => {
+                let cell = sync::Arc::new(sync::OnceLock::new());
+                vacant.insert(sync::Arc::clone(&cell));
+                cell
             }
         }
     }
@@ -126,21 +151,20 @@ impl<T: ?Sized, S: Strategy> Storage<T, S> {
             return None;
         }
 
-        self.values.get(&S::key(thread)).map(|value| sync::Arc::clone(&value))
+        self.cell(thread).and_then(|cell| cell.get().map(sync::Arc::clone))
     }
 
     /// Returns the value for `thread`'s partition, materializing it with `make` if it is empty.
     ///
-    /// `make` runs at most once per partition: the partition's entry is held for writing while it
-    /// runs, so concurrent relocations into that partition all observe the single published value.
+    /// `make` runs at most once per partition: a partition-local [`OnceLock`](sync::OnceLock)
+    /// coordinates concurrent relocations, which all observe the single published value.
     ///
-    /// Two consequences follow from holding that entry, and callers of the public constructors that
-    /// accept a factory inherit both:
+    /// Callers of the public constructors that accept a factory inherit two initialization
+    /// constraints:
     ///
-    /// * `make` must not touch this storage. Re-entering it deadlocks rather than recursing.
-    /// * The write is held on the map shard the key hashes to, not on the key alone, so a
-    ///   relocation into an unrelated partition that shares the shard waits until `make` returns.
-    ///   Keep `make` short for the same reason relocation itself is expected to be short.
+    /// * `make` must not reenter the same partition. Re-entering it deadlocks rather than recursing.
+    /// * The map shard guard is released before `make` runs, so initialization of one partition does
+    ///   not hold up another partition merely because their keys share a shard.
     ///
     /// A panic in `make` propagates and leaves the partition empty for the next relocation to retry.
     pub(crate) fn get_or_insert_with(&self, thread: &Thread, make: impl FnOnce() -> sync::Arc<T>) -> Option<sync::Arc<T>> {
@@ -148,8 +172,8 @@ impl<T: ?Sized, S: Strategy> Storage<T, S> {
             return None;
         }
 
-        let entry = self.values.entry(S::key(thread)).or_insert_with(make);
-        Some(sync::Arc::clone(entry.value()))
+        let cell = self.get_or_insert_cell(thread);
+        Some(sync::Arc::clone(cell.get_or_init(make)))
     }
 
     /// Counts published values for which `predicate` holds.
@@ -157,7 +181,10 @@ impl<T: ?Sized, S: Strategy> Storage<T, S> {
     /// The count is an estimate under concurrent relocation, matching the inherently racy nature of
     /// a strong-count query.
     pub(crate) fn count_where(&self, predicate: impl Fn(&sync::Arc<T>) -> bool) -> usize {
-        self.values.iter().filter(|entry| predicate(entry.value())).count()
+        self.values
+            .iter()
+            .filter(|entry| entry.value().get().is_some_and(&predicate))
+            .count()
     }
 }
 
@@ -181,7 +208,7 @@ mod tests {
     use std::sync::Arc;
     use std::thread;
 
-    use super::Storage;
+    use super::{DEFAULT_PARTITION_CAPACITY, Storage};
     use crate::PerThread;
     use crate::thread::ThreadBuilder;
 
@@ -189,7 +216,7 @@ mod tests {
     fn storage_starts_with_default_capacity() {
         let storage = Storage::<u32, PerThread>::new();
 
-        assert!(storage.values.capacity() >= 32);
+        assert!(storage.values.capacity() >= DEFAULT_PARTITION_CAPACITY);
     }
 
     #[test]

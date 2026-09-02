@@ -118,9 +118,10 @@ pub(super) fn run_after_factory_update_hook() {
 /// # Reentrant initialization
 ///
 /// Creating a value for a previously unused strategy partition invokes the configured constructor,
-/// clone function, and captured [`ThreadAware`] state. Reentrant initialization deadlocks: code
-/// initializing a destination value must not directly or indirectly trigger another relocation that
-/// requires the same value.
+/// clone function, and captured [`ThreadAware`] state. Initialization is coordinated per partition,
+/// outside the storage map's shard guard. Reentrant initialization deadlocks: code initializing a
+/// destination value must not directly or indirectly trigger another relocation that requires the
+/// same value.
 ///
 /// Relocation of different clones of the `Arc` results in deduplication in the destination strategy
 /// partition. The following example demonstrates this using the counter implemented in the
@@ -631,8 +632,7 @@ where
     /// storage, it behaves like a [`sync::Arc`].
     ///
     /// # Panics
-    /// Panics if `current_thread` falls outside the storage's coordinate space or its strategy
-    /// partition has no value.
+    /// Panics if the strategy partition selected by `current_thread` holds no value.
     ///
     /// # Examples
     ///
@@ -726,12 +726,12 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> Arc<T, S> {
 
     /// Produces the value `destination` will hold by running the configured factory.
     ///
-    /// This runs caller-supplied code while the destination partition's entry is held for writing.
-    /// Across all racing relocations into the same empty partition, the factory runs at most once
-    /// and every racer adopts the one published value — the closure's documented "once per strategy
-    /// partition" contract. The factory must not reenter this storage, which would deadlock on that
-    /// entry. If it panics, the panic propagates and the partition is left empty for the next
-    /// relocation into it to re-materialize.
+    /// This runs caller-supplied code under destination-partition initialization, but outside the
+    /// storage map's shard guard. Across all racing relocations into the same empty partition, the
+    /// factory runs at most once and every racer adopts the one published value — the closure's
+    /// documented "once per strategy partition" contract. The factory must not reenter the same
+    /// partition, which would deadlock on its initialization cell. If it panics, the panic
+    /// propagates and the partition is left empty for the next relocation to re-materialize.
     fn materialize_value(&self, source: Option<&Thread>, destination: &Thread) -> sync::Arc<T> {
         match &self.factory {
             Factory::Closure(factory, factory_source_thread) => {
