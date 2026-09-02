@@ -78,7 +78,7 @@ macro_rules! define_compressor_build {
         ///
         /// Returns an error if the underlying compression engine fails.
         pub fn compress(input: BytesView, resources: &$crate::Resources) -> Result<BytesView> {
-            Compressor::new(resources).compress(input)
+            $crate::compress(input, Compressor::new(resources))
         }
     };
     (fallible, $name:literal, $format:ty, $build_method:ident, $new_compressor:expr) => {
@@ -137,7 +137,7 @@ macro_rules! define_compressor_build {
         ///
         /// Returns an error if the underlying compression engine fails.
         pub fn compress(input: BytesView, resources: &$crate::Resources) -> Result<BytesView> {
-            Compressor::new(resources).compress(input)
+            $crate::compress(input, Compressor::new(resources))
         }
     };
 }
@@ -201,7 +201,7 @@ macro_rules! define_decompressor_build {
         ///
         /// Returns an error if the data is malformed, truncated, or exceeds the default limits.
         pub fn decompress(input: BytesView, resources: &$crate::Resources) -> Result<BytesView> {
-            Decompressor::new(resources).decompress(input)
+            $crate::decompress(input, Decompressor::new(resources))
         }
 
         #[doc = concat!("Decompresses a complete ", $name, " stream with explicit limits.")]
@@ -212,7 +212,7 @@ macro_rules! define_decompressor_build {
         ///
         /// Returns an error if the data is malformed, truncated, or exceeds `limits`.
         pub fn decompress_with_limits(input: BytesView, resources: &$crate::Resources, limits: DecompressionLimits) -> Result<BytesView> {
-            Decompressor::builder().limits(limits).build(resources).decompress(input)
+            $crate::decompress(input, Decompressor::builder().limits(limits).build(resources))
         }
     };
     (
@@ -287,7 +287,7 @@ macro_rules! define_decompressor_build {
         /// Returns an error if the decompressor cannot be built, or if the data is malformed,
         /// truncated, or exceeds the default limits.
         pub fn decompress(input: BytesView, resources: &$crate::Resources) -> Result<BytesView> {
-            Decompressor::new(resources).decompress(input)
+            $crate::decompress(input, Decompressor::new(resources))
         }
 
         #[doc = concat!("Decompresses a complete ", $name, " stream with explicit limits.")]
@@ -299,7 +299,7 @@ macro_rules! define_decompressor_build {
         /// Returns an error if the decompressor cannot be built, or if the data is malformed,
         /// truncated, or exceeds `limits`.
         pub fn decompress_with_limits(input: BytesView, resources: &$crate::Resources, limits: DecompressionLimits) -> Result<BytesView> {
-            Decompressor::builder().limits(limits).build(resources)?.decompress(input)
+            $crate::decompress(input, Decompressor::builder().limits(limits).build(resources)?)
         }
     };
 }
@@ -321,8 +321,7 @@ macro_rules! define_format {
         multi_stream_default = $multi_stream_default:expr,
     ) => {
         use bytesbuf::BytesView;
-        // Anonymous because the import exists only to bring the trait's methods into scope.
-        use $crate::core::Compression as _;
+
         use $crate::engine::Pump;
         use $crate::error::Result;
         use $crate::limits::DecompressionLimits;

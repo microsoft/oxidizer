@@ -28,6 +28,9 @@ intermediate copy is needed.
 
 ## Whole buffers
 
+Each format module has its own `compress` and `decompress` for the common case. The crate-level
+[`compress`][__link3] and [`decompress`][__link4] take an operation you already have instead, whatever built it.
+
 ```rust
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
@@ -47,9 +50,9 @@ assert_eq!(
 
 ## Streaming
 
-[`gzip::Compressor`][__link3] and [`gzip::Decompressor`][__link4] are push/pull state machines rather than one-shot
+[`gzip::Compressor`][__link5] and [`gzip::Decompressor`][__link6] are push/pull state machines rather than one-shot
 transforms. They carry no operations of their own: everything is driven through
-[`Compression`][__link5], so the same loop works for any format. Each `pull` returns at most one chunk,
+[`Compression`][__link7], so the same loop works for any format. Each `pull` returns at most one chunk,
 so processing a multi-gigabyte stream never holds more than one pending input view plus one
 output chunk:
 
@@ -80,10 +83,10 @@ assert_eq!(plain.consume_all().to_vec(), b"streamed".to_vec());
 
 ## Choosing a format
 
-The [`Compression`][__link6] trait describes the contract independently of the format and direction, so
+The [`Compression`][__link8] trait describes the contract independently of the format and direction, so
 code can be written once and used with any implementation. When the format is only known at
-runtime – from a `Content-Encoding` token, say – [`format::Format`][__link7] resolves it, and
-[`CompressorBuilder::build_format`][__link8] produces a boxed operation, which is itself a `Compression`
+runtime – from a `Content-Encoding` token, say – [`format::Format`][__link9] resolves it, and
+[`CompressorBuilder::build_format`][__link10] produces a boxed operation, which is itself a `Compression`
 and so fits anywhere a concrete one does:
 
 ```rust
@@ -109,13 +112,13 @@ assert_eq!(
 ## Reusing engine state
 
 Building a compressor allocates and initializes a substantial amount of state – on a small
-message, as much work as the compression itself. [`Resources`][__link9] recycles it: hold one, hand it to
+message, as much work as the compression itself. [`Resources`][__link11] recycles it: hold one, hand it to
 every operation, and each engine returns to it when its codec drops. The saving is roughly fixed
 per message, so it matters most for small bodies.
 
 Recycling is on by default, which is why every API that builds a codec asks for resources rather
 than for a memory provider alone. Turn it off with
-[`enable_pooling(0)`][__link10] when there is genuinely nothing to reuse.
+[`enable_pooling(0)`][__link12] when there is genuinely nothing to reuse.
 
 ```rust
 use compressors::{Level, Resources, gzip};
@@ -138,8 +141,8 @@ untrusted data is a memory-exhaustion vector.
 The codecs themselves never accumulate: each `pull` hands back one bounded chunk, so nothing in
 this crate grows with the length of the stream. The exposure belongs to whatever the caller does
 with those chunks, which is why the limits matter most for the accumulating conveniences –
-`compress`, `decompress`, and [`format::Format::compress`][__link11] / [`format::Format::decompress`][__link12].
-Use each format’s `decompress_with_limits` or [`format::Format::decompress_with_limits`][__link13] for
+`compress`, `decompress`, and [`format::Format::compress`][__link13] / [`format::Format::decompress`][__link14].
+Use each format’s `decompress_with_limits` or [`format::Format::decompress_with_limits`][__link15] for
 untrusted in-memory input.
 
 Each format declares its own default bounds, because a single portable ratio cannot serve both
@@ -150,17 +153,17 @@ for a repeated short string, `21 000x` for a repeated sentence and `80 660x` for
 zeros. It therefore has no default ratio limit; callers handling untrusted Brotli input must set
 an absolute output limit.
 
-[`DecompressionLimits`][__link14] carries *overrides*, not values: bounds you leave unset keep the
-format’s default, so [`DecompressionLimits::default()`][__link15] never silently imposes one format’s
+[`DecompressionLimits`][__link16] carries *overrides*, not values: bounds you leave unset keep the
+format’s default, so [`DecompressionLimits::default()`][__link17] never silently imposes one format’s
 calibration on another.
 
 **A ratio limit is therefore a coarse backstop, not real protection.** For untrusted input, set
-[`DecompressionLimits::with_max_output_len`][__link16] to whatever the caller can actually afford to
-buffer, and [`DecompressionLimits::with_max_streams`][__link17] when concatenated streams are accepted.
-Use [`DecompressionLimits::UNLIMITED`][__link18] only for sources you trust as much as your own process.
+[`DecompressionLimits::with_max_output_len`][__link18] to whatever the caller can actually afford to
+buffer, and [`DecompressionLimits::with_max_streams`][__link19] when concatenated streams are accepted.
+Use [`DecompressionLimits::UNLIMITED`][__link20] only for sources you trust as much as your own process.
 
 Streaming decompression can yield bytes before a final checksum or trailer has been verified.
-Treat those bytes as provisional until the operation reports [`Output::Done`][__link19].
+Treat those bytes as provisional until the operation reports [`Output::Done`][__link21].
 
 ## Features
 
@@ -172,7 +175,7 @@ Every format is a separate feature, so a build compiles only the engines it name
 * `zlib` – the `zlib` module and `Format::Zlib`, via `flate2`.
 * `brotli` – the `brotli` module and `Format::Brotli`, via the pure-Rust `brotli` crate.
 * `zstd` – the `zstd` module and `Format::Zstd`, via `zstd-safe`.
-* `futures-stream` – [`CompressionStream`][__link20], presenting compression and decompression as a
+* `futures-stream` – [`CompressionStream`][__link22], presenting compression and decompression as a
   `futures_core::Stream` over any stream of byte sequences.
 
 The deflate-family features share one dependency, so enabling all three costs no more than one.
@@ -184,25 +187,27 @@ A build that needs only `brotli` or only `zstd` never compiles `flate2` at all.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/compressors">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbQephwfwcosMbSFvYAn7_i_gb1RVeLxY6aKcbAxu_JhoCx4BhZIOCa0NvbXByZXNzaW9u9oJoYnl0ZXNidWZlMC45LjCCa2NvbXByZXNzb3JzZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbY7LJM4SzVbwbQ9O2OPPm1D0bgpqSGU-jCh4bkKFDOCyEHYxhZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
  [__link0]: https://crates.io/crates/bytesbuf/0.9.0
  [__link1]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesView
- [__link10]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources::enable_pooling
- [__link11]: https://docs.rs/compressors/0.1.0/compressors/?search=format::Format::compress
- [__link12]: https://docs.rs/compressors/0.1.0/compressors/?search=format::Format::decompress
- [__link13]: https://docs.rs/compressors/0.1.0/compressors/?search=format::Format::decompress_with_limits
- [__link14]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressionLimits
- [__link15]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressionLimits::default
- [__link16]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressionLimits::with_max_output_len
- [__link17]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressionLimits::with_max_streams
- [__link18]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressionLimits::UNLIMITED
- [__link19]: https://docs.rs/compressors/0.1.0/compressors/?search=Output::Done
+ [__link10]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressorBuilder::build_format
+ [__link11]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
+ [__link12]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources::enable_pooling
+ [__link13]: https://docs.rs/compressors/0.1.0/compressors/?search=format::Format::compress
+ [__link14]: https://docs.rs/compressors/0.1.0/compressors/?search=format::Format::decompress
+ [__link15]: https://docs.rs/compressors/0.1.0/compressors/?search=format::Format::decompress_with_limits
+ [__link16]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressionLimits
+ [__link17]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressionLimits::default
+ [__link18]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressionLimits::with_max_output_len
+ [__link19]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressionLimits::with_max_streams
  [__link2]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesBuf
- [__link20]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressionStream
- [__link3]: https://docs.rs/compressors/0.1.0/compressors/?search=gzip::Compressor
- [__link4]: https://docs.rs/compressors/0.1.0/compressors/?search=gzip::Decompressor
- [__link5]: https://crates.io/crates/Compression
- [__link6]: https://crates.io/crates/Compression
- [__link7]: https://docs.rs/compressors/0.1.0/compressors/?search=format::Format
- [__link8]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressorBuilder::build_format
- [__link9]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
+ [__link20]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressionLimits::UNLIMITED
+ [__link21]: https://docs.rs/compressors/0.1.0/compressors/?search=Output::Done
+ [__link22]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressionStream
+ [__link3]: https://docs.rs/compressors/0.1.0/compressors/fn.compress.html
+ [__link4]: https://docs.rs/compressors/0.1.0/compressors/fn.decompress.html
+ [__link5]: https://docs.rs/compressors/0.1.0/compressors/?search=gzip::Compressor
+ [__link6]: https://docs.rs/compressors/0.1.0/compressors/?search=gzip::Decompressor
+ [__link7]: https://docs.rs/compressors/0.1.0/compressors/?search=core::Compression
+ [__link8]: https://docs.rs/compressors/0.1.0/compressors/?search=core::Compression
+ [__link9]: https://docs.rs/compressors/0.1.0/compressors/?search=format::Format

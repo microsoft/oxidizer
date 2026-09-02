@@ -59,11 +59,8 @@ pub struct Decompress;
 /// use compressors::core::{Compress, Compression};
 /// use compressors::{Output, Resources, gzip};
 ///
-/// fn compress(
-///     mut compression: impl Compression<Mode = Compress>,
-///     input: BytesView,
-/// ) -> compressors::Result<BytesView> {
-///     compression.process(input)
+/// fn compress(compression: impl Compression<Mode = Compress>, input: BytesView) -> compressors::Result<BytesView> {
+///     compressors::compress(input, compression)
 /// }
 ///
 /// let memory = GlobalPool::new();
@@ -117,61 +114,34 @@ pub trait Compression: sealed::Compression + fmt::Debug + Send + Sync {
     fn flush(&mut self) -> Result<()> {
         Ok(())
     }
+}
 
-    /// Processes one complete input and returns the whole result.
-    ///
-    /// This is shorthand for [`push`][Compression::push], [`end_input`][Compression::end_input], and
-    /// draining [`pull`][Compression::pull]. It ends the operation, so an implementation serves
-    /// one call. Drive `pull` directly to keep memory bounded by the configured chunk size.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the underlying engine fails or the input is invalid.
-    fn process(mut self, input: BytesView) -> Result<BytesView>
-    where
-        Self: Sized,
-    {
-        self.push(input)?;
-        self.end_input();
+/// Drives one complete input through `operation` and returns the whole result.
+///
+/// This is [`push`][Compression::push], [`end_input`][Compression::end_input] and draining
+/// [`pull`][Compression::pull] in one call. It ends the operation, so an operation serves one call,
+/// and it buffers the entire result: drive `pull` directly to stay bounded by the chunk size.
+///
+/// # Errors
+///
+/// Returns an error if the underlying engine fails or the input is invalid.
+pub(crate) fn process(mut operation: impl Compression, input: BytesView) -> Result<BytesView> {
+    operation.push(input)?;
+    operation.end_input();
 
-        let mut collected = BytesBuf::new();
-        loop {
-            match self.pull()? {
-                Output::Data(chunk) => collected.put_bytes(chunk),
-                Output::Progress => {}
-                Output::Done => break,
-                Output::NeedInput => {
-                    return Err(crate::Error::invalid_state("the operation requested input after end of input"));
-                }
+    let mut collected = BytesBuf::new();
+    loop {
+        match operation.pull()? {
+            Output::Data(chunk) => collected.put_bytes(chunk),
+            Output::Progress => {}
+            Output::Done => break,
+            Output::NeedInput => {
+                return Err(crate::Error::invalid_state("the operation requested input after end of input"));
             }
         }
-
-        Ok(collected.consume_all())
     }
 
-    /// Compresses one complete input and returns the whole result.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the underlying compression engine fails.
-    fn compress(self, input: BytesView) -> Result<BytesView>
-    where
-        Self: Sized + Compression<Mode = Compress>,
-    {
-        self.process(input)
-    }
-
-    /// Decompresses one complete input and returns the whole result.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the data is invalid, truncated, or exceeds the configured limits.
-    fn decompress(self, input: BytesView) -> Result<BytesView>
-    where
-        Self: Sized + Compression<Mode = Decompress>,
-    {
-        self.process(input)
-    }
+    Ok(collected.consume_all())
 }
 
 impl<D> Compression for Box<dyn Compression<Mode = D>> {
@@ -332,9 +302,8 @@ mod tests {
             }
         }
 
-        let result = ProgressOnceThenDone { done: false }
-            .process(view(b"ignored"))
-            .expect("process succeeds even when a step only makes progress");
+        let result =
+            process(ProgressOnceThenDone { done: false }, view(b"ignored")).expect("process succeeds even when a step only makes progress");
 
         assert!(result.is_empty(), "the fixture never reports data");
     }
@@ -371,9 +340,8 @@ mod tests {
             }
         }
 
-        let error = NeedsMoreForever
-            .process(view(b"ignored"))
-            .expect_err("process rejects a pull that still requests input after end of input");
+        let error =
+            process(NeedsMoreForever, view(b"ignored")).expect_err("process rejects a pull that still requests input after end of input");
         assert!(error.is_invalid_state());
     }
 }

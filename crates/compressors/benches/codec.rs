@@ -24,7 +24,6 @@ use alloc_tracker::{Allocator, Operation, Session};
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
 use compressors::brotli::{self, WindowSize};
-use compressors::core::Compression as _;
 use compressors::format::Format;
 use compressors::{CompressorBuilder, DecompressorBuilder, Level, Resources};
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
@@ -91,29 +90,27 @@ fn compress(format: Format, level: Option<Level>, chunk_size: Option<NonZeroUsiz
         None => builder,
     };
 
-    builder
-        .build_format(format, resources)
-        .expect("the settings are accepted")
-        .compress(input.clone())
-        .expect("compression succeeds")
+    let compressor = builder.build_format(format, resources).expect("the settings are accepted");
+
+    compressors::compress(input.clone(), compressor).expect("compression succeeds")
 }
 
 fn decompress(format: Format, input: &BytesView, resources: &Resources) -> BytesView {
-    DecompressorBuilder::new()
+    let decompressor = DecompressorBuilder::new()
         .build_format(format, resources)
-        .expect("the settings are accepted")
-        .decompress(input.clone())
-        .expect("decompression succeeds")
+        .expect("the settings are accepted");
+
+    compressors::decompress(input.clone(), decompressor).expect("decompression succeeds")
 }
 
 /// Compresses with an explicit brotli window, which the runtime `Format` builder cannot express.
 fn compress_brotli(window: WindowSize, input: &BytesView, resources: &Resources) -> BytesView {
-    brotli::Compressor::builder()
+    let compressor = brotli::Compressor::builder()
         .window_size(window)
         .build(resources)
-        .expect("the window size is accepted")
-        .compress(input.clone())
-        .expect("compression succeeds")
+        .expect("the window size is accepted");
+
+    compressors::compress(input.clone(), compressor).expect("compression succeeds")
 }
 
 /// Runs `body` under Criterion while attributing its allocations to `operation`.

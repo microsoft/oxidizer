@@ -18,6 +18,9 @@
 //!
 //! # Whole buffers
 //!
+//! Each format module has its own `compress` and `decompress` for the common case. The crate-level
+//! [`compress`] and [`decompress`] take an operation you already have instead, whatever built it.
+//!
 //! ```
 //! use bytesbuf::BytesView;
 //! use bytesbuf::mem::GlobalPool;
@@ -213,3 +216,64 @@ pub use resources::Resources;
 #[cfg(feature = "futures-stream")]
 pub use stream::CompressionStream;
 pub use trailing::TrailingData;
+
+use bytesbuf::BytesView;
+
+use crate::core::{Compress, Compression, Decompress, process};
+
+/// Compresses one complete byte sequence that is already in memory.
+///
+/// Takes any compressor: a concrete one such as [`gzip::Compressor`][crate::gzip::Compressor], or a
+/// boxed one whose format was chosen at runtime. The direction is part of the bound, so a
+/// decompressor will not compile here.
+///
+/// Prefer driving the operation directly for data that arrives incrementally: this buffers the
+/// entire result before returning.
+///
+/// # Errors
+///
+/// Returns an error if the underlying compression engine fails.
+///
+/// # Examples
+///
+/// ```
+/// # #[cfg(feature = "gzip")]
+/// # {
+/// use bytesbuf::BytesView;
+/// use compressors::format::Format;
+/// use compressors::{CompressorBuilder, Resources, gzip};
+///
+/// let resources = Resources::global();
+/// let input = BytesView::copied_from_slice(b"either way", resources.memory());
+///
+/// // A compressor built by hand, or one for a format chosen at runtime.
+/// let by_hand = compressors::compress(input.clone(), gzip::Compressor::new(resources))?;
+/// let at_runtime = compressors::compress(
+///     input,
+///     CompressorBuilder::new().build_format(Format::Gzip, resources)?,
+/// )?;
+///
+/// assert_eq!(by_hand.to_vec(), at_runtime.to_vec());
+/// # }
+/// # Ok::<(), compressors::Error>(())
+/// ```
+pub fn compress(input: BytesView, compressor: impl Compression<Mode = Compress>) -> Result<BytesView> {
+    process(compressor, input)
+}
+
+/// Decompresses one complete stream that is already in memory.
+///
+/// Takes any decompressor, exactly as [`compress`] takes any compressor.
+///
+/// # Errors
+///
+/// Returns an error if the data is malformed, truncated, or exceeds the limits the decompressor
+/// was built with.
+///
+/// # Security
+///
+/// A format's default bounds are a coarse backstop. For untrusted input, build the decompressor
+/// with [`DecompressionLimits::with_max_output_len`][crate::DecompressionLimits::with_max_output_len].
+pub fn decompress(input: BytesView, decompressor: impl Compression<Mode = Decompress>) -> Result<BytesView> {
+    process(decompressor, input)
+}

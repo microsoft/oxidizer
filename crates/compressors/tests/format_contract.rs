@@ -142,9 +142,7 @@ macro_rules! format_contract {
                 // The convenience must be exactly the manual loop, not an approximation of it.
                 let data = payload();
 
-                let convenient = $module::Compressor::new(resources())
-                    .compress(view(&data))
-                    .expect("compression succeeds");
+                let convenient = compressors::compress(view(&data), $module::Compressor::new(resources())).expect("compression succeeds");
 
                 let mut by_hand = $module::Compressor::new(resources());
                 by_hand.push(view(&data)).expect("push succeeds");
@@ -161,9 +159,7 @@ macro_rules! format_contract {
 
                 assert_eq!(convenient.to_vec(), collected.consume_all().to_vec());
 
-                let plain = $module::Decompressor::new(resources())
-                    .decompress(convenient)
-                    .expect("decompression succeeds");
+                let plain = compressors::decompress(convenient, $module::Decompressor::new(resources())).expect("decompression succeeds");
 
                 assert_eq!(plain.to_vec(), data);
             }
@@ -174,12 +170,14 @@ macro_rules! format_contract {
                 let data = payload();
 
                 let compressor: Box<dyn Compression<Mode = Compress>> = Box::new($module::Compressor::new(resources()));
-                let compressed = compressor.compress(view(&data)).expect("compression succeeds");
+                let compressed = compressors::compress(view(&data), compressor).expect("compression succeeds");
 
                 let decompressor: Box<dyn Compression<Mode = Decompress>> = Box::new($module::Decompressor::new(resources()));
 
                 assert_eq!(
-                    decompressor.decompress(compressed).expect("decompression succeeds").to_vec(),
+                    compressors::decompress(compressed, decompressor)
+                        .expect("decompression succeeds")
+                        .to_vec(),
                     data
                 );
             }
@@ -1407,13 +1405,13 @@ mod zstd_specific_settings {
             .compression_level(CompressionLevel::min())
             .build(resources())
             .built();
-        let compressed = compressor.compress(view(&data)).expect("compression succeeds");
+        let compressed = compressors::compress(view(&data), compressor).expect("compression succeeds");
 
         let decompressor = zstd::Decompressor::builder()
             .max_window_log(WindowLog::DEFAULT)
             .build(resources())
             .built();
-        let plain = decompressor.decompress(compressed).expect("decompression succeeds");
+        let plain = compressors::decompress(compressed, decompressor).expect("decompression succeeds");
 
         assert_eq!(plain.to_vec(), data);
     }

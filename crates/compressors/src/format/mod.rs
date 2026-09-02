@@ -165,7 +165,7 @@ impl Format {
         reason = "one-shot operations consistently borrow the selected runtime format"
     )]
     pub fn compress(&self, input: BytesView, resources: &Resources) -> Result<BytesView> {
-        CompressorBuilder::new().build_format(*self, resources)?.compress(input)
+        crate::compress(input, CompressorBuilder::new().build_format(*self, resources)?)
     }
 
     /// Decompresses a complete stream that is already in memory.
@@ -182,7 +182,7 @@ impl Format {
         reason = "one-shot operations consistently borrow the selected runtime format"
     )]
     pub fn decompress(&self, input: BytesView, resources: &Resources) -> Result<BytesView> {
-        DecompressorBuilder::new().build_format(*self, resources)?.decompress(input)
+        crate::decompress(input, DecompressorBuilder::new().build_format(*self, resources)?)
     }
 
     /// Decompresses a complete stream with explicit output limits.
@@ -195,10 +195,7 @@ impl Format {
         reason = "one-shot operations consistently borrow the selected runtime format"
     )]
     pub fn decompress_with_limits(&self, input: BytesView, resources: &Resources, limits: DecompressionLimits) -> Result<BytesView> {
-        DecompressorBuilder::new()
-            .limits(limits)
-            .build_format(*self, resources)?
-            .decompress(input)
+        crate::decompress(input, DecompressorBuilder::new().limits(limits).build_format(*self, resources)?)
     }
 }
 
@@ -622,7 +619,7 @@ mod tests {
     }
 
     fn decompressed_len(decompressor: Box<dyn Compression<Mode = Decompress>>, input: BytesView) -> usize {
-        decompressor.decompress(input).expect("decompression succeeds").len()
+        crate::decompress(input, decompressor).expect("decompression succeeds").len()
     }
 
     fn decompressor_for(builder: DecompressorBuilder<()>, format: Format) -> Box<dyn Compression<Mode = Decompress>> {
