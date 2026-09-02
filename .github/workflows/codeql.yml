@@ -75,9 +75,9 @@ jobs:
 
     # Initializes the CodeQL tools for scanning.
     # github/codeql-action publishes immutable GitHub releases (verified via the GitHub API:
-    # "immutable": true on GET /repos/github/codeql-action/releases/tags/v4.37.3). The tag cannot
+    # "immutable": true on GET /repos/github/codeql-action/releases/tags/v4.37.8). The tag cannot
     # be retargeted, so init/analyze below are intentionally left pinned to the tag, not a SHA.
-    # See https://github.com/github/codeql-action/releases/tag/v4.37.3
+    # See https://github.com/github/codeql-action/releases/tag/v4.37.8
     - name: Initialize CodeQL
       uses: github/codeql-action/init@v4.37.8
       with:
