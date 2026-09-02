@@ -250,16 +250,11 @@ trait `impl` carries all three, as does the single inherent `impl` holding the
 constructors. That covers lifetimes, type parameters and where clauses in one
 rule, which is what R1.3's "all of them carry the input's generics" asks for.
 
+Every generated trait `impl` but `Debug` carries `#[automatically_derived]`.
+
 Two values recur below: the core field's member, and the type's name as a string
 literal — the default message the runtime falls back to when nothing else
 renders.
-
-`#[automatically_derived]` follows one rule as well, with an exception on each
-side of it. The attribute marks an `impl` as machine-written, which makes
-dead-code analysis skip the field reads inside it, and it is accepted only on a
-trait `impl`. Every generated trait `impl` therefore carries it except `Debug`,
-which wants those field reads counted, and the inherent `impl` holding the
-constructors cannot carry it at all.
 
 **`Display`** delegates to the core, passing the lowered message as an override
 when there is one. `OhnoCore::format_error` appends `caused by:`, the enrichment
@@ -285,8 +280,8 @@ error type becomes infallible.
 including the core, so it iterates the full field list and branches once on
 style, into `debug_struct` for a named struct or `debug_tuple` for a tuple one.
 
-It is the one generated trait `impl` without `#[automatically_derived]`.
-Dead-code analysis ignores field reads inside a derived `Debug`, so marking this
+It is the one generated trait `impl` without `#[automatically_derived]`, because
+dead-code analysis ignores field reads inside a derived `Debug`, and marking this
 one would make every field that only `Debug` reads look unused in the user's own
 crate.
 
