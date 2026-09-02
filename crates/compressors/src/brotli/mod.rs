@@ -235,18 +235,16 @@ impl From<WindowSize> for u8 {
 /// and are also reachable from a [`CompressorBuilder<()>`][crate::CompressorBuilder] that has not
 /// chosen a format yet. These are not: a builder that might produce any format cannot honour a
 /// setting only brotli has, so reach for them through this concrete builder and box the result if
-/// you need a [`Compressing`][crate::core::Compressing] trait object.
+/// you need a [`Compression`][crate::core::Compression] trait object.
 ///
 /// # Examples
 ///
 /// ```
-/// use bytesbuf::mem::GlobalPool;
-/// use compressors::brotli::{Mode, Quality, WindowSize};
-/// use compressors::brotli;
-/// use compressors::core::Compressing;
+/// use compressors::brotli::{self, Mode, Quality, WindowSize};
+/// use compressors::core::{Compress, Compression};
 /// use compressors::Resources;
 ///
-/// let compressor: Box<dyn Compressing> = Box::new(
+/// let compressor: Box<dyn Compression<Mode = Compress>> = Box::new(
 ///     brotli::Compressor::builder()
 ///         .quality(Quality::new(8).expect("8 is in range"))
 ///         .mode(Mode::Text)

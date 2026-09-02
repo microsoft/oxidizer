@@ -19,7 +19,7 @@ pub(crate) mod macros;
 use bytesbuf::BytesView;
 
 use crate::builder::{CompressorBuilder, DecompressorBuilder};
-use crate::core::{Compressing, Compression, Decompressing};
+use crate::core::{Compress, Compression, Decompress};
 use crate::error::{BuildError, Result};
 use crate::limits::DecompressionLimits;
 use crate::resources::Resources;
@@ -206,7 +206,7 @@ impl CompressorBuilder<()> {
     /// Builds a compressor for a format chosen at runtime.
     ///
     /// The result is boxed, because the concrete type is not known until `format` is. A boxed
-    /// [`Compressing`] is itself a `Compressing`, so it fits anywhere a concrete compressor does.
+    /// [`Compression`] is itself a `Compression`, so it fits anywhere a concrete compressor does.
     ///
     /// Everything this builder carries means the same thing in every format. A setting only one
     /// format has -- brotli's quality, say -- needs that format's own builder, whose result can be
@@ -223,7 +223,11 @@ impl CompressorBuilder<()> {
             reason = "brotli and zstd are the formats whose engines can reject a configuration, and neither is enabled"
         )
     )]
-    pub fn build_format(self, format: Format, resources: &Resources) -> ::core::result::Result<Box<dyn Compressing>, BuildError> {
+    pub fn build_format(
+        self,
+        format: Format,
+        resources: &Resources,
+    ) -> ::core::result::Result<Box<dyn Compression<Mode = Compress>>, BuildError> {
         Ok(match format {
             #[cfg(feature = "deflate")]
             Format::Deflate => Box::new(self.build_deflate(resources)),
@@ -243,8 +247,7 @@ impl DecompressorBuilder<()> {
     /// Builds a decompressor for a format chosen at runtime.
     ///
     /// The result is boxed, because the concrete type is not known until `format` is. A boxed
-    /// [`Decompressing`] is itself a `Decompressing`, so it fits anywhere a concrete decompressor
-    /// does.
+    /// [`Compression`] is itself a `Compression`, so it fits anywhere a concrete decompressor does.
     ///
     /// Bounds left unset on [`limits`][DecompressorBuilder::limits], and a
     /// [`multi_stream`][DecompressorBuilder::multi_stream] left unset, keep whatever the chosen
@@ -261,7 +264,11 @@ impl DecompressorBuilder<()> {
             reason = "zstd is the only format whose decompressor engine can reject a configuration, and it is not enabled"
         )
     )]
-    pub fn build_format(self, format: Format, resources: &Resources) -> ::core::result::Result<Box<dyn Decompressing>, BuildError> {
+    pub fn build_format(
+        self,
+        format: Format,
+        resources: &Resources,
+    ) -> ::core::result::Result<Box<dyn Compression<Mode = Decompress>>, BuildError> {
         Ok(match format {
             #[cfg(feature = "deflate")]
             Format::Deflate => Box::new(self.build_deflate(resources)),
@@ -614,11 +621,11 @@ mod tests {
         }
     }
 
-    fn decompressed_len(decompressor: Box<dyn Decompressing>, input: BytesView) -> usize {
+    fn decompressed_len(decompressor: Box<dyn Compression<Mode = Decompress>>, input: BytesView) -> usize {
         decompressor.decompress(input).expect("decompression succeeds").len()
     }
 
-    fn decompressor_for(builder: DecompressorBuilder<()>, format: Format) -> Box<dyn Decompressing> {
+    fn decompressor_for(builder: DecompressorBuilder<()>, format: Format) -> Box<dyn Compression<Mode = Decompress>> {
         builder
             .build_format(format, &Resources::default())
             .expect("the settings are accepted")

@@ -8,11 +8,12 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum TrailingData {
-    /// Stop after the compressed stream and preserve already-buffered trailing bytes.
+    /// Stop after the compressed stream and ignore whatever follows it.
     ///
-    /// Retrieve them with the decoder's `take_remainder` method.
+    /// The decoder reports [`Output::Done`][crate::Output::Done] at the end of the stream and never
+    /// looks at the bytes after it.
     #[default]
-    Preserve,
+    Ignore,
 
     /// Require the compressed stream to end exactly at end of input.
     ///

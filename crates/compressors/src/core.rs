@@ -5,11 +5,10 @@
 //!
 //! [`Compression`] is what makes the formats interchangeable: the same push/pull state machine
 //! whichever engine is behind it, with the [`Mode`][Compression::Mode] associated type recording
-//! which direction an implementation runs in. [`Compressing`] and [`Decompressing`] add the
-//! operations that only make sense in one direction.
+//! which direction an implementation runs in.
 //!
-//! Everything here is re-exported at the crate root, so `compressors::core::Compression` and
-//! `compressors::core::Compression` name the same trait.
+//! One trait covers both directions. [`Compress`] and [`Decompress`] are what an API names when it
+//! needs one of them -- `Compression<Mode = Compress>` accepts any compressor and no decompressor.
 
 use std::fmt;
 
@@ -26,8 +25,6 @@ pub(crate) mod sealed {
     pub trait Compression {}
 
     impl<D> Compression for Box<dyn super::Compression<Mode = D>> {}
-    impl Compression for Box<dyn super::Compressing> {}
-    impl Compression for Box<dyn super::Decompressing> {}
 }
 
 /// Marks a [`Compression`] implementation that compresses its input.
@@ -105,6 +102,22 @@ pub trait Compression: sealed::Compression + fmt::Debug + Send + Sync {
     /// The number of bytes produced so far.
     fn total_out(&self) -> u64;
 
+    /// Requests a resumable flush of everything supplied so far.
+    ///
+    /// Drain [`pull`][Compression::pull] until it reports [`Output::NeedInput`] before pushing more
+    /// input. Flushing ends a compressed block early, which can cost compression ratio, so use it
+    /// only when the bytes have to reach the far end before the stream does.
+    ///
+    /// Decompression has nothing to flush -- output is already produced as soon as the input allows
+    /// -- so this does nothing there, which is what the default implementation is.
+    ///
+    /// # Errors
+    ///
+    /// Returns an invalid-state error after end of input or a previous operation failure.
+    fn flush(&mut self) -> Result<()> {
+        Ok(())
+    }
+
     /// Processes one complete input and returns the whole result.
     ///
     /// This is shorthand for [`push`][Compression::push], [`end_input`][Compression::end_input], and
@@ -161,29 +174,6 @@ pub trait Compression: sealed::Compression + fmt::Debug + Send + Sync {
     }
 }
 
-/// Additional operations available while compressing.
-pub trait Compressing: Compression<Mode = Compress> {
-    /// Requests a resumable flush of all input supplied so far.
-    ///
-    /// Drain [`Compression::pull`] until it reports [`Output::NeedInput`] before pushing more
-    /// input. Flushing can reduce the compression ratio.
-    ///
-    /// # Errors
-    ///
-    /// Returns an invalid-state error after end of input or a previous operation failure.
-    fn flush(&mut self) -> Result<()>;
-}
-
-/// Additional operations available while decompressing.
-pub trait Decompressing: Compression<Mode = Decompress> {
-    /// Takes bytes already buffered after a completed single compressed stream.
-    ///
-    /// # Errors
-    ///
-    /// Returns an invalid-state error until decompression reports [`Output::Done`].
-    fn take_remainder(&mut self) -> Result<BytesView>;
-}
-
 impl<D> Compression for Box<dyn Compression<Mode = D>> {
     type Mode = D;
 
@@ -206,65 +196,9 @@ impl<D> Compression for Box<dyn Compression<Mode = D>> {
     fn total_out(&self) -> u64 {
         (**self).total_out()
     }
-}
 
-impl Compression for Box<dyn Compressing> {
-    type Mode = Compress;
-
-    fn push(&mut self, input: BytesView) -> Result<()> {
-        (**self).push(input)
-    }
-
-    fn end_input(&mut self) {
-        (**self).end_input();
-    }
-
-    fn pull(&mut self) -> Result<Output> {
-        (**self).pull()
-    }
-
-    fn total_in(&self) -> u64 {
-        (**self).total_in()
-    }
-
-    fn total_out(&self) -> u64 {
-        (**self).total_out()
-    }
-}
-
-impl Compressing for Box<dyn Compressing> {
     fn flush(&mut self) -> Result<()> {
         (**self).flush()
-    }
-}
-
-impl Compression for Box<dyn Decompressing> {
-    type Mode = Decompress;
-
-    fn push(&mut self, input: BytesView) -> Result<()> {
-        (**self).push(input)
-    }
-
-    fn end_input(&mut self) {
-        (**self).end_input();
-    }
-
-    fn pull(&mut self) -> Result<Output> {
-        (**self).pull()
-    }
-
-    fn total_in(&self) -> u64 {
-        (**self).total_in()
-    }
-
-    fn total_out(&self) -> u64 {
-        (**self).total_out()
-    }
-}
-
-impl Decompressing for Box<dyn Decompressing> {
-    fn take_remainder(&mut self) -> Result<BytesView> {
-        (**self).take_remainder()
     }
 }
 

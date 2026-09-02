@@ -14,7 +14,7 @@ use std::sync::OnceLock;
 
 use bytesbuf::mem::GlobalPool;
 use bytesbuf::{BytesBuf, BytesView};
-use compressors::core::{Compress, Compressing, Compression, Decompress, Decompressing};
+use compressors::core::{Compress, Compression, Decompress};
 use compressors::format::Format;
 use compressors::{CompressorBuilder, DecompressionLimits, DecompressorBuilder, Level, Output, Resources, TrailingData};
 
@@ -953,11 +953,11 @@ macro_rules! format_contract {
             }
 
             #[test]
-            fn single_stream_decompression_preserves_buffered_trailing_data() {
+            fn single_stream_decompression_stops_at_the_end_of_its_stream() {
                 let data = payload();
                 let compressed = $module::compress(view(&data), resources()).expect("compress");
                 let trailing = view(b"next protocol message");
-                let joined = BytesView::from_views([compressed, trailing.clone()]);
+                let joined = BytesView::from_views([compressed, trailing]);
                 let mut decompressor = $module::Decompressor::builder()
                     .multi_stream(false)
                     .build(resources())
@@ -967,24 +967,15 @@ macro_rules! format_contract {
                 let mut plain = BytesBuf::new();
                 loop {
                     match decompressor.pull().expect("decompression succeeds") {
-                        Output::Data(chunk) => {
-                            plain.put_bytes(chunk);
-                            let error = decompressor
-                                .take_remainder()
-                                .expect_err("the remainder is unavailable before Done");
-                            assert!(error.is_invalid_state(), "got {error}");
-                        }
+                        Output::Data(chunk) => plain.put_bytes(chunk),
                         Output::Progress => {}
                         Output::NeedInput => panic!("single stream was complete"),
                         Output::Done => break,
                     }
                 }
 
+                // The bytes after the stream are not decompressed, and not mistaken for more of it.
                 assert_eq!(plain.consume_all().to_vec(), data);
-                assert_eq!(
-                    decompressor.take_remainder().expect("done exposes remainder").to_vec(),
-                    trailing.to_vec()
-                );
             }
 
             #[test]
@@ -1370,7 +1361,7 @@ mod format_specific_settings {
         // The documented escape hatch: a runtime `Format` builder cannot carry a brotli-only
         // setting, so branch on the format, use the concrete builder, and box the result. That
         // works because a boxed compression operation is itself a `Compression`.
-        fn compressor_for(format: Format) -> Box<dyn Compressing> {
+        fn compressor_for(format: Format) -> Box<dyn Compression<Mode = Compress>> {
             match format {
                 Format::Brotli => Box::new(brotli::Compressor::builder().mode(Mode::Text).build(resources()).built()),
                 other => CompressorBuilder::new().build_format(other, resources()).built(),
@@ -1806,7 +1797,7 @@ mod trait_contract {
 
         let mut concrete = gzip::Compressor::new(resources());
         concrete.push(input.clone()).expect("push succeeds");
-        Compressing::flush(&mut concrete).expect("concrete flush succeeds");
+        concrete.flush().expect("concrete flush succeeds");
         loop {
             let output = concrete.pull().expect("pull succeeds");
             assert!(!output.is_done(), "flush ended the stream");
@@ -1836,7 +1827,7 @@ mod trait_contract {
         // against this baseline rather than against emptiness.
         let before_flush = compressed.len();
 
-        Compressing::flush(&mut compressor).expect("boxed flush succeeds");
+        compressor.flush().expect("boxed flush succeeds");
         loop {
             let output = compressor.pull().expect("pull succeeds");
             assert!(!output.is_done(), "flush ended the stream");
@@ -1867,26 +1858,26 @@ mod trait_contract {
             }
         }
 
-        let trailing = view(b"trailing");
-        let joined = BytesView::from_views([compressed.consume_all(), trailing.clone()]);
+        let joined = BytesView::from_views([compressed.consume_all(), view(b"trailing")]);
         let mut decompressor = DecompressorBuilder::new()
             .multi_stream(false)
             .build_format(Format::Gzip, resources())
             .expect("the default settings are accepted");
         decompressor.push(joined).expect("push succeeds");
+
+        let mut plain = BytesBuf::new();
         loop {
             let output = decompressor.pull().expect("pull succeeds");
             assert!(!output.is_need_input(), "complete stream requested more input");
-            if output.is_done() {
+            let done = output.is_done();
+            if let Some(chunk) = output.into_data() {
+                plain.put_bytes(chunk);
+            }
+            if done {
                 break;
             }
         }
 
-        assert_eq!(
-            Decompressing::take_remainder(&mut decompressor)
-                .expect("boxed remainder succeeds")
-                .to_vec(),
-            trailing.to_vec()
-        );
+        assert_eq!(plain.consume_all().to_vec(), b"direction-specific capabilities".to_vec());
     }
 }

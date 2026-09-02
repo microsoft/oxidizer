@@ -11,7 +11,7 @@
 //! # What a format module exposes
 //!
 //! A `Compressor` is reached through its builder and driven through
-//! [`Compression`][crate::core::Compression] and [`Compressing`][crate::core::Compressing]; it has no inherent
+//! [`Compression`][crate::core::Compression]; it has no inherent
 //! operations of its own. That is what lets code be written once against the trait and used with
 //! any format, including a boxed one whose format was chosen at runtime.
 //!
@@ -356,15 +356,15 @@ macro_rules! define_format {
 
         #[doc = concat!("Compresses a stream of byte sequences into ", $name, ".")]
         ///
-        /// A push/pull state machine, driven through [`Compression`][crate::core::Compression] and
-        /// [`Compressing`][crate::core::Compressing]: supply input with
-        /// [`push`][crate::core::Compression::push], take output with [`pull`][crate::core::Compression::pull],
-        /// and call [`end_input`][crate::core::Compression::end_input] when there is no more input. Each
-        /// pull returns at most one bounded chunk, so a stream of any length can be compressed with
-        /// a bounded working set.
+        /// A push/pull state machine, driven through [`Compression`][crate::core::Compression]:
+        /// supply input with [`push`][crate::core::Compression::push], take output with
+        /// [`pull`][crate::core::Compression::pull], and call
+        /// [`end_input`][crate::core::Compression::end_input] when there is no more input. Each pull
+        /// returns at most one bounded chunk, so a stream of any length can be compressed with a
+        /// bounded working set.
         ///
-        /// The operations live on the traits rather than here, so code written against them works
-        /// with every format, and with a boxed compressor whose format was picked at runtime.
+        /// The operations live on the trait rather than here, so code written against it works with
+        /// every format, and with a boxed compressor whose format was picked at runtime.
         #[derive(Debug)]
         pub struct Compressor {
             pump: Pump,
@@ -403,9 +403,7 @@ macro_rules! define_format {
             fn total_out(&self) -> u64 {
                 self.pump.total_out()
             }
-        }
 
-        impl $crate::core::Compressing for Compressor {
             fn flush(&mut self) -> Result<()> {
                 self.pump.flush()
             }
@@ -417,8 +415,8 @@ macro_rules! define_format {
 
         #[doc = concat!("Decompresses a ", $name, " stream into a stream of byte sequences.")]
         ///
-        /// Driven through [`Compression`][crate::core::Compression] and
-        /// [`Decompressing`][crate::core::Decompressing], like every other format's decompressor.
+        /// Driven through [`Compression`][crate::core::Compression], like every other format's
+        /// decompressor.
         ///
         /// # Security
         ///
@@ -465,12 +463,6 @@ macro_rules! define_format {
 
             fn total_out(&self) -> u64 {
                 self.pump.total_out()
-            }
-        }
-
-        impl $crate::core::Decompressing for Decompressor {
-            fn take_remainder(&mut self) -> Result<BytesView> {
-                self.pump.take_remainder()
             }
         }
 

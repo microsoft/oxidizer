@@ -190,7 +190,7 @@ impl Codec for FlateDecompress {
     fn stream_ended(&mut self) -> Result<StreamEnd> {
         if !self.multi_stream {
             return Ok(match self.trailing_data {
-                TrailingData::Preserve => StreamEnd::Complete,
+                TrailingData::Ignore => StreamEnd::Complete,
                 TrailingData::Reject => StreamEnd::AwaitEof,
             });
         }

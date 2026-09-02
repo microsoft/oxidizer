@@ -158,7 +158,7 @@ impl<T> DecompressorBuilder<T> {
             limits: DecompressionLimits::new(),
             chunk_size: default_chunk_size(),
             multi_stream: None,
-            trailing_data: TrailingData::Preserve,
+            trailing_data: TrailingData::Ignore,
             format,
         }
     }

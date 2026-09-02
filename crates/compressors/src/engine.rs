@@ -232,14 +232,6 @@ impl Pump {
         self.total_out
     }
 
-    pub(crate) fn take_remainder(&mut self) -> Result<BytesView> {
-        if self.state != State::Done || !self.done_reported {
-            return Err(Error::invalid_state("the input remainder is available only after decoding is done"));
-        }
-
-        Ok(std::mem::replace(&mut self.input, BytesView::new()))
-    }
-
     fn fail(&mut self, error: Error) -> Error {
         self.state = State::Failed;
         error
