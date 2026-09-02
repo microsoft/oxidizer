@@ -131,7 +131,7 @@ fn emit_event_with_no_fields() {
 
     emit!(sink, Heartbeat);
 
-    assert_eq!(processor.single_event(), ExpectedEvent::new("internal.heartbeat", Severity::Trace),);
+    assert_eq!(processor.single_event(), ExpectedEvent::new("internal.heartbeat", Severity::Trace));
 }
 
 #[test]
