@@ -56,7 +56,7 @@ opentelemetry = { workspace = true, features = ["logs"] }
 opentelemetry-stdout = { workspace = true, features = ["logs", "metrics"] }
 opentelemetry_sdk = { workspace = true, features = ["logs", "metrics", "testing"] }
 static_assertions = { workspace = true }
-thread_aware = { path = "../thread_aware", features = ["test-utils"] }
+thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
 tick = { workspace = true, features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
 
