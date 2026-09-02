@@ -3,13 +3,18 @@
 
 //! Test helpers for relocating thread-aware values.
 
-use std::sync::OnceLock;
+use std::sync::{OnceLock, mpsc};
 use std::thread::{self, ThreadId};
 
 use crate::thread::ThreadBuilder;
 use crate::{Thread, ThreadAware};
 
-static SOURCE_THREAD_ID: OnceLock<ThreadId> = OnceLock::new();
+static SOURCE_THREAD: OnceLock<SourceThread> = OnceLock::new();
+
+struct SourceThread {
+    id: ThreadId,
+    _keepalive: Option<mpsc::Sender<()>>,
+}
 
 /// Relocates a value between synthetic runtime thread coordinates.
 ///
@@ -64,15 +69,45 @@ impl Relocator {
     fn new(source_numa_node: u32, destination_numa_node: u32) -> Self {
         let builder = ThreadBuilder::default();
         Self {
-            source: builder.clone().numa_node(source_numa_node).build(*SOURCE_THREAD_ID.get_or_init(|| {
-                thread::spawn(|| thread::current().id())
-                    .join()
-                    .expect("test thread should return its ID")
-            })),
+            source: builder.clone().numa_node(source_numa_node).build(Self::source_thread_id()),
             destination: builder.numa_node(destination_numa_node).build(thread::current().id()),
             destination_numa_node,
             include_source: true,
         }
+    }
+
+    fn source_thread_id() -> ThreadId {
+        SOURCE_THREAD
+            .get_or_init(|| {
+                #[cfg(miri)]
+                {
+                    return SourceThread {
+                        id: thread::spawn(|| thread::current().id())
+                            .join()
+                            .expect("source thread must return its ID during initialization"),
+                        _keepalive: None,
+                    };
+                }
+
+                #[cfg(not(miri))]
+                let (id_sender, id_receiver) = mpsc::sync_channel(0);
+                #[cfg(not(miri))]
+                let (keepalive, wait) = mpsc::channel();
+                #[cfg(not(miri))]
+                let _source_thread = thread::spawn(move || {
+                    id_sender
+                        .send(thread::current().id())
+                        .expect("source thread ID receiver must remain alive during initialization");
+                    _ = wait.recv();
+                });
+
+                #[cfg(not(miri))]
+                SourceThread {
+                    id: id_receiver.recv().expect("source thread must publish its ID during initialization"),
+                    _keepalive: Some(keepalive),
+                }
+            })
+            .id
     }
 }
 
