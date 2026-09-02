@@ -14,8 +14,7 @@ use bytesbuf::BytesView;
 use futures_core::Stream;
 use pin_project_lite::pin_project;
 
-use crate::core::Output;
-use crate::core::{Compress, Compression, Decompress};
+use crate::core::{Compress, Compression, Decompress, Output};
 use crate::error::{Error, Result};
 
 /// Bounds the amount of immediately-ready work one `poll_next` performs.
@@ -169,15 +168,15 @@ where
     /// use bytesbuf::BytesView;
     /// use bytesbuf::mem::GlobalPool;
     /// use compressors::{CompressionStream, Resources, gzip};
-    /// use futures::StreamExt;
-    /// use futures::stream;
+    /// use futures::{StreamExt, stream};
     ///
     /// # futures::executor::block_on(async {
     /// let memory = GlobalPool::new();
     /// let compressed = gzip::compress(
     ///     BytesView::copied_from_slice(b"payload", &memory),
     ///     &Resources::default(),
-    /// ).unwrap();
+    /// )
+    /// .unwrap();
     ///
     /// // Deliver the gzip stream one byte at a time, the worst case for a decompressor.
     /// let source = stream::iter(
@@ -187,7 +186,9 @@ where
     /// );
     ///
     /// let chunks: Vec<_> =
-    ///     CompressionStream::decompress(source, gzip::Decompressor::new(&Resources::default())).collect().await;
+    ///     CompressionStream::decompress(source, gzip::Decompressor::new(&Resources::default()))
+    ///         .collect()
+    ///         .await;
     /// let plain = BytesView::from_views(chunks.into_iter().map(|c| c.unwrap()));
     ///
     /// assert_eq!(plain.to_vec(), b"payload".to_vec());
@@ -229,9 +230,8 @@ mod tests {
     use futures::{StreamExt, stream};
 
     use super::*;
-    use crate::Format;
     use crate::core::ProgressCompression;
-    use crate::{DecompressorLimits, Level, Resources, gzip};
+    use crate::{DecompressorLimits, Format, Level, Resources, gzip};
 
     fn view(bytes: &[u8]) -> BytesView {
         BytesView::copied_from_slice(bytes, &GlobalPool::new())

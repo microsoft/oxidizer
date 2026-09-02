@@ -43,8 +43,7 @@ pub(crate) const DEFAULT_CHUNK_SIZE: usize = 64 * 1024;
 /// ```
 /// # #[cfg(feature = "gzip")]
 /// # {
-/// use compressors::Format;
-/// use compressors::{CompressorBuilder, Level, Resources};
+/// use compressors::{CompressorBuilder, Format, Level, Resources};
 ///
 /// // Settings that say nothing about the format, applied to one chosen at runtime.
 /// let settings = CompressorBuilder::new().level(Level::HIGH);

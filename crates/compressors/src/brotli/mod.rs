@@ -240,9 +240,9 @@ impl From<WindowSize> for u8 {
 /// # Examples
 ///
 /// ```
+/// use compressors::Resources;
 /// use compressors::brotli::{self, Mode, Quality, WindowSize};
 /// use compressors::core::{Compress, Compression};
-/// use compressors::Resources;
 ///
 /// let compressor: Box<dyn Compression<Mode = Compress>> = Box::new(
 ///     brotli::Compressor::builder()

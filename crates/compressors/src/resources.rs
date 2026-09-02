@@ -48,7 +48,10 @@ use crate::pool::Pool;
 ///     BytesView::copied_from_slice(b"hello", resources.memory()),
 ///     resources,
 /// )?;
-/// assert_eq!(gzip::decompress(compressed, resources)?.to_vec(), b"hello".to_vec());
+/// assert_eq!(
+///     gzip::decompress(compressed, resources)?.to_vec(),
+///     b"hello".to_vec()
+/// );
 /// # }
 /// # Ok::<(), compressors::Error>(())
 /// ```

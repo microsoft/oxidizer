@@ -321,7 +321,6 @@ macro_rules! define_format {
         multi_stream_default = $multi_stream_default:expr,
     ) => {
         use bytesbuf::BytesView;
-
         use $crate::core::Output;
         use $crate::engine::Pump;
         use $crate::error::Result;
@@ -463,4 +462,6 @@ macro_rules! define_format {
     };
 }
 
-pub(crate) use {define_compressor_build, define_decompressor_build, define_format};
+pub(crate) use define_compressor_build;
+pub(crate) use define_decompressor_build;
+pub(crate) use define_format;

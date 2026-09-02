@@ -25,9 +25,8 @@ use crate::resources::Resources;
 /// ```
 /// use bytesbuf::BytesView;
 /// use bytesbuf::mem::GlobalPool;
-/// use compressors::Format;
 /// use compressors::core::Compression;
-/// use compressors::{CompressorBuilder, Level, Resources};
+/// use compressors::{CompressorBuilder, Format, Level, Resources};
 ///
 /// // The format arrives as a string, from an HTTP header.
 /// let format = Format::from_content_encoding("gzip").expect("a supported encoding");

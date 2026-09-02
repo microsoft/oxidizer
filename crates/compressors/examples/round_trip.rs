@@ -7,8 +7,7 @@
 
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
-use compressors::Format;
-use compressors::{Resources, Result, gzip};
+use compressors::{Format, Resources, Result, gzip};
 
 fn main() -> Result<()> {
     // Every output buffer is allocated from this provider.

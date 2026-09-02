@@ -14,9 +14,8 @@ use std::sync::OnceLock;
 
 use bytesbuf::mem::GlobalPool;
 use bytesbuf::{BytesBuf, BytesView};
-use compressors::Format;
 use compressors::core::{Compress, Compression, Decompress, Output};
-use compressors::{CompressorBuilder, DecompressorBuilder, DecompressorLimits, Level, Resources, TrailingData};
+use compressors::{CompressorBuilder, DecompressorBuilder, DecompressorLimits, Format, Level, Resources, TrailingData};
 
 fn view(bytes: &[u8]) -> BytesView {
     BytesView::copied_from_slice(bytes, &GlobalPool::new())
@@ -808,6 +807,22 @@ macro_rules! format_contract {
                         "round {round}: unexpected classification {error}"
                     );
                 }
+            }
+
+            #[test]
+            fn flushing_a_decompressor_does_nothing() {
+                // Decompression produces output as soon as the input allows, so there is nothing
+                // buffered to release early. The default must be a no-op, not an error and not an
+                // end of stream.
+                let data = payload();
+                let compressed = $module::compress(view(&data), resources()).expect("compress");
+                let mut decompressor = $module::Decompressor::new(resources());
+
+                decompressor.flush().expect("flushing a decompressor is a no-op");
+
+                let plain = decompress(&mut decompressor, &compressed, usize::MAX).expect("decompression succeeds");
+
+                assert_eq!(plain.to_vec(), data, "the flush must leave the stream untouched");
             }
 
             #[test]
@@ -1773,6 +1788,27 @@ mod trait_contract {
         }
 
         assert_eq!(plain.consume_all().to_vec(), b"driven through the trait".to_vec());
+    }
+
+    #[test]
+    fn a_boxed_operation_reports_the_same_counters_as_the_one_it_wraps() {
+        // Boxing is how a runtime-selected format reaches the same contract, so the counters must
+        // survive the indirection rather than reporting the box's own idea of progress.
+        let data = b"counted through the box ".repeat(50);
+        let input = view(&data);
+
+        let mut boxed: Box<dyn Compression<Mode = Compress>> = Box::new(gzip::Compressor::new(resources()));
+        assert_eq!(boxed.total_in(), 0, "nothing has been consumed yet");
+        assert_eq!(boxed.total_out(), 0, "nothing has been produced yet");
+
+        let compressed = compress(&mut *boxed, &input, usize::MAX).expect("compression succeeds");
+
+        assert_eq!(boxed.total_in(), data.len() as u64, "every input byte should be accounted for");
+        assert_eq!(
+            boxed.total_out(),
+            compressed.len() as u64,
+            "every output byte should be accounted for"
+        );
     }
 
     #[test]

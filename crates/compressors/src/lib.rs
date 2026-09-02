@@ -40,7 +40,10 @@
 //!     resources,
 //! )?;
 //!
-//! assert_eq!(gzip::decompress(compressed, resources)?.to_vec(), b"hello".to_vec());
+//! assert_eq!(
+//!     gzip::decompress(compressed, resources)?.to_vec(),
+//!     b"hello".to_vec()
+//! );
 //! # }
 //! # Ok::<(), compressors::Error>(())
 //! ```
@@ -58,14 +61,16 @@
 //! # {
 //! use bytesbuf::BytesView;
 //! use compressors::{CompressionStream, Resources, gzip};
-//! use futures::StreamExt;
-//! use futures::stream;
+//! use futures::{StreamExt, stream};
 //!
 //! # futures::executor::block_on(async {
 //! let resources = Resources::global();
 //! let body = stream::iter(vec![
 //!     Ok::<_, std::io::Error>(BytesView::copied_from_slice(b"a body ", resources.memory())),
-//!     Ok(BytesView::copied_from_slice(b"in pieces", resources.memory())),
+//!     Ok(BytesView::copied_from_slice(
+//!         b"in pieces",
+//!         resources.memory(),
+//!     )),
 //! ]);
 //!
 //! let chunks: Vec<_> = CompressionStream::compress(body, gzip::Compressor::new(resources))
@@ -127,7 +132,9 @@
 //! let resources = Resources::global();
 //!
 //! // Per request: cheap to build, recycles the engine on drop.
-//! let compressor = gzip::Compressor::builder().level(Level::DEFAULT).build(resources);
+//! let compressor = gzip::Compressor::builder()
+//!     .level(Level::DEFAULT)
+//!     .build(resources);
 //! # let _ = compressor;
 //! # }
 //! ```
@@ -201,6 +208,7 @@ pub mod zstd;
 mod stream;
 
 pub use builder::{CompressorBuilder, DecompressorBuilder};
+use bytesbuf::BytesView;
 pub use error::{BuildError, Error, Result};
 #[cfg(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
 pub use format::Format;
@@ -210,8 +218,6 @@ pub use resources::Resources;
 #[cfg(feature = "futures-stream")]
 pub use stream::CompressionStream;
 pub use trailing::TrailingData;
-
-use bytesbuf::BytesView;
 
 use crate::core::{Compress, Compression, Decompress, process};
 
@@ -234,8 +240,7 @@ use crate::core::{Compress, Compression, Decompress, process};
 /// # #[cfg(feature = "gzip")]
 /// # {
 /// use bytesbuf::BytesView;
-/// use compressors::Format;
-/// use compressors::{CompressorBuilder, Resources, gzip};
+/// use compressors::{CompressorBuilder, Format, Resources, gzip};
 ///
 /// let resources = Resources::global();
 /// let input = BytesView::copied_from_slice(b"either way", resources.memory());

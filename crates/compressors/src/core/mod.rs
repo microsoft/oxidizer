@@ -77,7 +77,10 @@ pub struct Decompress;
 /// use compressors::core::{Compress, Compression};
 /// use compressors::{Resources, gzip};
 ///
-/// fn compress(compression: impl Compression<Mode = Compress>, input: BytesView) -> compressors::Result<BytesView> {
+/// fn compress(
+///     compression: impl Compression<Mode = Compress>,
+///     input: BytesView,
+/// ) -> compressors::Result<BytesView> {
 ///     compressors::compress(input, compression)
 /// }
 ///

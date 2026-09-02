@@ -21,7 +21,10 @@
 //!     BytesView::copied_from_slice(b"the quick brown fox", &memory),
 //!     &Resources::default(),
 //! )?;
-//! assert_eq!(compressed.range(0..4).to_vec(), vec![0x28, 0xb5, 0x2f, 0xfd]);
+//! assert_eq!(
+//!     compressed.range(0..4).to_vec(),
+//!     vec![0x28, 0xb5, 0x2f, 0xfd]
+//! );
 //!
 //! assert_eq!(
 //!     zstd::decompress(compressed, &Resources::default())?.to_vec(),
