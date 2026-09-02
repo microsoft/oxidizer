@@ -349,6 +349,13 @@ mod tests {
     }
 
     #[test]
+    fn the_ratio_floor_is_exactly_32_kib() {
+        // Pinned as a literal (not `32 * 1024`) so a mutated multiplication in the constant's
+        // definition cannot hide behind a test that recomputes the same expression.
+        assert_eq!(RATIO_FLOOR_BYTES, 32_768);
+    }
+
+    #[test]
     fn ratio_guard_engages_immediately_above_the_floor() {
         let error = DEFAULTS
             .check(0, RATIO_FLOOR_BYTES + 1, 1)

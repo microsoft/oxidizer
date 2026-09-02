@@ -245,4 +245,73 @@ mod tests {
         assert_ne!(headers[0], headers[1], "raw deflate and zlib must differ");
         assert_ne!(headers[1], headers[2], "zlib and gzip must differ");
     }
+
+    #[test]
+    fn dropping_a_pooled_compressor_returns_its_engine() {
+        let pool = Pool::new();
+        let key = EngineKey {
+            wrapper: Wrapper::Gzip,
+            level: Level::DEFAULT.get(),
+        };
+
+        drop(FlateCompress::new(Wrapper::Gzip, Level::DEFAULT, Some(pool.clone())));
+
+        assert!(
+            pool.take_compressor(key).is_some(),
+            "the engine should have been returned to the pool"
+        );
+    }
+
+    #[test]
+    fn dropping_a_pooled_decompressor_returns_its_engine() {
+        let pool = Pool::new();
+
+        drop(FlateDecompress::new(
+            Wrapper::Zlib,
+            FormatLimits::new(None, None),
+            false,
+            TrailingData::Reject,
+            Some(pool.clone()),
+        ));
+
+        assert!(
+            pool.take_decompressor(Wrapper::Zlib).is_some(),
+            "the engine should have been returned to the pool"
+        );
+    }
+
+    #[test]
+    fn a_flush_reports_continue_until_a_small_output_buffer_catches_up() {
+        let mut codec = FlateCompress::new(Wrapper::Gzip, Level::DEFAULT, None);
+        let mut scratch = [MaybeUninit::uninit(); 4096];
+
+        let payload = b"flush boundary check payload";
+        let (_, consumed, _) = codec.step(payload, &mut scratch, Operation::Process).expect("process succeeds");
+        assert_eq!(consumed, payload.len(), "the whole input should have been consumed");
+
+        // A one byte buffer cannot hold the whole flush in a single call, so the guard must
+        // report `Continue`, not `FlushComplete`, while output remains buffered.
+        let mut tiny = [MaybeUninit::uninit(); 1];
+        let (step, consumed, produced) = codec.step(&[], &mut tiny, Operation::Flush).expect("flush succeeds");
+        assert_eq!(consumed, 0, "no new input was supplied");
+        assert_eq!(produced, 1, "the tiny buffer should be filled completely");
+        assert_eq!(step, Step::Continue, "the flush cannot be complete while output remains buffered");
+
+        // A generous buffer drains the rest of the same flush and reports completion. This must
+        // be a single call, not a retry loop: calling `Flush` again after it already completed
+        // would ask flate2 to insert another sync marker, so the test only issues exactly the
+        // calls this one flush needs.
+        let mut generous = [MaybeUninit::uninit(); 256];
+        let (step, consumed, _) = codec.step(&[], &mut generous, Operation::Flush).expect("flush succeeds");
+        assert_eq!(consumed, 0, "no new input was supplied");
+        assert_eq!(step, Step::FlushComplete, "a generous buffer must drain the remainder of the flush");
+    }
+
+    #[test]
+    fn remaining_output_delegates_to_the_configured_limits() {
+        let codec = FlateDecompress::new(Wrapper::Zlib, FormatLimits::new(None, Some(100)), false, TrailingData::Reject, None);
+
+        assert_eq!(Codec::remaining_output(&codec, 40), Some(60));
+        assert_eq!(Codec::remaining_output(&codec, 100), Some(0));
+    }
 }

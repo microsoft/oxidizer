@@ -340,6 +340,30 @@ impl Compression for ProgressCompression {
     }
 }
 
+/// A fixture that always asks for input and always rejects it, for exercising callers that must
+/// propagate a `push` failure rather than the specific reasons a real codec's `push` can fail.
+#[cfg(all(test, feature = "futures-stream", feature = "gzip"))]
+#[derive(Debug)]
+pub(crate) struct RejectsPush;
+
+#[cfg(all(test, feature = "futures-stream", feature = "gzip"))]
+impl sealed::Compression for RejectsPush {}
+
+#[cfg(all(test, feature = "futures-stream", feature = "gzip"))]
+impl Compression for RejectsPush {
+    type Mode = Compress;
+
+    fn push(&mut self, _input: BytesView) -> Result<()> {
+        Err(crate::Error::invalid_state("this fixture always rejects pushed input"))
+    }
+
+    fn end_input(&mut self) {}
+
+    fn pull(&mut self) -> Result<Output> {
+        Ok(Output::NeedInput)
+    }
+}
+
 #[cfg(all(test, feature = "gzip"))]
 mod tests {
     use bytesbuf::mem::GlobalPool;
@@ -362,11 +386,14 @@ mod tests {
 
         let mut collected = BytesBuf::new();
         loop {
-            match Compression::pull(&mut *compressor).expect("pull succeeds") {
-                Output::Data(chunk) => collected.put_bytes(chunk),
-                Output::Progress => {}
-                Output::NeedInput => panic!("compressor requested input after end"),
-                Output::Done => break,
+            let output = Compression::pull(&mut *compressor).expect("pull succeeds");
+            assert!(!output.is_need_input(), "compressor requested input after end");
+            let done = output.is_done();
+            if let Some(chunk) = output.into_data() {
+                collected.put_bytes(chunk);
+            }
+            if done {
+                break;
             }
         }
 
@@ -376,11 +403,14 @@ mod tests {
 
         let mut plain = BytesBuf::new();
         loop {
-            match Compression::pull(&mut *decompressor).expect("pull succeeds") {
-                Output::Data(chunk) => plain.put_bytes(chunk),
-                Output::Progress => {}
-                Output::NeedInput => panic!("decompressor requested input after end"),
-                Output::Done => break,
+            let output = Compression::pull(&mut *decompressor).expect("pull succeeds");
+            assert!(!output.is_need_input(), "decompressor requested input after end");
+            let done = output.is_done();
+            if let Some(chunk) = output.into_data() {
+                plain.put_bytes(chunk);
+            }
+            if done {
+                break;
             }
         }
 
@@ -412,33 +442,60 @@ mod tests {
         concrete.push(input.clone()).expect("push succeeds");
         Compressing::flush(&mut concrete).expect("concrete flush succeeds");
         loop {
-            match concrete.pull().expect("pull succeeds") {
-                Output::Data(_) | Output::Progress => {}
-                Output::NeedInput => break,
-                Output::Done => panic!("flush ended the stream"),
+            let output = concrete.pull().expect("pull succeeds");
+            assert!(!output.is_done(), "flush ended the stream");
+            if output.is_need_input() {
+                break;
             }
         }
 
         let mut compressor = Format::Gzip.compressor().build(memory.clone());
         compressor.push(input).expect("push succeeds");
-        Compressing::flush(&mut compressor).expect("boxed flush succeeds");
         let mut compressed = BytesBuf::new();
         loop {
-            match compressor.pull().expect("pull succeeds") {
-                Output::Data(chunk) => compressed.put_bytes(chunk),
-                Output::Progress => {}
-                Output::NeedInput => break,
-                Output::Done => panic!("flush ended the stream"),
+            let output = compressor.pull().expect("pull succeeds");
+            assert!(!output.is_done(), "flush ended the stream");
+            let need_input = output.is_need_input();
+            if let Some(chunk) = output.into_data() {
+                compressed.put_bytes(chunk);
+            }
+            if need_input {
+                break;
             }
         }
 
+        // The header alone is already non-empty, so the flush's contribution must be measured
+        // against this baseline rather than against emptiness.
+        let before_flush = compressed.len();
+
+        Compressing::flush(&mut compressor).expect("boxed flush succeeds");
+        loop {
+            let output = compressor.pull().expect("pull succeeds");
+            assert!(!output.is_done(), "flush ended the stream");
+            let need_input = output.is_need_input();
+            if let Some(chunk) = output.into_data() {
+                compressed.put_bytes(chunk);
+            }
+            if need_input {
+                break;
+            }
+        }
+
+        assert!(
+            compressed.len() > before_flush,
+            "boxed flush should have released a sync-flush chunk beyond the header before end_input"
+        );
+
         compressor.end_input();
         loop {
-            match compressor.pull().expect("pull succeeds") {
-                Output::Data(chunk) => compressed.put_bytes(chunk),
-                Output::Progress => {}
-                Output::NeedInput => panic!("compressor requested input after end"),
-                Output::Done => break,
+            let output = compressor.pull().expect("pull succeeds");
+            assert!(!output.is_need_input(), "compressor requested input after end");
+            let done = output.is_done();
+            if let Some(chunk) = output.into_data() {
+                compressed.put_bytes(chunk);
+            }
+            if done {
+                break;
             }
         }
 
@@ -447,10 +504,10 @@ mod tests {
         let mut decompressor = Format::Gzip.decompressor().multi_stream(false).build(memory);
         decompressor.push(joined).expect("push succeeds");
         loop {
-            match decompressor.pull().expect("pull succeeds") {
-                Output::Data(_) | Output::Progress => {}
-                Output::NeedInput => panic!("complete stream requested more input"),
-                Output::Done => break,
+            let output = decompressor.pull().expect("pull succeeds");
+            assert!(!output.is_need_input(), "complete stream requested more input");
+            if output.is_done() {
+                break;
             }
         }
 
@@ -460,5 +517,67 @@ mod tests {
                 .to_vec(),
             trailing.to_vec()
         );
+    }
+
+    #[test]
+    fn process_forwards_progress_without_producing_data() {
+        #[derive(Debug)]
+        struct ProgressOnceThenDone {
+            done: bool,
+        }
+
+        impl sealed::Compression for ProgressOnceThenDone {}
+
+        impl Compression for ProgressOnceThenDone {
+            type Mode = Compress;
+
+            fn push(&mut self, _input: BytesView) -> Result<()> {
+                Ok(())
+            }
+
+            fn end_input(&mut self) {}
+
+            fn pull(&mut self) -> Result<Output> {
+                if self.done {
+                    return Ok(Output::Done);
+                }
+
+                self.done = true;
+                Ok(Output::Progress)
+            }
+        }
+
+        let result = ProgressOnceThenDone { done: false }
+            .process(view(b"ignored"))
+            .expect("process succeeds even when a step only makes progress");
+
+        assert!(result.is_empty(), "the fixture never reports data");
+    }
+
+    #[test]
+    fn process_rejects_a_pull_that_still_requests_input_after_end() {
+        #[derive(Debug)]
+        struct NeedsMoreForever;
+
+        impl sealed::Compression for NeedsMoreForever {}
+
+        impl Compression for NeedsMoreForever {
+            type Mode = Compress;
+
+            fn push(&mut self, _input: BytesView) -> Result<()> {
+                Ok(())
+            }
+
+            fn end_input(&mut self) {}
+
+            fn pull(&mut self) -> Result<Output> {
+                Ok(Output::NeedInput)
+            }
+        }
+
+        let error = NeedsMoreForever
+            .process(view(b"ignored"))
+            .expect_err("process rejects a pull that still requests input after end of input");
+        assert!(error.is_invalid_state());
     }
 }

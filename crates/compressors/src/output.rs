@@ -132,6 +132,13 @@ mod tests {
     }
 
     #[test]
+    fn as_data_returns_nothing_for_non_data_variants() {
+        assert!(Output::Progress.as_data().is_none());
+        assert!(Output::NeedInput.as_data().is_none());
+        assert!(Output::Done.as_data().is_none());
+    }
+
+    #[test]
     fn debug_is_available_for_diagnostics() {
         assert!(format!("{:?}", Output::NeedInput).contains("NeedInput"));
     }

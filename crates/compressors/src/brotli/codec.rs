@@ -43,6 +43,17 @@ fn initialize(output: &mut [MaybeUninit<u8>]) -> &mut [u8] {
     unsafe { &mut *(std::ptr::from_mut(output) as *mut [u8]) }
 }
 
+/// `compress_stream` reports failure only when it is driven inconsistently, for example by
+/// supplying new input after the encoder has already reached a terminal state. The engine's
+/// [`Pump`][crate::engine::Pump] never calls [`Codec::step`] again once a compressor reports
+/// [`Step::StreamEnd`], so this crate can never actually trigger it.
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(test, mutants::skip)]
+#[cold]
+fn compress_stream_failed() -> Error {
+    Error::invalid_state("the brotli compression engine reported a failure")
+}
+
 pub(crate) struct BrotliCompress {
     state: BrotliEncoderStateStruct<StandardAlloc>,
     finished: bool,
@@ -119,9 +130,7 @@ impl Codec for BrotliCompress {
             &mut |_, _, _, _| (),
         );
 
-        if !ok {
-            return Err(Error::invalid_state("the brotli compression engine reported a failure"));
-        }
+        ok.then_some(()).ok_or_else(compress_stream_failed)?;
 
         self.finished = self.state.is_finished();
         let step = if self.finished {
@@ -258,6 +267,13 @@ mod tests {
     }
 
     #[test]
+    fn every_mode_maps_to_its_own_brotli_parameter() {
+        assert_eq!(mode(Mode::Generic), 0);
+        assert_eq!(mode(Mode::Text), 1);
+        assert_eq!(mode(Mode::Font), 2);
+    }
+
+    #[test]
     fn initialize_zeroes_the_whole_slice() {
         let mut raw = [MaybeUninit::new(0xff_u8); 8];
         let initialized = initialize(&mut raw);
@@ -284,5 +300,22 @@ mod tests {
 
         assert!(rendered.contains("trailing_data"));
         assert!(rendered.contains("Reject"));
+    }
+
+    #[test]
+    fn remaining_output_delegates_to_the_configured_limits() {
+        let codec = BrotliDecompress::new(FormatLimits::new(None, Some(100)), false, TrailingData::Reject);
+
+        assert_eq!(Codec::remaining_output(&codec, 40), Some(60));
+        assert_eq!(Codec::remaining_output(&codec, 100), Some(0));
+    }
+
+    #[test]
+    fn compressor_debug_includes_its_finished_flag() {
+        let codec = BrotliCompress::new(Level::DEFAULT, CompressorOptions::default());
+        let rendered = format!("{codec:?}");
+
+        assert!(rendered.contains("BrotliCompress"));
+        assert!(rendered.contains("finished"));
     }
 }

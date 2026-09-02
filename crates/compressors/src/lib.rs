@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 //! Streaming compression and decompression over [`bytesbuf`] byte sequences.
 //!
 //! Five formats are available, each behind a cargo feature of its own: `deflate`, `zlib`,

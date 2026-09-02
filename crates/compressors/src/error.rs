@@ -194,13 +194,15 @@ mod tests {
     #[test]
     fn accessors_report_exactly_one_kind() {
         let cases = [
-            (Error::corrupt_data("bad"), [true, false, false, false]),
-            (Error::unexpected_end_of_stream(), [false, true, false, false]),
-            (Error::output_limit_exceeded(2, 1), [false, false, true, false]),
-            (Error::invalid_state("wrong order"), [false, false, false, true]),
+            (Error::corrupt_data("bad"), [true, false, false, false, false, false]),
+            (Error::unexpected_end_of_stream(), [false, true, false, false, false, false]),
+            (Error::output_limit_exceeded(2, 1), [false, false, true, false, false, false]),
+            (Error::invalid_state("wrong order"), [false, false, false, true, false, false]),
+            (
+                Error::invalid_configuration("out of range"),
+                [false, false, false, false, true, false],
+            ),
         ];
-
-        assert!(Error::invalid_configuration("out of range").is_invalid_configuration());
 
         for (error, expected) in cases {
             let actual = [
@@ -208,9 +210,21 @@ mod tests {
                 error.is_unexpected_end_of_stream(),
                 error.is_limit_exceeded(),
                 error.is_invalid_state(),
+                error.is_invalid_configuration(),
+                error.is_source(),
             ];
             assert_eq!(actual, expected, "wrong classification for {error}");
         }
+    }
+
+    #[test]
+    #[cfg(feature = "futures-stream")]
+    fn is_source_reports_only_the_source_kind() {
+        let error = Error::source(std::io::Error::other("stream failed"));
+
+        assert!(error.is_source(), "got {error}");
+        assert!(!error.is_corrupt_data(), "got {error}");
+        assert!(!error.is_invalid_configuration(), "got {error}");
     }
 
     #[test]

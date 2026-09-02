@@ -283,3 +283,24 @@ mod quality_tests {
         assert!(error.is_invalid_configuration(), "got {error}");
     }
 }
+
+#[cfg(test)]
+mod window_size_tests {
+    use super::*;
+
+    #[test]
+    fn every_valid_exponent_is_representable() {
+        for exponent in WindowSize::MIN.get()..=WindowSize::MAX.get() {
+            assert_eq!(WindowSize::new(exponent).map(WindowSize::get), Some(exponent));
+        }
+
+        assert_eq!(WindowSize::new(WindowSize::MIN.get() - 1), None);
+        assert_eq!(WindowSize::new(WindowSize::MAX.get() + 1), None);
+        assert_eq!(WindowSize::default(), WindowSize::DEFAULT);
+        assert_eq!(WindowSize::try_from(20).expect("in range"), WindowSize::new(20).expect("in range"));
+        assert_eq!(u8::from(WindowSize::DEFAULT), 22);
+
+        let error = WindowSize::try_from(WindowSize::MAX.get() + 1).expect_err("out of range");
+        assert!(error.is_invalid_configuration(), "got {error}");
+    }
+}

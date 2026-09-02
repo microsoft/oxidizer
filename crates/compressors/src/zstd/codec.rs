@@ -52,6 +52,45 @@ fn decompression_failed(code: usize) -> Error {
     Error::corrupt_data(format!("zstd decompression failed: {}", zstd_safe::get_error_name(code)))
 }
 
+/// zstd only rejects a compression level outside its own `min_c_level()..=max_c_level()` range.
+/// [`CompressionLevel::new`][crate::zstd::CompressionLevel::new] and [`compression_level`] both
+/// stay inside exactly that range, so `set_parameter` can never actually reject the level this
+/// crate passes in.
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(test, mutants::skip)]
+#[cold]
+fn compression_level_rejected(level: i32, code: usize) -> Error {
+    Error::invalid_configuration(format!(
+        "zstd rejected compression level {level}: {}",
+        zstd_safe::get_error_name(code)
+    ))
+}
+
+/// zstd clamps `WindowLogMax` to `ZSTD_WINDOWLOG_MIN..=ZSTD_WINDOWLOG_MAX`, and
+/// [`WindowLog`][crate::zstd::WindowLog]'s own bounds are defined as exactly that range, so
+/// `set_parameter` can never actually reject a window log this crate passes in.
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(test, mutants::skip)]
+#[cold]
+fn window_log_rejected(window: u32, code: usize) -> Error {
+    Error::invalid_configuration(format!(
+        "zstd rejected maximum window log {window}: {}",
+        zstd_safe::get_error_name(code)
+    ))
+}
+
+/// Resetting a session, with no parameters to validate, has no documented failure mode; this
+/// guards against a native error the bundled zstd version has never been observed to return.
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(test, mutants::skip)]
+#[cold]
+fn reset_for_next_frame_failed(code: usize) -> Error {
+    Error::invalid_state(format!(
+        "zstd failed to reset for the next frame: {}",
+        zstd_safe::get_error_name(code)
+    ))
+}
+
 pub(crate) struct ZstdCompress {
     /// `Some` until the context is handed back in `drop`.
     context: Option<CCtx<'static>>,
@@ -71,12 +110,10 @@ impl ZstdCompress {
 
         // Applied unconditionally: a recycled context comes back with its parameters cleared, so
         // that a recycled compressor is indistinguishable from a fresh one.
-        let configuration_error = context.set_parameter(CParameter::CompressionLevel(level)).err().map(|code| {
-            Error::invalid_configuration(format!(
-                "zstd rejected compression level {level}: {}",
-                zstd_safe::get_error_name(code)
-            ))
-        });
+        let configuration_error = context
+            .set_parameter(CParameter::CompressionLevel(level))
+            .err()
+            .map(|code| compression_level_rejected(level, code));
 
         Self {
             context: Some(context),
@@ -164,13 +201,10 @@ impl ZstdDecompress {
     ) -> Self {
         let mut context = pool.as_ref().and_then(Pool::take_zstd_decompressor).unwrap_or_else(DCtx::create);
         let configuration_error = options.max_window_log.and_then(|window| {
-            context.set_parameter(DParameter::WindowLogMax(window.get())).err().map(|code| {
-                Error::invalid_configuration(format!(
-                    "zstd rejected maximum window log {}: {}",
-                    window.get(),
-                    zstd_safe::get_error_name(code)
-                ))
-            })
+            context
+                .set_parameter(DParameter::WindowLogMax(window.get()))
+                .err()
+                .map(|code| window_log_rejected(window.get(), code))
         });
 
         Self {
@@ -216,12 +250,9 @@ impl Codec for ZstdDecompress {
         }
 
         if self.needs_reset {
-            self.engine().reset(ResetDirective::SessionOnly).map_err(|code| {
-                Error::invalid_state(format!(
-                    "zstd failed to reset for the next frame: {}",
-                    zstd_safe::get_error_name(code)
-                ))
-            })?;
+            self.engine()
+                .reset(ResetDirective::SessionOnly)
+                .map_err(reset_for_next_frame_failed)?;
             self.needs_reset = false;
         }
 
@@ -347,5 +378,86 @@ mod tests {
 
         assert!(rendered.contains("trailing_data"));
         assert!(rendered.contains("Reject"));
+    }
+
+    #[test]
+    fn compressor_debug_includes_its_level() {
+        let codec = ZstdCompress::new(Level::DEFAULT, CompressorOptions::default(), None);
+        let rendered = format!("{codec:?}");
+
+        assert!(rendered.contains("ZstdCompress"));
+        assert!(rendered.contains("level"));
+    }
+
+    #[test]
+    fn dropping_a_pooled_compressor_returns_its_context() {
+        let pool = Pool::new();
+        let level = compression_level(Level::DEFAULT);
+
+        drop(ZstdCompress::new(Level::DEFAULT, CompressorOptions::default(), Some(pool.clone())));
+
+        assert!(
+            pool.take_zstd_compressor(level).is_some(),
+            "the context should have been returned to the pool"
+        );
+    }
+
+    #[test]
+    fn dropping_a_pooled_decompressor_returns_its_context() {
+        let pool = Pool::new();
+
+        drop(ZstdDecompress::new(
+            FormatLimits::new(None, None),
+            false,
+            TrailingData::Reject,
+            DecompressorOptions::default(),
+            Some(pool.clone()),
+        ));
+
+        assert!(
+            pool.take_zstd_decompressor().is_some(),
+            "the context should have been returned to the pool"
+        );
+    }
+
+    #[test]
+    fn a_flush_reports_continue_until_the_native_buffer_catches_up() {
+        let mut codec = ZstdCompress::new(Level::DEFAULT, CompressorOptions::default(), None);
+        let mut scratch = [MaybeUninit::uninit(); 4096];
+
+        let payload = b"zstd flush boundary check payload, repeated so the flush has real work to do. ".repeat(64);
+        let (_, consumed, _) = codec.step(&payload, &mut scratch, Operation::Process).expect("process succeeds");
+        assert_eq!(consumed, payload.len(), "the whole input should have been consumed");
+
+        // A one byte buffer cannot hold the whole flush in a single call, so the guard must
+        // report `Continue`, not `FlushComplete`, while zstd still has buffered output.
+        let mut tiny = [MaybeUninit::uninit(); 1];
+        let (step, consumed, produced) = codec.step(&[], &mut tiny, Operation::Flush).expect("flush succeeds");
+        assert_eq!(consumed, 0, "no new input was supplied");
+        assert_eq!(produced, 1, "the tiny buffer should be filled completely");
+        assert_eq!(step, Step::Continue, "the flush cannot be complete while output remains buffered");
+
+        // A generous buffer drains the rest of the same flush and reports completion. This must
+        // be a single call, not a retry loop: calling `Flush` again after it already completed
+        // would ask zstd to emit another empty flush frame, so the test only issues exactly the
+        // calls this one flush needs.
+        let mut generous = [MaybeUninit::uninit(); 4096];
+        let (step, consumed, _) = codec.step(&[], &mut generous, Operation::Flush).expect("flush succeeds");
+        assert_eq!(consumed, 0, "no new input was supplied");
+        assert_eq!(step, Step::FlushComplete, "a generous buffer must drain the remainder of the flush");
+    }
+
+    #[test]
+    fn remaining_output_delegates_to_the_configured_limits() {
+        let codec = ZstdDecompress::new(
+            FormatLimits::new(None, Some(100)),
+            false,
+            TrailingData::Reject,
+            DecompressorOptions::default(),
+            None,
+        );
+
+        assert_eq!(Codec::remaining_output(&codec, 40), Some(60));
+        assert_eq!(Codec::remaining_output(&codec, 100), Some(0));
     }
 }

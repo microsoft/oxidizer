@@ -83,15 +83,19 @@ impl Wrapper {
     }
 
     /// The boolean `Decompress::reset` needs to restore this container.
+    ///
+    /// Only `Raw` and `Zlib` ever reach this call: [`Self::reset_restores_framing`] keeps a gzip
+    /// decompressor out of the pool, so `checkout` never asks it to reset. Written without a
+    /// dedicated `Gzip` arm so every branch stays reachable through that existing pooling test.
     #[cfg(any(feature = "deflate", feature = "zlib"))]
     pub(crate) fn expects_zlib_header(self) -> bool {
-        match self {
-            #[cfg(feature = "deflate")]
-            Self::Raw => false,
-            #[cfg(feature = "zlib")]
-            Self::Zlib => true,
-            #[cfg(feature = "gzip")]
-            Self::Gzip => false,
+        #[cfg(feature = "zlib")]
+        {
+            matches!(self, Self::Zlib)
+        }
+        #[cfg(not(feature = "zlib"))]
+        {
+            false
         }
     }
 
@@ -116,5 +120,12 @@ mod tests {
         assert_eq!(Wrapper::Raw.name(), "deflate");
         assert_eq!(Wrapper::Zlib.name(), "zlib");
         assert_eq!(Wrapper::Gzip.name(), "gzip");
+    }
+
+    #[test]
+    fn only_gzip_loses_its_framing_on_reset() {
+        assert!(Wrapper::Raw.reset_restores_framing());
+        assert!(Wrapper::Zlib.reset_restores_framing());
+        assert!(!Wrapper::Gzip.reset_restores_framing());
     }
 }

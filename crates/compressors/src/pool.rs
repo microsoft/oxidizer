@@ -397,5 +397,190 @@ mod tests {
             assert_eq!(clean.total_in(), 0, "checkout must reset the engine");
             assert_eq!(clean.total_out(), 0);
         }
+
+        #[test]
+        fn a_poisoned_pool_silently_drops_a_returned_compressor() {
+            let pool = Pool::new();
+
+            // Poison the compressors mutex the same way a panicking holder would.
+            let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _guard = pool.inner.compressors.lock().expect("not yet poisoned");
+                panic!("poisoning the mutex for the test");
+            }));
+            assert!(poisoned.is_err(), "the panic should have been caught");
+            assert!(pool.inner.compressors.lock().is_err(), "the mutex must now be poisoned");
+
+            // Recycling is an optimisation, so a poisoned pool must not panic the caller.
+            pool.return_compressor(key(6), engine());
+            assert!(pool.take_compressor(key(6)).is_none(), "a poisoned pool has nothing to give");
+        }
+    }
+
+    #[cfg(any(feature = "deflate", feature = "zlib"))]
+    mod flate_decompressor_pooling {
+        use super::*;
+
+        #[cfg(feature = "deflate")]
+        fn wrapper() -> Wrapper {
+            Wrapper::Raw
+        }
+
+        #[cfg(all(feature = "zlib", not(feature = "deflate")))]
+        fn wrapper() -> Wrapper {
+            Wrapper::Zlib
+        }
+
+        fn engine() -> flate2::Decompress {
+            wrapper().decompressor()
+        }
+
+        /// Counts what the pool is holding, which the public API deliberately does not expose.
+        fn idle(pool: &Pool, wrapper: Wrapper) -> usize {
+            pool.inner
+                .decompressors
+                .lock()
+                .expect("pool is not poisoned")
+                .get(&wrapper)
+                .map_or(0, Vec::len)
+        }
+
+        #[test]
+        fn an_engine_survives_a_round_trip_through_the_pool() {
+            let pool = Pool::new();
+            assert!(pool.take_decompressor(wrapper()).is_none(), "an empty pool has nothing to give");
+
+            pool.return_decompressor(wrapper(), engine());
+            assert_eq!(idle(&pool, wrapper()), 1);
+
+            assert!(pool.take_decompressor(wrapper()).is_some(), "the returned engine should come back");
+            assert_eq!(idle(&pool, wrapper()), 0, "taking an engine removes it from the pool");
+        }
+
+        #[test]
+        fn capacity_bounds_what_is_retained() {
+            let pool = Pool::with_capacity(2);
+            for _ in 0..5 {
+                pool.return_decompressor(wrapper(), engine());
+            }
+
+            assert_eq!(idle(&pool, wrapper()), 2, "only `capacity` engines are kept");
+        }
+
+        #[test]
+        fn zero_capacity_disables_decompressor_recycling() {
+            let pool = Pool::with_capacity(0);
+            pool.return_decompressor(wrapper(), engine());
+
+            assert!(pool.take_decompressor(wrapper()).is_none());
+        }
+
+        #[test]
+        fn a_poisoned_pool_silently_drops_a_returned_decompressor() {
+            let pool = Pool::new();
+
+            let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _guard = pool.inner.decompressors.lock().expect("not yet poisoned");
+                panic!("poisoning the mutex for the test");
+            }));
+            assert!(poisoned.is_err(), "the panic should have been caught");
+            assert!(pool.inner.decompressors.lock().is_err(), "the mutex must now be poisoned");
+
+            pool.return_decompressor(wrapper(), engine());
+            assert!(pool.take_decompressor(wrapper()).is_none(), "a poisoned pool has nothing to give");
+        }
+    }
+
+    #[cfg(feature = "zstd")]
+    mod zstd_pooling {
+        use super::*;
+
+        /// Counts what the pool is holding, which the public API deliberately does not expose.
+        fn idle_compressors(pool: &Pool, level: i32) -> usize {
+            pool.inner
+                .zstd_compressors
+                .lock()
+                .expect("pool is not poisoned")
+                .get(&level)
+                .map_or(0, Vec::len)
+        }
+
+        fn idle_decompressors(pool: &Pool) -> usize {
+            pool.inner.zstd_decompressors.lock().expect("pool is not poisoned").len()
+        }
+
+        #[test]
+        fn a_compressor_survives_a_round_trip_through_the_pool() {
+            let pool = Pool::new();
+            assert!(pool.take_zstd_compressor(3).is_none(), "an empty pool has nothing to give");
+
+            pool.return_zstd_compressor(3, zstd_safe::CCtx::create());
+            assert_eq!(idle_compressors(&pool, 3), 1);
+
+            assert!(pool.take_zstd_compressor(3).is_some(), "the returned engine should come back");
+            assert_eq!(idle_compressors(&pool, 3), 0, "taking an engine removes it from the pool");
+        }
+
+        #[test]
+        fn compressor_capacity_bounds_what_is_retained() {
+            let pool = Pool::with_capacity(2);
+            for _ in 0..5 {
+                pool.return_zstd_compressor(3, zstd_safe::CCtx::create());
+            }
+
+            assert_eq!(idle_compressors(&pool, 3), 2, "only `capacity` engines are kept");
+        }
+
+        #[test]
+        fn zero_capacity_disables_zstd_compressor_recycling() {
+            let pool = Pool::with_capacity(0);
+            pool.return_zstd_compressor(3, zstd_safe::CCtx::create());
+
+            assert!(pool.take_zstd_compressor(3).is_none());
+        }
+
+        #[test]
+        fn a_poisoned_pool_silently_drops_a_returned_zstd_compressor() {
+            let pool = Pool::new();
+
+            let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _guard = pool.inner.zstd_compressors.lock().expect("not yet poisoned");
+                panic!("poisoning the mutex for the test");
+            }));
+            assert!(poisoned.is_err(), "the panic should have been caught");
+            assert!(pool.inner.zstd_compressors.lock().is_err(), "the mutex must now be poisoned");
+
+            pool.return_zstd_compressor(3, zstd_safe::CCtx::create());
+            assert!(pool.take_zstd_compressor(3).is_none(), "a poisoned pool has nothing to give");
+        }
+
+        #[test]
+        fn a_decompressor_survives_a_round_trip_through_the_pool() {
+            let pool = Pool::new();
+            assert!(pool.take_zstd_decompressor().is_none(), "an empty pool has nothing to give");
+
+            pool.return_zstd_decompressor(zstd_safe::DCtx::create());
+            assert_eq!(idle_decompressors(&pool), 1);
+
+            assert!(pool.take_zstd_decompressor().is_some(), "the returned engine should come back");
+            assert_eq!(idle_decompressors(&pool), 0, "taking an engine removes it from the pool");
+        }
+
+        #[test]
+        fn decompressor_capacity_bounds_what_is_retained() {
+            let pool = Pool::with_capacity(2);
+            for _ in 0..5 {
+                pool.return_zstd_decompressor(zstd_safe::DCtx::create());
+            }
+
+            assert_eq!(idle_decompressors(&pool), 2, "only `capacity` engines are kept");
+        }
+
+        #[test]
+        fn zero_capacity_disables_zstd_decompressor_recycling() {
+            let pool = Pool::with_capacity(0);
+            pool.return_zstd_decompressor(zstd_safe::DCtx::create());
+
+            assert!(pool.take_zstd_decompressor().is_none());
+        }
     }
 }

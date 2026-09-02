@@ -360,6 +360,24 @@ mod tests {
     }
 
     #[test]
+    fn reports_a_push_rejection_as_an_error() {
+        use crate::compression::RejectsPush;
+
+        let source = ok_stream(vec![view(b"chunk")]);
+        let error = collect(CompressionStream::compress(source, RejectsPush)).expect_err("the push failure surfaces");
+
+        assert!(error.is_invalid_state(), "got {error}");
+    }
+
+    #[test]
+    fn rejects_push_fixture_end_input_is_a_no_op() {
+        use crate::compression::RejectsPush;
+
+        let mut operation = RejectsPush;
+        operation.end_input();
+    }
+
+    #[test]
     fn ends_after_the_first_error_instead_of_repeating_it() {
         // A stream that keeps yielding the same error is unbounded: a caller that collects it
         // accumulates errors until it runs out of memory.
@@ -508,6 +526,15 @@ mod tests {
 
         assert!(stream.as_mut().poll_next(&mut cx).is_pending());
         assert_eq!(pulls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn the_progress_fixture_accepts_push_and_end_input_directly() {
+        use crate::Compression;
+
+        let mut operation = ProgressCompression::new(Arc::new(AtomicUsize::new(0)));
+        operation.push(view(b"ignored")).expect("the fixture always accepts pushed input");
+        operation.end_input();
     }
 
     #[test]

@@ -47,6 +47,7 @@ zstd-safe = { workspace = true, features = ["std"], optional = true }
 [dev-dependencies]
 alloc_tracker = { workspace = true }
 brotli = { workspace = true, features = ["std"] }
+bytesbuf = { workspace = true, features = ["std", "test-util"] }
 criterion = { workspace = true }
 flate2 = { workspace = true, features = ["zlib-rs"] }
 futures = { workspace = true, features = ["executor"] }

@@ -221,10 +221,14 @@ impl Format {
 }
 
 const fn default_chunk_size() -> NonZeroUsize {
-    match NonZeroUsize::new(DEFAULT_CHUNK_SIZE) {
+    // Evaluated by the compiler: if `DEFAULT_CHUNK_SIZE` were ever zero, this constant would fail
+    // to build rather than panicking at runtime, so there is no runtime branch to cover here.
+    const CHUNK_SIZE: NonZeroUsize = match NonZeroUsize::new(DEFAULT_CHUNK_SIZE) {
         Some(size) => size,
-        None => NonZeroUsize::MIN,
-    }
+        None => panic!("DEFAULT_CHUNK_SIZE must not be zero"),
+    };
+
+    CHUNK_SIZE
 }
 
 /// Configures a compressor for a [`Format`] chosen at runtime.
@@ -414,7 +418,6 @@ mod tests {
     use bytesbuf::mem::GlobalPool;
 
     use super::*;
-    use crate::Output;
 
     fn view(bytes: &[u8]) -> BytesView {
         BytesView::copied_from_slice(bytes, &GlobalPool::new())
@@ -427,11 +430,14 @@ mod tests {
 
         let mut total = 0;
         loop {
-            match compressor.pull().expect("pull succeeds") {
-                Output::Data(chunk) => total += chunk.len(),
-                Output::Progress => {}
-                Output::NeedInput => panic!("compressor requested input after end"),
-                Output::Done => break,
+            let output = compressor.pull().expect("pull succeeds");
+            assert!(!output.is_need_input(), "compressor requested input after end");
+            let done = output.is_done();
+            if let Some(chunk) = output.into_data() {
+                total += chunk.len();
+            }
+            if done {
+                break;
             }
         }
 
@@ -526,13 +532,14 @@ mod tests {
             compressor.end_input();
 
             loop {
-                match compressor.pull().expect("pull succeeds") {
-                    Output::Data(chunk) => {
-                        assert!(chunk.len() <= bound.get(), "{format:?} produced a {} byte chunk", chunk.len());
-                    }
-                    Output::Progress => {}
-                    Output::NeedInput => panic!("compressor requested input after end"),
-                    Output::Done => break,
+                let output = compressor.pull().expect("pull succeeds");
+                assert!(!output.is_need_input(), "compressor requested input after end");
+                let done = output.is_done();
+                if let Some(chunk) = output.as_data() {
+                    assert!(chunk.len() <= bound.get(), "{format:?} produced a {} byte chunk", chunk.len());
+                }
+                if done {
+                    break;
                 }
             }
         }
@@ -549,19 +556,65 @@ mod tests {
             let mut decompressor = format
                 .decompressor()
                 .limits(DecompressionLimits::new().without_max_ratio().with_max_output_len(1024))
+                .output_chunk_size(NonZeroUsize::new(64).expect("64 is not zero"))
                 .build(memory);
             decompressor.push(compressed).expect("push succeeds");
             decompressor.end_input();
 
             let error = loop {
                 match decompressor.pull() {
-                    Ok(Output::Data(_) | Output::Progress) => {}
-                    Ok(_) => panic!("{format:?}: the cap should have fired"),
+                    Ok(output) => {
+                        assert!(
+                            !output.is_done() && !output.is_need_input(),
+                            "{format:?}: the cap should have fired"
+                        );
+                    }
                     Err(error) => break error,
                 }
             };
 
             assert!(error.is_limit_exceeded(), "{format:?}: got {error}");
+        }
+    }
+
+    #[test]
+    fn a_decompressor_without_an_explicit_chunk_size_defaults_to_64_kib() {
+        // Hardcoded literal (rather than `DEFAULT_CHUNK_SIZE`) so this test pins the actual byte
+        // count instead of trivially matching whatever the constant happens to be set to.
+        const EXPECTED_DEFAULT_CHUNK_SIZE: usize = 65_536;
+
+        for &format in Format::ALL {
+            let memory = GlobalPool::new();
+            let compressed = format
+                .compress(view(&vec![0_u8; 4 * 1024 * 1024]), memory.clone())
+                .expect("compression succeeds");
+
+            let mut decompressor = format.decompressor().build(memory);
+            decompressor.push(compressed).expect("push succeeds");
+            decompressor.end_input();
+
+            let mut saw_a_full_size_chunk = false;
+            loop {
+                let output = decompressor.pull().expect("pull succeeds");
+                assert!(!output.is_need_input(), "decompressor requested input after end");
+                let done = output.is_done();
+                if let Some(chunk) = output.as_data() {
+                    let chunk_len = chunk.len();
+                    assert!(
+                        chunk_len <= EXPECTED_DEFAULT_CHUNK_SIZE,
+                        "{format:?} produced a {chunk_len} byte chunk, larger than the 64 KiB default"
+                    );
+                    saw_a_full_size_chunk |= chunk_len == EXPECTED_DEFAULT_CHUNK_SIZE;
+                }
+                if done {
+                    break;
+                }
+            }
+
+            assert!(
+                saw_a_full_size_chunk,
+                "{format:?}: decompressing 4 MiB of zeros never produced a full 64 KiB chunk"
+            );
         }
     }
 
@@ -579,13 +632,14 @@ mod tests {
             decompressor.end_input();
 
             loop {
-                match decompressor.pull().expect("pull succeeds") {
-                    Output::Data(chunk) => {
-                        assert!(chunk.len() <= bound.get(), "{format:?} produced a {} byte chunk", chunk.len());
-                    }
-                    Output::Progress => {}
-                    Output::NeedInput => panic!("decompressor requested input after end"),
-                    Output::Done => break,
+                let output = decompressor.pull().expect("pull succeeds");
+                assert!(!output.is_need_input(), "decompressor requested input after end");
+                let done = output.is_done();
+                if let Some(chunk) = output.as_data() {
+                    assert!(chunk.len() <= bound.get(), "{format:?} produced a {} byte chunk", chunk.len());
+                }
+                if done {
+                    break;
                 }
             }
         }
@@ -595,20 +649,27 @@ mod tests {
     fn the_decompressor_builder_applies_its_trailing_data_policy() {
         for &format in Format::ALL {
             let memory = GlobalPool::new();
-            let compressed = format.compress(view(b"payload"), memory.clone()).expect("compression succeeds");
+            let compressed = format
+                .compress(view(&b"payload ".repeat(4_096)), memory.clone())
+                .expect("compression succeeds");
             let joined = BytesView::from_views([compressed, view(b"trailing")]);
             let mut decompressor = format
                 .decompressor()
                 .multi_stream(false)
                 .trailing_data(TrailingData::Reject)
+                .output_chunk_size(NonZeroUsize::new(64).expect("64 is not zero"))
                 .build(memory);
             decompressor.push(joined).expect("push succeeds");
             decompressor.end_input();
 
             let error = loop {
                 match decompressor.pull() {
-                    Ok(Output::Data(_) | Output::Progress) => {}
-                    Ok(_) => panic!("{format:?}: trailing input unexpectedly completed"),
+                    Ok(output) => {
+                        assert!(
+                            !output.is_done() && !output.is_need_input(),
+                            "{format:?}: trailing input unexpectedly completed"
+                        );
+                    }
                     Err(error) => break error,
                 }
             };

@@ -257,4 +257,12 @@ mod configuration_tests {
         let error = WindowLog::try_from(WindowLog::MIN.get() - 1).expect_err("out of range");
         assert!(error.is_invalid_configuration(), "got {error}");
     }
+
+    #[test]
+    fn max_window_log_matches_this_targets_pointer_width() {
+        // Computed independently of `WindowLog::MAX`'s own definition so a mutated comparison
+        // there cannot hide behind a test that recomputes the same expression.
+        let expected = if usize::BITS == 32 { 30 } else { 31 };
+        assert_eq!(WindowLog::MAX.get(), expected);
+    }
 }
