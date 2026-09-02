@@ -12,8 +12,8 @@ use std::num::NonZeroUsize;
 
 use bytesbuf::mem::GlobalPool;
 use bytesbuf::{BytesBuf, BytesView};
-use compressors::core::Compression as _;
-use compressors::{DecompressorLimits, Output, Resources, gzip};
+use compressors::core::{Compression as _, Output};
+use compressors::{DecompressorLimits, Resources, gzip};
 
 /// The payload behind `tests/fixtures/system_gzip.gz`, compressed by the system `gzip -9 -n`.
 const FIXTURE_PLAINTEXT: &[u8] = b"The quick brown fox jumps over the lazy dog.\nPack my box with five dozen liquor jugs.\n";

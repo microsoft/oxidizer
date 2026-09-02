@@ -15,8 +15,8 @@ use std::sync::OnceLock;
 use bytesbuf::mem::GlobalPool;
 use bytesbuf::{BytesBuf, BytesView};
 use compressors::Format;
-use compressors::core::{Compress, Compression, Decompress};
-use compressors::{CompressorBuilder, DecompressorBuilder, DecompressorLimits, Level, Output, Resources, TrailingData};
+use compressors::core::{Compress, Compression, Decompress, Output};
+use compressors::{CompressorBuilder, DecompressorBuilder, DecompressorLimits, Level, Resources, TrailingData};
 
 fn view(bytes: &[u8]) -> BytesView {
     BytesView::copied_from_slice(bytes, &GlobalPool::new())

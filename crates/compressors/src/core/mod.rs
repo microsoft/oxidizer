@@ -9,13 +9,18 @@
 //!
 //! One trait covers both directions. [`Compress`] and [`Decompress`] are what an API names when it
 //! needs one of them -- `Compression<Mode = Compress>` accepts any compressor and no decompressor.
+//!
+//! [`Output`] is what one step of that contract reports, so it lives here too.
 
 use std::fmt;
 
 use bytesbuf::{BytesBuf, BytesView};
 
 use crate::error::Result;
-use crate::output::Output;
+
+mod output;
+
+pub use output::Output;
 
 pub(crate) mod sealed {
     /// Restricts [`Compression`][super::Compression] to this crate's own implementations.
@@ -57,7 +62,7 @@ pub struct Decompress;
 /// use bytesbuf::BytesView;
 /// use bytesbuf::mem::{GlobalPool, MemoryShared};
 /// use compressors::core::{Compress, Compression};
-/// use compressors::{Output, Resources, gzip};
+/// use compressors::{Resources, gzip};
 ///
 /// fn compress(compression: impl Compression<Mode = Compress>, input: BytesView) -> compressors::Result<BytesView> {
 ///     compressors::compress(input, compression)

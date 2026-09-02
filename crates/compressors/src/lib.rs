@@ -50,8 +50,8 @@
 //! ```
 //! use bytesbuf::mem::GlobalPool;
 //! use bytesbuf::{BytesBuf, BytesView};
-//! use compressors::core::Compression;
-//! use compressors::{Output, Resources, gzip};
+//! use compressors::core::{Compression, Output};
+//! use compressors::{Resources, gzip};
 //!
 //! # let memory = GlobalPool::new();
 //! # let source = vec![gzip::compress(
@@ -160,7 +160,7 @@
 //! Use [`DecompressorLimits::UNLIMITED`] only for sources you trust as much as your own process.
 //!
 //! Streaming decompression can yield bytes before a final checksum or trailer has been verified.
-//! Treat those bytes as provisional until the operation reports [`Output::Done`].
+//! Treat those bytes as provisional until the operation reports [`Output::Done`][core::Output::Done].
 //!
 //! # Features
 //!
@@ -197,7 +197,6 @@ mod level;
 mod limits;
 #[cfg(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
 mod macros;
-mod output;
 mod pool;
 mod resources;
 mod trailing;
@@ -215,7 +214,6 @@ pub use error::{BuildError, Error, Result};
 pub use format::Format;
 pub use level::Level;
 pub use limits::DecompressorLimits;
-pub use output::Output;
 pub use resources::Resources;
 #[cfg(feature = "futures-stream")]
 pub use stream::CompressionStream;

@@ -14,9 +14,9 @@ use bytesbuf::BytesView;
 use futures_core::Stream;
 use pin_project_lite::pin_project;
 
+use crate::core::Output;
 use crate::core::{Compress, Compression, Decompress};
 use crate::error::{Error, Result};
-use crate::output::Output;
 
 /// Bounds the amount of immediately-ready work one `poll_next` performs.
 const MAX_OPERATIONS_PER_POLL: usize = 64;

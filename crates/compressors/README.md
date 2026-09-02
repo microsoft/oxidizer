@@ -59,8 +59,8 @@ output chunk:
 ```rust
 use bytesbuf::mem::GlobalPool;
 use bytesbuf::{BytesBuf, BytesView};
-use compressors::core::Compression;
-use compressors::{Output, Resources, gzip};
+use compressors::core::{Compression, Output};
+use compressors::{Resources, gzip};
 
 let mut decompressor = gzip::Decompressor::new(&Resources::default());
 let mut chunks = source.into_iter();
@@ -187,7 +187,7 @@ A build that needs only `brotli` or only `zstd` never compiles `flate2` at all.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/compressors">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbe6BYj4PYQEsbcs5JZVO1lzwbXZSqaQBYrr8b8xvg8fnQOyhhZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbZqLAk22gX0kbFWjZEiLHhG8bWjPLVC9opmMbLt7K6pMbsuRhZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
  [__link0]: https://crates.io/crates/bytesbuf/0.9.0
  [__link1]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesView
  [__link10]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressorBuilder::build_format
@@ -202,7 +202,7 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link19]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits::with_max_streams
  [__link2]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesBuf
  [__link20]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits::UNLIMITED
- [__link21]: https://docs.rs/compressors/0.1.0/compressors/?search=Output::Done
+ [__link21]: https://docs.rs/compressors/0.1.0/compressors/?search=core::Output::Done
  [__link22]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressionStream
  [__link3]: https://docs.rs/compressors/0.1.0/compressors/fn.compress.html
  [__link4]: https://docs.rs/compressors/0.1.0/compressors/fn.decompress.html

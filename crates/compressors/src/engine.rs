@@ -7,8 +7,8 @@ use std::num::NonZeroUsize;
 use bytesbuf::mem::OpaqueMemory;
 use bytesbuf::{BytesBuf, BytesView};
 
+use crate::core::Output;
 use crate::error::{Error, Result};
-use crate::output::Output;
 
 /// Maximum input consumed by one public `pull` call.
 const MAX_INPUT_PER_PULL: usize = 1024 * 1024;

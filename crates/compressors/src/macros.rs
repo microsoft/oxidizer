@@ -322,10 +322,10 @@ macro_rules! define_format {
     ) => {
         use bytesbuf::BytesView;
 
+        use $crate::core::Output;
         use $crate::engine::Pump;
         use $crate::error::Result;
         use $crate::limits::DecompressorLimits;
-        use $crate::output::Output;
 
         impl Default for $crate::CompressorBuilder<$format> {
             fn default() -> Self {
