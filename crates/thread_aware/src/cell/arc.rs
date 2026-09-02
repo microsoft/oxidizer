@@ -110,9 +110,10 @@ pub(super) fn run_after_factory_update_hook() {
 /// [`ThreadAware`] relocation switches each `Arc` to the value assigned to the destination
 /// partition. See [`new`](Arc::new) for construction details.
 ///
-/// Relocate an `Arc` only among thread coordinates that its [`Strategy`] interprets in one
-/// consistent coordinate space: every such coordinate must report the same partition count and map
-/// inside that partitioning (see the design guide, "Strategy-partitioned values").
+/// Relocation is meaningful only among threads with the same [`Owner`](crate::Owner). Relocating to
+/// a thread owned by another runtime is a no-op, preserving the current value. Within one runtime,
+/// [`NumaNode`](crate::NumaNode) identifiers are comparable only when that runtime numbers its nodes
+/// consistently (see the design guide, "Scope").
 ///
 /// # Reentrant initialization
 ///
