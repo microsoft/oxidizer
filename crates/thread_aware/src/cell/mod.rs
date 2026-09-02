@@ -11,6 +11,6 @@ mod builtin;
 #[cfg(test)]
 mod tests;
 
-pub use arc::Arc;
+pub use arc::{Arc, FromStorageError};
 pub use builtin::{PerNumaNode, PerProcess, PerThread};
 pub(crate) use storage::Strategy;

@@ -32,11 +32,12 @@ all-features = true
 
 [features]
 default = ["std", "derive"]
-std = ["dep:dashmap", "thread_aware_core/std"]
+std = ["dep:dashmap", "dep:rustc-hash", "thread_aware_core/std"]
 derive = ["dep:thread_aware_macros"]
 
 [dependencies]
 dashmap = { workspace = true, optional = true }
+rustc-hash = { workspace = true, optional = true }
 
 thread_aware_core = { workspace = true }
 thread_aware_macros = { workspace = true, optional = true }

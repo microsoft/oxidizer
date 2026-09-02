@@ -5222,6 +5222,7 @@ dependencies = [
  "dashmap",
  "futures",
  "mutants",
+ "rustc-hash",
  "static_assertions",
  "thread_aware_core",
  "thread_aware_macros",

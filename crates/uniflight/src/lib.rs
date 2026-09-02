@@ -204,7 +204,7 @@ where
     /// // NUMA-local scope
     /// let numa: Merger<String, String, PerNumaNode> = Merger::new();
     ///
-    /// // Per-core scope
+    /// // Per-thread scope
     /// let thread: Merger<String, String, PerThread> = Merger::new();
     /// ```
     #[inline]
@@ -279,13 +279,22 @@ where
     /// ```
     /// use uniflight::Merger;
     ///
-    /// let merger = Merger::<String, String, _>::new_per_core();
+    /// let merger = Merger::<String, String, _>::new_per_thread();
     /// ```
     #[inline]
     #[must_use]
     #[cfg_attr(test, mutants::skip)] // Equivalent mutant: delegates to Default
-    pub fn new_per_core() -> Self {
+    pub fn new_per_thread() -> Self {
         Self::default()
+    }
+
+    /// Creates a new `Merger` with per-thread scoping.
+    #[deprecated(note = "use `new_per_thread`")]
+    #[inline]
+    #[must_use]
+    #[cfg_attr(test, mutants::skip)] // Compatibility shim delegates to the replacement.
+    pub fn new_per_core() -> Self {
+        Self::new_per_thread()
     }
 }
 

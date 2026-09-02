@@ -252,7 +252,7 @@ pub mod thread;
 pub use ::thread_aware_macros::ThreadAware;
 #[cfg(feature = "std")]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-pub use cell::{Arc, PerNumaNode, PerProcess, PerThread, storage};
+pub use cell::{Arc, FromStorageError, PerNumaNode, PerProcess, PerThread, storage};
 #[doc(inline)]
 pub use thread_aware_core::{NumaNode, Owner, Thread, ThreadAware};
 pub use wrappers::{Unaware, unaware};

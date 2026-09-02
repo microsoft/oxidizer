@@ -150,12 +150,12 @@
 //!
 //! # Thread-aware relocation
 //!
-//! All clock types implement [`ThreadAware`](thread_aware::ThreadAware), supporting per-core
+//! All clock types implement [`ThreadAware`](thread_aware::ThreadAware), supporting per-thread
 //! timer isolation in thread-per-core runtime architectures.
 //!
 //! When an [`InactiveClock`][runtime::InactiveClock] is
 //! [relocated](thread_aware::ThreadAware::relocate) to a target thread, the underlying timer
-//! storage is duplicated per core. After activation, each thread's [`Clock`] and
+//! storage is duplicated per thread. After activation, each thread's [`Clock`] and
 //! [`ClockDriver`][runtime::ClockDriver] operate on an independent set of timers with no
 //! cross-thread lock contention.
 //!

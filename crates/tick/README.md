@@ -141,12 +141,12 @@ examples for more details.
 
 ## Thread-aware relocation
 
-All clock types implement [`ThreadAware`][__link31], supporting per-core
+All clock types implement [`ThreadAware`][__link31], supporting per-thread
 timer isolation in thread-per-core runtime architectures.
 
 When an [`InactiveClock`][__link32] is
 [relocated][__link33] to a target thread, the underlying timer
-storage is duplicated per core. After activation, each thread’s [`Clock`][__link34] and
+storage is duplicated per thread. After activation, each thread’s [`Clock`][__link34] and
 [`ClockDriver`][__link35] operate on an independent set of timers with no
 cross-thread lock contention.
 
@@ -291,7 +291,7 @@ contain additional examples of how to use the time primitives.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbyb3-aFGC5KAbJcla10Ve5zcbhtxTPShzY-8bjBP3DyvGe3BhZIKCbHRocmVhZF9hd2FyZWYwLjExLjCCZHRpY2tlMC42LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbvjL_EiaxxvUbvI7uv9Ioukkb66R6bpv0haEb7vxiha_WdSthZIKCbHRocmVhZF9hd2FyZWYwLjExLjCCZHRpY2tlMC42LjA
  [__link0]: https://docs.rs/tick/0.6.0/tick/?search=ClockControl
  [__link1]: https://docs.rs/tick/0.6.0/tick/?search=Clock
  [__link10]: https://docs.rs/tick/0.6.0/tick/?search=Error

@@ -6,8 +6,9 @@
 use std::sync::Arc as StdArc;
 use std::thread;
 
+use thread_aware::storage::Storage;
 use thread_aware::thread::ThreadBuilder;
-use thread_aware::{Arc, NumaNode, Owner, PerThread, Thread, ThreadAware};
+use thread_aware::{Arc, FromStorageError, NumaNode, Owner, PerThread, Thread, ThreadAware};
 
 #[test]
 fn reexports_core_vocabulary() {
@@ -93,4 +94,41 @@ fn relocate_within_owner_materializes_destination() {
     value.relocate(Some(&source), &destination);
 
     assert!(!StdArc::ptr_eq(&carried, &value.into_arc()));
+}
+
+#[test]
+fn cross_owner_no_op_does_not_claim_shared_storage() {
+    let builder = ThreadBuilder::default();
+    let source = builder.build(thread::current().id());
+    let destination_id = thread::spawn(|| thread::current().id()).join().unwrap();
+    let destination = builder.build(destination_id);
+    let foreign = ThreadBuilder::default().build(thread::current().id());
+    let mut rejected = Arc::<_, PerThread>::from_unaware(42_u32);
+    let mut sibling = rejected.clone();
+    let carried = sibling.clone().into_arc();
+
+    rejected.relocate(Some(&source), &foreign);
+    sibling.relocate(Some(&source), &destination);
+
+    assert!(!StdArc::ptr_eq(&carried, &sibling.into_arc()));
+}
+
+#[test]
+fn try_from_storage_reports_owner_and_partition_errors() {
+    let builder = ThreadBuilder::default();
+    let populated = builder.build(thread::current().id());
+    let missing_id = thread::spawn(|| thread::current().id()).join().unwrap();
+    let missing = builder.build(missing_id);
+    let foreign = ThreadBuilder::default().build(thread::current().id());
+    let storage = StdArc::new(Storage::<u32, PerThread>::new());
+    storage.insert(&populated, StdArc::new(42)).unwrap();
+
+    assert_eq!(
+        Arc::try_from_storage(StdArc::clone(&storage), &missing).unwrap_err(),
+        FromStorageError::EmptyPartition
+    );
+    assert_eq!(
+        Arc::try_from_storage(storage, &foreign).unwrap_err(),
+        FromStorageError::ForeignOwner
+    );
 }

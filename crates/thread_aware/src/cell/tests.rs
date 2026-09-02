@@ -755,7 +755,7 @@ fn concurrent_relocation_to_same_thread_materializes_once() {
     // materialization on the cell: the winner runs the factory and every other racer blocks, then
     // adopts the winner's `sync::Arc`. This is the documented "once per strategy partition"
     // contract holding under contention.
-    // Ref: docs/implementation.md, "Relocation and publication".
+    // Ref: docs/implementation.md, "Publication and reentrancy".
 
     // A cloneable factory input that counts how many times the factory runs. Its `relocate` is a
     // no-op, so relocations do not disturb the count.
@@ -835,7 +835,7 @@ fn later_relocations_reproduce_the_original_source_thread() {
     // reproduces that original transfer instead of taking the `Arc`'s current thread as the
     // source. This pins the sequential propagation of that recorded source; the concurrent adopting
     // path is covered separately below.
-    // Ref: docs/implementation.md, "Relocation and publication".
+    // Ref: docs/implementation.md, "Relocation".
 
     let threads = test_threads(&[3]);
     let a = threads[0];
@@ -984,9 +984,9 @@ fn new_boxed_relocate() {
 
 #[test]
 fn factory_panic_leaves_the_cell_empty() {
-    // A relocation that misses runs the factory with no cell locked, then publishes the result into
-    // the write-once destination cell. The factory is caller code and may panic; because nothing is
-    // locked, the panic simply propagates and the cell is left empty for a later relocation to fill.
+    // A relocation that misses runs the factory while holding the vacant destination entry. The
+    // factory is caller code and may panic; unwinding drops the entry guard without publishing a
+    // value, so a later relocation can retry.
 
     // A value whose clone panics. `with_value` clones it only when materializing a new thread,
     // so construction succeeds and the first relocation into an empty thread panics.
@@ -1012,8 +1012,8 @@ fn factory_panic_leaves_the_cell_empty() {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| relocated.relocate(Some(source), destination)));
     assert!(result.is_err(), "the factory panic must propagate to the caller");
 
-    // The factory panicked before it could publish anything, so the write-once cell stays empty and
-    // a later relocation is free to materialize into it.
+    // The factory panicked before it could publish anything, so the destination stays empty and a
+    // later relocation is free to materialize into it.
     assert!(
         arc.storage.get(destination).is_none(),
         "a panicking factory must leave the cell empty"
@@ -1090,7 +1090,7 @@ fn opposite_direction_relocations_converge_without_deadlock() {
     // Two threads relocate in opposite directions across the same pair of thread coordinates. These
     // factories do not reenter another initializing cell, and source recording holds no cell across
     // another access, so each thread completes and ends on its destination's published value.
-    // Ref: docs/implementation.md, "Relocation and publication".
+    // Ref: docs/implementation.md, "Publication and reentrancy".
 
     // A small bounded repetition samples both writes without turning this into a stress test.
     const ROUNDS: usize = 8;

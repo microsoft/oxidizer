@@ -17,6 +17,27 @@ use super::storage::{Storage, Strategy};
 use crate::ThreadAware;
 use crate::closure::{ErasedClosureOnce, ThreadAwareFnOnce, closure_once};
 
+/// The reason [`Arc::try_from_storage`] could not select an initial value.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum FromStorageError {
+    /// The storage is already bound to a different runtime owner.
+    ForeignOwner,
+    /// The selected strategy partition has no value.
+    EmptyPartition,
+}
+
+impl std::fmt::Display for FromStorageError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ForeignOwner => f.write_str("storage belongs to another runtime owner"),
+            Self::EmptyPartition => f.write_str("the selected strategy partition is empty"),
+        }
+    }
+}
+
+impl std::error::Error for FromStorageError {}
+
 /// Adapter that wraps a `ThreadAwareFnOnce<T>` to produce `Box<T>` instead.
 struct BoxedRelocate<F>(F);
 
@@ -118,10 +139,9 @@ pub(super) fn run_after_factory_update_hook() {
 /// # Reentrant initialization
 ///
 /// Creating a value for a previously unused strategy partition invokes the configured constructor,
-/// clone function, and captured [`ThreadAware`] state. Initialization is coordinated per partition,
-/// outside the storage map's shard guard. Reentrant initialization deadlocks: code initializing a
-/// destination value must not directly or indirectly trigger another relocation that requires the
-/// same value.
+/// clone function, and captured [`ThreadAware`] state. Reentrant initialization deadlocks: code
+/// initializing a destination value must not directly or indirectly trigger another relocation that
+/// requires a value from the same storage shard.
 ///
 /// Relocation of different clones of the `Arc` results in deduplication in the destination strategy
 /// partition. The following example demonstrates this using the counter implemented in the
@@ -632,7 +652,9 @@ where
     /// storage, it behaves like a [`sync::Arc`].
     ///
     /// # Panics
-    /// Panics if the strategy partition selected by `current_thread` holds no value.
+    /// Panics if the storage belongs to another runtime owner or if the strategy partition selected
+    /// by `current_thread` holds no value. Use [`try_from_storage`](Self::try_from_storage) to handle
+    /// either condition.
     ///
     /// # Examples
     ///
@@ -656,14 +678,29 @@ where
     /// [`Storage`]: crate::storage::Storage
     /// [`Storage::insert`]: crate::storage::Storage::insert
     pub fn from_storage(storage: sync::Arc<Storage<T, S>>, current_thread: &Thread) -> Self {
-        let value = storage.get(current_thread).expect("No data found for the current thread");
+        Self::try_from_storage(storage, current_thread)
+            .expect("current_thread must select a populated partition belonging to the storage owner")
+    }
 
-        Self {
+    /// Creates a new `Arc` from storage populated for `current_thread`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FromStorageError::ForeignOwner`] if the storage belongs to another runtime, or
+    /// [`FromStorageError::EmptyPartition`] if the selected strategy partition has no value.
+    pub fn try_from_storage(storage: sync::Arc<Storage<T, S>>, current_thread: &Thread) -> Result<Self, FromStorageError> {
+        if !storage.owner_matches(current_thread.owner()) {
+            return Err(FromStorageError::ForeignOwner);
+        }
+
+        let value = storage.get_key(&S::key(current_thread)).ok_or(FromStorageError::EmptyPartition)?;
+
+        Ok(Self {
             storage,
             value,
             value_owner: Some(current_thread.owner().clone()),
             factory: Factory::Manual,
-        }
+        })
     }
 }
 
@@ -726,12 +763,12 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> Arc<T, S> {
 
     /// Produces the value `destination` will hold by running the configured factory.
     ///
-    /// This runs caller-supplied code under destination-partition initialization, but outside the
-    /// storage map's shard guard. Across all racing relocations into the same empty partition, the
-    /// factory runs at most once and every racer adopts the one published value — the closure's
-    /// documented "once per strategy partition" contract. The factory must not reenter the same
-    /// partition, which would deadlock on its initialization cell. If it panics, the panic
-    /// propagates and the partition is left empty for the next relocation to re-materialize.
+    /// This runs caller-supplied code while the destination partition holds its map entry for
+    /// writing. Across all racing relocations into the same empty partition, the factory runs at
+    /// most once and every racer adopts the one published value — the closure's documented "once
+    /// per strategy partition" contract. The factory must not reenter this storage, which would
+    /// deadlock on the shard. If it panics, the panic propagates and the partition is left empty for
+    /// the next relocation to re-materialize.
     fn materialize_value(&self, source: Option<&Thread>, destination: &Thread) -> sync::Arc<T> {
         match &self.factory {
             Factory::Closure(factory, factory_source_thread) => {
@@ -755,15 +792,19 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> Arc<T, S> {
             Factory::Manual => sync::Arc::clone(&self.value),
         }
     }
+
+    fn adopt(&mut self, value: sync::Arc<T>, destination: &Thread) {
+        self.value = value;
+        self.value_owner = Some(destination.owner().clone());
+    }
 }
 
 impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, S> {
     fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
-        if source.is_some_and(|source| source.owner() != destination.owner()) {
-            if let Some(source) = source {
-                let value_owner = self.value_owner.get_or_insert_with(|| source.owner().clone());
-                self.storage.bind_owner(value_owner);
-            }
+        if let Some(source) = source
+            && source.owner() != destination.owner()
+        {
+            self.value_owner.get_or_insert_with(|| source.owner().clone());
             return;
         }
 
@@ -784,17 +825,18 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
         // Record the original source before any fast path can return. A clone whose first relocation
         // hits an existing destination value or stays within one strategy partition still needs that
         // source when a later relocation materializes a new value.
-        // Ref: docs/implementation.md, "Relocation and publication".
+        // Ref: docs/implementation.md, "Relocation".
         self.record_factory_source(source);
+        let destination_key = S::key(destination);
+        let source_key = source.map(S::key);
 
         // Relocation reads the destination's partition with a shard read. The steady state of any
         // thread is "already materialized", so this hit is the overwhelmingly common outcome.
         // Cloning the stored `sync::Arc` and dropping the previously carried value still update
         // their strong counts, which can contend when callers share either allocation.
-        // Ref: docs/implementation.md, "Relocation and publication".
-        if let Some(value) = self.storage.get(destination) {
-            self.value = value;
-            self.value_owner = Some(destination.owner().clone());
+        // Ref: docs/implementation.md, "Relocation".
+        if let Some(value) = self.storage.get_key(&destination_key) {
+            self.adopt(value, destination);
             return;
         }
 
@@ -808,19 +850,16 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
         // Only `SINGLE_PARTITION` strategies take that shortcut. Keyed storage cannot tell "this
         // machine happens to have one thread" from "a partition I have not seen yet", so a
         // source-less relocation under `PerThread` or `PerNumaNode` always materializes.
-        let same_partition = match source {
-            Some(source) => S::key(source) == S::key(destination),
-            None => S::SINGLE_PARTITION,
-        };
+        let same_partition = source_key
+            .as_ref()
+            .map_or(S::SINGLE_PARTITION, |source_key| source_key == &destination_key);
         if same_partition {
             // If a racer published first, the entry already holds its value; adopt it so every clone
             // converges on one identity.
             let published = self
                 .storage
-                .get_or_insert_with(destination, || sync::Arc::<T>::clone(&self.value))
-                .expect("storage owner was bound to the destination above");
-            self.value = published;
-            self.value_owner = Some(destination.owner().clone());
+                .get_or_insert_key_with(destination_key, || sync::Arc::<T>::clone(&self.value));
+            self.adopt(published, destination);
             return;
         }
 
@@ -839,13 +878,11 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
         // even under a concurrent first relocation. The factory must not reenter this storage, which
         // would deadlock on that entry. A panic propagates and leaves the partition empty for the
         // next relocation to retry.
-        // Ref: docs/implementation.md, "Relocation and publication".
+        // Ref: docs/implementation.md, "Publication and reentrancy".
         let published = self
             .storage
-            .get_or_insert_with(destination, || self.materialize_value(source, destination))
-            .expect("storage owner was bound to the destination above");
-        self.value = published;
-        self.value_owner = Some(destination.owner().clone());
+            .get_or_insert_key_with(destination_key, || self.materialize_value(source, destination));
+        self.adopt(published, destination);
 
         // Record the value the `Arc` moved away from into the source partition, so a later
         // relocation back into it finds the original instead of materializing a fresh one. Reached
@@ -853,8 +890,8 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
         // partition is distinct from the destination just published. `insert` leaves an
         // already-populated source partition untouched; another thread may have recorded it with the
         // same value, so leaving it in place is correct.
-        if let Some(source) = source {
-            let _ = self.storage.insert(source, old_value);
+        if let Some(source_key) = source_key {
+            let _ = self.storage.insert_key(source_key, old_value);
         }
     }
 }

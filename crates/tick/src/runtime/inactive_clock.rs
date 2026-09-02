@@ -9,10 +9,10 @@ use crate::Clock;
 use crate::runtime::clock_driver::ClockDriver;
 use crate::state::ClockState;
 
-/// Marker for an [`InactiveClock`] backed by per-core isolated timer storage.
+/// Marker for an [`InactiveClock`] backed by per-thread isolated timer storage.
 ///
 /// This is the default mode. Clones can be relocated to different threads via
-/// [`ThreadAware::relocate`], producing independent timer storage per core. Suitable for
+/// [`ThreadAware::relocate`], producing independent timer storage per thread. Suitable for
 /// thread-per-core runtimes.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
@@ -33,7 +33,7 @@ pub struct Shared;
 /// This type represents a clock in an inactive state that cannot perform any time-related
 /// operations until activated. It is parameterized by a mode marker (`S`):
 ///
-/// - [`Isolated`] (default): per-core timer storage. The inactive clock can be cloned and
+/// - [`Isolated`] (default): per-thread timer storage. The inactive clock can be cloned and
 ///   relocated across threads, with each thread getting an independent timer set on
 ///   activation.
 /// - [`Shared`]: a single shared timer set advanced by a single driver. Use
@@ -63,7 +63,7 @@ pub struct Shared;
 ///
 /// In thread-per-core architectures, clone the `InactiveClock` and
 /// [`relocate`](thread_aware::ThreadAware::relocate) each clone to its target thread before
-/// activation. Relocation creates per-core timer storage, so each thread gets an independent set
+/// activation. Relocation creates per-thread timer storage, so each thread gets an independent set
 /// of timers with no cross-thread lock contention.
 #[derive(Debug)]
 pub struct InactiveClock<S = Isolated> {

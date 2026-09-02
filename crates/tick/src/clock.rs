@@ -83,15 +83,15 @@ use crate::timers::TimerKey;
 ///
 /// # Thread-aware relocation
 ///
-/// `Clock` implements [`ThreadAware`](thread_aware::ThreadAware), enabling per-core timer isolation
+/// `Clock` implements [`ThreadAware`](thread_aware::ThreadAware), enabling per-thread timer isolation
 /// in thread-per-core runtime architectures.
 ///
 /// How relocation affects the clock depends on the underlying clock variant:
 ///
-/// - **System clocks**: Relocation creates per-core timer storage. After relocation, each core
+/// - **System clocks**: Relocation creates per-thread timer storage. After relocation, each thread
 ///   maintains its own independent set of timers, eliminating cross-thread lock contention. Clones
-///   of a clock on the same core share timers, while clocks relocated to different cores are fully
-///   isolated. Each core's timers must be advanced by its own
+///   of a clock on the same thread share timers, while clocks relocated to different threads are
+///   fully isolated. Each thread's timers must be advanced by its own
 ///   [`ClockDriver`][crate::runtime::ClockDriver].
 ///
 /// - **`ClockControl` clocks** (`test-util`): Relocation is a no-op. All clones share the same
@@ -101,7 +101,7 @@ use crate::timers::TimerKey;
 ///
 /// - **Tokio clocks** (created via [`Clock::new_tokio()`]): Relocation is a no-op. The Tokio clock
 ///   is driven by a single background task that advances a shared set of timers, so all clones
-///   share the same timer storage regardless of which thread they are on. Per-core relocation
+///   share the same timer storage regardless of which thread they are on. Per-thread relocation
 ///   would create independent timer storage on the destination thread that the background driver
 ///   does not advance, so relocation is intentionally suppressed.
 ///

@@ -9,12 +9,20 @@ use std::sync;
 
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry;
+use rustc_hash::FxBuildHasher;
 use thread_aware_core::{Owner, Thread};
 
 /// Covers typical worker or NUMA partition counts without allocating for unusually large runtimes.
 ///
 /// Raising this trades more eager allocation in every `Storage` for less frequent map growth.
 const DEFAULT_PARTITION_CAPACITY: usize = 32;
+
+type PartitionMap<T, S> = DashMap<<S as Strategy>::Key, sync::Arc<T>, FxBuildHasher>;
+
+enum Values<T: ?Sized, S: Strategy> {
+    Single(sync::OnceLock<sync::Arc<T>>),
+    Partitioned(PartitionMap<T, S>),
+}
 
 /// Maps threads into strategy partitions for storage.
 ///
@@ -71,7 +79,7 @@ pub(crate) mod sealed {
 /// dropped, so `PerThread` storage is best suited to stable worker sets.
 pub struct Storage<T: ?Sized, S: Strategy> {
     owner: sync::OnceLock<Owner>,
-    values: DashMap<S::Key, sync::Arc<sync::OnceLock<sync::Arc<T>>>>,
+    values: Values<T, S>,
 }
 
 impl<T: ?Sized, S: Strategy> Storage<T, S> {
@@ -82,9 +90,15 @@ impl<T: ?Sized, S: Strategy> Storage<T, S> {
     /// [`Arc::from_storage`](crate::Arc::from_storage) expects.
     #[must_use]
     pub fn new() -> Self {
+        let values = if S::SINGLE_PARTITION {
+            Values::Single(sync::OnceLock::new())
+        } else {
+            Values::Partitioned(DashMap::with_capacity_and_hasher(DEFAULT_PARTITION_CAPACITY, FxBuildHasher))
+        };
+
         Self {
             owner: sync::OnceLock::new(),
-            values: DashMap::with_capacity(DEFAULT_PARTITION_CAPACITY),
+            values,
         }
     }
 
@@ -112,32 +126,30 @@ impl<T: ?Sized, S: Strategy> Storage<T, S> {
             return Err(value);
         }
 
-        let cell = match self.values.entry(S::key(thread)) {
-            Entry::Occupied(occupied) => sync::Arc::clone(occupied.get()),
-            Entry::Vacant(vacant) => {
-                let cell = sync::Arc::new(sync::OnceLock::new());
-                vacant.insert(sync::Arc::clone(&cell));
-                cell
-            }
-        };
-
-        cell.set(value)
+        self.insert_key(S::key(thread), value)
     }
 
-    /// Looks up a partition's initialization cell without retaining the map shard guard.
-    fn cell(&self, thread: &Thread) -> Option<sync::Arc<sync::OnceLock<sync::Arc<T>>>> {
-        self.values.get(&S::key(thread)).map(|cell| sync::Arc::clone(cell.value()))
+    pub(crate) fn insert_key(&self, key: S::Key, value: sync::Arc<T>) -> Result<(), sync::Arc<T>> {
+        match &self.values {
+            Values::Single(cell) => cell.set(value),
+            Values::Partitioned(values) => match values.entry(key) {
+                Entry::Occupied(_) => Err(value),
+                Entry::Vacant(vacant) => {
+                    vacant.insert(value);
+                    Ok(())
+                }
+            },
+        }
     }
 
-    /// Gets or creates a partition's initialization cell without retaining the map shard guard.
-    fn get_or_insert_cell(&self, thread: &Thread) -> sync::Arc<sync::OnceLock<sync::Arc<T>>> {
-        match self.values.entry(S::key(thread)) {
-            Entry::Occupied(occupied) => sync::Arc::clone(occupied.get()),
-            Entry::Vacant(vacant) => {
-                let cell = sync::Arc::new(sync::OnceLock::new());
-                vacant.insert(sync::Arc::clone(&cell));
-                cell
-            }
+    pub(crate) fn owner_matches(&self, owner: &Owner) -> bool {
+        self.owner.get().is_none_or(|bound| bound == owner)
+    }
+
+    pub(crate) fn get_key(&self, key: &S::Key) -> Option<sync::Arc<T>> {
+        match &self.values {
+            Values::Single(cell) => cell.get().map(sync::Arc::clone),
+            Values::Partitioned(values) => values.get(key).map(|value| sync::Arc::clone(value.value())),
         }
     }
 
@@ -147,33 +159,29 @@ impl<T: ?Sized, S: Strategy> Storage<T, S> {
     #[inline]
     #[must_use]
     pub fn get(&self, thread: &Thread) -> Option<sync::Arc<T>> {
-        if self.owner.get().is_some_and(|owner| owner != thread.owner()) {
+        if !self.owner_matches(thread.owner()) {
             return None;
         }
 
-        self.cell(thread).and_then(|cell| cell.get().map(sync::Arc::clone))
+        self.get_key(&S::key(thread))
     }
 
-    /// Returns the value for `thread`'s partition, materializing it with `make` if it is empty.
+    /// Returns the value for `key`, materializing it with `make` if it is empty.
     ///
-    /// `make` runs at most once per partition: a partition-local [`OnceLock`](sync::OnceLock)
-    /// coordinates concurrent relocations, which all observe the single published value.
+    /// `make` runs at most once per partition: concurrent relocations all observe the single
+    /// published value.
     ///
-    /// Callers of the public constructors that accept a factory inherit two initialization
-    /// constraints:
-    ///
-    /// * `make` must not reenter the same partition. Re-entering it deadlocks rather than recursing.
-    /// * The map shard guard is released before `make` runs, so initialization of one partition does
-    ///   not hold up another partition merely because their keys share a shard.
+    /// For partitioned storage, `make` runs while the destination entry holds its `DashMap` shard for
+    /// writing. This is an intentional first-use trade-off: materialization is rare, while retaining
+    /// the guard guarantees one factory call per partition without speculative duplicate values.
+    /// Keep `make` short and do not reenter this storage.
     ///
     /// A panic in `make` propagates and leaves the partition empty for the next relocation to retry.
-    pub(crate) fn get_or_insert_with(&self, thread: &Thread, make: impl FnOnce() -> sync::Arc<T>) -> Option<sync::Arc<T>> {
-        if !self.bind_owner(thread.owner()) {
-            return None;
+    pub(crate) fn get_or_insert_key_with(&self, key: S::Key, make: impl FnOnce() -> sync::Arc<T>) -> sync::Arc<T> {
+        match &self.values {
+            Values::Single(cell) => sync::Arc::clone(cell.get_or_init(make)),
+            Values::Partitioned(values) => sync::Arc::clone(values.entry(key).or_insert_with(make).value()),
         }
-
-        let cell = self.get_or_insert_cell(thread);
-        Some(sync::Arc::clone(cell.get_or_init(make)))
     }
 
     /// Counts published values for which `predicate` holds.
@@ -181,10 +189,18 @@ impl<T: ?Sized, S: Strategy> Storage<T, S> {
     /// The count is an estimate under concurrent relocation, matching the inherently racy nature of
     /// a strong-count query.
     pub(crate) fn count_where(&self, predicate: impl Fn(&sync::Arc<T>) -> bool) -> usize {
-        self.values
-            .iter()
-            .filter(|entry| entry.value().get().is_some_and(&predicate))
-            .count()
+        match &self.values {
+            Values::Single(cell) => usize::from(cell.get().is_some_and(predicate)),
+            Values::Partitioned(values) if values.is_empty() => 0,
+            Values::Partitioned(values) => values.iter().filter(|entry| predicate(entry.value())).count(),
+        }
+    }
+
+    fn len(&self) -> usize {
+        match &self.values {
+            Values::Single(cell) => usize::from(cell.get().is_some()),
+            Values::Partitioned(values) => values.len(),
+        }
     }
 }
 
@@ -198,7 +214,7 @@ impl<T: ?Sized, S: Strategy> Debug for Storage<T, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Storage")
             .field("owner", &self.owner.get())
-            .field("partitions", &self.values.len())
+            .field("values", &self.len())
             .finish()
     }
 }
@@ -208,15 +224,25 @@ mod tests {
     use std::sync::Arc;
     use std::thread;
 
-    use super::{DEFAULT_PARTITION_CAPACITY, Storage};
-    use crate::PerThread;
+    use super::{DEFAULT_PARTITION_CAPACITY, Storage, Values};
     use crate::thread::ThreadBuilder;
+    use crate::{PerProcess, PerThread};
 
     #[test]
     fn storage_starts_with_default_capacity() {
         let storage = Storage::<u32, PerThread>::new();
 
-        assert!(storage.values.capacity() >= DEFAULT_PARTITION_CAPACITY);
+        let Values::Partitioned(values) = &storage.values else {
+            panic!("per-thread storage must use partitioned values");
+        };
+        assert!(values.capacity() >= DEFAULT_PARTITION_CAPACITY);
+    }
+
+    #[test]
+    fn single_partition_storage_avoids_the_map() {
+        let storage = Storage::<u32, PerProcess>::new();
+
+        assert!(matches!(storage.values, Values::Single(_)));
     }
 
     #[test]

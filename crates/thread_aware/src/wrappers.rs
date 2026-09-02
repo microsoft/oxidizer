@@ -64,7 +64,7 @@ impl<T> Unaware<T> {
 
     /// Converts an `Arc<Unaware<T>>` into an `Arc<T>`.
     pub fn into_arc(self: Arc<Self>) -> Arc<T> {
-        // SAFETY: `Unaware` is a transparent wrapper around `T`,
+        // SAFETY: `Unaware<T>` is `repr(transparent)` over `T`, so both `Arc` pointee layouts match.
         unsafe { core::mem::transmute(self) }
     }
 }
