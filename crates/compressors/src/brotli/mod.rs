@@ -230,8 +230,8 @@ impl From<WindowSize> for u8 {
 
 /// Settings that only brotli has.
 ///
-/// The portable settings -- [`level`][CompressorBuilder::level] and
-/// [`output_chunk_size`][CompressorBuilder::output_chunk_size] -- are shared with every other format
+/// The portable settings -- [`level`][crate::CompressorBuilder::level] and
+/// [`output_chunk_size`][crate::CompressorBuilder::output_chunk_size] -- are shared with every other format
 /// and are also reachable from a [`CompressorBuilder<()>`][crate::CompressorBuilder] that has not
 /// chosen a format yet. These are not: a builder that might produce any format cannot honour a
 /// setting only brotli has, so reach for them through this concrete builder and box the result if
@@ -254,7 +254,7 @@ impl From<WindowSize> for u8 {
 /// # let _ = compressor;
 /// # Ok::<(), compressors::BuildError>(())
 /// ```
-impl CompressorBuilder {
+impl crate::CompressorBuilder<Brotli> {
     /// Sets brotli's native quality, overriding any portable [`Level`][crate::Level].
     #[must_use]
     pub const fn quality(mut self, quality: Quality) -> Self {

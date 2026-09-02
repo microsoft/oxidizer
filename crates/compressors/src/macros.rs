@@ -327,27 +327,13 @@ macro_rules! define_format {
         use $crate::limits::DecompressionLimits;
         use $crate::output::Output;
 
-        #[doc = concat!("Configures a ", $name, " compressor.")]
-        ///
-        /// An alias for the shared [`CompressorBuilder`][crate::CompressorBuilder] once it has
-        /// committed to this format, which is what gives it this format's own settings and a
-        /// `build` method returning this module's [`Compressor`].
-        pub type CompressorBuilder = $crate::CompressorBuilder<$format>;
-
-        #[doc = concat!("Configures a ", $name, " decompressor.")]
-        ///
-        /// An alias for the shared [`DecompressorBuilder`][crate::DecompressorBuilder] once it has
-        /// committed to this format, which is what gives it this format's own settings and a
-        /// `build` method returning this module's [`Decompressor`].
-        pub type DecompressorBuilder = $crate::DecompressorBuilder<$format>;
-
-        impl Default for CompressorBuilder {
+        impl Default for $crate::CompressorBuilder<$format> {
             fn default() -> Self {
                 $crate::CompressorBuilder::with_format(<$format>::new())
             }
         }
 
-        impl Default for DecompressorBuilder {
+        impl Default for $crate::DecompressorBuilder<$format> {
             fn default() -> Self {
                 $crate::DecompressorBuilder::with_format(<$format>::new())
             }
@@ -373,8 +359,8 @@ macro_rules! define_format {
         impl Compressor {
             /// Starts configuring a compressor.
             #[must_use]
-            pub fn builder() -> CompressorBuilder {
-                CompressorBuilder::default()
+            pub fn builder() -> $crate::CompressorBuilder<$format> {
+                $crate::CompressorBuilder::default()
             }
         }
 
@@ -434,8 +420,8 @@ macro_rules! define_format {
         impl Decompressor {
             /// Starts configuring a decompressor.
             #[must_use]
-            pub fn builder() -> DecompressorBuilder {
-                DecompressorBuilder::default()
+            pub fn builder() -> $crate::DecompressorBuilder<$format> {
+                $crate::DecompressorBuilder::default()
             }
         }
 

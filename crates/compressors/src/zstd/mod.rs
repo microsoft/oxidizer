@@ -216,11 +216,11 @@ impl TryFrom<u32> for WindowLog {
 /// # let _ = compressor;
 /// # Ok::<(), compressors::BuildError>(())
 /// ```
-impl CompressorBuilder {
+impl crate::CompressorBuilder<Zstd> {
     /// Sets the level on zstd's own scale, overriding any portable [`Level`][crate::Level].
     ///
     /// Use this only when you need a level the portable scale does not reach; prefer
-    /// [`level`][CompressorBuilder::level] otherwise, so the same configuration keeps working if the
+    /// [`level`][crate::CompressorBuilder::level] otherwise, so the same configuration keeps working if the
     /// format changes.
     #[must_use]
     pub const fn compression_level(mut self, level: CompressionLevel) -> Self {
@@ -229,7 +229,7 @@ impl CompressorBuilder {
     }
 }
 
-impl DecompressorBuilder {
+impl crate::DecompressorBuilder<Zstd> {
     /// Limits the largest frame window this decompressor accepts.
     #[must_use]
     pub const fn max_window_log(mut self, max_window_log: WindowLog) -> Self {
