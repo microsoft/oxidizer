@@ -259,6 +259,7 @@ pub use thread_aware_core::{NumaNode, Owner, Thread, ThreadAware};
 pub use wrappers::{Unaware, unaware};
 
 #[cfg(all(test, feature = "std"))]
+#[cfg_attr(test, mutants::skip)] // Mutating barrier coordination only deadlocks test setup.
 fn test_threads(counts: &[usize]) -> Vec<Thread> {
     use std::sync::{Arc, Barrier};
     use std::thread;
