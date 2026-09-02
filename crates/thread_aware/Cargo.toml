@@ -43,10 +43,8 @@ thread_aware_core = { workspace = true }
 thread_aware_macros = { workspace = true, optional = true }
 
 [dev-dependencies]
-criterion = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
 mutants = { workspace = true }
-static_assertions = { workspace = true }
 thread_aware_macros = { path = "../thread_aware_macros" }
 
 # These integration tests exercise `#[derive(ThreadAware)]`, so they compile only
