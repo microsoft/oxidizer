@@ -84,7 +84,6 @@ where
 #[derive(Clone, ThreadAware)]
 pub(crate) struct CustomSpawner {
     spawn: thread_aware::Arc<dyn SpawnCustom, PerThread>,
-    #[thread_aware(skip)]
     name: &'static str,
 }
 
