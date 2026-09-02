@@ -283,9 +283,16 @@ impl Sink {
     ///
     /// This is the entry point used by the `.enrich(&sink, ...)` API in
     /// [`EnrichFutureExt`](crate::enrichment::EnrichFutureExt) and
-    /// [`EnrichFnExt`](crate::enrichment::EnrichFnExt). Composites with zero children
-    /// return a no-op guard.
+    /// [`EnrichFnExt`](crate::enrichment::EnrichFnExt).
+    ///
+    /// An empty layer returns early, which spares composite fan-out and every
+    /// downstream slot write. The entry slice is built by the caller, so this
+    /// does not avoid the slice's own allocation.
     pub(crate) fn push_enrichment(&self, entries: Arc<[EnrichmentEntry]>) -> Guard {
+        if entries.is_empty() {
+            return Guard::empty();
+        }
+
         match &*self.inner {
             SinkInner::Single(state) => state.enrichment.push(entries),
             SinkInner::Composite { children } => Guard::merge(children.iter().map(|c| c.enrichment.push(Arc::clone(&entries)))),

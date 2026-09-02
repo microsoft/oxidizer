@@ -7,7 +7,7 @@
 //! - Full emit pipeline (event -> log record via `OTel` provider)
 //! - Enrichment resolution (context lookup + Vec building)
 //! - Metric dimension building
-//! - Context operations (enrich)
+//! - Sink operations (construction, emit through a no-op sink)
 //!
 //! Run with:
 //! ```sh
@@ -277,11 +277,11 @@ fn entrypoint(c: &mut Criterion) {
         group.finish();
     }
 
-    // --- Context operation benchmarks ---
+    // --- Sink operation benchmarks ---
     {
-        let mut group = c.benchmark_group("emit_context");
-        bench_attach_emitter(&mut group, &allocs, &time);
-        bench_emit_event_direct(&mut group, &allocs, &time);
+        let mut group = c.benchmark_group("sink_operations");
+        bench_construct_processor_free_sink(&mut group, &allocs, &time);
+        bench_emit_to_noop_sink(&mut group, &allocs, &time);
         group.finish();
     }
 
@@ -468,11 +468,15 @@ fn bench_enrich_push_pop(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &allo
 }
 
 // ---------------------------------------------------------------------------
-// Context operation benchmarks
+// Sink operation benchmarks
 // ---------------------------------------------------------------------------
 
-fn bench_attach_emitter(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
-    const ID: &str = "attach_emitter";
+fn bench_construct_processor_free_sink(
+    group: &mut BenchmarkGroup<'_, WallTime>,
+    allocs: &alloc_tracker::Session,
+    time: &all_the_time::Session,
+) {
+    const ID: &str = "construct_processor_free_sink";
     const EMPTY_PROCESSORS: Vec<Arc<dyn observed::processing::EventProcessor>> = Vec::new();
 
     bench_with_tracking(group, allocs, time, ID, || {
@@ -481,11 +485,10 @@ fn bench_attach_emitter(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc
     });
 }
 
-fn bench_emit_event_direct(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
-    const ID: &str = "emit_event_no_emitter";
+fn bench_emit_to_noop_sink(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
+    const ID: &str = "emit_to_noop_sink";
 
-    // Benchmark the emit path when no sink is registered - measures the
-    // cost of the context lookup + early return.
+    // Benchmark the emit path through an explicit no-op sink.
     let noop = Sink::noop();
     bench_with_tracking(group, allocs, time, ID, || {
         observed::emit!(&noop, SimpleLogEvent { status: 200, retries: 0 });
