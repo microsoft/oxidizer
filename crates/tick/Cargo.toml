@@ -21,8 +21,8 @@ allowed_external_types = [
     "serde_core::de::*",
     "serde_core::ser::*",
     "futures_core::stream::Stream",
-    "thread_aware::core::ThreadAware",
-    "thread_aware::core::Thread",
+    "thread_aware_core::thread_aware::ThreadAware",
+    "thread_aware_core::thread::Thread",
 ]
 
 [package.metadata.docs.rs]

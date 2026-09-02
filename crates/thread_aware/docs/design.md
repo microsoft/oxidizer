@@ -55,8 +55,10 @@ its carried value, although it may be less efficient.
 
 An `Owner` identifies one runtime. When relocation has a known source and the
 destination belongs to a different owner, `Arc::relocate` is a no-op. The holder
-keeps its carried value and does not read, publish, or materialize state for the
-foreign runtime.
+keeps its carried value and does not read, publish, or materialize a partition
+for the foreign runtime. Storage records its original owner so later relocation
+calls inside the foreign runtime also remain no-ops instead of publishing the
+retained value there.
 
 This preserves runtime-bound objects across relocation. They may continue to
 use state associated with the original runtime and therefore operate less
@@ -73,6 +75,9 @@ reserves capacity for 32 entries by default, which covers common
 thread-per-core runtimes without growing the map during initial worker
 materialization.
 
+Storage is bound to the first runtime owner that populates or relocates it.
+Threads belonging to another owner cannot read or publish its partitions.
+
 `Storage::insert` publishes a value only when a key is empty and returns the
 rejected value when another value was already published. `Storage::get` clones
 the value for a key.
@@ -81,6 +86,11 @@ Lazy materialization holds the destination map entry while the factory runs.
 This guarantees one published value per key, but factory code must not re-enter
 the same storage. An unrelated key that hashes to the same DashMap shard may
 wait for the factory, so factories should remain short and non-blocking.
+
+Published entries remain until the shared storage is dropped. `PerThread` is
+therefore intended for runtimes with a stable worker set; runtimes that create
+unbounded transient threads should use a coarser strategy or bound the lifetime
+of the containing `Arc`.
 
 ## 5. Prepared storage and unsized values
 

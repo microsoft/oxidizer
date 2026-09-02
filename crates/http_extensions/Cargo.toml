@@ -48,8 +48,8 @@ allowed_external_types = [
     "templated_uri::path_and_query::PathAndQuery",
     "templated_uri::uri::Uri",
     "templated_uri::base_uri::BaseUri",
-    "thread_aware::core::Thread",
-    "thread_aware::core::ThreadAware",
+    "thread_aware_core::thread::Thread",
+    "thread_aware_core::thread_aware::ThreadAware",
     "tick::clock::Clock",
 ]
 

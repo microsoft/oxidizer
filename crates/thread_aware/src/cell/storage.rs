@@ -9,7 +9,7 @@ use std::sync;
 
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry;
-use thread_aware_core::Thread;
+use thread_aware_core::{Owner, Thread};
 
 /// Maps threads into strategy partitions for storage.
 ///
@@ -60,7 +60,12 @@ pub(crate) mod sealed {
 /// coordinate space to fall outside of, no sizing step, and therefore no out-of-range access to
 /// reject. Neither [`insert`](Self::insert) nor [`get`](Self::get) panics, and relocation into a
 /// thread this storage has not seen before is an ordinary miss rather than a degraded path.
+///
+/// Storage binds to the first runtime owner that populates it. Calls naming a thread from another
+/// owner cannot read or publish partition values. Published values remain until the storage is
+/// dropped, so `PerThread` storage is best suited to stable worker sets.
 pub struct Storage<T: ?Sized, S: Strategy> {
+    owner: sync::OnceLock<Owner>,
     values: DashMap<S::Key, sync::Arc<T>>,
 }
 
@@ -73,8 +78,14 @@ impl<T: ?Sized, S: Strategy> Storage<T, S> {
     #[must_use]
     pub fn new() -> Self {
         Self {
+            owner: sync::OnceLock::new(),
             values: DashMap::with_capacity(32),
         }
+    }
+
+    /// Binds this storage to `owner`, or verifies that it is already bound to the same owner.
+    pub(crate) fn bind_owner(&self, owner: &Owner) -> bool {
+        self.owner.get_or_init(|| owner.clone()) == owner
     }
 
     /// Publishes the value for `thread`'s strategy partition if it is still empty.
@@ -88,9 +99,14 @@ impl<T: ?Sized, S: Strategy> Storage<T, S> {
     /// # Errors
     ///
     /// Returns `Err(value)`, handing the passed-in `value` back unchanged, when the strategy
-    /// partition selected by `thread` already holds a value.
+    /// partition selected by `thread` already holds a value or the storage belongs to another
+    /// runtime owner.
     #[inline]
     pub fn insert(&self, thread: &Thread, value: sync::Arc<T>) -> Result<(), sync::Arc<T>> {
+        if !self.bind_owner(thread.owner()) {
+            return Err(value);
+        }
+
         match self.values.entry(S::key(thread)) {
             Entry::Occupied(_) => Err(value),
             Entry::Vacant(vacant) => {
@@ -101,9 +117,15 @@ impl<T: ?Sized, S: Strategy> Storage<T, S> {
     }
 
     /// Returns a clone of the value published for `thread`'s strategy partition, if any.
+    ///
+    /// Returns `None` when the partition is empty or the storage belongs to another runtime owner.
     #[inline]
     #[must_use]
     pub fn get(&self, thread: &Thread) -> Option<sync::Arc<T>> {
+        if self.owner.get().is_some_and(|owner| owner != thread.owner()) {
+            return None;
+        }
+
         self.values.get(&S::key(thread)).map(|value| sync::Arc::clone(&value))
     }
 
@@ -121,9 +143,13 @@ impl<T: ?Sized, S: Strategy> Storage<T, S> {
     ///   Keep `make` short for the same reason relocation itself is expected to be short.
     ///
     /// A panic in `make` propagates and leaves the partition empty for the next relocation to retry.
-    pub(crate) fn get_or_insert_with(&self, thread: &Thread, make: impl FnOnce() -> sync::Arc<T>) -> sync::Arc<T> {
+    pub(crate) fn get_or_insert_with(&self, thread: &Thread, make: impl FnOnce() -> sync::Arc<T>) -> Option<sync::Arc<T>> {
+        if !self.bind_owner(thread.owner()) {
+            return None;
+        }
+
         let entry = self.values.entry(S::key(thread)).or_insert_with(make);
-        sync::Arc::clone(entry.value())
+        Some(sync::Arc::clone(entry.value()))
     }
 
     /// Counts published values for which `predicate` holds.
@@ -143,7 +169,10 @@ impl<T: ?Sized, S: Strategy> Default for Storage<T, S> {
 
 impl<T: ?Sized, S: Strategy> Debug for Storage<T, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Storage").field("partitions", &self.values.len()).finish()
+        f.debug_struct("Storage")
+            .field("owner", &self.owner.get())
+            .field("partitions", &self.values.len())
+            .finish()
     }
 }
 
@@ -173,5 +202,18 @@ mod tests {
         assert_eq!(storage.insert(&thread, Arc::clone(&first)), Ok(()));
         assert_eq!(storage.insert(&thread, Arc::clone(&second)), Err(second));
         assert!(Arc::ptr_eq(&storage.get(&thread).unwrap(), &first));
+    }
+
+    #[test]
+    fn storage_rejects_threads_from_another_owner() {
+        let first = ThreadBuilder::default().build(thread::current().id());
+        let second = ThreadBuilder::default().build(thread::current().id());
+        let storage = Storage::<u32, PerThread>::new();
+        let rejected = Arc::new(2);
+
+        storage.insert(&first, Arc::new(1)).unwrap();
+
+        assert!(Arc::ptr_eq(&storage.insert(&second, Arc::clone(&rejected)).unwrap_err(), &rejected));
+        assert!(storage.get(&second).is_none());
     }
 }

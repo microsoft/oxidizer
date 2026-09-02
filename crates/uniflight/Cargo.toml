@@ -21,7 +21,7 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/uniflight"
 allowed_external_types = [
     "thread_aware::cell::builtin::PerProcess",
     "thread_aware::cell::storage::Strategy",
-    "thread_aware::core::ThreadAware",
+    "thread_aware_core::thread_aware::ThreadAware",
 ]
 
 [dependencies]

@@ -27,14 +27,17 @@ protocol rely on the built-in semantic guarantees, especially the
 
 Relocation follows this order:
 
-1. If a known source has a different owner from the destination, return without
-   changing factory state, storage, or the carried value.
-2. Record the first known source for closure factories.
-3. Look up the destination key. On a hit, adopt its value.
-4. If source and destination have the same key, publish or adopt the carried
+1. Bind storage to the source owner when the first known relocation crosses an
+   owner boundary, then return without changing factory state, partition
+   contents, or the carried value.
+2. Bind unowned storage to the destination owner. If storage already belongs to
+   another owner, return without changing the carried value.
+3. Record the first known source for closure factories.
+4. Look up the destination key. On a hit, adopt its value.
+5. If source and destination have the same key, publish or adopt the carried
    value for that key.
-5. Otherwise materialize the destination entry through DashMap's entry API.
-6. Record the previous carried value under the known source key if that key was
+6. Otherwise materialize the destination entry through DashMap's entry API.
+7. Record the previous carried value under the known source key if that key was
    still empty.
 
 `PerProcess` treats an unknown source as the same partition because every
@@ -83,3 +86,9 @@ Relocation is advisory. Missing, repeated, same-key, unknown-source, and
 cross-owner calls must all leave the holder usable. The cross-owner no-op is
 especially important for runtime-bound resources: retaining a working remote
 resource is preferable to replacing it with state for an unrelated runtime.
+Owner binding also prevents that retained resource from becoming a canonical
+partition value if the holder later moves again inside the foreign runtime.
+
+Partition entries are retained until their shared storage is dropped. This
+matches stable thread-per-core worker sets but means `PerThread` storage should
+not outlive an unbounded sequence of transient threads.

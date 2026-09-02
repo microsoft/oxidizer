@@ -750,6 +750,16 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> Arc<T, S> {
 impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, S> {
     fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         if source.is_some_and(|source| source.owner() != destination.owner()) {
+            if let Some(source) = source {
+                self.storage.bind_owner(source.owner());
+            }
+            return;
+        }
+
+        // Storage belongs to one runtime. After a cross-owner no-op, later relocations within the
+        // destination runtime must remain no-ops instead of publishing the retained foreign value
+        // into that runtime's partitions.
+        if !self.storage.bind_owner(destination.owner()) {
             return;
         }
 
@@ -786,7 +796,10 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
         if same_partition {
             // If a racer published first, the entry already holds its value; adopt it so every clone
             // converges on one identity.
-            let published = self.storage.get_or_insert_with(destination, || sync::Arc::<T>::clone(&self.value));
+            let published = self
+                .storage
+                .get_or_insert_with(destination, || sync::Arc::<T>::clone(&self.value))
+                .expect("storage owner was bound to the destination above");
             self.value = published;
             return;
         }
@@ -809,7 +822,8 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
         // Ref: docs/implementation.md, "Relocation and publication".
         let published = self
             .storage
-            .get_or_insert_with(destination, || self.materialize_value(source, destination));
+            .get_or_insert_with(destination, || self.materialize_value(source, destination))
+            .expect("storage owner was bound to the destination above");
         self.value = published;
 
         // Record the value the `Arc` moved away from into the source partition, so a later
