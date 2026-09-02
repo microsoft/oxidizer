@@ -20,7 +20,7 @@ async fn main() {
     // Simulate a runtime with one thread on each of two NUMA nodes.
     let builder = ThreadBuilder::default();
     let thread0 = builder.build(std::thread::current().id());
-    let thread1_builder = builder.with_numa_node(1);
+    let thread1_builder = builder.numa_node(1);
     let thread1 = std::thread::spawn(move || thread1_builder.build(std::thread::current().id()))
         .join()
         .expect("coordinate thread must finish");

@@ -29,7 +29,7 @@
 //! # use tick::runtime::InactiveClock;
 //! # let builder = ThreadBuilder::default();
 //! # let thread_1 = builder.build(std::thread::current().id());
-//! # let thread_2_builder = builder.with_numa_node(1);
+//! # let thread_2_builder = builder.numa_node(1);
 //! # let thread_2 = std::thread::spawn(move || {
 //! #     thread_2_builder.build(std::thread::current().id())
 //! # }).join().unwrap();

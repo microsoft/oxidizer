@@ -584,7 +584,7 @@ mod tests {
     fn test_threads() -> [Thread; 2] {
         let builder = ThreadBuilder::default();
         let source = builder.build(std::thread::current().id());
-        let destination_builder = builder.with_numa_node(1);
+        let destination_builder = builder.numa_node(1);
         let destination = std::thread::spawn(move || destination_builder.build(std::thread::current().id()))
             .join()
             .unwrap();

@@ -23,7 +23,7 @@ pub struct ThreadBuilder {
 impl ThreadBuilder {
     /// Selects the NUMA node nearest to the thread being built.
     #[must_use]
-    pub fn with_numa_node(mut self, numa_node: u32) -> Self {
+    pub fn numa_node(mut self, numa_node: u32) -> Self {
         self.numa_node = new_numa_node(numa_node);
         self
     }
@@ -53,8 +53,8 @@ mod tests {
     #[test]
     fn clones_keep_owner_and_allow_distinct_numa_nodes() {
         let builder = ThreadBuilder::default();
-        let first = builder.clone().with_numa_node(1).build(thread::current().id());
-        let second = builder.with_numa_node(2).build(thread::current().id());
+        let first = builder.clone().numa_node(1).build(thread::current().id());
+        let second = builder.numa_node(2).build(thread::current().id());
 
         assert_eq!(first.owner(), second.owner());
         assert_ne!(first.numa_node(), second.numa_node());

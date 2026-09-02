@@ -32,7 +32,7 @@ async fn not_isolated_on_tokio() {
 
     let builder = ThreadBuilder::default();
     for numa_node in 0..4 {
-        let thread = builder.clone().with_numa_node(numa_node).build(std::thread::current().id());
+        let thread = builder.clone().numa_node(numa_node).build(std::thread::current().id());
         let mut client_clone = client.clone();
         client_clone.relocate(None, &thread);
     }
@@ -56,7 +56,7 @@ async fn tokio_client_relocated_ensure_works() {
         .map(|numa_node| {
             let mut client = client.clone();
             let url = url.clone();
-            let builder = builder.clone().with_numa_node(numa_node);
+            let builder = builder.clone().numa_node(numa_node);
             tokio::spawn(async move {
                 let thread = builder.build(std::thread::current().id());
                 client.relocate(None, &thread);
