@@ -287,15 +287,6 @@ where
     pub fn new_per_thread() -> Self {
         Self::default()
     }
-
-    /// Creates a new `Merger` with per-thread scoping.
-    #[deprecated(note = "use `new_per_thread`")]
-    #[inline]
-    #[must_use]
-    #[cfg_attr(test, mutants::skip)] // Compatibility shim delegates to the replacement.
-    pub fn new_per_core() -> Self {
-        Self::new_per_thread()
-    }
 }
 
 impl<K, T, S: Strategy> Merger<K, T, S>
