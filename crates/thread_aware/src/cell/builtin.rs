@@ -37,7 +37,7 @@ impl Strategy for PerNumaNode {
     type Key = NumaNode;
 
     fn key(thread: &Thread) -> Self::Key {
-        thread.numa_node()
+        thread.numa_node().clone()
     }
 }
 

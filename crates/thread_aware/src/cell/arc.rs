@@ -747,6 +747,10 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> Arc<T, S> {
 
 impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, S> {
     fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+        if source.is_some_and(|source| source.owner() != destination.owner()) {
+            return;
+        }
+
         // Record the original source before any fast path can return. A clone whose first relocation
         // hits an existing destination value or stays within one strategy partition still needs that
         // source when a later relocation materializes a new value.

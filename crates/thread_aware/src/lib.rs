@@ -204,6 +204,9 @@ mod wrappers;
 
 pub mod closure;
 
+#[cfg(feature = "std")]
+#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
+pub mod thread;
 
 #[doc(inline)]
 pub use thread_aware_core::{NumaNode, Owner, Thread, ThreadAware};
@@ -255,8 +258,7 @@ pub use thread_aware_core::{NumaNode, Owner, Thread, ThreadAware};
 ///
 /// # Example
 /// ```rust
-/// use thread_aware::ThreadAware;
-/// use thread_aware::affinity::Affinity;
+/// use thread_aware::{Thread, ThreadAware};
 /// #[derive(ThreadAware)]
 /// struct Payload {
 ///     id: u64,
@@ -272,7 +274,7 @@ pub use thread_aware_core::{NumaNode, Owner, Thread, ThreadAware};
 ///     raw_len: usize,
 /// }
 ///
-/// fn demo(a1: Option<&Thread>, a2: Affinity, mut w: Wrapper) {
+/// fn demo(a1: Option<&Thread>, a2: &Thread, mut w: Wrapper) {
 ///     // Move the wrapper from a1 to a2.
 ///     w.relocate(a1, a2);
 /// }

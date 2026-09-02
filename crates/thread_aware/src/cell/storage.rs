@@ -25,7 +25,7 @@ use thread_aware_core::Thread;
 /// [`PerProcess`](crate::PerProcess).
 pub trait Strategy: sealed::Sealed {
     /// Identifies one strategy partition.
-    type Key: Copy + Eq + Hash + Debug + Send + Sync + 'static;
+    type Key: Clone + Eq + Hash + Debug + Send + Sync + 'static;
 
     /// Whether every thread maps to the same partition.
     ///
@@ -72,7 +72,9 @@ impl<T: ?Sized, S: Strategy> Storage<T, S> {
     /// [`Arc::from_storage`](crate::Arc::from_storage) expects.
     #[must_use]
     pub fn new() -> Self {
-        Self { values: DashMap::new() }
+        Self {
+            values: DashMap::with_capacity(32),
+        }
     }
 
     /// Publishes the value for `thread`'s strategy partition if it is still empty.
