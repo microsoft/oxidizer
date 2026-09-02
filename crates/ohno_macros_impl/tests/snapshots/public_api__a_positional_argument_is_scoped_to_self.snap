@@ -53,6 +53,7 @@ impl ::ohno::ErrorExt for T {
         self.inner.backtrace()
     }
 }
+#[automatically_derived]
 impl ::core::fmt::Debug for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("T")
@@ -161,6 +162,7 @@ impl ::ohno::ErrorExt for T {
         self.inner.backtrace()
     }
 }
+#[automatically_derived]
 impl ::core::fmt::Debug for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("T")
@@ -269,6 +271,7 @@ impl ::ohno::ErrorExt for T {
         self.inner.backtrace()
     }
 }
+#[automatically_derived]
 impl ::core::fmt::Debug for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("T")
@@ -377,6 +380,7 @@ impl ::ohno::ErrorExt for T {
         self.inner.backtrace()
     }
 }
+#[automatically_derived]
 impl ::core::fmt::Debug for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("T")
@@ -485,6 +489,7 @@ impl ::ohno::ErrorExt for T {
         self.inner.backtrace()
     }
 }
+#[automatically_derived]
 impl ::core::fmt::Debug for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("T")
@@ -593,6 +598,7 @@ impl ::ohno::ErrorExt for T {
         self.inner.backtrace()
     }
 }
+#[automatically_derived]
 impl ::core::fmt::Debug for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("T")
@@ -697,6 +703,7 @@ impl ::ohno::ErrorExt for T {
         self.inner.backtrace()
     }
 }
+#[automatically_derived]
 impl ::core::fmt::Debug for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("T")
@@ -805,6 +812,7 @@ impl ::ohno::ErrorExt for T {
         self.inner.backtrace()
     }
 }
+#[automatically_derived]
 impl ::core::fmt::Debug for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("T")

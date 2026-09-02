@@ -39,6 +39,7 @@ impl<A, B> ::ohno::ErrorExt for T<A, B> {
         self.inner.backtrace()
     }
 }
+#[automatically_derived]
 impl<A, B> ::core::fmt::Debug for T<A, B> {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("T")
@@ -128,6 +129,7 @@ impl<'a> ::ohno::ErrorExt for T<'a> {
         self.inner.backtrace()
     }
 }
+#[automatically_derived]
 impl<'a> ::core::fmt::Debug for T<'a> {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("T")
@@ -225,6 +227,7 @@ where
         self.inner.backtrace()
     }
 }
+#[automatically_derived]
 impl<A> ::core::fmt::Debug for T<A>
 where
     A: Clone,

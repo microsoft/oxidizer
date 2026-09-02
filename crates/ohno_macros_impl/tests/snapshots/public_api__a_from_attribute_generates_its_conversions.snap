@@ -39,6 +39,7 @@ impl ::ohno::ErrorExt for T {
         self.inner.backtrace()
     }
 }
+#[automatically_derived]
 impl ::core::fmt::Debug for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("T")
@@ -132,6 +133,7 @@ impl ::ohno::ErrorExt for T {
         self.inner.backtrace()
     }
 }
+#[automatically_derived]
 impl ::core::fmt::Debug for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("T")
@@ -235,6 +237,7 @@ impl ::ohno::ErrorExt for T {
         self.inner.backtrace()
     }
 }
+#[automatically_derived]
 impl ::core::fmt::Debug for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("T")
@@ -328,6 +331,7 @@ impl ::ohno::ErrorExt for T {
         self.inner.backtrace()
     }
 }
+#[automatically_derived]
 impl ::core::fmt::Debug for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("T")
@@ -418,6 +422,7 @@ impl ::ohno::ErrorExt for T {
         self.1.backtrace()
     }
 }
+#[automatically_derived]
 impl ::core::fmt::Debug for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_tuple("T").field(&self.0).field(&self.1).finish()
@@ -500,6 +505,7 @@ impl ::ohno::ErrorExt for T {
         self.inner.backtrace()
     }
 }
+#[automatically_derived]
 impl ::core::fmt::Debug for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("T")
