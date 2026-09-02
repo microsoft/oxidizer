@@ -129,9 +129,7 @@ impl std::fmt::Debug for ZstdCompress {
 
 impl Drop for ZstdCompress {
     fn drop(&mut self) {
-        if let Some(context) = self.context.take() {
-            self.recycle.return_zstd_compressor(self.level, context);
-        }
+        self.recycle.return_zstd_compressor(self.level, &mut self.context);
     }
 }
 
@@ -220,9 +218,7 @@ impl std::fmt::Debug for ZstdDecompress {
 
 impl Drop for ZstdDecompress {
     fn drop(&mut self) {
-        if let Some(context) = self.context.take() {
-            self.recycle.return_zstd_decompressor(context);
-        }
+        self.recycle.return_zstd_decompressor(&mut self.context);
     }
 }
 

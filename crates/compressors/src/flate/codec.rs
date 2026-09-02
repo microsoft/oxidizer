@@ -45,9 +45,7 @@ impl FlateCompress {
 
 impl Drop for FlateCompress {
     fn drop(&mut self) {
-        if let Some(engine) = self.compress.take() {
-            self.recycle.return_compressor(self.key, engine);
-        }
+        self.recycle.return_compressor(self.key, &mut self.compress);
     }
 }
 
@@ -141,9 +139,7 @@ impl FlateDecompress {
 #[cfg(any(feature = "deflate", feature = "zlib"))]
 impl Drop for FlateDecompress {
     fn drop(&mut self) {
-        if let Some(engine) = self.decompress.take() {
-            self.recycle.return_decompressor(self.wrapper, engine);
-        }
+        self.recycle.return_decompressor(self.wrapper, &mut self.decompress);
     }
 }
 

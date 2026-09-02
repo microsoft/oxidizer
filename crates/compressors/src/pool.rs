@@ -174,16 +174,23 @@ impl Pool {
         Some(engine)
     }
 
-    /// Returns a compressor for reuse, dropping it if the pool is already full.
+    /// Takes `engine` for reuse, leaving it in place when the pool cannot keep it.
+    ///
+    /// The engine is borrowed rather than consumed so that a pool which will not store it never
+    /// takes ownership. Every caller is a [`Drop`] implementation, and dropping the engine there
+    /// would free it while the value being destroyed is still borrowed, which the aliasing rules
+    /// forbid.
     #[cfg(any(feature = "deflate", feature = "gzip", feature = "zlib"))]
-    pub(crate) fn return_compressor(&self, key: EngineKey, engine: flate2::Compress) {
+    pub(crate) fn return_compressor(&self, key: EngineKey, engine: &mut Option<flate2::Compress>) {
         if self.is_disabled() {
             return;
         }
 
         if let Ok(mut guard) = self.inner.compressors.lock() {
             let idle = guard.entry(key).or_default();
-            if idle.len() < self.inner.capacity {
+            if idle.len() < self.inner.capacity
+                && let Some(engine) = engine.take()
+            {
                 idle.push(engine);
             }
         }
@@ -205,16 +212,18 @@ impl Pool {
         Some(engine)
     }
 
-    /// Returns a decompressor for reuse, dropping it if the pool is already full.
+    /// Takes `engine` for reuse, leaving it in place when the pool cannot keep it; see [`Self::return_compressor`].
     #[cfg(any(feature = "deflate", feature = "zlib"))]
-    pub(crate) fn return_decompressor(&self, wrapper: Wrapper, engine: flate2::Decompress) {
+    pub(crate) fn return_decompressor(&self, wrapper: Wrapper, engine: &mut Option<flate2::Decompress>) {
         if self.is_disabled() {
             return;
         }
 
         if let Ok(mut guard) = self.inner.decompressors.lock() {
             let idle = guard.entry(wrapper).or_default();
-            if idle.len() < self.inner.capacity {
+            if idle.len() < self.inner.capacity
+                && let Some(engine) = engine.take()
+            {
                 idle.push(engine);
             }
         }
@@ -236,16 +245,18 @@ impl Pool {
         Some(context)
     }
 
-    /// Returns a zstd compressor for reuse, dropping it if the pool is already full.
+    /// Takes `context` for reuse, leaving it in place when the pool cannot keep it, for the reason given on `return_compressor`.
     #[cfg(feature = "zstd")]
-    pub(crate) fn return_zstd_compressor(&self, level: i32, context: zstd_safe::CCtx<'static>) {
+    pub(crate) fn return_zstd_compressor(&self, level: i32, context: &mut Option<zstd_safe::CCtx<'static>>) {
         if self.is_disabled() {
             return;
         }
 
         if let Ok(mut guard) = self.inner.zstd_compressors.lock() {
             let idle = guard.entry(level).or_default();
-            if idle.len() < self.inner.capacity {
+            if idle.len() < self.inner.capacity
+                && let Some(context) = context.take()
+            {
                 idle.push(context);
             }
         }
@@ -264,15 +275,16 @@ impl Pool {
         Some(context)
     }
 
-    /// Returns a zstd decompressor for reuse, dropping it if the pool is already full.
+    /// Takes `context` for reuse, leaving it in place when the pool cannot keep it, for the reason given on `return_compressor`.
     #[cfg(feature = "zstd")]
-    pub(crate) fn return_zstd_decompressor(&self, context: zstd_safe::DCtx<'static>) {
+    pub(crate) fn return_zstd_decompressor(&self, context: &mut Option<zstd_safe::DCtx<'static>>) {
         if self.is_disabled() {
             return;
         }
 
         if let Ok(mut guard) = self.inner.zstd_decompressors.lock()
             && guard.len() < self.inner.capacity
+            && let Some(context) = context.take()
         {
             guard.push(context);
         }
@@ -348,7 +360,7 @@ mod tests {
             let pool = Pool::new();
             assert!(pool.take_compressor(key(6)).is_none(), "an empty pool has nothing to give");
 
-            pool.return_compressor(key(6), engine());
+            pool.return_compressor(key(6), &mut Some(engine()));
             assert_eq!(idle(&pool, key(6)), 1);
 
             assert!(pool.take_compressor(key(6)).is_some(), "the returned engine should come back");
@@ -358,7 +370,7 @@ mod tests {
         #[test]
         fn engines_are_not_shared_between_configurations() {
             let pool = Pool::new();
-            pool.return_compressor(key(6), engine());
+            pool.return_compressor(key(6), &mut Some(engine()));
 
             assert!(
                 pool.take_compressor(key(9)).is_none(),
@@ -370,7 +382,7 @@ mod tests {
         fn capacity_bounds_what_is_retained() {
             let pool = Pool::with_capacity(2);
             for _ in 0..5 {
-                pool.return_compressor(key(6), engine());
+                pool.return_compressor(key(6), &mut Some(engine()));
             }
 
             assert_eq!(idle(&pool, key(6)), 2, "only `capacity` engines are kept");
@@ -379,7 +391,7 @@ mod tests {
         #[test]
         fn zero_capacity_disables_recycling() {
             let pool = Pool::with_capacity(0);
-            pool.return_compressor(key(6), engine());
+            pool.return_compressor(key(6), &mut Some(engine()));
 
             assert_eq!(idle(&pool, key(6)), 0);
             assert!(pool.take_compressor(key(6)).is_none());
@@ -396,7 +408,7 @@ mod tests {
             assert!(dirty.total_in() > 0, "the engine should be dirty");
 
             let pool = Pool::new();
-            pool.return_compressor(key(6), dirty);
+            pool.return_compressor(key(6), &mut Some(dirty));
 
             let clean = pool.take_compressor(key(6)).expect("the engine comes back");
             assert_eq!(clean.total_in(), 0, "checkout must reset the engine");
@@ -416,7 +428,7 @@ mod tests {
             assert!(pool.inner.compressors.lock().is_err(), "the mutex must now be poisoned");
 
             // Recycling is an optimisation, so a poisoned pool must not panic the caller.
-            pool.return_compressor(key(6), engine());
+            pool.return_compressor(key(6), &mut Some(engine()));
             assert!(pool.take_compressor(key(6)).is_none(), "a poisoned pool has nothing to give");
         }
     }
@@ -454,7 +466,7 @@ mod tests {
             let pool = Pool::new();
             assert!(pool.take_decompressor(wrapper()).is_none(), "an empty pool has nothing to give");
 
-            pool.return_decompressor(wrapper(), engine());
+            pool.return_decompressor(wrapper(), &mut Some(engine()));
             assert_eq!(idle(&pool, wrapper()), 1);
 
             assert!(pool.take_decompressor(wrapper()).is_some(), "the returned engine should come back");
@@ -465,7 +477,7 @@ mod tests {
         fn capacity_bounds_what_is_retained() {
             let pool = Pool::with_capacity(2);
             for _ in 0..5 {
-                pool.return_decompressor(wrapper(), engine());
+                pool.return_decompressor(wrapper(), &mut Some(engine()));
             }
 
             assert_eq!(idle(&pool, wrapper()), 2, "only `capacity` engines are kept");
@@ -474,7 +486,7 @@ mod tests {
         #[test]
         fn zero_capacity_disables_decompressor_recycling() {
             let pool = Pool::with_capacity(0);
-            pool.return_decompressor(wrapper(), engine());
+            pool.return_decompressor(wrapper(), &mut Some(engine()));
 
             assert!(pool.take_decompressor(wrapper()).is_none());
         }
@@ -490,7 +502,7 @@ mod tests {
             assert!(poisoned.is_err(), "the panic should have been caught");
             assert!(pool.inner.decompressors.lock().is_err(), "the mutex must now be poisoned");
 
-            pool.return_decompressor(wrapper(), engine());
+            pool.return_decompressor(wrapper(), &mut Some(engine()));
             assert!(pool.take_decompressor(wrapper()).is_none(), "a poisoned pool has nothing to give");
         }
     }
@@ -518,7 +530,7 @@ mod tests {
             let pool = Pool::new();
             assert!(pool.take_zstd_compressor(3).is_none(), "an empty pool has nothing to give");
 
-            pool.return_zstd_compressor(3, zstd_safe::CCtx::create());
+            pool.return_zstd_compressor(3, &mut Some(zstd_safe::CCtx::create()));
             assert_eq!(idle_compressors(&pool, 3), 1);
 
             assert!(pool.take_zstd_compressor(3).is_some(), "the returned engine should come back");
@@ -529,7 +541,7 @@ mod tests {
         fn compressor_capacity_bounds_what_is_retained() {
             let pool = Pool::with_capacity(2);
             for _ in 0..5 {
-                pool.return_zstd_compressor(3, zstd_safe::CCtx::create());
+                pool.return_zstd_compressor(3, &mut Some(zstd_safe::CCtx::create()));
             }
 
             assert_eq!(idle_compressors(&pool, 3), 2, "only `capacity` engines are kept");
@@ -538,7 +550,7 @@ mod tests {
         #[test]
         fn zero_capacity_disables_zstd_compressor_recycling() {
             let pool = Pool::with_capacity(0);
-            pool.return_zstd_compressor(3, zstd_safe::CCtx::create());
+            pool.return_zstd_compressor(3, &mut Some(zstd_safe::CCtx::create()));
 
             assert!(pool.take_zstd_compressor(3).is_none());
         }
@@ -554,7 +566,7 @@ mod tests {
             assert!(poisoned.is_err(), "the panic should have been caught");
             assert!(pool.inner.zstd_compressors.lock().is_err(), "the mutex must now be poisoned");
 
-            pool.return_zstd_compressor(3, zstd_safe::CCtx::create());
+            pool.return_zstd_compressor(3, &mut Some(zstd_safe::CCtx::create()));
             assert!(pool.take_zstd_compressor(3).is_none(), "a poisoned pool has nothing to give");
         }
 
@@ -563,7 +575,7 @@ mod tests {
             let pool = Pool::new();
             assert!(pool.take_zstd_decompressor().is_none(), "an empty pool has nothing to give");
 
-            pool.return_zstd_decompressor(zstd_safe::DCtx::create());
+            pool.return_zstd_decompressor(&mut Some(zstd_safe::DCtx::create()));
             assert_eq!(idle_decompressors(&pool), 1);
 
             assert!(pool.take_zstd_decompressor().is_some(), "the returned engine should come back");
@@ -574,7 +586,7 @@ mod tests {
         fn decompressor_capacity_bounds_what_is_retained() {
             let pool = Pool::with_capacity(2);
             for _ in 0..5 {
-                pool.return_zstd_decompressor(zstd_safe::DCtx::create());
+                pool.return_zstd_decompressor(&mut Some(zstd_safe::DCtx::create()));
             }
 
             assert_eq!(idle_decompressors(&pool), 2, "only `capacity` engines are kept");
@@ -583,7 +595,7 @@ mod tests {
         #[test]
         fn zero_capacity_disables_zstd_decompressor_recycling() {
             let pool = Pool::with_capacity(0);
-            pool.return_zstd_decompressor(zstd_safe::DCtx::create());
+            pool.return_zstd_decompressor(&mut Some(zstd_safe::DCtx::create()));
 
             assert!(pool.take_zstd_decompressor().is_none());
         }
