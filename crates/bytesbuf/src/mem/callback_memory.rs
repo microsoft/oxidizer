@@ -132,8 +132,7 @@ mod tests {
     use std::sync::atomic::{self, AtomicUsize};
 
     use static_assertions::assert_impl_all;
-    use thread_aware::Relocator;
-    use thread_aware::Thread;
+    use thread_aware::{Relocator, Thread};
 
     use super::*;
     use crate::mem::MemoryShared;
