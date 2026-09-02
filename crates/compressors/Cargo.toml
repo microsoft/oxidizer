@@ -19,6 +19,14 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/compressors
 [package.metadata.coverage-gate]
 min-lines-percent = 100
 
+# Miri cannot run this crate's compression engines. `zstd-safe` binds the native zstd library, and
+# Miri cannot call foreign functions; `flate2`'s `zlib-rs` backend has an open soundness bug that
+# trips Stacked Borrows whenever a Deflate or Inflate is dropped
+# (https://github.com/trifectatechfoundation/zlib-rs/issues/491). Only the brotli path would remain,
+# which is not enough to justify the per-format `cfg(miri)` scaffolding the rest would need.
+[package.metadata.anvil.miri]
+exclude = true
+
 [package.metadata.docs.rs]
 all-features = true
 
