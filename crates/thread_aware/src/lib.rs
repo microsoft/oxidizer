@@ -48,7 +48,8 @@
 //! combines an upstream [`alloc::sync::Arc`] with a relocation [`Strategy`](storage::Strategy), and
 //! implements [`ThreadAware`] for it. For
 //! example, while an `Arc<Foo, PerProcess>` effectively acts as vanilla `Arc`, an
-//! `Arc<Foo, PerThread>` ensures a separate `Foo` is available any time the types moves a core boundary.
+//! `Arc<Foo, PerThread>` ensures a separate `Foo` is available for every destination thread it is
+//! relocated to.
 //!
 //!
 //! ## Relation to [`Send`]

@@ -57,7 +57,8 @@ External crates might often not implement [`ThreadAware`][__link6]. In many of t
 combines an upstream [`alloc::sync::Arc`][__link8] with a relocation [`Strategy`][__link9], and
 implements [`ThreadAware`][__link10] for it. For
 example, while an `Arc<Foo, PerProcess>` effectively acts as vanilla `Arc`, an
-`Arc<Foo, PerThread>` ensures a separate `Foo` is available any time the types moves a core boundary.
+`Arc<Foo, PerThread>` ensures a separate `Foo` is available for every destination thread it is
+relocated to.
 
 ### Relation to [`Send`][__link11]
 
@@ -162,7 +163,7 @@ impl Service {
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb5FWN1iQpmM8bLjOmKxdzwkcbBtJ9df6SOPobwpMVDTp1lk9hZIOCbHRocmVhZF9hd2FyZWYwLjExLjCCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4wgnN0aHJlYWRfYXdhcmVfbWFjcm9zZjAuMTEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbBGqmUWpNwHUbOW9JdLw0WRIbR8JhAVkeBOQblX-soYMyY65hZIOCbHRocmVhZF9hd2FyZWYwLjExLjCCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4wgnN0aHJlYWRfYXdhcmVfbWFjcm9zZjAuMTEuMA
  [__link0]: https://docs.rs/thread_aware/0.11.0/thread_aware/?search=thread::ThreadBuilder
  [__link1]: https://docs.rs/thread_aware_core
  [__link10]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
