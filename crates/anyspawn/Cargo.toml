@@ -74,10 +74,6 @@ required-features = ["tokio"]
 name = "otel_context"
 required-features = ["tokio"]
 
-[[example]]
-name = "thread_aware"
-required-features = ["tokio"]
-
 # >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
