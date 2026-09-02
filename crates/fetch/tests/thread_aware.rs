@@ -4,8 +4,8 @@
 //! Integration tests for thread-aware (per-core) client relocation.
 
 use std::assert_eq;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Barrier};
 
 use bytes::Bytes;
 use fetch::HttpClient;
@@ -31,8 +31,20 @@ async fn not_isolated_on_tokio() {
     assert_eq!(counts.load(Ordering::Relaxed), 1);
 
     let builder = ThreadBuilder::default();
-    for numa_node in 0..4 {
-        let thread = builder.clone().numa_node(numa_node).build(std::thread::current().id());
+    let barrier = Arc::new(Barrier::new(5));
+    let handles = (0..4)
+        .map(|numa_node| {
+            let barrier = Arc::clone(&barrier);
+            let builder = builder.clone().numa_node(numa_node);
+            std::thread::spawn(move || {
+                barrier.wait();
+                builder.build(std::thread::current().id())
+            })
+        })
+        .collect::<Vec<_>>();
+    barrier.wait();
+
+    for thread in handles.into_iter().map(|handle| handle.join().unwrap()) {
         let mut client_clone = client.clone();
         client_clone.relocate(None, &thread);
     }
