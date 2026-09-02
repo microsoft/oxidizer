@@ -2,6 +2,13 @@
 // Licensed under the MIT License.
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(
+    not(all(feature = "futures-stream", feature = "gzip")),
+    expect(
+        rustdoc::broken_intra_doc_links,
+        reason = "the crate documentation illustrates itself with gzip and CompressionStream, so its links need those features"
+    )
+)]
 
 //! Streaming compression and decompression over [`bytesbuf`] byte sequences.
 //!
@@ -10,7 +17,7 @@
 //! so moving between them is a change of import rather than a change of code.
 //!
 //! Compression engines normally speak `std::io::Read` and `std::io::Write`, which assume a single
-//! contiguous `&[u8]`. A [`BytesView`][bytesbuf::BytesView] is a chain of segments with no
+//! contiguous `&[u8]`. A [`BytesView`] is a chain of segments with no
 //! contiguous representation, so bridging the two through `std::io` would mean copying every byte
 //! into a flat buffer first. This crate drives the engine from the view's segments directly, and
 //! writes into the uninitialized spare capacity of a [`BytesBuf`][bytesbuf::BytesBuf], so no
@@ -22,6 +29,8 @@
 //! [`compress`] and [`decompress`] take an operation you already have instead, whatever built it.
 //!
 //! ```
+//! # #[cfg(feature = "gzip")]
+//! # {
 //! use bytesbuf::BytesView;
 //! use bytesbuf::mem::GlobalPool;
 //! use compressors::{Resources, gzip};
@@ -36,6 +45,7 @@
 //!     gzip::decompress(compressed, &Resources::default())?.to_vec(),
 //!     b"hello".to_vec()
 //! );
+//! # }
 //! # Ok::<(), compressors::Error>(())
 //! ```
 //!
@@ -48,6 +58,8 @@
 //! output chunk:
 //!
 //! ```
+//! # #[cfg(feature = "gzip")]
+//! # {
 //! use bytesbuf::mem::GlobalPool;
 //! use bytesbuf::{BytesBuf, BytesView};
 //! use compressors::core::{Compression, Output};
@@ -73,6 +85,7 @@
 //! }
 //!
 //! assert_eq!(plain.consume_all().to_vec(), b"streamed".to_vec());
+//! # }
 //! # Ok::<(), compressors::Error>(())
 //! ```
 //!
@@ -85,10 +98,12 @@
 //! and so fits anywhere a concrete one does:
 //!
 //! ```
+//! # #[cfg(feature = "gzip")]
+//! # {
 //! use bytesbuf::BytesView;
 //! use bytesbuf::mem::GlobalPool;
-//! use compressors::Resources;
 //! use compressors::Format;
+//! use compressors::Resources;
 //!
 //! let format = Format::from_content_encoding("gzip").expect("this build supports gzip");
 //!
@@ -102,6 +117,7 @@
 //!     format.decompress(compressed, &Resources::default())?.to_vec(),
 //!     b"runtime selected".to_vec()
 //! );
+//! # }
 //! # Ok::<(), compressors::Error>(())
 //! ```
 //!
@@ -117,6 +133,8 @@
 //! [`enable_pooling(0)`][Resources::enable_pooling] when there is genuinely nothing to reuse.
 //!
 //! ```
+//! # #[cfg(feature = "gzip")]
+//! # {
 //! use compressors::{Level, Resources, gzip};
 //!
 //! // Held once by the application, cloned into whatever needs it.
@@ -125,6 +143,7 @@
 //! // Per request: cheap to build, recycles the engine on drop.
 //! let compressor = gzip::Compressor::builder().level(Level::DEFAULT).build(resources);
 //! # let _ = compressor;
+//! # }
 //! ```
 //!
 //! Recycling is transparent -- it applies to the engines that are worth it and quietly skips the
@@ -164,10 +183,11 @@
 //!
 //! # Features
 //!
-//! Every format is a separate feature, so a build compiles only the engines it names:
+//! Every format is a separate feature and none is on by default, so a build compiles only the
+//! engines it names:
 //!
-//! * `gzip` -- the `gzip` module and `Format::Gzip`, via `flate2`. The only feature on by
-//!   default, being the encoding most often seen on the wire.
+//! * `gzip` -- the `gzip` module and `Format::Gzip`, via `flate2`. The encoding most often seen on
+//!   the wire, and the one to reach for when in doubt.
 //! * `deflate` -- the `deflate` module and `Format::Deflate`, via `flate2`.
 //! * `zlib` -- the `zlib` module and `Format::Zlib`, via `flate2`.
 //! * `brotli` -- the `brotli` module and `Format::Brotli`, via the pure-Rust `brotli` crate.
@@ -176,7 +196,9 @@
 //!   `futures_core::Stream` over any stream of byte sequences.
 //!
 //! The deflate-family features share one dependency, so enabling all three costs no more than one.
-//! A build that needs only `brotli` or only `zstd` never compiles `flate2` at all.
+//! A build that needs only `brotli` or only `zstd` never compiles `flate2` at all, and a build that
+//! names no format at all still gets [`Compression`], the builders and [`Resources`], which is what
+//! a crate that only passes operations around needs.
 
 #[cfg(feature = "brotli")]
 pub mod brotli;

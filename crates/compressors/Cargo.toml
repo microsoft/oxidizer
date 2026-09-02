@@ -27,9 +27,10 @@ allowed_external_types = ["bytesbuf::*", "futures_core::stream::Stream"]
 
 [features]
 brotli = ["dep:brotli"]
-# Gzip alone is the default: the most widely used format, and one dependency. Everything else is
-# opt-in, so a build that only needs brotli never compiles flate2, and vice versa.
-default = ["gzip"]
+# No format is enabled by default: a dependent names the ones it actually speaks, so a build that
+# only needs brotli never compiles flate2, and vice versa. A build with no format at all still gets
+# the shared contract and builders, which is what a crate that only re-exports them needs.
+default = []
 deflate = ["dep:flate2"]
 futures-stream = ["dep:futures-core", "dep:pin-project-lite"]
 gzip = ["dep:flate2"]

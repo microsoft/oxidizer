@@ -70,6 +70,8 @@ pub struct Decompress;
 /// # Examples
 ///
 /// ```
+/// # #[cfg(feature = "gzip")]
+/// # {
 /// use bytesbuf::BytesView;
 /// use bytesbuf::mem::{GlobalPool, MemoryShared};
 /// use compressors::core::{Compress, Compression};
@@ -86,6 +88,7 @@ pub struct Decompress;
 /// )?;
 ///
 /// assert_eq!(compressed.range(0..2).to_vec(), vec![0x1f, 0x8b]);
+/// # }
 /// # Ok::<(), compressors::Error>(())
 /// ```
 pub trait Compression: sealed::Compression + fmt::Debug + Send + Sync {

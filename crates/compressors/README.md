@@ -92,8 +92,8 @@ and so fits anywhere a concrete one does:
 ```rust
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
-use compressors::Resources;
 use compressors::Format;
+use compressors::Resources;
 
 let format = Format::from_content_encoding("gzip").expect("this build supports gzip");
 
@@ -167,10 +167,11 @@ Treat those bytes as provisional until the operation reports [`Output::Done`][__
 
 ## Features
 
-Every format is a separate feature, so a build compiles only the engines it names:
+Every format is a separate feature and none is on by default, so a build compiles only the
+engines it names:
 
-* `gzip` – the `gzip` module and `Format::Gzip`, via `flate2`. The only feature on by
-  default, being the encoding most often seen on the wire.
+* `gzip` – the `gzip` module and `Format::Gzip`, via `flate2`. The encoding most often seen on
+  the wire, and the one to reach for when in doubt.
 * `deflate` – the `deflate` module and `Format::Deflate`, via `flate2`.
 * `zlib` – the `zlib` module and `Format::Zlib`, via `flate2`.
 * `brotli` – the `brotli` module and `Format::Brotli`, via the pure-Rust `brotli` crate.
@@ -179,7 +180,9 @@ Every format is a separate feature, so a build compiles only the engines it name
   `futures_core::Stream` over any stream of byte sequences.
 
 The deflate-family features share one dependency, so enabling all three costs no more than one.
-A build that needs only `brotli` or only `zstd` never compiles `flate2` at all.
+A build that needs only `brotli` or only `zstd` never compiles `flate2` at all, and a build that
+names no format at all still gets [`Compression`][__link23], the builders and [`Resources`][__link24], which is what
+a crate that only passes operations around needs.
 
 
 <hr/>
@@ -187,7 +190,7 @@ A build that needs only `brotli` or only `zstd` never compiles `flate2` at all.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/compressors">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbZqLAk22gX0kbFWjZEiLHhG8bWjPLVC9opmMbLt7K6pMbsuRhZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbv6a55yULlkgbEEUyWBTHwrwbs4njkZQeSrMb9IvXgDAwWXJhZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
  [__link0]: https://crates.io/crates/bytesbuf/0.9.0
  [__link1]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesView
  [__link10]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressorBuilder::build_format
@@ -204,6 +207,8 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link20]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits::UNLIMITED
  [__link21]: https://docs.rs/compressors/0.1.0/compressors/?search=core::Output::Done
  [__link22]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressionStream
+ [__link23]: https://docs.rs/compressors/0.1.0/compressors/?search=core::Compression
+ [__link24]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
  [__link3]: https://docs.rs/compressors/0.1.0/compressors/fn.compress.html
  [__link4]: https://docs.rs/compressors/0.1.0/compressors/fn.decompress.html
  [__link5]: https://docs.rs/compressors/0.1.0/compressors/?search=gzip::Compressor

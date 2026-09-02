@@ -27,6 +27,8 @@ pub(crate) enum Kind {
 /// # Examples
 ///
 /// ```
+/// # #[cfg(feature = "gzip")]
+/// # {
 /// use bytesbuf::BytesView;
 /// use bytesbuf::mem::GlobalPool;
 /// use compressors::{Resources, gzip};
@@ -36,6 +38,7 @@ pub(crate) enum Kind {
 ///
 /// let error = gzip::decompress(not_gzip, &Resources::default()).unwrap_err();
 /// assert!(error.is_corrupt_data());
+/// # }
 /// ```
 #[derive(Debug)]
 pub struct Error {
