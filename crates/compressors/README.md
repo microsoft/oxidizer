@@ -85,7 +85,7 @@ assert_eq!(plain.consume_all().to_vec(), b"streamed".to_vec());
 
 The [`Compression`][__link8] trait describes the contract independently of the format and direction, so
 code can be written once and used with any implementation. When the format is only known at
-runtime – from a `Content-Encoding` token, say – [`format::Format`][__link9] resolves it, and
+runtime – from a `Content-Encoding` token, say – [`Format`][__link9] resolves it, and
 [`CompressorBuilder::build_format`][__link10] produces a boxed operation, which is itself a `Compression`
 and so fits anywhere a concrete one does:
 
@@ -93,7 +93,7 @@ and so fits anywhere a concrete one does:
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
 use compressors::Resources;
-use compressors::format::Format;
+use compressors::Format;
 
 let format = Format::from_content_encoding("gzip").expect("this build supports gzip");
 
@@ -141,8 +141,8 @@ untrusted data is a memory-exhaustion vector.
 The codecs themselves never accumulate: each `pull` hands back one bounded chunk, so nothing in
 this crate grows with the length of the stream. The exposure belongs to whatever the caller does
 with those chunks, which is why the limits matter most for the accumulating conveniences –
-`compress`, `decompress`, and [`format::Format::compress`][__link13] / [`format::Format::decompress`][__link14].
-Use each format’s `decompress_with_limits` or [`format::Format::decompress_with_limits`][__link15] for
+`compress`, `decompress`, and [`Format::compress`][__link13] / [`Format::decompress`][__link14].
+Use each format’s `decompress_with_limits` or [`Format::decompress_with_limits`][__link15] for
 untrusted in-memory input.
 
 Each format declares its own default bounds, because a single portable ratio cannot serve both
@@ -187,15 +187,15 @@ A build that needs only `brotli` or only `zstd` never compiles `flate2` at all.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/compressors">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbY7LJM4SzVbwbQ9O2OPPm1D0bgpqSGU-jCh4bkKFDOCyEHYxhZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbBl8tjF39M8YbgvrtspAvOccboY9vxVOsGMcbO1fWcHMbif5hZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
  [__link0]: https://crates.io/crates/bytesbuf/0.9.0
  [__link1]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesView
  [__link10]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressorBuilder::build_format
  [__link11]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
  [__link12]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources::enable_pooling
- [__link13]: https://docs.rs/compressors/0.1.0/compressors/?search=format::Format::compress
- [__link14]: https://docs.rs/compressors/0.1.0/compressors/?search=format::Format::decompress
- [__link15]: https://docs.rs/compressors/0.1.0/compressors/?search=format::Format::decompress_with_limits
+ [__link13]: https://docs.rs/compressors/0.1.0/compressors/?search=Format::compress
+ [__link14]: https://docs.rs/compressors/0.1.0/compressors/?search=Format::decompress
+ [__link15]: https://docs.rs/compressors/0.1.0/compressors/?search=Format::decompress_with_limits
  [__link16]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressionLimits
  [__link17]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressionLimits::default
  [__link18]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressionLimits::with_max_output_len
@@ -210,4 +210,4 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link6]: https://docs.rs/compressors/0.1.0/compressors/?search=gzip::Decompressor
  [__link7]: https://docs.rs/compressors/0.1.0/compressors/?search=core::Compression
  [__link8]: https://docs.rs/compressors/0.1.0/compressors/?search=core::Compression
- [__link9]: https://docs.rs/compressors/0.1.0/compressors/?search=format::Format
+ [__link9]: https://docs.rs/compressors/0.1.0/compressors/?search=Format

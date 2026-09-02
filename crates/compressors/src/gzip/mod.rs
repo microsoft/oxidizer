@@ -29,7 +29,7 @@
 
 use crate::flate::Wrapper;
 use crate::flate::codec::{FlateCompress, FlateDecompress};
-use crate::format::macros::define_format;
+use crate::macros::define_format;
 
 /// Selects gzip as the format of a [`CompressorBuilder`] or [`DecompressorBuilder`].
 ///

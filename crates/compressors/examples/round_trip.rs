@@ -7,7 +7,7 @@
 
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
-use compressors::format::Format;
+use compressors::Format;
 use compressors::{Resources, Result, gzip};
 
 fn main() -> Result<()> {

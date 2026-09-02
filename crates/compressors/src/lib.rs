@@ -80,7 +80,7 @@
 //!
 //! The [`Compression`] trait describes the contract independently of the format and direction, so
 //! code can be written once and used with any implementation. When the format is only known at
-//! runtime -- from a `Content-Encoding` token, say -- [`format::Format`] resolves it, and
+//! runtime -- from a `Content-Encoding` token, say -- [`Format`] resolves it, and
 //! [`CompressorBuilder::build_format`] produces a boxed operation, which is itself a `Compression`
 //! and so fits anywhere a concrete one does:
 //!
@@ -88,7 +88,7 @@
 //! use bytesbuf::BytesView;
 //! use bytesbuf::mem::GlobalPool;
 //! use compressors::Resources;
-//! use compressors::format::Format;
+//! use compressors::Format;
 //!
 //! let format = Format::from_content_encoding("gzip").expect("this build supports gzip");
 //!
@@ -138,8 +138,8 @@
 //! The codecs themselves never accumulate: each `pull` hands back one bounded chunk, so nothing in
 //! this crate grows with the length of the stream. The exposure belongs to whatever the caller does
 //! with those chunks, which is why the limits matter most for the accumulating conveniences --
-//! `compress`, `decompress`, and [`format::Format::compress`] / [`format::Format::decompress`].
-//! Use each format's `decompress_with_limits` or [`format::Format::decompress_with_limits`] for
+//! `compress`, `decompress`, and [`Format::compress`] / [`Format::decompress`].
+//! Use each format's `decompress_with_limits` or [`Format::decompress_with_limits`] for
 //! untrusted in-memory input.
 //!
 //! Each format declares its own default bounds, because a single portable ratio cannot serve both
@@ -190,11 +190,13 @@ mod error;
 #[cfg(any(feature = "deflate", feature = "gzip", feature = "zlib"))]
 mod flate;
 #[cfg(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
-pub mod format;
+mod format;
 #[cfg(feature = "gzip")]
 pub mod gzip;
 mod level;
 mod limits;
+#[cfg(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
+mod macros;
 mod output;
 mod pool;
 mod resources;
@@ -209,6 +211,8 @@ mod stream;
 
 pub use builder::{CompressorBuilder, DecompressorBuilder};
 pub use error::{BuildError, Error, Result};
+#[cfg(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
+pub use format::Format;
 pub use level::Level;
 pub use limits::DecompressionLimits;
 pub use output::Output;
@@ -240,7 +244,7 @@ use crate::core::{Compress, Compression, Decompress, process};
 /// # #[cfg(feature = "gzip")]
 /// # {
 /// use bytesbuf::BytesView;
-/// use compressors::format::Format;
+/// use compressors::Format;
 /// use compressors::{CompressorBuilder, Resources, gzip};
 ///
 /// let resources = Resources::global();

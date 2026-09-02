@@ -32,8 +32,8 @@
 
 mod codec;
 
-use crate::format::macros::define_format;
 use crate::limits::FormatLimits;
+use crate::macros::define_format;
 use crate::zstd::codec::{ZstdCompress, ZstdDecompress};
 
 /// Zstd's default bounds.

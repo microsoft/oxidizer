@@ -229,8 +229,8 @@ mod tests {
     use futures::{StreamExt, stream};
 
     use super::*;
+    use crate::Format;
     use crate::core::ProgressCompression;
-    use crate::format::Format;
     use crate::{DecompressionLimits, Level, Resources, gzip};
 
     fn view(bytes: &[u8]) -> BytesView {

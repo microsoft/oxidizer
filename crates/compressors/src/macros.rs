@@ -408,7 +408,7 @@ macro_rules! define_format {
             }
         }
 
-        $crate::format::macros::define_compressor_build! {
+        $crate::macros::define_compressor_build! {
             $compressor_build, $name, $format, $build_method, $new_compressor
         }
 
@@ -465,7 +465,7 @@ macro_rules! define_format {
             }
         }
 
-        $crate::format::macros::define_decompressor_build! {
+        $crate::macros::define_decompressor_build! {
             $decompressor_build,
             $name,
             $format,

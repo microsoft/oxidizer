@@ -40,7 +40,7 @@ use crate::limits::FormatLimits;
 /// legitimate highly-compressible data. Callers handling untrusted input should set an absolute
 /// output limit based on how much data they can afford to buffer.
 const DEFAULT_LIMITS: FormatLimits = FormatLimits::new(None, None);
-use crate::format::macros::define_format;
+use crate::macros::define_format;
 
 /// Selects brotli as the format of a [`CompressorBuilder`] or [`DecompressorBuilder`], and carries
 /// the settings only brotli has.

@@ -3,18 +3,8 @@
 
 //! Choosing a compression format at runtime.
 //!
-//! The format modules (`gzip` and friends) are the right choice when the format is
-//! known at compile time. This module is for when it is not: encoding whatever a client asked for,
-//! or decoding whatever a peer declared it sent.
-//!
-//! [`Format`] is the entry point. It has no builders of its own: the shared
-//! [`CompressorBuilder`][crate::CompressorBuilder] and
-//! [`DecompressorBuilder`][crate::DecompressorBuilder] carry the settings, and their
-//! `build_format` methods -- defined here, because this is where the enum lives -- turn a `Format`
-//! into a boxed operation.
-
-#[cfg(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
-pub(crate) mod macros;
+//! [`Format`] is the entry point, and the `build_format` methods on the shared builders live here
+//! beside it, because this is the only place that has to know every format by name.
 
 use bytesbuf::BytesView;
 
@@ -35,7 +25,7 @@ use crate::resources::Resources;
 /// ```
 /// use bytesbuf::BytesView;
 /// use bytesbuf::mem::GlobalPool;
-/// use compressors::format::Format;
+/// use compressors::Format;
 /// use compressors::core::Compression;
 /// use compressors::{CompressorBuilder, Level, Resources};
 ///

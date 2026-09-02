@@ -14,8 +14,8 @@ use std::sync::OnceLock;
 
 use bytesbuf::mem::GlobalPool;
 use bytesbuf::{BytesBuf, BytesView};
+use compressors::Format;
 use compressors::core::{Compress, Compression, Decompress};
-use compressors::format::Format;
 use compressors::{CompressorBuilder, DecompressionLimits, DecompressorBuilder, Level, Output, Resources, TrailingData};
 
 fn view(bytes: &[u8]) -> BytesView {
