@@ -13,7 +13,7 @@
 //! Streaming compression and decompression over [`bytesbuf`] byte sequences.
 //!
 //! Five formats are available, each behind a cargo feature of its own: `deflate`, `zlib`,
-//! `gzip`, `brotli` and `zstd`. Each lives in its own module and exposes the same seven items,
+//! `gzip`, `brotli` and `zstd`. Each lives in its own module and exposes the same handful of items,
 //! so moving between them is a change of import rather than a change of code.
 //!
 //! Compression engines normally speak `std::io::Read` and `std::io::Write`, which assume a single
@@ -32,89 +32,75 @@
 //! # #[cfg(feature = "gzip")]
 //! # {
 //! use bytesbuf::BytesView;
-//! use bytesbuf::mem::GlobalPool;
 //! use compressors::{Resources, gzip};
 //!
-//! let memory = GlobalPool::new();
+//! let resources = Resources::global();
 //! let compressed = gzip::compress(
-//!     BytesView::copied_from_slice(b"hello", &memory),
-//!     &Resources::default(),
+//!     BytesView::copied_from_slice(b"hello", resources.memory()),
+//!     resources,
 //! )?;
 //!
-//! assert_eq!(
-//!     gzip::decompress(compressed, &Resources::default())?.to_vec(),
-//!     b"hello".to_vec()
-//! );
+//! assert_eq!(gzip::decompress(compressed, resources)?.to_vec(), b"hello".to_vec());
 //! # }
 //! # Ok::<(), compressors::Error>(())
 //! ```
 //!
 //! # Streaming
 //!
-//! [`gzip::Compressor`] and [`gzip::Decompressor`] are push/pull state machines rather than one-shot
-//! transforms. They carry no operations of their own: everything is driven through
-//! [`Compression`], so the same loop works for any format. Each `pull` returns at most one chunk,
-//! so processing a multi-gigabyte stream never holds more than one pending input view plus one
-//! output chunk:
+//! A codec is a state machine rather than a one-shot transform, so a stream of any length moves
+//! through it with a bounded working set: one pending input view and one output chunk, however many
+//! gigabytes pass through. [`CompressionStream`], behind the `futures-stream` feature, is how to
+//! reach that -- it turns any stream of byte sequences into its compressed or decompressed
+//! counterpart:
 //!
 //! ```
-//! # #[cfg(feature = "gzip")]
+//! # #[cfg(all(feature = "futures-stream", feature = "gzip"))]
 //! # {
-//! use bytesbuf::mem::GlobalPool;
-//! use bytesbuf::{BytesBuf, BytesView};
-//! use compressors::core::{Compression, Output};
-//! use compressors::{Resources, gzip};
+//! use bytesbuf::BytesView;
+//! use compressors::{CompressionStream, Resources, gzip};
+//! use futures::StreamExt;
+//! use futures::stream;
 //!
-//! # let memory = GlobalPool::new();
-//! # let source = vec![gzip::compress(
-//! #     BytesView::copied_from_slice(b"streamed", &memory), &Resources::default())?];
-//! let mut decompressor = gzip::Decompressor::new(&Resources::default());
-//! let mut chunks = source.into_iter();
-//! let mut plain = BytesBuf::new();
+//! # futures::executor::block_on(async {
+//! let resources = Resources::global();
+//! let body = stream::iter(vec![
+//!     Ok::<_, std::io::Error>(BytesView::copied_from_slice(b"a body ", resources.memory())),
+//!     Ok(BytesView::copied_from_slice(b"in pieces", resources.memory())),
+//! ]);
 //!
-//! loop {
-//!     match decompressor.pull()? {
-//!         Output::Data(data) => plain.put_bytes(data),
-//!         Output::Progress => {}
-//!         Output::NeedInput => match chunks.next() {
-//!             Some(chunk) => decompressor.push(chunk)?,
-//!             None => decompressor.end_input(),
-//!         },
-//!         Output::Done => break,
-//!     }
-//! }
+//! let chunks: Vec<_> = CompressionStream::compress(body, gzip::Compressor::new(resources))
+//!     .collect()
+//!     .await;
 //!
-//! assert_eq!(plain.consume_all().to_vec(), b"streamed".to_vec());
+//! let gzip = BytesView::from_views(chunks.into_iter().map(|chunk| chunk.unwrap()));
+//! assert_eq!(gzip.range(0..2).to_vec(), vec![0x1f, 0x8b]);
+//! # });
 //! # }
-//! # Ok::<(), compressors::Error>(())
 //! ```
 //!
 //! # Choosing a format
 //!
-//! The [`Compression`] trait describes the contract independently of the format and direction, so
-//! code can be written once and used with any implementation. When the format is only known at
-//! runtime -- from a `Content-Encoding` token, say -- [`Format`] resolves it, and
-//! [`CompressorBuilder::build_format`] produces a boxed operation, which is itself a `Compression`
-//! and so fits anywhere a concrete one does:
+//! When the format is only known at runtime -- from a `Content-Encoding` token, say -- [`Format`]
+//! resolves the token and compresses with whatever it names. Reach for
+//! [`CompressorBuilder::build_format`] instead when the level or the chunk size matters: it returns
+//! an operation that fits wherever a concrete one does.
 //!
 //! ```
 //! # #[cfg(feature = "gzip")]
 //! # {
 //! use bytesbuf::BytesView;
-//! use bytesbuf::mem::GlobalPool;
-//! use compressors::Format;
-//! use compressors::Resources;
+//! use compressors::{Format, Resources};
 //!
 //! let format = Format::from_content_encoding("gzip").expect("this build supports gzip");
 //!
-//! let memory = GlobalPool::new();
+//! let resources = Resources::global();
 //! let compressed = format.compress(
-//!     BytesView::copied_from_slice(b"runtime selected", &memory),
-//!     &Resources::default(),
+//!     BytesView::copied_from_slice(b"runtime selected", resources.memory()),
+//!     resources,
 //! )?;
 //!
 //! assert_eq!(
-//!     format.decompress(compressed, &Resources::default())?.to_vec(),
+//!     format.decompress(compressed, resources)?.to_vec(),
 //!     b"runtime selected".to_vec()
 //! );
 //! # }
@@ -151,35 +137,19 @@
 //!
 //! # Security
 //!
-//! Every one of these formats can expand its input by orders of magnitude, so a decompressor pointed at
-//! untrusted data is a memory-exhaustion vector.
+//! Every one of these formats can expand its input by orders of magnitude, so a decompressor
+//! pointed at untrusted data is a memory-exhaustion vector. Nothing here accumulates -- each chunk a
+//! codec hands back is bounded -- so the exposure is in what the caller keeps, which makes it the
+//! conveniences that buffer a whole result that need bounding.
 //!
-//! The codecs themselves never accumulate: each `pull` hands back one bounded chunk, so nothing in
-//! this crate grows with the length of the stream. The exposure belongs to whatever the caller does
-//! with those chunks, which is why the limits matter most for the accumulating conveniences --
-//! `compress`, `decompress`, and [`Format::compress`] / [`Format::decompress`].
-//! Use each format's `decompress_with_limits` or [`Format::decompress_with_limits`] for
-//! untrusted in-memory input.
+//! For untrusted input use each format's `decompress_with_limits`, or
+//! [`Format::decompress_with_limits`], and set
+//! [`with_max_output_len`][DecompressorLimits::with_max_output_len] to what you can afford to
+//! buffer. [`DecompressorLimits`] documents what each format bounds by default, and why a ratio
+//! alone is not protection.
 //!
-//! Each format declares its own default bounds, because a single portable ratio cannot serve both
-//! families. Deflate cannot expand by more than about `1032x` -- a structural property of the format --
-//! so the deflate family defaults to `1100x` and never rejects data it could legitimately have
-//! produced. Brotli has no such ceiling: measured on ordinary repetitive input it reaches `9 000x`
-//! for a repeated short string, `21 000x` for a repeated sentence and `80 660x` for a megabyte of
-//! zeros. It therefore has no default ratio limit; callers handling untrusted Brotli input must set
-//! an absolute output limit.
-//!
-//! [`DecompressorLimits`] carries *overrides*, not values: bounds you leave unset keep the
-//! format's default, so [`DecompressorLimits::default()`] never silently imposes one format's
-//! calibration on another.
-//!
-//! **A ratio limit is therefore a coarse backstop, not real protection.** For untrusted input, set
-//! [`DecompressorLimits::with_max_output_len`] to whatever the caller can actually afford to
-//! buffer, and [`DecompressorLimits::with_max_streams`] when concatenated streams are accepted.
-//! Use [`DecompressorLimits::UNLIMITED`] only for sources you trust as much as your own process.
-//!
-//! Streaming decompression can yield bytes before a final checksum or trailer has been verified.
-//! Treat those bytes as provisional until the operation reports [`Output::Done`][core::Output::Done].
+//! Decompression can yield bytes before a checksum or trailer has rejected the stream, so treat
+//! them as provisional until the operation reports that it is done.
 //!
 //! # Features
 //!
