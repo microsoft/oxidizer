@@ -5790,6 +5790,7 @@ dependencies = [
  "dashmap",
  "futures-util",
  "mutants",
+ "static_assertions",
  "thread_aware",
  "tokio",
 ]

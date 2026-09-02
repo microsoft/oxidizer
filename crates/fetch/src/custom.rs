@@ -20,7 +20,7 @@ use std::sync::Arc;
 use bytesbuf::mem::GlobalPool;
 use http_extensions::{HttpBodyBuilder, RequestHandler};
 use opentelemetry::metrics::Meter;
-use thread_aware::{PerCore, ThreadAware, unaware};
+use thread_aware::{PerThread, ThreadAware, unaware};
 use tick::Clock;
 
 use crate::handlers::TransportHandler;
@@ -243,7 +243,7 @@ pub(crate) struct Transport {
     runtime_name: Cow<'static, str>,
     #[thread_aware(skip)]
     name: Cow<'static, str>,
-    inner: thread_aware::Arc<TransportFn, PerCore>,
+    inner: thread_aware::Arc<TransportFn, PerThread>,
     clock: Clock,
     global_pool: GlobalPool,
     isolation: Isolation,

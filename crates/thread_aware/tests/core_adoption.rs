@@ -3,26 +3,42 @@
 
 #![expect(missing_docs, reason = "integration test")]
 
+use std::sync::Arc as StdArc;
+use std::thread;
+
+use thread_aware::thread::ThreadBuilder;
+use thread_aware::{Arc, NumaNode, Owner, PerThread, Thread, ThreadAware};
+
 #[test]
-#[ignore = "implementation stub"]
 fn reexports_core_vocabulary() {
-    // Assert that ThreadAware, Thread, Owner, and NumaNode are available from thread_aware.
+    fn accepts_core_types<T: ThreadAware>(_: Option<&Thread>, _: &Owner, _: &NumaNode) {}
+
+    let thread = ThreadBuilder::default().build(thread::current().id());
+    accepts_core_types::<u32>(Some(&thread), thread.owner(), thread.numa_node());
 }
 
 #[test]
-#[ignore = "implementation stub"]
-fn storage_starts_with_default_capacity() {
-    // Construct Storage and assert that it reserves capacity for at least 32 entries.
-}
-
-#[test]
-#[ignore = "implementation stub"]
 fn relocate_across_owners_keeps_carried_value() {
-    // Relocate an Arc between different owners and assert that its carried allocation is unchanged.
+    let source = ThreadBuilder::default().build(thread::current().id());
+    let destination = ThreadBuilder::default().with_numa_node(1).build(thread::current().id());
+    let mut value = Arc::<_, PerThread>::from_unaware(42_u32);
+    let carried = value.clone().into_arc();
+
+    value.relocate(Some(&source), &destination);
+
+    assert!(StdArc::ptr_eq(&carried, &value.into_arc()));
 }
 
 #[test]
-#[ignore = "implementation stub"]
 fn relocate_within_owner_materializes_destination() {
-    // Relocate an Arc within one owner and assert that the destination-keyed value is materialized.
+    let builder = ThreadBuilder::default();
+    let source = builder.build(thread::current().id());
+    let destination_id = thread::spawn(|| thread::current().id()).join().unwrap();
+    let destination = builder.with_numa_node(1).build(destination_id);
+    let mut value = Arc::<_, PerThread>::from_unaware(42_u32);
+    let carried = value.clone().into_arc();
+
+    value.relocate(Some(&source), &destination);
+
+    assert!(!StdArc::ptr_eq(&carried, &value.into_arc()));
 }

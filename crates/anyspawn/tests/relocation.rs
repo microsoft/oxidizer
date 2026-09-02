@@ -14,9 +14,18 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use anyspawn::{BoxedBlockingTask, BoxedFuture, SpawnCustom, Spawner};
-use thread_aware::ThreadAware;
-use thread_aware::affinity::{self, pinned_affinities};
 use thread_aware::closure::ThreadAwareAsyncFnOnce;
+use thread_aware::thread::ThreadBuilder;
+use thread_aware::{Thread, ThreadAware};
+
+fn test_threads() -> [Thread; 2] {
+    let builder = ThreadBuilder::default();
+    let source = builder.build(std::thread::current().id());
+    let destination = std::thread::spawn(move || builder.build(std::thread::current().id()))
+        .join()
+        .unwrap();
+    [source, destination]
+}
 
 /// Per-process spawner: relocation must not change which spawn function is used.
 ///
@@ -30,7 +39,7 @@ fn per_process_relocation_preserves_spawn_function() {
     struct CountingSpawner(Arc<AtomicUsize>);
 
     impl ThreadAware for CountingSpawner {
-        fn relocate(&mut self, _: Option<affinity::Affinity>, _: affinity::Affinity) {}
+        fn relocate(&mut self, _: Option<&Thread>, _: &Thread) {}
     }
 
     impl SpawnCustom for CountingSpawner {
@@ -50,10 +59,10 @@ fn per_process_relocation_preserves_spawn_function() {
 
     let spawner = Spawner::new_custom("shared", CountingSpawner(Arc::clone(&call_count)));
 
-    let affinities = pinned_affinities(&[2]);
+    let threads = test_threads();
     let original = spawner.clone();
     let mut spawner = spawner;
-    spawner.relocate(Some(affinities[0]), affinities[1]);
+    spawner.relocate(Some(&threads[0]), &threads[1]);
 
     let r1 = futures::executor::block_on(original.spawn(async { 1 }));
     let r2 = futures::executor::block_on(spawner.spawn(async { 2 }));
@@ -77,7 +86,7 @@ fn thread_aware_relocation_invokes_relocated_for_new_core() {
     struct CountingSpawner;
 
     impl ThreadAware for CountingSpawner {
-        fn relocate(&mut self, _: Option<affinity::Affinity>, _: affinity::Affinity) {
+        fn relocate(&mut self, _: Option<&Thread>, _: &Thread) {
             RELOCATE_CALLS.fetch_add(1, Ordering::SeqCst);
         }
     }
@@ -101,10 +110,10 @@ fn thread_aware_relocation_invokes_relocated_for_new_core() {
 
     let before = RELOCATE_CALLS.load(Ordering::SeqCst);
 
-    let affinities = pinned_affinities(&[2]);
+    let threads = test_threads();
     let original = spawner.clone();
     let mut spawner = spawner;
-    spawner.relocate(Some(affinities[0]), affinities[1]);
+    spawner.relocate(Some(&threads[0]), &threads[1]);
 
     assert!(
         RELOCATE_CALLS.load(Ordering::SeqCst) > before,
@@ -134,7 +143,7 @@ fn thread_aware_relocated_spawner_dispatches_through_destination() {
     }
 
     impl ThreadAware for IdSpawner {
-        fn relocate(&mut self, _: Option<affinity::Affinity>, _: affinity::Affinity) {
+        fn relocate(&mut self, _: Option<&Thread>, _: &Thread) {
             self.id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
         }
     }
@@ -156,10 +165,10 @@ fn thread_aware_relocated_spawner_dispatches_through_destination() {
 
     let spawner = Spawner::new_custom("per-core", IdSpawner { id: 0 });
 
-    let affinities = pinned_affinities(&[2]);
+    let threads = test_threads();
     let original = spawner.clone();
     let mut spawner = spawner;
-    spawner.relocate(Some(affinities[0]), affinities[1]);
+    spawner.relocate(Some(&threads[0]), &threads[1]);
 
     futures::executor::block_on(original.spawn(async {}));
     futures::executor::block_on(spawner.spawn(async {}));
@@ -176,7 +185,7 @@ fn thread_aware_relocated_spawner_dispatches_through_destination() {
 /// Verify that `spawn_anywhere` relocates the task data before execution.
 ///
 /// Uses a custom spawner whose `spawn_anywhere` relocates the task to a
-/// different affinity before calling `call_once`, exercising
+/// different thread coordinate before calling `call_once`, exercising
 /// `SpawnAnywhereTask::relocate`.
 #[test]
 fn spawn_anywhere_relocates_task_data() {
@@ -188,7 +197,7 @@ fn spawn_anywhere_relocates_task_data() {
     struct Tracker(bool);
 
     impl ThreadAware for Tracker {
-        fn relocate(&mut self, _: Option<affinity::Affinity>, _: affinity::Affinity) {
+        fn relocate(&mut self, _: Option<&Thread>, _: &Thread) {
             self.0 = true;
             DATA_WAS_RELOCATED.store(true, Ordering::SeqCst);
         }
@@ -199,7 +208,7 @@ fn spawn_anywhere_relocates_task_data() {
     struct RelocatingSpawner;
 
     impl ThreadAware for RelocatingSpawner {
-        fn relocate(&mut self, _: Option<affinity::Affinity>, _: affinity::Affinity) {}
+        fn relocate(&mut self, _: Option<&Thread>, _: &Thread) {}
     }
 
     impl SpawnCustom for RelocatingSpawner {
@@ -208,8 +217,8 @@ fn spawn_anywhere_relocates_task_data() {
         }
 
         fn spawn_anywhere(&self, mut task: Box<dyn ThreadAwareAsyncFnOnce<()>>) {
-            let affinities = pinned_affinities(&[2]);
-            task.relocate(Some(affinities[0]), affinities[1]);
+            let threads = test_threads();
+            task.relocate(Some(&threads[0]), &threads[1]);
             self.spawn(task.call_once());
         }
 

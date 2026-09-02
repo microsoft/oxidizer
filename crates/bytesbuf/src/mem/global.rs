@@ -38,7 +38,7 @@ use crate::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, Me
 /// [thread-aware]: https://docs.rs/thread_aware
 #[derive(Clone, Debug, ThreadAware)]
 pub struct GlobalPool {
-    inner: thread_aware::Arc<GlobalPoolInner, thread_aware::PerCore>,
+    inner: thread_aware::Arc<GlobalPoolInner, thread_aware::PerThread>,
 }
 
 impl GlobalPool {
@@ -58,7 +58,7 @@ impl GlobalPool {
     )]
     pub fn new() -> Self {
         Self {
-            inner: thread_aware::Arc::<_, thread_aware::PerCore>::new(GlobalPoolInner::new),
+            inner: thread_aware::Arc::<_, thread_aware::PerThread>::new(GlobalPoolInner::new),
         }
     }
 
@@ -476,8 +476,8 @@ std::thread_local! {
 
     // Counts how many GlobalPoolInner instances have been created. Each instance owns its own
     // memory capacity, so creating many of them defeats the purpose of pooling. In typical usage
-    // with a thread-aware GlobalPool backed by thread_aware::PerCore, there is at most one
-    // instance per core/affinity (for pinned worker threads), so application owners can use this
+    // with a thread-aware GlobalPool backed by thread_aware::PerThread, there is at most one
+    // instance per worker thread, so application owners can use this
     // metric to detect if something is inadvertently creating an excessive number of pools instead
     // of reusing existing ones.
     static INSTANCES_CREATED: Event = Event::builder()
@@ -493,13 +493,21 @@ mod tests {
     use std::thread;
 
     use static_assertions::assert_impl_all;
-    use thread_aware::affinity::pinned_affinities;
+    use thread_aware::Thread;
+    use thread_aware::thread::ThreadBuilder;
 
     use super::*;
     use crate::mem::MemoryShared;
 
     assert_impl_all!(GlobalPool: MemoryShared);
     assert_impl_all!(GlobalPool: ThreadAware);
+
+    fn test_threads() -> [Thread; 2] {
+        let builder = ThreadBuilder::default();
+        let source = builder.build(thread::current().id());
+        let destination = thread::spawn(move || builder.build(thread::current().id())).join().unwrap();
+        [source, destination]
+    }
 
     /// Helper to assert all sub-pools are empty.
     fn assert_all_pools_empty(inner: &GlobalPoolInner) {
@@ -808,9 +816,9 @@ mod tests {
 
     #[test]
     fn relocated_pool_works() {
-        let affinities = pinned_affinities(&[2]);
-        let source = Some(affinities[0]);
-        let destination = affinities[1];
+        let threads = test_threads();
+        let source = Some(&threads[0]);
+        let destination = &threads[1];
 
         let mut memory = GlobalPool::new();
 
@@ -820,7 +828,7 @@ mod tests {
         let view = buf.consume_all();
         assert_eq!(view.first_slice()[0], 42);
 
-        // Relocate the pool to a different affinity.
+        // Relocate the pool to a different thread coordinate.
         memory.relocate(source, destination);
 
         // The relocated pool should work independently.

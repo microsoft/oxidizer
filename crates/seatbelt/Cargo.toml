@@ -31,8 +31,7 @@ allowed_external_types = [
     "tower_layer::Layer",
     "tower_service::Service",
     "thread_aware::core::ThreadAware",
-    "thread_aware::affinity::MemoryAffinity",
-    "thread_aware::affinity::PinnedAffinity",
+    "thread_aware::core::Thread",
 ]
 
 [package.metadata.docs.rs]

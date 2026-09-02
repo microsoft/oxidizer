@@ -10,7 +10,7 @@ use anyspawn::{BoxedBlockingTask, BoxedFuture, SpawnCustom, Spawner};
 use thread_aware::ThreadAware;
 use thread_aware::closure::ThreadAwareAsyncFnOnce;
 
-static_assertions::assert_impl_all!(Spawner: Send, Sync);
+static_assertions::assert_impl_all!(Spawner: Send, Sync, ThreadAware);
 
 #[tokio::test]
 async fn tokio_spawn_and_await() {

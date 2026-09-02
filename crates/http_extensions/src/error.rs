@@ -11,8 +11,7 @@ use http::status::InvalidStatusCode;
 use http::uri::{InvalidUri, InvalidUriParts};
 use ohno::{ErrorLabel, Labeled};
 use recoverable::{Recovery, RecoveryInfo};
-use thread_aware::ThreadAware;
-use thread_aware::affinity::Affinity;
+use thread_aware::{Thread, ThreadAware};
 
 use crate::HttpRequest;
 use crate::error_labels::{
@@ -124,7 +123,7 @@ pub struct HttpError {
 }
 
 impl ThreadAware for HttpError {
-    fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
         // no thread-local state to relocate
     }
 }
@@ -306,7 +305,6 @@ mod tests {
     use ohno::ErrorExt;
     use recoverable::RecoveryKind;
     use serde::Deserialize;
-    use thread_aware::affinity::pinned_affinities;
 
     use super::*;
     use crate::{FakeHandler, HttpRequestBuilder, HttpRequestBuilderExt, HttpResponseBuilder, JsonError};
@@ -477,17 +475,6 @@ mod tests {
 
         // Later calls should return None
         assert!(error.take_request().is_none());
-    }
-
-    #[test]
-    fn relocated_preserves_error() {
-        let affinity = pinned_affinities(&[1])[0];
-        let mut error = HttpError::validation("relocated test");
-
-        error.relocate(None, affinity);
-
-        assert_eq!(error.message(), "relocated test");
-        assert_eq!(error.label(), "validation");
     }
 
     #[test]

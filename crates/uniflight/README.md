@@ -68,15 +68,15 @@ assert_eq!(result, Ok(42));
 type parameter. This controls how the internal state is partitioned across threads/NUMA nodes:
 
 * [`PerProcess`][__link4] (default): Single global state, maximum deduplication
-* [`PerNuma`][__link5]: Separate state per NUMA node, NUMA-local memory access
-* [`PerCore`][__link6]: Separate state per core, no deduplication (useful for already-partitioned work)
+* [`PerNumaNode`][__link5]: Separate state per NUMA node, NUMA-local memory access
+* [`PerThread`][__link6]: Separate state per thread, no deduplication (useful for already-partitioned work)
 
 ```rust
-use thread_aware::PerNuma;
+use thread_aware::PerNumaNode;
 use uniflight::Merger;
 
 // NUMA-aware merger - each NUMA node gets its own deduplication scope
-let merger: Merger<String, String, PerNuma> = Merger::new_per_numa();
+let merger: Merger<String, String, PerNumaNode> = Merger::new_per_numa();
 ```
 
 ## Cancellation and Panic Handling
@@ -135,7 +135,7 @@ Use `--save-baseline` and `--baseline` flags to track regressions over time.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/uniflight">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb4YsqHKJIO4Ebne8KVDRuJvAbVEqIpjwMtY4bZY2vS6iuAethZIKCbHRocmVhZF9hd2FyZWYwLjExLjCCaXVuaWZsaWdodGUwLjUuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbxVH-5Ud_Z5wbpx0B6dpq9YgblhlS6AAhGgUb5EKrOvxlkOlhZIKCbHRocmVhZF9hd2FyZWYwLjExLjCCaXVuaWZsaWdodGUwLjUuMA
  [__link0]: https://docs.rs/uniflight/0.5.0/uniflight/struct.Merger.html
  [__link1]: https://docs.rs/uniflight/0.5.0/uniflight/?search=Merger::execute
  [__link10]: https://doc.rust-lang.org/stable/std/?search=hash::Hash
@@ -144,8 +144,8 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link2]: https://doc.rust-lang.org/stable/std/?search=borrow::Borrow
  [__link3]: https://docs.rs/thread_aware/0.11.0/thread_aware/?search=storage::Strategy
  [__link4]: https://docs.rs/thread_aware/0.11.0/thread_aware/?search=PerProcess
- [__link5]: https://docs.rs/thread_aware/0.11.0/thread_aware/?search=PerNuma
- [__link6]: https://docs.rs/thread_aware/0.11.0/thread_aware/?search=PerCore
+ [__link5]: https://docs.rs/thread_aware/0.11.0/thread_aware/?search=PerNumaNode
+ [__link6]: https://docs.rs/thread_aware/0.11.0/thread_aware/?search=PerThread
  [__link7]: https://docs.rs/uniflight/0.5.0/uniflight/struct.LeaderPanicked.html
  [__link8]: https://docs.rs/uniflight/0.5.0/uniflight/?search=LeaderPanicked::message
  [__link9]: https://doc.rust-lang.org/stable/std/clone/trait.Clone.html

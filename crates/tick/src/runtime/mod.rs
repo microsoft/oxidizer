@@ -25,16 +25,21 @@
 //!
 //! ```rust
 //! # use thread_aware::ThreadAware;
-//! # use thread_aware::affinity::pinned_affinities;
+//! # use thread_aware::thread::ThreadBuilder;
 //! # use tick::runtime::InactiveClock;
-//! # let affinities = pinned_affinities(&[1, 1]);
+//! # let builder = ThreadBuilder::default();
+//! # let thread_1 = builder.build(std::thread::current().id());
+//! # let thread_2_builder = builder.with_numa_node(1);
+//! # let thread_2 = std::thread::spawn(move || {
+//! #     thread_2_builder.build(std::thread::current().id())
+//! # }).join().unwrap();
 //! let root = InactiveClock::default();
 //!
-//! // Clone and relocate to each thread's affinity
+//! // Clone and relocate to each thread's coordinate
 //! let mut inactive_1 = root.clone();
-//! inactive_1.relocate(Some(affinities[0]), affinities[0]);
+//! inactive_1.relocate(Some(&thread_1), &thread_1);
 //! let mut inactive_2 = root;
-//! inactive_2.relocate(Some(affinities[1]), affinities[1]);
+//! inactive_2.relocate(Some(&thread_2), &thread_2);
 //!
 //! // On thread 1: activate and drive timers independently
 //! let (clock_1, driver_1) = inactive_1.activate();

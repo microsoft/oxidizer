@@ -7,8 +7,8 @@ use core::any::type_name;
 use core::fmt;
 
 use crate::ThreadAware;
-use thread_aware_core::Thread;
 use crate::closure::ThreadAwareFnOnce;
+use thread_aware_core::Thread;
 
 /// A closure with erased bounds.
 pub(crate) struct ErasedClosureOnce<T: ?Sized> {
@@ -109,7 +109,7 @@ mod tests {
     #[test]
     fn test_erased_closure_once_debug_with_string() {
         // Create an ErasedClosureOnce that returns a String
-        let closure = closure_once("test", |s: &str| s.to_string());
+        let closure = closure_once("test".to_string(), |s: String| s);
         let erased = ErasedClosureOnce::new(closure);
 
         // Format using Debug trait
@@ -132,12 +132,11 @@ mod tests {
 
     #[test]
     fn erased_closure_once_relocate_forwards_to_inner() {
-        use crate::affinity::pinned_affinities;
         use crate::closure::ThreadAwareFnOnce;
 
-        let affinities = pinned_affinities(&[2]);
-        let src = Some(affinities[0]);
-        let dst = affinities[1];
+        let threads = crate::test_threads(&[2]);
+        let src = Some(threads[0]);
+        let dst = threads[1];
 
         let c = closure_once(Tracker(false), |t: Tracker| t.0);
         let mut erased = ErasedClosureOnce::new(c);

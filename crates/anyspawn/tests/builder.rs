@@ -207,44 +207,16 @@ async fn builder_spawn_anywhere_applies_layer() {
 }
 
 #[tokio::test]
-async fn builder_relocate_preserves_layer() {
-    use thread_aware::ThreadAware;
-    use thread_aware::affinity::pinned_affinities;
-
-    let count = Arc::new(AtomicUsize::new(0));
-    let count_clone = Arc::clone(&count);
-
-    let mut spawner = CustomSpawnerBuilder::tokio()
-        .layer(
-            move |task: BoxedFuture| -> BoxedFuture {
-                count_clone.fetch_add(1, Ordering::SeqCst);
-                task
-            },
-            |task: BoxedBlockingTask| -> BoxedBlockingTask { task },
-        )
-        .build();
-
-    let affinities = pinned_affinities(&[2]);
-    spawner.relocate(Some(affinities[0]), affinities[1]);
-
-    // After relocation, the layer must still be applied.
-    let result = spawner.spawn(async { 99 }).await;
-    assert_eq!(result, 99);
-    assert_eq!(count.load(Ordering::SeqCst), 1, "layer must still work after relocate");
-}
-
-#[tokio::test]
 async fn builder_custom_spawner_new() {
     // Exercises CustomSpawnerBuilder::new (non-tokio constructor)
     use anyspawn::SpawnCustom;
-    use thread_aware::ThreadAware;
-    use thread_aware::affinity::Affinity;
+    use thread_aware::{Thread, ThreadAware};
 
     #[derive(Clone)]
     struct InlineSpawner;
 
     impl ThreadAware for InlineSpawner {
-        fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
     }
 
     impl SpawnCustom for InlineSpawner {

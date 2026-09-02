@@ -4,8 +4,7 @@
 use std::task::Waker;
 use std::time::{Duration, Instant, SystemTime};
 
-use thread_aware::ThreadAware;
-use thread_aware::affinity::Affinity;
+use thread_aware::{Thread, ThreadAware};
 
 use crate::simple_clock::SimpleClock;
 use crate::state::ClockState;
@@ -180,7 +179,6 @@ use crate::timers::TimerKey;
 pub struct Clock {
     state: ClockState,
     time: SimpleClock,
-    affinity: Option<Affinity>,
 }
 
 impl std::fmt::Debug for Clock {
@@ -195,15 +193,13 @@ impl std::fmt::Debug for Clock {
             .field("kind", &kind)
             .field("timers", &self.state.timers_len())
             .field("alive", &self.state.alive())
-            .field("affinity", &self.affinity)
             .finish_non_exhaustive()
     }
 }
 
 impl ThreadAware for Clock {
-    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         self.state.relocate(source, destination);
-        self.affinity = Some(destination);
     }
 }
 
@@ -224,7 +220,6 @@ impl Clock {
         Self {
             time: SimpleClock::from_state(&state),
             state,
-            affinity: None,
         }
     }
 
@@ -578,13 +573,23 @@ mod tests {
     use std::thread::sleep;
 
     use futures::FutureExt;
-    use thread_aware::affinity::pinned_affinities;
+    use thread_aware::thread::ThreadBuilder;
 
     use super::*;
     use crate::ClockControl;
     use crate::runtime::InactiveClock;
 
     static_assertions::assert_impl_all!(Clock: Debug, Send, Sync, Clone, AsRef<Clock>);
+
+    fn test_threads() -> [Thread; 2] {
+        let builder = ThreadBuilder::default();
+        let source = builder.build(std::thread::current().id());
+        let destination_builder = builder.with_numa_node(1);
+        let destination = std::thread::spawn(move || destination_builder.build(std::thread::current().id()))
+            .join()
+            .unwrap();
+        [source, destination]
+    }
 
     #[test]
     fn assert_types() {
@@ -671,10 +676,10 @@ mod tests {
     async fn tokio_ensure_timers_advancing_after_relocate() {
         // Relocation must be a no-op for Tokio clocks: the background driver task drives a
         // shared timer set, so a relocated clone must still observe timers being advanced.
-        let affinities = pinned_affinities(&[2]);
+        let threads = test_threads();
         let clock = Clock::new_tokio();
         let mut clock = clock;
-        clock.relocate(Some(affinities[0]), affinities[1]);
+        clock.relocate(Some(&threads[0]), &threads[1]);
         clock.delay(Duration::from_millis(15)).await;
     }
 
@@ -764,18 +769,18 @@ mod tests {
 
     #[test]
     fn thread_aware() {
-        let affinites = pinned_affinities(&[1, 1]);
-        let source = Some(affinites[0]);
-        let pinned_1 = affinites[0];
-        let pinned_2 = affinites[1];
+        let threads = test_threads();
+        let source = Some(&threads[0]);
+        let thread_1 = &threads[0];
+        let thread_2 = &threads[1];
 
         // root clock
         let root = InactiveClock::default();
 
         let mut inactive_1 = root.clone();
-        inactive_1.relocate(source, pinned_1);
+        inactive_1.relocate(source, thread_1);
         let mut inactive_2 = root;
-        inactive_2.relocate(source, pinned_2);
+        inactive_2.relocate(source, thread_2);
 
         let (clock_1, mut driver_1) = inactive_1.activate();
         let (clock_2, mut driver_2) = inactive_2.activate();
@@ -789,7 +794,7 @@ mod tests {
         assert_eq!(driver_2.state.timers_len(), 0);
         {
             let mut relocated_clock = clock_1.clone();
-            relocated_clock.relocate(source, pinned_2);
+            relocated_clock.relocate(source, thread_2);
             assert_eq!(relocated_clock.state.timers_len(), 0);
         }
 
@@ -821,18 +826,18 @@ mod tests {
 
     #[test]
     fn thread_aware_clock_control() {
-        let affinites = pinned_affinities(&[1, 1]);
-        let source = Some(affinites[0]);
-        let pinned_1 = affinites[0];
-        let pinned_2 = affinites[1];
+        let threads = test_threads();
+        let source = Some(&threads[0]);
+        let thread_1 = &threads[0];
+        let thread_2 = &threads[1];
 
         // root clock
         let root: InactiveClock = ClockControl::default().into();
 
         let mut inactive_1 = root.clone();
-        inactive_1.relocate(source, pinned_1);
+        inactive_1.relocate(source, thread_1);
         let mut inactive_2 = root;
-        inactive_2.relocate(source, pinned_2);
+        inactive_2.relocate(source, thread_2);
 
         let (clock_1, driver_1) = inactive_1.activate();
         let (clock_2, driver_2) = inactive_2.activate();
@@ -857,7 +862,6 @@ mod tests {
     #[tokio::test]
     #[cfg_attr(miri, ignore)]
     async fn debug_alive_system_clock() {
-        let _affinites = pinned_affinities(&[2]);
         let clock = Clock::new_tokio();
 
         clock.delay(Duration::from_millis(1)).await;
@@ -868,9 +872,9 @@ mod tests {
     #[tokio::test]
     #[cfg_attr(miri, ignore)]
     async fn debug_alive_system_clock_relocated() {
-        let affinites = pinned_affinities(&[2]);
+        let threads = test_threads();
         let mut clock = Clock::new_system_frozen();
-        clock.relocate(Some(affinites[0]), affinites[1]);
+        clock.relocate(Some(&threads[0]), &threads[1]);
 
         insta::assert_debug_snapshot!(clock);
     }

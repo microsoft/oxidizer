@@ -132,13 +132,23 @@ mod tests {
     use std::sync::atomic::{self, AtomicUsize};
 
     use static_assertions::assert_impl_all;
-    use thread_aware::affinity::{Affinity, pinned_affinities};
+    use thread_aware::Thread;
+    use thread_aware::thread::ThreadBuilder;
 
     use super::*;
     use crate::mem::MemoryShared;
     use crate::mem::testing::TransparentMemory;
 
     assert_impl_all!(CallbackMemory<TransparentMemory>: MemoryShared);
+
+    fn test_threads() -> [Thread; 2] {
+        let builder = ThreadBuilder::default();
+        let source = builder.build(std::thread::current().id());
+        let destination = std::thread::spawn(move || builder.build(std::thread::current().id()))
+            .join()
+            .unwrap();
+        [source, destination]
+    }
 
     /// Thread-aware callback data carrying an observable call counter alongside the wrapped provider.
     #[derive(Clone, Debug, ThreadAware)]
@@ -166,7 +176,7 @@ mod tests {
     }
 
     impl ThreadAware for RelocationObserver {
-        fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
             self.relocations.fetch_add(1, atomic::Ordering::SeqCst);
         }
     }
@@ -237,8 +247,8 @@ mod tests {
             |observer: &RelocationObserver, min_bytes| observer.inner.reserve(min_bytes),
         );
 
-        let affinities = pinned_affinities(&[2]);
-        provider.relocate(Some(affinities[0]), affinities[1]);
+        let threads = test_threads();
+        provider.relocate(Some(&threads[0]), &threads[1]);
 
         assert_eq!(relocations.load(atomic::Ordering::SeqCst), 1);
 

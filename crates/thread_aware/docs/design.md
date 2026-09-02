@@ -1,134 +1,103 @@
 # `thread_aware` design
 
-This document describes the user-visible behavior and design tenets of
-`thread_aware::Arc` and its companion `storage::Storage` handle. The
-`ThreadAware` trait and the relocation model these build on are introduced in
-the crate root documentation; this document focuses on the strategy-partitioned
-`Arc`. The internal mechanism — the write-once partition slots and the
-relocation protocol built on them — is documented separately in
-[implementation.md](implementation.md).
+This document describes the user-visible behavior of `thread_aware::Arc` and
+`storage::Storage`. The stable relocation contract is defined by
+`thread_aware_core` and re-exported by `thread_aware`.
 
-## 1. Purpose
+## 1. Core vocabulary
 
-`thread_aware::Arc<T, S>` is a shared pointer, like `std::sync::Arc`, that
-additionally keeps a distinct value per strategy partition. It lets a type that
-is not itself `ThreadAware` — a third-party client, a connection pool, any value
-that benefits from being local to the core or NUMA node using it — be shared
-through a handle that reacts to relocation by adopting, or lazily creating, the
-value belonging to the destination affinity's partition.
+`thread_aware` re-exports `ThreadAware`, `Thread`, `Owner`, and `NumaNode` from
+`thread_aware_core`. There is one authoritative relocation trait across the
+package family.
 
-Cloning an `Arc<T, S>` is cheap and shares state. Dereferencing it yields the
-value carried by that holder. The `Strategy` type parameter `S` decides how
-affinities map to partitions.
+Runtime integrations construct coordinates with `thread::ThreadBuilder`.
+`ThreadBuilder::default()` creates a unique runtime owner. Clones of one builder
+retain that owner, so they can build coordinates for every worker in the same
+runtime. `with_numa_node` selects the nearest NUMA node and `build` adds the
+worker's `std::thread::ThreadId`.
 
-## 2. Affinities and strategies
+The old coordinate and runtime registry modules do not exist. Processor
+discovery, pinning, and worker enumeration belong to the runtime.
 
-An affinity identifies the placement of the code that holds the `Arc`. The
-strategy maps that affinity to the partition whose value the holder sees:
+Implementations for third-party crate types also do not live here. Once
+`thread_aware_core` is stable, third-party crates can implement its trait
+natively. Until then, callers may use `Unaware` for inert foreign values.
 
-- `PerProcess` maps every affinity to one partition, so all clones share a single value
-  process-wide and relocation keeps that shared value: an `Arc<T, PerProcess>`
-  behaves like a plain `sync::Arc<T>`.
-- `PerCore` defines one partition per processor. A holder that relocates to another
-  processor observes that processor partition's value.
-- `PerNuma` defines one partition per memory region, so holders on cores of the
-  same NUMA node share a value and holders on different nodes do not.
+## 2. Strategy-partitioned values
 
-Custom strategies are possible; they are expected to report a partition count —
-always at least one — that is consistent across the affinities that share one
-`Arc` (see [implementation.md](implementation.md)).
+`thread_aware::Arc<T, S>` is a shared pointer that can keep one value per
+strategy partition. It always carries a current `std::sync::Arc<T>` and
+dereferences directly to that value without consulting shared storage.
 
-## 3. Strategy-partitioned values
+The built-in strategies are:
 
-An `Arc<T, S>` always carries a current value in hand and derefs to it directly,
-without synchronization. It additionally keeps the value materialized for each
-strategy partition; a holder that relocates into a partition adopts that
-partition's value, and clones in the same partition share one underlying
-`sync::Arc<T>`.
+- `PerThread`, keyed by `std::thread::ThreadId`.
+- `PerNumaNode`, keyed by `NumaNode`.
+- `PerProcess`, keyed by one constant process-wide value.
 
-Constructors create the initial carried value eagerly. Additional partition
-values are then produced lazily — a partition is materialized the first time a
-holder relocates into it across a partition boundary while it is still empty —
-and how a value is produced depends on the constructor used:
+Strategies are sealed. The identifiers in `Thread` are opaque and not dense or
+enumerable, so storage is keyed rather than indexed.
 
-- `new` / `new_boxed` run a constructor function once per partition, giving each
-  partition a freshly built, independent value. Neither requires `T: Clone` or
-  `T: ThreadAware`.
-- `new_with` runs a closure that may capture other `ThreadAware` state, which is
-  itself relocated for the destination before the value is built.
-- `from_unaware` takes one value and clones it for each partition.
-- `with_clone_fn` takes a concrete value plus a clone function, so trait-object
-  values can be reproduced per partition without an object-safe `Clone`.
+Constructors create the carried value eagerly. Additional values are produced
+lazily when relocation first reaches a new key:
 
-Materialization runs while the destination partition is being initialized.
-Constructor functions, clone functions, and captured `ThreadAware` state must not
-relocate an `Arc` backed by the same storage into that partition or form a cycle
-among partition initializations. Write-once initialization is non-reentrant, so
-such dependencies can deadlock.
+- `new` and `new_boxed` invoke a constructor once per reached partition.
+- `new_with` relocates captured state before invoking its constructor.
+- `from_unaware` clones an inert value.
+- `with_clone_fn` supports unsized values and trait objects through an explicit
+  clone function.
 
-A relocation whose source and destination resolve to the same partition is not a
-cross-partition move: the holder keeps the value it is already carrying rather than
-producing a new one. This is why every relocation under `PerProcess` — where all
-affinities share one partition — preserves the shared value.
+Clones entering the same partition converge on one published value. A holder
+that reaches another thread without a relocation call remains correct and keeps
+its carried value, although it may be less efficient.
 
-Relocation is a cooperative performance optimization, not a guarantee: consistent
-with the crate-wide contract for `ThreadAware`, a holder that reaches a new
-affinity without a relocation call still functions correctly, keeping the value it
-already carries rather than switching. Dereferencing never blocks.
+## 3. Owner boundaries
 
-`Arc::strong_count` estimates how many strong references to the holder's current
-value are held outside the shared storage: it is that value's raw `sync::Arc`
-strong count minus the references the storage's partitions hold. It samples those two
-counts separately, so under concurrent relocation the result is approximate, and
-it saturates rather than underflowing.
+An `Owner` identifies one runtime. When relocation has a known source and the
+destination belongs to a different owner, `Arc::relocate` is a no-op. The holder
+keeps its carried value and does not read, publish, or materialize state for the
+foreign runtime.
 
-## 4. Unsized values
+This preserves runtime-bound objects across relocation. They may continue to
+use state associated with the original runtime and therefore operate less
+efficiently, but relocation does not replace working state with a value built
+for an unrelated owner.
 
-`T` may be unsized, so `Arc<dyn Trait, S>` and other trait-object or slice values
-are supported. Because an unsized value cannot be passed or held by value, the
-unsized-capable entry points work through a pointer: `new_boxed` and
-`with_clone_fn` produce `Box<T>`, and `from_storage` and `Storage::insert` accept
-a ready `sync::Arc<T>`. This support is a deliberate, retained capability of the
-type; see [implementation.md](implementation.md) for how it shapes the slot
-representation.
+When the source is unknown, the owner relationship cannot be checked.
+Relocation follows the normal destination-key lookup.
 
-## 5. Prepared storage
+## 4. Concurrent storage
 
-`storage::Storage<T, S>` is the strategy-partitioned table an `Arc` shares across
-its clones, exposed as a handle a caller can build directly. This serves the case
-where the partition values are known in advance rather than materialized lazily
-on relocation:
+`storage::Storage<T, S>` uses `DashMap<S::Key, std::sync::Arc<T>>`. New storage
+reserves capacity for 32 entries by default, which covers common
+thread-per-core runtimes without growing the map during initial worker
+materialization.
 
-1. Build an empty table with `Storage::new`.
-2. Publish a `sync::Arc<T>` for each strategy partition by passing a representative
-   affinity to `Storage::insert`; read one back with `Storage::get`.
-3. Hand the table to `Arc::from_storage` together with the current affinity to
-   obtain an `Arc` backed by those values.
+`Storage::insert` publishes a value only when a key is empty and returns the
+rejected value when another value was already published. `Storage::get` clones
+the value for a key.
 
-`from_storage` requires that the table already hold a value for the current
-affinity's partition. An `Arc` built this way that later relocates into an
-affinity whose partition the table left empty behaves like a plain `sync::Arc`,
-keeping the value it carries. The handle exposes only the affinity-keyed
-insert/get surface; the partition layout behind it is not part of the contract.
+Lazy materialization holds the destination map entry while the factory runs.
+This guarantees one published value per key, but factory code must not re-enter
+the same storage. An unrelated key that hashes to the same DashMap shard may
+wait for the factory, so factories should remain short and non-blocking.
 
-`Storage::insert` and `Storage::get` require an affinity that maps into the table's
-coordinate space — one within the partition count the strategy reports. A caller
-building storage by hand controls its own affinities, so these accessors reject
-an out-of-range affinity rather than tolerate it.
+## 5. Prepared storage and unsized values
+
+Callers that know partition values in advance may populate `Storage` and pass it
+to `Arc::from_storage` with the current `Thread`. The current key must already
+have a value. Missing later keys retain the carried value when manual storage
+mode materializes them.
+
+`T` may be unsized. `Arc<dyn Trait, S>`, boxed constructors, explicit clone
+functions, and prepared `std::sync::Arc<T>` values remain supported.
 
 ## 6. Design tenets
 
-- **Performance first, correctness always.** The type exists to reduce
-  cross-affinity contention, but relocation is advisory: skipping it degrades
-  performance, never correctness.
-- **Cheap, lock-free reads.** Dereferencing yields the carried value directly and
-  does not synchronize; synchronization is confined to relocation.
-- **Per-partition values, in-partition sharing.** Lazily materialized values are
-  kept per partition and are not shared across partitions, while holders in one
-  partition share its value. Prepared storage is under the caller's control and
-  can deliberately place the same value in several partitions.
-- **Unsized support is a feature.** Trait-object and slice values are a retained
-  capability, weighed against representations that would trade `?Sized` away.
-- **Storage is usable, its shape is not exposed.** Callers can construct and fill
-  a `Storage`, but only through an affinity-keyed contract that leaves the
-  representation free to change.
+- One stable relocation contract comes from `thread_aware_core`.
+- Relocation improves performance but never establishes correctness.
+- Dereferencing is lock-free and does not consult the map.
+- Partition values are published once per key.
+- Crossing runtime owners keeps the working carried value.
+- Runtime discovery and pinning are outside this crate.
+- Third-party implementations belong with the third-party type.

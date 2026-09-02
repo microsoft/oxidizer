@@ -10,18 +10,17 @@
 //! # Crate features
 //!
 //! * The **`std` Cargo feature** *(enabled by default)* enables the strategy-partitioned `Arc` and
-//!   hosted-only type implementations.
+//!   [`ThreadBuilder`](thread::ThreadBuilder).
 //! * **`derive`** *(default)* re-exports the `#[derive(ThreadAware)]` macro.
-//! * **`threads`** enables the `registry` module and implies `std`.
-//! * Disable default features for `#![no_std]` environments. The [`ThreadAware`] trait, affinity
-//!   identifiers, closures, wrappers, and implementations for `alloc` types remain available.
+//! * Disable default features for `#![no_std]` environments. The core thread vocabulary,
+//!   closures, and wrappers remain available.
 //!   Enable `derive` explicitly if the derive macro is needed.
 //!
 //! `no_std` environments require `alloc` and pointer-width atomics.
 //!
-//! This crate allows you to express migrations between NUMA nodes, threads, or specific CPU cores.
-//! It can serve as a foundation for building components and runtimes that operate across multiple
-//! memory affinities.
+//! This crate re-exports every type from [`thread_aware_core`], which is the authoritative stable
+//! relocation contract. It adds derive support, closures, wrappers, runtime thread construction,
+//! and strategy-partitioned shared state.
 //!
 //! # Theory of Operation
 //!
@@ -94,46 +93,19 @@
 //!
 //! ## Provided Implementations
 //!
-//! [`ThreadAware`] is implemented for many standard library types, including primitive types, Vec,
-//! String, Option, Result, tuples, etc. However, it's explicitly not implemented for [`alloc::sync::Arc`]
-//! as that type implies some level of cross-thread sharing and thus needs special attention when used
-//! from types that implement [`ThreadAware`].
+//! [`thread_aware_core`] implements [`ThreadAware`] for core, alloc, and standard library types.
+//! Implementations for third-party types live with those types once the stable trait can be adopted
+//! natively. Until then, inert foreign values can be wrapped in [`Unaware`].
 //!
 //! # Features
 //!
 //! * The **`std` Cargo feature** *(enabled by default)* enables the strategy-partitioned `Arc` and
-//!   hosted-only type implementations. Disable it for `#![no_std]` environments; the crate then
-//!   requires `alloc` and pointer-width atomics.
+//!   [`ThreadBuilder`](thread::ThreadBuilder). Disable it for `#![no_std]` environments; the crate
+//!   then requires `alloc` and pointer-width atomics.
 //! * **`derive`** *(default)*: Re-exports the `#[derive(ThreadAware)]` macro from the companion
 //!   `thread_aware_macros` crate. Disable to avoid pulling in proc-macro code in minimal
 //!   environments. For derive support without `std`, use
 //!   `default-features = false, features = ["derive"]`.
-//! * **`threads`**: Enables features mainly used by async runtimes for OS interactions and implies
-//!   `std`.
-//!
-//! ## 3rd-party crate impls
-//!
-//! The following opt-in features provide [`ThreadAware`] implementations for
-//! inert value types from popular 3rd-party crates. Enabling a feature pulls
-//! that crate in as a dependency. By default none are enabled and this crate
-//! brings in no extra dependencies.
-//!
-//! Feature names follow this convention so that future breaking versions of
-//! the wrapped crate can be supported additively:
-//!
-//! * Stable `1.x` (or any other stable major) → bare crate name
-//!   (e.g. `bytes`, `http`, `uuid`).
-//! * `N.x` for `N >= 2` → `<crate><N>` (e.g. `bytes2` if `bytes 2.x` ever lands).
-//! * `0.x` → `<crate>0<minor>` (e.g. `jiff02` for `jiff 0.2.x`).
-//!
-//! * **`bytes`**: Impls for `bytes::Bytes`, `bytes::BytesMut`.
-//! * **`http`**: Enables `std` and provides impls for `http::StatusCode`, `http::Method`, `http::Version`,
-//!   `http::HeaderName`, `http::HeaderValue`, `http::HeaderMap<HeaderValue>`,
-//!   `http::Uri`, `http::uri::Authority`, `http::uri::Scheme`,
-//!   `http::uri::PathAndQuery`, `http::uri::Port<T>`, `http::Error`,
-//!   `http::uri::InvalidUri`, `http::Request<T>`, `http::Response<T>`.
-//! * **`jiff02`**: Impls for `jiff::Timestamp`, `jiff::civil::DateTime`, etc.
-//! * **`uuid`**: Impl for `uuid::Uuid`.
 //!
 //! # Examples
 //!
@@ -188,7 +160,7 @@
 //! # }
 //! ```
 //!
-//! [`ThreadAware`]: crate::core::ThreadAware
+//! [`thread_aware_core`]: https://docs.rs/thread_aware_core
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/favicon.ico")]
@@ -283,5 +255,37 @@ pub use thread_aware_core::{NumaNode, Owner, Thread, ThreadAware};
 pub use ::thread_aware_macros::ThreadAware;
 #[cfg(feature = "std")]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-pub use cell::{Arc, PerThread, PerNumaNode, PerProcess, storage};
+pub use cell::{Arc, PerNumaNode, PerProcess, PerThread, storage};
 pub use wrappers::{Unaware, unaware};
+
+#[cfg(test)]
+fn test_threads(counts: &[usize]) -> Vec<&'static Thread> {
+    use std::sync::{Arc, Barrier};
+    use std::thread;
+
+    let builder = crate::thread::ThreadBuilder::default();
+    let nodes = counts
+        .iter()
+        .enumerate()
+        .flat_map(|(node, count)| std::iter::repeat_n(node, *count))
+        .collect::<Vec<_>>();
+    let barrier = Arc::new(Barrier::new(nodes.len() + 1));
+    let handles = nodes
+        .into_iter()
+        .map(|node| {
+            let builder = builder.clone().with_numa_node(node.try_into().unwrap());
+            let barrier = Arc::clone(&barrier);
+            thread::spawn(move || {
+                let coordinate = builder.build(thread::current().id());
+                barrier.wait();
+                coordinate
+            })
+        })
+        .collect::<Vec<_>>();
+
+    barrier.wait();
+    handles
+        .into_iter()
+        .map(|handle| &*Box::leak(Box::new(handle.join().unwrap())))
+        .collect()
+}

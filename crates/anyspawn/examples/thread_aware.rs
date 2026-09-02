@@ -12,9 +12,9 @@
 //! counter, or connection pool instead of a simple index.
 
 use anyspawn::{BoxedBlockingTask, BoxedFuture, SpawnCustom, Spawner};
-use thread_aware::ThreadAware;
-use thread_aware::affinity::{Affinity, pinned_affinities};
 use thread_aware::closure::ThreadAwareAsyncFnOnce;
+use thread_aware::thread::ThreadBuilder;
+use thread_aware::{Thread, ThreadAware};
 
 #[tokio::main]
 async fn main() {
@@ -28,14 +28,19 @@ async fn main() {
     // Simulate a two-node topology (1 core per NUMA node) and relocate the
     // spawner to each core. After relocation ThreadAware::relocate runs
     // with the destination core's processor index.
-    let affinities = pinned_affinities(&[1, 1]);
+    let builder = ThreadBuilder::default();
+    let thread0 = builder.build(std::thread::current().id());
+    let thread1_builder = builder.with_numa_node(1);
+    let thread1 = std::thread::spawn(move || thread1_builder.build(std::thread::current().id()))
+        .join()
+        .expect("coordinate thread must finish");
 
     let mut relocated0 = spawner.clone();
-    relocated0.relocate(None, affinities[0]);
+    relocated0.relocate(None, &thread0);
     let _relocated0 = relocated0.spawn(async { 1 + 1 }).await;
 
     let mut relocated1 = spawner.clone();
-    relocated1.relocate(None, affinities[1]);
+    relocated1.relocate(None, &thread1);
     let _relocated1 = relocated1.spawn(async { 1 + 1 }).await;
 }
 
@@ -44,20 +49,20 @@ async fn main() {
 /// Before relocation the processor index is `None` (default instance). After
 /// relocation it holds the destination core's processor index.
 #[derive(Default, Clone)]
-struct Scheduler(Option<usize>);
+struct Scheduler(Option<std::thread::ThreadId>);
 
 impl Scheduler {
     fn caption(&self) -> String {
         match self.0 {
-            Some(id) => format!("Scheduler ({id})"),
+            Some(id) => format!("Scheduler ({id:?})"),
             None => "Scheduler (default)".to_string(),
         }
     }
 }
 
 impl ThreadAware for Scheduler {
-    fn relocate(&mut self, _source: Option<Affinity>, destination: Affinity) {
-        self.0 = Some(destination.processor_index());
+    fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
+        self.0 = Some(destination.id());
     }
 }
 

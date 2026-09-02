@@ -81,7 +81,6 @@ pub const fn unaware<T>(value: T) -> Unaware<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::affinity::pinned_affinities;
 
     #[test]
     fn test_unaware_construction() {
@@ -172,9 +171,9 @@ mod tests {
     fn test_unaware_thread_aware() {
         use std::collections::HashMap;
 
-        let affinities = pinned_affinities(&[2]);
-        let source = Some(affinities[0]);
-        let destination = affinities[1];
+        let threads = crate::test_threads(&[2]);
+        let source = Some(threads[0]);
+        let destination = threads[1];
 
         // Test with simple type
         let mut value = Unaware(42);
@@ -241,9 +240,9 @@ mod tests {
         let mut unaware_wrapper = Unaware(Arc::clone(&inner_arc));
 
         // Should work, but this is the case the docs warn about
-        let affinities = pinned_affinities(&[2]);
-        let source = Some(affinities[0]);
-        let destination = affinities[1];
+        let threads = crate::test_threads(&[2]);
+        let source = Some(threads[0]);
+        let destination = threads[1];
 
         unaware_wrapper.relocate(source, destination);
 
@@ -288,9 +287,9 @@ mod tests {
         assert_eq!(unaware_complex.0.values, vec![1, 2, 3]);
 
         // Test with relocation
-        let affinities = pinned_affinities(&[2]);
-        let source = Some(affinities[0]);
-        let destination = affinities[1];
+        let threads = crate::test_threads(&[2]);
+        let source = Some(threads[0]);
+        let destination = threads[1];
 
         unaware_complex.relocate(source, destination);
         assert_eq!(unaware_complex.0.id, 1);

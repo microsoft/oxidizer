@@ -175,7 +175,7 @@ mod tests {
     use observed::Sink;
     use static_assertions::{assert_impl_all, assert_not_impl_any};
     use thread_aware::ThreadAware;
-    use thread_aware::affinity::pinned_affinities;
+    use thread_aware::thread::ThreadBuilder;
     use tick::{Clock, ClockControl};
 
     use super::{WinHttpDeps, WinHttpDepsBuilder, create_builder_with_bindings, into_custom_deps};
@@ -280,10 +280,10 @@ mod tests {
             .minimal_pipeline()
             .supported_http_versions(&[http::Version::HTTP_10])
             .build();
-        let affinities = pinned_affinities(&[2]);
+        let destination = ThreadBuilder::default().build(std::thread::current().id());
         let mut relocated = client.clone();
 
-        relocated.relocate(None, affinities[1]);
+        relocated.relocate(None, &destination);
 
         assert_eq!(opens.load(Ordering::SeqCst), 2);
         drive(relocated.get("http://example.com").fetch()).unwrap_err();

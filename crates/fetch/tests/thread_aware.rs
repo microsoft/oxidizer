@@ -12,7 +12,7 @@ use fetch::HttpClient;
 use fetch::tokio::TokioDeps;
 use futures::future::join_all;
 use thread_aware::ThreadAware;
-use thread_aware::affinity::pinned_affinities;
+use thread_aware::thread::ThreadBuilder;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -30,9 +30,11 @@ async fn not_isolated_on_tokio() {
         .build();
     assert_eq!(counts.load(Ordering::Relaxed), 1);
 
-    for affinity in pinned_affinities(&[2, 2]) {
+    let builder = ThreadBuilder::default();
+    for numa_node in 0..4 {
+        let thread = builder.clone().with_numa_node(numa_node).build(std::thread::current().id());
         let mut client_clone = client.clone();
-        client_clone.relocate(None, affinity);
+        client_clone.relocate(None, &thread);
     }
     assert_eq!(counts.load(Ordering::Relaxed), 1);
 }
@@ -49,13 +51,15 @@ async fn tokio_client_relocated_ensure_works() {
     assert_eq!(text, "Hello World!");
 
     // relocate the client and use it on worker threads
-    let handles = pinned_affinities(&[2, 2])
-        .into_iter()
-        .map(|affinity| {
+    let builder = ThreadBuilder::default();
+    let handles = (0..4)
+        .map(|numa_node| {
             let mut client = client.clone();
             let url = url.clone();
+            let builder = builder.clone().with_numa_node(numa_node);
             tokio::spawn(async move {
-                client.relocate(None, affinity);
+                let thread = builder.build(std::thread::current().id());
+                client.relocate(None, &thread);
                 let text = client.get(url).fetch_text().await.unwrap().into_body();
 
                 assert_eq!(text, "Hello World!");

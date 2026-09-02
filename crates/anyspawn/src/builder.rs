@@ -5,9 +5,8 @@
 
 use std::fmt::Debug;
 
-use thread_aware::ThreadAware;
-use thread_aware::affinity::Affinity;
 use thread_aware::closure::ThreadAwareAsyncFnOnce;
+use thread_aware::{Thread, ThreadAware};
 
 use crate::Spawner;
 use crate::custom::{BoxedBlockingTask, BoxedFuture, SpawnCustom};
@@ -38,7 +37,7 @@ impl<FL: Clone, BL: Clone, S: Clone> Clone for Layered<FL, BL, S> {
 }
 
 impl<FL: Send, BL: Send, S: ThreadAware> ThreadAware for Layered<FL, BL, S> {
-    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         self.inner.relocate(source, destination);
     }
 }
@@ -78,7 +77,7 @@ struct LayeredTask<F> {
 }
 
 impl<F: Send> ThreadAware for LayeredTask<F> {
-    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         self.task.relocate(source, destination);
     }
 }
@@ -100,7 +99,7 @@ struct TokioSpawner(Option<::tokio::runtime::Handle>);
 
 #[cfg(feature = "tokio")]
 impl ThreadAware for TokioSpawner {
-    fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
 }
 
 #[cfg(feature = "tokio")]
@@ -328,7 +327,18 @@ impl<S> Debug for CustomSpawnerBuilder<S> {
 mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
 
+    use thread_aware::thread::ThreadBuilder;
+
     use super::*;
+
+    fn test_threads() -> [Thread; 2] {
+        let builder = ThreadBuilder::default();
+        let source = builder.build(std::thread::current().id());
+        let destination = std::thread::spawn(move || builder.build(std::thread::current().id()))
+            .join()
+            .unwrap();
+        [source, destination]
+    }
 
     /// Mock spawner whose relocate sets a flag, so mutation tests catch no-ops.
     #[derive(Clone)]
@@ -337,7 +347,7 @@ mod tests {
     }
 
     impl ThreadAware for TrackingSpawner {
-        fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
             self.relocated.store(true, Ordering::SeqCst);
         }
     }
@@ -346,8 +356,8 @@ mod tests {
         fn spawn(&self, _task: BoxedFuture) {}
 
         fn spawn_anywhere(&self, mut task: Box<dyn ThreadAwareAsyncFnOnce<()>>) {
-            let affinities = thread_aware::affinity::pinned_affinities(&[2]);
-            task.relocate(Some(affinities[0]), affinities[1]);
+            let threads = test_threads();
+            task.relocate(Some(&threads[0]), &threads[1]);
         }
 
         fn spawn_blocking(&self, _task: BoxedBlockingTask) {}
@@ -356,7 +366,7 @@ mod tests {
     /// Minimal async task for covering `spawn_anywhere`.
     struct NoopTask;
     impl ThreadAware for NoopTask {
-        fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
     }
     impl ThreadAwareAsyncFnOnce<()> for NoopTask {
         fn call_once(self: Box<Self>) -> thread_aware::closure::BoxFuture<'static, ()> {
@@ -369,7 +379,7 @@ mod tests {
         static RELOCATED: AtomicBool = AtomicBool::new(false);
         static BLOCKING_LAYER_RAN: AtomicBool = AtomicBool::new(false);
 
-        let affinities = thread_aware::affinity::pinned_affinities(&[2]);
+        let threads = test_threads();
         let mut layered = Layered {
             future_layer: |task: BoxedFuture| -> BoxedFuture { task },
             blocking_layer: |task: BoxedBlockingTask| -> BoxedBlockingTask {
@@ -379,7 +389,7 @@ mod tests {
             inner: TrackingSpawner { relocated: &RELOCATED },
         };
 
-        layered.relocate(Some(affinities[0]), affinities[1]);
+        layered.relocate(Some(&threads[0]), &threads[1]);
         assert!(RELOCATED.load(Ordering::SeqCst), "Layered must forward relocate to inner");
 
         // Exercise spawn + spawn_anywhere + spawn_blocking + layer closures + NoopTask::call_once
@@ -404,7 +414,7 @@ mod tests {
         struct Tracker(&'static AtomicBool);
 
         impl ThreadAware for Tracker {
-            fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+            fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
                 self.0.store(true, Ordering::SeqCst);
             }
         }
@@ -415,13 +425,13 @@ mod tests {
             }
         }
 
-        let affinities = thread_aware::affinity::pinned_affinities(&[2]);
+        let threads = test_threads();
         let mut task = LayeredTask {
             task: Box::new(Tracker(&RELOCATED)),
             layer: |task: BoxedFuture| -> BoxedFuture { task },
         };
 
-        task.relocate(Some(affinities[0]), affinities[1]);
+        task.relocate(Some(&threads[0]), &threads[1]);
         assert!(RELOCATED.load(Ordering::SeqCst), "LayeredTask must forward relocate to inner task");
 
         // Exercise layer closure to cover helper code

@@ -6,7 +6,7 @@ use std::pin::Pin;
 
 use futures_channel::oneshot;
 use thread_aware::closure::ThreadAwareAsyncFnOnce;
-use thread_aware::{PerCore, ThreadAware};
+use thread_aware::{PerThread, Thread, ThreadAware};
 
 /// Trait for implementing custom task spawners.
 ///
@@ -61,7 +61,7 @@ struct SpawnAnywhereTask<T, D, F> {
 }
 
 impl<T: Send, D: ThreadAware, F> ThreadAware for SpawnAnywhereTask<T, D, F> {
-    fn relocate(&mut self, source: Option<thread_aware::affinity::Affinity>, destination: thread_aware::affinity::Affinity) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         self.data.relocate(source, destination);
     }
 }
@@ -83,7 +83,8 @@ where
 /// Internal wrapper for custom spawn functions.
 #[derive(Clone, ThreadAware)]
 pub(crate) struct CustomSpawner {
-    spawn: thread_aware::Arc<dyn SpawnCustom, PerCore>,
+    spawn: thread_aware::Arc<dyn SpawnCustom, PerThread>,
+    #[thread_aware(skip)]
     name: &'static str,
 }
 

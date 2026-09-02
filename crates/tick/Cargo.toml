@@ -22,8 +22,7 @@ allowed_external_types = [
     "serde_core::ser::*",
     "futures_core::stream::Stream",
     "thread_aware::core::ThreadAware",
-    "thread_aware::affinity::MemoryAffinity",
-    "thread_aware::affinity::PinnedAffinity",
+    "thread_aware::core::Thread",
 ]
 
 [package.metadata.docs.rs]

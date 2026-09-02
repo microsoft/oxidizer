@@ -7,10 +7,26 @@
 use core::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::thread;
 
-use thread_aware::ThreadAware as _;
-use thread_aware::affinity::{Affinity, pinned_affinities};
+use thread_aware::thread::ThreadBuilder;
+use thread_aware::{Thread, ThreadAware as _};
 use thread_aware_macros::ThreadAware;
+
+fn test_threads(counts: &[usize]) -> Vec<&'static Thread> {
+    let builder = ThreadBuilder::default();
+    counts
+        .iter()
+        .enumerate()
+        .flat_map(|(numa_node, count)| {
+            let builder = builder.clone().with_numa_node(numa_node.try_into().unwrap());
+            (0..*count).map(move |_| {
+                let thread_id = thread::spawn(|| thread::current().id()).join().unwrap();
+                &*Box::leak(Box::new(builder.build(thread_id)))
+            })
+        })
+        .collect()
+}
 
 #[derive(ThreadAware)]
 struct Inner(u32);
@@ -24,7 +40,7 @@ struct Container<T: thread_aware::ThreadAware> {
 
 #[test]
 fn derive_thread_aware_compiles_and_calls() {
-    let mut addrs = pinned_affinities(&[2]);
+    let mut addrs = test_threads(&[2]);
     let a = Some(addrs.remove(0));
     let b = addrs.remove(0);
     let mut c = Container { val: Inner(5), raw: 10 };
@@ -39,14 +55,14 @@ struct Tracker {
 }
 
 impl thread_aware::ThreadAware for Tracker {
-    fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
         self.relocations += 1;
     }
 }
 
-fn affinity_pair() -> (Option<Affinity>, Affinity) {
-    let affinities = pinned_affinities(&[2]);
-    (Some(affinities[0]), affinities[1])
+fn thread_pair() -> (Option<&'static Thread>, &'static Thread) {
+    let threads = test_threads(&[2]);
+    (Some(threads[0]), threads[1])
 }
 
 /// A generic named only inside `PhantomData` must still compile.
@@ -58,7 +74,7 @@ struct DirectPhantom<T, U>(T, PhantomData<U>);
 
 #[test]
 fn phantom_only_generic_compiles_and_relocates() {
-    let (source, destination) = affinity_pair();
+    let (source, destination) = thread_pair();
 
     let mut value = DirectPhantom::<Tracker, Tracker>(Tracker::default(), PhantomData);
     value.relocate(source, destination);
@@ -73,7 +89,7 @@ struct NestedPhantom<T>((PhantomData<T>,));
 
 #[test]
 fn nested_phantom_data_compiles_and_relocates() {
-    let (source, destination) = affinity_pair();
+    let (source, destination) = thread_pair();
 
     let mut value = NestedPhantom::<Tracker>((PhantomData,));
     value.relocate(source, destination);
@@ -88,7 +104,7 @@ struct ConcretePhantom {
 
 #[test]
 fn concrete_phantom_of_non_thread_aware_type_compiles() {
-    let (source, destination) = affinity_pair();
+    let (source, destination) = thread_pair();
 
     let mut value = ConcretePhantom {
         tracked: Tracker::default(),
@@ -110,7 +126,7 @@ struct Mixed<T, U> {
 
 #[test]
 fn relocate_reaches_every_non_skipped_field_and_no_skipped_one() {
-    let (source, destination) = affinity_pair();
+    let (source, destination) = thread_pair();
 
     let mut value = Mixed::<Tracker, Tracker> {
         tracked: Tracker::default(),
@@ -132,7 +148,7 @@ enum PhantomEnum<T, U> {
 
 #[test]
 fn enum_with_phantom_only_generic_compiles_and_relocates() {
-    let (source, destination) = affinity_pair();
+    let (source, destination) = thread_pair();
 
     let mut tracked = PhantomEnum::<Tracker, Tracker>::Tracked(Tracker::default());
     tracked.relocate(source, destination);
@@ -156,7 +172,7 @@ struct PhantomRef<'a, T: 'a>(Tracker, PhantomData<fn(&'a T)>);
 
 #[test]
 fn phantom_shared_reference_compiles_and_relocates() {
-    let (source, destination) = affinity_pair();
+    let (source, destination) = thread_pair();
 
     let mut value = PhantomRef::<'_, Rc<()>>(Tracker::default(), PhantomData);
     value.relocate(source, destination);
@@ -170,7 +186,7 @@ struct PhantomSlice<T>(Tracker, PhantomData<fn(&[T])>);
 
 #[test]
 fn phantom_slice_compiles_and_relocates() {
-    let (source, destination) = affinity_pair();
+    let (source, destination) = thread_pair();
 
     let mut value = PhantomSlice::<Rc<()>>(Tracker::default(), PhantomData);
     value.relocate(source, destination);
@@ -185,7 +201,7 @@ struct PhantomProjection<T: Iterator>(Tracker, PhantomData<fn(T::Item)>);
 
 #[test]
 fn phantom_projection_compiles_and_relocates() {
-    let (source, destination) = affinity_pair();
+    let (source, destination) = thread_pair();
 
     let mut value = PhantomProjection::<std::vec::IntoIter<i32>>(Tracker::default(), PhantomData);
     value.relocate(source, destination);
@@ -203,7 +219,7 @@ struct SkippedGeneric<T> {
 
 #[test]
 fn skipped_generic_field_needs_only_send() {
-    let (source, destination) = affinity_pair();
+    let (source, destination) = thread_pair();
 
     // `Arc<i32>` is `Send` but deliberately not `ThreadAware`; a skipped field must not
     // force the stronger bound.
@@ -223,14 +239,14 @@ fn skipped_generic_field_needs_only_send() {
 /// The derive does no name matching on field types at all, so this is an ordinary field:
 /// relocated, and traversed for the parameters it contains.
 mod lookalike {
-    use thread_aware::affinity::Affinity;
+    use thread_aware::Thread;
 
     pub(crate) struct PhantomData<T> {
         pub(crate) value: T,
     }
 
     impl<T: thread_aware::ThreadAware> thread_aware::ThreadAware for PhantomData<T> {
-        fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+        fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
             self.value.relocate(source, destination);
         }
     }
@@ -241,7 +257,7 @@ struct HoldsLookalike<T>(lookalike::PhantomData<T>);
 
 #[test]
 fn qualified_type_named_phantom_data_is_relocated() {
-    let (source, destination) = affinity_pair();
+    let (source, destination) = thread_pair();
 
     let mut value = HoldsLookalike(lookalike::PhantomData { value: Tracker::default() });
     value.relocate(source, destination);
@@ -258,7 +274,7 @@ fn qualified_type_named_phantom_data_is_relocated() {
 /// traversed like any other, with the look-alike's own impl deciding what its bound reduces
 /// to. A syntactic classifier could not tell this shape apart from the real marker.
 mod bare_lookalike {
-    use thread_aware::affinity::Affinity;
+    use thread_aware::Thread;
     use thread_aware_macros::ThreadAware;
 
     pub(crate) struct Marker<T> {
@@ -266,7 +282,7 @@ mod bare_lookalike {
     }
 
     impl<T: thread_aware::ThreadAware> thread_aware::ThreadAware for Marker<T> {
-        fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+        fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
             self.value.relocate(source, destination);
         }
     }
@@ -279,7 +295,7 @@ mod bare_lookalike {
 
 #[test]
 fn bare_type_named_phantom_data_is_relocated() {
-    let (source, destination) = affinity_pair();
+    let (source, destination) = thread_pair();
 
     let mut value = bare_lookalike::HoldsBareLookalike(bare_lookalike::Marker { value: Tracker::default() });
     value.relocate(source, destination);
@@ -313,7 +329,7 @@ fn raw_pointer_variance_marker_needs_no_escape_hatch() {
     // No `skip`, no `unsafe impl`, and the payload is not `Send` on its own.
     assert_thread_aware::<RawMarker<*const u8>>();
 
-    let (source, destination) = affinity_pair();
+    let (source, destination) = thread_pair();
     let mut value = RawMarker::<i32> {
         len: 3,
         marker: PhantomData,
@@ -334,7 +350,7 @@ struct HoldsNonSendPayload<T> {
 fn a_non_send_payload_still_derives_through_a_fn_marker() {
     assert_thread_aware::<HoldsNonSendPayload<Rc<()>>>();
 
-    let (source, destination) = affinity_pair();
+    let (source, destination) = thread_pair();
     let mut value = HoldsNonSendPayload::<i32> {
         tracked: Tracker::default(),
         marker: PhantomData,
@@ -349,7 +365,7 @@ fn a_non_send_payload_still_derives_through_a_fn_marker() {
 ///
 /// The generated arm binds every relocated field to a name of the derive's own choosing, so no
 /// field name can reach the relocation call. Without that rebinding either variant shadows a
-/// parameter of the generated `relocate` and passes a field where an `Affinity` is expected.
+/// parameter of the generated `relocate` and passes a field where a `Thread` is expected.
 #[derive(ThreadAware)]
 enum ShadowingFieldNames<T> {
     Both {
@@ -421,7 +437,7 @@ mod shadowed_prelude {
 
 #[test]
 fn a_shadowed_prelude_name_does_not_break_the_derive() {
-    let (source, destination) = affinity_pair();
+    let (source, destination) = thread_pair();
 
     let mut holder = shadowed_prelude::Holder {
         tracked: Tracker::default(),
@@ -470,7 +486,7 @@ mod colliding_parameter_names {
 
 #[test]
 fn caller_constants_do_not_collide_with_generated_parameters() {
-    let (source, destination) = affinity_pair();
+    let (source, destination) = thread_pair();
 
     let mut value = colliding_parameter_names::ConstParamNamedSource::<3> {
         tracked: Tracker::default(),
@@ -490,7 +506,7 @@ fn caller_constants_do_not_collide_with_generated_parameters() {
 
 #[test]
 fn caller_constants_do_not_collide_with_generated_bindings() {
-    let (source, destination) = affinity_pair();
+    let (source, destination) = thread_pair();
 
     let mut tuple = ConstCapture::Tuple(Tracker::default(), Tracker::default());
     tuple.relocate(source, destination);
@@ -520,7 +536,7 @@ fn caller_constants_do_not_collide_with_generated_bindings() {
 
 #[test]
 fn variant_fields_named_after_relocate_parameters_compile() {
-    let (source, destination) = affinity_pair();
+    let (source, destination) = thread_pair();
 
     let mut value = ShadowingFieldNames::<i32>::Both {
         source: Tracker::default(),
@@ -600,7 +616,7 @@ struct MacroHidden<T> {
 
 #[test]
 fn payloads_invisible_to_a_syntactic_scan_need_no_escape_hatch() {
-    let (source, destination) = affinity_pair();
+    let (source, destination) = thread_pair();
 
     // Both instantiated with arguments that are neither `Send` nor `ThreadAware`.
     assert_thread_aware::<ConstDependent<7>>();
@@ -628,7 +644,7 @@ fn payloads_invisible_to_a_syntactic_scan_need_no_escape_hatch() {
 /// the generated body needs, leaving an impl that cannot compile. A bare `ThreadAware` is
 /// inherently ambiguous and is assumed to be the real trait - see `is_same_trait`.
 mod own_thread_aware {
-    use thread_aware::affinity::Affinity;
+    use thread_aware::Thread;
     use thread_aware_macros::ThreadAware as DeriveThreadAware;
 
     pub(crate) mod inner {
@@ -640,7 +656,7 @@ mod own_thread_aware {
     impl inner::ThreadAware for Inner {}
 
     impl thread_aware::ThreadAware for Inner {
-        fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
     }
 
     #[derive(DeriveThreadAware)]
@@ -649,7 +665,7 @@ mod own_thread_aware {
 
 #[test]
 fn user_trait_named_thread_aware_does_not_suppress_the_real_bound() {
-    let (source, destination) = affinity_pair();
+    let (source, destination) = thread_pair();
 
     let mut value = own_thread_aware::Holder(own_thread_aware::Inner);
     value.relocate(source, destination);
@@ -686,7 +702,7 @@ mod enum_named_bindings {
 fn enum_named_variant_bindings_do_not_warn() {
     use enum_named_bindings::NamedVariants;
 
-    let (source, destination) = affinity_pair();
+    let (source, destination) = thread_pair();
 
     let mut marked = NamedVariants::<i32, u8>::Marked {
         value: Tracker::default(),

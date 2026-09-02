@@ -29,7 +29,7 @@ pub trait Strategy: sealed::Sealed {
 
     /// Whether every thread maps to the same partition.
     ///
-    /// Relocation uses this to recognise that a carried value provably belongs to the destination
+    /// Relocation uses this to recognize that a carried value provably belongs to the destination
     /// partition even when the source is unknown, seeding the partition with that value instead of
     /// materializing a fresh one. Leave it `false` unless [`key`](Self::key) is constant.
     ///
@@ -144,5 +144,34 @@ impl<T: ?Sized, S: Strategy> Default for Storage<T, S> {
 impl<T: ?Sized, S: Strategy> Debug for Storage<T, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Storage").field("partitions", &self.values.len()).finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::thread;
+
+    use super::Storage;
+    use crate::PerThread;
+    use crate::thread::ThreadBuilder;
+
+    #[test]
+    fn storage_starts_with_default_capacity() {
+        let storage = Storage::<u32, PerThread>::new();
+
+        assert!(storage.values.capacity() >= 32);
+    }
+
+    #[test]
+    fn insert_publishes_once_per_key() {
+        let thread = ThreadBuilder::default().build(thread::current().id());
+        let storage = Storage::<u32, PerThread>::new();
+        let first = Arc::new(1);
+        let second = Arc::new(2);
+
+        assert_eq!(storage.insert(&thread, Arc::clone(&first)), Ok(()));
+        assert_eq!(storage.insert(&thread, Arc::clone(&second)), Err(second));
+        assert!(Arc::ptr_eq(&storage.get(&thread).unwrap(), &first));
     }
 }

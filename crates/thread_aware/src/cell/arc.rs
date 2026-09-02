@@ -13,8 +13,8 @@ use std::{cell::RefCell, rc::Rc};
 use super::factory::Factory;
 use super::storage::{Storage, Strategy};
 use crate::ThreadAware;
-use thread_aware_core::Thread;
 use crate::closure::{ErasedClosureOnce, ThreadAwareFnOnce, closure_once};
+use thread_aware_core::Thread;
 
 /// Adapter that wraps a `ThreadAwareFnOnce<T>` to produce `Box<T>` instead.
 struct BoxedRelocate<F>(F);
@@ -103,15 +103,15 @@ pub(super) fn run_after_factory_update_hook() {
 
 /// Transferable reference counted type.
 ///
-/// The strategy parameter `S` partitions the available affinity space. Clones whose affinities map
-/// to the same partition share one value, while different partitions use independently materialized
-/// values. After an object graph moves to another thread, [`ThreadAware`] relocation switches each
-/// `Arc` to the value assigned to the destination thread's affinity. See [`new`](Arc::new) for
-/// construction details.
+/// The strategy parameter `S` partitions the available coordinate space. Clones whose thread
+/// coordinates map to the same partition share one value, while different partitions use
+/// independently materialized values. After an object graph moves to another thread,
+/// [`ThreadAware`] relocation switches each `Arc` to the value assigned to the destination
+/// partition. See [`new`](Arc::new) for construction details.
 ///
-/// Relocate an `Arc` only among affinities that its [`Strategy`] interprets in one consistent
-/// coordinate space: every such affinity must report the same partition count and map inside that
-/// partitioning (see the design guide, "Affinities and strategies").
+/// Relocate an `Arc` only among thread coordinates that its [`Strategy`] interprets in one
+/// consistent coordinate space: every such coordinate must report the same partition count and map
+/// inside that partitioning (see the design guide, "Strategy-partitioned values").
 ///
 /// # Reentrant initialization
 ///
@@ -125,12 +125,14 @@ pub(super) fn run_after_factory_update_hook() {
 /// documentation for the [`trait@ThreadAware`] trait.
 ///
 /// ```rust
-/// # use thread_aware::{Arc, ThreadAware, PerThread};
-/// # use thread_aware::affinity::*;
+/// # use std::thread;
+/// # use thread_aware::thread::ThreadBuilder;
+/// # use thread_aware::{Arc, PerThread, Thread, ThreadAware};
 /// # use std::sync::atomic::{AtomicI32, Ordering};
-/// # let affinities = pinned_affinities(&[2]);
-/// # let affinity1 = Some(affinities[0]);
-/// # let affinity2 = affinities[1];
+/// # let builder = ThreadBuilder::default();
+/// # let source = builder.build(thread::current().id());
+/// # let destination_id = thread::spawn(|| thread::current().id()).join().unwrap();
+/// # let destination = builder.build(destination_id);
 /// # #[derive(Clone)]
 /// # struct Counter {
 /// #     value: std::sync::Arc<AtomicI32>,
@@ -154,26 +156,26 @@ pub(super) fn run_after_factory_update_hook() {
 /// #
 /// # impl ThreadAware for Counter {
 /// #     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
-/// #         // Initialize a new value in the destination affinity independent
-/// #         // of the source affinity.
+/// #         // Initialize a new value in the destination partition independent
+/// #         // of the source partition.
 /// #         self.value = std::sync::Arc::new(AtomicI32::new(0));
 /// #     }
 /// # }
 ///
-/// let mut arc_affinity1 = Arc::<_, PerThread>::new(Counter::new);
-/// let arc_affinity1_clone = arc_affinity1.clone();
+/// let mut arc = Arc::<_, PerThread>::new(Counter::new);
+/// let arc_clone = arc.clone();
 ///
-/// arc_affinity1.increment_by(42);
-/// assert_eq!(arc_affinity1.value(), 42);
+/// arc.increment_by(42);
+/// assert_eq!(arc.value(), 42);
 ///
-/// arc_affinity1.relocate(affinity1, affinity2);
-/// assert_eq!(arc_affinity1.value(), 0);
-/// assert_eq!(arc_affinity1_clone.value(), 42);
+/// arc.relocate(Some(&source), &destination);
+/// assert_eq!(arc.value(), 0);
+/// assert_eq!(arc_clone.value(), 42);
 ///
-/// arc_affinity1.increment_by(11);
-/// let mut arc_affinity2_clone = arc_affinity1_clone;
-/// arc_affinity2_clone.relocate(affinity1, affinity2);
-/// assert_eq!(arc_affinity2_clone.value(), 11);
+/// arc.increment_by(11);
+/// let mut relocated_clone = arc_clone;
+/// relocated_clone.relocate(Some(&source), &destination);
+/// assert_eq!(relocated_clone.value(), 11);
 /// ```
 #[derive(Debug)]
 pub struct Arc<T: ?Sized, S: Strategy> {
@@ -252,8 +254,7 @@ where
     /// can be used with `new` by passing the constructor function (note the absence of `()`):
     ///
     /// ```rust
-    /// # use thread_aware::{Arc, ThreadAware, PerThread};
-    /// # use thread_aware::affinity::*;
+    /// # use thread_aware::{Arc, PerThread, Thread, ThreadAware};
     /// # use std::sync::atomic::{AtomicI32, Ordering};
     /// # use std::sync;
     /// # #[derive(Clone)]
@@ -278,8 +279,8 @@ where
     /// # }
     /// # impl ThreadAware for Counter {
     /// #     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
-    /// #         // Initialize a new value in the destination affinity independent
-    /// #         // of the source affinity.
+    /// #         // Initialize a new value in the destination partition independent
+    /// #         // of the source partition.
     /// #         self.value = sync::Arc::new(AtomicI32::new(0));
     /// #     }
     /// # }
@@ -373,7 +374,7 @@ where
     /// Construction invokes `f` immediately for the initial value. Relocation invokes it at most
     /// once for each additional strategy partition, when that partition is first reached. The
     /// captured `data` behaves like a [`ThreadAwareFnOnce`] input so it can be relocated safely to
-    /// the destination affinity before `f` is invoked.
+    /// the destination thread before `f` is invoked.
     ///
     /// Relocating `data` and invoking `f` are part of destination-value initialization. Their
     /// implementations must obey the reentrant initialization restriction documented on [`Arc`].
@@ -404,8 +405,7 @@ where
     /// defined in [`trait@ThreadAware`] documentation):
     ///
     /// ```rust
-    /// # use thread_aware::{ThreadAware, Arc, PerThread};
-    /// # use thread_aware::affinity::*;
+    /// # use thread_aware::{Arc, PerThread, Thread, ThreadAware};
     /// # use std::sync::atomic::{AtomicI32, Ordering};
     /// # use std::sync;
     /// # #[derive(Clone)]
@@ -431,8 +431,8 @@ where
     /// #
     /// # impl ThreadAware for Counter {
     /// #     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
-    /// #         // Initialize a new value in the destination affinity independent
-    /// #         // of the source affinity.
+    /// #         // Initialize a new value in the destination partition independent
+    /// #         // of the source partition.
     /// #         self.value = sync::Arc::new(AtomicI32::new(0));
     /// #     }
     /// # }
@@ -464,7 +464,7 @@ where
     ///
     /// The value must implement [`trait@ThreadAware`] and [`Clone`]. When relocation first reaches an
     /// unmaterialized destination partition, a new value is created by cloning the value carried by
-    /// the `Arc` and relocating it to the destination affinity.
+    /// the `Arc` and relocating it to the destination thread.
     ///
     /// For example, the counter type we implemented in the documentation for the [`trait@ThreadAware`] trait
     /// can be used with new.
@@ -555,7 +555,7 @@ where
     ///
     /// The `clone_fn` receives `&V` (the concrete type) and returns `Box<T>`, enabling
     /// use with `dyn Trait` where `Clone` is not object-safe. Each partition's clone is
-    /// [`relocate`](ThreadAware::relocate) to the destination affinity that first materializes it.
+    /// [`relocate`](ThreadAware::relocate) to the destination thread that first materializes it.
     ///
     /// The clone function and the returned value's relocation participate in destination-value
     /// initialization. Their implementations must obey the reentrant initialization restriction
@@ -566,7 +566,7 @@ where
     /// # #[derive(Clone)]
     /// # struct Foo(u32);
     /// # impl ThreadAware for Foo {
-    /// #     fn relocate(&mut self, _: Option<thread_aware::affinity::Affinity>, _: thread_aware::affinity::Affinity) {}
+    /// #     fn relocate(&mut self, _: Option<&thread_aware::Thread>, _: &thread_aware::Thread) {}
     /// # }
     /// trait MyPlugin: ThreadAware {}
     /// impl MyPlugin for Foo {}
@@ -612,34 +612,35 @@ where
         }
     }
 
-    /// Creates a new `Arc` from the given storage and the current affinity.
+    /// Creates a new `Arc` from the given storage and the current thread.
     ///
     /// This is the counterpart to building a [`Storage`] directly: populate it with
     /// [`Storage::insert`] for the strategy partitions that should carry a value, then hand it here
     /// to obtain an `Arc` backed by those values.
     ///
-    /// If the resulting `Arc` is relocated to an affinity whose strategy partition has no value in
-    /// the storage, it behaves like a [`sync::Arc`].
+    /// If the resulting `Arc` is relocated to a thread whose strategy partition has no value in the
+    /// storage, it behaves like a [`sync::Arc`].
     ///
     /// # Panics
-    /// Panics if `current_affinity` falls outside the storage's coordinate space or its strategy
+    /// Panics if `current_thread` falls outside the storage's coordinate space or its strategy
     /// partition has no value.
     ///
     /// # Examples
     ///
     /// ```
+    /// use std::thread;
     /// use std::sync::Arc as StdArc;
     ///
-    /// use thread_aware::affinity::pinned_affinities;
+    /// use thread_aware::thread::ThreadBuilder;
     /// use thread_aware::storage::Storage;
     /// use thread_aware::{Arc, PerThread};
     ///
-    /// let affinity = pinned_affinities(&[2])[0];
+    /// let current = ThreadBuilder::default().build(thread::current().id());
     ///
     /// let storage = Storage::new();
-    /// storage.insert(affinity, StdArc::new(42)).unwrap();
+    /// storage.insert(&current, StdArc::new(42)).unwrap();
     ///
-    /// let arc = Arc::<_, PerThread>::from_storage(StdArc::new(storage), affinity);
+    /// let arc = Arc::<_, PerThread>::from_storage(StdArc::new(storage), &current);
     /// assert_eq!(*arc, 42);
     /// ```
     ///
@@ -661,8 +662,9 @@ impl<T, S: Strategy> Arc<T, S> {
     ///
     /// This method returns the strong reference count for the underlying [`sync::Arc`]
     /// that holds the value carried by this `Arc`, excluding any internal references held by the
-    /// storage for deduplication purposes. Affinities that map to the same strategy partition share
-    /// one value and reference count; different partitions maintain separate values and counts.
+    /// storage for deduplication purposes. Thread coordinates that map to the same strategy
+    /// partition share one value and reference count; different partitions maintain separate values
+    /// and counts.
     ///
     /// The count is approximate under concurrent relocation: a relocation publishing this value
     /// into another strategy partition can skew the sample. It saturates at zero rather than
@@ -687,7 +689,7 @@ impl<T, S: Strategy> Arc<T, S> {
 
         // `sync::Arc::strong_count` is an unsynchronized snapshot, stale the instant it is read, so
         // `raw` and `internal` can never be reconciled into one consistent view regardless of how
-        // they are sampled: a concurrent relocation can publish this value into another slot,
+        // they are sampled: a concurrent relocation can publish this value into another partition,
         // leaving `internal` momentarily larger than the now-stale `raw`. Saturate rather than
         // underflow.
         raw.saturating_sub(internal)
@@ -805,7 +807,9 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
         // would deadlock on that entry. A panic propagates and leaves the partition empty for the
         // next relocation to retry.
         // Ref: docs/implementation.md, "Relocation and publication".
-        let published = self.storage.get_or_insert_with(destination, || self.materialize_value(source, destination));
+        let published = self
+            .storage
+            .get_or_insert_with(destination, || self.materialize_value(source, destination));
         self.value = published;
 
         // Record the value the `Arc` moved away from into the source partition, so a later
