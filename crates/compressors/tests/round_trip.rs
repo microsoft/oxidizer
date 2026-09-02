@@ -13,7 +13,7 @@ use std::num::NonZeroUsize;
 use bytesbuf::mem::GlobalPool;
 use bytesbuf::{BytesBuf, BytesView};
 use compressors::core::Compression as _;
-use compressors::{DecompressionLimits, Output, Resources, gzip};
+use compressors::{DecompressorLimits, Output, Resources, gzip};
 
 /// The payload behind `tests/fixtures/system_gzip.gz`, compressed by the system `gzip -9 -n`.
 const FIXTURE_PLAINTEXT: &[u8] = b"The quick brown fox jumps over the lazy dog.\nPack my box with five dozen liquor jugs.\n";
@@ -177,7 +177,7 @@ fn rejects_a_bomb_before_materialising_it() {
     assert!(bomb.len() < 100 * 1024, "the bomb should be tiny: {} bytes", bomb.len());
 
     let mut decompressor = gzip::Decompressor::builder()
-        .limits(DecompressionLimits::new().with_max_output_len(1024 * 1024))
+        .limits(DecompressorLimits::new().with_max_output_len(1024 * 1024))
         .build(&Resources::default());
     decompressor.push(bomb).expect("push succeeds");
     decompressor.end_input();
@@ -216,7 +216,7 @@ fn trusted_callers_can_opt_out_of_the_limits() {
     let compressed = gzip::compress(view(&payload), &Resources::default()).expect("compression succeeds");
 
     let decompressor = gzip::Decompressor::builder()
-        .limits(DecompressionLimits::UNLIMITED)
+        .limits(DecompressorLimits::UNLIMITED)
         .build(&Resources::default());
     let plain = drive_decompressor(decompressor, &compressed, usize::MAX).expect("decompression succeeds");
 

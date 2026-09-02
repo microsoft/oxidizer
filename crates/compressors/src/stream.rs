@@ -156,7 +156,7 @@ where
     /// # Security
     ///
     /// A decompressor built with its format's `new` applies that format's default
-    /// [`DecompressionLimits`][crate::DecompressionLimits]. These defaults do not bound total output,
+    /// [`DecompressorLimits`][crate::DecompressorLimits]. These defaults do not bound total output,
     /// and Brotli has no default ratio bound. For an untrusted source, build the decompressor with its
     /// `builder` and set an absolute output limit the caller can actually afford.
     ///
@@ -231,7 +231,7 @@ mod tests {
     use super::*;
     use crate::Format;
     use crate::core::ProgressCompression;
-    use crate::{DecompressionLimits, Level, Resources, gzip};
+    use crate::{DecompressorLimits, Level, Resources, gzip};
 
     fn view(bytes: &[u8]) -> BytesView {
         BytesView::copied_from_slice(bytes, &GlobalPool::new())
@@ -427,7 +427,7 @@ mod tests {
         let gzip = crate::gzip::compress(view(&vec![0_u8; 4 * 1024 * 1024]), &Resources::default()).expect("compression succeeds");
 
         let decompressor = gzip::Decompressor::builder()
-            .limits(DecompressionLimits::new().with_max_output_len(1024))
+            .limits(DecompressorLimits::new().with_max_output_len(1024))
             .build(&Resources::default());
 
         let error = collect(CompressionStream::decompress(ok_stream(vec![gzip]), decompressor)).expect_err("the cap fires");

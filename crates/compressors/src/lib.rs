@@ -150,14 +150,14 @@
 //! zeros. It therefore has no default ratio limit; callers handling untrusted Brotli input must set
 //! an absolute output limit.
 //!
-//! [`DecompressionLimits`] carries *overrides*, not values: bounds you leave unset keep the
-//! format's default, so [`DecompressionLimits::default()`] never silently imposes one format's
+//! [`DecompressorLimits`] carries *overrides*, not values: bounds you leave unset keep the
+//! format's default, so [`DecompressorLimits::default()`] never silently imposes one format's
 //! calibration on another.
 //!
 //! **A ratio limit is therefore a coarse backstop, not real protection.** For untrusted input, set
-//! [`DecompressionLimits::with_max_output_len`] to whatever the caller can actually afford to
-//! buffer, and [`DecompressionLimits::with_max_streams`] when concatenated streams are accepted.
-//! Use [`DecompressionLimits::UNLIMITED`] only for sources you trust as much as your own process.
+//! [`DecompressorLimits::with_max_output_len`] to whatever the caller can actually afford to
+//! buffer, and [`DecompressorLimits::with_max_streams`] when concatenated streams are accepted.
+//! Use [`DecompressorLimits::UNLIMITED`] only for sources you trust as much as your own process.
 //!
 //! Streaming decompression can yield bytes before a final checksum or trailer has been verified.
 //! Treat those bytes as provisional until the operation reports [`Output::Done`].
@@ -214,7 +214,7 @@ pub use error::{BuildError, Error, Result};
 #[cfg(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
 pub use format::Format;
 pub use level::Level;
-pub use limits::DecompressionLimits;
+pub use limits::DecompressorLimits;
 pub use output::Output;
 pub use resources::Resources;
 #[cfg(feature = "futures-stream")]
@@ -277,7 +277,7 @@ pub fn compress(input: BytesView, compressor: impl Compression<Mode = Compress>)
 /// # Security
 ///
 /// A format's default bounds are a coarse backstop. For untrusted input, build the decompressor
-/// with [`DecompressionLimits::with_max_output_len`][crate::DecompressionLimits::with_max_output_len].
+/// with [`DecompressorLimits::with_max_output_len`][crate::DecompressorLimits::with_max_output_len].
 pub fn decompress(input: BytesView, decompressor: impl Compression<Mode = Decompress>) -> Result<BytesView> {
     process(decompressor, input)
 }

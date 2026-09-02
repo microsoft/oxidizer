@@ -153,14 +153,14 @@ for a repeated short string, `21 000x` for a repeated sentence and `80 660x` for
 zeros. It therefore has no default ratio limit; callers handling untrusted Brotli input must set
 an absolute output limit.
 
-[`DecompressionLimits`][__link16] carries *overrides*, not values: bounds you leave unset keep the
-format’s default, so [`DecompressionLimits::default()`][__link17] never silently imposes one format’s
+[`DecompressorLimits`][__link16] carries *overrides*, not values: bounds you leave unset keep the
+format’s default, so [`DecompressorLimits::default()`][__link17] never silently imposes one format’s
 calibration on another.
 
 **A ratio limit is therefore a coarse backstop, not real protection.** For untrusted input, set
-[`DecompressionLimits::with_max_output_len`][__link18] to whatever the caller can actually afford to
-buffer, and [`DecompressionLimits::with_max_streams`][__link19] when concatenated streams are accepted.
-Use [`DecompressionLimits::UNLIMITED`][__link20] only for sources you trust as much as your own process.
+[`DecompressorLimits::with_max_output_len`][__link18] to whatever the caller can actually afford to
+buffer, and [`DecompressorLimits::with_max_streams`][__link19] when concatenated streams are accepted.
+Use [`DecompressorLimits::UNLIMITED`][__link20] only for sources you trust as much as your own process.
 
 Streaming decompression can yield bytes before a final checksum or trailer has been verified.
 Treat those bytes as provisional until the operation reports [`Output::Done`][__link21].
@@ -187,7 +187,7 @@ A build that needs only `brotli` or only `zstd` never compiles `flate2` at all.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/compressors">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbBl8tjF39M8YbgvrtspAvOccboY9vxVOsGMcbO1fWcHMbif5hZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbe6BYj4PYQEsbcs5JZVO1lzwbXZSqaQBYrr8b8xvg8fnQOyhhZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
  [__link0]: https://crates.io/crates/bytesbuf/0.9.0
  [__link1]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesView
  [__link10]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressorBuilder::build_format
@@ -196,12 +196,12 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link13]: https://docs.rs/compressors/0.1.0/compressors/?search=Format::compress
  [__link14]: https://docs.rs/compressors/0.1.0/compressors/?search=Format::decompress
  [__link15]: https://docs.rs/compressors/0.1.0/compressors/?search=Format::decompress_with_limits
- [__link16]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressionLimits
- [__link17]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressionLimits::default
- [__link18]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressionLimits::with_max_output_len
- [__link19]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressionLimits::with_max_streams
+ [__link16]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits
+ [__link17]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits::default
+ [__link18]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits::with_max_output_len
+ [__link19]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits::with_max_streams
  [__link2]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesBuf
- [__link20]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressionLimits::UNLIMITED
+ [__link20]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits::UNLIMITED
  [__link21]: https://docs.rs/compressors/0.1.0/compressors/?search=Output::Done
  [__link22]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressionStream
  [__link3]: https://docs.rs/compressors/0.1.0/compressors/fn.compress.html

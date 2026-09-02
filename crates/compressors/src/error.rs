@@ -137,9 +137,9 @@ impl Error {
         self.kind == Kind::UnexpectedEndOfStream
     }
 
-    /// Decompression would have exceeded the configured [`DecompressionLimits`].
+    /// Decompression would have exceeded the configured [`DecompressorLimits`].
     ///
-    /// [`DecompressionLimits`]: crate::DecompressionLimits
+    /// [`DecompressorLimits`]: crate::DecompressorLimits
     #[must_use]
     pub fn is_limit_exceeded(&self) -> bool {
         self.kind == Kind::LimitExceeded

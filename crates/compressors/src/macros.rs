@@ -211,7 +211,7 @@ macro_rules! define_decompressor_build {
         /// # Errors
         ///
         /// Returns an error if the data is malformed, truncated, or exceeds `limits`.
-        pub fn decompress_with_limits(input: BytesView, resources: &$crate::Resources, limits: DecompressionLimits) -> Result<BytesView> {
+        pub fn decompress_with_limits(input: BytesView, resources: &$crate::Resources, limits: DecompressorLimits) -> Result<BytesView> {
             $crate::decompress(input, Decompressor::builder().limits(limits).build(resources))
         }
     };
@@ -298,7 +298,7 @@ macro_rules! define_decompressor_build {
         ///
         /// Returns an error if the decompressor cannot be built, or if the data is malformed,
         /// truncated, or exceeds `limits`.
-        pub fn decompress_with_limits(input: BytesView, resources: &$crate::Resources, limits: DecompressionLimits) -> Result<BytesView> {
+        pub fn decompress_with_limits(input: BytesView, resources: &$crate::Resources, limits: DecompressorLimits) -> Result<BytesView> {
             $crate::decompress(input, Decompressor::builder().limits(limits).build(resources)?)
         }
     };
@@ -324,7 +324,7 @@ macro_rules! define_format {
 
         use $crate::engine::Pump;
         use $crate::error::Result;
-        use $crate::limits::DecompressionLimits;
+        use $crate::limits::DecompressorLimits;
         use $crate::output::Output;
 
         impl Default for $crate::CompressorBuilder<$format> {

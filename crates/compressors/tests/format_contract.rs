@@ -16,7 +16,7 @@ use bytesbuf::mem::GlobalPool;
 use bytesbuf::{BytesBuf, BytesView};
 use compressors::Format;
 use compressors::core::{Compress, Compression, Decompress};
-use compressors::{CompressorBuilder, DecompressionLimits, DecompressorBuilder, Level, Output, Resources, TrailingData};
+use compressors::{CompressorBuilder, DecompressorBuilder, DecompressorLimits, Level, Output, Resources, TrailingData};
 
 fn view(bytes: &[u8]) -> BytesView {
     BytesView::copied_from_slice(bytes, &GlobalPool::new())
@@ -357,7 +357,7 @@ macro_rules! format_contract {
                 let bomb = $module::compress(view(&vec![0_u8; 16 * 1024 * 1024]), resources()).expect("compression succeeds");
 
                 let mut decompressor = $module::Decompressor::builder()
-                    .limits(DecompressionLimits::new().with_max_ratio(NonZeroU32::new(4).expect("4 is not zero")))
+                    .limits(DecompressorLimits::new().with_max_ratio(NonZeroU32::new(4).expect("4 is not zero")))
                     .build(resources())
                     .built();
                 decompressor.push(bomb).expect("push succeeds");
@@ -413,7 +413,7 @@ macro_rules! format_contract {
                 let compressed = $module::compress(view(&vec![0_u8; 4 * 1024 * 1024]), resources()).expect("compression succeeds");
 
                 let mut decompressor = $module::Decompressor::builder()
-                    .limits(DecompressionLimits::new().without_max_ratio().with_max_output_len(1024))
+                    .limits(DecompressorLimits::new().without_max_ratio().with_max_output_len(1024))
                     .build(resources())
                     .built();
                 decompressor.push(compressed).expect("push succeeds");
@@ -436,7 +436,7 @@ macro_rules! format_contract {
                 let compressed = $module::compress(view(&data), resources()).expect("compression succeeds");
 
                 let mut decompressor = $module::Decompressor::builder()
-                    .limits(DecompressionLimits::UNLIMITED)
+                    .limits(DecompressorLimits::UNLIMITED)
                     .build(resources())
                     .built();
                 let plain = decompress(&mut decompressor, &compressed, usize::MAX).expect("decompression succeeds");
@@ -1104,7 +1104,7 @@ macro_rules! format_contract {
                 let joined = BytesView::from_views([compressed.clone(), compressed]);
                 let mut decompressor = $module::Decompressor::builder()
                     .multi_stream(true)
-                    .limits(DecompressionLimits::new().with_max_streams(NonZeroU64::new(1).expect("one is non-zero")))
+                    .limits(DecompressorLimits::new().with_max_streams(NonZeroU64::new(1).expect("one is non-zero")))
                     .build(resources())
                     .built();
                 decompressor.push(joined).expect("push succeeds");
@@ -1129,7 +1129,7 @@ macro_rules! format_contract {
                 let compressed = $module::compress(view(&payload()), resources()).expect("compress");
                 let mut decompressor = $module::Decompressor::builder()
                     .multi_stream(true)
-                    .limits(DecompressionLimits::new().with_max_streams(NonZeroU64::new(1).expect("one is non-zero")))
+                    .limits(DecompressorLimits::new().with_max_streams(NonZeroU64::new(1).expect("one is non-zero")))
                     .build(resources())
                     .built();
                 decompressor.push(compressed.clone()).expect("first push succeeds");
@@ -1154,7 +1154,7 @@ macro_rules! format_contract {
                 let exact = $module::decompress_with_limits(
                     compressed.clone(),
                     resources(),
-                    DecompressionLimits::new()
+                    DecompressorLimits::new()
                         .without_max_ratio()
                         .with_max_output_len(data.len() as u64),
                 )
@@ -1165,7 +1165,7 @@ macro_rules! format_contract {
                 let error = $module::decompress_with_limits(
                     compressed,
                     resources(),
-                    DecompressionLimits::new().without_max_ratio().with_max_output_len(maximum),
+                    DecompressorLimits::new().without_max_ratio().with_max_output_len(maximum),
                 )
                 .expect_err("one byte beyond the cap is rejected");
 

@@ -21,7 +21,7 @@
 use std::num::NonZeroUsize;
 
 use crate::level::Level;
-use crate::limits::DecompressionLimits;
+use crate::limits::DecompressorLimits;
 use crate::trailing::TrailingData;
 
 /// How much output a single `pull` produces before handing control back.
@@ -132,11 +132,11 @@ impl Default for CompressorBuilder<()> {
 ///
 /// Compressed data can expand by orders of magnitude, so a decompressor pointed at untrusted input
 /// is a memory-exhaustion vector. Set [`limits`][DecompressorBuilder::limits] with
-/// [`with_max_output_len`][DecompressionLimits::with_max_output_len] when the data comes from an
+/// [`with_max_output_len`][DecompressorLimits::with_max_output_len] when the data comes from an
 /// untrusted peer.
 #[derive(Debug, Clone)]
 pub struct DecompressorBuilder<T = ()> {
-    pub(crate) limits: DecompressionLimits,
+    pub(crate) limits: DecompressorLimits,
     pub(crate) chunk_size: NonZeroUsize,
     pub(crate) multi_stream: Option<bool>,
     pub(crate) trailing_data: TrailingData,
@@ -155,7 +155,7 @@ impl<T> DecompressorBuilder<T> {
     /// marker types need no public constructor.
     pub(crate) fn with_format(format: T) -> Self {
         Self {
-            limits: DecompressionLimits::new(),
+            limits: DecompressorLimits::new(),
             chunk_size: default_chunk_size(),
             multi_stream: None,
             trailing_data: TrailingData::Ignore,
@@ -170,10 +170,10 @@ impl<T> DecompressorBuilder<T> {
     ///
     /// # Security
     ///
-    /// Set [`with_max_output_len`][DecompressionLimits::with_max_output_len] when the data comes
+    /// Set [`with_max_output_len`][DecompressorLimits::with_max_output_len] when the data comes
     /// from an untrusted peer.
     #[must_use]
-    pub const fn limits(mut self, limits: DecompressionLimits) -> Self {
+    pub const fn limits(mut self, limits: DecompressorLimits) -> Self {
         self.limits = limits;
         self
     }

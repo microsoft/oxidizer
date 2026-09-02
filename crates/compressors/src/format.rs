@@ -11,7 +11,7 @@ use bytesbuf::BytesView;
 use crate::builder::{CompressorBuilder, DecompressorBuilder};
 use crate::core::{Compress, Compression, Decompress};
 use crate::error::{BuildError, Result};
-use crate::limits::DecompressionLimits;
+use crate::limits::DecompressorLimits;
 use crate::resources::Resources;
 
 /// A compression format, selectable at runtime.
@@ -160,7 +160,7 @@ impl Format {
 
     /// Decompresses a complete stream that is already in memory.
     ///
-    /// Applies [`DecompressionLimits::new()`]; for anything else, configure a
+    /// Applies [`DecompressorLimits::new()`]; for anything else, configure a
     /// [`DecompressorBuilder`] and finish it with
     /// [`build_format`][DecompressorBuilder::build_format].
     ///
@@ -184,7 +184,7 @@ impl Format {
         clippy::trivially_copy_pass_by_ref,
         reason = "one-shot operations consistently borrow the selected runtime format"
     )]
-    pub fn decompress_with_limits(&self, input: BytesView, resources: &Resources, limits: DecompressionLimits) -> Result<BytesView> {
+    pub fn decompress_with_limits(&self, input: BytesView, resources: &Resources, limits: DecompressorLimits) -> Result<BytesView> {
         crate::decompress(input, DecompressorBuilder::new().limits(limits).build_format(*self, resources)?)
     }
 }
@@ -422,7 +422,7 @@ mod tests {
                 .expect("compression succeeds");
 
             let mut decompressor = DecompressorBuilder::new()
-                .limits(DecompressionLimits::new().without_max_ratio().with_max_output_len(1024))
+                .limits(DecompressorLimits::new().without_max_ratio().with_max_output_len(1024))
                 .output_chunk_size(NonZeroUsize::new(64).expect("64 is not zero"))
                 .build_format(format, &Resources::default())
                 .expect("the settings are accepted");
@@ -558,7 +558,7 @@ mod tests {
                 .decompress_with_limits(
                     compressed,
                     &Resources::default(),
-                    DecompressionLimits::new().without_max_ratio().with_max_output_len(1024),
+                    DecompressorLimits::new().without_max_ratio().with_max_output_len(1024),
                 )
                 .expect_err("the explicit cap fires");
 
