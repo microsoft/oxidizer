@@ -14,7 +14,7 @@ use super::factory::Factory;
 use super::storage::{Storage, Strategy};
 use crate::ThreadAware;
 use crate::closure::{ErasedClosureOnce, ThreadAwareFnOnce, closure_once};
-use thread_aware_core::Thread;
+use thread_aware_core::{Owner, Thread};
 
 /// Adapter that wraps a `ThreadAwareFnOnce<T>` to produce `Box<T>` instead.
 struct BoxedRelocate<F>(F);
@@ -181,6 +181,7 @@ pub(super) fn run_after_factory_update_hook() {
 pub struct Arc<T: ?Sized, S: Strategy> {
     pub(super) storage: sync::Arc<Storage<T, S>>,
     pub(super) value: sync::Arc<T>,
+    value_owner: Option<Owner>,
     factory: Factory<T>,
 }
 
@@ -215,6 +216,7 @@ impl<T: ?Sized, S: Strategy> Clone for Arc<T, S> {
         Self {
             storage: sync::Arc::clone(&self.storage),
             value: sync::Arc::clone(&self.value),
+            value_owner: self.value_owner.clone(),
             factory: self.factory.clone(),
         }
     }
@@ -475,6 +477,7 @@ where
         Self {
             storage: sync::Arc::new(Storage::new()),
             value,
+            value_owner: None,
             factory: Factory::Data(|data: &T, source, destination| {
                 let mut data = data.clone();
                 data.relocate(source, destination);
@@ -539,6 +542,7 @@ where
         Self {
             storage: sync::Arc::new(Storage::new()),
             value,
+            value_owner: None,
             factory: Factory::Data(|data: &T, _source, _destination| Box::new(data.clone())),
         }
     }
@@ -581,6 +585,7 @@ where
         Self {
             storage: sync::Arc::new(Storage::new()),
             value,
+            value_owner: None,
             factory: Factory::ErasedCloneFn(erased),
         }
     }
@@ -608,6 +613,7 @@ where
         Self {
             storage: sync::Arc::new(Storage::new()),
             value,
+            value_owner: None,
             factory: Factory::Closure(sync::Arc::new(ErasedClosureOnce::new(closure)), None),
         }
     }
@@ -652,6 +658,7 @@ where
         Self {
             storage,
             value,
+            value_owner: Some(current_thread.owner().clone()),
             factory: Factory::Manual,
         }
     }
@@ -751,8 +758,16 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
     fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         if source.is_some_and(|source| source.owner() != destination.owner()) {
             if let Some(source) = source {
-                self.storage.bind_owner(source.owner());
+                let value_owner = self.value_owner.get_or_insert_with(|| source.owner().clone());
+                self.storage.bind_owner(value_owner);
             }
+            return;
+        }
+
+        // Shared storage and each holder track ownership independently. Another clone may have bound
+        // the storage to this destination even though this holder still carries a value from a
+        // different owner.
+        if self.value_owner.as_ref().is_some_and(|owner| owner != destination.owner()) {
             return;
         }
 
@@ -776,6 +791,7 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
         // Ref: docs/implementation.md, "Relocation and publication".
         if let Some(value) = self.storage.get(destination) {
             self.value = value;
+            self.value_owner = Some(destination.owner().clone());
             return;
         }
 
@@ -801,6 +817,7 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
                 .get_or_insert_with(destination, || sync::Arc::<T>::clone(&self.value))
                 .expect("storage owner was bound to the destination above");
             self.value = published;
+            self.value_owner = Some(destination.owner().clone());
             return;
         }
 
@@ -825,6 +842,7 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
             .get_or_insert_with(destination, || self.materialize_value(source, destination))
             .expect("storage owner was bound to the destination above");
         self.value = published;
+        self.value_owner = Some(destination.owner().clone());
 
         // Record the value the `Arc` moved away from into the source partition, so a later
         // relocation back into it finds the original instead of materializing a fresh one. Reached

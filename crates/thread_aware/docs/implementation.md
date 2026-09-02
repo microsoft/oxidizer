@@ -88,6 +88,8 @@ especially important for runtime-bound resources: retaining a working remote
 resource is preferable to replacing it with state for an unrelated runtime.
 Owner binding also prevents that retained resource from becoming a canonical
 partition value if the holder later moves again inside the foreign runtime.
+Each holder separately records the owner of its carried value because another
+clone may have already bound the shared storage to a different owner.
 
 Partition entries are retained until their shared storage is dropped. This
 matches stable thread-per-core worker sets but means `PerThread` storage should

@@ -46,6 +46,42 @@ fn relocate_within_foreign_owner_keeps_original_carried_value() {
 }
 
 #[test]
+fn prebound_foreign_storage_cannot_publish_carried_value() {
+    let source = ThreadBuilder::default().build(thread::current().id());
+    let foreign_builder = ThreadBuilder::default();
+    let foreign_source = foreign_builder.build(thread::current().id());
+    let foreign_destination_id = thread::spawn(|| thread::current().id()).join().unwrap();
+    let foreign_destination = foreign_builder.build(foreign_destination_id);
+    let mut value = Arc::<_, PerThread>::from_unaware(42_u32);
+    let mut foreign_value = value.clone();
+    let carried = value.clone().into_arc();
+
+    foreign_value.relocate(Some(&foreign_source), &foreign_source);
+    value.relocate(Some(&source), &foreign_source);
+    value.relocate(Some(&foreign_source), &foreign_destination);
+
+    assert!(StdArc::ptr_eq(&carried, &value.into_arc()));
+}
+
+#[test]
+fn rejected_relocation_does_not_claim_unowned_value() {
+    let owner_builder = ThreadBuilder::default();
+    let owner_source = owner_builder.build(thread::current().id());
+    let owner_destination_id = thread::spawn(|| thread::current().id()).join().unwrap();
+    let owner_destination = owner_builder.build(owner_destination_id);
+    let foreign = ThreadBuilder::default().build(thread::current().id());
+    let mut owner_value = Arc::<_, PerThread>::from_unaware(42_u32);
+    let mut unowned_value = owner_value.clone();
+    let carried = unowned_value.clone().into_arc();
+
+    owner_value.relocate(Some(&owner_source), &owner_source);
+    unowned_value.relocate(Some(&foreign), &foreign);
+    unowned_value.relocate(Some(&owner_source), &owner_destination);
+
+    assert!(!StdArc::ptr_eq(&carried, &unowned_value.into_arc()));
+}
+
+#[test]
 fn relocate_within_owner_materializes_destination() {
     let builder = ThreadBuilder::default();
     let source = builder.build(thread::current().id());

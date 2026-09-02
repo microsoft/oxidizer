@@ -56,9 +56,10 @@ its carried value, although it may be less efficient.
 An `Owner` identifies one runtime. When relocation has a known source and the
 destination belongs to a different owner, `Arc::relocate` is a no-op. The holder
 keeps its carried value and does not read, publish, or materialize a partition
-for the foreign runtime. Storage records its original owner so later relocation
-calls inside the foreign runtime also remain no-ops instead of publishing the
-retained value there.
+for the foreign runtime. Storage records its runtime owner, while each holder
+records the owner of its carried value. The per-holder owner prevents a retained
+value from being published after another clone has already bound shared storage
+to the foreign runtime.
 
 This preserves runtime-bound objects across relocation. They may continue to
 use state associated with the original runtime and therefore operate less
