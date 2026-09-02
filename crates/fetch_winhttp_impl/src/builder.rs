@@ -174,8 +174,7 @@ mod tests {
     use fetch::{Recovery, RecoveryInfo};
     use observed::Sink;
     use static_assertions::{assert_impl_all, assert_not_impl_any};
-    use thread_aware::Relocator;
-    use thread_aware::ThreadAware;
+    use thread_aware::{Relocator, ThreadAware};
     use tick::{Clock, ClockControl};
 
     use super::{WinHttpDeps, WinHttpDepsBuilder, create_builder_with_bindings, into_custom_deps};
