@@ -12,7 +12,6 @@ use std::any::type_name;
 /// `SinkId` is `Copy` - pass it by value, not by reference.
 #[derive(Copy, Clone, thread_aware::ThreadAware)]
 pub struct SinkId {
-    #[thread_aware(skip)]
     label: &'static str,
 }
 

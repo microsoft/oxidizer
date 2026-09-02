@@ -72,6 +72,7 @@ impl_thread_aware!(Duration);
 impl_thread_aware!(Path);
 
 impl_thread_aware!(str);
+impl_thread_aware!(&'static str);
 
 impl_thread_aware!(Owner);
 impl_thread_aware!(NumaNode);
