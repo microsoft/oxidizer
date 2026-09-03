@@ -176,7 +176,10 @@ impl Error {
     /// use compressors::Error;
     /// use recoverable::{Recovery, RecoveryKind};
     ///
-    /// let error = Error::other("reading the body failed", io::Error::from(io::ErrorKind::TimedOut));
+    /// let error = Error::other(
+    ///     "reading the body failed",
+    ///     io::Error::from(io::ErrorKind::TimedOut),
+    /// );
     ///
     /// assert!(error.is_source());
     /// assert_eq!(error.recovery().kind(), RecoveryKind::Retry);
@@ -209,7 +212,11 @@ impl Error {
     /// # }
     /// # impl std::error::Error for Throttled {}
     ///
-    /// let error = Error::other_with_recovery("the backend throttled us", Throttled, RecoveryInfo::unavailable());
+    /// let error = Error::other_with_recovery(
+    ///     "the backend throttled us",
+    ///     Throttled,
+    ///     RecoveryInfo::unavailable(),
+    /// );
     ///
     /// assert_eq!(error.recovery().kind(), RecoveryKind::Unavailable);
     /// ```

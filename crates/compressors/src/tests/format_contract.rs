@@ -123,9 +123,8 @@ fn decompress(decompressor: &mut dyn Compression<Mode = Decompress>, input: &Byt
 macro_rules! format_contract {
     ($module:ident, $format:expr) => {
         mod $module {
-            use crate::$module;
-
             use super::*;
+            use crate::$module;
 
             const FORMAT: Format = $format;
 
@@ -1389,10 +1388,9 @@ fn a_decompressor_can_be_chosen_from_a_declared_encoding() {
 /// Format-specific settings: how a format extends the shared builder without breaking the contract.
 #[cfg(feature = "brotli")]
 mod format_specific_settings {
+    use super::*;
     use crate::brotli;
     use crate::brotli::{Mode, Quality, WindowSize};
-
-    use super::*;
 
     #[test]
     fn default_limits_accept_the_compressors_own_high_ratio_output() {
@@ -1490,10 +1488,9 @@ mod format_specific_settings {
 
 #[cfg(feature = "zstd")]
 mod zstd_specific_settings {
+    use super::*;
     use crate::zstd;
     use crate::zstd::{CompressionLevel, WindowLog};
-
-    use super::*;
 
     #[test]
     fn native_level_and_decompressor_window_limit_are_wired() {
@@ -1517,9 +1514,8 @@ mod zstd_specific_settings {
 /// Engine reuse must be invisible: a recycled compressor has to behave exactly like a fresh one.
 #[cfg(feature = "gzip")]
 mod pooling {
-    use crate::gzip;
-
     use super::*;
+    use crate::gzip;
 
     /// Resources whose engines are recycled, shared by the tests in this module.
     fn pooled_resources() -> &'static Resources {
@@ -1829,9 +1825,8 @@ fn pooled_output_does_not_drift_over_many_reuses() {
 /// `core` deliberately knows about none.
 #[cfg(feature = "gzip")]
 mod trait_contract {
-    use crate::gzip;
-
     use super::*;
+    use crate::gzip;
 
     #[test]
     fn round_trips_through_the_trait_alone() {
