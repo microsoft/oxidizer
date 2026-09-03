@@ -218,7 +218,7 @@ as an Axum fallback service.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/rest_over_grpc">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb4yyDbhLmywUbUgoeDyjY0hYb_gBd7xtnrJEbm_ruDQCrgu9hZIOCZ2xheWVyZWRlMC4zLjaCbnJlc3Rfb3Zlcl9ncnBjZTAuMi4wgm10b3dlcl9zZXJ2aWNlZTAuMy4z
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb4yyDbhLmywUbUgoeDyjY0hYb_gBd7xtnrJEbm_ruDQCrgu9hZIOCZ2xheWVyZWRlMC4zLjaCbnJlc3Rfb3Zlcl9ncnBjZTAuMi4wg210b3dlci1zZXJ2aWNlZTAuMy4zbXRvd2VyX3NlcnZpY2U
  [__link0]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=handling::Status
  [__link1]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=serving::RestService::new
  [__link10]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=transcoding::Transcode::try_transcode
@@ -231,7 +231,7 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link17]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=handling::ResponseStream
  [__link18]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=handling::Status
  [__link19]: https://github.com/microsoft/oxidizer/blob/main/crates/rest_over_grpc_examples/Cargo.toml
- [__link2]: https://docs.rs/tower_service/0.3.3/tower_service/?search=Service
+ [__link2]: https://docs.rs/tower-service/0.3.3/tower_service/?search=Service
  [__link20]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=build::Generator::builder
  [__link21]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=build::GeneratorBuilder::emit_tonic_bridge
  [__link22]: https://github.com/microsoft/oxidizer/blob/main/crates/rest_over_grpc_examples/build.rs
@@ -246,7 +246,7 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link30]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=serving::serve_http_fn
  [__link31]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=serving::RestBody
  [__link32]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=serving::RestService
- [__link33]: https://docs.rs/tower_service/0.3.3/tower_service/?search=Service
+ [__link33]: https://docs.rs/tower-service/0.3.3/tower_service/?search=Service
  [__link34]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=serving::RestService
  [__link35]: https://docs.rs/layered/0.3.6/layered/?search=Service
  [__link36]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=transcoding::HttpResponse
