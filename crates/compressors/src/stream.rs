@@ -217,6 +217,7 @@ where
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(all(test, feature = "gzip"))]
 mod tests {
     use std::sync::Arc;

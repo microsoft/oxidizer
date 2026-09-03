@@ -508,6 +508,7 @@ fn non_driving_state_reached_the_step_loop() -> ! {
     unreachable!("non-driving states return before stepping")
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroU32;

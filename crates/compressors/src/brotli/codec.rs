@@ -257,6 +257,7 @@ unsafe impl Codec for BrotliDecompress {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use super::*;

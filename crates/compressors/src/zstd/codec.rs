@@ -48,7 +48,8 @@ struct UninitOutput<'a> {
 
 // SAFETY: `as_mut_ptr` returns a pointer to `capacity` writable bytes that stays valid for the
 // borrow, and `as_slice` never covers more than `filled`, which only ever advances through
-// `filled_until` -- whose own contract is that the caller initialized that many bytes.
+// `filled_until` -- whose own contract is that the caller initialized that many bytes, and which
+// clamps to `capacity` so `filled` can never exceed the allocation.
 unsafe impl zstd_safe::WriteBuf for UninitOutput<'_> {
     fn as_slice(&self) -> &[u8] {
         // SAFETY: `filled_until` promised these bytes are initialized, and `u8` shares its layout
@@ -64,8 +65,13 @@ unsafe impl zstd_safe::WriteBuf for UninitOutput<'_> {
         self.buffer.as_mut_ptr().cast::<u8>()
     }
 
+    // zstd is handed `capacity()` and reports back how much of it it wrote, so `n` is always within
+    // the buffer. The clamp holds `as_slice` sound by construction rather than by trusting the
+    // binding to honour that: were it ever violated, the out-of-bounds write would already have
+    // happened, and this at least stops it becoming a lasting out-of-bounds read.
     unsafe fn filled_until(&mut self, n: usize) {
-        self.filled = n;
+        debug_assert!(n <= self.buffer.len(), "zstd reported writing more than the capacity it was given");
+        self.filled = n.min(self.buffer.len());
     }
 }
 
@@ -318,6 +324,7 @@ unsafe impl Codec for ZstdDecompress {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use super::*;

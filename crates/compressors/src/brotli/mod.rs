@@ -281,6 +281,7 @@ impl crate::CompressorBuilder<Brotli> {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod quality_tests {
     use super::*;
@@ -301,6 +302,7 @@ mod quality_tests {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod window_size_tests {
     use super::*;

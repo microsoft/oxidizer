@@ -363,6 +363,7 @@ impl From<BuildError> for Error {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use recoverable::RecoveryKind;

@@ -297,6 +297,7 @@ impl CompressionInternal for RejectsPush {
         0
     }
 }
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use bytesbuf::mem::GlobalPool;

@@ -212,6 +212,7 @@ unsafe impl Codec for FlateDecompress {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(all(test, feature = "deflate", feature = "gzip", feature = "zlib"))]
 mod tests {
     use super::*;

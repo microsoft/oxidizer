@@ -242,6 +242,7 @@ impl crate::DecompressorBuilder<Zstd> {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod configuration_tests {
     use super::*;

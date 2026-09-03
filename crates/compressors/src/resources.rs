@@ -139,6 +139,7 @@ fn global_memory() -> &'static GlobalPool {
     MEMORY.get_or_init(GlobalPool::new)
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use super::*;
