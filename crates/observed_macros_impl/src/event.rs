@@ -745,7 +745,7 @@ fn parse_field_def(field: &Field) -> Result<FieldDef> {
 /// helper attributes never need to resolve as real macros. (The `warn` severity
 /// is spelled `#[warning(...)]` to avoid the built-in `warn` lint attribute,
 /// which rustc validates before macro expansion.)
-pub(crate) fn event_attr(attr: TokenStream, item: TokenStream) -> Result<TokenStream> {
+pub(crate) fn event_attr(attr: TokenStream, item: TokenStream, runtime: &TokenStream) -> Result<TokenStream> {
     let args: EventArgs = syn::parse2(attr)?;
     let item_struct: ItemStruct = syn::parse2(item)?;
     let impl_tokens = generate_event(
@@ -754,6 +754,7 @@ pub(crate) fn event_attr(attr: TokenStream, item: TokenStream) -> Result<TokenSt
         &item_struct.attrs,
         &item_struct.fields,
         &args,
+        runtime,
     )?;
     let cleaned = strip_helper_attrs(item_struct);
     Ok(quote! {
@@ -769,10 +770,11 @@ pub(crate) fn generate_event(
     attrs: &[Attribute],
     fields: &Fields,
     args: &EventArgs,
+    runtime: &TokenStream,
 ) -> Result<TokenStream> {
     let def = parse_event_def(ident, generics, attrs, fields, args)?;
     validate_message_placeholders(&def)?;
-    Ok(generate_event_impl(&def))
+    Ok(generate_event_impl(&def, runtime))
 }
 
 /// Returns whether `attr` is a struct-level helper consumed by `#[event]`
@@ -856,7 +858,7 @@ fn validate_message_placeholders(def: &EventDef) -> Result<()> {
 
 /// Builds the `Option<LogDescription>` expression for the event's log signal
 /// (or `None` when the event declares no severity attribute).
-fn log_description_expr(def: &EventDef) -> TokenStream {
+fn log_description_expr(def: &EventDef, runtime: &TokenStream) -> TokenStream {
     let Some(log) = &def.log else {
         return quote! { ::core::option::Option::None };
     };
@@ -869,9 +871,9 @@ fn log_description_expr(def: &EventDef) -> TokenStream {
     };
     quote! {
         ::core::option::Option::Some(
-            ::observed::metadata::LogDescription::new(
+            #runtime::metadata::LogDescription::new(
                 #log_name,
-                ::observed::Severity::#severity,
+                #runtime::Severity::#severity,
                 #body_expr,
             )
         )
@@ -901,13 +903,13 @@ fn field_reaches_signal(field: &FieldDef, has_log: bool) -> bool {
 /// The redaction bounds are added only for fields that reach a signal, since a
 /// field routed nowhere generates no code to bound - which a metric-only event
 /// does to every one of its non-dimension fields.
-fn event_predicates(def: &EventDef) -> Vec<syn::WherePredicate> {
+fn event_predicates(def: &EventDef, runtime: &TokenStream) -> Vec<syn::WherePredicate> {
     let params = crate::field_attrs::type_param_idents(&def.generics);
     let has_log = def.log.is_some();
     let mut predicates = Vec::new();
     for field in &def.fields {
         if field_reaches_signal(field, has_log) {
-            predicates.extend(crate::field_attrs::field_predicates(&field.ty, &field.redaction, &params));
+            predicates.extend(crate::field_attrs::field_predicates(&field.ty, &field.redaction, &params, runtime));
         }
         let ty = &field.ty;
         if crate::field_attrs::mentions_any_type_param(ty, &params) {
@@ -917,7 +919,7 @@ fn event_predicates(def: &EventDef) -> Vec<syn::WherePredicate> {
     predicates
 }
 
-fn generate_event_impl(def: &EventDef) -> TokenStream {
+fn generate_event_impl(def: &EventDef, runtime: &TokenStream) -> TokenStream {
     let struct_ident = &def.ident;
 
     // Event identity comes from the required `#[event("...")]` attribute.
@@ -937,7 +939,7 @@ fn generate_event_impl(def: &EventDef) -> TokenStream {
     // Spell out the obligations the generated body relies on, so a generic event
     // reports them against the caller's type instead of failing inside the
     // expansion.
-    crate::field_attrs::extend_where_clause(&mut generics_with_static, event_predicates(def));
+    crate::field_attrs::extend_where_clause(&mut generics_with_static, event_predicates(def, runtime));
 
     let (impl_generics, ty_generics, where_clause) = generics_with_static.split_for_impl();
 
@@ -970,7 +972,7 @@ fn generate_event_impl(def: &EventDef) -> TokenStream {
         )
     };
 
-    let log_expr = log_description_expr(def);
+    let log_expr = log_description_expr(def, runtime);
 
     let metric_expr = if let Some(metric) = &def.metric {
         let instrument_name = metric.name.clone().unwrap_or_else(|| def.event_name.clone());
@@ -979,9 +981,9 @@ fn generate_event_impl(def: &EventDef) -> TokenStream {
         // A fieldless event-level metric is always a counter (records `1`).
         quote! {
             ::core::option::Option::Some(
-                ::observed::metadata::MetricDescription::new(
+                #runtime::metadata::MetricDescription::new(
                     #instrument_name,
-                    ::observed::metadata::InstrumentKind::Counter,
+                    #runtime::metadata::InstrumentKind::Counter,
                     #description,
                     #unit,
                 )
@@ -995,13 +997,13 @@ fn generate_event_impl(def: &EventDef) -> TokenStream {
     let disabled = def.disabled;
     let has_log = def.log.is_some();
 
-    let visit_fields_body = generate_visit_fields_body(&def.fields, has_log);
+    let visit_fields_body = generate_visit_fields_body(&def.fields, has_log, runtime);
 
     quote! {
         const _: () = {
-            impl #impl_generics ::observed::Event for #struct_ident #ty_generics #where_clause {
-                const DESCRIPTION: ::observed::metadata::EventDescription =
-                    ::observed::metadata::EventDescription::new(
+            impl #impl_generics #runtime::Event for #struct_ident #ty_generics #where_clause {
+                const DESCRIPTION: #runtime::metadata::EventDescription =
+                    #runtime::metadata::EventDescription::new(
                         #event_name,
                         #type_id_expr,
                         #log_expr,
@@ -1012,7 +1014,7 @@ fn generate_event_impl(def: &EventDef) -> TokenStream {
 
                 fn visit_fields(
                     &self,
-                    visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+                    visitor: &mut #runtime::processing::FieldVisitorFn<'_>,
                 ) -> ::core::ops::ControlFlow<()> {
                     #visit_fields_body
                     ::core::ops::ControlFlow::Continue(())
@@ -1022,12 +1024,12 @@ fn generate_event_impl(def: &EventDef) -> TokenStream {
     }
 }
 
-fn generate_visit_fields_body(fields: &[FieldDef], has_log: bool) -> TokenStream {
-    let visits: Vec<TokenStream> = fields.iter().map(|f| generate_field_visit(f, has_log)).collect();
+fn generate_visit_fields_body(fields: &[FieldDef], has_log: bool, runtime: &TokenStream) -> TokenStream {
+    let visits: Vec<TokenStream> = fields.iter().map(|f| generate_field_visit(f, has_log, runtime)).collect();
     quote! { #(#visits)* }
 }
 
-fn generate_field_visit(field: &FieldDef, has_log: bool) -> TokenStream {
+fn generate_field_visit(field: &FieldDef, has_log: bool, runtime: &TokenStream) -> TokenStream {
     let field_ident = &field.ident;
     // Unraw-ed so a field written as `r#type` is exported under the domain key
     // `type`; `field_ident` keeps the raw form because it addresses the field.
@@ -1036,7 +1038,7 @@ fn generate_field_visit(field: &FieldDef, has_log: bool) -> TokenStream {
     // Log routing
     let log_key = if has_log { field.log_key() } else { None };
     let log_entry = if let Some(key) = &log_key {
-        quote! { ::core::option::Option::Some(::observed::metadata::LogFieldEntry::new(#key)) }
+        quote! { ::core::option::Option::Some(#runtime::metadata::LogFieldEntry::new(#key)) }
     } else {
         quote! { ::core::option::Option::None }
     };
@@ -1048,18 +1050,18 @@ fn generate_field_visit(field: &FieldDef, has_log: bool) -> TokenStream {
         let description = decl.description.as_deref().unwrap_or("");
         let unit = decl.unit.as_deref().unwrap_or("");
         quote! {
-            ::core::option::Option::Some(::observed::metadata::MetricFieldEntry::instrument(
+            ::core::option::Option::Some(#runtime::metadata::MetricFieldEntry::instrument(
                 #default_key,
-                ::observed::metadata::MetricDescription::new(
+                #runtime::metadata::MetricDescription::new(
                     #name,
-                    ::observed::metadata::InstrumentKind::#kind,
+                    #runtime::metadata::InstrumentKind::#kind,
                     #description,
                     #unit,
                 ),
             ))
         }
     } else if let Some(key) = field.metric_dimension.resolve_key(&default_key) {
-        quote! { ::core::option::Option::Some(::observed::metadata::MetricFieldEntry::dimension(#key)) }
+        quote! { ::core::option::Option::Some(#runtime::metadata::MetricFieldEntry::dimension(#key)) }
     } else {
         quote! { ::core::option::Option::None }
     };
@@ -1071,14 +1073,14 @@ fn generate_field_visit(field: &FieldDef, has_log: bool) -> TokenStream {
     }
 
     let field_desc = quote! {
-        const FIELD_DESC: ::observed::metadata::FieldDescriptor =
-            ::observed::metadata::FieldDescriptor::new(#default_key, #log_entry, #metric_entry);
+        const FIELD_DESC: #runtime::metadata::FieldDescriptor =
+            #runtime::metadata::FieldDescriptor::new(#default_key, #log_entry, #metric_entry);
     };
 
     // `Option<T>` fields dispatch on `#[if_none(...)]`: a `None` value is
     // either dropped or replaced with a placeholder string (default `"n/a"`).
     if let Some(inner_ty) = option_inner_type(&field.ty) {
-        return generate_option_field_visit(field, inner_ty, &field_desc);
+        return generate_option_field_visit(field, inner_ty, &field_desc, runtime);
     }
 
     let owned = quote! { self.#field_ident.clone() };
@@ -1090,7 +1092,14 @@ fn generate_field_visit(field: &FieldDef, has_log: bool) -> TokenStream {
         // Field is an owned type, so `&self.field` produces `&T`.
         quote! { &self.#field_ident }
     };
-    let value = value_expr(&field.redaction, &owned, &by_ref, &quote! { engine }, is_borrowed_str(&field.ty));
+    let value = value_expr(
+        &field.redaction,
+        &owned,
+        &by_ref,
+        &quote! { engine },
+        is_borrowed_str(&field.ty),
+        runtime,
+    );
     let getter = if matches!(field.redaction, FieldRedaction::Unredacted) {
         quote! { |_| #value }
     } else {
@@ -1105,7 +1114,8 @@ fn generate_field_visit(field: &FieldDef, has_log: bool) -> TokenStream {
     }
 }
 
-/// Builds the `::observed::Value::…` expression for a field value.
+/// Builds the `Value::…` expression for a field value, rooted at the resolved
+/// `observed` runtime path.
 ///
 /// All generated paths are fully qualified: the consumer's `#[data_class(...)]`
 /// expression is interpolated into this output, so importing `Value` here would
@@ -1122,25 +1132,26 @@ fn value_expr(
     by_ref: &TokenStream,
     engine: &TokenStream,
     borrowed_str: bool,
+    runtime: &TokenStream,
 ) -> TokenStream {
     match redaction {
         // A borrowed `&str` cannot be stored by reference, so the macro spells
         // out the copy that `Value` has no `From<&str>` impl to hide.
         FieldRedaction::Unredacted if borrowed_str => {
-            quote! { ::observed::Value::from(::std::sync::Arc::<str>::from(#by_ref)) }
+            quote! { #runtime::Value::from(::std::sync::Arc::<str>::from(#by_ref)) }
         }
-        FieldRedaction::Unredacted => quote! { ::observed::Value::from(#owned) },
+        FieldRedaction::Unredacted => quote! { #runtime::Value::from(#owned) },
         // `Sensitive<T>` is `RedactedDisplay` whenever `T: Display`, and a
         // reference to a `Display` type is itself `Display`, so the classified
         // value can be borrowed rather than cloned. `from_redacted` only
         // borrows the temporary `Sensitive`, so nothing needs to own the value.
         FieldRedaction::DataClass(expr) => quote! {
-            ::observed::Value::from_redacted(
-                &::observed::__private::Sensitive::new(#by_ref, #expr),
+            #runtime::Value::from_redacted(
+                &#runtime::__private::Sensitive::new(#by_ref, #expr),
                 #engine)
         },
         FieldRedaction::Default => quote! {
-            ::observed::Value::from_redacted(#by_ref, #engine)
+            #runtime::Value::from_redacted(#by_ref, #engine)
         },
     }
 }
@@ -1153,7 +1164,7 @@ fn value_expr(
 ///   [`Drop`](IfNone::Drop) skips the field entirely (`visitor` is never
 ///   called), while [`Fill`](IfNone::Fill) records the placeholder string
 ///   in place of the missing value.
-fn generate_option_field_visit(field: &FieldDef, inner_ty: &syn::Type, field_desc: &TokenStream) -> TokenStream {
+fn generate_option_field_visit(field: &FieldDef, inner_ty: &syn::Type, field_desc: &TokenStream, runtime: &TokenStream) -> TokenStream {
     let field_ident = &field.ident;
     let inner_is_ref = is_reference_type(inner_ty);
     let engine = quote! { _engine };
@@ -1167,7 +1178,7 @@ fn generate_option_field_visit(field: &FieldDef, inner_ty: &syn::Type, field_des
     } else {
         (quote! { __val.clone() }, quote! { __val })
     };
-    let some_value = value_expr(&field.redaction, &val_owned, &val_ref, &engine, is_borrowed_str(inner_ty));
+    let some_value = value_expr(&field.redaction, &val_owned, &val_ref, &engine, is_borrowed_str(inner_ty), runtime);
 
     match &field.if_none {
         // `drop`: omit the field entirely when `None`.
@@ -1186,7 +1197,7 @@ fn generate_option_field_visit(field: &FieldDef, inner_ty: &syn::Type, field_des
                         visitor(&FIELD_DESC, &|_engine| #some_value )?;
                     }
                     ::core::option::Option::None => {
-                        visitor(&FIELD_DESC, &|_| ::observed::Value::from(#placeholder))?;
+                        visitor(&FIELD_DESC, &|_| #runtime::Value::from(#placeholder))?;
                     }
                 }
             }

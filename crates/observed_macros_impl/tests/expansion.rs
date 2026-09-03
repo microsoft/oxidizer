@@ -21,7 +21,7 @@
 
 #![cfg(not(miri))]
 
-use observed_macros_impl::{derive_enrichment, event};
+use observed_macros_impl::{derive_enrichment, derive_enrichment_with_runtime_path, event, event_with_runtime_path};
 use proc_macro2::{Delimiter, Group, TokenStream, TokenTree};
 use quote::quote;
 use testing_aids::{render_expansion, tokenize};
@@ -42,6 +42,23 @@ fn event_error(attr: &str, item: &str) -> String {
 
 fn enrichment_error(item: &str) -> String {
     derive_enrichment(tokenize(item)).expect_err("the derive is rejected").to_string()
+}
+
+/// The path a consumer that renamed its `observed` dependency reaches the runtime under.
+///
+/// The production entry points resolve this from the manifest of the crate being compiled,
+/// which these tests cannot vary, so they drive the generators through the hooks that take
+/// the path as an argument.
+fn renamed_runtime() -> TokenStream {
+    quote! { ::telemetry }
+}
+
+fn expand_event_renamed(attr: &str, item: &str) -> String {
+    render_expansion(&event_with_runtime_path(tokenize(attr), tokenize(item), &renamed_runtime()).expect("the event attribute expands"))
+}
+
+fn expand_enrichment_renamed(item: &str) -> String {
+    render_expansion(&derive_enrichment_with_runtime_path(tokenize(item), &renamed_runtime()).expect("the derive expands"))
 }
 
 /// The source a user would write to reach `#[event(...)]`, for the input side of a report row.
@@ -723,5 +740,53 @@ fn both_macros_validate_the_shared_field_attributes_identically() {
             ]
         }),
     );
+    insta::assert_snapshot!(output);
+}
+
+// ============================================================================================
+// Resolution of the `observed` runtime crate
+// ============================================================================================
+
+#[test]
+fn a_renamed_observed_dependency_is_named_throughout_both_expansions() {
+    // A consumer may rename its dependency (`telemetry = { package = "observed", ... }`),
+    // after which `::observed` names nothing in that crate. Every path the generators emit
+    // has to follow the rename -- the trait, the descriptors, `Value`, the visitor function
+    // type, the `__private` items, and the bounds spelled into the `where` clause -- so a
+    // single hard-coded `::observed` left anywhere shows up in this snapshot. Both entry
+    // points are covered in one snapshot so a divergence reads as a diff between them.
+    let event_item = r#"
+        #[info("{user} on {shard}")]
+        #[counter(requests, name = "requests")]
+        struct Renamed<'a, T> {
+            #[data_class(DataTaxonomy::Euii)]
+            user: T,
+            #[dimension(metric = "shard")]
+            #[unredacted]
+            shard: u64,
+            #[unredacted]
+            requests: u64,
+            #[unredacted]
+            borrowed: &'a str,
+            optional: Option<ClassifiedString>,
+        }
+    "#;
+    let enrichment_item = r"
+        struct RenamedEnrichment<T> {
+            #[data_class(DataTaxonomy::Euii)]
+            user: T,
+            #[unredacted]
+            region: String,
+            #[if_none(drop)]
+            tenant: Option<ClassifiedString>,
+        }
+    ";
+    let output = report([
+        (
+            event_source(r#""renamed""#, event_item),
+            expand_event_renamed(r#""renamed""#, event_item),
+        ),
+        (enrichment_source(enrichment_item), expand_enrichment_renamed(enrichment_item)),
+    ]);
     insta::assert_snapshot!(output);
 }

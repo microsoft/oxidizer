@@ -124,13 +124,13 @@ fn parse_enrichment_field_def(field: &Field) -> Result<EnrichmentFieldDef> {
 // ================================================================================================
 
 /// Entry point: generates the `Enrichment` trait implementation from `DeriveInput`.
-pub(crate) fn derive_enrichment(input: &DeriveInput) -> Result<TokenStream> {
+pub(crate) fn derive_enrichment(input: &DeriveInput, runtime: &TokenStream) -> Result<TokenStream> {
     let def = parse_enrichment_def(input)?;
-    Ok(generate_enrichment_impl(&def))
+    Ok(generate_enrichment_impl(&def, runtime))
 }
 
 /// Generates the complete `Enrichment` trait implementation.
-fn generate_enrichment_impl(def: &EnrichmentDef) -> TokenStream {
+fn generate_enrichment_impl(def: &EnrichmentDef, runtime: &TokenStream) -> TokenStream {
     let struct_ident = &def.ident;
 
     // Spell out the obligations the generated `into_entries` body relies on, so
@@ -146,19 +146,20 @@ fn generate_enrichment_impl(def: &EnrichmentDef) -> TokenStream {
                 &field.ty,
                 field.shared.redaction.as_ref().unwrap_or(&FieldRedaction::Default),
                 &params,
+                runtime,
             )
         })
         .collect();
     crate::field_attrs::extend_where_clause(&mut generics, predicates);
 
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
-    let entry_stmts: Vec<TokenStream> = def.fields.iter().map(generate_entry_stmt).collect();
+    let entry_stmts: Vec<TokenStream> = def.fields.iter().map(|field| generate_entry_stmt(field, runtime)).collect();
     let field_count = def.fields.len();
 
     quote! {
         const _: () = {
-            impl #impl_generics ::observed::enrichment::Enrichment for #struct_ident #ty_generics #where_clause {
-                fn into_entries(self) -> ::std::vec::Vec<::observed::__private::EnrichmentEntry> {
+            impl #impl_generics #runtime::enrichment::Enrichment for #struct_ident #ty_generics #where_clause {
+                fn into_entries(self) -> ::std::vec::Vec<#runtime::__private::EnrichmentEntry> {
                     let mut entries = ::std::vec::Vec::with_capacity(#field_count);
                     #(#entry_stmts)*
                     entries
@@ -173,7 +174,7 @@ fn generate_enrichment_impl(def: &EnrichmentDef) -> TokenStream {
 /// `Option<T>` fields behave like in `#[event(...)]`: on `None`,
 /// `#[if_none(...)]` decides whether the entry is dropped or filled with
 /// a placeholder string (default `"n/a"`).
-fn generate_entry_stmt(field: &EnrichmentFieldDef) -> TokenStream {
+fn generate_entry_stmt(field: &EnrichmentFieldDef, runtime: &TokenStream) -> TokenStream {
     let field_ident = &field.ident;
     // Unraw-ed so a field written as `r#type` is exported under the domain key
     // `type`; `field_ident` keeps the raw form because it addresses the field.
@@ -202,11 +203,20 @@ fn generate_entry_stmt(field: &EnrichmentFieldDef) -> TokenStream {
             exclude,
             metric_key.as_deref(),
             borrowed_str,
+            runtime,
         );
         return quote! { entries.push(#entry); };
     }
 
-    let some_entry = entry_ctor(&key, redaction, &quote! { __val }, exclude, metric_key.as_deref(), borrowed_str);
+    let some_entry = entry_ctor(
+        &key,
+        redaction,
+        &quote! { __val },
+        exclude,
+        metric_key.as_deref(),
+        borrowed_str,
+        runtime,
+    );
 
     // On `None`, `#[if_none(...)]` decides whether the entry is dropped
     // or filled with a placeholder string (default `"n/a"`).
@@ -225,6 +235,7 @@ fn generate_entry_stmt(field: &EnrichmentFieldDef) -> TokenStream {
                 metric_key.as_deref(),
                 // The placeholder is a literal, so it is stored without copying.
                 false,
+                runtime,
             );
             quote! {
                 match self.#field_ident {
@@ -246,30 +257,31 @@ fn entry_ctor(
     exclude: bool,
     metric_key: Option<&str>,
     borrowed_str: bool,
+    runtime: &TokenStream,
 ) -> TokenStream {
     let constructor = match redaction {
         // A borrowed `&str` cannot be stored by reference, so the macro spells
         // out the copy that `Value` has no `From<&str>` impl to hide.
         FieldRedaction::Unredacted if borrowed_str => quote! {
-            ::observed::__private::EnrichmentEntry::unclassified(
+            #runtime::__private::EnrichmentEntry::unclassified(
                 #key,
-                ::observed::Value::from(::std::sync::Arc::<str>::from(#value)),
+                #runtime::Value::from(::std::sync::Arc::<str>::from(#value)),
             )
         },
         // Unredacted: bypass redaction, type must impl `Into<Value>`.
         FieldRedaction::Unredacted => quote! {
-            ::observed::__private::EnrichmentEntry::unclassified(#key, #value)
+            #runtime::__private::EnrichmentEntry::unclassified(#key, #value)
         },
         // `data_class`: wrap in `Sensitive` before storing.
         FieldRedaction::DataClass(data_class_expr) => quote! {
-            ::observed::__private::EnrichmentEntry::new(
+            #runtime::__private::EnrichmentEntry::new(
                 #key,
-                ::observed::__private::Sensitive::new(#value, #data_class_expr),
+                #runtime::__private::Sensitive::new(#value, #data_class_expr),
             )
         },
         // Default: type must impl `RedactedDisplay`.
         FieldRedaction::Default => quote! {
-            ::observed::__private::EnrichmentEntry::new(#key, #value)
+            #runtime::__private::EnrichmentEntry::new(#key, #value)
         },
     };
     let exclude_chain = exclude.then(|| quote! { .exclude_from_logs() });

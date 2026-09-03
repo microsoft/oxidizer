@@ -431,7 +431,12 @@ fn walk_tokens(token: &proc_macro2::TokenTree, params: &[Ident], found: &mut boo
 /// `&impl RedactedDisplay`.
 ///
 /// Returns an empty vector for field types that do not mention `params`.
-pub(crate) fn field_predicates(ty: &syn::Type, redaction: &FieldRedaction, params: &[Ident]) -> Vec<syn::WherePredicate> {
+pub(crate) fn field_predicates(
+    ty: &syn::Type,
+    redaction: &FieldRedaction,
+    params: &[Ident],
+    runtime: &proc_macro2::TokenStream,
+) -> Vec<syn::WherePredicate> {
     let owned = option_inner_type(ty).unwrap_or(ty);
     if !mentions_any_type_param(owned, params) {
         return Vec::new();
@@ -441,7 +446,7 @@ pub(crate) fn field_predicates(ty: &syn::Type, redaction: &FieldRedaction, param
     match redaction {
         FieldRedaction::Unredacted => vec![
             syn::parse_quote!(#owned: ::core::clone::Clone),
-            syn::parse_quote!(::observed::Value: ::core::convert::From<#owned>),
+            syn::parse_quote!(#runtime::Value: ::core::convert::From<#owned>),
         ],
         FieldRedaction::DataClass(_) => {
             // The value is borrowed, not cloned, so the bound is `Display` on
@@ -450,7 +455,7 @@ pub(crate) fn field_predicates(ty: &syn::Type, redaction: &FieldRedaction, param
             vec![syn::parse_quote!(#by_ref: ::core::fmt::Display)]
         }
         FieldRedaction::Default => {
-            vec![syn::parse_quote!(#by_ref: ::observed::__private::RedactedDisplay)]
+            vec![syn::parse_quote!(#by_ref: #runtime::__private::RedactedDisplay)]
         }
     }
 }
@@ -463,7 +468,12 @@ pub(crate) fn field_predicates(ty: &syn::Type, redaction: &FieldRedaction, param
 /// is why they additionally require `Send + Sync + 'static`.
 ///
 /// Returns an empty vector for field types that do not mention `params`.
-pub(crate) fn enrichment_field_predicates(ty: &syn::Type, redaction: &FieldRedaction, params: &[Ident]) -> Vec<syn::WherePredicate> {
+pub(crate) fn enrichment_field_predicates(
+    ty: &syn::Type,
+    redaction: &FieldRedaction,
+    params: &[Ident],
+    runtime: &proc_macro2::TokenStream,
+) -> Vec<syn::WherePredicate> {
     let owned = option_inner_type(ty).unwrap_or(ty);
     if !mentions_any_type_param(owned, params) {
         return Vec::new();
@@ -471,16 +481,16 @@ pub(crate) fn enrichment_field_predicates(ty: &syn::Type, redaction: &FieldRedac
 
     match redaction {
         FieldRedaction::Unredacted => {
-            vec![syn::parse_quote!(#owned: ::core::convert::Into<::observed::Value>)]
+            vec![syn::parse_quote!(#owned: ::core::convert::Into<#runtime::Value>)]
         }
         FieldRedaction::DataClass(_) => vec![syn::parse_quote!(
-            ::observed::__private::Sensitive<#owned>: ::observed::__private::RedactedDisplay
+            #runtime::__private::Sensitive<#owned>: #runtime::__private::RedactedDisplay
                 + ::core::marker::Send
                 + ::core::marker::Sync
                 + 'static
         )],
         FieldRedaction::Default => vec![syn::parse_quote!(
-            #owned: ::observed::__private::RedactedDisplay
+            #owned: #runtime::__private::RedactedDisplay
                 + ::core::marker::Send
                 + ::core::marker::Sync
                 + 'static

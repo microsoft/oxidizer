@@ -1,0 +1,198 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: output
+---
+---- input ----
+#[event("renamed")]
+#[info("{user} on {shard}")]
+        #[counter(requests, name = "requests")]
+        struct Renamed<'a, T> {
+            #[data_class(DataTaxonomy::Euii)]
+            user: T,
+            #[dimension(metric = "shard")]
+            #[unredacted]
+            shard: u64,
+            #[unredacted]
+            requests: u64,
+            #[unredacted]
+            borrowed: &'a str,
+            optional: Option<ClassifiedString>,
+        }
+
+---- yields ----
+struct Renamed<'a, T> {
+    user: T,
+    shard: u64,
+    requests: u64,
+    borrowed: &'a str,
+    optional: Option<ClassifiedString>,
+}
+const _: () = {
+    impl<'a, T: 'static> ::telemetry::Event for Renamed<'a, T>
+    where
+        T: ::core::fmt::Display,
+        T: ::core::marker::Send + ::core::marker::Sync,
+    {
+        const DESCRIPTION: ::telemetry::metadata::EventDescription = ::telemetry::metadata::EventDescription::new(
+            "renamed",
+            ::core::option::Option::Some(
+                ::core::any::TypeId::of::<Renamed<'static, T>>(),
+            ),
+            ::core::option::Option::Some(
+                ::telemetry::metadata::LogDescription::new(
+                    "renamed",
+                    ::telemetry::Severity::Info,
+                    ::core::option::Option::Some("{user} on {shard}"),
+                ),
+            ),
+            ::core::option::Option::None,
+            true,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::telemetry::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                const FIELD_DESC: ::telemetry::metadata::FieldDescriptor = ::telemetry::metadata::FieldDescriptor::new(
+                    "user",
+                    ::core::option::Option::Some(
+                        ::telemetry::metadata::LogFieldEntry::new("user"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|engine| ::telemetry::Value::from_redacted(
+                        &::telemetry::__private::Sensitive::new(
+                            &self.user,
+                            DataTaxonomy::Euii,
+                        ),
+                        engine,
+                    ),
+                )?;
+            }
+            {
+                const FIELD_DESC: ::telemetry::metadata::FieldDescriptor = ::telemetry::metadata::FieldDescriptor::new(
+                    "shard",
+                    ::core::option::Option::Some(
+                        ::telemetry::metadata::LogFieldEntry::new("shard"),
+                    ),
+                    ::core::option::Option::Some(
+                        ::telemetry::metadata::MetricFieldEntry::dimension("shard"),
+                    ),
+                );
+                visitor(&FIELD_DESC, &|_| ::telemetry::Value::from(self.shard.clone()))?;
+            }
+            {
+                const FIELD_DESC: ::telemetry::metadata::FieldDescriptor = ::telemetry::metadata::FieldDescriptor::new(
+                    "requests",
+                    ::core::option::Option::Some(
+                        ::telemetry::metadata::LogFieldEntry::new("requests"),
+                    ),
+                    ::core::option::Option::Some(
+                        ::telemetry::metadata::MetricFieldEntry::instrument(
+                            "requests",
+                            ::telemetry::metadata::MetricDescription::new(
+                                "requests",
+                                ::telemetry::metadata::InstrumentKind::Counter,
+                                "",
+                                "",
+                            ),
+                        ),
+                    ),
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|_| ::telemetry::Value::from(self.requests.clone()),
+                )?;
+            }
+            {
+                const FIELD_DESC: ::telemetry::metadata::FieldDescriptor = ::telemetry::metadata::FieldDescriptor::new(
+                    "borrowed",
+                    ::core::option::Option::Some(
+                        ::telemetry::metadata::LogFieldEntry::new("borrowed"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|_| ::telemetry::Value::from(
+                        ::std::sync::Arc::<str>::from(self.borrowed),
+                    ),
+                )?;
+            }
+            {
+                const FIELD_DESC: ::telemetry::metadata::FieldDescriptor = ::telemetry::metadata::FieldDescriptor::new(
+                    "optional",
+                    ::core::option::Option::Some(
+                        ::telemetry::metadata::LogFieldEntry::new("optional"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                match self.optional.as_ref() {
+                    ::core::option::Option::Some(__val) => {
+                        visitor(
+                            &FIELD_DESC,
+                            &|_engine| ::telemetry::Value::from_redacted(__val, _engine),
+                        )?;
+                    }
+                    ::core::option::Option::None => {
+                        visitor(&FIELD_DESC, &|_| ::telemetry::Value::from("n/a"))?;
+                    }
+                }
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};
+
+---- input ----
+#[derive(Enrichment)]
+struct RenamedEnrichment<T> {
+            #[data_class(DataTaxonomy::Euii)]
+            user: T,
+            #[unredacted]
+            region: String,
+            #[if_none(drop)]
+            tenant: Option<ClassifiedString>,
+        }
+
+---- yields ----
+const _: () = {
+    impl<T> ::telemetry::enrichment::Enrichment for RenamedEnrichment<T>
+    where
+        ::telemetry::__private::Sensitive<
+            T,
+        >: ::telemetry::__private::RedactedDisplay + ::core::marker::Send
+            + ::core::marker::Sync + 'static,
+    {
+        fn into_entries(
+            self,
+        ) -> ::std::vec::Vec<::telemetry::__private::EnrichmentEntry> {
+            let mut entries = ::std::vec::Vec::with_capacity(3usize);
+            entries
+                .push(
+                    ::telemetry::__private::EnrichmentEntry::new(
+                        "user",
+                        ::telemetry::__private::Sensitive::new(
+                            self.user,
+                            DataTaxonomy::Euii,
+                        ),
+                    ),
+                );
+            entries
+                .push(
+                    ::telemetry::__private::EnrichmentEntry::unclassified(
+                        "region",
+                        self.region,
+                    ),
+                );
+            if let ::core::option::Option::Some(__val) = self.tenant {
+                entries
+                    .push(::telemetry::__private::EnrichmentEntry::new("tenant", __val));
+            }
+            entries
+        }
+    }
+};

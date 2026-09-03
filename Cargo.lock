@@ -3381,6 +3381,7 @@ name = "observed_macros_impl"
 version = "0.24.0"
 dependencies = [
  "insta",
+ "proc-macro-crate 3.5.0",
  "proc-macro2",
  "quote",
  "syn 3.0.3",
