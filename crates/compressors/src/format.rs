@@ -541,7 +541,12 @@ mod tests {
     /// A conforming operation always terminates, so exceeding this means the code under test is
     /// spinning. A hanging test reports nothing at all, so the cap turns a hang into a failure --
     /// which also lets mutation testing reach a verdict instead of timing out.
-    const MAX_STEPS: usize = 1_000_000;
+    ///
+    /// The cap has to stay tight enough for that verdict to arrive inside the mutation harness's
+    /// per-mutant timeout. No test here needs more than a few hundred steps, so this leaves well
+    /// over an order of magnitude of headroom while still failing a spinning mutant in under a
+    /// second. Matches the cap the other drain-loop tests use.
+    const MAX_STEPS: usize = 10_000;
 
     /// Fails a spinning test instead of letting it hang.
     ///
