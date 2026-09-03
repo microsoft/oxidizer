@@ -204,6 +204,8 @@ pub(super) fn run_after_factory_update_hook() {
 pub struct Arc<T: ?Sized, S: Strategy> {
     pub(super) storage: sync::Arc<Storage<T, S>>,
     pub(super) value: sync::Arc<T>,
+    // `None` means the eagerly constructed value has not yet been bound by relocation. Adoption
+    // binds it to the destination; a known cross-owner move binds it to the source and returns.
     value_owner: Option<Owner>,
     factory: Factory<T>,
 }

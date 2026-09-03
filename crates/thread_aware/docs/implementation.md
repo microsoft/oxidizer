@@ -8,12 +8,19 @@ Each holder contains:
 
 - `storage: std::sync::Arc<Storage<T, S>>`
 - `value: std::sync::Arc<T>`
+- `value_owner: Option<Owner>`
 - a cloneable factory describing how to create a value for a new partition
 
-`Storage<T, S>` contains a `DashMap<S::Key, std::sync::Arc<T>>` initialized with
-capacity 32. The capacity is a bounded-runtime default, not an empirically
-established limit: it avoids initial growth through 32 partitions and grows
-normally beyond that. The strategy key is derived from a borrowed `Thread`.
+`Storage<T, S>` contains an owner `OnceLock` and one of two value
+representations:
+
+- `OnceLock<std::sync::Arc<T>>` for a strategy that is always single-partition;
+- `DashMap<S::Key, std::sync::Arc<T>>` for partitioned strategies.
+
+The map is initialized with capacity 32. The capacity is a bounded-runtime
+default, not an empirically established limit: it avoids initial growth through
+32 partitions and grows normally beyond that. The strategy key is derived from
+a borrowed `Thread`.
 
 The carried `value` makes `Deref` independent of shared storage. Reads through
 the holder perform no map lookup and take no lock.
@@ -33,17 +40,21 @@ owner-boundary rejection cannot be mistaken for a populated partition.
 
 Relocation follows this order:
 
-1. Bind storage to the source owner when the first known relocation crosses an
-   owner boundary, then return without changing factory state, partition
-   contents, or the carried value.
-2. Bind unowned storage to the destination owner. If storage already belongs to
+1. If a known source and destination have different owners, bind an unbound
+   holder's `value_owner` to the source and return. Do not bind storage or
+   change factory state, partition contents, or the carried value.
+2. If `value_owner` is already bound to an owner other than the destination,
+   return.
+3. Bind unowned storage to the destination owner. If storage already belongs to
    another owner, return without changing the carried value.
-3. Record the first known source for closure factories.
-4. Look up the destination key. On a hit, adopt its value.
-5. If source and destination have the same key, publish or adopt the carried
+4. Record the first known source for closure factories.
+5. Look up the destination key. On a hit, adopt its value and bind
+   `value_owner` to the destination.
+6. If source and destination have the same key, publish or adopt the carried
    value for that key.
-6. Otherwise materialize the destination entry through DashMap's entry API.
-7. Record the previous carried value under the known source key if that key was
+7. Otherwise materialize the destination entry through the strategy's storage
+   representation and bind the adopted value to the destination owner.
+8. Record the previous carried value under the known source key if that key was
    still empty.
 
 `PerProcess` treats an unknown source as the same partition because every

@@ -97,6 +97,9 @@ pub(crate) mod sealed {
 /// Storage binds to the first runtime owner that populates it. Calls naming a thread from another
 /// owner cannot read or publish partition values. Published values remain until the storage is
 /// dropped, so `PerThread` storage is best suited to stable worker sets.
+///
+/// A single-partition strategy stores its value in a [`OnceLock`](std::sync::OnceLock).
+/// Partitioned strategies use a [`DashMap`], because their opaque keys are not dense or enumerable.
 pub struct Storage<T: ?Sized, S: Strategy> {
     owner: sync::OnceLock<Owner>,
     values: Values<T, S>,

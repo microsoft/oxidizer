@@ -56,22 +56,37 @@ its carried value, although it may be less efficient.
 An `Owner` identifies one runtime. When relocation has a known source and the
 destination belongs to a different owner, `Arc::relocate` is a no-op. The holder
 keeps its carried value and does not read, publish, or materialize a partition
-for the foreign runtime. Storage records its runtime owner, while each holder
-records the owner of its carried value. The per-holder owner prevents a retained
-value from being published after another clone has already bound shared storage
-to the foreign runtime.
+for the foreign runtime. The holder records the source as the owner of its
+carried value, but the shared storage remains unbound by that rejected move.
 
 This preserves runtime-bound objects across relocation. They may continue to
 use state associated with the original runtime and therefore operate less
 efficiently, but relocation does not replace working state with a value built
 for an unrelated owner.
 
-When the source is unknown, the owner relationship cannot be checked.
-Relocation follows the normal destination-key lookup.
+Storage and holders bind independently and only once:
+
+1. A newly constructed holder has an unbound carried value, and its storage is
+   also unbound.
+2. An accepted relocation or prepared insertion binds unowned storage to the
+   destination owner.
+3. Publishing or adopting a destination partition binds that holder's carried
+   value to the destination owner.
+4. A known cross-owner relocation instead binds an unbound holder to the
+   source owner and leaves storage unchanged.
+
+Once either binding is present, a different owner is rejected. Another clone
+may already have bound the shared storage even while this holder still carries
+an unbound or source-owned value, so both checks are required. When the source
+is unknown, the source/destination owner relationship cannot be checked, but
+the existing holder and storage bindings still are; an otherwise unbound move
+may bind to the destination and follow the normal key lookup.
 
 ## 4. Concurrent storage
 
-`storage::Storage<T, S>` uses `DashMap<S::Key, std::sync::Arc<T>>`. New
+`storage::Storage<T, S>` uses `OnceLock<std::sync::Arc<T>>` for the
+single-partition `PerProcess` strategy and
+`DashMap<S::Key, std::sync::Arc<T>>` for partitioned strategies. New
 partitioned storage reserves capacity for 32 entries by default. This is an
 explicit bounded-runtime heuristic: runtimes configured with at most 32 initial
 partitions avoid map growth, while larger runtimes grow normally. It is not an
