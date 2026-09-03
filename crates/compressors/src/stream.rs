@@ -48,6 +48,13 @@ where
         return Poll::Ready(None);
     }
 
+    // Latches when the source has run dry and `end_input` has been signalled. A conforming codec
+    // answers the next `pull` with output or `Done`, never with another request for input, so a
+    // second `NeedInput` means the codec is not honouring the contract. Without this the loop would
+    // poll the exhausted source again, re-signal end of input, and keep waking itself: bounded per
+    // poll, but a livelock across them. `process` rejects the same sequence outright.
+    let mut input_ended = false;
+
     for _ in 0..MAX_OPERATIONS_PER_POLL {
         match compression.pull() {
             Err(error) => {
@@ -63,9 +70,16 @@ where
                 *finished = true;
                 return Poll::Ready(None);
             }
+            Ok(Output::NeedInput) if input_ended => {
+                *finished = true;
+                return Poll::Ready(Some(Err(Error::invalid_state("the operation requested input after end of input"))));
+            }
             Ok(Output::NeedInput) => match source.as_mut().poll_next(cx) {
                 Poll::Pending => return Poll::Pending,
-                Poll::Ready(None) => compression.end_input(),
+                Poll::Ready(None) => {
+                    compression.end_input();
+                    input_ended = true;
+                }
                 Poll::Ready(Some(Ok(chunk))) => {
                     if let Err(error) = compression.push(chunk) {
                         *finished = true;
@@ -364,6 +378,18 @@ mod tests {
 
         let source = ok_stream(vec![view(b"chunk")]);
         let error = collect(CompressionStream::compress(source, RejectsPush)).expect_err("the push failure surfaces");
+
+        assert!(error.is_invalid_state(), "got {error}");
+    }
+
+    #[test]
+    fn reports_a_request_for_input_after_end_of_input_as_an_error() {
+        // The fixture asks for input forever. Once the source is exhausted there is none left to
+        // give, so the adapter has to end the stream rather than keep waking itself to ask again.
+        use crate::core::RejectsPush;
+
+        let source = ok_stream(Vec::new());
+        let error = collect(CompressionStream::compress(source, RejectsPush)).expect_err("a codec that never stops asking is rejected");
 
         assert!(error.is_invalid_state(), "got {error}");
     }
