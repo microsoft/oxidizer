@@ -225,7 +225,6 @@ impl ProgressCompression {
 }
 
 #[cfg(all(test, feature = "futures-stream"))]
-#[cfg(all(test, feature = "futures-stream"))]
 impl Compression for ProgressCompression {
     type Mode = Compress;
 }
@@ -264,7 +263,6 @@ impl CompressionInternal for ProgressCompression {
 #[derive(Debug)]
 pub(crate) struct RejectsPush;
 
-#[cfg(all(test, feature = "futures-stream"))]
 #[cfg(all(test, feature = "futures-stream"))]
 impl Compression for RejectsPush {
     type Mode = Compress;

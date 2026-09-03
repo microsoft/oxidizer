@@ -129,9 +129,9 @@ impl Default for CompressorBuilder<()> {
 ///
 /// The type parameter selects the format, and defaults to `()` for a builder that has not chosen
 /// one yet: it carries only the settings every format shares, and gains a `build_gzip`-style method
-/// per enabled format plus [`build_format`][CompressorBuilder::build_format]. Committing to a
-/// format -- which [`gzip::Compressor::builder`][crate::gzip::Compressor::builder] does -- adds that
-/// format's own settings and a `build` returning its concrete compressor.
+/// per enabled format plus [`build_format`][DecompressorBuilder::build_format]. Committing to a
+/// format -- which [`gzip::Decompressor::builder`][crate::gzip::Decompressor::builder] does -- adds
+/// that format's own settings and a `build` returning its concrete decompressor.
 ///
 /// # Security
 ///
