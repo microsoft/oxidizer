@@ -12,11 +12,12 @@
 
 # Build documentation for required workspace packages.
 [script("pwsh", "-NoProfile")]
-anvil-doc-build: anvil-doc-build-validate-prereqs
+anvil-doc-build: anvil-doc-build-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
-    if ($env:ANVIL_INCLUDE_REQUIRED -eq '--skip') { exit 0 }
+    $include = (& "{{ just_executable() }}" _anvil-impact-include required)
+    if ($include -eq '--skip') { Write-Host 'anvil-doc-build: no affected packages; skipping'; exit 0 }
     $env:RUSTDOCFLAGS = '-D warnings'
-    & cargo doc @(if ($env:ANVIL_INCLUDE_REQUIRED) { -split $env:ANVIL_INCLUDE_REQUIRED } else { '--workspace' }) --all-features --no-deps
+    & cargo {{_anvil_stable_toolchain_args}} doc @(if ($include) { -split $include } else { '--workspace' }) --all-features --no-deps
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # doc-build, examples and doc-test are pure cargo built-ins; the rust
@@ -25,7 +26,7 @@ anvil-doc-build: anvil-doc-build-validate-prereqs
 
 # Install prerequisites for the `anvil-doc-build` recipe.
 [group("anvil-setup")]
-anvil-doc-build-setup installer="install": anvil-tool-rustc-validate-prereqs
+anvil-doc-build-setup installer="install": anvil-toolchain-stable-install
 
 # Validate prerequisites for the `anvil-doc-build` recipe.
 [group("anvil-setup")]

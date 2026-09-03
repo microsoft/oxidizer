@@ -10,10 +10,11 @@
 
 # Check that workspace dependencies contain no cycles.
 [script("pwsh", "-NoProfile")]
-anvil-ensure-no-cyclic-deps: anvil-ensure-no-cyclic-deps-validate-prereqs
+anvil-ensure-no-cyclic-deps: anvil-ensure-no-cyclic-deps-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
-    if ($env:ANVIL_INCLUDE_MODIFIED -eq '--skip') { exit 0 }
-    cargo ensure-no-cyclic-deps
+    $include = (& "{{ just_executable() }}" _anvil-impact-include modified)
+    if ($include -eq '--skip') { Write-Host 'anvil-ensure-no-cyclic-deps: no modified packages; skipping'; exit 0 }
+    & cargo {{_anvil_stable_toolchain_args}} ensure-no-cyclic-deps
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Install prerequisites for the `anvil-ensure-no-cyclic-deps` recipe.

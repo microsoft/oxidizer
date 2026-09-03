@@ -6,7 +6,11 @@
 
 # See https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/checks.md
 
-# Modified tier.
+# Unscoped.
+#
+# A workspace-level README template (`crates/README.j2` / `README.j2`) feeds
+# every crate's README but is a repo-level input cargo-delta does not map to a
+# cargo package, so this check cannot be safely impact-scoped and always runs.
 #
 # cargo-doc2readme regenerates a crate's README.md from its rustdoc.
 # Two extension points users frequently need:
@@ -18,25 +22,29 @@
 #     `[package.metadata.ox-gen-readme]\ndisable = true` to their
 #     Cargo.toml. anvil skips those crates.
 #
-# Bin-only crates have no library rustdoc to base a README on, so they
-# are skipped as well (cargo doc2readme requires a library target).
+# Library or proc-macro rustdoc is preferred when a crate has one; bin-only
+# crates use their binary rustdoc so every publishable crate follows the same
+# generation policy.
 # TODO(anvil-runner): even after a `cargo ox-run` helper absorbs the
 # skip/splat preamble, this recipe stays multi-step: per-crate
-# iteration over library targets, cargo-metadata-driven opt-outs
+# iteration over eligible targets, cargo-metadata-driven opt-outs
 # (publish=false, [package.metadata.ox-gen-readme] disable), per-crate
 # Push-Location into the crate dir (cargo-doc2readme is CWD-sensitive
 # rather than --manifest-path-driven), and per-crate template-path
-# resolution. The ANVIL_INCLUDE_MODIFIED value would still need to
-# be intersected with the lib-crate set rather than splatted into cargo.
+# resolution. The recipe iterates the full eligible-crate set every run.
 
-# Check that crate README files are up to date.
+# Generate or check every eligible crate README with the same selection policy.
 [script("pwsh", "-NoProfile")]
-anvil-readme-check: anvil-readme-check-validate-prereqs
+_anvil-readme mode: anvil-readme-check-validate-prereqs
     $ErrorActionPreference = 'Stop'
-    if ($env:ANVIL_INCLUDE_MODIFIED -eq '--skip') {
-        Write-Host 'anvil-readme-check: no modified packages; skipping'
-        exit 0
+    $stableArgs = {{_anvil_stable_toolchain_args}}
+    $action = '{{ mode }}'
+    if ($action -notin @('generate', 'check')) {
+        [Console]::Error.WriteLine("anvil-readme: invalid mode '$action'; expected 'generate' or 'check'")
+        exit 2
     }
+    $check = $action -eq 'check'
+    $prefix = "anvil-readme-${action}"
     # Detect a workspace-level README template. Two conventional
     # locations: crates/README.j2 (cargo-workspaces idiom) or
     # README.j2 at repo root.
@@ -44,45 +52,28 @@ anvil-readme-check: anvil-readme-check-validate-prereqs
     foreach ($candidate in 'crates/README.j2', 'README.j2') {
         if (Test-Path $candidate) { $template = (Resolve-Path $candidate).Path; break }
     }
-    # Iterate library crates. Filter by impact set when set, then drop
-    # bin-only crates and opt-outs.
-    $pkg = @(if ($env:ANVIL_INCLUDE_MODIFIED) { -split $env:ANVIL_INCLUDE_MODIFIED } else { '--workspace' })
-    $metadataJson = & cargo metadata --no-deps --format-version 1
+    # Iterate every crate with rustdoc, then drop private crates and opt-outs.
+    # Unscoped: a change to the workspace-level README template is a repo-level
+    # input cargo-delta cannot map to a package, so this check always runs the
+    # full eligible-crate set rather than an impact subset.
+    $metadataJson = & cargo @stableArgs metadata --no-deps --format-version 1
     if ($LASTEXITCODE -ne 0) {
-        Write-Error 'anvil-readme-check: cargo metadata failed'
+        Write-Error "${prefix}: cargo metadata failed"
         exit $LASTEXITCODE
     }
     $meta = $metadataJson | ConvertFrom-Json
-    $byName = @{}
-    foreach ($p in $meta.packages) { $byName[$p.name] = $p }
-    $candidates = if ($pkg -contains '--workspace') {
-        @($meta.packages | ForEach-Object { $_.name })
-    } else {
-        $names = @()
-        for ($i = 0; $i -lt $pkg.Count; $i++) {
-            if ($pkg[$i] -eq '--package' -and ($i + 1) -lt $pkg.Count) {
-                # Impact emits version-qualified specs (name@version);
-                # strip the @version to recover the bare package name
-                # this metadata lookup keys on.
-                $names += ($pkg[$i + 1] -split '@', 2)[0]; $i++
-            }
-        }
-        $names
-    }
     $hadFailure = $false
-    foreach ($name in $candidates) {
-        $p = $byName[$name]
-        if (-not $p) {
-            Write-Error "anvil-readme-check: impact selected unknown package '$name'"
-            exit 1
-        }
-        if (-not ($p.targets | Where-Object { $_.kind -contains 'lib' })) { continue }
+    foreach ($p in $meta.packages) {
+        $name = $p.name
+        $hasLib = [bool]($p.targets | Where-Object { ($_.kind -contains 'lib') -or ($_.kind -contains 'proc-macro') })
+        $hasBin = [bool]($p.targets | Where-Object { $_.kind -contains 'bin' })
+        if (-not $hasLib -and -not $hasBin) { continue }
         # Skip private crates (publish = false). They aren't released
         # and rarely have a polished README. Mirrors the
         # `cargo workspaces exec --ignore-private` idiom adopters
         # commonly use.
         if ($p.publish -is [array] -and $p.publish.Count -eq 0) {
-            Write-Host "anvil-readme-check: $name (skipped: publish = false)"
+            Write-Host "${prefix}: $name (skipped: publish = false)"
             continue
         }
         $disabled = $false
@@ -90,13 +81,13 @@ anvil-readme-check: anvil-readme-check-validate-prereqs
             $disabled = $true
         }
         if ($disabled) {
-            Write-Host "anvil-readme-check: $name (opted out via [package.metadata.ox-gen-readme])"
+            Write-Host "${prefix}: $name (opted out via [package.metadata.ox-gen-readme])"
             continue
         }
-        Write-Host "anvil-readme-check: $name"
+        Write-Host "${prefix}: $name"
         # cargo doc2readme writes / compares relative to its CWD (not
-        # --manifest-path), so chdir into the crate before invoking
-        # --check. We also compute a per-crate relative path to the
+        # --manifest-path), so chdir into the crate before invoking it.
+        # We also compute a per-crate relative path to the
         # workspace-level template so the same template file works for
         # every crate (parallels the cargo-workspaces idiom).
         $crateDir = Split-Path -Parent $p.manifest_path
@@ -107,15 +98,20 @@ anvil-readme-check: anvil-readme-check-validate-prereqs
             } else {
                 $null
             }
-            $args = @('doc2readme', '--check')
+            $target = if ($hasLib) { '--lib' } else { '--bin' }
+            $args = @('doc2readme', $target)
+            if ($check) { $args += '--check' }
             if ($relTemplate) { $args += @('--template', $relTemplate) }
-            & cargo @args
+            & cargo @stableArgs @args
             if ($LASTEXITCODE -ne 0) { $hadFailure = $true }
         } finally {
             Pop-Location
         }
     }
     if ($hadFailure) { exit 1 }
+
+# Check that crate README files are up to date.
+anvil-readme-check: (_anvil-readme "check")
 
 # Install prerequisites for the `anvil-readme-check` recipe.
 [group("anvil-setup")]

@@ -17,7 +17,7 @@ anvil-mutants-full: anvil-mutants-full-validate-prereqs
         Write-Host 'anvil-mutants-full: aarch64-pc-windows-msvc -- cargo-mutants does not build here (winapi); skipping'
         exit 0
     }
-    & cargo mutants --workspace --no-shuffle --jobs 0
+    & cargo {{_anvil_stable_toolchain_args}} mutants --workspace --no-shuffle --jobs 0
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # --- scheduled-exhaustive members (mutants-full reuses cargo-mutants;

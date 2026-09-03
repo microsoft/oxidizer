@@ -36,6 +36,7 @@
 # it, to avoid conflicting with adopters who already have it.
 
 import 'helpers.just'
+import 'impact.just'
 import 'checks/aprz.just'
 import 'checks/audit.just'
 import 'checks/bench.just'
@@ -59,6 +60,7 @@ import 'checks/miri.just'
 import 'checks/miri-race-coverage.just'
 import 'checks/miri-strict-provenance.just'
 import 'checks/miri-tree-borrows.just'
+import 'checks/msrv-test.just'
 import 'checks/mutants-diff.just'
 import 'checks/mutants-full.just'
 import 'checks/pr-title.just'
@@ -66,8 +68,13 @@ import 'checks/readme-check.just'
 import 'checks/semver-check.just'
 import 'checks/spellcheck.just'
 import 'checks/udeps.just'
-import 'container.just'
+# Optional: the container artifacts can be removed through `without_artifact`,
+# which deletes this file. A hard import would then fail parsing for every
+# recipe in the tree, not merely the container ones, so the documented opt-out
+# would break the whole Justfile.
+import? 'container.just'
 import 'groups/pr-fast.just'
+import 'groups/pr-msrv.just'
 import 'groups/pr-slow.just'
 import 'groups/pr-test.just'
 import 'groups/pr-runtime-analysis.just'
@@ -76,7 +83,6 @@ import 'groups/scheduled-test.just'
 import 'groups/scheduled-advisories.just'
 import 'groups/scheduled-runtime-analysis.just'
 import 'groups/scheduled-exhaustive.just'
-import 'runner.just'
 import 'tiers.just'
 import 'tools.just'
 import 'versions.just'

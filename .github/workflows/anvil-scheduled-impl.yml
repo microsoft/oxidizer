@@ -39,6 +39,12 @@ permissions:
 # Note on matrices: see pr-impl-workflow.yml for the rationale. OS
 # matrices are hardcoded; per-leg runner labels are inputs.
 
+# Disable cargo incremental compilation for every job/step (see
+# pr-impl-workflow.yml for the rationale): the incremental dir is not
+# cached, so on CI it is pure cost.
+env:
+  CARGO_INCREMENTAL: "0"
+
 jobs:
   scheduled-test:
     strategy:
@@ -100,8 +106,8 @@ jobs:
     # miri profiles (base miri + the three stricter ones) sequentially
     # within the leg. Parallelism is across OS legs, not across profiles:
     # running the profiles sequentially lets them share toolchain setup
-    # and the target/ cache, which is the right trade given each profile
-    # already costs hours.
+    # and the compiled target/ artifacts within the leg, which is the
+    # right trade given each profile already costs hours.
     strategy:
       fail-fast: false
       matrix:

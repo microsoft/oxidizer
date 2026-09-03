@@ -10,15 +10,16 @@
 # rather than the modified set: a change in a crate can introduce a
 # clippy issue in a dependent crate (e.g., trait-bound or
 # obviously-truthy-condition lints that key off the changed type), so
-# we want downstream rev-deps to lint as well. cargo-clippy is a
+# we want downstream reverse dependencies to lint as well. cargo-clippy is a
 # rustup component; same reasoning as fmt for the require.
 
 # Lint affected workspace packages with Clippy.
 [script("pwsh", "-NoProfile")]
-anvil-clippy: anvil-clippy-validate-prereqs
+anvil-clippy: anvil-clippy-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
-    if ($env:ANVIL_INCLUDE_AFFECTED -eq '--skip') { exit 0 }
-    & cargo clippy @(if ($env:ANVIL_INCLUDE_AFFECTED) { -split $env:ANVIL_INCLUDE_AFFECTED } else { '--workspace' }) --all-targets --all-features --locked "--" '-D' 'warnings'
+    $include = (& "{{ just_executable() }}" _anvil-impact-include affected)
+    if ($include -eq '--skip') { Write-Host 'anvil-clippy: no affected packages; skipping'; exit 0 }
+    & cargo {{_anvil_stable_toolchain_args}} clippy @(if ($include) { -split $include } else { '--workspace' }) --all-targets --all-features --locked "--" '-D' 'warnings'
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Install prerequisites for the `anvil-clippy` recipe.

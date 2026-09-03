@@ -33,6 +33,8 @@
 # only through *other* members (e.g. concurrent-queue), and run
 # single-threaded (loom drives its own scheduling). --release per the
 # loom docs: permutation exploration is wall-clock dominated by the SUT.
+# Anvil does not impose a global exploration bound: each model owns its
+# topology and must remain tractable under exhaustive exploration.
 #
 # Fail-loud guard: a crate that *declares* loom support -- a `loom`
 # feature or a `cfg(loom)`-gated dependency -- but exposes no
@@ -48,26 +50,29 @@
 
 # Run Loom concurrency tests for affected workspace packages.
 [script("pwsh", "-NoProfile")]
-anvil-loom: anvil-loom-validate-prereqs
+anvil-loom: anvil-loom-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
-    if ($env:ANVIL_INCLUDE_AFFECTED -eq '--skip') {
+    $include = (& "{{ just_executable() }}" _anvil-impact-include affected)
+    if ($include -eq '--skip') {
         Write-Host 'anvil-loom: no affected packages; skipping'
         exit 0
     }
-    $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+    $meta = & cargo {{_anvil_stable_toolchain_args}} metadata --no-deps --format-version 1 | ConvertFrom-Json
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     # Optional impact-scoping: recover bare package names from the
     # impact step's version-qualified `--package name@version` pairs.
+    # Full-workspace modes (`--workspace` -- e.g. the scheduled tier,
+    # ANVIL_IMPACT=off, or no impact cache) carry no `--package` tokens,
+    # so $affected stays $null and the package set is left unfiltered
+    # (filtering on an empty set would wrongly skip every loom target).
     $affected = $null
-    if ($env:ANVIL_INCLUDE_AFFECTED) {
-        $tokens = @(-split $env:ANVIL_INCLUDE_AFFECTED)
-        $affected = @()
-        for ($i = 0; $i -lt $tokens.Count; $i++) {
-            if ($tokens[$i] -eq '--package' -and ($i + 1) -lt $tokens.Count) {
-                $affected += ($tokens[$i + 1] -split '@', 2)[0]
-                $i++
-            }
+    $tokens = @(-split $include)
+    for ($i = 0; $i -lt $tokens.Count; $i++) {
+        if ($tokens[$i] -eq '--package' -and ($i + 1) -lt $tokens.Count) {
+            if ($null -eq $affected) { $affected = @() }
+            $affected += ($tokens[$i + 1] -split '@', 2)[0]
+            $i++
         }
     }
     $pkgs = $meta.packages
@@ -105,7 +110,7 @@ anvil-loom: anvil-loom-validate-prereqs
     $env:RUSTFLAGS = "--cfg loom $($env:RUSTFLAGS)".Trim()
     foreach ($lt in $loomTargets) {
         Write-Host "anvil-loom: $($lt.pkg) :: $($lt.target)"
-        & cargo test -p $lt.pkg --release --all-features --locked --test $lt.target -- --test-threads=1
+        & cargo {{_anvil_stable_toolchain_args}} test -p $lt.pkg --release --all-features --locked --test $lt.target -- --test-threads=1
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
 
@@ -115,7 +120,7 @@ anvil-loom: anvil-loom-validate-prereqs
 
 # Install prerequisites for the `anvil-loom` recipe.
 [group("anvil-setup")]
-anvil-loom-setup installer="install": anvil-tool-rustc-validate-prereqs
+anvil-loom-setup installer="install": anvil-toolchain-stable-install
 
 # Validate prerequisites for the `anvil-loom` recipe.
 [group("anvil-setup")]

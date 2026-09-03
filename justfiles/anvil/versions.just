@@ -5,6 +5,7 @@
 # Update behaviour: https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/updates.md
 #
 # Pinned versions used by the anvil check tree.
+
 #
 # Everything anvil installs (cargo subcommands + rustup toolchains)
 # is pinned here. The pinning policy:
@@ -29,6 +30,61 @@
 # ============================================================================
 # Rustup toolchains
 # ============================================================================
+
+# Stable commands interpolate this PowerShell array expression directly at each
+# command site. Rustup resolves repository toolchain files from the repository
+# root; Anvil only reads Cargo.toml when it needs the root MSRV fallback.
+# `RUSTUP_TOOLCHAIN` is an input override only; Anvil never exports a resolved
+# value globally into unrelated recipes or helpers.
+[private]
+_anvil_stable_toolchain_args := trim("@(& {\n$RepoRoot = '" + replace(justfile_directory(), "'", "''") + "'\n\n" + '''
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version 3
+
+if (-not [string]::IsNullOrWhiteSpace($env:RUSTUP_TOOLCHAIN)) {
+    return
+}
+
+if ((Test-Path -LiteralPath (Join-Path $RepoRoot 'rust-toolchain') -PathType Leaf) -or
+    (Test-Path -LiteralPath (Join-Path $RepoRoot 'rust-toolchain.toml') -PathType Leaf)) {
+    return
+}
+
+if (-not [string]::IsNullOrWhiteSpace($env:ANVIL_MSRV_TOOLCHAIN)) {
+    throw 'anvil: ANVIL_MSRV_TOOLCHAIN is set without RUSTUP_TOOLCHAIN and no repository toolchain file selects stable checks; set RUSTUP_TOOLCHAIN to the provisioned stable toolchain or unset ANVIL_MSRV_TOOLCHAIN'
+}
+
+$manifestPath = Join-Path $RepoRoot 'Cargo.toml'
+if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+    throw "anvil: Cargo.toml not found at repository root '$RepoRoot'"
+}
+
+# This bootstrap scan must choose Cargo before Cargo is available to parse the
+# manifest. Keep its workspace.package-before-package precedence and accepted
+# syntax synchronized with Get-RootMsrv in tools.just.
+$values = @{}
+$section = ''
+foreach ($line in (Get-Content -LiteralPath $manifestPath)) {
+    if ($line -match '^\s*\[\s*([^\]]+)\s*\]\s*(?:#.*)?$') {
+        $section = $Matches[1].Trim()
+        continue
+    }
+    if ($section -in @('workspace.package', 'package') -and
+        $line -match '^\s*["'']?rust-version["'']?\s*=\s*(["''])([^"'']+)\1\s*(?:#.*)?$') {
+        $values[$section] = $Matches[2]
+    }
+}
+
+$msrv = if ($values.ContainsKey('workspace.package')) {
+    $values['workspace.package']
+} elseif ($values.ContainsKey('package')) {
+    $values['package']
+} else {
+    throw 'anvil: no selecting rust-toolchain(.toml) and no root [workspace.package] or [package] rust-version; declare an MSRV or select a toolchain explicitly'
+}
+Write-Output ('+' + $msrv)
+})
+''')
 
 # General nightly used by udeps, miri, careful, and any future
 # nightly-dependent check. Bumped on a regular cadence (monthly is a
@@ -56,16 +112,17 @@ cargo_careful_version := "0.4.10"
 cargo_check_external_types_version := "0.5.0"
 cargo_coverage_gate_version := "0.2.0"
 cargo_delta_version := "0.3.1"
-cargo_deny_version := "0.19.8"
-cargo_doc2readme_version := "0.7.2"
+cargo_deny_version := "0.20.2"
+cargo_doc2readme_version := "0.7.3"
+cargo_each_version := "0.1.0"
 cargo_ensure_no_cyclic_deps_version := "0.2.0"
 cargo_ensure_no_default_features_version := "1.1.0"
 cargo_hack_version := "0.6.45"
 cargo_heather_version := "0.2.1"
-cargo_llvm_cov_version := "0.8.7"
-cargo_mutants_version := "27.0.0"
-cargo_nextest_version := "0.9.137"
-cargo_semver_checks_version := "0.49.0"
+cargo_llvm_cov_version := "0.9.0"
+cargo_mutants_version := "27.1.0"
+cargo_nextest_version := "0.9.143"
+cargo_semver_checks_version := "0.50.0"
 cargo_sort_version := "2.1.4"
 cargo_spellcheck_version := "0.15.7"
 cargo_udeps_version := "0.1.61"

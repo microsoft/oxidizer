@@ -6,7 +6,7 @@
 
 # See https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/checks.md
 
-# Affected tier (lints public API of changed crates and rev-deps).
+# Affected tier (lints public API of changed crates and reverse dependencies).
 #
 # cargo-check-external-types is per-manifest: no --package/--workspace,
 # only --manifest-path. Iterate the affected library crates and run
@@ -16,21 +16,22 @@
 # skip/splat preamble, this recipe stays multi-step: cargo-check-
 # external-types is per-manifest (no --package/--workspace), so we
 # build a name->manifest map from cargo metadata, filter to lib crates,
-# intersect with ANVIL_INCLUDE_AFFECTED, and call the tool once per
+# intersect with the affected set ($include), and call the tool once per
 # crate. Hard-fails on errors (no tolerance, unlike semver-check).
 
 # Check public APIs for unapproved external types.
 [script("pwsh", "-NoProfile")]
-anvil-external-types: anvil-external-types-validate-prereqs
+anvil-external-types: anvil-external-types-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
-    if ($env:ANVIL_INCLUDE_AFFECTED -eq '--skip') {
+    $include = (& "{{ just_executable() }}" _anvil-impact-include affected)
+    if ($include -eq '--skip') {
         Write-Host 'anvil-external-types: no affected packages; skipping'
         exit 0
     }
-    $pkg = @(if ($env:ANVIL_INCLUDE_AFFECTED) { -split $env:ANVIL_INCLUDE_AFFECTED } else { '--workspace' })
+    $pkg = @(if ($include) { -split $include } else { '--workspace' })
     # Build pkg-name -> manifest-path map, restricted to library crates.
     $libPkgs = @{}
-    $metadataJson = & cargo metadata --no-deps --format-version 1
+    $metadataJson = & cargo {{_anvil_stable_toolchain_args}} metadata --no-deps --format-version 1
     if ($LASTEXITCODE -ne 0) {
         Write-Error 'anvil-external-types: cargo metadata failed'
         exit $LASTEXITCODE

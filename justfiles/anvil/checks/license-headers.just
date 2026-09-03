@@ -10,10 +10,11 @@
 
 # Check source files for required license headers.
 [script("pwsh", "-NoProfile")]
-anvil-license-headers: anvil-license-headers-validate-prereqs
+anvil-license-headers: anvil-license-headers-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
-    if ($env:ANVIL_INCLUDE_MODIFIED -eq '--skip') { exit 0 }
-    cargo heather
+    $include = (& "{{ just_executable() }}" _anvil-impact-include modified)
+    if ($include -eq '--skip') { Write-Host 'anvil-license-headers: no modified packages; skipping'; exit 0 }
+    & cargo {{_anvil_stable_toolchain_args}} heather
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Install prerequisites for the `anvil-license-headers` recipe.

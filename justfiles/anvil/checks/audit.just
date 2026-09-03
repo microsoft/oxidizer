@@ -12,7 +12,7 @@
 [script("pwsh", "-NoProfile")]
 anvil-audit: anvil-audit-validate-prereqs
     $ErrorActionPreference = 'Stop'
-    & cargo audit
+    & cargo {{_anvil_stable_toolchain_args}} audit
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Install prerequisites for the `anvil-audit` recipe.

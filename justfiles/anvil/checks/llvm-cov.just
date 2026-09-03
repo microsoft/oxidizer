@@ -16,13 +16,14 @@
 
 # Measure test coverage and enforce the coverage gate.
 [script("pwsh", "-NoProfile")]
-anvil-llvm-cov: anvil-llvm-cov-validate-prereqs
+anvil-llvm-cov: anvil-llvm-cov-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
-    if ($env:ANVIL_INCLUDE_AFFECTED -eq '--skip') {
+    $include = (& "{{ just_executable() }}" _anvil-impact-include affected)
+    if ($include -eq '--skip') {
         Write-Host 'anvil-llvm-cov: no affected packages; skipping'
         exit 0
     }
-    $pkg = @(if ($env:ANVIL_INCLUDE_AFFECTED) { -split $env:ANVIL_INCLUDE_AFFECTED } else { '--workspace' })
+    $pkg = @(if ($include) { -split $include } else { '--workspace' })
     $allTestPkg = $pkg
     # Separate coverage-opted-out packages from the measured set. A crate that
     # is entirely `#![cfg_attr(coverage_nightly, coverage(off))]` (e.g. a
@@ -36,7 +37,7 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs
     # never opts a changed package out of tests.
     $testOnlyPkg = [System.Collections.Generic.List[string]]::new()
     if ($pkg -contains '--package') {
-        $metadataJson = & cargo metadata --no-deps --format-version 1
+        $metadataJson = & cargo {{_anvil_stable_toolchain_args}} metadata --no-deps --format-version 1
         if ($LASTEXITCODE -ne 0) {
             Write-Error 'anvil-llvm-cov: cargo metadata failed'
             exit $LASTEXITCODE
@@ -147,7 +148,7 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs
     # threshold, so coverage regressions fail the PR locally and in cloud
     # workflows -- the Codecov upload stays purely for display, not the gate.
     #
-    # Scope the gate to the SAME package set we measured. When impact
+    # Scope the gate to the same package set we measured. When impact
     # scoping is active, $pkg holds `--package X@ver ...` (already opt-out
     # filtered above); pass those through so the gate only gates packages
     # that were actually instrumented -- otherwise unmeasured members would
@@ -167,7 +168,7 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs
         }
         $gateArgs.Add($pkg[$i])
     }
-    cargo coverage-gate @gateArgs --lcov target/coverage/lcov-all-features.info --lcov target/coverage/lcov-no-default.info
+    & cargo {{_anvil_stable_toolchain_args}} coverage-gate @gateArgs --lcov target/coverage/lcov-all-features.info --lcov target/coverage/lcov-no-default.info
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # --- pr-test members (shared with scheduled-test) ---

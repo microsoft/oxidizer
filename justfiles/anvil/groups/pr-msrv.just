@@ -6,25 +6,18 @@
 
 # See https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/checks.md
 
-# Run the pull request tests.
+# Run pull request compatibility tests under the declared MSRV.
 [group("anvil")]
-anvil-pr-test: anvil-pr-test-validate-prereqs \
-    anvil-llvm-cov \
-    anvil-doc-test \
-    anvil-examples
+anvil-pr-msrv: anvil-pr-msrv-validate-prereqs anvil-msrv-test
 
-# Install prerequisites for the `anvil-pr-test` recipe.
+# Install prerequisites for the `anvil-pr-msrv` recipe.
 [group("anvil-setup")]
-anvil-pr-test-setup installer="install": \
+anvil-pr-msrv-setup installer="install": \
     (anvil-tool-cargo-delta-install installer) \
-    (anvil-llvm-cov-setup installer) \
-    (anvil-doc-test-setup installer) \
-    (anvil-examples-setup installer)
+    (anvil-msrv-test-setup installer)
 
-# Validate prerequisites for the `anvil-pr-test` recipe.
+# Validate prerequisites for the `anvil-pr-msrv` recipe.
 [group("anvil-setup")]
-anvil-pr-test-validate-prereqs: \
+anvil-pr-msrv-validate-prereqs: \
     anvil-tool-cargo-delta-validate-prereqs \
-    anvil-llvm-cov-validate-prereqs \
-    anvil-doc-test-validate-prereqs \
-    anvil-examples-validate-prereqs
+    anvil-msrv-test-validate-prereqs

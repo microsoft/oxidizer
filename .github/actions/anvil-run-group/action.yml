@@ -9,27 +9,19 @@ inputs:
   group:
     description: Anvil group recipe name without the anvil- prefix.
     required: true
-  include_modified:
+  impact_mode:
     description: |
-      Pre-formatted --package args (e.g. "--package alpha@1.0.0 --package
-      beta@0.2.0") for the modified tier, or the sentinel "--skip" when
-      nothing modified. Packages are version-qualified cargo specs so they
-      resolve uniquely even when a like-named crate is also a transitive
-      dependency. Local invocations leave it unset; recipes default to
-      --workspace.
-    default: ""
-    required: false
-  include_affected:
-    description: |
-      Same shape as include_modified, but for the affected tier
-      (modified ∪ rev-deps).
-    default: ""
-    required: false
-  include_required:
-    description: |
-      Same shape as include_modified, but for the required tier
-      (affected ∪ workspace-internal transitive deps).
-    default: ""
+      Impact-scoping mode exported as ANVIL_IMPACT before the group runs.
+      Fixed by tier at the call site, never probed from a runtime marker:
+        - "consume" (PR groups): trust the impact cache the caller downloaded
+          into target/anvil/impact/. The group's `anvil-impact` dependency
+          no-ops (no snapshot, cargo-delta, or base-ref resolution) and the
+          scoped check recipes read the downloaded cache via
+          `_anvil-impact-include`, exactly as a local run does.
+        - "off" (scheduled groups): every tier runs full-workspace, so no
+          leftover cache on the runner can wrongly narrow the backstop.
+      Defaults to "off" so an un-wired caller never silently scopes checks out.
+    default: "off"
     required: false
   free-disk-space:
     description: Remove unused toolchains from GitHub-hosted runners before setup.
@@ -57,9 +49,10 @@ runs:
       shell: bash
       env:
         ANVIL_GROUP: ${{ inputs.group }}
-        ANVIL_INCLUDE_MODIFIED: ${{ inputs.include_modified }}
-        ANVIL_INCLUDE_AFFECTED: ${{ inputs.include_affected }}
-        ANVIL_INCLUDE_REQUIRED: ${{ inputs.include_required }}
+        # The impact set reaches scoped checks through the downloaded
+        # target/anvil/impact cache (read via `_anvil-impact-include`), not
+        # threaded --package strings. This action only fixes the mode.
+        ANVIL_IMPACT: ${{ inputs.impact_mode }}
         # Some checks (e.g. cargo-aprz) call GitHub's API. The built-in token
         # gives them the authenticated quota without adding group knowledge
         # to this action.

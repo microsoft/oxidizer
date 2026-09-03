@@ -18,13 +18,14 @@
 
 # Run mutation testing for changes relative to the base branch.
 [script("pwsh", "-NoProfile")]
-anvil-mutants-diff: anvil-mutants-diff-validate-prereqs
+anvil-mutants-diff: anvil-mutants-diff-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
+    $include = (& "{{ just_executable() }}" _anvil-impact-include affected)
     if ($IsWindows -and ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64')) {
         Write-Host 'anvil-mutants-diff: anvil-mutants-diff-validate-prereqs aarch64-pc-windows-msvc -- cargo-mutants does not build here (winapi); skipping'
         exit 0
     }
-    if ($env:ANVIL_INCLUDE_AFFECTED -eq '--skip') {
+    if ($include -eq '--skip') {
         Write-Host 'anvil-mutants-diff: anvil-mutants-diff-validate-prereqs no affected packages; skipping'
         exit 0
     }
@@ -40,9 +41,16 @@ anvil-mutants-diff: anvil-mutants-diff-validate-prereqs
     if (-not $tmp_dir) { $tmp_dir = $env:AGENT_TEMPDIRECTORY }
     if (-not $tmp_dir) { $tmp_dir = [System.IO.Path]::GetTempPath() }
     $diff_path = Join-Path $tmp_dir 'anvil-mutants-diff.diff'
-    git diff "$base..HEAD" --output=$diff_path
+    # Diff the base against the WORKING TREE, not against HEAD.
+    # cargo-mutants validates every line of the diff against the file on
+    # disk and aborts when they disagree, so a commit-to-commit diff fails
+    # the moment anything is uncommitted -- which is the normal local state,
+    # since the point of running a tier locally is to check work in progress.
+    # CI has a clean tree, so the two forms are identical there and this is
+    # not a behaviour change for it.
+    git diff "$base" --output=$diff_path
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    cargo mutants --in-diff $diff_path --no-shuffle --jobs 0
+    & cargo {{_anvil_stable_toolchain_args}} mutants --in-diff $diff_path --no-shuffle --jobs 0
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # --- pr-mutants members ---

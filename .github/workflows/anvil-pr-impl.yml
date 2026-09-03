@@ -66,34 +66,32 @@ jobs:
   impact-linux:
     name: "Preparation: Impact Analysis (linux)"
     runs-on: ${{ inputs.linux_runner }}
-    outputs:
-      include_modified: ${{ steps.delta.outputs.include_modified }}
-      include_affected: ${{ steps.delta.outputs.include_affected }}
-      include_required: ${{ steps.delta.outputs.include_required }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          lfs: true
+          # No lfs: true -- the impact job only runs cargo-delta snapshot/impact
+          # + cargo metadata over paths and dependency metadata; it never reads
+          # LFS payload contents (the baseline worktree even disables LFS
+          # smudging). Hydrating LFS assets here would add two large downloads
+          # to the critical path for no impact-selection benefit. Downstream
+          # group jobs keep lfs: true because they run arbitrary checks.
           fetch-depth: 0
-      - id: delta
-        uses: ./.github/actions/anvil-impact
+      # anvil-impact runs `just anvil-impact` and uploads the resulting
+      # target/anvil/impact cache as the anvil-impact-<runner.os> artifact.
+      - uses: ./.github/actions/anvil-impact
         env:
           BASE_REF: ${{ inputs.base_ref }}
 
   impact-windows:
     name: "Preparation: Impact Analysis (windows)"
     runs-on: ${{ inputs.windows_runner }}
-    outputs:
-      include_modified: ${{ steps.delta.outputs.include_modified }}
-      include_affected: ${{ steps.delta.outputs.include_affected }}
-      include_required: ${{ steps.delta.outputs.include_required }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          lfs: true
+          # See impact-linux: impact needs only path/metadata inputs, not LFS
+          # payloads, so it checks out without lfs: true.
           fetch-depth: 0
-      - id: delta
-        uses: ./.github/actions/anvil-impact
+      - uses: ./.github/actions/anvil-impact
         env:
           BASE_REF: ${{ inputs.base_ref }}
 
@@ -127,13 +125,20 @@ jobs:
           # origin/<base> absent. Full history makes the baseline
           # resolvable; the other pr-fast checks only touch the HEAD tree.
           fetch-depth: 0
+      - name: Download impact artifact
+        # Pull the impact cache computed on this leg's OS family into
+        # target/anvil/impact/ so the group's scoped checks read it via their
+        # `anvil-impact` dependency -- the same code path as a local run. arm
+        # legs reuse their OS family's artifact.
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: anvil-impact-${{ startsWith(matrix.os, 'linux') && 'Linux' || 'Windows' }}
+          path: target/anvil/impact
       - uses: ./.github/actions/anvil-run-group
         with:
           group: pr-fast
           publish_commit_statuses: ${{ inputs.publish_commit_statuses }}
-          include_modified: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_modified || needs.impact-windows.outputs.include_modified }}
-          include_affected: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_affected || needs.impact-windows.outputs.include_affected }}
-          include_required: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_required || needs.impact-windows.outputs.include_required }}
+          impact_mode: consume
         env:
           BASE_REF: ${{ inputs.base_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
@@ -180,14 +185,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: true
+      - name: Download impact artifact
+        # See pr-fast: pull the OS-family impact cache so scoped checks read it
+        # via their `anvil-impact` dependency.
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: anvil-impact-${{ startsWith(matrix.os, 'linux') && 'Linux' || 'Windows' }}
+          path: target/anvil/impact
       - uses: ./.github/actions/anvil-run-group
         with:
           group: pr-test
           publish_commit_statuses: ${{ inputs.publish_commit_statuses }}
           free-disk-space: true
-          include_modified: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_modified || needs.impact-windows.outputs.include_modified }}
-          include_affected: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_affected || needs.impact-windows.outputs.include_affected }}
-          include_required: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_required || needs.impact-windows.outputs.include_required }}
+          impact_mode: consume
       - name: Upload coverage to Codecov
         # Upload from every leg except windows-11-arm. OS/arch-gated
         # code only gets exercised on its native target, so a single-
@@ -202,14 +212,42 @@ jobs:
         # lcov-*.info are produced by the anvil-llvm-cov recipe inside
         # anvil-pr-test (one per feature config); if the affected set was
         # empty the recipe no-ops and there is no file to upload, so we gate
-        # on the impact output. Codecov coalesces the two per-config files.
-        if: matrix.os != 'windows-arm' && ((startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_affected != '--skip') || (matrix.os == 'windows' && needs.impact-windows.outputs.include_affected != '--skip'))
+        # on the files existing (impact scoping lives in the downloaded cache
+        # now, not a job output). Codecov coalesces the two per-config files.
+        if: matrix.os != 'windows-arm' && hashFiles('target/coverage/lcov-all-features.info', 'target/coverage/lcov-no-default.info') != ''
         uses: codecov/codecov-action@v7.0.0 # immutable release, the tag cannot be moved
         with:
           files: target/coverage/lcov-all-features.info,target/coverage/lcov-no-default.info
           flags: ${{ matrix.os }}
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
+
+  pr-msrv:
+    name: "Check Group: MSRV Tests (${{ matrix.os }})"
+    needs: [impact-linux, impact-windows]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [linux, windows, linux-arm, windows-arm]
+    runs-on: ${{ matrix.os == 'linux' && inputs.linux_runner
+      || matrix.os == 'windows' && inputs.windows_runner
+      || matrix.os == 'linux-arm' && inputs.linux_arm_runner
+      || inputs.windows_arm_runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          lfs: true
+      - name: Download impact artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: anvil-impact-${{ startsWith(matrix.os, 'linux') && 'Linux' || 'Windows' }}
+          path: target/anvil/impact
+      - uses: ./.github/actions/anvil-run-group
+        with:
+          group: pr-msrv
+          publish_commit_statuses: ${{ inputs.publish_commit_statuses }}
+          free-disk-space: true
+          impact_mode: consume
 
   pr-runtime-analysis:
     name: "Check Group: Runtime Analysis (${{ matrix.os }})"
@@ -230,13 +268,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: true
+      - name: Download impact artifact
+        # See pr-fast: pull the OS-family impact cache so scoped checks read it
+        # via their `anvil-impact` dependency.
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: anvil-impact-${{ startsWith(matrix.os, 'linux') && 'Linux' || 'Windows' }}
+          path: target/anvil/impact
       - uses: ./.github/actions/anvil-run-group
         with:
           group: pr-runtime-analysis
           publish_commit_statuses: ${{ inputs.publish_commit_statuses }}
-          include_modified: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_modified || needs.impact-windows.outputs.include_modified }}
-          include_affected: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_affected || needs.impact-windows.outputs.include_affected }}
-          include_required: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_required || needs.impact-windows.outputs.include_required }}
+          impact_mode: consume
 
   pr-mutants:
     name: "Check Group: Mutation Testing (${{ matrix.os }})"
@@ -259,12 +302,17 @@ jobs:
         with:
           lfs: true
           fetch-depth: 0
+      - name: Download impact artifact
+        # See pr-fast: pull the OS-family impact cache so scoped checks read it
+        # via their `anvil-impact` dependency.
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: anvil-impact-${{ startsWith(matrix.os, 'linux') && 'Linux' || 'Windows' }}
+          path: target/anvil/impact
       - uses: ./.github/actions/anvil-run-group
         with:
           group: pr-mutants
           publish_commit_statuses: ${{ inputs.publish_commit_statuses }}
-          include_modified: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_modified || needs.impact-windows.outputs.include_modified }}
-          include_affected: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_affected || needs.impact-windows.outputs.include_affected }}
-          include_required: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_required || needs.impact-windows.outputs.include_required }}
+          impact_mode: consume
         env:
           BASE_REF: ${{ inputs.base_ref }}

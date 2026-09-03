@@ -12,10 +12,7 @@
 
 # Run all pull request checks.
 [group("anvil")]
-anvil-pr: (_anvil-run "pr" anvil_runner)
-
-[private]
-_anvil-pr: anvil-pr-validate-prereqs \
+anvil-pr: anvil-pr-validate-prereqs \
     anvil-pr-fast \
     anvil-pr-slow
 
@@ -23,10 +20,19 @@ _anvil-pr: anvil-pr-validate-prereqs \
 # without a commit (advisories, flakes) + the truly expensive
 # exhaustive checks that don't fit in a PR budget. Runs on a schedule
 # against `main`, not on PRs.
+#
+# The scheduled tier is deliberately NOT impact-scoped: it is the catch-all
+# that backstops PR-tier scoping. Every impact-scoped check depends on
+# `anvil-impact` and populates its own scope from the cache, so the tier runs
+# with ANVIL_IMPACT=off, which makes `_anvil-impact-include` return each
+# category's full-workspace default and the `anvil-impact` dependency no-op.
+# A dependency-only recipe cannot set an environment variable for its own
+# dependencies, so the public tier wraps the private one through
+# `_anvil-unscoped`.
 
 # Run all scheduled checks.
 [group("anvil")]
-anvil-scheduled: (_anvil-run "scheduled" anvil_runner)
+anvil-scheduled: (_anvil-unscoped "scheduled")
 
 [private]
 _anvil-scheduled: anvil-scheduled-validate-prereqs \
@@ -35,13 +41,15 @@ _anvil-scheduled: anvil-scheduled-validate-prereqs \
     anvil-scheduled-runtime-analysis \
     anvil-scheduled-exhaustive
 
+# Full-workspace for the same reason as the scheduled tier.
+
 # Full tier: PR + scheduled, end-to-end. Useful before tagging a release.
 [group("anvil")]
-anvil-full: (_anvil-run "full" anvil_runner)
+anvil-full: (_anvil-unscoped "full")
 
 [private]
 _anvil-full: anvil-full-validate-prereqs \
-    _anvil-pr \
+    anvil-pr \
     _anvil-scheduled
 
 # Tier-level + global setup + validate-prereqs
@@ -100,14 +108,15 @@ anvil-full-validate-prereqs: \
 # catalog knows about; `anvil-validate-prereqs` verifies every tool
 # and component is present at or above its pinned version.
 #
-# These also install / verify cargo-delta, the impact-analysis tool.
-# cargo-delta is only invoked by the cloud-workflow impact step (not by
-# any check), so it is deliberately NOT part of the per-group / per-tier
-# setup recipes -- a CI group job installs only what its checks need, and
-# the impact step installs cargo-delta itself. But the catch-all
-# `anvil-setup` is "install everything the catalog knows about", so it
-# includes cargo-delta too (a local `just anvil-setup` then provisions a
-# complete environment, impact tool included).
+# cargo-delta (the impact-analysis tool) is a prerequisite of every group
+# whose checks are impact-scoped: those checks depend on `anvil-impact`,
+# which invokes cargo-delta when it has to (re)compute the impact set, so
+# each such group's `-setup` / `-validate-prereqs` installs / verifies it
+# (fail-fast, rather than discovering it missing mid-run). In a cloud
+# workflow a group job normally consumes the downloaded impact artifact and
+# never actually runs cargo-delta, but the tool is guaranteed present.
+# `anvil-setup` also lists it explicitly as the catch-all (harmless -- just
+# dedups the fan-out).
 
 # Install every tool and component in the anvil catalog.
 [group("anvil-setup")]

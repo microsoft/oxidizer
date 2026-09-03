@@ -6,9 +6,17 @@
 
 # See https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/checks.md
 
+# Full-workspace backstop: routed through _anvil-unscoped so
+# ANVIL_IMPACT=off is set before the check dependencies run, regardless of how
+# the group is invoked. The group does not recompute impact and therefore does
+# not require cargo-delta.
+
 # Run the scheduled exhaustive checks.
 [group("anvil")]
-anvil-scheduled-exhaustive: anvil-scheduled-exhaustive-validate-prereqs \
+anvil-scheduled-exhaustive: (_anvil-unscoped "scheduled-exhaustive")
+
+[private]
+_anvil-scheduled-exhaustive: anvil-scheduled-exhaustive-validate-prereqs \
     anvil-mutants-full \
     anvil-cargo-hack \
     anvil-bench

@@ -26,10 +26,11 @@
 
 # Check required workspace packages for unused dependencies.
 [script("pwsh", "-NoProfile")]
-anvil-udeps: anvil-udeps-validate-prereqs
+anvil-udeps: anvil-udeps-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
-    if ($env:ANVIL_INCLUDE_REQUIRED -eq '--skip') { exit 0 }
-    $pkg = @(if ($env:ANVIL_INCLUDE_REQUIRED) { -split $env:ANVIL_INCLUDE_REQUIRED } else { '--workspace' })
+    $include = (& "{{ just_executable() }}" _anvil-impact-include required)
+    if ($include -eq '--skip') { Write-Host 'anvil-udeps: no affected packages; skipping'; exit 0 }
+    $pkg = @(if ($include) { -split $include } else { '--workspace' })
     # Pass 1: default targets (lib + bins) -- surfaces [dependencies] that
     # are only used by tests/benches/examples (should be dev-deps).
     & cargo '+{{ rust_nightly }}' udeps @pkg --all-features

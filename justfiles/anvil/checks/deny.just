@@ -14,7 +14,7 @@
 [script("pwsh", "-NoProfile")]
 anvil-deny: anvil-deny-validate-prereqs
     $ErrorActionPreference = 'Stop'
-    & cargo deny check
+    & cargo {{_anvil_stable_toolchain_args}} deny check
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Install prerequisites for the `anvil-deny` recipe.
