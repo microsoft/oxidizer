@@ -6,25 +6,29 @@
 //! The body is never held whole: each chunk passes through the engine and leaves, so peak memory
 //! follows the chunk size rather than the size of the body.
 
+use std::env;
 use std::time::Duration;
 
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
 use compressors::{CompressionStream, Resources, gzip};
-use tick::{Clock, PeriodicTimer};
+use tick::{Clock, ClockControl, PeriodicTimer};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::{Stream, StreamExt};
 
+/// How often a chunk arrives from the stand-in upstream.
+const ARRIVAL_PERIOD: Duration = Duration::from_millis(1);
+
 /// Stands in for an upstream that produces a body gradually, such as a socket.
-fn body(memory: GlobalPool) -> impl Stream<Item = Result<BytesView, std::io::Error>> {
+///
+/// Takes its clock rather than choosing one, so a caller can drive the arrivals in simulated time
+/// instead of waiting for them.
+fn body(clock: Clock, memory: GlobalPool) -> impl Stream<Item = Result<BytesView, std::io::Error>> {
     let (sender, receiver) = mpsc::channel(4);
 
     tokio::spawn(async move {
-        // Time comes from a `tick::Clock` rather than the runtime directly, so a test can drive
-        // this timer instantly instead of waiting for it.
-        let clock = Clock::new_tokio();
-        let mut arrivals = PeriodicTimer::new(&clock, Duration::from_micros(50));
+        let mut arrivals = PeriodicTimer::new(&clock, ARRIVAL_PERIOD);
 
         for event in 0..200 {
             arrivals.next().await;
@@ -45,7 +49,16 @@ fn body(memory: GlobalPool) -> impl Stream<Item = Result<BytesView, std::io::Err
 async fn main() -> Result<(), compressors::Error> {
     let memory = GlobalPool::new();
 
-    let compressed = CompressionStream::compress(body(memory.clone()), gzip::Compressor::new(&Resources::default()));
+    // Under `scripts/run-examples.rs` this runs as an automated check, where waiting out 200 real
+    // arrivals would be two seconds of wall clock and a dependency on runtime scheduling. A clock
+    // that advances itself on every query settles the same 200 arrivals immediately.
+    let clock = if env::var_os("IS_TESTING").is_some() {
+        ClockControl::new().auto_advance(ARRIVAL_PERIOD).to_clock()
+    } else {
+        Clock::new_tokio()
+    };
+
+    let compressed = CompressionStream::compress(body(clock, memory.clone()), gzip::Compressor::new(&Resources::default()));
     let mut plain = CompressionStream::decompress(compressed, gzip::Decompressor::new(&Resources::default()));
 
     let mut bytes = 0;
