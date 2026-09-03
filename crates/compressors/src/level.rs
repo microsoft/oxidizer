@@ -20,11 +20,14 @@
 /// # Examples
 ///
 /// ```
+/// # #[cfg(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
+/// # {
 /// use compressors::Level;
 ///
 /// assert_eq!(Level::default(), Level::DEFAULT);
 /// assert_eq!(Level::new(9), Some(Level::HIGH));
 /// assert_eq!(Level::new(10), None);
+/// # }
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Level(u8);

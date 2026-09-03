@@ -43,14 +43,10 @@
 //! ```
 //! # #[cfg(feature = "gzip")]
 //! # {
-//! use bytesbuf::BytesView;
 //! use compressors::{Resources, gzip};
 //!
 //! let resources = Resources::global();
-//! let compressed = gzip::compress(
-//!     BytesView::copied_from_slice(b"hello", resources.memory()),
-//!     resources,
-//! )?;
+//! let compressed = gzip::compress(b"hello", resources)?;
 //!
 //! assert_eq!(
 //!     gzip::decompress(compressed, resources)?.to_vec(),
@@ -97,27 +93,24 @@
 //!
 //! # Choosing a format
 //!
-//! When the format is only known at runtime -- from a `Content-Encoding` token, say -- [`Format`]
-//! resolves the token and compresses with whatever it names. Reach for
-//! [`CompressorBuilder::build_format`] instead when the level or the chunk size matters: it returns
-//! an operation that fits wherever a concrete one does.
+//! When the format is only known at runtime -- from a `Content-Encoding` token, say -- the
+//! [`format`] module resolves the token and carries the same shape every other format module does:
+//! a `Compressor`, a `Decompressor`, and the whole-buffer conveniences. Reach for
+//! [`CompressorBuilder::build_format`] when the level or the chunk size matters.
 //!
 //! ```
 //! # #[cfg(feature = "gzip")]
 //! # {
-//! use bytesbuf::BytesView;
-//! use compressors::{Format, Resources};
+//! use compressors::Resources;
+//! use compressors::format::{self, Format};
 //!
 //! let format = Format::from_content_encoding("gzip").expect("this build supports gzip");
 //!
 //! let resources = Resources::global();
-//! let compressed = format.compress(
-//!     BytesView::copied_from_slice(b"runtime selected", resources.memory()),
-//!     resources,
-//! )?;
+//! let compressed = format::compress(format, b"runtime selected", resources)?;
 //!
 //! assert_eq!(
-//!     format.decompress(compressed, resources)?.to_vec(),
+//!     format::decompress(format, compressed, resources)?.to_vec(),
 //!     b"runtime selected".to_vec()
 //! );
 //! # }
@@ -201,10 +194,10 @@ mod engine;
 mod error;
 #[cfg(any(feature = "deflate", feature = "gzip", feature = "zlib"))]
 mod flate;
-#[cfg(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
-mod format;
+pub mod format;
 #[cfg(feature = "gzip")]
 pub mod gzip;
+mod input;
 mod level;
 pub(crate) mod limits;
 #[cfg(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
@@ -226,8 +219,8 @@ mod tests;
 pub use builder::{CompressorBuilder, DecompressorBuilder};
 use bytesbuf::BytesView;
 pub use error::{BuildError, Error, Result};
+pub use input::InputData;
 #[cfg(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
-pub use format::Format;
 pub use level::Level;
 pub use limits::DecompressorLimits;
 pub use resources::Resources;
@@ -256,7 +249,8 @@ use crate::core::{Compress, Compression, Decompress, process};
 /// # #[cfg(feature = "gzip")]
 /// # {
 /// use bytesbuf::BytesView;
-/// use compressors::{CompressorBuilder, Format, Resources, gzip};
+/// use compressors::format::Format;
+/// use compressors::{CompressorBuilder, Resources, gzip};
 ///
 /// let resources = Resources::global();
 /// let input = BytesView::copied_from_slice(b"either way", resources.memory());

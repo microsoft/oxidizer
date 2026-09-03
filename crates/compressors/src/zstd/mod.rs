@@ -12,15 +12,9 @@
 //! # Examples
 //!
 //! ```
-//! use bytesbuf::BytesView;
-//! use bytesbuf::mem::GlobalPool;
 //! use compressors::{Resources, zstd};
 //!
-//! let memory = GlobalPool::new();
-//! let compressed = zstd::compress(
-//!     BytesView::copied_from_slice(b"the quick brown fox", &memory),
-//!     &Resources::default(),
-//! )?;
+//! let compressed = zstd::compress(b"the quick brown fox", &Resources::default())?;
 //! assert_eq!(
 //!     compressed.range(0..4).to_vec(),
 //!     vec![0x28, 0xb5, 0x2f, 0xfd]

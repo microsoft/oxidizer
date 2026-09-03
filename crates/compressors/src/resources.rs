@@ -38,16 +38,12 @@ use crate::pool::Pool;
 /// ```
 /// # #[cfg(feature = "gzip")]
 /// # {
-/// use bytesbuf::BytesView;
 /// use compressors::{Resources, gzip};
 ///
 /// // One shared instance: the process-wide memory provider and process-wide engine recycling.
 /// let resources = Resources::global();
 ///
-/// let compressed = gzip::compress(
-///     BytesView::copied_from_slice(b"hello", resources.memory()),
-///     resources,
-/// )?;
+/// let compressed = gzip::compress(b"hello", resources)?;
 /// assert_eq!(
 ///     gzip::decompress(compressed, resources)?.to_vec(),
 ///     b"hello".to_vec()

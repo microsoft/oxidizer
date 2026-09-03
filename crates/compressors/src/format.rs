@@ -3,13 +3,16 @@
 
 //! Choosing a compression format at runtime.
 //!
-//! [`Format`] is the entry point, and the `build_format` methods on the shared builders live here
-//! beside it, because this is the only place that has to know every format by name.
+//! [`Format`] is the entry point, and this module carries the same shape every format module does
+//! -- a [`Compressor`], a [`Decompressor`], and the [`compress`], [`decompress`] and
+//! [`decompress_with_limits`] conveniences -- with the format threaded through at runtime rather
+//! than fixed at compile time. The `build_format` methods on the shared builders live here too,
+//! because this is the only place that has to know every format by name.
 
 use bytesbuf::BytesView;
 
 use crate::builder::{CompressorBuilder, DecompressorBuilder};
-use crate::core::{Compress, Compression, Decompress};
+use crate::core::{Compress, Compression, CompressionInternal, Decompress, Output};
 use crate::error::{BuildError, Result};
 use crate::limits::DecompressorLimits;
 use crate::resources::Resources;
@@ -25,24 +28,22 @@ use crate::resources::Resources;
 /// ```
 /// # #[cfg(feature = "gzip")]
 /// # {
-/// use bytesbuf::BytesView;
-/// use bytesbuf::mem::GlobalPool;
-/// use compressors::{CompressorBuilder, Format, Level, Resources};
+/// use compressors::format::{self, Format};
+/// use compressors::{CompressorBuilder, Level, Resources};
 ///
 /// // The format arrives as a string, from an HTTP header.
 /// let format = Format::from_content_encoding("gzip").expect("a supported encoding");
 ///
-/// let memory = GlobalPool::new();
-/// let compressor = CompressorBuilder::new()
-///     .level(Level::HIGH)
-///     .build_format(format, &Resources::default())?;
-///
-/// let compressed = compressors::compress(
-///     BytesView::copied_from_slice(b"payload", &memory),
-///     compressor,
-/// )?;
+/// let resources = Resources::global();
+/// let compressed = format::compress(format, b"payload", resources)?;
 ///
 /// assert_eq!(compressed.range(0..2).to_vec(), vec![0x1f, 0x8b]);
+///
+/// // Or build the compressor yourself when the level or chunk size matters.
+/// let tuned = CompressorBuilder::new()
+///     .level(Level::HIGH)
+///     .build_format(format, resources)?;
+/// # let _ = tuned;
 /// # }
 /// # Ok::<(), compressors::Error>(())
 /// ```
@@ -89,7 +90,10 @@ impl Format {
     /// `deflate` token means a *zlib* stream, not raw deflate, so it maps to `Format::Zlib`.
     #[must_use]
     #[cfg_attr(
-        not(feature = "deflate"),
+        all(
+            not(feature = "deflate"),
+            any(feature = "brotli", feature = "gzip", feature = "zlib", feature = "zstd")
+        ),
         expect(
             clippy::unnecessary_wraps,
             reason = "raw deflate is the only format without an HTTP token, and it is not enabled in this configuration"
@@ -146,78 +150,291 @@ impl Format {
 
         None
     }
+}
 
-    /// Compresses a complete byte sequence that is already in memory.
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(all(
+    test,
+    not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))
+))]
+mod no_format_tests {
+    use super::*;
+
+    #[test]
+    fn nothing_resolves_when_no_format_is_enabled() {
+        // The module is still compiled so its types can be named; it just has nothing to offer.
+        assert_eq!(Format::from_content_encoding("gzip"), None);
+        assert_eq!(Format::from_content_encoding("br"), None);
+        assert!(Format::ALL.is_empty(), "no format is enabled, so none can be listed");
+    }
+}
+
+/// Dispatches one method to whichever format's codec a runtime-format codec is holding.
+///
+/// With no format feature enabled the enum has no variants, so this expands to a match on an
+/// uninhabited value -- which is exactly right: there is then no way to construct one.
+macro_rules! dispatch {
+    ($kind:ident, $value:expr, $codec:ident => $call:expr) => {
+        match $value {
+            #[cfg(feature = "deflate")]
+            $kind::Deflate($codec) => $call,
+            #[cfg(feature = "zlib")]
+            $kind::Zlib($codec) => $call,
+            #[cfg(feature = "gzip")]
+            $kind::Gzip($codec) => $call,
+            #[cfg(feature = "brotli")]
+            $kind::Brotli($codec) => $call,
+            #[cfg(feature = "zstd")]
+            $kind::Zstd($codec) => $call,
+            #[cfg(not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")))]
+            #[expect(
+                clippy::uninhabited_references,
+                reason = "the variant cannot be constructed, so a reference to it cannot exist for this arm to reach"
+            )]
+            $kind::Impossible(never) => match *never {},
+        }
+    };
+}
+
+#[derive(Debug)]
+enum CompressorKind {
+    #[cfg(feature = "deflate")]
+    Deflate(crate::deflate::Compressor),
+    #[cfg(feature = "zlib")]
+    Zlib(crate::zlib::Compressor),
+    #[cfg(feature = "gzip")]
+    Gzip(crate::gzip::Compressor),
+    #[cfg(feature = "brotli")]
+    // Brotli's engine state dwarfs the others (roughly 6.5 KiB against 1 KiB), and this enum is
+    // returned by value, so the odd one out is boxed to keep the common cases cheap to move.
+    Brotli(Box<crate::brotli::Compressor>),
+    #[cfg(feature = "zstd")]
+    Zstd(crate::zstd::Compressor),
+    /// Keeps the dispatch below exhaustive when no format is enabled.
     ///
-    /// Uses [`Level::DEFAULT`][crate::Level::DEFAULT]; for anything else, configure a
-    /// [`CompressorBuilder`] and finish it with
-    /// [`build_format`][CompressorBuilder::build_format].
+    /// [`Infallible`][core::convert::Infallible] cannot be constructed, so neither can this: the
+    /// type exists so a build with no format can still name it, not so it can be used.
+    #[cfg_attr(
+        not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")),
+        expect(dead_code, reason = "the placeholder exists to be matched, never constructed")
+    )]
+    #[cfg(not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")))]
+    Impossible(core::convert::Infallible),
+}
+
+#[derive(Debug)]
+enum DecompressorKind {
+    #[cfg(feature = "deflate")]
+    Deflate(crate::deflate::Decompressor),
+    #[cfg(feature = "zlib")]
+    Zlib(crate::zlib::Decompressor),
+    #[cfg(feature = "gzip")]
+    Gzip(crate::gzip::Decompressor),
+    #[cfg(feature = "brotli")]
+    // Boxed for the same reason as the compressor above.
+    Brotli(Box<crate::brotli::Decompressor>),
+    #[cfg(feature = "zstd")]
+    Zstd(crate::zstd::Decompressor),
+    /// Keeps the dispatch exhaustive when no format is enabled, exactly as for the compressor above.
+    #[cfg_attr(
+        not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")),
+        expect(dead_code, reason = "the placeholder exists to be matched, never constructed")
+    )]
+    #[cfg(not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")))]
+    Impossible(core::convert::Infallible),
+}
+
+/// Compresses a stream of byte sequences into a format chosen at runtime.
+///
+/// The runtime-format counterpart of each format module's `Compressor`, and driven exactly the same
+/// way -- through [`Compression`][crate::core::Compression]. The chosen format is held internally,
+/// so this is a concrete type rather than a trait object: it can be stored in a struct, returned
+/// from a function and handed to [`compress`][crate::compress] like any other compressor.
+///
+/// Reach it through [`CompressorBuilder::build_format`], or [`compress`] for a complete buffer.
+#[derive(Debug)]
+pub struct Compressor {
+    kind: CompressorKind,
+}
+
+impl Compressor {
+    /// Creates a compressor for `format` at [`Level::DEFAULT`][crate::Level::DEFAULT].
     ///
     /// # Errors
     ///
-    /// Returns an error if the underlying compression engine fails.
-    #[expect(
-        clippy::trivially_copy_pass_by_ref,
-        reason = "one-shot operations consistently borrow the selected runtime format"
-    )]
-    pub fn compress(&self, input: BytesView, resources: &Resources) -> Result<BytesView> {
-        crate::compress(input, CompressorBuilder::new().build_format(*self, resources)?)
+    /// Returns a [`BuildError`][crate::BuildError] if the chosen format's engine rejects the
+    /// default configuration, which in practice it never does.
+    pub fn new(format: Format, resources: &Resources) -> ::core::result::Result<Self, BuildError> {
+        Self::builder().build_format(format, resources)
     }
 
-    /// Decompresses a complete stream that is already in memory.
-    ///
-    /// Buffers the whole result, so it applies the format's own ratio bound plus a 64 MiB output
-    /// cap and a 1024 concatenated-stream cap. For anything else, configure a
-    /// [`DecompressorBuilder`] and finish it with
-    /// [`build_format`][DecompressorBuilder::build_format], which adds no bounds of its own.
+    /// Starts configuring a compressor whose format is chosen when it is built.
+    #[must_use]
+    pub fn builder() -> CompressorBuilder<()> {
+        CompressorBuilder::new()
+    }
+}
+
+impl Compression for Compressor {
+    type Mode = Compress;
+}
+
+impl CompressionInternal for Compressor {
+    #[cfg_attr(
+        not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")),
+        expect(unused_variables, reason = "the dispatch below diverges when no format is enabled")
+    )]
+    fn push(&mut self, input: BytesView) -> Result<()> {
+        dispatch!(CompressorKind, &mut self.kind, codec => codec.push(input))
+    }
+
+    fn end_input(&mut self) {
+        dispatch!(CompressorKind, &mut self.kind, codec => codec.end_input());
+    }
+
+    fn pull(&mut self) -> Result<Output> {
+        dispatch!(CompressorKind, &mut self.kind, codec => codec.pull())
+    }
+
+    fn total_in(&self) -> u64 {
+        dispatch!(CompressorKind, &self.kind, codec => codec.total_in())
+    }
+
+    fn total_out(&self) -> u64 {
+        dispatch!(CompressorKind, &self.kind, codec => codec.total_out())
+    }
+
+    fn flush(&mut self) -> Result<()> {
+        dispatch!(CompressorKind, &mut self.kind, codec => codec.flush())
+    }
+}
+
+/// Decompresses a stream in a format chosen at runtime.
+///
+/// The runtime-format counterpart of each format module's `Decompressor`.
+///
+/// # Security
+///
+/// This carries whatever bounds it was built with and adds none of its own, exactly like every
+/// other format's decompressor. [`decompress`] is the bounded convenience.
+///
+/// Reach it through [`DecompressorBuilder::build_format`], or [`decompress`] for a complete stream.
+#[derive(Debug)]
+pub struct Decompressor {
+    kind: DecompressorKind,
+}
+
+impl Decompressor {
+    /// Creates a decompressor for `format` with that format's own default bounds.
     ///
     /// # Errors
     ///
-    /// Returns an error if the data is malformed, truncated, or exceeds those bounds.
-    #[expect(
-        clippy::trivially_copy_pass_by_ref,
-        reason = "one-shot operations consistently borrow the selected runtime format"
-    )]
-    pub fn decompress(&self, input: BytesView, resources: &Resources) -> Result<BytesView> {
-        // Buffers the whole result, so it carries the same accumulation bounds as each format's own
-        // `decompress` convenience. See `DecompressorLimits::for_buffered_output`.
-        crate::decompress(
-            input,
-            DecompressorBuilder::new()
-                .limits(DecompressorLimits::new().for_buffered_output())
-                .build_format(*self, resources)?,
-        )
+    /// Returns a [`BuildError`][crate::BuildError] if the chosen format's engine rejects the
+    /// default configuration, which in practice it never does.
+    pub fn new(format: Format, resources: &Resources) -> ::core::result::Result<Self, BuildError> {
+        Self::builder().build_format(format, resources)
     }
 
-    /// Decompresses a complete stream with explicit output limits.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the data is malformed, truncated, or exceeds `limits`. Bounds left unset
-    /// on `limits` still receive this convenience's buffering caps.
-    #[expect(
-        clippy::trivially_copy_pass_by_ref,
-        reason = "one-shot operations consistently borrow the selected runtime format"
-    )]
-    pub fn decompress_with_limits(&self, input: BytesView, resources: &Resources, limits: DecompressorLimits) -> Result<BytesView> {
-        crate::decompress(
-            input,
-            DecompressorBuilder::new()
-                .limits(limits.for_buffered_output())
-                .build_format(*self, resources)?,
-        )
+    /// Starts configuring a decompressor whose format is chosen when it is built.
+    #[must_use]
+    pub fn builder() -> DecompressorBuilder<()> {
+        DecompressorBuilder::new()
     }
+}
+
+impl Compression for Decompressor {
+    type Mode = Decompress;
+}
+
+impl CompressionInternal for Decompressor {
+    #[cfg_attr(
+        not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")),
+        expect(unused_variables, reason = "the dispatch below diverges when no format is enabled")
+    )]
+    fn push(&mut self, input: BytesView) -> Result<()> {
+        dispatch!(DecompressorKind, &mut self.kind, codec => codec.push(input))
+    }
+
+    fn end_input(&mut self) {
+        dispatch!(DecompressorKind, &mut self.kind, codec => codec.end_input());
+    }
+
+    fn pull(&mut self) -> Result<Output> {
+        dispatch!(DecompressorKind, &mut self.kind, codec => codec.pull())
+    }
+
+    fn total_in(&self) -> u64 {
+        dispatch!(DecompressorKind, &self.kind, codec => codec.total_in())
+    }
+
+    fn total_out(&self) -> u64 {
+        dispatch!(DecompressorKind, &self.kind, codec => codec.total_out())
+    }
+
+    fn flush(&mut self) -> Result<()> {
+        dispatch!(DecompressorKind, &mut self.kind, codec => codec.flush())
+    }
+}
+
+/// Compresses a complete byte sequence into `format`.
+///
+/// Uses [`Level::DEFAULT`][crate::Level::DEFAULT]; for anything else, configure a
+/// [`CompressorBuilder`] and finish it with [`build_format`][CompressorBuilder::build_format].
+/// Prefer [`Compressor`] for data that arrives incrementally; this convenience buffers the entire
+/// result before returning.
+///
+/// # Errors
+///
+/// Returns an error if the underlying compression engine fails.
+pub fn compress(format: Format, input: impl crate::InputData, resources: &Resources) -> Result<BytesView> {
+    let input = crate::InputData::into_view(input, resources);
+
+    crate::compress(input, Compressor::new(format, resources)?)
+}
+
+/// Decompresses a complete stream in `format`.
+///
+/// Applies that format's default bounds plus this convenience's buffering caps, because it
+/// accumulates the whole result. Prefer [`Decompressor`] for data that arrives incrementally.
+///
+/// # Errors
+///
+/// Returns an error if the data is malformed, truncated, or exceeds those bounds.
+pub fn decompress(format: Format, input: impl crate::InputData, resources: &Resources) -> Result<BytesView> {
+    decompress_with_limits(format, input, resources, DecompressorLimits::new())
+}
+
+/// Decompresses a complete stream in `format` with explicit output limits.
+///
+/// # Errors
+///
+/// Returns an error if the data is malformed, truncated, or exceeds `limits`. Bounds left unset on
+/// `limits` still receive this convenience's buffering caps.
+pub fn decompress_with_limits(
+    format: Format,
+    input: impl crate::InputData,
+    resources: &Resources,
+    limits: DecompressorLimits,
+) -> Result<BytesView> {
+    let input = crate::InputData::into_view(input, resources);
+
+    crate::decompress(
+        input,
+        Decompressor::builder()
+            .limits(limits.for_buffered_output())
+            .build_format(format, resources)?,
+    )
 }
 
 impl CompressorBuilder<()> {
     /// Builds a compressor for a format chosen at runtime.
     ///
-    /// The result is boxed, because the concrete type is not known until `format` is. A boxed
-    /// [`Compression`] is itself a `Compression`, so it fits anywhere a concrete compressor does.
+    /// The result is this module's [`Compressor`], a concrete type like every other format's, so it
+    /// fits anywhere one of those does. The chosen format is an implementation detail of the value
+    /// rather than something the caller has to name.
     ///
     /// Everything this builder carries means the same thing in every format. A setting only one
-    /// format has -- brotli's quality, say -- needs that format's own builder, whose result can be
-    /// boxed to the same trait object.
+    /// format has -- brotli's quality, say -- needs that format's own builder.
     ///
     /// # Errors
     ///
@@ -230,31 +447,37 @@ impl CompressorBuilder<()> {
             reason = "brotli and zstd are the formats whose engines can reject a configuration, and neither is enabled"
         )
     )]
-    pub fn build_format(
-        self,
-        format: Format,
-        resources: &Resources,
-    ) -> ::core::result::Result<Box<dyn Compression<Mode = Compress>>, BuildError> {
-        Ok(match format {
+    #[cfg_attr(
+        not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")),
+        expect(
+            unreachable_code,
+            unused_variables,
+            clippy::unused_self,
+            reason = "with no format enabled `Format` has no variants, so the match below diverges"
+        )
+    )]
+    pub fn build_format(self, format: Format, resources: &Resources) -> ::core::result::Result<Compressor, BuildError> {
+        let kind = match format {
             #[cfg(feature = "deflate")]
-            Format::Deflate => Box::new(self.build_deflate(resources)),
+            Format::Deflate => CompressorKind::Deflate(self.build_deflate(resources)),
             #[cfg(feature = "zlib")]
-            Format::Zlib => Box::new(self.build_zlib(resources)),
+            Format::Zlib => CompressorKind::Zlib(self.build_zlib(resources)),
             #[cfg(feature = "gzip")]
-            Format::Gzip => Box::new(self.build_gzip(resources)),
+            Format::Gzip => CompressorKind::Gzip(self.build_gzip(resources)),
             #[cfg(feature = "brotli")]
-            Format::Brotli => Box::new(self.build_brotli(resources)?),
+            Format::Brotli => CompressorKind::Brotli(Box::new(self.build_brotli(resources)?)),
             #[cfg(feature = "zstd")]
-            Format::Zstd => Box::new(self.build_zstd(resources)?),
-        })
+            Format::Zstd => CompressorKind::Zstd(self.build_zstd(resources)?),
+        };
+
+        Ok(Compressor { kind })
     }
 }
 
 impl DecompressorBuilder<()> {
     /// Builds a decompressor for a format chosen at runtime.
     ///
-    /// The result is boxed, because the concrete type is not known until `format` is. A boxed
-    /// [`Compression`] is itself a `Compression`, so it fits anywhere a concrete decompressor does.
+    /// The result is this module's [`Decompressor`], a concrete type like every other format's.
     ///
     /// Bounds left unset on [`limits`][DecompressorBuilder::limits], and a
     /// [`multi_stream`][DecompressorBuilder::multi_stream] left unset, keep whatever the chosen
@@ -271,30 +494,41 @@ impl DecompressorBuilder<()> {
             reason = "zstd is the only format whose decompressor engine can reject a configuration, and it is not enabled"
         )
     )]
-    pub fn build_format(
-        self,
-        format: Format,
-        resources: &Resources,
-    ) -> ::core::result::Result<Box<dyn Compression<Mode = Decompress>>, BuildError> {
-        Ok(match format {
+    #[cfg_attr(
+        not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")),
+        expect(
+            unreachable_code,
+            unused_variables,
+            clippy::unused_self,
+            reason = "with no format enabled `Format` has no variants, so the match below diverges"
+        )
+    )]
+    pub fn build_format(self, format: Format, resources: &Resources) -> ::core::result::Result<Decompressor, BuildError> {
+        let kind = match format {
             #[cfg(feature = "deflate")]
-            Format::Deflate => Box::new(self.build_deflate(resources)),
+            Format::Deflate => DecompressorKind::Deflate(self.build_deflate(resources)),
             #[cfg(feature = "zlib")]
-            Format::Zlib => Box::new(self.build_zlib(resources)),
+            Format::Zlib => DecompressorKind::Zlib(self.build_zlib(resources)),
             #[cfg(feature = "gzip")]
-            Format::Gzip => Box::new(self.build_gzip(resources)),
+            Format::Gzip => DecompressorKind::Gzip(self.build_gzip(resources)),
             #[cfg(feature = "brotli")]
-            Format::Brotli => Box::new(self.build_brotli(resources)),
+            Format::Brotli => DecompressorKind::Brotli(Box::new(self.build_brotli(resources))),
             #[cfg(feature = "zstd")]
-            Format::Zstd => Box::new(self.build_zstd(resources)?),
-        })
+            Format::Zstd => DecompressorKind::Zstd(self.build_zstd(resources)?),
+        };
+
+        Ok(Decompressor { kind })
     }
 }
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(test)]
+#[cfg(all(
+    test,
+    any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")
+))]
 mod tests {
-    use std::num::NonZeroUsize;
+    use std::num::{NonZeroU64, NonZeroUsize};
 
+    use bytesbuf::BytesBuf;
     use bytesbuf::mem::GlobalPool;
 
     use super::*;
@@ -358,16 +592,92 @@ mod tests {
     }
 
     #[test]
+    fn the_runtime_format_codecs_report_their_byte_counters_and_flush() {
+        // The counters and `flush` forward to whichever codec the enum is holding, so they need
+        // driving for every format rather than only for whichever one happens to be first.
+        let payload = b"counted and flushed ".repeat(200);
+
+        for &format in Format::ALL {
+            let mut compressor = Compressor::new(format, &Resources::default()).expect("the defaults are accepted");
+
+            compressor.push(view(&payload)).expect("push succeeds");
+            compressor.flush().expect("flush succeeds");
+
+            let mut compressed = BytesBuf::new();
+            let mut guard = 0;
+            loop {
+                guard += 1;
+                assert!(guard < MAX_STEPS, "the flush did not settle for {format:?}");
+
+                let output = compressor.pull().expect("pull succeeds");
+                if output.is_need_input() {
+                    break;
+                }
+                if let Some(chunk) = output.into_data() {
+                    compressed.put_bytes(chunk);
+                }
+            }
+
+            assert_eq!(
+                compressor.total_in(),
+                payload.len() as u64,
+                "{format:?} miscounted what it consumed"
+            );
+            assert!(compressor.total_out() > 0, "{format:?} reported no output after a flush");
+
+            compressor.end_input();
+            loop {
+                guard += 1;
+                assert!(guard < MAX_STEPS, "compression did not finish for {format:?}");
+
+                let output = compressor.pull().expect("pull succeeds");
+                let done = output.is_done();
+                if let Some(chunk) = output.into_data() {
+                    compressed.put_bytes(chunk);
+                }
+                if done {
+                    break;
+                }
+            }
+
+            let mut decompressor = Decompressor::new(format, &Resources::default()).expect("the defaults are accepted");
+
+            decompressor.push(compressed.consume_all()).expect("push succeeds");
+            decompressor.flush().expect("a decompressor has nothing to flush");
+            decompressor.end_input();
+
+            let mut plain = BytesBuf::new();
+            loop {
+                guard += 1;
+                assert!(guard < MAX_STEPS, "decompression did not finish for {format:?}");
+
+                let output = decompressor.pull().expect("pull succeeds");
+                let done = output.is_done();
+                if let Some(chunk) = output.into_data() {
+                    plain.put_bytes(chunk);
+                }
+                if done {
+                    break;
+                }
+            }
+
+            assert_eq!(plain.consume_all().to_vec(), payload, "{format:?} did not round trip");
+            assert_eq!(
+                decompressor.total_out(),
+                payload.len() as u64,
+                "{format:?} miscounted what it produced"
+            );
+            assert!(decompressor.total_in() > 0, "{format:?} reported consuming nothing");
+        }
+    }
+
+    #[test]
     fn every_format_round_trips_through_the_enum() {
         let payload = b"runtime selected format ".repeat(200);
 
         for &format in Format::ALL {
-            let compressed = format
-                .compress(view(&payload), &Resources::default())
-                .expect("compression succeeds");
-            let plain = format
-                .decompress(compressed, &Resources::default())
-                .expect("decompression succeeds");
+            let compressed = crate::format::compress(format, view(&payload), &Resources::default()).expect("compression succeeds");
+            let plain = crate::format::decompress(format, compressed, &Resources::default()).expect("decompression succeeds");
 
             assert_eq!(plain.to_vec(), payload, "{format:?} failed to round trip");
         }
@@ -470,12 +780,15 @@ mod tests {
     #[test]
     fn the_decompressor_builder_applies_its_limits() {
         for &format in Format::ALL {
-            let compressed = format
-                .compress(view(&vec![0_u8; 256 * 1024]), &Resources::default())
-                .expect("compression succeeds");
+            let compressed =
+                crate::format::compress(format, view(&vec![0_u8; 256 * 1024]), &Resources::default()).expect("compression succeeds");
 
             let mut decompressor = DecompressorBuilder::new()
-                .limits(DecompressorLimits::new().without_max_ratio().with_max_output_len(1024))
+                .limits(
+                    DecompressorLimits::new()
+                        .without_max_ratio()
+                        .with_max_output_len(NonZeroU64::new(1024).unwrap()),
+                )
                 .output_chunk_size(NonZeroUsize::new(64).expect("64 is not zero"))
                 .build_format(format, &Resources::default())
                 .expect("the settings are accepted");
@@ -507,9 +820,8 @@ mod tests {
         const EXPECTED_DEFAULT_CHUNK_SIZE: usize = 65_536;
 
         for &format in Format::ALL {
-            let compressed = format
-                .compress(view(&vec![0_u8; 256 * 1024]), &Resources::default())
-                .expect("compression succeeds");
+            let compressed =
+                crate::format::compress(format, view(&vec![0_u8; 256 * 1024]), &Resources::default()).expect("compression succeeds");
 
             let mut decompressor = DecompressorBuilder::new()
                 .build_format(format, &Resources::default())
@@ -550,8 +862,7 @@ mod tests {
         let bound = NonZeroUsize::new(128).expect("128 is not zero");
 
         for &format in Format::ALL {
-            let compressed = format
-                .compress(view(&b"chunked output ".repeat(5_000)), &Resources::default())
+            let compressed = crate::format::compress(format, view(&b"chunked output ".repeat(5_000)), &Resources::default())
                 .expect("compression succeeds");
             let mut decompressor = DecompressorBuilder::new()
                 .output_chunk_size(bound)
@@ -580,9 +891,8 @@ mod tests {
     #[test]
     fn the_decompressor_builder_applies_its_trailing_data_policy() {
         for &format in Format::ALL {
-            let compressed = format
-                .compress(view(&b"payload ".repeat(4_096)), &Resources::default())
-                .expect("compression succeeds");
+            let compressed =
+                crate::format::compress(format, view(&b"payload ".repeat(4_096)), &Resources::default()).expect("compression succeeds");
             let joined = BytesView::from_views([compressed, view(b"trailing")]);
             let mut decompressor = DecompressorBuilder::new()
                 .multi_stream(false)
@@ -614,16 +924,16 @@ mod tests {
     #[test]
     fn explicit_limits_are_available_on_the_one_shot_runtime_api() {
         for &format in Format::ALL {
-            let compressed = format
-                .compress(view(&vec![0_u8; 4096]), &Resources::default())
-                .expect("compression succeeds");
-            let error = format
-                .decompress_with_limits(
-                    compressed,
-                    &Resources::default(),
-                    DecompressorLimits::new().without_max_ratio().with_max_output_len(1024),
-                )
-                .expect_err("the explicit cap fires");
+            let compressed = crate::format::compress(format, view(&vec![0_u8; 4096]), &Resources::default()).expect("compression succeeds");
+            let error = crate::format::decompress_with_limits(
+                format,
+                compressed,
+                &Resources::default(),
+                DecompressorLimits::new()
+                    .without_max_ratio()
+                    .with_max_output_len(NonZeroU64::new(1024).unwrap()),
+            )
+            .expect_err("the explicit cap fires");
 
             assert!(error.is_limit_exceeded(), "{format:?}: got {error}");
         }
@@ -636,7 +946,7 @@ mod tests {
         let payload = b"member ".repeat(50);
 
         for &format in Format::ALL {
-            let compressed = format.compress(view(&payload), &Resources::default()).expect("compress");
+            let compressed = crate::format::compress(format, view(&payload), &Resources::default()).expect("compress");
             let joined = BytesView::from_views([compressed.clone(), compressed]);
 
             let joined_len = decompressed_len(
@@ -661,7 +971,7 @@ mod tests {
             // Matching the variant by name keeps this free of the cfg gates the variants carry.
             let joins_by_default = matches!(format!("{format:?}").as_str(), "Gzip" | "Zstd");
 
-            let compressed = format.compress(view(&payload), &Resources::default()).expect("compress");
+            let compressed = crate::format::compress(format, view(&payload), &Resources::default()).expect("compress");
             let joined = BytesView::from_views([compressed.clone(), compressed]);
 
             let len = decompressed_len(decompressor_for(DecompressorBuilder::new(), format), joined);
@@ -671,11 +981,11 @@ mod tests {
         }
     }
 
-    fn decompressed_len(decompressor: Box<dyn Compression<Mode = Decompress>>, input: BytesView) -> usize {
+    fn decompressed_len(decompressor: Decompressor, input: BytesView) -> usize {
         crate::decompress(input, decompressor).expect("decompression succeeds").len()
     }
 
-    fn decompressor_for(builder: DecompressorBuilder<()>, format: Format) -> Box<dyn Compression<Mode = Decompress>> {
+    fn decompressor_for(builder: DecompressorBuilder<()>, format: Format) -> Decompressor {
         builder
             .build_format(format, &Resources::default())
             .expect("the settings are accepted")

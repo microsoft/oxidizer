@@ -14,7 +14,8 @@ use bytesbuf::mem::GlobalPool;
 use bytesbuf::{BytesBuf, BytesView};
 
 use crate::core::{Compress, Compression, CompressionInternal, Decompress, Output};
-use crate::{CompressorBuilder, DecompressorBuilder, DecompressorLimits, Format, Level, Resources, TrailingData};
+use crate::format::Format;
+use crate::{CompressorBuilder, DecompressorBuilder, DecompressorLimits, Level, Resources, TrailingData};
 
 fn view(bytes: &[u8]) -> BytesView {
     BytesView::copied_from_slice(bytes, &GlobalPool::new())
@@ -193,14 +194,14 @@ macro_rules! format_contract {
             }
 
             #[test]
-            fn compress_and_decompress_work_through_a_trait_object() {
-                // Provided methods are easy to break for `dyn`, so reach them that way too.
+            fn compress_and_decompress_work_through_the_runtime_format_codec() {
+                // The runtime-format codec is the type-erasing path, so drive it the same way.
                 let data = payload();
 
-                let compressor: Box<dyn Compression<Mode = Compress>> = Box::new($module::Compressor::new(resources()));
+                let compressor = crate::format::Compressor::new(FORMAT, resources()).expect("the defaults are accepted");
                 let compressed = crate::compress(view(&data), compressor).expect("compression succeeds");
 
-                let decompressor: Box<dyn Compression<Mode = Decompress>> = Box::new($module::Decompressor::new(resources()));
+                let decompressor = crate::format::Decompressor::new(FORMAT, resources()).expect("the defaults are accepted");
 
                 assert_eq!(
                     crate::decompress(compressed, decompressor)
@@ -450,7 +451,11 @@ macro_rules! format_contract {
                 let compressed = $module::compress(view(&vec![0_u8; 256 * 1024]), resources()).expect("compression succeeds");
 
                 let mut decompressor = $module::Decompressor::builder()
-                    .limits(DecompressorLimits::new().without_max_ratio().with_max_output_len(1024))
+                    .limits(
+                        DecompressorLimits::new()
+                            .without_max_ratio()
+                            .with_max_output_len(NonZeroU64::new(1024).unwrap()),
+                    )
                     .build(resources())
                     .built();
                 decompressor.push(compressed).expect("push succeeds");
@@ -513,7 +518,7 @@ macro_rules! format_contract {
                 let data = payload();
 
                 let via_module = $module::compress(view(&data), resources()).expect("compression succeeds");
-                let via_format = FORMAT.compress(view(&data), resources()).expect("compression succeeds");
+                let via_format = crate::format::compress(FORMAT, view(&data), resources()).expect("compression succeeds");
 
                 assert_eq!(
                     via_module.to_vec(),
@@ -523,8 +528,7 @@ macro_rules! format_contract {
 
                 // Either output must decompress through either path.
                 assert_eq!(
-                    FORMAT
-                        .decompress(via_module, resources())
+                    crate::format::decompress(FORMAT, via_module, resources())
                         .expect("decompression succeeds")
                         .to_vec(),
                     data
@@ -538,14 +542,14 @@ macro_rules! format_contract {
             }
 
             #[test]
-            fn works_through_boxed_trait_objects() {
+            fn works_through_the_runtime_format_codec() {
                 let data = payload();
 
                 let mut compressor = CompressorBuilder::new().build_format(FORMAT, resources()).built();
-                let compressed = compress(&mut *compressor, &view(&data), usize::MAX).expect("compression succeeds");
+                let compressed = compress(&mut compressor, &view(&data), usize::MAX).expect("compression succeeds");
 
                 let mut decompressor = DecompressorBuilder::new().build_format(FORMAT, resources()).built();
-                let plain = decompress(&mut *decompressor, &compressed, usize::MAX).expect("decompression succeeds");
+                let plain = decompress(&mut decompressor, &compressed, usize::MAX).expect("decompression succeeds");
 
                 assert_eq!(plain.to_vec(), data);
             }
@@ -1251,7 +1255,7 @@ macro_rules! format_contract {
                     resources(),
                     DecompressorLimits::new()
                         .without_max_ratio()
-                        .with_max_output_len(data.len() as u64),
+                        .with_max_output_len(NonZeroU64::new(data.len() as u64).unwrap()),
                 )
                 .expect("an exact limit succeeds");
                 assert_eq!(exact.to_vec(), data);
@@ -1260,7 +1264,9 @@ macro_rules! format_contract {
                 let error = $module::decompress_with_limits(
                     compressed,
                     resources(),
-                    DecompressorLimits::new().without_max_ratio().with_max_output_len(maximum),
+                    DecompressorLimits::new()
+                        .without_max_ratio()
+                        .with_max_output_len(NonZeroU64::new(maximum).unwrap()),
                 )
                 .expect_err("one byte beyond the cap is rejected");
 
@@ -1351,14 +1357,14 @@ fn formats_produce_mutually_incompatible_streams() {
     let data = b"cross format check ".repeat(200);
 
     for &produced_by in Format::ALL {
-        let compressed = produced_by.compress(view(&data), resources()).expect("compression succeeds");
+        let compressed = crate::format::compress(produced_by, view(&data), resources()).expect("compression succeeds");
 
         for &decompressed_by in Format::ALL {
             if produced_by == decompressed_by {
                 continue;
             }
 
-            if let Ok(plain) = decompressed_by.decompress(compressed.clone(), resources()) {
+            if let Ok(plain) = crate::format::decompress(decompressed_by, compressed.clone(), resources()) {
                 assert_ne!(
                     plain.to_vec(),
                     data,
@@ -1380,10 +1386,10 @@ fn a_decompressor_can_be_chosen_from_a_declared_encoding() {
             continue;
         };
 
-        let compressed = format.compress(view(&data), resources()).expect("compression succeeds");
+        let compressed = crate::format::compress(format, view(&data), resources()).expect("compression succeeds");
 
         let declared = Format::from_content_encoding(token).expect("the token is supported");
-        let plain = declared.decompress(compressed, resources()).expect("decompression succeeds");
+        let plain = crate::format::decompress(declared, compressed, resources()).expect("decompression succeeds");
 
         assert_eq!(plain.to_vec(), data, "{format:?} did not decompress via its declared token");
     }
@@ -1456,27 +1462,28 @@ mod format_specific_settings {
     #[test]
     fn a_runtime_chosen_format_can_still_reach_format_specific_settings() {
         // The documented escape hatch: a runtime `Format` builder cannot carry a brotli-only
-        // setting, so branch on the format, use the concrete builder, and box the result. That
-        // works because a boxed compression operation is itself a `Compression`.
-        fn compressor_for(format: Format) -> Box<dyn Compression<Mode = Compress>> {
-            match format {
-                Format::Brotli => Box::new(brotli::Compressor::builder().mode(Mode::Text).build(resources()).built()),
+        // setting, so branch on the format and use that format's own builder for the odd one out.
+        let data = b"escape hatch ".repeat(200);
+
+        for &format in Format::ALL {
+            let compressed = match format {
+                Format::Brotli => {
+                    let mut tuned = brotli::Compressor::builder().mode(Mode::Text).build(resources()).built();
+                    compress(&mut tuned, &view(&data), usize::MAX).expect("compression succeeds")
+                }
                 // With brotli as the only enabled format there is no other variant to reach, so
                 // the fallback is dead in that configuration rather than wrong.
                 #[cfg_attr(
                     not(any(feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")),
                     expect(unreachable_patterns, reason = "brotli is the only enabled format, so it is the only variant")
                 )]
-                other => CompressorBuilder::new().build_format(other, resources()).built(),
-            }
-        }
-        let data = b"escape hatch ".repeat(200);
+                other => {
+                    let mut tuned = CompressorBuilder::new().build_format(other, resources()).built();
+                    compress(&mut tuned, &view(&data), usize::MAX).expect("compression succeeds")
+                }
+            };
 
-        for &format in Format::ALL {
-            let mut tuned = compressor_for(format);
-            let compressed = compress(&mut *tuned, &view(&data), usize::MAX).expect("compression succeeds");
-
-            let plain = format.decompress(compressed, resources()).expect("decompression succeeds");
+            let plain = crate::format::decompress(format, compressed, resources()).expect("decompression succeeds");
             assert_eq!(plain.to_vec(), data, "{format:?} failed through the escape hatch");
         }
     }
@@ -1636,10 +1643,10 @@ mod pooling {
         for &format in Format::ALL {
             for round in 0..4 {
                 for payload in &payloads {
-                    let compressed = format.compress(view(payload), resources()).expect("compression succeeds");
+                    let compressed = crate::format::compress(format, view(payload), resources()).expect("compression succeeds");
 
                     let mut decompressor = DecompressorBuilder::new().build_format(format, resources()).built();
-                    let plain = decompress(&mut *decompressor, &compressed, usize::MAX).expect("decompression succeeds");
+                    let plain = decompress(&mut decompressor, &compressed, usize::MAX).expect("decompression succeeds");
 
                     assert_eq!(plain.to_vec(), *payload, "{format:?} round {round} diverged when pooled");
                 }
@@ -1709,7 +1716,7 @@ fn formats_never_share_pooled_engines() {
                 .output_chunk_size(chunk(4096))
                 .build_format(format, resources())
                 .built();
-            let bytes = compress(&mut *compressor, &input, usize::MAX)
+            let bytes = compress(&mut compressor, &input, usize::MAX)
                 .expect("compression succeeds")
                 .to_vec();
             (format, bytes)
@@ -1723,7 +1730,7 @@ fn formats_never_share_pooled_engines() {
                 .output_chunk_size(chunk(4096))
                 .build_format(*format, resources())
                 .built();
-            let pooled = compress(&mut *compressor, &input, usize::MAX).expect("compression succeeds");
+            let pooled = compress(&mut compressor, &input, usize::MAX).expect("compression succeeds");
             drop(compressor);
 
             assert_eq!(
@@ -1735,7 +1742,7 @@ fn formats_never_share_pooled_engines() {
             // And the bytes really are this format's, not a sibling's that happens to decompress.
             for (other, _) in &baselines {
                 let mut reader = DecompressorBuilder::new().build_format(*other, resources()).built();
-                let decompressed = decompress(&mut *reader, &pooled, usize::MAX);
+                let decompressed = decompress(&mut reader, &pooled, usize::MAX);
 
                 if other == format {
                     assert_eq!(
@@ -1764,7 +1771,7 @@ fn a_shared_pool_is_correct_under_concurrency() {
                 .output_chunk_size(chunk(4096))
                 .build_format(format, resources())
                 .built();
-            let bytes = compress(&mut *compressor, &input, usize::MAX)
+            let bytes = compress(&mut compressor, &input, usize::MAX)
                 .expect("compression succeeds")
                 .to_vec();
             (format, bytes)
@@ -1786,13 +1793,13 @@ fn a_shared_pool_is_correct_under_concurrency() {
                             .output_chunk_size(chunk(4096))
                             .build_format(*format, resources())
                             .built();
-                        let pooled = compress(&mut *compressor, &input, usize::MAX).expect("compression succeeds");
+                        let pooled = compress(&mut compressor, &input, usize::MAX).expect("compression succeeds");
                         drop(compressor);
 
                         assert_eq!(&pooled.to_vec(), baseline, "{format:?} round {round}: concurrent pooling diverged");
 
                         let mut decompressor = DecompressorBuilder::new().build_format(*format, resources()).built();
-                        let plain = decompress(&mut *decompressor, &pooled, usize::MAX).expect("decompression succeeds");
+                        let plain = decompress(&mut decompressor, &pooled, usize::MAX).expect("decompression succeeds");
 
                         assert_eq!(plain.to_vec(), data, "{format:?} round {round}: concurrent decompress lost data");
                     }
@@ -1816,7 +1823,7 @@ fn pooled_output_does_not_drift_over_many_reuses() {
                 .output_chunk_size(chunk(4096))
                 .build_format(format, resources())
                 .built();
-            let pooled = compress(&mut *compressor, &input, usize::MAX)
+            let pooled = compress(&mut compressor, &input, usize::MAX)
                 .expect("compression succeeds")
                 .to_vec();
             drop(compressor);
@@ -1840,15 +1847,15 @@ mod trait_contract {
 
     #[test]
     fn round_trips_through_the_trait_alone() {
-        let mut compressor: Box<dyn Compression<Mode = Compress>> = Box::new(gzip::Compressor::new(resources()));
-        CompressionInternal::push(&mut *compressor, view(b"driven through the trait")).expect("push succeeds");
-        CompressionInternal::end_input(&mut *compressor);
+        let mut compressor = gzip::Compressor::new(resources());
+        CompressionInternal::push(&mut compressor, view(b"driven through the trait")).expect("push succeeds");
+        CompressionInternal::end_input(&mut compressor);
 
         let mut collected = BytesBuf::new();
         let mut guard = StepGuard::new();
         loop {
             guard.step();
-            let output = CompressionInternal::pull(&mut *compressor).expect("pull succeeds");
+            let output = CompressionInternal::pull(&mut compressor).expect("pull succeeds");
             assert!(!output.is_need_input(), "compressor requested input after end");
             let done = output.is_done();
             if let Some(chunk) = output.into_data() {
@@ -1859,15 +1866,15 @@ mod trait_contract {
             }
         }
 
-        let mut decompressor: Box<dyn Compression<Mode = Decompress>> = Box::new(gzip::Decompressor::new(resources()));
-        CompressionInternal::push(&mut *decompressor, collected.consume_all()).expect("push succeeds");
-        CompressionInternal::end_input(&mut *decompressor);
+        let mut decompressor = gzip::Decompressor::new(resources());
+        CompressionInternal::push(&mut decompressor, collected.consume_all()).expect("push succeeds");
+        CompressionInternal::end_input(&mut decompressor);
 
         let mut plain = BytesBuf::new();
         let mut guard = StepGuard::new();
         loop {
             guard.step();
-            let output = CompressionInternal::pull(&mut *decompressor).expect("pull succeeds");
+            let output = CompressionInternal::pull(&mut decompressor).expect("pull succeeds");
             assert!(!output.is_need_input(), "decompressor requested input after end");
             let done = output.is_done();
             if let Some(chunk) = output.into_data() {
@@ -1888,11 +1895,11 @@ mod trait_contract {
         let data = b"counted through the box ".repeat(50);
         let input = view(&data);
 
-        let mut boxed: Box<dyn Compression<Mode = Compress>> = Box::new(gzip::Compressor::new(resources()));
+        let mut boxed = gzip::Compressor::new(resources());
         assert_eq!(boxed.total_in(), 0, "nothing has been consumed yet");
         assert_eq!(boxed.total_out(), 0, "nothing has been produced yet");
 
-        let compressed = compress(&mut *boxed, &input, usize::MAX).expect("compression succeeds");
+        let compressed = compress(&mut boxed, &input, usize::MAX).expect("compression succeeds");
 
         assert_eq!(boxed.total_in(), data.len() as u64, "every input byte should be accounted for");
         assert_eq!(
@@ -1905,11 +1912,11 @@ mod trait_contract {
     #[test]
     fn trait_objects_are_send_sync_and_debug() {
         fn assert_send_sync<T: Send + Sync + ?Sized>(_: &T) {}
-        let compressor: Box<dyn Compression<Mode = Compress>> = Box::new(gzip::Compressor::new(resources()));
-        let decompressor: Box<dyn Compression<Mode = Decompress>> = Box::new(gzip::Decompressor::new(resources()));
+        let compressor = gzip::Compressor::new(resources());
+        let decompressor = gzip::Decompressor::new(resources());
 
-        assert_send_sync(&*compressor);
-        assert_send_sync(&*decompressor);
+        assert_send_sync(&compressor);
+        assert_send_sync(&decompressor);
         assert_send_sync(&gzip::Compressor::new(resources()));
         assert_send_sync(&gzip::Decompressor::new(resources()));
         assert!(format!("{compressor:?}").contains("Compressor"));

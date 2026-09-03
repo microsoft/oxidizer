@@ -44,14 +44,10 @@ Each format module has its own `compress` and `decompress` for the common case. 
 [`compress`][__link6] and [`decompress`][__link7] take an operation you already have instead, whatever built it.
 
 ```rust
-use bytesbuf::BytesView;
 use compressors::{Resources, gzip};
 
 let resources = Resources::global();
-let compressed = gzip::compress(
-    BytesView::copied_from_slice(b"hello", resources.memory()),
-    resources,
-)?;
+let compressed = gzip::compress(b"hello", resources)?;
 
 assert_eq!(
     gzip::decompress(compressed, resources)?.to_vec(),
@@ -91,25 +87,22 @@ assert_eq!(gzip.range(0..2).to_vec(), vec![0x1f, 0x8b]);
 
 ## Choosing a format
 
-When the format is only known at runtime – from a `Content-Encoding` token, say – [`Format`][__link9]
-resolves the token and compresses with whatever it names. Reach for
-[`CompressorBuilder::build_format`][__link10] instead when the level or the chunk size matters: it returns
-an operation that fits wherever a concrete one does.
+When the format is only known at runtime – from a `Content-Encoding` token, say – the
+[`format`][__link9] module resolves the token and carries the same shape every other format module does:
+a `Compressor`, a `Decompressor`, and the whole-buffer conveniences. Reach for
+[`CompressorBuilder::build_format`][__link10] when the level or the chunk size matters.
 
 ```rust
-use bytesbuf::BytesView;
-use compressors::{Format, Resources};
+use compressors::Resources;
+use compressors::format::{self, Format};
 
 let format = Format::from_content_encoding("gzip").expect("this build supports gzip");
 
 let resources = Resources::global();
-let compressed = format.compress(
-    BytesView::copied_from_slice(b"runtime selected", resources.memory()),
-    resources,
-)?;
+let compressed = format::compress(format, b"runtime selected", resources)?;
 
 assert_eq!(
-    format.decompress(compressed, resources)?.to_vec(),
+    format::decompress(format, compressed, resources)?.to_vec(),
     b"runtime selected".to_vec()
 );
 ```
@@ -182,7 +175,7 @@ a crate that only passes operations around needs.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/compressors">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbTdkudQvI68obvsJDDdruXeAb11AFPpiz0J0byhJXkNZsB1thZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbB1370g8pnEUb22IdVaU-cTcbaG2iSPeoTtQbC3fCZXxHXhphZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
  [__link0]: https://crates.io/crates/bytesbuf/0.9.0
  [__link1]: https://crates.io/crates/bytesbuf/0.9.0
  [__link10]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressorBuilder::build_format
@@ -200,4 +193,4 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link6]: https://docs.rs/compressors/0.1.0/compressors/fn.compress.html
  [__link7]: https://docs.rs/compressors/0.1.0/compressors/fn.decompress.html
  [__link8]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressionStream
- [__link9]: https://docs.rs/compressors/0.1.0/compressors/?search=Format
+ [__link9]: https://docs.rs/compressors/0.1.0/compressors/format/index.html

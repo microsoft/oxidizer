@@ -68,14 +68,9 @@ fn detect_recovery(source: &(dyn StdError + 'static)) -> RecoveryInfo {
 /// ```
 /// # #[cfg(feature = "gzip")]
 /// # {
-/// use bytesbuf::BytesView;
-/// use bytesbuf::mem::GlobalPool;
 /// use compressors::{Resources, gzip};
 ///
-/// let memory = GlobalPool::new();
-/// let not_gzip = BytesView::copied_from_slice(b"definitely not gzip", &memory);
-///
-/// let error = gzip::decompress(not_gzip, &Resources::default()).unwrap_err();
+/// let error = gzip::decompress(b"definitely not gzip", &Resources::default()).unwrap_err();
 /// assert!(error.is_corrupt_data());
 /// # }
 /// ```

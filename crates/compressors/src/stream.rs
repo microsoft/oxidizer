@@ -184,17 +184,11 @@ where
     /// # #[cfg(feature = "gzip")]
     /// # {
     /// use bytesbuf::BytesView;
-    /// use bytesbuf::mem::GlobalPool;
     /// use compressors::{CompressionStream, Resources, gzip};
     /// use futures::{StreamExt, stream};
     ///
     /// # futures::executor::block_on(async {
-    /// let memory = GlobalPool::new();
-    /// let compressed = gzip::compress(
-    ///     BytesView::copied_from_slice(b"payload", &memory),
-    ///     &Resources::default(),
-    /// )
-    /// .unwrap();
+    /// let compressed = gzip::compress(b"payload", &Resources::default()).unwrap();
     ///
     /// // Deliver the gzip stream one byte at a time, the worst case for a decompressor.
     /// let source = stream::iter(
@@ -240,6 +234,7 @@ where
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(all(test, feature = "gzip"))]
 mod tests {
+    use std::num::NonZeroU64;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -251,7 +246,8 @@ mod tests {
 
     use super::*;
     use crate::core::ProgressCompression;
-    use crate::{DecompressorLimits, Format, Level, Resources, gzip};
+    use crate::format::Format;
+    use crate::{DecompressorLimits, Level, Resources, gzip};
 
     fn view(bytes: &[u8]) -> BytesView {
         BytesView::copied_from_slice(bytes, &GlobalPool::new())
@@ -459,7 +455,7 @@ mod tests {
         let gzip = crate::gzip::compress(view(&vec![0_u8; 4 * 1024 * 1024]), &Resources::default()).expect("compression succeeds");
 
         let decompressor = gzip::Decompressor::builder()
-            .limits(DecompressorLimits::new().with_max_output_len(1024))
+            .limits(DecompressorLimits::new().with_max_output_len(NonZeroU64::new(1024).unwrap()))
             .build(&Resources::default());
 
         let error = collect(CompressionStream::decompress(ok_stream(vec![gzip]), decompressor)).expect_err("the cap fires");

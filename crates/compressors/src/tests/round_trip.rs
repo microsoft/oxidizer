@@ -6,7 +6,7 @@
 //! Gzip specific: interop fixtures produced by the system `gzip`, and the concatenated-member
 //! behaviour that only gzip enables by default.
 
-use std::num::NonZeroUsize;
+use std::num::{NonZeroU64, NonZeroUsize};
 
 use bytesbuf::mem::GlobalPool;
 use bytesbuf::{BytesBuf, BytesView};
@@ -207,7 +207,7 @@ fn rejects_a_bomb_before_materialising_it() {
     assert!(bomb.len() < 16 * 1024, "the bomb should be tiny: {} bytes", bomb.len());
 
     let mut decompressor = gzip::Decompressor::builder()
-        .limits(DecompressorLimits::new().with_max_output_len(16 * 1024))
+        .limits(DecompressorLimits::new().with_max_output_len(NonZeroU64::new(16 * 1024).unwrap()))
         .build(&Resources::default());
     decompressor.push(bomb).expect("push succeeds");
     decompressor.end_input();

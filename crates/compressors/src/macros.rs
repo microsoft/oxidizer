@@ -77,7 +77,9 @@ macro_rules! define_compressor_build {
         /// # Errors
         ///
         /// Returns an error if the underlying compression engine fails.
-        pub fn compress(input: BytesView, resources: &$crate::Resources) -> Result<BytesView> {
+        pub fn compress(input: impl $crate::InputData, resources: &$crate::Resources) -> Result<BytesView> {
+            let input = $crate::InputData::into_view(input, resources);
+
             $crate::compress(input, Compressor::new(resources))
         }
     };
@@ -136,7 +138,9 @@ macro_rules! define_compressor_build {
         /// # Errors
         ///
         /// Returns an error if the underlying compression engine fails.
-        pub fn compress(input: BytesView, resources: &$crate::Resources) -> Result<BytesView> {
+        pub fn compress(input: impl $crate::InputData, resources: &$crate::Resources) -> Result<BytesView> {
+            let input = $crate::InputData::into_view(input, resources);
+
             $crate::compress(input, Compressor::new(resources))
         }
     };
@@ -202,7 +206,9 @@ macro_rules! define_decompressor_build {
         /// Returns an error if the data is malformed, truncated, or exceeds the bounds this convenience
         /// applies: the format's own ratio, plus 64 MiB of output and 1024 concatenated streams because it
         /// buffers the whole result. Use `decompress_with_limits` to choose your own.
-        pub fn decompress(input: BytesView, resources: &$crate::Resources) -> Result<BytesView> {
+        pub fn decompress(input: impl $crate::InputData, resources: &$crate::Resources) -> Result<BytesView> {
+            let input = $crate::InputData::into_view(input, resources);
+
             // This convenience accumulates the whole result, so it is the caller's memory that a
             // bomb would exhaust. Incremental decompressors hand each chunk straight back and are
             // left uncapped, because a total-output bound there would cut off long streams that
@@ -223,7 +229,13 @@ macro_rules! define_decompressor_build {
         ///
         /// Returns an error if the data is malformed, truncated, or exceeds `limits`. Bounds left unset
         /// on `limits` still receive this convenience's buffering caps.
-        pub fn decompress_with_limits(input: BytesView, resources: &$crate::Resources, limits: DecompressorLimits) -> Result<BytesView> {
+        pub fn decompress_with_limits(
+            input: impl $crate::InputData,
+            resources: &$crate::Resources,
+            limits: DecompressorLimits,
+        ) -> Result<BytesView> {
+            let input = $crate::InputData::into_view(input, resources);
+
             $crate::decompress(
                 input,
                 Decompressor::builder().limits(limits.for_buffered_output()).build(resources),
@@ -303,7 +315,9 @@ macro_rules! define_decompressor_build {
         /// truncated, or exceeds the bounds this convenience applies: the format's own ratio, plus
         /// 64 MiB of output and 1024 concatenated streams because it buffers the whole result. Use
         /// `decompress_with_limits` to choose your own.
-        pub fn decompress(input: BytesView, resources: &$crate::Resources) -> Result<BytesView> {
+        pub fn decompress(input: impl $crate::InputData, resources: &$crate::Resources) -> Result<BytesView> {
+            let input = $crate::InputData::into_view(input, resources);
+
             // This convenience accumulates the whole result, so it is the caller's memory that a
             // bomb would exhaust. Incremental decompressors hand each chunk straight back and are
             // left uncapped, because a total-output bound there would cut off long streams that
@@ -325,7 +339,13 @@ macro_rules! define_decompressor_build {
         /// Returns an error if the decompressor cannot be built, or if the data is malformed,
         /// truncated, or exceeds `limits`. Bounds left unset on `limits` still receive this
         /// convenience's buffering caps.
-        pub fn decompress_with_limits(input: BytesView, resources: &$crate::Resources, limits: DecompressorLimits) -> Result<BytesView> {
+        pub fn decompress_with_limits(
+            input: impl $crate::InputData,
+            resources: &$crate::Resources,
+            limits: DecompressorLimits,
+        ) -> Result<BytesView> {
+            let input = $crate::InputData::into_view(input, resources);
+
             $crate::decompress(
                 input,
                 Decompressor::builder()

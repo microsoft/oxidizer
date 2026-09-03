@@ -7,7 +7,8 @@
 
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
-use compressors::{Format, Resources, Result, gzip};
+use compressors::format::Format;
+use compressors::{Resources, Result, gzip};
 
 fn main() -> Result<()> {
     // Every output buffer is allocated from this provider.
@@ -23,8 +24,8 @@ fn main() -> Result<()> {
     // The same payload through a format chosen at run time.
     for &format in Format::ALL {
         let input = BytesView::copied_from_slice(&original, &memory);
-        let compressed = format.compress(input, &Resources::default())?;
-        let decompressed = format.decompress(compressed.clone(), &Resources::default())?;
+        let compressed = compressors::format::compress(format, input, &Resources::default())?;
+        let decompressed = compressors::format::decompress(format, compressed.clone(), &Resources::default())?;
 
         assert_eq!(decompressed.to_vec(), original);
         println!("{format:?}: {} bytes", compressed.len());

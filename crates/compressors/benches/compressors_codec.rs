@@ -24,7 +24,8 @@ use alloc_tracker::{Allocator, Operation, Session};
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
 use compressors::brotli::{self, WindowSize};
-use compressors::{CompressorBuilder, DecompressorBuilder, Format, Level, Resources};
+use compressors::format::Format;
+use compressors::{CompressorBuilder, DecompressorBuilder, Level, Resources};
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
 #[global_allocator]

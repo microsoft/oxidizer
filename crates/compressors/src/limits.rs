@@ -25,20 +25,13 @@ const RATIO_FLOOR_BYTES: u64 = 32 * 1024;
 /// A ratio bound cannot tell a bomb from legitimate highly-compressible data, so an absolute cap is
 /// what actually bounds untrusted input. It applies where the crate accumulates a whole result --
 /// each format's `decompress` and `decompress_with_limits`, and the same pair on
-/// [`Format`][crate::Format] -- because those are the paths where a bomb exhausts the caller's
+/// [`Format`][crate::format::Format] -- because those are the paths where a bomb exhausts the caller's
 /// memory. A decompressor driven incrementally hands every chunk straight back, so a cumulative
 /// bound there would cut off long streams that never buffer more than one chunk.
 ///
 /// 64 MiB is a policy guardrail for the common case, not a universal safety guarantee: a server
 /// decompressing many bodies at once still has to bound its own concurrency. A caller who buffers
 /// more, or less, passes explicit [`DecompressorLimits`] to `decompress_with_limits`.
-#[cfg_attr(
-    all(
-        not(test),
-        not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))
-    ),
-    expect(dead_code, reason = "only the decompressors resolve and enforce bounds, and no format is enabled")
-)]
 pub(crate) const DEFAULT_MAX_OUTPUT_LEN: u64 = 64 * 1024 * 1024;
 
 /// The cap the buffering conveniences put on concatenated stream count.
@@ -48,13 +41,6 @@ pub(crate) const DEFAULT_MAX_OUTPUT_LEN: u64 = 64 * 1024 * 1024;
 /// only where output accumulates: formats that treat concatenated members as one logical stream are
 /// used incrementally for exactly the block-oriented archive workloads that run to many thousands
 /// of members, and those must keep passing through.
-#[cfg_attr(
-    all(
-        not(test),
-        not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))
-    ),
-    expect(dead_code, reason = "only the decompressors resolve and enforce bounds, and no format is enabled")
-)]
 pub(crate) const DEFAULT_MAX_STREAMS: u64 = 1024;
 
 /// One configurable bound, in one of three states.
@@ -104,7 +90,7 @@ impl<T> Limit<T> {
 /// Total output and stream count are not bounded by default, because a decompressor hands each
 /// chunk straight back and a stream of any length passes through it in bounded memory. The
 /// conveniences that buffer a whole result -- each format's `decompress` and
-/// `decompress_with_limits`, and the same pair on [`Format`][crate::Format] -- add a 64 MiB output
+/// `decompress_with_limits`, and the same pair on [`Format`][crate::format::Format] -- add a 64 MiB output
 /// cap and a 1024 stream cap to whichever of those bounds the caller left unset.
 ///
 /// # Security
@@ -123,12 +109,13 @@ impl<T> Limit<T> {
 /// use compressors::DecompressorLimits;
 ///
 /// // Tighten the shared 64 MiB cap to what this caller can actually buffer.
-/// let untrusted = DecompressorLimits::new().with_max_output_len(16 * 1024 * 1024);
+/// let untrusted =
+///     DecompressorLimits::new().with_max_output_len(NonZeroU64::new(16 * 1024 * 1024).unwrap());
 ///
 /// // Or override every bound.
 /// let strict = DecompressorLimits::new()
 ///     .with_max_ratio(NonZeroU32::new(50).unwrap())
-///     .with_max_output_len(1024 * 1024)
+///     .with_max_output_len(NonZeroU64::new(1024 * 1024).unwrap())
 ///     .with_max_streams(NonZeroU64::new(16).unwrap());
 /// # let _ = (untrusted, strict);
 /// ```
@@ -186,10 +173,12 @@ impl DecompressorLimits {
 
     /// Bounds the total decompressed size, in bytes.
     ///
-    /// This is the bound that actually protects a caller which buffers the output.
+    /// This is the bound that actually protects a caller which buffers the output. It takes a
+    /// [`NonZeroU64`] for the same reason the ratio and stream bounds take non-zero types: a bound
+    /// of zero rejects every stream, which is a way of not decompressing rather than a limit.
     #[must_use]
-    pub const fn with_max_output_len(mut self, bytes: u64) -> Self {
-        self.output_len = Limit::Value(bytes);
+    pub const fn with_max_output_len(mut self, bytes: NonZeroU64) -> Self {
+        self.output_len = Limit::Value(bytes.get());
         self
     }
 
@@ -224,13 +213,6 @@ impl DecompressorLimits {
     /// different proposition: what they produce is what the caller holds, so they apply the shared
     /// caps. Only bounds the caller left [`Limit::Unset`] are filled -- an explicit value, or an
     /// explicit removal, is the caller's decision and survives untouched.
-    #[cfg_attr(
-        all(
-            not(test),
-            not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))
-        ),
-        expect(dead_code, reason = "only the buffering conveniences apply this, and no format is enabled")
-    )]
     pub(crate) const fn for_buffered_output(mut self) -> Self {
         if matches!(self.output_len, Limit::Unset) {
             self.output_len = Limit::Value(DEFAULT_MAX_OUTPUT_LEN);
@@ -358,7 +340,7 @@ mod tests {
     #[test]
     fn buffering_leaves_an_explicit_choice_alone() {
         let chosen = DecompressorLimits::new()
-            .with_max_output_len(99)
+            .with_max_output_len(NonZeroU64::new(99).unwrap())
             .with_max_streams(NonZeroU64::new(3).expect("three is non-zero"))
             .for_buffered_output();
 
@@ -413,7 +395,7 @@ mod tests {
     fn an_unset_bound_defers_to_the_format() {
         // The whole point of the override model: a caller who cares about one bound must not
         // silently clobber the other with a value calibrated for a different format.
-        let limits = DecompressorLimits::new().with_max_output_len(4096);
+        let limits = DecompressorLimits::new().with_max_output_len(NonZeroU64::new(4096).unwrap());
         let resolved = resolved(limits);
 
         assert_eq!(resolved.ratio, DEFAULTS.ratio, "the format's ratio must survive");
@@ -495,7 +477,7 @@ mod tests {
 
     #[test]
     fn absolute_bound_rejects_beyond_the_cap() {
-        let limits = resolved(DecompressorLimits::new().with_max_output_len(100));
+        let limits = resolved(DecompressorLimits::new().with_max_output_len(NonZeroU64::new(100).unwrap()));
         let error = limits.check(1_000_000, 101, 1).expect_err("101 bytes exceeds a 100 byte cap");
 
         assert!(error.is_limit_exceeded());
@@ -503,7 +485,7 @@ mod tests {
 
     #[test]
     fn absolute_bound_allows_exactly_the_cap() {
-        let limits = resolved(DecompressorLimits::new().with_max_output_len(100));
+        let limits = resolved(DecompressorLimits::new().with_max_output_len(NonZeroU64::new(100).unwrap()));
 
         limits.check(1_000_000, 100, 1).expect("the cap itself is allowed");
     }
@@ -529,7 +511,7 @@ mod tests {
 
     #[test]
     fn remaining_output_saturates_at_zero() {
-        let limits = resolved(DecompressorLimits::new().with_max_output_len(100));
+        let limits = resolved(DecompressorLimits::new().with_max_output_len(NonZeroU64::new(100).unwrap()));
 
         assert_eq!(limits.remaining_output(40), Some(60));
         assert_eq!(limits.remaining_output(100), Some(0));

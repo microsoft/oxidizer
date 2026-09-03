@@ -176,60 +176,27 @@ pub(crate) fn process(mut operation: impl Compression, input: BytesView) -> Resu
     Ok(collected.consume_all())
 }
 
-impl<D> Compression for Box<dyn Compression<Mode = D>> {
-    type Mode = D;
-}
-
-impl<D> CompressionInternal for Box<dyn Compression<Mode = D>> {
-    fn push(&mut self, input: BytesView) -> Result<()> {
-        (**self).push(input)
-    }
-
-    // Dropping the forward leaves the wrapped operation waiting for input forever, so the mutant
-    // hangs rather than failing and the harness records a timeout instead of a verdict.
-    #[cfg_attr(test, mutants::skip)]
-    fn end_input(&mut self) {
-        (**self).end_input();
-    }
-
-    fn pull(&mut self) -> Result<Output> {
-        (**self).pull()
-    }
-
-    fn total_in(&self) -> u64 {
-        (**self).total_in()
-    }
-
-    fn total_out(&self) -> u64 {
-        (**self).total_out()
-    }
-
-    fn flush(&mut self) -> Result<()> {
-        (**self).flush()
-    }
-}
-
 /// A fixture that only ever reports progress, for exercising callers that must keep polling rather
 /// than treat a progress step as output.
-#[cfg(all(test, feature = "futures-stream"))]
+#[cfg(all(test, feature = "futures-stream", feature = "gzip"))]
 #[derive(Debug)]
 pub(crate) struct ProgressCompression {
     pulls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
-#[cfg(all(test, feature = "futures-stream"))]
+#[cfg(all(test, feature = "futures-stream", feature = "gzip"))]
 impl ProgressCompression {
     pub(crate) fn new(pulls: std::sync::Arc<std::sync::atomic::AtomicUsize>) -> Self {
         Self { pulls }
     }
 }
 
-#[cfg(all(test, feature = "futures-stream"))]
+#[cfg(all(test, feature = "futures-stream", feature = "gzip"))]
 impl Compression for ProgressCompression {
     type Mode = Compress;
 }
 
-#[cfg(all(test, feature = "futures-stream"))]
+#[cfg(all(test, feature = "futures-stream", feature = "gzip"))]
 impl CompressionInternal for ProgressCompression {
     fn push(&mut self, _input: BytesView) -> Result<()> {
         Ok(())
@@ -259,16 +226,16 @@ impl CompressionInternal for ProgressCompression {
 
 /// A fixture that always asks for input and always rejects it, for exercising callers that must
 /// propagate a `push` failure rather than the specific reasons a real codec's `push` can fail.
-#[cfg(all(test, feature = "futures-stream"))]
+#[cfg(all(test, feature = "futures-stream", feature = "gzip"))]
 #[derive(Debug)]
 pub(crate) struct RejectsPush;
 
-#[cfg(all(test, feature = "futures-stream"))]
+#[cfg(all(test, feature = "futures-stream", feature = "gzip"))]
 impl Compression for RejectsPush {
     type Mode = Compress;
 }
 
-#[cfg(all(test, feature = "futures-stream"))]
+#[cfg(all(test, feature = "futures-stream", feature = "gzip"))]
 impl CompressionInternal for RejectsPush {
     // Accepting input would make this fixture, whose whole purpose is to reject it, ask for input
     // endlessly instead. The mutant hangs rather than failing, so no verdict is available.

@@ -9,15 +9,9 @@
 //! # Examples
 //!
 //! ```
-//! use bytesbuf::BytesView;
-//! use bytesbuf::mem::GlobalPool;
 //! use compressors::{Resources, zlib};
 //!
-//! let memory = GlobalPool::new();
-//! let compressed = zlib::compress(
-//!     BytesView::copied_from_slice(b"the quick brown fox", &memory),
-//!     &Resources::default(),
-//! )?;
+//! let compressed = zlib::compress(b"the quick brown fox", &Resources::default())?;
 //!
 //! assert_eq!(
 //!     zlib::decompress(compressed, &Resources::default())?.to_vec(),

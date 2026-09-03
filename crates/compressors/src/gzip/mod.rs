@@ -9,15 +9,9 @@
 //! # Examples
 //!
 //! ```
-//! use bytesbuf::BytesView;
-//! use bytesbuf::mem::GlobalPool;
 //! use compressors::{Resources, gzip};
 //!
-//! let memory = GlobalPool::new();
-//! let compressed = gzip::compress(
-//!     BytesView::copied_from_slice(b"the quick brown fox", &memory),
-//!     &Resources::default(),
-//! )?;
+//! let compressed = gzip::compress(b"the quick brown fox", &Resources::default())?;
 //! assert_eq!(compressed.range(0..2).to_vec(), vec![0x1f, 0x8b]);
 //!
 //! assert_eq!(

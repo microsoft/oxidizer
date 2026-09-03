@@ -12,15 +12,9 @@
 //! # Examples
 //!
 //! ```
-//! use bytesbuf::BytesView;
-//! use bytesbuf::mem::GlobalPool;
 //! use compressors::{Resources, brotli};
 //!
-//! let memory = GlobalPool::new();
-//! let compressed = brotli::compress(
-//!     BytesView::copied_from_slice(b"the quick brown fox", &memory),
-//!     &Resources::default(),
-//! )?;
+//! let compressed = brotli::compress(b"the quick brown fox", &Resources::default())?;
 //!
 //! assert_eq!(
 //!     brotli::decompress(compressed, &Resources::default())?.to_vec(),

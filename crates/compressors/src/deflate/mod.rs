@@ -10,15 +10,9 @@
 //! # Examples
 //!
 //! ```
-//! use bytesbuf::BytesView;
-//! use bytesbuf::mem::GlobalPool;
 //! use compressors::{Resources, deflate};
 //!
-//! let memory = GlobalPool::new();
-//! let compressed = deflate::compress(
-//!     BytesView::copied_from_slice(b"the quick brown fox", &memory),
-//!     &Resources::default(),
-//! )?;
+//! let compressed = deflate::compress(b"the quick brown fox", &Resources::default())?;
 //!
 //! assert_eq!(
 //!     deflate::decompress(compressed, &Resources::default())?.to_vec(),
