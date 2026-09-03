@@ -311,7 +311,7 @@ fn entrypoint(c: &mut Criterion) {
 fn bench_emit_simple_log(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
     const ID: &str = "simple_log_2_fields";
     let (processor, _provider) = make_log_processor();
-    let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_frozen());
+    let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_system());
 
     bench_with_tracking(group, allocs, time, ID, || {
         observed::emit!(&sink, SimpleLogEvent { status: 200, retries: 0 });
@@ -321,7 +321,7 @@ fn bench_emit_simple_log(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &allo
 fn bench_emit_many_fields(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
     const ID: &str = "log_8_fields";
     let (processor, _provider) = make_log_processor();
-    let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_frozen());
+    let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_system());
 
     bench_with_tracking(group, allocs, time, ID, || {
         observed::emit!(
@@ -343,7 +343,7 @@ fn bench_emit_many_fields(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &all
 fn bench_emit_with_body(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
     const ID: &str = "log_with_body";
     let (processor, _provider) = make_log_processor();
-    let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_frozen());
+    let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_system());
 
     bench_with_tracking(group, allocs, time, ID, || {
         observed::emit!(&sink, BodyEvent { code: 42 });
@@ -362,7 +362,7 @@ fn bench_emit_with_body(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc
 fn bench_emit_log_of_metric_event(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
     const ID: &str = "log_of_metric_event";
     let (processor, _provider) = make_log_processor();
-    let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_frozen());
+    let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_system());
 
     bench_with_tracking(group, allocs, time, ID, || {
         observed::emit!(
@@ -387,7 +387,7 @@ fn bench_emit_log_of_metric_event(group: &mut BenchmarkGroup<'_, WallTime>, allo
 fn bench_emit_redacted_strings(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
     const ID: &str = "log_2_redacted_strings";
     let (processor, _provider) = make_log_processor_with(replacing_engine());
-    let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_frozen());
+    let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_system());
 
     bench_with_tracking(group, allocs, time, ID, || {
         observed::emit!(
@@ -403,7 +403,7 @@ fn bench_emit_redacted_strings(group: &mut BenchmarkGroup<'_, WallTime>, allocs:
 fn bench_emit_with_enrichments(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
     const ID: &str = "emit_with_3_enrichments";
     let (processor, _provider) = make_log_processor();
-    let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_frozen());
+    let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_system());
 
     // Establish an enrichment context, then benchmark emission within it.
     (|| {
@@ -428,7 +428,7 @@ fn bench_emit_deeply_nested_enrichments(
 ) {
     const ID: &str = "emit_with_10_nested_enrichments";
     let (processor, _provider) = make_log_processor();
-    let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_frozen());
+    let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_system());
 
     // Create 10 nested enrichment levels to stress the Arc-linked list resolution.
     (|| {
@@ -479,8 +479,13 @@ fn bench_construct_processor_free_sink(
     const ID: &str = "construct_processor_free_sink";
     const EMPTY_PROCESSORS: Vec<Arc<dyn observed::processing::EventProcessor>> = Vec::new();
 
+    // The clock is built once and cloned per iteration: an application owns its
+    // clock and hands it to every sink, so clock construction is not part of the
+    // sink-construction cost this benchmark reports.
+    let clock = tick::SimpleClock::new_system();
+
     bench_with_tracking(group, allocs, time, ID, || {
-        let sink = Sink::new("bench", EMPTY_PROCESSORS, tick::SimpleClock::new_frozen());
+        let sink = Sink::new("bench", EMPTY_PROCESSORS, clock.clone());
         drop(sink);
     });
 }
@@ -512,7 +517,7 @@ fn bench_emit_to_noop_sink(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &al
 fn bench_enrichment_vec_collect(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
     const ID: &str = "enrichment_vec_collect_3";
     let (processor, _provider) = make_log_processor();
-    let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_frozen());
+    let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_system());
 
     // Single enrich scope with 3 entries - measures the Vec allocation
     // and EnrichmentEntry cloning that happens on every emit.
@@ -680,7 +685,7 @@ fn bench_pending_enriched_future_polls(
     });
 
     let children: Vec<Sink> = (0..COMPOSITE_CHILDREN)
-        .map(|_| Sink::new("bench", EMPTY_PROCESSORS, tick::SimpleClock::new_frozen()))
+        .map(|_| Sink::new("bench", EMPTY_PROCESSORS, tick::SimpleClock::new_system()))
         .collect();
     let composite = Sink::composite(children);
     bench_with_tracking(group, allocs, time, ID_COMPOSITE, || {
@@ -749,7 +754,7 @@ fn bench_emit_varying_enrichment_depth(
     {
         const ID: &str = "emit_depth_0";
         let (processor, _provider) = make_log_processor();
-        let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_frozen());
+        let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_system());
 
         bench_with_tracking(group, allocs, time, ID, || {
             observed::emit!(&sink, SimpleLogEvent { status: 200, retries: 0 });
@@ -760,7 +765,7 @@ fn bench_emit_varying_enrichment_depth(
     {
         const ID: &str = "emit_depth_5";
         let (processor, _provider) = make_log_processor();
-        let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_frozen());
+        let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_system());
 
         (|| {
             bench_with_tracking(group, allocs, time, ID, || {
