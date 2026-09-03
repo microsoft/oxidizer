@@ -166,10 +166,10 @@ pub(crate) struct Pump {
 
 /// Whether one `pull` has done enough work and should hand control back.
 ///
-/// Answering `false` unconditionally lets a single call run until the stream ends, and answering
-/// `true` unconditionally makes it report progress without ever advancing. Both leave every drain
-/// loop spinning, so the mutants hang rather than failing and the harness records a timeout instead
-/// of a verdict.
+/// Answering `false` unconditionally lets a single call run until the stream ends; answering `true`
+/// unconditionally makes it report progress without ever advancing.
+// Either answer leaves every drain loop spinning, so those mutants hang rather than failing and
+// mutation testing records a timeout instead of a verdict.
 #[cfg_attr(test, mutants::skip)]
 fn yields_to_the_caller(steps: usize, input_work: usize) -> bool {
     steps >= MAX_STEPS_PER_PULL || input_work >= MAX_INPUT_PER_PULL
@@ -177,8 +177,8 @@ fn yields_to_the_caller(steps: usize, input_work: usize) -> bool {
 
 /// Whether an engine step moved neither input nor output, which means it is stuck.
 ///
-/// This is the engine's only guard against an engine that can never finish. Answering `false`
-/// unconditionally removes it, so the mutant hangs rather than failing.
+/// This is the engine's only guard against an engine that can never finish.
+// Answering `false` unconditionally removes that guard, so the mutant hangs rather than failing.
 #[cfg_attr(test, mutants::skip)]
 fn made_no_progress(consumed: usize, produced: usize) -> bool {
     consumed == 0 && produced == 0
@@ -284,10 +284,9 @@ impl Pump {
     }
 
     /// Hands over whatever output has accumulated, if any.
-    ///
-    /// Answering `Some(empty)` unconditionally hands every drain loop an endless supply of empty
-    /// chunks, so the mutant hangs rather than failing and the harness records a timeout instead of
-    /// a verdict.
+    // Answering `Some(empty)` unconditionally hands every drain loop an endless supply of empty
+    // chunks, so the mutant hangs rather than failing and mutation testing records a timeout
+    // instead of a verdict.
     #[cfg_attr(test, mutants::skip)]
     fn take_output(&mut self) -> Option<BytesView> {
         if self.output.is_empty() {
@@ -1213,7 +1212,11 @@ mod tests {
         #[derive(Debug)]
         struct Overreports;
 
-        // SAFETY: this fixture reports only what it wrote into the slice, which is usually nothing at all.
+        // SAFETY: this fixture over-reports on purpose -- it writes one byte and claims
+        // `output.len() + 1` -- which is exactly what the test below drives. Soundness does not
+        // rest on this impl: `Pump::pull` rejects `produced > provided_output` before it reaches
+        // `advance`, and the assertion on `total_out` is what proves the uninitialized tail is
+        // never handed out.
 
         unsafe impl Codec for Overreports {
             fn step(&mut self, _input: &[u8], output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
