@@ -19,9 +19,9 @@ struct SourceThread {
 /// Relocates a value between synthetic runtime thread coordinates.
 ///
 /// The source uses one process-wide thread ID, while the destination uses the
-/// calling thread's ID. Ordinary fixtures share one process-wide owner. This
-/// keeps repeated relocation tests cheap while still providing distinct thread
-/// coordinates.
+/// thread ID captured when the fixture is constructed. Ordinary fixtures share
+/// one process-wide owner. This keeps repeated relocation tests cheap while
+/// still providing distinct thread coordinates.
 #[derive(Debug)]
 pub struct Relocator {
     source: Thread,
