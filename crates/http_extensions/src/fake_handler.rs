@@ -8,8 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use http::{Response, StatusCode};
 use layered::Service;
-use thread_aware::ThreadAware;
-use thread_aware::affinity::Affinity;
+use thread_aware::{Thread, ThreadAware};
 
 use crate::constants::ERR_POISONED_LOCK;
 use crate::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, Result};
@@ -96,7 +95,7 @@ pub struct FakeHandler {
 }
 
 impl ThreadAware for FakeHandler {
-    fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
         // No thread awareness needed for fake handler, we want the same behavior
         // even after relocation.
     }
@@ -401,12 +400,21 @@ mod tests {
     use futures::executor::block_on;
     use http_body_util::Empty;
     use ohno::{ErrorExt, assert_error_message};
-    use thread_aware::affinity::pinned_affinities;
     use tick::{ClockControl, FutureExt};
 
     use super::*;
     use crate::HttpResponseBuilder;
     use crate::http_request_builder_ext::HttpRequestBuilderExt;
+
+    #[test]
+    fn fake_handler_can_be_relocated_between_threads() -> std::result::Result<(), ohno::AppError> {
+        let mut handler = FakeHandler::from(StatusCode::NOT_IMPLEMENTED);
+        let (source, destination) = thread_aware::Relocator::between_threads().relocate(&mut handler);
+
+        assert_ne!(source.unwrap().id(), destination.id());
+        assert_eq!(get_response(&handler)?.status(), StatusCode::NOT_IMPLEMENTED);
+        Ok(())
+    }
 
     #[test]
     fn from_status_code_ok() -> std::result::Result<(), ohno::AppError> {
@@ -512,7 +520,7 @@ mod tests {
 
     #[test]
     fn assert_clone_implemented() {
-        static_assertions::assert_impl_all!(FakeHandler: Clone);
+        static_assertions::assert_impl_all!(FakeHandler: Clone, ThreadAware);
     }
 
     #[test]
@@ -580,17 +588,6 @@ mod tests {
 
         let error = get_response(&handler).unwrap_err();
         assert_eq!(error.message(), "simulated error");
-    }
-
-    #[test]
-    fn relocated_preserves_behavior() {
-        let affinity = pinned_affinities(&[2])[0];
-        let mut handler = FakeHandler::from(StatusCode::ACCEPTED);
-
-        handler.relocate(None, affinity);
-
-        let status = get_response(&handler).unwrap().status();
-        assert_eq!(status, StatusCode::ACCEPTED);
     }
 
     #[test]

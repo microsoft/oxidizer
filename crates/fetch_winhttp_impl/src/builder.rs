@@ -174,8 +174,7 @@ mod tests {
     use fetch::{Recovery, RecoveryInfo};
     use observed::Sink;
     use static_assertions::{assert_impl_all, assert_not_impl_any};
-    use thread_aware::ThreadAware;
-    use thread_aware::affinity::pinned_affinities;
+    use thread_aware::{Relocator, ThreadAware};
     use tick::{Clock, ClockControl};
 
     use super::{WinHttpDeps, WinHttpDepsBuilder, create_builder_with_bindings, into_custom_deps};
@@ -273,17 +272,16 @@ mod tests {
     }
 
     #[test]
-    fn relocation_materializes_an_independent_session_for_the_destination_core() {
+    fn relocation_materializes_an_independent_session_for_the_destination_thread() {
         let (facade, opens, closes) = successful_bindings_facade(2);
         let client = create_builder_with_bindings(complete_builder().build(), facade)
             .insecure_allow_http()
             .minimal_pipeline()
             .supported_http_versions(&[http::Version::HTTP_10])
             .build();
-        let affinities = pinned_affinities(&[2]);
         let mut relocated = client.clone();
 
-        relocated.relocate(None, affinities[1]);
+        _ = Relocator::between_threads().source(false).relocate(&mut relocated);
 
         assert_eq!(opens.load(Ordering::SeqCst), 2);
         drive(relocated.get("http://example.com").fetch()).unwrap_err();

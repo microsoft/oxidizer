@@ -21,7 +21,7 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/uniflight"
 allowed_external_types = [
     "thread_aware::cell::builtin::PerProcess",
     "thread_aware::cell::storage::Strategy",
-    "thread_aware::core::ThreadAware",
+    "thread_aware_core::thread_aware::ThreadAware",
 ]
 
 [dependencies]
@@ -35,6 +35,8 @@ thread_aware = { workspace = true, default-features = false, features = ["std"] 
 criterion = { workspace = true, features = ["async_tokio"] }
 futures-util = { workspace = true, features = ["alloc", "std"] }
 mutants = { workspace = true }
+static_assertions = { workspace = true }
+thread_aware = { path = "../thread_aware", default-features = false, features = ["std", "test-utils"] }
 tokio = { workspace = true, features = [
     "macros",
     "rt",

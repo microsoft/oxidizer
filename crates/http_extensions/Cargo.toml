@@ -48,9 +48,8 @@ allowed_external_types = [
     "templated_uri::path_and_query::PathAndQuery",
     "templated_uri::uri::Uri",
     "templated_uri::base_uri::BaseUri",
-    "thread_aware::affinity::MemoryAffinity",
-    "thread_aware::affinity::PinnedAffinity",
-    "thread_aware::core::ThreadAware",
+    "thread_aware_core::thread::Thread",
+    "thread_aware_core::thread_aware::ThreadAware",
     "tick::clock::Clock",
 ]
 
@@ -95,6 +94,7 @@ serde_core = { workspace = true }
 serde_json = { workspace = true, features = ["std"] }
 static_assertions = { workspace = true }
 templated_uri = { path = "../templated_uri", features = ["uuid"] }
+thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
 tick = { path = "../tick", features = ["fmt", "test-util", "tokio"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
 uuid = { workspace = true }

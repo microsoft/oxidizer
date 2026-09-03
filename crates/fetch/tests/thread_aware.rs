@@ -1,18 +1,17 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Integration tests for thread-aware (per-core) client relocation.
+//! Integration tests for per-thread client relocation.
 
 use std::assert_eq;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Barrier};
 
 use bytes::Bytes;
 use fetch::HttpClient;
 use fetch::tokio::TokioDeps;
 use futures::future::join_all;
-use thread_aware::ThreadAware;
-use thread_aware::affinity::pinned_affinities;
+use thread_aware::{ThreadAware, ThreadBuilder};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -30,9 +29,27 @@ async fn not_isolated_on_tokio() {
         .build();
     assert_eq!(counts.load(Ordering::Relaxed), 1);
 
-    for affinity in pinned_affinities(&[2, 2]) {
-        let mut client_clone = client.clone();
-        client_clone.relocate(None, affinity);
+    let builder = ThreadBuilder::default();
+    let barrier = Arc::new(Barrier::new(5));
+    let handles = (0..4)
+        .map(|numa_node| {
+            let mut client = client.clone();
+            let barrier = Arc::clone(&barrier);
+            let builder = builder.clone().with_numa_node(numa_node);
+            std::thread::spawn(move || {
+                let thread = builder.build(std::thread::current().id());
+                // All coordinate-owning threads reach this point before any relocation. Their
+                // simultaneously live IDs are therefore distinct and remain live while each
+                // relocation executes on its owning thread.
+                barrier.wait();
+                client.relocate(None, &thread);
+            })
+        })
+        .collect::<Vec<_>>();
+    barrier.wait();
+
+    for handle in handles {
+        handle.join().unwrap();
     }
     assert_eq!(counts.load(Ordering::Relaxed), 1);
 }
@@ -49,13 +66,15 @@ async fn tokio_client_relocated_ensure_works() {
     assert_eq!(text, "Hello World!");
 
     // relocate the client and use it on worker threads
-    let handles = pinned_affinities(&[2, 2])
-        .into_iter()
-        .map(|affinity| {
+    let builder = ThreadBuilder::default();
+    let handles = (0..4)
+        .map(|numa_node| {
             let mut client = client.clone();
             let url = url.clone();
+            let builder = builder.clone().with_numa_node(numa_node);
             tokio::spawn(async move {
-                client.relocate(None, affinity);
+                let thread = builder.build(std::thread::current().id());
+                client.relocate(None, &thread);
                 let text = client.get(url).fetch_text().await.unwrap().into_body();
 
                 assert_eq!(text, "Hello World!");

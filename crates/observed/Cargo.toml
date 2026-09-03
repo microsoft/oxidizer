@@ -24,7 +24,7 @@ allowed_external_types = [
     "observed_macros::Enrichment",
     "observed_macros::event",
     "ohno::*",
-    "thread_aware::core::ThreadAware",
+    "thread_aware_core::thread_aware::ThreadAware",
     "tick::simple_clock::SimpleClock",
 ]
 
@@ -39,13 +39,13 @@ test-util = []
 data_privacy = { workspace = true }
 observed_macros = { workspace = true }
 ohno = { workspace = true }
-thread_aware = { workspace = true, features = ["std", "derive"] }
-tick = { workspace = true }
 
 # 3rd-party
 pin-project = { workspace = true }
 smallvec = { workspace = true }
+thread_aware = { workspace = true, features = ["std", "derive"] }
 thread_local = { workspace = true }
+tick = { workspace = true }
 
 [dev-dependencies]
 all_the_time = { workspace = true }
@@ -56,6 +56,7 @@ opentelemetry = { workspace = true, features = ["logs"] }
 opentelemetry-stdout = { workspace = true, features = ["logs", "metrics"] }
 opentelemetry_sdk = { workspace = true, features = ["logs", "metrics", "testing"] }
 static_assertions = { workspace = true }
+thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
 tick = { workspace = true, features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
 

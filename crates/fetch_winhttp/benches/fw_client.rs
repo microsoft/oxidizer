@@ -75,7 +75,7 @@ mod windows {
         });
         drop(template);
 
-        // Building a fresh client materializes the initial per-affinity transport (and
+        // Building a fresh client materializes the initial per-thread transport (and
         // its WinHTTP session) immediately; the first request then additionally pays
         // connection setup. The difference against `fw_request/roundtrip/get_minimal`
         // is that whole cold path.

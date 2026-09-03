@@ -6,6 +6,5 @@ Clock {
     kind: "system",
     timers: 0,
     alive: false,
-    affinity: None,
     ..
 }

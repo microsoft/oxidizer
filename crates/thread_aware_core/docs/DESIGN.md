@@ -7,21 +7,23 @@ runtime moves them between threads. It exists to be depended on permanently:
 crates are meant to name `ThreadAware` and `Thread` in their own public
 signatures, and this crate's job is to make sure that never becomes a liability.
 
-It exposes the following vocabulary and nothing else:
+Its public vocabulary consists of:
 
 - `ThreadAware` — the trait a value implements when it can adapt after a move;
   `relocate` is the trait's callback.
 - `Thread` — the coordinate where a value runs, composed of the `Owner`,
   `std::thread::ThreadId`, and `NumaNode` identifiers.
+- `Owner` — the identity of the runtime that issued a coordinate.
 - `NumaNode` — the identity of a non-uniform memory access (NUMA) node, the
   hardware locality domain whose processors have similarly local memory.
 
-Everything that makes relocation *convenient* — registries, containers,
-callbacks, derive macros, runtime integration — lives in the pre-1.0
-`thread_aware` crate. This crate carries only what two unrelated libraries must
-agree on in order to interoperate. Implementations of `ThreadAware` for
-`core`, `alloc` and `std` types ship here because they are part of that shared
-vocabulary; implementations for third-party types deliberately do not.
+Everything that makes relocation *convenient* — derive macros, closure adapters,
+policy wrappers, runtime coordinate construction, and strategy-partitioned
+`Arc`/`Storage` — lives in the pre-1.0 `thread_aware` crate. This crate carries
+only what two unrelated libraries must agree on in order to interoperate.
+Implementations of `ThreadAware` for `core`, `alloc` and `std` types ship here
+because they are part of that shared vocabulary; implementations for
+third-party types deliberately do not.
 
 ## Why a separate crate
 

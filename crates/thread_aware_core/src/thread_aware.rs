@@ -63,9 +63,10 @@ use crate::Thread;
 ///   must keep working even if this method is never called, so a driver handle must remain
 ///   usable from the new thread. Relocation brings it closer; it does not make it valid.
 ///
-/// * **Neither panic nor block.** This runs while the runtime is placing work, so it
-///   performs no network or disk I/O, no waiting on another worker, and takes no contended
-///   lock. Defer adaptation that would block; retaining usable state is acceptable.
+/// * **Neither panic nor perform long blocking work.** This runs while the runtime is placing work,
+///   so it takes no contended lock, performs no network or disk I/O, and does not wait for external
+///   progress. Brief in-memory coordination is acceptable. Defer longer adaptation; retaining usable
+///   state is acceptable.
 ///
 /// * **Tolerate repeated calls.** Relocating to the same [`Thread`], or with `source` equal to
 ///   `destination`, is harmless, and should also be cheap: compare the relevant ids and
@@ -80,8 +81,8 @@ use crate::Thread;
 ///   [`NumaNode`](crate::NumaNode) may remain useful, subject to the caveat in
 ///   [what the ids mean](crate#what-the-ids-mean).
 ///
-/// A [`Thread`] may be cloned and retained, but the thread id it holds is meaningful only
-/// while that thread is alive, and an [`Owner`](crate::Owner) only while that runtime is.
+/// A [`Thread`] may be cloned and retained. Its thread id remains unique after the OS thread exits,
+/// but retaining the coordinate does not keep that thread or its runtime operational.
 ///
 /// Runtimes carry their own requirements. They call [`relocate`](Self::relocate) only after
 /// the value has actually moved, pass `None` when no previous [`Thread`] is known, build one

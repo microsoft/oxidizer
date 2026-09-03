@@ -3,18 +3,18 @@
 
 use std::marker::PhantomData;
 
-use thread_aware::ThreadAware;
-use thread_aware::affinity::Affinity;
+use thread_aware::{Thread, ThreadAware};
 
 use crate::Clock;
 use crate::runtime::clock_driver::ClockDriver;
 use crate::state::ClockState;
 
-/// Marker for an [`InactiveClock`] backed by per-core isolated timer storage.
+/// Marker for an [`InactiveClock`] backed by per-thread isolated timer storage.
 ///
 /// This is the default mode. Clones can be relocated to different threads via
-/// [`ThreadAware::relocate`], producing independent timer storage per core. Suitable for
-/// thread-per-core runtimes.
+/// [`ThreadAware::relocate`], producing independent timer storage per thread
+/// when the coordinates share one runtime owner. Suitable for runtimes with
+/// stable worker threads.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
 pub struct Isolated;
@@ -34,7 +34,7 @@ pub struct Shared;
 /// This type represents a clock in an inactive state that cannot perform any time-related
 /// operations until activated. It is parameterized by a mode marker (`S`):
 ///
-/// - [`Isolated`] (default): per-core timer storage. The inactive clock can be cloned and
+/// - [`Isolated`] (default): per-thread timer storage. The inactive clock can be cloned and
 ///   relocated across threads, with each thread getting an independent timer set on
 ///   activation.
 /// - [`Shared`]: a single shared timer set advanced by a single driver. Use
@@ -60,12 +60,15 @@ pub struct Shared;
 /// // driver.advance_timers(std::time::Instant::now());
 /// ```
 ///
-/// # Thread-per-core runtimes
+/// # Thread-aware isolated runtimes
 ///
-/// In thread-per-core architectures, clone the `InactiveClock` and
+/// In runtimes that keep work on stable worker threads, clone the `InactiveClock` and
 /// [`relocate`](thread_aware::ThreadAware::relocate) each clone to its target thread before
-/// activation. Relocation creates per-core timer storage, so each thread gets an independent set
-/// of timers with no cross-thread lock contention.
+/// activation. Relocation creates per-thread timer storage, so each thread gets an independent set
+/// of timers with no cross-thread lock contention. Construct those coordinates from clones of one
+/// [`ThreadBuilder`](thread_aware::ThreadBuilder), so they share a runtime owner. A
+/// cross-owner relocation retains the existing timer set and remains functional, but does not
+/// establish destination-local storage.
 #[derive(Debug)]
 pub struct InactiveClock<S = Isolated> {
     state: ClockState,
@@ -91,7 +94,7 @@ impl Default for InactiveClock<Isolated> {
 }
 
 impl ThreadAware for InactiveClock<Isolated> {
-    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         self.state.relocate(source, destination);
     }
 }

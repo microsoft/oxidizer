@@ -37,8 +37,8 @@
 //! # Thread-Aware Support
 //!
 //! `Spawner` implements [`ThreadAware`](thread_aware::ThreadAware) and supports
-//! per-core isolation via custom [`SpawnCustom`] implementations, enabling
-//! contention-free, NUMA-friendly task dispatch.
+//! per-thread state via custom [`SpawnCustom`] implementations, allowing runtime
+//! integrations to adapt task dispatch after relocation.
 //!
 //! # Features
 //!

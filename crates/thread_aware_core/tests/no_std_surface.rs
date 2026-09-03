@@ -30,6 +30,7 @@ assert_not_impl_any!(Thread: Copy);
 assert_impl_all!(Owner: Clone, Eq, Send, Sync);
 assert_impl_all!(NumaNode: Clone, Eq, Send, Sync);
 assert_not_impl_any!(NumaNode: Copy);
+assert_impl_all!(&'static str: ThreadAware);
 assert_not_impl_any!(&'static i32: ThreadAware);
 assert_not_impl_any!(BTreeSet<i32>: ThreadAware);
 assert_not_impl_any!(Cow<'static, str>: ThreadAware);

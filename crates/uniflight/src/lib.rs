@@ -61,16 +61,17 @@
 //! type parameter. This controls how the internal state is partitioned across threads/NUMA nodes:
 //!
 //! - [`PerProcess`] (default): Single global state, maximum deduplication
-//! - [`PerNuma`]: Separate state per NUMA node, NUMA-local memory access
-//! - [`PerCore`]: Separate state per core, no deduplication (useful for already-partitioned work)
+//! - [`PerNumaNode`]: Separate state per NUMA node, NUMA-local memory access
+//! - [`PerThread`]: Separate state per thread; the same key coalesces within one thread
+//!   partition, with no sharing across thread partitions
 //!
 //! ```
-//! use thread_aware::PerNuma;
+//! use thread_aware::PerNumaNode;
 //! use uniflight::Merger;
 //!
 //! # async fn example() {
 //! // NUMA-aware merger - each NUMA node gets its own deduplication scope
-//! let merger: Merger<String, String, PerNuma> = Merger::new_per_numa();
+//! let merger: Merger<String, String, PerNumaNode> = Merger::new_per_numa();
 //! # }
 //! ```
 //!
@@ -141,16 +142,15 @@ use async_once_cell::OnceCell;
 use dashmap::DashMap;
 use dashmap::Entry::{Occupied, Vacant};
 use futures_util::FutureExt; // catch_unwind, map
-use thread_aware::affinity::Affinity;
 use thread_aware::storage::Strategy;
-use thread_aware::{Arc as TaArc, PerCore, PerNuma, PerProcess, ThreadAware};
+use thread_aware::{Arc as TaArc, PerNumaNode, PerProcess, PerThread, Thread, ThreadAware};
 
 /// Suppresses duplicate async operations identified by a key.
 ///
 /// The `S` type parameter controls the thread-aware scoping strategy:
 /// - [`PerProcess`]: Single global scope (default, maximum deduplication)
-/// - [`PerNuma`]: Per-NUMA-node scope (NUMA-local memory access)
-/// - [`PerCore`]: Per-core scope (no deduplication)
+/// - [`PerNumaNode`]: Per-NUMA-node scope (NUMA-local memory access)
+/// - [`PerThread`]: Per-thread scope (same-key work coalesces only within one thread partition)
 pub struct Merger<K, T, S: Strategy = PerProcess> {
     inner: TaArc<DashMap<K, Weak<PanicAwareCell<T>>, RandomState>, S>,
 }
@@ -190,23 +190,24 @@ where
     ///
     /// The scoping strategy is determined by the type parameter `S`:
     /// - [`PerProcess`] (default): Process-wide scope, maximum deduplication
-    /// - [`PerNuma`]: Per-NUMA-node scope, NUMA-local memory access
-    /// - [`PerCore`]: Per-core scope, no cross-core deduplication
+    /// - [`PerNumaNode`]: Per-NUMA-node scope, NUMA-local memory access
+    /// - [`PerThread`]: Per-thread scope, with same-key coalescing inside each thread partition
+    ///   and no sharing across thread partitions
     ///
     /// # Examples
     ///
     /// ```
-    /// use thread_aware::{PerCore, PerNuma};
+    /// use thread_aware::{PerNumaNode, PerThread};
     /// use uniflight::Merger;
     ///
     /// // Default (PerProcess) - type can be inferred
     /// let global: Merger<String, String> = Merger::new();
     ///
     /// // NUMA-local scope
-    /// let numa: Merger<String, String, PerNuma> = Merger::new();
+    /// let numa: Merger<String, String, PerNumaNode> = Merger::new();
     ///
-    /// // Per-core scope
-    /// let core: Merger<String, String, PerCore> = Merger::new();
+    /// // Per-thread scope
+    /// let thread: Merger<String, String, PerThread> = Merger::new();
     /// ```
     #[inline]
     #[must_use]
@@ -240,7 +241,7 @@ where
     }
 }
 
-impl<K, T> Merger<K, T, PerNuma>
+impl<K, T> Merger<K, T, PerNumaNode>
 where
     K: Hash + Eq + Send + Sync + 'static,
     T: Send + Sync + 'static,
@@ -265,27 +266,29 @@ where
     }
 }
 
-impl<K, T> Merger<K, T, PerCore>
+impl<K, T> Merger<K, T, PerThread>
 where
     K: Hash + Eq + Send + Sync + 'static,
     T: Send + Sync + 'static,
 {
-    /// Creates a new `Merger` with per-core scoping.
+    /// Creates a new `Merger` with per-thread scoping.
     ///
-    /// Each core gets its own deduplication scope. This is useful when work
-    /// is already partitioned by core and cross-core deduplication is not needed.
+    /// Each thread gets its own deduplication scope. Concurrent calls with the
+    /// same key coalesce within that thread's partition, but calls in different
+    /// thread partitions never share work. This is useful when work is already
+    /// partitioned by thread.
     ///
     /// # Example
     ///
     /// ```
     /// use uniflight::Merger;
     ///
-    /// let merger = Merger::<String, String, _>::new_per_core();
+    /// let merger = Merger::<String, String, _>::new_per_thread();
     /// ```
     #[inline]
     #[must_use]
     #[cfg_attr(test, mutants::skip)] // Equivalent mutant: delegates to Default
-    pub fn new_per_core() -> Self {
+    pub fn new_per_thread() -> Self {
         Self::default()
     }
 }
@@ -314,7 +317,7 @@ where
     S: Strategy + Send + Sync,
 {
     #[cfg_attr(test, mutants::skip)]
-    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         self.inner.relocate(source, destination);
     }
 }
@@ -493,20 +496,22 @@ impl<T> PanicAwareCell<T> {
 mod tests {
     use std::time::Duration;
 
-    use thread_aware::affinity::pinned_affinities;
+    use thread_aware::Relocator;
 
     use super::*;
 
+    static_assertions::assert_impl_all!(Merger<String, String>: ThreadAware);
+
     #[test]
-    fn relocated_delegates_to_inner() {
-        let affinities = pinned_affinities(&[2]);
-        let source = Some(affinities[0]);
-        let destination = affinities[1];
+    #[cfg_attr(miri, ignore)]
+    fn merger_can_be_relocated_between_threads() {
+        let mut merger = Merger::<String, String, PerThread>::new();
+        let cell = Arc::new(PanicAwareCell::new());
+        merger.inner.insert("key".to_owned(), Arc::downgrade(&cell));
+        assert_eq!(merger.len(), 1);
 
-        let mut merger: Merger<String, String> = Merger::new();
-        merger.relocate(source, destination);
+        _ = Relocator::between_threads().relocate(&mut merger);
 
-        // Verify the relocated merger still works
         assert!(merger.is_empty());
     }
 
