@@ -1041,18 +1041,22 @@ fn new_boxed_relocate() {
 }
 
 #[test]
-fn factory_panic_leaves_the_destination_partition_empty() {
+fn factory_panic_leaves_destination_available_for_retry() {
     // A relocation that misses runs the factory while holding the vacant destination entry. The
     // factory is caller code and may panic; unwinding drops the entry guard without publishing a
     // value, so a later relocation can retry.
 
-    // A value whose clone panics. `with_value` clones it only when materializing a new thread,
-    // so construction succeeds and the first relocation into an empty thread panics.
-    struct Bomb;
+    // A value whose first clone panics. `with_value` clones it only when materializing a new
+    // thread, so construction succeeds, the first relocation panics, and the retry succeeds.
+    struct Bomb(sync::Arc<AtomicUsize>);
 
     impl Clone for Bomb {
         fn clone(&self) -> Self {
-            panic!("materialization bomb");
+            if self.0.fetch_add(1, Ordering::Relaxed) == 0 {
+                panic!("materialization bomb");
+            }
+
+            Self(sync::Arc::clone(&self.0))
         }
     }
 
@@ -1064,7 +1068,8 @@ fn factory_panic_leaves_the_destination_partition_empty() {
     let source = threads[0].clone();
     let destination = threads[1].clone();
 
-    let arc = super::Arc::<Bomb, crate::PerThread>::with_value(Bomb);
+    let attempts = sync::Arc::new(AtomicUsize::new(0));
+    let arc = super::Arc::<Bomb, crate::PerThread>::with_value(Bomb(sync::Arc::clone(&attempts)));
     let mut relocated = arc.clone();
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| relocated.relocate(Some(&source), &destination)));
@@ -1076,6 +1081,15 @@ fn factory_panic_leaves_the_destination_partition_empty() {
         arc.storage.get(&destination).is_none(),
         "a panicking factory must leave the destination partition empty"
     );
+
+    relocated.relocate(Some(&source), &destination);
+    let published = arc.storage.get(&destination).unwrap();
+    assert!(sync::Arc::ptr_eq(&relocated.value, &published));
+
+    let mut reused = arc.clone();
+    reused.relocate(Some(&source), &destination);
+    assert!(sync::Arc::ptr_eq(&reused.value, &published));
+    assert_eq!(attempts.load(Ordering::Relaxed), 2, "reusing a published value must not rerun the factory");
 }
 
 #[test]
