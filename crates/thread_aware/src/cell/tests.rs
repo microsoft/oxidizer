@@ -1052,9 +1052,7 @@ fn factory_panic_leaves_destination_available_for_retry() {
 
     impl Clone for Bomb {
         fn clone(&self) -> Self {
-            if self.0.fetch_add(1, Ordering::Relaxed) == 0 {
-                panic!("materialization bomb");
-            }
+            assert_ne!(self.0.fetch_add(1, Ordering::Relaxed), 0, "materialization bomb");
 
             Self(sync::Arc::clone(&self.0))
         }
@@ -1086,7 +1084,7 @@ fn factory_panic_leaves_destination_available_for_retry() {
     let published = arc.storage.get(&destination).unwrap();
     assert!(sync::Arc::ptr_eq(&relocated.value, &published));
 
-    let mut reused = arc.clone();
+    let mut reused = arc;
     reused.relocate(Some(&source), &destination);
     assert!(sync::Arc::ptr_eq(&reused.value, &published));
     assert_eq!(
