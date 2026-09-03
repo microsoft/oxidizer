@@ -18,16 +18,16 @@ use crate::zstd::{CompressionLevel, Zstd};
 
 /// Maps the portable [`Level`] scale onto zstd's levels.
 ///
-/// zstd accepts 1 to 22, but the top of that range is not a sensible destination for a portable
-/// "highest quality" setting: measured on realistic JSON, level 19 is over 200 times slower than
-/// level 3 for about `17%` better compression, and 22 buys nothing over 19 at all. The scale is
-/// therefore anchored on zstd's own default rather than stretched across the whole range, so
-/// [`Level::DEFAULT`] means what it says on every format -- a balanced trade-off.
+/// zstd's positive levels run to 22, but the top of that range is not a sensible destination for a
+/// portable "highest quality" setting: compression time rises steeply there while the ratio gain
+/// flattens out. The scale is therefore anchored on zstd's own default rather than stretched across
+/// the whole range, so [`Level::DEFAULT`] means what it says on every format -- a balanced
+/// trade-off.
 ///
-/// Reach the levels above this range with
+/// Reach the levels outside this range, including zstd's negative fast levels, with
 /// [`CompressorBuilder::compression_level`][crate::zstd::CompressorBuilder::compression_level].
 fn compression_level(level: Level) -> i32 {
-    // 0..=6 spans zstd 1..=3 (its default); 7..=9 climbs to 12, past which cost explodes.
+    // 0..=6 spans zstd 1..=3 (its default); 7..=9 climbs to 12, past which cost rises sharply.
     const MAPPING: [i32; 10] = [1, 1, 2, 2, 3, 3, 3, 6, 9, 12];
 
     MAPPING[usize::from(level.get().min(9))]

@@ -3,11 +3,13 @@
 
 //! Zstandard (RFC 8878): fast compression with ratios well beyond the deflate family.
 //!
-//! The usual choice when both speed and ratio matter, and the format behind HTTP
-//! `Content-Encoding: zstd`. Requires the `zstd` cargo feature.
+//! The format behind HTTP `Content-Encoding: zstd`, and the usual choice when both compression time
+//! and ratio matter -- though where it wins over the alternatives depends on the payload, so
+//! benchmark a representative corpus. Requires the `zstd` cargo feature.
 //!
-//! Unlike this crate's other formats, zstd is provided by a C library compiled from bundled
-//! sources, so enabling it requires a C compiler. Builds that leave the feature off stay pure Rust.
+//! Unlike this crate's other formats, zstd is currently provided by a C library compiled from
+//! bundled sources, so enabling it requires a C compiler. Builds that leave the feature off stay
+//! pure Rust.
 //!
 //! # Examples
 //!
@@ -80,9 +82,13 @@ define_format! {
 /// A level on zstd's own scale, for reaching settings the portable [`Level`][crate::Level] does not cover.
 ///
 /// The portable scale is anchored on zstd's default so that [`Level::DEFAULT`][crate::Level::DEFAULT] means the same
-/// thing on every format. Native negative fast modes and levels above the portable range remain
-/// reachable here. Strong levels are rarely worth it -- measured on realistic JSON, level 19 is
-/// over 200 times slower than level 3 for about `17%` better compression.
+/// thing on every format, and it maps onto a positive subset of zstd's range. This type exposes the
+/// whole range the bundled library reports, including the negative fast levels below `1` and the
+/// strong levels above the portable maximum.
+///
+/// Compression time rises steeply towards the strong end while the ratio gain flattens, and where
+/// that trade stops being worthwhile depends on the payload and the hardware, so benchmark a
+/// representative corpus rather than assuming a level.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CompressionLevel(i32);
 
@@ -207,12 +213,12 @@ impl TryFrom<u32> for WindowLog {
 /// # Examples
 ///
 /// ```
-/// use bytesbuf::mem::GlobalPool;
 /// use compressors::Resources;
 /// use compressors::zstd::{self, CompressionLevel};
 ///
+/// // A negative fast level -- below the portable scale, so only reachable here.
 /// let compressor = zstd::Compressor::builder()
-///     .compression_level(CompressionLevel::new(19).expect("19 is in range"))
+///     .compression_level(CompressionLevel::new(-3).expect("-3 is in range"))
 ///     .build(&Resources::default())?;
 /// # let _ = compressor;
 /// # Ok::<(), compressors::BuildError>(())
