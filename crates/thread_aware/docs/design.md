@@ -32,7 +32,7 @@ dereferences directly to that value without consulting shared storage.
 The built-in strategies are:
 
 - `PerThread`, keyed by `std::thread::ThreadId`.
-- `PerNumaNode`, keyed by `NumaNode`.
+- `PerNumaNode`, keyed by exact `NumaNode` coordinate identity.
 - `PerProcess`, keyed by one constant process-wide value.
 
 Strategies are sealed. The identifiers in `Thread` are opaque and not dense or

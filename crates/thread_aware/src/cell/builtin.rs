@@ -25,9 +25,11 @@ impl Strategy for PerThread {
     }
 }
 
-/// Defines one strategy partition per NUMA node.
+/// Defines one strategy partition per exact [`NumaNode`] coordinate identity.
 ///
-/// Threads near the same memory map to the same partition.
+/// Two threads map to the same partition exactly when their
+/// [`Thread::numa_node`] values compare equal. The strategy does not infer
+/// physical proximity between differently identified nodes.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct PerNumaNode;
 
