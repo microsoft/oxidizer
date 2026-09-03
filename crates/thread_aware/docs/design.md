@@ -13,7 +13,7 @@ package family.
 Runtime integrations construct coordinates with `thread_aware::ThreadBuilder`.
 `ThreadBuilder::default()` creates a unique runtime owner. Clones of one builder
 retain that owner, so they can build coordinates for every worker in the same
-runtime. `numa_node` selects the nearest NUMA node and `build` adds the
+runtime. `with_numa_node` selects the nearest NUMA node and `build` adds the
 worker's `std::thread::ThreadId`.
 
 The old coordinate and runtime registry modules do not exist. Processor
