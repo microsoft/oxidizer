@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Reuse of compression engine state across codecs.
+//! Reuse of compression engine state from one stream to the next.
 
 #[cfg(any(feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
 use std::collections::HashMap;
@@ -30,51 +30,32 @@ pub(crate) struct EngineKey {
 
 /// A shared, cloneable pool of reusable compression engine state.
 ///
-/// Building a compressor allocates and initializes a substantial amount of state, and on a small
-/// message that setup can cost as much as the compression itself. A service that builds a fresh
-/// compressor per message therefore spends much of its compression budget getting ready to compress.
-/// Recycling engines removes that cost.
+/// Building an engine allocates and initializes a substantial amount of state -- on a small message,
+/// as much work as the compression itself -- so recycling removes a cost that is roughly fixed per
+/// engine and therefore matters most for small messages.
 ///
-/// The saving is roughly fixed per compressor, so it matters most for small messages and fades as
-/// bodies grow -- which suits ordinary request and response traffic, where most bodies are small.
+/// Reached through [`Resources`][crate::Resources]; a capacity of zero recycles nothing.
 ///
-/// This is an implementation detail of [`Resources`][crate::Resources], which is how callers reach
-/// it: a pool with a capacity of zero recycles nothing and gives them the baseline to measure
-/// against.
-///
-/// # What is actually pooled
-///
-/// The pool is transparent: it recycles the engines that are worth recycling and silently builds
-/// the rest, so calling code never has to know which is which. Measured, the engines it does not
-/// pool are not worth pooling:
+/// # What is pooled
 ///
 /// | Engine | Reused? |
 /// |---|---|
 /// | `deflate` / `zlib` / `gzip` compressor | yes -- `reset` preserves its container and level |
 /// | `deflate` / `zlib` decompressor | yes -- `reset` restores the framing |
-/// | `gzip` decompressor | no -- the underlying reset takes a boolean that cannot express gzip framing, so a recycled engine would silently decompress as raw deflate |
+/// | `gzip` decompressor | no -- see below |
 /// | `zstd` compressor and decompressor | yes -- `reset` keeps the context's allocations, which is where most of the cost is |
 /// | `brotli` compressor and decompressor | no -- upstream exposes no reset, and recycling its buffers through a custom allocator was measured and did not pay for itself |
 ///
-/// Decompressors are cheaper to build than compressors, but decompression is also much faster, so
-/// the fixed setup cost is a comparable share of the work either way.
-///
-/// The gzip decompressor is the one gap worth explaining, because gzip is the encoding most often
-/// seen on the wire. Nothing about gzip prevents recycling: the obstacle is only that the engine's
-/// reset cannot express gzip framing. Taking over that framing here would let gzip decompressors join
-/// the pool, but it would mean owning header parsing and checksum validation permanently in order
-/// to route around an upstream API gap. That is a poor trade for a crate whose job is to stream
-/// bytes, so the gap is left where it belongs. If the engine ever gains a reset that can express
-/// gzip framing, gzip decompressors can start being pooled with no change to calling code.
-///
-/// Because this is an implementation detail rather than a contract, more engines can start being
-/// pooled without any change to calling code.
+/// The gzip decompressor is the gap worth explaining. `flate2`'s reset takes a boolean that cannot
+/// express gzip framing, so a recycled engine would silently decompress as raw deflate. Taking that
+/// framing over here would let gzip decompressors join the pool, but only by owning header parsing
+/// and checksum validation permanently to route around an upstream API gap. If `flate2` gains a
+/// reset that can express gzip framing, they can start being pooled with no change elsewhere.
 ///
 /// # Bounds
 ///
-/// The pool keeps at most [`Pool::capacity`] idle engines per distinct configuration, so a burst of
-/// concurrent requests cannot make it grow without limit. Engines beyond that are dropped when they
-/// are returned.
+/// At most [`Pool::capacity`] idle engines per distinct configuration, so a burst of concurrent
+/// requests cannot make it grow without limit. Engines beyond that are dropped when returned.
 #[derive(Clone)]
 pub(crate) struct Pool {
     inner: Arc<Inner>,
@@ -83,7 +64,7 @@ pub(crate) struct Pool {
 /// The shared state every [`Pool`] clone points at.
 ///
 /// A `Pool` is a handle: cloning one shares this, which is what lets a `Resources` be handed around
-/// while every codec built from it draws on the same idle engines.
+/// while every compressor and decompressor built from it draws on the same idle engines.
 ///
 /// Each engine class gets its own [`Mutex`] rather than one lock over everything, so a compressor
 /// being returned never waits on a decompressor being taken, and poisoning is contained to the one
@@ -117,8 +98,8 @@ impl Pool {
 
     /// Creates a pool that keeps up to `capacity` idle engines per configuration.
     ///
-    /// Size this to the number of messages you expect to be encoding at once. A capacity of zero
-    /// disables recycling, which is useful for measuring what the pool is buying you.
+    /// Sized to the number of messages expected to be in flight at once. A capacity of zero
+    /// disables recycling.
     #[must_use]
     pub(crate) fn with_capacity(capacity: usize) -> Self {
         Self {
@@ -138,12 +119,9 @@ impl Pool {
 
     /// A shared pool that recycles nothing.
     ///
-    /// Every API that builds a codec asks for a pool, so that going without recycling is a
-    /// deliberate choice rather than the path of least resistance. This is that choice: one
-    /// process-wide pool of capacity zero, so passing it costs no more than cloning a handle.
-    ///
-    /// Reach for it in tests, in one-off tools, and while measuring what a real pool is worth.
-    /// Anything that compresses more than a handful of messages should hold a [`Pool::new`] instead.
+    /// Every API that builds an engine asks for a pool, so going without recycling has to be an
+    /// explicit choice. This is that choice: one process-wide pool of capacity zero, so passing it
+    /// costs no more than cloning a handle.
     #[must_use]
     pub(crate) fn disabled() -> &'static Self {
         static DISABLED: OnceLock<Pool> = OnceLock::new();
@@ -157,10 +135,10 @@ impl Pool {
         self.inner.capacity
     }
 
-    /// Whether this pool stores nothing, so that every operation on it can return without locking.
+    /// Whether this pool stores nothing, so that every access can return without locking.
     ///
     /// A pool of capacity zero can neither hand an engine out nor keep one, so the locks it would
-    /// take are pure overhead on a path this crate encourages callers to use.
+    /// take are pure overhead.
     #[cfg_attr(
         not(any(feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")),
         expect(dead_code, reason = "only the pooled formats ask, and none of them is enabled")
@@ -175,7 +153,7 @@ impl Pool {
 
     /// Takes an idle compressor for `key`, or reports that one must be built.
     ///
-    /// The engine is reset before it is handed over, so a codec dropped part-way through a stream
+    /// The engine is reset before it is handed over, so an engine dropped part-way through a stream
     /// cannot leak its state into the next user.
     #[cfg(any(feature = "deflate", feature = "gzip", feature = "zlib"))]
     pub(crate) fn take_compressor(&self, key: EngineKey) -> Option<flate2::Compress> {

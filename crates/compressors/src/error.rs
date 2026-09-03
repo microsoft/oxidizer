@@ -257,7 +257,7 @@ impl Error {
         self.kind == Kind::LimitExceeded
     }
 
-    /// The codec was driven in an order it does not support, such as pushing input after end of
+    /// The engine was driven in an order it does not support, such as pushing input after end of
     /// input, or the underlying compression engine reported an internal failure.
     #[must_use]
     pub fn is_invalid_state(&self) -> bool {
@@ -273,7 +273,7 @@ impl Error {
         self.kind == Kind::InvalidConfiguration
     }
 
-    /// The stream feeding the codec failed.
+    /// The stream feeding the engine failed.
     ///
     /// The compressed data itself was fine as far as it went; the source could not deliver more.
     /// The original failure is available from [`source`][std::error::Error::source]. Produced by
@@ -319,7 +319,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// -- brotli and zstd -- where building applies the configuration and can therefore be rejected.
 ///
 /// This is a separate type from [`Error`] so that a failure to build is not something callers have
-/// to consider while streaming: once a codec exists, this error can no longer occur. It converts
+/// to consider while streaming: once an engine exists, this error can no longer occur. It converts
 /// into [`Error`] for code that handles both in one place.
 ///
 /// # Examples

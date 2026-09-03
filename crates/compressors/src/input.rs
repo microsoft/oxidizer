@@ -50,7 +50,7 @@ pub(crate) mod sealed {
 /// # Ok::<(), compressors::Error>(())
 /// ```
 pub trait InputData: sealed::Sealed {
-    /// Produces the [`BytesView`] the codec consumes, allocating from `resources` if it has to.
+    /// Produces the [`BytesView`] the engine consumes, allocating from `resources` if it has to.
     ///
     /// Taking `self` by value is what lets an existing view be forwarded without a copy.
     fn into_view(self, resources: &Resources) -> BytesView;

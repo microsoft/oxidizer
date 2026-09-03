@@ -169,7 +169,7 @@ mod no_format_tests {
     }
 }
 
-/// Dispatches one method to whichever format's codec a runtime-format codec is holding.
+/// Dispatches one method to whichever format's engine a runtime-format compressor or decompressor is holding.
 ///
 /// With no format feature enabled the enum has no variants, so this expands to a match on an
 /// uninhabited value -- which is exactly right: there is then no way to construct one.
@@ -538,7 +538,7 @@ mod tests {
 
     /// Caps every drain loop in this module.
     ///
-    /// A conforming operation always terminates, so exceeding this means the code under test is
+    /// A conforming engine always terminates, so exceeding this means the code under test is
     /// spinning. A hanging test reports nothing at all, so the cap turns a hang into a failure --
     /// which also lets mutation testing reach a verdict instead of timing out.
     ///
@@ -550,7 +550,7 @@ mod tests {
 
     /// Fails a spinning test instead of letting it hang.
     ///
-    /// A conforming operation always terminates, so exceeding the cap means the code under test is
+    /// A conforming engine always terminates, so exceeding the cap means the code under test is
     /// looping. A hanging test reports nothing at all, and mutation testing records a timeout rather
     /// than a verdict, so every drain loop here counts its steps through this.
     struct StepGuard(usize);

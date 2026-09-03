@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Throughput and allocation behaviour of the codecs.
+//! Throughput and allocation behaviour of the compression engines.
 //!
 //! Every benchmark reports both time and allocations, because this crate's central claims are about
 //! allocation: input is consumed segment by segment without being flattened, output is written into

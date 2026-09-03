@@ -5,7 +5,7 @@
 //!
 //! [`CompressionStream`] wraps a stream of byte sequences and yields converted chunks as they
 //! become available, so a body of any size passes through in bounded memory. Both the source and
-//! compression operation remain generic. Requires the `futures-stream` cargo feature.
+//! compression engine remain generic. Requires the `futures-stream` cargo feature.
 
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -22,10 +22,10 @@ const MAX_OPERATIONS_PER_POLL: usize = 64;
 
 /// Drives one poll of a compression stream, whichever direction it runs in.
 ///
-/// The source is polled only when the operation has nothing left to give, so a slow consumer never
+/// The source is polled only when the engine has nothing left to give, so a slow consumer never
 /// causes unbounded buffering.
 ///
-/// `finished` latches once the stream has yielded its last item. Without it, a failing codec would
+/// `finished` latches once the stream has yielded its last item. Without it, a failing engine would
 /// report the same error on every subsequent poll, and a caller that collects the stream would
 /// accumulate errors until it ran out of memory.
 // Answering with data unconditionally produces a stream that never ends, so that mutant hangs
@@ -100,7 +100,7 @@ pin_project! {
     /// Compresses or decompresses a stream of [`BytesView`] values.
     ///
     /// Construct it with [`CompressionStream::compress`] or [`CompressionStream::decompress`].
-    /// Both the source and operation retain their concrete types; this adapter performs no boxing.
+    /// Both the source and the engine retain their concrete types; this adapter performs no boxing.
     ///
     /// The source yields `Result<BytesView, E>` rather than bare views, for any `E` that converts
     /// into a boxed `std::error::Error + Send + Sync`. A source failure ends the stream, reported as

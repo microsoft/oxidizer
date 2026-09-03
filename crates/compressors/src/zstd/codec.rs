@@ -37,7 +37,7 @@ fn compression_level(level: Level) -> i32 {
 ///
 /// Zstd writes into the output without ever reading it, and `WriteBuf` is the trait zstd-safe
 /// provides to say exactly that: the capacity may be uninitialized, and the callee reports what it
-/// filled. Handing over the engine's spare capacity directly is what keeps this codec from zeroing
+/// filled. Handing over the engine's spare capacity directly is what keeps this engine from zeroing
 /// a whole output chunk before every step, which would defeat the point of reserving uninitialized
 /// memory in the first place.
 struct UninitOutput<'a> {
@@ -84,7 +84,7 @@ impl<'a> UninitOutput<'a> {
 /// Reads zstd's "bytes still buffered" answer as a step outcome.
 ///
 /// A zero remaining count means the epilogue is out and the flush or finish is complete; a non-zero
-/// count means the operation has more to give and must be driven again.
+/// count means the engine has more to give and must be driven again.
 // Treating a zero remaining count as anything else leaves a finish that never completes, so that
 // mutant hangs rather than failing and mutation testing records a timeout instead of a verdict.
 #[cfg_attr(test, mutants::skip)]

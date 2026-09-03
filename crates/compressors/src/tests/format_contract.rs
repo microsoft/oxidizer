@@ -44,7 +44,7 @@ fn resources() -> &'static Resources {
 /// Erases the difference between a build that can fail and one that cannot.
 ///
 /// Brotli and zstd validate their configuration as they apply it, so their builders return a
-/// [`Result`]; the deflate family's cannot fail and return the codec directly. The contract below
+/// [`Result`]; the deflate family's cannot fail and return the compressor directly. The contract below
 /// is the same either way, so it goes through this to stay one test.
 trait Built {
     type Codec;
@@ -60,10 +60,10 @@ impl<T> Built for Result<T, crate::BuildError> {
     }
 }
 
-/// Drives any compression operation to completion, feeding the input in `feed` sized pieces.
+/// Drives any compression engine to completion, feeding the input in `feed` sized pieces.
 /// Caps every drain loop in this file.
 ///
-/// A conforming operation always terminates, so exceeding this means the code under test is
+/// A conforming engine always terminates, so exceeding this means the code under test is
 /// spinning. A hanging test reports nothing at all, so the cap turns a hang into a failure --
 /// which also lets mutation testing reach a verdict instead of timing out.
 ///
@@ -74,7 +74,7 @@ const MAX_STEPS: usize = 10_000;
 
 /// Fails a spinning test instead of letting it hang.
 ///
-/// A conforming operation always terminates, so exceeding the cap means the code under test is
+/// A conforming engine always terminates, so exceeding the cap means the code under test is
 /// looping. A hanging test reports nothing at all, and mutation testing records a timeout rather
 /// than a verdict, so every drain loop below counts its steps through this.
 struct StepGuard(usize);

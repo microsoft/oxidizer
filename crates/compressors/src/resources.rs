@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! What a codec draws on, rather than what it is configured to do.
+//! What an engine draws on, rather than what it is configured to do.
 //!
 //! Compression needs two things from its caller that have nothing to do with the format: somewhere
 //! to allocate output buffers, and somewhere to keep engine state between messages. Both are
@@ -14,11 +14,11 @@ use bytesbuf::mem::{GlobalPool, MemoryShared, OpaqueMemory};
 
 use crate::pool::Pool;
 
-/// The memory and engine state a codec draws on.
+/// The memory and engine state a compressor or decompressor draws on.
 ///
 /// Everything a builder carries describes what to do; this describes what to do it with. Hold one
 /// per application -- or per subsystem that wants its own memory accounting -- and hand it to every
-/// operation. Cloning is cheap, and every clone draws on the same memory and the same engines.
+/// compressor and decompressor. Cloning is cheap, and every clone draws on the same memory and the same engines.
 ///
 /// # Recycling
 ///
@@ -108,7 +108,7 @@ impl Resources {
         &self.memory
     }
 
-    /// The engines a codec built from these resources checks out of, and back into.
+    /// The engines a compressor or decompressor built from these resources checks out of, and back into.
     #[cfg_attr(
         all(
             not(test),

@@ -7,7 +7,7 @@
 //! whichever format ends up being used: the level, the output chunk size, the decompression limits
 //! and the trailing-data policy. The type parameter records whether a format has been chosen yet.
 //!
-//! What a codec is built *with* -- memory and an engine pool -- is not a setting, so it lives in
+//! What an engine is built *with* -- memory and an engine pool -- is not a setting, so it lives in
 //! [`Resources`][crate::Resources] and is supplied to `build` instead.
 //!
 //! `CompressorBuilder<()>` has not chosen one. It is the builder to hold when the format is a
@@ -26,8 +26,9 @@ use crate::trailing::TrailingData;
 
 /// How much output a single `pull` produces before handing control back.
 ///
-/// This bounds a codec's working set: a caller streaming hundreds of gigabytes never holds more
-/// than one pending input view plus one chunk of output.
+/// This bounds pending output only: a caller streaming hundreds of gigabytes never accumulates
+/// more than one chunk of it. Pending input and the engine's own window and tables are additional,
+/// and their size depends on the format and its configuration.
 pub(crate) const DEFAULT_CHUNK_SIZE: usize = 64 * 1024;
 
 /// Configures a compressor.
@@ -59,7 +60,7 @@ pub struct CompressorBuilder<T = ()> {
     pub(crate) chunk_size: NonZeroUsize,
     /// The chosen format's own settings, and `()` until a format is chosen.
     ///
-    /// The shared builder never reads this beyond handing it to the codec; the format's own module
+    /// The shared builder never reads this beyond handing it to the engine; the format's own module
     /// adds the setters that populate it.
     #[cfg_attr(
         not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")),
@@ -90,8 +91,9 @@ impl<T> CompressorBuilder<T> {
 
     /// Sets how much output a single `pull` produces before returning.
     ///
-    /// This bounds the compressor's working set. Larger chunks reduce per-call overhead; smaller
-    /// chunks reduce peak memory and latency.
+    /// This bounds how much output is buffered before `pull` returns it -- not total memory, which
+    /// also covers pending input and the engine's own state. Larger chunks reduce per-call
+    /// overhead; smaller chunks reduce peak output buffering and latency.
     #[must_use]
     pub const fn output_chunk_size(mut self, bytes: NonZeroUsize) -> Self {
         self.chunk_size = bytes;

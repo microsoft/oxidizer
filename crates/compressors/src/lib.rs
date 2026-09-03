@@ -13,33 +13,45 @@
 
 //! Streaming compression and decompression over [`bytesbuf`] byte sequences.
 //!
-//! Five formats are available, each behind a cargo feature of its own: `deflate`, `zlib`,
-//! `gzip`, `brotli` and `zstd`. Each lives in its own module and exposes the same handful of items,
-//! so moving between them is a change of import rather than a change of code.
+//! Each supported format -- `deflate`, `zlib`, `gzip`, `brotli`, `zstd` -- lives in a module of its
+//! own behind a cargo feature of its own. What those modules share is uniform: `compress`,
+//! `decompress`, `Compressor` and `Decompressor` have the same shape in every one of them, so
+//! moving a call site between formats is a change of import. Their builders are not uniform:
+//! `brotli` and `zstd` add format-specific settings, and their compressor `build` returns a
+//! [`Result`], so switching a builder call site can take more than an import change.
 //!
-//! Three things distinguish this crate:
+//! **Engine** below means a third-party format implementation (`flate2`, the `brotli` crate,
+//! `zstd-safe`) together with the working memory it allocates. A `Compressor` or a `Decompressor`
+//! owns one, configured and positioned in a single stream, and returns it to [`Resources`] on drop.
 //!
-//! * **It speaks [`bytesbuf`] natively.** Input is read from a [`BytesView`]'s segments where they
-//!   already sit, and output is written into the uninitialized spare capacity of a
-//!   [`BytesBuf`][bytesbuf::BytesBuf]. Nothing is flattened into an intermediate buffer on the way
-//!   in, and nothing is copied out of one on the way back.
+//! This crate is distinguished by:
+//!
+//! * **It reads and writes [`bytesbuf`] sequences directly.** Input is read from a [`BytesView`]'s
+//!   segments where they already sit, and output is written into the uninitialized spare capacity
+//!   of a [`BytesBuf`][bytesbuf::BytesBuf]. Nothing is flattened into an intermediate buffer on the
+//!   way in, and nothing is copied out of one on the way back.
 //! * **It recycles engine state.** [`Resources`] keeps the window and hash tables an engine
-//!   allocates and hands them to the next codec that needs them. On a small message that setup
-//!   costs about as much as the compression itself, so the saving is worth having.
-//! * **One API spans every format, at any size.** The same push/pull contract drives all five
-//!   engines, so code is written once and works with whichever one it is given. Because a codec is
-//!   a state machine rather than a one-shot transform, gigabytes pass through it with a working set
-//!   of one pending input view and one output chunk.
+//!   allocates and hands them to the next compressor or decompressor that needs them. On a small
+//!   message that setup costs about as much as the compression itself, so the saving is worth
+//!   having.
+//! * **One API spans every format, at any size.** The same push/pull contract drives every engine,
+//!   so code is written once and works with whichever one it is given. Because an engine is a state
+//!   machine rather than a one-shot transform, a stream of any length passes through it while the
+//!   pending output it buffers stays bounded by the configured chunk size.
 //!
-//! Secondarily, this is also why the engines are not driven through `std::io`. `std::io::Read` and
-//! `std::io::Write` assume a single contiguous `&[u8]`, whereas a [`BytesView`] is a chain of
-//! segments with no contiguous representation, so bridging the two that way would mean copying
-//! every byte into a flat buffer first.
+//! Secondarily, this is also why the engines are not driven through `std::io`. That route works --
+//! [`BytesView`] implements `BufRead` over its segments and `BytesBufWriter` implements `Write`
+//! into segmented storage, so nothing has to be flattened to use it. What the direct adapters buy
+//! is narrower: output goes straight into a [`BytesBuf`][bytesbuf::BytesBuf]'s uninitialized spare
+//! capacity rather than through an intermediate buffer the adapter owns, engine state stays
+//! reusable from one stream to the next, and flush and chunk boundaries remain under this crate's
+//! control.
 //!
 //! # Whole buffers
 //!
 //! Each format module has its own `compress` and `decompress` for the common case. The crate-level
-//! [`compress`] and [`decompress`] take an operation you already have instead, whatever built it.
+//! [`compress`] and [`decompress`] instead accept any engine implementing [`Compression`],
+//! however it was constructed.
 //!
 //! ```
 //! # #[cfg(feature = "gzip")]
@@ -59,45 +71,63 @@
 //!
 //! # Streaming
 //!
-//! A codec is a state machine rather than a one-shot transform, so a stream of any length moves
-//! through it with a bounded working set: one pending input view and one output chunk, however many
-//! gigabytes pass through. [`CompressionStream`], behind the `futures-stream` feature, is how to
-//! reach that -- it turns any stream of byte sequences into its compressed or decompressed
-//! counterpart:
+//! An engine is a state machine rather than a one-shot transform, so a stream of any length moves
+//! through it while the output it has buffered but not yet handed back stays bounded by the
+//! configured chunk size. Pending input and the engine's own window and tables are additional, and
+//! their size depends on the format and its configuration. [`CompressionStream`], behind the
+//! `futures-stream` feature, is how to reach that -- it turns any stream of byte sequences into its
+//! compressed or decompressed counterpart:
 //!
 //! ```
 //! # #[cfg(all(feature = "futures-stream", feature = "gzip"))]
 //! # {
+//! use std::io::Error as IoError;
+//!
 //! use bytesbuf::BytesView;
 //! use compressors::{CompressionStream, Resources, gzip};
-//! use futures::{StreamExt, stream};
+//! use futures::{TryStreamExt, stream};
 //!
 //! # futures::executor::block_on(async {
 //! let resources = Resources::global();
 //! let body = stream::iter(vec![
-//!     Ok::<_, std::io::Error>(BytesView::copied_from_slice(b"a body ", resources.memory())),
+//!     Ok::<_, IoError>(BytesView::copied_from_slice(b"a body ", resources.memory())),
 //!     Ok(BytesView::copied_from_slice(
 //!         b"in pieces",
 //!         resources.memory(),
 //!     )),
 //! ]);
 //!
-//! let chunks: Vec<_> = CompressionStream::compress(body, gzip::Compressor::new(resources))
-//!     .collect()
-//!     .await;
+//! let mut compressed = CompressionStream::compress(body, gzip::Compressor::new(resources));
 //!
-//! let gzip = BytesView::from_views(chunks.into_iter().map(|chunk| chunk.unwrap()));
-//! assert_eq!(gzip.range(0..2).to_vec(), vec![0x1f, 0x8b]);
-//! # });
+//! // Each chunk is inspected and dropped as it arrives, so the caller stays bounded too --
+//! // collecting them all would put the whole encoded body back in memory.
+//! let mut magic = Vec::new();
+//! while let Some(chunk) = compressed.try_next().await? {
+//!     if magic.is_empty() && chunk.len() >= 2 {
+//!         magic = chunk.range(0..2).to_vec();
+//!     }
+//! }
+//!
+//! assert_eq!(magic, vec![0x1f, 0x8b]);
+//! # Ok::<(), compressors::Error>(())
+//! # })
+//! # .expect("the in-memory source stream cannot fail");
 //! # }
 //! ```
 //!
 //! # Choosing a format
 //!
 //! When the format is only known at runtime -- from a `Content-Encoding` token, say -- the
-//! [`format`](mod@crate::format) module resolves the token and carries the same shape every other format module does:
-//! a `Compressor`, a `Decompressor`, and the whole-buffer conveniences. Reach for
-//! [`CompressorBuilder::build_format`] when the level or the chunk size matters.
+//! [`format`](mod@crate::format) module resolves the token and carries the same shape every other
+//! format module does: a `Compressor`, a `Decompressor`, and the whole-buffer conveniences. Use
+//! [`CompressorBuilder::build_format`] instead when a level or chunk size has to be set on the
+//! result.
+//!
+//! Note that the `deflate` feature and the HTTP `deflate` content coding are not the same thing.
+//! `Format::Deflate` is raw DEFLATE (RFC 1951), which has no content-coding token, so
+//! `Format::Deflate.content_encoding()` returns `None`. The HTTP `deflate` token denotes a
+//! zlib-wrapped stream (RFC 1950), so `Format::from_content_encoding("deflate")` resolves to
+//! `Format::Zlib` and needs the `zlib` feature, not the `deflate` one.
 //!
 //! ```
 //! # #[cfg(feature = "gzip")]
@@ -122,12 +152,13 @@
 //!
 //! Building a compressor allocates and initializes a substantial amount of state -- on a small
 //! message, as much work as the compression itself. [`Resources`] recycles it: hold one, hand it to
-//! every operation, and each engine returns to it when its codec drops. The saving is roughly fixed
-//! per message, so it matters most for small bodies.
+//! every compressor and decompressor, and each engine returns to it on drop. The saving is roughly
+//! fixed per message, so it matters most for small bodies.
 //!
-//! Recycling is on by default, which is why every API that builds a codec asks for resources rather
-//! than for a memory provider alone. Turn it off with
-//! [`enable_pooling(0)`][Resources::enable_pooling] when there is genuinely nothing to reuse.
+//! Recycling is on by default, which is why every API that builds an engine asks for resources rather
+//! than for a memory provider alone. Set the capacity to zero with
+//! [`enable_pooling`][Resources::enable_pooling] when compression is rare enough that retaining
+//! engine state costs more than rebuilding it.
 //!
 //! ```
 //! # #[cfg(feature = "gzip")]
@@ -145,8 +176,8 @@
 //! # }
 //! ```
 //!
-//! Recycling is transparent -- it applies to the engines that are worth it and quietly skips the
-//! rest -- so calling code never has to know which engines benefit.
+//! Recycling applies only to the engines whose state is expensive enough to be worth retaining and
+//! is skipped for the rest, so calling code never has to know which engines benefit.
 //!
 //! # Security
 //!
@@ -163,26 +194,29 @@
 //! alone is not protection.
 //!
 //! Decompression can yield bytes before a checksum or trailer has rejected the stream, so treat
-//! them as provisional until the operation reports that it is done.
+//! them as provisional until the decompressor reports that it is done.
 //!
 //! # Features
 //!
 //! Every format is a separate feature and none is on by default, so a build compiles only the
 //! engines it names:
 //!
-//! * `gzip` -- the `gzip` module and `Format::Gzip`, via `flate2`. The encoding most often seen on
-//!   the wire, and the one to reach for when in doubt.
-//! * `deflate` -- the `deflate` module and `Format::Deflate`, via `flate2`.
-//! * `zlib` -- the `zlib` module and `Format::Zlib`, via `flate2`.
+//! * `gzip` -- the `gzip` module and `Format::Gzip`, via `flate2`. Accepted by essentially every
+//!   HTTP client and server, so it is the safe default when the peer's capabilities are unknown.
+//! * `deflate` -- the `deflate` module and `Format::Deflate`, via `flate2`. Raw DEFLATE, with no
+//!   HTTP content-coding token of its own.
+//! * `zlib` -- the `zlib` module and `Format::Zlib`, via `flate2`. This is what the HTTP `deflate`
+//!   content coding actually denotes.
 //! * `brotli` -- the `brotli` module and `Format::Brotli`, via the pure-Rust `brotli` crate.
 //! * `zstd` -- the `zstd` module and `Format::Zstd`, via `zstd-safe`.
 //! * `futures-stream` -- [`CompressionStream`], presenting compression and decompression as a
 //!   `futures_core::Stream` over any stream of byte sequences.
 //!
-//! The deflate-family features share one dependency, so enabling all three costs no more than one.
-//! A build that needs only `brotli` or only `zstd` never compiles `flate2` at all, and a build that
-//! names no format at all still gets [`Compression`], the builders and [`Resources`], which is what
-//! a crate that only passes operations around needs.
+//! The deflate-family features share one dependency, so enabling more than one of them costs no
+//! more than enabling one. A build that needs only `brotli` or only `zstd` never compiles `flate2`
+//! at all, and a build that names no format at all still gets [`Compression`], the builders and
+//! [`Resources`], which is what a crate that only passes compressors and decompressors around
+//! needs.
 
 #[cfg(feature = "brotli")]
 pub mod brotli;
@@ -237,7 +271,7 @@ use crate::core::{Compress, Compression, Decompress, process};
 /// boxed one whose format was chosen at runtime. The direction is part of the bound, so a
 /// decompressor will not compile here.
 ///
-/// Prefer driving the operation directly for data that arrives incrementally: this buffers the
+/// Prefer driving the engine directly for data that arrives incrementally: this buffers the
 /// entire result before returning.
 ///
 /// # Errors

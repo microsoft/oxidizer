@@ -4,7 +4,7 @@
 //! The deflate family: raw deflate, zlib and gzip.
 //!
 //! All three wrap the same deflate payload, differing only in framing, so the `deflate`, `zlib` and
-//! `gzip` modules share one codec implementation, parameterized by [`Wrapper`].
+//! `gzip` modules share one engine implementation, parameterized by [`Wrapper`].
 
 pub(crate) mod codec;
 

@@ -3,7 +3,7 @@
 
 //! Compressing and decompressing a body that arrives over time, on tokio.
 //!
-//! The body is never held whole: each chunk passes through the codec and leaves, so peak memory
+//! The body is never held whole: each chunk passes through the engine and leaves, so peak memory
 //! follows the chunk size rather than the size of the body.
 
 use std::time::Duration;

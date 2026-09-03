@@ -49,7 +49,7 @@ pub(crate) enum StreamEnd {
     Complete,
     /// The stream is complete only when the caller confirms EOF.
     AwaitEof,
-    /// Reset the codec and accept another compressed stream.
+    /// Reset the engine and accept another compressed stream.
     NextStream,
 }
 
@@ -85,13 +85,13 @@ pub(crate) unsafe trait Codec {
 
     /// Called when [`Codec::step`] reported [`Step::StreamEnd`].
     ///
-    /// Defaults to a complete, single-stream container; codecs whose containers can continue
+    /// Defaults to a complete, single-stream container; engines whose containers can continue
     /// (trailing data, concatenated streams, strict EOF checks) override this.
     fn stream_ended(&mut self) -> Result<StreamEnd> {
         Ok(StreamEnd::Complete)
     }
 
-    /// Validates the cumulative byte counts, for codecs that enforce limits.
+    /// Validates the cumulative byte counts, for engines that enforce limits.
     // Equivalent mutant: the body already reduces to `Ok(())` for every input; `mutants::skip`
     // documents that no test can distinguish this default from a mutant that also always
     // returns `Ok(())`, since the two are behaviorally identical (the only difference is
@@ -107,7 +107,7 @@ pub(crate) unsafe trait Codec {
         None
     }
 
-    /// Returns the maximum number of streams this codec may decode.
+    /// Returns the maximum number of streams this engine may decode.
     fn max_streams(&self) -> Option<u64> {
         None
     }
@@ -129,7 +129,7 @@ enum State {
     AtStreamLimit { maximum: u64 },
     /// The engine reported end of stream.
     Done,
-    /// A fatal codec error occurred. Native state must never be entered again.
+    /// A fatal engine error occurred. Native state must never be entered again.
     Failed,
 }
 
@@ -177,7 +177,7 @@ fn yields_to_the_caller(steps: usize, input_work: usize) -> bool {
 
 /// Whether an engine step moved neither input nor output, which means it is stuck.
 ///
-/// This is the engine's only guard against a codec that can never finish. Answering `false`
+/// This is the engine's only guard against an engine that can never finish. Answering `false`
 /// unconditionally removes it, so the mutant hangs rather than failing.
 #[cfg_attr(test, mutants::skip)]
 fn made_no_progress(consumed: usize, produced: usize) -> bool {
@@ -504,7 +504,7 @@ impl Pump {
 }
 
 /// `Pump::pull` returns before entering the step loop for every state that does not drive the
-/// codec (`Done`, `Failed`, and, whenever no input is pending, `BetweenStreams`, `AwaitingEof`,
+/// engine (`Done`, `Failed`, and, whenever no input is pending, `BetweenStreams`, `AwaitingEof`,
 /// and `AtStreamLimit`); `push` never leaves input pending for the latter three otherwise. So the
 /// step loop can only ever run in `Open`, `Flushing`, or `Finishing` when driven through the
 /// public API. Exercised directly by a white-box test that violates the invariant through private
@@ -524,7 +524,7 @@ mod tests {
 
     use super::*;
 
-    /// A codec that copies input to output verbatim, so pump behaviour can be tested on its own.
+    /// An engine that copies input to output verbatim, so pump behaviour can be tested on its own.
     #[derive(Debug, Default)]
     struct Passthrough {
         ended: bool,

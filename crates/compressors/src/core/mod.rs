@@ -33,7 +33,7 @@ pub(crate) mod internal {
     ///
     /// This is deliberately kept off [`Compression`][super::Compression], and this module is
     /// `pub(crate)`, so none of it reaches the public API. What that trait is for is *naming* an
-    /// operation; these methods are how this crate drives one.
+    /// engine; these methods are how this crate drives one.
     ///
     /// Being unnameable outside the crate is also what seals [`Compression`][super::Compression]:
     /// a downstream crate cannot implement a supertrait it cannot refer to, so formats and methods
@@ -73,7 +73,7 @@ pub(crate) mod internal {
         ///
         /// # Errors
         ///
-        /// Returns an invalid-state error after end of input or a previous operation failure.
+        /// Returns an invalid-state error after end of input or a previous failure.
         fn flush(&mut self) -> Result<()> {
             Ok(())
         }
@@ -96,10 +96,10 @@ pub struct Compress;
 #[non_exhaustive]
 pub struct Decompress;
 
-/// A streaming compression or decompression operation.
+/// A streaming compression or decompression engine.
 ///
 /// Every format's compressor and decompressor implements this contract. The `Mode` associated type
-/// records which operation an implementation performs without changing how callers drive it. This
+/// records which direction an implementation compresses in without changing how callers drive it. This
 /// allows shared processing code to accept any `Compression`, while APIs that require one direction
 /// can use `Compression<Mode = Compress>` or `Compression<Mode = Decompress>`.
 ///
@@ -108,7 +108,7 @@ pub struct Decompress;
 ///
 /// # The mechanics are an internal detail
 ///
-/// What this trait is *for* is naming an operation: `impl Compression<Mode = Compress>` accepts any
+/// What this trait is *for* is naming an engine: `impl Compression<Mode = Compress>` accepts any
 /// compressor and no decompressor. How this crate actually drives one -- pushing input, pulling
 /// output, ending input -- lives on a crate-private supertrait that no downstream crate can name,
 /// let alone implement. Those mechanics are therefore not public API and can change freely.
@@ -148,27 +148,27 @@ pub trait Compression: CompressionInternal {
     type Mode;
 }
 
-/// Drives one complete input through `operation` and returns the whole result.
+/// Drives one complete input through `engine` and returns the whole result.
 ///
 /// This is [`push`][Compression::push], [`end_input`][Compression::end_input] and draining
-/// [`pull`][Compression::pull] in one call. It ends the operation, so an operation serves one call,
+/// [`pull`][Compression::pull] in one call. It ends the engine, so an engine serves one call,
 /// and it buffers the entire result: drive `pull` directly to stay bounded by the chunk size.
 ///
 /// # Errors
 ///
 /// Returns an error if the underlying engine fails or the input is invalid.
-pub(crate) fn process(mut operation: impl Compression, input: BytesView) -> Result<BytesView> {
-    operation.push(input)?;
-    operation.end_input();
+pub(crate) fn process(mut engine: impl Compression, input: BytesView) -> Result<BytesView> {
+    engine.push(input)?;
+    engine.end_input();
 
     let mut collected = BytesBuf::new();
     loop {
-        match operation.pull()? {
+        match engine.pull()? {
             Output::Data(chunk) => collected.put_bytes(chunk),
             Output::Progress => {}
             Output::Done => break,
             Output::NeedInput => {
-                return Err(crate::Error::invalid_state("the operation requested input after end of input"));
+                return Err(crate::Error::invalid_state("the engine requested input after end of input"));
             }
         }
     }
@@ -225,7 +225,7 @@ impl CompressionInternal for ProgressCompression {
 }
 
 /// A fixture that always asks for input and always rejects it, for exercising callers that must
-/// propagate a `push` failure rather than the specific reasons a real codec's `push` can fail.
+/// propagate a `push` failure rather than the specific reasons a real engine's `push` can fail.
 #[cfg(all(test, feature = "futures-stream", feature = "gzip"))]
 #[derive(Debug)]
 pub(crate) struct RejectsPush;

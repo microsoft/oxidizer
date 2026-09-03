@@ -3,7 +3,7 @@
 
 use bytesbuf::BytesView;
 
-/// What a single codec step produced.
+/// What a single engine step produced.
 ///
 /// This is the state machine a caller drives: keep calling `pull` until it reports
 /// [`Output::NeedInput`], supply more data, and stop at [`Output::Done`]. When
@@ -13,7 +13,7 @@ use bytesbuf::BytesView;
 /// "no bytes right now" and "no bytes ever again" require different responses from the caller, and
 /// conflating them turns a missing check into an infinite loop.
 ///
-/// It is deliberately *not* `#[non_exhaustive]`. These four states describe a complete codec step,
+/// It is deliberately *not* `#[non_exhaustive]`. These states describe a complete engine step,
 /// and a caller that fails to handle one has a bug. Forcing a wildcard arm would convert that bug
 /// from a compile error into silent misbehavior, which is the opposite of what a wildcard is for.
 #[derive(Debug)]
@@ -27,7 +27,7 @@ pub enum Output {
     /// Never empty.
     Data(BytesView),
 
-    /// The codec advanced without producing bytes.
+    /// The engine advanced without producing bytes.
     ///
     /// Call `pull` again before supplying more input. This bounds how much CPU work one `pull`
     /// performs even when highly compressible input produces very little output.
@@ -65,13 +65,13 @@ impl Output {
         }
     }
 
-    /// Whether the codec needs more input before it can produce more output.
+    /// Whether the engine needs more input before it can produce more output.
     #[must_use]
     pub fn is_need_input(&self) -> bool {
         matches!(*self, Self::NeedInput)
     }
 
-    /// Whether the codec made progress and should be pulled again.
+    /// Whether the engine made progress and should be pulled again.
     #[must_use]
     pub fn is_progress(&self) -> bool {
         matches!(*self, Self::Progress)

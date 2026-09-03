@@ -3,7 +3,7 @@
 
 //! The macros that generate each format module's public surface.
 //!
-//! Every format exposes the same types and functions, differing only in which codec they drive and
+//! Every format exposes the same types and functions, differing only in which engine they drive and
 //! in their documentation. Generating them keeps the modules honest -- a change to the contract
 //! cannot drift between formats -- without collapsing them into one type that would lose the
 //! compile-time distinction between, say, a gzip and a brotli compressor.
@@ -12,7 +12,7 @@
 //!
 //! A `Compressor` is reached through its builder and driven through
 //! [`Compression`][crate::core::Compression]; it has no inherent
-//! operations of its own. That is what lets code be written once against the trait and used with
+//! methods of its own. That is what lets code be written once against the trait and used with
 //! any format, including a boxed one whose format was chosen at runtime.
 //!
 //! # Format-specific settings
@@ -405,7 +405,7 @@ macro_rules! define_format {
         /// more input. Each pull returns at most one bounded chunk, so a stream of any length can be
         /// compressed with a bounded working set.
         ///
-        /// The operations live on the trait rather than here, so code written against it works with
+        /// The methods live on the trait rather than here, so code written against it works with
         /// every format, and with a boxed compressor whose format was picked at runtime.
         #[derive(Debug)]
         pub struct Compressor {
@@ -466,7 +466,7 @@ macro_rules! define_format {
         /// input is a memory-exhaustion vector. This format's own default bounds apply unless
         /// [`DecompressorBuilder::limits`][crate::DecompressorBuilder::limits] overrides them.
         ///
-        /// Output is provisional until the operation reports that it is done, because a checksum or
+        /// Output is provisional until the decompressor reports that it is done, because a checksum or
         /// trailer can reject the stream after earlier chunks have been returned.
         #[derive(Debug)]
         pub struct Decompressor {

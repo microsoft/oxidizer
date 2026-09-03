@@ -36,7 +36,7 @@ fn chunk(size: usize) -> NonZeroUsize {
 
 /// Caps every drain loop in this file.
 ///
-/// A conforming operation always terminates, so exceeding this means the code under test is
+/// A conforming engine always terminates, so exceeding this means the code under test is
 /// spinning. A hanging test reports nothing at all, so the cap turns a hang into a failure --
 /// which also lets mutation testing reach a verdict instead of timing out.
 ///
@@ -47,7 +47,7 @@ const MAX_STEPS: usize = 10_000;
 
 /// Fails a spinning test instead of letting it hang.
 ///
-/// A conforming operation always terminates, so exceeding the cap means the code under test is
+/// A conforming engine always terminates, so exceeding the cap means the code under test is
 /// looping. A hanging test reports nothing at all, and mutation testing records a timeout rather
 /// than a verdict, so every drain loop below counts its steps through this.
 struct StepGuard(usize);
@@ -63,7 +63,7 @@ impl StepGuard {
     }
 }
 
-/// Drives a codec to completion over an input delivered in `feed` sized pieces.
+/// Drives an engine to completion over an input delivered in `feed` sized pieces.
 fn drive_decompressor(mut decompressor: gzip::Decompressor, input: &BytesView, feed: usize) -> crate::Result<BytesView> {
     let mut offset = 0;
     let mut collected = BytesBuf::new();
