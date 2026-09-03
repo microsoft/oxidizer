@@ -185,8 +185,7 @@ mod tests {
             ExpectedEvent::new("fetch.winhttp.session.initialization.failure", Severity::Error)
                 .body("WinHTTP transport initialization failed")
                 .dimension("winhttp.error_code", 1234_u32)
-                .dimension("winhttp.operation", "assured_non_blocking_callbacks")
-                .log(),
+                .dimension("winhttp.operation", "assured_non_blocking_callbacks"),
         );
         assert_eq!(
             events[1],
@@ -196,7 +195,6 @@ mod tests {
             events[2],
             ExpectedEvent::new("fetch.winhttp.request.error", Severity::Error)
                 .body("WinHTTP transport request failed")
-                .log()
                 .metric(),
         );
         assert!(events[1].dimensions().is_empty());
@@ -216,7 +214,6 @@ mod tests {
                 .body("WinHTTP transport request failed")
                 .dimension("winhttp.connect.duration", 0.25_f64)
                 .dimension("winhttp.connection.fresh", true)
-                .log()
                 .metric(),
         );
 

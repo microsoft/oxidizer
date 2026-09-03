@@ -483,7 +483,6 @@ mod tests {
                     .body("WinHTTP transport request failed")
                     .dimension("winhttp.connect.duration", 0.25_f64)
                     .dimension("winhttp.connection.fresh", true)
-                    .log()
                     .metric(),
             ]
         );

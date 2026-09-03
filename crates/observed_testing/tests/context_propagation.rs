@@ -45,8 +45,7 @@ fn cross_thread_context_transfer() {
         processor.single_event(),
         ExpectedEvent::new("test.probe", Severity::Info)
             .dimension("origin", "1")
-            .dimension("value", "99")
-            .log(),
+            .dimension("value", "99"),
     );
 }
 
@@ -64,8 +63,7 @@ fn context_transfer_does_not_affect_source_thread() {
         processor.single_event(),
         ExpectedEvent::new("test.probe", Severity::Info)
             .dimension("origin", "42")
-            .dimension("value", "1")
-            .log(),
+            .dimension("value", "1"),
     );
 }
 
@@ -89,8 +87,7 @@ async fn async_enrichment_propagation() {
         processor.single_event(),
         ExpectedEvent::new("test.probe", Severity::Info)
             .dimension("async_key", "7")
-            .dimension("value", "42")
-            .log(),
+            .dimension("value", "42"),
     );
 }
 
@@ -117,8 +114,7 @@ async fn async_enrichment_with_context_transfer() {
         processor.single_event(),
         ExpectedEvent::new("test.probe", Severity::Info)
             .dimension("async_key", "99")
-            .dimension("value", "7")
-            .log(),
+            .dimension("value", "7"),
     );
 }
 
@@ -147,8 +143,7 @@ async fn async_enrichment_after_attach_stays_visible() {
         processor.single_event(),
         ExpectedEvent::new("test.probe", Severity::Info)
             .dimension("async_key", "99")
-            .dimension("value", "7")
-            .log(),
+            .dimension("value", "7"),
     );
 }
 
@@ -181,14 +176,13 @@ async fn targeted_async_enrichment_after_attach_stays_visible() {
     // Only the addressed sink emits the targeted entry.
     assert_eq!(
         app_proc.single_event(),
-        ExpectedEvent::new("test.probe", Severity::Info).dimension("value", "7").log(),
+        ExpectedEvent::new("test.probe", Severity::Info).dimension("value", "7"),
     );
     assert_eq!(
         audit_proc.single_event(),
         ExpectedEvent::new("test.probe", Severity::Info)
             .dimension("async_key", "99")
-            .dimension("value", "7")
-            .log(),
+            .dimension("value", "7"),
     );
 }
 
@@ -237,13 +231,12 @@ async fn targeted_enrichment_carried_by_transfer_survives_generic_attach() {
     // have widened this entry onto `APP` as well.
     assert_eq!(
         app_proc.single_event(),
-        ExpectedEvent::new("test.probe", Severity::Info).dimension("value", "7").log(),
+        ExpectedEvent::new("test.probe", Severity::Info).dimension("value", "7"),
     );
     assert_eq!(
         audit_proc.single_event(),
         ExpectedEvent::new("test.probe", Severity::Info)
             .dimension("async_key", "99")
-            .dimension("value", "7")
-            .log(),
+            .dimension("value", "7"),
     );
 }

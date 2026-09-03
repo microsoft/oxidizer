@@ -296,8 +296,7 @@ fn dyn_event_body_bypasses_redaction_while_fields_do_not() {
         erasing.single_event(),
         ExpectedEvent::new("dyn.redaction", Severity::Info)
             .body("body-secret")
-            .dimension("detail", "")
-            .log(),
+            .dimension("detail", ""),
     );
 }
 

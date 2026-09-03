@@ -6,7 +6,9 @@
 #[ohno::error]
 #[from(std::io::Error, std::fmt::Error)]
 struct MyError {
+    #[expect(dead_code, reason = "the example shows that #[from] fills the remaining fields")]
     optional_field: Option<String>,
+    #[expect(dead_code, reason = "the example shows that #[from] fills the remaining fields")]
     count: u32,
 }
 

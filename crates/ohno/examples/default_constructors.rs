@@ -6,6 +6,7 @@
 use ohno::{Error, OhnoCore};
 
 #[derive(Error)]
+#[display("cannot open {path}")]
 struct MyError {
     path: String,
     inner: OhnoCore,
