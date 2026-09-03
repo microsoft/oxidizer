@@ -753,12 +753,12 @@ fn factory_closure_debug() {
     ignore = "contended DashMap locking calls GetModuleHandleA, which Windows Miri does not support"
 )]
 fn concurrent_relocation_to_same_thread_materializes_once() {
-    // Races many threads into the same empty destination cell and asserts two things: the caller's
-    // factory runs exactly once for that strategy partition, and every racer ends on the one value
-    // published for it. Publication goes through `OnceLock::get_or_init`, which serializes
-    // materialization on the cell: the winner runs the factory and every other racer blocks, then
-    // adopts the winner's `sync::Arc`. This is the documented "once per strategy partition"
-    // contract holding under contention.
+    // Races many threads into the same empty keyed destination partition and asserts two things:
+    // the caller's factory runs exactly once for that strategy partition, and every racer ends on
+    // the one value published for it. The DashMap vacant-entry guard serializes first publication:
+    // the winner runs the factory while holding the shard for writing, and every other racer then
+    // observes and adopts the winner's `sync::Arc`. This is the documented "once per strategy
+    // partition" contract holding under contention.
     // Ref: docs/implementation.md, "Publication and reentrancy".
 
     // A cloneable factory input that counts how many times the factory runs. Its `relocate` is a
@@ -807,7 +807,8 @@ fn concurrent_relocation_to_same_thread_materializes_once() {
             let source = source.clone();
             let destination = destination.clone();
             racers.push(std::thread::spawn(move || {
-                // Release all racers together so they contend for the same empty destination cell.
+                // Release all racers together so they contend for the same empty destination
+                // partition.
                 barrier.wait();
                 racer.relocate(Some(&source), &destination);
                 racer.into_arc()
@@ -1040,7 +1041,7 @@ fn new_boxed_relocate() {
 }
 
 #[test]
-fn factory_panic_leaves_the_cell_empty() {
+fn factory_panic_leaves_the_destination_partition_empty() {
     // A relocation that misses runs the factory while holding the vacant destination entry. The
     // factory is caller code and may panic; unwinding drops the entry guard without publishing a
     // value, so a later relocation can retry.
@@ -1073,7 +1074,7 @@ fn factory_panic_leaves_the_cell_empty() {
     // later relocation is free to materialize into it.
     assert!(
         arc.storage.get(&destination).is_none(),
-        "a panicking factory must leave the cell empty"
+        "a panicking factory must leave the destination partition empty"
     );
 }
 
@@ -1149,8 +1150,9 @@ fn relocation_leaves_a_populated_source_key_untouched() {
 )]
 fn opposite_direction_relocations_converge_without_deadlock() {
     // Two threads relocate in opposite directions across the same pair of thread coordinates. These
-    // factories do not reenter another initializing cell, and source recording holds no cell across
-    // another access, so each thread completes and ends on its destination's published value.
+    // factories do not reenter storage while a destination entry is held, and source recording
+    // retains no map guard across another access, so each thread completes and ends on its
+    // destination's published value.
     // Ref: docs/implementation.md, "Publication and reentrancy".
 
     // A small bounded repetition samples both writes without turning this into a stress test.
@@ -1221,10 +1223,11 @@ fn same_key_relocation_keeps_the_carried_value() {
 
 #[test]
 fn none_source_single_key_relocation_keeps_the_carried_value() {
-    // A relocation with no source into a single-key table is still a same-key case: with one
-    // key the carried value provably belongs to it, so `PerProcess` must keep it rather than run
-    // the factory. This pins the `None`-source arm of the same-key test, the whole of relocation
-    // under `PerProcess` for sourceless moves. Ref: docs/design.md, `PerProcess`.
+    // A relocation with no source under a guaranteed single-partition strategy is still a
+    // same-partition case: the carried value provably belongs to that partition, so `PerProcess`
+    // must keep it rather than run the factory. This pins the `None`-source arm of the
+    // `SINGLE_PARTITION` path, the whole of relocation under `PerProcess` for sourceless moves.
+    // Ref: docs/design.md, `PerProcess`.
     let threads = test_threads(&[1]);
 
     let arc = crate::Arc::<Counter, crate::PerProcess>::new(Counter::new);
@@ -1246,10 +1249,10 @@ fn none_source_single_key_relocation_keeps_the_carried_value() {
 
 #[test]
 fn none_source_multi_key_relocation_materializes_a_fresh_value() {
-    // With more than one key a sourceless relocation is not provably same-key: the destination is
-    // a distinct key, so relocation must materialize a fresh value rather than keep the carried
-    // one. This pins the `count == 1` boundary of the sourceless same-key arm against widening to
-    // cover multi-key tables.
+    // Under a partitioned strategy, a sourceless relocation cannot prove that the carried value
+    // belongs to the destination key, so it must materialize a fresh value. This pins the
+    // `SINGLE_PARTITION` marker boundary against accidentally treating keyed storage as though its
+    // current contents described the complete coordinate space.
     let threads = test_threads(&[2]);
 
     let arc = PerThreadArc::new(Counter::new);
