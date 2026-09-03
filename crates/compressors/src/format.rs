@@ -402,10 +402,6 @@ impl CompressionInternal for Decompressor {
     fn total_out(&self) -> u64 {
         dispatch!(DecompressorKind, &self.kind, codec => codec.total_out())
     }
-
-    fn flush(&mut self) -> Result<()> {
-        dispatch!(DecompressorKind, &mut self.kind, codec => codec.flush())
-    }
 }
 
 /// Compresses a complete byte sequence into `format`.
@@ -667,7 +663,11 @@ mod tests {
                 payload.len() as u64,
                 "{format:?} miscounted what it consumed"
             );
-            assert!(compressor.total_out() > 0, "{format:?} reported no output after a flush");
+            assert_eq!(
+                compressor.total_out(),
+                compressed.len() as u64,
+                "{format:?} miscounted what it produced after a flush"
+            );
 
             compressor.end_input();
             loop {
@@ -686,6 +686,7 @@ mod tests {
 
             let mut decompressor = Decompressor::new(format, &Resources::default()).expect("the defaults are accepted");
 
+            let compressed_len = compressed.len() as u64;
             decompressor.push(compressed.consume_all()).expect("push succeeds");
             decompressor.flush().expect("a decompressor has nothing to flush");
             decompressor.end_input();
@@ -711,7 +712,13 @@ mod tests {
                 payload.len() as u64,
                 "{format:?} miscounted what it produced"
             );
-            assert!(decompressor.total_in() > 0, "{format:?} reported consuming nothing");
+            assert_eq!(decompressor.total_in(), compressed_len, "{format:?} miscounted what it consumed");
+
+            // The `flush` above lands on a state that accepts one, so it cannot tell a forwarding
+            // `flush` from one that just answers `Ok`. Flushing after the stream is finished must
+            // be refused, and only the codec behind the enum knows that.
+            let refused = compressor.flush();
+            assert!(refused.is_err(), "{format:?} allowed a flush after end of input");
         }
     }
 
