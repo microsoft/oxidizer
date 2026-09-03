@@ -46,7 +46,11 @@ fn initialize(output: &mut [MaybeUninit<u8>]) -> &mut [u8] {
 /// `compress_stream` reports failure only when it is driven inconsistently, for example by
 /// supplying new input after the encoder has already reached a terminal state. The engine's
 /// [`Pump`][crate::engine::Pump] never calls [`Codec::step`] again once a compressor reports
-/// [`Step::StreamEnd`], so this crate can never actually trigger it.
+/// [`Step::StreamEnd`].
+///
+/// Defensive against the encoder's contract rather than this crate's invariants: `compress_stream`
+/// does not document the complete set of conditions under which it reports failure, so this
+/// forwards whatever it reports rather than asserting a condition upstream has not promised.
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg_attr(test, mutants::skip)]
 #[cold]
@@ -56,7 +60,12 @@ fn compress_stream_failed() -> Error {
 
 /// Every value the builders can express is inside the range brotli accepts -- [`Quality`],
 /// [`WindowSize`] and [`Mode`] all validate on construction, and the portable [`Level`] is mapped
-/// into `0..=11` -- so the encoder has never been observed to reject a parameter this crate sets.
+/// into `0..=11`.
+///
+/// This is defensive against the encoder's contract rather than a check on this crate's own
+/// invariants: the accepted ranges belong to the `brotli` crate, so a future version could narrow
+/// them. Reporting rather than asserting keeps an upstream change a build failure the caller can
+/// act on instead of a panic.
 ///
 /// [`Quality`]: crate::brotli::Quality
 /// [`WindowSize`]: crate::brotli::WindowSize

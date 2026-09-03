@@ -104,10 +104,15 @@ fn decompression_failed(code: usize) -> Error {
     Error::corrupt_data(format!("zstd decompression failed: {}", zstd_safe::get_error_name(code)))
 }
 
-/// zstd only rejects a compression level outside its own `min_c_level()..=max_c_level()` range.
+/// zstd only rejects a compression level outside its own `min_c_level()..=max_c_level()` range, and
 /// [`CompressionLevel::new`][crate::zstd::CompressionLevel::new] and [`compression_level`] both
-/// stay inside exactly that range, so `set_parameter` can never actually reject the level this
-/// crate passes in.
+/// stay inside exactly that range.
+///
+/// This is therefore defensive against the bundled native library's contract rather than a check on
+/// this crate's own invariants: the bounds are queried from `zstd_safe` at run time, so a future
+/// zstd could narrow them or add validation `set_parameter` does not perform today. It is reported
+/// rather than asserted for that reason -- a caller can act on a build failure from a dependency it
+/// did not choose, whereas a panic would take the process down for an upstream change.
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg_attr(test, mutants::skip)]
 #[cold]
@@ -119,8 +124,11 @@ fn compression_level_rejected(level: i32, code: usize) -> BuildError {
 }
 
 /// zstd clamps `WindowLogMax` to `ZSTD_WINDOWLOG_MIN..=ZSTD_WINDOWLOG_MAX`, and
-/// [`WindowLog`][crate::zstd::WindowLog]'s own bounds are defined as exactly that range, so
-/// `set_parameter` can never actually reject a window log this crate passes in.
+/// [`WindowLog`][crate::zstd::WindowLog]'s own bounds are defined as exactly that range.
+///
+/// Defensive against the bundled native library's contract rather than this crate's invariants, for
+/// the same reason as [`compression_level_rejected`]: those limits come from the linked zstd, so a
+/// different build of it could reject a value this one accepts.
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg_attr(test, mutants::skip)]
 #[cold]
