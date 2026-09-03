@@ -102,12 +102,14 @@ impl CompressionLevel {
 
     /// The fastest level supported by the bundled zstd library.
     #[must_use]
+    #[inline]
     pub fn min() -> Self {
         Self(zstd_safe::min_c_level())
     }
 
     /// The strongest level supported by the bundled zstd library.
     #[must_use]
+    #[inline]
     pub fn max() -> Self {
         Self(zstd_safe::max_c_level())
     }
@@ -140,6 +142,7 @@ impl TryFrom<i32> for CompressionLevel {
 }
 
 impl From<CompressionLevel> for i32 {
+    #[inline]
     fn from(level: CompressionLevel) -> Self {
         level.get()
     }

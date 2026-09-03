@@ -49,6 +49,7 @@ macro_rules! define_compressor_build {
         impl $crate::CompressorBuilder<$format> {
             /// Builds the compressor, drawing its memory and engine state from `resources`.
             #[must_use]
+            #[inline]
             pub fn build(self, resources: &$crate::Resources) -> Compressor {
                 Compressor {
                     pump: Pump::new(resources.memory().clone(), self.chunk_size),
@@ -108,6 +109,7 @@ macro_rules! define_compressor_build {
             /// # Errors
             ///
             /// Returns a [`BuildError`][crate::BuildError] if the engine rejects the configuration.
+            #[inline]
             pub fn build(self, resources: &$crate::Resources) -> ::core::result::Result<Compressor, $crate::BuildError> {
                 Ok(Compressor {
                     pump: Pump::new(resources.memory().clone(), self.chunk_size),
@@ -171,6 +173,7 @@ macro_rules! define_decompressor_build {
         impl $crate::DecompressorBuilder<$format> {
             /// Builds the decompressor, drawing its memory and engine state from `resources`.
             #[must_use]
+            #[inline]
             pub fn build(self, resources: &$crate::Resources) -> Decompressor {
                 Decompressor {
                     pump: Pump::new(resources.memory().clone(), self.chunk_size),
@@ -277,6 +280,7 @@ macro_rules! define_decompressor_build {
             /// # Errors
             ///
             /// Returns a [`BuildError`][crate::BuildError] if the engine rejects the configuration.
+            #[inline]
             pub fn build(self, resources: &$crate::Resources) -> ::core::result::Result<Decompressor, $crate::BuildError> {
                 Ok(Decompressor {
                     pump: Pump::new(resources.memory().clone(), self.chunk_size),

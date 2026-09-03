@@ -102,6 +102,7 @@ impl<T> CompressorBuilder<T> {
 impl CompressorBuilder<()> {
     /// Starts configuring a compressor whose format has not been chosen yet.
     #[must_use]
+    #[inline]
     pub fn new() -> Self {
         Self::default()
     }
@@ -121,6 +122,7 @@ impl CompressorBuilder<()> {
 }
 
 impl Default for CompressorBuilder<()> {
+    #[inline]
     fn default() -> Self {
         Self::with_format(())
     }
@@ -227,6 +229,7 @@ impl<T> DecompressorBuilder<T> {
 impl DecompressorBuilder<()> {
     /// Starts configuring a decompressor whose format has not been chosen yet.
     #[must_use]
+    #[inline]
     pub fn new() -> Self {
         Self::default()
     }
@@ -248,6 +251,7 @@ impl DecompressorBuilder<()> {
 }
 
 impl Default for DecompressorBuilder<()> {
+    #[inline]
     fn default() -> Self {
         Self::with_format(())
     }
