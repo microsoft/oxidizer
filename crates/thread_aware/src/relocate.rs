@@ -9,6 +9,7 @@ use std::thread::{self, ThreadId};
 use crate::{Thread, ThreadAware, ThreadBuilder};
 
 static SOURCE_THREAD: OnceLock<SourceThread> = OnceLock::new();
+static THREAD_BUILDER: OnceLock<ThreadBuilder> = OnceLock::new();
 
 struct SourceThread {
     id: ThreadId,
@@ -18,8 +19,9 @@ struct SourceThread {
 /// Relocates a value between synthetic runtime thread coordinates.
 ///
 /// The source uses one process-wide thread ID, while the destination uses the
-/// calling thread's ID. This keeps repeated relocation tests cheap while still
-/// providing distinct thread coordinates.
+/// calling thread's ID. Ordinary fixtures share one process-wide owner. This
+/// keeps repeated relocation tests cheap while still providing distinct thread
+/// coordinates.
 #[derive(Debug)]
 pub struct Relocator {
     source: Thread,
@@ -66,10 +68,10 @@ impl Relocator {
     }
 
     fn new(source_numa_node: u32, destination_numa_node: u32) -> Self {
-        let builder = ThreadBuilder::default();
+        let builder = THREAD_BUILDER.get_or_init(ThreadBuilder::default);
         Self {
             source: builder.clone().with_numa_node(source_numa_node).build(Self::source_thread_id()),
-            destination: builder.with_numa_node(destination_numa_node).build(thread::current().id()),
+            destination: builder.clone().with_numa_node(destination_numa_node).build(thread::current().id()),
             destination_numa_node,
             include_source: true,
         }
@@ -189,6 +191,15 @@ mod tests {
         let second_coordinates = relocator.relocate(&mut second);
 
         assert_eq!(first_coordinates, second_coordinates);
+    }
+
+    #[test]
+    fn separate_relocators_share_owner() {
+        let (first_source, first_destination) = Relocator::between_threads().relocate(&mut ());
+        let (second_source, second_destination) = Relocator::between_numa_nodes().relocate(&mut ());
+
+        assert_eq!(first_source.unwrap().owner(), second_source.unwrap().owner());
+        assert_eq!(first_destination.owner(), second_destination.owner());
     }
 
     #[test]
