@@ -176,6 +176,7 @@ pub mod interop;
 pub(crate) mod key;
 pub mod metadata;
 pub mod processing;
+pub mod sampling;
 pub(crate) mod severity;
 pub(crate) mod sink;
 pub(crate) mod text;
