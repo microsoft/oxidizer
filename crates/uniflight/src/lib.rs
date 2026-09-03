@@ -503,6 +503,7 @@ mod tests {
     static_assertions::assert_impl_all!(Merger<String, String>: ThreadAware);
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn merger_can_be_relocated_between_threads() {
         let mut merger = Merger::<String, String, PerThread>::new();
         let cell = Arc::new(PanicAwareCell::new());

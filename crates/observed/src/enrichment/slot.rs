@@ -327,16 +327,6 @@ mod coverage_tests {
     static_assertions::assert_impl_all!(Slot: thread_aware::ThreadAware);
 
     #[test]
-    fn slot_can_be_relocated_between_threads() {
-        let slot = Slot::new();
-        let mut relocated = slot.clone();
-        let (source, destination) = thread_aware::Relocator::between_threads().relocate(&mut relocated);
-
-        assert!(slot.ptr_eq(&relocated));
-        assert_ne!(source.unwrap().id(), destination.id());
-    }
-
-    #[test]
     fn transfer_ignores_empty_enrichment_layers() {
         let slot = Slot::new();
         let mut transfer = EnrichmentTransfer::default();

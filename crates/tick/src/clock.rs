@@ -762,6 +762,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn thread_aware() {
         // root clock
         let root = InactiveClock::default();
