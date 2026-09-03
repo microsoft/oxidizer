@@ -450,3 +450,94 @@ impl<'a, A: Allocator + Clone> BytemuckView<'a, A> {
         self.arena.try_alloc_slice_fill_with_box::<T, _>(len, |_| T::zeroed())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    //! Every `BytemuckView` entry point rejects a type aligned at or above
+    //! the relevant cap. The smart-pointer paths and the single-value
+    //! reference paths reject at the smart-pointer cap; the reference-slice
+    //! paths reject only at the looser chunk cap.
+    //!
+    //! The tests run against [`capped_arena`], whose caps are lowered so the
+    //! boundary is reachable by an alignment every codegen backend accepts.
+
+    use crate::tests_support::{ChunkOverAligned, SmartPtrOverAligned, capped_arena};
+
+    #[test]
+    fn try_alloc_box_over_aligned_returns_err() {
+        let arena = capped_arena();
+        arena.bytemuck().try_alloc_box::<SmartPtrOverAligned>().unwrap_err();
+    }
+
+    #[test]
+    fn try_alloc_arc_over_aligned_returns_err() {
+        let arena = capped_arena();
+        arena.bytemuck().try_alloc_arc::<SmartPtrOverAligned>().unwrap_err();
+    }
+
+    #[test]
+    fn try_alloc_slice_box_over_aligned_returns_err() {
+        let arena = capped_arena();
+        arena.bytemuck().try_alloc_slice_box::<SmartPtrOverAligned>(4).unwrap_err();
+    }
+
+    #[test]
+    fn try_alloc_slice_arc_over_aligned_returns_err() {
+        let arena = capped_arena();
+        arena.bytemuck().try_alloc_slice_arc::<SmartPtrOverAligned>(4).unwrap_err();
+    }
+
+    #[test]
+    #[should_panic = "arena allocation failed"]
+    fn alloc_box_panics_on_over_aligned() {
+        let arena = capped_arena();
+        let _ = arena.bytemuck().alloc_box::<SmartPtrOverAligned>();
+    }
+
+    #[test]
+    #[should_panic = "arena allocation failed"]
+    fn alloc_arc_panics_on_over_aligned() {
+        let arena = capped_arena();
+        let _ = arena.bytemuck().alloc_arc::<SmartPtrOverAligned>();
+    }
+
+    #[test]
+    #[should_panic = "arena allocation failed"]
+    fn alloc_slice_box_panics_on_over_aligned() {
+        let arena = capped_arena();
+        let _ = arena.bytemuck().alloc_slice_box::<SmartPtrOverAligned>(4);
+    }
+
+    #[test]
+    #[should_panic = "arena allocation failed"]
+    fn alloc_slice_arc_panics_on_over_aligned() {
+        let arena = capped_arena();
+        let _ = arena.bytemuck().alloc_slice_arc::<SmartPtrOverAligned>(4);
+    }
+
+    #[test]
+    fn try_alloc_over_aligned_returns_err() {
+        let arena = capped_arena();
+        arena.bytemuck().try_alloc::<SmartPtrOverAligned>().unwrap_err();
+    }
+
+    #[test]
+    #[should_panic = "arena allocation failed"]
+    fn alloc_panics_on_over_aligned() {
+        let arena = capped_arena();
+        let _ = arena.bytemuck().alloc::<SmartPtrOverAligned>();
+    }
+
+    #[test]
+    fn try_alloc_slice_over_aligned_returns_err() {
+        let arena = capped_arena();
+        arena.bytemuck().try_alloc_slice::<ChunkOverAligned>(4).unwrap_err();
+    }
+
+    #[test]
+    #[should_panic = "arena allocation failed"]
+    fn alloc_slice_panics_on_over_aligned() {
+        let arena = capped_arena();
+        let _ = arena.bytemuck().alloc_slice::<ChunkOverAligned>(4);
+    }
+}

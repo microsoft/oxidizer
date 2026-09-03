@@ -18,7 +18,7 @@ use crate::internal::chunk::Chunk;
 use crate::internal::chunk_mutator::ChunkMutator;
 use crate::internal::chunk_provider::{ChunkProvider, ChunkProviderConfig};
 use crate::internal::chunk_ref::ChunkRef;
-use crate::internal::constants::{MAX_NORMAL_ALLOC, SizeClass};
+use crate::internal::constants::{CHUNK_ALIGN, MAX_NORMAL_ALLOC, SizeClass};
 use crate::internal::current_chunk::CurrentChunk;
 
 /// Surplus of chunk strong refs the arena pre-credits to the
@@ -40,6 +40,8 @@ use crate::internal::current_chunk::CurrentChunk;
 /// chunk retire.
 const LARGE_SHARED_REF_SURPLUS: u32 = 1 << 30;
 
+#[cfg(test)]
+mod align_guard_tests;
 mod alloc_growable;
 #[cfg(feature = "hashbrown")]
 mod alloc_hashbrown;
@@ -152,6 +154,12 @@ pub struct Arena<A: Allocator + Clone = Global> {
     /// Number of completed bulk resets.
     #[cfg(feature = "stats")]
     resets: Cell<u64>,
+
+    /// Test-only override for [`CHUNK_ALIGN`] in the alignment-rejection
+    /// guards. Production builds read the constant directly; see
+    /// [`Self::chunk_align_cap`].
+    #[cfg(test)]
+    align_cap: Cell<usize>,
 }
 
 // Fields make `Arena` sendable when `A: Send + Sync`, but `CurrentChunk` and
@@ -315,6 +323,8 @@ impl<A: Allocator + Clone> Arena<A> {
             relocations_since_reset: Cell::new(0),
             #[cfg(feature = "stats")]
             resets: Cell::new(0),
+            #[cfg(test)]
+            align_cap: Cell::new(CHUNK_ALIGN),
         })
     }
 
@@ -549,6 +559,72 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline]
     pub(crate) fn max_normal_alloc(&self) -> usize {
         self.provider.config().max_normal_alloc()
+    }
+
+    /// Exclusive upper bound on the alignment a chunk can satisfy.
+    ///
+    /// Production builds always report [`CHUNK_ALIGN`]. Tests lower it
+    /// with [`Self::set_align_cap`] so the rejection guards can be driven
+    /// by types whose alignment every codegen backend accepts — a type
+    /// aligned to the real cap does not compile everywhere.
+    #[cfg(not(test))]
+    #[inline(always)]
+    #[expect(clippy::unused_self, reason = "signature must match the cfg(test) arm, which reads a field")]
+    pub(crate) fn chunk_align_cap(&self) -> usize {
+        CHUNK_ALIGN
+    }
+
+    #[cfg(test)]
+    #[inline(always)]
+    pub(crate) fn chunk_align_cap(&self) -> usize {
+        self.align_cap.get()
+    }
+
+    /// Lower the alignment caps so tests can reach them with types the
+    /// compiler will accept. `cap` replaces [`CHUNK_ALIGN`]; the
+    /// smart-pointer cap stays at half of it, as in production.
+    ///
+    /// Only the allocation guards consult this. The `buffer_freezable`
+    /// predicate that decides whether a `Vec` can freeze in place still
+    /// compares against the real constant, so a capped arena is not a
+    /// faithful model for the growable-collection paths.
+    #[cfg(test)]
+    pub(crate) fn set_align_cap(&self, cap: usize) {
+        assert!(cap.is_power_of_two(), "alignment cap must be a power of two");
+        assert!(
+            cap <= CHUNK_ALIGN,
+            "the cap may only be lowered: raising it would let the guards accept alignments no chunk can satisfy"
+        );
+        assert!(cap >= 4, "alignment cap must leave room for a non-zero smart-pointer cap");
+        self.align_cap.set(cap);
+    }
+
+    /// Exclusive upper bound on the alignment a smart-pointer allocation
+    /// can satisfy.
+    ///
+    /// Values at or above this cap can no longer be guaranteed to lie
+    /// strictly inside the first [`CHUNK_ALIGN`] bytes of their chunk,
+    /// which would break the header-recovery mask used by `Drop` and
+    /// `deallocate`.
+    #[inline(always)]
+    pub(crate) fn smart_ptr_align_cap(&self) -> usize {
+        self.chunk_align_cap() / 2
+    }
+
+    /// Whether `align` is too large for a smart-pointer allocation.
+    #[inline(always)]
+    pub(crate) fn rejects_smart_ptr_align(&self, align: usize) -> bool {
+        align >= self.smart_ptr_align_cap()
+    }
+
+    /// Whether `align` exceeds what any single chunk can satisfy.
+    ///
+    /// A looser cap than [`Self::rejects_smart_ptr_align`]: simple-reference
+    /// allocations hand back a plain reference with no header-recovery mask,
+    /// so they can use the full chunk.
+    #[inline(always)]
+    pub(crate) fn rejects_chunk_align(&self, align: usize) -> bool {
+        align >= self.chunk_align_cap()
     }
 
     /// True iff an allocation request of `min_payload` bytes must be routed

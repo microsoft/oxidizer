@@ -148,86 +148,6 @@ fn try_alloc_slice_arc_ok() {
     assert!(v.iter().all(|&x| x == 0));
 }
 
-// Manually impl Zeroable for an over-aligned type since derive
-// requires Clone+Copy which don't affect alignment semantics.
-//
-// Windows cannot materialize a 64 KiB-aligned value in its default stack;
-// non-slice variants check the same alignment guard there.
-#[cfg(not(align_capped_backend))]
-#[derive(Clone, Copy)]
-#[repr(C, align(65536))]
-struct OverAligned {
-    _data: u8,
-}
-
-// SAFETY: all-zeros is a valid OverAligned (it's just a u8 + padding).
-#[cfg(not(align_capped_backend))]
-unsafe impl Zeroable for OverAligned {}
-
-#[test]
-#[cfg(not(align_capped_backend))]
-fn try_alloc_box_over_aligned_returns_err() {
-    let arena = Arena::new();
-    let result = arena.bytemuck().try_alloc_box::<OverAligned>();
-    assert!(result.is_err());
-}
-
-#[test]
-#[cfg(not(align_capped_backend))]
-fn try_alloc_arc_over_aligned_returns_err() {
-    let arena = Arena::new();
-    let result = arena.bytemuck().try_alloc_arc::<OverAligned>();
-    assert!(result.is_err());
-}
-
-#[test]
-#[cfg(not(align_capped_backend))]
-fn try_alloc_slice_box_over_aligned_returns_err() {
-    let arena = Arena::new();
-    let result = arena.bytemuck().try_alloc_slice_box::<OverAligned>(4);
-    assert!(result.is_err());
-}
-
-#[test]
-#[cfg(not(align_capped_backend))]
-fn try_alloc_slice_arc_over_aligned_returns_err() {
-    let arena = Arena::new();
-    let result = arena.bytemuck().try_alloc_slice_arc::<OverAligned>(4);
-    assert!(result.is_err());
-}
-
-#[test]
-#[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
-#[should_panic = "arena allocation failed"]
-fn alloc_box_panics_on_over_aligned() {
-    let arena = Arena::new();
-    let _ = arena.bytemuck().alloc_box::<OverAligned>();
-}
-
-#[test]
-#[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
-#[should_panic = "arena allocation failed"]
-fn alloc_arc_panics_on_over_aligned() {
-    let arena = Arena::new();
-    let _ = arena.bytemuck().alloc_arc::<OverAligned>();
-}
-
-#[test]
-#[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
-#[should_panic = "arena allocation failed"]
-fn alloc_slice_box_panics_on_over_aligned() {
-    let arena = Arena::new();
-    let _ = arena.bytemuck().alloc_slice_box::<OverAligned>(4);
-}
-
-#[test]
-#[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
-#[should_panic = "arena allocation failed"]
-fn alloc_slice_arc_panics_on_over_aligned() {
-    let arena = Arena::new();
-    let _ = arena.bytemuck().alloc_slice_arc::<OverAligned>(4);
-}
-
 #[test]
 fn bytemuck_view_debug() {
     let arena = Arena::new();
@@ -258,22 +178,6 @@ fn try_alloc_ref_scalar_ok() {
 }
 
 #[test]
-#[cfg(not(align_capped_backend))]
-fn try_alloc_ref_over_aligned_returns_err() {
-    let arena = Arena::new();
-    let result = arena.bytemuck().try_alloc::<OverAligned>();
-    assert!(result.is_err());
-}
-
-#[test]
-#[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
-#[should_panic = "arena allocation failed"]
-fn alloc_ref_panics_on_over_aligned() {
-    let arena = Arena::new();
-    let _ = arena.bytemuck().alloc::<OverAligned>();
-}
-
-#[test]
 fn alloc_ref_is_mutable() {
     let arena = Arena::new();
     let mut v = arena.bytemuck().alloc::<u32>();
@@ -301,22 +205,6 @@ fn try_alloc_slice_ref_ok() {
     let arena = Arena::new();
     let s = arena.bytemuck().try_alloc_slice::<u16>(3).unwrap();
     assert_eq!(&*s, &[0, 0, 0]);
-}
-
-#[test]
-#[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
-fn try_alloc_slice_ref_over_aligned_returns_err() {
-    let arena = Arena::new();
-    let result = arena.bytemuck().try_alloc_slice::<OverAligned>(4);
-    assert!(result.is_err());
-}
-
-#[test]
-#[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
-#[should_panic = "arena allocation failed"]
-fn alloc_slice_ref_panics_on_over_aligned() {
-    let arena = Arena::new();
-    let _ = arena.bytemuck().alloc_slice::<OverAligned>(4);
 }
 
 #[test]
