@@ -64,7 +64,7 @@ pub(crate) const SESSION_OPTIONS_WITHOUT_KEEP_ALIVE: usize = 3;
 #[derive(Debug)]
 /// Defines the OS connection-pool boundary for one transport instance.
 ///
-/// The custom transport factory creates one session for each materialized core
+/// The custom transport factory creates one session for each materialized thread
 /// and pool slot. The session configures direct connections, native
 /// timeout policy, keep-alive behavior, and the callback inherited by all child
 /// request handles. Disabling WinHTTP global pooling keeps independently built

@@ -10,12 +10,12 @@ documented separately in [design.md](design.md).
 
 This is the whole design in one picture; the numbered chapters below elaborate each part.
 
-- **One OS session per (processor × pool slot), scoped to the built client.** Each materialized
+- **One OS session per (thread × pool slot), scoped to the built client.** Each materialized
   transport instance owns one session. Independently built clients, including builds from
   cloned builders, never share a session or connection pool; cloned `HttpClient` values
   share their original client's resources (§3.2).
-- **One transport instance per (processor × pool slot).** `fetch` clones and relocates the
-  transport per processor (`Isolation::Isolated`, §3.2), then materializes one factory result
+- **One transport instance per (thread × pool slot).** `fetch` clones and relocates the
+  transport per thread (`Isolation::Isolated`, §3.2), then materializes one factory result
   for each configured pool slot. Each instance owns its context pool (§5) and one session
   `Arc`.
 - **One `RequestDriver` future per request** (§4.4). It owns a `RequestGuard`
@@ -25,7 +25,7 @@ This is the whole design in one picture; the numbered chapters below elaborate e
 - **WinHTTP drives the I/O on its own threads** (§3). The transport issues
   asynchronous calls and each one signals completion back to the awaiting future
   through an `events_once` one-shot (§3.3). A completion runs either inline on the
-  submitting thread (keeping work on one processor) or on a WinHTTP worker thread.
+  submitting thread (keeping work on that thread) or on a WinHTTP worker thread.
 - **No blocking pool and no Tokio.** Every setup call is synchronous but performs no
   I/O, so it runs inline on the executor; only WinHTTP's own async steps defer
   (§2.1).
@@ -132,8 +132,8 @@ crates/fetch_winhttp/                 // published facade
 crates/fetch_winhttp_impl/src/        // implementation
   lib.rs                 // module declarations + re-exports for the facade
   builder.rs             // WinHttpDeps/WinHttpDepsBuilder and client-builder integration
-  transport.rs           // WinHttpTransport: per-(processor × pool-slot) RequestHandler (§3.2)
-  session.rs             // WinHttpSession: per-(processor × pool-slot) session handle (§3.2)
+  transport.rs           // WinHttpTransport: per-(thread × pool-slot) RequestHandler (§3.2)
+  session.rs             // WinHttpSession: per-(thread × pool-slot) session handle (§3.2)
   request.rs             // RequestDriver: drives one request/response lifecycle (§6.3)
   context.rs             // RequestContext: pinned per-request state the callback reads
   callback.rs            // extern "system" trampoline -> dispatch_completion
@@ -369,7 +369,7 @@ The sole exception is the very first `WinHttpOpen` in a process, which runs
 WinHTTP's one-time global initialization (a lock plus registry reads) and can
 briefly block. Since each materialized transport instance opens its own session lazily
 inside the factory when `fetch` materializes it (§3.2), this is a one-time
-per-processor construction cost off the request path; the process-wide global
+per-thread construction cost off the request path; the process-wide global
 initialization runs only on the first such open.
 
 The session sets `WINHTTP_OPTION_ASSURED_NON_BLOCKING_CALLBACKS`: we promise our
@@ -427,7 +427,7 @@ there is no additional "blocking pool" tier - no request-path call can block.
 
 WinHTTP does not run a bespoke thread pool; it posts async completions to the
 process-global Win32 thread pool, from which a worker dispatches our callback. There
-is no per-request or per-handle thread affinity: successive completions for one
+is no per-request or per-handle fixed-thread placement: successive completions for one
 request can land on different workers, so no callback may assume it runs on the
 thread that submitted the operation or on the same worker as the previous completion.
 Soundness rests on documented properties: "exactly one completion per async
@@ -442,32 +442,32 @@ handle wrappers, §3.4); and the callback-to-future handoff must be a real
 cross-thread signal, not a shared cell - that is `events_once` (§3.3), which behaves
 identically same-thread or cross-thread.
 
-Inline completions (§2.1) give a degree of processor affinity for free: when an
+Inline completions (§2.1) give a degree of submitting-thread locality for free: when an
 operation completes immediately, WinHTTP runs the callback on the very thread that
-submitted it, so completion work stays on the same processor as the async work that
+submitted it, so completion work stays on the same thread as the async work that
 issued it rather than hopping to an arbitrary thread-pool worker. Only genuinely
 deferred completions incur the hop.
 
-### 3.2 Per-processor/per-pool-slot transport instances and sessions
+### 3.2 Per-thread/per-pool-slot transport instances and sessions
 
 `fetch_winhttp` registers with `Isolation::Isolated`. Under `Isolated`, `fetch`
-stores the *config plus a factory* and, the first time each processor touches
-it, clones and relocates the configuration to that processor. Within that
-processor it invokes the factory once for every configured `multiple_pools`
+stores the *config plus a factory* and, the first time each thread touches
+it, clones and relocates the configuration to that thread. Within that
+thread it invokes the factory once for every configured `multiple_pools`
 slot, caching each resulting `WinHttpTransport` separately. Each
-(processor × pool slot) therefore has its own transport, session, and context
+(thread × pool slot) therefore has its own transport, session, and context
 pool (§5). (`Isolation::Shared` would instead share materialized handlers
-across processors.)
+across threads.)
 
 `Isolated` is a design principle rather than a workaround: thread-isolated
 execution is the default because minimizing sharing is more efficient. That the
 `!Sync` `plurality` context pool (§5) can stay instance-local follows from the
 choice rather than motivating it. The handler must still be `Sync`, so that pool
 sits behind a coarse `Mutex` (§5). `WinHttpDeps` derives `ThreadAware` so `fetch`
-can clone and relocate the configuration per processor.
+can clone and relocate the configuration per thread.
 
 The OS session - which owns session-scoped state, most importantly the connection
-(keep-alive) pool - is opened by the factory when `fetch` materializes a per-processor
+(keep-alive) pool - is opened by the factory when `fetch` materializes a per-thread
 transport instance, from the finalized `CustomContext`, not eagerly in `builder_winhttp`.
 This is deliberate: `HttpClientBuilder` is `Clone`, so a session opened up front and
 captured in the (clone-shared) factory closure would be shared by every client built from
@@ -477,18 +477,18 @@ Opening it inside the factory (exactly as the Tokio transport builds its hyper c
 its own factory) scopes the session to the built client: two independently built clients -
 including two builds of a cloned builder - never share a session or its pool.
 
-Under `Isolation::Isolated` the factory runs once per processor; `fetch`
+Under `Isolation::Isolated` the factory runs once per thread; `fetch`
 additionally invokes it once per configured `multiple_pools` slot
 (`0..pool_count` in `client_builder.rs`, a single slot by default), so each
-(processor × pool slot) opens its own session and the client holds one
-connection pool per (processor × pool slot) rather than a single
-cross-processor pool - one pool per processor in the default single-slot case.
-That is an acceptable, even preferable, trade: processor-local pools stay warm
+(thread × pool slot) opens its own session and the client holds one
+connection pool per (thread × pool slot) rather than a single
+cross-thread pool - one pool per thread in the default single-slot case.
+That is an acceptable, even preferable, trade: thread-local pools stay warm
 and uncontended (see Future exploration below). A single session shared across a
-client's processors *and* isolated between independently built clients is not
+client's threads *and* isolated between independently built clients is not
 expressible with today's custom-transport API - it exposes only builder-scoped
-state (shared across clones) or per-processor/per-slot state (not shared across
-processors), with no per-built-client scope - so it is noted as `fetch` API
+state (shared across clones) or per-thread/per-slot state (not shared across
+threads), with no per-built-client scope - so it is noted as `fetch` API
 feedback (../../fetch/docs/stabilization.md, connection-management item). Each
 instance's session is immutable after setup, so a plain `Arc` cloned into that
 instance's in-flight requests suffices. The instance-local context pool is the
@@ -497,24 +497,24 @@ only mutable shared state (`Mutex`-guarded, §5), while the read-buffer
 thread-isolated use.
 
 **Contrast with `fetch_hyper`.** `fetch_hyper` uses `Isolation::Shared`: one
-hyper client, already fully thread-safe, shared across processors, so its pool is
+hyper client, already fully thread-safe, shared across threads, so its pool is
 process-wide by construction. `fetch_winhttp` instead keeps a session (and
-therefore a connection pool) per processor, trading a single cross-processor pool
-for warmer, processor-local pools that need no cross-processor coordination.
+therefore a connection pool) per thread, trading a single cross-thread pool
+for warmer, thread-local pools that need no cross-thread coordination.
 
-**Future exploration.** The per-processor session baseline is open to revision
+**Future exploration.** The per-thread session baseline is open to revision
 after performance analysis: a future design could consolidate to one session
-shared across a client's processors - recovering cross-processor connection reuse
+shared across a client's threads - recovering cross-thread connection reuse
 and enabling session-granularity connection recycling (the connection-lifetime
 control the transport does not offer today, design.md §2.2) - but doing so
 cleanly needs a `fetch` per-built-client shared-state hook (or accepting
-`Isolation::Shared` at the cost of processor-local object pools). It is not
-obvious either beats per-processor sessions with warmer, processor-local pools,
-so v2 may revisit it. Relatedly, whether per-processor instancing is the right
+`Isolation::Shared` at the cost of thread-local object pools). It is not
+obvious either beats per-thread sessions with warmer, thread-local pools,
+so v2 may revisit it. Relatedly, whether per-thread instancing is the right
 default at all could become a knob: a low-traffic client has no need for
-per-processor instances and might prefer a single shared instance. This is left
+per-thread instances and might prefer a single shared instance. This is left
 unconfigurable in v1 - a knob earns its place only with demonstrated value, and
-per-processor is a sound default - but is a candidate future opportunity if
+per-thread is a sound default - but is a candidate future opportunity if
 profiling shows it matters.
 
 Connection management (connect handles, reuse, lifetime) gets its own chapter (design.md §2).
@@ -589,7 +589,7 @@ their sharing needs differ:
   `Send` alone is what we need, and the `not_sync` marker on `ConnectHandle` and
   `RequestHandle` is what holds them to it.
 - **The session handle is `Send + Sync`.** A session `Arc` is cloned into every
-  in-flight request on its processor and is touched by WinHTTP's process-global callback
+  in-flight request on its thread and is touched by WinHTTP's process-global callback
   threads (§3.1), so it is shared by reference across threads.
   The handler that holds it must be `Send + Sync` (a `fetch` requirement), so the session
   must be too. `SessionHandle` and `WinHttpSession` reach that by omitting the `not_sync`
@@ -1454,7 +1454,7 @@ where
 
 `CustomContext` hands the factory a `HttpBodyBuilder` (carrying the clock and
 read-buffer pool), a `PoolIndex`, the generic `TransportOptions`/`TlsOptions`, a
-`Meter`, and the caller's `Extras`. `fetch_winhttp` ignores `PoolIndex` (per-processor
+`Meter`, and the caller's `Extras`. `fetch_winhttp` ignores `PoolIndex` (per-thread
 placement comes from `Isolation::Isolated`, §3.2) and ignores `CustomContext::tls` (it
 takes its own `WinHttpTlsConfig` instead; see design.md §1.2). This generic TLS
 configuration is ignored without a runtime warning; the limitation is part of the
@@ -1464,13 +1464,13 @@ pool slot (`0..pool_count` in `client_builder.rs`), so each slot opens its own W
 session (§3.2), and because pooling is per-session (`DISABLE_GLOBAL_POOLING`, §9.3) those
 sessions already hold distinct pools. Distinct `PoolIndex` slots therefore land in distinct
 sessions/pools structurally, without the transport keying anything on the index. The real
-v1 resource profile is one session/pool per (processor × pool slot). Whether connection-pool
+v1 resource profile is one session/pool per (thread × pool slot). Whether connection-pool
 ownership belongs on `fetch` at all or entirely on the transport is unresolved and may
 retire the `PoolIndex` surface in its current shape (../../fetch/docs/stabilization.md,
 connection-management item).
 
 `builder_winhttp` does **not** open the session; it just calls `create_builder` with the
-factory. Each materialized (processor × pool-slot) transport instance opens its own session
+factory. Each materialized (thread × pool-slot) transport instance opens its own session
 inside the factory when
 `fetch` materializes it (§3.2), so the session is scoped to the built client and never
 captured in the clone-shared builder closure. The session is deliberately not a
@@ -1478,7 +1478,7 @@ captured in the clone-shared builder closure. The session is deliberately not a
 clock comes from `CustomContext`. Because `CustomContext` exposes only the derived
 `HttpBodyBuilder`, not the underlying `GlobalPool`, `WinHttpDeps` also retains a pool
 clone in `Extras` for WinHTTP read buffers. The `observed::Sink` rides in the same extras
-and relocates per processor with the rest of the config; the transport emits its telemetry
+and relocates per thread with the rest of the config; the transport emits its telemetry
 through it (§13). There is no
 `anyspawn::Spawner`: no WinHTTP call the transport makes can block (§2.1).
 
@@ -1565,7 +1565,7 @@ would let two independent `fetch_winhttp` clients - for instance a strict one an
 one built with `accept_invalid_certs` (design.md §4) - reuse each other's pooled
 connections, collapsing the security boundary between them. Disabling global
 pooling scopes the connection pool to this session, so each `HttpClient` gets its
-own pool (one pool per (processor × pool slot) under the per-session model, §3.2)
+own pool (one pool per (thread × pool slot) under the per-session model, §3.2)
 while different clients stay isolated. Reuse within a client is unaffected.
 
 For draining, WinHTTP exposes only coarse controls:
@@ -1778,7 +1778,7 @@ response is built and copied into the per-call `HttpBodyOptions` passed to
 `HttpBodyBuilder::body`; that builder merges client-level defaults and applies the
 reset-on-frame idle timeout.
 
-`TransportOptions.connect_timeout` is not wrapped by `fetch` processor, so the request driver
+`TransportOptions.connect_timeout` is not wrapped by `fetch` pipeline, so the request driver
 implements it with the supplied `tick::Clock`. This remains transport logic, but it does
 not use a native WinHTTP timer.
 
@@ -1879,27 +1879,27 @@ metric cardinality.
 Design points deliberately deferred in v1, recorded here so they are revisited when
 the `fetch` API or profiling data makes them actionable:
 
-- **Consolidate per-processor sessions into one session per client.** v1 opens one WinHTTP
-  session (and therefore one connection pool) per processor - and per `multiple_pools` slot
-  within a processor (§3.2) - because that is the only shape the
+- **Consolidate per-thread sessions into one session per client.** v1 opens one WinHTTP
+  session (and therefore one connection pool) per thread - and per `multiple_pools` slot
+  within a thread (§3.2) - because that is the only shape the
   current `fetch` custom-transport API expresses while still isolating independently built
   clients (§3.2). This diverges from a single-session-per-client model: it trades
-  cross-processor connection reuse and session-granularity connection recycling (the
+  cross-thread connection reuse and session-granularity connection recycling (the
   connection-lifetime control the transport does not offer today, design.md §2.2) for warmer,
-  uncontended processor-local pools. Once `fetch` grows a per-built-client shared-state hook -
-  or once profiling justifies `Isolation::Shared` despite processor-local object pools -
+  uncontended thread-local pools. Once `fetch` grows a per-built-client shared-state hook -
+  or once profiling justifies `Isolation::Shared` despite thread-local object pools -
   revisit whether one shared session per client is the better default. Tracked as `fetch`
   API feedback (../../fetch/docs/stabilization.md, connection-management item) so the
   divergence is not forgotten when that API becomes more expressive.
-- **Per-processor vs shared instancing as a knob.** Whether per-processor instancing is the right
+- **Per-thread vs shared instancing as a knob.** Whether per-thread instancing is the right
   default at all could become configurable: a low-traffic client gains nothing from
-  per-processor instances and might prefer a single shared instance (§3.2). Left unconfigurable
+  per-thread instances and might prefer a single shared instance (§3.2). Left unconfigurable
   in v1 - a knob earns its place only with demonstrated value - but a candidate if
   profiling shows it matters.
 - **Session-keyed connection pools (`PoolIndex`).** v1 does not key anything on `fetch`'s
   `PoolIndex` value. It does not need to: `fetch` invokes the factory once per pool slot, so
   each slot already opens its own session/pool (§8), giving a resource profile of one
-  session/pool per (processor × pool slot) rather than a single collapsed OS pool. If pool
+  session/pool per (thread × pool slot) rather than a single collapsed OS pool. If pool
   ownership stays a transport concern after the v2 sessions/pools discussion, revisit
   whether to interpret `PoolIndex` explicitly (../../fetch/docs/stabilization.md,
   connection-management item).

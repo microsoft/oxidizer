@@ -17,9 +17,9 @@ use thread_aware::{PerThread, Thread, ThreadAware};
 /// from a `SpawnCustom` implementation, or [`CustomSpawnerBuilder`](crate::CustomSpawnerBuilder) to
 /// compose one with layer closures.
 pub trait SpawnCustom: ThreadAware + Sync + 'static {
-    /// Spawn a task with affinity to the current core.
+    /// Spawns a task on the current runtime thread.
     fn spawn(&self, task: BoxedFuture);
-    /// Spawn a task that may run on any core.
+    /// Spawns a task that may run on any runtime thread.
     ///
     /// The task is provided as a [`ThreadAwareAsyncFnOnce`] whose captured data
     /// implements [`ThreadAware`], so the spawner can relocate it before execution

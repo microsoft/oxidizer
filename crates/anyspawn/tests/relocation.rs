@@ -2,13 +2,13 @@
 // Licensed under the MIT License.
 
 #![allow(missing_docs, clippy::items_after_statements, reason = "test code")]
-#![cfg(not(miri))] // miri does not support OS threads and CPU affinity helpers
+#![cfg(not(miri))] // Miri does not support the OS threads used by these tests.
 
 //! Tests for [`Spawner`] relocation behavior with [`ThreadAware`].
 //!
 //! Per-process spawners with a no-op [`ThreadAware`] are unaffected by
 //! relocation. Thread-aware spawners (custom [`SpawnCustom`] impls) create
-//! per-core state through `clone` + `relocate`.
+//! per-thread state through `clone` + `relocate`.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -146,9 +146,9 @@ fn per_process_relocation_preserves_spawn_function() {
 }
 
 /// Thread-aware spawner: relocation must invoke `relocate` to create fresh
-/// per-core state.
+/// per-thread state.
 #[test]
-fn thread_aware_relocation_invokes_relocated_for_new_core() {
+fn thread_aware_relocation_invokes_relocated_for_new_thread() {
     static RELOCATE_CALLS: AtomicUsize = AtomicUsize::new(0);
 
     #[derive(Clone)]
@@ -175,7 +175,7 @@ fn thread_aware_relocation_invokes_relocated_for_new_core() {
         }
     }
 
-    let spawner = Spawner::new_custom("per-core", CountingSpawner);
+    let spawner = Spawner::new_custom("per-thread", CountingSpawner);
 
     let before = RELOCATE_CALLS.load(Ordering::SeqCst);
 
@@ -185,7 +185,7 @@ fn thread_aware_relocation_invokes_relocated_for_new_core() {
 
     assert!(
         RELOCATE_CALLS.load(Ordering::SeqCst) > before,
-        "relocated must be called for the destination core"
+        "relocated must be called for the destination thread"
     );
 
     let r1 = futures::executor::block_on(original.spawn(async { 10 }));
@@ -195,7 +195,7 @@ fn thread_aware_relocation_invokes_relocated_for_new_core() {
 }
 
 /// Thread-aware spawner: after relocation, spawning must dispatch through the
-/// spawn function associated with the destination core, not the source.
+/// spawn function associated with the destination thread, not the source.
 ///
 /// Each instance gets a unique ID on construction via `relocate`. When a spawn
 /// function is invoked it records its ID in a shared log. After spawning on both
@@ -231,7 +231,7 @@ fn thread_aware_relocated_spawner_dispatches_through_destination() {
         }
     }
 
-    let spawner = Spawner::new_custom("per-core", IdSpawner { id: 0 });
+    let spawner = Spawner::new_custom("per-thread", IdSpawner { id: 0 });
 
     let original = spawner.clone();
     let mut spawner = spawner;

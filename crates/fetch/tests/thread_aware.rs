@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Integration tests for thread-aware (per-core) client relocation.
+//! Integration tests for per-thread client relocation.
 
 use std::assert_eq;
 use std::sync::atomic::{AtomicUsize, Ordering};

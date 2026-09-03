@@ -272,7 +272,7 @@ mod tests {
     }
 
     #[test]
-    fn relocation_materializes_an_independent_session_for_the_destination_core() {
+    fn relocation_materializes_an_independent_session_for_the_destination_thread() {
         let (facade, opens, closes) = successful_bindings_facade(2);
         let client = create_builder_with_bindings(complete_builder().build(), facade)
             .insecure_allow_http()

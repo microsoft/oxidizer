@@ -88,12 +88,12 @@ use crate::handle::{JoinHandle, JoinHandleInner};
 ///
 /// # Thread-Aware Support
 ///
-/// `Spawner` implements [`ThreadAware`] and supports per-core isolation via
+/// `Spawner` implements [`ThreadAware`] and supports per-thread state via
 /// custom [`SpawnCustom`](crate::SpawnCustom) implementations. A thread-aware
-/// spawner creates per-core state through cloning and calling [`relocate`](ThreadAware::relocate), enabling
-/// contention-free, NUMA-friendly task dispatch. The Tokio variants do not
-/// create per-core state: they ignore relocation and behave identically
-/// regardless of which core they run on.
+/// spawner creates destination-thread state through cloning and calling
+/// [`relocate`](ThreadAware::relocate). The Tokio variants do not create
+/// per-thread state: they ignore relocation and behave identically regardless
+/// of which thread runs them.
 #[derive(Clone, ThreadAware)]
 #[must_use]
 pub struct Spawner(SpawnerKind);
@@ -220,9 +220,9 @@ impl Spawner {
         }
     }
 
-    /// Spawn a task that may run on any core, returning a [`JoinHandle`] for the result.
+    /// Spawns a task that may run on any runtime thread, returning a [`JoinHandle`] for the result.
     ///
-    /// Unlike [`spawn`](Self::spawn), this does not guarantee core affinity.
+    /// Unlike [`spawn`](Self::spawn), this does not guarantee execution on the current runtime thread.
     /// The `data` must implement [`ThreadAware`](thread_aware::ThreadAware) so
     /// the spawner can relocate it before execution. The function pointer `f`
     /// receives ownership of `data` and returns a future.
