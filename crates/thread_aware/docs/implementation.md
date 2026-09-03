@@ -25,6 +25,10 @@ the holder perform no map lookup and take no lock.
 protocol rely on the built-in semantic guarantees, especially the
 `SINGLE_PARTITION` marker used by `PerProcess`.
 
+The public `Storage::insert` API returns a rejected `Arc<T>` for compatibility.
+Its internal insertion result keeps `Occupied` and `ForeignOwner` distinct, so
+owner-boundary rejection cannot be mistaken for a populated partition.
+
 ## Relocation
 
 Relocation follows this order:

@@ -26,6 +26,19 @@ enum Values<T: ?Sized, S: Strategy> {
     Partitioned(PartitionMap<T, S>),
 }
 
+pub(crate) enum InsertError<T: ?Sized> {
+    Occupied(sync::Arc<T>),
+    ForeignOwner(sync::Arc<T>),
+}
+
+impl<T: ?Sized> InsertError<T> {
+    fn into_value(self) -> sync::Arc<T> {
+        match self {
+            Self::Occupied(value) | Self::ForeignOwner(value) => value,
+        }
+    }
+}
+
 #[cfg_attr(test, mutants::skip)] // Returning zero early is equivalent to iterating an empty map.
 fn empty_partition_count<T: ?Sized, S: Strategy>(values: &PartitionMap<T, S>) -> Option<usize> {
     values.is_empty().then_some(0)
@@ -126,21 +139,26 @@ impl<T: ?Sized, S: Strategy> Storage<T, S> {
     ///
     /// Returns `Err(value)`, handing the passed-in `value` back unchanged, when the strategy
     /// partition selected by `thread` already holds a value or the storage belongs to another
-    /// runtime owner.
+    /// runtime owner. The internal insertion path preserves those as distinct diagnostics while
+    /// this public API retains its original rejected-value error type.
     #[inline]
     pub fn insert(&self, thread: &Thread, value: sync::Arc<T>) -> Result<(), sync::Arc<T>> {
+        self.insert_with_reason(thread, value).map_err(InsertError::into_value)
+    }
+
+    pub(crate) fn insert_with_reason(&self, thread: &Thread, value: sync::Arc<T>) -> Result<(), InsertError<T>> {
         if !self.bind_owner(thread.owner()) {
-            return Err(value);
+            return Err(InsertError::ForeignOwner(value));
         }
 
         self.insert_key(S::key(thread), value)
     }
 
-    pub(crate) fn insert_key(&self, key: S::Key, value: sync::Arc<T>) -> Result<(), sync::Arc<T>> {
+    pub(crate) fn insert_key(&self, key: S::Key, value: sync::Arc<T>) -> Result<(), InsertError<T>> {
         match &self.values {
-            Values::Single(cell) => cell.set(value),
+            Values::Single(cell) => cell.set(value).map_err(InsertError::Occupied),
             Values::Partitioned(values) => match values.entry(key) {
-                Entry::Occupied(_) => Err(value),
+                Entry::Occupied(_) => Err(InsertError::Occupied(value)),
                 Entry::Vacant(vacant) => {
                     vacant.insert(value);
                     Ok(())
@@ -232,7 +250,7 @@ mod tests {
     use std::sync::Arc;
     use std::thread;
 
-    use super::{DEFAULT_PARTITION_CAPACITY, Storage, Values};
+    use super::{DEFAULT_PARTITION_CAPACITY, InsertError, Storage, Values};
     use crate::thread::ThreadBuilder;
     use crate::{PerProcess, PerThread};
 
@@ -287,6 +305,27 @@ mod tests {
 
         assert!(Arc::ptr_eq(&storage.insert(&second, Arc::clone(&rejected)).unwrap_err(), &rejected));
         assert!(storage.get(&second).is_none());
+    }
+
+    #[test]
+    fn insertion_reason_distinguishes_occupied_partition_from_foreign_owner() {
+        let builder = ThreadBuilder::default();
+        let thread = builder.build(thread::current().id());
+        let foreign = ThreadBuilder::default().build(thread::current().id());
+        let storage = Storage::<u32, PerThread>::new();
+        storage.insert(&thread, Arc::new(1)).unwrap();
+
+        let occupied = Arc::new(2);
+        match storage.insert_with_reason(&thread, Arc::clone(&occupied)) {
+            Err(InsertError::Occupied(rejected)) => assert!(Arc::ptr_eq(&rejected, &occupied)),
+            Err(InsertError::ForeignOwner(_)) | Ok(()) => panic!("occupied partition must retain its diagnostic"),
+        }
+
+        let foreign_value = Arc::new(3);
+        match storage.insert_with_reason(&foreign, Arc::clone(&foreign_value)) {
+            Err(InsertError::ForeignOwner(rejected)) => assert!(Arc::ptr_eq(&rejected, &foreign_value)),
+            Err(InsertError::Occupied(_)) | Ok(()) => panic!("foreign owner must retain its diagnostic"),
+        }
     }
 
     #[test]

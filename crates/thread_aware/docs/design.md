@@ -81,8 +81,11 @@ Storage is bound to the first runtime owner that populates or relocates it.
 Threads belonging to another owner cannot read or publish its partitions.
 
 `Storage::insert` publishes a value only when a key is empty and returns the
-rejected value when another value was already published. `Storage::get` clones
-the value for a key.
+rejected value when another value was already published or the storage belongs
+to another owner. Its public error type remains the rejected `Arc`; internally,
+the insertion path distinguishes an occupied partition from an owner mismatch
+so callers and tests do not lose that diagnostic. `Storage::get` clones the
+value for a key.
 
 Lazy materialization holds the destination map entry while the factory runs.
 This guarantees one published value per key, but factory code must not re-enter
