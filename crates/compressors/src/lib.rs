@@ -16,12 +16,24 @@
 //! `gzip`, `brotli` and `zstd`. Each lives in its own module and exposes the same handful of items,
 //! so moving between them is a change of import rather than a change of code.
 //!
-//! Compression engines normally speak `std::io::Read` and `std::io::Write`, which assume a single
-//! contiguous `&[u8]`. A [`BytesView`] is a chain of segments with no
-//! contiguous representation, so bridging the two through `std::io` would mean copying every byte
-//! into a flat buffer first. This crate drives the engine from the view's segments directly, and
-//! writes into the uninitialized spare capacity of a [`BytesBuf`][bytesbuf::BytesBuf], so no
-//! intermediate copy is needed.
+//! Three things distinguish this crate:
+//!
+//! * **It speaks [`bytesbuf`] natively.** Input is read from a [`BytesView`]'s segments where they
+//!   already sit, and output is written into the uninitialized spare capacity of a
+//!   [`BytesBuf`][bytesbuf::BytesBuf]. Nothing is flattened into an intermediate buffer on the way
+//!   in, and nothing is copied out of one on the way back.
+//! * **It recycles engine state.** [`Resources`] keeps the window and hash tables an engine
+//!   allocates and hands them to the next codec that needs them. On a small message that setup
+//!   costs about as much as the compression itself, so the saving is worth having.
+//! * **One API spans every format, at any size.** The same push/pull contract drives all five
+//!   engines, so code is written once and works with whichever one it is given. Because a codec is
+//!   a state machine rather than a one-shot transform, gigabytes pass through it with a working set
+//!   of one pending input view and one output chunk.
+//!
+//! Secondarily, this is also why the engines are not driven through `std::io`. `std::io::Read` and
+//! `std::io::Write` assume a single contiguous `&[u8]`, whereas a [`BytesView`] is a chain of
+//! segments with no contiguous representation, so bridging the two that way would mean copying
+//! every byte into a flat buffer first.
 //!
 //! # Whole buffers
 //!

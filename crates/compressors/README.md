@@ -19,17 +19,29 @@ Five formats are available, each behind a cargo feature of its own: `deflate`, `
 `gzip`, `brotli` and `zstd`. Each lives in its own module and exposes the same handful of items,
 so moving between them is a change of import rather than a change of code.
 
-Compression engines normally speak `std::io::Read` and `std::io::Write`, which assume a single
-contiguous `&[u8]`. A [`BytesView`][__link1] is a chain of segments with no
-contiguous representation, so bridging the two through `std::io` would mean copying every byte
-into a flat buffer first. This crate drives the engine from the view’s segments directly, and
-writes into the uninitialized spare capacity of a [`BytesBuf`][__link2], so no
-intermediate copy is needed.
+Three things distinguish this crate:
+
+* **It speaks [`bytesbuf`][__link1] natively.** Input is read from a [`BytesView`][__link2]’s segments where they
+  already sit, and output is written into the uninitialized spare capacity of a
+  [`BytesBuf`][__link3]. Nothing is flattened into an intermediate buffer on the way
+  in, and nothing is copied out of one on the way back.
+* **It recycles engine state.** [`Resources`][__link4] keeps the window and hash tables an engine
+  allocates and hands them to the next codec that needs them. On a small message that setup
+  costs about as much as the compression itself, so the saving is worth having.
+* **One API spans every format, at any size.** The same push/pull contract drives all five
+  engines, so code is written once and works with whichever one it is given. Because a codec is
+  a state machine rather than a one-shot transform, gigabytes pass through it with a working set
+  of one pending input view and one output chunk.
+
+Secondarily, this is also why the engines are not driven through `std::io`. `std::io::Read` and
+`std::io::Write` assume a single contiguous `&[u8]`, whereas a [`BytesView`][__link5] is a chain of
+segments with no contiguous representation, so bridging the two that way would mean copying
+every byte into a flat buffer first.
 
 ## Whole buffers
 
 Each format module has its own `compress` and `decompress` for the common case. The crate-level
-[`compress`][__link3] and [`decompress`][__link4] take an operation you already have instead, whatever built it.
+[`compress`][__link6] and [`decompress`][__link7] take an operation you already have instead, whatever built it.
 
 ```rust
 use bytesbuf::BytesView;
@@ -51,7 +63,7 @@ assert_eq!(
 
 A codec is a state machine rather than a one-shot transform, so a stream of any length moves
 through it with a bounded working set: one pending input view and one output chunk, however many
-gigabytes pass through. [`CompressionStream`][__link5], behind the `futures-stream` feature, is how to
+gigabytes pass through. [`CompressionStream`][__link8], behind the `futures-stream` feature, is how to
 reach that – it turns any stream of byte sequences into its compressed or decompressed
 counterpart:
 
@@ -79,9 +91,9 @@ assert_eq!(gzip.range(0..2).to_vec(), vec![0x1f, 0x8b]);
 
 ## Choosing a format
 
-When the format is only known at runtime – from a `Content-Encoding` token, say – [`Format`][__link6]
+When the format is only known at runtime – from a `Content-Encoding` token, say – [`Format`][__link9]
 resolves the token and compresses with whatever it names. Reach for
-[`CompressorBuilder::build_format`][__link7] instead when the level or the chunk size matters: it returns
+[`CompressorBuilder::build_format`][__link10] instead when the level or the chunk size matters: it returns
 an operation that fits wherever a concrete one does.
 
 ```rust
@@ -105,13 +117,13 @@ assert_eq!(
 ## Reusing engine state
 
 Building a compressor allocates and initializes a substantial amount of state – on a small
-message, as much work as the compression itself. [`Resources`][__link8] recycles it: hold one, hand it to
+message, as much work as the compression itself. [`Resources`][__link11] recycles it: hold one, hand it to
 every operation, and each engine returns to it when its codec drops. The saving is roughly fixed
 per message, so it matters most for small bodies.
 
 Recycling is on by default, which is why every API that builds a codec asks for resources rather
 than for a memory provider alone. Turn it off with
-[`enable_pooling(0)`][__link9] when there is genuinely nothing to reuse.
+[`enable_pooling(0)`][__link12] when there is genuinely nothing to reuse.
 
 ```rust
 use compressors::{Level, Resources, gzip};
@@ -137,9 +149,9 @@ keeps, which makes it the conveniences that buffer a whole result that need boun
 a 64 MiB output cap and a 1024 concatenated-stream cap to whatever the caller did not set.
 
 When you buffer decompressed output yourself, set
-[`with_max_output_len`][__link10] to what you can afford. That
+[`with_max_output_len`][__link13] to what you can afford. That
 guardrail is for the common case, not a substitute for bounding how many bodies you decompress
-at once. [`DecompressorLimits`][__link11] documents what each format bounds by default, and why a ratio
+at once. [`DecompressorLimits`][__link14] documents what each format bounds by default, and why a ratio
 alone is not protection.
 
 Decompression can yield bytes before a checksum or trailer has rejected the stream, so treat
@@ -156,12 +168,12 @@ engines it names:
 * `zlib` – the `zlib` module and `Format::Zlib`, via `flate2`.
 * `brotli` – the `brotli` module and `Format::Brotli`, via the pure-Rust `brotli` crate.
 * `zstd` – the `zstd` module and `Format::Zstd`, via `zstd-safe`.
-* `futures-stream` – [`CompressionStream`][__link12], presenting compression and decompression as a
+* `futures-stream` – [`CompressionStream`][__link15], presenting compression and decompression as a
   `futures_core::Stream` over any stream of byte sequences.
 
 The deflate-family features share one dependency, so enabling all three costs no more than one.
 A build that needs only `brotli` or only `zstd` never compiles `flate2` at all, and a build that
-names no format at all still gets [`Compression`][__link13], the builders and [`Resources`][__link14], which is what
+names no format at all still gets [`Compression`][__link16], the builders and [`Resources`][__link17], which is what
 a crate that only passes operations around needs.
 
 
@@ -170,19 +182,22 @@ a crate that only passes operations around needs.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/compressors">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbp2crvA7KUgobG5bgojiayJYbh4A-pxnRc8ob9P8qMfTqrrVhZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbTdkudQvI68obvsJDDdruXeAb11AFPpiz0J0byhJXkNZsB1thZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
  [__link0]: https://crates.io/crates/bytesbuf/0.9.0
- [__link1]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesView
- [__link10]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits::with_max_output_len
- [__link11]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits
- [__link12]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressionStream
- [__link13]: https://docs.rs/compressors/0.1.0/compressors/?search=core::Compression
- [__link14]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
- [__link2]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesBuf
- [__link3]: https://docs.rs/compressors/0.1.0/compressors/fn.compress.html
- [__link4]: https://docs.rs/compressors/0.1.0/compressors/fn.decompress.html
- [__link5]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressionStream
- [__link6]: https://docs.rs/compressors/0.1.0/compressors/?search=Format
- [__link7]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressorBuilder::build_format
- [__link8]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
- [__link9]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources::enable_pooling
+ [__link1]: https://crates.io/crates/bytesbuf/0.9.0
+ [__link10]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressorBuilder::build_format
+ [__link11]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
+ [__link12]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources::enable_pooling
+ [__link13]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits::with_max_output_len
+ [__link14]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits
+ [__link15]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressionStream
+ [__link16]: https://docs.rs/compressors/0.1.0/compressors/?search=core::Compression
+ [__link17]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
+ [__link2]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesView
+ [__link3]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesBuf
+ [__link4]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
+ [__link5]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesView
+ [__link6]: https://docs.rs/compressors/0.1.0/compressors/fn.compress.html
+ [__link7]: https://docs.rs/compressors/0.1.0/compressors/fn.decompress.html
+ [__link8]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressionStream
+ [__link9]: https://docs.rs/compressors/0.1.0/compressors/?search=Format
