@@ -44,8 +44,10 @@ pub(crate) fn capped_arena() -> Arena {
 }
 
 /// Aligned exactly at the smart-pointer cap: rejected by every
-/// smart-pointer entry point, accepted by the simple-reference paths.
+/// smart-pointer entry point, accepted by the simple-reference slice paths.
 #[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "bytemuck", derive(bytemuck::Zeroable))]
+#[cfg_attr(feature = "zerocopy", derive(zerocopy::FromZeros))]
 #[repr(C, align(4096))]
 pub(crate) struct SmartPtrOverAligned(pub(crate) u8);
 
@@ -63,6 +65,8 @@ impl Drop for SmartPtrOverAlignedDrop {
 /// Aligned exactly at the chunk cap: no chunk can satisfy it, so even the
 /// simple-reference paths reject it.
 #[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "bytemuck", derive(bytemuck::Zeroable))]
+#[cfg_attr(feature = "zerocopy", derive(zerocopy::FromZeros))]
 #[repr(C, align(8192))]
 pub(crate) struct ChunkOverAligned(pub(crate) u8);
 
@@ -73,36 +77,6 @@ const _: () = {
     assert!(align_of::<SmartPtrOverAlignedDrop>() == TEST_SMART_PTR_ALIGN);
     assert!(align_of::<ChunkOverAligned>() == TEST_CHUNK_ALIGN);
 };
-
-/// The `bytemuck` and `zerocopy` entry points bound `T` on their own marker
-/// traits, which cannot be derived from another module. Both helper types are
-/// a `u8` plus alignment padding, so every byte pattern — including all-zeros
-/// — is a valid instance.
-macro_rules! impl_zero_valid {
-    ($ty:ty) => {
-        #[cfg(feature = "bytemuck")]
-        // SAFETY: a `u8` plus alignment padding; all-zeros is a valid instance.
-        unsafe impl bytemuck::Zeroable for $ty {}
-
-        #[cfg(feature = "zerocopy")]
-        // SAFETY: a `u8` plus alignment padding; every byte pattern is valid.
-        unsafe impl zerocopy::TryFromBytes for $ty {
-            fn only_derive_is_allowed_to_implement_this_trait() {}
-            fn is_bit_valid<A: zerocopy::pointer::invariant::Alignment>(_candidate: zerocopy::Maybe<'_, Self, A>) -> bool {
-                true
-            }
-        }
-
-        #[cfg(feature = "zerocopy")]
-        // SAFETY: a `u8` plus alignment padding; all-zeros is a valid instance.
-        unsafe impl zerocopy::FromZeros for $ty {
-            fn only_derive_is_allowed_to_implement_this_trait() {}
-        }
-    };
-}
-
-impl_zero_valid!(SmartPtrOverAligned);
-impl_zero_valid!(ChunkOverAligned);
 
 /// Send-and-Sync allocator that fails after a fixed number of successful
 /// allocations.
