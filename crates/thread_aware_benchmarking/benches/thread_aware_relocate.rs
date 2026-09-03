@@ -23,7 +23,7 @@
 //! * `hit_path` / `miss_path` — uncontended cost of the two branches.
 //! * `concurrent` — the hit-path cost with as many concurrent workers as
 //!   processors, and beyond. Each worker uses distinct logical keys, while the
-//!   shared DashMap still performs shard-level read synchronization.
+//!   shared `DashMap` still performs shard-level read synchronization.
 //!
 //! Paired with `thread_aware_relocate_cg.rs`, which covers `hit_path` and
 //! `miss_path` under instruction-count measurement. The `concurrent` subgroup has
@@ -55,7 +55,7 @@ use thread_aware_benchmarking::{Payload, TREE_DEPTH, Tree};
 /// thread-per-core runtime reaches whenever it has more runnable work than cores.
 /// Every worker still relocates between its own already-filled source and
 /// destination keys, eliminating same-entry publication contention. Different
-/// keys may still share a DashMap shard, so the shape includes shard read-lock
+/// keys may still share a `DashMap` shard, so the shape includes shard read-lock
 /// synchronization as well as scheduler pressure.
 ///
 /// A small multiple is enough to reach that regime. Higher factors only add more
@@ -252,7 +252,7 @@ fn bench_miss_path(c: &mut Criterion) {
 /// reported per-iteration time is the batch makespan divided by the batch size: the
 /// amortized cost of one relocation on the worker that finishes last. Because the
 /// destinations are distinct and already populated, no two workers contend on one
-/// logical entry or execute a factory. They still access shared DashMap shards, so
+/// logical entry or execute a factory. They still access shared `DashMap` shards, so
 /// the figure includes any resulting read-lock synchronization.
 ///
 /// Readiness is proven before the clock starts. Every worker parks on `ready`,

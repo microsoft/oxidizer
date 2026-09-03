@@ -9,7 +9,7 @@
 //! threads, which the single-threaded Callgrind simulator cannot model.
 //!
 //! The instruction counts here are a regression guard, not a demonstration of
-//! the concurrency behavior. A hit acquires a DashMap shard read guard; a miss
+//! the concurrency behavior. A hit acquires a `DashMap` shard read guard; a miss
 //! takes the destination shard's entry path, runs the factory while holding the
 //! vacant write guard, and inserts the source value. Callgrind measures the
 //! single-threaded synchronization and instruction overhead of those operations,
