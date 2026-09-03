@@ -926,6 +926,58 @@ fn same_partition_path_records_the_original_source_thread() {
 }
 
 #[test]
+fn adopting_racer_retains_its_own_original_source_thread() {
+    // Pause one clone after it records A as its factory source but before it probes the empty
+    // destination partition. A second clone publishes B from C, forcing the paused clone to adopt
+    // that value when it resumes. Its later B -> D miss must still relocate its own factory state
+    // from A rather than inheriting the publisher's C provenance.
+    let threads = test_threads(&[4]);
+    let adopter_source = threads[0].clone();
+    let publisher_source = threads[1].clone();
+    let shared_destination = threads[2].clone();
+    let later_destination = threads[3].clone();
+
+    let recorded = sync::Arc::new(sync::Mutex::new(None));
+    let origin = PerThreadArc::new_with(SourceRecorder(sync::Arc::clone(&recorded)), |_recorder: SourceRecorder| 0_i32);
+    let mut adopter = origin.clone();
+    let mut publisher = origin;
+
+    let (paused_sender, paused_receiver) = sync::mpsc::sync_channel(0);
+    let (resume_sender, resume_receiver) = sync::mpsc::sync_channel(0);
+    let adopter_source_for_thread = adopter_source.clone();
+    let shared_destination_for_thread = shared_destination.clone();
+    let adopter_thread = std::thread::spawn(move || {
+        let hook_guard = super::arc::set_after_factory_update_hook(move || {
+            paused_sender.send(()).unwrap();
+            resume_receiver.recv().unwrap();
+        });
+
+        adopter.relocate(Some(&adopter_source_for_thread), &shared_destination_for_thread);
+        drop(hook_guard);
+        adopter
+    });
+
+    paused_receiver.recv().unwrap();
+    publisher.relocate(Some(&publisher_source), &shared_destination);
+    let published = sync::Arc::clone(&publisher.value);
+
+    *recorded.lock().unwrap() = None;
+    resume_sender.send(()).unwrap();
+    let mut adopter = adopter_thread.join().unwrap();
+    assert!(
+        sync::Arc::ptr_eq(&adopter.value, &published),
+        "the paused racer must adopt the value published for the shared destination"
+    );
+
+    adopter.relocate(Some(&shared_destination), &later_destination);
+    assert_eq!(
+        *recorded.lock().unwrap(),
+        Some(adopter_source),
+        "an adopting racer must retain its own original source for later materialization"
+    );
+}
+
+#[test]
 fn dropping_factory_update_hook_guard_clears_the_hook() {
     let calls = sync::Arc::new(AtomicUsize::new(0));
 
