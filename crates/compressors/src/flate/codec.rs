@@ -15,6 +15,12 @@ use crate::limits::FormatLimits;
 use crate::pool::{EngineKey, Pool};
 use crate::trailing::TrailingData;
 
+/// Drives `flate2`'s encoder for one compressed stream.
+///
+/// Owns the engine for the whole operation and hands it back to the pool on drop, so `compress` is
+/// `Some` until then. `key` records the container and level the engine was built with, because
+/// `reset` preserves both and a recycled engine is therefore only interchangeable with one built
+/// the same way. Nothing here spans more than one stream: the deflate family does not concatenate.
 #[derive(Debug)]
 pub(crate) struct FlateCompress {
     /// `Some` until the engine is handed back in `drop`.
@@ -84,6 +90,16 @@ unsafe impl Codec for FlateCompress {
     }
 }
 
+/// Drives `flate2`'s decoder, across as many concatenated streams as the configuration allows.
+///
+/// Splits into three lifetimes. `decompress` and `recycle` last the whole operation, the engine
+/// going back to the pool on drop. `limits`, `multi_stream` and `trailing_data` are the fixed
+/// policy the builder chose. `needs_reset` spans one stream: it is set when a stream ends and
+/// consumed before the next one starts, so the reset happens lazily and only if another stream
+/// actually arrives.
+///
+/// `recycle` is absent for gzip, whose decompressor cannot be pooled -- `flate2`'s reset takes a
+/// boolean that cannot express gzip framing, so a recycled engine would decode as raw deflate.
 #[derive(Debug)]
 pub(crate) struct FlateDecompress {
     /// `Some` until the engine is handed back in `drop`.

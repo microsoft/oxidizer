@@ -58,6 +58,12 @@ fn compress_stream_failed() -> Error {
     Error::invalid_state("the brotli compression engine reported a failure")
 }
 
+/// Drives the `brotli` crate's encoder for one compressed stream.
+///
+/// The encoder is owned outright rather than borrowed from a pool: brotli exposes no reset, so
+/// there is nothing to hand back and no `Drop` work to do. `finished` latches once the encoder has
+/// emitted its terminal block, and the pump never calls `step` again after that -- which is what
+/// makes the "driven inconsistently" branch of `compress_stream` unreachable from here.
 pub(crate) struct BrotliCompress {
     state: BrotliEncoderStateStruct<StandardAlloc>,
     finished: bool,
@@ -152,6 +158,13 @@ unsafe impl Codec for BrotliCompress {
     }
 }
 
+/// Drives the `brotli` crate's decoder, across as many concatenated streams as the configuration
+/// allows.
+///
+/// Like the encoder, the state is owned rather than pooled. `limits`, `multi_stream` and
+/// `trailing_data` are fixed policy; `needs_reset` spans one stream and defers the reset until
+/// another stream actually arrives. `total_out` is counted here rather than read back from the
+/// decoder, because the decoder reports per-call progress and the limits are cumulative.
 pub(crate) struct BrotliDecompress {
     state: BrotliState<HeapAlloc<u8>, HeapAlloc<u32>, HeapAlloc<HuffmanCode>>,
     limits: FormatLimits,

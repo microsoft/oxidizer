@@ -151,6 +151,12 @@ fn reset_for_next_frame_failed(code: usize) -> Error {
     ))
 }
 
+/// Drives zstd's compression context for one compressed stream.
+///
+/// The context lasts the whole operation and returns to the pool on drop, so `context` is `Some`
+/// until then. `level` is re-applied on every checkout rather than baked into the pooled context,
+/// which is why the compressor pool is unkeyed: any idle context serves any level, so a
+/// caller-chosen level cannot fragment reuse or grow the pool.
 pub(crate) struct ZstdCompress {
     /// `Some` until the context is handed back in `drop`.
     context: Option<CCtx<'static>>,
@@ -223,6 +229,13 @@ unsafe impl Codec for ZstdCompress {
     }
 }
 
+/// Drives zstd's decompression context, across as many concatenated frames as the configuration
+/// allows.
+///
+/// `context` and `recycle` last the whole operation, the context going back to the pool on drop.
+/// `limits`, `multi_stream` and `trailing_data` are the fixed policy the builder chose.
+/// `needs_reset` spans one frame: zstd concatenates by default, so this is the common path rather
+/// than the exception, and the reset is deferred until another frame actually arrives.
 pub(crate) struct ZstdDecompress {
     /// `Some` until the context is handed back in `drop`.
     context: Option<DCtx<'static>>,
