@@ -1089,7 +1089,11 @@ fn factory_panic_leaves_destination_available_for_retry() {
     let mut reused = arc.clone();
     reused.relocate(Some(&source), &destination);
     assert!(sync::Arc::ptr_eq(&reused.value, &published));
-    assert_eq!(attempts.load(Ordering::Relaxed), 2, "reusing a published value must not rerun the factory");
+    assert_eq!(
+        attempts.load(Ordering::Relaxed),
+        2,
+        "reusing a published value must not rerun the factory"
+    );
 }
 
 #[test]
