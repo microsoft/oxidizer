@@ -392,9 +392,6 @@ macro_rules! define_format {
                 $crate::CompressorBuilder::default()
             }
         }
-
-        impl $crate::core::sealed::Compression for Compressor {}
-
         impl $crate::core::Compression for Compressor {
             type Mode = $crate::core::Compress;
         }
@@ -455,9 +452,6 @@ macro_rules! define_format {
                 $crate::DecompressorBuilder::default()
             }
         }
-
-        impl $crate::core::sealed::Compression for Decompressor {}
-
         impl $crate::core::Compression for Decompressor {
             type Mode = $crate::core::Decompress;
         }

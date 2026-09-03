@@ -12,8 +12,6 @@
 //!
 //! [`Output`] is what one step of that contract reports, so it lives here too.
 
-use std::fmt;
-
 use bytesbuf::{BytesBuf, BytesView};
 
 use crate::error::Result;
@@ -22,16 +20,66 @@ mod output;
 
 pub use output::Output;
 
-pub(crate) mod sealed {
-    /// Restricts [`CompressionInternal`][super::CompressionInternal] to this crate's own
-    /// implementations.
-    ///
-    /// Each format module implements this for its compressor and decompressor beside the real
-    /// implementation, so adding a format needs no edit here.
-    pub trait Compression {}
+pub(crate) mod internal {
+    use std::fmt;
 
-    impl<D> Compression for Box<dyn super::Compression<Mode = D>> {}
+    use bytesbuf::BytesView;
+
+    use super::Output;
+    use crate::error::Result;
+
+    /// The push/pull mechanics behind every [`Compression`][super::Compression] implementation.
+    ///
+    /// This is deliberately kept off [`Compression`][super::Compression], and this module is
+    /// `pub(crate)`, so none of it reaches the public API. What that trait is for is *naming* an
+    /// operation; these methods are how this crate drives one.
+    ///
+    /// Being unnameable outside the crate is also what seals [`Compression`][super::Compression]:
+    /// a downstream crate cannot implement a supertrait it cannot refer to, so formats and methods
+    /// can be added here without breaking anyone. Every implementation is `Send + Sync`.
+    pub trait CompressionInternal: fmt::Debug + Send + Sync {
+        /// Supplies more input.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if input is still pending or end of input has been signaled.
+        fn push(&mut self, input: BytesView) -> Result<()>;
+
+        /// Signals that no further input will be supplied.
+        fn end_input(&mut self);
+
+        /// Produces the next output chunk.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if the underlying engine fails or the input is invalid.
+        fn pull(&mut self) -> Result<Output>;
+
+        /// The number of bytes consumed from the input so far.
+        fn total_in(&self) -> u64;
+
+        /// The number of bytes produced so far.
+        fn total_out(&self) -> u64;
+
+        /// Requests a resumable flush of everything supplied so far.
+        ///
+        /// Drain [`pull`][CompressionInternal::pull] until it reports [`Output::NeedInput`] before
+        /// pushing more input. Flushing ends a compressed block early, which can cost compression
+        /// ratio, so use it only when the bytes have to reach the far end before the stream does.
+        ///
+        /// Decompression has nothing to flush -- output is already produced as soon as the input
+        /// allows -- so this does nothing there, which is what the default implementation is.
+        ///
+        /// # Errors
+        ///
+        /// Returns an invalid-state error after end of input or a previous operation failure.
+        fn flush(&mut self) -> Result<()> {
+            Ok(())
+        }
+    }
 }
+
+pub(crate) use internal::CompressionInternal;
 
 /// Marks a [`Compression`] implementation that compresses its input.
 ///
@@ -60,10 +108,9 @@ pub struct Decompress;
 /// # The mechanics are an internal detail
 ///
 /// What this trait is *for* is naming an operation: `impl Compression<Mode = Compress>` accepts any
-/// compressor and no decompressor. How this crate actually drives one lives on
-/// [`CompressionInternal`], a hidden supertrait that no downstream crate can implement. Treat it as
-/// internal: it is absent from the rendered documentation, and its methods can change without that
-/// being a breaking change worth announcing.
+/// compressor and no decompressor. How this crate actually drives one -- pushing input, pulling
+/// output, ending input -- lives on a crate-private supertrait that no downstream crate can name,
+/// let alone implement. Those mechanics are therefore not public API and can change freely.
 ///
 /// Reach for [`compress`][crate::compress] and [`decompress`][crate::decompress] for a complete
 /// buffer, or [`CompressionStream`][crate::CompressionStream] for data that arrives over time.
@@ -98,56 +145,6 @@ pub struct Decompress;
 pub trait Compression: CompressionInternal {
     /// Whether this implementation compresses or decompresses its input.
     type Mode;
-}
-
-/// The push/pull mechanics behind every [`Compression`] implementation.
-///
-/// This is deliberately kept off [`Compression`] itself: what that trait is for is naming an
-/// operation, and these methods are how this crate drives one. They are documented here only for
-/// the reader of this crate's own source.
-///
-/// The trait is sealed, so it cannot be implemented outside this crate and methods can be added to
-/// it without breaking downstream code. Every implementation is `Send + Sync`.
-#[doc(hidden)]
-pub trait CompressionInternal: sealed::Compression + fmt::Debug + Send + Sync {
-    /// Supplies more input.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if input is still pending or end of input has been signaled.
-    fn push(&mut self, input: BytesView) -> Result<()>;
-
-    /// Signals that no further input will be supplied.
-    fn end_input(&mut self);
-
-    /// Produces the next output chunk.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the underlying engine fails or the input is invalid.
-    fn pull(&mut self) -> Result<Output>;
-
-    /// The number of bytes consumed from the input so far.
-    fn total_in(&self) -> u64;
-
-    /// The number of bytes produced so far.
-    fn total_out(&self) -> u64;
-
-    /// Requests a resumable flush of everything supplied so far.
-    ///
-    /// Drain [`pull`][CompressionInternal::pull] until it reports [`Output::NeedInput`] before
-    /// pushing more input. Flushing ends a compressed block early, which can cost compression
-    /// ratio, so use it only when the bytes have to reach the far end before the stream does.
-    ///
-    /// Decompression has nothing to flush -- output is already produced as soon as the input allows
-    /// -- so this does nothing there, which is what the default implementation is.
-    ///
-    /// # Errors
-    ///
-    /// Returns an invalid-state error after end of input or a previous operation failure.
-    fn flush(&mut self) -> Result<()> {
-        Ok(())
-    }
 }
 
 /// Drives one complete input through `operation` and returns the whole result.
@@ -227,8 +224,6 @@ impl ProgressCompression {
 }
 
 #[cfg(all(test, feature = "futures-stream"))]
-impl sealed::Compression for ProgressCompression {}
-
 #[cfg(all(test, feature = "futures-stream"))]
 impl Compression for ProgressCompression {
     type Mode = Compress;
@@ -269,8 +264,6 @@ impl CompressionInternal for ProgressCompression {
 pub(crate) struct RejectsPush;
 
 #[cfg(all(test, feature = "futures-stream"))]
-impl sealed::Compression for RejectsPush {}
-
 #[cfg(all(test, feature = "futures-stream"))]
 impl Compression for RejectsPush {
     type Mode = Compress;
@@ -321,9 +314,6 @@ mod tests {
         struct ProgressOnceThenDone {
             done: bool,
         }
-
-        impl sealed::Compression for ProgressOnceThenDone {}
-
         impl Compression for ProgressOnceThenDone {
             type Mode = Compress;
         }
@@ -368,9 +358,6 @@ mod tests {
     fn process_rejects_a_pull_that_still_requests_input_after_end() {
         #[derive(Debug)]
         struct NeedsMoreForever;
-
-        impl sealed::Compression for NeedsMoreForever {}
-
         impl Compression for NeedsMoreForever {
             type Mode = Compress;
         }

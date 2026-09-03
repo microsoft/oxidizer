@@ -6,14 +6,13 @@
 //! Gzip specific: interop fixtures produced by the system `gzip`, and the concatenated-member
 //! behaviour that only gzip enables by default.
 
-#![cfg(feature = "gzip")]
-
 use std::num::NonZeroUsize;
 
 use bytesbuf::mem::GlobalPool;
 use bytesbuf::{BytesBuf, BytesView};
-use compressors::core::{CompressionInternal as _, Output};
-use compressors::{DecompressorLimits, Resources, gzip};
+
+use crate::core::{CompressionInternal as _, Output};
+use crate::{DecompressorLimits, Resources, gzip};
 
 /// The payload behind `tests/fixtures/system_gzip.gz`, compressed by the system `gzip -9 -n`.
 const FIXTURE_PLAINTEXT: &[u8] = b"The quick brown fox jumps over the lazy dog.\nPack my box with five dozen liquor jugs.\n";
@@ -61,7 +60,7 @@ impl StepGuard {
 }
 
 /// Drives a codec to completion over an input delivered in `feed` sized pieces.
-fn drive_decompressor(mut decompressor: gzip::Decompressor, input: &BytesView, feed: usize) -> compressors::Result<BytesView> {
+fn drive_decompressor(mut decompressor: gzip::Decompressor, input: &BytesView, feed: usize) -> crate::Result<BytesView> {
     let mut offset = 0;
     let mut collected = BytesBuf::new();
 

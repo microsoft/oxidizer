@@ -219,6 +219,8 @@ pub mod zstd;
 
 #[cfg(feature = "futures-stream")]
 mod stream;
+#[cfg(test)]
+mod tests;
 
 pub use builder::{CompressorBuilder, DecompressorBuilder};
 use bytesbuf::BytesView;

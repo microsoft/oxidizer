@@ -7,15 +7,14 @@
 //! so a format that behaves differently from its siblings -- or an abstraction that quietly only
 //! fits the deflate family -- fails here rather than surprising a consumer.
 
-#![cfg(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
-
 use std::num::{NonZeroU32, NonZeroU64, NonZeroUsize};
 use std::sync::OnceLock;
 
 use bytesbuf::mem::GlobalPool;
 use bytesbuf::{BytesBuf, BytesView};
-use compressors::core::{Compress, Compression, CompressionInternal, Decompress, Output};
-use compressors::{CompressorBuilder, DecompressorBuilder, DecompressorLimits, Format, Level, Resources, TrailingData};
+
+use crate::core::{Compress, Compression, CompressionInternal, Decompress, Output};
+use crate::{CompressorBuilder, DecompressorBuilder, DecompressorLimits, Format, Level, Resources, TrailingData};
 
 fn view(bytes: &[u8]) -> BytesView {
     BytesView::copied_from_slice(bytes, &GlobalPool::new())
@@ -52,7 +51,7 @@ trait Built {
     fn built(self) -> Self::Codec;
 }
 
-impl<T> Built for Result<T, compressors::BuildError> {
+impl<T> Built for Result<T, crate::BuildError> {
     type Codec = T;
 
     fn built(self) -> T {
@@ -86,7 +85,7 @@ impl StepGuard {
     }
 }
 
-fn process<D>(compression: &mut dyn Compression<Mode = D>, input: &BytesView, feed: usize) -> compressors::Result<BytesView> {
+fn process<D>(compression: &mut dyn Compression<Mode = D>, input: &BytesView, feed: usize) -> crate::Result<BytesView> {
     let mut offset = 0;
     let mut collected = BytesBuf::new();
 
@@ -111,11 +110,11 @@ fn process<D>(compression: &mut dyn Compression<Mode = D>, input: &BytesView, fe
     }
 }
 
-fn compress(compressor: &mut dyn Compression<Mode = Compress>, input: &BytesView, feed: usize) -> compressors::Result<BytesView> {
+fn compress(compressor: &mut dyn Compression<Mode = Compress>, input: &BytesView, feed: usize) -> crate::Result<BytesView> {
     process(compressor, input, feed)
 }
 
-fn decompress(decompressor: &mut dyn Compression<Mode = Decompress>, input: &BytesView, feed: usize) -> compressors::Result<BytesView> {
+fn decompress(decompressor: &mut dyn Compression<Mode = Decompress>, input: &BytesView, feed: usize) -> crate::Result<BytesView> {
     process(decompressor, input, feed)
 }
 
@@ -124,7 +123,7 @@ fn decompress(decompressor: &mut dyn Compression<Mode = Decompress>, input: &Byt
 macro_rules! format_contract {
     ($module:ident, $format:expr) => {
         mod $module {
-            use compressors::$module;
+            use crate::$module;
 
             use super::*;
 
@@ -166,7 +165,7 @@ macro_rules! format_contract {
                 // The convenience must be exactly the manual loop, not an approximation of it.
                 let data = payload();
 
-                let convenient = compressors::compress(view(&data), $module::Compressor::new(resources())).expect("compression succeeds");
+                let convenient = crate::compress(view(&data), $module::Compressor::new(resources())).expect("compression succeeds");
 
                 let mut by_hand = $module::Compressor::new(resources());
                 by_hand.push(view(&data)).expect("push succeeds");
@@ -185,7 +184,7 @@ macro_rules! format_contract {
 
                 assert_eq!(convenient.to_vec(), collected.consume_all().to_vec());
 
-                let plain = compressors::decompress(convenient, $module::Decompressor::new(resources())).expect("decompression succeeds");
+                let plain = crate::decompress(convenient, $module::Decompressor::new(resources())).expect("decompression succeeds");
 
                 assert_eq!(plain.to_vec(), data);
             }
@@ -196,12 +195,12 @@ macro_rules! format_contract {
                 let data = payload();
 
                 let compressor: Box<dyn Compression<Mode = Compress>> = Box::new($module::Compressor::new(resources()));
-                let compressed = compressors::compress(view(&data), compressor).expect("compression succeeds");
+                let compressed = crate::compress(view(&data), compressor).expect("compression succeeds");
 
                 let decompressor: Box<dyn Compression<Mode = Decompress>> = Box::new($module::Decompressor::new(resources()));
 
                 assert_eq!(
-                    compressors::decompress(compressed, decompressor)
+                    crate::decompress(compressed, decompressor)
                         .expect("decompression succeeds")
                         .to_vec(),
                     data
@@ -1390,8 +1389,8 @@ fn a_decompressor_can_be_chosen_from_a_declared_encoding() {
 /// Format-specific settings: how a format extends the shared builder without breaking the contract.
 #[cfg(feature = "brotli")]
 mod format_specific_settings {
-    use compressors::brotli;
-    use compressors::brotli::{Mode, Quality, WindowSize};
+    use crate::brotli;
+    use crate::brotli::{Mode, Quality, WindowSize};
 
     use super::*;
 
@@ -1491,8 +1490,8 @@ mod format_specific_settings {
 
 #[cfg(feature = "zstd")]
 mod zstd_specific_settings {
-    use compressors::zstd;
-    use compressors::zstd::{CompressionLevel, WindowLog};
+    use crate::zstd;
+    use crate::zstd::{CompressionLevel, WindowLog};
 
     use super::*;
 
@@ -1503,13 +1502,13 @@ mod zstd_specific_settings {
             .compression_level(CompressionLevel::min())
             .build(resources())
             .built();
-        let compressed = compressors::compress(view(&data), compressor).expect("compression succeeds");
+        let compressed = crate::compress(view(&data), compressor).expect("compression succeeds");
 
         let decompressor = zstd::Decompressor::builder()
             .max_window_log(WindowLog::DEFAULT)
             .build(resources())
             .built();
-        let plain = compressors::decompress(compressed, decompressor).expect("decompression succeeds");
+        let plain = crate::decompress(compressed, decompressor).expect("decompression succeeds");
 
         assert_eq!(plain.to_vec(), data);
     }
@@ -1518,7 +1517,7 @@ mod zstd_specific_settings {
 /// Engine reuse must be invisible: a recycled compressor has to behave exactly like a fresh one.
 #[cfg(feature = "gzip")]
 mod pooling {
-    use compressors::gzip;
+    use crate::gzip;
 
     use super::*;
 
@@ -1645,7 +1644,7 @@ mod pooling {
     #[cfg(feature = "zlib")]
     #[test]
     fn a_decompressor_abandoned_mid_stream_does_not_poison_the_pool() {
-        use compressors::zlib;
+        use crate::zlib;
         let payload = b"a stream that gets cut short ".repeat(200);
         let compressed = zlib::compress(view(&payload), resources()).expect("compression succeeds");
 
@@ -1830,7 +1829,7 @@ fn pooled_output_does_not_drift_over_many_reuses() {
 /// `core` deliberately knows about none.
 #[cfg(feature = "gzip")]
 mod trait_contract {
-    use compressors::gzip;
+    use crate::gzip;
 
     use super::*;
 
