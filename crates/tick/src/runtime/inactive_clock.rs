@@ -13,7 +13,7 @@ use crate::state::ClockState;
 ///
 /// This is the default mode. Clones can be relocated to different threads via
 /// [`ThreadAware::relocate`], producing independent timer storage per thread. Suitable for
-/// thread-per-core runtimes.
+/// runtimes with stable worker threads.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
 pub struct Isolated;
@@ -59,9 +59,9 @@ pub struct Shared;
 /// // driver.advance_timers(std::time::Instant::now());
 /// ```
 ///
-/// # Thread-per-core runtimes
+/// # Thread-aware isolated runtimes
 ///
-/// In thread-per-core architectures, clone the `InactiveClock` and
+/// In runtimes that keep work on stable worker threads, clone the `InactiveClock` and
 /// [`relocate`](thread_aware::ThreadAware::relocate) each clone to its target thread before
 /// activation. Relocation creates per-thread timer storage, so each thread gets an independent set
 /// of timers with no cross-thread lock contention.

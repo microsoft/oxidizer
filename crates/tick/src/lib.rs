@@ -151,7 +151,7 @@
 //! # Thread-aware relocation
 //!
 //! All clock types implement [`ThreadAware`](thread_aware::ThreadAware), supporting per-thread
-//! timer isolation in thread-per-core runtime architectures.
+//! timer isolation in thread-isolated runtime architectures.
 //!
 //! When an [`InactiveClock`][runtime::InactiveClock] is
 //! [relocated](thread_aware::ThreadAware::relocate) to a target thread, the underlying timer

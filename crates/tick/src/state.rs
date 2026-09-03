@@ -83,7 +83,7 @@ pub(crate) enum SynchronizedTimers {
     Shared(std::sync::Arc<Mutex<Timers>>),
 
     /// Per-thread isolated timer storage. [`ThreadAware::relocate`] creates a fresh timer set on
-    /// the destination thread, enabling thread-per-core runtimes to operate on independent timers
+    /// the destination thread, enabling thread-isolated runtimes to operate on independent timers
     /// with no cross-thread lock contention.
     Isolated(thread_aware::Arc<Mutex<Timers>, PerThread>),
 }

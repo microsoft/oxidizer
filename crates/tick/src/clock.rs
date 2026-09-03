@@ -84,7 +84,7 @@ use crate::timers::TimerKey;
 /// # Thread-aware relocation
 ///
 /// `Clock` implements [`ThreadAware`](thread_aware::ThreadAware), enabling per-thread timer isolation
-/// in thread-per-core runtime architectures.
+/// in thread-isolated runtime architectures.
 ///
 /// How relocation affects the clock depends on the underlying clock variant:
 ///
@@ -105,7 +105,7 @@ use crate::timers::TimerKey;
 ///   would create independent timer storage on the destination thread that the background driver
 ///   does not advance, so relocation is intentionally suppressed.
 ///
-/// For thread-per-core setups, the typical pattern is to clone an
+/// For thread-isolated setups, the typical pattern is to clone an
 /// [`InactiveClock`][crate::runtime::InactiveClock], relocate each clone to its target thread,
 /// and then activate it. See the [`runtime`][crate::runtime] module for details.
 ///

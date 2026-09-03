@@ -12,8 +12,8 @@ use crate::state::ClockState;
 /// the clock. The runtime must call [`ClockDriver::advance_timers`] periodically to
 /// ensure timers fire at the correct time.
 ///
-/// In thread-per-core architectures, each thread owns its own `ClockDriver` that advances
-/// only the timers registered on that thread's [`Clock`][crate::Clock]. See the
+/// In thread-isolated runtime architectures, each worker owns its own `ClockDriver` that
+/// advances only the timers registered on that thread's [`Clock`][crate::Clock]. See the
 /// [`runtime`][crate::runtime] module for the setup pattern.
 #[derive(Debug)]
 pub struct ClockDriver {
