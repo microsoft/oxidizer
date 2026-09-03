@@ -69,7 +69,8 @@ type parameter. This controls how the internal state is partitioned across threa
 
 * [`PerProcess`][__link4] (default): Single global state, maximum deduplication
 * [`PerNumaNode`][__link5]: Separate state per NUMA node, NUMA-local memory access
-* [`PerThread`][__link6]: Separate state per thread, no deduplication (useful for already-partitioned work)
+* [`PerThread`][__link6]: Separate state per thread; the same key coalesces within one thread
+  partition, with no sharing across thread partitions
 
 ```rust
 use thread_aware::PerNumaNode;
@@ -135,7 +136,7 @@ Use `--save-baseline` and `--baseline` flags to track regressions over time.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/uniflight">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbxVH-5Ud_Z5wbpx0B6dpq9YgblhlS6AAhGgUb5EKrOvxlkOlhZIKCbHRocmVhZF9hd2FyZWYwLjExLjCCaXVuaWZsaWdodGUwLjUuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbY6wXwvRz0pQbx6KzuUtboiQbugWkMR1TOusbWXF-IL5rJU9hZIKCbHRocmVhZF9hd2FyZWYwLjExLjCCaXVuaWZsaWdodGUwLjUuMA
  [__link0]: https://docs.rs/uniflight/0.5.0/uniflight/struct.Merger.html
  [__link1]: https://docs.rs/uniflight/0.5.0/uniflight/?search=Merger::execute
  [__link10]: https://doc.rust-lang.org/stable/std/?search=hash::Hash

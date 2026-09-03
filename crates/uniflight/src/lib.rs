@@ -62,7 +62,8 @@
 //!
 //! - [`PerProcess`] (default): Single global state, maximum deduplication
 //! - [`PerNumaNode`]: Separate state per NUMA node, NUMA-local memory access
-//! - [`PerThread`]: Separate state per thread, no deduplication (useful for already-partitioned work)
+//! - [`PerThread`]: Separate state per thread; the same key coalesces within one thread
+//!   partition, with no sharing across thread partitions
 //!
 //! ```
 //! use thread_aware::PerNumaNode;
@@ -149,7 +150,7 @@ use thread_aware::{Arc as TaArc, PerNumaNode, PerProcess, PerThread, Thread, Thr
 /// The `S` type parameter controls the thread-aware scoping strategy:
 /// - [`PerProcess`]: Single global scope (default, maximum deduplication)
 /// - [`PerNumaNode`]: Per-NUMA-node scope (NUMA-local memory access)
-/// - [`PerThread`]: Per-thread scope (no deduplication)
+/// - [`PerThread`]: Per-thread scope (same-key work coalesces only within one thread partition)
 pub struct Merger<K, T, S: Strategy = PerProcess> {
     inner: TaArc<DashMap<K, Weak<PanicAwareCell<T>>, RandomState>, S>,
 }
@@ -190,7 +191,8 @@ where
     /// The scoping strategy is determined by the type parameter `S`:
     /// - [`PerProcess`] (default): Process-wide scope, maximum deduplication
     /// - [`PerNumaNode`]: Per-NUMA-node scope, NUMA-local memory access
-    /// - [`PerThread`]: Per-thread scope, no cross-thread deduplication
+    /// - [`PerThread`]: Per-thread scope, with same-key coalescing inside each thread partition
+    ///   and no sharing across thread partitions
     ///
     /// # Examples
     ///
@@ -271,8 +273,10 @@ where
 {
     /// Creates a new `Merger` with per-thread scoping.
     ///
-    /// Each thread gets its own deduplication scope. This is useful when work
-    /// is already partitioned by thread and cross-thread deduplication is not needed.
+    /// Each thread gets its own deduplication scope. Concurrent calls with the
+    /// same key coalesce within that thread's partition, but calls in different
+    /// thread partitions never share work. This is useful when work is already
+    /// partitioned by thread.
     ///
     /// # Example
     ///
