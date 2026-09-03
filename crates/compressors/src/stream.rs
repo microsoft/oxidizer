@@ -74,7 +74,7 @@ where
                 }
                 Poll::Ready(Some(Err(error))) => {
                     *finished = true;
-                    return Poll::Ready(Some(Err(Error::source(error))));
+                    return Poll::Ready(Some(Err(Error::other("the underlying stream failed", error))));
                 }
             },
         }

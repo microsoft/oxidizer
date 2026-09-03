@@ -5,6 +5,8 @@ use std::borrow::Cow;
 use std::error::Error as StdError;
 use std::fmt;
 
+use recoverable::{Recovery, RecoveryInfo};
+
 /// The failure mode of an [`Error`].
 ///
 /// Deliberately private: keeping the discriminants out of the public API means new failure modes
@@ -19,10 +21,47 @@ pub(crate) enum Kind {
     Source,
 }
 
+impl Kind {
+    /// How a failure of this kind is recovered from, absent anything more specific.
+    fn default_recovery(self) -> RecoveryInfo {
+        match self {
+            // The bytes decoded so far were valid, so the producer stopped early or the transport
+            // truncated the stream. Asking again often gets the rest.
+            Self::UnexpectedEndOfStream => RecoveryInfo::retry(),
+            // A foreign failure classifies itself; until one is detected or supplied, this crate
+            // has nothing to say about it.
+            Self::Source => RecoveryInfo::unknown(),
+            // Malformed input stays malformed, a bound stays exceeded, and misuse or a rejected
+            // setting needs a code change rather than another attempt.
+            Self::CorruptData | Self::LimitExceeded | Self::InvalidState | Self::InvalidConfiguration => RecoveryInfo::never(),
+        }
+    }
+}
+
+/// Classifies a foreign error by looking for an [`io::Error`][std::io::Error] in its chain.
+///
+/// An engine or transport failure is usually an IO failure wearing a wrapper, and `recoverable`
+/// already classifies every [`ErrorKind`][std::io::ErrorKind]. Anything else is unknown rather than
+/// guessed at.
+fn detect_recovery(source: &(dyn StdError + 'static)) -> RecoveryInfo {
+    let mut current = Some(source);
+
+    while let Some(error) = current {
+        if let Some(io) = error.downcast_ref::<std::io::Error>() {
+            return RecoveryInfo::from(io.kind());
+        }
+
+        current = error.source();
+    }
+
+    RecoveryInfo::unknown()
+}
+
 /// An error produced while compressing or decompressing.
 ///
 /// This is a single canonical error type rather than an enum, so that new failure modes do not
-/// break downstream `match` statements. Classify a failure with the `is_*` accessors.
+/// break downstream `match` statements. Classify a failure with the `is_*` accessors, or with
+/// [`recovery`][Recovery::recovery] when what matters is whether retrying could help.
 ///
 /// # Examples
 ///
@@ -45,6 +84,7 @@ pub struct Error {
     kind: Kind,
     message: Cow<'static, str>,
     source: Option<Box<dyn StdError + Send + Sync>>,
+    recovery: RecoveryInfo,
 }
 
 #[cfg_attr(
@@ -60,15 +100,13 @@ impl Error {
             kind,
             message: message.into(),
             source: None,
+            recovery: kind.default_recovery(),
         }
     }
 
     #[cfg_attr(
-        all(
-            not(test),
-            not(any(feature = "deflate", feature = "futures-stream", feature = "gzip", feature = "zlib"))
-        ),
-        expect(dead_code, reason = "only the flate codecs and the stream adapters attach a source")
+        all(not(test), not(any(feature = "deflate", feature = "gzip", feature = "zlib"))),
+        expect(dead_code, reason = "only the flate codecs attach a source")
     )]
     pub(crate) fn with_source(mut self, source: impl StdError + Send + Sync + 'static) -> Self {
         self.source = Some(Box::new(source));
@@ -114,16 +152,79 @@ impl Error {
     pub(crate) fn invalid_configuration(message: impl Into<Cow<'static, str>>) -> Self {
         Self::new(Kind::InvalidConfiguration, message)
     }
-
-    #[cfg(feature = "futures-stream")]
-    pub(crate) fn source(source: impl Into<Box<dyn StdError + Send + Sync>>) -> Self {
-        let mut error = Self::new(Kind::Source, "the underlying stream failed");
-        error.source = Some(source.into());
-        error
-    }
 }
 
 impl Error {
+    /// Wraps a foreign error, classifying it by inspecting it.
+    ///
+    /// Use this to carry a failure from something this crate drives -- a transport, a reader, an
+    /// engine binding -- through an API that returns this crate's [`Error`]. The wrapped error stays
+    /// reachable through [`source`][std::error::Error::source], and
+    /// [`is_source`][Self::is_source] reports the resulting error.
+    ///
+    /// The recovery information is detected rather than assumed: if an
+    /// [`io::Error`][std::io::Error] appears anywhere in `source`'s chain, its
+    /// [`ErrorKind`][std::io::ErrorKind] decides the classification. Anything else is
+    /// [`RecoveryInfo::unknown`]. Reach for [`other_with_recovery`][Self::other_with_recovery] when
+    /// you already know better than the heuristic.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::io;
+    ///
+    /// use compressors::Error;
+    /// use recoverable::{Recovery, RecoveryKind};
+    ///
+    /// let error = Error::other("reading the body failed", io::Error::from(io::ErrorKind::TimedOut));
+    ///
+    /// assert!(error.is_source());
+    /// assert_eq!(error.recovery().kind(), RecoveryKind::Retry);
+    /// ```
+    #[must_use]
+    pub fn other(message: impl Into<Cow<'static, str>>, source: impl Into<Box<dyn StdError + Send + Sync>>) -> Self {
+        let source = source.into();
+        let recovery = detect_recovery(&*source);
+
+        Self::other_with_recovery(message, source, recovery)
+    }
+
+    /// Wraps a foreign error with recovery information you supply.
+    ///
+    /// Identical to [`other`][Self::other] except that `recovery` is attached as given, for when the
+    /// caller knows how the failure should be handled and the heuristic cannot.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressors::Error;
+    /// use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
+    ///
+    /// #[derive(Debug)]
+    /// struct Throttled;
+    /// # impl std::fmt::Display for Throttled {
+    /// #     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    /// #         f.write_str("throttled")
+    /// #     }
+    /// # }
+    /// # impl std::error::Error for Throttled {}
+    ///
+    /// let error = Error::other_with_recovery("the backend throttled us", Throttled, RecoveryInfo::unavailable());
+    ///
+    /// assert_eq!(error.recovery().kind(), RecoveryKind::Unavailable);
+    /// ```
+    #[must_use]
+    pub fn other_with_recovery(
+        message: impl Into<Cow<'static, str>>,
+        source: impl Into<Box<dyn StdError + Send + Sync>>,
+        recovery: RecoveryInfo,
+    ) -> Self {
+        let mut error = Self::new(Kind::Source, message);
+        error.source = Some(source.into());
+        error.recovery = recovery;
+        error
+    }
+
     /// The compressed data is malformed, or its checksum does not match the decompressed bytes.
     #[must_use]
     pub fn is_corrupt_data(&self) -> bool {
@@ -167,11 +268,24 @@ impl Error {
     /// The stream feeding the codec failed.
     ///
     /// The compressed data itself was fine as far as it went; the source could not deliver more.
-    /// The original failure is available from [`source`][std::error::Error::source]. Only produced
-    /// by the adapters behind the `futures-stream` feature.
+    /// The original failure is available from [`source`][std::error::Error::source]. Produced by
+    /// [`other`][Self::other] and [`other_with_recovery`][Self::other_with_recovery], and by the
+    /// adapters behind the `futures-stream` feature.
     #[must_use]
     pub fn is_source(&self) -> bool {
         self.kind == Kind::Source
+    }
+}
+
+impl Recovery for Error {
+    /// Whether retrying could help, and how soon.
+    ///
+    /// Kinds this crate raises itself are classified by what they mean: a truncated stream is worth
+    /// another attempt, while corrupt data, an exceeded bound, misuse and a rejected setting are
+    /// not. A wrapped foreign error reports whatever [`other`][Self::other] detected or
+    /// [`other_with_recovery`][Self::other_with_recovery] was given.
+    fn recovery(&self) -> RecoveryInfo {
+        self.recovery.clone()
     }
 }
 
@@ -244,6 +358,8 @@ impl From<BuildError> for Error {
 
 #[cfg(test)]
 mod tests {
+    use recoverable::RecoveryKind;
+
     use super::*;
 
     #[test]
@@ -286,9 +402,8 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "futures-stream")]
     fn is_source_reports_only_the_source_kind() {
-        let error = Error::source(std::io::Error::other("stream failed"));
+        let error = Error::other("the underlying stream failed", std::io::Error::other("stream failed"));
 
         assert!(error.is_source(), "got {error}");
         assert!(!error.is_corrupt_data(), "got {error}");
@@ -330,5 +445,111 @@ mod tests {
     fn debug_is_available_for_diagnostics() {
         let rendered = format!("{:?}", Error::output_limit_exceeded(2, 1));
         assert!(rendered.contains("LimitExceeded"), "kind should be visible: {rendered}");
+    }
+
+    #[test]
+    fn each_kind_classifies_its_own_recoverability() {
+        let cases = [
+            (Error::unexpected_end_of_stream(), RecoveryKind::Retry),
+            (Error::corrupt_data("bad"), RecoveryKind::Never),
+            (Error::output_limit_exceeded(2, 1), RecoveryKind::Never),
+            (Error::invalid_state("wrong order"), RecoveryKind::Never),
+            (Error::invalid_configuration("out of range"), RecoveryKind::Never),
+        ];
+
+        for (error, expected) in cases {
+            assert_eq!(error.recovery().kind(), expected, "wrong recovery for {error}");
+        }
+    }
+
+    #[test]
+    fn a_build_failure_converts_to_an_unrecoverable_error() {
+        let error = Error::from(BuildError::new("the engine rejected the window size"));
+
+        assert_eq!(error.recovery().kind(), RecoveryKind::Never);
+    }
+
+    #[test]
+    fn other_classifies_a_wrapped_io_error_by_its_kind() {
+        let cases = [
+            (std::io::ErrorKind::TimedOut, RecoveryKind::Retry),
+            (std::io::ErrorKind::NetworkDown, RecoveryKind::Unavailable),
+            (std::io::ErrorKind::NotFound, RecoveryKind::Never),
+        ];
+
+        for (kind, expected) in cases {
+            let error = Error::other("the transport failed", std::io::Error::from(kind));
+
+            assert!(error.is_source(), "got {error}");
+            assert_eq!(error.to_string(), "the transport failed");
+            assert_eq!(error.recovery().kind(), expected, "wrong recovery for {kind:?}");
+        }
+    }
+
+    #[test]
+    fn other_finds_an_io_error_nested_inside_a_wrapper() {
+        // A transport rarely hands back a bare io::Error; the heuristic has to look through
+        // whatever wrapped it.
+        #[derive(Debug)]
+        struct Wrapper(std::io::Error);
+
+        impl fmt::Display for Wrapper {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("wrapped")
+            }
+        }
+
+        impl StdError for Wrapper {
+            fn source(&self) -> Option<&(dyn StdError + 'static)> {
+                Some(&self.0)
+            }
+        }
+
+        let error = Error::other(
+            "the transport failed",
+            Wrapper(std::io::Error::from(std::io::ErrorKind::WouldBlock)),
+        );
+
+        assert_eq!(error.recovery().kind(), RecoveryKind::Retry);
+    }
+
+    #[test]
+    fn other_reports_unknown_when_nothing_in_the_chain_is_an_io_error() {
+        let error = Error::other("something else failed", "a plain message");
+
+        assert_eq!(error.recovery().kind(), RecoveryKind::Unknown);
+        assert_eq!(error.source().expect("the cause was attached").to_string(), "a plain message");
+    }
+
+    #[test]
+    fn other_with_recovery_attaches_what_it_was_given() {
+        let supplied = RecoveryInfo::unavailable();
+        let error = Error::other_with_recovery("the backend is degraded", "a plain message", supplied.clone());
+
+        assert!(error.is_source(), "got {error}");
+        assert_eq!(error.recovery(), supplied, "the supplied information should win over the heuristic");
+    }
+
+    #[test]
+    fn other_with_recovery_overrides_what_the_heuristic_would_have_detected() {
+        // The caller knows the timeout is terminal for them even though the heuristic says retry.
+        let error = Error::other_with_recovery(
+            "the deadline is gone",
+            std::io::Error::from(std::io::ErrorKind::TimedOut),
+            RecoveryInfo::never(),
+        );
+
+        assert_eq!(error.recovery().kind(), RecoveryKind::Never);
+    }
+
+    #[test]
+    fn a_wrapped_cause_carries_its_own_recovery() {
+        let error = Error::other(
+            "the underlying stream failed",
+            std::io::Error::from(std::io::ErrorKind::ConnectionReset),
+        );
+
+        assert!(error.is_source(), "got {error}");
+        assert_eq!(error.recovery().kind(), RecoveryKind::Retry);
     }
 }

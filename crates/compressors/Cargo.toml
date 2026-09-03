@@ -31,7 +31,7 @@ exclude = true
 all-features = true
 
 [package.metadata.cargo_check_external_types]
-allowed_external_types = ["bytesbuf::*", "futures_core::stream::Stream"]
+allowed_external_types = ["bytesbuf::*", "futures_core::stream::Stream", "recoverable::*"]
 
 [features]
 brotli = ["dep:brotli"]
@@ -51,6 +51,7 @@ bytesbuf = { workspace = true, features = ["std"] }
 flate2 = { workspace = true, features = ["zlib-rs"], optional = true }
 futures-core = { workspace = true, optional = true }
 pin-project-lite = { workspace = true, optional = true }
+recoverable = { workspace = true }
 zstd-safe = { workspace = true, features = ["std"], optional = true }
 
 [dev-dependencies]
