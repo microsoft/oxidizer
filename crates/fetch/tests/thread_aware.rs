@@ -35,7 +35,7 @@ async fn not_isolated_on_tokio() {
         .map(|numa_node| {
             let mut client = client.clone();
             let barrier = Arc::clone(&barrier);
-            let builder = builder.clone().numa_node(numa_node);
+            let builder = builder.clone().with_numa_node(numa_node);
             std::thread::spawn(move || {
                 let thread = builder.build(std::thread::current().id());
                 // All coordinate-owning threads reach this point before any relocation. Their
@@ -71,7 +71,7 @@ async fn tokio_client_relocated_ensure_works() {
         .map(|numa_node| {
             let mut client = client.clone();
             let url = url.clone();
-            let builder = builder.clone().numa_node(numa_node);
+            let builder = builder.clone().with_numa_node(numa_node);
             tokio::spawn(async move {
                 let thread = builder.build(std::thread::current().id());
                 client.relocate(None, &thread);

@@ -20,7 +20,7 @@ fn test_threads(counts: &[usize]) -> Vec<Thread> {
         .flat_map(|(numa_node, count)| {
             let builder = builder
                 .clone()
-                .numa_node(numa_node.try_into().expect("test NUMA node index must fit"));
+                .with_numa_node(numa_node.try_into().expect("test NUMA node index must fit"));
             (0..*count).map(move |_| {
                 let thread_id = thread::spawn(|| thread::current().id()).join().expect("test thread should finish");
                 builder.build(thread_id)

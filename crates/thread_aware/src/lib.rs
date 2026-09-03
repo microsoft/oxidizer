@@ -285,7 +285,9 @@ fn test_threads(counts: &[usize]) -> Vec<Thread> {
     let barrier = Arc::new(Barrier::new(nodes.len() + 1));
     let mut handles = Vec::with_capacity(nodes.len());
     for node in nodes {
-        let builder = builder.clone().numa_node(node.try_into().expect("test NUMA node index must fit"));
+        let builder = builder
+            .clone()
+            .with_numa_node(node.try_into().expect("test NUMA node index must fit"));
         let barrier = Arc::clone(&barrier);
         handles.push(thread::spawn(move || {
             let coordinate = builder.build(thread::current().id());

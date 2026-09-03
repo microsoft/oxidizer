@@ -52,7 +52,7 @@ impl Relocator {
     #[must_use]
     pub fn different_owner(mut self) -> Self {
         self.destination = ThreadBuilder::default()
-            .numa_node(self.destination_numa_node)
+            .with_numa_node(self.destination_numa_node)
             .build(self.destination.id());
         self
     }
@@ -68,8 +68,8 @@ impl Relocator {
     fn new(source_numa_node: u32, destination_numa_node: u32) -> Self {
         let builder = ThreadBuilder::default();
         Self {
-            source: builder.clone().numa_node(source_numa_node).build(Self::source_thread_id()),
-            destination: builder.numa_node(destination_numa_node).build(thread::current().id()),
+            source: builder.clone().with_numa_node(source_numa_node).build(Self::source_thread_id()),
+            destination: builder.with_numa_node(destination_numa_node).build(thread::current().id()),
             destination_numa_node,
             include_source: true,
         }

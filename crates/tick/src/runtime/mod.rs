@@ -36,7 +36,7 @@
 //! let ready = Arc::new(Barrier::new(3));
 //! let first = {
 //!     let ready = Arc::clone(&ready);
-//!     let builder = builder.clone().numa_node(0);
+//!     let builder = builder.clone().with_numa_node(0);
 //!     let source = source.clone();
 //!     let mut inactive = root.clone();
 //!     std::thread::spawn(move || {
@@ -50,7 +50,7 @@
 //! };
 //! let second = {
 //!     let ready = Arc::clone(&ready);
-//!     let builder = builder.numa_node(1);
+//!     let builder = builder.with_numa_node(1);
 //!     let mut inactive = root;
 //!     std::thread::spawn(move || {
 //!         let destination = builder.build(std::thread::current().id());

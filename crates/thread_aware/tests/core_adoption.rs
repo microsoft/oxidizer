@@ -20,7 +20,7 @@ fn reexports_core_vocabulary() {
 #[test]
 fn relocate_across_owners_keeps_carried_value() {
     let source = ThreadBuilder::default().build(thread::current().id());
-    let destination = ThreadBuilder::default().numa_node(1).build(thread::current().id());
+    let destination = ThreadBuilder::default().with_numa_node(1).build(thread::current().id());
     let mut value = Arc::<_, PerThread>::from_unaware(42_u32);
     let carried = value.clone().into_arc();
 
@@ -86,7 +86,7 @@ fn relocate_within_owner_materializes_destination() {
     let builder = ThreadBuilder::default();
     let source = builder.build(thread::current().id());
     let destination_id = thread::spawn(|| thread::current().id()).join().unwrap();
-    let destination = builder.numa_node(1).build(destination_id);
+    let destination = builder.with_numa_node(1).build(destination_id);
     let mut value = Arc::<_, PerThread>::from_unaware(42_u32);
     let carried = value.clone().into_arc();
 
