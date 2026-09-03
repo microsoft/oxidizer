@@ -121,7 +121,7 @@ pub struct Decompress;
 /// how to hold one without naming its type.
 ///
 /// Reach for [`compress`][crate::compress] and [`decompress`][crate::decompress] for a complete
-/// buffer, or [`CompressionStream`][crate::CompressionStream] for data that arrives over time.
+/// buffer, or `CompressionStream` (behind the `futures-stream` feature) for data that arrives over time.
 ///
 /// # Examples
 ///

@@ -3,7 +3,7 @@
 
 //! Brotli (RFC 7932): a general-purpose compressor with a static dictionary tuned for web content.
 //!
-//! Compresses text noticeably better than [`gzip`][crate::gzip] at comparable speed, which is why
+//! Compresses text noticeably better than `gzip` at comparable speed, which is why
 //! it is the usual choice for HTTP `Content-Encoding: br`. Requires the `brotli` cargo feature.
 //!
 //! Brotli streams carry no magic bytes, so the format has to be known from context, such as a

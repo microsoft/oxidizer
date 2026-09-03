@@ -273,7 +273,7 @@ impl Error {
 
     /// A configuration value was outside the range the format accepts.
     ///
-    /// Produced by the `TryFrom` conversions on types such as [`Level`][crate::Level], where the
+    /// Produced by the `TryFrom` conversions on types such as `Level`, where the
     /// value typically came from a configuration file or a command line.
     #[must_use]
     pub fn is_invalid_configuration(&self) -> bool {

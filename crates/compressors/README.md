@@ -72,7 +72,7 @@ assert_eq!(
 An engine is a state machine rather than a one-shot transform, so a stream of any length moves
 through it while the output it has buffered but not yet handed back stays bounded by the
 configured chunk size. Pending input and the engine’s own window and tables are additional, and
-their size depends on the format and its configuration. [`CompressionStream`][__link12], behind the
+their size depends on the format and its configuration. `CompressionStream`, behind the
 `futures-stream` feature, is how to reach that – it turns any stream of byte sequences into its
 compressed or decompressed counterpart:
 
@@ -109,9 +109,9 @@ assert_eq!(magic, vec![0x1f, 0x8b]);
 ## Choosing a format
 
 When the format is only known at runtime – from a `Content-Encoding` token, say – the
-[`format`][__link13] module resolves the token and carries the same shape every other
+[`format`][__link12] module resolves the token and carries the same shape every other
 format module does: a `Compressor`, a `Decompressor`, and the whole-buffer conveniences. Use
-[`CompressorBuilder::build_format`][__link14] instead when a level or chunk size has to be set on the
+[`CompressorBuilder::build_format`][__link13] instead when a level or chunk size has to be set on the
 result.
 
 Note that the `deflate` feature and the HTTP `deflate` content coding are not the same thing.
@@ -138,13 +138,13 @@ assert_eq!(
 ## Reusing engine state
 
 Building a compressor allocates and initializes a substantial amount of state – on a small
-message, as much work as the compression itself. [`Resources`][__link15] recycles it: hold one, hand it to
+message, as much work as the compression itself. [`Resources`][__link14] recycles it: hold one, hand it to
 every compressor and decompressor, and each engine returns to it on drop. The saving is roughly
 fixed per message, so it matters most for small bodies.
 
 Recycling is on by default, which is why every API that builds an engine asks for resources rather
 than for a memory provider alone. Set the capacity to zero with
-[`with_pool_capacity`][__link16] when compression is rare enough that
+[`with_pool_capacity`][__link15] when compression is rare enough that
 retaining engine state costs more than rebuilding it.
 
 ```rust
@@ -171,9 +171,9 @@ keeps, which makes it the conveniences that buffer a whole result that need boun
 a 64 MiB output cap and a 1024 concatenated-stream cap to whatever the caller did not set.
 
 When you buffer decompressed output yourself, set
-[`max_output_len`][__link17] to what you can afford. That
+[`max_output_len`][__link16] to what you can afford. That
 guardrail is for the common case, not a substitute for bounding how many bodies you decompress
-at once. [`DecompressorLimits`][__link18] documents what each format bounds by default, and why a ratio
+at once. [`DecompressorLimits`][__link17] documents what each format bounds by default, and why a ratio
 alone is not protection.
 
 Decompression can yield bytes before a checksum or trailer has rejected the stream, so treat
@@ -192,13 +192,13 @@ engines it names:
   content coding actually denotes.
 * `brotli` – the `brotli` module and `Format::Brotli`, via the pure-Rust `brotli` crate.
 * `zstd` – the `zstd` module and `Format::Zstd`, via `zstd-safe`.
-* `futures-stream` – [`CompressionStream`][__link19], presenting compression and decompression as a
+* `futures-stream` – `CompressionStream`, presenting compression and decompression as a
   `futures_core::Stream` over any stream of byte sequences.
 
 The deflate-family features share one dependency, so enabling more than one of them costs no
 more than enabling one. A build that needs only `brotli` or only `zstd` never compiles `flate2`
-at all, and a build that names no format at all still gets [`Compression`][__link20], the builders and
-[`Resources`][__link21], which is what a crate that only passes compressors and decompressors around
+at all, and a build that names no format at all still gets [`Compression`][__link18], the builders and
+[`Resources`][__link19], which is what a crate that only passes compressors and decompressors around
 needs.
 
 ## Further reading
@@ -206,10 +206,10 @@ needs.
 Two guides cover the decisions that span several APIs, which no single item’s documentation can
 carry:
 
-* [design.md][__link22] – the user-visible policies: format selection, what is uniform across formats and
+* [design.md][__link20] – the user-visible policies: format selection, what is uniform across formats and
   what is not, how decompression is bounded, stream framing, and why the public surface is
   sealed.
-* [implementation.md][__link23] – the mechanisms behind them: the pump state machine, the unsafe
+* [implementation.md][__link21] – the mechanisms behind them: the pump state machine, the unsafe
   initialized-output contract every backend adapter must honour, engine pooling and why some
   engines are excluded, and the async driving rules.
 
@@ -219,24 +219,22 @@ carry:
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/compressors">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbYZ9vsjOoyMwbnQp1rFN_lxAbPKl4HNhSo80bmfYglAiZtLZhZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbOBm9yPIcquUb5Wyp1P28vVgbTmn5uSq6qXEbqd2jQ-gxpzRhZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
  [__link0]: https://crates.io/crates/bytesbuf/0.9.0
  [__link1]: https://docs.rs/compressors/0.1.0/compressors/?search=Result
  [__link10]: https://docs.rs/compressors/0.1.0/compressors/fn.decompress.html
  [__link11]: https://docs.rs/compressors/0.1.0/compressors/?search=core::Compression
- [__link12]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressionStream
- [__link13]: mod@crate::format
- [__link14]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressorBuilder::build_format
- [__link15]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
- [__link16]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources::with_pool_capacity
- [__link17]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits::max_output_len
- [__link18]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits
- [__link19]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressionStream
+ [__link12]: mod@crate::format
+ [__link13]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressorBuilder::build_format
+ [__link14]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
+ [__link15]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources::with_pool_capacity
+ [__link16]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits::max_output_len
+ [__link17]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits
+ [__link18]: https://docs.rs/compressors/0.1.0/compressors/?search=core::Compression
+ [__link19]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
  [__link2]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
- [__link20]: https://docs.rs/compressors/0.1.0/compressors/?search=core::Compression
- [__link21]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
- [__link22]: https://github.com/microsoft/oxidizer/blob/main/crates/compressors/docs/design.md
- [__link23]: https://github.com/microsoft/oxidizer/blob/main/crates/compressors/docs/implementation.md
+ [__link20]: https://github.com/microsoft/oxidizer/blob/main/crates/compressors/docs/design.md
+ [__link21]: https://github.com/microsoft/oxidizer/blob/main/crates/compressors/docs/implementation.md
  [__link3]: https://crates.io/crates/bytesbuf/0.9.0
  [__link4]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesView
  [__link5]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesBuf

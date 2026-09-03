@@ -276,7 +276,7 @@ pub struct Compressor {
 }
 
 impl Compressor {
-    /// Creates a compressor for `format` at [`Level::DEFAULT`][crate::Level::DEFAULT].
+    /// Creates a compressor for `format` at `Level::DEFAULT`.
     ///
     /// # Errors
     ///
@@ -406,7 +406,7 @@ impl CompressionInternal for Decompressor {
 
 /// Compresses a complete byte sequence into `format`.
 ///
-/// Uses [`Level::DEFAULT`][crate::Level::DEFAULT]; for anything else, configure a
+/// Uses `Level::DEFAULT`; for anything else, configure a
 /// [`CompressorBuilder`] and finish it with [`build_format`][CompressorBuilder::build_format].
 /// Prefer [`Compressor`] for data that arrives incrementally; this convenience buffers the entire
 /// result before returning.

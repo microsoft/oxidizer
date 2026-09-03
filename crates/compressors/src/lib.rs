@@ -3,13 +3,6 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![cfg_attr(
-    not(all(feature = "futures-stream", feature = "gzip")),
-    expect(
-        rustdoc::broken_intra_doc_links,
-        reason = "the crate documentation illustrates itself with gzip and CompressionStream, so its links need those features"
-    )
-)]
 
 //! Streaming compression and decompression over [`bytesbuf`] byte sequences.
 //!
@@ -74,7 +67,7 @@
 //! An engine is a state machine rather than a one-shot transform, so a stream of any length moves
 //! through it while the output it has buffered but not yet handed back stays bounded by the
 //! configured chunk size. Pending input and the engine's own window and tables are additional, and
-//! their size depends on the format and its configuration. [`CompressionStream`], behind the
+//! their size depends on the format and its configuration. `CompressionStream`, behind the
 //! `futures-stream` feature, is how to reach that -- it turns any stream of byte sequences into its
 //! compressed or decompressed counterpart:
 //!
@@ -209,7 +202,7 @@
 //!   content coding actually denotes.
 //! * `brotli` -- the `brotli` module and `Format::Brotli`, via the pure-Rust `brotli` crate.
 //! * `zstd` -- the `zstd` module and `Format::Zstd`, via `zstd-safe`.
-//! * `futures-stream` -- [`CompressionStream`], presenting compression and decompression as a
+//! * `futures-stream` -- `CompressionStream`, presenting compression and decompression as a
 //!   `futures_core::Stream` over any stream of byte sequences.
 //!
 //! The deflate-family features share one dependency, so enabling more than one of them costs no
@@ -306,7 +299,7 @@ use crate::core::{Compress, Compression, Decompress, process};
 
 /// Compresses one complete byte sequence that is already in memory.
 ///
-/// Takes any compressor: a concrete one such as [`gzip::Compressor`], or a
+/// Takes any compressor: a concrete one such as a `gzip::Compressor`, or a
 /// boxed one whose format was chosen at runtime. The direction is part of the bound, so a
 /// decompressor will not compile here.
 ///
