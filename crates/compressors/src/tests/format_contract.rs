@@ -1461,6 +1461,12 @@ mod format_specific_settings {
         fn compressor_for(format: Format) -> Box<dyn Compression<Mode = Compress>> {
             match format {
                 Format::Brotli => Box::new(brotli::Compressor::builder().mode(Mode::Text).build(resources()).built()),
+                // With brotli as the only enabled format there is no other variant to reach, so
+                // the fallback is dead in that configuration rather than wrong.
+                #[cfg_attr(
+                    not(any(feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")),
+                    expect(unreachable_patterns, reason = "brotli is the only enabled format, so it is the only variant")
+                )]
                 other => CompressorBuilder::new().build_format(other, resources()).built(),
             }
         }

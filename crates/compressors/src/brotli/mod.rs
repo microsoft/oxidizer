@@ -111,9 +111,6 @@ impl Quality {
     /// Brotli's fastest quality.
     pub const MIN: Self = Self(0);
 
-    /// Brotli's native default.
-    pub const DEFAULT: Self = Self(11);
-
     /// Brotli's strongest quality.
     pub const MAX: Self = Self(11);
 
@@ -127,12 +124,6 @@ impl Quality {
     #[must_use]
     pub const fn get(self) -> u8 {
         self.0
-    }
-}
-
-impl Default for Quality {
-    fn default() -> Self {
-        Self::DEFAULT
     }
 }
 
@@ -293,7 +284,6 @@ mod quality_tests {
         }
 
         assert_eq!(Quality::new(12), None);
-        assert_eq!(Quality::default(), Quality::DEFAULT);
         assert_eq!(Quality::try_from(8).expect("in range"), Quality::new(8).expect("in range"));
         assert_eq!(u8::from(Quality::MAX), 11);
 

@@ -25,12 +25,12 @@ impl Kind {
     /// How a failure of this kind is recovered from, absent anything more specific.
     fn default_recovery(self) -> RecoveryInfo {
         match self {
-            // The bytes decoded so far were valid, so the producer stopped early or the transport
-            // truncated the stream. Asking again often gets the rest.
-            Self::UnexpectedEndOfStream => RecoveryInfo::retry(),
-            // A foreign failure classifies itself; until one is detected or supplied, this crate
-            // has nothing to say about it.
-            Self::Source => RecoveryInfo::unknown(),
+            // Truncation is worth another attempt only if the bytes are fetched again, and this
+            // crate neither owns nor re-drives the source: the operation that raised this is a pure
+            // decode of bytes already in hand, so re-running it is guaranteed to fail identically.
+            // Whoever owns the transport is the layer that can classify this, exactly as for a
+            // foreign failure below.
+            Self::UnexpectedEndOfStream | Self::Source => RecoveryInfo::unknown(),
             // Malformed input stays malformed, a bound stays exceeded, and misuse or a rejected
             // setting needs a code change rather than another attempt.
             Self::CorruptData | Self::LimitExceeded | Self::InvalidState | Self::InvalidConfiguration => RecoveryInfo::never(),
@@ -241,8 +241,14 @@ impl Error {
     /// The input ended in the middle of a compressed stream.
     ///
     /// The bytes decompressed so far are valid; the producer stopped early or the transport truncated
-    /// them. This is distinct from [`is_corrupt_data`][Self::is_corrupt_data] because it is usually
-    /// worth retrying, whereas corrupt data is not.
+    /// them. This is distinct from [`is_corrupt_data`][Self::is_corrupt_data] because fetching the
+    /// body again may well produce a complete one, whereas corrupt data stays corrupt.
+    ///
+    /// That is advice for whoever owns the byte source, not for a retry of this call: decompressing
+    /// the same buffer again is deterministic and fails the same way, which is why
+    /// [`recovery`][recoverable::Recovery::recovery] reports this as
+    /// [`Unknown`][recoverable::RecoveryKind::Unknown] rather than asserting a retry to middleware
+    /// that cannot re-drive the transport.
     #[must_use]
     pub fn is_unexpected_end_of_stream(&self) -> bool {
         self.kind == Kind::UnexpectedEndOfStream
@@ -357,6 +363,13 @@ impl fmt::Display for BuildError {
 
 impl StdError for BuildError {}
 
+impl Recovery for BuildError {
+    /// A rejected setting needs a code change rather than another attempt.
+    fn recovery(&self) -> RecoveryInfo {
+        RecoveryInfo::never()
+    }
+}
+
 impl From<BuildError> for Error {
     fn from(error: BuildError) -> Self {
         Self::new(Kind::InvalidConfiguration, error.message)
@@ -458,7 +471,7 @@ mod tests {
     #[test]
     fn each_kind_classifies_its_own_recoverability() {
         let cases = [
-            (Error::unexpected_end_of_stream(), RecoveryKind::Retry),
+            (Error::unexpected_end_of_stream(), RecoveryKind::Unknown),
             (Error::corrupt_data("bad"), RecoveryKind::Never),
             (Error::output_limit_exceeded(2, 1), RecoveryKind::Never),
             (Error::invalid_state("wrong order"), RecoveryKind::Never),
@@ -472,7 +485,15 @@ mod tests {
 
     #[test]
     fn a_build_failure_converts_to_an_unrecoverable_error() {
-        let error = Error::from(BuildError::new("the engine rejected the window size"));
+        let build_error = BuildError::new("the engine rejected the window size");
+
+        assert_eq!(
+            build_error.recovery().kind(),
+            RecoveryKind::Never,
+            "a rejected setting needs a code change"
+        );
+
+        let error = Error::from(build_error);
 
         assert_eq!(error.recovery().kind(), RecoveryKind::Never);
     }

@@ -109,6 +109,8 @@ pin_project! {
     /// # Examples
     ///
     /// ```
+    /// # #[cfg(feature = "gzip")]
+    /// # {
     /// use bytesbuf::BytesView;
     /// use bytesbuf::mem::GlobalPool;
     /// use compressors::{CompressionStream, Resources, gzip};
@@ -128,6 +130,7 @@ pin_project! {
     ///
     /// assert_eq!(gzip.range(0..2).to_vec(), vec![0x1f, 0x8b]);
     /// # });
+    /// # }
     /// ```
     #[derive(Debug)]
     pub struct CompressionStream<S, C> {
@@ -178,6 +181,8 @@ where
     /// # Examples
     ///
     /// ```
+    /// # #[cfg(feature = "gzip")]
+    /// # {
     /// use bytesbuf::BytesView;
     /// use bytesbuf::mem::GlobalPool;
     /// use compressors::{CompressionStream, Resources, gzip};
@@ -206,6 +211,7 @@ where
     ///
     /// assert_eq!(plain.to_vec(), b"payload".to_vec());
     /// # });
+    /// # }
     /// ```
     #[must_use]
     pub fn decompress(source: S, compression: C) -> Self {

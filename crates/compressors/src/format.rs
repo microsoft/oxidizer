@@ -23,20 +23,27 @@ use crate::resources::Resources;
 /// # Examples
 ///
 /// ```
+/// # #[cfg(feature = "gzip")]
+/// # {
 /// use bytesbuf::BytesView;
 /// use bytesbuf::mem::GlobalPool;
-/// use compressors::core::Compression;
 /// use compressors::{CompressorBuilder, Format, Level, Resources};
 ///
 /// // The format arrives as a string, from an HTTP header.
 /// let format = Format::from_content_encoding("gzip").expect("a supported encoding");
 ///
 /// let memory = GlobalPool::new();
-/// let mut compressor = CompressorBuilder::new()
+/// let compressor = CompressorBuilder::new()
 ///     .level(Level::HIGH)
 ///     .build_format(format, &Resources::default())?;
 ///
-/// compressor.push(BytesView::copied_from_slice(b"payload", &memory))?;
+/// let compressed = compressors::compress(
+///     BytesView::copied_from_slice(b"payload", &memory),
+///     compressor,
+/// )?;
+///
+/// assert_eq!(compressed.range(0..2).to_vec(), vec![0x1f, 0x8b]);
+/// # }
 /// # Ok::<(), compressors::Error>(())
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

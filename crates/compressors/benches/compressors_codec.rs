@@ -127,7 +127,7 @@ fn measured(bencher: &mut criterion::Bencher<'_>, operation: &Operation, mut bod
 }
 
 fn compression(criterion: &mut Criterion, session: &Session) {
-    let mut group = criterion.benchmark_group("compress");
+    let mut group = criterion.benchmark_group("compressors_codec/compress");
 
     for size in SIZES {
         let bytes = payload(size);
@@ -152,7 +152,7 @@ fn compression(criterion: &mut Criterion, session: &Session) {
 }
 
 fn decompression(criterion: &mut Criterion, session: &Session) {
-    let mut group = criterion.benchmark_group("decompress");
+    let mut group = criterion.benchmark_group("compressors_codec/decompress");
 
     for size in SIZES {
         let bytes = payload(size);
@@ -181,7 +181,7 @@ fn decompression(criterion: &mut Criterion, session: &Session) {
 /// Also the regression guard for it. If pooled stops beating unpooled, or stops allocating less,
 /// something has broken.
 fn pooling(criterion: &mut Criterion, session: &Session) {
-    let mut group = criterion.benchmark_group("pooling");
+    let mut group = criterion.benchmark_group("compressors_codec/pooling");
     let bytes = payload(4096);
     group.throughput(Throughput::Bytes(bytes.len() as u64));
 
@@ -225,7 +225,7 @@ fn pooling(criterion: &mut Criterion, session: &Session) {
 /// A regression here -- for instance flattening the view before handing it to the engine -- would
 /// show up as a jump in allocations for the fragmented cases.
 fn segmentation(criterion: &mut Criterion, session: &Session) {
-    let mut group = criterion.benchmark_group("segmentation");
+    let mut group = criterion.benchmark_group("compressors_codec/segmentation");
     let bytes = payload(64 * 1024);
     group.throughput(Throughput::Bytes(bytes.len() as u64));
 
@@ -261,7 +261,7 @@ fn segmentation(criterion: &mut Criterion, session: &Session) {
 /// The engines zero-fill the uninitialized output slice they are handed, so a larger chunk is not
 /// automatically better; this is what settles the default.
 fn chunk_size(criterion: &mut Criterion, session: &Session) {
-    let mut group = criterion.benchmark_group("chunk_size");
+    let mut group = criterion.benchmark_group("compressors_codec/chunk_size");
     let bytes = payload(256 * 1024);
     group.throughput(Throughput::Bytes(bytes.len() as u64));
 
@@ -286,7 +286,7 @@ fn chunk_size(criterion: &mut Criterion, session: &Session) {
 
 /// Compression levels, so the portable scale's cost across formats is visible rather than assumed.
 fn levels(criterion: &mut Criterion, session: &Session) {
-    let mut group = criterion.benchmark_group("levels");
+    let mut group = criterion.benchmark_group("compressors_codec/levels");
     let bytes = payload(64 * 1024);
     group.throughput(Throughput::Bytes(bytes.len() as u64));
 
@@ -319,7 +319,7 @@ fn levels(criterion: &mut Criterion, session: &Session) {
 /// in it is visible rather than silent. The cause lies inside the brotli compressor, so treat these
 /// figures as the observed shape rather than as a rule about window sizes in general.
 fn brotli_window(criterion: &mut Criterion, session: &Session) {
-    let mut group = criterion.benchmark_group("brotli_window");
+    let mut group = criterion.benchmark_group("compressors_codec/brotli_window");
     let bytes = payload(1024);
     group.throughput(Throughput::Bytes(bytes.len() as u64));
 
