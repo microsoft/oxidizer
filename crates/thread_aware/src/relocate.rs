@@ -128,6 +128,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn between_threads_uses_distinct_threads_on_the_same_numa_node() {
         let mut relocation = Relocation {
             had_source: false,
@@ -144,6 +145,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn between_numa_nodes_uses_distinct_numa_nodes() {
         let mut relocation = Relocation {
             had_source: false,
