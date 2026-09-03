@@ -95,6 +95,8 @@ impl AllocError {
     /// succeed, regardless of how much memory is available.
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(not(utc_backend))] {
     /// #[repr(align(32768))]
     /// struct OverAligned;
     ///
@@ -103,6 +105,8 @@ impl AllocError {
     ///     panic!("over-aligned values must be rejected");
     /// };
     /// assert!(error.is_alignment_too_large());
+    /// # }
+    /// # }
     /// ```
     #[must_use]
     pub fn is_alignment_too_large(self) -> bool {
