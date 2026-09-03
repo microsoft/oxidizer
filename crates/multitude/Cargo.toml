@@ -97,7 +97,7 @@ mutants = { workspace = true }
 serde = { workspace = true, features = ["alloc", "derive"] }
 serde_json = { workspace = true, features = ["alloc", "raw_value"] }
 widestring = { workspace = true, features = ["alloc"] }
-zerocopy = { workspace = true }
+zerocopy = { workspace = true, features = ["derive"] }
 
 [target.'cfg(loom)'.dev-dependencies]
 loom = { workspace = true }

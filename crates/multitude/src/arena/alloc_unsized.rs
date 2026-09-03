@@ -19,16 +19,9 @@ use super::alloc_value::acquire_chunk_ref;
 use super::{Arena, ExpectAlloc};
 use crate::arc::Arc;
 use crate::r#box::Box;
-use crate::internal::constants::max_smart_ptr_align;
 use crate::internal::thin_dst::{AtomicStrong, LocalStrong, Strong, strong_prefix_bytes_for};
 use crate::rc::Rc;
 use crate::{AllocError, SmartPointerPointee};
-
-/// Maximum `layout.align()` accepted by smart-pointer allocations.
-/// Mirrors the constant of the same name in [`alloc_value`](super::alloc_value):
-/// values must lie strictly inside the first `CHUNK_ALIGN` bytes of
-/// their chunk so the header-recovery mask works.
-const MAX_SMART_PTR_ALIGN: usize = max_smart_ptr_align();
 
 impl<A: Allocator + Clone> Arena<A> {
     /// Allocate a possibly-unsized `T` and return an `Arc<T, A>`.
@@ -394,7 +387,7 @@ impl<A: Allocator + Clone> Arena<A> {
         metadata: T::Metadata,
         init: impl FnOnce(*mut T),
     ) -> Result<Box<T, A>, AllocError> {
-        if layout.align() >= MAX_SMART_PTR_ALIGN {
+        if self.rejects_smart_ptr_align(layout.align()) {
             return Err(AllocError::ALIGNMENT_TOO_LARGE);
         }
         let meta_bytes = T::ALLOCATION_METADATA_BYTES;
@@ -483,7 +476,7 @@ impl<A: Allocator + Clone> Arena<A> {
         metadata: T::Metadata,
         init: impl FnOnce(*mut T),
     ) -> Result<NonNull<u8>, AllocError> {
-        if layout.align() >= MAX_SMART_PTR_ALIGN {
+        if self.rejects_smart_ptr_align(layout.align()) {
             return Err(AllocError::ALIGNMENT_TOO_LARGE);
         }
         let meta_bytes = T::ALLOCATION_METADATA_BYTES;

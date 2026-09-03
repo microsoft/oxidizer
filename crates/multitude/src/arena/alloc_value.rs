@@ -15,7 +15,6 @@ use super::{Arena, ExpectAlloc};
 use crate::arc::Arc;
 use crate::r#box::Box;
 use crate::internal::chunk_ref::ChunkRef;
-use crate::internal::constants::max_smart_ptr_align;
 use crate::internal::thin_dst::{AtomicStrong, LocalStrong};
 use crate::internal::uninit::Uninit;
 use crate::internal::{Chunk, thin_dst};
@@ -46,16 +45,6 @@ fn worst_case_strong_payload<S: thin_dst::Strong, T>() -> usize {
         .saturating_add(value_bytes)
         .saturating_add(S::block_align(align))
 }
-
-/// Maximum `align_of::<T>()` accepted by smart-pointer allocations.
-///
-/// Boxes recover their chunk header by subtracting the value pointer's
-/// offset within its `CHUNK_ALIGN` tile; for that step to land on the
-/// header rather than the value itself, the value must lie strictly
-/// inside the first `CHUNK_ALIGN` bytes. Keeping the alignment well
-/// below `CHUNK_ALIGN` leaves room for the chunk header plus the
-/// value itself in the dedicated oversized case.
-pub(in crate::arena) const MAX_SMART_PTR_ALIGN: usize = max_smart_ptr_align();
 
 impl<A: Allocator + Clone> Arena<A> {
     /// Allocate `value` and return a `Send + Sync` reference-counted smart pointer.
@@ -807,7 +796,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// [`Self::impl_alloc_value_with`].
     #[inline(always)]
     fn alloc_value_with_raw<T, F: FnOnce() -> T>(&self, f: F) -> Result<&mut T, AllocError> {
-        if const { mem::align_of::<T>() >= MAX_SMART_PTR_ALIGN } {
+        if self.rejects_smart_ptr_align(mem::align_of::<T>()) {
             return Err(AllocError::ALIGNMENT_TOO_LARGE);
         }
         // `f` is moved into exactly one of the in-chunk or fallback paths.
@@ -897,7 +886,7 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline(always)]
     #[cfg_attr(test, mutants::skip)] // routing-predicate mutations ⇒ refill spin (OOM)
     fn alloc_smart_prefixed_with_raw<S: thin_dst::Strong, T, F: FnOnce() -> T>(&self, f: F) -> Result<NonNull<u8>, AllocError> {
-        if const { mem::align_of::<T>() >= MAX_SMART_PTR_ALIGN } {
+        if self.rejects_smart_ptr_align(mem::align_of::<T>()) {
             return Err(AllocError::ALIGNMENT_TOO_LARGE);
         }
         let mut f = Some(f);
@@ -924,14 +913,14 @@ impl<A: Allocator + Clone> Arena<A> {
     /// into the reservation. [`Box`] runs `T::drop` eagerly in its own
     /// `Drop`.
     ///
-    /// Rejects alignments at or above [`MAX_SMART_PTR_ALIGN`]: such
+    /// Rejects alignments at or above [`Arena::smart_ptr_align_cap`]: such
     /// values cannot live inside the first [`CHUNK_ALIGN`] bytes of a
     /// chunk, which would break the header-recovery mask used by the
     /// smart pointers' `Drop` impls.
     #[inline(always)]
     #[cfg_attr(test, mutants::skip)] // routing-predicate mutations ⇒ refill spin (OOM)
     fn impl_alloc_smart_with<T, F: FnOnce() -> T>(&self, f: F) -> Result<NonNull<T>, AllocError> {
-        if const { mem::align_of::<T>() >= MAX_SMART_PTR_ALIGN } {
+        if self.rejects_smart_ptr_align(mem::align_of::<T>()) {
             return Err(AllocError::ALIGNMENT_TOO_LARGE);
         }
         loop {
