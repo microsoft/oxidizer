@@ -65,8 +65,10 @@ use crate::Thread;
 ///
 /// * **Neither panic nor perform long blocking work.** This runs while the runtime is placing work,
 ///   so it performs no network or disk I/O and does not wait for external progress. Brief in-memory
-///   coordination is acceptable, but caller code must not run while a shared map or collection lock
-///   is held. Defer longer adaptation; retaining usable state is acceptable.
+///   coordination is acceptable. Caller code normally does not run while a shared map or collection
+///   lock is held; the narrow exception is a utility that explicitly documents holding a vacant-entry
+///   write guard to guarantee exactly-once insertion. Such callbacks must remain short, non-blocking,
+///   and non-reentrant into that storage. Defer longer adaptation; retaining usable state is acceptable.
 ///
 /// * **Tolerate repeated calls.** Relocating to the same [`Thread`], or with `source` equal to
 ///   `destination`, is harmless, and should also be cheap: compare the relevant ids and
