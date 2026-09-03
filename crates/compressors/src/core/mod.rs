@@ -103,8 +103,9 @@ pub struct Decompress;
 /// allows shared processing code to accept any `Compression`, while APIs that require one direction
 /// can use `Compression<Mode = Compress>` or `Compression<Mode = Decompress>`.
 ///
-/// The trait is sealed so formats and methods can be added without breaking downstream code.
-/// Every implementation is `Send + Sync`.
+/// The trait is sealed so formats and methods can be added without breaking downstream code, and
+/// it is `Sized` so no `dyn Compression` object can be formed. Every implementation is
+/// `Send + Sync`.
 ///
 /// # The mechanics are an internal detail
 ///
@@ -112,6 +113,12 @@ pub struct Decompress;
 /// compressor and no decompressor. How this crate actually drives one -- pushing input, pulling
 /// output, ending input -- lives on a crate-private supertrait that no downstream crate can name,
 /// let alone implement. Those mechanics are therefore not public API and can change freely.
+///
+/// The `Sized` bound is what makes that true rather than merely intended. A trait object resolves
+/// supertrait methods as inherent candidates, with no need for the supertrait to be nameable or in
+/// scope, so a `dyn Compression` vtable would hand every downstream crate the push/pull mechanics
+/// and values of the crate-private step type. Boxing a concrete compressor stays available and is
+/// how to hold one without naming its type.
 ///
 /// Reach for [`compress`][crate::compress] and [`decompress`][crate::decompress] for a complete
 /// buffer, or [`CompressionStream`][crate::CompressionStream] for data that arrives over time.
@@ -143,7 +150,7 @@ pub struct Decompress;
 /// # }
 /// # Ok::<(), compressors::Error>(())
 /// ```
-pub trait Compression: CompressionInternal {
+pub trait Compression: CompressionInternal + Sized {
     /// Whether this implementation compresses or decompresses its input.
     type Mode;
 }

@@ -77,7 +77,7 @@ impl StepGuard {
     }
 }
 
-fn process<D>(compression: &mut dyn Compression<Mode = D>, input: &BytesView, feed: usize) -> crate::Result<BytesView> {
+fn process<C: Compression>(compression: &mut C, input: &BytesView, feed: usize) -> crate::Result<BytesView> {
     let mut offset = 0;
     let mut collected = BytesBuf::new();
 
@@ -102,11 +102,11 @@ fn process<D>(compression: &mut dyn Compression<Mode = D>, input: &BytesView, fe
     }
 }
 
-fn compress(compressor: &mut dyn Compression<Mode = Compress>, input: &BytesView, feed: usize) -> crate::Result<BytesView> {
+fn compress<C: Compression<Mode = Compress>>(compressor: &mut C, input: &BytesView, feed: usize) -> crate::Result<BytesView> {
     process(compressor, input, feed)
 }
 
-fn decompress(decompressor: &mut dyn Compression<Mode = Decompress>, input: &BytesView, feed: usize) -> crate::Result<BytesView> {
+fn decompress<C: Compression<Mode = Decompress>>(decompressor: &mut C, input: &BytesView, feed: usize) -> crate::Result<BytesView> {
     process(decompressor, input, feed)
 }
 
@@ -380,7 +380,7 @@ macro_rules! format_contract {
                 let bomb = $module::compress(view(&vec![0_u8; 256 * 1024]), resources()).expect("compression succeeds");
 
                 let mut decompressor = $module::Decompressor::builder()
-                    .limits(DecompressorLimits::new().with_max_ratio(NonZeroU32::new(4).expect("4 is not zero")))
+                    .limits(DecompressorLimits::new().max_ratio(NonZeroU32::new(4).expect("4 is not zero")))
                     .build(resources())
                     .built();
                 decompressor.push(bomb).expect("push succeeds");
@@ -440,8 +440,8 @@ macro_rules! format_contract {
                 let mut decompressor = $module::Decompressor::builder()
                     .limits(
                         DecompressorLimits::new()
-                            .without_max_ratio()
-                            .with_max_output_len(NonZeroU64::new(1024).unwrap()),
+                            .unbounded_ratio()
+                            .max_output_len(NonZeroU64::new(1024).unwrap()),
                     )
                     .build(resources())
                     .built();
@@ -701,7 +701,7 @@ macro_rules! format_contract {
 
                 let shared = Resources::new(GlobalPool::new());
                 let input = view(&payload());
-                let baseline = run(&mut build(&Resources::new(GlobalPool::new()).enable_pooling(0)), &input);
+                let baseline = run(&mut build(&Resources::new(GlobalPool::new()).with_pool_capacity(0)), &input);
 
                 // Prime the pool so there is exactly one idle engine for two codecs to want.
                 drop(run(&mut build(&shared), &input));
@@ -778,7 +778,7 @@ macro_rules! format_contract {
                 };
 
                 for capacity in [0_usize, 1, 4] {
-                    let bounded = Resources::new(GlobalPool::new()).enable_pooling(capacity);
+                    let bounded = Resources::new(GlobalPool::new()).with_pool_capacity(capacity);
 
                     for round in 0..12 {
                         let mut compressor = $module::Compressor::builder()
@@ -1213,7 +1213,7 @@ macro_rules! format_contract {
                 let joined = BytesView::from_views([compressed.clone(), compressed]);
                 let mut decompressor = $module::Decompressor::builder()
                     .multi_stream(true)
-                    .limits(DecompressorLimits::new().with_max_streams(NonZeroU64::new(1).expect("one is non-zero")))
+                    .limits(DecompressorLimits::new().max_streams(NonZeroU64::new(1).expect("one is non-zero")))
                     .build(resources())
                     .built();
                 decompressor.push(joined).expect("push succeeds");
@@ -1240,7 +1240,7 @@ macro_rules! format_contract {
                 let compressed = $module::compress(view(&payload()), resources()).expect("compress");
                 let mut decompressor = $module::Decompressor::builder()
                     .multi_stream(true)
-                    .limits(DecompressorLimits::new().with_max_streams(NonZeroU64::new(1).expect("one is non-zero")))
+                    .limits(DecompressorLimits::new().max_streams(NonZeroU64::new(1).expect("one is non-zero")))
                     .build(resources())
                     .built();
                 decompressor.push(compressed.clone()).expect("first push succeeds");
@@ -1268,8 +1268,8 @@ macro_rules! format_contract {
                     compressed.clone(),
                     resources(),
                     DecompressorLimits::new()
-                        .without_max_ratio()
-                        .with_max_output_len(NonZeroU64::new(data.len() as u64).unwrap()),
+                        .unbounded_ratio()
+                        .max_output_len(NonZeroU64::new(data.len() as u64).unwrap()),
                 )
                 .expect("an exact limit succeeds");
                 assert_eq!(exact.to_vec(), data);
@@ -1279,8 +1279,8 @@ macro_rules! format_contract {
                     compressed,
                     resources(),
                     DecompressorLimits::new()
-                        .without_max_ratio()
-                        .with_max_output_len(NonZeroU64::new(maximum).unwrap()),
+                        .unbounded_ratio()
+                        .max_output_len(NonZeroU64::new(maximum).unwrap()),
                 )
                 .expect_err("one byte beyond the cap is rejected");
 
@@ -1573,7 +1573,7 @@ mod pooling {
         for round in 0..4 {
             for payload in &payloads {
                 let pooled = compress_with(pooled_resources(), Level::DEFAULT, payload);
-                let fresh = compress_with(&Resources::new(GlobalPool::new()).enable_pooling(0), Level::DEFAULT, payload);
+                let fresh = compress_with(&Resources::new(GlobalPool::new()).with_pool_capacity(0), Level::DEFAULT, payload);
 
                 assert_eq!(
                     pooled.to_vec(),
@@ -1599,7 +1599,7 @@ mod pooling {
 
         let recovered = compress_with(pooled_resources(), Level::DEFAULT, b"a fresh stream");
         let fresh = compress_with(
-            &Resources::new(GlobalPool::new()).enable_pooling(0),
+            &Resources::new(GlobalPool::new()).with_pool_capacity(0),
             Level::DEFAULT,
             b"a fresh stream",
         );
@@ -1621,11 +1621,11 @@ mod pooling {
 
         assert_eq!(
             fast.to_vec(),
-            compress_with(&Resources::new(GlobalPool::new()).enable_pooling(0), Level::FAST, &payload).to_vec()
+            compress_with(&Resources::new(GlobalPool::new()).with_pool_capacity(0), Level::FAST, &payload).to_vec()
         );
         assert_eq!(
             best.to_vec(),
-            compress_with(&Resources::new(GlobalPool::new()).enable_pooling(0), Level::HIGH, &payload).to_vec()
+            compress_with(&Resources::new(GlobalPool::new()).with_pool_capacity(0), Level::HIGH, &payload).to_vec()
         );
         assert!(best.len() <= fast.len(), "level 9 must still out-compress level 1");
     }
@@ -1706,7 +1706,7 @@ mod pooling {
 
     #[test]
     fn resources_without_recycling_still_work() {
-        let plain = Resources::new(GlobalPool::new()).enable_pooling(0);
+        let plain = Resources::new(GlobalPool::new()).with_pool_capacity(0);
         let payload = b"no recycling here".repeat(20);
 
         let compressed = compress_with(&plain, Level::DEFAULT, &payload);

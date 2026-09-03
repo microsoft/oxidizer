@@ -39,7 +39,7 @@ fn poll_compression<S, C, E>(
 ) -> Poll<Option<Result<BytesView>>>
 where
     S: Stream<Item = std::result::Result<BytesView, E>>,
-    C: Compression + ?Sized,
+    C: Compression,
     E: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
     if *finished {
@@ -176,14 +176,14 @@ where
     /// built with, and hands every chunk straight back rather than accumulating. A decompressor
     /// built with its format's `new` therefore carries only that format's ratio bound. If the
     /// consumer buffers what this yields, build the decompressor with its `builder` and set
-    /// [`with_max_output_len`][crate::DecompressorLimits::with_max_output_len] to what that consumer
+    /// [`max_output_len`][crate::DecompressorLimits::max_output_len] to what that consumer
     /// can afford.
     ///
     /// An output cap is not the whole story for a format that joins concatenated streams -- gzip
     /// and zstd do so by default. Cumulative output is what
-    /// [`with_max_output_len`][crate::DecompressorLimits::with_max_output_len] bounds, so a long run
+    /// [`max_output_len`][crate::DecompressorLimits::max_output_len] bounds, so a long run
     /// of small or empty members can keep decoding without ever reaching it. Bound the member count
-    /// as well with [`with_max_streams`][crate::DecompressorLimits::with_max_streams], or turn
+    /// as well with [`max_streams`][crate::DecompressorLimits::max_streams], or turn
     /// joining off with [`multi_stream(false)`][crate::DecompressorBuilder::multi_stream].
     ///
     /// Output chunks are provisional until the stream ends, because a checksum or trailer can
@@ -213,7 +213,7 @@ where
     /// // This consumer collects every chunk, so it caps the total rather than relying on the
     /// // adapter's bounded working set.
     /// let decompressor = gzip::Decompressor::builder()
-    ///     .limits(DecompressorLimits::new().with_max_output_len(NonZeroU64::new(1 << 20).unwrap()))
+    ///     .limits(DecompressorLimits::new().max_output_len(NonZeroU64::new(1 << 20).unwrap()))
     ///     .build(&Resources::default());
     ///
     /// let chunks: Vec<_> = CompressionStream::decompress(source, decompressor)
@@ -469,7 +469,7 @@ mod tests {
         let gzip = crate::gzip::compress(view(&vec![0_u8; 4 * 1024 * 1024]), &Resources::default()).expect("compression succeeds");
 
         let decompressor = gzip::Decompressor::builder()
-            .limits(DecompressorLimits::new().with_max_output_len(NonZeroU64::new(1024).unwrap()))
+            .limits(DecompressorLimits::new().max_output_len(NonZeroU64::new(1024).unwrap()))
             .build(&Resources::default());
 
         let error = collect(CompressionStream::decompress(ok_stream(vec![gzip]), decompressor)).expect_err("the cap fires");
