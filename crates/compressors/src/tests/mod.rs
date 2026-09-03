@@ -7,8 +7,15 @@
 //! which a separate test crate cannot name. They live here so that contract can be driven by hand
 //! without any of it reaching the public API.
 
-#[cfg(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
+#[cfg(any(
+    test,
+    feature = "brotli",
+    feature = "deflate",
+    feature = "gzip",
+    feature = "zlib",
+    feature = "zstd"
+))]
 mod format_contract;
 
-#[cfg(feature = "gzip")]
+#[cfg(any(test, feature = "gzip"))]
 mod round_trip;

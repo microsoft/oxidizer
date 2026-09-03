@@ -14,7 +14,14 @@ use crate::error::{Error, Result};
 #[cfg_attr(
     all(
         not(test),
-        not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))
+        not(any(
+            test,
+            feature = "brotli",
+            feature = "deflate",
+            feature = "gzip",
+            feature = "zlib",
+            feature = "zstd"
+        ))
     ),
     expect(dead_code, reason = "only the decompressors resolve and enforce bounds, and no format is enabled")
 )]
@@ -59,7 +66,14 @@ impl<T> Limit<T> {
     #[cfg_attr(
         all(
             not(test),
-            not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))
+            not(any(
+                test,
+                feature = "brotli",
+                feature = "deflate",
+                feature = "gzip",
+                feature = "zlib",
+                feature = "zstd"
+            ))
         ),
         expect(dead_code, reason = "only the decompressors resolve and enforce bounds, and no format is enabled")
     )]
@@ -233,7 +247,14 @@ impl DecompressorLimits {
     #[cfg_attr(
         all(
             not(test),
-            not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))
+            not(any(
+                test,
+                feature = "brotli",
+                feature = "deflate",
+                feature = "gzip",
+                feature = "zlib",
+                feature = "zstd"
+            ))
         ),
         expect(dead_code, reason = "only the decompressors resolve and enforce bounds, and no format is enabled")
     )]
@@ -252,7 +273,14 @@ impl DecompressorLimits {
 #[cfg_attr(
     all(
         not(test),
-        not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))
+        not(any(
+            test,
+            feature = "brotli",
+            feature = "deflate",
+            feature = "gzip",
+            feature = "zlib",
+            feature = "zstd"
+        ))
     ),
     expect(dead_code, reason = "only the decompressors resolve and enforce bounds, and no format is enabled")
 )]
@@ -266,7 +294,14 @@ pub(crate) struct FormatLimits {
 #[cfg_attr(
     all(
         not(test),
-        not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))
+        not(any(
+            test,
+            feature = "brotli",
+            feature = "deflate",
+            feature = "gzip",
+            feature = "zlib",
+            feature = "zstd"
+        ))
     ),
     expect(dead_code, reason = "only the decompressors resolve and enforce bounds, and no format is enabled")
 )]
@@ -309,7 +344,14 @@ impl FormatLimits {
     }
 
     #[cfg_attr(
-        not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")),
+        not(any(
+            test,
+            feature = "brotli",
+            feature = "deflate",
+            feature = "gzip",
+            feature = "zlib",
+            feature = "zstd"
+        )),
         expect(dead_code, reason = "no decompression engine reads the stream limit when no format is enabled")
     )]
     pub(crate) fn max_streams(self) -> Option<u64> {

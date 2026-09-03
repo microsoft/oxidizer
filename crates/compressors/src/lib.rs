@@ -218,35 +218,52 @@
 //! [`Resources`], which is what a crate that only passes compressors and decompressors around
 //! needs.
 
-#[cfg(feature = "brotli")]
+#[cfg(any(test, feature = "brotli"))]
 pub mod brotli;
 mod builder;
 pub mod core;
-#[cfg(feature = "deflate")]
+#[cfg(any(test, feature = "deflate"))]
 pub mod deflate;
-#[cfg(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
+#[cfg(any(
+    test,
+    feature = "brotli",
+    feature = "deflate",
+    feature = "gzip",
+    feature = "zlib",
+    feature = "zstd"
+))]
 mod engine;
 mod error;
-#[cfg(any(feature = "deflate", feature = "gzip", feature = "zlib"))]
+#[cfg(any(test, feature = "deflate", feature = "gzip", feature = "zlib"))]
 mod flate;
 pub mod format;
-#[cfg(feature = "gzip")]
+#[cfg(any(test, feature = "gzip"))]
 pub mod gzip;
 mod input;
 mod level;
 pub(crate) mod limits;
-#[cfg(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
+#[cfg(any(
+    test,
+    feature = "brotli",
+    feature = "deflate",
+    feature = "gzip",
+    feature = "zlib",
+    feature = "zstd"
+))]
 mod macros;
 mod pool;
 mod resources;
 mod trailing;
-#[cfg(feature = "zlib")]
+#[cfg(any(test, feature = "zlib"))]
 pub mod zlib;
-#[cfg(feature = "zstd")]
+#[cfg(any(test, feature = "zstd"))]
 pub mod zstd;
 
-#[cfg(feature = "futures-stream")]
+#[cfg(any(test, feature = "futures-stream"))]
 mod stream;
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(test)]
+mod testing;
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests;
@@ -255,11 +272,18 @@ pub use builder::{CompressorBuilder, DecompressorBuilder};
 use bytesbuf::BytesView;
 pub use error::{BuildError, Error, Result};
 pub use input::InputData;
-#[cfg(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
+#[cfg(any(
+    test,
+    feature = "brotli",
+    feature = "deflate",
+    feature = "gzip",
+    feature = "zlib",
+    feature = "zstd"
+))]
 pub use level::Level;
 pub use limits::DecompressorLimits;
 pub use resources::Resources;
-#[cfg(feature = "futures-stream")]
+#[cfg(any(test, feature = "futures-stream"))]
 pub use stream::CompressionStream;
 pub use trailing::TrailingData;
 

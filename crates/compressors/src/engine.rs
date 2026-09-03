@@ -522,6 +522,7 @@ mod tests {
     use bytesbuf::mem::testing::FixedBlockMemory;
 
     use super::*;
+    use crate::testing::{chunk, view};
 
     /// An engine that copies input to output verbatim, so pump behaviour can be tested on its own.
     #[derive(Debug, Default)]
@@ -549,14 +550,6 @@ mod tests {
 
             Ok((Step::Continue, count, count))
         }
-    }
-
-    fn chunk(size: usize) -> NonZeroUsize {
-        NonZeroUsize::new(size).expect("test chunk sizes are never zero")
-    }
-
-    fn view(bytes: &[u8]) -> BytesView {
-        BytesView::copied_from_slice(bytes, &GlobalPool::new())
     }
 
     #[test]

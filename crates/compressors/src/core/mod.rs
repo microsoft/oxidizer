@@ -176,104 +176,11 @@ pub(crate) fn process(mut engine: impl Compression, input: BytesView) -> Result<
     Ok(collected.consume_all())
 }
 
-/// A fixture that only ever reports progress, for exercising callers that must keep polling rather
-/// than treat a progress step as output.
-#[cfg(all(test, feature = "futures-stream", feature = "gzip"))]
-#[derive(Debug)]
-pub(crate) struct ProgressCompression {
-    pulls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-}
-
-#[cfg(all(test, feature = "futures-stream", feature = "gzip"))]
-impl ProgressCompression {
-    pub(crate) fn new(pulls: std::sync::Arc<std::sync::atomic::AtomicUsize>) -> Self {
-        Self { pulls }
-    }
-}
-
-#[cfg(all(test, feature = "futures-stream", feature = "gzip"))]
-impl Compression for ProgressCompression {
-    type Mode = Compress;
-}
-
-#[cfg(all(test, feature = "futures-stream", feature = "gzip"))]
-impl CompressionInternal for ProgressCompression {
-    fn push(&mut self, _input: BytesView) -> Result<()> {
-        Ok(())
-    }
-
-    fn end_input(&mut self) {}
-
-    fn pull(&mut self) -> Result<Output> {
-        self.pulls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        Ok(Output::Progress)
-    }
-
-    // No caller on the path this fixture exists for asks for the byte counters; they are here only
-    // because the trait requires them.
-    #[cfg_attr(coverage_nightly, coverage(off))]
-    #[cfg_attr(test, mutants::skip)]
-    fn total_in(&self) -> u64 {
-        0
-    }
-
-    #[cfg_attr(coverage_nightly, coverage(off))]
-    #[cfg_attr(test, mutants::skip)]
-    fn total_out(&self) -> u64 {
-        0
-    }
-}
-
-/// A fixture that always asks for input and always rejects it, for exercising callers that must
-/// propagate a `push` failure rather than the specific reasons a real engine's `push` can fail.
-#[cfg(all(test, feature = "futures-stream", feature = "gzip"))]
-#[derive(Debug)]
-pub(crate) struct RejectsPush;
-
-#[cfg(all(test, feature = "futures-stream", feature = "gzip"))]
-impl Compression for RejectsPush {
-    type Mode = Compress;
-}
-
-#[cfg(all(test, feature = "futures-stream", feature = "gzip"))]
-impl CompressionInternal for RejectsPush {
-    // Accepting input would make this fixture, whose whole purpose is to reject it, ask for input
-    // endlessly instead. The mutant hangs rather than failing, so no verdict is available.
-    #[cfg_attr(test, mutants::skip)]
-    fn push(&mut self, _input: BytesView) -> Result<()> {
-        Err(crate::Error::invalid_state("this fixture always rejects pushed input"))
-    }
-
-    fn end_input(&mut self) {}
-
-    fn pull(&mut self) -> Result<Output> {
-        Ok(Output::NeedInput)
-    }
-
-    // No caller on the path this fixture exists for asks for the byte counters; they are here only
-    // because the trait requires them.
-    #[cfg_attr(coverage_nightly, coverage(off))]
-    #[cfg_attr(test, mutants::skip)]
-    fn total_in(&self) -> u64 {
-        0
-    }
-
-    #[cfg_attr(coverage_nightly, coverage(off))]
-    #[cfg_attr(test, mutants::skip)]
-    fn total_out(&self) -> u64 {
-        0
-    }
-}
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
-    use bytesbuf::mem::GlobalPool;
-
     use super::*;
-
-    fn view(bytes: &[u8]) -> BytesView {
-        BytesView::copied_from_slice(bytes, &GlobalPool::new())
-    }
+    use crate::testing::view;
 
     #[test]
     fn process_forwards_progress_without_producing_data() {

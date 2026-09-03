@@ -7,7 +7,7 @@
 //! so a format that behaves differently from its siblings -- or an abstraction that quietly only
 //! fits the deflate family -- fails here rather than surprising a consumer.
 
-use std::num::{NonZeroU32, NonZeroU64, NonZeroUsize};
+use std::num::{NonZeroU32, NonZeroU64};
 use std::sync::OnceLock;
 
 use bytesbuf::mem::GlobalPool;
@@ -15,21 +15,8 @@ use bytesbuf::{BytesBuf, BytesView};
 
 use crate::core::{Compress, Compression, CompressionInternal, Decompress, Output};
 use crate::format::Format;
+use crate::testing::{chunk, fragmented, view};
 use crate::{CompressorBuilder, DecompressorBuilder, DecompressorLimits, Level, Resources, TrailingData};
-
-fn view(bytes: &[u8]) -> BytesView {
-    BytesView::copied_from_slice(bytes, &GlobalPool::new())
-}
-
-/// Builds a view split into `segment` sized spans, exercising the multi-segment paths.
-fn fragmented(bytes: &[u8], segment: usize) -> BytesView {
-    let memory = GlobalPool::new();
-    BytesView::from_views(bytes.chunks(segment).map(|chunk| BytesView::copied_from_slice(chunk, &memory)))
-}
-
-fn chunk(size: usize) -> NonZeroUsize {
-    NonZeroUsize::new(size).expect("test chunk sizes are never zero")
-}
 
 /// The resources every test here draws on: one memory provider, one set of recycled engines.
 ///
@@ -1350,25 +1337,25 @@ macro_rules! format_contract {
     };
 }
 
-#[cfg(feature = "deflate")]
+#[cfg(any(test, feature = "deflate"))]
 format_contract!(deflate, Format::Deflate);
-#[cfg(feature = "zlib")]
+#[cfg(any(test, feature = "zlib"))]
 format_contract!(zlib, Format::Zlib);
-#[cfg(feature = "gzip")]
+#[cfg(any(test, feature = "gzip"))]
 format_contract!(gzip, Format::Gzip);
-#[cfg(feature = "brotli")]
+#[cfg(any(test, feature = "brotli"))]
 format_contract!(brotli, Format::Brotli);
-#[cfg(feature = "zstd")]
+#[cfg(any(test, feature = "zstd"))]
 format_contract!(zstd, Format::Zstd);
 
 #[test]
 fn every_compiled_format_satisfies_the_contract() {
     // Guards against a format being added to `Format::ALL` without being added to the suite above.
-    let covered = usize::from(cfg!(feature = "deflate"))
-        + usize::from(cfg!(feature = "zlib"))
-        + usize::from(cfg!(feature = "gzip"))
-        + usize::from(cfg!(feature = "brotli"))
-        + usize::from(cfg!(feature = "zstd"));
+    let covered = usize::from(cfg!(any(test, feature = "deflate")))
+        + usize::from(cfg!(any(test, feature = "zlib")))
+        + usize::from(cfg!(any(test, feature = "gzip")))
+        + usize::from(cfg!(any(test, feature = "brotli")))
+        + usize::from(cfg!(any(test, feature = "zstd")));
 
     assert_eq!(
         Format::ALL.len(),
@@ -1423,7 +1410,7 @@ fn a_decompressor_can_be_chosen_from_a_declared_encoding() {
 }
 
 /// Format-specific settings: how a format extends the shared builder without breaking the contract.
-#[cfg(feature = "brotli")]
+#[cfg(any(test, feature = "brotli"))]
 mod format_specific_settings {
     use super::*;
     use crate::brotli;
@@ -1501,7 +1488,7 @@ mod format_specific_settings {
                 // With brotli as the only enabled format there is no other variant to reach, so
                 // the fallback is dead in that configuration rather than wrong.
                 #[cfg_attr(
-                    not(any(feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")),
+                    not(any(test, feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")),
                     expect(unreachable_patterns, reason = "brotli is the only enabled format, so it is the only variant")
                 )]
                 other => {
@@ -1530,7 +1517,7 @@ mod format_specific_settings {
     }
 }
 
-#[cfg(feature = "zstd")]
+#[cfg(any(test, feature = "zstd"))]
 mod zstd_specific_settings {
     use super::*;
     use crate::zstd;
@@ -1556,7 +1543,7 @@ mod zstd_specific_settings {
 }
 
 /// Engine reuse must be invisible: a recycled compressor has to behave exactly like a fresh one.
-#[cfg(feature = "gzip")]
+#[cfg(any(test, feature = "gzip"))]
 mod pooling {
     use super::*;
     use crate::gzip;
@@ -1681,7 +1668,7 @@ mod pooling {
         }
     }
 
-    #[cfg(feature = "zlib")]
+    #[cfg(any(test, feature = "zlib"))]
     #[test]
     fn a_decompressor_abandoned_mid_stream_does_not_poison_the_pool() {
         use crate::zlib;
@@ -1867,7 +1854,7 @@ fn pooled_output_does_not_drift_over_many_reuses() {
 ///
 /// These live here rather than beside the traits because driving them needs a concrete format, and
 /// `core` deliberately knows about none.
-#[cfg(feature = "gzip")]
+#[cfg(any(test, feature = "gzip"))]
 mod trait_contract {
     use super::*;
     use crate::gzip;

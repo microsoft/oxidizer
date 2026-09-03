@@ -94,7 +94,7 @@ pub(crate) struct FlateDecompress {
     trailing_data: TrailingData,
     needs_reset: bool,
     /// Only present where some container's decompressor can actually be recycled.
-    #[cfg(any(feature = "deflate", feature = "zlib"))]
+    #[cfg(any(test, feature = "deflate", feature = "zlib"))]
     recycle: Pool,
 }
 
@@ -108,7 +108,7 @@ impl FlateDecompress {
         };
         let decompress = Self::checkout(wrapper, &pool);
 
-        #[cfg(not(any(feature = "deflate", feature = "zlib")))]
+        #[cfg(not(any(test, feature = "deflate", feature = "zlib")))]
         drop(pool);
 
         Self {
@@ -118,13 +118,13 @@ impl FlateDecompress {
             multi_stream,
             trailing_data,
             needs_reset: false,
-            #[cfg(any(feature = "deflate", feature = "zlib"))]
+            #[cfg(any(test, feature = "deflate", feature = "zlib"))]
             recycle: pool,
         }
     }
 
     fn checkout(wrapper: Wrapper, pool: &Pool) -> Decompress {
-        #[cfg(any(feature = "deflate", feature = "zlib"))]
+        #[cfg(any(test, feature = "deflate", feature = "zlib"))]
         if let Some(engine) = pool.take_decompressor(wrapper) {
             return engine;
         }
@@ -138,7 +138,7 @@ impl FlateDecompress {
     }
 }
 
-#[cfg(any(feature = "deflate", feature = "zlib"))]
+#[cfg(any(test, feature = "deflate", feature = "zlib"))]
 impl Drop for FlateDecompress {
     fn drop(&mut self) {
         self.recycle.return_decompressor(self.wrapper, &mut self.decompress);
@@ -151,11 +151,11 @@ unsafe impl Codec for FlateDecompress {
     fn step(&mut self, input: &[u8], output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
         if self.needs_reset {
             match self.wrapper {
-                #[cfg(feature = "deflate")]
+                #[cfg(any(test, feature = "deflate"))]
                 Wrapper::Raw => self.engine().reset(false),
-                #[cfg(feature = "zlib")]
+                #[cfg(any(test, feature = "zlib"))]
                 Wrapper::Zlib => self.engine().reset(true),
-                #[cfg(feature = "gzip")]
+                #[cfg(any(test, feature = "gzip"))]
                 Wrapper::Gzip => {
                     // `Decompress::reset` cannot express gzip framing.
                     self.decompress = Some(self.wrapper.decompressor());
@@ -213,7 +213,7 @@ unsafe impl Codec for FlateDecompress {
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(all(test, feature = "deflate", feature = "gzip", feature = "zlib"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

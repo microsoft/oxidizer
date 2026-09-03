@@ -3,14 +3,14 @@
 
 //! Reuse of compression engine state from one stream to the next.
 
-#[cfg(any(feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
+#[cfg(any(test, feature = "deflate", feature = "gzip", feature = "zlib"))]
 use std::collections::HashMap;
 use std::fmt;
-#[cfg(any(feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
+#[cfg(any(test, feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
 use std::sync::Mutex;
 use std::sync::{Arc, OnceLock};
 
-#[cfg(any(feature = "deflate", feature = "gzip", feature = "zlib"))]
+#[cfg(any(test, feature = "deflate", feature = "gzip", feature = "zlib"))]
 use crate::flate::Wrapper;
 
 /// How many idle engines the pool keeps per distinct configuration, unless told otherwise.
@@ -21,7 +21,7 @@ const DEFAULT_CAPACITY: usize = 16;
 /// An engine can only be reused for the configuration it was built with: resetting a compressor
 /// preserves its container and its level, so a gzip level-9 engine cannot serve a zlib level-1
 /// request.
-#[cfg(any(feature = "deflate", feature = "gzip", feature = "zlib"))]
+#[cfg(any(test, feature = "deflate", feature = "gzip", feature = "zlib"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct EngineKey {
     pub(crate) wrapper: Wrapper,
@@ -71,10 +71,10 @@ pub(crate) struct Pool {
 /// class whose critical section panicked -- every checkout treats a poisoned lock as "nothing to
 /// reuse" and builds a fresh engine instead.
 struct Inner {
-    #[cfg(any(feature = "deflate", feature = "gzip", feature = "zlib"))]
+    #[cfg(any(test, feature = "deflate", feature = "gzip", feature = "zlib"))]
     compressors: Mutex<HashMap<EngineKey, Vec<flate2::Compress>>>,
     /// Decompressors carry no level, so the container alone identifies them.
-    #[cfg(any(feature = "deflate", feature = "zlib"))]
+    #[cfg(any(test, feature = "deflate", feature = "zlib"))]
     decompressors: Mutex<HashMap<Wrapper, Vec<flate2::Decompress>>>,
     /// Zstd contexts allocate their working memory lazily, so recycling them saves far more than
     /// their construction cost suggests.
@@ -82,9 +82,9 @@ struct Inner {
     /// Not keyed by level: checkout resets with `SessionAndParameters` and the compressor then
     /// applies its level unconditionally, so any idle context serves any level. Keying by level
     /// would only fragment reuse and let a caller-chosen level grow the map.
-    #[cfg(feature = "zstd")]
+    #[cfg(any(test, feature = "zstd"))]
     zstd_compressors: Mutex<Vec<zstd_safe::CCtx<'static>>>,
-    #[cfg(feature = "zstd")]
+    #[cfg(any(test, feature = "zstd"))]
     zstd_decompressors: Mutex<Vec<zstd_safe::DCtx<'static>>>,
     capacity: usize,
 }
@@ -104,13 +104,13 @@ impl Pool {
     pub(crate) fn with_capacity(capacity: usize) -> Self {
         Self {
             inner: Arc::new(Inner {
-                #[cfg(any(feature = "deflate", feature = "gzip", feature = "zlib"))]
+                #[cfg(any(test, feature = "deflate", feature = "gzip", feature = "zlib"))]
                 compressors: Mutex::new(HashMap::new()),
-                #[cfg(any(feature = "deflate", feature = "zlib"))]
+                #[cfg(any(test, feature = "deflate", feature = "zlib"))]
                 decompressors: Mutex::new(HashMap::new()),
-                #[cfg(feature = "zstd")]
+                #[cfg(any(test, feature = "zstd"))]
                 zstd_compressors: Mutex::new(Vec::new()),
-                #[cfg(feature = "zstd")]
+                #[cfg(any(test, feature = "zstd"))]
                 zstd_decompressors: Mutex::new(Vec::new()),
                 capacity,
             }),
@@ -140,7 +140,7 @@ impl Pool {
     /// A pool of capacity zero can neither hand an engine out nor keep one, so the locks it would
     /// take are pure overhead.
     #[cfg_attr(
-        not(any(feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")),
+        not(any(test, feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")),
         expect(dead_code, reason = "only the pooled formats ask, and none of them is enabled")
     )]
     // Answering `false` here is unobservable: every caller then takes the lock and reaches a
@@ -155,7 +155,7 @@ impl Pool {
     ///
     /// The engine is reset before it is handed over, so an engine dropped part-way through a stream
     /// cannot leak its state into the next user.
-    #[cfg(any(feature = "deflate", feature = "gzip", feature = "zlib"))]
+    #[cfg(any(test, feature = "deflate", feature = "gzip", feature = "zlib"))]
     pub(crate) fn take_compressor(&self, key: EngineKey) -> Option<flate2::Compress> {
         if self.is_disabled() {
             return None;
@@ -175,7 +175,7 @@ impl Pool {
     /// takes ownership. Every caller is a [`Drop`] implementation, and dropping the engine there
     /// would free it while the value being destroyed is still borrowed, which the aliasing rules
     /// forbid.
-    #[cfg(any(feature = "deflate", feature = "gzip", feature = "zlib"))]
+    #[cfg(any(test, feature = "deflate", feature = "gzip", feature = "zlib"))]
     pub(crate) fn return_compressor(&self, key: EngineKey, engine: &mut Option<flate2::Compress>) {
         if self.is_disabled() {
             return;
@@ -196,7 +196,7 @@ impl Pool {
     ///
     /// Only called for containers whose reset restores the framing; see
     /// [`Wrapper::reset_restores_framing`].
-    #[cfg(any(feature = "deflate", feature = "zlib"))]
+    #[cfg(any(test, feature = "deflate", feature = "zlib"))]
     pub(crate) fn take_decompressor(&self, wrapper: Wrapper) -> Option<flate2::Decompress> {
         if self.is_disabled() {
             return None;
@@ -209,7 +209,7 @@ impl Pool {
     }
 
     /// Takes `engine` for reuse, leaving it in place when the pool cannot keep it; see [`Self::return_compressor`].
-    #[cfg(any(feature = "deflate", feature = "zlib"))]
+    #[cfg(any(test, feature = "deflate", feature = "zlib"))]
     pub(crate) fn return_decompressor(&self, wrapper: Wrapper, engine: &mut Option<flate2::Decompress>) {
         if self.is_disabled() {
             return;
@@ -229,7 +229,7 @@ impl Pool {
     ///
     /// Resetting the session drops any half-written frame while keeping the context's allocations,
     /// which is where the saving comes from.
-    #[cfg(feature = "zstd")]
+    #[cfg(any(test, feature = "zstd"))]
     pub(crate) fn take_zstd_compressor(&self) -> Option<zstd_safe::CCtx<'static>> {
         if self.is_disabled() {
             return None;
@@ -242,7 +242,7 @@ impl Pool {
     }
 
     /// Takes `context` for reuse, leaving it in place when the pool cannot keep it, for the reason given on `return_compressor`.
-    #[cfg(feature = "zstd")]
+    #[cfg(any(test, feature = "zstd"))]
     pub(crate) fn return_zstd_compressor(&self, context: &mut Option<zstd_safe::CCtx<'static>>) {
         if self.is_disabled() {
             return;
@@ -257,7 +257,7 @@ impl Pool {
     }
 
     /// Takes an idle zstd decompressor, or reports that one must be built.
-    #[cfg(feature = "zstd")]
+    #[cfg(any(test, feature = "zstd"))]
     pub(crate) fn take_zstd_decompressor(&self) -> Option<zstd_safe::DCtx<'static>> {
         if self.is_disabled() {
             return None;
@@ -270,7 +270,7 @@ impl Pool {
     }
 
     /// Takes `context` for reuse, leaving it in place when the pool cannot keep it, for the reason given on `return_compressor`.
-    #[cfg(feature = "zstd")]
+    #[cfg(any(test, feature = "zstd"))]
     pub(crate) fn return_zstd_decompressor(&self, context: &mut Option<zstd_safe::DCtx<'static>>) {
         if self.is_disabled() {
             return;
@@ -324,7 +324,7 @@ mod tests {
         assert!(format!("{:?}", Pool::with_capacity(4)).contains("capacity: 4"));
     }
 
-    #[cfg(feature = "gzip")]
+    #[cfg(any(test, feature = "gzip"))]
     mod pooling {
         use super::*;
         use crate::Level;
@@ -428,16 +428,16 @@ mod tests {
         }
     }
 
-    #[cfg(any(feature = "deflate", feature = "zlib"))]
+    #[cfg(any(test, feature = "deflate", feature = "zlib"))]
     mod flate_decompressor_pooling {
         use super::*;
 
-        #[cfg(feature = "deflate")]
+        #[cfg(any(test, feature = "deflate"))]
         fn wrapper() -> Wrapper {
             Wrapper::Raw
         }
 
-        #[cfg(all(feature = "zlib", not(feature = "deflate")))]
+        #[cfg(all(not(test), feature = "zlib", not(feature = "deflate")))]
         fn wrapper() -> Wrapper {
             Wrapper::Zlib
         }
@@ -502,7 +502,7 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "zstd")]
+    #[cfg(any(test, feature = "zstd"))]
     mod zstd_pooling {
         use super::*;
 

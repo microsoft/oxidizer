@@ -112,7 +112,14 @@ impl Resources {
     #[cfg_attr(
         all(
             not(test),
-            not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))
+            not(any(
+                test,
+                feature = "brotli",
+                feature = "deflate",
+                feature = "gzip",
+                feature = "zlib",
+                feature = "zstd"
+            ))
         ),
         expect(dead_code, reason = "only a format module's build method checks an engine out")
     )]

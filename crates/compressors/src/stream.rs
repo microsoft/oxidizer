@@ -250,26 +250,21 @@ where
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(all(test, feature = "gzip"))]
+#[cfg(test)]
 mod tests {
     use std::num::NonZeroU64;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use bytesbuf::BytesBuf;
-    use bytesbuf::mem::GlobalPool;
     use futures::executor::block_on;
     use futures::task::noop_waker;
     use futures::{StreamExt, stream};
 
     use super::*;
-    use crate::core::ProgressCompression;
     use crate::format::Format;
+    use crate::testing::{ProgressCompression, view};
     use crate::{DecompressorLimits, Level, Resources, gzip};
-
-    fn view(bytes: &[u8]) -> BytesView {
-        BytesView::copied_from_slice(bytes, &GlobalPool::new())
-    }
 
     fn ok_stream(chunks: Vec<BytesView>) -> impl Stream<Item = std::result::Result<BytesView, std::io::Error>> {
         stream::iter(chunks.into_iter().map(Ok))
@@ -394,7 +389,7 @@ mod tests {
 
     #[test]
     fn reports_a_push_rejection_as_an_error() {
-        use crate::core::RejectsPush;
+        use crate::testing::RejectsPush;
 
         let source = ok_stream(vec![view(b"chunk")]);
         let error = collect(CompressionStream::compress(source, RejectsPush)).expect_err("the push failure surfaces");
@@ -406,7 +401,7 @@ mod tests {
     fn reports_a_request_for_input_after_end_of_input_as_an_error() {
         // The fixture asks for input forever. Once the source is exhausted there is none left to
         // give, so the adapter has to end the stream rather than keep waking itself to ask again.
-        use crate::core::RejectsPush;
+        use crate::testing::RejectsPush;
 
         let source = ok_stream(Vec::new());
         let error = collect(CompressionStream::compress(source, RejectsPush)).expect_err("a codec that never stops asking is rejected");
@@ -416,7 +411,8 @@ mod tests {
 
     #[test]
     fn rejects_push_fixture_end_input_is_a_no_op() {
-        use crate::core::{CompressionInternal as _, RejectsPush};
+        use crate::core::CompressionInternal as _;
+        use crate::testing::RejectsPush;
 
         let mut operation = RejectsPush;
         operation.end_input();

@@ -6,12 +6,13 @@
 //! Gzip specific: interop fixtures produced by the system `gzip`, and the concatenated-member
 //! behaviour that only gzip enables by default.
 
-use std::num::{NonZeroU64, NonZeroUsize};
+use std::num::NonZeroU64;
 
 use bytesbuf::mem::GlobalPool;
 use bytesbuf::{BytesBuf, BytesView};
 
 use crate::core::{CompressionInternal as _, Output};
+use crate::testing::{chunk, fragmented, view};
 use crate::{DecompressorLimits, Resources, gzip};
 
 /// The payload behind `tests/fixtures/system_gzip.gz`, compressed by the system `gzip -9 -n`.
@@ -19,20 +20,6 @@ const FIXTURE_PLAINTEXT: &[u8] = b"The quick brown fox jumps over the lazy dog.\
 
 const SYSTEM_GZIP: &[u8] = include_bytes!("fixtures/system_gzip.gz");
 const SYSTEM_GZIP_TWO_MEMBERS: &[u8] = include_bytes!("fixtures/system_gzip_two_members.gz");
-
-fn view(bytes: &[u8]) -> BytesView {
-    BytesView::copied_from_slice(bytes, &GlobalPool::new())
-}
-
-/// Builds a view split into `segment` sized spans, so the multi-segment paths are exercised.
-fn fragmented(bytes: &[u8], segment: usize) -> BytesView {
-    let memory = GlobalPool::new();
-    BytesView::from_views(bytes.chunks(segment).map(|chunk| BytesView::copied_from_slice(chunk, &memory)))
-}
-
-fn chunk(size: usize) -> NonZeroUsize {
-    NonZeroUsize::new(size).expect("test chunk sizes are never zero")
-}
 
 /// Caps every drain loop in this file.
 ///

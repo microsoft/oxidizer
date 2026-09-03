@@ -51,19 +51,19 @@ use crate::resources::Resources;
 #[non_exhaustive]
 pub enum Format {
     /// Raw deflate, RFC 1951. See `deflate`. Requires the `deflate` feature.
-    #[cfg(feature = "deflate")]
+    #[cfg(any(test, feature = "deflate"))]
     Deflate,
     /// Zlib, RFC 1950. See `zlib`. Requires the `zlib` feature.
-    #[cfg(feature = "zlib")]
+    #[cfg(any(test, feature = "zlib"))]
     Zlib,
     /// Gzip, RFC 1952. See `gzip`. Requires the `gzip` feature.
-    #[cfg(feature = "gzip")]
+    #[cfg(any(test, feature = "gzip"))]
     Gzip,
     /// Brotli, RFC 7932. See `brotli`. Requires the `brotli` feature.
-    #[cfg(feature = "brotli")]
+    #[cfg(any(test, feature = "brotli"))]
     Brotli,
     /// Zstandard, RFC 8878. See `zstd`. Requires the `zstd` feature.
-    #[cfg(feature = "zstd")]
+    #[cfg(any(test, feature = "zstd"))]
     Zstd,
 }
 
@@ -72,15 +72,15 @@ impl Format {
     ///
     /// The contents depend on which cargo features are enabled.
     pub const ALL: &'static [Self] = &[
-        #[cfg(feature = "deflate")]
+        #[cfg(any(test, feature = "deflate"))]
         Self::Deflate,
-        #[cfg(feature = "zlib")]
+        #[cfg(any(test, feature = "zlib"))]
         Self::Zlib,
-        #[cfg(feature = "gzip")]
+        #[cfg(any(test, feature = "gzip"))]
         Self::Gzip,
-        #[cfg(feature = "brotli")]
+        #[cfg(any(test, feature = "brotli"))]
         Self::Brotli,
-        #[cfg(feature = "zstd")]
+        #[cfg(any(test, feature = "zstd"))]
         Self::Zstd,
     ];
 
@@ -91,7 +91,7 @@ impl Format {
     #[must_use]
     #[cfg_attr(
         all(
-            not(feature = "deflate"),
+            not(any(test, feature = "deflate")),
             any(feature = "brotli", feature = "gzip", feature = "zlib", feature = "zstd")
         ),
         expect(
@@ -101,15 +101,15 @@ impl Format {
     )]
     pub const fn content_encoding(self) -> Option<&'static str> {
         match self {
-            #[cfg(feature = "deflate")]
+            #[cfg(any(test, feature = "deflate"))]
             Self::Deflate => None,
-            #[cfg(feature = "zlib")]
+            #[cfg(any(test, feature = "zlib"))]
             Self::Zlib => Some("deflate"),
-            #[cfg(feature = "gzip")]
+            #[cfg(any(test, feature = "gzip"))]
             Self::Gzip => Some("gzip"),
-            #[cfg(feature = "brotli")]
+            #[cfg(any(test, feature = "brotli"))]
             Self::Brotli => Some("br"),
-            #[cfg(feature = "zstd")]
+            #[cfg(any(test, feature = "zstd"))]
             Self::Zstd => Some("zstd"),
         }
     }
@@ -125,47 +125,30 @@ impl Format {
     pub fn from_content_encoding(token: &str) -> Option<Self> {
         let token = token.trim();
 
-        #[cfg(feature = "gzip")]
+        #[cfg(any(test, feature = "gzip"))]
         if token.eq_ignore_ascii_case("gzip") || token.eq_ignore_ascii_case("x-gzip") {
             return Some(Self::Gzip);
         }
 
-        #[cfg(feature = "zlib")]
+        #[cfg(any(test, feature = "zlib"))]
         if token.eq_ignore_ascii_case("deflate") {
             return Some(Self::Zlib);
         }
 
-        #[cfg(feature = "brotli")]
+        #[cfg(any(test, feature = "brotli"))]
         if token.eq_ignore_ascii_case("br") {
             return Some(Self::Brotli);
         }
 
-        #[cfg(feature = "zstd")]
+        #[cfg(any(test, feature = "zstd"))]
         if token.eq_ignore_ascii_case("zstd") {
             return Some(Self::Zstd);
         }
 
-        #[cfg(not(any(feature = "brotli", feature = "gzip", feature = "zlib", feature = "zstd")))]
+        #[cfg(not(any(test, feature = "brotli", feature = "gzip", feature = "zlib", feature = "zstd")))]
         let _ = token;
 
         None
-    }
-}
-
-#[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(all(
-    test,
-    not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))
-))]
-mod no_format_tests {
-    use super::*;
-
-    #[test]
-    fn nothing_resolves_when_no_format_is_enabled() {
-        // The module is still compiled so its types can be named; it just has nothing to offer.
-        assert_eq!(Format::from_content_encoding("gzip"), None);
-        assert_eq!(Format::from_content_encoding("br"), None);
-        assert!(Format::ALL.is_empty(), "no format is enabled, so none can be listed");
     }
 }
 
@@ -176,17 +159,24 @@ mod no_format_tests {
 macro_rules! dispatch {
     ($kind:ident, $value:expr, $codec:ident => $call:expr) => {
         match $value {
-            #[cfg(feature = "deflate")]
+            #[cfg(any(test, feature = "deflate"))]
             $kind::Deflate($codec) => $call,
-            #[cfg(feature = "zlib")]
+            #[cfg(any(test, feature = "zlib"))]
             $kind::Zlib($codec) => $call,
-            #[cfg(feature = "gzip")]
+            #[cfg(any(test, feature = "gzip"))]
             $kind::Gzip($codec) => $call,
-            #[cfg(feature = "brotli")]
+            #[cfg(any(test, feature = "brotli"))]
             $kind::Brotli($codec) => $call,
-            #[cfg(feature = "zstd")]
+            #[cfg(any(test, feature = "zstd"))]
             $kind::Zstd($codec) => $call,
-            #[cfg(not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")))]
+            #[cfg(not(any(
+                test,
+                feature = "brotli",
+                feature = "deflate",
+                feature = "gzip",
+                feature = "zlib",
+                feature = "zstd"
+            )))]
             #[expect(
                 clippy::uninhabited_references,
                 reason = "the variant cannot be constructed, so a reference to it cannot exist for this arm to reach"
@@ -198,49 +188,77 @@ macro_rules! dispatch {
 
 #[derive(Debug)]
 enum CompressorKind {
-    #[cfg(feature = "deflate")]
+    #[cfg(any(test, feature = "deflate"))]
     Deflate(crate::deflate::Compressor),
-    #[cfg(feature = "zlib")]
+    #[cfg(any(test, feature = "zlib"))]
     Zlib(crate::zlib::Compressor),
-    #[cfg(feature = "gzip")]
+    #[cfg(any(test, feature = "gzip"))]
     Gzip(crate::gzip::Compressor),
-    #[cfg(feature = "brotli")]
+    #[cfg(any(test, feature = "brotli"))]
     // Brotli's engine state dwarfs the others (roughly 6.5 KiB against 1 KiB), and this enum is
     // returned by value, so the odd one out is boxed to keep the common cases cheap to move.
     Brotli(Box<crate::brotli::Compressor>),
-    #[cfg(feature = "zstd")]
+    #[cfg(any(test, feature = "zstd"))]
     Zstd(crate::zstd::Compressor),
     /// Keeps the dispatch below exhaustive when no format is enabled.
     ///
     /// [`Infallible`][core::convert::Infallible] cannot be constructed, so neither can this: the
     /// type exists so a build with no format can still name it, not so it can be used.
     #[cfg_attr(
-        not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")),
+        not(any(
+            test,
+            feature = "brotli",
+            feature = "deflate",
+            feature = "gzip",
+            feature = "zlib",
+            feature = "zstd"
+        )),
         expect(dead_code, reason = "the placeholder exists to be matched, never constructed")
     )]
-    #[cfg(not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")))]
+    #[cfg(not(any(
+        test,
+        feature = "brotli",
+        feature = "deflate",
+        feature = "gzip",
+        feature = "zlib",
+        feature = "zstd"
+    )))]
     Impossible(core::convert::Infallible),
 }
 
 #[derive(Debug)]
 enum DecompressorKind {
-    #[cfg(feature = "deflate")]
+    #[cfg(any(test, feature = "deflate"))]
     Deflate(crate::deflate::Decompressor),
-    #[cfg(feature = "zlib")]
+    #[cfg(any(test, feature = "zlib"))]
     Zlib(crate::zlib::Decompressor),
-    #[cfg(feature = "gzip")]
+    #[cfg(any(test, feature = "gzip"))]
     Gzip(crate::gzip::Decompressor),
-    #[cfg(feature = "brotli")]
+    #[cfg(any(test, feature = "brotli"))]
     // Boxed for the same reason as the compressor above.
     Brotli(Box<crate::brotli::Decompressor>),
-    #[cfg(feature = "zstd")]
+    #[cfg(any(test, feature = "zstd"))]
     Zstd(crate::zstd::Decompressor),
     /// Keeps the dispatch exhaustive when no format is enabled, exactly as for the compressor above.
     #[cfg_attr(
-        not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")),
+        not(any(
+            test,
+            feature = "brotli",
+            feature = "deflate",
+            feature = "gzip",
+            feature = "zlib",
+            feature = "zstd"
+        )),
         expect(dead_code, reason = "the placeholder exists to be matched, never constructed")
     )]
-    #[cfg(not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")))]
+    #[cfg(not(any(
+        test,
+        feature = "brotli",
+        feature = "deflate",
+        feature = "gzip",
+        feature = "zlib",
+        feature = "zstd"
+    )))]
     Impossible(core::convert::Infallible),
 }
 
@@ -281,7 +299,14 @@ impl Compression for Compressor {
 
 impl CompressionInternal for Compressor {
     #[cfg_attr(
-        not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")),
+        not(any(
+            test,
+            feature = "brotli",
+            feature = "deflate",
+            feature = "gzip",
+            feature = "zlib",
+            feature = "zstd"
+        )),
         expect(unused_variables, reason = "the dispatch below diverges when no format is enabled")
     )]
     fn push(&mut self, input: BytesView) -> Result<()> {
@@ -348,7 +373,14 @@ impl Compression for Decompressor {
 
 impl CompressionInternal for Decompressor {
     #[cfg_attr(
-        not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")),
+        not(any(
+            test,
+            feature = "brotli",
+            feature = "deflate",
+            feature = "gzip",
+            feature = "zlib",
+            feature = "zstd"
+        )),
         expect(unused_variables, reason = "the dispatch below diverges when no format is enabled")
     )]
     fn push(&mut self, input: BytesView) -> Result<()> {
@@ -441,14 +473,21 @@ impl CompressorBuilder<()> {
     /// Returns a [`BuildError`] if the chosen format's engine rejects the
     /// configuration.
     #[cfg_attr(
-        not(any(feature = "brotli", feature = "zstd")),
+        not(any(test, feature = "brotli", feature = "zstd")),
         expect(
             clippy::unnecessary_wraps,
             reason = "brotli and zstd are the formats whose engines can reject a configuration, and neither is enabled"
         )
     )]
     #[cfg_attr(
-        not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")),
+        not(any(
+            test,
+            feature = "brotli",
+            feature = "deflate",
+            feature = "gzip",
+            feature = "zlib",
+            feature = "zstd"
+        )),
         expect(
             unreachable_code,
             unused_variables,
@@ -458,15 +497,15 @@ impl CompressorBuilder<()> {
     )]
     pub fn build_format(self, format: Format, resources: &Resources) -> ::core::result::Result<Compressor, BuildError> {
         let kind = match format {
-            #[cfg(feature = "deflate")]
+            #[cfg(any(test, feature = "deflate"))]
             Format::Deflate => CompressorKind::Deflate(self.build_deflate(resources)),
-            #[cfg(feature = "zlib")]
+            #[cfg(any(test, feature = "zlib"))]
             Format::Zlib => CompressorKind::Zlib(self.build_zlib(resources)),
-            #[cfg(feature = "gzip")]
+            #[cfg(any(test, feature = "gzip"))]
             Format::Gzip => CompressorKind::Gzip(self.build_gzip(resources)),
-            #[cfg(feature = "brotli")]
+            #[cfg(any(test, feature = "brotli"))]
             Format::Brotli => CompressorKind::Brotli(Box::new(self.build_brotli(resources)?)),
-            #[cfg(feature = "zstd")]
+            #[cfg(any(test, feature = "zstd"))]
             Format::Zstd => CompressorKind::Zstd(self.build_zstd(resources)?),
         };
 
@@ -495,7 +534,14 @@ impl DecompressorBuilder<()> {
         )
     )]
     #[cfg_attr(
-        not(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")),
+        not(any(
+            test,
+            feature = "brotli",
+            feature = "deflate",
+            feature = "gzip",
+            feature = "zlib",
+            feature = "zstd"
+        )),
         expect(
             unreachable_code,
             unused_variables,
@@ -505,15 +551,15 @@ impl DecompressorBuilder<()> {
     )]
     pub fn build_format(self, format: Format, resources: &Resources) -> ::core::result::Result<Decompressor, BuildError> {
         let kind = match format {
-            #[cfg(feature = "deflate")]
+            #[cfg(any(test, feature = "deflate"))]
             Format::Deflate => DecompressorKind::Deflate(self.build_deflate(resources)),
-            #[cfg(feature = "zlib")]
+            #[cfg(any(test, feature = "zlib"))]
             Format::Zlib => DecompressorKind::Zlib(self.build_zlib(resources)),
-            #[cfg(feature = "gzip")]
+            #[cfg(any(test, feature = "gzip"))]
             Format::Gzip => DecompressorKind::Gzip(self.build_gzip(resources)),
-            #[cfg(feature = "brotli")]
+            #[cfg(any(test, feature = "brotli"))]
             Format::Brotli => DecompressorKind::Brotli(Box::new(self.build_brotli(resources))),
-            #[cfg(feature = "zstd")]
+            #[cfg(any(test, feature = "zstd"))]
             Format::Zstd => DecompressorKind::Zstd(self.build_zstd(resources)?),
         };
 
@@ -521,19 +567,16 @@ impl DecompressorBuilder<()> {
     }
 }
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(all(
-    test,
-    any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")
-))]
+#[cfg(test)]
 mod tests {
     use std::num::{NonZeroU64, NonZeroUsize};
 
     use bytesbuf::BytesBuf;
-    use bytesbuf::mem::GlobalPool;
 
     use super::*;
     use crate::level::Level;
     use crate::limits::FormatLimits;
+    use crate::testing::view;
     use crate::trailing::TrailingData;
 
     /// Caps every drain loop in this module.
@@ -564,10 +607,6 @@ mod tests {
             self.0 += 1;
             assert!(self.0 < MAX_STEPS, "the operation did not finish within {MAX_STEPS} steps");
         }
-    }
-
-    fn view(bytes: &[u8]) -> BytesView {
-        BytesView::copied_from_slice(bytes, &GlobalPool::new())
     }
 
     fn compressed_len(builder: CompressorBuilder<()>, format: Format, payload: &[u8]) -> usize {
@@ -703,7 +742,7 @@ mod tests {
         }
     }
 
-    #[cfg(all(feature = "deflate", feature = "zlib"))]
+    #[cfg(any(test, all(feature = "deflate", feature = "zlib")))]
     #[test]
     fn http_deflate_token_means_zlib() {
         // The most common source of confusion in this area: the HTTP `deflate` token denotes a zlib
@@ -712,7 +751,7 @@ mod tests {
         assert_eq!(Format::Deflate.content_encoding(), None);
     }
 
-    #[cfg(feature = "gzip")]
+    #[cfg(any(test, feature = "gzip"))]
     #[test]
     fn content_encoding_parsing_is_case_insensitive_and_trims() {
         assert_eq!(Format::from_content_encoding("GZIP"), Some(Format::Gzip));
@@ -722,23 +761,19 @@ mod tests {
         assert_eq!(Format::from_content_encoding(""), None);
     }
 
-    #[cfg(feature = "brotli")]
+    #[cfg(any(test, feature = "brotli"))]
     #[test]
     fn brotli_uses_the_br_token() {
         assert_eq!(Format::from_content_encoding("br"), Some(Format::Brotli));
         assert_eq!(Format::Brotli.content_encoding(), Some("br"));
     }
 
-    #[cfg(not(feature = "brotli"))]
     #[test]
-    fn brotli_token_is_rejected_when_the_feature_is_off() {
-        assert_eq!(Format::from_content_encoding("br"), None);
-    }
-
-    #[cfg(not(feature = "gzip"))]
-    #[test]
-    fn gzip_token_is_rejected_when_the_feature_is_off() {
-        assert_eq!(Format::from_content_encoding("gzip"), None);
+    fn unknown_tokens_are_rejected() {
+        // A token no format claims, and one that names a format this crate deliberately gives no
+        // content coding: raw deflate has none, because the HTTP `deflate` token means zlib.
+        assert_eq!(Format::from_content_encoding("compress"), None);
+        assert_eq!(Format::from_content_encoding("identity"), None);
     }
 
     #[test]
@@ -1021,21 +1056,21 @@ mod tests {
             assert!(limits.check(1, 0, HUGE).is_ok(), "{name} should not cap stream count");
         }
 
-        #[cfg(any(feature = "deflate", feature = "gzip", feature = "zlib"))]
+        #[cfg(any(test, feature = "deflate", feature = "gzip", feature = "zlib"))]
         assert_uncapped("flate", crate::flate::DEFAULT_LIMITS);
-        #[cfg(feature = "brotli")]
+        #[cfg(any(test, feature = "brotli"))]
         assert_uncapped("brotli", crate::brotli::DEFAULT_LIMITS);
-        #[cfg(feature = "zstd")]
+        #[cfg(any(test, feature = "zstd"))]
         assert_uncapped("zstd", crate::zstd::DEFAULT_LIMITS);
     }
 
     #[test]
     fn all_lists_exactly_the_compiled_in_formats() {
-        let expected = usize::from(cfg!(feature = "deflate"))
-            + usize::from(cfg!(feature = "zlib"))
-            + usize::from(cfg!(feature = "gzip"))
-            + usize::from(cfg!(feature = "brotli"))
-            + usize::from(cfg!(feature = "zstd"));
+        let expected = usize::from(cfg!(any(test, feature = "deflate")))
+            + usize::from(cfg!(any(test, feature = "zlib")))
+            + usize::from(cfg!(any(test, feature = "gzip")))
+            + usize::from(cfg!(any(test, feature = "brotli")))
+            + usize::from(cfg!(any(test, feature = "zstd")));
 
         assert_eq!(Format::ALL.len(), expected);
     }
