@@ -327,6 +327,17 @@ mod coverage_tests {
     static_assertions::assert_impl_all!(Slot: thread_aware::ThreadAware);
 
     #[test]
+    fn relocation_preserves_thread_local_storage_identity() {
+        let slot = Slot::new();
+        let mut relocated = slot.clone();
+        let destination = thread_aware::ThreadBuilder::default().build(std::thread::current().id());
+
+        relocated.relocate(None, &destination);
+
+        assert!(slot.ptr_eq(&relocated));
+    }
+
+    #[test]
     fn transfer_ignores_empty_enrichment_layers() {
         let slot = Slot::new();
         let mut transfer = EnrichmentTransfer::default();
