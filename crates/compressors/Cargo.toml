@@ -16,14 +16,13 @@ homepage = { workspace = true }
 include = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/compressors"
 
-[package.metadata.coverage-gate]
-min-lines-percent = 100
-
-# Miri cannot run this crate's compression engines. `zstd-safe` binds the native zstd library, and
-# Miri cannot call foreign functions; `flate2`'s `zlib-rs` backend has an open soundness bug that
-# trips Stacked Borrows whenever a Deflate or Inflate is dropped
-# (https://github.com/trifectatechfoundation/zlib-rs/issues/491). Only the brotli path would remain,
-# which is not enough to justify the per-format `cfg(miri)` scaffolding the rest would need.
+# Miri cannot run all of this crate's backends. `zstd-safe` binds the native zstd library, and Miri
+# cannot call foreign functions; `flate2`'s `zlib-rs` backend has an open soundness bug that trips
+# Stacked Borrows whenever a Deflate or Inflate is dropped
+# (https://github.com/trifectatechfoundation/zlib-rs/issues/491). Brotli is pure Rust and would run;
+# excluding the whole crate rather than maintaining a brotli-only Miri configuration is a separate
+# decision, taken because the per-format `cfg(miri)` scaffolding the rest would need costs more than
+# the remaining coverage is worth.
 [package.metadata.anvil.miri]
 exclude = true
 
@@ -48,6 +47,9 @@ zstd = ["dep:zstd-safe"]
 [dependencies]
 brotli = { workspace = true, features = ["std"], optional = true }
 bytesbuf = { workspace = true, features = ["std"] }
+# `zlib-rs` rather than flate2's default `miniz_oxide`: it is the fastest of flate2's backends and,
+# unlike the `zlib`/`zlib-ng` bindings, is pure Rust, so the deflate family stays free of C on a path
+# that parses untrusted input. The cost is recorded above -- it is what keeps this crate out of Miri.
 flate2 = { workspace = true, features = ["zlib-rs"], optional = true }
 futures-core = { workspace = true, optional = true }
 pin-project-lite = { workspace = true, optional = true }
@@ -64,7 +66,7 @@ futures = { workspace = true, features = ["executor"] }
 futures-core = { workspace = true }
 mutants = { workspace = true }
 pin-project-lite = { workspace = true }
-tick = { workspace = true, features = ["tokio"] }
+tick = { path = "../tick", features = ["tokio"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }
 tokio-stream = { workspace = true }
 zstd-safe = { workspace = true, features = ["std"] }

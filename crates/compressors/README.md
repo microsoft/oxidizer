@@ -175,7 +175,7 @@ a crate that only passes operations around needs.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/compressors">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbB1370g8pnEUb22IdVaU-cTcbaG2iSPeoTtQbC3fCZXxHXhphZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbz-EZ7BBpZSUb8SVZjL85q_UbSNYprxI0IkIbBhoG6YWX2e5hZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
  [__link0]: https://crates.io/crates/bytesbuf/0.9.0
  [__link1]: https://crates.io/crates/bytesbuf/0.9.0
  [__link10]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressorBuilder::build_format
@@ -193,4 +193,4 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link6]: https://docs.rs/compressors/0.1.0/compressors/fn.compress.html
  [__link7]: https://docs.rs/compressors/0.1.0/compressors/fn.decompress.html
  [__link8]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressionStream
- [__link9]: https://docs.rs/compressors/0.1.0/compressors/format/index.html
+ [__link9]: mod@crate::format

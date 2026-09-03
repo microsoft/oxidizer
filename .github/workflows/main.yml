@@ -364,8 +364,8 @@ jobs:
         if: success() || failure()
         # Excluded crates fall into two groups.
         #
-        # The first generate code rather than run it, so Miri has no
-        # aliasing or provenance violations to find in them:
+        # Crates in the first group generate code rather than run it, so Miri has
+        # no aliasing or provenance violations to find in them:
         #
         #   * the `*_macros_impl` crates are proc-macro implementations whose
         #     tests are snapshot comparisons of generated token streams;
@@ -381,13 +381,15 @@ jobs:
         # Interpreting them anyway cost ~75 min of the ~3h16m step
         # (`multitude_macros_impl` alone ran 30 tests in 45 min).
         #
-        # The second group is `compressors`, whose compression engines Miri
-        # cannot run at all: `zstd-safe` binds the native zstd library and Miri
-        # cannot call foreign functions, while `flate2`'s `zlib-rs` backend trips
-        # Stacked Borrows whenever a deflate or inflate stream is dropped
-        # (https://github.com/trifectatechfoundation/zlib-rs/issues/491). Only
-        # the brotli path would survive, which does not justify gating every
-        # other format's tests on `cfg(miri)`. The crate also carries
+        # The second group is `compressors`, whose backends Miri cannot all run:
+        # `zstd-safe` binds the native zstd library and Miri cannot call foreign
+        # functions, while `flate2`'s `zlib-rs` backend trips Stacked Borrows
+        # whenever a deflate or inflate stream is dropped
+        # (https://github.com/trifectatechfoundation/zlib-rs/issues/491). Brotli
+        # is pure Rust and would run; excluding the whole crate rather than
+        # maintaining a brotli-only Miri configuration is a separate decision,
+        # taken because gating every other format's tests on `cfg(miri)` costs
+        # more than the remaining coverage is worth. The crate also carries
         # `package.metadata.anvil.miri.exclude`, which is what the `anvil-miri`
         # recipe honours; this job builds its own command line, so it needs the
         # exclusion spelled out here too.
