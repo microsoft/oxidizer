@@ -36,10 +36,13 @@ impl ThreadBuilder {
 
     /// Builds a thread coordinate for `thread_id`.
     ///
-    /// The ID must belong to a live worker thread. Rust may reuse a [`ThreadId`]
-    /// after its thread exits, which could alias an existing per-thread partition.
     /// Runtimes should normally call this method with
     /// `std::thread::current().id()` from the worker being described.
+    ///
+    /// A [`ThreadId`] is never reused, even after its thread exits, so a
+    /// coordinate built for a finished thread cannot alias a live worker's
+    /// partition. Published per-thread values remain until their storage is
+    /// dropped.
     #[must_use]
     pub fn build(&self, thread_id: ThreadId) -> Thread {
         new_thread(self.owner.clone(), thread_id, self.numa_node.clone())

@@ -83,8 +83,8 @@ use crate::Thread;
 ///   [`NumaNode`](crate::NumaNode) may remain useful, subject to the caveat in
 ///   [what the ids mean](crate#what-the-ids-mean).
 ///
-/// A [`Thread`] may be cloned and retained, but the thread id it holds is meaningful only
-/// while that thread is alive, and an [`Owner`](crate::Owner) only while that runtime is.
+/// A [`Thread`] may be cloned and retained. Its thread id remains unique after the OS thread exits,
+/// but retaining the coordinate does not keep that thread or its runtime operational.
 ///
 /// Runtimes carry their own requirements. They call [`relocate`](Self::relocate) only after
 /// the value has actually moved, pass `None` when no previous [`Thread`] is known, build one
