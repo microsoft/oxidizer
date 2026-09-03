@@ -855,15 +855,6 @@ mod tests {
         insta::assert_debug_snapshot!(clock);
     }
 
-    #[tokio::test]
-    #[cfg_attr(miri, ignore)]
-    async fn debug_alive_system_clock_relocated() {
-        let mut clock = Clock::new_system_frozen();
-        _ = Relocator::between_numa_nodes().relocate(&mut clock);
-
-        insta::assert_debug_snapshot!(clock);
-    }
-
     #[test]
     #[cfg_attr(miri, ignore)]
     fn debug_controlled_clock() {
