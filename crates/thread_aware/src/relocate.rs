@@ -3,18 +3,13 @@
 
 //! Test helpers for relocating thread-aware values.
 
-use std::sync::{OnceLock, mpsc};
+use std::sync::OnceLock;
 use std::thread::{self, ThreadId};
 
 use crate::{Thread, ThreadAware, ThreadBuilder};
 
-static SOURCE_THREAD: OnceLock<SourceThread> = OnceLock::new();
+static SOURCE_THREAD_ID: OnceLock<ThreadId> = OnceLock::new();
 static THREAD_BUILDER: OnceLock<ThreadBuilder> = OnceLock::new();
-
-struct SourceThread {
-    id: ThreadId,
-    _keepalive: Option<mpsc::Sender<()>>,
-}
 
 /// Relocates a value between synthetic runtime thread coordinates.
 ///
@@ -78,35 +73,17 @@ impl Relocator {
     }
 
     fn source_thread_id() -> ThreadId {
-        SOURCE_THREAD
-            .get_or_init(|| {
-                #[cfg(miri)]
-                {
-                    return SourceThread {
-                        id: thread::current().id(),
-                        _keepalive: None,
-                    };
-                }
+        *SOURCE_THREAD_ID.get_or_init(|| {
+            #[cfg(miri)]
+            {
+                return thread::current().id();
+            }
 
-                #[cfg(not(miri))]
-                let (id_sender, id_receiver) = mpsc::sync_channel(0);
-                #[cfg(not(miri))]
-                let (keepalive, wait) = mpsc::channel();
-                #[cfg(not(miri))]
-                let _source_thread = thread::spawn(move || {
-                    id_sender
-                        .send(thread::current().id())
-                        .expect("source thread ID receiver must remain alive during initialization");
-                    _ = wait.recv();
-                });
-
-                #[cfg(not(miri))]
-                SourceThread {
-                    id: id_receiver.recv().expect("source thread must publish its ID during initialization"),
-                    _keepalive: Some(keepalive),
-                }
-            })
-            .id
+            #[cfg(not(miri))]
+            thread::spawn(|| thread::current().id())
+                .join()
+                .expect("source thread only reads its own ID and cannot panic")
+        })
     }
 }
 
