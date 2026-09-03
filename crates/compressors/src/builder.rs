@@ -141,9 +141,16 @@ impl Default for CompressorBuilder<()> {
 /// # Security
 ///
 /// Compressed data can expand by orders of magnitude, so a decompressor pointed at untrusted input
-/// is a memory-exhaustion vector. Set [`limits`][DecompressorBuilder::limits] with
-/// [`with_max_output_len`][DecompressorLimits::with_max_output_len] when the data comes from an
-/// untrusted peer.
+/// is a memory-exhaustion vector. What bounds that exposure is how much decompressed output is
+/// *retained*, not how much passes through: a decompressor driven directly hands back one bounded
+/// chunk at a time, so a consumer that processes and drops each chunk stays bounded however long
+/// the stream is.
+///
+/// Set [`limits`][DecompressorBuilder::limits] with
+/// [`with_max_output_len`][DecompressorLimits::with_max_output_len] to what you can afford whenever
+/// decompressed output is accumulated -- by the buffering conveniences, or by a consumer that keeps
+/// the chunks it is handed. Applying a cumulative cap to a pipeline that retains nothing only
+/// rejects legitimately long streams.
 #[derive(Debug, Clone)]
 pub struct DecompressorBuilder<T = ()> {
     pub(crate) limits: DecompressorLimits,
@@ -182,8 +189,10 @@ impl<T> DecompressorBuilder<T> {
     ///
     /// # Security
     ///
-    /// Set [`with_max_output_len`][DecompressorLimits::with_max_output_len] when the data comes
-    /// from an untrusted peer. Do not rely on the format default for brotli, which has none.
+    /// Set [`with_max_output_len`][DecompressorLimits::with_max_output_len] to match your memory
+    /// budget whenever decompressed output is accumulated, rather than whenever the input is
+    /// untrusted -- retained output is what a cumulative cap protects. Do not rely on the format
+    /// default for brotli, which has none.
     #[must_use]
     pub const fn limits(mut self, limits: DecompressorLimits) -> Self {
         self.limits = limits;
