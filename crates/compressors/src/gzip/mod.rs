@@ -24,8 +24,8 @@
 //! # Ok::<(), compressors::Error>(())
 //! ```
 
-use crate::flate::Wrapper;
 use crate::flate::codec::{FlateCompress, FlateDecompress};
+use crate::flate::{DEFAULT_LIMITS, Wrapper};
 use crate::macros::define_format;
 
 /// Selects gzip as the format of a [`CompressorBuilder`][crate::CompressorBuilder] or [`DecompressorBuilder`][crate::DecompressorBuilder].
@@ -53,7 +53,7 @@ define_format! {
     new_compressor = |level, _format, pool| FlateCompress::new(Wrapper::Gzip, level, pool),
     decompressor_codec = FlateDecompress,
     decompressor_build = infallible,
-    default_limits = crate::flate::DEFAULT_LIMITS,
+    default_limits = DEFAULT_LIMITS,
     new_decompressor = |limits, multi_stream, trailing_data, _format, pool| {
         FlateDecompress::new(Wrapper::Gzip, limits, multi_stream, trailing_data, pool)
     },

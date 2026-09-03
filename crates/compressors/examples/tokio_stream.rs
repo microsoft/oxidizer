@@ -5,8 +5,6 @@
 //!
 //! The body is never held whole: each chunk passes through the codec and leaves, so peak memory
 //! follows the chunk size rather than the size of the body.
-//!
-//! Run with `cargo run --example tokio_stream --all-features`.
 
 use std::time::Duration;
 

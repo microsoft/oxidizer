@@ -179,8 +179,15 @@ impl BrotliDecompress {
         }
     }
 
+    /// A decoder restricted to RFC 7932.
+    ///
+    /// `new_strict` rather than `new`: the permissive constructor also accepts Large Window Brotli,
+    /// a non-standard extension whose declared window can reach 1 GiB, and the decoder sizes its
+    /// ring buffer from that declaration before producing any output. Nothing in this crate emits
+    /// such a stream -- [`WindowSize`][crate::brotli::WindowSize] tops out at the window the RFC
+    /// allows -- so accepting one would only widen what untrusted input can ask the allocator for.
     fn state() -> BrotliState<HeapAlloc<u8>, HeapAlloc<u32>, HeapAlloc<HuffmanCode>> {
-        BrotliState::new(HeapAlloc::new(0), HeapAlloc::new(0), HeapAlloc::new(HuffmanCode::default()))
+        BrotliState::new_strict(HeapAlloc::new(0), HeapAlloc::new(0), HeapAlloc::new(HuffmanCode::default()))
     }
 }
 

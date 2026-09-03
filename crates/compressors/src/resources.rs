@@ -61,7 +61,8 @@ impl Resources {
     /// Draws output buffers from `memory`, recycling engine state between messages.
     ///
     /// The engines belong to the returned value, so every clone of it shares them, and separately
-    /// constructed resources share nothing.
+    /// constructed resources have independent engine pools. Whether they also share memory is a
+    /// property of the [`MemoryShared`] provider handed in, not of this type.
     #[must_use]
     pub fn new(memory: impl MemoryShared) -> Self {
         Self {

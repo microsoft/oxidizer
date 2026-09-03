@@ -2,8 +2,6 @@
 // Licensed under the MIT License.
 
 //! Compressing and decompressing a whole buffer.
-//!
-//! Run with `cargo run --example round_trip --all-features`.
 
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;

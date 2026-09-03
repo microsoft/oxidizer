@@ -171,14 +171,15 @@ impl<T> DecompressorBuilder<T> {
 
     /// Overrides the bounds on how much data decompression may produce.
     ///
-    /// Bounds left unset on the passed value keep the chosen format's own default, which is a ratio
-    /// and nothing else. The conveniences that buffer a whole result add their own caps on top; see
-    /// [`DecompressorLimits`].
+    /// Bounds left unset on the passed value keep the chosen format's own defaults. For most
+    /// formats that is a ratio and nothing else; brotli has no structural ceiling to derive one
+    /// from, so it defaults to no ratio bound either. The conveniences that buffer a whole result
+    /// add their own output and stream caps on top; see [`DecompressorLimits`].
     ///
     /// # Security
     ///
     /// Set [`with_max_output_len`][DecompressorLimits::with_max_output_len] when the data comes
-    /// from an untrusted peer.
+    /// from an untrusted peer. Do not rely on the format default for brotli, which has none.
     #[must_use]
     pub const fn limits(mut self, limits: DecompressorLimits) -> Self {
         self.limits = limits;
