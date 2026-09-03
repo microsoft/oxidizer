@@ -10,7 +10,7 @@ This document describes the user-visible behavior of `thread_aware::Arc` and
 `thread_aware_core`. There is one authoritative relocation trait across the
 package family.
 
-Runtime integrations construct coordinates with `thread::ThreadBuilder`.
+Runtime integrations construct coordinates with `thread_aware::ThreadBuilder`.
 `ThreadBuilder::default()` creates a unique runtime owner. Clones of one builder
 retain that owner, so they can build coordinates for every worker in the same
 runtime. `numa_node` selects the nearest NUMA node and `build` adds the

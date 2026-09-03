@@ -9,8 +9,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::thread;
 
-use thread_aware::thread::ThreadBuilder;
-use thread_aware::{Thread, ThreadAware as _};
+use thread_aware::{Thread, ThreadAware as _, ThreadBuilder};
 use thread_aware_macros::ThreadAware;
 
 fn test_threads(counts: &[usize]) -> Vec<Thread> {

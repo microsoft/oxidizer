@@ -149,8 +149,7 @@ pub(super) fn run_after_factory_update_hook() {
 ///
 /// ```rust
 /// # use std::thread;
-/// # use thread_aware::thread::ThreadBuilder;
-/// # use thread_aware::{Arc, PerThread, Thread, ThreadAware};
+/// # use thread_aware::{Arc, PerThread, Thread, ThreadAware, ThreadBuilder};
 /// # use std::sync::atomic::{AtomicI32, Ordering};
 /// # let builder = ThreadBuilder::default();
 /// # let source = builder.build(thread::current().id());
@@ -665,8 +664,7 @@ where
     /// use std::thread;
     ///
     /// use thread_aware::storage::Storage;
-    /// use thread_aware::thread::ThreadBuilder;
-    /// use thread_aware::{Arc, PerThread};
+    /// use thread_aware::{Arc, PerThread, ThreadBuilder};
     ///
     /// let current = ThreadBuilder::default().build(thread::current().id());
     ///

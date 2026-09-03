@@ -11,8 +11,7 @@ use bytes::Bytes;
 use fetch::HttpClient;
 use fetch::tokio::TokioDeps;
 use futures::future::join_all;
-use thread_aware::ThreadAware;
-use thread_aware::thread::ThreadBuilder;
+use thread_aware::{ThreadAware, ThreadBuilder};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

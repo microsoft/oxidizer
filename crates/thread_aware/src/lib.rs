@@ -11,10 +11,7 @@
 //!
 //! * The **`std` Cargo feature** *(enabled by default)* enables the strategy-partitioned `Arc` and
 //!   the `ThreadBuilder` runtime integration API.
-#![cfg_attr(
-    feature = "std",
-    doc = "  See [`ThreadBuilder`](thread::ThreadBuilder) for coordinate construction."
-)]
+#![cfg_attr(feature = "std", doc = "  See [`ThreadBuilder`] for coordinate construction.")]
 //! * **`derive`** *(default)* re-exports the `#[derive(ThreadAware)]` macro.
 //! * Disable default features for `#![no_std]` environments. The core thread vocabulary,
 //!   closures, and wrappers remain available.
@@ -107,10 +104,7 @@
 //! * The **`std` Cargo feature** *(enabled by default)* enables the strategy-partitioned `Arc` and
 //!   the `ThreadBuilder` runtime integration API. Disable it for `#![no_std]` environments; the
 //!   crate then requires `alloc` and pointer-width atomics.
-#![cfg_attr(
-    feature = "std",
-    doc = "  See [`ThreadBuilder`](thread::ThreadBuilder) for coordinate construction."
-)]
+#![cfg_attr(feature = "std", doc = "  See [`ThreadBuilder`] for coordinate construction.")]
 //! * **`derive`** *(default)*: Re-exports the `#[derive(ThreadAware)]` macro from the companion
 //!   `thread_aware_macros` crate. Disable to avoid pulling in proc-macro code in minimal
 //!   environments. For derive support without `std`, use
@@ -190,7 +184,7 @@ pub mod closure;
 mod relocate;
 #[cfg(any(test, feature = "std"))]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-pub mod thread;
+mod thread;
 
 // Re-export the derive macro (behind the `derive` feature) so users can
 // simply `use thread_aware::ThreadAware;`. Disable the feature to avoid the
@@ -268,6 +262,10 @@ pub use cell::{Arc, FromStorageError, PerNumaNode, PerProcess, PerThread, storag
 #[cfg(feature = "test-utils")]
 #[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
 pub use relocate::Relocator;
+#[cfg(any(test, feature = "std"))]
+#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
+#[doc(inline)]
+pub use thread::ThreadBuilder;
 #[doc(inline)]
 pub use thread_aware_core::{NumaNode, Owner, Thread, ThreadAware};
 pub use wrappers::{Unaware, unaware};
@@ -278,7 +276,7 @@ fn test_threads(counts: &[usize]) -> Vec<Thread> {
     use std::sync::{Arc, Barrier};
     use std::thread;
 
-    let builder = crate::thread::ThreadBuilder::default();
+    let builder = crate::ThreadBuilder::default();
     let nodes = counts
         .iter()
         .enumerate()

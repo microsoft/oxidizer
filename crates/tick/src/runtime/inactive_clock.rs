@@ -66,7 +66,7 @@ pub struct Shared;
 /// [`relocate`](thread_aware::ThreadAware::relocate) each clone to its target thread before
 /// activation. Relocation creates per-thread timer storage, so each thread gets an independent set
 /// of timers with no cross-thread lock contention. Construct those coordinates from clones of one
-/// [`ThreadBuilder`](thread_aware::thread::ThreadBuilder), so they share a runtime owner. A
+/// [`ThreadBuilder`](thread_aware::ThreadBuilder), so they share a runtime owner. A
 /// cross-owner relocation retains the existing timer set and remains functional, but does not
 /// establish destination-local storage.
 #[derive(Debug)]

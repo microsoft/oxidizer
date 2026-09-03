@@ -42,8 +42,7 @@ mod linux {
     use std::hint::black_box;
 
     use gungraun::{library_benchmark, library_benchmark_group};
-    use thread_aware::thread::ThreadBuilder;
-    use thread_aware::{Arc, PerThread, Thread, ThreadAware};
+    use thread_aware::{Arc, PerThread, Thread, ThreadAware, ThreadBuilder};
     use thread_aware_benchmarking::{Payload, Tree};
 
     fn threads(count: usize) -> Vec<Thread> {

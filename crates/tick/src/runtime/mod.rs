@@ -26,8 +26,7 @@
 //! worker, relocate from the source coordinate, and activate:
 //!
 //! ```rust
-//! # use thread_aware::ThreadAware;
-//! # use thread_aware::thread::ThreadBuilder;
+//! # use thread_aware::{ThreadAware, ThreadBuilder};
 //! # use tick::runtime::InactiveClock;
 //! # use std::sync::{Arc, Barrier};
 //! let builder = ThreadBuilder::default();

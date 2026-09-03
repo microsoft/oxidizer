@@ -43,8 +43,7 @@ use std::{sync, thread};
 
 use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
 use many_cpus::SystemHardware;
-use thread_aware::thread::ThreadBuilder;
-use thread_aware::{Arc, PerThread, Thread, ThreadAware};
+use thread_aware::{Arc, PerThread, Thread, ThreadAware, ThreadBuilder};
 use thread_aware_benchmarking::{Payload, TREE_DEPTH, Tree};
 
 /// How far the oversubscribed case of the `concurrent` group exceeds the

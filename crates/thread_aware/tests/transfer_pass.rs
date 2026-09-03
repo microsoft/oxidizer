@@ -6,8 +6,7 @@
 
 use std::thread;
 
-use thread_aware::ThreadAware;
-use thread_aware::thread::ThreadBuilder;
+use thread_aware::{ThreadAware, ThreadBuilder};
 
 #[derive(ThreadAware)]
 struct Simple {

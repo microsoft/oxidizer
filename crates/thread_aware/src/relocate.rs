@@ -6,8 +6,7 @@
 use std::sync::{OnceLock, mpsc};
 use std::thread::{self, ThreadId};
 
-use crate::thread::ThreadBuilder;
-use crate::{Thread, ThreadAware};
+use crate::{Thread, ThreadAware, ThreadBuilder};
 
 static SOURCE_THREAD: OnceLock<SourceThread> = OnceLock::new();
 

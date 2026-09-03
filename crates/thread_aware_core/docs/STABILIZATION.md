@@ -23,7 +23,7 @@ OS thread it is on, and which memory is closest to that thread (`NumaNode`). The
 thread component is `std::thread::ThreadId` rather than an id of our own, so it
 is not re-exported; callers take it from `std`.
 
-`thread_aware::thread::ThreadBuilder` is the public runtime integration API. It
+`thread_aware::ThreadBuilder` is the public runtime integration API. It
 owns one runtime identifier, is cloneable across worker setup, and constructs
 thread coordinates with optional NUMA-node selection. Only that builder uses the
 doc-hidden, versioned `__private::v1` constructors.

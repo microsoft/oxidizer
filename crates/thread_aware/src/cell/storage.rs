@@ -257,8 +257,7 @@ mod tests {
     use std::thread;
 
     use super::{DEFAULT_PARTITION_CAPACITY, InsertError, Storage, Values};
-    use crate::thread::ThreadBuilder;
-    use crate::{PerProcess, PerThread};
+    use crate::{PerProcess, PerThread, ThreadBuilder};
 
     #[test]
     fn storage_starts_with_default_capacity() {

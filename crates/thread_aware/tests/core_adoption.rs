@@ -7,8 +7,7 @@ use std::sync::Arc as StdArc;
 use std::thread;
 
 use thread_aware::storage::Storage;
-use thread_aware::thread::ThreadBuilder;
-use thread_aware::{Arc, FromStorageError, NumaNode, Owner, PerThread, Thread, ThreadAware};
+use thread_aware::{Arc, FromStorageError, NumaNode, Owner, PerThread, Thread, ThreadAware, ThreadBuilder};
 
 #[test]
 fn reexports_core_vocabulary() {
