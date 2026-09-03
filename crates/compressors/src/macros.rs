@@ -40,6 +40,7 @@ macro_rules! define_compressor_build {
         impl Compressor {
             #[doc = concat!("Creates a ", $name, " compressor at [`Level::DEFAULT`][crate::Level::DEFAULT].")]
             #[must_use]
+            #[inline]
             pub fn new(resources: &$crate::Resources) -> Self {
                 Self::builder().build(resources)
             }
@@ -93,6 +94,7 @@ macro_rules! define_compressor_build {
             /// it has nothing to reject. Build through [`Compressor::builder`] to handle a
             /// rejection of settings that are not the defaults.
             #[must_use]
+            #[inline]
             pub fn new(resources: &$crate::Resources) -> Self {
                 Self::builder()
                     .build(resources)
@@ -160,6 +162,7 @@ macro_rules! define_decompressor_build {
         impl Decompressor {
             #[doc = concat!("Creates a ", $name, " decompressor with this format's default bounds.")]
             #[must_use]
+            #[inline]
             pub fn new(resources: &$crate::Resources) -> Self {
                 Self::builder().build(resources)
             }
@@ -260,6 +263,7 @@ macro_rules! define_decompressor_build {
             /// it has nothing to reject. Build through [`Decompressor::builder`] to handle a
             /// rejection of settings that are not the defaults.
             #[must_use]
+            #[inline]
             pub fn new(resources: &$crate::Resources) -> Self {
                 Self::builder()
                     .build(resources)
@@ -408,6 +412,7 @@ macro_rules! define_format {
         impl Compressor {
             /// Starts configuring a compressor.
             #[must_use]
+            #[inline]
             pub fn builder() -> $crate::CompressorBuilder<$format> {
                 $crate::CompressorBuilder::default()
             }
@@ -468,6 +473,7 @@ macro_rules! define_format {
         impl Decompressor {
             /// Starts configuring a decompressor.
             #[must_use]
+            #[inline]
             pub fn builder() -> $crate::DecompressorBuilder<$format> {
                 $crate::DecompressorBuilder::default()
             }

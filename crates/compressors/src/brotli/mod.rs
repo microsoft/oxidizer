@@ -136,6 +136,7 @@ impl TryFrom<u8> for Quality {
 }
 
 impl From<Quality> for u8 {
+    #[inline]
     fn from(quality: Quality) -> Self {
         quality.get()
     }
@@ -209,6 +210,7 @@ impl TryFrom<u8> for WindowSize {
 }
 
 impl From<WindowSize> for u8 {
+    #[inline]
     fn from(window_size: WindowSize) -> Self {
         window_size.get()
     }

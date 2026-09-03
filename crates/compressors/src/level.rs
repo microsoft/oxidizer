@@ -101,6 +101,7 @@ impl TryFrom<u8> for Level {
 }
 
 impl From<Level> for u8 {
+    #[inline]
     fn from(level: Level) -> Self {
         level.get()
     }
