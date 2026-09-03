@@ -53,6 +53,7 @@ impl ::ohno::ErrorExt for T {
         self.inner.backtrace()
     }
 }
+#[automatically_derived]
 impl ::core::fmt::Debug for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("T")
@@ -62,7 +63,6 @@ impl ::core::fmt::Debug for T {
             .finish()
     }
 }
-#[automatically_derived]
 impl T {
     /// Creates the error with no source.
     #[allow(
@@ -162,6 +162,7 @@ impl ::ohno::ErrorExt for T {
         self.inner.backtrace()
     }
 }
+#[automatically_derived]
 impl ::core::fmt::Debug for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("T")
@@ -171,7 +172,6 @@ impl ::core::fmt::Debug for T {
             .finish()
     }
 }
-#[automatically_derived]
 impl T {
     /// Creates the error with no source.
     #[allow(
@@ -271,6 +271,7 @@ impl ::ohno::ErrorExt for T {
         self.inner.backtrace()
     }
 }
+#[automatically_derived]
 impl ::core::fmt::Debug for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("T")
@@ -280,7 +281,6 @@ impl ::core::fmt::Debug for T {
             .finish()
     }
 }
-#[automatically_derived]
 impl T {
     /// Creates the error with no source.
     #[allow(
@@ -380,6 +380,7 @@ impl ::ohno::ErrorExt for T {
         self.inner.backtrace()
     }
 }
+#[automatically_derived]
 impl ::core::fmt::Debug for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("T")
@@ -389,7 +390,6 @@ impl ::core::fmt::Debug for T {
             .finish()
     }
 }
-#[automatically_derived]
 impl T {
     /// Creates the error with no source.
     #[allow(
@@ -489,6 +489,7 @@ impl ::ohno::ErrorExt for T {
         self.inner.backtrace()
     }
 }
+#[automatically_derived]
 impl ::core::fmt::Debug for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("T")
@@ -498,7 +499,6 @@ impl ::core::fmt::Debug for T {
             .finish()
     }
 }
-#[automatically_derived]
 impl T {
     /// Creates the error with no source.
     #[allow(
@@ -598,6 +598,7 @@ impl ::ohno::ErrorExt for T {
         self.inner.backtrace()
     }
 }
+#[automatically_derived]
 impl ::core::fmt::Debug for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("T")
@@ -607,7 +608,6 @@ impl ::core::fmt::Debug for T {
             .finish()
     }
 }
-#[automatically_derived]
 impl T {
     /// Creates the error with no source.
     #[allow(
@@ -703,6 +703,7 @@ impl ::ohno::ErrorExt for T {
         self.inner.backtrace()
     }
 }
+#[automatically_derived]
 impl ::core::fmt::Debug for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("T")
@@ -712,7 +713,6 @@ impl ::core::fmt::Debug for T {
             .finish()
     }
 }
-#[automatically_derived]
 impl T {
     /// Creates the error with no source.
     #[allow(
@@ -812,6 +812,7 @@ impl ::ohno::ErrorExt for T {
         self.inner.backtrace()
     }
 }
+#[automatically_derived]
 impl ::core::fmt::Debug for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("T")
@@ -821,7 +822,6 @@ impl ::core::fmt::Debug for T {
             .finish()
     }
 }
-#[automatically_derived]
 impl T {
     /// Creates the error with no source.
     #[allow(
