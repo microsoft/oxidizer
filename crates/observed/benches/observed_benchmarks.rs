@@ -479,13 +479,14 @@ fn bench_construct_processor_free_sink(
     const ID: &str = "construct_processor_free_sink";
     const EMPTY_PROCESSORS: Vec<Arc<dyn observed::processing::EventProcessor>> = Vec::new();
 
-    // The clock is built once and cloned per iteration: an application owns its
+    // The clock is built once and passed by reference: an application owns its
     // clock and hands it to every sink, so clock construction is not part of the
-    // sink-construction cost this benchmark reports.
+    // sink-construction cost this benchmark reports. `Sink::new` clones it
+    // internally, so a reference keeps that at exactly one clone per iteration.
     let clock = tick::SimpleClock::new_system();
 
     bench_with_tracking(group, allocs, time, ID, || {
-        let sink = Sink::new("bench", EMPTY_PROCESSORS, clock.clone());
+        let sink = Sink::new("bench", EMPTY_PROCESSORS, &clock);
         drop(sink);
     });
 }
