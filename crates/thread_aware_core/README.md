@@ -127,9 +127,11 @@ first, then told where it landed. [`Send`][__link28] is what makes the move safe
 Values with no thread-local state use an empty implementation. Containers forward
 relocation to their values, while map keys remain unchanged.
 
-References, sets, `Cow`, and `Arc` have no implementation because relocation would be
-ambiguous or could violate their invariants. [`thread_aware`][__link30] provides wrappers for cases
-that need an explicit policy, including its strategy-partitioned [`Arc`][__link31].
+General references, sets, `Cow`, and `Arc` have no implementation because relocation would be
+ambiguous or could violate their invariants. The narrow reference exception is `&'static str`:
+immutable process-lifetime labels cannot dangle and carry no referent state to relocate.
+[`thread_aware`][__link30] provides wrappers for cases that need an explicit policy, including its
+strategy-partitioned [`Arc`][__link31].
 
 ## Features
 
@@ -144,7 +146,7 @@ that need an explicit policy, including its strategy-partitioned [`Arc`][__link3
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbudvIUy5oHB4b1laJQzc98fobHfngDkVCVM4b8WdqAul7utxhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbaud81CVbfjgbWXnplkiWVocb2M0ryv2Vh08bO8ENADRtsdlhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4w
  [__link0]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
  [__link1]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware::relocate
  [__link10]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=NumaNode

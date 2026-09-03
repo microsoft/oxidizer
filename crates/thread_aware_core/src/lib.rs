@@ -131,9 +131,11 @@
 //! Values with no thread-local state use an empty implementation. Containers forward
 //! relocation to their values, while map keys remain unchanged.
 //!
-//! References, sets, `Cow`, and `Arc` have no implementation because relocation would be
-//! ambiguous or could violate their invariants. [`thread_aware`] provides wrappers for cases
-//! that need an explicit policy, including its strategy-partitioned [`Arc`][arc].
+//! General references, sets, `Cow`, and `Arc` have no implementation because relocation would be
+//! ambiguous or could violate their invariants. The narrow reference exception is `&'static str`:
+//! immutable process-lifetime labels cannot dangle and carry no referent state to relocate.
+//! [`thread_aware`] provides wrappers for cases that need an explicit policy, including its
+//! strategy-partitioned [`Arc`][arc].
 //!
 //! # Features
 //!

@@ -72,6 +72,8 @@ impl_thread_aware!(Duration);
 impl_thread_aware!(Path);
 
 impl_thread_aware!(str);
+// Immutable process-lifetime string labels have no referent state to relocate and cannot dangle.
+// This narrow reference exception does not extend to borrowed or mutable references in general.
 impl_thread_aware!(&'static str);
 
 impl_thread_aware!(Owner);
