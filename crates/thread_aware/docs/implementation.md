@@ -11,7 +11,9 @@ Each holder contains:
 - a cloneable factory describing how to create a value for a new partition
 
 `Storage<T, S>` contains a `DashMap<S::Key, std::sync::Arc<T>>` initialized with
-capacity 32. The strategy key is derived from a borrowed `Thread`.
+capacity 32. The capacity is a bounded-runtime default, not an empirically
+established limit: it avoids initial growth through 32 partitions and grows
+normally beyond that. The strategy key is derived from a borrowed `Thread`.
 
 The carried `value` makes `Deref` independent of shared storage. Reads through
 the holder perform no map lookup and take no lock.

@@ -71,10 +71,11 @@ Relocation follows the normal destination-key lookup.
 
 ## 4. Concurrent storage
 
-`storage::Storage<T, S>` uses `DashMap<S::Key, std::sync::Arc<T>>`. New storage
-reserves capacity for 32 entries by default, which covers common
-thread-per-core runtimes without growing the map during initial worker
-materialization.
+`storage::Storage<T, S>` uses `DashMap<S::Key, std::sync::Arc<T>>`. New
+partitioned storage reserves capacity for 32 entries by default. This is an
+explicit bounded-runtime heuristic: runtimes configured with at most 32 initial
+partitions avoid map growth, while larger runtimes grow normally. It is not an
+empirically established partition limit.
 
 Storage is bound to the first runtime owner that populates or relocates it.
 Threads belonging to another owner cannot read or publish its partitions.

@@ -12,9 +12,11 @@ use dashmap::mapref::entry::Entry;
 use rustc_hash::FxBuildHasher;
 use thread_aware_core::{Owner, Thread};
 
-/// Covers typical worker or NUMA partition counts without allocating for unusually large runtimes.
+/// An explicit bounded-runtime heuristic, not an empirically established partition limit.
 ///
-/// Raising this trades more eager allocation in every `Storage` for less frequent map growth.
+/// Reserving 32 entries avoids initial growth for runtimes configured with at most 32 partitions
+/// while keeping eager allocation bounded. Larger runtimes grow the map normally. Raising this
+/// trades more eager allocation in every partitioned `Storage` for less frequent map growth.
 const DEFAULT_PARTITION_CAPACITY: usize = 32;
 
 type PartitionMap<T, S> = DashMap<<S as Strategy>::Key, sync::Arc<T>, FxBuildHasher>;
