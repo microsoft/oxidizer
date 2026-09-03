@@ -90,11 +90,7 @@ may bind to the destination and follow the normal key lookup.
 
 `storage::Storage<T, S>` uses `OnceLock<std::sync::Arc<T>>` for the
 single-partition `PerProcess` strategy and
-`DashMap<S::Key, std::sync::Arc<T>>` for partitioned strategies. New
-partitioned storage reserves capacity for 32 entries by default. This is an
-explicit bounded-runtime heuristic: runtimes configured with at most 32 initial
-partitions avoid map growth, while larger runtimes grow normally. It is not an
-empirically established partition limit.
+`DashMap<S::Key, std::sync::Arc<T>>` for partitioned strategies.
 
 Storage is bound to the first runtime owner that populates or relocates it.
 Threads belonging to another owner cannot read or publish its partitions.

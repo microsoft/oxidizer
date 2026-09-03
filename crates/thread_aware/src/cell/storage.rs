@@ -12,13 +12,6 @@ use dashmap::mapref::entry::Entry;
 use rustc_hash::FxBuildHasher;
 use thread_aware_core::{Owner, Thread};
 
-/// An explicit bounded-runtime heuristic, not an empirically established partition limit.
-///
-/// Reserving 32 entries avoids initial growth for runtimes configured with at most 32 partitions
-/// while keeping eager allocation bounded. Larger runtimes grow the map normally. Raising this
-/// trades more eager allocation in every partitioned `Storage` for less frequent map growth.
-const DEFAULT_PARTITION_CAPACITY: usize = 32;
-
 // Strategy keys are sealed, trusted runtime-generated coordinates (`ThreadId`, `NumaNode`, or
 // `()`), never attacker-controlled request data. Randomized hash-flood resistance is therefore
 // unnecessary; the non-cryptographic Fx hasher is an intentional lower-overhead choice.
@@ -119,7 +112,7 @@ impl<T: ?Sized, S: Strategy> Storage<T, S> {
         let values = if S::SINGLE_PARTITION {
             Values::Single(sync::OnceLock::new())
         } else {
-            Values::Partitioned(DashMap::with_capacity_and_hasher(DEFAULT_PARTITION_CAPACITY, FxBuildHasher))
+            Values::Partitioned(DashMap::with_hasher(FxBuildHasher))
         };
 
         Self {
@@ -256,15 +249,8 @@ mod tests {
     use std::sync::Arc;
     use std::thread;
 
-    use super::{DEFAULT_PARTITION_CAPACITY, InsertError, Storage, Values};
+    use super::{InsertError, Storage, Values};
     use crate::{PerProcess, PerThread, ThreadBuilder};
-
-    #[test]
-    fn storage_starts_with_default_capacity() {
-        let storage = Storage::<u32, PerThread>::new();
-
-        assert!(matches!(&storage.values, Values::Partitioned(values) if values.capacity() >= DEFAULT_PARTITION_CAPACITY));
-    }
 
     #[test]
     fn single_partition_storage_avoids_the_map() {

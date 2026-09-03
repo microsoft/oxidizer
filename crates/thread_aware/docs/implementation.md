@@ -17,10 +17,8 @@ representations:
 - `OnceLock<std::sync::Arc<T>>` for a strategy that is always single-partition;
 - `DashMap<S::Key, std::sync::Arc<T>>` for partitioned strategies.
 
-The map is initialized with capacity 32. The capacity is a bounded-runtime
-default, not an empirically established limit: it avoids initial growth through
-32 partitions and grows normally beyond that. The strategy key is derived from
-a borrowed `Thread`. The map uses `FxBuildHasher` intentionally: sealed strategy
+The strategy key is derived from a borrowed `Thread`. The map uses
+`FxBuildHasher` intentionally: sealed strategy
 keys are trusted runtime-generated coordinate identifiers, so cryptographic
 randomization and hash-flood resistance would add overhead without protecting
 an untrusted-input boundary.
