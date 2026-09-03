@@ -34,19 +34,23 @@ async fn not_isolated_on_tokio() {
     let barrier = Arc::new(Barrier::new(5));
     let handles = (0..4)
         .map(|numa_node| {
+            let mut client = client.clone();
             let barrier = Arc::clone(&barrier);
             let builder = builder.clone().numa_node(numa_node);
             std::thread::spawn(move || {
+                let thread = builder.build(std::thread::current().id());
+                // All coordinate-owning threads reach this point before any relocation. Their
+                // simultaneously live IDs are therefore distinct and remain live while each
+                // relocation executes on its owning thread.
                 barrier.wait();
-                builder.build(std::thread::current().id())
+                client.relocate(None, &thread);
             })
         })
         .collect::<Vec<_>>();
     barrier.wait();
 
-    for thread in handles.into_iter().map(|handle| handle.join().unwrap()) {
-        let mut client_clone = client.clone();
-        client_clone.relocate(None, &thread);
+    for handle in handles {
+        handle.join().unwrap();
     }
     assert_eq!(counts.load(Ordering::Relaxed), 1);
 }
