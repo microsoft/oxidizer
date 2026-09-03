@@ -19,17 +19,16 @@ use core::ptr::NonNull;
 use allocator_api2::alloc::Allocator;
 
 use super::{Arena, ExpectAlloc};
-use crate::internal::constants::CHUNK_ALIGN;
 use crate::{Alloc, AllocError};
 
 /// Reject over-aligned slice element types early. Simple-reference
 /// slices return a plain `&mut [T]` (no header-recovery mask), so they
 /// can use the full chunk and only reject alignments that no single
-/// chunk could satisfy (`>= CHUNK_ALIGN`). This is a looser cap than the
-/// smart-pointer slice paths, which need [`MAX_SMART_PTR_ALIGN`].
+/// chunk could satisfy. This is a looser cap than the smart-pointer
+/// slice paths, which need [`Arena::smart_ptr_align_cap`].
 #[inline(always)]
-fn reject_over_aligned<T>() -> Result<(), AllocError> {
-    if const { mem::align_of::<T>() >= CHUNK_ALIGN } {
+fn reject_over_aligned<T, A: Allocator + Clone>(arena: &Arena<A>) -> Result<(), AllocError> {
+    if arena.rejects_chunk_align(mem::align_of::<T>()) {
         return Err(AllocError::ALIGNMENT_TOO_LARGE);
     }
     Ok(())
@@ -306,7 +305,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// `try_alloc_slice_copy`. `T: Copy` requires no drop entry.
     #[inline(always)]
     fn alloc_slice_copy_raw<T: Copy>(&self, src: &[T]) -> Result<&mut [T], AllocError> {
-        reject_over_aligned::<T>()?;
+        reject_over_aligned::<T, _>(self)?;
         let len = src.len();
         if len == 0 {
             return Ok(empty_slice::<T>());
@@ -373,7 +372,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// `try_alloc_slice_clone`. `PANIC` monomorphizes the error arm.
     #[inline(always)]
     fn alloc_slice_clone_raw<T: Clone>(&self, src: &[T]) -> Result<&mut [T], AllocError> {
-        reject_over_aligned::<T>()?;
+        reject_over_aligned::<T, _>(self)?;
         let len = src.len();
         if len == 0 {
             return Ok(empty_slice::<T>());
@@ -436,7 +435,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// line avoids materializing closure state on the common path.
     #[inline(always)]
     fn alloc_slice_fill_with_raw<T, F: FnMut(usize) -> T>(&self, len: usize, f: F) -> Result<&mut [T], AllocError> {
-        reject_over_aligned::<T>()?;
+        reject_over_aligned::<T, _>(self)?;
         if len == 0 {
             return Ok(empty_slice::<T>());
         }
@@ -485,7 +484,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// arena slot from `iter` and takes ownership of it in an [`Alloc`].
     #[inline(always)]
     fn impl_alloc_slice_fill_iter<T, I: ExactSizeIterator<Item = T>>(&self, iter: I) -> Result<Alloc<'_, [T]>, AllocError> {
-        reject_over_aligned::<T>()?;
+        reject_over_aligned::<T, _>(self)?;
         let len = iter.len();
         let slot = self.alloc_slice_fill_iter_raw::<T, I>(len, iter)?;
         // SAFETY: `alloc_slice_fill_iter_raw` initialized exactly `len`
