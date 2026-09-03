@@ -511,6 +511,11 @@ mod tests {
         );
 
         assert_eq!(error.recovery().kind(), RecoveryKind::Retry);
+        assert_eq!(
+            error.source().expect("the wrapper was attached").to_string(),
+            "wrapped",
+            "the wrapper itself stays the reported cause, not the io::Error the heuristic reached through it"
+        );
     }
 
     #[test]
