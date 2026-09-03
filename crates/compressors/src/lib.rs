@@ -94,7 +94,7 @@
 //! # Choosing a format
 //!
 //! When the format is only known at runtime -- from a `Content-Encoding` token, say -- the
-//! [`format`] module resolves the token and carries the same shape every other format module does:
+//! [`format`](mod@crate::format) module resolves the token and carries the same shape every other format module does:
 //! a `Compressor`, a `Decompressor`, and the whole-buffer conveniences. Reach for
 //! [`CompressorBuilder::build_format`] when the level or the chunk size matters.
 //!

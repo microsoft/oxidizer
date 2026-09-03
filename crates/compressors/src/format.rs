@@ -247,7 +247,7 @@ enum DecompressorKind {
 /// Compresses a stream of byte sequences into a format chosen at runtime.
 ///
 /// The runtime-format counterpart of each format module's `Compressor`, and driven exactly the same
-/// way -- through [`Compression`][crate::core::Compression]. The chosen format is held internally,
+/// way -- through [`Compression`]. The chosen format is held internally,
 /// so this is a concrete type rather than a trait object: it can be stored in a struct, returned
 /// from a function and handed to [`compress`][crate::compress] like any other compressor.
 ///
@@ -262,7 +262,7 @@ impl Compressor {
     ///
     /// # Errors
     ///
-    /// Returns a [`BuildError`][crate::BuildError] if the chosen format's engine rejects the
+    /// Returns a [`BuildError`] if the chosen format's engine rejects the
     /// default configuration, which in practice it never does.
     pub fn new(format: Format, resources: &Resources) -> ::core::result::Result<Self, BuildError> {
         Self::builder().build_format(format, resources)
@@ -329,7 +329,7 @@ impl Decompressor {
     ///
     /// # Errors
     ///
-    /// Returns a [`BuildError`][crate::BuildError] if the chosen format's engine rejects the
+    /// Returns a [`BuildError`] if the chosen format's engine rejects the
     /// default configuration, which in practice it never does.
     pub fn new(format: Format, resources: &Resources) -> ::core::result::Result<Self, BuildError> {
         Self::builder().build_format(format, resources)
@@ -438,7 +438,7 @@ impl CompressorBuilder<()> {
     ///
     /// # Errors
     ///
-    /// Returns a [`BuildError`][crate::BuildError] if the chosen format's engine rejects the
+    /// Returns a [`BuildError`] if the chosen format's engine rejects the
     /// configuration.
     #[cfg_attr(
         not(any(feature = "brotli", feature = "zstd")),
@@ -485,7 +485,7 @@ impl DecompressorBuilder<()> {
     ///
     /// # Errors
     ///
-    /// Returns a [`BuildError`][crate::BuildError] if the chosen format's engine rejects the
+    /// Returns a [`BuildError`] if the chosen format's engine rejects the
     /// configuration.
     #[cfg_attr(
         not(feature = "zstd"),

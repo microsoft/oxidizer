@@ -191,11 +191,12 @@ impl Pool {
         }
 
         if let Ok(mut guard) = self.inner.compressors.lock() {
-            let idle = guard.entry(key).or_default();
-            if idle.len() < self.inner.capacity
+            // Probe before inserting. `entry(..).or_default()` leaves an empty bucket behind for
+            // every key it is asked about, so a full pool would still grow the map without bound.
+            if guard.get(&key).map_or(0, Vec::len) < self.inner.capacity
                 && let Some(engine) = engine.take()
             {
-                idle.push(engine);
+                guard.entry(key).or_default().push(engine);
             }
         }
     }
@@ -224,11 +225,11 @@ impl Pool {
         }
 
         if let Ok(mut guard) = self.inner.decompressors.lock() {
-            let idle = guard.entry(wrapper).or_default();
-            if idle.len() < self.inner.capacity
+            // Probe before inserting, for the reason given on `return_compressor`.
+            if guard.get(&wrapper).map_or(0, Vec::len) < self.inner.capacity
                 && let Some(engine) = engine.take()
             {
-                idle.push(engine);
+                guard.entry(wrapper).or_default().push(engine);
             }
         }
     }
@@ -257,11 +258,12 @@ impl Pool {
         }
 
         if let Ok(mut guard) = self.inner.zstd_compressors.lock() {
-            let idle = guard.entry(level).or_default();
-            if idle.len() < self.inner.capacity
+            // Probe before inserting. This key is a caller-controlled compression level, so
+            // inserting on every return would let a full pool grow the map without bound.
+            if guard.get(&level).map_or(0, Vec::len) < self.inner.capacity
                 && let Some(context) = context.take()
             {
-                idle.push(context);
+                guard.entry(level).or_default().push(context);
             }
         }
     }

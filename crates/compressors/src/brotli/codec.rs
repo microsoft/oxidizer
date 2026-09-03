@@ -31,14 +31,14 @@ fn portable_quality(level: Level) -> u32 {
 
 /// Initializes an uninitialized output slice so brotli, which writes into `&mut [u8]`, can use it.
 ///
-/// The deflate backend performs the same zero-fill internally, so this is not extra work relative
-/// to the other formats.
+/// Unlike the flate backend, which takes the spare capacity uninitialized through
+/// `compress_uninit`/`decompress_uninit`, brotli's binding only accepts an initialized `&mut [u8]`.
+/// The zero-fill is therefore real work this format pays and the others do not, so it is done as a
+/// single bulk fill that lowers to `memset` rather than a per-element store loop.
 fn initialize(output: &mut [MaybeUninit<u8>]) -> &mut [u8] {
-    for slot in &mut *output {
-        slot.write(0);
-    }
+    output.fill(MaybeUninit::new(0));
 
-    // SAFETY: every element of the slice was just initialized by the loop above, and `u8` has the
+    // SAFETY: every element of the slice was just initialized by the fill above, and `u8` has the
     // same layout as `MaybeUninit<u8>`.
     unsafe { &mut *(std::ptr::from_mut(output) as *mut [u8]) }
 }

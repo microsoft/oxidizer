@@ -437,6 +437,11 @@ impl Pump {
                     Err(error) => return Err(self.fail(error)),
                 };
 
+                // One read of the codec's stream cap, already narrowed to "and we are at it", so the
+                // three arms below cannot drift apart on how the limit is tested and none of them
+                // has to re-open the `Option` it just matched on.
+                let stream_limit = codec.max_streams().filter(|maximum| self.streams >= *maximum);
+
                 // Paired with the state so the match below stays exhaustive over exactly the
                 // states this match can actually produce, with no catch-all for a state this
                 // engine step can never reach.
@@ -448,15 +453,13 @@ impl Pump {
                     StreamEnd::AwaitEof if end_of_input => (State::Done, StreamContinuation::Done),
                     StreamEnd::AwaitEof => (State::AwaitingEof, StreamContinuation::NeedInput),
                     StreamEnd::NextStream
-                        if codec.max_streams().is_some_and(|maximum| self.streams >= maximum) && !self.input.is_empty() =>
+                        if let Some(maximum) = stream_limit
+                            && !self.input.is_empty() =>
                     {
-                        let maximum = codec.max_streams().unwrap_or(u64::MAX);
                         return Err(self.fail(Error::stream_limit_exceeded(self.streams.saturating_add(1), maximum)));
                     }
-                    StreamEnd::NextStream if codec.max_streams().is_some_and(|maximum| self.streams >= maximum) && end_of_input => {
-                        (State::Done, StreamContinuation::Done)
-                    }
-                    StreamEnd::NextStream if let Some(maximum) = codec.max_streams().filter(|maximum| self.streams >= *maximum) => {
+                    StreamEnd::NextStream if stream_limit.is_some() && end_of_input => (State::Done, StreamContinuation::Done),
+                    StreamEnd::NextStream if let Some(maximum) = stream_limit => {
                         (State::AtStreamLimit { maximum }, StreamContinuation::NeedInput)
                     }
                     StreamEnd::NextStream if !self.input.is_empty() && end_of_input => (State::Finishing, StreamContinuation::Loop),
