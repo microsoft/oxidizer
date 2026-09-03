@@ -1035,6 +1035,7 @@ macro_rules! format_contract {
                 let joined = BytesView::from_views([compressed, trailing]);
                 let mut decompressor = $module::Decompressor::builder()
                     .multi_stream(false)
+                    .trailing_data(TrailingData::Ignore)
                     .build(resources())
                     .built();
                 decompressor.push(joined).expect("push succeeds");
@@ -1053,6 +1054,32 @@ macro_rules! format_contract {
 
                 // The bytes after the stream are not decompressed, and not mistaken for more of it.
                 assert_eq!(plain.consume_all().to_vec(), data);
+            }
+
+            #[test]
+            fn trailing_bytes_after_a_single_stream_are_rejected_by_default() {
+                // Silently dropping them is a parser differential, so it has to be opted into.
+                let data = payload();
+                let compressed = $module::compress(view(&data), resources()).expect("compress");
+                let joined = BytesView::from_views([compressed, view(b"next protocol message")]);
+                let mut decompressor = $module::Decompressor::builder()
+                    .multi_stream(false)
+                    .build(resources())
+                    .built();
+                decompressor.push(joined).expect("push succeeds");
+                decompressor.end_input();
+
+                let mut guard = StepGuard::new();
+                let error = loop {
+                    guard.step();
+                    match decompressor.pull() {
+                        Ok(Output::Done) => panic!("the trailing bytes were accepted"),
+                        Ok(_) => {}
+                        Err(error) => break error,
+                    }
+                };
+
+                assert!(error.is_corrupt_data(), "got {error}");
             }
 
             #[test]
@@ -2001,6 +2028,7 @@ mod trait_contract {
         let joined = BytesView::from_views([compressed.consume_all(), view(b"trailing")]);
         let mut decompressor = DecompressorBuilder::new()
             .multi_stream(false)
+            .trailing_data(TrailingData::Ignore)
             .build_format(Format::Gzip, resources())
             .expect("the default settings are accepted");
         decompressor.push(joined).expect("push succeeds");

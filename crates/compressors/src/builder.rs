@@ -164,7 +164,7 @@ impl<T> DecompressorBuilder<T> {
             limits: DecompressorLimits::new(),
             chunk_size: default_chunk_size(),
             multi_stream: None,
-            trailing_data: TrailingData::Ignore,
+            trailing_data: TrailingData::Reject,
             format,
         }
     }
@@ -208,6 +208,11 @@ impl<T> DecompressorBuilder<T> {
     }
 
     /// Sets how a single-stream decompressor handles bytes after the compressed stream.
+    ///
+    /// Defaults to [`TrailingData::Reject`], so a stream that does not end exactly at end of input
+    /// is an error rather than a silent truncation of what the caller was given. Pass
+    /// [`TrailingData::Ignore`] for a container whose framing legitimately puts other data after
+    /// the compressed stream.
     ///
     /// In multi-stream mode, subsequent bytes are interpreted as another compressed stream
     /// regardless of this setting.

@@ -955,7 +955,13 @@ mod tests {
             );
             assert_eq!(joined_len, payload.len() * 2, "{format:?} should join with multi_stream(true)");
 
-            let single_len = decompressed_len(decompressor_for(DecompressorBuilder::new().multi_stream(false), format), joined);
+            let single_len = decompressed_len(
+                decompressor_for(
+                    DecompressorBuilder::new().multi_stream(false).trailing_data(TrailingData::Ignore),
+                    format,
+                ),
+                joined,
+            );
             assert_eq!(single_len, payload.len(), "{format:?} should stop with multi_stream(false)");
         }
     }
@@ -974,7 +980,12 @@ mod tests {
             let compressed = crate::format::compress(format, view(&payload), &Resources::default()).expect("compress");
             let joined = BytesView::from_views([compressed.clone(), compressed]);
 
-            let len = decompressed_len(decompressor_for(DecompressorBuilder::new(), format), joined);
+            // `Ignore` isolates the multi-stream default under test from the trailing-data policy,
+            // which would otherwise reject the second member for the formats that do not join.
+            let len = decompressed_len(
+                decompressor_for(DecompressorBuilder::new().trailing_data(TrailingData::Ignore), format),
+                joined,
+            );
             let expected = if joins_by_default { payload.len() * 2 } else { payload.len() };
 
             assert_eq!(len, expected, "{format:?} did not keep its documented default");
