@@ -321,16 +321,14 @@ mod tests {
         storage.insert(&thread, Arc::new(1)).unwrap();
 
         let occupied = Arc::new(2);
-        match storage.insert_with_reason(&thread, Arc::clone(&occupied)) {
-            Err(InsertError::Occupied(rejected)) => assert!(Arc::ptr_eq(&rejected, &occupied)),
-            Err(InsertError::ForeignOwner(_)) | Ok(()) => panic!("occupied partition must retain its diagnostic"),
-        }
+        let occupied_error = storage.insert_with_reason(&thread, Arc::clone(&occupied)).unwrap_err();
+        assert!(matches!(&occupied_error, InsertError::Occupied(_)));
+        assert!(Arc::ptr_eq(&occupied_error.into_value(), &occupied));
 
         let foreign_value = Arc::new(3);
-        match storage.insert_with_reason(&foreign, Arc::clone(&foreign_value)) {
-            Err(InsertError::ForeignOwner(rejected)) => assert!(Arc::ptr_eq(&rejected, &foreign_value)),
-            Err(InsertError::Occupied(_)) | Ok(()) => panic!("foreign owner must retain its diagnostic"),
-        }
+        let foreign_error = storage.insert_with_reason(&foreign, Arc::clone(&foreign_value)).unwrap_err();
+        assert!(matches!(&foreign_error, InsertError::ForeignOwner(_)));
+        assert!(Arc::ptr_eq(&foreign_error.into_value(), &foreign_value));
     }
 
     #[test]
