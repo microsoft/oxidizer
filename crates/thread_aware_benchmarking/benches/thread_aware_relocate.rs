@@ -22,8 +22,8 @@
 //!
 //! * `hit_path` / `miss_path` — uncontended cost of the two branches.
 //! * `concurrent` — the hit-path cost with as many concurrent workers as
-//!   processors, and beyond, each relocating into its own key, so there is no
-//!   shared cell to contend on.
+//!   processors, and beyond. Each worker uses distinct logical keys, while the
+//!   shared DashMap still performs shard-level read synchronization.
 //!
 //! Paired with `thread_aware_relocate_cg.rs`, which covers `hit_path` and
 //! `miss_path` under instruction-count measurement. The `concurrent` subgroup has
@@ -54,8 +54,9 @@ use thread_aware_benchmarking::{Payload, TREE_DEPTH, Tree};
 /// the scheduler queue than there are processors to run them, the regime a
 /// thread-per-core runtime reaches whenever it has more runnable work than cores.
 /// Every worker still relocates between its own already-filled source and
-/// destination keys, so no two workers share a cell; the shape exposes how the
-/// uncontended hit path behaves under scheduler pressure, not cell contention.
+/// destination keys, eliminating same-entry publication contention. Different
+/// keys may still share a DashMap shard, so the shape includes shard read-lock
+/// synchronization as well as scheduler pressure.
 ///
 /// A small multiple is enough to reach that regime. Higher factors only add more
 /// scheduler queueing without exercising a different code path.
@@ -185,9 +186,9 @@ fn bench_hit_path(c: &mut Criterion) {
 // =========================================================================
 // miss_path — destination key is empty, so the value is materialized.
 //             A primer thread populates the shared storage before timing, so
-//             the measurement is the cross-key miss itself — the re-probe
-//             load, the factory call, and the two cell writes — rather than
-//             initial storage setup.
+//             the measurement is the cross-key miss itself — the destination
+//             entry lookup, factory call, destination insertion, and source
+//             insertion — rather than initial storage setup.
 // =========================================================================
 
 fn bench_miss_path(c: &mut Criterion) {
@@ -231,7 +232,7 @@ fn bench_miss_path(c: &mut Criterion) {
 
 // =========================================================================
 // concurrent — the hit-path cost while many workers relocate into their own
-//              keys at once, with no shared cell to contend on.
+//              keys at once, including shared DashMap shard synchronization.
 // =========================================================================
 
 /// Persistent worker pool that measures a relocation performed concurrently from
@@ -250,8 +251,9 @@ fn bench_miss_path(c: &mut Criterion) {
 /// batch size, so the fixed release cost lands in the regression intercept and the
 /// reported per-iteration time is the batch makespan divided by the batch size: the
 /// amortized cost of one relocation on the worker that finishes last. Because the
-/// destinations are distinct and already populated, no two workers share a keyed
-/// cell, so that figure reflects the hit path while every worker is busy.
+/// destinations are distinct and already populated, no two workers contend on one
+/// logical entry or execute a factory. They still access shared DashMap shards, so
+/// the figure includes any resulting read-lock synchronization.
 ///
 /// Readiness is proven before the clock starts. Every worker parks on `ready`,
 /// the controller waits there too, and only once all of them have arrived does it
@@ -274,7 +276,8 @@ impl ConcurrentRelocation {
         T: ThreadAware + Clone + Send + 'static,
     {
         // Give every worker distinct source and destination partitions. Two partitions per worker
-        // keep both directions of the repeated handoff uncontended by other workers.
+        // avoid same-entry sharing in both directions; DashMap shard synchronization remains part
+        // of the measured path.
         let coordinate_count = thread_count.saturating_mul(2);
         let threads = threads(coordinate_count);
         let subject = make(&threads);
@@ -403,17 +406,19 @@ fn bench_concurrent(c: &mut Criterion) {
 
     // A sweep over worker count: one worker per processor, then more workers than
     // processors. Every worker relocates into its own distinct, already-populated
-    // key, so the measured relocations are all hits and no two workers share a
-    // cell; the reported per-relocation time therefore reflects the hit path scaling
-    // as the machine fills rather than contention. The oversubscribed shape
-    // adds scheduler pressure, not contention. The uncontended single-worker
-    // cost belongs to `hit_path`, so it is deliberately absent here: one worker would
-    // only add this harness's thread-handoff overhead to the same number.
+    // key, so the measured relocations are all hits without same-entry publication
+    // contention. Keys can share DashMap shards, however, so the result includes
+    // shard read-lock synchronization as the machine fills. The oversubscribed
+    // shape adds scheduler pressure on top of that synchronization. The
+    // single-worker baseline belongs to `hit_path`, so it is deliberately absent
+    // here: one worker would only add this harness's thread-handoff overhead to the
+    // same number.
     //
     // The subject is the object tree, which is what actually crosses threads in
     // a consumer. It reads one storage map per layer, so each message does several
-    // cell reads and the per-message storage cost is large enough to resolve; a
-    // bare `Arc` does one read, too little to resolve above the harness noise.
+    // shard-synchronized lookups and the per-message storage cost is large enough
+    // to resolve; a bare `Arc` does one lookup, too little to resolve above the
+    // harness noise.
     let shapes = [
         ("threads_saturated", saturated),
         ("threads_oversubscribed", saturated * CONCURRENT_OVERSUBSCRIPTION),
