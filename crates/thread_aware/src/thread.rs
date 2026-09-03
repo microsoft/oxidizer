@@ -14,6 +14,11 @@ use crate::{NumaNode, Owner, Thread};
 /// A new builder creates a unique [`Owner`]. Cloning the builder preserves that
 /// owner, allowing a runtime to construct coordinates for all of its worker
 /// threads while selecting each worker's nearest NUMA node.
+///
+/// The default NUMA coordinate is node `0`, used as a topology-agnostic
+/// single-node fallback. It does not assert that every worker is physically on
+/// hardware node zero. A runtime that knows its topology should call
+/// [`numa_node`](Self::numa_node) for each worker before building its coordinate.
 #[derive(Clone, Debug)]
 pub struct ThreadBuilder {
     owner: Owner,
@@ -21,7 +26,8 @@ pub struct ThreadBuilder {
 }
 
 impl ThreadBuilder {
-    /// Selects the NUMA node nearest to the thread being built.
+    /// Selects the NUMA node nearest to the thread being built, overriding the
+    /// topology-agnostic node-zero fallback.
     #[must_use]
     pub fn numa_node(mut self, numa_node: u32) -> Self {
         self.numa_node = new_numa_node(numa_node);
