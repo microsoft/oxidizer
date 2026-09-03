@@ -147,10 +147,7 @@ fn decompress(format: Format, input: &BytesView, resources: &Resources) -> Bytes
 
 /// Compresses with an explicit brotli window, which the runtime `Format` builder cannot express.
 fn compress_brotli(window: WindowSize, input: &BytesView, resources: &Resources) -> BytesView {
-    let compressor = brotli::Compressor::builder()
-        .window_size(window)
-        .build(resources)
-        .expect("the window size is accepted");
+    let compressor = brotli::Compressor::builder().window_size(window).build(resources);
 
     compressors::compress(input.clone(), compressor).expect("compression succeeds")
 }
@@ -235,7 +232,7 @@ fn pooling(criterion: &mut Criterion, session: &Session) {
     for &format in Format::ALL {
         let memory = GlobalPool::new();
         let input = view(&bytes, &memory);
-        let fresh = Resources::new(memory.clone()).enable_pooling(0);
+        let fresh = Resources::new(memory.clone()).with_pool_capacity(0);
         let pooled = Resources::new(memory.clone());
         let compressed = compress(format, None, None, &input, &fresh);
 

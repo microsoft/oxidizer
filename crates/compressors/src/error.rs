@@ -322,8 +322,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// A compressor or decompressor could not be built from the settings it was given.
 ///
 /// Most formats accept any combination the builders can express, so their `build` methods do not
-/// return this at all. The exceptions are the formats whose engines validate their own parameters
-/// -- brotli and zstd -- where building applies the configuration and can therefore be rejected.
+/// return this at all. The exception is zstd, whose native library validates the parameters this
+/// crate hands it and can therefore reject them.
 ///
 /// This is a separate type from [`Error`] so that a failure to build is not something callers have
 /// to consider while streaming: once an engine exists, this error can no longer occur. It converts
@@ -332,11 +332,11 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// # Examples
 ///
 /// ```
-/// # #[cfg(feature = "brotli")]
+/// # #[cfg(feature = "zstd")]
 /// # {
-/// use compressors::{Resources, brotli};
+/// use compressors::{Resources, zstd};
 ///
-/// let compressor = brotli::Compressor::builder().build(&Resources::default())?;
+/// let compressor = zstd::Compressor::builder().build(&Resources::default())?;
 /// # let _ = compressor;
 /// # }
 /// # Ok::<(), compressors::BuildError>(())
@@ -347,8 +347,8 @@ pub struct BuildError {
 }
 
 #[cfg_attr(
-    all(not(test), not(any(feature = "brotli", feature = "zstd"))),
-    expect(dead_code, reason = "only the brotli and zstd engines validate a configuration")
+    all(not(test), not(feature = "zstd")),
+    expect(dead_code, reason = "only the zstd engine validates a configuration")
 )]
 impl BuildError {
     pub(crate) fn new(message: impl Into<Cow<'static, str>>) -> Self {

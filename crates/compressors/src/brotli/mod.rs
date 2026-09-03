@@ -66,7 +66,7 @@ define_format! {
     format = Brotli,
     build_method = build_brotli,
     compressor_codec = BrotliCompress,
-    compressor_build = fallible,
+    compressor_build = infallible,
     new_compressor = |level, format, _pool| BrotliCompress::new(level, format),
     decompressor_codec = BrotliDecompress,
     decompressor_build = infallible,
@@ -222,25 +222,23 @@ impl From<WindowSize> for u8 {
 /// [`output_chunk_size`][crate::CompressorBuilder::output_chunk_size] -- are shared with every other format
 /// and are also reachable from a [`CompressorBuilder<()>`][crate::CompressorBuilder] that has not
 /// chosen a format yet. These are not: a builder that might produce any format cannot honour a
-/// setting only brotli has, so reach for them through this concrete builder and box the result if
-/// you need a [`Compression`][crate::core::Compression] trait object.
+/// setting only brotli has, so reach for them through this concrete builder. Box the result when a
+/// call site needs to hold one of several formats without naming which.
 ///
 /// # Examples
 ///
 /// ```
 /// use compressors::Resources;
 /// use compressors::brotli::{self, Mode, Quality, WindowSize};
-/// use compressors::core::{Compress, Compression};
 ///
-/// let compressor: Box<dyn Compression<Mode = Compress>> = Box::new(
+/// let compressor = Box::new(
 ///     brotli::Compressor::builder()
 ///         .quality(Quality::new(8).expect("8 is in range"))
 ///         .mode(Mode::Text)
 ///         .window_size(WindowSize::new(20).expect("20 is in range"))
-///         .build(&Resources::default())?,
+///         .build(&Resources::default()),
 /// );
 /// # let _ = compressor;
-/// # Ok::<(), compressors::BuildError>(())
 /// ```
 impl crate::CompressorBuilder<Brotli> {
     /// Sets brotli's native quality, overriding any portable [`Level`][crate::Level].

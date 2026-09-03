@@ -144,8 +144,8 @@ fixed per message, so it matters most for small bodies.
 
 Recycling is on by default, which is why every API that builds an engine asks for resources rather
 than for a memory provider alone. Set the capacity to zero with
-[`enable_pooling`][__link16] when compression is rare enough that retaining
-engine state costs more than rebuilding it.
+[`with_pool_capacity`][__link16] when compression is rare enough that
+retaining engine state costs more than rebuilding it.
 
 ```rust
 use compressors::{Level, Resources, gzip};
@@ -171,7 +171,7 @@ keeps, which makes it the conveniences that buffer a whole result that need boun
 a 64 MiB output cap and a 1024 concatenated-stream cap to whatever the caller did not set.
 
 When you buffer decompressed output yourself, set
-[`with_max_output_len`][__link17] to what you can afford. That
+[`max_output_len`][__link17] to what you can afford. That
 guardrail is for the common case, not a substitute for bounding how many bodies you decompress
 at once. [`DecompressorLimits`][__link18] documents what each format bounds by default, and why a ratio
 alone is not protection.
@@ -207,7 +207,7 @@ needs.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/compressors">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb1zOULLzYMFUbWNLhT9xgsUwbQyNc6rGvTwcbZLzN8FpQrBphZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb9zeZTPTKSTsbmvOkT6-Y-nUbB0panqBu9YwbejKq8JGBw31hZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
  [__link0]: https://crates.io/crates/bytesbuf/0.9.0
  [__link1]: https://docs.rs/compressors/0.1.0/compressors/?search=Result
  [__link10]: https://docs.rs/compressors/0.1.0/compressors/fn.decompress.html
@@ -216,8 +216,8 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link13]: mod@crate::format
  [__link14]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressorBuilder::build_format
  [__link15]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
- [__link16]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources::enable_pooling
- [__link17]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits::with_max_output_len
+ [__link16]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources::with_pool_capacity
+ [__link17]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits::max_output_len
  [__link18]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits
  [__link19]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressionStream
  [__link2]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources

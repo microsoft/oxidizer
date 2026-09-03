@@ -504,7 +504,7 @@ impl CompressorBuilder<()> {
             #[cfg(any(test, feature = "gzip"))]
             Format::Gzip => CompressorKind::Gzip(self.build_gzip(resources)),
             #[cfg(any(test, feature = "brotli"))]
-            Format::Brotli => CompressorKind::Brotli(Box::new(self.build_brotli(resources)?)),
+            Format::Brotli => CompressorKind::Brotli(Box::new(self.build_brotli(resources))),
             #[cfg(any(test, feature = "zstd"))]
             Format::Zstd => CompressorKind::Zstd(self.build_zstd(resources)?),
         };
@@ -826,8 +826,8 @@ mod tests {
             let mut decompressor = DecompressorBuilder::new()
                 .limits(
                     DecompressorLimits::new()
-                        .without_max_ratio()
-                        .with_max_output_len(NonZeroU64::new(1024).unwrap()),
+                        .unbounded_ratio()
+                        .max_output_len(NonZeroU64::new(1024).unwrap()),
                 )
                 .output_chunk_size(NonZeroUsize::new(64).expect("64 is not zero"))
                 .build_format(format, &Resources::default())
@@ -970,8 +970,8 @@ mod tests {
                 compressed,
                 &Resources::default(),
                 DecompressorLimits::new()
-                    .without_max_ratio()
-                    .with_max_output_len(NonZeroU64::new(1024).unwrap()),
+                    .unbounded_ratio()
+                    .max_output_len(NonZeroU64::new(1024).unwrap()),
             )
             .expect_err("the explicit cap fires");
 

@@ -157,8 +157,8 @@
 //!
 //! Recycling is on by default, which is why every API that builds an engine asks for resources rather
 //! than for a memory provider alone. Set the capacity to zero with
-//! [`enable_pooling`][Resources::enable_pooling] when compression is rare enough that retaining
-//! engine state costs more than rebuilding it.
+//! [`with_pool_capacity`][Resources::with_pool_capacity] when compression is rare enough that
+//! retaining engine state costs more than rebuilding it.
 //!
 //! ```
 //! # #[cfg(feature = "gzip")]
@@ -188,7 +188,7 @@
 //! a 64 MiB output cap and a 1024 concatenated-stream cap to whatever the caller did not set.
 //!
 //! When you buffer decompressed output yourself, set
-//! [`with_max_output_len`][DecompressorLimits::with_max_output_len] to what you can afford. That
+//! [`max_output_len`][DecompressorLimits::max_output_len] to what you can afford. That
 //! guardrail is for the common case, not a substitute for bounding how many bodies you decompress
 //! at once. [`DecompressorLimits`] documents what each format bounds by default, and why a ratio
 //! alone is not protection.
@@ -342,7 +342,7 @@ pub fn compress(input: BytesView, compressor: impl Compression<Mode = Compress>)
 ///
 /// This adds no bounds of its own: the decompressor arrives already configured, so whatever it was
 /// built with is what applies. It does accumulate the whole result, so pass a decompressor built
-/// with [`DecompressorLimits::with_max_output_len`][crate::DecompressorLimits::with_max_output_len]
+/// with [`DecompressorLimits::max_output_len`][crate::DecompressorLimits::max_output_len]
 /// when the input is untrusted. Each format's own `decompress` is the bounded convenience.
 pub fn decompress(input: BytesView, decompressor: impl Compression<Mode = Decompress>) -> Result<BytesView> {
     process(decompressor, input)

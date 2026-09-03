@@ -161,7 +161,7 @@ impl Default for CompressorBuilder<()> {
 /// the stream is.
 ///
 /// Set [`limits`][DecompressorBuilder::limits] with
-/// [`with_max_output_len`][DecompressorLimits::with_max_output_len] to what you can afford whenever
+/// [`max_output_len`][DecompressorLimits::max_output_len] to what you can afford whenever
 /// decompressed output is accumulated -- by the buffering conveniences, or by a consumer that keeps
 /// the chunks it is handed. Applying a cumulative cap to a pipeline that retains nothing only
 /// rejects legitimately long streams.
@@ -210,7 +210,7 @@ impl<T> DecompressorBuilder<T> {
     ///
     /// # Security
     ///
-    /// Set [`with_max_output_len`][DecompressorLimits::with_max_output_len] to match your memory
+    /// Set [`max_output_len`][DecompressorLimits::max_output_len] to match your memory
     /// budget whenever decompressed output is accumulated, rather than whenever the input is
     /// untrusted -- retained output is what a cumulative cap protects. Do not rely on the format
     /// default for brotli, which has none.

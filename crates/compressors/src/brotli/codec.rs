@@ -15,7 +15,7 @@ use brotli::{BrotliDecompressStream, BrotliResult, BrotliState, HeapAlloc, Huffm
 
 use crate::brotli::{Brotli, Mode};
 use crate::engine::{Codec, Operation, Step, StreamEnd};
-use crate::error::{BuildError, Error, Result};
+use crate::error::{Error, Result};
 use crate::level::Level;
 use crate::limits::FormatLimits;
 use crate::trailing::TrailingData;
@@ -58,31 +58,13 @@ fn compress_stream_failed() -> Error {
     Error::invalid_state("the brotli compression engine reported a failure")
 }
 
-/// Every value the builders can express is inside the range brotli accepts -- [`Quality`],
-/// [`WindowSize`] and [`Mode`] all validate on construction, and the portable [`Level`] is mapped
-/// into `0..=11`.
-///
-/// This is defensive against the encoder's contract rather than a check on this crate's own
-/// invariants: the accepted ranges belong to the `brotli` crate, so a future version could narrow
-/// them. Reporting rather than asserting keeps an upstream change a build failure the caller can
-/// act on instead of a panic.
-///
-/// [`Quality`]: crate::brotli::Quality
-/// [`WindowSize`]: crate::brotli::WindowSize
-#[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg_attr(test, mutants::skip)]
-#[cold]
-fn configuration_rejected() -> BuildError {
-    BuildError::new("the brotli compression engine rejected its configuration")
-}
-
 pub(crate) struct BrotliCompress {
     state: BrotliEncoderStateStruct<StandardAlloc>,
     finished: bool,
 }
 
 impl BrotliCompress {
-    pub(crate) fn new(level: Level, options: &Brotli) -> ::core::result::Result<Self, BuildError> {
+    pub(crate) fn new(level: Level, options: &Brotli) -> Self {
         use brotli::enc::encode::BrotliEncoderParameter;
 
         let mut state = BrotliEncoderStateStruct::new(StandardAlloc::default());
@@ -90,15 +72,18 @@ impl BrotliCompress {
             .quality
             .map_or_else(|| portable_quality(level), |quality| u32::from(quality.get()));
 
-        // Written as one expression so the branch that cannot be taken needs no statement of its
-        // own: `configuration_rejected` carries the explanation of why it is unreachable.
-        (state.set_parameter(BrotliEncoderParameter::BROTLI_PARAM_QUALITY, quality)
+        let accepted = state.set_parameter(BrotliEncoderParameter::BROTLI_PARAM_QUALITY, quality)
             && state.set_parameter(BrotliEncoderParameter::BROTLI_PARAM_LGWIN, u32::from(options.window_size.get()))
-            && state.set_parameter(BrotliEncoderParameter::BROTLI_PARAM_MODE, mode(options.mode)))
-        .then_some(())
-        .ok_or_else(configuration_rejected)?;
+            && state.set_parameter(BrotliEncoderParameter::BROTLI_PARAM_MODE, mode(options.mode));
 
-        Ok(Self { state, finished: false })
+        // `set_parameter` refuses only an already-initialized encoder or an unrecognized parameter.
+        // The state was created two statements ago and all three identifiers are recognized, so a
+        // refusal here means the encoder's contract changed under us rather than that the caller
+        // configured something invalid -- `Quality`, `WindowSize` and `Mode` validate on
+        // construction, and the portable `Level` is mapped into `0..=11`.
+        assert!(accepted, "the brotli encoder rejected a parameter it documents as recognized");
+
+        Self { state, finished: false }
     }
 }
 
@@ -313,6 +298,8 @@ mod tests {
     fn every_expressible_configuration_is_accepted_by_the_engine() {
         use crate::brotli::{Quality, WindowSize};
 
+        // Construction asserts that the encoder accepted every parameter, so this passing is what
+        // proves the assertion cannot fire for any configuration a caller can express.
         for quality in Quality::MIN.get()..=Quality::MAX.get() {
             for exponent in WindowSize::MIN.get()..=WindowSize::MAX.get() {
                 for chosen in [Mode::Generic, Mode::Text, Mode::Font] {
@@ -321,7 +308,7 @@ mod tests {
                     settings.window_size = WindowSize::new(exponent).expect("in range");
                     settings.mode = chosen;
 
-                    BrotliCompress::new(Level::DEFAULT, &settings).expect("the engine accepts every configuration the builder can express");
+                    drop(BrotliCompress::new(Level::DEFAULT, &settings));
                 }
             }
         }
@@ -346,7 +333,7 @@ mod tests {
 
     #[test]
     fn compressor_debug_includes_its_finished_flag() {
-        let codec = BrotliCompress::new(Level::DEFAULT, &Brotli::new()).expect("the default settings are accepted");
+        let codec = BrotliCompress::new(Level::DEFAULT, &Brotli::new());
         let rendered = format!("{codec:?}");
 
         assert!(rendered.contains("BrotliCompress"));
