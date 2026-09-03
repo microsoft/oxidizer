@@ -26,8 +26,8 @@ use crate::pool::Pool;
 /// message, as much work as the compression itself. These resources recycle that state between
 /// messages, so a service that compresses many small bodies spends its budget compressing rather
 /// than getting ready to compress. It is on by default, and
-/// [`enable_pooling`][Resources::enable_pooling] turns it off for the rare caller that wants to
-/// measure what it is worth, or that compresses one message and exits.
+/// [`with_pool_capacity(0)`][Resources::with_pool_capacity] turns it off for the rare caller that
+/// wants to measure what it is worth, or that compresses one message and exits.
 ///
 /// Recycling is transparent: it applies to the engines that benefit and quietly skips the rest, so
 /// calling code never has to know which is which, and which engines those are can change without
@@ -73,14 +73,15 @@ impl Resources {
 
     /// Sets how many idle engines are kept per distinct configuration, where zero stops recycling.
     ///
-    /// Recycling is on by default at a capacity that suits ordinary request traffic, so this is for
-    /// callers who know better: size it to the number of messages you expect to be encoding at
-    /// once, or pass zero to get the baseline that measures what recycling is worth.
+    /// Recycling is already on after [`new`][Resources::new] at a capacity that suits ordinary
+    /// request traffic. Set this to the number of messages expected to be in flight at once, or to
+    /// zero when compression is rare enough that retaining engine state costs more than rebuilding
+    /// it.
     ///
     /// The capacity bounds what is kept, not what can be used: a burst beyond it still compresses,
     /// building engines it then drops instead of storing.
     #[must_use]
-    pub fn enable_pooling(mut self, capacity: usize) -> Self {
+    pub fn with_pool_capacity(mut self, capacity: usize) -> Self {
         self.pool = match capacity {
             0 => Pool::disabled().clone(),
             capacity => Pool::with_capacity(capacity),
@@ -153,10 +154,10 @@ mod tests {
         let recycling = Resources::new(GlobalPool::new());
         assert!(recycling.pool().capacity() > 0, "recycling should be the default");
 
-        let plain = recycling.enable_pooling(0);
+        let plain = recycling.with_pool_capacity(0);
         assert_eq!(plain.pool().capacity(), 0, "a capacity of zero must stop recycling");
 
-        assert_eq!(plain.enable_pooling(4).pool().capacity(), 4, "the capacity must be honoured");
+        assert_eq!(plain.with_pool_capacity(4).pool().capacity(), 4, "the capacity must be honoured");
     }
 
     #[test]
