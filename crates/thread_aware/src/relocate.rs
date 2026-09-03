@@ -81,9 +81,7 @@ impl Relocator {
                 #[cfg(miri)]
                 {
                     return SourceThread {
-                        id: thread::spawn(|| thread::current().id())
-                            .join()
-                            .expect("source thread must return its ID during initialization"),
+                        id: thread::current().id(),
                         _keepalive: None,
                     };
                 }
