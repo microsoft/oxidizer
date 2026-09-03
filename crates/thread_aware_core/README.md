@@ -30,17 +30,17 @@ requires aliasing one of them.
 ## The `thread_aware` family
 
 Downstream libraries need one small contract they can implement and expose in public APIs
-without also adopting derive macros, policy wrappers, registries, or runtime integration.
-Keeping that contract here lets unrelated libraries interoperate while the larger utility
-surface evolves independently.
+without also adopting derive macros, closure adapters, policy wrappers, partitioned storage,
+or runtime integration. Keeping that contract here lets unrelated libraries interoperate while
+the larger utility surface evolves independently.
 
 * **`thread_aware_core`** (this crate) — the vocabulary that two unrelated libraries must
   agree on before either can relocate a value defined by the other. It evolves
   conservatively, reducing how much public APIs couple to changes in the utility crate.
 * **[`thread_aware`][__link5]** — the utilities that make relocation convenient: a
-  [`#[derive(ThreadAware)]`][__link6] macro, wrappers for foreign types, a per-core
-  [`Arc`][__link7], containers and registries. Free to evolve, and not meant to appear in a
-  public API.
+  [`#[derive(ThreadAware)]`][__link6] macro, closure adapters, wrappers for foreign types,
+  runtime coordinate construction, and strategy-partitioned [`Arc`][__link7] storage. Free to
+  evolve, and not meant to appear in a public API.
 
 Depend on this crate directly when all you need is the trait. It has no normal dependencies
 and works without `std`: with default features turned off, [`Thread`][__link8] loses its thread id
@@ -48,7 +48,7 @@ component and keeps [`Owner`][__link9] and [`NumaNode`][__link10].
 
 ## Why relocation exists
 
-Thread-per-core and non-uniform memory access (NUMA)-aware runtimes are fast because each
+Thread-isolated and non-uniform memory access (NUMA)-aware runtimes are fast because each
 worker keeps to itself: it uses memory close to its own thread, talks to its own I/O
 driver, and does not synchronize with other workers. When a value moves to another
 worker, what used to be close by is now in the wrong place: a cache line shared between
@@ -66,8 +66,8 @@ sides, and most code sits on only one of them.
 both and then invokes the implementation. It is a callback, like [`Drop::drop`][__link17].
 
 The derive lives in [`thread_aware`][__link18], so a library that wants it depends on that crate.
-Only the trait and [`Thread`][__link19] cross the public boundary, and both come from here, so the
-dependency stays an implementation detail:
+Only the trait, [`Thread`][__link19], and its component identifiers cross the public boundary, and all
+come from here, so the dependency stays an implementation detail:
 
 ```rust
 // A build dependency, not part of what this library promises.
@@ -129,7 +129,7 @@ relocation to their values, while map keys remain unchanged.
 
 References, sets, `Cow`, and `Arc` have no implementation because relocation would be
 ambiguous or could violate their invariants. [`thread_aware`][__link30] provides wrappers for cases
-that need an explicit policy, including its per-core [`Arc`][__link31].
+that need an explicit policy, including its strategy-partitioned [`Arc`][__link31].
 
 ## Features
 
@@ -144,7 +144,7 @@ that need an explicit policy, including its per-core [`Arc`][__link31].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbk_hQf4SqQD4b5s51ofjYzCAbz8QOpjCYSScbFJ9MdlTDQrBhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbudvIUy5oHB4b1laJQzc98fobHfngDkVCVM4b8WdqAul7utxhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4w
  [__link0]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
  [__link1]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware::relocate
  [__link10]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=NumaNode

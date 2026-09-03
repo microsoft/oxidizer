@@ -40,9 +40,11 @@ outside the stable boundary.
 
 ## Unstable utilities
 
-Implementation helpers, containers, callbacks, registry APIs, derive support,
-and integration helpers remain in the pre-1.0 `thread_aware` crate. Stable
-downstream crates should not expose those types in their public APIs.
+The derive macro, closure adapters, policy wrappers, `ThreadBuilder`,
+strategy-partitioned `Arc` and `Storage`, and relocation test helpers remain in
+the pre-1.0 `thread_aware` crate. Stable downstream crates should not expose
+those types in their public APIs.
 
-This split allows the trait contract and its required `Thread` type to remain
-stable without prematurely stabilizing the larger utility surface.
+This split allows the trait contract, thread coordinate types, and built-in
+implementations to remain stable without prematurely stabilizing the larger
+utility surface.
