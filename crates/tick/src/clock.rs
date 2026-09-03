@@ -86,6 +86,11 @@ use crate::timers::TimerKey;
 /// `Clock` implements [`ThreadAware`](thread_aware::ThreadAware), enabling per-thread timer isolation
 /// in thread-isolated runtime architectures.
 ///
+/// Per-thread locality is established only when the source and destination
+/// coordinates have the same runtime [`Owner`](thread_aware::Owner). Relocation
+/// across owners keeps the current timer storage: the clock remains functional,
+/// but its storage is not made local to the destination.
+///
 /// How relocation affects the clock depends on the underlying clock variant:
 ///
 /// - **System clocks**: Relocation creates per-thread timer storage. After relocation, each thread

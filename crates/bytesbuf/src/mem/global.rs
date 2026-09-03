@@ -22,7 +22,8 @@ use crate::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, Me
 /// For clarity, the pool itself is not in any way global - rather the word "global" in the name
 /// refers to the fact that all the memory capacity is obtained from the Rust global memory allocator.
 ///
-/// Clones of this type are equivalent and share the same pool of memory as long as they remain on the same thread.
+/// Clones initially share the same pool. Within one runtime owner, thread-aware relocation selects
+/// one pool per reached thread partition, and clones relocated to the same partition share it.
 #[doc = include_str!("../../docs/snippets/choosing_memory_provider.md")]
 ///
 /// # Multithreaded use
@@ -31,11 +32,14 @@ use crate::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, Me
 /// handing to `thread::spawn()` or `tokio::spawn()`). While the pool will still operate correctly, it will
 /// suffer degraded performance in all clones from the same family.
 ///
-/// This type is [thread-aware]. If moved across threads using thread-aware APIs, the performance
-/// penalty is not incurred. If no suitable thread-aware API is available, use a thread-local pool
-/// via the `thread_local!` macro.
+/// This type is [thread-aware]. When the source and destination coordinates belong to the same
+/// runtime [`Owner`], thread-aware APIs select the destination thread's pool and avoid the penalty.
+/// Relocation across runtime owners intentionally retains the source pool: it remains fully
+/// functional, but does not establish destination-local storage and may be slower. If no suitable
+/// thread-aware API is available, use a thread-local pool via the `thread_local!` macro.
 ///
 /// [thread-aware]: https://docs.rs/thread_aware
+/// [`Owner`]: thread_aware::Owner
 #[derive(Clone, Debug, ThreadAware)]
 pub struct GlobalPool {
     inner: thread_aware::Arc<GlobalPoolInner, thread_aware::PerThread>,

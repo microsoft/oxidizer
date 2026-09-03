@@ -69,9 +69,12 @@
 //! second.join().unwrap();
 //! ```
 //!
-//! After relocation, each thread's clock and driver operate on an independent set of timers.
-//! Timers registered on `clock_1` are only visible to `driver_1`, and the other way around. Each driver
-//! must be advanced independently by its owning thread.
+//! Because the coordinates above come from clones of one `ThreadBuilder`, they
+//! share a runtime owner. Each thread's clock and driver therefore operate on an
+//! independent set of timers. Timers registered on one clock are visible only
+//! to its driver, and each driver must be advanced independently by its owning
+//! thread. A cross-owner relocation instead keeps the existing timer storage:
+//! it remains usable, but does not become local to the destination runtime.
 //!
 //! ## Work-stealing runtimes
 //!

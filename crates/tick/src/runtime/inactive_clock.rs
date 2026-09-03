@@ -12,8 +12,9 @@ use crate::state::ClockState;
 /// Marker for an [`InactiveClock`] backed by per-thread isolated timer storage.
 ///
 /// This is the default mode. Clones can be relocated to different threads via
-/// [`ThreadAware::relocate`], producing independent timer storage per thread. Suitable for
-/// runtimes with stable worker threads.
+/// [`ThreadAware::relocate`], producing independent timer storage per thread
+/// when the coordinates share one runtime owner. Suitable for runtimes with
+/// stable worker threads.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
 pub struct Isolated;
@@ -64,7 +65,10 @@ pub struct Shared;
 /// In runtimes that keep work on stable worker threads, clone the `InactiveClock` and
 /// [`relocate`](thread_aware::ThreadAware::relocate) each clone to its target thread before
 /// activation. Relocation creates per-thread timer storage, so each thread gets an independent set
-/// of timers with no cross-thread lock contention.
+/// of timers with no cross-thread lock contention. Construct those coordinates from clones of one
+/// [`ThreadBuilder`](thread_aware::thread::ThreadBuilder), so they share a runtime owner. A
+/// cross-owner relocation retains the existing timer set and remains functional, but does not
+/// establish destination-local storage.
 #[derive(Debug)]
 pub struct InactiveClock<S = Isolated> {
     state: ClockState,

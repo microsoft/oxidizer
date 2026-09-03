@@ -145,10 +145,11 @@ All clock types implement [`ThreadAware`][__link31], supporting per-thread
 timer isolation in thread-isolated runtime architectures.
 
 When an [`InactiveClock`][__link32] is
-[relocated][__link33] to a target thread, the underlying timer
-storage is duplicated per thread. After activation, each thread’s [`Clock`][__link34] and
-[`ClockDriver`][__link35] operate on an independent set of timers with no
-cross-thread lock contention.
+[relocated][__link33] between coordinates owned by the same runtime,
+the underlying timer storage is duplicated per thread. After activation, each thread’s
+[`Clock`][__link34] and [`ClockDriver`][__link35] operate on an independent set of timers with
+no cross-thread lock contention. A cross-owner relocation remains functional but retains the
+existing timer storage, so it does not establish destination-local state.
 
 [`ClockControl`][__link36] clocks are unaffected by relocation, all clones always share the same
 controlled time state regardless of thread, so a single `ClockControl` can drive time for
@@ -291,7 +292,7 @@ contain additional examples of how to use the time primitives.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbznba-YYc5hYboZPv1uVrzMwbLGz0yoJ7uBgbPlx57Hl7JBVhZIKCbHRocmVhZF9hd2FyZWYwLjExLjCCZHRpY2tlMC42LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQboHuu5M6pCuEb3VZo280w0XAbKK68kBCH6YMb59kPPAtIPCVhZIKCbHRocmVhZF9hd2FyZWYwLjExLjCCZHRpY2tlMC42LjA
  [__link0]: https://docs.rs/tick/0.6.0/tick/?search=ClockControl
  [__link1]: https://docs.rs/tick/0.6.0/tick/?search=Clock
  [__link10]: https://docs.rs/tick/0.6.0/tick/?search=Error
