@@ -85,7 +85,7 @@ impl<T> Limit<T> {
 /// |---|---|---|
 /// | `deflate`, `zlib`, `gzip` | `1100x` | deflate cannot expand further than about `1032x`; that is structural |
 /// | `brotli` | none | brotli has no structural ceiling, so any ratio bound rejects sufficiently compressible legitimate data |
-/// | `zstd` | `250 000x` | zstd has no structural ceiling either, so it needs the same loose bound |
+/// | `zstd` | `250 000x` | zstd has no structural ceiling either, so this is a very loose coarse backstop rather than a bound derived from the format |
 ///
 /// Total output and stream count are not bounded by default, because a decompressor hands each
 /// chunk straight back and a stream of any length passes through it in bounded memory. The
@@ -189,7 +189,11 @@ impl DecompressorLimits {
         self
     }
 
-    /// Bounds how many concatenated streams or members may be decompressed.
+    /// Bounds how many compressed streams may be decompressed from one input.
+    ///
+    /// One independently framed compressed stream costs one count. A gzip member is one such
+    /// stream, so a file of concatenated members costs one per member even though multi-stream mode
+    /// joins them into a single logical output; the same holds for concatenated zstd frames.
     ///
     /// This limits work that produces little or no output, such as a file containing millions of
     /// empty gzip members.

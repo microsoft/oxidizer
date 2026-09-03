@@ -327,7 +327,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// ```
 /// # #[cfg(feature = "brotli")]
 /// # {
-/// use bytesbuf::mem::GlobalPool;
 /// use compressors::{Resources, brotli};
 ///
 /// let compressor = brotli::Compressor::builder().build(&Resources::default())?;

@@ -22,7 +22,8 @@ use crate::limits::FormatLimits;
 /// a stream of any length passes through; the buffering conveniences bound what they accumulate.
 pub(crate) const DEFAULT_LIMITS: FormatLimits = FormatLimits::new(Some(1_100), None, None);
 
-/// The deflate window size exponent. 15 is the maximum, giving the best compression ratio.
+/// The deflate window size exponent: the maximum the backend accepts, for the best compression
+/// ratio.
 ///
 /// Only the gzip container needs it explicitly; the raw and zlib constructors default to it.
 #[cfg(feature = "gzip")]

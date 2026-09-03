@@ -11,6 +11,16 @@
 /// compression. It does not promise that zero disables compression or that nine is the strongest
 /// setting a format supports; use a format-specific level type when exact native control matters.
 ///
+/// # How the scale is calibrated
+///
+/// The `0..=9` range and the position of [`DEFAULT`][Self::DEFAULT] come from the deflate family,
+/// whose native scale this is; every other format is mapped onto it rather than the other way
+/// round. The anchor is meaning rather than arithmetic: each format's mapping is chosen so that
+/// [`DEFAULT`][Self::DEFAULT] lands on that format's own balanced setting -- zstd's native 3, for
+/// instance -- rather than on the midpoint of its native range. Where a format's own range climbs
+/// steeply at the top, the mapping stops short of it instead of stretching to reach it, which is
+/// why the top of this scale is not necessarily the top of a format's.
+///
 /// The scale is portable but its *cost* is not, and the difference between formats is large. On
 /// the deflate family and on zstd, moving up the scale changes the time taken but barely moves the
 /// memory used. On brotli both climb steeply towards the top of the range, while the ratio gained

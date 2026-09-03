@@ -3,9 +3,11 @@
 
 //! Raw deflate (RFC 1951): the compressed payload with no header and no checksum.
 //!
-//! Use this only where the surrounding format supplies its own framing and integrity check, such
-//! as inside a ZIP archive or a PNG chunk. Without a checksum, corruption is not reliably detected,
-//! so prefer [`zlib`][crate::zlib] or [`gzip`][crate::gzip] for data in transit.
+//! Use this only where the surrounding format supplies its own framing and integrity check, such as
+//! inside a ZIP archive. Without a checksum, corruption is not reliably detected, so prefer
+//! [`zlib`][crate::zlib] or [`gzip`][crate::gzip] for data in transit. PNG is not an example of
+//! this: its `IDAT` payloads concatenate into a single zlib stream, so reach for
+//! [`zlib`][crate::zlib] there.
 //!
 //! # Examples
 //!

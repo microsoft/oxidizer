@@ -1,7 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Gzip (RFC 1952): a deflate payload with a ten byte header and a CRC-32 plus length trailer.
+//! Gzip (RFC 1952): a deflate payload with a member header and a CRC-32 plus length trailer.
+//!
+//! The header is a ten byte fixed prefix followed by optional fields -- an original file name, a
+//! comment, an extra field, a header checksum -- so a member header is not a fixed size.
 //!
 //! This is the format behind HTTP `Content-Encoding: gzip` and the `.gz` file extension.
 //! Concatenated members decompress as one logical stream by default, matching `gzip(1)`.
