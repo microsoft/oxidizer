@@ -53,8 +53,7 @@ pub(crate) enum StreamEnd {
     NextStream,
 }
 
-/// One direction of a compression algorithm, as the [`Pump`] drives it.
-/// Drives one compression engine, step by step.
+/// Drives one direction of a compression algorithm, step by step, as the [`Pump`] calls it.
 ///
 /// # Safety
 ///

@@ -201,13 +201,25 @@ at all, and a build that names no format at all still gets [`Compression`][__lin
 [`Resources`][__link21], which is what a crate that only passes compressors and decompressors around
 needs.
 
+## Further reading
+
+Two guides cover the decisions that span several APIs, which no single item’s documentation can
+carry:
+
+* [design.md][__link22] – the user-visible policies: format selection, what is uniform across formats and
+  what is not, how decompression is bounded, stream framing, and why the public surface is
+  sealed.
+* [implementation.md][__link23] – the mechanisms behind them: the pump state machine, the unsafe
+  initialized-output contract every backend adapter must honour, engine pooling and why some
+  engines are excluded, and the async driving rules.
+
 
 <hr/>
 <sub>
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/compressors">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb9zeZTPTKSTsbmvOkT6-Y-nUbB0panqBu9YwbejKq8JGBw31hZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbYZ9vsjOoyMwbnQp1rFN_lxAbPKl4HNhSo80bmfYglAiZtLZhZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
  [__link0]: https://crates.io/crates/bytesbuf/0.9.0
  [__link1]: https://docs.rs/compressors/0.1.0/compressors/?search=Result
  [__link10]: https://docs.rs/compressors/0.1.0/compressors/fn.decompress.html
@@ -223,6 +235,8 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link2]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
  [__link20]: https://docs.rs/compressors/0.1.0/compressors/?search=core::Compression
  [__link21]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
+ [__link22]: https://github.com/microsoft/oxidizer/blob/main/crates/compressors/docs/design.md
+ [__link23]: https://github.com/microsoft/oxidizer/blob/main/crates/compressors/docs/implementation.md
  [__link3]: https://crates.io/crates/bytesbuf/0.9.0
  [__link4]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesView
  [__link5]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesBuf
