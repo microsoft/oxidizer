@@ -38,6 +38,10 @@ The built-in strategies are:
 Strategies are sealed. The identifiers in `Thread` are opaque and not dense or
 enumerable, so storage is keyed rather than indexed.
 
+Partitioned storage intentionally uses the non-cryptographic Fx hasher. Its
+sealed keys are trusted runtime-generated coordinate identifiers, not
+attacker-controlled input, so randomized hash-flood resistance is unnecessary.
+
 Constructors create the carried value eagerly. Additional values are produced
 lazily when relocation first reaches a new key:
 

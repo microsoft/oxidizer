@@ -19,6 +19,9 @@ use thread_aware_core::{Owner, Thread};
 /// trades more eager allocation in every partitioned `Storage` for less frequent map growth.
 const DEFAULT_PARTITION_CAPACITY: usize = 32;
 
+// Strategy keys are sealed, trusted runtime-generated coordinates (`ThreadId`, `NumaNode`, or
+// `()`), never attacker-controlled request data. Randomized hash-flood resistance is therefore
+// unnecessary; the non-cryptographic Fx hasher is an intentional lower-overhead choice.
 type PartitionMap<T, S> = DashMap<<S as Strategy>::Key, sync::Arc<T>, FxBuildHasher>;
 
 enum Values<T: ?Sized, S: Strategy> {

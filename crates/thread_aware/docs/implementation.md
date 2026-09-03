@@ -20,7 +20,10 @@ representations:
 The map is initialized with capacity 32. The capacity is a bounded-runtime
 default, not an empirically established limit: it avoids initial growth through
 32 partitions and grows normally beyond that. The strategy key is derived from
-a borrowed `Thread`.
+a borrowed `Thread`. The map uses `FxBuildHasher` intentionally: sealed strategy
+keys are trusted runtime-generated coordinate identifiers, so cryptographic
+randomization and hash-flood resistance would add overhead without protecting
+an untrusted-input boundary.
 
 The carried `value` makes `Deref` independent of shared storage. Reads through
 the holder perform no map lookup and take no lock.
