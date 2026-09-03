@@ -20,3 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `proc-macro-crate` instead of emitting a hard-coded `::observed`. A crate that
   renames its dependency (`telemetry = { package = "observed", ... }`) can now
   use `#[event(...)]` and `#[derive(Enrichment)]`.
+- `#[event(...)]` now rejects a field holding a mutable reference (`&mut T` or
+  `Option<&mut T>`) while parsing, naming the offending field, rather than
+  accepting it and failing later inside the generated code. Event fields are read
+  through `&self` when the event is visited, so only shared references work.

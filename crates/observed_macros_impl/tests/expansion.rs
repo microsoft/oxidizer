@@ -790,3 +790,47 @@ fn a_renamed_observed_dependency_is_named_throughout_both_expansions() {
     ]);
     insta::assert_snapshot!(output);
 }
+
+#[test]
+fn an_event_field_may_not_hold_a_mutable_reference() {
+    // Fields are read through `&self` while the event is visited, so an exclusive borrow
+    // can never be handed out. Rejecting it during parsing names the offending field;
+    // without the check the input is accepted and fails later inside generated code the
+    // author never wrote. The optional form is checked separately because the visit body
+    // dereferences the inner type rather than the field type.
+    let output = report(
+        [
+            "#[unredacted] v: &mut u64",
+            "#[unredacted] v: Option<&mut u64>",
+            "v: &mut Classified",
+            "#[unredacted] v: &'a mut u64",
+            // A shared reference to a mutable one still cannot be handed out.
+            "#[unredacted] v: &&mut u64",
+        ]
+        .into_iter()
+        .map(|field| {
+            let item = format!("#[info] struct Subject<'a> {{ {field} }}");
+            (event_source(r#""e""#, &item), event_error(r#""e""#, &item))
+        }),
+    );
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn an_event_field_may_hold_a_shared_reference() {
+    // The guard above must not catch the shared references the macro has always accepted.
+    insta::assert_snapshot!(expand_event(
+        r#""shared.refs""#,
+        r"
+        #[info]
+        struct SharedRefs<'a> {
+            #[unredacted]
+            plain: &'a u64,
+            #[unredacted]
+            nested: &'a &'a u64,
+            #[unredacted]
+            optional: Option<&'a u64>,
+        }
+        ",
+    ));
+}
