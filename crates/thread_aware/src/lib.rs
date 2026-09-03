@@ -11,7 +11,6 @@
 //!
 //! * The **`std` Cargo feature** *(enabled by default)* enables the strategy-partitioned `Arc` and
 //!   the `ThreadBuilder` runtime integration API.
-#![cfg_attr(feature = "std", doc = "  See [`ThreadBuilder`] for coordinate construction.")]
 //! * **`derive`** *(default)* re-exports the `#[derive(ThreadAware)]` macro.
 //! * Disable default features for `#![no_std]` environments. The core thread vocabulary,
 //!   closures, and wrappers remain available.
