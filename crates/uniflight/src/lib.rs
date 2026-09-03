@@ -505,9 +505,13 @@ mod tests {
     #[test]
     fn merger_can_be_relocated_between_threads() {
         let mut merger = Merger::<String, String, PerThread>::new();
-        let (source, destination) = Relocator::between_threads().relocate(&mut merger);
+        let cell = Arc::new(PanicAwareCell::new());
+        merger.inner.insert("key".to_owned(), Arc::downgrade(&cell));
+        assert_eq!(merger.len(), 1);
 
-        assert_ne!(source.unwrap().id(), destination.id());
+        _ = Relocator::between_threads().relocate(&mut merger);
+
+        assert!(merger.is_empty());
     }
 
     #[test]
