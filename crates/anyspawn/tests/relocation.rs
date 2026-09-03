@@ -13,9 +13,89 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use anyspawn::{BoxedBlockingTask, BoxedFuture, SpawnCustom, Spawner};
+use anyspawn::{BoxedBlockingTask, BoxedFuture, CustomSpawnerBuilder, SpawnCustom, Spawner};
 use thread_aware::closure::ThreadAwareAsyncFnOnce;
 use thread_aware::{Relocator, Thread, ThreadAware};
+
+#[test]
+fn layered_public_spawner_preserves_layers_after_relocation() {
+    #[derive(Clone)]
+    struct InlineSpawner;
+
+    impl ThreadAware for InlineSpawner {
+        fn relocate(&mut self, _: Option<&Thread>, _: &Thread) {}
+    }
+
+    impl SpawnCustom for InlineSpawner {
+        fn spawn(&self, task: BoxedFuture) {
+            futures::executor::block_on(task);
+        }
+
+        fn spawn_anywhere(&self, task: Box<dyn ThreadAwareAsyncFnOnce<()>>) {
+            futures::executor::block_on(task.call_once());
+        }
+
+        fn spawn_blocking(&self, task: BoxedBlockingTask) {
+            task();
+        }
+    }
+
+    let future_layers = Arc::new(AtomicUsize::new(0));
+    let blocking_layers = Arc::new(AtomicUsize::new(0));
+    let mut spawner = CustomSpawnerBuilder::new(InlineSpawner)
+        .layer(
+            {
+                let future_layers = Arc::clone(&future_layers);
+                move |task: BoxedFuture| {
+                    let future_layers = Arc::clone(&future_layers);
+                    Box::pin(async move {
+                        future_layers.fetch_add(1, Ordering::SeqCst);
+                        task.await;
+                    }) as BoxedFuture
+                }
+            },
+            {
+                let blocking_layers = Arc::clone(&blocking_layers);
+                move |task: BoxedBlockingTask| {
+                    let blocking_layers = Arc::clone(&blocking_layers);
+                    Box::new(move || {
+                        blocking_layers.fetch_add(1, Ordering::SeqCst);
+                        task();
+                    }) as BoxedBlockingTask
+                }
+            },
+        )
+        .layer(
+            {
+                let future_layers = Arc::clone(&future_layers);
+                move |task: BoxedFuture| {
+                    let future_layers = Arc::clone(&future_layers);
+                    Box::pin(async move {
+                        future_layers.fetch_add(1, Ordering::SeqCst);
+                        task.await;
+                    }) as BoxedFuture
+                }
+            },
+            {
+                let blocking_layers = Arc::clone(&blocking_layers);
+                move |task: BoxedBlockingTask| {
+                    let blocking_layers = Arc::clone(&blocking_layers);
+                    Box::new(move || {
+                        blocking_layers.fetch_add(1, Ordering::SeqCst);
+                        task();
+                    }) as BoxedBlockingTask
+                }
+            },
+        )
+        .build();
+
+    _ = Relocator::between_threads().relocate(&mut spawner);
+
+    assert_eq!(futures::executor::block_on(spawner.spawn(async { 42 })), 42);
+    assert_eq!(futures::executor::block_on(spawner.spawn_blocking(|| 7)), 7);
+    assert_eq!(future_layers.load(Ordering::SeqCst), 2);
+    assert_eq!(blocking_layers.load(Ordering::SeqCst), 2);
+}
 
 /// Per-process spawner: relocation must not change which spawn function is used.
 ///
