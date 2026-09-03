@@ -10,7 +10,11 @@
 //! # Crate features
 //!
 //! * The **`std` Cargo feature** *(enabled by default)* enables the strategy-partitioned `Arc` and
-//!   [`ThreadBuilder`](thread::ThreadBuilder).
+//!   the `ThreadBuilder` runtime integration API.
+#![cfg_attr(
+    feature = "std",
+    doc = "  See [`ThreadBuilder`](thread::ThreadBuilder) for coordinate construction."
+)]
 //! * **`derive`** *(default)* re-exports the `#[derive(ThreadAware)]` macro.
 //! * Disable default features for `#![no_std]` environments. The core thread vocabulary,
 //!   closures, and wrappers remain available.
@@ -101,8 +105,12 @@
 //! # Features
 //!
 //! * The **`std` Cargo feature** *(enabled by default)* enables the strategy-partitioned `Arc` and
-//!   [`ThreadBuilder`](thread::ThreadBuilder). Disable it for `#![no_std]` environments; the crate
-//!   then requires `alloc` and pointer-width atomics.
+//!   the `ThreadBuilder` runtime integration API. Disable it for `#![no_std]` environments; the
+//!   crate then requires `alloc` and pointer-width atomics.
+#![cfg_attr(
+    feature = "std",
+    doc = "  See [`ThreadBuilder`](thread::ThreadBuilder) for coordinate construction."
+)]
 //! * **`derive`** *(default)*: Re-exports the `#[derive(ThreadAware)]` macro from the companion
 //!   `thread_aware_macros` crate. Disable to avoid pulling in proc-macro code in minimal
 //!   environments. For derive support without `std`, use
