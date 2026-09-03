@@ -124,14 +124,6 @@ pin_project! {
     }
 }
 
-impl<S, C> CompressionStream<S, C> {
-    /// Returns the source stream and compression operation.
-    #[must_use]
-    pub fn into_parts(self) -> (S, C) {
-        (self.source, self.compression)
-    }
-}
-
 impl<S, C> CompressionStream<S, C>
 where
     C: Compression<Mode = Compress>,
@@ -545,15 +537,6 @@ mod tests {
         let mut operation = ProgressCompression::new(Arc::new(AtomicUsize::new(0)));
         operation.push(view(b"ignored")).expect("the fixture always accepts pushed input");
         operation.end_input();
-    }
-
-    #[test]
-    fn into_parts_returns_the_concrete_operation() {
-        let source = ok_stream(Vec::new());
-        let stream = CompressionStream::compress(source, gzip::Compressor::new(&Resources::default()));
-        let (_source, compressor): (_, gzip::Compressor) = stream.into_parts();
-
-        assert_eq!(compressor.total_in(), 0);
     }
 
     #[test]
