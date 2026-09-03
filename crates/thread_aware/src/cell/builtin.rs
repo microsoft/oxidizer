@@ -10,8 +10,7 @@ use crate::cell::storage::sealed;
 
 /// Defines one strategy partition per thread.
 ///
-/// Threads with the same id map to the same partition. This is the default strategy used by
-/// [`Arc`](crate::Arc).
+/// Threads with the same id map to the same partition.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct PerThread;
 
