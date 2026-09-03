@@ -122,7 +122,7 @@ pub struct Decompress;
 /// # #[cfg(feature = "gzip")]
 /// # {
 /// use bytesbuf::BytesView;
-/// use bytesbuf::mem::{GlobalPool, MemoryShared};
+/// use bytesbuf::mem::GlobalPool;
 /// use compressors::core::{Compress, Compression};
 /// use compressors::{Resources, gzip};
 ///

@@ -80,6 +80,15 @@ pub(crate) struct Pool {
     inner: Arc<Inner>,
 }
 
+/// The shared state every [`Pool`] clone points at.
+///
+/// A `Pool` is a handle: cloning one shares this, which is what lets a `Resources` be handed around
+/// while every codec built from it draws on the same idle engines.
+///
+/// Each engine class gets its own [`Mutex`] rather than one lock over everything, so a compressor
+/// being returned never waits on a decompressor being taken, and poisoning is contained to the one
+/// class whose critical section panicked -- every checkout treats a poisoned lock as "nothing to
+/// reuse" and builds a fresh engine instead.
 struct Inner {
     #[cfg(any(feature = "deflate", feature = "gzip", feature = "zlib"))]
     compressors: Mutex<HashMap<EngineKey, Vec<flate2::Compress>>>,
@@ -88,8 +97,12 @@ struct Inner {
     decompressors: Mutex<HashMap<Wrapper, Vec<flate2::Decompress>>>,
     /// Zstd contexts allocate their working memory lazily, so recycling them saves far more than
     /// their construction cost suggests.
+    ///
+    /// Not keyed by level: checkout resets with `SessionAndParameters` and the compressor then
+    /// applies its level unconditionally, so any idle context serves any level. Keying by level
+    /// would only fragment reuse and let a caller-chosen level grow the map.
     #[cfg(feature = "zstd")]
-    zstd_compressors: Mutex<HashMap<i32, Vec<zstd_safe::CCtx<'static>>>>,
+    zstd_compressors: Mutex<Vec<zstd_safe::CCtx<'static>>>,
     #[cfg(feature = "zstd")]
     zstd_decompressors: Mutex<Vec<zstd_safe::DCtx<'static>>>,
     capacity: usize,
@@ -115,7 +128,7 @@ impl Pool {
                 #[cfg(any(feature = "deflate", feature = "zlib"))]
                 decompressors: Mutex::new(HashMap::new()),
                 #[cfg(feature = "zstd")]
-                zstd_compressors: Mutex::new(HashMap::new()),
+                zstd_compressors: Mutex::new(Vec::new()),
                 #[cfg(feature = "zstd")]
                 zstd_decompressors: Mutex::new(Vec::new()),
                 capacity,
@@ -239,12 +252,12 @@ impl Pool {
     /// Resetting the session drops any half-written frame while keeping the context's allocations,
     /// which is where the saving comes from.
     #[cfg(feature = "zstd")]
-    pub(crate) fn take_zstd_compressor(&self, level: i32) -> Option<zstd_safe::CCtx<'static>> {
+    pub(crate) fn take_zstd_compressor(&self) -> Option<zstd_safe::CCtx<'static>> {
         if self.is_disabled() {
             return None;
         }
 
-        let mut context = self.inner.zstd_compressors.lock().ok()?.get_mut(&level).and_then(Vec::pop)?;
+        let mut context = self.inner.zstd_compressors.lock().ok()?.pop()?;
 
         context.reset(zstd_safe::ResetDirective::SessionAndParameters).ok()?;
         Some(context)
@@ -252,19 +265,16 @@ impl Pool {
 
     /// Takes `context` for reuse, leaving it in place when the pool cannot keep it, for the reason given on `return_compressor`.
     #[cfg(feature = "zstd")]
-    pub(crate) fn return_zstd_compressor(&self, level: i32, context: &mut Option<zstd_safe::CCtx<'static>>) {
+    pub(crate) fn return_zstd_compressor(&self, context: &mut Option<zstd_safe::CCtx<'static>>) {
         if self.is_disabled() {
             return;
         }
 
-        if let Ok(mut guard) = self.inner.zstd_compressors.lock() {
-            // Probe before inserting. This key is a caller-controlled compression level, so
-            // inserting on every return would let a full pool grow the map without bound.
-            if guard.get(&level).map_or(0, Vec::len) < self.inner.capacity
-                && let Some(context) = context.take()
-            {
-                guard.entry(level).or_default().push(context);
-            }
+        if let Ok(mut guard) = self.inner.zstd_compressors.lock()
+            && guard.len() < self.inner.capacity
+            && let Some(context) = context.take()
+        {
+            guard.push(context);
         }
     }
 
@@ -519,13 +529,8 @@ mod tests {
         use super::*;
 
         /// Counts what the pool is holding, which the public API deliberately does not expose.
-        fn idle_compressors(pool: &Pool, level: i32) -> usize {
-            pool.inner
-                .zstd_compressors
-                .lock()
-                .expect("pool is not poisoned")
-                .get(&level)
-                .map_or(0, Vec::len)
+        fn idle_compressors(pool: &Pool) -> usize {
+            pool.inner.zstd_compressors.lock().expect("pool is not poisoned").len()
         }
 
         fn idle_decompressors(pool: &Pool) -> usize {
@@ -535,31 +540,31 @@ mod tests {
         #[test]
         fn a_compressor_survives_a_round_trip_through_the_pool() {
             let pool = Pool::new();
-            assert!(pool.take_zstd_compressor(3).is_none(), "an empty pool has nothing to give");
+            assert!(pool.take_zstd_compressor().is_none(), "an empty pool has nothing to give");
 
-            pool.return_zstd_compressor(3, &mut Some(zstd_safe::CCtx::create()));
-            assert_eq!(idle_compressors(&pool, 3), 1);
+            pool.return_zstd_compressor(&mut Some(zstd_safe::CCtx::create()));
+            assert_eq!(idle_compressors(&pool), 1);
 
-            assert!(pool.take_zstd_compressor(3).is_some(), "the returned engine should come back");
-            assert_eq!(idle_compressors(&pool, 3), 0, "taking an engine removes it from the pool");
+            assert!(pool.take_zstd_compressor().is_some(), "the returned engine should come back");
+            assert_eq!(idle_compressors(&pool), 0, "taking an engine removes it from the pool");
         }
 
         #[test]
         fn compressor_capacity_bounds_what_is_retained() {
             let pool = Pool::with_capacity(2);
             for _ in 0..5 {
-                pool.return_zstd_compressor(3, &mut Some(zstd_safe::CCtx::create()));
+                pool.return_zstd_compressor(&mut Some(zstd_safe::CCtx::create()));
             }
 
-            assert_eq!(idle_compressors(&pool, 3), 2, "only `capacity` engines are kept");
+            assert_eq!(idle_compressors(&pool), 2, "only `capacity` engines are kept");
         }
 
         #[test]
         fn zero_capacity_disables_zstd_compressor_recycling() {
             let pool = Pool::with_capacity(0);
-            pool.return_zstd_compressor(3, &mut Some(zstd_safe::CCtx::create()));
+            pool.return_zstd_compressor(&mut Some(zstd_safe::CCtx::create()));
 
-            assert!(pool.take_zstd_compressor(3).is_none());
+            assert!(pool.take_zstd_compressor().is_none());
         }
 
         #[test]
@@ -573,8 +578,8 @@ mod tests {
             assert!(poisoned.is_err(), "the panic should have been caught");
             assert!(pool.inner.zstd_compressors.lock().is_err(), "the mutex must now be poisoned");
 
-            pool.return_zstd_compressor(3, &mut Some(zstd_safe::CCtx::create()));
-            assert!(pool.take_zstd_compressor(3).is_none(), "a poisoned pool has nothing to give");
+            pool.return_zstd_compressor(&mut Some(zstd_safe::CCtx::create()));
+            assert!(pool.take_zstd_compressor().is_none(), "a poisoned pool has nothing to give");
         }
 
         #[test]

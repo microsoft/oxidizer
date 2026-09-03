@@ -83,9 +83,10 @@ impl<'a> UninitOutput<'a> {
 
 /// Reads zstd's "bytes still buffered" answer as a step outcome.
 ///
-/// `remaining == 0` is how zstd says the epilogue is out, so treating it as anything else leaves a
-/// finish that never completes: the mutant hangs rather than failing, and the harness records a
-/// timeout instead of a verdict.
+/// A zero remaining count means the epilogue is out and the flush or finish is complete; a non-zero
+/// count means the operation has more to give and must be driven again.
+// Treating a zero remaining count as anything else leaves a finish that never completes, so that
+// mutant hangs rather than failing and mutation testing records a timeout instead of a verdict.
 #[cfg_attr(test, mutants::skip)]
 fn finish_step(operation: Operation, remaining: usize) -> Step {
     match operation {
@@ -152,7 +153,7 @@ pub(crate) struct ZstdCompress {
 impl ZstdCompress {
     pub(crate) fn new(level: Level, options: &Zstd, pool: Pool) -> ::core::result::Result<Self, BuildError> {
         let level = options.level.map_or_else(|| compression_level(level), CompressionLevel::get);
-        let mut context = pool.take_zstd_compressor(level).unwrap_or_else(CCtx::create);
+        let mut context = pool.take_zstd_compressor().unwrap_or_else(CCtx::create);
 
         // Applied unconditionally: a recycled context comes back with its parameters cleared, so
         // that a recycled compressor is indistinguishable from a fresh one.
@@ -180,7 +181,7 @@ impl std::fmt::Debug for ZstdCompress {
 
 impl Drop for ZstdCompress {
     fn drop(&mut self) {
-        self.recycle.return_zstd_compressor(self.level, &mut self.context);
+        self.recycle.return_zstd_compressor(&mut self.context);
     }
 }
 
@@ -425,12 +426,11 @@ mod tests {
     #[test]
     fn dropping_a_pooled_compressor_returns_its_context() {
         let pool = Pool::new();
-        let level = compression_level(Level::DEFAULT);
 
         drop(ZstdCompress::new(Level::DEFAULT, &Zstd::new(), pool.clone()).expect("the default settings are accepted"));
 
         assert!(
-            pool.take_zstd_compressor(level).is_some(),
+            pool.take_zstd_compressor().is_some(),
             "the context should have been returned to the pool"
         );
     }

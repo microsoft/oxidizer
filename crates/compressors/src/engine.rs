@@ -66,9 +66,10 @@ pub(crate) enum StreamEnd {
 /// write exposes uninitialized memory to the caller.
 ///
 /// Every implementation must write through an API that accepts uninitialized memory, or initialize
-/// the slice before writing. The three in this crate do the former twice and the latter once:
-/// `flate` writes through `flate2`'s `*_uninit` entry points, zstd through `zstd_safe::WriteBuf`,
-/// and brotli initializes the slice before handing it to an encoder that takes `&mut [u8]`.
+/// the slice before writing. The three backend families in this crate split two to one: `flate`
+/// writes through `flate2`'s `*_uninit` entry points and zstd through `zstd_safe::WriteBuf`, while
+/// brotli initializes the slice before handing it to an encoder that takes `&mut [u8]`. Each family
+/// implements this trait twice, once for compression and once for decompression.
 pub(crate) unsafe trait Codec {
     /// Runs a single engine step.
     ///
@@ -185,13 +186,15 @@ fn made_no_progress(consumed: usize, produced: usize) -> bool {
 
 impl Pump {
     pub(crate) fn new(memory: OpaqueMemory, chunk_size: NonZeroUsize) -> Self {
-        let output = memory.reserve(chunk_size.get());
-
         Self {
             memory,
             chunk_size: chunk_size.get(),
             input: BytesView::new(),
-            output,
+            // Reserved on the first pull rather than here. `pull` calls `ensure_output_capacity`
+            // before every engine step anyway, so starting empty makes the same single reservation
+            // at the same point, while a codec that is built and never driven -- including a
+            // fallible build that fails after this field is evaluated -- costs no output capacity.
+            output: BytesBuf::new(),
             total_in: 0,
             total_out: 0,
             streams: 0,

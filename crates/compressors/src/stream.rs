@@ -20,7 +20,7 @@ use crate::error::{Error, Result};
 /// Bounds the amount of immediately-ready work one `poll_next` performs.
 const MAX_OPERATIONS_PER_POLL: usize = 64;
 
-/// Drives a compression operation from a source stream.
+/// Drives one poll of a compression stream, whichever direction it runs in.
 ///
 /// The source is polled only when the operation has nothing left to give, so a slow consumer never
 /// causes unbounded buffering.
@@ -28,10 +28,8 @@ const MAX_OPERATIONS_PER_POLL: usize = 64;
 /// `finished` latches once the stream has yielded its last item. Without it, a failing codec would
 /// report the same error on every subsequent poll, and a caller that collects the stream would
 /// accumulate errors until it ran out of memory.
-/// Drives one poll of a compression stream, whichever direction it runs in.
-///
-/// Answering with data unconditionally produces a stream that never ends, so that mutant hangs
-/// rather than failing and the harness records a timeout instead of a verdict.
+// Answering with data unconditionally produces a stream that never ends, so that mutant hangs
+// rather than failing and mutation testing records a timeout instead of a verdict.
 #[cfg_attr(test, mutants::skip)]
 fn poll_compression<S, C, E>(
     mut source: Pin<&mut S>,
@@ -104,6 +102,12 @@ pin_project! {
     /// Construct it with [`CompressionStream::compress`] or [`CompressionStream::decompress`].
     /// Both the source and operation retain their concrete types; this adapter performs no boxing.
     ///
+    /// The source yields `Result<BytesView, E>` rather than bare views, for any `E` that converts
+    /// into a boxed `std::error::Error + Send + Sync`. A source failure ends the stream, reported as
+    /// an [`Error`][crate::Error] for which [`is_source`][crate::Error::is_source] is true and whose
+    /// [`source`][std::error::Error::source] is the original. The constructors accept any `S`, so a
+    /// source of plain views compiles and only fails to satisfy [`Stream`] when it is polled.
+    ///
     /// The stream ends after its first error rather than reporting the same failure repeatedly.
     ///
     /// # Examples
@@ -175,6 +179,13 @@ where
     /// [`with_max_output_len`][crate::DecompressorLimits::with_max_output_len] to what that consumer
     /// can afford.
     ///
+    /// An output cap is not the whole story for a format that joins concatenated streams -- gzip
+    /// and zstd do so by default. Cumulative output is what
+    /// [`with_max_output_len`][crate::DecompressorLimits::with_max_output_len] bounds, so a long run
+    /// of small or empty members can keep decoding without ever reaching it. Bound the member count
+    /// as well with [`with_max_streams`][crate::DecompressorLimits::with_max_streams], or turn
+    /// joining off with [`multi_stream(false)`][crate::DecompressorBuilder::multi_stream].
+    ///
     /// Output chunks are provisional until the stream ends, because a checksum or trailer can
     /// reject the compressed stream after earlier bytes have been returned.
     ///
@@ -183,8 +194,10 @@ where
     /// ```
     /// # #[cfg(feature = "gzip")]
     /// # {
+    /// use std::num::NonZeroU64;
+    ///
     /// use bytesbuf::BytesView;
-    /// use compressors::{CompressionStream, Resources, gzip};
+    /// use compressors::{CompressionStream, DecompressorLimits, Resources, gzip};
     /// use futures::{StreamExt, stream};
     ///
     /// # futures::executor::block_on(async {
@@ -197,10 +210,15 @@ where
     ///         .collect::<Vec<_>>(),
     /// );
     ///
-    /// let chunks: Vec<_> =
-    ///     CompressionStream::decompress(source, gzip::Decompressor::new(&Resources::default()))
-    ///         .collect()
-    ///         .await;
+    /// // This consumer collects every chunk, so it caps the total rather than relying on the
+    /// // adapter's bounded working set.
+    /// let decompressor = gzip::Decompressor::builder()
+    ///     .limits(DecompressorLimits::new().with_max_output_len(NonZeroU64::new(1 << 20).unwrap()))
+    ///     .build(&Resources::default());
+    ///
+    /// let chunks: Vec<_> = CompressionStream::decompress(source, decompressor)
+    ///     .collect()
+    ///     .await;
     /// let plain = BytesView::from_views(chunks.into_iter().map(|c| c.unwrap()));
     ///
     /// assert_eq!(plain.to_vec(), b"payload".to_vec());
