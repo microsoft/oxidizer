@@ -12,7 +12,7 @@ use std::num::NonZeroUsize;
 
 use bytesbuf::mem::GlobalPool;
 use bytesbuf::{BytesBuf, BytesView};
-use compressors::core::{Compression as _, Output};
+use compressors::core::{CompressionInternal as _, Output};
 use compressors::{DecompressorLimits, Resources, gzip};
 
 /// The payload behind `tests/fixtures/system_gzip.gz`, compressed by the system `gzip -9 -n`.

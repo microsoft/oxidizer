@@ -14,7 +14,7 @@ use std::sync::OnceLock;
 
 use bytesbuf::mem::GlobalPool;
 use bytesbuf::{BytesBuf, BytesView};
-use compressors::core::{Compress, Compression, Decompress, Output};
+use compressors::core::{Compress, Compression, CompressionInternal, Decompress, Output};
 use compressors::{CompressorBuilder, DecompressorBuilder, DecompressorLimits, Format, Level, Resources, TrailingData};
 
 fn view(bytes: &[u8]) -> BytesView {
@@ -170,12 +170,12 @@ macro_rules! format_contract {
 
                 let mut by_hand = $module::Compressor::new(resources());
                 by_hand.push(view(&data)).expect("push succeeds");
-                Compression::end_input(&mut by_hand);
+                CompressionInternal::end_input(&mut by_hand);
                 let mut collected = BytesBuf::new();
                 let mut guard = StepGuard::new();
                 loop {
                     guard.step();
-                    match Compression::pull(&mut by_hand).expect("pull succeeds") {
+                    match CompressionInternal::pull(&mut by_hand).expect("pull succeeds") {
                         Output::Data(chunk) => collected.put_bytes(chunk),
                         Output::Progress => {}
                         Output::NeedInput => panic!("compressor requested input after end"),
@@ -259,13 +259,13 @@ macro_rules! format_contract {
                     .build(resources())
                     .built();
                 compressor.push(view(&data)).expect("push succeeds");
-                Compression::end_input(&mut compressor);
+                CompressionInternal::end_input(&mut compressor);
 
                 let mut compressed = BytesBuf::new();
                 let mut guard = StepGuard::new();
                 loop {
                     guard.step();
-                    match Compression::pull(&mut compressor).expect("pull succeeds") {
+                    match CompressionInternal::pull(&mut compressor).expect("pull succeeds") {
                         Output::Data(piece) => {
                             assert!(piece.len() <= 256, "chunk of {} bytes exceeded the bound", piece.len());
                             compressed.put_bytes(piece);
@@ -281,13 +281,13 @@ macro_rules! format_contract {
                     .build(resources())
                     .built();
                 decompressor.push(compressed.consume_all()).expect("push succeeds");
-                Compression::end_input(&mut decompressor);
+                CompressionInternal::end_input(&mut decompressor);
 
                 let mut plain = BytesBuf::new();
                 let mut guard = StepGuard::new();
                 loop {
                     guard.step();
-                    match Compression::pull(&mut decompressor).expect("pull succeeds") {
+                    match CompressionInternal::pull(&mut decompressor).expect("pull succeeds") {
                         Output::Data(piece) => {
                             assert!(piece.len() <= 256, "chunk of {} bytes exceeded the bound", piece.len());
                             plain.put_bytes(piece);
@@ -351,13 +351,13 @@ macro_rules! format_contract {
             #[test]
             fn rejects_input_after_end_input() {
                 let mut compressor = $module::Compressor::new(resources());
-                Compression::end_input(&mut compressor);
+                CompressionInternal::end_input(&mut compressor);
 
                 let error = compressor.push(view(b"late")).expect_err("push after end_input is rejected");
                 assert!(error.is_invalid_state());
 
                 let mut decompressor = $module::Decompressor::new(resources());
-                Compression::end_input(&mut decompressor);
+                CompressionInternal::end_input(&mut decompressor);
 
                 let error = decompressor
                     .push(view(b"late"))
@@ -373,7 +373,7 @@ macro_rules! format_contract {
                 let mut guard = StepGuard::new();
                 let output = loop {
                     guard.step();
-                    match Compression::pull(&mut compressor).expect("pull succeeds") {
+                    match CompressionInternal::pull(&mut compressor).expect("pull succeeds") {
                         Output::Data(_) | Output::Progress => {}
                         other => break other,
                     }
@@ -394,12 +394,12 @@ macro_rules! format_contract {
                     .build(resources())
                     .built();
                 decompressor.push(bomb).expect("push succeeds");
-                Compression::end_input(&mut decompressor);
+                CompressionInternal::end_input(&mut decompressor);
 
                 let mut guard = StepGuard::new();
                 let error = loop {
                     guard.step();
-                    match Compression::pull(&mut decompressor) {
+                    match CompressionInternal::pull(&mut decompressor) {
                         Ok(Output::Data(_) | Output::Progress) => {}
                         Ok(_) => panic!("the bomb decompressed fully instead of being rejected"),
                         Err(error) => break error,
@@ -452,12 +452,12 @@ macro_rules! format_contract {
                     .build(resources())
                     .built();
                 decompressor.push(compressed).expect("push succeeds");
-                Compression::end_input(&mut decompressor);
+                CompressionInternal::end_input(&mut decompressor);
 
                 let mut guard = StepGuard::new();
                 let error = loop {
                     guard.step();
-                    match Compression::pull(&mut decompressor) {
+                    match CompressionInternal::pull(&mut decompressor) {
                         Ok(Output::Data(_) | Output::Progress) => {}
                         Ok(_) => panic!("the cap should have fired"),
                         Err(error) => break error,
@@ -602,7 +602,7 @@ macro_rules! format_contract {
                             .build(resources())
                             .built();
                         abandoned.push(input.clone()).expect("push succeeds");
-                        let _ = Compression::pull(&mut abandoned).expect("pull succeeds");
+                        let _ = CompressionInternal::pull(&mut abandoned).expect("pull succeeds");
                         // Dropped without finishing, so its engine is mid-frame.
                     }
 
@@ -682,13 +682,13 @@ macro_rules! format_contract {
                 // their output is the engine and nothing else.
                 fn run(compressor: &mut $module::Compressor, input: &BytesView) -> Vec<u8> {
                     compressor.push(input.clone()).expect("push succeeds");
-                    Compression::end_input(compressor);
+                    CompressionInternal::end_input(compressor);
 
                     let mut collected = BytesBuf::new();
                     let mut guard = StepGuard::new();
                     loop {
                         guard.step();
-                        match Compression::pull(compressor).expect("pull succeeds") {
+                        match CompressionInternal::pull(compressor).expect("pull succeeds") {
                             Output::Data(chunk) => collected.put_bytes(chunk),
                             Output::Progress => {}
                             Output::NeedInput => panic!("compressor requested input after end"),
@@ -719,15 +719,15 @@ macro_rules! format_contract {
                 // Interleave: both are live before either finishes, so they cannot be sharing.
                 first.push(input.clone()).expect("push succeeds");
                 second.push(input.clone()).expect("push succeeds");
-                Compression::end_input(&mut first);
-                Compression::end_input(&mut second);
+                CompressionInternal::end_input(&mut first);
+                CompressionInternal::end_input(&mut second);
 
                 for (label, compressor) in [("first", &mut first), ("second", &mut second)] {
                     let mut collected = BytesBuf::new();
                     let mut guard = StepGuard::new();
                     loop {
                         guard.step();
-                        match Compression::pull(compressor).expect("pull succeeds") {
+                        match CompressionInternal::pull(compressor).expect("pull succeeds") {
                             Output::Data(chunk) => collected.put_bytes(chunk),
                             Output::Progress => {}
                             Output::NeedInput => panic!("compressor requested input after end"),
@@ -1171,12 +1171,12 @@ macro_rules! format_contract {
 
                 let mut decompressor = $module::Decompressor::builder().multi_stream(true).build(resources()).built();
                 decompressor.push(joined).expect("push succeeds");
-                Compression::end_input(&mut decompressor);
+                CompressionInternal::end_input(&mut decompressor);
 
                 let mut guard = StepGuard::new();
                 let error = loop {
                     guard.step();
-                    match Compression::pull(&mut decompressor) {
+                    match CompressionInternal::pull(&mut decompressor) {
                         Ok(Output::Data(_) | Output::Progress) => {}
                         Ok(_) => panic!("a truncated member unexpectedly completed"),
                         Err(error) => break error,
@@ -1567,7 +1567,7 @@ mod pooling {
         {
             let mut abandoned = gzip::Compressor::builder().build(resources()).built();
             abandoned.push(view(&b"half a stream ".repeat(100))).expect("push succeeds");
-            let _ = Compression::pull(&mut abandoned).expect("pull succeeds");
+            let _ = CompressionInternal::pull(&mut abandoned).expect("pull succeeds");
             // Dropped without `end_input`, so its engine is mid-stream.
         }
 
@@ -1652,7 +1652,7 @@ mod pooling {
         {
             let mut abandoned = zlib::Decompressor::builder().build(resources()).built();
             abandoned.push(compressed.range(0..compressed.len() / 2)).expect("push succeeds");
-            let _ = Compression::pull(&mut abandoned).expect("pull succeeds");
+            let _ = CompressionInternal::pull(&mut abandoned).expect("pull succeeds");
             // Dropped mid-stream, so its engine is dirty.
         }
 
@@ -1837,14 +1837,14 @@ mod trait_contract {
     #[test]
     fn round_trips_through_the_trait_alone() {
         let mut compressor: Box<dyn Compression<Mode = Compress>> = Box::new(gzip::Compressor::new(resources()));
-        Compression::push(&mut *compressor, view(b"driven through the trait")).expect("push succeeds");
-        Compression::end_input(&mut *compressor);
+        CompressionInternal::push(&mut *compressor, view(b"driven through the trait")).expect("push succeeds");
+        CompressionInternal::end_input(&mut *compressor);
 
         let mut collected = BytesBuf::new();
         let mut guard = StepGuard::new();
         loop {
             guard.step();
-            let output = Compression::pull(&mut *compressor).expect("pull succeeds");
+            let output = CompressionInternal::pull(&mut *compressor).expect("pull succeeds");
             assert!(!output.is_need_input(), "compressor requested input after end");
             let done = output.is_done();
             if let Some(chunk) = output.into_data() {
@@ -1856,14 +1856,14 @@ mod trait_contract {
         }
 
         let mut decompressor: Box<dyn Compression<Mode = Decompress>> = Box::new(gzip::Decompressor::new(resources()));
-        Compression::push(&mut *decompressor, collected.consume_all()).expect("push succeeds");
-        Compression::end_input(&mut *decompressor);
+        CompressionInternal::push(&mut *decompressor, collected.consume_all()).expect("push succeeds");
+        CompressionInternal::end_input(&mut *decompressor);
 
         let mut plain = BytesBuf::new();
         let mut guard = StepGuard::new();
         loop {
             guard.step();
-            let output = Compression::pull(&mut *decompressor).expect("pull succeeds");
+            let output = CompressionInternal::pull(&mut *decompressor).expect("pull succeeds");
             assert!(!output.is_need_input(), "decompressor requested input after end");
             let done = output.is_done();
             if let Some(chunk) = output.into_data() {

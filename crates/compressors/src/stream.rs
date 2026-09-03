@@ -369,7 +369,7 @@ mod tests {
 
     #[test]
     fn rejects_push_fixture_end_input_is_a_no_op() {
-        use crate::core::RejectsPush;
+        use crate::core::{CompressionInternal as _, RejectsPush};
 
         let mut operation = RejectsPush;
         operation.end_input();
@@ -532,7 +532,7 @@ mod tests {
 
     #[test]
     fn the_progress_fixture_accepts_push_and_end_input_directly() {
-        use crate::core::Compression;
+        use crate::core::CompressionInternal as _;
 
         let mut operation = ProgressCompression::new(Arc::new(AtomicUsize::new(0)));
         operation.push(view(b"ignored")).expect("the fixture always accepts pushed input");

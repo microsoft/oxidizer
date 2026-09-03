@@ -23,7 +23,8 @@ mod output;
 pub use output::Output;
 
 pub(crate) mod sealed {
-    /// Restricts [`Compression`][super::Compression] to this crate's own implementations.
+    /// Restricts [`CompressionInternal`][super::CompressionInternal] to this crate's own
+    /// implementations.
     ///
     /// Each format module implements this for its compressor and decompressor beside the real
     /// implementation, so adding a format needs no edit here.
@@ -56,13 +57,13 @@ pub struct Decompress;
 /// The trait is sealed so formats and methods can be added without breaking downstream code.
 /// Every implementation is `Send + Sync`.
 ///
-/// # The methods are an internal detail
+/// # The mechanics are an internal detail
 ///
 /// What this trait is *for* is naming an operation: `impl Compression<Mode = Compress>` accepts any
-/// compressor and no decompressor. Its methods are how this crate drives one, and are documented
-/// here only for the reader of this crate's own source. Treat them as internal: they are hidden
-/// from the rendered documentation, and they can change without that being a breaking change worth
-/// announcing.
+/// compressor and no decompressor. How this crate actually drives one lives on
+/// [`CompressionInternal`], a hidden supertrait that no downstream crate can implement. Treat it as
+/// internal: it is absent from the rendered documentation, and its methods can change without that
+/// being a breaking change worth announcing.
 ///
 /// Reach for [`compress`][crate::compress] and [`decompress`][crate::decompress] for a complete
 /// buffer, or [`CompressionStream`][crate::CompressionStream] for data that arrives over time.
@@ -94,20 +95,29 @@ pub struct Decompress;
 /// # }
 /// # Ok::<(), compressors::Error>(())
 /// ```
-pub trait Compression: sealed::Compression + fmt::Debug + Send + Sync {
+pub trait Compression: CompressionInternal {
     /// Whether this implementation compresses or decompresses its input.
     type Mode;
+}
 
+/// The push/pull mechanics behind every [`Compression`] implementation.
+///
+/// This is deliberately kept off [`Compression`] itself: what that trait is for is naming an
+/// operation, and these methods are how this crate drives one. They are documented here only for
+/// the reader of this crate's own source.
+///
+/// The trait is sealed, so it cannot be implemented outside this crate and methods can be added to
+/// it without breaking downstream code. Every implementation is `Send + Sync`.
+#[doc(hidden)]
+pub trait CompressionInternal: sealed::Compression + fmt::Debug + Send + Sync {
     /// Supplies more input.
     ///
     /// # Errors
     ///
     /// Returns an error if input is still pending or end of input has been signaled.
-    #[doc(hidden)]
     fn push(&mut self, input: BytesView) -> Result<()>;
 
     /// Signals that no further input will be supplied.
-    #[doc(hidden)]
     fn end_input(&mut self);
 
     /// Produces the next output chunk.
@@ -115,22 +125,19 @@ pub trait Compression: sealed::Compression + fmt::Debug + Send + Sync {
     /// # Errors
     ///
     /// Returns an error if the underlying engine fails or the input is invalid.
-    #[doc(hidden)]
     fn pull(&mut self) -> Result<Output>;
 
     /// The number of bytes consumed from the input so far.
-    #[doc(hidden)]
     fn total_in(&self) -> u64;
 
     /// The number of bytes produced so far.
-    #[doc(hidden)]
     fn total_out(&self) -> u64;
 
     /// Requests a resumable flush of everything supplied so far.
     ///
-    /// Drain [`pull`][Compression::pull] until it reports [`Output::NeedInput`] before pushing more
-    /// input. Flushing ends a compressed block early, which can cost compression ratio, so use it
-    /// only when the bytes have to reach the far end before the stream does.
+    /// Drain [`pull`][CompressionInternal::pull] until it reports [`Output::NeedInput`] before
+    /// pushing more input. Flushing ends a compressed block early, which can cost compression
+    /// ratio, so use it only when the bytes have to reach the far end before the stream does.
     ///
     /// Decompression has nothing to flush -- output is already produced as soon as the input allows
     /// -- so this does nothing there, which is what the default implementation is.
@@ -138,7 +145,6 @@ pub trait Compression: sealed::Compression + fmt::Debug + Send + Sync {
     /// # Errors
     ///
     /// Returns an invalid-state error after end of input or a previous operation failure.
-    #[doc(hidden)]
     fn flush(&mut self) -> Result<()> {
         Ok(())
     }
@@ -174,7 +180,9 @@ pub(crate) fn process(mut operation: impl Compression, input: BytesView) -> Resu
 
 impl<D> Compression for Box<dyn Compression<Mode = D>> {
     type Mode = D;
+}
 
+impl<D> CompressionInternal for Box<dyn Compression<Mode = D>> {
     fn push(&mut self, input: BytesView) -> Result<()> {
         (**self).push(input)
     }
@@ -224,7 +232,10 @@ impl sealed::Compression for ProgressCompression {}
 #[cfg(all(test, feature = "futures-stream"))]
 impl Compression for ProgressCompression {
     type Mode = Compress;
+}
 
+#[cfg(all(test, feature = "futures-stream"))]
+impl CompressionInternal for ProgressCompression {
     fn push(&mut self, _input: BytesView) -> Result<()> {
         Ok(())
     }
@@ -263,7 +274,10 @@ impl sealed::Compression for RejectsPush {}
 #[cfg(all(test, feature = "futures-stream"))]
 impl Compression for RejectsPush {
     type Mode = Compress;
+}
 
+#[cfg(all(test, feature = "futures-stream"))]
+impl CompressionInternal for RejectsPush {
     // Accepting input would make this fixture, whose whole purpose is to reject it, ask for input
     // endlessly instead. The mutant hangs rather than failing, so no verdict is available.
     #[cfg_attr(test, mutants::skip)]
@@ -312,7 +326,9 @@ mod tests {
 
         impl Compression for ProgressOnceThenDone {
             type Mode = Compress;
+        }
 
+        impl CompressionInternal for ProgressOnceThenDone {
             fn push(&mut self, _input: BytesView) -> Result<()> {
                 Ok(())
             }
@@ -357,7 +373,9 @@ mod tests {
 
         impl Compression for NeedsMoreForever {
             type Mode = Compress;
+        }
 
+        impl CompressionInternal for NeedsMoreForever {
             fn push(&mut self, _input: BytesView) -> Result<()> {
                 Ok(())
             }

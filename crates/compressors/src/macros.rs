@@ -373,11 +373,9 @@ macro_rules! define_format {
         #[doc = concat!("Compresses a stream of byte sequences into ", $name, ".")]
         ///
         /// A push/pull state machine, driven through [`Compression`][crate::core::Compression]:
-        /// supply input with [`push`][crate::core::Compression::push], take output with
-        /// [`pull`][crate::core::Compression::pull], and call
-        /// [`end_input`][crate::core::Compression::end_input] when there is no more input. Each pull
-        /// returns at most one bounded chunk, so a stream of any length can be compressed with a
-        /// bounded working set.
+        /// supply input with `push`, take output with `pull`, and call `end_input` when there is no
+        /// more input. Each pull returns at most one bounded chunk, so a stream of any length can be
+        /// compressed with a bounded working set.
         ///
         /// The operations live on the trait rather than here, so code written against it works with
         /// every format, and with a boxed compressor whose format was picked at runtime.
@@ -399,7 +397,9 @@ macro_rules! define_format {
 
         impl $crate::core::Compression for Compressor {
             type Mode = $crate::core::Compress;
+        }
 
+        impl $crate::core::CompressionInternal for Compressor {
             fn push(&mut self, input: BytesView) -> Result<()> {
                 self.pump.push(input)
             }
@@ -460,7 +460,9 @@ macro_rules! define_format {
 
         impl $crate::core::Compression for Decompressor {
             type Mode = $crate::core::Decompress;
+        }
 
+        impl $crate::core::CompressionInternal for Decompressor {
             fn push(&mut self, input: BytesView) -> Result<()> {
                 self.pump.push(input)
             }
