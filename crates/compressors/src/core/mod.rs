@@ -10,7 +10,8 @@
 //! One trait covers both directions. [`Compress`] and [`Decompress`] are what an API names when it
 //! needs one of them -- `Compression<Mode = Compress>` accepts any compressor and no decompressor.
 //!
-//! [`Output`] is what one step of that contract reports, so it lives here too.
+//! What one step of that contract reports is a crate-private detail, as are the methods that drive
+//! it: this module publishes the names an API is written against, and nothing else.
 
 use bytesbuf::{BytesBuf, BytesView};
 
@@ -18,7 +19,7 @@ use crate::error::Result;
 
 mod output;
 
-pub use output::Output;
+pub(crate) use output::Output;
 
 pub(crate) mod internal {
     use std::fmt;

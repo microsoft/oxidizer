@@ -437,8 +437,8 @@ macro_rules! define_format {
         /// input is a memory-exhaustion vector. This format's own default bounds apply unless
         /// [`DecompressorBuilder::limits`][crate::DecompressorBuilder::limits] overrides them.
         ///
-        /// Output is provisional until [`Output::Done`], because a checksum or trailer can reject
-        /// the stream after earlier chunks have been returned.
+        /// Output is provisional until the operation reports that it is done, because a checksum or
+        /// trailer can reject the stream after earlier chunks have been returned.
         #[derive(Debug)]
         pub struct Decompressor {
             pump: Pump,
