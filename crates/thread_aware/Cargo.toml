@@ -44,8 +44,13 @@ thread_aware_core = { workspace = true }
 thread_aware_macros = { workspace = true, optional = true }
 
 [dev-dependencies]
+# `dashmap`, `rustc-hash`, `thread_aware_core`, and `thread_aware_macros` mirror dependencies
+# activated by optional public surfaces that also compile through `cfg(test)`.
+dashmap = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
 mutants = { workspace = true }
+rustc-hash = { workspace = true }
+thread_aware_core = { path = "../thread_aware_core", features = ["std"] }
 thread_aware_macros = { path = "../thread_aware_macros" }
 
 # These integration tests exercise `#[derive(ThreadAware)]`, so they compile only

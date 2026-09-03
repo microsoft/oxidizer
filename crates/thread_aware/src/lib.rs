@@ -178,7 +178,7 @@ extern crate alloc;
 #[cfg(all(feature = "std", not(test)))]
 extern crate std;
 
-#[cfg(feature = "std")]
+#[cfg(any(test, feature = "std"))]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 mod cell;
 mod wrappers;
@@ -188,7 +188,7 @@ pub mod closure;
 #[cfg(feature = "test-utils")]
 #[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
 mod relocate;
-#[cfg(feature = "std")]
+#[cfg(any(test, feature = "std"))]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 pub mod thread;
 
@@ -260,9 +260,9 @@ pub mod thread;
 ///     w.relocate(a1, a2);
 /// }
 /// ```
-#[cfg(feature = "derive")]
+#[cfg(any(test, feature = "derive"))]
 pub use ::thread_aware_macros::ThreadAware;
-#[cfg(feature = "std")]
+#[cfg(any(test, feature = "std"))]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 pub use cell::{Arc, FromStorageError, PerNumaNode, PerProcess, PerThread, storage};
 #[cfg(feature = "test-utils")]
@@ -272,7 +272,7 @@ pub use relocate::Relocator;
 pub use thread_aware_core::{NumaNode, Owner, Thread, ThreadAware};
 pub use wrappers::{Unaware, unaware};
 
-#[cfg(all(test, feature = "std"))]
+#[cfg(test)]
 #[cfg_attr(test, mutants::skip)] // Mutating barrier coordination only deadlocks test setup.
 fn test_threads(counts: &[usize]) -> Vec<Thread> {
     use std::sync::{Arc, Barrier};
