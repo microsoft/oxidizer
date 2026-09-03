@@ -250,6 +250,8 @@ trait `impl` carries all three, as does the single inherent `impl` holding the
 constructors. That covers lifetimes, type parameters and where clauses in one
 rule, which is what R1.3's "all of them carry the input's generics" asks for.
 
+Every generated trait `impl` carries `#[automatically_derived]`.
+
 Two values recur below: the core field's member, and the type's name as a string
 literal — the default message the runtime falls back to when nothing else
 renders.
@@ -278,10 +280,12 @@ error type becomes infallible.
 including the core, so it iterates the full field list and branches once on
 style, into `debug_struct` for a named struct or `debug_tuple` for a tuple one.
 
-It is the one generated item that is **not** `#[automatically_derived]`.
-Dead-code analysis ignores field reads inside a derived `Debug`, so marking this
-one would make every field that only `Debug` reads look unused in the user's own
-crate.
+`Debug` carries `#[rustc_trivial_field_reads]`, so marking this impl
+`#[automatically_derived]` makes dead-code analysis discard its field reads. A
+field that nothing but `Debug` reads is then reported, which is the answer
+`#[derive(Debug)]` gives too. The core and any field the `#[display]` template
+names stay live, because the other generated impls read them and their traits
+carry no such attribute.
 
 **Constructors** are emitted unless the model suppresses them. `new` takes one
 parameter per non-core field and defaults the core; `caused_by` takes the same

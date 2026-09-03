@@ -43,6 +43,7 @@ Please see each crate's change log below:
 - [`templated_uri_macros`](./crates/templated_uri_macros/CHANGELOG.md)
 - [`templated_uri_macros_impl`](./crates/templated_uri_macros_impl/CHANGELOG.md)
 - [`thread_aware`](./crates/thread_aware/CHANGELOG.md)
+- [`thread_aware_core`](./crates/thread_aware_core/CHANGELOG.md)
 - [`thread_aware_macros`](./crates/thread_aware_macros/CHANGELOG.md)
 - [`thread_aware_macros_impl`](./crates/thread_aware_macros_impl/CHANGELOG.md)
 - [`tick`](./crates/tick/CHANGELOG.md)

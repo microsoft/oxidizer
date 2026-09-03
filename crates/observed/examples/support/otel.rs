@@ -31,9 +31,6 @@ const CODE_FILE_PATH: &str = "code.file.path";
 /// `OTel` attribute key for the source line a call site came from.
 const CODE_LINE_NUMBER: &str = "code.line.number";
 
-/// `OTel` attribute key for the crate a call site came from.
-const CODE_NAMESPACE: &str = "code.namespace";
-
 /// Converts a [`Text`] into an `OTel` string, preserving the borrowed-versus-
 /// shared distinction so neither representation copies.
 ///
@@ -133,6 +130,11 @@ pub(crate) fn populate_log_record(record: &mut impl LogRecord, event: &EventView
         ControlFlow::Continue(())
     });
 
+    // File and line use stable OpenTelemetry code attributes. The emitting
+    // crate is deliberately not exported: `code.namespace` is deprecated with
+    // no standalone replacement, and its successor `code.function.name` needs a
+    // fully qualified function name that the event model does not capture.
+    // https://opentelemetry.io/docs/specs/semconv/registry/attributes/code/
     if let Some(file) = event.source_file() {
         record.add_attribute(opentelemetry::Key::from_static_str(CODE_FILE_PATH), AnyValue::String(file.into()));
     }
@@ -142,12 +144,5 @@ pub(crate) fn populate_log_record(record: &mut impl LogRecord, event: &EventView
             AnyValue::Int(i64::from(line)),
         );
     }
-    if let Some(crate_name) = event.source_crate() {
-        record.add_attribute(
-            opentelemetry::Key::from_static_str(CODE_NAMESPACE),
-            AnyValue::String(crate_name.into()),
-        );
-    }
-
     true
 }

@@ -28,6 +28,8 @@ fn test_complex_error_constructors() {
     }
 
     let db_err = DatabaseError::new("users", "SELECT");
+    assert_eq!(db_err.table, "users");
+    assert_eq!(db_err.operation, "SELECT");
     assert_error_message!(db_err, "DatabaseError");
 
     let db_err_with_error = DatabaseError::caused_by("users", "SELECT", "Table not found");
