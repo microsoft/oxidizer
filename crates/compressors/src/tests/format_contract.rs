@@ -47,7 +47,7 @@ impl<T> Built for Result<T, crate::BuildError> {
     }
 }
 
-/// Drives any compression engine to completion, feeding the input in `feed` sized pieces.
+/// Drives any compression engine to completion, feeding the input in `feed`-sized pieces.
 /// Caps every drain loop in this file.
 ///
 /// A conforming engine always terminates, so exceeding this means the code under test is
@@ -463,7 +463,11 @@ macro_rules! format_contract {
             }
 
             #[test]
-            fn trusted_callers_can_opt_out_of_the_limits() {
+            fn known_good_data_can_opt_out_of_the_limits() {
+                // What justifies UNLIMITED is knowing the input's expansion, or bounding it
+                // elsewhere -- not knowing the caller. A trusted caller can still be relaying an
+                // attacker's bytes. Here the data is generated locally, which is the precondition
+                // the opt-out actually needs.
                 let data = vec![0_u8; 256 * 1024];
                 let compressed = $module::compress(view(&data), resources()).expect("compression succeeds");
 

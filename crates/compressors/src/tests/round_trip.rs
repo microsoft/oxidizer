@@ -1,10 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Behaviour tests that exercise the crate as a downstream consumer sees it.
+//! End-to-end behaviour of gzip, including the parts no other format exercises.
 //!
-//! Gzip specific: interop fixtures produced by the system `gzip`, and the concatenated-member
-//! behaviour that only gzip enables by default.
+//! Gzip-specific: interop fixtures produced by the system `gzip`, and the concatenated-stream
+//! behaviour that only gzip enables by default. Drives the crate-private mechanics where a
+//! transition has to be observed rather than inferred from the final bytes.
 
 use std::num::NonZeroU64;
 
@@ -14,7 +15,7 @@ use crate::core::{CompressionInternal as _, Output};
 use crate::testing::{chunk, fragmented, view};
 use crate::{DecompressorLimits, Resources, gzip};
 
-/// The payload behind `tests/fixtures/system_gzip.gz`, compressed by the system `gzip -9 -n`.
+/// The payload behind `fixtures/system_gzip.gz`, compressed by the system `gzip -9 -n`.
 const FIXTURE_PLAINTEXT: &[u8] = b"The quick brown fox jumps over the lazy dog.\nPack my box with five dozen liquor jugs.\n";
 
 const SYSTEM_GZIP: &[u8] = include_bytes!("fixtures/system_gzip.gz");
@@ -49,7 +50,7 @@ impl StepGuard {
     }
 }
 
-/// Drives an engine to completion over an input delivered in `feed` sized pieces.
+/// Drives an engine to completion over an input delivered in `feed`-sized pieces.
 fn drive_decompressor(mut decompressor: gzip::Decompressor, input: &BytesView, feed: usize) -> crate::Result<BytesView> {
     let mut offset = 0;
     let mut collected = BytesBuf::new();
@@ -231,7 +232,9 @@ fn the_default_limits_accept_maximally_compressible_deflate_data() {
 }
 
 #[test]
-fn trusted_callers_can_opt_out_of_the_limits() {
+fn known_good_data_can_opt_out_of_the_limits() {
+    // The precondition is the data, not the caller: this payload is generated here, so its
+    // expansion is known. A trusted caller relaying an attacker's bytes would not qualify.
     let payload = vec![0_u8; 1024 * 1024];
     let compressed = gzip::compress(view(&payload), &Resources::default()).expect("compression succeeds");
 

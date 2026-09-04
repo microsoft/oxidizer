@@ -81,7 +81,7 @@ pub(crate) fn view(bytes: &[u8]) -> BytesView {
     BytesView::copied_from_slice(bytes, &GlobalPool::new())
 }
 
-/// A view over `bytes` split into `segment` sized spans, exercising the multi-segment paths.
+/// A view over `bytes` split into `segment`-sized spans, exercising the multi-segment paths.
 pub(crate) fn fragmented(bytes: &[u8], segment: usize) -> BytesView {
     let memory = GlobalPool::new();
     BytesView::from_views(bytes.chunks(segment).map(|chunk| BytesView::copied_from_slice(chunk, &memory)))

@@ -1,11 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Behaviour tests that drive the crate the way its own consumers do.
+//! White-box behaviour tests for the crate's cross-cutting contracts.
 //!
-//! These were integration tests until the push/pull mechanics moved onto a crate-private trait,
-//! which a separate test crate cannot name. They live here so that contract can be driven by hand
-//! without any of it reaching the public API.
+//! These drive concrete engines through the crate-private push/pull mechanics and inspect the
+//! private step outcomes, which is what lets them assert the state machine's transitions rather
+//! than only its end results. That access is why they live inside the crate: a separate test crate
+//! cannot name those items, and exposing them so it could would defeat the sealing they exist to
+//! verify.
 
 #[cfg(any(
     test,
