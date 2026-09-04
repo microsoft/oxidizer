@@ -1,0 +1,38 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "arty"
+description = "Single-threaded, thread-aware application runtime."
+version = "0.2.0"
+readme = "README.md"
+keywords = ["arty", "async", "runtime"]
+categories = ["asynchronous"]
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/arty"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["thread_aware_core::*", "tick::*"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = []
+time = ["dep:tick"]
+test-util = ["tick?/test-util"]
+
+[dependencies]
+arty_core = { workspace = true }
+thread_aware_core = { workspace = true, features = ["std"] }
+tick = { workspace = true, optional = true }
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints
