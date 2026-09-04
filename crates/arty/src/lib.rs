@@ -26,6 +26,8 @@
 //! - [Panics](https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/PANICS.md)
 //! - [Stabilization](https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/STABILIZATION.md)
 
+use arty_core as _;
+
 /// Foundational runtime and thread-awareness types.
 pub mod core {
     #[doc(inline)]
