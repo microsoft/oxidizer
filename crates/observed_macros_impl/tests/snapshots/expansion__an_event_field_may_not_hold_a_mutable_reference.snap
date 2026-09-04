@@ -1,0 +1,38 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: output
+---
+---- input ----
+#[event("e")]
+#[info] struct Subject<'a> { #[unredacted] v: &mut u64 }
+
+---- yields ----
+an event field cannot hold a mutable reference; event fields are read through `&self` when the event is visited, so they support only shared references. Use `&T` instead of `&mut T`
+
+---- input ----
+#[event("e")]
+#[info] struct Subject<'a> { #[unredacted] v: Option<&mut u64> }
+
+---- yields ----
+an event `Option<&mut T>` field cannot hold a mutable reference; event fields are read through `&self` when the event is visited, so they support only shared references. Use `&T` instead of `&mut T`
+
+---- input ----
+#[event("e")]
+#[info] struct Subject<'a> { v: &mut Classified }
+
+---- yields ----
+an event field cannot hold a mutable reference; event fields are read through `&self` when the event is visited, so they support only shared references. Use `&T` instead of `&mut T`
+
+---- input ----
+#[event("e")]
+#[info] struct Subject<'a> { #[unredacted] v: &'a mut u64 }
+
+---- yields ----
+an event field cannot hold a mutable reference; event fields are read through `&self` when the event is visited, so they support only shared references. Use `&T` instead of `&mut T`
+
+---- input ----
+#[event("e")]
+#[info] struct Subject<'a> { #[unredacted] v: &&mut u64 }
+
+---- yields ----
+an event field cannot hold a mutable reference; event fields are read through `&self` when the event is visited, so they support only shared references. Use `&T` instead of `&mut T`
