@@ -28,9 +28,6 @@ const MAX_OPERATIONS_PER_POLL: usize = 64;
 /// `finished` latches once the stream has yielded its last item. Without it, a failing engine would
 /// report the same error on every subsequent poll, and a caller that collects the stream would
 /// accumulate errors until it ran out of memory.
-// Answering with data unconditionally produces a stream that never ends, so that mutant hangs
-// rather than failing and mutation testing records a timeout instead of a verdict.
-#[cfg_attr(test, mutants::skip)]
 fn poll_compression<S, C, E>(
     mut source: Pin<&mut S>,
     compression: &mut C,
