@@ -19,7 +19,7 @@ use bytesbuf::BytesView;
 #[derive(Debug)]
 #[expect(
     clippy::large_enum_variant,
-    reason = "a BytesView is ~272 bytes because it stores its first spans inline; boxing it would               add an allocation per chunk on the hot path, which is exactly what this crate exists               to avoid"
+    reason = "a BytesView is ~272 bytes because it stores its first spans inline; boxing it would add an allocation per chunk on the hot path, which is exactly what this crate exists to avoid"
 )]
 pub enum Output {
     /// Bytes are available now.

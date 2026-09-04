@@ -81,7 +81,13 @@ impl Resources {
         }
     }
 
-    /// Sets how many idle engines are kept per distinct configuration, where zero stops recycling.
+    /// Sets how many idle engines are kept per interchangeable group, where zero stops recycling.
+    ///
+    /// What counts as a group depends on the engine. The deflate family's compressors are keyed by
+    /// container and level, because a reset preserves both; zstd contexts are keyed by nothing at
+    /// all, because a reset lets any idle context serve any level. So the ceiling on retained
+    /// engines is this capacity times the number of groups a workload actually reaches, not this
+    /// capacity alone.
     ///
     /// Recycling is already on after [`new`][Resources::new] at a capacity that suits ordinary
     /// request traffic. Set this to the number of messages expected to be in flight at once, or to

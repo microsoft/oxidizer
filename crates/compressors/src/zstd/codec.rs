@@ -359,7 +359,10 @@ mod tests {
             let mapped = compression_level(level);
 
             assert!(mapped >= previous, "mapping must not decrease at level {raw}");
-            assert!((1..=22).contains(&mapped), "level {raw} mapped outside zstd's range");
+            assert!(
+                (CompressionLevel::min().get()..=CompressionLevel::max().get()).contains(&mapped),
+                "level {raw} mapped outside the range the bundled zstd accepts"
+            );
             previous = mapped;
         }
     }

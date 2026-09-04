@@ -30,9 +30,9 @@ fn resources() -> &'static Resources {
 
 /// Erases the difference between a build that can fail and one that cannot.
 ///
-/// Brotli and zstd validate their configuration as they apply it, so their builders return a
-/// [`Result`]; the deflate family's cannot fail and return the compressor directly. The contract below
-/// is the same either way, so it goes through this to stay one test.
+/// zstd's native library validates its configuration as it applies it, so its compressor build
+/// returns a [`Result`]; every other format's cannot fail and returns the compressor directly. The
+/// contract below is the same either way, so it goes through this to stay one test.
 trait Built {
     type Codec;
 
