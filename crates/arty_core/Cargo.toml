@@ -19,6 +19,11 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/arty_core"
 [package.metadata.docs.rs]
 all-features = true
 
+# Empty foundation crate: it has no executable source lines until foundational
+# runtime contracts are introduced.
+[package.metadata.coverage-gate]
+min-lines-percent = 0
+
 [features]
 default = []
 

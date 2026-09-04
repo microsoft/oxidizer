@@ -35,6 +35,11 @@ allowed_external_types = [
 [package.metadata.docs.rs]
 all-features = true
 
+# Facade-only crate: its public surface consists of re-exports, so it has no
+# instrumented source lines for the per-package coverage gate.
+[package.metadata.coverage-gate]
+min-lines-percent = 0
+
 [features]
 default = []
 time = ["dep:tick"]
