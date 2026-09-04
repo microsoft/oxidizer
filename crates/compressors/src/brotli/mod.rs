@@ -281,10 +281,10 @@ mod quality_tests {
         }
 
         assert_eq!(Quality::new(12), None);
-        assert_eq!(Quality::try_from(8).expect("in range"), Quality::new(8).expect("in range"));
+        assert_eq!(Quality::try_from(8).unwrap(), Quality::new(8).unwrap());
         assert_eq!(u8::from(Quality::MAX), 11);
 
-        let error = Quality::try_from(12).expect_err("out of range");
+        let error = Quality::try_from(12).unwrap_err();
         assert!(error.is_invalid_configuration(), "got {error}");
     }
 }
@@ -303,10 +303,10 @@ mod window_size_tests {
         assert_eq!(WindowSize::new(WindowSize::MIN.get() - 1), None);
         assert_eq!(WindowSize::new(WindowSize::MAX.get() + 1), None);
         assert_eq!(WindowSize::default(), WindowSize::DEFAULT);
-        assert_eq!(WindowSize::try_from(20).expect("in range"), WindowSize::new(20).expect("in range"));
+        assert_eq!(WindowSize::try_from(20).unwrap(), WindowSize::new(20).unwrap());
         assert_eq!(u8::from(WindowSize::DEFAULT), 22);
 
-        let error = WindowSize::try_from(WindowSize::MAX.get() + 1).expect_err("out of range");
+        let error = WindowSize::try_from(WindowSize::MAX.get() + 1).unwrap_err();
         assert!(error.is_invalid_configuration(), "got {error}");
     }
 }

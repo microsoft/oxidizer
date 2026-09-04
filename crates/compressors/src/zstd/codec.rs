@@ -54,7 +54,7 @@ struct UninitOutput<'a> {
 // SAFETY: `as_mut_ptr` returns a pointer to `capacity` writable bytes that stays valid for the
 // borrow, and `as_slice` never covers more than `filled`, which only ever advances through
 // `filled_until` -- whose own contract is that the caller initialized that many bytes, and which
-// clamps to `capacity` so `filled` can never exceed the allocation.
+// refuses a count larger than the allocation.
 unsafe impl zstd_safe::WriteBuf for UninitOutput<'_> {
     fn as_slice(&self) -> &[u8] {
         // SAFETY: `filled_until` promised these bytes are initialized, and `u8` shares its layout
@@ -71,12 +71,18 @@ unsafe impl zstd_safe::WriteBuf for UninitOutput<'_> {
     }
 
     // zstd is handed `capacity()` and reports back how much of it it wrote, so `n` is always within
-    // the buffer. The clamp holds `as_slice` sound by construction rather than by trusting the
-    // binding to honour that: were it ever violated, the out-of-bounds write would already have
-    // happened, and this at least stops it becoming a lasting out-of-bounds read.
+    // the buffer. This is checked rather than assumed, and in every build: `as_slice` hands out
+    // `filled` bytes as initialized, so a wrong `n` here is the difference between sound and
+    // unsound. Clamping would not be a recovery -- it would assert that the whole buffer was
+    // written, which is exactly what a nonsense report gives no reason to believe -- so an
+    // out-of-range count aborts instead.
     unsafe fn filled_until(&mut self, n: usize) {
-        debug_assert!(n <= self.buffer.len(), "zstd reported writing more than the capacity it was given");
-        self.filled = n.min(self.buffer.len());
+        assert!(
+            n <= self.buffer.len(),
+            "zstd reported writing {n} bytes into a {}-byte buffer",
+            self.buffer.len()
+        );
+        self.filled = n;
     }
 }
 
@@ -395,6 +401,22 @@ mod tests {
         unsafe { zstd_safe::WriteBuf::filled_until(&mut out, 3) };
 
         assert_eq!(zstd_safe::WriteBuf::as_slice(&out), &[0xff_u8; 3]);
+    }
+
+    #[test]
+    #[should_panic(expected = "zstd reported writing 9 bytes into a 8-byte buffer")]
+    fn the_uninit_output_refuses_a_count_past_its_capacity() {
+        // `as_slice` hands out `filled` bytes as initialized, so a count past the end is the
+        // difference between sound and unsound. It has to fail in release builds too, which is why
+        // this is an `assert!` rather than a `debug_assert!`, and why it does not clamp: clamping
+        // would claim the whole buffer was written, which a nonsense report gives no reason to
+        // believe.
+        let mut raw = [MaybeUninit::new(0xff_u8); 8];
+        let mut out = UninitOutput::new(&mut raw);
+
+        // SAFETY: the contract is deliberately violated to prove the check fires. Nothing
+        // uninitialized is read: the assertion runs before `filled` is touched.
+        unsafe { zstd_safe::WriteBuf::filled_until(&mut out, 9) };
     }
 
     #[test]
