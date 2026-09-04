@@ -215,43 +215,9 @@ impl Sink {
     ///
     /// # Sharing
     ///
-    /// The sampler belongs to the returned sink and to clones made from
-    /// it. A clone taken before this call keeps dispatching without a
-    /// sampler, on the same leaf identity and the same enrichment slot - which
-    /// also means [`Sink::composite`] rejects an attempt to combine the two,
-    /// as it does for any duplicated leaf.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use std::sync::Arc;
-    /// # use observed::metadata::EventDescription;
-    /// # use observed::processing::{EventProcessor, EventView};
-    /// # use observed::{FlushError, Sink};
-    /// use observed::{EventSampler, EventSamplingContext, EventSamplingDecision};
-    ///
-    /// # struct Exporter;
-    /// # impl EventProcessor for Exporter {
-    /// #     fn is_interested(&self, _description: &EventDescription) -> bool { true }
-    /// #     fn process(&self, _event: &EventView<'_>) {}
-    /// #     fn flush(&self) -> Result<(), FlushError> { Ok(()) }
-    /// # }
-    /// struct DropHealthChecks;
-    ///
-    /// impl EventSampler for DropHealthChecks {
-    ///     fn sample(&self, event: &EventSamplingContext<'_>) -> EventSamplingDecision {
-    ///         if event.description().name() == "health.check" {
-    ///             EventSamplingDecision::Drop
-    ///         } else {
-    ///             EventSamplingDecision::Continue
-    ///         }
-    ///     }
-    /// }
-    ///
-    /// let processors: Vec<Arc<dyn EventProcessor>> = vec![Arc::new(Exporter)];
-    /// let sink = Sink::new("service", processors, tick::SimpleClock::new_frozen())
-    ///     .with_event_sampler(Arc::new(DropHealthChecks));
-    /// ```
+    /// Clones made from the returned sink share its sampler configuration.
+    /// Existing clones keep their prior configuration and remain subject to
+    /// [`Sink::composite`]'s normal duplicate-sink restriction.
     #[must_use]
     pub fn with_event_sampler(self, sampler: Arc<dyn EventSampler>) -> Self {
         let inner = match &*self.inner {

@@ -10,49 +10,6 @@
 //!
 //! The context is borrowed and read-only. A sampler owns its own
 //! synchronization and must return its decision synchronously.
-//!
-//! # Examples
-//!
-//! ```
-//! use std::sync::Arc;
-//!
-//! use observed::metadata::EventDescription;
-//! use observed::processing::{EventProcessor, EventView};
-//! use observed::{
-//!     EventSampler, EventSamplingContext, EventSamplingDecision, FlushError, Sink, emit, event,
-//! };
-//!
-//! #[event("health.check")]
-//! #[info("Health check")]
-//! struct HealthCheck;
-//!
-//! # struct Exporter;
-//! # impl EventProcessor for Exporter {
-//! #     fn is_interested(&self, _description: &EventDescription) -> bool { true }
-//! #     fn process(&self, _event: &EventView<'_>) {}
-//! #     fn flush(&self) -> Result<(), FlushError> { Ok(()) }
-//! # }
-//! struct DropHealthChecks;
-//!
-//! impl EventSampler for DropHealthChecks {
-//!     fn sample(&self, event: &EventSamplingContext<'_>) -> EventSamplingDecision {
-//!         if event.description().name() == "health.check" {
-//!             EventSamplingDecision::Drop
-//!         } else {
-//!             EventSamplingDecision::Continue
-//!         }
-//!     }
-//! }
-//!
-//! let sink = Sink::new(
-//!     "service",
-//!     vec![Arc::new(Exporter) as Arc<dyn EventProcessor>],
-//!     tick::SimpleClock::new_frozen(),
-//! )
-//! .with_event_sampler(Arc::new(DropHealthChecks));
-//!
-//! emit!(sink, HealthCheck);
-//! ```
 
 use std::time::SystemTime;
 
@@ -116,6 +73,10 @@ pub enum EventSamplingDecision {
 /// [`Sink::with_event_sampler`](crate::Sink::with_event_sampler). The same
 /// sampler instance may be attached to multiple Sinks; use
 /// [`EventSamplingContext::sink_id`] to distinguish them.
+///
+/// See the
+/// [`event_sampling` example](https://github.com/microsoft/oxidizer/blob/main/crates/observed/examples/event_sampling.rs)
+/// for a complete sampler and registration.
 pub trait EventSampler: Send + Sync + 'static {
     /// Decides whether `event` continues to this Sink's processors.
     ///

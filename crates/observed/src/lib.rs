@@ -22,6 +22,7 @@
 //!   out field by field with the `#[unredacted]` escape hatch
 //! - Provides **per-field routing** - one event struct can produce logs and metrics with
 //!   independent field subsets per signal
+//! - Supports **per-Sink event sampling** through [`EventSampler`]
 //! - Integrates with **OpenTelemetry** through pluggable [`EventProcessor`](processing::EventProcessor) implementations
 //!
 //! # Quick Start
