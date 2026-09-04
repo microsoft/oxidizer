@@ -439,6 +439,11 @@ enum QueryNode {
 /// build and the matching deserialization descend once per level. The bound
 /// keeps an untrusted request from driving that descent past the stack, while
 /// staying far above the nesting any real proto message uses.
+///
+/// Known limitation: a query parameter whose field path nests deeper than this
+/// is rejected with `Code::InvalidArgument`, never truncated and never decoded.
+/// The cap is fixed and deliberately not configurable — a depth a caller could
+/// raise would not bound anything.
 const MAX_QUERY_FIELD_DEPTH: usize = 64;
 
 fn decode_tree<T: DeserializeOwned>(body: Option<&[u8]>, query: &[(&str, &str)]) -> Result<T, TranscodeError> {
