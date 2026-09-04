@@ -137,8 +137,8 @@ jobs:
       # execute
       - name: Miri (strict provenance)
         env:
-          MIRIFLAGS: -Zmiri-strict-provenance
-          RUSTFLAGS: --cfg miri_strict_provenance
+          MIRIFLAGS: -Zmiri-strict-provenance ${{ env.MIRIFLAGS }}
+          RUSTFLAGS: --cfg miri_strict_provenance ${{ env.RUSTFLAGS }}
         run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace --lib --tests
         timeout-minutes: 240
 
