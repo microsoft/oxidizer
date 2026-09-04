@@ -299,6 +299,12 @@ use crate::core::{Compress, Compression, Decompress, process};
 /// Prefer [`CompressionStream`] for data that arrives incrementally: this buffers the entire
 /// result before returning.
 ///
+/// # Security
+///
+/// Unlike [`decompress`], this applies no ceiling. Compressed output tracks the size of the input
+/// the caller already holds, so it is not an amplification vector, and a cap would make a
+/// legitimately large compression impossible with no way to raise it.
+///
 /// # Errors
 ///
 /// Returns an error if the underlying compression engine fails.
@@ -327,7 +333,7 @@ use crate::core::{Compress, Compression, Decompress, process};
 /// # Ok::<(), compressors::Error>(())
 /// ```
 pub fn compress(input: BytesView, compressor: impl Compression<Mode = Compress>) -> Result<BytesView> {
-    process(compressor, input)
+    process(compressor, input, None)
 }
 
 /// Decompresses one complete stream that is already in memory.
@@ -341,10 +347,21 @@ pub fn compress(input: BytesView, compressor: impl Compression<Mode = Compress>)
 ///
 /// # Security
 ///
-/// This adds no bounds of its own: the decompressor arrives already configured, so whatever it was
-/// built with is what applies. It does accumulate the whole result, so pass a decompressor built
-/// with [`DecompressorLimits::max_output_len`][crate::DecompressorLimits::max_output_len]
-/// when the input is untrusted. Each format's own `decompress` is the bounded convenience.
+/// Buffering the whole result is a memory-exhaustion vector on untrusted input, so a decompressor
+/// that was left unbounded is held to the same 64 MiB ceiling every format's own `decompress`
+/// applies. Without it, a decompressor for a format that declares no defaults -- brotli declares
+/// none -- would let a hundred compressed bytes expand without limit here.
+///
+/// The ceiling is a fallback, not an override. Whatever the caller asked for on the decompressor's
+/// [`limits`][DecompressorBuilder::limits] wins:
+///
+/// | Built with | Ceiling applied here |
+/// |---|---|
+/// | nothing, or [`DecompressorLimits::new`] | 64 MiB |
+/// | [`max_output_len`][DecompressorLimits::max_output_len] | the caller's value |
+/// | [`DecompressorLimits::UNLIMITED`] | none -- removing the bound is a decision too |
 pub fn decompress(input: BytesView, decompressor: impl Compression<Mode = Decompress>) -> Result<BytesView> {
-    process(decompressor, input)
+    let ceiling = decompressor.buffered_output_ceiling();
+
+    process(decompressor, input, ceiling)
 }

@@ -12,6 +12,7 @@ use std::num::NonZeroU64;
 use bytesbuf::{BytesBuf, BytesView};
 
 use crate::core::{CompressionInternal as _, Output};
+use crate::limits::DEFAULT_MAX_OUTPUT_LEN;
 use crate::testing::{chunk, fragmented, view};
 use crate::{DecompressorLimits, Resources, gzip};
 
@@ -342,4 +343,35 @@ fn a_stream_of_many_tiny_members_is_rejected_without_the_caller_setting_any_limi
         error.to_string().contains("decoded stream count"),
         "the stream cap should be what fired: {error}"
     );
+}
+
+#[test]
+fn the_crate_level_decompress_applies_the_default_ceiling_unless_the_caller_decided() {
+    // `decompress` takes an already-built decompressor, so without a ceiling of its own it was
+    // bounded only by whatever that decompressor carried -- and brotli declares no defaults at all,
+    // so a hundred compressed bytes could expand without limit.
+    let over_the_cap = vec![0_u8; usize::try_from(DEFAULT_MAX_OUTPUT_LEN).unwrap() + 1];
+    let compressed = gzip::compress(&*over_the_cap, &Resources::default()).unwrap();
+
+    let decompress_with = |limits: DecompressorLimits| {
+        crate::decompress(
+            compressed.clone(),
+            gzip::Decompressor::builder().limits(limits).build(&Resources::default()),
+        )
+    };
+
+    // Bound left unset: our 64 MiB stands in, so this is refused.
+    let error = decompress_with(DecompressorLimits::new()).unwrap_err();
+    assert!(error.is_limit_exceeded(), "got {error}");
+
+    // Raised explicitly: the caller's number wins over ours.
+    let raised = DecompressorLimits::new().max_output_len(NonZeroU64::new(DEFAULT_MAX_OUTPUT_LEN * 2).unwrap());
+    assert_eq!(decompress_with(raised).unwrap().len(), over_the_cap.len());
+
+    // Removed explicitly: also the caller's decision, so nothing is added on top.
+    assert_eq!(decompress_with(DecompressorLimits::UNLIMITED).unwrap().len(), over_the_cap.len());
+
+    // Lowered explicitly: still the caller's decision, in the other direction.
+    let lowered = DecompressorLimits::new().max_output_len(NonZeroU64::new(1024).unwrap());
+    assert!(decompress_with(lowered).unwrap_err().is_limit_exceeded());
 }

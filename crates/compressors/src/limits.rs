@@ -247,6 +247,19 @@ impl DecompressorLimits {
         self
     }
 
+    /// The ceiling a caller that buffers this decompressor's whole output should apply on top.
+    ///
+    /// `Some` only when the caller left the output bound [`Limit::Unset`], in which case the shared
+    /// 64 MiB cap stands in. An explicit value -- or an explicit
+    /// [`UNLIMITED`][DecompressorLimits::UNLIMITED] -- is the caller's decision, and the
+    /// decompressor already enforces it, so nothing is added on top.
+    pub(crate) const fn buffered_ceiling(self) -> Option<NonZeroU64> {
+        match self.output_len {
+            Limit::Unset => NonZeroU64::new(DEFAULT_MAX_OUTPUT_LEN),
+            Limit::Unlimited | Limit::Value(_) => None,
+        }
+    }
+
     /// Applies these overrides on top of a format's defaults.
     #[cfg_attr(
         all(
