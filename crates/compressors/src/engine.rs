@@ -112,6 +112,12 @@ pub(crate) unsafe trait Codec {
     }
 
     /// Returns the remaining absolute output budget, if one is configured.
+    // Excluded for the same reason as the implementations that override it: a mutant answering a
+    // small constant is not wrong, only slow. Every codec that keeps this default -- which is every
+    // compressor -- would then be offered one byte per step, so the suite runs orders of magnitude
+    // slower and the harness's timeout expires before the failing assertion is reached. That
+    // timeout is derived from the suite's own runtime, so it is now ~20s and there is no margin.
+    #[cfg_attr(test, mutants::skip)]
     fn remaining_output(&self, _total_out: u64) -> Option<u64> {
         None
     }
