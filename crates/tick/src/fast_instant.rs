@@ -123,6 +123,6 @@ mod tests {
 
     #[test]
     fn platform_time_can_be_read() {
-        _ = platform_time();
+        assert_ne!(platform_time(), Duration::ZERO);
     }
 }
