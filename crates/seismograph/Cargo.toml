@@ -1,0 +1,34 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "seismograph"
+version = "0.1.0"
+description = "High-performance process telemetry with extensible snapshot sources."
+readme = "README.md"
+keywords = ["telemetry", "diagnostics", "profiling", "performance"]
+categories = ["development-tools::debugging"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/seismograph"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
+
+[features]
+monitor = ["dep:getrandom", "dep:seismograph_protocol"]
+
+[dependencies]
+getrandom = { workspace = true, optional = true }
+seismograph_protocol = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_System_Diagnostics_Debug"] }
+
+[lints]
+workspace = true

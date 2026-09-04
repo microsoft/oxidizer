@@ -6,20 +6,16 @@ use std::cell::UnsafeCell;
 use std::hint::spin_loop;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering, fence};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, AtomicUsize, Ordering, fence};
 use std::{cmp, mem, ptr};
 
-use allocation_hints::backend::RawHint;
-use allocation_hints::heap::general::{AllocationUsage, Options as GeneralOptions, Usage as GeneralHeapUsage};
-use allocation_hints::heap::{Usage as HeapUsage, UsageKind as HeapUsageKind};
-
-use crate::config::{Config, Standard};
+use crate::config::{Config, MAX_SIZE_CLASSES, SizeClassLayout, SizeClassTables, Standard, Tunables, valid_size_classes};
 use crate::hal;
-use crate::hal::{peek_free_requested, read_free_next, read_free_requested, release_free_metadata, write_free_next, write_free_requested};
+use crate::hal::{read_free_next, read_free_requested, release_free_metadata, write_free_next, write_free_requested};
+use crate::heap::HeapTarget;
 use crate::heap::bump::{self, BumpState};
-use crate::heap::{HeapTarget, target_from_hint};
-use crate::telemetry::{self as tracking, HeapKind as TrackingHeapKind, PendingTracking, TrackingAllocation, TrackingState};
-use crate::tunables::{MAX_SIZE_CLASSES, SizeClassLayout, SizeClassTables, Tunables, valid_size_classes};
+use crate::heap::general::Options as GeneralOptions;
+use crate::telemetry::{self as tracking, HeapKind as TrackingHeapKind, PendingTracking, TrackingAllocation};
 #[cfg(feature = "tuning-telemetry")]
 use crate::tuning_telemetry::{self, ClassEvent, MediumEvent};
 
@@ -38,9 +34,8 @@ const MAX_MEDIUM_ALIGNMENT: usize = 64 * 1024;
 const DIRECT_SLAB_SEGMENT: u16 = u16::MAX;
 const RETIRED_REMOTE_SENTINEL: *mut u8 = ptr::without_provenance_mut(1);
 const REMOTE_SLAB_SENTINEL: usize = usize::MAX;
-const OPERATION_INSPECTING: usize = 1 << (usize::BITS - 1);
-const OPERATION_RETIRED: usize = 1 << (usize::BITS - 2);
-const OPERATION_FLAGS: usize = OPERATION_INSPECTING | OPERATION_RETIRED;
+const OPERATION_RETIRED: usize = 1 << (usize::BITS - 1);
+const OPERATION_FLAGS: usize = OPERATION_RETIRED;
 const DIRECT_TAG: usize = 15;
 const CONTEXT_TAG: usize = 14;
 const TAG_MASK: usize = 15;
@@ -55,6 +50,11 @@ const PHYSICAL_KIND_MASK: usize = 0xff;
 const PHYSICAL_SPAN_SHIFT: usize = 8;
 const PHYSICAL_SEGMENT_CONTEXT: usize = 1 << (usize::BITS - 1);
 const RECYCLED_BITMAP_WORDS: usize = SLAB_SIZE / 16 / 64;
+const PASSIVE_ATTACHMENT_CACHE_LEN: usize = 8;
+const AGGREGATE_BATCH_OPERATIONS: usize = 256;
+const AGGREGATE_ALLOCATION_COUNT_SHIFT: u32 = 9;
+const AGGREGATE_ALLOCATION_COUNT_INCREMENT: usize = 1 << AGGREGATE_ALLOCATION_COUNT_SHIFT;
+const AGGREGATE_OPERATION_COUNT_MASK: usize = AGGREGATE_ALLOCATION_COUNT_INCREMENT - 1;
 
 thread_local! {
     // A separate guard performs cleanup while the storage remains usable by later TLS destructors.
@@ -68,6 +68,12 @@ thread_local! {
     static TEST_FAIL_REMOTE_POP_CAS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     #[cfg(test)]
     static TEST_FAIL_REMOTE_PUSH_CAS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    #[cfg(test)]
+    static TEST_FAIL_REMOTE_POP_LOCK_CAS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    #[cfg(test)]
+    static TEST_FAIL_HEAP_USAGE_CAS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    #[cfg(test)]
+    static TEST_FAIL_PASSIVE_REGISTRATION_CAS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     #[cfg(all(test, not(miri)))]
     static TEST_FAIL_REMOTE_REFILL_CAS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     #[cfg(all(test, not(miri)))]
@@ -79,9 +85,7 @@ thread_local! {
 
 /// A global allocator with thread-local general-purpose size-class slabs.
 ///
-/// Aggregate allocation statistics are disabled by default so the normal
-/// allocation path contains no atomic operations. Define a [`crate::config!`]
-/// with `track_aggregates: true` when those counters are required.
+/// Process-wide allocation totals are retained in batched thread-local counters.
 pub struct Rallocator<C = Standard>
 where
     C: Config + Send + Sync + 'static,
@@ -90,10 +94,61 @@ where
 {
     config: PhantomData<C>,
 }
+static GLOBAL_ALLOCATOR_ACTIVE: AtomicBool = AtomicBool::new(false);
 static DOMAINS: AtomicPtr<DomainState> = AtomicPtr::new(ptr::null_mut());
+static PASSIVE_THREAD_HEAPS: AtomicPtr<RemoteHeapState> = AtomicPtr::new(ptr::null_mut());
 static NEXT_DOMAIN_ID: AtomicUsize = AtomicUsize::new(1);
 static DIRECT_ALLOCATIONS: SpinLock<DirectAllocationState> = SpinLock::new(DirectAllocationState { head: ptr::null_mut() });
 static NEXT_THREAD_TOKEN: AtomicUsize = AtomicUsize::new(1);
+
+/// The macro-installed global allocator wrapper.
+#[doc(hidden)]
+pub struct GlobalRallocator<C = Standard>
+where
+    C: Config + Send + Sync + 'static,
+    C::Tunables: Send + Sync + 'static,
+    ConfigSizeClasses<C>: Send + Sync + 'static,
+{
+    allocator: Rallocator<C>,
+}
+
+impl<C> GlobalRallocator<C>
+where
+    C: Config + Send + Sync + 'static,
+    C::Tunables: Send + Sync + 'static,
+    ConfigSizeClasses<C>: Send + Sync + 'static,
+{
+    /// Creates the macro-installed global allocator wrapper.
+    ///
+    /// # Safety
+    ///
+    /// The process must use one rallocator configuration.
+    #[doc(hidden)]
+    #[must_use]
+    pub const unsafe fn new() -> Self {
+        Self {
+            allocator: unsafe { Rallocator::new() },
+        }
+    }
+}
+
+impl<C> Deref for GlobalRallocator<C>
+where
+    C: Config + Send + Sync + 'static,
+    C::Tunables: Send + Sync + 'static,
+    ConfigSizeClasses<C>: Send + Sync + 'static,
+{
+    type Target = Rallocator<C>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.allocator
+    }
+}
+
+#[cfg(test)]
+pub(crate) const fn ensure_global_allocator_active() -> bool {
+    true
+}
 
 #[cfg(test)]
 fn set_test_cas_barrier(barrier: std::sync::Arc<std::sync::Barrier>) {
@@ -107,6 +162,10 @@ fn wait_at_test_cas_barrier() {
     }
 }
 
+#[cfg(not(test))]
+#[cfg_attr(coverage_nightly, coverage(off))] // Production half of a unit-test synchronization hook.
+const fn wait_at_test_cas_barrier() {}
+
 #[cfg(test)]
 fn fail_next_test_remote_pop_cas() {
     TEST_FAIL_REMOTE_POP_CAS.with(|fail| fail.set(true));
@@ -117,10 +176,99 @@ fn fail_next_test_remote_push_cas() {
     TEST_FAIL_REMOTE_PUSH_CAS.with(|fail| fail.set(true));
 }
 
+#[cfg(test)]
+fn fail_next_test_remote_pop_lock_cas() {
+    TEST_FAIL_REMOTE_POP_LOCK_CAS.with(|fail| fail.set(true));
+}
+
+#[cfg(test)]
+fn fail_next_test_heap_usage_cas() {
+    TEST_FAIL_HEAP_USAGE_CAS.with(|fail| fail.set(true));
+}
+
+#[cfg(test)]
+fn fail_next_test_passive_registration_cas() {
+    TEST_FAIL_PASSIVE_REGISTRATION_CAS.with(|fail| fail.set(true));
+}
+
 #[cfg(all(test, not(miri)))]
 fn force_next_test_remote_refill_contention() {
     TEST_FAIL_REMOTE_REFILL_CAS.with(|fail| fail.set(true));
     TEST_CLEAR_REMOTE_REFILL_AFTER_SPIN.with(|clear| clear.set(true));
+}
+
+#[cfg(all(test, not(miri)))]
+fn test_remote_refill_spin(class: &RemoteClass) {
+    TEST_CLEAR_REMOTE_REFILL_AFTER_SPIN.with(|clear| {
+        if clear.replace(false) {
+            class.refilling.store(false, Ordering::Release);
+        }
+    });
+}
+
+#[cfg(any(not(test), miri))]
+#[cfg_attr(coverage_nightly, coverage(off))] // Production half of a unit-test fault-injection hook.
+const fn test_remote_refill_spin(_: &RemoteClass) {}
+
+#[cfg(test)]
+fn compare_heap_usage_operation(retirement: &RetirementState, state: usize) -> Result<usize, usize> {
+    TEST_FAIL_HEAP_USAGE_CAS.with(|fail| {
+        if fail.replace(false) {
+            Err(retirement.operations.load(Ordering::Acquire))
+        } else {
+            retirement
+                .operations
+                .compare_exchange_weak(state, state + 1, Ordering::AcqRel, Ordering::Acquire)
+        }
+    })
+}
+
+#[cfg(not(test))]
+fn compare_heap_usage_operation(retirement: &RetirementState, state: usize) -> Result<usize, usize> {
+    retirement
+        .operations
+        .compare_exchange_weak(state, state + 1, Ordering::AcqRel, Ordering::Acquire)
+}
+
+#[cfg(test)]
+fn compare_passive_registration(
+    head: *mut RemoteHeapState,
+    remote: *mut RemoteHeapState,
+) -> Result<*mut RemoteHeapState, *mut RemoteHeapState> {
+    TEST_FAIL_PASSIVE_REGISTRATION_CAS.with(|fail| {
+        if fail.replace(false) {
+            Err(PASSIVE_THREAD_HEAPS.load(Ordering::Acquire))
+        } else {
+            PASSIVE_THREAD_HEAPS.compare_exchange_weak(head, remote, Ordering::Release, Ordering::Acquire)
+        }
+    })
+}
+
+#[cfg(not(test))]
+fn compare_passive_registration(
+    head: *mut RemoteHeapState,
+    remote: *mut RemoteHeapState,
+) -> Result<*mut RemoteHeapState, *mut RemoteHeapState> {
+    PASSIVE_THREAD_HEAPS.compare_exchange_weak(head, remote, Ordering::Release, Ordering::Acquire)
+}
+
+#[cfg(test)]
+fn acquire_remote_pop_lock(class: &RemoteClass) -> bool {
+    TEST_FAIL_REMOTE_POP_LOCK_CAS.with(|fail| {
+        !fail.replace(false)
+            && class
+                .popping
+                .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+                .is_ok()
+    })
+}
+
+#[cfg(not(test))]
+fn acquire_remote_pop_lock(class: &RemoteClass) -> bool {
+    class
+        .popping
+        .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+        .is_ok()
 }
 
 #[repr(C, align(16))]
@@ -143,15 +291,57 @@ struct ThreadState {
     token: usize,
     default_heap: *mut ReusableHeapState,
     remote_heap: *mut RemoteHeapState,
-    tracking_session: usize,
-    tracking_log: *const TrackingState,
-    tracking_identity_registered: bool,
     in_tracking: bool,
-    active_heap: *mut ReusableHeapState,
-    active_bump: *mut BumpState,
-    active_remote: *mut RemoteHeapState,
+    aggregate_allocated_bytes: usize,
+    aggregate_deallocated_bytes: usize,
+    aggregate_counts: usize,
+    passive_hint_id: u64,
+    passive_heap: *mut ReusableHeapState,
+    passive_bump: *mut BumpState,
+    passive_remote: *mut RemoteHeapState,
+    passive_attachments: [PassiveAttachment; PASSIVE_ATTACHMENT_CACHE_LEN],
+    passive_attachment_len: usize,
     bump_pool: [*mut BumpState; 4],
     bump_pool_len: usize,
+    aggregate_shard: *const tracking::AggregateShard,
+    aggregate_size_classes: [PendingSizeClassAggregate; MAX_SIZE_CLASSES],
+    aggregate_size_class_dirty: u64,
+}
+
+#[derive(Clone, Copy)]
+struct PendingSizeClassAggregate {
+    block_bytes: usize,
+    allocations: u16,
+    deallocations: u16,
+    allocated_bytes: usize,
+    deallocated_bytes: usize,
+}
+
+impl PendingSizeClassAggregate {
+    const EMPTY: Self = Self {
+        block_bytes: 0,
+        allocations: 0,
+        deallocations: 0,
+        allocated_bytes: 0,
+        deallocated_bytes: 0,
+    };
+}
+
+#[derive(Clone, Copy)]
+struct PassiveAttachment {
+    id: u64,
+    heap: *mut ReusableHeapState,
+    bump: *mut BumpState,
+    remote: *mut RemoteHeapState,
+}
+
+impl PassiveAttachment {
+    const EMPTY: Self = Self {
+        id: 0,
+        heap: ptr::null_mut(),
+        bump: ptr::null_mut(),
+        remote: ptr::null_mut(),
+    };
 }
 
 struct ThreadStateGuard;
@@ -171,7 +361,6 @@ pub(crate) struct ReusableHeapState {
     owner: *mut OwnerState,
     segments: *mut SlabHeader,
     locality_segment: *mut SlabHeader,
-    track_aggregates: bool,
     retirable: bool,
     owner_storage: OwnerStorage,
 }
@@ -210,26 +399,15 @@ struct OwnerStorage {
 
 #[repr(C, align(64))]
 pub(crate) struct RemoteHeapState {
+    passive_thread_id: AtomicU64,
+    passive_next: AtomicPtr<Self>,
     owner: *mut OwnerState,
     embedded_owner: OwnerState,
     owner_token: AtomicUsize,
     owner_heap: AtomicPtr<ReusableHeapState>,
     pub(crate) domain: *mut DomainState,
-    options: GeneralOptions,
-    usage: RemoteUsage,
     classes: [RemoteClass; MAX_SIZE_CLASSES],
     context_classes: [RemoteClass; MAX_SIZE_CLASSES],
-}
-
-struct RemoteUsage {
-    operations: AtomicUsize,
-    live_allocations: AtomicUsize,
-    requested_bytes: AtomicUsize,
-    usable_bytes: AtomicUsize,
-    reserved_bytes: AtomicUsize,
-    committed_bytes: AtomicUsize,
-    slab_count: AtomicUsize,
-    slice_count: AtomicUsize,
 }
 
 struct RemoteClass {
@@ -271,9 +449,8 @@ struct RetiredSliceState {
     state: *mut Self,
     ready: AtomicBool,
     released: AtomicBool,
-    track_aggregates: bool,
     direct_mapping: bool,
-    state_padding: [u8; 4],
+    state_padding: [u8; 5],
     committed_bytes: usize,
     release_bytes: usize,
 }
@@ -332,6 +509,8 @@ struct MediumAllocationMeta {
     owner: AtomicPtr<ReusableHeapState>,
     requested_bytes: AtomicUsize,
     usable_bytes: AtomicUsize,
+    tracking_allocation_id: AtomicUsize,
+    tracking_session_id: AtomicU64,
 }
 
 #[derive(Clone, Copy)]
@@ -383,6 +562,8 @@ impl MediumAllocationMeta {
             owner: AtomicPtr::new(ptr::null_mut()),
             requested_bytes: AtomicUsize::new(0),
             usable_bytes: AtomicUsize::new(0),
+            tracking_allocation_id: AtomicUsize::new(0),
+            tracking_session_id: AtomicU64::new(0),
         }
     }
 }
@@ -415,26 +596,12 @@ struct SpinLockGuard<'a, T> {
     lock: &'a SpinLock<T>,
 }
 
-struct UsageInspectionGuard {
-    retirement: *const RetirementState,
-    remote: *mut RemoteHeapState,
-}
-
 struct HeapOperationGuard {
     retirement: *mut RetirementState,
 }
 
 struct ExternalAllocationReleaseGuard {
     retirement: *mut RetirementState,
-}
-
-impl Drop for UsageInspectionGuard {
-    fn drop(&mut self) {
-        if !self.remote.is_null() {
-            unsafe { (*self.remote).usage.operations.store(0, Ordering::Release) };
-        }
-        unsafe { (*self.retirement).operations.store(0, Ordering::Release) };
-    }
 }
 
 impl HeapOperationGuard {
@@ -472,7 +639,6 @@ enum FastAllocationKind {
     Context,
     Medium,
     Direct,
-    Bump,
 }
 
 const EXTRA_SIZE: usize = size_of::<ExtraHeader>();
@@ -485,6 +651,14 @@ const _: () = assert!(std::mem::offset_of!(RetiredSliceState, state) == 24);
 const _: () = assert!(std::mem::offset_of!(RetiredSliceState, ready) == 32);
 const _: () = assert!(std::mem::offset_of!(RetiredSliceState, committed_bytes) == 40);
 const _: () = assert!(std::mem::offset_of!(SpinLock<MediumState>, value) == 64);
+const _: () = assert!(
+    std::mem::offset_of!(ThreadState, aggregate_allocated_bytes) / 64
+        == std::mem::offset_of!(ThreadState, aggregate_deallocated_bytes) / 64
+);
+const _: () =
+    assert!(std::mem::offset_of!(ThreadState, aggregate_allocated_bytes) / 64 == std::mem::offset_of!(ThreadState, aggregate_counts) / 64);
+const _: () =
+    assert!(std::mem::offset_of!(ThreadState, aggregate_allocated_bytes) / 64 == std::mem::offset_of!(ThreadState, default_heap) / 64);
 
 impl ThreadState {
     const fn new() -> Self {
@@ -494,26 +668,33 @@ impl ThreadState {
             token: 0,
             default_heap: ptr::null_mut(),
             remote_heap: ptr::null_mut(),
-            tracking_session: 0,
-            tracking_log: ptr::null(),
-            tracking_identity_registered: false,
             in_tracking: false,
-            active_heap: ptr::null_mut(),
-            active_bump: ptr::null_mut(),
-            active_remote: ptr::null_mut(),
+            aggregate_allocated_bytes: 0,
+            aggregate_deallocated_bytes: 0,
+            aggregate_counts: 0,
+            passive_hint_id: 0,
+            passive_heap: ptr::null_mut(),
+            passive_bump: ptr::null_mut(),
+            passive_remote: ptr::null_mut(),
+            passive_attachments: [PassiveAttachment::EMPTY; PASSIVE_ATTACHMENT_CACHE_LEN],
+            passive_attachment_len: 0,
             bump_pool: [ptr::null_mut(); 4],
             bump_pool_len: 0,
+            aggregate_shard: ptr::null(),
+            aggregate_size_classes: [PendingSizeClassAggregate::EMPTY; MAX_SIZE_CLASSES],
+            aggregate_size_class_dirty: 0,
         }
     }
 
     unsafe fn cleanup(state: *mut Self) {
-        debug_assert!(unsafe { (*state).active_heap.is_null() });
-        debug_assert!(unsafe { (*state).active_bump.is_null() });
-        debug_assert!(unsafe { (*state).active_remote.is_null() });
-        let tracking_log = unsafe { (*state).tracking_log };
-        unsafe { (*state).tracking_log = ptr::null() };
-        unsafe { tracking::release_thread_log(tracking_log) };
-
+        unsafe { detach_passive_hint(state) };
+        while unsafe { (*state).passive_attachment_len != 0 } {
+            unsafe { (*state).passive_attachment_len -= 1 };
+            let index = unsafe { (*state).passive_attachment_len };
+            let attachment = unsafe { (*state).passive_attachments[index] };
+            unsafe { (*state).passive_attachments[index] = PassiveAttachment::EMPTY };
+            unsafe { release_passive_attachment(attachment) };
+        }
         while unsafe { (*state).bump_pool_len != 0 } {
             unsafe { (*state).bump_pool_len -= 1 };
             let index = unsafe { (*state).bump_pool_len };
@@ -543,6 +724,7 @@ impl Drop for ThreadStateGuard {
         THREAD_STATE.with(|storage| {
             let state = storage.get().cast::<ThreadState>();
             unsafe {
+                flush_aggregate_batch(state);
                 (*state).tearing_down = true;
                 ThreadState::cleanup(state);
             }
@@ -556,21 +738,6 @@ impl RemoteClass {
             blocks: AtomicPtr::new(ptr::null_mut()),
             popping: AtomicBool::new(false),
             refilling: AtomicBool::new(false),
-        }
-    }
-}
-
-impl RemoteUsage {
-    const fn new() -> Self {
-        Self {
-            operations: AtomicUsize::new(0),
-            live_allocations: AtomicUsize::new(0),
-            requested_bytes: AtomicUsize::new(0),
-            usable_bytes: AtomicUsize::new(0),
-            reserved_bytes: AtomicUsize::new(0),
-            committed_bytes: AtomicUsize::new(0),
-            slab_count: AtomicUsize::new(0),
-            slice_count: AtomicUsize::new(0),
         }
     }
 }
@@ -622,7 +789,6 @@ impl ReusableHeapState {
             owner: ptr::null_mut(),
             segments: ptr::null_mut(),
             locality_segment: ptr::null_mut(),
-            track_aggregates: false,
             retirable: false,
             owner_storage: OwnerStorage::new(),
         }
@@ -777,21 +943,15 @@ where
         C::Tunables::PARTIAL_SLAB_SCAN_LIMIT != 0 && valid_size_classes(ConfigSizeClasses::<C>::SIZES),
         "invalid allocator tunables"
     );
-    const VALIDATE_CONFIG: () = tracking::validate_config::<C>();
-
     /// Creates an allocator handle for the process-global allocator state.
     ///
     /// # Safety
     ///
-    /// Every `Rallocator` used in the process must use identical tunables and
-    /// caller-tracking configuration because those options affect allocation
-    /// representation. `TRACK_AGGREGATES` may differ because aggregate counters
-    /// do not alter shared allocator state. Prefer [`crate::rallocator!`] for
-    /// the global allocator.
+    /// Every `Rallocator` used in the process must use identical tunables.
+    /// Prefer [`crate::rallocator!`] for the global allocator.
     #[must_use]
     pub const unsafe fn new() -> Self {
         let () = Self::VALIDATE_TUNABLES;
-        let () = Self::VALIDATE_CONFIG;
         Self { config: PhantomData }
     }
 
@@ -827,8 +987,7 @@ where
 
     #[cold]
     #[inline(never)]
-    fn pop_or_refill_remote(&self, remote: *mut RemoteHeapState, class_index: usize, context: bool, requested_bytes: usize) -> *mut u8 {
-        unsafe { begin_remote_usage_operation(remote) };
+    fn pop_or_refill_remote(&self, remote: *mut RemoteHeapState, class_index: usize, context: bool, _requested_bytes: usize) -> *mut u8 {
         let class = unsafe {
             if context {
                 (*remote).context_classes.get_unchecked(class_index)
@@ -839,10 +998,6 @@ where
         loop {
             let block = unsafe { pop_remote_block(class) };
             if !block.is_null() {
-                unsafe {
-                    record_remote_small_allocation(remote, requested_bytes, ConfigSizeClasses::<C>::SIZES[class_index]);
-                    end_remote_usage_operation(remote);
-                }
                 record_class_event(class_index, ClassEventKind::Allocation);
                 return block;
             }
@@ -860,12 +1015,7 @@ where
             if refill.is_err() {
                 while class.refilling.load(Ordering::Acquire) {
                     spin_loop();
-                    #[cfg(all(test, not(miri)))]
-                    TEST_CLEAR_REMOTE_REFILL_AFTER_SPIN.with(|clear| {
-                        if clear.replace(false) {
-                            class.refilling.store(false, Ordering::Release);
-                        }
-                    });
+                    test_remote_refill_spin(class);
                 }
                 continue;
             }
@@ -877,18 +1027,11 @@ where
                     unsafe { regions.release_slices(slice, 1) };
                 }
                 class.refilling.store(false, Ordering::Release);
-                unsafe { end_remote_usage_operation(remote) };
                 return ptr::null_mut();
             }
 
             let marker = if context { CONTEXT_SLAB_MARKER } else { SLAB_MARKER };
             self.record_mapping(MEDIUM_SLICE_SIZE);
-            unsafe {
-                (*remote).usage.reserved_bytes.fetch_add(MEDIUM_SLICE_SIZE, Ordering::Relaxed);
-                (*remote).usage.committed_bytes.fetch_add(MEDIUM_SLICE_SIZE, Ordering::Relaxed);
-                (*remote).usage.slab_count.fetch_add(2, Ordering::Relaxed);
-                (*remote).usage.slice_count.fetch_add(1, Ordering::Relaxed);
-            }
             unsafe {
                 self.initialize_remote_slab(slice, class_index, (*remote).owner, marker, class);
                 self.initialize_remote_slab(slice.add(SLAB_SIZE), class_index, (*remote).owner, marker, class);
@@ -936,7 +1079,7 @@ where
             marker == CONTEXT_SLAB_MARKER,
             owner,
             block_count - first_block,
-            C::TRACK_AGGREGATES,
+            false,
         );
         for block_index in first_block..block_count {
             let block = unsafe { slab.add(block_index * block_size) };
@@ -998,7 +1141,7 @@ where
             marker == CONTEXT_SLAB_MARKER,
             slab_owner,
             block_count - first_block,
-            C::TRACK_AGGREGATES,
+            false,
         );
         if state.owner.is_null() {
             state.owner = slab_owner;
@@ -1019,7 +1162,6 @@ where
     }
 
     fn allocate_slab(&self, heap: &mut ReusableHeapState) -> SlabAllocation {
-        heap.track_aggregates = C::TRACK_AGGREGATES;
         if heap.locality_next.addr() < heap.locality_end.addr() {
             let slab = heap.locality_next;
             let Some(committed_bytes) = (unsafe { hal::commit_locality_slab(slab, SLAB_SIZE) }) else {
@@ -1082,12 +1224,11 @@ where
 
     #[cold]
     #[inline(never)]
-    fn allocate_medium(&self, layout: Layout, heap: &mut ReusableHeapState) -> *mut u8 {
+    fn allocate_medium(&self, layout: Layout, heap: &mut ReusableHeapState, mut tracking: Option<PendingTracking>) -> *mut u8 {
         let Some(slice_count) = medium_slice_count(layout) else {
             return ptr::null_mut();
         };
         let span_size = slice_count * MEDIUM_SLICE_SIZE;
-        heap.track_aggregates = C::TRACK_AGGREGATES;
         if span_size <= heap.medium_cache_max_bytes
             && let Some(cache_index) = local_medium_class(slice_count)
         {
@@ -1095,7 +1236,7 @@ where
             if !cached.is_null() {
                 let address = *cached;
                 *cached = ptr::null_mut();
-                unsafe { register_medium_allocation(address, layout, heap) };
+                unsafe { register_medium_allocation(address, layout, heap, tracking.take()) };
                 self.record_allocation(layout.size());
                 record_medium_event(MediumEventKind::TlsCacheHit, 1);
                 return address;
@@ -1121,7 +1262,7 @@ where
                 unsafe { take_large_extent(region, slice_count) }.unwrap_or(ptr::null_mut())
             };
             if !cached.is_null() {
-                unsafe { register_medium_allocation(cached, layout, heap) };
+                unsafe { register_medium_allocation(cached, layout, heap, tracking.take()) };
                 self.record_allocation(layout.size());
                 record_medium_event(MediumEventKind::GlobalCacheHit, 1);
                 return cached;
@@ -1140,7 +1281,7 @@ where
             unsafe { mark_slices(&mut (*region).used, slice_index, slice_count, false) };
             return ptr::null_mut();
         }
-        unsafe { register_medium_allocation(address, layout, heap) };
+        unsafe { register_medium_allocation(address, layout, heap, tracking) };
         self.record_mapping(span_size);
         self.record_allocation(layout.size());
         record_medium_event(MediumEventKind::FreshCommit, 1);
@@ -1155,9 +1296,10 @@ where
         };
         let span_size = slice_count * MEDIUM_SLICE_SIZE;
         let mut address = address;
-        let (owner, owner_retirable, coordination, operation) = unsafe { unregister_medium_allocation(address, heap) };
+        let (owner, owner_retirable, coordination, operation, tracking_allocation) = unsafe { unregister_medium_allocation(address, heap) };
         let _operation = operation;
         let _external_release = ExternalAllocationReleaseGuard::new(coordination, owner_retirable);
+        tracking::record_deallocation(tracking_allocation, address, layout, false);
         let cache_locally = !heap.is_null() && ptr::eq(owner, heap) && span_size <= unsafe { (*heap).medium_cache_max_bytes };
         if cache_locally && let Some(cache_index) = local_medium_class(slice_count) {
             let cached = unsafe { (*heap).medium_cache.get_unchecked_mut(cache_index) };
@@ -1392,9 +1534,8 @@ where
         if remote.is_null() {
             unsafe { record_small_allocation::<C::Tunables>(block, class_index, layout.size(), remote) };
         }
-        if C::TRACK_AGGREGATES {
-            record_physical_small_allocation(block);
-            tracking::record_small_allocation(class_index, block_size, layout.size());
+        if !unsafe { (*state).in_tracking } {
+            unsafe { record_aggregate_allocation(state, class_index, block_size, layout.size()) };
         }
         user_address
     }
@@ -1421,9 +1562,8 @@ where
         let extra = unsafe { *extra };
         tracking::record_deallocation(extra.tracking, address, layout, false);
         let block = unsafe { address.sub(context_user_offset(layout.align())) };
-        if C::TRACK_AGGREGATES {
-            record_physical_small_deallocation(block);
-            tracking::record_small_deallocation(extra.class_index, layout.size());
+        if !unsafe { (*state).in_tracking } {
+            unsafe { record_aggregate_deallocation(state, extra.class_index, extra.usable_bytes, layout.size()) };
         }
         unsafe { push_context_block::<C::Tunables>(block, extra.class_index, layout.size(), state) };
     }
@@ -1541,29 +1681,21 @@ where
     }
 
     fn record_mapping(&self, size: usize) {
-        if C::TRACK_AGGREGATES {
-            tracking::record_mapping(size);
-        }
+        tracking::record_mapping(size);
     }
 
     fn record_unmapping(&self, size: usize) {
-        if C::TRACK_AGGREGATES {
-            tracking::record_unmapping(size);
-        }
+        tracking::record_unmapping(size);
     }
 
     #[inline(always)]
     fn record_allocation(&self, size: usize) {
-        if C::TRACK_AGGREGATES {
-            tracking::record_allocation(size);
-        }
+        tracking::record_allocation(size);
     }
 
     #[inline(always)]
     fn record_deallocation(&self, size: usize) {
-        if C::TRACK_AGGREGATES {
-            tracking::record_deallocation_stats(size);
-        }
+        tracking::record_deallocation_stats(size);
     }
 
     #[inline(always)]
@@ -1578,12 +1710,8 @@ where
     unsafe fn deallocate_bump(&self, address: *mut u8, layout: Layout, state: *mut BumpState) {
         self.record_deallocation(layout.size());
         let thread = unsafe { thread_state() };
-        let reclaim_tail = unsafe { (*thread).active_bump == state };
-        if C::TRACK_CALLERS {
-            unsafe { bump::deallocate_tracked(state, address, layout, reclaim_tail) };
-        } else {
-            unsafe { bump::deallocate(state, address, layout, reclaim_tail) };
-        }
+        let reclaim_tail = unsafe { current_active_bump(thread) == state };
+        unsafe { bump::deallocate_tracked(state, address, layout, reclaim_tail) };
     }
 }
 
@@ -1594,17 +1722,19 @@ where
     ConfigSizeClasses<C>: Send + Sync + 'static,
 {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let tracking = if C::TRACK_CALLERS {
-            tracking::begin_allocation::<C>()
-        } else {
-            None
-        };
-        let state = unsafe { thread_state() };
+        GLOBAL_ALLOCATOR_ACTIVE.store(true, Ordering::Release);
+        let state = unsafe { allocation_thread_state() };
         if unsafe { (*state).tearing_down } {
             return unsafe { self.allocate_direct(layout, false, None, ptr::null_mut()) };
         }
-        if C::TRACK_CALLERS && !unsafe { (*state).active_bump }.is_null() {
-            let bump = unsafe { (*state).active_bump };
+        let hints = allocation_hints::allocator_hints();
+        unsafe { register_passive_thread_heap(state, hints.thread_heap()) };
+        unsafe { synchronize_passive_hint(state, true, hints.active()) };
+        let tracking = tracking::begin_allocation();
+        let active_bump = unsafe { current_active_bump(state) };
+
+        if !active_bump.is_null() {
+            let bump = active_bump;
             let address = unsafe { bump::allocate_tracked(bump, layout) };
             if !address.is_null() {
                 let allocation = if let Some(tracking) = tracking {
@@ -1623,51 +1753,30 @@ where
                 return ptr::null_mut();
             }
             let remote = unsafe { current_remote_heap(state) };
-            if tracking.is_some() {
+            if let Some(class_index) = default_class::<C::Tunables>(layout) {
                 FastAllocation {
-                    block: ptr::null_mut(),
-                    kind: FastAllocationKind::Context,
-                }
-            } else if !C::TRACK_CALLERS && !unsafe { (*state).active_bump }.is_null() {
-                let block = unsafe { bump::allocate((*state).active_bump, layout) };
-                if !block.is_null() {
-                    FastAllocation {
-                        block,
-                        kind: FastAllocationKind::Bump,
-                    }
-                } else if let Some(class_index) = default_class::<C::Tunables>(layout) {
-                    FastAllocation {
-                        block: if remote.is_null() {
-                            self.pop_or_refill(class_index, unsafe { &mut *heap })
-                        } else {
-                            self.pop_or_refill_remote(remote, class_index, false, layout.size())
-                        },
-                        kind: FastAllocationKind::Small(class_index),
-                    }
-                } else if medium_slice_count(layout).is_some() {
-                    FastAllocation {
-                        block: ptr::null_mut(),
-                        kind: FastAllocationKind::Medium,
-                    }
-                } else {
-                    FastAllocation {
-                        block: ptr::null_mut(),
-                        kind: FastAllocationKind::Direct,
-                    }
-                }
-            } else if let Some(class_index) = default_class::<C::Tunables>(layout) {
-                FastAllocation {
-                    block: if remote.is_null() {
+                    block: if tracking.is_some() {
+                        ptr::null_mut()
+                    } else if remote.is_null() {
                         self.pop_or_refill(class_index, unsafe { &mut *heap })
                     } else {
                         self.pop_or_refill_remote(remote, class_index, false, layout.size())
                     },
-                    kind: FastAllocationKind::Small(class_index),
+                    kind: if tracking.is_some() {
+                        FastAllocationKind::Context
+                    } else {
+                        FastAllocationKind::Small(class_index)
+                    },
                 }
             } else if medium_slice_count(layout).is_some() {
                 FastAllocation {
                     block: ptr::null_mut(),
                     kind: FastAllocationKind::Medium,
+                }
+            } else if tracking.is_some() {
+                FastAllocation {
+                    block: ptr::null_mut(),
+                    kind: FastAllocationKind::Context,
                 }
             } else {
                 FastAllocation {
@@ -1679,17 +1788,13 @@ where
 
         let class_index = match allocation.kind {
             FastAllocationKind::Context => return unsafe { self.allocate_with_context(layout, tracking, state) },
-            FastAllocationKind::Bump => {
-                self.record_allocation(layout.size());
-                return allocation.block;
-            }
             FastAllocationKind::Medium => {
                 let heap = unsafe { &mut *current_reusable_heap(state) };
-                let address = self.allocate_medium(layout, heap);
+                let address = self.allocate_medium(layout, heap, tracking);
                 if !address.is_null() {
                     return address;
                 }
-                return unsafe { self.allocate_direct(layout, false, None, heap) };
+                return unsafe { self.allocate_direct(layout, tracking.is_some(), tracking, heap) };
             }
             FastAllocationKind::Direct => {
                 let heap = unsafe { current_reusable_heap(state) };
@@ -1706,14 +1811,18 @@ where
         if remote.is_null() {
             unsafe { record_small_allocation::<C::Tunables>(allocation.block, class_index, layout.size(), remote) };
         }
-        if C::TRACK_AGGREGATES {
-            record_physical_small_allocation(allocation.block);
-            tracking::record_small_allocation(class_index, ConfigSizeClasses::<C>::SIZES[class_index], layout.size());
+        if !unsafe { (*state).in_tracking } {
+            unsafe { record_aggregate_allocation(state, class_index, ConfigSizeClasses::<C>::SIZES[class_index], layout.size()) };
         }
         allocation.block
     }
 
     unsafe fn dealloc(&self, address: *mut u8, layout: Layout) {
+        GLOBAL_ALLOCATOR_ACTIVE.store(true, Ordering::Release);
+        let state = unsafe { thread_state() };
+        if !unsafe { (*state).tearing_down } {
+            unsafe { synchronize_passive_hint(state, false, allocation_hints::active_hint()) };
+        }
         let region = region_containing(address);
         let segment = allocation_segment(address);
         // Allocations entering this branch are preceded within their segment by
@@ -1747,9 +1856,8 @@ where
         // Ordinary layouts can still use a direct mapping after a slab fallback. A valid slab
         // marker is therefore required before the address is treated as a small allocation.
         if let Some(class_index) = slab_class_from_marker::<C::Tunables>(marker) {
-            if C::TRACK_AGGREGATES {
-                record_physical_small_deallocation(address);
-                tracking::record_small_deallocation(class_index, layout.size());
+            if !unsafe { (*state).in_tracking } {
+                unsafe { record_aggregate_deallocation(state, class_index, ConfigSizeClasses::<C>::SIZES[class_index], layout.size()) };
             }
             let state = unsafe { thread_state() };
             unsafe { push_block::<C::Tunables>(address, class_index, layout.size(), state) };
@@ -1777,38 +1885,125 @@ where
     }
 }
 
-pub(crate) fn tracking_target<C: Config>(session: usize) -> Option<*const TrackingState> {
-    let state = unsafe { thread_state() };
-    if unsafe { (*state).in_tracking } {
-        return None;
+unsafe impl<C> GlobalAlloc for GlobalRallocator<C>
+where
+    C: Config + Send + Sync + 'static,
+    C::Tunables: Send + Sync + 'static,
+    ConfigSizeClasses<C>: Send + Sync + 'static,
+{
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        if !seismograph::snapshot::snapshot_arena_allocation_suspended() {
+            if let Some(address) = seismograph::snapshot::snapshot_arena_allocate(layout) {
+                return address;
+            }
+            if let Some(address) = tracking::snapshot_arena_allocate(layout) {
+                return address;
+            }
+        }
+        GLOBAL_ALLOCATOR_ACTIVE.store(true, Ordering::Release);
+        unsafe { self.allocator.alloc(layout) }
     }
 
-    if session != unsafe { (*state).tracking_session } {
-        let previous_log = unsafe { (*state).tracking_log };
-        unsafe {
-            (*state).tracking_session = session;
-            (*state).tracking_log = ptr::null();
+    unsafe fn dealloc(&self, address: *mut u8, layout: Layout) {
+        if seismograph::snapshot::snapshot_arena_deallocate(address) {
+            return;
         }
-        let previous = enter_tracking_internal();
-        let _restore = RestoreTrackingInternal(previous);
-        unsafe { tracking::release_thread_log(previous_log) };
-        if session != 0 {
-            unsafe { (*state).tracking_log = tracking::create_thread_log::<C>(session) };
+        if tracking::snapshot_arena_deallocate(address) {
+            return;
         }
+        GLOBAL_ALLOCATOR_ACTIVE.store(true, Ordering::Release);
+        unsafe { self.allocator.dealloc(address, layout) };
     }
+}
 
-    let log = unsafe { (*state).tracking_log };
-    (!log.is_null()).then_some(log)
+#[inline(always)]
+unsafe fn record_aggregate_allocation(state: *mut ThreadState, class_index: usize, block_bytes: usize, size: usize) {
+    // SAFETY: the caller owns this thread's state and class_index came from the
+    // validated allocator size-class table.
+    let class = unsafe { (*state).aggregate_size_classes.get_unchecked_mut(class_index) };
+    class.block_bytes = block_bytes;
+    class.allocations = class.allocations.wrapping_add(1);
+    class.allocated_bytes = class.allocated_bytes.wrapping_add(size);
+    unsafe {
+        (*state).aggregate_size_class_dirty |= 1_u64 << class_index;
+        (*state).aggregate_allocated_bytes = (*state).aggregate_allocated_bytes.wrapping_add(size);
+        (*state).aggregate_counts = (*state).aggregate_counts.wrapping_add(AGGREGATE_ALLOCATION_COUNT_INCREMENT + 1);
+    }
+    if unsafe { (*state).aggregate_counts & AGGREGATE_OPERATION_COUNT_MASK == AGGREGATE_BATCH_OPERATIONS } {
+        unsafe { flush_aggregate_batch(state) };
+    }
+}
+
+#[inline(always)]
+unsafe fn record_aggregate_deallocation(state: *mut ThreadState, class_index: usize, block_bytes: usize, size: usize) {
+    // SAFETY: the caller owns this thread's state and class_index came from the
+    // validated allocator size-class table.
+    let class = unsafe { (*state).aggregate_size_classes.get_unchecked_mut(class_index) };
+    class.block_bytes = block_bytes;
+    class.deallocations = class.deallocations.wrapping_add(1);
+    class.deallocated_bytes = class.deallocated_bytes.wrapping_add(size);
+    unsafe {
+        (*state).aggregate_size_class_dirty |= 1_u64 << class_index;
+        (*state).aggregate_deallocated_bytes = (*state).aggregate_deallocated_bytes.wrapping_add(size);
+        (*state).aggregate_counts += 1;
+    }
+    if unsafe { (*state).aggregate_counts & AGGREGATE_OPERATION_COUNT_MASK == AGGREGATE_BATCH_OPERATIONS } {
+        unsafe { flush_aggregate_batch(state) };
+    }
+}
+
+#[cold]
+#[inline(never)]
+unsafe fn flush_aggregate_batch(state: *mut ThreadState) {
+    let counts = unsafe { (*state).aggregate_counts };
+    let operations = counts & AGGREGATE_OPERATION_COUNT_MASK;
+    if operations == 0 {
+        return;
+    }
+    let allocations = counts >> AGGREGATE_ALLOCATION_COUNT_SHIFT;
+    let deallocations = operations - allocations;
+    if unsafe { (*state).aggregate_shard.is_null() } {
+        unsafe { (*state).aggregate_shard = tracking::aggregate_shard_pointer() };
+    }
+    unsafe {
+        tracking::publish_aggregate_batch(
+            (*state).aggregate_shard,
+            (*state).aggregate_allocated_bytes,
+            (*state).aggregate_deallocated_bytes,
+            allocations,
+            deallocations,
+        );
+        (*state).aggregate_allocated_bytes = 0;
+        (*state).aggregate_deallocated_bytes = 0;
+        (*state).aggregate_counts = 0;
+    }
+    let mut dirty = unsafe { (*state).aggregate_size_class_dirty };
+    while dirty != 0 {
+        let class_index = dirty.trailing_zeros() as usize;
+        // SAFETY: dirty only contains bits set from validated size-class indices.
+        let class = unsafe { (*state).aggregate_size_classes.get_unchecked_mut(class_index) };
+        tracking::publish_size_class_batch(
+            class_index,
+            class.block_bytes,
+            usize::from(class.allocations),
+            usize::from(class.deallocations),
+            class.allocated_bytes,
+            class.deallocated_bytes,
+        );
+        *class = PendingSizeClassAggregate::EMPTY;
+        dirty &= dirty - 1;
+    }
+    unsafe { (*state).aggregate_size_class_dirty = 0 };
 }
 
 pub(crate) fn tracking_thread_token() -> usize {
     let state = unsafe { thread_state() };
-    let token = unsafe { thread_token(state) };
-    if !unsafe { (*state).tracking_identity_registered } {
-        crate::telemetry::register_thread_identity(token);
-        unsafe { (*state).tracking_identity_registered = true };
-    }
-    token
+    unsafe { thread_token(state) }
+}
+
+pub(crate) fn flush_thread_aggregate_batch() {
+    let state = unsafe { thread_state() };
+    unsafe { flush_aggregate_batch(state) };
 }
 
 pub(crate) fn telemetry_region_snapshots() -> Vec<tracking::RegionSnapshot> {
@@ -1926,16 +2121,6 @@ pub(crate) fn telemetry_domain_snapshots() -> Vec<tracking::DomainSnapshot> {
     snapshots
 }
 
-pub(crate) fn invalidate_tracking_cache() {
-    let state = unsafe { thread_state() };
-    let log = unsafe { (*state).tracking_log };
-    unsafe {
-        (*state).tracking_session = usize::MAX;
-        (*state).tracking_log = ptr::null();
-        tracking::release_thread_log(log);
-    }
-}
-
 pub(crate) fn enter_tracking_internal() -> bool {
     let state = unsafe { &mut *thread_state() };
     let previous = state.in_tracking;
@@ -1945,14 +2130,6 @@ pub(crate) fn enter_tracking_internal() -> bool {
 
 pub(crate) fn restore_tracking_internal(previous: bool) {
     unsafe { (*thread_state()).in_tracking = previous };
-}
-
-struct RestoreTrackingInternal(bool);
-
-impl Drop for RestoreTrackingInternal {
-    fn drop(&mut self) {
-        restore_tracking_internal(self.0);
-    }
 }
 
 pub(crate) unsafe fn initialize_general_heap(state: *mut ReusableHeapState) {
@@ -1975,187 +2152,6 @@ unsafe fn initialize_heap_owner(state: *mut ReusableHeapState) {
         (*owner).retirement = retirement;
         (*state).owner = owner;
     }
-}
-
-pub(crate) unsafe fn general_heap_options(state: *mut ReusableHeapState) -> GeneralOptions {
-    unsafe {
-        GeneralOptions::from_values(
-            (*state).locality_segment_slices * MEDIUM_SLICE_SIZE,
-            (*state).medium_cache_max_bytes,
-        )
-    }
-}
-
-pub(crate) unsafe fn thread_heap_options(state: *mut RemoteHeapState) -> GeneralOptions {
-    unsafe { (*state).options }
-}
-
-pub(crate) fn thread_heap_is_active(remote: *mut RemoteHeapState) -> bool {
-    let state = unsafe { thread_state() };
-    unsafe { (*state).active_remote == remote }
-}
-
-pub(crate) unsafe fn thread_heap_usage(remote: *mut RemoteHeapState) -> Result<HeapUsage, ()> {
-    let state = unsafe { thread_state() };
-    if unsafe { (*remote).owner_token.load(Ordering::Acquire) } != unsafe { thread_token(state) } {
-        return Err(());
-    }
-    let owner_heap = unsafe { (*remote).owner_heap.load(Ordering::Acquire) };
-    if owner_heap.is_null() {
-        return Err(());
-    }
-    Ok(unsafe { general_heap_usage(owner_heap, remote) })
-}
-
-pub(crate) unsafe fn general_heap_usage(state: *mut ReusableHeapState, remote: *mut RemoteHeapState) -> HeapUsage {
-    let heap = unsafe { &mut *state };
-    if heap.retirable {
-        unsafe { initialize_heap_owner(ptr::from_mut(heap)) };
-    }
-    let coordination = unsafe { &*(*heap.owner).retirement };
-    acquire_heap_inspection(coordination);
-    if !remote.is_null() {
-        acquire_remote_inspection(unsafe { &(*remote).usage });
-    }
-    let _inspection = UsageInspectionGuard {
-        retirement: coordination,
-        remote,
-    };
-
-    let mut small = AllocationUsage::default();
-    let mut reserved_bytes = 0;
-    let mut committed_bytes = 0;
-    let mut slab_count = 0;
-    let mut slice_count = 0;
-    let mut segment = heap.segments;
-    while !segment.is_null() {
-        let next = unsafe { (*segment).segment_next };
-        let segment_slices = unsafe { (*segment).segment_slices };
-        if segment_slices == DIRECT_SLAB_SEGMENT {
-            reserved_bytes += SLAB_SIZE;
-            committed_bytes += unsafe { (*segment).segment_committed_bytes };
-            slab_count += 1;
-            unsafe { add_slab_usage(heap, segment, &mut small) };
-        } else {
-            let total_slabs = segment_slices as usize * 2;
-            let used_slabs = if segment == heap.locality_segment {
-                (heap.locality_next.addr() - segment.addr()) / SLAB_SIZE
-            } else {
-                total_slabs
-            };
-            reserved_bytes += segment_slices as usize * MEDIUM_SLICE_SIZE;
-            committed_bytes += unsafe { (*segment).segment_committed_bytes };
-            slab_count += used_slabs;
-            slice_count += segment_slices as usize;
-            for slab_index in 0..used_slabs {
-                let slab = unsafe { segment.cast::<u8>().add(slab_index * SLAB_SIZE).cast::<SlabHeader>() };
-                unsafe { add_slab_usage(heap, slab, &mut small) };
-            }
-        }
-        segment = next;
-    }
-
-    let mut cached_medium_bytes = 0;
-    for (index, address) in heap.medium_cache.iter().enumerate() {
-        if !address.is_null() {
-            cached_medium_bytes += (1_usize << index) * MEDIUM_SLICE_SIZE;
-        }
-    }
-    reserved_bytes += cached_medium_bytes;
-    committed_bytes += cached_medium_bytes;
-
-    let mut medium = AllocationUsage::default();
-    let regions = unsafe { domain_regions(heap.domain) };
-    let mut region = regions.regions.load(Ordering::Acquire);
-    while !region.is_null() {
-        for metadata in unsafe { &(*region).allocations } {
-            let encoded_owner = metadata.owner.load(Ordering::Acquire);
-            let (owner, _, _) = unsafe { decode_medium_owner(encoded_owner) };
-            if owner == state {
-                medium.add(
-                    1,
-                    metadata.requested_bytes.load(Ordering::Acquire),
-                    metadata.usable_bytes.load(Ordering::Acquire),
-                );
-            }
-        }
-        region = unsafe { (*region).next.load(Ordering::Acquire) };
-    }
-    reserved_bytes += medium.usable_bytes();
-    committed_bytes += medium.usable_bytes();
-
-    let mut direct = AllocationUsage::default();
-    {
-        let direct_allocations = DIRECT_ALLOCATIONS.lock();
-        let mut current = direct_allocations.head;
-        while !current.is_null() {
-            let (owner, _, _) = decode_heap_owner(unsafe { (*current).owner });
-            if owner == state {
-                direct.add(1, unsafe { (*current).requested_bytes }, unsafe { (*current).usable_bytes });
-                reserved_bytes += unsafe { (*current).mapping_size };
-                committed_bytes += unsafe { (*current).mapping_size };
-            }
-            current = unsafe { (*current).next_direct };
-        }
-    }
-
-    if !remote.is_null() {
-        let usage = unsafe { &(*remote).usage };
-        small.add(
-            usage.live_allocations.load(Ordering::Relaxed),
-            usage.requested_bytes.load(Ordering::Relaxed),
-            usage.usable_bytes.load(Ordering::Relaxed),
-        );
-        reserved_bytes += usage.reserved_bytes.load(Ordering::Relaxed);
-        committed_bytes += usage.committed_bytes.load(Ordering::Relaxed);
-        slab_count += usage.slab_count.load(Ordering::Relaxed);
-        slice_count += usage.slice_count.load(Ordering::Relaxed);
-    }
-
-    let live_allocations = small.live_allocations() + medium.live_allocations() + direct.live_allocations();
-    let live_requested_bytes = small.requested_bytes() + medium.requested_bytes() + direct.requested_bytes();
-    let live_usable_bytes = small.usable_bytes() + medium.usable_bytes() + direct.usable_bytes();
-    HeapUsage::new(
-        live_allocations,
-        live_requested_bytes,
-        live_usable_bytes,
-        reserved_bytes,
-        committed_bytes,
-        HeapUsageKind::General(GeneralHeapUsage::new(
-            small,
-            medium,
-            direct,
-            cached_medium_bytes,
-            slab_count,
-            slice_count,
-        )),
-    )
-}
-
-unsafe fn add_slab_usage(heap: &ReusableHeapState, slab: *mut SlabHeader, usage: &mut AllocationUsage) {
-    let mut cached_blocks = 0;
-    for classes in [&heap.classes, &heap.context_classes] {
-        for class in classes {
-            for cached in class.cached {
-                if !cached.is_null() && (cached.addr() & !(SLAB_SIZE - 1)) == slab.addr() {
-                    cached_blocks += 1;
-                }
-            }
-        }
-    }
-
-    let mut remote_blocks = 0;
-    let mut remote_padding_bytes = 0;
-    let mut block = unsafe { (*slab).remote_free.load(Ordering::Acquire) };
-    while !block.is_null() && block != RETIRED_REMOTE_SENTINEL {
-        remote_blocks += 1;
-        remote_padding_bytes += unsafe { peek_free_requested(block) };
-        block = unsafe { read_free_next(block) };
-    }
-    let live_blocks = unsafe { (*slab).usable_blocks as usize - (*slab).free_count - cached_blocks - remote_blocks };
-    let live_usable_bytes = live_blocks * unsafe { (*slab).block_size as usize };
-    let live_padding_bytes = unsafe { (*slab).requested_bytes }.saturating_sub(remote_padding_bytes);
-    usage.add(live_blocks, live_usable_bytes.saturating_sub(live_padding_bytes), live_usable_bytes);
 }
 
 pub(crate) unsafe fn retire_general_heap(state: *mut ReusableHeapState) {
@@ -2190,9 +2186,7 @@ pub(crate) unsafe fn retire_general_heap(state: *mut ReusableHeapState) {
         if decommitted {
             let regions = unsafe { domain_regions(heap.domain) };
             unsafe { regions.release_slices(*cached, slice_count) };
-            if heap.track_aggregates {
-                tracking::record_unmapping(bytes);
-            }
+            tracking::record_unmapping(bytes);
         }
         *cached = ptr::null_mut();
     }
@@ -2202,7 +2196,7 @@ pub(crate) unsafe fn retire_general_heap(state: *mut ReusableHeapState) {
         let next = unsafe { (*segment).segment_next };
         let segment_slices = unsafe { (*segment).segment_slices };
         if segment_slices == DIRECT_SLAB_SEGMENT {
-            if unsafe { prepare_retired_slice(segment, 1, SLAB_SIZE, true, heap.track_aggregates) } {
+            if unsafe { prepare_retired_slice(segment, 1, SLAB_SIZE, true) } {
                 retained += 1;
             }
         } else {
@@ -2218,7 +2212,7 @@ pub(crate) unsafe fn retire_general_heap(state: *mut ReusableHeapState) {
                 let slice = unsafe { segment.cast::<u8>().add(slice_index * MEDIUM_SLICE_SIZE).cast::<SlabHeader>() };
                 let initialized_slabs = used_slabs.saturating_sub(slice_index * 2).min(2);
                 let committed_bytes = committed_slabs.saturating_sub(slice_index * 2).min(2) * SLAB_SIZE;
-                if unsafe { prepare_retired_slice(slice, initialized_slabs, committed_bytes, false, heap.track_aggregates) } {
+                if unsafe { prepare_retired_slice(slice, initialized_slabs, committed_bytes, false) } {
                     retained += 1;
                 }
             }
@@ -2239,13 +2233,7 @@ pub(crate) unsafe fn retire_general_heap(state: *mut ReusableHeapState) {
     }
 }
 
-unsafe fn prepare_retired_slice(
-    slice: *mut SlabHeader,
-    initialized_slabs: usize,
-    committed_bytes: usize,
-    direct_mapping: bool,
-    track_aggregates: bool,
-) -> bool {
+unsafe fn prepare_retired_slice(slice: *mut SlabHeader, initialized_slabs: usize, committed_bytes: usize, direct_mapping: bool) -> bool {
     if initialized_slabs == 0 {
         unsafe {
             release_retired_storage(
@@ -2253,7 +2241,6 @@ unsafe fn prepare_retired_slice(
                 direct_mapping,
                 committed_bytes,
                 if direct_mapping { SLAB_SIZE } else { MEDIUM_SLICE_SIZE },
-                track_aggregates,
             )
         };
         return false;
@@ -2282,7 +2269,6 @@ unsafe fn prepare_retired_slice(
                 direct_mapping,
                 committed_bytes,
                 if direct_mapping { SLAB_SIZE } else { MEDIUM_SLICE_SIZE },
-                track_aggregates,
             )
         };
         return false;
@@ -2294,7 +2280,6 @@ unsafe fn prepare_retired_slice(
             root,
             remaining,
             root,
-            track_aggregates,
             direct_mapping,
             committed_bytes,
             if direct_mapping { SLAB_SIZE } else { MEDIUM_SLICE_SIZE },
@@ -2303,15 +2288,7 @@ unsafe fn prepare_retired_slice(
     if initialized_slabs == 2 {
         let second = unsafe { slice.cast::<u8>().add(SLAB_SIZE).cast::<RetiredSliceState>() };
         unsafe {
-            initialize_retired_slice(
-                second,
-                0,
-                root,
-                track_aggregates,
-                direct_mapping,
-                committed_bytes,
-                MEDIUM_SLICE_SIZE,
-            );
+            initialize_retired_slice(second, 0, root, direct_mapping, committed_bytes, MEDIUM_SLICE_SIZE);
         };
     }
     true
@@ -2321,7 +2298,6 @@ unsafe fn initialize_retired_slice(
     state: *mut RetiredSliceState,
     remaining: usize,
     root: *mut RetiredSliceState,
-    track_aggregates: bool,
     direct_mapping: bool,
     committed_bytes: usize,
     release_bytes: usize,
@@ -2331,9 +2307,8 @@ unsafe fn initialize_retired_slice(
         ptr::addr_of_mut!((*state).state).write(root);
         ptr::addr_of_mut!((*state).ready).write(AtomicBool::new(true));
         ptr::addr_of_mut!((*state).released).write(AtomicBool::new(false));
-        ptr::addr_of_mut!((*state).track_aggregates).write(track_aggregates);
         ptr::addr_of_mut!((*state).direct_mapping).write(direct_mapping);
-        ptr::addr_of_mut!((*state).state_padding).write([0; 4]);
+        ptr::addr_of_mut!((*state).state_padding).write([0; 5]);
         ptr::addr_of_mut!((*state).committed_bytes).write(committed_bytes);
         ptr::addr_of_mut!((*state).release_bytes).write(release_bytes);
     }
@@ -2353,15 +2328,7 @@ unsafe fn release_retired_block(slab: *mut SlabHeader) {
     }
     fence(Ordering::Acquire);
     let owner = unsafe { (*root).owner };
-    let released = unsafe {
-        release_retired_storage(
-            root.cast(),
-            (*root).direct_mapping,
-            (*root).committed_bytes,
-            (*root).release_bytes,
-            (*root).track_aggregates,
-        )
-    };
+    let released = unsafe { release_retired_storage(root.cast(), (*root).direct_mapping, (*root).committed_bytes, (*root).release_bytes) };
     if !released {
         return;
     }
@@ -2377,38 +2344,11 @@ unsafe fn retain_external_allocation(owner: *mut ReusableHeapState) {
     retirement.external_allocations.fetch_add(1, Ordering::Relaxed);
 }
 
-fn acquire_heap_inspection(retirement: &RetirementState) {
-    loop {
-        match retirement
-            .operations
-            .compare_exchange(0, OPERATION_INSPECTING, Ordering::AcqRel, Ordering::Acquire)
-        {
-            Ok(_) => return,
-            Err(state) if state & OPERATION_RETIRED != 0 => {
-                unreachable!("retired heaps cannot be inspected")
-            }
-            Err(_) => spin_loop(),
-        }
-    }
-}
-
 fn acquire_heap_retirement(retirement: &RetirementState) {
     loop {
         match retirement
             .operations
             .compare_exchange(0, OPERATION_RETIRED, Ordering::AcqRel, Ordering::Acquire)
-        {
-            Ok(_) => return,
-            Err(_) => spin_loop(),
-        }
-    }
-}
-
-fn acquire_remote_inspection(usage: &RemoteUsage) {
-    loop {
-        match usage
-            .operations
-            .compare_exchange(0, OPERATION_INSPECTING, Ordering::AcqRel, Ordering::Acquire)
         {
             Ok(_) => return,
             Err(_) => spin_loop(),
@@ -2423,18 +2363,11 @@ unsafe fn begin_heap_usage_operation(retirement: *mut RetirementState) -> bool {
         if state & OPERATION_RETIRED != 0 || retirement.retiring.load(Ordering::Acquire) {
             while !retirement.retirement_ready.load(Ordering::Acquire) {
                 spin_loop();
+                wait_at_test_cas_barrier();
             }
             return false;
         }
-        if state & OPERATION_INSPECTING != 0 {
-            spin_loop();
-            continue;
-        }
-        if retirement
-            .operations
-            .compare_exchange_weak(state, state + 1, Ordering::AcqRel, Ordering::Acquire)
-            .is_ok()
-        {
+        if compare_heap_usage_operation(retirement, state).is_ok() {
             return true;
         }
     }
@@ -2482,13 +2415,7 @@ unsafe fn release_owner_storage(retirement: *const RetirementState) {
     unsafe { hal::release_storage(storage, embedded) };
 }
 
-unsafe fn release_retired_storage(
-    address: *mut u8,
-    direct_mapping: bool,
-    committed_bytes: usize,
-    release_bytes: usize,
-    track_aggregates: bool,
-) -> bool {
+unsafe fn release_retired_storage(address: *mut u8, direct_mapping: bool, committed_bytes: usize, release_bytes: usize) -> bool {
     if direct_mapping {
         unsafe { hal::unmap(address, release_bytes) };
     } else {
@@ -2501,9 +2428,7 @@ unsafe fn release_retired_storage(
         let regions = unsafe { domain_regions((*region).domain) };
         unsafe { regions.release_slices(address, release_bytes / MEDIUM_SLICE_SIZE) };
     }
-    if track_aggregates {
-        tracking::record_unmapping(committed_bytes);
-    }
+    tracking::record_unmapping(committed_bytes);
     true
 }
 
@@ -2520,8 +2445,13 @@ pub(crate) fn take_pooled_bump(domain: *mut DomainState) -> Option<*mut BumpStat
     bump::take_global(domain)
 }
 
+#[cfg(test)]
 pub(crate) fn thread_heap_state() -> Option<*mut RemoteHeapState> {
-    let state = unsafe { &mut *thread_state() };
+    unsafe { thread_heap_state_for(thread_state()) }
+}
+
+unsafe fn thread_heap_state_for(state: *mut ThreadState) -> Option<*mut RemoteHeapState> {
+    let state = unsafe { &mut *state };
     let default_heap = unsafe { ensure_default_heap(ptr::from_mut(state)) };
     if default_heap.is_null() {
         return None;
@@ -2534,13 +2464,13 @@ pub(crate) fn thread_heap_state() -> Option<*mut RemoteHeapState> {
         }
         unsafe {
             remote.write(RemoteHeapState {
+                passive_thread_id: AtomicU64::new(0),
+                passive_next: AtomicPtr::new(ptr::null_mut()),
                 owner: ptr::null_mut(),
                 embedded_owner: OwnerState::new(),
                 owner_token: AtomicUsize::new(thread_token(state)),
                 owner_heap: AtomicPtr::new(default_heap),
                 domain: (*default_heap).domain,
-                options: general_heap_options(default_heap),
-                usage: RemoteUsage::new(),
                 classes: [const { RemoteClass::new() }; MAX_SIZE_CLASSES],
                 context_classes: [const { RemoteClass::new() }; MAX_SIZE_CLASSES],
             });
@@ -2552,6 +2482,46 @@ pub(crate) fn thread_heap_state() -> Option<*mut RemoteHeapState> {
         state.remote_heap = remote;
     }
     Some(state.remote_heap)
+}
+
+unsafe fn register_passive_thread_heap(state: *mut ThreadState, thread_id: Option<allocation_hints::heaps::ThreadId>) {
+    let Some(thread_id) = thread_id else {
+        return;
+    };
+    let existing = unsafe { (*state).remote_heap };
+    let registered = if existing.is_null() {
+        0
+    } else {
+        unsafe { (*existing).passive_thread_id.load(Ordering::Relaxed) }
+    };
+    if registered != 0 {
+        debug_assert_eq!(registered, thread_id.get());
+        return;
+    }
+    let Some(remote) = (unsafe { thread_heap_state_for(state) }) else {
+        return;
+    };
+
+    unsafe { (*remote).passive_thread_id.store(thread_id.get(), Ordering::Relaxed) };
+    let mut head = PASSIVE_THREAD_HEAPS.load(Ordering::Acquire);
+    loop {
+        unsafe { (*remote).passive_next.store(head, Ordering::Relaxed) };
+        match compare_passive_registration(head, remote) {
+            Ok(_) => return,
+            Err(observed) => head = observed,
+        }
+    }
+}
+
+pub(crate) fn passive_thread_heap(thread_id: allocation_hints::heaps::ThreadId) -> Option<*mut RemoteHeapState> {
+    let mut remote = PASSIVE_THREAD_HEAPS.load(Ordering::Acquire);
+    while !remote.is_null() {
+        if unsafe { (*remote).passive_thread_id.load(Ordering::Relaxed) } == thread_id.get() {
+            return Some(remote);
+        }
+        remote = unsafe { (*remote).passive_next.load(Ordering::Relaxed) };
+    }
+    None
 }
 
 pub(crate) fn allocate_bump_chunk(domain: *mut DomainState) -> *mut u8 {
@@ -2605,23 +2575,89 @@ pub(crate) fn return_pooled_bump(bump: *mut BumpState) {
     }
 }
 
-pub(crate) fn hint_thread_context() -> *mut () {
-    unsafe { thread_state().cast() }
+#[inline]
+unsafe fn synchronize_passive_hint(state: *mut ThreadState, attach: bool, hint: Option<allocation_hints::heaps::ActiveHint>) {
+    let requested_id = hint.map_or(0, |hint| hint.id().get());
+    if requested_id == unsafe { (*state).passive_hint_id } {
+        return;
+    }
+
+    unsafe { detach_passive_hint(state) };
+    let Some(hint) = hint.filter(|_| attach) else {
+        return;
+    };
+
+    if unsafe { restore_passive_attachment(state, requested_id) } {
+        return;
+    }
+    let Some(target) = crate::heap::create_passive_hint(hint) else {
+        return;
+    };
+    unsafe { (*state).passive_hint_id = requested_id };
+    match target {
+        HeapTarget::General(heap) => unsafe { (*state).passive_heap = heap.as_ptr() },
+        HeapTarget::Bump(bump) => unsafe {
+            (*state).passive_heap = (*bump.as_ptr()).fallback_heap;
+            (*state).passive_bump = bump.as_ptr();
+        },
+        HeapTarget::Thread(remote) => unsafe { (*state).passive_remote = remote.as_ptr() },
+    }
 }
 
-pub(crate) unsafe fn set_active_hint(thread_context: *mut (), hint: RawHint) {
-    let state = unsafe { &mut *thread_context.cast::<ThreadState>() };
-    state.active_heap = ptr::null_mut();
-    state.active_bump = ptr::null_mut();
-    state.active_remote = ptr::null_mut();
-    match target_from_hint(hint) {
-        Some(HeapTarget::General(heap)) => state.active_heap = heap.as_ptr(),
-        Some(HeapTarget::Bump(bump)) => {
-            state.active_heap = unsafe { (*bump.as_ptr()).fallback_heap };
-            state.active_bump = bump.as_ptr();
+unsafe fn detach_passive_hint(state: *mut ThreadState) {
+    let id = unsafe { (*state).passive_hint_id };
+    let bump = unsafe { (*state).passive_bump };
+    let heap = unsafe { (*state).passive_heap };
+    let remote = unsafe { (*state).passive_remote };
+    unsafe {
+        (*state).passive_hint_id = 0;
+        (*state).passive_heap = ptr::null_mut();
+        (*state).passive_bump = ptr::null_mut();
+        (*state).passive_remote = ptr::null_mut();
+    }
+    if id == 0 {
+        return;
+    }
+    let attachment = PassiveAttachment { id, heap, bump, remote };
+    let len = unsafe { (*state).passive_attachment_len };
+    if len == PASSIVE_ATTACHMENT_CACHE_LEN {
+        let evicted = unsafe { (*state).passive_attachments[0] };
+        unsafe {
+            (*state).passive_attachments.copy_within(1..PASSIVE_ATTACHMENT_CACHE_LEN, 0);
+            (*state).passive_attachments[PASSIVE_ATTACHMENT_CACHE_LEN - 1] = attachment;
+            release_passive_attachment(evicted);
         }
-        Some(HeapTarget::Thread(remote)) => state.active_remote = remote.as_ptr(),
-        None => {}
+    } else {
+        unsafe {
+            (*state).passive_attachments[len] = attachment;
+            (*state).passive_attachment_len = len + 1;
+        }
+    }
+}
+
+unsafe fn restore_passive_attachment(state: *mut ThreadState, id: u64) -> bool {
+    let len = unsafe { (*state).passive_attachment_len };
+    let Some(index) = (0..len).find(|&index| unsafe { (*state).passive_attachments[index].id == id }) else {
+        return false;
+    };
+    let attachment = unsafe { (*state).passive_attachments[index] };
+    unsafe {
+        (*state).passive_attachment_len = len - 1;
+        (*state).passive_attachments[index] = (*state).passive_attachments[len - 1];
+        (*state).passive_attachments[len - 1] = PassiveAttachment::EMPTY;
+        (*state).passive_hint_id = attachment.id;
+        (*state).passive_heap = attachment.heap;
+        (*state).passive_bump = attachment.bump;
+        (*state).passive_remote = attachment.remote;
+    }
+    true
+}
+
+unsafe fn release_passive_attachment(attachment: PassiveAttachment) {
+    if !attachment.bump.is_null() {
+        unsafe { bump::release_handle(attachment.bump) };
+    } else if !attachment.heap.is_null() {
+        unsafe { retire_general_heap(attachment.heap) };
     }
 }
 
@@ -2687,7 +2723,7 @@ fn medium_slice_count(layout: Layout) -> Option<usize> {
     }
 }
 
-unsafe fn register_medium_allocation(address: *mut u8, layout: Layout, heap: &mut ReusableHeapState) {
+unsafe fn register_medium_allocation(address: *mut u8, layout: Layout, heap: &mut ReusableHeapState, tracking: Option<PendingTracking>) {
     if heap.retirable {
         unsafe { initialize_heap_owner(ptr::from_mut(heap)) };
     }
@@ -2697,6 +2733,14 @@ unsafe fn register_medium_allocation(address: *mut u8, layout: Layout, heap: &mu
     let slice_count = medium_slice_count(layout).unwrap();
     metadata.requested_bytes.store(layout.size(), Ordering::Relaxed);
     metadata.usable_bytes.store(slice_count * MEDIUM_SLICE_SIZE, Ordering::Relaxed);
+    let tracking = tracking.map_or(TrackingAllocation::NONE, |tracking| {
+        tracking.commit(address, layout, ptr::from_mut(heap).addr(), TrackingHeapKind::General)
+    });
+    metadata.tracking_allocation_id.store(tracking.allocation_id(), Ordering::Relaxed);
+    metadata.tracking_session_id.store(
+        tracking.recording_session().map_or(0, seismograph::recorder::RecordingSession::get),
+        Ordering::Relaxed,
+    );
     unsafe { retain_external_allocation(heap) };
     let encoded_owner = encode_medium_owner(heap);
     metadata.owner.store(encoded_owner, Ordering::Release);
@@ -2706,7 +2750,13 @@ unsafe fn register_medium_allocation(address: *mut u8, layout: Layout, heap: &mu
 unsafe fn unregister_medium_allocation(
     address: *mut u8,
     current_heap: *mut ReusableHeapState,
-) -> (*mut ReusableHeapState, bool, *mut RetirementState, Option<HeapOperationGuard>) {
+) -> (
+    *mut ReusableHeapState,
+    bool,
+    *mut RetirementState,
+    Option<HeapOperationGuard>,
+    TrackingAllocation,
+) {
     let region = region_containing(address).expect("medium allocation must belong to a region");
     let slice_index = (address.addr() - unsafe { (*region).base.addr() }) / MEDIUM_SLICE_SIZE;
     let metadata = unsafe { &(*region).allocations[slice_index] };
@@ -2727,8 +2777,21 @@ unsafe fn unregister_medium_allocation(
     }
     metadata.requested_bytes.store(0, Ordering::Relaxed);
     metadata.usable_bytes.store(0, Ordering::Relaxed);
+    let tracking_allocation_id = metadata.tracking_allocation_id.swap(0, Ordering::Relaxed);
+    let tracking_session_id = metadata.tracking_session_id.swap(0, Ordering::Relaxed);
     unsafe { &(*region).physical[slice_index] }.owner.store(0, Ordering::Release);
-    (owner, owner_retirable, coordination, operation)
+    (
+        owner,
+        owner_retirable,
+        coordination,
+        operation,
+        TrackingAllocation::from_parts(
+            tracking_allocation_id,
+            seismograph::recorder::RecordingSession::from_raw(tracking_session_id),
+            owner.addr(),
+            TrackingHeapKind::General,
+        ),
+    )
 }
 
 unsafe fn register_direct_allocation(extra: *mut ExtraHeader) {
@@ -2810,29 +2873,6 @@ fn record_small_segment(
     metadata.kind_and_span.store(PHYSICAL_SLICE_SMALL, Ordering::Release);
 }
 
-fn record_physical_small_allocation(address: *mut u8) {
-    update_physical_small_live_blocks(address, true);
-}
-
-fn record_physical_small_deallocation(address: *mut u8) {
-    update_physical_small_live_blocks(address, false);
-}
-
-fn update_physical_small_live_blocks(address: *mut u8, allocate: bool) {
-    let Some(region) = region_containing(address) else {
-        return;
-    };
-    let offset = address.addr() - unsafe { (*region).base.addr() };
-    let slice_index = offset / MEDIUM_SLICE_SIZE;
-    let segment_index = (offset % MEDIUM_SLICE_SIZE) / SLAB_SIZE;
-    let counter = unsafe { &*ptr::addr_of!((*region).physical[slice_index].segment_live_blocks[segment_index]) };
-    if allocate {
-        counter.fetch_add(1, Ordering::Relaxed);
-    } else {
-        counter.fetch_sub(1, Ordering::Relaxed);
-    }
-}
-
 fn record_medium_span(region: *mut RegionState, slice_index: usize, slice_count: usize, owner: *mut ReusableHeapState) {
     let start = unsafe { &(*region).physical[slice_index] };
     start.owner.store(owner.addr(), Ordering::Relaxed);
@@ -2901,68 +2941,8 @@ unsafe fn decode_medium_owner(encoded: *mut ReusableHeapState) -> (*mut Reusable
 unsafe fn record_small_allocation<T: Tunables>(block: *mut u8, class_index: usize, requested_bytes: usize, remote: *mut RemoteHeapState) {
     let padding_bytes = T::SizeClasses::SIZES[class_index] - requested_bytes;
     let slab = allocation_slab(block);
-    if remote.is_null() && !unsafe { is_remote_slab(slab) } {
-        if padding_bytes != 0 {
-            unsafe { (*slab).requested_bytes += padding_bytes };
-        }
-        return;
-    }
-    let remote = if remote.is_null() {
-        unsafe { remote_from_owner((*slab).owner) }
-    } else {
-        remote
-    };
-    let usable_bytes = T::SizeClasses::SIZES[class_index];
-    unsafe {
-        begin_remote_usage_operation(remote);
-        (*remote).usage.live_allocations.fetch_add(1, Ordering::Relaxed);
-        (*remote).usage.requested_bytes.fetch_add(requested_bytes, Ordering::Relaxed);
-        (*remote).usage.usable_bytes.fetch_add(usable_bytes, Ordering::Relaxed);
-        end_remote_usage_operation(remote);
-    }
-}
-
-unsafe fn begin_remote_usage_operation(remote: *mut RemoteHeapState) {
-    loop {
-        let operations = unsafe { &(*remote).usage.operations };
-        let state = operations.load(Ordering::Acquire);
-        if state & OPERATION_INSPECTING != 0 {
-            spin_loop();
-            continue;
-        }
-        if operations
-            .compare_exchange_weak(state, state + 1, Ordering::AcqRel, Ordering::Acquire)
-            .is_ok()
-        {
-            return;
-        }
-    }
-}
-
-unsafe fn end_remote_usage_operation(remote: *mut RemoteHeapState) {
-    let previous = unsafe { (*remote).usage.operations.fetch_sub(1, Ordering::Release) };
-    debug_assert_eq!(previous & OPERATION_FLAGS, 0);
-    debug_assert_ne!(previous, 0);
-}
-
-unsafe fn record_remote_small_allocation(remote: *mut RemoteHeapState, requested_bytes: usize, usable_bytes: usize) {
-    unsafe {
-        (*remote).usage.live_allocations.fetch_add(1, Ordering::Relaxed);
-        (*remote).usage.requested_bytes.fetch_add(requested_bytes, Ordering::Relaxed);
-        (*remote).usage.usable_bytes.fetch_add(usable_bytes, Ordering::Relaxed);
-    }
-}
-
-unsafe fn record_remote_small_free<T: Tunables>(slab: *mut SlabHeader, class_index: usize, requested_bytes: usize) {
-    let remote = unsafe { remote_from_owner((*slab).owner) };
-    debug_assert!(!remote.is_null());
-    unsafe { begin_remote_usage_operation(remote) };
-    let usable_bytes = T::SizeClasses::SIZES[class_index];
-    unsafe {
-        (*remote).usage.live_allocations.fetch_sub(1, Ordering::Relaxed);
-        (*remote).usage.requested_bytes.fetch_sub(requested_bytes, Ordering::Relaxed);
-        (*remote).usage.usable_bytes.fetch_sub(usable_bytes, Ordering::Relaxed);
-        end_remote_usage_operation(remote);
+    if remote.is_null() && !unsafe { is_remote_slab(slab) } && padding_bytes != 0 {
+        unsafe { (*slab).requested_bytes += padding_bytes };
     }
 }
 
@@ -3234,9 +3214,6 @@ unsafe fn push_block<T: Tunables>(address: *mut u8, class_index: usize, requeste
     let mut slab = allocation_slab(address);
     let address = slab.cast::<u8>().with_addr(address.addr());
     let remote_slab = unsafe { is_remote_slab(slab) };
-    if remote_slab {
-        unsafe { record_remote_small_free::<T>(slab, class_index, requested_bytes) };
-    }
     let owner_local = (!state.is_null() && unsafe { (*slab).owner == (*state).owner })
         || (remote_slab
             && unsafe {
@@ -3286,9 +3263,6 @@ unsafe fn push_context_block<T: Tunables>(address: *mut u8, class_index: usize, 
     let mut slab = allocation_slab(address);
     let address = slab.cast::<u8>().with_addr(address.addr());
     let remote_slab = unsafe { is_remote_slab(slab) };
-    if remote_slab {
-        unsafe { record_remote_small_free::<T>(slab, class_index, requested_bytes) };
-    }
     let owner_local = (!state.is_null() && unsafe { (*slab).owner == (*state).owner })
         || (remote_slab
             && unsafe {
@@ -3589,11 +3563,7 @@ unsafe fn take_most_free_slab<T: Tunables>(slot: &mut *mut SlabHeader, class_ind
 
 #[inline(always)]
 unsafe fn pop_remote_block(class: &RemoteClass) -> *mut u8 {
-    while class
-        .popping
-        .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
-        .is_err()
-    {
+    while !acquire_remote_pop_lock(class) {
         spin_loop();
     }
     let mut head = class.blocks.load(Ordering::Acquire);
@@ -3722,11 +3692,33 @@ fn record_medium_event(event: MediumEventKind, count: usize) {
 #[inline(always)]
 unsafe fn thread_state() -> *mut ThreadState {
     let state = THREAD_STATE.with(|storage| storage.get().cast::<ThreadState>());
-    if !unsafe { (*state).cleanup_registered || (*state).tearing_down } {
-        THREAD_STATE_GUARD.with(|_| {});
-        unsafe { (*state).cleanup_registered = true };
-    }
+    unsafe { initialize_thread_state(state, false) };
     state
+}
+
+#[inline(always)]
+unsafe fn allocation_thread_state() -> *mut ThreadState {
+    let state = THREAD_STATE.with(|storage| storage.get().cast::<ThreadState>());
+    unsafe { initialize_thread_state(state, true) };
+    state
+}
+
+#[inline(always)]
+unsafe fn initialize_thread_state(state: *mut ThreadState, register_source: bool) {
+    if !unsafe { (*state).cleanup_registered || (*state).tearing_down } {
+        unsafe { initialize_thread_state_cold(state, register_source) };
+    }
+}
+
+#[cold]
+unsafe fn initialize_thread_state_cold(state: *mut ThreadState, register_source: bool) {
+    // Source registration is process-wide, but its atomic once check is not free.
+    // Piggyback on the existing first-allocation initialization path.
+    if register_source && !unsafe { (*state).cleanup_registered } {
+        crate::telemetry::register_seismograph_source();
+    }
+    THREAD_STATE_GUARD.with(|_| {});
+    unsafe { (*state).cleanup_registered = true };
 }
 
 unsafe fn thread_token(state: *mut ThreadState) -> usize {
@@ -3742,12 +3734,11 @@ unsafe fn thread_token(state: *mut ThreadState) -> usize {
 
 #[inline(always)]
 unsafe fn current_reusable_heap(state: *mut ThreadState) -> *mut ReusableHeapState {
-    let active = unsafe { (*state).active_heap };
-    if active.is_null() {
-        unsafe { ensure_default_heap(state) }
-    } else {
-        active
+    let passive = unsafe { (*state).passive_heap };
+    if !passive.is_null() {
+        return passive;
     }
+    unsafe { ensure_default_heap(state) }
 }
 
 #[cold]
@@ -3771,21 +3762,25 @@ unsafe fn ensure_default_heap(state: *mut ThreadState) -> *mut ReusableHeapState
 
 #[inline(always)]
 unsafe fn current_initialized_reusable_heap(state: *mut ThreadState) -> *mut ReusableHeapState {
-    let active = unsafe { (*state).active_heap };
-    if active.is_null() {
-        unsafe { (*state).default_heap }
-    } else {
-        active
+    let passive = unsafe { (*state).passive_heap };
+    if !passive.is_null() {
+        return passive;
     }
+    unsafe { (*state).default_heap }
+}
+
+#[inline(always)]
+unsafe fn current_active_bump(state: *mut ThreadState) -> *mut BumpState {
+    unsafe { (*state).passive_bump }
 }
 
 #[inline(always)]
 unsafe fn current_remote_heap(state: *mut ThreadState) -> *mut RemoteHeapState {
-    let active = unsafe { (*state).active_remote };
-    if active == unsafe { (*state).remote_heap } {
+    let remote = unsafe { (*state).passive_remote };
+    if remote == unsafe { (*state).remote_heap } {
         ptr::null_mut()
     } else {
-        active
+        remote
     }
 }
 
@@ -3818,22 +3813,25 @@ unsafe fn read_header(address: *mut u8) -> *mut ExtraHeader {
 mod tests {
     use std::sync::mpsc;
 
-    use allocation_hints::domain::Domain;
-
     use super::*;
+    use crate::domain::Domain;
 
     #[cfg(not(miri))]
-    crate::config!(DirectTrackingConfig { track_aggregates: true });
-    crate::config!(CallerTrackingConfig {
-        track_callers: true,
-        caller_event_capacity: 4,
-        caller_allocation_stack_frames: 0,
-        caller_deallocation_stack_frames: 0,
-    });
+    struct DirectTrackingConfig;
+
+    #[cfg(not(miri))]
+    impl Config for DirectTrackingConfig {
+        type Tunables = crate::config::Standard;
+    }
+
+    struct CallerTrackingConfig;
+
+    impl Config for CallerTrackingConfig {
+        type Tunables = crate::config::Standard;
+    }
 
     fn new_domain() -> Domain {
-        crate::initialize();
-        Domain::new()
+        Domain::new().unwrap()
     }
 
     struct LateTlsAllocatorUser;
@@ -3866,6 +3864,12 @@ mod tests {
     struct SendAddress(*mut u8);
 
     unsafe impl Send for SendAddress {}
+
+    impl SendAddress {
+        unsafe fn begin_heap_usage(self) -> bool {
+            unsafe { begin_heap_usage_operation(self.0.cast()) }
+        }
+    }
 
     impl SendSlab {
         unsafe fn queue(self) {
@@ -3903,14 +3907,13 @@ mod tests {
 
     #[test]
     fn constructors_initialize_empty_runtime_state() {
-        crate::initialize();
         let state = ThreadState::new();
         assert_eq!(state.token, 0);
         assert!(state.default_heap.is_null());
         assert!(state.remote_heap.is_null());
-        assert!(state.active_heap.is_null());
-        assert!(state.active_bump.is_null());
-        assert!(state.active_remote.is_null());
+        assert_eq!(state.passive_hint_id, 0);
+        assert!(state.passive_heap.is_null());
+        assert!(state.passive_bump.is_null());
         assert_eq!(state.bump_pool_len, 0);
 
         let class = RemoteClass::new();
@@ -3923,8 +3926,20 @@ mod tests {
     }
 
     #[test]
+    fn global_wrapper_constructs_and_routes_snapshot_arena_allocations() {
+        let allocator = unsafe { GlobalRallocator::<Standard>::new() };
+        let _: &Rallocator<Standard> = &allocator;
+        let layout = Layout::new::<u64>();
+
+        tracking::with_snapshot_arena(|| {
+            let address = unsafe { GlobalAlloc::alloc(&allocator, layout) };
+            assert!(!address.is_null());
+            unsafe { GlobalAlloc::dealloc(&allocator, address, layout) };
+        });
+    }
+
+    #[test]
     fn remote_available_retries_compare_exchange_failures() {
-        crate::initialize();
         let class = RemoteClass::new();
         let block = Box::into_raw(Box::new(0_usize)).cast::<u8>();
 
@@ -3932,6 +3947,7 @@ mod tests {
         unsafe { push_remote_available(&class, block) };
         assert_eq!(class.blocks.load(Ordering::Relaxed), block);
 
+        fail_next_test_remote_pop_lock_cas();
         fail_next_test_remote_pop_cas();
         assert_eq!(unsafe { pop_remote_block(&class) }, block);
         assert!(class.blocks.load(Ordering::Relaxed).is_null());
@@ -3942,7 +3958,6 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn allocator_propagates_hal_allocation_failures() {
-        crate::initialize();
         hal::fail_next_map();
         assert!(create_domain().is_null());
 
@@ -3979,7 +3994,6 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn slab_initialization_and_fallback_cover_capacity_edges() {
-        crate::initialize();
         let (first_block, block_count) = slab_block_layout(ConfigSizeClasses::<Standard>::SIZES[0]);
         assert!(first_block < block_count);
 
@@ -4013,7 +4027,6 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn slow_refills_reuse_active_and_partial_slabs() {
-        crate::initialize();
         let allocator = unsafe { Rallocator::<Standard>::new() };
         let mut domain = DomainState::new();
         let mut heap = ReusableHeapState::new(GeneralOptions::new(), ptr::from_mut(&mut domain));
@@ -4087,14 +4100,13 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn allocator_recovers_from_commit_and_decommit_failures() {
-        crate::initialize();
         let domain = new_domain();
         let allocator = unsafe { Rallocator::<Standard>::new() };
         let mut heap = ReusableHeapState::new(GeneralOptions::new(), crate::domain::state(domain));
 
         hal::fail_next_commit();
         let medium_layout = Layout::from_size_align(MEDIUM_SLICE_SIZE, 16).unwrap();
-        assert!(allocator.allocate_medium(medium_layout, &mut heap).is_null());
+        assert!(allocator.allocate_medium(medium_layout, &mut heap, None).is_null());
 
         hal::fail_next_commit();
         assert!(allocate_bump_chunk(crate::domain::state(domain)).is_null());
@@ -4110,14 +4122,13 @@ mod tests {
         let address = unsafe { domain_regions(domain_state).allocate_slices(domain_state, 1) }.unwrap();
         assert!(unsafe { hal::commit(address, MEDIUM_SLICE_SIZE) });
         hal::fail_next_decommit();
-        assert!(!unsafe { release_retired_storage(address, false, MEDIUM_SLICE_SIZE, MEDIUM_SLICE_SIZE, false) });
-        assert!(unsafe { release_retired_storage(address, false, MEDIUM_SLICE_SIZE, MEDIUM_SLICE_SIZE, false) });
+        assert!(!unsafe { release_retired_storage(address, false, MEDIUM_SLICE_SIZE, MEDIUM_SLICE_SIZE) });
+        assert!(unsafe { release_retired_storage(address, false, MEDIUM_SLICE_SIZE, MEDIUM_SLICE_SIZE) });
     }
 
     #[cfg(not(miri))]
     #[test]
     fn locality_slab_commit_failure_preserves_the_reserved_segment() {
-        crate::initialize();
         let domain = new_domain();
         let allocator = unsafe { Rallocator::<Standard>::new() };
         let mut heap = ReusableHeapState::new(GeneralOptions::new(), crate::domain::state(domain));
@@ -4144,7 +4155,6 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn remote_and_direct_allocation_failures_return_null() {
-        crate::initialize();
         let domain = new_domain();
         let allocator = unsafe { Rallocator::<Standard>::new() };
         let mut heap = ReusableHeapState::new(GeneralOptions::new(), crate::domain::state(domain));
@@ -4154,13 +4164,13 @@ mod tests {
         assert!(unsafe { allocator.allocate_direct(direct_layout, false, None, ptr::from_mut(&mut heap)) }.is_null());
 
         let mut remote = Box::new(RemoteHeapState {
+            passive_thread_id: AtomicU64::new(0),
+            passive_next: AtomicPtr::new(ptr::null_mut()),
             owner: ptr::null_mut(),
             embedded_owner: OwnerState::new(),
             owner_token: AtomicUsize::new(1),
             owner_heap: AtomicPtr::new(ptr::from_mut(&mut heap)),
             domain: crate::domain::state(domain),
-            options: GeneralOptions::new(),
-            usage: RemoteUsage::new(),
             classes: [const { RemoteClass::new() }; MAX_SIZE_CLASSES],
             context_classes: [const { RemoteClass::new() }; MAX_SIZE_CLASSES],
         });
@@ -4171,8 +4181,6 @@ mod tests {
                 .pop_or_refill_remote(ptr::from_mut(remote.as_mut()), 0, false, 1)
                 .is_null()
         );
-        assert_eq!(remote.usage.operations.load(Ordering::Relaxed), 0);
-
         force_next_test_remote_refill_contention();
         assert!(
             !allocator
@@ -4180,7 +4188,6 @@ mod tests {
                 .is_null()
         );
         assert!(!remote.classes[0].refilling.load(Ordering::Relaxed));
-        assert_eq!(remote.usage.operations.load(Ordering::Relaxed), 0);
 
         hal::fail_next_align_offset();
         assert!(unsafe { allocator.allocate_direct(Layout::new::<u64>(), false, None, ptr::from_mut(&mut heap),) }.is_null());
@@ -4220,13 +4227,84 @@ mod tests {
 
     #[cfg(not(miri))]
     #[test]
+    fn tracked_direct_allocation_uses_the_context_fallback() {
+        let _test = tracking::TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let allocator = unsafe { Rallocator::<Standard>::new() };
+        let layout = Layout::from_size_align(MEDIUM_REGION_SIZE + MEDIUM_SLICE_SIZE, 16).unwrap();
+        let address = unsafe { allocator.allocate_with_context(layout, Some(tracking::pending_tracking_for_test()), thread_state()) };
+        assert!(!address.is_null());
+        unsafe { allocator.dealloc(address, layout) };
+    }
+
+    #[cfg(not(miri))]
+    #[test]
+    fn medium_cache_displacement_releases_the_previous_span() {
+        let _test = tracking::TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let domain = new_domain();
+        let allocator = unsafe { Rallocator::<Standard>::new() };
+        let heap = create_bump_fallback_heap(crate::domain::state(domain));
+        assert!(!heap.is_null());
+        let layout = Layout::from_size_align(MEDIUM_SLICE_SIZE, 16).unwrap();
+        let first = allocator.allocate_medium(layout, unsafe { &mut *heap }, None);
+        let second = allocator.allocate_medium(layout, unsafe { &mut *heap }, None);
+        assert!(!first.is_null());
+        assert!(!second.is_null());
+
+        unsafe {
+            allocator.deallocate_medium(first, layout, heap);
+            allocator.deallocate_medium(second, layout, heap);
+            retire_general_heap(heap);
+        }
+    }
+
+    #[cfg(not(miri))]
+    #[test]
+    fn retiring_heap_waits_for_and_releases_an_external_allocation() {
+        let _test = tracking::TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let domain = new_domain();
+        let allocator = unsafe { Rallocator::<Standard>::new() };
+        let heap = create_bump_fallback_heap(crate::domain::state(domain));
+        assert!(!heap.is_null());
+        let layout = Layout::from_size_align(2 * MEDIUM_REGION_SIZE, 16).unwrap();
+        let address = unsafe { allocator.allocate_direct(layout, false, None, heap) };
+        assert!(!address.is_null());
+
+        unsafe { retire_general_heap(heap) };
+        unsafe { allocator.dealloc(address, layout) };
+    }
+
+    #[test]
+    fn heap_usage_retries_contention_and_waits_for_retirement_readiness() {
+        let retirement = RetirementState::new();
+        fail_next_test_heap_usage_cas();
+        assert!(unsafe { begin_heap_usage_operation(ptr::from_ref(&retirement).cast_mut()) });
+        unsafe { end_heap_usage_operation(ptr::from_ref(&retirement).cast_mut()) };
+
+        let retirement = Box::into_raw(Box::new(RetirementState::new()));
+        unsafe {
+            (*retirement).retiring.store(true, Ordering::Release);
+        }
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let worker_barrier = barrier.clone();
+        let worker_retirement = SendAddress(retirement.cast());
+        let worker = std::thread::spawn(move || {
+            set_test_cas_barrier(worker_barrier);
+            unsafe { worker_retirement.begin_heap_usage() }
+        });
+        barrier.wait();
+        unsafe { (*retirement).retirement_ready.store(true, Ordering::Release) };
+
+        assert!(!worker.join().unwrap());
+        unsafe { drop(Box::from_raw(retirement)) };
+    }
+
+    #[cfg(not(miri))]
+    #[test]
     fn ordinary_alignment_direct_payload_cannot_forge_bump_ownership() {
         const OLD_BUMP_MARKER: usize = 0x5241_4C4C_4152_454E;
-
-        crate::initialize();
+        let _test = tracking::TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         // SAFETY: DirectTrackingConfig uses the same Standard tunables and block
-        // geometry as every other allocator in this test process; only aggregate
-        // counter instrumentation differs.
+        // geometry as every other allocator in this test process.
         let allocator = unsafe { Rallocator::<DirectTrackingConfig>::new() };
         let layout = Layout::from_size_align(3 * size_of::<usize>(), align_of::<usize>()).unwrap();
         // SAFETY: the owner is null, tracking is disabled, and layout is valid.
@@ -4251,7 +4329,7 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn global_allocation_falls_back_after_injected_failures() {
-        crate::initialize();
+        let _test = tracking::TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         std::thread::spawn(|| {
             let allocator = unsafe { Rallocator::<Standard>::new() };
             hal::fail_next_map();
@@ -4278,7 +4356,6 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn thread_heap_and_bump_chunk_report_backing_failures() {
-        crate::initialize();
         std::thread::spawn(|| {
             hal::fail_next_map();
             assert!(thread_heap_state().is_none());
@@ -4312,7 +4389,7 @@ mod tests {
         std::thread::spawn(|| {
             let domain = new_domain();
             for _ in 0..5 {
-                let bump = bump::create_state(allocation_hints::heap::bump::Options::new(), crate::domain::state(domain)).unwrap();
+                let bump = bump::create_state(crate::heap::bump::Options::new(), crate::domain::state(domain)).unwrap();
                 return_pooled_bump(bump);
             }
             assert_eq!(unsafe { (*thread_state()).bump_pool_len }, 4);
@@ -4321,36 +4398,138 @@ mod tests {
         .unwrap();
     }
 
+    #[cfg(not(miri))]
     #[test]
-    fn tracking_target_creates_a_log_for_a_new_session() {
-        crate::initialize();
+    fn pooled_bump_lookup_skips_other_domains() {
         let _test = tracking::TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        tracking::track_callers(true);
-        invalidate_tracking_cache();
-        assert!(tracking_target::<Standard>(tracking::active_session()).is_some());
-        tracking::track_callers(false);
-        invalidate_tracking_cache();
+        std::thread::spawn(|| {
+            let first_domain = new_domain();
+            let second_domain = new_domain();
+            let first = bump::create_state(crate::heap::bump::Options::new(), crate::domain::state(first_domain)).unwrap();
+            let second = bump::create_state(crate::heap::bump::Options::new(), crate::domain::state(second_domain)).unwrap();
+            return_pooled_bump(first);
+            return_pooled_bump(second);
+
+            assert_eq!(take_pooled_bump(crate::domain::state(second_domain)), Some(second));
+            assert_eq!(take_pooled_bump(crate::domain::state(first_domain)), Some(first));
+            return_pooled_bump(first);
+            return_pooled_bump(second);
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[cfg(not(miri))]
+    #[test]
+    fn passive_thread_heaps_cover_registration_failure_retry_and_non_head_lookup() {
+        let _test = tracking::TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        std::thread::spawn(|| {
+            let allocator = unsafe { Rallocator::<Standard>::new() };
+            let layout = Layout::new::<u8>();
+            let address = unsafe { allocator.alloc(layout) };
+            assert!(!address.is_null());
+            unsafe { allocator.dealloc(address, layout) };
+            let default_heap = unsafe { (*thread_state()).default_heap };
+            assert!(!default_heap.is_null());
+
+            let first_id = std::thread::spawn(|| {
+                let _heap = allocation_hints::heaps::thread_heap();
+                allocation_hints::allocator_hints().thread_heap().unwrap()
+            })
+            .join()
+            .unwrap();
+            let second_id = std::thread::spawn(|| {
+                let _heap = allocation_hints::heaps::thread_heap();
+                allocation_hints::allocator_hints().thread_heap().unwrap()
+            })
+            .join()
+            .unwrap();
+            let missing_id = std::thread::spawn(|| {
+                let _heap = allocation_hints::heaps::thread_heap();
+                allocation_hints::allocator_hints().thread_heap().unwrap()
+            })
+            .join()
+            .unwrap();
+
+            let mut failed = ThreadState::new();
+            failed.default_heap = default_heap;
+            hal::fail_next_map();
+            unsafe { register_passive_thread_heap(ptr::from_mut(&mut failed), Some(missing_id)) };
+            assert!(failed.remote_heap.is_null());
+
+            let mut first = ThreadState::new();
+            first.default_heap = default_heap;
+            fail_next_test_passive_registration_cas();
+            unsafe { register_passive_thread_heap(ptr::from_mut(&mut first), Some(first_id)) };
+            assert!(!first.remote_heap.is_null());
+            assert_eq!(unsafe { thread_heap_state_for(ptr::from_mut(&mut first)) }, Some(first.remote_heap));
+            unsafe { register_passive_thread_heap(ptr::from_mut(&mut first), Some(first_id)) };
+
+            let mut second = ThreadState::new();
+            second.default_heap = default_heap;
+            unsafe { register_passive_thread_heap(ptr::from_mut(&mut second), None) };
+            unsafe { register_passive_thread_heap(ptr::from_mut(&mut second), Some(second_id)) };
+            assert_eq!(passive_thread_heap(second_id), Some(second.remote_heap));
+            assert_eq!(passive_thread_heap(first_id), Some(first.remote_heap));
+            assert!(passive_thread_heap(missing_id).is_none());
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[cfg(not(miri))]
+    #[test]
+    fn ordinary_remote_slab_free_returns_to_the_remote_available_list() {
+        let allocator = unsafe { Rallocator::<Standard>::new() };
+        let slab = hal::map(SLAB_SIZE);
+        assert!(!slab.is_null());
+        let mut domain = DomainState::new();
+        let mut remote = Box::new(RemoteHeapState {
+            passive_thread_id: AtomicU64::new(0),
+            passive_next: AtomicPtr::new(ptr::null_mut()),
+            owner: ptr::null_mut(),
+            embedded_owner: OwnerState::new(),
+            owner_token: AtomicUsize::new(usize::MAX),
+            owner_heap: AtomicPtr::new(ptr::null_mut()),
+            domain: ptr::from_mut(&mut domain),
+            classes: [const { RemoteClass::new() }; MAX_SIZE_CLASSES],
+            context_classes: [const { RemoteClass::new() }; MAX_SIZE_CLASSES],
+        });
+        remote.owner = ptr::addr_of_mut!(remote.embedded_owner);
+        unsafe { allocator.initialize_remote_slab(slab, 0, remote.owner, SLAB_MARKER, &remote.classes[0]) };
+        let block = unsafe { pop_remote_block(&remote.classes[0]) };
+        assert!(!block.is_null());
+
+        let mut thread = ThreadState::new();
+        unsafe { push_block::<crate::config::Standard>(block, 0, 1, ptr::from_mut(&mut thread)) };
+        assert_eq!(unsafe { pop_remote_block(&remote.classes[0]) }, block);
+
+        unsafe { hal::unmap(slab, SLAB_SIZE) };
     }
 
     #[test]
     fn caller_tracking_allocates_directly_from_an_active_bump() {
-        crate::initialize();
         let _test = tracking::TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let domain = new_domain();
-        let options = allocation_hints::heap::bump::Options::new();
+        let options = crate::heap::bump::Options::new();
         let bump_state = bump::create_state(options, crate::domain::state(domain)).unwrap();
         unsafe { bump::reset_state(bump_state, options) };
         assert!(bump::ensure_fallback_heap(bump_state));
 
         let state = unsafe { thread_state() };
-        let saved = unsafe { ((*state).active_heap, (*state).active_bump, (*state).active_remote) };
+        let saved = unsafe { ((*state).passive_heap, (*state).passive_bump, (*state).passive_remote) };
         unsafe {
-            (*state).active_heap = (*bump_state).fallback_heap;
-            (*state).active_bump = bump_state;
-            (*state).active_remote = ptr::null_mut();
+            (*state).passive_heap = (*bump_state).fallback_heap;
+            (*state).passive_bump = bump_state;
+            (*state).passive_remote = ptr::null_mut();
         }
-        tracking::track_callers(true);
-        invalidate_tracking_cache();
+        seismograph::recorder(seismograph::recorder::Configuration {
+            allocations: seismograph::recorder::RecordingPolicy {
+                enabled: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
 
         let allocator = unsafe { Rallocator::<CallerTrackingConfig>::new() };
         let layout = Layout::new::<u64>();
@@ -4358,8 +4537,16 @@ mod tests {
         assert!(!address.is_null());
         unsafe { allocator.dealloc(address, layout) };
 
-        tracking::track_callers(false);
-        invalidate_tracking_cache();
+        let direct_layout = Layout::from_size_align(MEDIUM_REGION_SIZE + MEDIUM_SLICE_SIZE, 16).unwrap();
+        let direct = unsafe { allocator.alloc(direct_layout) };
+        assert!(!direct.is_null());
+        unsafe { allocator.dealloc(direct, direct_layout) };
+
+        seismograph::recorder(seismograph::recorder::Configuration::default());
+        seismograph::snapshot(seismograph::snapshot::SnapshotOptions {
+            event_buffers: seismograph::snapshot::EventBufferDisposition::Release,
+        })
+        .unwrap();
         let untracked = unsafe { allocator.alloc(layout) };
         assert!(!untracked.is_null());
         unsafe { allocator.dealloc(untracked, layout) };
@@ -4370,53 +4557,32 @@ mod tests {
         unsafe { allocator.dealloc(fallback, fallback_layout) };
 
         unsafe {
-            ((*state).active_heap, (*state).active_bump, (*state).active_remote) = saved;
+            ((*state).passive_heap, (*state).passive_bump, (*state).passive_remote) = saved;
             bump::release_handle(bump_state);
         }
     }
 
     #[test]
-    fn thread_heap_usage_rejects_a_detached_owner_heap() {
-        crate::initialize();
-        let state = unsafe { thread_state() };
-        let token = unsafe { thread_token(state) };
-        let mut remote = Box::new(RemoteHeapState {
-            owner: ptr::null_mut(),
-            embedded_owner: OwnerState::new(),
-            owner_token: AtomicUsize::new(token),
-            owner_heap: AtomicPtr::new(ptr::null_mut()),
-            domain: crate::domain::default_state(),
-            options: GeneralOptions::new(),
-            usage: RemoteUsage::new(),
-            classes: [const { RemoteClass::new() }; MAX_SIZE_CLASSES],
-            context_classes: [const { RemoteClass::new() }; MAX_SIZE_CLASSES],
-        });
-        remote.owner = ptr::addr_of_mut!(remote.embedded_owner);
-        assert_eq!(unsafe { thread_heap_usage(ptr::from_mut(remote.as_mut())) }, Err(()));
-    }
-
-    #[test]
     fn exhausted_bump_allocations_use_every_general_fallback_class() {
-        crate::initialize();
         let domain = new_domain();
-        let options = allocation_hints::heap::bump::Options::new().with_max_allocation_bytes(1);
+        let options = crate::heap::bump::Options::new().with_max_allocation_bytes(1);
         let bump_state = bump::create_state(options, crate::domain::state(domain)).unwrap();
         unsafe { bump::reset_state(bump_state, options) };
         assert!(bump::ensure_fallback_heap(bump_state));
         let fallback = unsafe { (*bump_state).fallback_heap };
         let state = unsafe { thread_state() };
-        let saved = unsafe { ((*state).active_heap, (*state).active_bump, (*state).active_remote) };
+        let saved = unsafe { ((*state).passive_heap, (*state).passive_bump, (*state).passive_remote) };
 
         #[cfg(not(miri))]
         let remote = {
             let mut remote = Box::new(RemoteHeapState {
+                passive_thread_id: AtomicU64::new(0),
+                passive_next: AtomicPtr::new(ptr::null_mut()),
                 owner: ptr::null_mut(),
                 embedded_owner: OwnerState::new(),
                 owner_token: AtomicUsize::new(unsafe { thread_token(state) }),
                 owner_heap: AtomicPtr::new(fallback),
                 domain: crate::domain::state(domain),
-                options: GeneralOptions::new(),
-                usage: RemoteUsage::new(),
                 classes: [const { RemoteClass::new() }; MAX_SIZE_CLASSES],
                 context_classes: [const { RemoteClass::new() }; MAX_SIZE_CLASSES],
             });
@@ -4424,16 +4590,16 @@ mod tests {
             Box::into_raw(remote)
         };
         unsafe {
-            (*state).active_heap = fallback;
-            (*state).active_bump = bump_state;
+            (*state).passive_heap = fallback;
+            (*state).passive_bump = bump_state;
         }
         #[cfg(not(miri))]
         unsafe {
-            (*state).active_remote = remote;
+            (*state).passive_remote = remote;
         }
         #[cfg(miri)]
         unsafe {
-            (*state).active_remote = ptr::null_mut();
+            (*state).passive_remote = ptr::null_mut();
         }
 
         let allocator = unsafe { Rallocator::<Standard>::new() };
@@ -4448,14 +4614,13 @@ mod tests {
         }
 
         unsafe {
-            ((*state).active_heap, (*state).active_bump, (*state).active_remote) = saved;
+            ((*state).passive_heap, (*state).passive_bump, (*state).passive_remote) = saved;
         }
         unsafe { bump::release_handle(bump_state) };
     }
 
     #[test]
     fn medium_purge_releases_fixed_and_variable_spans() {
-        crate::initialize();
         let domain = new_domain();
         let allocator = unsafe { Rallocator::<Standard>::new() };
         let options = GeneralOptions::from_values(MEDIUM_SLICE_SIZE, 0);
@@ -4463,8 +4628,8 @@ mod tests {
         let fixed_layout = Layout::from_size_align(MEDIUM_SLICE_SIZE, 16).unwrap();
         let large_layout = Layout::from_size_align((MEDIUM_MAX_SLICES + 1) * MEDIUM_SLICE_SIZE, 16).unwrap();
 
-        let fixed = allocator.allocate_medium(fixed_layout, &mut heap);
-        let large = allocator.allocate_medium(large_layout, &mut heap);
+        let fixed = allocator.allocate_medium(fixed_layout, &mut heap, None);
+        let large = allocator.allocate_medium(large_layout, &mut heap, None);
         assert!(!fixed.is_null());
         assert!(!large.is_null());
         unsafe {
@@ -4493,12 +4658,11 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn medium_purge_keeps_slices_reserved_when_decommit_fails() {
-        crate::initialize();
         let domain = new_domain();
         let allocator = unsafe { Rallocator::<Standard>::new() };
         let mut heap = ReusableHeapState::new(GeneralOptions::from_values(MEDIUM_SLICE_SIZE, 0), crate::domain::state(domain));
         let fixed_layout = Layout::from_size_align(MEDIUM_SLICE_SIZE, 16).unwrap();
-        let fixed = allocator.allocate_medium(fixed_layout, &mut heap);
+        let fixed = allocator.allocate_medium(fixed_layout, &mut heap, None);
         unsafe { allocator.deallocate_medium(fixed, fixed_layout, ptr::from_mut(&mut heap)) };
         let regions = unsafe { domain_regions(crate::domain::state(domain)) };
         {
@@ -4511,7 +4675,7 @@ mod tests {
         unsafe { regions.release_slices(fixed, 1) };
 
         let large_layout = Layout::from_size_align((MEDIUM_MAX_SLICES + 1) * MEDIUM_SLICE_SIZE, 16).unwrap();
-        let large = allocator.allocate_medium(large_layout, &mut heap);
+        let large = allocator.allocate_medium(large_layout, &mut heap, None);
         unsafe { allocator.deallocate_medium(large, large_layout, ptr::from_mut(&mut heap)) };
         {
             let mut state = regions.state.lock();
@@ -4526,19 +4690,17 @@ mod tests {
 
     #[test]
     fn invalid_medium_requests_and_non_region_metadata_are_rejected() {
-        crate::initialize();
         let allocator = unsafe { Rallocator::<Standard>::new() };
         let mut domain = DomainState::new();
         let mut heap = ReusableHeapState::new(GeneralOptions::new(), ptr::from_mut(&mut domain));
         let over_aligned = Layout::from_size_align(1, 2 * MAX_MEDIUM_ALIGNMENT).unwrap();
-        assert!(allocator.allocate_medium(over_aligned, &mut heap).is_null());
+        assert!(allocator.allocate_medium(over_aligned, &mut heap, None).is_null());
         unsafe { allocator.deallocate_medium(ptr::null_mut(), over_aligned, ptr::from_mut(&mut heap)) };
         let oversized = Layout::from_size_align(MEDIUM_REGION_SIZE + MEDIUM_SLICE_SIZE, 16).unwrap();
         assert_eq!(medium_slice_count(oversized), None);
 
         let outside = ptr::without_provenance_mut::<u8>(0x1234_5000);
         record_small_segment(outside, 0, false, ptr::null_mut(), 1, false);
-        update_physical_small_live_blocks(outside, true);
         assert_eq!(allocation_segment(outside).addr(), outside.addr() & !(SLAB_SIZE - 1));
 
         let state = MediumState {
@@ -4551,12 +4713,11 @@ mod tests {
 
     #[test]
     fn ordinary_layout_medium_allocation_uses_region_deallocation_path() {
-        crate::initialize();
         let domain = new_domain();
         let allocator = unsafe { Rallocator::<Standard>::new() };
         let mut heap = ReusableHeapState::new(GeneralOptions::new(), crate::domain::state(domain));
         let layout = Layout::new::<[u8; 16]>();
-        let address = allocator.allocate_medium(layout, &mut heap);
+        let address = allocator.allocate_medium(layout, &mut heap, None);
         assert!(!address.is_null());
         unsafe {
             address.cast::<usize>().write(0);
@@ -4565,8 +4726,57 @@ mod tests {
     }
 
     #[test]
+    fn tracked_medium_allocation_stays_region_backed_and_emits_a_pair() {
+        let _test = tracking::TEST_LOCK.lock().unwrap();
+        seismograph::recorder(seismograph::recorder::Configuration {
+            allocations: seismograph::recorder::RecordingPolicy {
+                enabled: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let allocator = unsafe { Rallocator::<Standard>::new() };
+        let layout = Layout::from_size_align(MEDIUM_SLICE_SIZE, 16).unwrap();
+
+        let address = unsafe { allocator.alloc(layout) };
+        assert!(!address.is_null());
+        let region = region_containing(address).unwrap();
+        let slice_index = (address.addr() - unsafe { (*region).base.addr() }) / MEDIUM_SLICE_SIZE;
+        let metadata = unsafe { &(*region).allocations[slice_index] };
+        assert_ne!(metadata.tracking_allocation_id.load(Ordering::Relaxed), 0);
+        assert_ne!(metadata.tracking_session_id.load(Ordering::Relaxed), 0);
+        unsafe { allocator.dealloc(address, layout) };
+        assert_eq!(metadata.tracking_allocation_id.load(Ordering::Relaxed), 0);
+        assert_eq!(metadata.tracking_session_id.load(Ordering::Relaxed), 0);
+
+        let snapshot = seismograph::snapshot(seismograph::snapshot::SnapshotOptions {
+            event_buffers: seismograph::snapshot::EventBufferDisposition::Release,
+        })
+        .unwrap();
+        let events = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap().events;
+        let matching = events
+            .events
+            .iter()
+            .filter(|event| {
+                event
+                    .allocation()
+                    .is_some_and(|allocation| allocation.size == MEDIUM_SLICE_SIZE as u64)
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            matching.iter().map(|event| event.kind).collect::<Vec<_>>(),
+            vec![
+                seismograph::recorder::event::EventKind::Allocation,
+                seismograph::recorder::event::EventKind::Deallocation,
+            ]
+        );
+        assert_eq!(matching[0].object_id(), matching[1].object_id());
+        seismograph::recorder(seismograph::recorder::Configuration::default());
+    }
+
+    #[test]
     fn topology_snapshots_cover_continuations_and_truncated_spans() {
-        crate::initialize();
         let domain = new_domain();
         let domain_state = crate::domain::state(domain);
         let regions = unsafe { domain_regions(domain_state) };
@@ -4595,8 +4805,7 @@ mod tests {
     }
 
     #[test]
-    fn direct_slab_usage_and_list_removal_cover_non_head_entries() {
-        crate::initialize();
+    fn direct_slab_and_list_removal_cover_non_head_entries() {
         let allocator = unsafe { Rallocator::<Standard>::new() };
         let mut domain = DomainState::new();
         let domain_pointer = ptr::from_mut(&mut domain);
@@ -4615,22 +4824,6 @@ mod tests {
             SLAB_MARKER,
         );
         assert!(!block.is_null());
-        let mut remote = Box::new(RemoteHeapState {
-            owner: ptr::null_mut(),
-            embedded_owner: OwnerState::new(),
-            owner_token: AtomicUsize::new(0),
-            owner_heap: AtomicPtr::new(ptr::from_mut(&mut heap)),
-            domain: domain_pointer,
-            options: GeneralOptions::new(),
-            usage: RemoteUsage::new(),
-            classes: [const { RemoteClass::new() }; MAX_SIZE_CLASSES],
-            context_classes: [const { RemoteClass::new() }; MAX_SIZE_CLASSES],
-        });
-        remote.owner = ptr::addr_of_mut!(remote.embedded_owner);
-        unsafe { record_small_allocation::<crate::tunables::Standard>(block, 0, 16, ptr::from_mut(remote.as_mut())) };
-        let usage = unsafe { general_heap_usage(ptr::from_mut(&mut heap), ptr::null_mut()) };
-        assert_eq!(usage.reserved_bytes(), SLAB_SIZE);
-
         let segment = hal::map(MEDIUM_SLICE_SIZE);
         let first_segment_block = allocator.initialize_slab(
             SlabAllocation {
@@ -4655,8 +4848,6 @@ mod tests {
         assert!(!first_segment_block.is_null());
         assert!(!second_segment_block.is_null());
         heap.locality_segment = ptr::null_mut();
-        let usage = unsafe { general_heap_usage(ptr::from_mut(&mut heap), ptr::null_mut()) };
-        assert!(usage.reserved_bytes() >= MEDIUM_SLICE_SIZE + SLAB_SIZE);
 
         let layout = Layout::from_size_align(MEDIUM_REGION_SIZE + MEDIUM_SLICE_SIZE, 16).unwrap();
         let first = unsafe { allocator.allocate_direct(layout, false, None, ptr::from_mut(&mut heap)) };
@@ -4676,15 +4867,18 @@ mod tests {
 
     #[cfg(not(miri))]
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "The test keeps the complete retirement state-machine scenario visible in one place"
+    )]
     fn retirement_handles_direct_slabs_and_decommit_failures() {
-        crate::initialize();
         let mut domain = DomainState::new();
         let domain_pointer = ptr::from_mut(&mut domain);
         let allocator = unsafe { Rallocator::<Standard>::new() };
 
         let empty_mapping = hal::map(SLAB_SIZE);
         assert!(!empty_mapping.is_null());
-        assert!(!unsafe { prepare_retired_slice(empty_mapping.cast(), 0, SLAB_SIZE, true, false) });
+        assert!(!unsafe { prepare_retired_slice(empty_mapping.cast(), 0, SLAB_SIZE, true) });
 
         let empty_heap = create_bump_fallback_heap(domain_pointer);
         assert!(!empty_heap.is_null());
@@ -4719,7 +4913,7 @@ mod tests {
         assert!(!live_block.is_null());
         unsafe { retire_general_heap(live_heap) };
         let mut thread = ThreadState::new();
-        unsafe { push_block::<crate::tunables::Standard>(live_block, 0, 1, ptr::from_mut(&mut thread)) };
+        unsafe { push_block::<crate::config::Standard>(live_block, 0, 1, ptr::from_mut(&mut thread)) };
 
         let full_domain = new_domain();
         let full_domain_state = crate::domain::state(full_domain);
@@ -4760,7 +4954,7 @@ mod tests {
         let cached_heap = create_bump_fallback_heap(crate::domain::state(cached_domain));
         assert!(!cached_heap.is_null());
         let layout = Layout::from_size_align(MEDIUM_SLICE_SIZE, 16).unwrap();
-        let cached = allocator.allocate_medium(layout, unsafe { &mut *cached_heap });
+        let cached = allocator.allocate_medium(layout, unsafe { &mut *cached_heap }, None);
         assert!(!cached.is_null());
         unsafe { allocator.deallocate_medium(cached, layout, cached_heap) };
         hal::fail_next_decommit();
@@ -4784,7 +4978,7 @@ mod tests {
             SLAB_MARKER,
         );
         assert!(!block.is_null());
-        assert!(unsafe { prepare_retired_slice(slice.cast(), 1, SLAB_SIZE, false, false) });
+        assert!(unsafe { prepare_retired_slice(slice.cast(), 1, SLAB_SIZE, false) });
         hal::fail_next_decommit();
         unsafe { release_retired_block(slice.cast()) };
         assert!(unsafe { hal::decommit(slice, MEDIUM_SLICE_SIZE) });
@@ -4799,9 +4993,8 @@ mod tests {
                 state: ptr::null_mut(),
                 ready: AtomicBool::new(false),
                 released: AtomicBool::new(false),
-                track_aggregates: false,
                 direct_mapping: true,
-                state_padding: [0; 4],
+                state_padding: [0; 5],
                 committed_bytes: SLAB_SIZE,
                 release_bytes: SLAB_SIZE,
             });
@@ -4813,7 +5006,6 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn exhausted_region_and_secondary_extents_cover_search_edges() {
-        crate::initialize();
         let mut domain = DomainState::new();
         let domain_pointer = ptr::from_mut(&mut domain);
         let regions = &domain.regions;
@@ -4823,7 +5015,7 @@ mod tests {
         hal::fail_next_reserve();
         assert!(
             allocator
-                .allocate_medium(Layout::from_size_align(MEDIUM_SLICE_SIZE, 16).unwrap(), &mut heap,)
+                .allocate_medium(Layout::from_size_align(MEDIUM_SLICE_SIZE, 16).unwrap(), &mut heap, None)
                 .is_null()
         );
         hal::fail_next_reserve();
@@ -4873,12 +5065,8 @@ mod tests {
     }
 
     #[test]
-    fn coordination_retries_and_partial_selection_cover_contended_paths() {
-        crate::initialize();
+    fn retirement_retries_and_partial_selection_cover_contended_paths() {
         let retirement = RetirementState::new();
-        retirement.operations.store(OPERATION_RETIRED, Ordering::Relaxed);
-        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { acquire_heap_inspection(&retirement) })).is_err());
-
         retirement.operations.store(1, Ordering::Relaxed);
         std::thread::scope(|scope| {
             scope.spawn(|| {
@@ -4887,48 +5075,7 @@ mod tests {
             });
             acquire_heap_retirement(&retirement);
         });
-        retirement.operations.store(OPERATION_INSPECTING, Ordering::Relaxed);
-        std::thread::scope(|scope| {
-            scope.spawn(|| {
-                std::thread::yield_now();
-                retirement.operations.store(0, Ordering::Release);
-            });
-            assert!(unsafe { begin_heap_usage_operation(ptr::from_ref(&retirement).cast_mut()) });
-        });
-        unsafe { end_heap_usage_operation(ptr::from_ref(&retirement).cast_mut()) };
         unsafe { release_external_allocation(ptr::null_mut()) };
-
-        let usage = RemoteUsage::new();
-        usage.operations.store(1, Ordering::Relaxed);
-        std::thread::scope(|scope| {
-            scope.spawn(|| {
-                std::thread::yield_now();
-                usage.operations.store(0, Ordering::Release);
-            });
-            acquire_remote_inspection(&usage);
-        });
-
-        let remote = Box::new(RemoteHeapState {
-            owner: ptr::null_mut(),
-            embedded_owner: OwnerState::new(),
-            owner_token: AtomicUsize::new(0),
-            owner_heap: AtomicPtr::new(ptr::null_mut()),
-            domain: ptr::null_mut(),
-            options: GeneralOptions::new(),
-            usage: RemoteUsage::new(),
-            classes: [const { RemoteClass::new() }; MAX_SIZE_CLASSES],
-            context_classes: [const { RemoteClass::new() }; MAX_SIZE_CLASSES],
-        });
-        remote.usage.operations.store(OPERATION_INSPECTING, Ordering::Relaxed);
-        let remote_pointer = ptr::from_ref(remote.as_ref()).cast_mut();
-        std::thread::scope(|scope| {
-            scope.spawn(|| {
-                std::thread::yield_now();
-                remote.usage.operations.store(0, Ordering::Release);
-            });
-            unsafe { begin_remote_usage_operation(remote_pointer) };
-        });
-        unsafe { end_remote_usage_operation(remote_pointer) };
 
         let allocator = unsafe { Rallocator::<Standard>::new() };
         let mut domain = DomainState::new();
@@ -4963,7 +5110,7 @@ mod tests {
         }
         let mut list = first.cast::<SlabHeader>();
         assert_eq!(
-            unsafe { take_most_free_slab::<crate::tunables::Standard>(&mut list, 0) },
+            unsafe { take_most_free_slab::<crate::config::Standard>(&mut list, 0) },
             second.cast()
         );
         assert!(unsafe { (*first.cast::<SlabHeader>()).next_partial }.is_null());
@@ -4975,7 +5122,6 @@ mod tests {
 
     #[test]
     fn publication_retries_after_deterministic_compare_exchange_contention() {
-        crate::initialize();
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
         let mut workers = Vec::new();
         for _ in 0..2 {
@@ -5042,7 +5188,7 @@ mod tests {
             &mut heap,
             SLAB_MARKER,
         );
-        let second_block = unsafe { take_local_slab_block::<crate::tunables::Standard>(slab.cast(), 0) };
+        let second_block = unsafe { take_local_slab_block::<crate::config::Standard>(slab.cast(), 0) };
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
         let mut workers = Vec::new();
         for block in [first_block, second_block] {
@@ -5065,8 +5211,11 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "The test keeps the complete remote-inbox state transition visible in one place"
+    )]
     fn context_remote_inbox_returns_freed_blocks_to_partial_lists() {
-        crate::initialize();
         let allocator = unsafe { Rallocator::<Standard>::new() };
         let mut domain = DomainState::new();
         let mut heap = ReusableHeapState::new(GeneralOptions::new(), ptr::from_mut(&mut domain));
@@ -5129,7 +5278,7 @@ mod tests {
         #[cfg(not(miri))]
         {
             unsafe {
-                drain_remote_inbox::<crate::tunables::Standard>(&mut ReusableHeapState::new(
+                drain_remote_inbox::<crate::config::Standard>(&mut ReusableHeapState::new(
                     GeneralOptions::new(),
                     ptr::from_mut(&mut domain),
                 ));
@@ -5151,7 +5300,7 @@ mod tests {
                 &mut heap,
                 SLAB_MARKER,
             );
-            let second_remote = unsafe { take_local_slab_block::<crate::tunables::Standard>(requeued_slab.cast(), 0) };
+            let second_remote = unsafe { take_local_slab_block::<crate::config::Standard>(requeued_slab.cast(), 0) };
             let requeued_header = requeued_slab.cast::<SlabHeader>();
             unsafe {
                 write_free_next(first_remote, ptr::null_mut());
@@ -5173,7 +5322,7 @@ mod tests {
                 std::thread::yield_now();
             }
             set_test_cas_barrier(barrier);
-            unsafe { drain_remote_inbox::<crate::tunables::Standard>(&mut heap) };
+            unsafe { drain_remote_inbox::<crate::config::Standard>(&mut heap) };
             worker.join().unwrap();
             assert_eq!(unsafe { (*heap.owner).remote_slabs.load(Ordering::Relaxed) }, requeued_header);
             unsafe {
@@ -5184,13 +5333,13 @@ mod tests {
 
             let remote_slab = hal::map(SLAB_SIZE);
             let mut remote = Box::new(RemoteHeapState {
+                passive_thread_id: AtomicU64::new(0),
+                passive_next: AtomicPtr::new(ptr::null_mut()),
                 owner: ptr::null_mut(),
                 embedded_owner: OwnerState::new(),
                 owner_token: AtomicUsize::new(usize::MAX),
                 owner_heap: AtomicPtr::new(ptr::null_mut()),
                 domain: ptr::from_mut(&mut domain),
-                options: GeneralOptions::new(),
-                usage: RemoteUsage::new(),
                 classes: [const { RemoteClass::new() }; MAX_SIZE_CLASSES],
                 context_classes: [const { RemoteClass::new() }; MAX_SIZE_CLASSES],
             });
@@ -5199,11 +5348,8 @@ mod tests {
                 allocator.initialize_remote_slab(remote_slab, 0, remote.owner, CONTEXT_SLAB_MARKER, &remote.context_classes[0]);
             }
             let remote_block = unsafe { pop_remote_block(&remote.context_classes[0]) };
-            remote.usage.live_allocations.store(1, Ordering::Relaxed);
-            remote.usage.requested_bytes.store(1, Ordering::Relaxed);
-            remote.usage.usable_bytes.store(16, Ordering::Relaxed);
             let mut thread = ThreadState::new();
-            unsafe { push_context_block::<crate::tunables::Standard>(remote_block, 0, 1, ptr::from_mut(&mut thread)) };
+            unsafe { push_context_block::<crate::config::Standard>(remote_block, 0, 1, ptr::from_mut(&mut thread)) };
             assert!(!unsafe { pop_remote_block(&remote.context_classes[0]) }.is_null());
             unsafe { hal::unmap(remote_slab, SLAB_SIZE) };
 
@@ -5218,8 +5364,8 @@ mod tests {
                 &mut heap,
                 CONTEXT_SLAB_MARKER,
             );
-            let second = unsafe { take_local_slab_block::<crate::tunables::Standard>(spill_slab.cast(), 0) };
-            let third = unsafe { take_local_slab_block::<crate::tunables::Standard>(spill_slab.cast(), 0) };
+            let second = unsafe { take_local_slab_block::<crate::config::Standard>(spill_slab.cast(), 0) };
+            let third = unsafe { take_local_slab_block::<crate::config::Standard>(spill_slab.cast(), 0) };
             let spill_header = spill_slab.cast::<SlabHeader>();
             let block_size = ConfigSizeClasses::<Standard>::SIZES[0];
             unsafe {
@@ -5230,9 +5376,9 @@ mod tests {
             let mut thread = ThreadState::new();
             thread.default_heap = ptr::from_mut(&mut heap);
             unsafe {
-                push_context_block::<crate::tunables::Standard>(first, 0, block_size, ptr::from_mut(&mut thread));
-                push_context_block::<crate::tunables::Standard>(second, 0, block_size, ptr::from_mut(&mut thread));
-                push_context_block::<crate::tunables::Standard>(third, 0, block_size, ptr::from_mut(&mut thread));
+                push_context_block::<crate::config::Standard>(first, 0, block_size, ptr::from_mut(&mut thread));
+                push_context_block::<crate::config::Standard>(second, 0, block_size, ptr::from_mut(&mut thread));
+                push_context_block::<crate::config::Standard>(third, 0, block_size, ptr::from_mut(&mut thread));
             }
             assert_eq!(heap.context_class_lists[0].partial, spill_header);
             unsafe { hal::unmap(spill_slab, SLAB_SIZE) };
@@ -5249,7 +5395,6 @@ mod tests {
 
     #[test]
     fn bitmap_and_extent_helpers_cover_wrapping_and_coalescing() {
-        crate::initialize();
         let mut used = [0; MEDIUM_REGION_BITMAP_WORDS];
         mark_slices(&mut used, 0, 2, true);
         mark_slices(&mut used, 4, 2, true);
@@ -5288,7 +5433,6 @@ mod tests {
 
     #[test]
     fn region_manager_expands_after_a_region_is_full() {
-        crate::initialize();
         let mut domain = DomainState::new();
         let domain_pointer = ptr::from_mut(&mut domain);
         let regions = &domain.regions;
@@ -5316,7 +5460,6 @@ mod tests {
 
     #[test]
     fn bump_chunks_are_slices_from_shared_regions() {
-        crate::initialize();
         let domain = new_domain();
         let domain_state = crate::domain::state(domain);
         let chunk = allocate_bump_chunk(domain_state);
@@ -5329,7 +5472,6 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn thread_exit_releases_empty_default_heap_slices() {
-        crate::initialize();
         let (sender, receiver) = mpsc::channel();
         std::thread::spawn(move || {
             let allocator = unsafe { Rallocator::<Standard>::new() };
@@ -5354,7 +5496,6 @@ mod tests {
 
     #[test]
     fn later_tls_destructor_can_use_allocator_after_thread_state_cleanup() {
-        crate::initialize();
         std::thread::spawn(|| {
             LATE_TLS_ALLOCATOR_USER.with(|_| {});
 
@@ -5370,7 +5511,6 @@ mod tests {
 
     #[test]
     fn escaped_thread_allocation_releases_its_slice_after_owner_exit() {
-        crate::initialize();
         let (sender, receiver) = mpsc::channel();
         let address = std::thread::spawn(move || {
             let allocator = unsafe { Rallocator::<Standard>::new() };

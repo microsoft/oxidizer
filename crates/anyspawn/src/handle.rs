@@ -7,7 +7,7 @@ use std::fmt::Debug;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use futures_channel::oneshot;
+use performables::sync::channel::OneshotReceiver;
 
 /// A handle to a spawned task that can be awaited to retrieve its result.
 ///
@@ -22,7 +22,7 @@ pub struct JoinHandle<T>(pub(crate) JoinHandleInner<T>);
 pub(crate) enum JoinHandleInner<T> {
     #[cfg(feature = "tokio")]
     Tokio(::tokio::task::JoinHandle<T>),
-    Custom(oneshot::Receiver<T>),
+    Custom(OneshotReceiver<T>),
 }
 
 impl<T> Future for JoinHandle<T> {

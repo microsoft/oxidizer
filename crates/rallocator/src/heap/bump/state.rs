@@ -7,8 +7,7 @@ use std::alloc::Layout;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering, fence};
 
-use allocation_hints::heap::bump::Options;
-
+use super::Options;
 use crate::allocator::{DomainState, ReusableHeapState};
 use crate::hal;
 use crate::telemetry::{self, TrackingAllocation};
@@ -116,41 +115,8 @@ static FAIL_NEXT_FALLBACK_ALLOCATION: std::sync::Mutex<Option<std::thread::Threa
 
 const _: () = assert!(std::mem::offset_of!(BumpState, root) == 64);
 
-pub(crate) fn usage(state: &BumpState) -> (usize, usize, usize, usize, usize, usize) {
-    usage_with_retry_hook(state, |_| {})
-}
-
-// The exclusive heap claim serializes allocation and inspection. The seqcount
-// only stabilizes the non-atomic accounting fields against cross-thread frees.
-fn usage_with_retry_hook(state: &BumpState, mut retry_hook: impl FnMut(&BumpState)) -> (usize, usize, usize, usize, usize, usize) {
-    loop {
-        let sequence = state.usage_sequence.load(Ordering::Acquire);
-        if sequence & 1 != 0 {
-            std::hint::spin_loop();
-            retry_hook(state);
-            continue;
-        }
-        let live_allocations = state.references.load(Ordering::Acquire) - 1 - state.remaining_reference_credits.get();
-        let live_requested_bytes = state.live_requested_bytes.load(Ordering::Acquire);
-        retry_hook(state);
-        if state.usage_sequence.load(Ordering::Acquire) == sequence {
-            return (
-                state.chunk_count * BUMP_CHUNK_SIZE,
-                state.used_bytes,
-                state.allocation_count,
-                live_allocations,
-                live_requested_bytes,
-                state.chunk_count,
-            );
-        }
-    }
-}
-
-pub(crate) fn options(state: &BumpState) -> Options {
-    state.options
-}
-
 #[inline(always)]
+#[cfg(test)]
 pub(crate) unsafe fn allocate(state: *mut BumpState, layout: Layout) -> *mut u8 {
     let size = layout.size().max(1);
     let options = unsafe { (*state).options };
@@ -244,6 +210,7 @@ pub(crate) unsafe fn state_for_allocation(segment: *mut u8, marker: usize) -> Op
 }
 
 #[inline(always)]
+#[cfg(test)]
 pub(crate) unsafe fn deallocate(state: *mut BumpState, address: *mut u8, layout: Layout, reclaim_tail: bool) {
     let size = layout.size().max(1);
     unsafe {
@@ -636,6 +603,7 @@ fn align_up(address: usize, alignment: usize) -> Option<usize> {
     address.checked_add(alignment - 1).map(|address| address & !(alignment - 1))
 }
 
+#[cfg(test)]
 fn can_fit_in_chunk_segment(layout: Layout) -> bool {
     let start = align_up(size_of::<BumpChunk>(), layout.align()).unwrap();
     start <= BUMP_SEGMENT_SIZE && BUMP_SEGMENT_SIZE - start >= layout.size().max(1)
@@ -708,16 +676,12 @@ fn lock_global_pool_with_retry_hook(mut retry_hook: impl FnMut()) {
 
 #[cfg(test)]
 mod tests {
-    use allocation_hints::domain::Domain;
-
     use super::*;
+    use crate::domain::Domain;
 
     fn default_domain_state() -> *mut crate::allocator::DomainState {
-        crate::initialize();
         crate::domain::state(Domain::default())
     }
-
-    static USAGE_RETRY_HOOK_CALLS: AtomicUsize = AtomicUsize::new(0);
 
     fn state(options: Options) -> *mut BumpState {
         let state = create_state(options, default_domain_state()).unwrap();
@@ -726,27 +690,7 @@ mod tests {
     }
 
     #[test]
-    fn usage_retries_while_a_writer_is_active_or_changes_sequence() {
-        crate::initialize();
-        let state = state(Options::new());
-        let state_ref = unsafe { &*state };
-        assert_eq!(options(state_ref), Options::new());
-        state_ref.usage_sequence.store(1, Ordering::Relaxed);
-        USAGE_RETRY_HOOK_CALLS.store(0, Ordering::Relaxed);
-        let snapshot = usage_with_retry_hook(state_ref, |state| {
-            let call = USAGE_RETRY_HOOK_CALLS.fetch_add(1, Ordering::Relaxed);
-            assert!(call < 4, "usage retry loop did not converge");
-            state.usage_sequence.store(if call == 0 { 2 } else { 4 }, Ordering::Release);
-        });
-        assert_eq!(snapshot.0, BUMP_CHUNK_SIZE);
-        assert!(USAGE_RETRY_HOOK_CALLS.load(Ordering::Relaxed) >= 3);
-        assert_eq!(usage(state_ref).0, BUMP_CHUNK_SIZE);
-        unsafe { release_handle(state) };
-    }
-
-    #[test]
     fn allocation_rejects_address_overflow_and_exhausted_backing() {
-        crate::initialize();
         let state = state(Options::new());
         let original_cursor = unsafe { (*state).cursor };
         unsafe { (*state).cursor = ptr::without_provenance_mut(usize::MAX) };
@@ -784,7 +728,6 @@ mod tests {
 
     #[test]
     fn deallocation_waits_for_an_in_progress_usage_update() {
-        crate::initialize();
         let state = state(Options::new());
         let layout = Layout::new::<u64>();
         let address = unsafe { allocate(state, layout) };
@@ -812,7 +755,6 @@ mod tests {
 
     #[test]
     fn contiguous_latest_allocations_rewind_in_reverse_order() {
-        crate::initialize();
         let state = state(Options::new());
         let layout = Layout::new::<u64>();
         let first = unsafe { allocate(state, layout) };
@@ -839,7 +781,6 @@ mod tests {
 
     #[test]
     fn tracked_latest_allocations_restore_alignment_padding() {
-        crate::initialize();
         let state = state(Options::new());
         let first_layout = Layout::from_size_align(3, 1).unwrap();
         let second_layout = Layout::from_size_align(5, 8).unwrap();
@@ -865,7 +806,6 @@ mod tests {
 
     #[test]
     fn non_latest_allocation_does_not_rewind_the_cursor() {
-        crate::initialize();
         let state = state(Options::new());
         let layout = Layout::new::<u64>();
         let first = unsafe { allocate(state, layout) };
@@ -883,7 +823,6 @@ mod tests {
 
     #[test]
     fn headerless_alignment_padding_stops_the_rewind_chain_safely() {
-        crate::initialize();
         let state = state(Options::new());
         let first_layout = Layout::from_size_align(1, 1).unwrap();
         let second_layout = Layout::from_size_align(1, 64).unwrap();
@@ -901,7 +840,6 @@ mod tests {
 
     #[test]
     fn final_allocation_release_returns_state_without_a_handle() {
-        crate::initialize();
         let state = state(Options::new());
         let layout = Layout::new::<u64>();
         let address = unsafe { allocate(state, layout) };
@@ -915,7 +853,6 @@ mod tests {
 
     #[test]
     fn matching_state_removal_handles_a_non_head_domain() {
-        crate::initialize();
         let first = state(Options::new());
         let second = state(Options::new());
         let first_domain = ptr::without_provenance_mut::<DomainState>(std::mem::align_of::<DomainState>());
@@ -930,11 +867,12 @@ mod tests {
         assert_eq!(unsafe { take_matching_state(&mut head, second_domain) }, second);
         assert_eq!(head, first);
         assert!(unsafe { (*first).pool_next }.is_null());
+        assert_eq!(unsafe { take_matching_state(&mut head, first_domain) }, first);
+        assert!(head.is_null());
     }
 
     #[test]
     fn state_creation_and_fallback_restoration_report_allocation_failures() {
-        crate::initialize();
         let domain = default_domain_state();
         inject_failure(&FAIL_NEXT_CHUNK_ALLOCATION);
         assert!(create_state(Options::new(), domain).is_none());
@@ -976,7 +914,6 @@ mod tests {
 
     #[test]
     fn state_thresholds_and_retention_cover_direct_lifecycle_paths() {
-        crate::initialize();
         let options = Options::new().with_retained_chunks(1).with_max_retained_chunks(4);
         let state = state(options);
         assert!(ensure_fallback_heap(state));
@@ -997,7 +934,6 @@ mod tests {
 
     #[test]
     fn reset_reuses_available_chunks_and_zero_credits_need_no_release() {
-        crate::initialize();
         let options = Options::new().with_retained_chunks(2);
         let state = state(options);
         let layout = Layout::from_size_align(BUMP_SEGMENT_SIZE / 2, 16).unwrap();
@@ -1033,7 +969,6 @@ mod tests {
 
     #[test]
     fn global_pool_lock_spins_until_the_owner_releases_it() {
-        crate::initialize();
         GLOBAL_POOL.locked.store(true, Ordering::Relaxed);
         let mut retries = 0;
         lock_global_pool_with_retry_hook(|| {

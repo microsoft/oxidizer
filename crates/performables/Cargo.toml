@@ -1,0 +1,43 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "performables"
+version = "0.1.0"
+description = "Performance-oriented ownership and asynchronous synchronization primitives."
+readme = "README.md"
+keywords = ["async", "concurrency", "synchronization", "telemetry"]
+categories = ["asynchronous", "concurrency"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/performables"
+
+[features]
+default = ["seismograph"]
+seismograph = ["dep:seismograph"]
+
+[dependencies]
+seismograph = { workspace = true, optional = true }
+serde = { workspace = true, features = ["std"] }
+thread_aware = { workspace = true, features = ["std"] }
+
+[dev-dependencies]
+criterion.workspace = true
+thread_aware = { workspace = true, features = ["test-utils"] }
+
+[[bench]]
+name = "performables_uncontended"
+harness = false
+
+[[bench]]
+name = "performables_telemetry_sampling"
+harness = false
+required-features = ["seismograph"]
+
+[lints]
+workspace = true

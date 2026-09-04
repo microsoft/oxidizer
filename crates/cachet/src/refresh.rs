@@ -114,6 +114,7 @@ where
         if let Some(refresh) = &self.inner.refresh {
             // Check if already in-flight on this thread
             if !refresh.try_start_refresh(key) {
+                self.inner.telemetry.record_refresh_suppressed(self.inner.name);
                 return;
             }
 
@@ -148,10 +149,10 @@ where
 {
     pub(crate) async fn fetch_and_promote(&self, key: K) {
         let watch = self.clock.stopwatch();
-        if let Ok(Some(value)) = self.fallback.get(&key).await {
-            self.handle_fallback_hit(key, value, watch.elapsed()).await;
-        } else {
-            self.handle_fallback_miss(watch.elapsed());
+        match self.fallback.get(&key).await {
+            Ok(Some(value)) => self.handle_fallback_hit(key, value, watch.elapsed()).await,
+            Ok(None) => self.handle_fallback_miss(watch.elapsed()),
+            Err(_) => self.handle_fallback_error(watch.elapsed()),
         }
         self.telemetry.complete_operation(
             CacheTelemetry::current_request_id(),
@@ -172,11 +173,19 @@ where
         // Insert errors are intentionally swallowed - a failed promotion should not
         // affect the refresh. The CacheWrapper around the primary tier already
         // records telemetry for the insert (Inserted or Rejected).
-        let _ = self.primary.insert(key, value).await;
+        match self.primary.insert(key, value).await {
+            Ok(cachet_tier::InsertOutcome::Accepted) => self.telemetry.record_promotion_accepted(self.name),
+            Ok(cachet_tier::InsertOutcome::Rejected) => self.telemetry.record_promotion_rejected(self.name),
+            Err(_) => self.telemetry.record_promotion_failed(self.name),
+        }
     }
 
     fn handle_fallback_miss(&self, duration: Duration) {
         self.telemetry.record_refresh_miss(self.name, duration);
+    }
+
+    fn handle_fallback_error(&self, duration: Duration) {
+        self.telemetry.record_refresh_error(self.name, duration);
     }
 }
 

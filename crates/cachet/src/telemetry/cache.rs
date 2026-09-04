@@ -11,10 +11,21 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use pin_project_lite::pin_project;
+#[cfg(any(test, feature = "seismograph"))]
+use seismograph::recorder::event::EventKind;
 
 use crate::cache::CacheName;
 use crate::telemetry::attributes;
 use crate::telemetry::handler::{CacheEventHandler, CacheOperationEvent, CacheTierEvent, RequestId};
+#[cfg(any(test, feature = "seismograph"))]
+use crate::telemetry::seismograph::record_event;
+
+macro_rules! record_cache_event {
+    ($tier_name:expr, $fallback:expr, $kind:ident) => {
+        #[cfg(any(test, feature = "seismograph"))]
+        record_event($tier_name, $fallback, EventKind::$kind);
+    };
+}
 
 /// Process-wide counter for generating unique request IDs.
 static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
@@ -139,7 +150,7 @@ impl CacheTelemetry {
     }
 
     #[cfg_attr(
-        not(feature = "logs"),
+        all(not(feature = "logs"), not(test)),
         expect(clippy::unused_self, reason = "self.logging_enabled is used when logs is enabled")
     )]
     // The body is a no-op when `logs` is off; under `--no-default-features`
@@ -163,7 +174,7 @@ impl CacheTelemetry {
     }
 
     #[cfg_attr(
-        not(feature = "logs"),
+        all(not(feature = "logs"), not(test)),
         expect(clippy::unused_self, reason = "self.logging_enabled is used when logs is enabled")
     )]
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -183,7 +194,7 @@ impl CacheTelemetry {
     }
 
     #[cfg_attr(
-        not(feature = "logs"),
+        all(not(feature = "logs"), not(test)),
         expect(clippy::unused_self, reason = "self.logging_enabled is used when logs is enabled")
     )]
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -203,21 +214,25 @@ impl CacheTelemetry {
     }
 
     pub(crate) fn record_hit(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
+        record_cache_event!(tier_name, fallback, CacheHit);
         self.record_debug_with_duration(tier_name, attributes::EVENT_HIT, duration);
         self.emit_tier_event(Self::current_request_id(), tier_name, attributes::EVENT_HIT, duration, fallback);
     }
 
     pub(crate) fn record_miss(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
+        record_cache_event!(tier_name, fallback, CacheMiss);
         self.record_debug_with_duration(tier_name, attributes::EVENT_MISS, duration);
         self.emit_tier_event(Self::current_request_id(), tier_name, attributes::EVENT_MISS, duration, fallback);
     }
 
     pub(crate) fn record_expired(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
+        record_cache_event!(tier_name, fallback, CacheExpired);
         self.record_info_with_duration(tier_name, attributes::EVENT_EXPIRED, duration);
         self.emit_tier_event(Self::current_request_id(), tier_name, attributes::EVENT_EXPIRED, duration, fallback);
     }
 
     pub(crate) fn record_get_error(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
+        record_cache_event!(tier_name, fallback, CacheGetError);
         self.record_error_with_duration(tier_name, attributes::EVENT_GET_ERROR, duration);
         self.emit_tier_event(
             Self::current_request_id(),
@@ -229,6 +244,7 @@ impl CacheTelemetry {
     }
 
     pub(crate) fn record_inserted(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
+        record_cache_event!(tier_name, fallback, CacheInserted);
         self.record_info_with_duration(tier_name, attributes::EVENT_INSERTED, duration);
         self.emit_tier_event(
             Self::current_request_id(),
@@ -240,6 +256,7 @@ impl CacheTelemetry {
     }
 
     pub(crate) fn record_insert_error(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
+        record_cache_event!(tier_name, fallback, CacheInsertError);
         self.record_error_with_duration(tier_name, attributes::EVENT_INSERT_ERROR, duration);
         self.emit_tier_event(
             Self::current_request_id(),
@@ -251,6 +268,7 @@ impl CacheTelemetry {
     }
 
     pub(crate) fn record_invalidated(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
+        record_cache_event!(tier_name, fallback, CacheInvalidated);
         self.record_info_with_duration(tier_name, attributes::EVENT_INVALIDATED, duration);
         self.emit_tier_event(
             Self::current_request_id(),
@@ -262,6 +280,7 @@ impl CacheTelemetry {
     }
 
     pub(crate) fn record_invalidate_error(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
+        record_cache_event!(tier_name, fallback, CacheInvalidateError);
         self.record_error_with_duration(tier_name, attributes::EVENT_INVALIDATE_ERROR, duration);
         self.emit_tier_event(
             Self::current_request_id(),
@@ -273,11 +292,13 @@ impl CacheTelemetry {
     }
 
     pub(crate) fn record_cleared(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
+        record_cache_event!(tier_name, fallback, CacheCleared);
         self.record_debug_with_duration(tier_name, attributes::EVENT_CLEARED, duration);
         self.emit_tier_event(Self::current_request_id(), tier_name, attributes::EVENT_CLEARED, duration, fallback);
     }
 
     pub(crate) fn record_clear_error(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
+        record_cache_event!(tier_name, fallback, CacheClearError);
         self.record_error_with_duration(tier_name, attributes::EVENT_CLEAR_ERROR, duration);
         self.emit_tier_event(
             Self::current_request_id(),
@@ -290,6 +311,7 @@ impl CacheTelemetry {
 
     /// Records a successful background refresh from the fallback tier.
     pub(crate) fn record_refresh_hit(&self, cache_name: CacheName, duration: Duration) {
+        record_cache_event!(cache_name, true, CacheRefreshHit);
         self.record_debug_with_duration(cache_name, attributes::EVENT_REFRESH_HIT, duration);
         self.emit_tier_event(
             Self::current_request_id(),
@@ -302,6 +324,7 @@ impl CacheTelemetry {
 
     /// Records a background refresh that found no data in the fallback tier.
     pub(crate) fn record_refresh_miss(&self, cache_name: CacheName, duration: Duration) {
+        record_cache_event!(cache_name, true, CacheRefreshMiss);
         self.record_info_with_duration(cache_name, attributes::EVENT_REFRESH_MISS, duration);
         self.emit_tier_event(
             Self::current_request_id(),
@@ -312,7 +335,56 @@ impl CacheTelemetry {
         );
     }
 
+    /// Records a background refresh that failed to read from the fallback tier.
+    pub(crate) fn record_refresh_error(&self, cache_name: CacheName, duration: Duration) {
+        record_cache_event!(cache_name, true, CacheRefreshError);
+        self.record_info_with_duration(cache_name, attributes::EVENT_REFRESH_MISS, duration);
+        self.emit_tier_event(
+            Self::current_request_id(),
+            cache_name,
+            attributes::EVENT_REFRESH_MISS,
+            duration,
+            true,
+        );
+    }
+
+    pub(crate) fn record_compute_succeeded(&self, cache_name: CacheName) {
+        record_cache_event!(cache_name, false, CacheComputeSucceeded);
+        let _ = (self, cache_name);
+    }
+
+    pub(crate) fn record_compute_failed(&self, cache_name: CacheName) {
+        record_cache_event!(cache_name, false, CacheComputeFailed);
+        let _ = (self, cache_name);
+    }
+
+    pub(crate) fn record_compute_returned_none(&self, cache_name: CacheName) {
+        record_cache_event!(cache_name, false, CacheComputeReturnedNone);
+        let _ = (self, cache_name);
+    }
+
+    pub(crate) fn record_promotion_accepted(&self, cache_name: CacheName) {
+        record_cache_event!(cache_name, false, CachePromotionAccepted);
+        let _ = (self, cache_name);
+    }
+
+    pub(crate) fn record_promotion_rejected(&self, cache_name: CacheName) {
+        record_cache_event!(cache_name, false, CachePromotionRejected);
+        let _ = (self, cache_name);
+    }
+
+    pub(crate) fn record_promotion_failed(&self, cache_name: CacheName) {
+        record_cache_event!(cache_name, false, CachePromotionFailed);
+        let _ = (self, cache_name);
+    }
+
+    pub(crate) fn record_refresh_suppressed(&self, cache_name: CacheName) {
+        record_cache_event!(cache_name, true, CacheRefreshSuppressed);
+        let _ = (self, cache_name);
+    }
+
     pub(crate) fn record_insert_rejected(&self, tier_name: CacheName, fallback: bool) {
+        record_cache_event!(tier_name, fallback, CacheInsertRejected);
         #[cfg(any(feature = "logs", test))]
         if self.logging_enabled {
             tracing::info!(cache.name = tier_name, cache.event = attributes::EVENT_INSERT_REJECTED);
@@ -327,6 +399,7 @@ impl CacheTelemetry {
     }
 
     pub(crate) fn record_insert_rejected_with_duration(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
+        record_cache_event!(tier_name, fallback, CacheInsertRejected);
         self.record_info_with_duration(tier_name, attributes::EVENT_INSERT_REJECTED, duration);
         self.emit_tier_event(
             Self::current_request_id(),
@@ -346,6 +419,7 @@ impl CacheTelemetry {
     /// a request ID of 0.
     #[cfg(any(feature = "memory", test))]
     pub(crate) fn record_eviction(&self, cache_name: CacheName) {
+        record_cache_event!(cache_name, false, CacheEvicted);
         #[cfg(any(feature = "logs", test))]
         if self.logging_enabled {
             tracing::info!(cache.name = cache_name, cache.event = attributes::EVENT_EVICTION);
@@ -369,6 +443,7 @@ impl CacheTelemetry {
     /// during a cache operation).
     #[cfg(feature = "memory")]
     pub(crate) fn record_background_expired(&self, cache_name: CacheName) {
+        record_cache_event!(cache_name, false, CacheExpired);
         #[cfg(any(feature = "logs", test))]
         if self.logging_enabled {
             tracing::info!(cache.name = cache_name, cache.event = attributes::EVENT_EXPIRED);

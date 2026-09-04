@@ -16,6 +16,8 @@ pub mod attributes;
 pub(crate) mod cache;
 /// Callback-based telemetry handlers.
 pub mod handler;
+#[cfg(any(test, feature = "seismograph"))]
+mod seismograph;
 
 #[doc(inline)]
 pub use cache::CacheTelemetry;

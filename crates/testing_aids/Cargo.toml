@@ -32,6 +32,7 @@ min-lines-percent = 0
 futures = { workspace = true, features = ["executor"] }
 opentelemetry = { workspace = true, features = ["metrics"] }
 opentelemetry_sdk = { workspace = true, features = ["metrics", "testing"] }
+performables.workspace = true
 prettyplease = { workspace = true }
 proc-macro2 = { workspace = true }
 syn = { workspace = true, features = ["full", "parsing", "printing", "clone-impls"] }
