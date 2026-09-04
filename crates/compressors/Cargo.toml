@@ -34,7 +34,6 @@ allowed_external_types = [
     "bytesbuf::*",
     "futures_core::stream::Stream",
     "recoverable::*",
-    "thread_aware_core::thread::Thread",
     "thread_aware_core::thread_aware::ThreadAware",
 ]
 
