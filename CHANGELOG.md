@@ -26,6 +26,7 @@ Please see each crate's change log below:
 - [`http_path_template`](./crates/http_path_template/CHANGELOG.md)
 - [`internity`](./crates/internity/CHANGELOG.md)
 - [`layered`](./crates/layered/CHANGELOG.md)
+- [`metabench`](./crates/metabench/CHANGELOG.md)
 - [`multitude`](./crates/multitude/CHANGELOG.md)
 - [`observed_macros_impl`](./crates/observed_macros_impl/CHANGELOG.md)
 - [`ohno`](./crates/ohno/CHANGELOG.md)

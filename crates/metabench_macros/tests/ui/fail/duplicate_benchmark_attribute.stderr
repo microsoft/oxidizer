@@ -1,0 +1,5 @@
+error: duplicate `benchmark` attribute
+  --> tests/ui/fail/duplicate_benchmark_attribute.rs:11:5
+   |
+11 |     #[metabench_macros::benchmark]
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

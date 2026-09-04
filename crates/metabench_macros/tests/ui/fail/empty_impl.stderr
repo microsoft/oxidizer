@@ -1,0 +1,5 @@
+error: benchmark impl blocks must contain at least one method marked with `#[benchmark]`
+ --> tests/ui/fail/empty_impl.rs:9:1
+  |
+9 | impl Group {}
+  | ^^^^^^^^^^^^^

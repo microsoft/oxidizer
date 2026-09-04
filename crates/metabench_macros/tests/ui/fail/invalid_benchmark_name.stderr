@@ -1,0 +1,5 @@
+error: benchmark names must be non-empty and cannot contain `/`
+  --> tests/ui/fail/invalid_benchmark_name.rs:10:42
+   |
+10 |     #[metabench_macros::benchmark(name = "invalid/name")]
+   |                                          ^^^^^^^^^^^^^^

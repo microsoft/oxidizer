@@ -1,0 +1,5 @@
+error: benchmark methods must be synchronous, safe, non-const, and non-generic
+  --> tests/ui/fail/unsafe_method.rs:11:5
+   |
+11 |     unsafe fn work() {}
+   |     ^^^^^^^^^^^^^^^^

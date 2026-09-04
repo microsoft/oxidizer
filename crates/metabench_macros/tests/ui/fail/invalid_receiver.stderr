@@ -1,0 +1,5 @@
+error: benchmark methods must take no arguments, one shared case reference, `&self`, or `&mut self`
+  --> tests/ui/fail/invalid_receiver.rs:11:13
+   |
+11 |     fn work(self) {}
+   |             ^^^^

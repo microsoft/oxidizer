@@ -1,0 +1,5 @@
+error: metabench controls benchmark inlining; remove this attribute
+  --> tests/ui/fail/inline_method.rs:10:5
+   |
+10 |     #[inline]
+   |     ^^^^^^^^^

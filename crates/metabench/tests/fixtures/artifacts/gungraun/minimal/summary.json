@@ -1,0 +1,30 @@
+{
+  "baselines": [null, null],
+  "benchmark_exe": "bench",
+  "benchmark_file": "benches/bench.rs",
+  "function_name": "metabench_adapter",
+  "id": "case_0",
+  "kind": "LibraryBenchmark",
+  "module_path": "bench::adapter",
+  "package_dir": ".",
+  "profiles": [{
+    "flamegraphs": [],
+    "log_paths": [],
+    "out_paths": [],
+    "summaries": {
+      "parts": [],
+      "total": {
+        "regressions": [],
+        "summary": {"Callgrind": {
+          "Ir": {"diffs": null, "metrics": {"Left": {"Int": 100}}},
+          "L1hits": {"diffs": null, "metrics": {"Left": {"Int": 80}}},
+          "RamHits": {"diffs": null, "metrics": {"Left": {"Int": 5}}}
+        }}
+      }
+    },
+    "tool": "Callgrind"
+  }],
+  "project_root": ".",
+  "summary_output": null,
+  "version": "6"
+}

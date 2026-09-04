@@ -1,0 +1,5 @@
+error: duplicate benchmark name
+  --> tests/ui/fail/duplicate_names.rs:13:42
+   |
+13 |     #[metabench_macros::benchmark(name = "same")]
+   |                                          ^^^^^^

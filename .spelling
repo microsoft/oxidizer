@@ -864,3 +864,14 @@ Idempotence
 symlinks
 junctions
 recurse
+metabench
+acknowledgement
+destructions
+FIFOs
+orchestrator
+perf
+PMU
+stateful
+uncompared
+unpopulated
+unscoped

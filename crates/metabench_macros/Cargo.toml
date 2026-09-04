@@ -1,0 +1,42 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "metabench_macros"
+description = "Procedural macro entry points for metabench."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["benchmark", "criterion", "callgrind", "perf", "oxidizer"]
+categories = ["development-tools::profiling"]
+
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/metabench_macros"
+
+[package.metadata.docs.rs]
+all-features = true
+
+# Thin proc-macro entry crate: coverage is collected from the delegated
+# implementation crate rather than compile-time expansion in consumers.
+[package.metadata.coverage-gate]
+min-lines-percent = 0
+
+[lib]
+proc-macro = true
+bench = false
+
+[dependencies]
+metabench_macros_impl = { workspace = true }
+
+[dev-dependencies]
+mutants = { workspace = true }
+trybuild = { workspace = true }
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

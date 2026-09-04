@@ -1,0 +1,5 @@
+error: generic benchmark impl blocks are not supported
+ --> tests/ui/fail/generic_impl.rs:9:5
+  |
+9 | impl<T> Group<T> {
+  |     ^^^
