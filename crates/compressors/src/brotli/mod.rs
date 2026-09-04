@@ -3,8 +3,9 @@
 
 //! Brotli (RFC 7932): a general-purpose compressor with a static dictionary tuned for web content.
 //!
-//! Compresses text noticeably better than `gzip` at comparable speed, which is why
-//! it is the usual choice for HTTP `Content-Encoding: br`. Requires the `brotli` cargo feature.
+//! Compresses text better than `gzip` for a given effort, which is why it is the usual choice for
+//! HTTP `Content-Encoding: br`. Where it lands on the speed/ratio trade depends on the payload and
+//! the level, so benchmark a representative corpus. Requires the `brotli` cargo feature.
 //!
 //! Brotli streams carry no magic bytes, so the format has to be known from context, such as a
 //! `Content-Encoding` header.
@@ -146,13 +147,15 @@ impl From<Quality> for u8 {
 ///
 /// A larger window lets the compressor find matches further back, which is what helps on large inputs.
 ///
-/// It is tempting to read this as a memory dial and shrink it to economize. Measurement says
-/// otherwise, and in more than one direction. Compressor memory and throughput do not fall off
-/// smoothly as the window shrinks: below a threshold the compressor allocates *more* and runs
-/// *slower*, so a small window can cost on every axis at once. The ratio is not monotonic either,
-/// because a window comparable to the payload can beat a much larger one. Decompressor memory tracks
-/// the data actually decompressed rather than the window the compressor declared, so a small window is not
-/// a reliable way to spare the reader.
+/// RFC 7932 gives the declared window a format-level role: it is what a decoder must be prepared to
+/// buffer, so raising it is a cost the reader may pay as well as the writer.
+///
+/// It is tempting to read this as a memory dial and shrink it to economize, but that is not
+/// dependable in either direction. Shrinking the window does not reduce compressor memory or raise
+/// throughput smoothly, and below some point it can worsen both; the ratio is not monotonic either,
+/// since a window comparable to the payload can beat a much larger one. Where those turning points
+/// fall depends on the payload, the level and the backend version, so they are not values this
+/// crate can state.
 ///
 /// The practical advice is to leave this alone unless a measurement on real payloads says
 /// otherwise.

@@ -21,11 +21,11 @@
 /// steeply at the top, the mapping stops short of it instead of stretching to reach it, which is
 /// why the top of this scale is not necessarily the top of a format's.
 ///
-/// The scale is portable but its *cost* is not, and the difference between formats is large. On
-/// the deflate family and on zstd, moving up the scale changes the time taken but barely moves the
-/// memory used. On brotli both climb steeply towards the top of the range, while the ratio gained
-/// over the middle of the range stays small. Treat [`Level::HIGH`] as a deliberate choice to be
-/// measured on real payloads, not as a free improvement.
+/// The scale is portable but its *cost* is not, and how much a step costs differs by format and by
+/// payload -- in time, and for some backends in working memory too. The mapping is chosen so that
+/// moving up the scale never lowers effort, and nothing stronger than that ordering is promised.
+/// Treat [`Level::HIGH`] as a deliberate choice to be measured on real payloads, not as a free
+/// improvement.
 ///
 /// # Examples
 ///
