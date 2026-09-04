@@ -115,7 +115,7 @@ mod tests {
     #[test]
     fn new_accepts_the_whole_valid_range() {
         for level in 0..=Level::MAX.get() {
-            let parsed = Level::new(level).expect("level is within range");
+            let parsed = Level::new(level).unwrap();
             assert_eq!(parsed.get(), level);
         }
     }
@@ -134,10 +134,10 @@ mod tests {
 
     #[test]
     fn conversions_follow_the_standard_traits() {
-        assert_eq!(Level::try_from(9).expect("in range"), Level::HIGH);
+        assert_eq!(Level::try_from(9).unwrap(), Level::HIGH);
         assert_eq!(u8::from(Level::HIGH), 9);
 
-        let error = Level::try_from(10).expect_err("out of range");
+        let error = Level::try_from(10).unwrap_err();
         assert!(error.is_invalid_configuration(), "got {error}");
         assert!(error.to_string().contains("0..=9"), "the message should name the range: {error}");
     }

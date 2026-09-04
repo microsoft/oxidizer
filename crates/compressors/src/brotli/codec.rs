@@ -283,7 +283,7 @@ mod tests {
 
         let mut previous = None;
         for raw in 0..=Level::MAX.get() {
-            let level = Level::new(raw).expect("level is in range");
+            let level = Level::new(raw).unwrap();
             let mapped = portable_quality(level);
 
             assert!(Some(mapped) > previous, "mapping must be strictly monotonic at level {raw}");
@@ -318,7 +318,7 @@ mod tests {
                 for chosen in [Mode::Generic, Mode::Text, Mode::Font] {
                     let mut settings = Brotli::new();
                     settings.quality = Quality::new(quality);
-                    settings.window_size = WindowSize::new(exponent).expect("in range");
+                    settings.window_size = WindowSize::new(exponent).unwrap();
                     settings.mode = chosen;
 
                     drop(BrotliCompress::new(Level::DEFAULT, &settings));

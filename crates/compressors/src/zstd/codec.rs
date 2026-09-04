@@ -360,7 +360,7 @@ mod tests {
     fn the_level_mapping_is_monotonic_and_within_zstds_range() {
         let mut previous = 0;
         for raw in 0..=Level::MAX.get() {
-            let level = Level::new(raw).expect("level is in range");
+            let level = Level::new(raw).unwrap();
             let mapped = compression_level(level);
 
             assert!(mapped >= previous, "mapping must not decrease at level {raw}");
@@ -410,7 +410,7 @@ mod tests {
         let mut settings = Zstd::new();
         for level in [CompressionLevel::min(), CompressionLevel::DEFAULT, CompressionLevel::max()] {
             settings.level = Some(level);
-            ZstdCompress::new(Level::DEFAULT, &settings, Pool::disabled().clone()).expect("the engine accepts every native level");
+            ZstdCompress::new(Level::DEFAULT, &settings, Pool::disabled().clone()).unwrap();
         }
 
         for log in [WindowLog::MIN, WindowLog::DEFAULT, WindowLog::MAX] {
@@ -423,7 +423,7 @@ mod tests {
                 &settings,
                 Pool::disabled().clone(),
             )
-            .expect("the engine accepts every window log the builder can express");
+            .unwrap();
         }
     }
 
@@ -436,7 +436,7 @@ mod tests {
             &Zstd::new(),
             Pool::disabled().clone(),
         )
-        .expect("the default settings are accepted");
+        .unwrap();
         let rendered = format!("{codec:?}");
 
         assert!(rendered.contains("trailing_data"));
@@ -445,7 +445,7 @@ mod tests {
 
     #[test]
     fn compressor_debug_includes_its_level() {
-        let codec = ZstdCompress::new(Level::DEFAULT, &Zstd::new(), Pool::disabled().clone()).expect("the default settings are accepted");
+        let codec = ZstdCompress::new(Level::DEFAULT, &Zstd::new(), Pool::disabled().clone()).unwrap();
         let rendered = format!("{codec:?}");
 
         assert!(rendered.contains("ZstdCompress"));
@@ -456,7 +456,7 @@ mod tests {
     fn dropping_a_pooled_compressor_returns_its_context() {
         let pool = Pool::new();
 
-        drop(ZstdCompress::new(Level::DEFAULT, &Zstd::new(), pool.clone()).expect("the default settings are accepted"));
+        drop(ZstdCompress::new(Level::DEFAULT, &Zstd::new(), pool.clone()).unwrap());
 
         assert!(
             pool.take_zstd_compressor().is_some(),
@@ -476,7 +476,7 @@ mod tests {
                 &Zstd::new(),
                 pool.clone(),
             )
-            .expect("the default settings are accepted"),
+            .unwrap(),
         );
 
         assert!(
@@ -487,18 +487,17 @@ mod tests {
 
     #[test]
     fn a_flush_reports_continue_until_the_native_buffer_catches_up() {
-        let mut codec =
-            ZstdCompress::new(Level::DEFAULT, &Zstd::new(), Pool::disabled().clone()).expect("the default settings are accepted");
+        let mut codec = ZstdCompress::new(Level::DEFAULT, &Zstd::new(), Pool::disabled().clone()).unwrap();
         let mut scratch = [MaybeUninit::uninit(); 4096];
 
         let payload = b"zstd flush boundary check payload, repeated so the flush has real work to do. ".repeat(64);
-        let (_, consumed, _) = codec.step(&payload, &mut scratch, Operation::Process).expect("process succeeds");
+        let (_, consumed, _) = codec.step(&payload, &mut scratch, Operation::Process).unwrap();
         assert_eq!(consumed, payload.len(), "the whole input should have been consumed");
 
         // A one byte buffer cannot hold the whole flush in a single call, so the guard must
         // report `Continue`, not `FlushComplete`, while zstd still has buffered output.
         let mut tiny = [MaybeUninit::uninit(); 1];
-        let (step, consumed, produced) = codec.step(&[], &mut tiny, Operation::Flush).expect("flush succeeds");
+        let (step, consumed, produced) = codec.step(&[], &mut tiny, Operation::Flush).unwrap();
         assert_eq!(consumed, 0, "no new input was supplied");
         assert_eq!(produced, 1, "the tiny buffer should be filled completely");
         assert_eq!(step, Step::Continue, "the flush cannot be complete while output remains buffered");
@@ -508,7 +507,7 @@ mod tests {
         // would ask zstd to emit another empty flush frame, so the test only issues exactly the
         // calls this one flush needs.
         let mut generous = [MaybeUninit::uninit(); 4096];
-        let (step, consumed, _) = codec.step(&[], &mut generous, Operation::Flush).expect("flush succeeds");
+        let (step, consumed, _) = codec.step(&[], &mut generous, Operation::Flush).unwrap();
         assert_eq!(consumed, 0, "no new input was supplied");
         assert_eq!(step, Step::FlushComplete, "a generous buffer must drain the remainder of the flush");
     }
@@ -522,7 +521,7 @@ mod tests {
             &Zstd::new(),
             Pool::disabled().clone(),
         )
-        .expect("the default settings are accepted");
+        .unwrap();
 
         assert_eq!(Codec::remaining_output(&codec, 40), Some(60));
         assert_eq!(Codec::remaining_output(&codec, 100), Some(0));

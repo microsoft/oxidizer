@@ -606,16 +606,14 @@ mod tests {
     }
 
     fn compressed_len(builder: CompressorBuilder<()>, format: Format, payload: &[u8]) -> usize {
-        let mut compressor = builder
-            .build_format(format, &Resources::default())
-            .expect("the settings are accepted");
-        compressor.push(view(payload)).expect("push succeeds");
+        let mut compressor = builder.build_format(format, &Resources::default()).unwrap();
+        compressor.push(view(payload)).unwrap();
         compressor.end_input();
 
         let mut total = 0;
         let mut finished = false;
         for _ in 0..MAX_STEPS {
-            let output = compressor.pull().expect("pull succeeds");
+            let output = compressor.pull().unwrap();
             assert!(!output.is_need_input(), "compressor requested input after end");
             let done = output.is_done();
             if let Some(chunk) = output.into_data() {
@@ -638,10 +636,10 @@ mod tests {
         let payload = b"counted and flushed ".repeat(200);
 
         for &format in Format::ALL {
-            let mut compressor = Compressor::new(format, &Resources::default()).expect("the defaults are accepted");
+            let mut compressor = Compressor::new(format, &Resources::default()).unwrap();
 
-            compressor.push(view(&payload)).expect("push succeeds");
-            compressor.flush().expect("flush succeeds");
+            compressor.push(view(&payload)).unwrap();
+            compressor.flush().unwrap();
 
             let mut compressed = BytesBuf::new();
             let mut guard = 0;
@@ -649,7 +647,7 @@ mod tests {
                 guard += 1;
                 assert!(guard < MAX_STEPS, "the flush did not settle for {format:?}");
 
-                let output = compressor.pull().expect("pull succeeds");
+                let output = compressor.pull().unwrap();
                 if output.is_need_input() {
                     break;
                 }
@@ -674,7 +672,7 @@ mod tests {
                 guard += 1;
                 assert!(guard < MAX_STEPS, "compression did not finish for {format:?}");
 
-                let output = compressor.pull().expect("pull succeeds");
+                let output = compressor.pull().unwrap();
                 let done = output.is_done();
                 if let Some(chunk) = output.into_data() {
                     compressed.put_bytes(chunk);
@@ -684,11 +682,11 @@ mod tests {
                 }
             }
 
-            let mut decompressor = Decompressor::new(format, &Resources::default()).expect("the defaults are accepted");
+            let mut decompressor = Decompressor::new(format, &Resources::default()).unwrap();
 
             let compressed_len = compressed.len() as u64;
-            decompressor.push(compressed.consume_all()).expect("push succeeds");
-            decompressor.flush().expect("a decompressor has nothing to flush");
+            decompressor.push(compressed.consume_all()).unwrap();
+            decompressor.flush().unwrap();
             decompressor.end_input();
 
             let mut plain = BytesBuf::new();
@@ -696,7 +694,7 @@ mod tests {
                 guard += 1;
                 assert!(guard < MAX_STEPS, "decompression did not finish for {format:?}");
 
-                let output = decompressor.pull().expect("pull succeeds");
+                let output = decompressor.pull().unwrap();
                 let done = output.is_done();
                 if let Some(chunk) = output.into_data() {
                     plain.put_bytes(chunk);
@@ -727,8 +725,8 @@ mod tests {
         let payload = b"runtime selected format ".repeat(200);
 
         for &format in Format::ALL {
-            let compressed = crate::format::compress(format, view(&payload), &Resources::default()).expect("compression succeeds");
-            let plain = crate::format::decompress(format, compressed, &Resources::default()).expect("decompression succeeds");
+            let compressed = crate::format::compress(format, view(&payload), &Resources::default()).unwrap();
+            let plain = crate::format::decompress(format, compressed, &Resources::default()).unwrap();
 
             assert_eq!(plain.to_vec(), payload, "{format:?} failed to round trip");
         }
@@ -797,19 +795,19 @@ mod tests {
 
     #[test]
     fn the_compressor_builder_applies_its_chunk_size() {
-        let bound = NonZeroUsize::new(128).expect("128 is not zero");
+        let bound = NonZeroUsize::new(128).unwrap();
 
         for &format in Format::ALL {
             let mut compressor = CompressorBuilder::new()
                 .output_chunk_size(bound)
                 .build_format(format, &Resources::default())
-                .expect("the settings are accepted");
-            compressor.push(view(&b"chunked ".repeat(5_000))).expect("push succeeds");
+                .unwrap();
+            compressor.push(view(&b"chunked ".repeat(5_000))).unwrap();
             compressor.end_input();
 
             let mut finished = false;
             for _ in 0..MAX_STEPS {
-                let output = compressor.pull().expect("pull succeeds");
+                let output = compressor.pull().unwrap();
                 assert!(!output.is_need_input(), "compressor requested input after end");
                 let done = output.is_done();
                 if let Some(chunk) = output.as_data() {
@@ -827,8 +825,7 @@ mod tests {
     #[test]
     fn the_decompressor_builder_applies_its_limits() {
         for &format in Format::ALL {
-            let compressed =
-                crate::format::compress(format, view(&vec![0_u8; 256 * 1024]), &Resources::default()).expect("compression succeeds");
+            let compressed = crate::format::compress(format, view(&vec![0_u8; 256 * 1024]), &Resources::default()).unwrap();
 
             let mut decompressor = DecompressorBuilder::new()
                 .limits(
@@ -836,10 +833,10 @@ mod tests {
                         .unbounded_ratio()
                         .max_output_len(NonZeroU64::new(1024).unwrap()),
                 )
-                .output_chunk_size(NonZeroUsize::new(64).expect("64 is not zero"))
+                .output_chunk_size(NonZeroUsize::new(64).unwrap())
                 .build_format(format, &Resources::default())
-                .expect("the settings are accepted");
-            decompressor.push(compressed).expect("push succeeds");
+                .unwrap();
+            decompressor.push(compressed).unwrap();
             decompressor.end_input();
 
             let mut guard = StepGuard::new();
@@ -867,19 +864,16 @@ mod tests {
         const EXPECTED_DEFAULT_CHUNK_SIZE: usize = 65_536;
 
         for &format in Format::ALL {
-            let compressed =
-                crate::format::compress(format, view(&vec![0_u8; 256 * 1024]), &Resources::default()).expect("compression succeeds");
+            let compressed = crate::format::compress(format, view(&vec![0_u8; 256 * 1024]), &Resources::default()).unwrap();
 
-            let mut decompressor = DecompressorBuilder::new()
-                .build_format(format, &Resources::default())
-                .expect("the settings are accepted");
-            decompressor.push(compressed).expect("push succeeds");
+            let mut decompressor = DecompressorBuilder::new().build_format(format, &Resources::default()).unwrap();
+            decompressor.push(compressed).unwrap();
             decompressor.end_input();
 
             let mut saw_a_full_size_chunk = false;
             let mut finished = false;
             for _ in 0..MAX_STEPS {
-                let output = decompressor.pull().expect("pull succeeds");
+                let output = decompressor.pull().unwrap();
                 assert!(!output.is_need_input(), "decompressor requested input after end");
                 let done = output.is_done();
                 if let Some(chunk) = output.as_data() {
@@ -906,21 +900,20 @@ mod tests {
 
     #[test]
     fn the_decompressor_builder_applies_its_chunk_size() {
-        let bound = NonZeroUsize::new(128).expect("128 is not zero");
+        let bound = NonZeroUsize::new(128).unwrap();
 
         for &format in Format::ALL {
-            let compressed = crate::format::compress(format, view(&b"chunked output ".repeat(5_000)), &Resources::default())
-                .expect("compression succeeds");
+            let compressed = crate::format::compress(format, view(&b"chunked output ".repeat(5_000)), &Resources::default()).unwrap();
             let mut decompressor = DecompressorBuilder::new()
                 .output_chunk_size(bound)
                 .build_format(format, &Resources::default())
-                .expect("the settings are accepted");
-            decompressor.push(compressed).expect("push succeeds");
+                .unwrap();
+            decompressor.push(compressed).unwrap();
             decompressor.end_input();
 
             let mut finished = false;
             for _ in 0..MAX_STEPS {
-                let output = decompressor.pull().expect("pull succeeds");
+                let output = decompressor.pull().unwrap();
                 assert!(!output.is_need_input(), "decompressor requested input after end");
                 let done = output.is_done();
                 if let Some(chunk) = output.as_data() {
@@ -938,16 +931,15 @@ mod tests {
     #[test]
     fn the_decompressor_builder_applies_its_trailing_data_policy() {
         for &format in Format::ALL {
-            let compressed =
-                crate::format::compress(format, view(&b"payload ".repeat(4_096)), &Resources::default()).expect("compression succeeds");
+            let compressed = crate::format::compress(format, view(&b"payload ".repeat(4_096)), &Resources::default()).unwrap();
             let joined = BytesView::from_views([compressed, view(b"trailing")]);
             let mut decompressor = DecompressorBuilder::new()
                 .multi_stream(false)
                 .trailing_data(TrailingData::Reject)
-                .output_chunk_size(NonZeroUsize::new(64).expect("64 is not zero"))
+                .output_chunk_size(NonZeroUsize::new(64).unwrap())
                 .build_format(format, &Resources::default())
-                .expect("the settings are accepted");
-            decompressor.push(joined).expect("push succeeds");
+                .unwrap();
+            decompressor.push(joined).unwrap();
             decompressor.end_input();
 
             let mut guard = StepGuard::new();
@@ -971,7 +963,7 @@ mod tests {
     #[test]
     fn explicit_limits_are_available_on_the_one_shot_runtime_api() {
         for &format in Format::ALL {
-            let compressed = crate::format::compress(format, view(&vec![0_u8; 4096]), &Resources::default()).expect("compression succeeds");
+            let compressed = crate::format::compress(format, view(&vec![0_u8; 4096]), &Resources::default()).unwrap();
             let error = crate::format::decompress_with_limits(
                 format,
                 compressed,
@@ -980,7 +972,7 @@ mod tests {
                     .unbounded_ratio()
                     .max_output_len(NonZeroU64::new(1024).unwrap()),
             )
-            .expect_err("the explicit cap fires");
+            .unwrap_err();
 
             assert!(error.is_limit_exceeded(), "{format:?}: got {error}");
         }
@@ -993,7 +985,7 @@ mod tests {
         let payload = b"member ".repeat(50);
 
         for &format in Format::ALL {
-            let compressed = crate::format::compress(format, view(&payload), &Resources::default()).expect("compress");
+            let compressed = crate::format::compress(format, view(&payload), &Resources::default()).unwrap();
             let joined = BytesView::from_views([compressed.clone(), compressed]);
 
             let joined_len = decompressed_len(
@@ -1024,7 +1016,7 @@ mod tests {
             // Matching the variant by name keeps this free of the cfg gates the variants carry.
             let joins_by_default = matches!(format!("{format:?}").as_str(), "Gzip" | "Zstd");
 
-            let compressed = crate::format::compress(format, view(&payload), &Resources::default()).expect("compress");
+            let compressed = crate::format::compress(format, view(&payload), &Resources::default()).unwrap();
             let joined = BytesView::from_views([compressed.clone(), compressed]);
 
             // `Ignore` isolates the multi-stream default under test from the trailing-data policy,
@@ -1040,13 +1032,11 @@ mod tests {
     }
 
     fn decompressed_len(decompressor: Decompressor, input: BytesView) -> usize {
-        crate::decompress(input, decompressor).expect("decompression succeeds").len()
+        crate::decompress(input, decompressor).unwrap().len()
     }
 
     fn decompressor_for(builder: DecompressorBuilder<()>, format: Format) -> Decompressor {
-        builder
-            .build_format(format, &Resources::default())
-            .expect("the settings are accepted")
+        builder.build_format(format, &Resources::default()).unwrap()
     }
 
     #[test]

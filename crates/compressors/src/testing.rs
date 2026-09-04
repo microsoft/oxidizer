@@ -93,7 +93,7 @@ pub(crate) fn fragmented(bytes: &[u8], segment: usize) -> BytesView {
 ///
 /// Panics if `size` is zero, which is a mistake in the calling test.
 pub(crate) fn chunk(size: usize) -> NonZeroUsize {
-    NonZeroUsize::new(size).expect("test chunk sizes are non-zero literals")
+    NonZeroUsize::new(size).unwrap()
 }
 
 /// A fixture that only ever reports progress, for exercising callers that must keep polling rather

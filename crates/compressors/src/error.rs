@@ -454,7 +454,7 @@ mod tests {
 
         for error in errors {
             let rendered = error.to_string();
-            let first = rendered.chars().next().expect("error messages are never empty");
+            let first = rendered.chars().next().unwrap();
             assert!(!first.is_uppercase(), "message should not start with a capital: {rendered}");
             assert!(!rendered.contains("exception"), "say 'error', not 'exception': {rendered}");
         }
@@ -465,7 +465,7 @@ mod tests {
         let inner = std::io::Error::other("inner failure");
         let error = Error::corrupt_data("outer").with_source(inner);
 
-        let source = error.source().expect("source was attached");
+        let source = error.source().unwrap();
         assert_eq!(source.to_string(), "inner failure");
     }
 
@@ -553,7 +553,7 @@ mod tests {
 
         assert_eq!(error.recovery().kind(), RecoveryKind::Retry);
         assert_eq!(
-            error.source().expect("the wrapper was attached").to_string(),
+            error.source().unwrap().to_string(),
             "wrapped",
             "the wrapper itself stays the reported cause, not the io::Error the heuristic reached through it"
         );
@@ -564,7 +564,7 @@ mod tests {
         let error = Error::other("something else failed", "a plain message");
 
         assert_eq!(error.recovery().kind(), RecoveryKind::Unknown);
-        assert_eq!(error.source().expect("the cause was attached").to_string(), "a plain message");
+        assert_eq!(error.source().unwrap().to_string(), "a plain message");
     }
 
     #[test]

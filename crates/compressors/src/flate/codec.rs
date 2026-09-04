@@ -262,9 +262,7 @@ mod tests {
         for wrapper in [Wrapper::Raw, Wrapper::Zlib, Wrapper::Gzip] {
             let mut codec = FlateCompress::new(wrapper, Level::DEFAULT, Pool::disabled().clone());
             let mut out = [MaybeUninit::uninit(); 64];
-            let (_, _, produced) = codec
-                .step(b"header check", &mut out, Operation::Finish)
-                .expect("compression succeeds");
+            let (_, _, produced) = codec.step(b"header check", &mut out, Operation::Finish).unwrap();
 
             // SAFETY: the engine reported initializing `produced` bytes.
             let bytes = unsafe { std::slice::from_raw_parts(out.as_ptr().cast::<u8>(), produced) };
@@ -316,13 +314,13 @@ mod tests {
         let mut scratch = [MaybeUninit::uninit(); 4096];
 
         let payload = b"flush boundary check payload";
-        let (_, consumed, _) = codec.step(payload, &mut scratch, Operation::Process).expect("process succeeds");
+        let (_, consumed, _) = codec.step(payload, &mut scratch, Operation::Process).unwrap();
         assert_eq!(consumed, payload.len(), "the whole input should have been consumed");
 
         // A one byte buffer cannot hold the whole flush in a single call, so the guard must
         // report `Continue`, not `FlushComplete`, while output remains buffered.
         let mut tiny = [MaybeUninit::uninit(); 1];
-        let (step, consumed, produced) = codec.step(&[], &mut tiny, Operation::Flush).expect("flush succeeds");
+        let (step, consumed, produced) = codec.step(&[], &mut tiny, Operation::Flush).unwrap();
         assert_eq!(consumed, 0, "no new input was supplied");
         assert_eq!(produced, 1, "the tiny buffer should be filled completely");
         assert_eq!(step, Step::Continue, "the flush cannot be complete while output remains buffered");
@@ -332,7 +330,7 @@ mod tests {
         // would ask flate2 to insert another sync marker, so the test only issues exactly the
         // calls this one flush needs.
         let mut generous = [MaybeUninit::uninit(); 256];
-        let (step, consumed, _) = codec.step(&[], &mut generous, Operation::Flush).expect("flush succeeds");
+        let (step, consumed, _) = codec.step(&[], &mut generous, Operation::Flush).unwrap();
         assert_eq!(consumed, 0, "no new input was supplied");
         assert_eq!(step, Step::FlushComplete, "a generous buffer must drain the remainder of the flush");
     }

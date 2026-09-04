@@ -229,8 +229,7 @@ mod tests {
             }
         }
 
-        let result =
-            process(ProgressOnceThenDone { done: false }, view(b"ignored")).expect("process succeeds even when a step only makes progress");
+        let result = process(ProgressOnceThenDone { done: false }, view(b"ignored")).unwrap();
 
         assert!(result.is_empty(), "the fixture never reports data");
     }
@@ -268,8 +267,7 @@ mod tests {
             }
         }
 
-        let error =
-            process(NeedsMoreForever, view(b"ignored")).expect_err("process rejects a pull that still requests input after end of input");
+        let error = process(NeedsMoreForever, view(b"ignored")).unwrap_err();
         assert!(error.is_invalid_state());
     }
 }

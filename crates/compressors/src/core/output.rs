@@ -129,7 +129,7 @@ mod tests {
         let output = Output::Data(BytesView::copied_from_slice(b"peek", &memory));
 
         assert_eq!(output.as_data().map(BytesView::len), Some(4));
-        assert_eq!(output.into_data().expect("still there").to_vec(), b"peek".to_vec());
+        assert_eq!(output.into_data().unwrap().to_vec(), b"peek".to_vec());
     }
 
     #[test]

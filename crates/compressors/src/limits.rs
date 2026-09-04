@@ -391,7 +391,7 @@ mod tests {
     fn buffering_leaves_an_explicit_choice_alone() {
         let chosen = DecompressorLimits::new()
             .max_output_len(NonZeroU64::new(99).unwrap())
-            .max_streams(NonZeroU64::new(3).expect("three is non-zero"))
+            .max_streams(NonZeroU64::new(3).unwrap())
             .for_buffered_output();
 
         assert_eq!(
@@ -428,7 +428,7 @@ mod tests {
     const ALL_BOUNDS: FormatLimits = FormatLimits::new(Some(1_000), Some(4_096), Some(8));
 
     fn ratio(value: u32) -> NonZeroU32 {
-        NonZeroU32::new(value).expect("test ratios are never zero")
+        NonZeroU32::new(value).unwrap()
     }
 
     fn resolved(limits: DecompressorLimits) -> FormatLimits {
@@ -459,7 +459,7 @@ mod tests {
         assert_eq!(resolved.ratio, None);
         assert_eq!(resolved.output_len, None);
         assert_eq!(resolved.streams, None);
-        resolved.check(1, u64::MAX, u64::MAX).expect("unlimited never rejects");
+        resolved.check(1, u64::MAX, u64::MAX).unwrap();
     }
 
     #[test]
@@ -489,7 +489,7 @@ mod tests {
 
     #[test]
     fn ratio_guard_rejects_a_bomb() {
-        let error = DEFAULTS.check(1_000, 100 * 1024 * 1024, 1).expect_err("100 MB from 1 KB is a bomb");
+        let error = DEFAULTS.check(1_000, 100 * 1024 * 1024, 1).unwrap_err();
 
         assert!(error.is_limit_exceeded());
     }
@@ -497,16 +497,12 @@ mod tests {
     #[test]
     fn ratio_guard_allows_multi_gigabyte_streams() {
         // An absolute cap would reject this; a ratio guard must not.
-        DEFAULTS
-            .check(64 * 1024 * 1024 * 1024, 640 * 1024 * 1024 * 1024, 1)
-            .expect("a 640 GB stream at tenfold expansion is legitimate");
+        DEFAULTS.check(64 * 1024 * 1024 * 1024, 640 * 1024 * 1024 * 1024, 1).unwrap();
     }
 
     #[test]
     fn ratio_guard_ignores_output_below_the_floor() {
-        DEFAULTS
-            .check(0, RATIO_FLOOR_BYTES, 1)
-            .expect("small outputs are never rejected on ratio");
+        DEFAULTS.check(0, RATIO_FLOOR_BYTES, 1).unwrap();
     }
 
     #[test]
@@ -518,9 +514,7 @@ mod tests {
 
     #[test]
     fn ratio_guard_engages_immediately_above_the_floor() {
-        let error = DEFAULTS
-            .check(0, RATIO_FLOOR_BYTES + 1, 1)
-            .expect_err("zero input can never justify output above the floor");
+        let error = DEFAULTS.check(0, RATIO_FLOOR_BYTES + 1, 1).unwrap_err();
 
         assert!(error.is_limit_exceeded());
     }
@@ -528,7 +522,7 @@ mod tests {
     #[test]
     fn absolute_bound_rejects_beyond_the_cap() {
         let limits = resolved(DecompressorLimits::new().max_output_len(NonZeroU64::new(100).unwrap()));
-        let error = limits.check(1_000_000, 101, 1).expect_err("101 bytes exceeds a 100 byte cap");
+        let error = limits.check(1_000_000, 101, 1).unwrap_err();
 
         assert!(error.is_limit_exceeded());
     }
@@ -537,24 +531,22 @@ mod tests {
     fn absolute_bound_allows_exactly_the_cap() {
         let limits = resolved(DecompressorLimits::new().max_output_len(NonZeroU64::new(100).unwrap()));
 
-        limits.check(1_000_000, 100, 1).expect("the cap itself is allowed");
+        limits.check(1_000_000, 100, 1).unwrap();
     }
 
     #[test]
     fn ratio_multiplication_saturates_instead_of_overflowing() {
         let limits = resolved(DecompressorLimits::new().max_ratio(ratio(u32::MAX)));
 
-        limits
-            .check(u64::MAX, u64::MAX, 1)
-            .expect("saturating multiplication must not panic or wrap");
+        limits.check(u64::MAX, u64::MAX, 1).unwrap();
     }
 
     #[test]
     fn stream_count_is_bounded() {
-        let limits = resolved(DecompressorLimits::new().max_streams(NonZeroU64::new(2).expect("two is non-zero")));
+        let limits = resolved(DecompressorLimits::new().max_streams(NonZeroU64::new(2).unwrap()));
 
-        limits.check(100, 100, 2).expect("the limit itself is allowed");
-        let error = limits.check(100, 100, 3).expect_err("the third stream exceeds the limit");
+        limits.check(100, 100, 2).unwrap();
+        let error = limits.check(100, 100, 3).unwrap_err();
 
         assert!(error.is_limit_exceeded());
     }

@@ -77,7 +77,7 @@ fn drive_decompressor(mut decompressor: gzip::Decompressor, input: &BytesView, f
 
 #[test]
 fn decompresses_a_stream_produced_by_the_system_gzip() {
-    let plain = gzip::decompress(view(SYSTEM_GZIP), &Resources::default()).expect("the fixture decompresses");
+    let plain = gzip::decompress(view(SYSTEM_GZIP), &Resources::default()).unwrap();
 
     assert_eq!(plain.to_vec(), FIXTURE_PLAINTEXT);
 }
@@ -89,7 +89,7 @@ fn decompresses_concatenated_members_produced_by_the_system_gzip() {
     // one independently generated fixture as the source of truth.
     let two_members = [SYSTEM_GZIP, SYSTEM_GZIP].concat();
 
-    let plain = gzip::decompress(view(&two_members), &Resources::default()).expect("the fixture decompresses");
+    let plain = gzip::decompress(view(&two_members), &Resources::default()).unwrap();
 
     assert_eq!(plain.to_vec(), [FIXTURE_PLAINTEXT, FIXTURE_PLAINTEXT].concat());
 }
@@ -101,12 +101,12 @@ fn our_framing_matches_an_independent_gzip_reader() {
     use std::io::Read as _;
 
     let payload = b"cross checked against an independent reader ".repeat(200);
-    let compressed = gzip::compress(fragmented(&payload, 71), &Resources::default()).expect("compression succeeds");
+    let compressed = gzip::compress(fragmented(&payload, 71), &Resources::default()).unwrap();
 
     let mut decompressed = Vec::new();
     flate2::read::GzDecoder::new(compressed.to_vec().as_slice())
         .read_to_end(&mut decompressed)
-        .expect("an independent reader accepts our output");
+        .unwrap();
 
     assert_eq!(decompressed, payload);
 }
@@ -120,8 +120,8 @@ fn round_trips_a_multi_segment_view() {
     for (segment, repeats) in [(1, 200), (7, 500), (64, 5_000), (1024, 20_000), (65_536, 20_000)] {
         let payload = b"multi segment payload ".repeat(repeats);
 
-        let compressed = gzip::compress(fragmented(&payload, segment), &Resources::default()).expect("compression succeeds");
-        let plain = gzip::decompress(compressed, &Resources::default()).expect("decompression succeeds");
+        let compressed = gzip::compress(fragmented(&payload, segment), &Resources::default()).unwrap();
+        let plain = gzip::decompress(compressed, &Resources::default()).unwrap();
 
         assert_eq!(plain.to_vec(), payload, "round trip failed for {segment} byte segments");
     }
@@ -130,12 +130,12 @@ fn round_trips_a_multi_segment_view() {
 #[test]
 fn round_trips_when_input_arrives_one_byte_at_a_time() {
     let payload = b"trickled in".repeat(50);
-    let compressed = gzip::compress(view(&payload), &Resources::default()).expect("compression succeeds");
+    let compressed = gzip::compress(view(&payload), &Resources::default()).unwrap();
 
     let decompressor = gzip::Decompressor::builder()
         .output_chunk_size(chunk(1))
         .build(&Resources::default());
-    let plain = drive_decompressor(decompressor, &compressed, 1).expect("decompression succeeds");
+    let plain = drive_decompressor(decompressor, &compressed, 1).unwrap();
 
     assert_eq!(plain.to_vec(), payload);
 }
@@ -152,14 +152,14 @@ fn streams_a_large_payload_with_a_bounded_working_set() {
     let mut compressor = gzip::Compressor::builder()
         .output_chunk_size(chunk(CHUNK))
         .build(&Resources::default());
-    compressor.push(fragmented(&payload, 4096)).expect("push succeeds");
+    compressor.push(fragmented(&payload, 4096)).unwrap();
     compressor.end_input();
 
     let mut compressed = Vec::new();
     let mut guard = StepGuard::new();
     loop {
         guard.step();
-        match compressor.pull().expect("pull succeeds") {
+        match compressor.pull().unwrap() {
             Output::Data(piece) => {
                 assert!(
                     piece.len() <= CHUNK,
@@ -180,7 +180,7 @@ fn streams_a_large_payload_with_a_bounded_working_set() {
     let decompressor = gzip::Decompressor::builder()
         .output_chunk_size(chunk(CHUNK))
         .build(&Resources::default());
-    let plain = drive_decompressor(decompressor, &gz, 8192).expect("decompression succeeds");
+    let plain = drive_decompressor(decompressor, &gz, 8192).unwrap();
 
     assert_eq!(plain.len(), payload.len());
     assert_eq!(plain.to_vec(), payload);
@@ -194,13 +194,13 @@ fn rejects_a_bomb_before_materialising_it() {
     // The cap is set explicitly rather than relying on the default: deflate cannot expand by more
     // than about `1032x`, so its default ratio never fires on data the format could have produced.
     // An absolute cap is what actually protects a caller that buffers the output.
-    let bomb = gzip::compress(view(&vec![0_u8; 1024 * 1024]), &Resources::default()).expect("compression succeeds");
+    let bomb = gzip::compress(view(&vec![0_u8; 1024 * 1024]), &Resources::default()).unwrap();
     assert!(bomb.len() < 16 * 1024, "the bomb should be tiny: {} bytes", bomb.len());
 
     let mut decompressor = gzip::Decompressor::builder()
         .limits(DecompressorLimits::new().max_output_len(NonZeroU64::new(16 * 1024).unwrap()))
         .build(&Resources::default());
-    decompressor.push(bomb).expect("push succeeds");
+    decompressor.push(bomb).unwrap();
     decompressor.end_input();
 
     let mut guard = StepGuard::new();
@@ -228,9 +228,9 @@ fn the_default_limits_accept_maximally_compressible_deflate_data() {
     // reaches that ceiling and clears the ratio guard's 32 KiB floor, so the guard is genuinely
     // active here rather than skipped as too small to judge.
     let payload = vec![0_u8; 1024 * 1024];
-    let compressed = gzip::compress(view(&payload), &Resources::default()).expect("compression succeeds");
+    let compressed = gzip::compress(view(&payload), &Resources::default()).unwrap();
 
-    let plain = gzip::decompress(compressed, &Resources::default()).expect("default limits must accept maximal deflate compression");
+    let plain = gzip::decompress(compressed, &Resources::default()).unwrap();
 
     assert_eq!(plain.len(), payload.len());
 }
@@ -240,19 +240,19 @@ fn known_good_data_can_opt_out_of_the_limits() {
     // The precondition is the data, not the caller: this payload is generated here, so its
     // expansion is known. A trusted caller relaying an attacker's bytes would not qualify.
     let payload = vec![0_u8; 1024 * 1024];
-    let compressed = gzip::compress(view(&payload), &Resources::default()).expect("compression succeeds");
+    let compressed = gzip::compress(view(&payload), &Resources::default()).unwrap();
 
     let decompressor = gzip::Decompressor::builder()
         .limits(DecompressorLimits::UNLIMITED)
         .build(&Resources::default());
-    let plain = drive_decompressor(decompressor, &compressed, usize::MAX).expect("decompression succeeds");
+    let plain = drive_decompressor(decompressor, &compressed, usize::MAX).unwrap();
 
     assert_eq!(plain.len(), payload.len());
 }
 
 #[test]
 fn detects_truncation_at_every_offset() {
-    let compressed = gzip::compress(view(&b"truncate me ".repeat(500)), &Resources::default()).expect("compression succeeds");
+    let compressed = gzip::compress(view(&b"truncate me ".repeat(500)), &Resources::default()).unwrap();
 
     for cut in [
         1,
@@ -261,8 +261,7 @@ fn detects_truncation_at_every_offset() {
         compressed.len() - 8,
         compressed.len() - 1,
     ] {
-        let error = gzip::decompress(compressed.range(0..cut), &Resources::default())
-            .expect_err("a truncated stream must not decompress successfully");
+        let error = gzip::decompress(compressed.range(0..cut), &Resources::default()).unwrap_err();
 
         assert!(
             error.is_unexpected_end_of_stream() || error.is_corrupt_data(),
@@ -274,7 +273,7 @@ fn detects_truncation_at_every_offset() {
 #[test]
 fn a_corrupted_byte_anywhere_is_detected() {
     let payload = b"integrity checked payload ".repeat(100);
-    let compressed = gzip::compress(view(&payload), &Resources::default()).expect("compression succeeds");
+    let compressed = gzip::compress(view(&payload), &Resources::default()).unwrap();
     let original = compressed.to_vec();
 
     for index in [0, 1, 2, original.len() / 2, original.len() - 5, original.len() - 1] {
@@ -295,8 +294,8 @@ fn a_corrupted_byte_anywhere_is_detected() {
 
 #[test]
 fn empty_input_round_trips() {
-    let compressed = gzip::compress(BytesView::new(), &Resources::default()).expect("compression succeeds");
-    let plain = gzip::decompress(compressed, &Resources::default()).expect("decompression succeeds");
+    let compressed = gzip::compress(BytesView::new(), &Resources::default()).unwrap();
+    let plain = gzip::decompress(compressed, &Resources::default()).unwrap();
 
     assert!(plain.is_empty());
 }
@@ -309,11 +308,11 @@ fn a_custom_memory_provider_is_used_for_output() {
     let (memory, activity) = crate::testing::counting_memory();
     let resources = Resources::new(memory);
 
-    let compressed = gzip::compress(view(b"provider supplied"), &resources).expect("compression succeeds");
+    let compressed = gzip::compress(view(b"provider supplied"), &resources).unwrap();
     let after_compress = activity.reservations();
     assert!(after_compress > 0, "compression must draw its output from the caller's provider");
 
-    let plain = gzip::decompress(compressed, &resources).expect("decompression succeeds");
+    let plain = gzip::decompress(compressed, &resources).unwrap();
 
     assert_eq!(plain.to_vec(), b"provider supplied".to_vec());
     assert!(
@@ -328,17 +327,15 @@ fn a_stream_of_many_tiny_members_is_rejected_without_the_caller_setting_any_limi
     // amplifies work out of all proportion to its size. The default stream cap is what bounds it,
     // so the count is derived from that constant rather than restated: this is the smallest input
     // that crosses the boundary, whatever the boundary currently is.
-    let members = usize::try_from(crate::limits::DEFAULT_MAX_STREAMS).expect("the cap fits a count") + 1;
+    let members = usize::try_from(crate::limits::DEFAULT_MAX_STREAMS).unwrap() + 1;
 
-    let member = gzip::compress(BytesView::new(), &Resources::default())
-        .expect("compression succeeds")
-        .to_vec();
+    let member = gzip::compress(BytesView::new(), &Resources::default()).unwrap().to_vec();
     let mut many = Vec::with_capacity(member.len() * members);
     for _ in 0..members {
         many.extend_from_slice(&member);
     }
 
-    let error = gzip::decompress(view(&many), &Resources::default()).expect_err("the default cap should reject this");
+    let error = gzip::decompress(view(&many), &Resources::default()).unwrap_err();
 
     assert!(error.is_limit_exceeded(), "expected a limit failure, got: {error}");
     assert!(

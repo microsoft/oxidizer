@@ -564,7 +564,7 @@ mod tests {
     #[test]
     fn reports_need_input_when_empty() {
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
-        let output = pump.pull(&mut Passthrough::default()).expect("pull succeeds");
+        let output = pump.pull(&mut Passthrough::default()).unwrap();
 
         assert!(output.is_need_input());
     }
@@ -572,13 +572,9 @@ mod tests {
     #[test]
     fn round_trips_data_through_the_codec() {
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
-        pump.push(view(b"hello world")).expect("push succeeds");
+        pump.push(view(b"hello world")).unwrap();
 
-        let data = pump
-            .pull(&mut Passthrough::default())
-            .expect("pull succeeds")
-            .into_data()
-            .expect("data is available");
+        let data = pump.pull(&mut Passthrough::default()).unwrap().into_data().unwrap();
 
         assert_eq!(data.to_vec(), b"hello world".to_vec());
         assert_eq!(pump.total_in(), 11);
@@ -588,13 +584,9 @@ mod tests {
     #[test]
     fn bounds_each_chunk_to_the_configured_size() {
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(4));
-        pump.push(view(b"abcdefghij")).expect("push succeeds");
+        pump.push(view(b"abcdefghij")).unwrap();
 
-        let data = pump
-            .pull(&mut Passthrough::default())
-            .expect("pull succeeds")
-            .into_data()
-            .expect("data is available");
+        let data = pump.pull(&mut Passthrough::default()).unwrap().into_data().unwrap();
 
         assert!(data.len() <= 8, "chunk was {} bytes, expected it near 4", data.len());
     }
@@ -624,13 +616,9 @@ mod tests {
         }
 
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(10));
-        pump.push(view(&[0_u8; 10])).expect("push succeeds");
+        pump.push(view(&[0_u8; 10])).unwrap();
 
-        let data = pump
-            .pull(&mut PartialThenGreedy::default())
-            .expect("pull succeeds")
-            .into_data()
-            .expect("data is available");
+        let data = pump.pull(&mut PartialThenGreedy::default()).unwrap().into_data().unwrap();
 
         // `take_output` itself caps a returned chunk at `chunk_size`, so a step that was handed
         // too much room would not show up in `data.len()`; it shows up as extra bytes recorded in
@@ -666,9 +654,9 @@ mod tests {
         }
 
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(100));
-        pump.push(view(&[0_u8; 150])).expect("push succeeds");
+        pump.push(view(&[0_u8; 150])).unwrap();
 
-        let output = pump.pull(&mut OneByteEcho).expect("pull succeeds");
+        let output = pump.pull(&mut OneByteEcho).unwrap();
         assert!(output.is_data());
         assert_eq!(
             pump.total_in(),
@@ -693,9 +681,9 @@ mod tests {
         // Hardcoded literals (rather than `MAX_INPUT_PER_PULL`) so this test actually pins the
         // budget's numeric value instead of trivially matching whatever the constant is set to.
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
-        pump.push(view(&vec![0_u8; 1_048_577])).expect("push succeeds");
+        pump.push(view(&vec![0_u8; 1_048_577])).unwrap();
 
-        assert!(pump.pull(&mut SilentConsumer).expect("pull succeeds").is_progress());
+        assert!(pump.pull(&mut SilentConsumer).unwrap().is_progress());
         assert_eq!(
             pump.total_in(),
             1_048_576,
@@ -728,18 +716,14 @@ mod tests {
             }
         }
 
-        let large_block = NonZeroU32::new(2_000_000).expect("test block size is never zero");
+        let large_block = NonZeroU32::new(2_000_000).unwrap();
         let single_block_memory = FixedBlockMemory::new(large_block);
 
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.push(BytesView::copied_from_slice(&vec![0_u8; 1_048_578], &single_block_memory))
-            .expect("push succeeds");
+            .unwrap();
 
-        assert!(
-            pump.pull(&mut SmallFirstThenGreedy::default())
-                .expect("pull succeeds")
-                .is_progress()
-        );
+        assert!(pump.pull(&mut SmallFirstThenGreedy::default()).unwrap().is_progress());
         assert_eq!(
             pump.total_in(),
             1_048_576,
@@ -750,56 +734,40 @@ mod tests {
     #[test]
     fn flush_returns_to_the_open_state() {
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
-        pump.push(view(b"flush me")).expect("push succeeds");
-        pump.flush().expect("flush request succeeds");
+        pump.push(view(b"flush me")).unwrap();
+        pump.flush().unwrap();
 
         let mut codec = Passthrough::default();
-        assert_eq!(
-            pump.pull(&mut codec)
-                .expect("pull succeeds")
-                .into_data()
-                .expect("flushed data")
-                .to_vec(),
-            b"flush me".to_vec()
-        );
-        assert!(pump.pull(&mut codec).expect("pull succeeds").is_need_input());
-        pump.push(view(b"more")).expect("input is accepted after the flush");
+        assert_eq!(pump.pull(&mut codec).unwrap().into_data().unwrap().to_vec(), b"flush me".to_vec());
+        assert!(pump.pull(&mut codec).unwrap().is_need_input());
+        pump.push(view(b"more")).unwrap();
     }
 
     #[test]
     fn flush_is_idempotent_while_still_pending() {
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
-        pump.flush().expect("flush request succeeds");
-        pump.flush()
-            .expect("a repeated flush request while one is already pending is a no-op");
+        pump.flush().unwrap();
+        pump.flush().unwrap();
 
-        assert!(pump.pull(&mut Passthrough::default()).expect("pull succeeds").is_need_input());
+        assert!(pump.pull(&mut Passthrough::default()).unwrap().is_need_input());
     }
 
     #[test]
     fn empty_flush_completes_without_output() {
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
-        pump.flush().expect("flush request succeeds");
+        pump.flush().unwrap();
 
-        assert!(
-            pump.pull(&mut Passthrough::default())
-                .expect("empty flush succeeds")
-                .is_need_input()
-        );
-        pump.flush().expect("a completed flush can be requested again");
+        assert!(pump.pull(&mut Passthrough::default()).unwrap().is_need_input());
+        pump.flush().unwrap();
     }
 
     #[test]
     fn flush_with_queued_end_input_continues_to_finishing() {
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
-        pump.flush().expect("flush request succeeds");
+        pump.flush().unwrap();
         pump.end_input();
 
-        assert!(
-            pump.pull(&mut Passthrough::default())
-                .expect("the queued end of input drains straight through")
-                .is_done()
-        );
+        assert!(pump.pull(&mut Passthrough::default()).unwrap().is_done());
     }
 
     #[test]
@@ -828,35 +796,27 @@ mod tests {
         }
 
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(4));
-        pump.push(view(b"x")).expect("push succeeds");
-        pump.flush().expect("flush request succeeds");
+        pump.push(view(b"x")).unwrap();
+        pump.flush().unwrap();
 
         let mut codec = FlushSizedStreamEnd;
-        let first = pump.pull(&mut codec).expect("pull succeeds").into_data().expect("some data");
+        let first = pump.pull(&mut codec).unwrap().into_data().unwrap();
         assert_eq!(first.len(), 4, "the first pull hands over exactly one chunk");
 
-        let second = pump
-            .pull(&mut codec)
-            .expect("pull succeeds")
-            .into_data()
-            .expect("leftover output beyond the chunk size");
+        let second = pump.pull(&mut codec).unwrap().into_data().unwrap();
         assert!(!second.is_empty(), "the remainder must still be delivered");
 
-        assert!(pump.pull(&mut codec).expect("pull succeeds").is_done());
+        assert!(pump.pull(&mut codec).unwrap().is_done());
     }
 
     #[test]
     fn rejects_input_and_final_flush_while_flushing() {
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
-        pump.flush().expect("flush request succeeds");
+        pump.flush().unwrap();
 
-        assert!(pump.push(view(b"late")).expect_err("push is rejected").is_invalid_state());
+        assert!(pump.push(view(b"late")).unwrap_err().is_invalid_state());
         pump.end_input();
-        assert!(
-            pump.flush()
-                .expect_err("another flush after end_input is rejected")
-                .is_invalid_state()
-        );
+        assert!(pump.flush().unwrap_err().is_invalid_state());
     }
 
     #[test]
@@ -873,12 +833,12 @@ mod tests {
         }
 
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
-        assert!(pump.pull(&mut Fails).expect_err("codec fails").is_corrupt_data());
+        assert!(pump.pull(&mut Fails).unwrap_err().is_corrupt_data());
         pump.end_input();
 
-        assert!(pump.push(view(b"late")).expect_err("push is rejected").is_invalid_state());
-        assert!(pump.flush().expect_err("flush is rejected").is_invalid_state());
-        assert!(pump.pull(&mut Fails).expect_err("pull is rejected").is_invalid_state());
+        assert!(pump.push(view(b"late")).unwrap_err().is_invalid_state());
+        assert!(pump.flush().unwrap_err().is_invalid_state());
+        assert!(pump.pull(&mut Fails).unwrap_err().is_invalid_state());
     }
 
     #[test]
@@ -895,11 +855,7 @@ mod tests {
         }
 
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
-        assert!(
-            pump.pull(&mut SpuriousFlush)
-                .expect_err("unrequested completion is rejected")
-                .is_invalid_state()
-        );
+        assert!(pump.pull(&mut SpuriousFlush).unwrap_err().is_invalid_state());
     }
 
     #[test]
@@ -920,12 +876,8 @@ mod tests {
         }
 
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
-        pump.push(view(b"input")).expect("push succeeds");
-        assert!(
-            pump.pull(&mut BadEnd)
-                .expect_err("stream-end hook failure propagates")
-                .is_invalid_state()
-        );
+        pump.push(view(b"input")).unwrap();
+        assert!(pump.pull(&mut BadEnd).unwrap_err().is_invalid_state());
     }
 
     #[test]
@@ -946,10 +898,10 @@ mod tests {
         }
 
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
-        pump.push(view(b"input")).expect("push succeeds");
+        pump.push(view(b"input")).unwrap();
         pump.end_input();
 
-        assert!(pump.pull(&mut StrictEnd).expect("strict stream completes").is_done());
+        assert!(pump.pull(&mut StrictEnd).unwrap().is_done());
     }
 
     #[test]
@@ -972,16 +924,15 @@ mod tests {
         }
 
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
-        pump.push(view(b"member")).expect("push succeeds");
+        pump.push(view(b"member")).unwrap();
 
-        assert!(pump.pull(&mut Recyclable).expect("pull succeeds").is_need_input());
+        assert!(pump.pull(&mut Recyclable).unwrap().is_need_input());
 
         // A real `Some(n)` limit would put the pump in `State::AtStreamLimit` right here, and the
         // next `push` would fail with `stream_limit_exceeded`. Succeeding proves the default is
         // genuinely unbounded (`None`), not merely a limit this test happens not to reach.
-        pump.push(view(b"second member"))
-            .expect("push succeeds after one stream with no limit");
-        assert!(pump.pull(&mut Recyclable).expect("pull succeeds").is_need_input());
+        pump.push(view(b"second member")).unwrap();
+        assert!(pump.pull(&mut Recyclable).unwrap().is_need_input());
     }
 
     #[test]
@@ -1008,9 +959,9 @@ mod tests {
         }
 
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
-        pump.push(view(b"firstsecond")).expect("push succeeds");
+        pump.push(view(b"firstsecond")).unwrap();
 
-        assert!(pump.pull(&mut FixedFrame).expect("pull succeeds").is_need_input());
+        assert!(pump.pull(&mut FixedFrame).unwrap().is_need_input());
         assert_eq!(
             pump.total_in(),
             11,
@@ -1042,10 +993,10 @@ mod tests {
         }
 
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
-        pump.push(view(b"member")).expect("push succeeds");
+        pump.push(view(b"member")).unwrap();
         pump.end_input();
 
-        assert!(pump.pull(&mut StreamLimited).expect("pull succeeds").is_done());
+        assert!(pump.pull(&mut StreamLimited).unwrap().is_done());
     }
 
     #[test]
@@ -1072,11 +1023,9 @@ mod tests {
         }
 
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
-        pump.push(view(b"member")).expect("push succeeds");
+        pump.push(view(b"member")).unwrap();
 
-        let error = pump
-            .pull(&mut RejectsAnotherStream)
-            .expect_err("the stream-count limit is enforced right after the stream ends");
+        let error = pump.pull(&mut RejectsAnotherStream).unwrap_err();
         assert!(error.is_limit_exceeded());
     }
 
@@ -1112,17 +1061,17 @@ mod tests {
         }
 
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
-        pump.push(view(b"input")).expect("push succeeds");
+        pump.push(view(b"input")).unwrap();
 
-        assert!(pump.pull(&mut Stalled).expect_err("a stalled codec is rejected").is_invalid_state());
+        assert!(pump.pull(&mut Stalled).unwrap_err().is_invalid_state());
     }
 
     #[test]
     fn rejects_a_second_push_while_input_is_pending() {
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
-        pump.push(view(b"first")).expect("push succeeds");
+        pump.push(view(b"first")).unwrap();
 
-        let error = pump.push(view(b"second")).expect_err("overlapping push is rejected");
+        let error = pump.push(view(b"second")).unwrap_err();
         assert!(error.is_invalid_state());
     }
 
@@ -1131,7 +1080,7 @@ mod tests {
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.end_input();
 
-        let error = pump.push(view(b"late")).expect_err("push after end_input is rejected");
+        let error = pump.push(view(b"late")).unwrap_err();
         assert!(error.is_invalid_state());
     }
 
@@ -1141,22 +1090,22 @@ mod tests {
         pump.end_input();
         pump.end_input();
 
-        let output = pump.pull(&mut Passthrough::default()).expect("pull succeeds");
+        let output = pump.pull(&mut Passthrough::default()).unwrap();
         assert!(output.is_done());
     }
 
     #[test]
     fn reports_done_after_the_stream_ends() {
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
-        pump.push(view(b"tail")).expect("push succeeds");
+        pump.push(view(b"tail")).unwrap();
         pump.end_input();
 
         let mut codec = Passthrough::default();
-        let data = pump.pull(&mut codec).expect("pull succeeds").into_data().expect("data");
+        let data = pump.pull(&mut codec).unwrap().into_data().unwrap();
         assert_eq!(data.to_vec(), b"tail".to_vec());
 
-        assert!(pump.pull(&mut codec).expect("pull succeeds").is_done());
-        assert!(pump.pull(&mut codec).expect("pull succeeds").is_done());
+        assert!(pump.pull(&mut codec).unwrap().is_done());
+        assert!(pump.pull(&mut codec).unwrap().is_done());
     }
 
     #[test]
@@ -1176,7 +1125,7 @@ mod tests {
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.end_input();
 
-        let error = pump.pull(&mut NeverEnds).expect_err("truncation is reported");
+        let error = pump.pull(&mut NeverEnds).unwrap_err();
         assert!(error.is_unexpected_end_of_stream());
     }
 
@@ -1203,9 +1152,9 @@ mod tests {
         }
 
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
-        pump.push(view(b"seed")).expect("push succeeds");
+        pump.push(view(b"seed")).unwrap();
 
-        let error = pump.pull(&mut Expanding).expect_err("limit is enforced");
+        let error = pump.pull(&mut Expanding).unwrap_err();
         assert!(error.is_limit_exceeded());
     }
 
@@ -1232,9 +1181,9 @@ mod tests {
         }
 
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
-        pump.push(view(b"input")).expect("push succeeds");
+        pump.push(view(b"input")).unwrap();
 
-        let error = pump.pull(&mut Overreports).expect_err("invalid output count is rejected");
+        let error = pump.pull(&mut Overreports).unwrap_err();
         assert!(error.is_invalid_state(), "got {error}");
         assert_eq!(pump.total_out(), 0, "uninitialized bytes must never be advanced");
     }

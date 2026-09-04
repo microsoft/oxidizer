@@ -348,12 +348,7 @@ mod tests {
 
         /// Counts what the pool is holding, which the public API deliberately does not expose.
         fn idle(pool: &Pool, key: EngineKey) -> usize {
-            pool.inner
-                .compressors
-                .lock()
-                .expect("pool is not poisoned")
-                .get(&key)
-                .map_or(0, Vec::len)
+            pool.inner.compressors.lock().unwrap().get(&key).map_or(0, Vec::len)
         }
 
         #[test]
@@ -403,15 +398,13 @@ mod tests {
             // An engine abandoned mid-stream must not leak its state into the next user.
             let mut dirty = engine();
             let mut scratch = [0_u8; 256];
-            dirty
-                .compress(b"half a stream", &mut scratch, flate2::FlushCompress::None)
-                .expect("compress");
+            dirty.compress(b"half a stream", &mut scratch, flate2::FlushCompress::None).unwrap();
             assert!(dirty.total_in() > 0, "the engine should be dirty");
 
             let pool = Pool::new();
             pool.return_compressor(key(6), &mut Some(dirty));
 
-            let clean = pool.take_compressor(key(6)).expect("the engine comes back");
+            let clean = pool.take_compressor(key(6)).unwrap();
             assert_eq!(clean.total_in(), 0, "checkout must reset the engine");
             assert_eq!(clean.total_out(), 0);
         }
@@ -422,7 +415,7 @@ mod tests {
 
             // Poison the compressors mutex the same way a panicking holder would.
             let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _guard = pool.inner.compressors.lock().expect("not yet poisoned");
+                let _guard = pool.inner.compressors.lock().unwrap();
                 panic!("poisoning the mutex for the test");
             }));
             assert!(poisoned.is_err(), "the panic should have been caught");
@@ -454,12 +447,7 @@ mod tests {
 
         /// Counts what the pool is holding, which the public API deliberately does not expose.
         fn idle(pool: &Pool, wrapper: Wrapper) -> usize {
-            pool.inner
-                .decompressors
-                .lock()
-                .expect("pool is not poisoned")
-                .get(&wrapper)
-                .map_or(0, Vec::len)
+            pool.inner.decompressors.lock().unwrap().get(&wrapper).map_or(0, Vec::len)
         }
 
         #[test]
@@ -497,7 +485,7 @@ mod tests {
             let pool = Pool::new();
 
             let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _guard = pool.inner.decompressors.lock().expect("not yet poisoned");
+                let _guard = pool.inner.decompressors.lock().unwrap();
                 panic!("poisoning the mutex for the test");
             }));
             assert!(poisoned.is_err(), "the panic should have been caught");
@@ -514,11 +502,11 @@ mod tests {
 
         /// Counts what the pool is holding, which the public API deliberately does not expose.
         fn idle_compressors(pool: &Pool) -> usize {
-            pool.inner.zstd_compressors.lock().expect("pool is not poisoned").len()
+            pool.inner.zstd_compressors.lock().unwrap().len()
         }
 
         fn idle_decompressors(pool: &Pool) -> usize {
-            pool.inner.zstd_decompressors.lock().expect("pool is not poisoned").len()
+            pool.inner.zstd_decompressors.lock().unwrap().len()
         }
 
         #[test]
@@ -556,7 +544,7 @@ mod tests {
             let pool = Pool::new();
 
             let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _guard = pool.inner.zstd_compressors.lock().expect("not yet poisoned");
+                let _guard = pool.inner.zstd_compressors.lock().unwrap();
                 panic!("poisoning the mutex for the test");
             }));
             assert!(poisoned.is_err(), "the panic should have been caught");
