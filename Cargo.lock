@@ -1148,6 +1148,7 @@ dependencies = [
  "alloc_tracker",
  "brotli",
  "bytesbuf",
+ "cfg_aliases",
  "criterion",
  "flate2",
  "futures",

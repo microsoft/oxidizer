@@ -169,14 +169,7 @@ macro_rules! dispatch {
             $kind::Brotli($codec) => $call,
             #[cfg(any(test, feature = "zstd"))]
             $kind::Zstd($codec) => $call,
-            #[cfg(not(any(
-                test,
-                feature = "brotli",
-                feature = "deflate",
-                feature = "gzip",
-                feature = "zlib",
-                feature = "zstd"
-            )))]
+            #[cfg(not(any(test, any_format)))]
             #[expect(
                 clippy::uninhabited_references,
                 reason = "the variant cannot be constructed, so a reference to it cannot exist for this arm to reach"
@@ -205,24 +198,10 @@ enum CompressorKind {
     /// [`Infallible`][core::convert::Infallible] cannot be constructed, so neither can this: the
     /// type exists so a build with no format can still name it, not so it can be used.
     #[cfg_attr(
-        not(any(
-            test,
-            feature = "brotli",
-            feature = "deflate",
-            feature = "gzip",
-            feature = "zlib",
-            feature = "zstd"
-        )),
+        not(any(test, any_format)),
         expect(dead_code, reason = "the placeholder exists to be matched, never constructed")
     )]
-    #[cfg(not(any(
-        test,
-        feature = "brotli",
-        feature = "deflate",
-        feature = "gzip",
-        feature = "zlib",
-        feature = "zstd"
-    )))]
+    #[cfg(not(any(test, any_format)))]
     Impossible(core::convert::Infallible),
 }
 
@@ -241,24 +220,10 @@ enum DecompressorKind {
     Zstd(crate::zstd::Decompressor),
     /// Keeps the dispatch exhaustive when no format is enabled, exactly as for the compressor above.
     #[cfg_attr(
-        not(any(
-            test,
-            feature = "brotli",
-            feature = "deflate",
-            feature = "gzip",
-            feature = "zlib",
-            feature = "zstd"
-        )),
+        not(any(test, any_format)),
         expect(dead_code, reason = "the placeholder exists to be matched, never constructed")
     )]
-    #[cfg(not(any(
-        test,
-        feature = "brotli",
-        feature = "deflate",
-        feature = "gzip",
-        feature = "zlib",
-        feature = "zstd"
-    )))]
+    #[cfg(not(any(test, any_format)))]
     Impossible(core::convert::Infallible),
 }
 
@@ -299,14 +264,7 @@ impl Compression for Compressor {
 
 impl CompressionInternal for Compressor {
     #[cfg_attr(
-        not(any(
-            test,
-            feature = "brotli",
-            feature = "deflate",
-            feature = "gzip",
-            feature = "zlib",
-            feature = "zstd"
-        )),
+        not(any(test, any_format)),
         expect(unused_variables, reason = "the dispatch below diverges when no format is enabled")
     )]
     fn push(&mut self, input: BytesView) -> Result<()> {
@@ -317,6 +275,10 @@ impl CompressionInternal for Compressor {
         dispatch!(CompressorKind, &mut self.kind, codec => codec.end_input());
     }
 
+    #[cfg_attr(
+        not(any(test, any_format)),
+        expect(unused_variables, reason = "the dispatch below diverges when no format is enabled")
+    )]
     fn pull(&mut self, into: Destination) -> Result<Output> {
         dispatch!(CompressorKind, &mut self.kind, codec => codec.pull(into))
     }
@@ -373,14 +335,7 @@ impl Compression for Decompressor {
 
 impl CompressionInternal for Decompressor {
     #[cfg_attr(
-        not(any(
-            test,
-            feature = "brotli",
-            feature = "deflate",
-            feature = "gzip",
-            feature = "zlib",
-            feature = "zstd"
-        )),
+        not(any(test, any_format)),
         expect(unused_variables, reason = "the dispatch below diverges when no format is enabled")
     )]
     fn push(&mut self, input: BytesView) -> Result<()> {
@@ -391,6 +346,10 @@ impl CompressionInternal for Decompressor {
         dispatch!(DecompressorKind, &mut self.kind, codec => codec.end_input());
     }
 
+    #[cfg_attr(
+        not(any(test, any_format)),
+        expect(unused_variables, reason = "the dispatch below diverges when no format is enabled")
+    )]
     fn pull(&mut self, into: Destination) -> Result<Output> {
         dispatch!(DecompressorKind, &mut self.kind, codec => codec.pull(into))
     }
@@ -476,14 +435,7 @@ impl CompressorBuilder<()> {
         )
     )]
     #[cfg_attr(
-        not(any(
-            test,
-            feature = "brotli",
-            feature = "deflate",
-            feature = "gzip",
-            feature = "zlib",
-            feature = "zstd"
-        )),
+        not(any(test, any_format)),
         expect(
             unreachable_code,
             unused_variables,
@@ -530,14 +482,7 @@ impl DecompressorBuilder<()> {
         )
     )]
     #[cfg_attr(
-        not(any(
-            test,
-            feature = "brotli",
-            feature = "deflate",
-            feature = "gzip",
-            feature = "zlib",
-            feature = "zstd"
-        )),
+        not(any(test, any_format)),
         expect(
             unreachable_code,
             unused_variables,

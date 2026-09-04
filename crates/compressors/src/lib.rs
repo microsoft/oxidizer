@@ -233,14 +233,7 @@ mod builder;
 pub mod core;
 #[cfg(any(test, feature = "deflate"))]
 pub mod deflate;
-#[cfg(any(
-    test,
-    feature = "brotli",
-    feature = "deflate",
-    feature = "gzip",
-    feature = "zlib",
-    feature = "zstd"
-))]
+#[cfg(any(test, any_format))]
 mod engine;
 mod error;
 #[cfg(any(test, feature = "deflate", feature = "gzip", feature = "zlib"))]
@@ -251,14 +244,7 @@ pub mod gzip;
 mod input;
 mod level;
 pub(crate) mod limits;
-#[cfg(any(
-    test,
-    feature = "brotli",
-    feature = "deflate",
-    feature = "gzip",
-    feature = "zlib",
-    feature = "zstd"
-))]
+#[cfg(any(test, any_format))]
 mod macros;
 mod pool;
 mod resources;

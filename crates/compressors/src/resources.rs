@@ -127,17 +127,7 @@ impl Resources {
 
     /// The engines a compressor or decompressor built from these resources checks out of, and back into.
     #[cfg_attr(
-        all(
-            not(test),
-            not(any(
-                test,
-                feature = "brotli",
-                feature = "deflate",
-                feature = "gzip",
-                feature = "zlib",
-                feature = "zstd"
-            ))
-        ),
+        not(any(test, any_format)),
         expect(dead_code, reason = "only a format module's build method checks an engine out")
     )]
     pub(crate) fn pool(&self) -> &Pool {

@@ -69,14 +69,7 @@ pub struct CompressorBuilder<T = ()> {
     /// The shared builder never reads this beyond handing it to the engine; the format's own module
     /// adds the setters that populate it.
     #[cfg_attr(
-        not(any(
-            test,
-            feature = "brotli",
-            feature = "deflate",
-            feature = "gzip",
-            feature = "zlib",
-            feature = "zstd"
-        )),
+        not(any(test, any_format)),
         expect(dead_code, reason = "only a format module's build method reads the settings it owns")
     )]
     pub(crate) format: T,
@@ -124,14 +117,7 @@ impl CompressorBuilder<()> {
 
     /// Commits the format-independent settings to one format.
     #[cfg_attr(
-        not(any(
-            test,
-            feature = "brotli",
-            feature = "deflate",
-            feature = "gzip",
-            feature = "zlib",
-            feature = "zstd"
-        )),
+        not(any(test, any_format)),
         expect(dead_code, reason = "only a format module's build method commits a builder to a format")
     )]
     pub(crate) fn specialize<T>(self, format: T) -> CompressorBuilder<T> {
@@ -179,14 +165,7 @@ pub struct DecompressorBuilder<T = ()> {
     pub(crate) trailing_data: TrailingData,
     /// The chosen format's own settings, and `()` until a format is chosen.
     #[cfg_attr(
-        not(any(
-            test,
-            feature = "brotli",
-            feature = "deflate",
-            feature = "gzip",
-            feature = "zlib",
-            feature = "zstd"
-        )),
+        not(any(test, any_format)),
         expect(dead_code, reason = "only a format module's build method reads the settings it owns")
     )]
     pub(crate) format: T,
@@ -274,14 +253,7 @@ impl DecompressorBuilder<()> {
 
     /// Commits the format-independent settings to one format.
     #[cfg_attr(
-        not(any(
-            test,
-            feature = "brotli",
-            feature = "deflate",
-            feature = "gzip",
-            feature = "zlib",
-            feature = "zstd"
-        )),
+        not(any(test, any_format)),
         expect(dead_code, reason = "only a format module's build method commits a builder to a format")
     )]
     pub(crate) fn specialize<T>(self, format: T) -> DecompressorBuilder<T> {

@@ -1530,6 +1530,10 @@ mod zstd_specific_settings {
 
         let decompressor = zstd::Decompressor::builder()
             .max_window_log(WindowLog::DEFAULT)
+            // The payload has to be large for the window limit above to be observable at all, which
+            // puts it past the buffering ceiling. Stating the output bound explicitly keeps this
+            // test about the window setting rather than about the ceiling.
+            .limits(DecompressorLimits::UNLIMITED)
             .build(resources())
             .built();
         let plain = crate::decompress(compressed, decompressor).unwrap();

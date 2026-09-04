@@ -30,7 +30,7 @@
 /// # Examples
 ///
 /// ```
-/// # #[cfg(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
+/// # #[cfg(any_format)]
 /// # {
 /// use compressors::Level;
 ///

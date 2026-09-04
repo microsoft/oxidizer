@@ -12,6 +12,7 @@ use std::num::NonZeroU64;
 use bytesbuf::{BytesBuf, BytesView};
 
 use crate::core::{CompressionInternal as _, Destination, Output};
+use crate::format::Format;
 use crate::limits::DEFAULT_MAX_OUTPUT_LEN;
 use crate::testing::{chunk, fragmented, view};
 use crate::{DecompressorLimits, Resources, gzip};
@@ -374,4 +375,29 @@ fn the_crate_level_decompress_applies_the_default_ceiling_unless_the_caller_deci
     // Lowered explicitly: still the caller's decision, in the other direction.
     let lowered = DecompressorLimits::new().max_output_len(NonZeroU64::new(1024).unwrap());
     assert!(decompress_with(lowered).unwrap_err().is_limit_exceeded());
+}
+
+#[test]
+fn the_crate_level_decompress_applies_the_default_ceiling_to_runtime_formats_too() {
+    // The runtime-format decompressor is a separate `CompressionInternal` implementation, so the
+    // ceiling has to reach it the same way it reaches every other one. Brotli is the format that
+    // makes this observable: it declares no bounds of its own, so nothing but the ceiling can
+    // refuse this.
+    let over_the_cap = vec![0_u8; usize::try_from(DEFAULT_MAX_OUTPUT_LEN).unwrap() + 1];
+    let compressed = crate::format::compress(Format::Brotli, &*over_the_cap, &Resources::default()).unwrap();
+
+    let decompress_with = |limits: DecompressorLimits| {
+        crate::decompress(
+            compressed.clone(),
+            crate::format::Decompressor::builder()
+                .limits(limits)
+                .build_format(Format::Brotli, &Resources::default())
+                .unwrap(),
+        )
+    };
+
+    let error = decompress_with(DecompressorLimits::new()).unwrap_err();
+    assert!(error.is_limit_exceeded(), "got {error}");
+
+    assert_eq!(decompress_with(DecompressorLimits::UNLIMITED).unwrap().len(), over_the_cap.len());
 }

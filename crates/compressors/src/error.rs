@@ -83,17 +83,7 @@ pub struct Error {
 }
 
 #[cfg_attr(
-    all(
-        not(test),
-        not(any(
-            test,
-            feature = "brotli",
-            feature = "deflate",
-            feature = "gzip",
-            feature = "zlib",
-            feature = "zstd"
-        ))
-    ),
+    not(any(test, any_format)),
     expect(dead_code, reason = "only the codecs construct these, and no format is enabled")
 )]
 impl Error {

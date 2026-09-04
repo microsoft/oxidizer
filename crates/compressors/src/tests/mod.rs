@@ -9,14 +9,7 @@
 //! cannot name those items, and exposing them so it could would defeat the sealing they exist to
 //! verify.
 
-#[cfg(any(
-    test,
-    feature = "brotli",
-    feature = "deflate",
-    feature = "gzip",
-    feature = "zlib",
-    feature = "zstd"
-))]
+#[cfg(any(test, any_format))]
 mod format_contract;
 
 #[cfg(any(test, feature = "gzip"))]

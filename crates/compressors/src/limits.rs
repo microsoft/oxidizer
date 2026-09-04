@@ -12,17 +12,7 @@ use crate::error::{Error, Result};
 /// infinitely bad expansion ratio and be rejected. 32 KiB is far below any size at which a
 /// decompression bomb becomes a memory-exhaustion risk.
 #[cfg_attr(
-    all(
-        not(test),
-        not(any(
-            test,
-            feature = "brotli",
-            feature = "deflate",
-            feature = "gzip",
-            feature = "zlib",
-            feature = "zstd"
-        ))
-    ),
+    not(any(test, any_format)),
     expect(dead_code, reason = "only the decompressors resolve and enforce bounds, and no format is enabled")
 )]
 const RATIO_FLOOR_BYTES: u64 = 32 * 1024;
@@ -39,7 +29,23 @@ const RATIO_FLOOR_BYTES: u64 = 32 * 1024;
 /// 64 MiB is a policy guardrail for the common case, not a universal safety guarantee: a server
 /// decompressing many bodies at once still has to bound its own concurrency. A caller who buffers
 /// more, or less, passes explicit [`DecompressorLimits`] to `decompress_with_limits`.
-pub(crate) const DEFAULT_MAX_OUTPUT_LEN: u64 = 64 * 1024 * 1024;
+#[cfg(not(test))]
+pub(crate) const DEFAULT_MAX_OUTPUT_LEN: u64 = SHIPPED_MAX_OUTPUT_LEN;
+
+/// The shipped cap is [`SHIPPED_MAX_OUTPUT_LEN`]; see the definition above for what it is for.
+///
+/// Lowered to 1 MiB for the crate's own tests. Every case that has to cross this bound builds a
+/// payload derived from it, so the shipped value costs the suite a 64 MiB allocation per such case
+/// -- and one brotli compression of that size -- for no added confidence. What those tests check is
+/// that the bound is applied, resolved and overridden correctly, and none of that depends on its
+/// magnitude. They state the bound through this constant rather than a literal, so they follow it
+/// down.
+#[cfg(test)]
+pub(crate) const DEFAULT_MAX_OUTPUT_LEN: u64 = 1024 * 1024;
+
+/// What a real build caps buffered output at, named separately from [`DEFAULT_MAX_OUTPUT_LEN`] so
+/// that a test build -- which lowers that constant -- can still assert the documented figure.
+pub(crate) const SHIPPED_MAX_OUTPUT_LEN: u64 = 64 * 1024 * 1024;
 
 /// The cap the buffering conveniences put on concatenated stream count.
 ///
@@ -68,17 +74,7 @@ enum Limit<T> {
 
 impl<T> Limit<T> {
     #[cfg_attr(
-        all(
-            not(test),
-            not(any(
-                test,
-                feature = "brotli",
-                feature = "deflate",
-                feature = "gzip",
-                feature = "zlib",
-                feature = "zstd"
-            ))
-        ),
+        not(any(test, any_format)),
         expect(dead_code, reason = "only the decompressors resolve and enforce bounds, and no format is enabled")
     )]
     fn resolve(self, default: Option<T>) -> Option<T> {
@@ -253,6 +249,10 @@ impl DecompressorLimits {
     /// 64 MiB cap stands in. An explicit value -- or an explicit
     /// [`UNLIMITED`][DecompressorLimits::UNLIMITED] -- is the caller's decision, and the
     /// decompressor already enforces it, so nothing is added on top.
+    #[cfg_attr(
+        not(any(test, any_format)),
+        expect(dead_code, reason = "only a decompressor's pump carries the ceiling, and no format is enabled")
+    )]
     pub(crate) const fn buffered_ceiling(self) -> Option<NonZeroU64> {
         match self.output_len {
             Limit::Unset => NonZeroU64::new(DEFAULT_MAX_OUTPUT_LEN),
@@ -262,17 +262,7 @@ impl DecompressorLimits {
 
     /// Applies these overrides on top of a format's defaults.
     #[cfg_attr(
-        all(
-            not(test),
-            not(any(
-                test,
-                feature = "brotli",
-                feature = "deflate",
-                feature = "gzip",
-                feature = "zlib",
-                feature = "zstd"
-            ))
-        ),
+        not(any(test, any_format)),
         expect(dead_code, reason = "only the decompressors resolve and enforce bounds, and no format is enabled")
     )]
     pub(crate) fn resolve(self, defaults: FormatLimits) -> FormatLimits {
@@ -288,17 +278,7 @@ impl DecompressorLimits {
 ///
 /// Private: formats declare their defaults as constants of this type, and the decompressors enforce it.
 #[cfg_attr(
-    all(
-        not(test),
-        not(any(
-            test,
-            feature = "brotli",
-            feature = "deflate",
-            feature = "gzip",
-            feature = "zlib",
-            feature = "zstd"
-        ))
-    ),
+    not(any(test, any_format)),
     expect(dead_code, reason = "only the decompressors resolve and enforce bounds, and no format is enabled")
 )]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -309,17 +289,7 @@ pub(crate) struct FormatLimits {
 }
 
 #[cfg_attr(
-    all(
-        not(test),
-        not(any(
-            test,
-            feature = "brotli",
-            feature = "deflate",
-            feature = "gzip",
-            feature = "zlib",
-            feature = "zstd"
-        ))
-    ),
+    not(any(test, any_format)),
     expect(dead_code, reason = "only the decompressors resolve and enforce bounds, and no format is enabled")
 )]
 impl FormatLimits {
@@ -367,14 +337,7 @@ impl FormatLimits {
     }
 
     #[cfg_attr(
-        not(any(
-            test,
-            feature = "brotli",
-            feature = "deflate",
-            feature = "gzip",
-            feature = "zlib",
-            feature = "zstd"
-        )),
+        not(any(test, any_format)),
         expect(dead_code, reason = "no decompression engine reads the stream limit when no format is enabled")
     )]
     pub(crate) fn max_streams(self) -> Option<u64> {
@@ -391,9 +354,11 @@ mod tests {
     fn the_shared_defaults_are_the_documented_values() {
         // Pinned as literals rather than by reference to the constants, so moving either one is a
         // deliberate edit here as well as there -- and so the doc table that quotes these numbers
-        // cannot drift away from them unnoticed.
-        assert_eq!(DEFAULT_MAX_OUTPUT_LEN, 64 * 1024 * 1024, "the shared output cap is 64 MiB");
+        // cannot drift away from them unnoticed. Asserted against the shipped constant because this
+        // is a test build, where `DEFAULT_MAX_OUTPUT_LEN` is deliberately lowered.
+        assert_eq!(SHIPPED_MAX_OUTPUT_LEN, 64 * 1024 * 1024, "the shared output cap is 64 MiB");
         assert_eq!(DEFAULT_MAX_STREAMS, 1024, "the shared stream cap is 1024");
+        assert_eq!(DEFAULT_MAX_OUTPUT_LEN, 1024 * 1024, "test builds lower the output cap to 1 MiB");
     }
 
     #[test]

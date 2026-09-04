@@ -62,6 +62,9 @@ recoverable = { workspace = true }
 thread_aware = { workspace = true, features = ["std"] }
 zstd-safe = { workspace = true, features = ["std"], optional = true }
 
+[build-dependencies]
+cfg_aliases = { workspace = true }
+
 [dev-dependencies]
 alloc_tracker = { workspace = true }
 brotli = { workspace = true, features = ["std"] }
