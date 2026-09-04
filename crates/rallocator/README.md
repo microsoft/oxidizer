@@ -13,7 +13,7 @@
 
 </div>
 
-A pure-Rust, high-performance allocator integrated with [`allocation_hints`][__link0].
+A pure-Rust, high-performance allocator with scoped heaps and telemetry.
 
 ## Supported platforms
 
@@ -30,67 +30,67 @@ Install the standard configuration as the process-global allocator:
 
 ```rust
 rallocator::rallocator!();
-rallocator::initialize();
 ```
 
 The macro declares the required `#[global_allocator]` static and contains
-the unsafe call to [`Rallocator::new`][__link1], whose process-wide
-same-configuration invariant it establishes by construction. [`initialize`][__link2]
-registers rallocator with [`allocation_hints`][__link3] before heap or domain APIs are
-used.
+the unsafe call to [`Rallocator::new`][__link0], whose process-wide
+same-configuration invariant it establishes by construction.
 
 Ordinary allocations then use each thread’s implicit general heap. To group
-related allocations, create a [`Heap`][__link4] and
-activate it for a synchronous scope:
+related allocations, use an [`allocation_hints`][__link1] prospective heap. These
+handles publish only a thread-local request. Rallocator lazily realizes the
+request and retains a bounded per-thread cache for later reattachment:
 
 ```rust
-use allocation_hints::heap::{Heap, bump};
+use allocation_hints::heaps::{Heap, bump};
 use allocation_hints::with_hint;
 
 rallocator::rallocator!();
-rallocator::initialize();
 
 let heap = Heap::bump(bump::Options::new());
 let values = with_hint(&heap, || vec![1, 2, 3]);
 assert_eq!(values.len(), 3);
 ```
 
+If another global allocator is installed, the same code remains valid and
+the hint may be ignored.
+
 ### Telemetry
 
-Telemetry is opt-in at compile time. Define a [`config::Config`][__link5] with
-aggregate or caller tracking enabled, then pass it to [`rallocator!`][__link6]:
+Telemetry is opt-in at compile time through [`rallocator!`][__link2]:
 
 ```rust
-use rallocator::telemetry::{snapshot, stats, track_callers};
+use seismograph::recorder::{Configuration, RecordingPolicy};
 
-rallocator::config!(Telemetry {
-    track_aggregates: true,
-    track_callers: true,
-});
-rallocator::rallocator!(Telemetry);
+rallocator::rallocator!();
 
-fn main() -> std::io::Result<()> {
-    rallocator::initialize();
-    track_callers(true);
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    seismograph::recorder(Configuration {
+        allocations: RecordingPolicy::all(true),
+        ..Default::default()
+    });
     let mut values = vec![1, 2, 3];
     values[0] += 1;
     std::hint::black_box(&values);
     drop(values);
-    track_callers(false);
+    seismograph::recorder(Configuration::default());
 
-    snapshot()
-        .expect("telemetry tracking is enabled")
-        .write_file("snapshot.rallocator")?;
+    seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default())
+        .expect("telemetry snapshot capture succeeds")
+        .write_file("snapshot.seismograph")?;
 
     Ok(())
 }
 ```
 
-Convert the snapshot to HTML with `rallocator_cli snapshot html snapshot.rallocator`.
+Convert the snapshot to HTML with `seismograph snapshot html snapshot.seismograph`.
 
-Aggregate counters remain active for the process lifetime. Caller tracking
-can be enabled only around the interval of interest to limit its overhead;
-snapshots include allocator topology, counters, and retained caller events.
+Process-wide byte and operation counters remain active for the process
+lifetime. Threads publish these counters in batches of 256 operations;
+snapshots flush the capturing thread, while other active threads can lag by
+at most one batch. Per-size histograms, allocation events, and backtraces
+require Seismograph recording, which can be enabled only around the interval
+of interest to limit its overhead.
 The default `caller-symbolization` feature resolves captured instruction
 pointers through the optional `backtrace` dependency. Disabling default
 features retains caller tracking and raw addresses without in-process symbol
@@ -99,25 +99,22 @@ resolution.
 ## Design guide
 
 Use the implicit thread-local general heap for ordinary allocations.
-Introduce explicit general heaps when you want locality boundaries without
+Introduce prospective general heaps when you want locality boundaries without
 changing the mixed-size allocation model. Use bump heaps for phase-bounded
 work where individual frees are rare and bulk reclamation matters more than
-per-allocation reuse. Use separate [`Domain`][__link7]
-values only when heaps must stop sharing allocator-managed regions.
+per-allocation reuse. Use [`allocation_hints::heaps::thread_heap`][__link3] when another
+thread should allocate into the current thread’s allocator-preferred heap.
 
 ## Implementation guide
 
-1. Choose a [`config::Config`][__link8] and, if needed, custom
-   [`tunables::Tunables`][__link9].
-1. Install [`rallocator!`][__link10] exactly once as the process-global allocator.
-1. Call [`initialize`][__link11] near the start of `main` before creating
-   allocation-hint heaps or domains.
-1. Route special-purpose allocations with
-   [`allocation_hints::with_hint`][__link12] and [`allocation_hints::heap::Heap`][__link13].
-1. Enable telemetry only when you need it: aggregate counters are a
-   compile-time choice, while caller tracking is also runtime-gated.
+1. Install and configure [`rallocator!`][__link4] exactly once as the process-global
+   allocator.
+1. Route special-purpose allocations with [`allocation_hints::with_hint`][__link5]
+   and [`allocation_hints::heaps::Heap`][__link6].
+1. Enable Seismograph recording only when you need allocation events and
+   backtraces; lifetime aggregate counters remain active.
 
-Invalid tunables fail early when [`Rallocator::new`][__link14] is instantiated: the
+Invalid tunables fail early when [`Rallocator::new`][__link7] is instantiated: the
 size-class layout must be well-formed and the partial-slab scan limit must
 be non-zero.
 
@@ -125,9 +122,9 @@ be non-zero.
 
 Rallocator is organized as a hierarchy:
 
-* A [`Domain`][__link15] owns one or more 1 GiB virtual-memory
+* An internal allocation domain owns one or more 1 GiB virtual-memory
   **regions**, divided into 64 KiB **slices**.
-* A domain can serve multiple [`Heap`][__link16] instances.
+* A domain can serve multiple allocator-native heap realizations.
   Each heap keeps its own allocation state while drawing backing memory from
   its domain.
 * General heaps use slices for **locality segments** containing 32 KiB
@@ -211,11 +208,11 @@ Rallocator is organized as a hierarchy:
 </svg>
 </div>
 
-Each thread has an implicit general heap. [`with_hint`][__link17] can
-temporarily route allocations to an explicit general or bump heap instead;
-leaving the scope restores the previous heap. This keeps the common
-allocation path thread-local while allowing runtimes and data structures to
-choose allocation topology deliberately.
+Each thread has an implicit general heap. [`allocation_hints::with_hint`][__link8]
+can temporarily route allocations to a prospective general, bump, or
+thread-target heap; leaving the scope restores the previous request. This
+keeps the common allocation path thread-local while allowing runtimes and
+data structures to choose allocation topology deliberately.
 
 General heaps route requests by size and alignment:
 
@@ -227,9 +224,10 @@ General heaps route requests by size and alignment:
 
 Small frees normally return to the owning heap’s caches; cross-thread frees
 are queued for that owner. Medium spans are cached or returned to domain
-free lists, while direct mappings go back to the operating system. Dropping
-an explicit heap releases empty backing memory but preserves metadata for any
-allocations that escaped its lifetime.
+free lists, while direct mappings go back to the operating system. Detached
+prospective realizations remain in a bounded per-thread cache; eviction
+releases empty backing while preserving metadata needed by escaped
+allocations.
 
 
 <hr/>
@@ -237,22 +235,13 @@ allocations that escaped its lifetime.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/rallocator">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG9pHOqVApzhFG7NChVEi3M3DG_Olw3Fh_nbAG3s8iqavN9PSYWSCgnBhbGxvY2F0aW9uX2hpbnRzZTAuMS4wgmpyYWxsb2NhdG9yZTAuMS4w
- [__link0]: https://crates.io/crates/allocation_hints/0.1.0
- [__link1]: https://docs.rs/rallocator/0.1.0/rallocator/?search=Rallocator::new
- [__link10]: https://docs.rs/rallocator/0.1.0/rallocator/macro.rallocator.html
- [__link11]: https://docs.rs/rallocator/0.1.0/rallocator/fn.initialize.html
- [__link12]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=with_hint
- [__link13]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=heap::Heap
- [__link14]: https://docs.rs/rallocator/0.1.0/rallocator/?search=Rallocator::new
- [__link15]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=domain::Domain
- [__link16]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=heap::Heap
- [__link17]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=with_hint
- [__link2]: https://docs.rs/rallocator/0.1.0/rallocator/fn.initialize.html
- [__link3]: https://crates.io/crates/allocation_hints/0.1.0
- [__link4]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=heap::Heap
- [__link5]: https://docs.rs/rallocator/0.1.0/rallocator/?search=config::Config
- [__link6]: https://docs.rs/rallocator/0.1.0/rallocator/macro.rallocator.html
- [__link7]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=domain::Domain
- [__link8]: https://docs.rs/rallocator/0.1.0/rallocator/?search=config::Config
- [__link9]: https://docs.rs/rallocator/0.1.0/rallocator/?search=tunables::Tunables
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG8qaDMdVmwFaGxNz4HUXKxLfGz_RBjLGxzv0GyX9p4PlU3DEYWSCgnBhbGxvY2F0aW9uX2hpbnRzZTAuMS4wgmpyYWxsb2NhdG9yZTAuMS4w
+ [__link0]: https://docs.rs/rallocator/0.1.0/rallocator/?search=Rallocator::new
+ [__link1]: https://crates.io/crates/allocation_hints/0.1.0
+ [__link2]: https://docs.rs/rallocator/0.1.0/rallocator/macro.rallocator.html
+ [__link3]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=heaps::thread_heap
+ [__link4]: https://docs.rs/rallocator/0.1.0/rallocator/macro.rallocator.html
+ [__link5]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=with_hint
+ [__link6]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=heaps::Heap
+ [__link7]: https://docs.rs/rallocator/0.1.0/rallocator/?search=Rallocator::new
+ [__link8]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=with_hint

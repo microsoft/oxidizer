@@ -1,0 +1,28 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "seismograph_runtime"
+version = "0.1.0"
+description = "Process-wide multi-runtime telemetry source for seismograph."
+readme = "README.md"
+keywords = ["runtime", "telemetry", "diagnostics", "profiling"]
+categories = ["development-tools::debugging"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/seismograph_runtime"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["seismograph::*"]
+
+[dependencies]
+backtrace = { workspace = true, features = ["std"] }
+seismograph.workspace = true
+
+[lints]
+workspace = true

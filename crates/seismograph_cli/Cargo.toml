@@ -1,0 +1,37 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "seismograph_cli"
+version = "0.1.0"
+description = "Command-line tools for inspecting seismograph telemetry."
+readme = "README.md"
+keywords = ["allocator", "memory", "telemetry", "diagnostics"]
+categories = ["command-line-utilities", "development-tools::debugging"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/seismograph_cli"
+
+[[bin]]
+name = "seismograph"
+path = "src/main.rs"
+
+[dependencies]
+chrono = { workspace = true, features = ["clock"] }
+clap = { workspace = true, features = ["color", "derive", "error-context", "help", "std", "suggestions", "usage"] }
+crossterm.workspace = true
+performables = { workspace = true, features = ["seismograph"] }
+ratatui.workspace = true
+same-file.workspace = true
+seismograph.workspace = true
+seismograph_protocol.workspace = true
+seismograph_rallocator.workspace = true
+seismograph_runtime.workspace = true
+
+[lints]
+workspace = true

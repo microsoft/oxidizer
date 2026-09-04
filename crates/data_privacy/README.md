@@ -192,7 +192,7 @@ assert_eq!(output_buffer, "********");
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/data_privacy">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbfPAU5OoNavUbRy0yQBG8se0b5QdS3UiPpR4bCQr6vjqou8phZIOCbGRhdGFfcHJpdmFjeWYwLjEyLjSCcWRhdGFfcHJpdmFjeV9jb3JlZTAuMS4ygnNkYXRhX3ByaXZhY3lfbWFjcm9zZjAuMTAuMw
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG3zwFOTqDWr1G0ctMkARvLHtG-UHUt1Ij6UeGwkK-r46qLvKYWSDgmxkYXRhX3ByaXZhY3lmMC4xMi40gnFkYXRhX3ByaXZhY3lfY29yZWUwLjEuMoJzZGF0YV9wcml2YWN5X21hY3Jvc2YwLjEwLjM
  [__link0]: https://docs.rs/data_privacy_core/0.1.2/data_privacy_core/?search=Classified
  [__link1]: https://docs.rs/data_privacy_core/0.1.2/data_privacy_core/?search=Redactor
  [__link10]: https://docs.rs/data_privacy_macros/0.10.3/data_privacy_macros/?search=classified

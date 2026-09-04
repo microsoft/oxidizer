@@ -12,13 +12,24 @@
 use std::alloc::{GlobalAlloc, Layout};
 use std::sync::Mutex;
 
-use allocation_hints::heap::bump::Options as BumpOptions;
-use allocation_hints::heap::{Heap, Options as HeapOptions, thread_heap};
-use allocation_hints::{Hint, with_hint};
+use allocation_hints::heaps::{Heap, bump, thread_heap};
+use allocation_hints::with_hint;
 use rallocator::Rallocator;
-use rallocator::config::Config;
-use rallocator::telemetry::{stats, track_callers};
-use rallocator::tunables::{SizeClassLayout, Tunables};
+use rallocator::config::{Config, SizeClassLayout, Tunables};
+use support::stats;
+
+mod support;
+
+fn track_callers(enabled: bool) {
+    seismograph::recorder(seismograph::recorder::Configuration {
+        allocations: seismograph::recorder::RecordingPolicy {
+            enabled,
+            capture_backtraces: enabled,
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+}
 
 enum TestSizeClasses {}
 
@@ -29,36 +40,40 @@ impl SizeClassLayout for TestSizeClasses {
     ];
 }
 
-rallocator::tunable!(TestTunables {
-    size_classes: TestSizeClasses,
-    partial_slab_scan_limit: 4,
-    recycled_bitmap_batch_max_block_size: 256,
-    medium_purge_delay_ms: 1_000,
-});
+struct TestTunables;
 
-rallocator::config!(TestConfig {
-    track_aggregates: true,
-    track_callers: true,
-    tunables: TestTunables,
-});
+impl Tunables for TestTunables {
+    type SizeClasses = TestSizeClasses;
 
-rallocator::tunable!(DefaultTunables {});
-rallocator::tunable!(PartialTunables {
-    medium_purge_delay_ms: 250,
-});
-rallocator::config!(DefaultConfig {});
-rallocator::config!(TunablesOnlyConfig { tunables: PartialTunables });
+    const PARTIAL_SLAB_SCAN_LIMIT: usize = 4;
+    const RECYCLED_BITMAP_BATCH_MAX_BLOCK_SIZE: usize = 256;
+    const MEDIUM_PURGE_DELAY_MS: u64 = 1_000;
+}
+
+struct TestConfig;
+
+impl Config for TestConfig {
+    type Tunables = TestTunables;
+}
+
+type DefaultTunables = rallocator::config::Standard;
+
+struct PartialTunables;
+
+impl Tunables for PartialTunables {
+    type SizeClasses = rallocator::config::StandardSizeClasses;
+
+    const PARTIAL_SLAB_SCAN_LIMIT: usize = 4;
+    const RECYCLED_BITMAP_BATCH_MAX_BLOCK_SIZE: usize = 256;
+    const MEDIUM_PURGE_DELAY_MS: u64 = 250;
+}
 
 const _: () = {
-    assert!(!DefaultConfig::TRACK_AGGREGATES);
-    assert!(!DefaultConfig::TRACK_CALLERS);
     assert!(DefaultTunables::PARTIAL_SLAB_SCAN_LIMIT == 4);
     assert!(DefaultTunables::RECYCLED_BITMAP_BATCH_MAX_BLOCK_SIZE == 256);
     assert!(DefaultTunables::MEDIUM_PURGE_DELAY_MS == 1_000);
     assert!(PartialTunables::PARTIAL_SLAB_SCAN_LIMIT == 4);
     assert!(PartialTunables::MEDIUM_PURGE_DELAY_MS == 250);
-    assert!(!TunablesOnlyConfig::TRACK_AGGREGATES);
-    assert!(!TunablesOnlyConfig::TRACK_CALLERS);
 };
 
 static ALLOCATOR: Rallocator<TestConfig> = unsafe { Rallocator::new() };
@@ -77,7 +92,6 @@ impl SendAddress {
 
 #[test]
 fn allocates_aligned_memory_and_tracks_statistics() {
-    rallocator::initialize();
     let _test = test_lock();
     let allocator = &ALLOCATOR;
     let warmup = Layout::from_size_align(16, 16).unwrap();
@@ -106,7 +120,6 @@ fn allocates_aligned_memory_and_tracks_statistics() {
 
 #[test]
 fn small_allocations_support_every_power_of_two_alignment() {
-    rallocator::initialize();
     let _test = test_lock();
     let allocator = &ALLOCATOR;
     for alignment in [32, 64, 128, 256, 512, 1024, 2048, 4096] {
@@ -122,7 +135,6 @@ fn small_allocations_support_every_power_of_two_alignment() {
 
 #[test]
 fn application_defined_layout_builds_derived_lookup_tables() {
-    rallocator::initialize();
     let _test = test_lock();
     let allocator = &ALLOCATOR;
     let layout = Layout::from_size_align(65, 16).unwrap();
@@ -134,30 +146,26 @@ fn application_defined_layout_builds_derived_lookup_tables() {
 #[test]
 #[cfg_attr(miri, ignore = "thread/TLS lifecycle coverage is exercised by native tests")]
 fn application_defined_layout_supports_context_and_remote_slab_lifecycles() {
-    rallocator::initialize();
     let _test = test_lock();
     track_callers(true);
     let layout = Layout::from_size_align(64, 16).unwrap();
     let heap = Heap::new();
-    let addresses = with_hint(Hint::new().with_heap(&heap), || {
-        std::array::from_fn::<_, 3, _>(|_| unsafe { ALLOCATOR.alloc(layout) })
-    });
+    let addresses = with_hint(&heap, || std::array::from_fn::<_, 3, _>(|_| unsafe { ALLOCATOR.alloc(layout) }));
     assert!(addresses.iter().all(|address| !address.is_null()));
     for address in addresses {
         unsafe { ALLOCATOR.dealloc(address, layout) };
     }
 
-    let owner = thread_heap().unwrap();
-    let owner_hint = Hint::new().with_heap(&owner);
-    let local_free = std::thread::spawn(move || SendAddress(with_hint(owner_hint, || unsafe { ALLOCATOR.alloc(layout) })))
+    let owner = thread_heap();
+    let remote_owner = owner.clone();
+    let local_free = std::thread::spawn(move || SendAddress(with_hint(&remote_owner, || unsafe { ALLOCATOR.alloc(layout) })))
         .join()
         .unwrap();
     let local_free = local_free.0;
     assert!(!local_free.is_null());
     unsafe { ALLOCATOR.dealloc(local_free, layout) };
 
-    let owner_hint = Hint::new().with_heap(&owner);
-    let remote_free = std::thread::spawn(move || SendAddress(with_hint(owner_hint, || unsafe { ALLOCATOR.alloc(layout) })))
+    let remote_free = std::thread::spawn(move || SendAddress(with_hint(&owner, || unsafe { ALLOCATOR.alloc(layout) })))
         .join()
         .unwrap();
     assert!(!remote_free.0.is_null());
@@ -168,16 +176,14 @@ fn application_defined_layout_supports_context_and_remote_slab_lifecycles() {
 }
 
 #[test]
-fn caller_capable_bump_heap_falls_back_when_tracking_header_does_not_fit() {
-    rallocator::initialize();
+fn tracked_bump_heap_falls_back_when_tracking_header_does_not_fit() {
     let _test = test_lock();
     track_callers(false);
     let layout = Layout::from_size_align(32 * 1024 - 32, 16).unwrap();
-    let heap = Heap::with_options(HeapOptions::bump(BumpOptions::new().with_max_allocation_bytes(layout.size())));
+    let heap = Heap::bump(bump::Options::new().with_max_allocation_bytes(layout.size()));
 
-    let address = with_hint(Hint::new().with_heap(&heap), || unsafe { ALLOCATOR.alloc(layout) });
+    let address = with_hint(&heap, || unsafe { ALLOCATOR.alloc(layout) });
     assert!(!address.is_null());
-    assert_eq!(heap.usage().unwrap().bump().unwrap().allocation_count(), 0);
     unsafe {
         address.write_bytes(0xA5, layout.size());
         ALLOCATOR.dealloc(address, layout);
@@ -186,7 +192,6 @@ fn caller_capable_bump_heap_falls_back_when_tracking_header_does_not_fit() {
 
 #[test]
 fn small_allocations_reuse_size_class_slabs() {
-    rallocator::initialize();
     let _test = test_lock();
     let allocator = &ALLOCATOR;
     let layout = Layout::from_size_align(64, 8).unwrap();
@@ -209,7 +214,6 @@ fn small_allocations_reuse_size_class_slabs() {
 
 #[test]
 fn local_small_reuse_does_not_overwrite_the_block() {
-    rallocator::initialize();
     let _test = test_lock();
     std::thread::spawn(|| {
         let allocator = &ALLOCATOR;
@@ -232,7 +236,6 @@ fn local_small_reuse_does_not_overwrite_the_block() {
 
 #[test]
 fn mixed_small_classes_share_a_locality_segment() {
-    rallocator::initialize();
     let _test = test_lock();
     std::thread::spawn(move || {
         let allocating = &ALLOCATOR;
@@ -265,7 +268,6 @@ fn mixed_small_classes_share_a_locality_segment() {
 
 #[test]
 fn large_allocations_release_direct_mappings() {
-    rallocator::initialize();
     let _test = test_lock();
     let allocator = &ALLOCATOR;
     let layout = if cfg!(miri) {
@@ -288,7 +290,6 @@ fn large_allocations_release_direct_mappings() {
 
 #[test]
 fn medium_spans_are_aligned_and_reused() {
-    rallocator::initialize();
     let _test = test_lock();
     let allocator = &ALLOCATOR;
     let layout = Layout::from_size_align(64 * 1024, 64 * 1024).unwrap();
@@ -305,7 +306,6 @@ fn medium_spans_are_aligned_and_reused() {
 
 #[test]
 fn medium_region_supports_cached_and_variable_length_spans() {
-    rallocator::initialize();
     let _test = test_lock();
     let allocator = &ALLOCATOR;
     let before = stats().unwrap();
@@ -334,7 +334,6 @@ fn medium_region_supports_cached_and_variable_length_spans() {
 
 #[test]
 fn adjacent_large_extents_coalesce_and_split() {
-    rallocator::initialize();
     let _test = test_lock();
     let allocator = &ALLOCATOR;
     let (first_size, combined_size) = if cfg!(miri) {

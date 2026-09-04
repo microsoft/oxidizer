@@ -9,7 +9,6 @@
 )]
 #![expect(
     clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
     reason = "Allocator dimensions and wire fields are range-checked by their surrounding layout invariants"
 )]
 #![expect(
@@ -20,10 +19,6 @@
 #![expect(
     clippy::manual_let_else,
     reason = "The existing forms mirror allocator state-machine and bitmap operations"
-)]
-#![expect(
-    clippy::missing_errors_doc,
-    reason = "Internal configuration and telemetry types are documented through their containing API"
 )]
 #![expect(
     clippy::multiple_unsafe_ops_per_block,
@@ -46,10 +41,6 @@
 )]
 #![expect(clippy::struct_field_names, reason = "Telemetry units stay explicit at call sites")]
 #![expect(
-    clippy::too_many_lines,
-    reason = "Allocator state-machine functions remain linear so lock and ownership transitions are auditable"
-)]
-#![expect(
     clippy::unwrap_used,
     reason = "Infallible formatting and test-only invariant checks use unwrap to expose programming errors"
 )]
@@ -66,7 +57,7 @@
     expect(clippy::iter_with_drain, reason = "The test explicitly drains before reverse-order deallocation")
 )]
 
-//! A pure-Rust, high-performance allocator integrated with [`allocation_hints`].
+//! A pure-Rust, high-performance allocator with scoped heaps and telemetry.
 //!
 //! # Supported platforms
 //!
@@ -83,67 +74,67 @@
 //!
 //! ```
 //! rallocator::rallocator!();
-//! rallocator::initialize();
 //! ```
 //!
 //! The macro declares the required `#[global_allocator]` static and contains
 //! the unsafe call to [`Rallocator::new`], whose process-wide
-//! same-configuration invariant it establishes by construction. [`initialize`]
-//! registers rallocator with [`allocation_hints`] before heap or domain APIs are
-//! used.
+//! same-configuration invariant it establishes by construction.
 //!
 //! Ordinary allocations then use each thread's implicit general heap. To group
-//! related allocations, create a [`Heap`](allocation_hints::heap::Heap) and
-//! activate it for a synchronous scope:
+//! related allocations, use an [`allocation_hints`] prospective heap. These
+//! handles publish only a thread-local request. Rallocator lazily realizes the
+//! request and retains a bounded per-thread cache for later reattachment:
 //!
 //! ```
-//! use allocation_hints::heap::{Heap, bump};
+//! use allocation_hints::heaps::{Heap, bump};
 //! use allocation_hints::with_hint;
 //!
 //! rallocator::rallocator!();
-//! rallocator::initialize();
 //!
 //! let heap = Heap::bump(bump::Options::new());
 //! let values = with_hint(&heap, || vec![1, 2, 3]);
 //! assert_eq!(values.len(), 3);
 //! ```
 //!
+//! If another global allocator is installed, the same code remains valid and
+//! the hint may be ignored.
+//!
 //! ## Telemetry
 //!
-//! Telemetry is opt-in at compile time. Define a [`config::Config`] with
-//! aggregate or caller tracking enabled, then pass it to [`rallocator!`]:
+//! Telemetry is opt-in at compile time through [`rallocator!`]:
 //!
 //! ```no_run
-//! use rallocator::telemetry::{snapshot, stats, track_callers};
+//! use seismograph::recorder::{Configuration, RecordingPolicy};
 //!
-//! rallocator::config!(Telemetry {
-//!     track_aggregates: true,
-//!     track_callers: true,
-//! });
-//! rallocator::rallocator!(Telemetry);
+//! rallocator::rallocator!();
 //!
-//! fn main() -> std::io::Result<()> {
-//!     rallocator::initialize();
-//!     track_callers(true);
+//! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     seismograph::recorder(Configuration {
+//!         allocations: RecordingPolicy::all(true),
+//!         ..Default::default()
+//!     });
 //!     let mut values = vec![1, 2, 3];
 //!     values[0] += 1;
 //!     std::hint::black_box(&values);
 //!     drop(values);
-//!     track_callers(false);
+//!     seismograph::recorder(Configuration::default());
 //!
-//!     snapshot()
-//!         .expect("telemetry tracking is enabled")
-//!         .write_file("snapshot.rallocator")?;
+//!     seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default())
+//!         .expect("telemetry snapshot capture succeeds")
+//!         .write_file("snapshot.seismograph")?;
 //!
 //!     Ok(())
 //! }
 //! ```
 //!
-//! Convert the snapshot to HTML with `rallocator_cli snapshot html snapshot.rallocator`.
+//! Convert the snapshot to HTML with `seismograph snapshot html snapshot.seismograph`.
 //!
-//! Aggregate counters remain active for the process lifetime. Caller tracking
-//! can be enabled only around the interval of interest to limit its overhead;
-//! snapshots include allocator topology, counters, and retained caller events.
+//! Process-wide byte and operation counters remain active for the process
+//! lifetime. Threads publish these counters in batches of 256 operations;
+//! snapshots flush the capturing thread, while other active threads can lag by
+//! at most one batch. Per-size histograms, allocation events, and backtraces
+//! require Seismograph recording, which can be enabled only around the interval
+//! of interest to limit its overhead.
 //! The default `caller-symbolization` feature resolves captured instruction
 //! pointers through the optional `backtrace` dependency. Disabling default
 //! features retains caller tracking and raw addresses without in-process symbol
@@ -152,23 +143,20 @@
 //! # Design guide
 //!
 //! Use the implicit thread-local general heap for ordinary allocations.
-//! Introduce explicit general heaps when you want locality boundaries without
+//! Introduce prospective general heaps when you want locality boundaries without
 //! changing the mixed-size allocation model. Use bump heaps for phase-bounded
 //! work where individual frees are rare and bulk reclamation matters more than
-//! per-allocation reuse. Use separate [`Domain`](allocation_hints::domain::Domain)
-//! values only when heaps must stop sharing allocator-managed regions.
+//! per-allocation reuse. Use [`allocation_hints::heaps::thread_heap`] when another
+//! thread should allocate into the current thread's allocator-preferred heap.
 //!
 //! # Implementation guide
 //!
-//! 1. Choose a [`config::Config`] and, if needed, custom
-//!    [`tunables::Tunables`].
-//! 2. Install [`rallocator!`] exactly once as the process-global allocator.
-//! 3. Call [`initialize`] near the start of `main` before creating
-//!    allocation-hint heaps or domains.
-//! 4. Route special-purpose allocations with
-//!    [`allocation_hints::with_hint`] and [`allocation_hints::heap::Heap`].
-//! 5. Enable telemetry only when you need it: aggregate counters are a
-//!    compile-time choice, while caller tracking is also runtime-gated.
+//! 1. Install and configure [`rallocator!`] exactly once as the process-global
+//!    allocator.
+//! 2. Route special-purpose allocations with [`allocation_hints::with_hint`]
+//!    and [`allocation_hints::heaps::Heap`].
+//! 3. Enable Seismograph recording only when you need allocation events and
+//!    backtraces; lifetime aggregate counters remain active.
 //!
 //! Invalid tunables fail early when [`Rallocator::new`] is instantiated: the
 //! size-class layout must be well-formed and the partial-slab scan limit must
@@ -178,9 +166,9 @@
 //!
 //! Rallocator is organized as a hierarchy:
 //!
-//! - A [`Domain`](allocation_hints::domain::Domain) owns one or more 1 GiB virtual-memory
+//! - An internal allocation domain owns one or more 1 GiB virtual-memory
 //!   **regions**, divided into 64 KiB **slices**.
-//! - A domain can serve multiple [`Heap`](allocation_hints::heap::Heap) instances.
+//! - A domain can serve multiple allocator-native heap realizations.
 //!   Each heap keeps its own allocation state while drawing backing memory from
 //!   its domain.
 //! - General heaps use slices for **locality segments** containing 32 KiB
@@ -264,11 +252,11 @@
 //! </svg>
 //! </div>
 //!
-//! Each thread has an implicit general heap. [`with_hint`](allocation_hints::with_hint) can
-//! temporarily route allocations to an explicit general or bump heap instead;
-//! leaving the scope restores the previous heap. This keeps the common
-//! allocation path thread-local while allowing runtimes and data structures to
-//! choose allocation topology deliberately.
+//! Each thread has an implicit general heap. [`allocation_hints::with_hint`]
+//! can temporarily route allocations to a prospective general, bump, or
+//! thread-target heap; leaving the scope restores the previous request. This
+//! keeps the common allocation path thread-local while allowing runtimes and
+//! data structures to choose allocation topology deliberately.
 //!
 //! General heaps route requests by size and alignment:
 //!
@@ -280,43 +268,55 @@
 //!
 //! Small frees normally return to the owning heap's caches; cross-thread frees
 //! are queued for that owner. Medium spans are cached or returned to domain
-//! free lists, while direct mappings go back to the operating system. Dropping
-//! an explicit heap releases empty backing memory but preserves metadata for any
-//! allocations that escaped its lifetime.
+//! free lists, while direct mappings go back to the operating system. Detached
+//! prospective realizations remain in a bounded per-thread cache; eviction
+//! releases empty backing while preserving metadata needed by escaped
+//! allocations.
 
 mod allocator;
 pub mod config;
 mod domain;
 mod hal;
 mod heap;
-pub mod telemetry;
-pub mod tunables;
+mod telemetry;
 #[cfg(feature = "tuning-telemetry")]
 #[cfg_attr(not(test), expect(dead_code, reason = "internal tuning diagnostics are exercised by crate tests"))]
 mod tuning_telemetry;
 
+#[doc(hidden)]
+pub use allocator::GlobalRallocator;
 pub use allocator::Rallocator;
 
-/// Registers rallocator as the process allocation-hint backend.
+/// Installs and configures the process-global allocator.
 ///
-/// Call this once near the start of `main`, after declaring the global
-/// allocator with [`rallocator!`], and before creating allocation-hint heaps or
-/// domains. Repeated calls are harmless.
+/// All options are optional and inherit the standard configuration.
 ///
-/// Ordinary global allocation does not require initialization and does not
-/// implicitly install the allocation-hint backend.
-pub fn initialize() {
-    heap::ensure_backend_registered();
-}
-
-/// Installs the process-global allocator.
+/// # Options
 ///
-/// The optional argument selects a [`config::Config`], including its tunables.
-/// Omitting it uses [`config::Standard`].
+/// | Option | Default |
+/// | --- | --- |
+/// | `size_classes` | [`config::StandardSizeClasses`] |
+/// | `partial_slab_scan_limit` | `4` |
+/// | `recycled_bitmap_batch_max_block_size` | `256` |
+/// | `medium_purge_delay_ms` | `1_000` |
+///
+/// `size_classes` accepts either a type implementing
+/// [`config::SizeClassLayout`] or an inline list.
+///
+/// # Complete configuration
 ///
 /// ```
-/// rallocator::rallocator!();
-/// rallocator::initialize();
+/// rallocator::rallocator! {
+///     size_classes: [
+///         16, 32, 48, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384,
+///         448, 512, 640, 768, 896, 1_024, 1_280, 1_536, 1_792, 2_048, 2_560,
+///         3_072, 3_584, 4_096, 5_120, 6_144, 7_168, 8_192, 10_240, 12_288,
+///         14_336, 16_384,
+///     ],
+///     partial_slab_scan_limit: 8,
+///     recycled_bitmap_batch_max_block_size: 512,
+///     medium_purge_delay_ms: 250,
+/// }
 /// ```
 #[macro_export]
 macro_rules! rallocator {
@@ -325,15 +325,107 @@ macro_rules! rallocator {
     };
     ($config:ty $(,)?) => {
         #[global_allocator]
-        static GLOBAL: $crate::Rallocator<$config> = unsafe { $crate::Rallocator::new() };
+        static GLOBAL: $crate::GlobalRallocator<$config> =
+            unsafe { $crate::GlobalRallocator::new() };
     };
-}
+    (
+        @parse
+        [$size_classes:ty]
+        [$partial_slab_scan_limit:expr]
+        [$recycled_bitmap_batch_max_block_size:expr]
+        [$medium_purge_delay_ms:expr]
+    ) => {
+        struct __RallocatorMacroTunables;
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn initialization_is_idempotent() {
-        crate::initialize();
-        crate::initialize();
-    }
+        impl $crate::config::Tunables for __RallocatorMacroTunables {
+            type SizeClasses = $size_classes;
+
+            const PARTIAL_SLAB_SCAN_LIMIT: usize = $partial_slab_scan_limit;
+            const RECYCLED_BITMAP_BATCH_MAX_BLOCK_SIZE: usize =
+                $recycled_bitmap_batch_max_block_size;
+            const MEDIUM_PURGE_DELAY_MS: u64 = $medium_purge_delay_ms;
+        }
+
+        struct __RallocatorMacroConfig;
+
+        impl $crate::config::Config for __RallocatorMacroConfig {
+            type Tunables = __RallocatorMacroTunables;
+        }
+
+        #[global_allocator]
+        static GLOBAL: $crate::GlobalRallocator<__RallocatorMacroConfig> =
+            unsafe { $crate::GlobalRallocator::new() };
+    };
+    (
+        @parse
+        [$size_classes:ty] [$partial_slab_scan_limit:expr]
+        [$recycled_bitmap_batch_max_block_size:expr] [$medium_purge_delay_ms:expr]
+        size_classes: [$($value:expr),* $(,)?] $(, $($rest:tt)*)?
+    ) => {
+        struct __RallocatorInlineSizeClasses;
+
+        impl $crate::config::SizeClassLayout for __RallocatorInlineSizeClasses {
+            const SIZES: &'static [usize] = &[$($value),*];
+        }
+
+        $crate::rallocator!(@parse
+            [__RallocatorInlineSizeClasses] [$partial_slab_scan_limit] [$recycled_bitmap_batch_max_block_size] [$medium_purge_delay_ms]
+            $($($rest)*)?
+        );
+    };
+    (
+        @parse
+        [$size_classes:ty] [$partial_slab_scan_limit:expr]
+        [$recycled_bitmap_batch_max_block_size:expr] [$medium_purge_delay_ms:expr]
+        size_classes: $value:ty $(, $($rest:tt)*)?
+    ) => {
+        $crate::rallocator!(@parse
+            [$value] [$partial_slab_scan_limit] [$recycled_bitmap_batch_max_block_size] [$medium_purge_delay_ms]
+            $($($rest)*)?
+        );
+    };
+    (
+        @parse
+        [$size_classes:ty] [$partial_slab_scan_limit:expr]
+        [$recycled_bitmap_batch_max_block_size:expr] [$medium_purge_delay_ms:expr]
+        partial_slab_scan_limit: $value:expr $(, $($rest:tt)*)?
+    ) => {
+        $crate::rallocator!(@parse
+            [$size_classes] [$value] [$recycled_bitmap_batch_max_block_size] [$medium_purge_delay_ms]
+            $($($rest)*)?
+        );
+    };
+    (
+        @parse
+        [$size_classes:ty] [$partial_slab_scan_limit:expr]
+        [$recycled_bitmap_batch_max_block_size:expr] [$medium_purge_delay_ms:expr]
+        recycled_bitmap_batch_max_block_size: $value:expr $(, $($rest:tt)*)?
+    ) => {
+        $crate::rallocator!(@parse
+            [$size_classes] [$partial_slab_scan_limit] [$value] [$medium_purge_delay_ms]
+            $($($rest)*)?
+        );
+    };
+    (
+        @parse
+        [$size_classes:ty] [$partial_slab_scan_limit:expr]
+        [$recycled_bitmap_batch_max_block_size:expr] [$medium_purge_delay_ms:expr]
+        medium_purge_delay_ms: $value:expr $(, $($rest:tt)*)?
+    ) => {
+        $crate::rallocator!(@parse
+            [$size_classes] [$partial_slab_scan_limit] [$recycled_bitmap_batch_max_block_size] [$value]
+            $($($rest)*)?
+        );
+    };
+
+    ($($options:tt)+) => {
+        $crate::rallocator!(
+            @parse
+            [$crate::config::StandardSizeClasses]
+            [<$crate::config::Standard as $crate::config::Tunables>::PARTIAL_SLAB_SCAN_LIMIT]
+            [<$crate::config::Standard as $crate::config::Tunables>::RECYCLED_BITMAP_BATCH_MAX_BLOCK_SIZE]
+            [<$crate::config::Standard as $crate::config::Tunables>::MEDIUM_PURGE_DELAY_MS]
+            $($options)+
+        );
+    };
 }

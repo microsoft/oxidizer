@@ -1,0 +1,243 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+//! Compile-time allocation tuning parameters.
+pub(crate) const MAX_SIZE_CLASSES: usize = 48;
+pub(crate) const CLASS_MAP_LEN: usize = 1_025;
+pub(crate) const ALIGNMENT_CLASS_MAPS: usize = 13;
+
+/// Compile-time small-allocation size-class layout.
+///
+/// The allocator derives all lookup tables from [`Self::SIZES`], so custom
+/// layouts only control the size classes themselves.
+pub trait SizeClassLayout {
+    /// Small-allocation classes for the allocator personality.
+    ///
+    /// Valid layouts contain between 1 and 48 entries. Every class must be
+    /// non-zero, 16-byte aligned, and strictly larger than the previous one.
+    /// The final class must be exactly 16 KiB so the allocator's full small
+    /// allocation range remains covered.
+    const SIZES: &'static [usize];
+}
+
+pub(crate) trait SizeClassTables: SizeClassLayout {
+    const CLASS_MAP: [u8; CLASS_MAP_LEN] = create_class_map(Self::SIZES);
+
+    const ALIGNED_CLASS_MAP: [[u8; CLASS_MAP_LEN]; ALIGNMENT_CLASS_MAPS] = create_aligned_class_map(Self::SIZES);
+
+    const CLASS_RECIPROCALS: [usize; MAX_SIZE_CLASSES] = create_class_reciprocals(Self::SIZES);
+
+    const CLASS_SHIFTS: [u8; MAX_SIZE_CLASSES] = create_class_shifts(Self::SIZES);
+}
+
+impl<T: SizeClassLayout> SizeClassTables for T {}
+
+/// Compile-time allocator personality.
+///
+/// Implement this trait on an application-owned zero-sized type to specialize
+/// allocator policy without adding runtime branches to the allocation path.
+/// Personalities configure the process's single global allocator. Small-slab
+/// thread-local state is shared by allocator instances and is not isolated by
+/// personality type.
+///
+/// [`crate::Rallocator::new`] validates every personality. A valid
+/// implementation must provide:
+///
+/// - a `SizeClasses::SIZES` slice with 1 to 48 entries,
+/// - size classes that are non-zero, 16-byte aligned, and strictly
+///   increasing,
+/// - a final size class of exactly 16 KiB,
+/// - and a non-zero [`PARTIAL_SLAB_SCAN_LIMIT`](Self::PARTIAL_SLAB_SCAN_LIMIT).
+///
+/// [`RECYCLED_BITMAP_BATCH_MAX_BLOCK_SIZE`](Self::RECYCLED_BITMAP_BATCH_MAX_BLOCK_SIZE)
+/// and [`MEDIUM_PURGE_DELAY_MS`](Self::MEDIUM_PURGE_DELAY_MS) do not have
+/// additional validity constraints beyond their types; they only tune policy.
+pub trait Tunables {
+    type SizeClasses: SizeClassLayout;
+
+    /// Maximum number of partial slabs examined when selecting a new active slab.
+    ///
+    /// This value must be non-zero.
+    const PARTIAL_SLAB_SCAN_LIMIT: usize;
+
+    /// Largest block size whose recycled bitmap word is cached in its slab.
+    const RECYCLED_BITMAP_BATCH_MAX_BLOCK_SIZE: usize;
+
+    /// Delay before unused medium spans become eligible for decommit.
+    const MEDIUM_PURGE_DELAY_MS: u64;
+}
+
+/// General-purpose size classes used by [`super::Standard`].
+pub struct StandardSizeClasses;
+
+impl SizeClassLayout for StandardSizeClasses {
+    const SIZES: &'static [usize] = &[
+        16, 32, 48, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384, 448, 512, 640, 768, 896, 1024, 1280, 1536, 1792, 2048, 2560, 3072,
+        3584, 4096, 4384, 5120, 6144, 7168, 8192, 10240, 12288, 14336, 16384,
+    ];
+}
+
+impl Tunables for super::Standard {
+    type SizeClasses = StandardSizeClasses;
+
+    const PARTIAL_SLAB_SCAN_LIMIT: usize = 4;
+    const RECYCLED_BITMAP_BATCH_MAX_BLOCK_SIZE: usize = 256;
+    const MEDIUM_PURGE_DELAY_MS: u64 = 1_000;
+}
+
+pub(crate) const fn valid_size_classes(sizes: &[usize]) -> bool {
+    if sizes.is_empty() || sizes.len() > MAX_SIZE_CLASSES || sizes[sizes.len() - 1] != 16_384 {
+        return false;
+    }
+    let mut index = 0;
+    let mut previous = 0;
+    while index < sizes.len() {
+        let size = sizes[index];
+        if size == 0 || !size.is_multiple_of(16) || size <= previous {
+            return false;
+        }
+        previous = size;
+        index += 1;
+    }
+    true
+}
+
+const fn create_class_map(sizes: &[usize]) -> [u8; CLASS_MAP_LEN] {
+    let mut map = [u8::MAX; CLASS_MAP_LEN];
+    let mut bucket = 1;
+    while bucket < map.len() {
+        let bytes = bucket * 16;
+        let mut class_index = 0;
+        while class_index < sizes.len() && sizes[class_index] < bytes {
+            class_index += 1;
+        }
+        if class_index < sizes.len() {
+            map[bucket] = class_index as u8;
+        }
+        bucket += 1;
+    }
+    map
+}
+
+const fn create_aligned_class_map(sizes: &[usize]) -> [[u8; CLASS_MAP_LEN]; ALIGNMENT_CLASS_MAPS] {
+    let mut map = [[u8::MAX; CLASS_MAP_LEN]; ALIGNMENT_CLASS_MAPS];
+    let mut alignment_shift = 0;
+    while alignment_shift < map.len() {
+        let alignment = 1 << alignment_shift;
+        let mut bucket = 1;
+        while bucket < CLASS_MAP_LEN {
+            let required_size = bucket * 16;
+            let mut class_index = 0;
+            while class_index < sizes.len() {
+                let class_size = sizes[class_index];
+                if class_size >= required_size && class_size.is_multiple_of(alignment) {
+                    map[alignment_shift][bucket] = class_index as u8;
+                    break;
+                }
+                class_index += 1;
+            }
+            bucket += 1;
+        }
+        alignment_shift += 1;
+    }
+    map
+}
+
+const fn create_class_reciprocals(sizes: &[usize]) -> [usize; MAX_SIZE_CLASSES] {
+    let mut reciprocals = [0; MAX_SIZE_CLASSES];
+    // recycle_local_block uses high(offset * ceil(2^BITS / size)) instead of
+    // division. Its offset is an exact multiple of size and is bounded by one
+    // slab, so the rounded reciprocal's error stays below one quotient unit.
+    // The u128 product prevents intermediate overflow; power-of-two classes
+    // use CLASS_SHIFTS instead.
+    let scale = 1_u128 << usize::BITS;
+    let mut index = 0;
+    while index < sizes.len() {
+        reciprocals[index] = scale.div_ceil(sizes[index] as u128) as usize;
+        index += 1;
+    }
+    reciprocals
+}
+
+const fn create_class_shifts(sizes: &[usize]) -> [u8; MAX_SIZE_CLASSES] {
+    let mut shifts = [u8::MAX; MAX_SIZE_CLASSES];
+    let mut index = 0;
+    while index < sizes.len() {
+        let size = sizes[index];
+        if size.is_power_of_two() {
+            shifts[index] = size.trailing_zeros() as u8;
+        }
+        index += 1;
+    }
+    shifts
+}
+
+#[cfg(test)]
+mod tests {
+    use std::hint::black_box;
+
+    use super::*;
+
+    enum ShadowedSizeClassTables {}
+
+    impl SizeClassLayout for ShadowedSizeClassTables {
+        const SIZES: &'static [usize] = &[16, 48, 64, 16_384];
+    }
+
+    impl ShadowedSizeClassTables {
+        const CLASS_MAP: [u8; CLASS_MAP_LEN] = [0; CLASS_MAP_LEN];
+        const ALIGNED_CLASS_MAP: [[u8; CLASS_MAP_LEN]; ALIGNMENT_CLASS_MAPS] = [[0; CLASS_MAP_LEN]; ALIGNMENT_CLASS_MAPS];
+        const CLASS_RECIPROCALS: [usize; MAX_SIZE_CLASSES] = [0; MAX_SIZE_CLASSES];
+        const CLASS_SHIFTS: [u8; MAX_SIZE_CLASSES] = [0; MAX_SIZE_CLASSES];
+    }
+
+    #[test]
+    fn derived_tables_cannot_be_shadowed_by_layout() {
+        assert_eq!(ShadowedSizeClassTables::CLASS_MAP[2], 0);
+        assert_eq!(<ShadowedSizeClassTables as SizeClassTables>::CLASS_MAP[2], 1);
+        assert_eq!(ShadowedSizeClassTables::ALIGNED_CLASS_MAP[6][1], 0);
+        assert_eq!(<ShadowedSizeClassTables as SizeClassTables>::ALIGNED_CLASS_MAP[6][1], 2);
+        assert_eq!(ShadowedSizeClassTables::CLASS_RECIPROCALS[1], 0);
+        assert_ne!(<ShadowedSizeClassTables as SizeClassTables>::CLASS_RECIPROCALS[1], 0);
+        assert_eq!(ShadowedSizeClassTables::CLASS_SHIFTS[1], 0);
+        assert_eq!(<ShadowedSizeClassTables as SizeClassTables>::CLASS_SHIFTS[1], u8::MAX);
+    }
+
+    #[test]
+    fn runtime_size_class_validation_rejects_every_invalid_shape() {
+        assert!(!valid_size_classes(black_box(&[])));
+        assert!(!valid_size_classes(black_box(&[16; MAX_SIZE_CLASSES + 1])));
+        assert!(!valid_size_classes(black_box(&[16, 32])));
+        assert!(!valid_size_classes(black_box(&[0, 16_384])));
+        assert!(!valid_size_classes(black_box(&[17, 16_384])));
+        assert!(!valid_size_classes(black_box(&[32, 16, 16_384])));
+        assert!(valid_size_classes(black_box(&[16, 48, 16_384])));
+    }
+
+    #[test]
+    fn runtime_size_class_tables_cover_alignment_and_arithmetic_cases() {
+        let sizes = black_box([16, 48, 64, 16_384]);
+        let class_map = create_class_map(&sizes);
+        assert_eq!(class_map[1], 0);
+        assert_eq!(class_map[2], 1);
+        assert_eq!(class_map[4], 2);
+        assert_eq!(class_map[CLASS_MAP_LEN - 1], 3);
+
+        let aligned = create_aligned_class_map(&sizes);
+        assert_eq!(aligned[0][1], 0);
+        assert_eq!(aligned[6][1], 2);
+        assert_eq!(aligned[12][1], 3);
+
+        let reciprocals = create_class_reciprocals(&sizes);
+        assert_ne!(reciprocals[0], 0);
+        assert_ne!(reciprocals[3], 0);
+        assert_eq!(reciprocals[4], 0);
+
+        let shifts = create_class_shifts(&sizes);
+        assert_eq!(shifts[0], 4);
+        assert_eq!(shifts[1], u8::MAX);
+        assert_eq!(shifts[2], 6);
+        assert_eq!(shifts[3], 14);
+        assert_eq!(shifts[4], u8::MAX);
+    }
+}

@@ -1,13 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Region ownership domains shared by one or more heaps.
+//! Process-retained allocation domains.
 
+#[cfg(test)]
+use std::fmt;
 use std::ptr::NonNull;
 use std::sync::OnceLock;
-
-use allocation_hints::backend::RawDomain;
-use allocation_hints::domain::Domain;
 
 use crate::allocator::DomainState;
 
@@ -20,29 +19,86 @@ struct DomainStatePtr(NonNull<DomainState>);
 // SAFETY: Domain states are process-retained, and DomainState synchronizes all
 // mutable shared state before the pointer is dereferenced across threads.
 unsafe impl Send for DomainStatePtr {}
+// SAFETY: Sharing the process-retained pointer does not bypass DomainState synchronization.
 unsafe impl Sync for DomainStatePtr {}
 
-pub(crate) fn state(domain: Domain) -> *mut DomainState {
-    domain.raw_for(crate::heap::backend()).target().cast()
+/// A process-retained allocation domain.
+#[cfg(test)]
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) struct Domain {
+    state: NonNull<DomainState>,
 }
 
-pub(crate) unsafe fn from_state(state: *mut DomainState) -> Domain {
-    unsafe { Domain::from_raw(RawDomain::new(state.cast()), crate::heap::backend()) }
+// SAFETY: DomainState is process-retained and internally synchronizes shared state.
+#[cfg(test)]
+unsafe impl Send for Domain {}
+// SAFETY: Sharing a Domain only copies its stable identity pointer.
+#[cfg(test)]
+unsafe impl Sync for Domain {}
+
+#[cfg(test)]
+impl Domain {
+    /// Creates an independent allocation domain.
+    ///
+    /// Returns `None` when rallocator cannot reserve the domain's initial state.
+    #[must_use]
+    pub(crate) fn new() -> Option<Self> {
+        crate::allocator::ensure_global_allocator_active().then_some(())?;
+        NonNull::new(create_domain()).map(|state| Self { state })
+    }
+
+    /// Returns the shared process-default allocation domain.
+    #[must_use]
+    pub(crate) fn process() -> Self {
+        Self {
+            // SAFETY: default_state is initialized from a validated NonNull value.
+            state: unsafe { NonNull::new_unchecked(default_state()) },
+        }
+    }
+}
+
+#[cfg(test)]
+impl Default for Domain {
+    fn default() -> Self {
+        Self::process()
+    }
+}
+
+#[cfg(test)]
+impl fmt::Debug for Domain {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Domain")
+            .field("identity", &self.state.as_ptr())
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+pub(crate) const fn state(domain: Domain) -> *mut DomainState {
+    domain.state.as_ptr()
 }
 
 pub(crate) fn default_state() -> *mut DomainState {
-    default_domain().target().cast()
+    DEFAULT_DOMAIN
+        .get_or_init(|| {
+            let state = domain_or_else(NonNull::new(create_domain()), || -> NonNull<DomainState> { std::process::abort() });
+            crate::allocator::mark_default_domain(state.as_ptr());
+            DomainStatePtr(state)
+        })
+        .0
+        .as_ptr()
 }
 
-pub(crate) fn create_domain() -> Option<RawDomain> {
+fn create_domain() -> *mut DomainState {
     if fail_next_domain_creation() {
-        return None;
+        return std::ptr::null_mut();
     }
-    NonNull::new(crate::allocator::create_domain()).map(|state| unsafe { RawDomain::new(state.as_ptr().cast()) })
+    crate::allocator::create_domain()
 }
 
 #[cfg(not(test))]
-fn fail_next_domain_creation() -> bool {
+const fn fail_next_domain_creation() -> bool {
     false
 }
 
@@ -55,17 +111,7 @@ fn fail_next_domain_creation() -> bool {
         .is_some()
 }
 
-pub(crate) fn default_domain() -> RawDomain {
-    let state = DEFAULT_DOMAIN.get_or_init(|| {
-        let domain = domain_or_else(create_domain(), || -> RawDomain { std::process::abort() });
-        let state = domain.target().cast::<DomainState>();
-        crate::allocator::mark_default_domain(state);
-        DomainStatePtr(NonNull::new(state).expect("domain creation returned a validated non-null target"))
-    });
-    unsafe { RawDomain::new(state.0.as_ptr().cast()) }
-}
-
-fn domain_or_else(domain: Option<RawDomain>, on_failure: impl FnOnce() -> RawDomain) -> RawDomain {
+fn domain_or_else(domain: Option<NonNull<DomainState>>, on_failure: impl FnOnce() -> NonNull<DomainState>) -> NonNull<DomainState> {
     match domain {
         Some(domain) => domain,
         None => on_failure(),
@@ -78,16 +124,24 @@ mod tests {
 
     #[test]
     fn domain_creation_reports_mapping_failure() {
-        crate::initialize();
         *FAIL_NEXT_DOMAIN_CREATION.lock().unwrap() = Some(std::thread::current().id());
-        assert!(Domain::try_new().is_none());
-
-        *FAIL_NEXT_DOMAIN_CREATION.lock().unwrap() = Some(std::thread::current().id());
-        std::panic::catch_unwind(Domain::new).unwrap_err();
+        assert_eq!(Domain::new(), None);
     }
 
     #[test]
     fn default_domain_delegates_unrecoverable_creation_failure() {
         std::panic::catch_unwind(|| domain_or_else(None, || panic!("injected domain creation failure"))).unwrap_err();
+    }
+
+    #[test]
+    fn domain_debug_reports_its_stable_identity() {
+        let domain = Domain::new().unwrap();
+        let identity = state(domain);
+
+        let debug = format!("{domain:?}");
+
+        assert!(debug.starts_with("Domain { identity: "));
+        assert!(debug.contains(&format!("{identity:p}")));
+        assert!(debug.ends_with(", .. }"));
     }
 }

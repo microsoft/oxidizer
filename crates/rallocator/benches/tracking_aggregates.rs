@@ -1,12 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Allocation benchmark with aggregate telemetry enabled.
+//! Allocation benchmark with lifetime aggregate telemetry.
 
 mod workloads;
 
-rallocator::config!(AggregatesConfig { track_aggregates: true });
-rallocator::rallocator!(AggregatesConfig);
+rallocator::rallocator!();
 
 fn main() {
     workloads::run("tracking_aggregates");

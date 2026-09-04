@@ -39,7 +39,7 @@ The runtime is supplied by the caller via an [`anyspawn::Spawner`][__link6].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_hyper">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb1PafKPRqQnMbycEo89Tdc1Ibs7VR1QL49eUbNVExL_GkLMNhZISCaGFueXNwYXduZTAuOC4wgmtmZXRjaF9oeXBlcmUwLjcuMYJtZmV0Y2hfb3B0aW9uc2UwLjIuNIJvaHR0cF9leHRlbnNpb25zZjAuMTAuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG9T2nyj0akJzG8nBKPPU3XNSG7O1UdUC-PXlGzVRMS_xpCzDYWSEgmhhbnlzcGF3bmUwLjguMIJrZmV0Y2hfaHlwZXJlMC43LjGCbWZldGNoX29wdGlvbnNlMC4yLjSCb2h0dHBfZXh0ZW5zaW9uc2YwLjEwLjA
  [__link0]: https://docs.rs/fetch_hyper/0.7.1/fetch_hyper/?search=HyperTransportBuilder
  [__link1]: https://docs.rs/fetch_hyper/0.7.1/fetch_hyper/?search=Connect
  [__link2]: https://docs.rs/fetch_options/0.2.4/fetch_options/?search=TransportOptions

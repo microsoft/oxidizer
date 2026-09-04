@@ -17,17 +17,17 @@ mod linux;
 use linux as platform;
 #[cfg(miri)]
 pub(crate) use miri::{
-    MEDIUM_MAX_SLICES, MEDIUM_REGION_SIZE, align_down, allocation_prefix_for_read, allocation_prefix_for_write, capture_stack, commit,
-    commit_locality_segment, commit_locality_slab, decommit, initialize_storage, map, monotonic_millis, peek_free_requested,
-    read_free_next, read_free_requested, release_free_metadata, release_storage, reserve, unmap, write_free_next, write_free_requested,
+    MEDIUM_MAX_SLICES, MEDIUM_REGION_SIZE, align_down, allocation_prefix_for_read, allocation_prefix_for_write, commit,
+    commit_locality_segment, commit_locality_slab, decommit, initialize_storage, map, monotonic_millis, read_free_next,
+    read_free_requested, release_free_metadata, release_storage, reserve, unmap, write_free_next, write_free_requested,
 };
 #[cfg(not(miri))]
 pub(crate) use native::{
-    MEDIUM_MAX_SLICES, MEDIUM_REGION_SIZE, allocation_prefix_for_write, initialize_storage, peek_free_requested, read_free_next,
-    read_free_requested, release_free_metadata, release_storage, write_free_next, write_free_requested,
+    MEDIUM_MAX_SLICES, MEDIUM_REGION_SIZE, allocation_prefix_for_write, initialize_storage, read_free_next, read_free_requested,
+    release_free_metadata, release_storage, write_free_next, write_free_requested,
 };
 #[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
-pub(crate) use platform::{capture_stack, monotonic_millis, unmap};
+pub(crate) use platform::{monotonic_millis, unmap};
 #[cfg(all(not(miri), target_os = "windows"))]
 use win64 as platform;
 

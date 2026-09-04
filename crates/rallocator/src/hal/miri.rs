@@ -96,10 +96,6 @@ pub(crate) fn monotonic_millis() -> u64 {
     MONOTONIC_MILLIS.fetch_add(1, Ordering::Relaxed)
 }
 
-pub(crate) fn capture_stack(_frames: &mut [usize], _limit: usize) -> usize {
-    0
-}
-
 #[inline(always)]
 pub(crate) unsafe fn allocation_prefix_for_write<T>(address: *mut u8, offset: usize) -> *mut T {
     let prefix = unsafe { address.sub(offset).cast::<T>() };
@@ -212,11 +208,6 @@ pub(crate) unsafe fn read_free_requested(block: *mut u8) -> usize {
 #[inline(always)]
 pub(crate) unsafe fn release_free_metadata(block: *mut u8) {
     free_metadata(block, false).block.store(ptr::null_mut(), Ordering::Release);
-}
-
-#[inline(always)]
-pub(crate) unsafe fn peek_free_requested(block: *mut u8) -> usize {
-    free_metadata(block, false).requested_bytes.load(Ordering::Relaxed)
 }
 
 unsafe fn allocate(size: usize) -> *mut u8 {

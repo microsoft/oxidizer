@@ -15,65 +15,35 @@ use std::alloc::{GlobalAlloc, Layout};
 use std::hint::black_box;
 use std::sync::Mutex;
 
-use allocation_hints::domain::Domain;
-use allocation_hints::heap::{Heap, Options, bump, thread_heap};
-use allocation_hints::{Hint, with_hint};
-#[cfg(not(miri))]
-use rallocator::config::Config;
-use rallocator::telemetry::stats::{Sampler, Session};
-use rallocator::telemetry::{snapshot, stats, track_callers};
-use rallocator_telemetry::callers::{EventKind, HeapKind};
-use rallocator_telemetry::snapshot::Snapshot;
-use rallocator_telemetry::topology::SliceKind;
+use allocation_hints::heaps::{Heap, bump, thread_heap};
+use allocation_hints::with_hint;
+use seismograph_rallocator::callers::{EventKind, HeapKind};
+use seismograph_rallocator::snapshot::Snapshot;
+use seismograph_rallocator::topology::SliceKind;
+use support::stats;
+
+mod support;
+
+fn track_callers(enabled: bool) {
+    seismograph::recorder(seismograph::recorder::Configuration {
+        allocations: seismograph::recorder::RecordingPolicy {
+            enabled,
+            capture_backtraces: enabled,
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+}
 
 static TEST_LOCK: Mutex<()> = Mutex::new(());
 
-const TEST_CALLER_EVENT_CAPACITY: usize = if cfg!(miri) { 128 } else { 128 * 1024 };
+const OVERWRITE_TEST_ALLOCATIONS: usize = 64 * 1024;
 
-rallocator::config!(TelemetryConfig {
-    track_aggregates: true,
-    track_callers: true,
-    caller_event_capacity: TEST_CALLER_EVENT_CAPACITY,
-});
-
-rallocator::config!(DefaultCallerConfig { track_callers: true });
-
-rallocator::config!(CustomCallerConfig {
-    track_callers: true,
-    caller_event_capacity: 8,
-    caller_allocation_stack_frames: 3,
-    caller_deallocation_stack_frames: 5,
-    caller_track_threads: false,
-    caller_track_heap_lifetimes: false,
-});
-
-rallocator::rallocator!(TelemetryConfig);
+rallocator::rallocator!();
 
 #[test]
-fn caller_diagnostic_configuration_has_stable_defaults_and_overrides() {
-    use rallocator::config::Config;
-
-    rallocator::initialize();
-
-    const {
-        assert!(DefaultCallerConfig::CALLER_EVENT_CAPACITY == 128 * 1024);
-        assert!(DefaultCallerConfig::CALLER_ALLOCATION_STACK_FRAMES == 16);
-        assert!(DefaultCallerConfig::CALLER_DEALLOCATION_STACK_FRAMES == 16);
-        assert!(DefaultCallerConfig::CALLER_TRACK_THREADS);
-        assert!(DefaultCallerConfig::CALLER_TRACK_HEAP_LIFETIMES);
-
-        assert!(CustomCallerConfig::CALLER_EVENT_CAPACITY == 8);
-        assert!(CustomCallerConfig::CALLER_ALLOCATION_STACK_FRAMES == 3);
-        assert!(CustomCallerConfig::CALLER_DEALLOCATION_STACK_FRAMES == 5);
-        assert!(!CustomCallerConfig::CALLER_TRACK_THREADS);
-        assert!(!CustomCallerConfig::CALLER_TRACK_HEAP_LIFETIMES);
-    }
-}
-
-#[test]
-fn tracking_is_off_by_default_and_process_wide_when_enabled() {
+fn caller_tracking_is_runtime_gated() {
     let _test = test_lock();
-    rallocator::initialize();
     track_callers(false);
     let before = snapshot();
     drop(Box::new(1_u64));
@@ -97,10 +67,53 @@ fn tracking_is_off_by_default_and_process_wide_when_enabled() {
 }
 
 #[test]
+fn passive_bump_hints_detach_and_reuse_native_state() {
+    let _test = test_lock();
+    track_callers(true);
+
+    let heap = Heap::bump(bump::Options::new());
+    let first = with_hint(&heap, || vec![1_u8; 1024]);
+    let first_address = first.as_ptr() as u64;
+    drop(first);
+
+    let second = with_hint(&heap, || vec![2_u8; 1024]);
+    let second_address = second.as_ptr() as u64;
+    drop(heap);
+    drop(second);
+
+    track_callers(false);
+    let snapshot = decoded_snapshot();
+    let allocations = snapshot
+        .callers
+        .unwrap()
+        .events
+        .into_iter()
+        .filter(|event| event.kind == EventKind::Allocated && (event.address == first_address || event.address == second_address))
+        .collect::<Vec<_>>();
+
+    assert_eq!(allocations.len(), 2);
+    assert!(allocations.iter().all(|event| event.heap_kind == HeapKind::Bump));
+    assert_eq!(allocations[0].heap_id, allocations[1].heap_id);
+}
+
+#[test]
+fn snapshot_capture_does_not_add_allocator_mappings() {
+    let _test = test_lock();
+    track_callers(false);
+    let before = stats().unwrap();
+
+    let captured = snapshot().unwrap();
+    let after = stats().unwrap();
+
+    assert!(after.mapped_bytes <= before.mapped_bytes);
+    assert_eq!(after.os_mappings, before.os_mappings);
+    drop(captured);
+}
+
+#[test]
 #[cfg_attr(miri, ignore = "cross-thread tracking-log/TLS lifecycle coverage is exercised by native tests")]
 fn collection_includes_every_participating_thread_log() {
     let _test = test_lock();
-    rallocator::initialize();
     track_callers(false);
     track_callers(true);
 
@@ -134,32 +147,80 @@ fn collection_includes_every_participating_thread_log() {
 #[cfg_attr(miri, ignore = "cross-thread tracking-log/TLS lifecycle coverage is exercised by native tests")]
 fn remote_thread_heap_allocations_keep_caller_tracking() {
     let _test = test_lock();
-    rallocator::initialize();
     track_callers(false);
-    let heap = thread_heap().unwrap();
+    let heap = thread_heap();
     track_callers(true);
 
-    let value = std::thread::spawn(move || with_hint(Hint::new().with_heap(&heap), || Box::new([3_u8; 64])))
+    let value = std::thread::spawn(move || with_hint(&heap, || Box::new([3_u8; 64])))
         .join()
         .unwrap();
+    let address = value.as_ptr() as u64;
     drop(value);
     track_callers(false);
 
     let snapshot = decoded_snapshot();
+    assert!(snapshot.callers.unwrap().events.iter().any(|event| {
+        event.kind == EventKind::Allocated
+            && event.address == address
+            && event.heap_kind == HeapKind::Thread
+            && !event.call_stack.is_empty()
+    }));
+}
+
+#[test]
+fn one_logical_heap_gets_independent_native_realizations_per_thread() {
+    let _test = test_lock();
+    track_callers(false);
+    let heap = Heap::bump(bump::Options::new());
+    track_callers(true);
+
+    let first_heap = heap.clone();
+    let second_heap = heap;
+    let first = std::thread::spawn(move || with_hint(&first_heap, || Box::new([1_u8; 80])));
+    let second = std::thread::spawn(move || with_hint(&second_heap, || Box::new([2_u8; 80])));
+    let first = first.join().unwrap();
+    let second = second.join().unwrap();
+    let addresses = [first.as_ptr() as u64, second.as_ptr() as u64];
+    drop((first, second));
+    track_callers(false);
+
+    let callers = decoded_snapshot().callers.unwrap();
+    let heap_ids = addresses.map(|address| {
+        callers
+            .events
+            .iter()
+            .find(|event| event.kind == EventKind::Allocated && event.address == address)
+            .unwrap()
+            .heap_id
+    });
+    assert_ne!(heap_ids[0], heap_ids[1]);
+}
+
+#[test]
+fn thread_heap_hint_remains_usable_after_its_owner_exits() {
+    let _test = test_lock();
+    track_callers(false);
+    let heap = std::thread::spawn(thread_heap).join().unwrap();
+    track_callers(true);
+
+    let value = with_hint(&heap, || Box::new([4_u8; 96]));
+    let address = value.as_ptr() as u64;
+    drop(value);
+    track_callers(false);
+
     assert!(
-        snapshot
+        decoded_snapshot()
             .callers
             .unwrap()
             .events
             .iter()
-            .any(|event| { event.kind == EventKind::Allocated && event.size == 64 && !event.call_stack.is_empty() })
+            .any(|event| event.kind == EventKind::Allocated && event.address == address && event.heap_kind == HeapKind::Thread)
     );
 }
 
 #[test]
 fn snapshot_encodes_allocations_by_stack() {
     let _test = test_lock();
-    rallocator::initialize();
     track_callers(false);
     track_callers(true);
     for value in 0..4 {
@@ -187,7 +248,6 @@ fn snapshot_encodes_allocations_by_stack() {
 #[cfg_attr(miri, ignore = "cross-thread tracking-log/TLS lifecycle coverage is exercised by native tests")]
 fn tracked_allocation_can_be_freed_on_another_thread() {
     let _test = test_lock();
-    rallocator::initialize();
     track_callers(false);
     track_callers(true);
     let address = Box::into_raw(Box::new([0xA5_u8; 128])) as usize;
@@ -234,10 +294,9 @@ fn tracked_allocation_can_be_freed_on_another_thread() {
 #[test]
 fn bounded_per_thread_logs_report_overwritten_events() {
     let _test = test_lock();
-    rallocator::initialize();
     track_callers(false);
     track_callers(true);
-    for value in 0..=(TelemetryConfig::CALLER_EVENT_CAPACITY / 2) {
+    for value in 0..=OVERWRITE_TEST_ALLOCATIONS {
         black_box(Box::new(value));
     }
     track_callers(false);
@@ -259,7 +318,6 @@ fn bounded_per_thread_logs_report_overwritten_events() {
 #[cfg_attr(miri, ignore = "cross-thread tracking-log/TLS lifecycle coverage is exercised by native tests")]
 fn collection_is_safe_while_a_thread_updates_its_log() {
     let _test = test_lock();
-    rallocator::initialize();
     track_callers(false);
     track_callers(true);
 
@@ -296,7 +354,6 @@ fn collection_is_safe_while_a_thread_updates_its_log() {
 #[cfg(not(miri))]
 fn retained_call_stacks_are_encoded() {
     let _test = test_lock();
-    rallocator::initialize();
     track_callers(false);
     track_callers(true);
     drop(Box::new(7_u64));
@@ -318,7 +375,6 @@ fn retained_call_stacks_are_encoded() {
 #[test]
 fn tracked_larger_small_allocations_reuse_context_slabs() {
     let _test = test_lock();
-    rallocator::initialize();
     track_callers(false);
     let allocator = &GLOBAL;
     let layout = Layout::from_size_align(4_096, 16).unwrap();
@@ -340,11 +396,10 @@ fn tracked_larger_small_allocations_reuse_context_slabs() {
 #[test]
 fn bump_heap_allocations_are_still_fully_tracked() {
     let _test = test_lock();
-    rallocator::initialize();
     track_callers(false);
     track_callers(true);
-    let heap = Heap::with_options(Options::bump(bump::Options::new()));
-    let value = with_hint(Hint::new().with_heap(&heap), || Box::new([7_u8; 256]));
+    let heap = Heap::bump(bump::Options::new());
+    let value = with_hint(&heap, || Box::new([7_u8; 256]));
     let address = value.as_ptr() as usize;
     drop(value);
     track_callers(false);
@@ -367,13 +422,12 @@ fn bump_heap_allocations_are_still_fully_tracked() {
 }
 
 #[test]
-fn escaped_bump_free_records_heap_lifetime_and_free_stack() {
+fn escaped_bump_free_uses_the_cached_attachment_and_records_its_stack() {
     let _test = test_lock();
-    rallocator::initialize();
     track_callers(false);
     track_callers(true);
-    let heap = Heap::with_options(Options::bump(bump::Options::new()));
-    let value = with_hint(Hint::new().with_heap(&heap), || Box::new([0x5A_u8; 384]));
+    let heap = Heap::bump(bump::Options::new());
+    let value = with_hint(&heap, || Box::new([0x5A_u8; 384]));
     let address = value.as_ptr() as usize;
     drop(heap);
     drop(value);
@@ -396,15 +450,14 @@ fn escaped_bump_free_records_heap_lifetime_and_free_stack() {
         .unwrap();
     assert_eq!(allocation.heap_kind, HeapKind::Bump);
     assert_eq!(allocation.heap_id, deallocation.heap_id);
-    assert!(deallocation.freed_after_heap_release);
+    assert!(!deallocation.freed_after_heap_release);
     #[cfg(not(miri))]
     assert!(!deallocation.call_stack.is_empty());
 }
 
 #[test]
-fn aggregate_and_per_thread_histograms_record_allocated_and_live_sizes() {
+fn active_recording_tracks_per_thread_histograms() {
     let _test = test_lock();
-    rallocator::initialize();
     track_callers(false);
     track_callers(true);
     let value = Box::new([0xC3_u8; 512]);
@@ -414,7 +467,8 @@ fn aggregate_and_per_thread_histograms_record_allocated_and_live_sizes() {
 
     let snapshot = decoded_snapshot();
     let bucket = usize::BITS as usize - 512_usize.leading_zeros() as usize;
-    assert!(snapshot.histograms.allocated[bucket] >= 1);
+    assert!(snapshot.histograms.allocated.is_empty());
+    assert!(snapshot.histograms.live.is_empty());
     let callers = snapshot.callers.unwrap();
     let thread = callers
         .threads
@@ -434,23 +488,18 @@ fn test_lock() -> std::sync::MutexGuard<'static, ()> {
 }
 
 #[test]
-fn snapshot_reports_bounded_size_class_and_region_telemetry() {
+fn snapshot_reports_process_totals_and_region_topology() {
     let _test = test_lock();
-    rallocator::initialize();
     track_callers(false);
     let value = Box::new([7_u8; 64]);
     let snapshot = decoded_snapshot();
     assert!(snapshot.stats.live_bytes >= 64);
     assert!(snapshot.stats.mapped_bytes >= snapshot.stats.live_bytes);
 
-    let class = snapshot.size_classes.iter().find(|class| class.block_bytes == 64).unwrap();
-    assert!(class.live_allocations.value >= 1);
-    assert!(class.requested_bytes.value >= 64);
-    assert!(class.usable_bytes.value >= 64);
-    for estimate in [class.live_allocations, class.requested_bytes, class.usable_bytes] {
-        assert!(estimate.lower_bound <= estimate.value);
-        assert!(estimate.value <= estimate.upper_bound);
-    }
+    let size_class = snapshot.size_classes.iter().find(|class| class.block_bytes == 64).unwrap();
+    assert!(size_class.live_allocations.value >= 1);
+    assert!(size_class.requested_bytes.value >= 64);
+    assert!(size_class.usable_bytes.value >= size_class.requested_bytes.value);
     assert!(!snapshot.regions.is_empty());
     let default_domain = snapshot
         .domains
@@ -465,60 +514,16 @@ fn snapshot_reports_bounded_size_class_and_region_telemetry() {
         .flat_map(|region| &region.slices)
         .filter(|slice| slice.kind == SliceKind::Small)
         .flat_map(|slice| &slice.segments)
-        .filter(|segment| segment.class_index == class.class_index)
         .collect::<Vec<_>>();
     assert!(!segments.is_empty());
-    assert!(segments.iter().all(|segment| segment.utilization_tracked));
-    assert!(
-        segments
-            .iter()
-            .any(|segment| segment.live_blocks >= 1 && segment.usable_blocks >= segment.live_blocks)
-    );
+    assert!(segments.iter().all(|segment| !segment.utilization_tracked));
 
     drop(value);
-}
-
-#[test]
-fn snapshot_reports_explicit_domain_region_use() {
-    let _test = test_lock();
-    rallocator::initialize();
-    let domain = Domain::new();
-    let heap = Heap::with_options(Options::default().with_domain(domain));
-    let value = with_hint(Hint::new().with_heap(&heap), || Box::new([9_u8; 64]));
-
-    let snapshot = decoded_snapshot();
-    let explicit = snapshot
-        .domains
-        .iter()
-        .find(|domain| !domain.is_default && domain.small_slices != 0)
-        .expect("explicit domain telemetry");
-    assert_eq!(explicit.region_count, 1);
-    assert_eq!(explicit.region_indices.len(), 1);
-
-    drop(value);
-}
-
-#[test]
-fn sampler_and_session_report_interval_deltas() {
-    let _test = test_lock();
-    rallocator::initialize();
-    let mut sampler = Sampler::new().unwrap();
-    drop(Box::new(11_u64));
-    let sample = sampler.sample().unwrap();
-    assert!(sample.delta().allocations() >= 1);
-    assert!(sample.delta().deallocations() >= 1);
-
-    let session = Session::start().unwrap();
-    drop(Box::new([3_u8; 128]));
-    let report = session.finish().unwrap();
-    assert!(report.delta().allocations() >= 1);
-    assert!(report.delta().deallocations() >= 1);
 }
 
 #[test]
 fn opaque_snapshot_suppresses_allocator_operations() {
     let _test = test_lock();
-    rallocator::initialize();
     #[cfg(not(miri))]
     let path = format!("opaque-snapshot-{}.bin", std::process::id());
     track_callers(false);
@@ -552,5 +557,15 @@ fn opaque_snapshot_suppresses_allocator_operations() {
 
 fn decoded_snapshot() -> Snapshot {
     let snapshot = snapshot().unwrap();
-    rallocator_telemetry::decode(snapshot.as_bytes()).unwrap()
+    let snapshot = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap();
+    let source = snapshot
+        .sources
+        .iter()
+        .find(|source| source.id == seismograph_rallocator::source::ID)
+        .unwrap();
+    seismograph_rallocator::decode(&source.data).unwrap()
+}
+
+fn snapshot() -> Option<seismograph::snapshot::Snapshot> {
+    seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).ok()
 }

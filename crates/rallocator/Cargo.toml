@@ -4,7 +4,7 @@
 [package]
 name = "rallocator"
 version = "0.1.0"
-description = "A high-performance global allocator with scoped heap hints and telemetry."
+description = "A high-performance global allocator with passive allocation hints and telemetry."
 readme = "README.md"
 keywords = ["allocator", "memory", "performance", "telemetry"]
 categories = ["memory-management"]
@@ -27,7 +27,6 @@ tuning-telemetry = []
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { workspace = true, features = [
-    "Win32_System_Diagnostics_Debug",
     "Win32_System_Memory",
     "Win32_System_SystemInformation",
 ] }
@@ -35,13 +34,18 @@ windows-sys = { workspace = true, features = [
 [dependencies]
 allocation_hints.workspace = true
 backtrace = { workspace = true, features = ["std"], optional = true }
-rallocator_telemetry.workspace = true
+seismograph.workspace = true
+seismograph_rallocator.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
 hashbrown = { workspace = true, features = ["default-hasher"] }
 mimalloc.workspace = true
 multitude = { workspace = true, features = ["hashbrown"] }
+mutants.workspace = true
+performables = { workspace = true, features = ["seismograph"] }
+seismograph = { workspace = true, features = ["monitor"] }
+seismograph_runtime.workspace = true
 
 [lints]
 workspace = true
@@ -67,7 +71,7 @@ name = "bump_multitude"
 harness = false
 
 [[bench]]
-name = "bump_rallocator"
+name = "bump_allocation_hints"
 harness = false
 
 [[bench]]
@@ -83,19 +87,19 @@ name = "bump_rallocator_global"
 harness = false
 
 [[bench]]
-name = "tracking_none"
-harness = false
-
-[[bench]]
 name = "tracking_aggregates"
 harness = false
 
 [[bench]]
-name = "tracking_callers_capable"
+name = "rallocator_tracking_events"
 harness = false
 
 [[bench]]
-name = "tracking_all"
+name = "rallocator_tracking_events_1_in_20"
+harness = false
+
+[[bench]]
+name = "rallocator_tracking_events_1_in_100"
 harness = false
 
 [[bench]]
