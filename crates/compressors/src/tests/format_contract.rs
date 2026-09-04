@@ -405,10 +405,11 @@ macro_rules! format_contract {
 
             #[test]
             fn default_limits_accept_ordinary_highly_compressible_data() {
-                // Regression guard. A single portable ratio limit was calibrated on deflate, whose
-                // structural ceiling is about `1032x`. Brotli legitimately reaches tens of thousands of
-                // times expansion, so that limit rejected ordinary repetitive input -- a repeated
-                // sentence, and JSON. Each format now carries its own default.
+                // The formats' expansion characteristics differ by orders of magnitude: deflate has a
+                // structural ceiling around `1032x` while brotli legitimately reaches tens of thousands.
+                // A default calibrated for one therefore rejects ordinary repetitive input under
+                // another, which is why each format carries its own. These cases are what "ordinary"
+                // means -- repeated text and JSON, not contrived payloads.
 
                 let cases: [(&str, Vec<u8>); 3] = [
                     ("repeated short string", b"windowed ".repeat(20_000)),
@@ -938,12 +939,13 @@ macro_rules! format_contract {
                     compressor.flush().expect("flush request succeeds");
 
                     let mut compressed = BytesBuf::new();
+                    // One guard, not two: the shared `StepGuard` would have tripped first and
+                    // reported the generic message, leaving this bound unreachable. This one keeps
+                    // the chunk size in the diagnostic, which is what the test is varying.
                     let mut pulls = 0;
-                    let mut guard = StepGuard::new();
                     loop {
-                        guard.step();
                         pulls += 1;
-                        assert!(pulls < 20_000, "flush did not terminate at chunk size {size}");
+                        assert!(pulls < MAX_STEPS, "flush did not terminate at chunk size {size}");
 
                         match compressor.pull().expect("pull succeeds") {
                             Output::Data(piece) => {
@@ -1071,7 +1073,7 @@ macro_rules! format_contract {
 
             #[test]
             fn an_empty_push_does_not_create_a_phantom_stream() {
-                let data = b"one member only".repeat(20);
+                let data = b"one stream only".repeat(20);
                 let compressed = $module::compress(view(&data), resources()).expect("compress");
                 let mut decompressor = $module::Decompressor::builder().multi_stream(true).build(resources()).built();
                 decompressor.push(compressed).expect("first push succeeds");
@@ -1096,7 +1098,7 @@ macro_rules! format_contract {
             }
 
             #[test]
-            fn multi_stream_end_input_handles_an_internal_member_boundary() {
+            fn multi_stream_end_input_handles_an_internal_stream_boundary() {
                 let first_plain = b"AAAAAAAAAA";
                 let second_plain = b"BBBBBBBBBB";
                 let first = $module::compress(view(first_plain), resources()).expect("compress");
@@ -1180,10 +1182,10 @@ macro_rules! format_contract {
             }
 
             #[test]
-            fn a_truncated_later_member_reads_as_a_short_stream() {
+            fn a_truncated_later_stream_reads_as_a_short_stream() {
                 // A caller retrying a partial transfer needs to tell "it stopped early" from "these
-                // bytes are wrong". A member that starts and then runs out is the former, however
-                // many members decoded cleanly before it.
+                // bytes are wrong". A stream that starts and then runs out is the former, however
+                // many streams decoded cleanly before it.
                 let compressed = $module::compress(view(&payload()), resources()).expect("compress");
                 let whole = compressed.to_vec();
                 let truncated = &whole[..whole.len() - 1];
@@ -1198,7 +1200,7 @@ macro_rules! format_contract {
                     guard.step();
                     match CompressionInternal::pull(&mut decompressor) {
                         Ok(Output::Data(_) | Output::Progress) => {}
-                        Ok(_) => panic!("a truncated member unexpectedly completed"),
+                        Ok(_) => panic!("a truncated stream unexpectedly completed"),
                         Err(error) => break error,
                     }
                 };
@@ -1365,9 +1367,11 @@ fn every_compiled_format_satisfies_the_contract() {
 }
 
 #[test]
-fn formats_produce_mutually_incompatible_streams() {
-    // Each format must be genuinely distinct: decoding one format's output with another's decompressor
-    // must fail rather than silently produce garbage.
+fn one_formats_output_never_decodes_to_the_original_through_another() {
+    // The guarantee this can enforce is weaker than "wrong format always errors", and deliberately
+    // so: a checksum-free or permissive decoder may accept unrelated bytes without that implying
+    // the formats are compatible. What must never happen is a wrong-format decode reproducing the
+    // payload, which would mean the two formats are not distinct.
     let data = b"cross format check ".repeat(200);
 
     for &produced_by in Format::ALL {
@@ -1627,7 +1631,7 @@ mod pooling {
             best.to_vec(),
             compress_with(&Resources::new(GlobalPool::new()).with_pool_capacity(0), Level::HIGH, &payload).to_vec()
         );
-        assert!(best.len() <= fast.len(), "level 9 must still out-compress level 1");
+        assert!(best.len() <= fast.len(), "Level::HIGH must still out-compress Level::FAST");
     }
 
     #[test]
@@ -1823,7 +1827,7 @@ fn a_shared_pool_is_correct_under_concurrency() {
     });
 }
 
-/// A long run must not drift: the hundredth message has to match the first.
+/// A long run must not drift: however many messages a pooled engine serves, each must match the first.
 #[test]
 fn pooled_output_does_not_drift_over_many_reuses() {
     let data = b"steady state ".repeat(120);
