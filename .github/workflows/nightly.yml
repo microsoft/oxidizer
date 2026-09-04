@@ -115,6 +115,14 @@ jobs:
     needs: [nightly-gatekeeper]
     if: ${{ needs.nightly-gatekeeper.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
+    # Suppression mechanism: `#[cfg_attr(miri_strict_provenance, ignore = "...")]`
+    #
+    # Tests that cannot pass under `-Zmiri-strict-provenance` for reasons
+    # outside this workspace are gated on the `miri_strict_provenance` cfg
+    # (declared in the workspace `check-cfg` list). The cfg is only defined
+    # when this job sets it, so the RUSTFLAGS below are what make those
+    # `ignore` attributes take effect - matching the `just
+    # anvil-miri-strict-provenance` recipe this job mirrors.
     steps:
       # prep
       - name: Checkout
@@ -130,6 +138,7 @@ jobs:
       - name: Miri (strict provenance)
         env:
           MIRIFLAGS: -Zmiri-strict-provenance
+          RUSTFLAGS: --cfg miri_strict_provenance
         run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace --lib --tests
         timeout-minutes: 240
 
