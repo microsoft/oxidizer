@@ -27,9 +27,6 @@
 
 /// Foundational runtime and thread-awareness types.
 pub mod core {
-    #[allow(unused_imports)]
-    #[doc(inline)]
-    pub use arty_core::*;
     #[doc(inline)]
     pub use thread_aware_core::*;
 }
