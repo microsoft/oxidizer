@@ -206,9 +206,10 @@ impl Sink {
     /// Attaches one [`EventSampler`] to this sink, replacing any sampler
     /// already attached.
     ///
-    /// For a composite, the same sampler is attached to every leaf. A
-    /// [`Sink::noop`] value is returned unchanged. A sink that is not
-    /// interested in an event never calls the sampler.
+    /// For a composite, the new sampler replaces every sampler previously
+    /// attached to its leaves. Only the new sampler runs. A [`Sink::noop`]
+    /// value is returned unchanged. A sink that is not interested in an event
+    /// never calls the sampler.
     ///
     /// See [`EventSampler::sample`] for the invocation and decision contract.
     ///

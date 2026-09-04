@@ -67,7 +67,9 @@ pub struct EventContext<'a> {
 }
 
 impl<'a> EventContext<'a> {
-    pub(crate) const fn new(description: &'a EventDescription, sink_id: SinkId, timestamp: SystemTime) -> Self {
+    /// Creates context for evaluating an [`EventSampler`] directly.
+    #[must_use]
+    pub const fn new(description: &'a EventDescription, sink_id: SinkId, timestamp: SystemTime) -> Self {
         Self {
             description,
             sink_id,

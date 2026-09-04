@@ -275,6 +275,40 @@ fn composite_leaves_decide_independently() {
 }
 
 #[test]
+fn composite_does_not_sample_uninterested_leaf() {
+    let interested_id = SinkId::new("interested");
+    let uninterested_id = SinkId::new("uninterested");
+    let interested = MockProcessor::new();
+    let uninterested = MockProcessor::with_filter(|_| false);
+    let (sampler, calls) = probe_sampler(move |event| {
+        assert_eq!(event.sink_id(), interested_id);
+        EventSamplingDecision::Continue
+    });
+
+    let composite = Sink::composite([
+        Sink::new(interested_id, vec![Arc::new(interested.clone())], tick::SimpleClock::new_frozen()),
+        Sink::new(
+            uninterested_id,
+            vec![Arc::new(uninterested.clone())],
+            tick::SimpleClock::new_frozen(),
+        ),
+    ])
+    .with_event_sampler(sampler);
+
+    emit!(
+        composite,
+        UserAction {
+            user: PiiString("Alice".into()),
+            action_code: 3,
+        }
+    );
+
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert_eq!(interested.len(), 1);
+    assert!(uninterested.is_empty());
+}
+
+#[test]
 fn sampled_sink_accepts_stack_borrowing_event() {
     let processor = MockProcessor::new();
     let (sampler, calls) = constant_sampler(EventSamplingDecision::Continue);
