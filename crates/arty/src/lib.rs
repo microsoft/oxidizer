@@ -15,7 +15,7 @@
 //!
 //! # Features
 //!
-//! - **`time`** - Exposes time primitives through [`time`].
+//! - **`time`** - Exposes time primitives through `arty::time`.
 //! - **`test-util`** - Exposes `time::ClockControl` when `time` is also enabled.
 //!
 //! # Project policies

@@ -21,15 +21,15 @@ established.
 
 ## Features
 
-* **`time`** - Exposes time primitives through [`time`][__link1].
+* **`time`** - Exposes time primitives through `arty::time`.
 * **`test-util`** - Exposes `time::ClockControl` when `time` is also enabled.
 
 ## Project policies
 
-* [Design][__link2]
-* [I/O][__link3]
-* [Panics][__link4]
-* [Stabilization][__link5]
+* [Design][__link1]
+* [I/O][__link2]
+* [Panics][__link3]
+* [Stabilization][__link4]
 
 
 <hr/>
@@ -37,10 +37,9 @@ established.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbEFhdCMfrIyQbub_8bikp6rcbiSrLDhTe6HsbMdTJ8_3SS1phZIKCZGFydHllMC4yLjCCaWFydHlfY29yZWUwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbVwyeVLFSO68b1R3yOQcfYiwbakqCi1YB3uIbJnq7wcCXYGJhZIGCaWFydHlfY29yZWUwLjIuMA
  [__link0]: https://crates.io/crates/arty_core/0.2.0
- [__link1]: https://docs.rs/arty/0.2.0/arty/time/index.html
- [__link2]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/DESIGN.md
- [__link3]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/IO.md
- [__link4]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/PANICS.md
- [__link5]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/STABILIZATION.md
+ [__link1]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/DESIGN.md
+ [__link2]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/IO.md
+ [__link3]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/PANICS.md
+ [__link4]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/STABILIZATION.md

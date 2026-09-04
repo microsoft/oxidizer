@@ -66,10 +66,10 @@ backtrace = { version = "0.3.76", default-features = false }
 allocation_hints = { path = "crates/allocation_hints", default-features = false, version = "0.1.0" }
 anyspawn = { path = "crates/anyspawn", default-features = false, version = "0.8.0" }
 anyspawn_azure = { path = "crates/anyspawn_azure", default-features = false, version = "0.3.0" }
-arty = { path = "crates/arty", default-features = false, version = "0.2.0" }
-arty_core = { path = "crates/arty_core", default-features = false, version = "0.2.0" }
 argh = { version = "0.1.13", default-features = false }
 arrayvec = { version = "0.7.6", default-features = false }
+arty = { path = "crates/arty", default-features = false, version = "0.2.0" }
+arty_core = { path = "crates/arty_core", default-features = false, version = "0.2.0" }
 async-once-cell = { version = "0.5.0", default-features = false }
 async-trait = { version = "0.1.89", default-features = false }
 axum = { version = "0.8.9", default-features = false }
