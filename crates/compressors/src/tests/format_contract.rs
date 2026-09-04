@@ -13,7 +13,7 @@ use std::sync::OnceLock;
 use bytesbuf::mem::GlobalPool;
 use bytesbuf::{BytesBuf, BytesView};
 
-use crate::core::{Compress, Compression, CompressionInternal, Decompress, Output};
+use crate::core::{Compress, Compression, CompressionInternal, Decompress, Destination, Output};
 use crate::format::Format;
 use crate::testing::{chunk, fragmented, view};
 use crate::{CompressorBuilder, DecompressorBuilder, DecompressorLimits, Level, Resources, TrailingData};
@@ -84,7 +84,7 @@ fn process<C: Compression>(compression: &mut C, input: &BytesView, feed: usize) 
     let mut guard = StepGuard::new();
     loop {
         guard.step();
-        match compression.pull()? {
+        match compression.pull(Destination::Stream)? {
             Output::Data(data) => collected.put_bytes(data),
             Output::Progress => {}
             Output::Done => return Ok(collected.consume_all()),
@@ -165,7 +165,7 @@ macro_rules! format_contract {
                 let mut guard = StepGuard::new();
                 loop {
                     guard.step();
-                    match CompressionInternal::pull(&mut by_hand).unwrap() {
+                    match CompressionInternal::pull(&mut by_hand, Destination::Stream).unwrap() {
                         Output::Data(chunk) => collected.put_bytes(chunk),
                         Output::Progress => {}
                         Output::NeedInput => panic!("compressor requested input after end"),
@@ -250,7 +250,7 @@ macro_rules! format_contract {
                 let mut guard = StepGuard::new();
                 loop {
                     guard.step();
-                    match CompressionInternal::pull(&mut compressor).unwrap() {
+                    match CompressionInternal::pull(&mut compressor, Destination::Stream).unwrap() {
                         Output::Data(piece) => {
                             assert!(piece.len() <= 256, "chunk of {} bytes exceeded the bound", piece.len());
                             compressed.put_bytes(piece);
@@ -272,7 +272,7 @@ macro_rules! format_contract {
                 let mut guard = StepGuard::new();
                 loop {
                     guard.step();
-                    match CompressionInternal::pull(&mut decompressor).unwrap() {
+                    match CompressionInternal::pull(&mut decompressor, Destination::Stream).unwrap() {
                         Output::Data(piece) => {
                             assert!(piece.len() <= 256, "chunk of {} bytes exceeded the bound", piece.len());
                             plain.put_bytes(piece);
@@ -355,7 +355,7 @@ macro_rules! format_contract {
                 let mut guard = StepGuard::new();
                 let output = loop {
                     guard.step();
-                    match CompressionInternal::pull(&mut compressor).unwrap() {
+                    match CompressionInternal::pull(&mut compressor, Destination::Stream).unwrap() {
                         Output::Data(_) | Output::Progress => {}
                         other => break other,
                     }
@@ -381,7 +381,7 @@ macro_rules! format_contract {
                 let mut guard = StepGuard::new();
                 let error = loop {
                     guard.step();
-                    match CompressionInternal::pull(&mut decompressor) {
+                    match CompressionInternal::pull(&mut decompressor, Destination::Stream) {
                         Ok(Output::Data(_) | Output::Progress) => {}
                         Ok(_) => panic!("the bomb decompressed fully instead of being rejected"),
                         Err(error) => break error,
@@ -444,7 +444,7 @@ macro_rules! format_contract {
                 let mut guard = StepGuard::new();
                 let error = loop {
                     guard.step();
-                    match CompressionInternal::pull(&mut decompressor) {
+                    match CompressionInternal::pull(&mut decompressor, Destination::Stream) {
                         Ok(Output::Data(_) | Output::Progress) => {}
                         Ok(_) => panic!("the cap should have fired"),
                         Err(error) => break error,
@@ -585,7 +585,7 @@ macro_rules! format_contract {
                             .build(resources())
                             .built();
                         abandoned.push(input.clone()).unwrap();
-                        let _ = CompressionInternal::pull(&mut abandoned).unwrap();
+                        let _ = CompressionInternal::pull(&mut abandoned, Destination::Stream).unwrap();
                         // Dropped without finishing, so its engine is mid-frame.
                     }
 
@@ -669,7 +669,7 @@ macro_rules! format_contract {
                     let mut guard = StepGuard::new();
                     loop {
                         guard.step();
-                        match CompressionInternal::pull(compressor).unwrap() {
+                        match CompressionInternal::pull(compressor, Destination::Stream).unwrap() {
                             Output::Data(chunk) => collected.put_bytes(chunk),
                             Output::Progress => {}
                             Output::NeedInput => panic!("compressor requested input after end"),
@@ -708,7 +708,7 @@ macro_rules! format_contract {
                     let mut guard = StepGuard::new();
                     loop {
                         guard.step();
-                        match CompressionInternal::pull(compressor).unwrap() {
+                        match CompressionInternal::pull(compressor, Destination::Stream).unwrap() {
                             Output::Data(chunk) => collected.put_bytes(chunk),
                             Output::Progress => {}
                             Output::NeedInput => panic!("compressor requested input after end"),
@@ -858,7 +858,7 @@ macro_rules! format_contract {
                 let mut guard = StepGuard::new();
                 loop {
                     guard.step();
-                    match compressor.pull().unwrap() {
+                    match compressor.pull(Destination::Stream).unwrap() {
                         Output::Data(chunk) => compressed.put_bytes(chunk),
                         Output::Progress => {}
                         Output::NeedInput => break,
@@ -873,7 +873,7 @@ macro_rules! format_contract {
                 let mut guard = StepGuard::new();
                 loop {
                     guard.step();
-                    match decompressor.pull().unwrap() {
+                    match decompressor.pull(Destination::Stream).unwrap() {
                         Output::Data(chunk) => plain.put_bytes(chunk),
                         Output::Progress => {}
                         Output::NeedInput => break,
@@ -898,7 +898,7 @@ macro_rules! format_contract {
                 let mut guard = StepGuard::new();
                 loop {
                     guard.step();
-                    match compressor.pull().unwrap() {
+                    match compressor.pull(Destination::Stream).unwrap() {
                         Output::Data(chunk) => compressed.put_bytes(chunk),
                         Output::Progress => {}
                         Output::NeedInput => panic!("end of input is already queued"),
@@ -931,7 +931,7 @@ macro_rules! format_contract {
                         pulls += 1;
                         assert!(pulls < MAX_STEPS, "flush did not terminate at chunk size {size}");
 
-                        match compressor.pull().unwrap() {
+                        match compressor.pull(Destination::Stream).unwrap() {
                             Output::Data(piece) => {
                                 assert!(piece.len() <= size);
                                 compressed.put_bytes(piece);
@@ -946,7 +946,7 @@ macro_rules! format_contract {
                     let mut guard = StepGuard::new();
                     loop {
                         guard.step();
-                        match compressor.pull().unwrap() {
+                        match compressor.pull(Destination::Stream).unwrap() {
                             Output::Data(piece) => {
                                 assert!(piece.len() <= size);
                                 compressed.put_bytes(piece);
@@ -976,7 +976,7 @@ macro_rules! format_contract {
                 let mut guard = StepGuard::new();
                 loop {
                     guard.step();
-                    match decompressor.pull().unwrap() {
+                    match decompressor.pull(Destination::Stream).unwrap() {
                         Output::Data(chunk) => plain.put_bytes(chunk),
                         Output::Progress => {}
                         Output::NeedInput => break,
@@ -989,7 +989,7 @@ macro_rules! format_contract {
                 let mut guard = StepGuard::new();
                 loop {
                     guard.step();
-                    match decompressor.pull().unwrap() {
+                    match decompressor.pull(Destination::Stream).unwrap() {
                         Output::Data(chunk) => plain.put_bytes(chunk),
                         Output::Progress => {}
                         Output::NeedInput => panic!("decompressor requested input after end"),
@@ -1017,7 +1017,7 @@ macro_rules! format_contract {
                 let mut guard = StepGuard::new();
                 loop {
                     guard.step();
-                    match decompressor.pull().unwrap() {
+                    match decompressor.pull(Destination::Stream).unwrap() {
                         Output::Data(chunk) => plain.put_bytes(chunk),
                         Output::Progress => {}
                         Output::NeedInput => panic!("single stream was complete"),
@@ -1045,7 +1045,7 @@ macro_rules! format_contract {
                 let mut guard = StepGuard::new();
                 let error = loop {
                     guard.step();
-                    match decompressor.pull() {
+                    match decompressor.pull(Destination::Stream) {
                         Ok(Output::Done) => panic!("the trailing bytes were accepted"),
                         Ok(_) => {}
                         Err(error) => break error,
@@ -1066,7 +1066,7 @@ macro_rules! format_contract {
                 let mut guard = StepGuard::new();
                 loop {
                     guard.step();
-                    match decompressor.pull().unwrap() {
+                    match decompressor.pull(Destination::Stream).unwrap() {
                         Output::Data(chunk) => plain.put_bytes(chunk),
                         Output::Progress => {}
                         Output::NeedInput => break,
@@ -1075,9 +1075,9 @@ macro_rules! format_contract {
                 }
 
                 decompressor.push(BytesView::new()).unwrap();
-                assert!(decompressor.pull().unwrap().is_need_input());
+                assert!(decompressor.pull(Destination::Stream).unwrap().is_need_input());
                 decompressor.end_input();
-                assert!(decompressor.pull().unwrap().is_done());
+                assert!(decompressor.pull(Destination::Stream).unwrap().is_done());
                 assert_eq!(plain.consume_all().to_vec(), data);
             }
 
@@ -1101,7 +1101,7 @@ macro_rules! format_contract {
                 let mut guard = StepGuard::new();
                 loop {
                     guard.step();
-                    match decompressor.pull().unwrap() {
+                    match decompressor.pull(Destination::Stream).unwrap() {
                         Output::Data(chunk) => plain.put_bytes(chunk),
                         Output::Progress => {}
                         Output::NeedInput => panic!("all input was already supplied"),
@@ -1128,7 +1128,7 @@ macro_rules! format_contract {
                 let mut guard = StepGuard::new();
                 loop {
                     guard.step();
-                    match decompressor.pull().unwrap() {
+                    match decompressor.pull(Destination::Stream).unwrap() {
                         Output::Data(_) | Output::Progress => {}
                         Output::NeedInput => break,
                         Output::Done => panic!("strict trailing validation must wait for EOF"),
@@ -1154,7 +1154,7 @@ macro_rules! format_contract {
                 let mut guard = StepGuard::new();
                 let error = loop {
                     guard.step();
-                    match decompressor.pull() {
+                    match decompressor.pull(Destination::Stream) {
                         Ok(Output::Data(_) | Output::Progress) => {}
                         Ok(_) => panic!("trailing input unexpectedly completed"),
                         Err(error) => break error,
@@ -1180,7 +1180,7 @@ macro_rules! format_contract {
                 let mut guard = StepGuard::new();
                 let error = loop {
                     guard.step();
-                    match CompressionInternal::pull(&mut decompressor) {
+                    match CompressionInternal::pull(&mut decompressor, Destination::Stream) {
                         Ok(Output::Data(_) | Output::Progress) => {}
                         Ok(_) => panic!("a truncated stream unexpectedly completed"),
                         Err(error) => break error,
@@ -1206,7 +1206,7 @@ macro_rules! format_contract {
                 let mut guard = StepGuard::new();
                 let error = loop {
                     guard.step();
-                    match decompressor.pull() {
+                    match decompressor.pull(Destination::Stream) {
                         Ok(Output::Data(_) | Output::Progress) => {}
                         Ok(_) => panic!("the second stream should exceed the limit"),
                         Err(error) => break error,
@@ -1232,7 +1232,7 @@ macro_rules! format_contract {
                 let mut guard = StepGuard::new();
                 loop {
                     guard.step();
-                    match decompressor.pull().unwrap() {
+                    match decompressor.pull(Destination::Stream).unwrap() {
                         Output::Data(_) | Output::Progress => {}
                         Output::NeedInput => break,
                         Output::Done => panic!("multi-stream decompressor must wait for EOF"),
@@ -1281,7 +1281,7 @@ macro_rules! format_contract {
                 let mut guard = StepGuard::new();
                 let first = loop {
                     guard.step();
-                    match decompressor.pull() {
+                    match decompressor.pull(Destination::Stream) {
                         Ok(Output::Data(_) | Output::Progress) => {}
                         Ok(_) => panic!("invalid input unexpectedly completed"),
                         Err(error) => break error,
@@ -1289,7 +1289,7 @@ macro_rules! format_contract {
                 };
                 assert!(first.is_corrupt_data() || first.is_unexpected_end_of_stream(), "got {first}");
 
-                let second = decompressor.pull().unwrap_err();
+                let second = decompressor.pull(Destination::Stream).unwrap_err();
                 assert!(second.is_invalid_state(), "got {second}");
             }
 
@@ -1589,7 +1589,7 @@ mod pooling {
         {
             let mut abandoned = gzip::Compressor::builder().build(resources()).built();
             abandoned.push(view(&b"half a stream ".repeat(100))).unwrap();
-            let _ = CompressionInternal::pull(&mut abandoned).unwrap();
+            let _ = CompressionInternal::pull(&mut abandoned, Destination::Stream).unwrap();
             // Dropped without `end_input`, so its engine is mid-stream.
         }
 
@@ -1674,7 +1674,7 @@ mod pooling {
         {
             let mut abandoned = zlib::Decompressor::builder().build(resources()).built();
             abandoned.push(compressed.range(0..compressed.len() / 2)).unwrap();
-            let _ = CompressionInternal::pull(&mut abandoned).unwrap();
+            let _ = CompressionInternal::pull(&mut abandoned, Destination::Stream).unwrap();
             // Dropped mid-stream, so its engine is dirty.
         }
 
@@ -1859,7 +1859,7 @@ mod trait_contract {
         let mut guard = StepGuard::new();
         loop {
             guard.step();
-            let output = CompressionInternal::pull(&mut compressor).unwrap();
+            let output = CompressionInternal::pull(&mut compressor, Destination::Stream).unwrap();
             assert!(!output.is_need_input(), "compressor requested input after end");
             let done = output.is_done();
             if let Some(chunk) = output.into_data() {
@@ -1878,7 +1878,7 @@ mod trait_contract {
         let mut guard = StepGuard::new();
         loop {
             guard.step();
-            let output = CompressionInternal::pull(&mut decompressor).unwrap();
+            let output = CompressionInternal::pull(&mut decompressor, Destination::Stream).unwrap();
             assert!(!output.is_need_input(), "decompressor requested input after end");
             let done = output.is_done();
             if let Some(chunk) = output.into_data() {
@@ -1937,7 +1937,7 @@ mod trait_contract {
         let mut guard = StepGuard::new();
         loop {
             guard.step();
-            let output = concrete.pull().unwrap();
+            let output = concrete.pull(Destination::Stream).unwrap();
             assert!(!output.is_done(), "flush ended the stream");
             if output.is_need_input() {
                 break;
@@ -1950,7 +1950,7 @@ mod trait_contract {
         let mut guard = StepGuard::new();
         loop {
             guard.step();
-            let output = compressor.pull().unwrap();
+            let output = compressor.pull(Destination::Stream).unwrap();
             assert!(!output.is_done(), "flush ended the stream");
             let need_input = output.is_need_input();
             if let Some(chunk) = output.into_data() {
@@ -1969,7 +1969,7 @@ mod trait_contract {
         let mut guard = StepGuard::new();
         loop {
             guard.step();
-            let output = compressor.pull().unwrap();
+            let output = compressor.pull(Destination::Stream).unwrap();
             assert!(!output.is_done(), "flush ended the stream");
             let need_input = output.is_need_input();
             if let Some(chunk) = output.into_data() {
@@ -1989,7 +1989,7 @@ mod trait_contract {
         let mut guard = StepGuard::new();
         loop {
             guard.step();
-            let output = compressor.pull().unwrap();
+            let output = compressor.pull(Destination::Stream).unwrap();
             assert!(!output.is_need_input(), "compressor requested input after end");
             let done = output.is_done();
             if let Some(chunk) = output.into_data() {
@@ -2012,7 +2012,7 @@ mod trait_contract {
         let mut guard = StepGuard::new();
         loop {
             guard.step();
-            let output = decompressor.pull().unwrap();
+            let output = decompressor.pull(Destination::Stream).unwrap();
             assert!(!output.is_need_input(), "complete stream requested more input");
             let done = output.is_done();
             if let Some(chunk) = output.into_data() {

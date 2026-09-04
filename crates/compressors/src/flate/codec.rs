@@ -25,7 +25,11 @@ use crate::trailing::TrailingData;
 ///
 /// On a 64-bit target the conversion is a no-op and this cannot fail, which is why it is excluded
 /// from coverage; it earns its place on narrower targets.
+// Excluded from mutation testing for a related reason: this runs on every engine step, so a mutant
+// that fixes the result to a small constant makes every step report a byte-sized delta. The pump
+// then needs one step per byte and the harness times out before any assertion can fail.
 #[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(test, mutants::skip)]
 fn step_count(delta: u64) -> Result<usize> {
     usize::try_from(delta).map_err(|error| {
         Error::invalid_state(format!(
@@ -239,6 +243,10 @@ unsafe impl Codec for FlateDecompress {
         self.limits.check(total_in, total_out, streams)
     }
 
+    // Delegates to `FormatLimits::remaining_output`, and is excluded for the same reason: a mutant
+    // that answers a small constant only shrinks the slice offered per step, so the pump crawls and
+    // the harness times out rather than reaching a verdict.
+    #[cfg_attr(test, mutants::skip)]
     fn remaining_output(&self, total_out: u64) -> Option<u64> {
         self.limits.remaining_output(total_out)
     }

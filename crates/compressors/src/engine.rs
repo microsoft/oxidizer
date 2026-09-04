@@ -2,12 +2,12 @@
 // Licensed under the MIT License.
 
 use std::mem::MaybeUninit;
-use std::num::NonZeroUsize;
+use std::num::{NonZeroU64, NonZeroUsize};
 
 use bytesbuf::mem::OpaqueMemory;
 use bytesbuf::{BytesBuf, BytesView};
 
-use crate::core::Output;
+use crate::core::{Destination, Output};
 use crate::error::{Error, Result};
 
 /// Maximum input consumed by one public `pull` call.
@@ -171,6 +171,7 @@ pub(crate) struct Pump {
     total_out: u64,
     streams: u64,
     state: State,
+    buffered_ceiling: Option<NonZeroU64>,
 }
 
 /// Whether one `pull` has done enough work and should hand control back.
@@ -208,7 +209,66 @@ impl Pump {
             total_out: 0,
             streams: 0,
             state: State::Open,
+            buffered_ceiling: None,
         }
+    }
+
+    /// Sets the output ceiling that applies while a caller accumulates the whole output.
+    ///
+    /// Separate from the engine's own limits because it is not a property of the format: the same
+    /// decompressor is safe to stream unbounded and unsafe to buffer unbounded, so this bound
+    /// exists only for [`Destination::Buffer`] and the engine's own bound applies either way.
+    pub(crate) const fn with_buffered_ceiling(mut self, ceiling: Option<NonZeroU64>) -> Self {
+        self.buffered_ceiling = ceiling;
+        self
+    }
+
+    /// The buffering ceiling in force for this destination.
+    ///
+    /// `None` for [`Destination::Stream`]: each chunk is consumed and dropped, so cumulative output
+    /// is not what the caller retains and bounding it would cap stream length for no benefit.
+    const fn buffered_ceiling(&self, into: Destination) -> Option<NonZeroU64> {
+        match into {
+            Destination::Buffer => self.buffered_ceiling,
+            Destination::Stream => None,
+        }
+    }
+
+    /// The output budget still available, narrowing the engine's own bound by the buffering ceiling.
+    ///
+    /// Whichever bound is tighter is the one that decides, and either may be absent.
+    // A mutant that answers a small constant is not wrong, only slow: the step loop always offers
+    // at least the probe byte, so the pump still produces exactly the right bytes, one per step.
+    // Every drain loop then needs one step per byte and mutation testing records a timeout instead
+    // of a verdict. `None` -- the answer that actually loosens the bound -- is caught.
+    #[cfg_attr(test, mutants::skip)]
+    fn remaining_output(&self, codec: &impl Codec, into: Destination) -> Option<u64> {
+        let buffered = self
+            .buffered_ceiling(into)
+            .map(|ceiling| ceiling.get().saturating_sub(self.total_out));
+
+        match (codec.remaining_output(self.total_out), buffered) {
+            (Some(engine), Some(buffered)) => Some(engine.min(buffered)),
+            (bound, None) | (None, bound) => bound,
+        }
+    }
+
+    /// Validates the cumulative counts against the engine's own limits and the buffering ceiling.
+    ///
+    /// One method so the two call sites below cannot drift apart on which bounds they test. Both
+    /// bounds are tested the same way the engines test theirs -- against a count that the probe
+    /// byte in the step loop lets exceed the bound by one, which is what proves the stream needed
+    /// more output than the bound allows rather than ending exactly at it.
+    fn check_limits(&self, codec: &impl Codec, into: Destination) -> Result<()> {
+        codec.check_limits(self.total_in, self.total_out, self.streams)?;
+
+        if let Some(ceiling) = self.buffered_ceiling(into)
+            && self.total_out > ceiling.get()
+        {
+            return Err(Error::output_limit_exceeded(self.total_out, ceiling.get()));
+        }
+
+        Ok(())
     }
 
     pub(crate) fn push(&mut self, input: BytesView) -> Result<()> {
@@ -323,7 +383,7 @@ impl Pump {
         clippy::too_many_lines,
         reason = "keeping the state transitions in one loop makes their ordering and terminal paths explicit"
     )]
-    pub(crate) fn pull(&mut self, codec: &mut impl Codec) -> Result<Output> {
+    pub(crate) fn pull(&mut self, codec: &mut impl Codec, into: Destination) -> Result<Output> {
         match self.state {
             State::Done => {
                 if let Some(data) = self.take_output() {
@@ -363,6 +423,9 @@ impl Pump {
             let budget = self.chunk_size - self.output.len();
             let pending = self.input.len();
             let input_budget = MAX_INPUT_PER_PULL - input_work;
+            // Read before the borrows below, since it needs all of `self` and neither it nor
+            // anything it reads changes inside the step block.
+            let remaining = self.remaining_output(codec, into);
             let (step, consumed, produced, supplied, provided_output) = {
                 let first = self.input.first_slice();
                 let input = &first[..first.len().min(input_budget)];
@@ -383,7 +446,6 @@ impl Pump {
                 };
                 Self::ensure_output_capacity(&mut self.output, &self.memory, engine_budget);
                 let spare = self.output.first_unfilled_slice();
-                let remaining = codec.remaining_output(self.total_out);
                 let limit_budget = remaining.map_or(usize::MAX, |remaining| usize::try_from(remaining).unwrap_or(usize::MAX));
                 // One probe byte lets the engine prove that a stream ending exactly at the limit
                 // needs no more output, while bounding any overshoot to a byte that is never
@@ -412,7 +474,7 @@ impl Pump {
             input_work = input_work.saturating_add(consumed);
             steps += 1;
 
-            if let Err(error) = codec.check_limits(self.total_in, self.total_out, self.streams) {
+            if let Err(error) = self.check_limits(codec, into) {
                 return Err(self.fail(error));
             }
 
@@ -438,7 +500,7 @@ impl Pump {
 
             if step == Step::StreamEnd {
                 self.streams = self.streams.saturating_add(1);
-                if let Err(error) = codec.check_limits(self.total_in, self.total_out, self.streams) {
+                if let Err(error) = self.check_limits(codec, into) {
                     return Err(self.fail(error));
                 }
 
@@ -564,7 +626,7 @@ mod tests {
     #[test]
     fn reports_need_input_when_empty() {
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
-        let output = pump.pull(&mut Passthrough::default()).unwrap();
+        let output = pump.pull(&mut Passthrough::default(), Destination::Stream).unwrap();
 
         assert!(output.is_need_input());
     }
@@ -574,7 +636,11 @@ mod tests {
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.push(view(b"hello world")).unwrap();
 
-        let data = pump.pull(&mut Passthrough::default()).unwrap().into_data().unwrap();
+        let data = pump
+            .pull(&mut Passthrough::default(), Destination::Stream)
+            .unwrap()
+            .into_data()
+            .unwrap();
 
         assert_eq!(data.to_vec(), b"hello world".to_vec());
         assert_eq!(pump.total_in(), 11);
@@ -586,7 +652,11 @@ mod tests {
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(4));
         pump.push(view(b"abcdefghij")).unwrap();
 
-        let data = pump.pull(&mut Passthrough::default()).unwrap().into_data().unwrap();
+        let data = pump
+            .pull(&mut Passthrough::default(), Destination::Stream)
+            .unwrap()
+            .into_data()
+            .unwrap();
 
         assert!(data.len() <= 8, "chunk was {} bytes, expected it near 4", data.len());
     }
@@ -618,7 +688,11 @@ mod tests {
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(10));
         pump.push(view(&[0_u8; 10])).unwrap();
 
-        let data = pump.pull(&mut PartialThenGreedy::default()).unwrap().into_data().unwrap();
+        let data = pump
+            .pull(&mut PartialThenGreedy::default(), Destination::Stream)
+            .unwrap()
+            .into_data()
+            .unwrap();
 
         // `take_output` itself caps a returned chunk at `chunk_size`, so a step that was handed
         // too much room would not show up in `data.len()`; it shows up as extra bytes recorded in
@@ -656,7 +730,7 @@ mod tests {
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(100));
         pump.push(view(&[0_u8; 150])).unwrap();
 
-        let output = pump.pull(&mut OneByteEcho).unwrap();
+        let output = pump.pull(&mut OneByteEcho, Destination::Stream).unwrap();
         assert!(output.is_data());
         assert_eq!(
             pump.total_in(),
@@ -683,7 +757,7 @@ mod tests {
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.push(view(&vec![0_u8; 1_048_577])).unwrap();
 
-        assert!(pump.pull(&mut SilentConsumer).unwrap().is_progress());
+        assert!(pump.pull(&mut SilentConsumer, Destination::Stream).unwrap().is_progress());
         assert_eq!(
             pump.total_in(),
             1_048_576,
@@ -723,7 +797,11 @@ mod tests {
         pump.push(BytesView::copied_from_slice(&vec![0_u8; 1_048_578], &single_block_memory))
             .unwrap();
 
-        assert!(pump.pull(&mut SmallFirstThenGreedy::default()).unwrap().is_progress());
+        assert!(
+            pump.pull(&mut SmallFirstThenGreedy::default(), Destination::Stream)
+                .unwrap()
+                .is_progress()
+        );
         assert_eq!(
             pump.total_in(),
             1_048_576,
@@ -738,8 +816,11 @@ mod tests {
         pump.flush().unwrap();
 
         let mut codec = Passthrough::default();
-        assert_eq!(pump.pull(&mut codec).unwrap().into_data().unwrap().to_vec(), b"flush me".to_vec());
-        assert!(pump.pull(&mut codec).unwrap().is_need_input());
+        assert_eq!(
+            pump.pull(&mut codec, Destination::Stream).unwrap().into_data().unwrap().to_vec(),
+            b"flush me".to_vec()
+        );
+        assert!(pump.pull(&mut codec, Destination::Stream).unwrap().is_need_input());
         pump.push(view(b"more")).unwrap();
     }
 
@@ -749,7 +830,7 @@ mod tests {
         pump.flush().unwrap();
         pump.flush().unwrap();
 
-        assert!(pump.pull(&mut Passthrough::default()).unwrap().is_need_input());
+        assert!(pump.pull(&mut Passthrough::default(), Destination::Stream).unwrap().is_need_input());
     }
 
     #[test]
@@ -757,7 +838,7 @@ mod tests {
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.flush().unwrap();
 
-        assert!(pump.pull(&mut Passthrough::default()).unwrap().is_need_input());
+        assert!(pump.pull(&mut Passthrough::default(), Destination::Stream).unwrap().is_need_input());
         pump.flush().unwrap();
     }
 
@@ -767,7 +848,7 @@ mod tests {
         pump.flush().unwrap();
         pump.end_input();
 
-        assert!(pump.pull(&mut Passthrough::default()).unwrap().is_done());
+        assert!(pump.pull(&mut Passthrough::default(), Destination::Stream).unwrap().is_done());
     }
 
     #[test]
@@ -800,13 +881,13 @@ mod tests {
         pump.flush().unwrap();
 
         let mut codec = FlushSizedStreamEnd;
-        let first = pump.pull(&mut codec).unwrap().into_data().unwrap();
+        let first = pump.pull(&mut codec, Destination::Stream).unwrap().into_data().unwrap();
         assert_eq!(first.len(), 4, "the first pull hands over exactly one chunk");
 
-        let second = pump.pull(&mut codec).unwrap().into_data().unwrap();
+        let second = pump.pull(&mut codec, Destination::Stream).unwrap().into_data().unwrap();
         assert!(!second.is_empty(), "the remainder must still be delivered");
 
-        assert!(pump.pull(&mut codec).unwrap().is_done());
+        assert!(pump.pull(&mut codec, Destination::Stream).unwrap().is_done());
     }
 
     #[test]
@@ -833,12 +914,12 @@ mod tests {
         }
 
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
-        assert!(pump.pull(&mut Fails).unwrap_err().is_corrupt_data());
+        assert!(pump.pull(&mut Fails, Destination::Stream).unwrap_err().is_corrupt_data());
         pump.end_input();
 
         assert!(pump.push(view(b"late")).unwrap_err().is_invalid_state());
         assert!(pump.flush().unwrap_err().is_invalid_state());
-        assert!(pump.pull(&mut Fails).unwrap_err().is_invalid_state());
+        assert!(pump.pull(&mut Fails, Destination::Stream).unwrap_err().is_invalid_state());
     }
 
     #[test]
@@ -855,7 +936,7 @@ mod tests {
         }
 
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
-        assert!(pump.pull(&mut SpuriousFlush).unwrap_err().is_invalid_state());
+        assert!(pump.pull(&mut SpuriousFlush, Destination::Stream).unwrap_err().is_invalid_state());
     }
 
     #[test]
@@ -877,7 +958,7 @@ mod tests {
 
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.push(view(b"input")).unwrap();
-        assert!(pump.pull(&mut BadEnd).unwrap_err().is_invalid_state());
+        assert!(pump.pull(&mut BadEnd, Destination::Stream).unwrap_err().is_invalid_state());
     }
 
     #[test]
@@ -901,7 +982,7 @@ mod tests {
         pump.push(view(b"input")).unwrap();
         pump.end_input();
 
-        assert!(pump.pull(&mut StrictEnd).unwrap().is_done());
+        assert!(pump.pull(&mut StrictEnd, Destination::Stream).unwrap().is_done());
     }
 
     #[test]
@@ -926,13 +1007,13 @@ mod tests {
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.push(view(b"member")).unwrap();
 
-        assert!(pump.pull(&mut Recyclable).unwrap().is_need_input());
+        assert!(pump.pull(&mut Recyclable, Destination::Stream).unwrap().is_need_input());
 
         // A real `Some(n)` limit would put the pump in `State::AtStreamLimit` right here, and the
         // next `push` would fail with `stream_limit_exceeded`. Succeeding proves the default is
         // genuinely unbounded (`None`), not merely a limit this test happens not to reach.
         pump.push(view(b"second member")).unwrap();
-        assert!(pump.pull(&mut Recyclable).unwrap().is_need_input());
+        assert!(pump.pull(&mut Recyclable, Destination::Stream).unwrap().is_need_input());
     }
 
     #[test]
@@ -961,7 +1042,7 @@ mod tests {
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.push(view(b"firstsecond")).unwrap();
 
-        assert!(pump.pull(&mut FixedFrame).unwrap().is_need_input());
+        assert!(pump.pull(&mut FixedFrame, Destination::Stream).unwrap().is_need_input());
         assert_eq!(
             pump.total_in(),
             11,
@@ -996,7 +1077,7 @@ mod tests {
         pump.push(view(b"member")).unwrap();
         pump.end_input();
 
-        assert!(pump.pull(&mut StreamLimited).unwrap().is_done());
+        assert!(pump.pull(&mut StreamLimited, Destination::Stream).unwrap().is_done());
     }
 
     #[test]
@@ -1025,7 +1106,7 @@ mod tests {
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.push(view(b"member")).unwrap();
 
-        let error = pump.pull(&mut RejectsAnotherStream).unwrap_err();
+        let error = pump.pull(&mut RejectsAnotherStream, Destination::Stream).unwrap_err();
         assert!(error.is_limit_exceeded());
     }
 
@@ -1038,7 +1119,7 @@ mod tests {
         pump.state = State::BetweenStreams;
 
         let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _ = pump.pull(&mut Passthrough::default());
+            let _ = pump.pull(&mut Passthrough::default(), Destination::Stream);
         }));
 
         assert!(
@@ -1063,7 +1144,7 @@ mod tests {
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.push(view(b"input")).unwrap();
 
-        assert!(pump.pull(&mut Stalled).unwrap_err().is_invalid_state());
+        assert!(pump.pull(&mut Stalled, Destination::Stream).unwrap_err().is_invalid_state());
     }
 
     #[test]
@@ -1090,7 +1171,7 @@ mod tests {
         pump.end_input();
         pump.end_input();
 
-        let output = pump.pull(&mut Passthrough::default()).unwrap();
+        let output = pump.pull(&mut Passthrough::default(), Destination::Stream).unwrap();
         assert!(output.is_done());
     }
 
@@ -1101,11 +1182,11 @@ mod tests {
         pump.end_input();
 
         let mut codec = Passthrough::default();
-        let data = pump.pull(&mut codec).unwrap().into_data().unwrap();
+        let data = pump.pull(&mut codec, Destination::Stream).unwrap().into_data().unwrap();
         assert_eq!(data.to_vec(), b"tail".to_vec());
 
-        assert!(pump.pull(&mut codec).unwrap().is_done());
-        assert!(pump.pull(&mut codec).unwrap().is_done());
+        assert!(pump.pull(&mut codec, Destination::Stream).unwrap().is_done());
+        assert!(pump.pull(&mut codec, Destination::Stream).unwrap().is_done());
     }
 
     #[test]
@@ -1125,7 +1206,7 @@ mod tests {
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.end_input();
 
-        let error = pump.pull(&mut NeverEnds).unwrap_err();
+        let error = pump.pull(&mut NeverEnds, Destination::Stream).unwrap_err();
         assert!(error.is_unexpected_end_of_stream());
     }
 
@@ -1154,7 +1235,7 @@ mod tests {
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.push(view(b"seed")).unwrap();
 
-        let error = pump.pull(&mut Expanding).unwrap_err();
+        let error = pump.pull(&mut Expanding, Destination::Stream).unwrap_err();
         assert!(error.is_limit_exceeded());
     }
 
@@ -1183,8 +1264,112 @@ mod tests {
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.push(view(b"input")).unwrap();
 
-        let error = pump.pull(&mut Overreports).unwrap_err();
+        let error = pump.pull(&mut Overreports, Destination::Stream).unwrap_err();
         assert!(error.is_invalid_state(), "got {error}");
         assert_eq!(pump.total_out(), 0, "uninitialized bytes must never be advanced");
+    }
+
+    /// Drains a pump to completion the way a caller that accumulates the whole result does.
+    fn drain(pump: &mut Pump, codec: &mut impl Codec, into: Destination) -> Result<Vec<u8>> {
+        let mut collected = Vec::new();
+        loop {
+            match pump.pull(codec, into)? {
+                Output::Data(data) => collected.extend_from_slice(&data.to_vec()),
+                Output::Progress => {}
+                Output::Done => return Ok(collected),
+                Output::NeedInput => panic!("input was ended, so the pump must not ask for more"),
+            }
+        }
+    }
+
+    fn ceiling(pump: Pump, bytes: u64) -> Pump {
+        pump.with_buffered_ceiling(Some(NonZeroU64::new(bytes).unwrap()))
+    }
+
+    #[test]
+    fn the_buffering_ceiling_rejects_output_past_the_bound() {
+        let mut pump = ceiling(Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64)), 4);
+        pump.push(view(b"too much")).unwrap();
+        pump.end_input();
+
+        let error = drain(&mut pump, &mut Passthrough::default(), Destination::Buffer).unwrap_err();
+        assert!(error.is_limit_exceeded(), "got {error}");
+        assert_eq!(pump.total_out(), 5, "the probe byte is the only overshoot the bound allows");
+    }
+
+    #[test]
+    fn the_buffering_ceiling_does_not_bound_a_streaming_destination() {
+        // The same pump and the same over-long input as above: only the destination differs, which
+        // is what makes this the proof that the ceiling is not a property of the engine's config.
+        let mut pump = ceiling(Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64)), 4);
+        pump.push(view(b"too much")).unwrap();
+        pump.end_input();
+
+        let output = drain(&mut pump, &mut Passthrough::default(), Destination::Stream).unwrap();
+        assert_eq!(output, b"too much".to_vec());
+    }
+
+    #[test]
+    fn the_buffering_ceiling_admits_output_ending_exactly_at_the_bound() {
+        let mut pump = ceiling(Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64)), 8);
+        pump.push(view(b"exactly!")).unwrap();
+        pump.end_input();
+
+        let output = drain(&mut pump, &mut Passthrough::default(), Destination::Buffer).unwrap();
+        assert_eq!(output, b"exactly!".to_vec());
+    }
+
+    #[test]
+    fn the_tighter_of_the_engine_bound_and_the_buffering_ceiling_decides() {
+        /// A passthrough that bounds its own output, the way configured decompressor limits do.
+        #[derive(Debug)]
+        struct Bounded {
+            inner: Passthrough,
+            maximum: u64,
+        }
+
+        // SAFETY: `step` delegates to `Passthrough`, whose reported counts are already sound.
+
+        unsafe impl Codec for Bounded {
+            fn step(&mut self, input: &[u8], output: &mut [MaybeUninit<u8>], operation: Operation) -> Result<(Step, usize, usize)> {
+                self.inner.step(input, output, operation)
+            }
+
+            fn check_limits(&self, _total_in: u64, total_out: u64, _streams: u64) -> Result<()> {
+                if total_out > self.maximum {
+                    return Err(Error::output_limit_exceeded(total_out, self.maximum));
+                }
+
+                Ok(())
+            }
+
+            fn remaining_output(&self, total_out: u64) -> Option<u64> {
+                Some(self.maximum.saturating_sub(total_out))
+            }
+        }
+
+        // Whichever side is tighter, the pump must stop at four bytes plus the probe byte. Reading
+        // a looser bound would let the engine produce past the tighter one before anything noticed.
+        for (maximum, buffered) in [(4, 8), (8, 4)] {
+            let mut pump = ceiling(Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64)), buffered);
+            pump.push(view(b"far too much")).unwrap();
+            pump.end_input();
+
+            let mut codec = Bounded {
+                inner: Passthrough::default(),
+                maximum,
+            };
+            let error = drain(&mut pump, &mut codec, Destination::Buffer).unwrap_err();
+
+            assert!(
+                error.is_limit_exceeded(),
+                "got {error} for maximum {maximum} and ceiling {buffered}"
+            );
+            assert_eq!(
+                pump.total_out(),
+                5,
+                "maximum {maximum} and ceiling {buffered} must stop at the tighter bound"
+            );
+        }
     }
 }

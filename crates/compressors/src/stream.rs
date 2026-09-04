@@ -14,7 +14,7 @@ use bytesbuf::BytesView;
 use futures_core::Stream;
 use pin_project_lite::pin_project;
 
-use crate::core::{Compress, Compression, Decompress, Output};
+use crate::core::{Compress, Compression, Decompress, Destination, Output};
 use crate::error::{Error, Result};
 
 /// Bounds the amount of immediately-ready work one `poll_next` performs.
@@ -57,7 +57,7 @@ where
     let mut input_ended = false;
 
     for _ in 0..MAX_OPERATIONS_PER_POLL {
-        match compression.pull() {
+        match compression.pull(Destination::Stream) {
             Err(error) => {
                 *finished = true;
                 return Poll::Ready(Some(Err(error)));

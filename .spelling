@@ -881,3 +881,5 @@ junctions
 zlib
 zstd's
 unkeyed
+incompressible
+decompressor's

@@ -62,6 +62,10 @@ unsafe impl zstd_safe::WriteBuf for UninitOutput<'_> {
         unsafe { std::slice::from_raw_parts(self.buffer.as_ptr().cast::<u8>(), self.filled) }
     }
 
+    // A mutant that reports a smaller capacity is not wrong, only slow: zstd writes no more than it
+    // is offered, so the same bytes are produced a step at a time and the harness times out instead
+    // of reaching a verdict.
+    #[cfg_attr(test, mutants::skip)]
     fn capacity(&self) -> usize {
         self.buffer.len()
     }

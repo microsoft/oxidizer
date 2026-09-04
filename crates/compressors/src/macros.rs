@@ -182,7 +182,7 @@ macro_rules! define_decompressor_build {
             #[inline]
             pub fn build(self, resources: &$crate::Resources) -> Decompressor {
                 Decompressor {
-                    pump: Pump::new(resources.memory().clone(), self.chunk_size),
+                    pump: Pump::new(resources.memory().clone(), self.chunk_size).with_buffered_ceiling(self.limits.buffered_ceiling()),
                     codec: $new_decompressor(
                         self.limits.resolve($default_limits),
                         self.multi_stream.unwrap_or($multi_stream_default),
@@ -190,7 +190,6 @@ macro_rules! define_decompressor_build {
                         &self.format,
                         resources.pool().clone(),
                     ),
-                    buffered_ceiling: self.limits.buffered_ceiling(),
                 }
             }
         }
@@ -290,7 +289,7 @@ macro_rules! define_decompressor_build {
             #[inline]
             pub fn build(self, resources: &$crate::Resources) -> ::core::result::Result<Decompressor, $crate::BuildError> {
                 Ok(Decompressor {
-                    pump: Pump::new(resources.memory().clone(), self.chunk_size),
+                    pump: Pump::new(resources.memory().clone(), self.chunk_size).with_buffered_ceiling(self.limits.buffered_ceiling()),
                     codec: $new_decompressor(
                         self.limits.resolve($default_limits),
                         self.multi_stream.unwrap_or($multi_stream_default),
@@ -298,7 +297,6 @@ macro_rules! define_decompressor_build {
                         &self.format,
                         resources.pool().clone(),
                     )?,
-                    buffered_ceiling: self.limits.buffered_ceiling(),
                 })
             }
         }
@@ -442,8 +440,8 @@ macro_rules! define_format {
                 self.pump.end_input();
             }
 
-            fn pull(&mut self) -> Result<Output> {
-                self.pump.pull(&mut self.codec)
+            fn pull(&mut self, into: $crate::core::Destination) -> Result<Output> {
+                self.pump.pull(&mut self.codec, into)
             }
 
             fn total_in(&self) -> u64 {
@@ -480,8 +478,6 @@ macro_rules! define_format {
         pub struct Decompressor {
             pump: Pump,
             codec: $decompressor_codec,
-            /// The ceiling a buffering caller adds, when this decompressor was left unbounded.
-            buffered_ceiling: ::core::option::Option<::core::num::NonZeroU64>,
         }
 
         impl Decompressor {
@@ -505,8 +501,8 @@ macro_rules! define_format {
                 self.pump.end_input();
             }
 
-            fn pull(&mut self) -> Result<Output> {
-                self.pump.pull(&mut self.codec)
+            fn pull(&mut self, into: $crate::core::Destination) -> Result<Output> {
+                self.pump.pull(&mut self.codec, into)
             }
 
             fn total_in(&self) -> u64 {
@@ -515,10 +511,6 @@ macro_rules! define_format {
 
             fn total_out(&self) -> u64 {
                 self.pump.total_out()
-            }
-
-            fn buffered_output_ceiling(&self) -> ::core::option::Option<::core::num::NonZeroU64> {
-                self.buffered_ceiling
             }
         }
 

@@ -13,14 +13,14 @@
 //! What one step of that contract reports is a crate-private detail, as are the methods that drive
 //! it: this module publishes the names an API is written against, and nothing else.
 
-use std::num::NonZeroU64;
-
 use bytesbuf::{BytesBuf, BytesView};
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 
+mod destination;
 mod output;
 
+pub(crate) use destination::Destination;
 pub(crate) use output::Output;
 
 pub(crate) mod internal {
@@ -28,7 +28,7 @@ pub(crate) mod internal {
 
     use bytesbuf::BytesView;
 
-    use super::Output;
+    use super::{Destination, Output};
     use crate::error::Result;
 
     /// The push/pull mechanics behind every [`Compression`][super::Compression] implementation.
@@ -53,10 +53,17 @@ pub(crate) mod internal {
 
         /// Produces the next output chunk.
         ///
+        /// `into` says what the caller will do with it, and the engine bounds its own output
+        /// accordingly: a decompressor left unbounded applies the shared 64 MiB ceiling for
+        /// [`Destination::Buffer`], because that is the case where its cumulative output is what
+        /// the caller retains. Compressors ignore it -- compressed output tracks input the caller
+        /// already holds.
+        ///
         /// # Errors
         ///
-        /// Returns an error if the underlying engine fails or the input is invalid.
-        fn pull(&mut self) -> Result<Output>;
+        /// Returns an error if the underlying engine fails, the input is invalid, or a bound that
+        /// applies to this destination has been reached.
+        fn pull(&mut self, into: Destination) -> Result<Output>;
 
         /// The number of bytes consumed from the input so far.
         fn total_in(&self) -> u64;
@@ -78,17 +85,6 @@ pub(crate) mod internal {
         /// Returns an invalid-state error after end of input or a previous failure.
         fn flush(&mut self) -> Result<()> {
             Ok(())
-        }
-
-        /// The ceiling an API that buffers this engine's whole output should apply on top of it.
-        ///
-        /// `None` by default, which is right for every compressor -- compressed output tracks the
-        /// input the caller already holds, so it amplifies nothing -- and for any decompressor
-        /// whose output bound the caller set, or explicitly removed, since the engine enforces that
-        /// itself. A decompressor whose caller left the bound unset returns the shared 64 MiB cap,
-        /// so buffering never becomes unbounded merely because a format declares no default.
-        fn buffered_output_ceiling(&self) -> Option<std::num::NonZeroU64> {
-            None
         }
     }
 }
@@ -174,33 +170,22 @@ pub trait Compression: CompressionInternal + Sized {
 /// [`pull`][Compression::pull] in one call. It ends the engine, so an engine serves one call,
 /// and it buffers the entire result: drive `pull` directly to stay bounded by the chunk size.
 ///
-/// `max_output_len` bounds what this function accumulates, which is the exposure buffering adds.
-/// It is checked as the result grows, so an oversized stream is refused partway rather than after
-/// the whole thing has been materialized, and it holds however the engine itself was configured.
-/// Whatever bounds the engine carries apply as well; this is an additional ceiling, not a
-/// replacement.
+/// Every `pull` here says [`Destination::Buffer`], which is what tells a decompressor that its
+/// cumulative output is what the caller will retain. The engine applies its own ceiling on that
+/// basis, so this loop does no bounding of its own.
 ///
 /// # Errors
 ///
-/// Returns an error if the underlying engine fails, the input is invalid, or the accumulated output
-/// passes `max_output_len`.
-pub(crate) fn process(mut engine: impl Compression, input: BytesView, max_output_len: Option<NonZeroU64>) -> Result<BytesView> {
+/// Returns an error if the underlying engine fails, the input is invalid, or the engine's bounds
+/// for a buffered destination are reached.
+pub(crate) fn process(mut engine: impl Compression, input: BytesView) -> Result<BytesView> {
     engine.push(input)?;
     engine.end_input();
 
     let mut collected = BytesBuf::new();
     loop {
-        match engine.pull()? {
-            Output::Data(chunk) => {
-                collected.put_bytes(chunk);
-
-                if let Some(max) = max_output_len {
-                    let produced = u64::try_from(collected.len()).unwrap_or(u64::MAX);
-                    if produced > max.get() {
-                        return Err(Error::output_limit_exceeded(produced, max.get()));
-                    }
-                }
-            }
+        match engine.pull(Destination::Buffer)? {
+            Output::Data(chunk) => collected.put_bytes(chunk),
             Output::Progress => {}
             Output::Done => break,
             Output::NeedInput => {
@@ -235,7 +220,7 @@ mod tests {
 
             fn end_input(&mut self) {}
 
-            fn pull(&mut self) -> Result<Output> {
+            fn pull(&mut self, _into: Destination) -> Result<Output> {
                 if self.done {
                     return Ok(Output::Done);
                 }
@@ -258,7 +243,7 @@ mod tests {
             }
         }
 
-        let result = process(ProgressOnceThenDone { done: false }, view(b"ignored"), None).unwrap();
+        let result = process(ProgressOnceThenDone { done: false }, view(b"ignored")).unwrap();
 
         assert!(result.is_empty(), "the fixture never reports data");
     }
@@ -278,7 +263,7 @@ mod tests {
 
             fn end_input(&mut self) {}
 
-            fn pull(&mut self) -> Result<Output> {
+            fn pull(&mut self, _into: Destination) -> Result<Output> {
                 Ok(Output::NeedInput)
             }
             // No caller on the path under test asks for the byte counters; they exist only because
@@ -296,7 +281,7 @@ mod tests {
             }
         }
 
-        let error = process(NeedsMoreForever, view(b"ignored"), None).unwrap_err();
+        let error = process(NeedsMoreForever, view(b"ignored")).unwrap_err();
         assert!(error.is_invalid_state());
     }
 }

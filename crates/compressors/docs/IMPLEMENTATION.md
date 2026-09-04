@@ -93,6 +93,30 @@ program that hangs rather than fails, and the harness records a timeout instead
 of a verdict. The exclusion is attached to the attribute rather than the doc
 comment, so the item's documentation stays about behaviour.
 
+## Bounding cumulative output
+
+Output bounds work differently from the two guards above: they are cumulative, and
+whether they apply at all depends on what the caller does with the result. `pull`
+therefore takes a `Destination`, and `Pump` combines two sources of budget:
+
+- `Codec::remaining_output` and `Codec::check_limits`, which report whatever the
+  decompressor was configured with. These apply to every destination.
+- `Pump`'s own `buffered_ceiling`, set at build time from
+  `DecompressorLimits::buffered_ceiling`. This applies only to
+  `Destination::Buffer`, since a caller that consumes and drops each chunk
+  retains nothing that cumulative output measures.
+
+`Pump::remaining_output` narrows one budget by the other and `Pump::check_limits`
+tests both, so the tighter bound decides and the two call sites cannot drift
+apart on which bounds they test.
+
+The budget is what the step loop uses to size the output slice it offers, so an
+expansion bomb stops producing at the bound rather than being measured after the
+fact — except for one probe byte. `limit_budget.max(1)` always offers at least
+one byte, so an engine can prove a stream ending exactly at the bound needs no
+more output. That byte is what makes the rejection test `total_out > bound`
+rather than `>=`, and it is never handed to the caller.
+
 ## Backend lifecycle and pooling
 
 Pooling is what makes engine reuse worth the complexity, and the constraint is

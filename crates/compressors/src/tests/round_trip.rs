@@ -11,7 +11,7 @@ use std::num::NonZeroU64;
 
 use bytesbuf::{BytesBuf, BytesView};
 
-use crate::core::{CompressionInternal as _, Output};
+use crate::core::{CompressionInternal as _, Destination, Output};
 use crate::limits::DEFAULT_MAX_OUTPUT_LEN;
 use crate::testing::{chunk, fragmented, view};
 use crate::{DecompressorLimits, Resources, gzip};
@@ -58,7 +58,7 @@ fn drive_decompressor(mut decompressor: gzip::Decompressor, input: &BytesView, f
     let mut guard = StepGuard::new();
     loop {
         guard.step();
-        match decompressor.pull()? {
+        match decompressor.pull(Destination::Stream)? {
             Output::Data(data) => collected.put_bytes(data),
             Output::Progress => {}
             Output::Done => return Ok(collected.consume_all()),
@@ -160,7 +160,7 @@ fn streams_a_large_payload_with_a_bounded_working_set() {
     let mut guard = StepGuard::new();
     loop {
         guard.step();
-        match compressor.pull().unwrap() {
+        match compressor.pull(Destination::Stream).unwrap() {
             Output::Data(piece) => {
                 assert!(
                     piece.len() <= CHUNK,
@@ -207,7 +207,7 @@ fn rejects_a_bomb_before_materialising_it() {
     let mut guard = StepGuard::new();
     let error = loop {
         guard.step();
-        match decompressor.pull() {
+        match decompressor.pull(Destination::Stream) {
             Ok(Output::Data(_) | Output::Progress) => {}
             Ok(_) => panic!("the bomb decompressed fully instead of being rejected"),
             Err(error) => break error,

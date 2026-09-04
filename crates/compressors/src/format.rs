@@ -12,7 +12,7 @@
 use bytesbuf::BytesView;
 
 use crate::builder::{CompressorBuilder, DecompressorBuilder};
-use crate::core::{Compress, Compression, CompressionInternal, Decompress, Output};
+use crate::core::{Compress, Compression, CompressionInternal, Decompress, Destination, Output};
 use crate::error::{BuildError, Result};
 use crate::limits::DecompressorLimits;
 use crate::resources::Resources;
@@ -317,8 +317,8 @@ impl CompressionInternal for Compressor {
         dispatch!(CompressorKind, &mut self.kind, codec => codec.end_input());
     }
 
-    fn pull(&mut self) -> Result<Output> {
-        dispatch!(CompressorKind, &mut self.kind, codec => codec.pull())
+    fn pull(&mut self, into: Destination) -> Result<Output> {
+        dispatch!(CompressorKind, &mut self.kind, codec => codec.pull(into))
     }
 
     fn total_in(&self) -> u64 {
@@ -391,8 +391,8 @@ impl CompressionInternal for Decompressor {
         dispatch!(DecompressorKind, &mut self.kind, codec => codec.end_input());
     }
 
-    fn pull(&mut self) -> Result<Output> {
-        dispatch!(DecompressorKind, &mut self.kind, codec => codec.pull())
+    fn pull(&mut self, into: Destination) -> Result<Output> {
+        dispatch!(DecompressorKind, &mut self.kind, codec => codec.pull(into))
     }
 
     fn total_in(&self) -> u64 {
@@ -613,7 +613,7 @@ mod tests {
         let mut total = 0;
         let mut finished = false;
         for _ in 0..MAX_STEPS {
-            let output = compressor.pull().unwrap();
+            let output = compressor.pull(Destination::Stream).unwrap();
             assert!(!output.is_need_input(), "compressor requested input after end");
             let done = output.is_done();
             if let Some(chunk) = output.into_data() {
@@ -647,7 +647,7 @@ mod tests {
                 guard += 1;
                 assert!(guard < MAX_STEPS, "the flush did not settle for {format:?}");
 
-                let output = compressor.pull().unwrap();
+                let output = compressor.pull(Destination::Stream).unwrap();
                 if output.is_need_input() {
                     break;
                 }
@@ -672,7 +672,7 @@ mod tests {
                 guard += 1;
                 assert!(guard < MAX_STEPS, "compression did not finish for {format:?}");
 
-                let output = compressor.pull().unwrap();
+                let output = compressor.pull(Destination::Stream).unwrap();
                 let done = output.is_done();
                 if let Some(chunk) = output.into_data() {
                     compressed.put_bytes(chunk);
@@ -694,7 +694,7 @@ mod tests {
                 guard += 1;
                 assert!(guard < MAX_STEPS, "decompression did not finish for {format:?}");
 
-                let output = decompressor.pull().unwrap();
+                let output = decompressor.pull(Destination::Stream).unwrap();
                 let done = output.is_done();
                 if let Some(chunk) = output.into_data() {
                     plain.put_bytes(chunk);
@@ -807,7 +807,7 @@ mod tests {
 
             let mut finished = false;
             for _ in 0..MAX_STEPS {
-                let output = compressor.pull().unwrap();
+                let output = compressor.pull(Destination::Stream).unwrap();
                 assert!(!output.is_need_input(), "compressor requested input after end");
                 let done = output.is_done();
                 if let Some(chunk) = output.as_data() {
@@ -842,7 +842,7 @@ mod tests {
             let mut guard = StepGuard::new();
             let error = loop {
                 guard.step();
-                match decompressor.pull() {
+                match decompressor.pull(Destination::Stream) {
                     Ok(output) => {
                         assert!(
                             !output.is_done() && !output.is_need_input(),
@@ -873,7 +873,7 @@ mod tests {
             let mut saw_a_full_size_chunk = false;
             let mut finished = false;
             for _ in 0..MAX_STEPS {
-                let output = decompressor.pull().unwrap();
+                let output = decompressor.pull(Destination::Stream).unwrap();
                 assert!(!output.is_need_input(), "decompressor requested input after end");
                 let done = output.is_done();
                 if let Some(chunk) = output.as_data() {
@@ -913,7 +913,7 @@ mod tests {
 
             let mut finished = false;
             for _ in 0..MAX_STEPS {
-                let output = decompressor.pull().unwrap();
+                let output = decompressor.pull(Destination::Stream).unwrap();
                 assert!(!output.is_need_input(), "decompressor requested input after end");
                 let done = output.is_done();
                 if let Some(chunk) = output.as_data() {
@@ -945,7 +945,7 @@ mod tests {
             let mut guard = StepGuard::new();
             let error = loop {
                 guard.step();
-                match decompressor.pull() {
+                match decompressor.pull(Destination::Stream) {
                     Ok(output) => {
                         assert!(
                             !output.is_done() && !output.is_need_input(),

@@ -14,7 +14,7 @@ use bytesbuf::mem::{CallbackMemory, GlobalPool};
 use bytesbuf::{BytesBuf, BytesView};
 use thread_aware::{Thread, ThreadAware};
 
-use crate::core::{Compress, Compression, CompressionInternal, Output};
+use crate::core::{Compress, Compression, CompressionInternal, Destination, Output};
 use crate::{Error, Result};
 
 /// What a [`counting_memory`] provider has been asked to do.
@@ -120,7 +120,7 @@ impl CompressionInternal for ProgressCompression {
 
     fn end_input(&mut self) {}
 
-    fn pull(&mut self) -> Result<Output> {
+    fn pull(&mut self, _into: Destination) -> Result<Output> {
         self.pulls.fetch_add(1, Ordering::Relaxed);
         Ok(Output::Progress)
     }
@@ -159,7 +159,7 @@ impl CompressionInternal for RejectsPush {
 
     fn end_input(&mut self) {}
 
-    fn pull(&mut self) -> Result<Output> {
+    fn pull(&mut self, _into: Destination) -> Result<Output> {
         Ok(Output::NeedInput)
     }
 

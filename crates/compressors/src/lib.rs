@@ -333,7 +333,7 @@ use crate::core::{Compress, Compression, Decompress, process};
 /// # Ok::<(), compressors::Error>(())
 /// ```
 pub fn compress(input: BytesView, compressor: impl Compression<Mode = Compress>) -> Result<BytesView> {
-    process(compressor, input, None)
+    process(compressor, input)
 }
 
 /// Decompresses one complete stream that is already in memory.
@@ -361,7 +361,5 @@ pub fn compress(input: BytesView, compressor: impl Compression<Mode = Compress>)
 /// | [`max_output_len`][DecompressorLimits::max_output_len] | the caller's value |
 /// | [`DecompressorLimits::UNLIMITED`] | none -- removing the bound is a decision too |
 pub fn decompress(input: BytesView, decompressor: impl Compression<Mode = Decompress>) -> Result<BytesView> {
-    let ceiling = decompressor.buffered_output_ceiling();
-
-    process(decompressor, input, ceiling)
+    process(decompressor, input)
 }

@@ -105,6 +105,21 @@ length, and a count of concatenated streams. Two policies follow:
   caps on top of whatever the caller did not set, because those are the APIs
   whose exposure the caller cannot otherwise bound.
 
+Because the boundary is retained output rather than throughput, the bound cannot
+be a property of the decompressor alone: the same decompressor is safe to stream
+unbounded and unsafe to buffer unbounded. So every `pull` states which it is,
+and the engine — not the caller — decides. Given a buffering destination, a
+decompressor whose output length the caller left unset applies the shared 64 MiB
+ceiling, alongside whatever bounds it was configured with; whichever is tighter
+decides. Given a streaming destination it applies only its configured bounds.
+
+Putting that in the engine rather than in each buffering caller is what makes the
+bound load-bearing. The engine already narrows the output slice it offers per
+step by its remaining budget, so the ceiling stops production *at* the bound
+instead of letting a bomb expand freely and be measured afterwards. A caller
+cannot get it wrong by forgetting to count, and there is one implementation to
+test rather than one per format.
+
 ## 7. Stream framing
 
 Whether bytes after a complete compressed stream begin another one is a
