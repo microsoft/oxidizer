@@ -147,6 +147,22 @@ diagnostics can anchor at it. The `#[from(...)]` payload keeps its field
 expressions keyed as the user wrote them; whether a key names a field is a rule,
 so it is checked in validate rather than at decode time.
 
+A `#[from(...)]` entry is a type followed by an optional `(member: expression)`
+override list, and both a parenthesized type such as `(std::io::Error)` and that
+override list open with the same token. The ambiguity is settled by *trying* the
+override list on a forked stream: it is resolved by the grammar of the two forms,
+not by a hand-written look-ahead that has to know how far a path's `::` reaches.
+Only an entry that opens with an override list is rejected, because a type is
+what an entry has to start with.
+
+An *empty* pair of parentheses is excluded from that trial, so `()` decodes as
+the unit type. It is not a type an entry may use — nothing converts from it, so a
+generated `From<()>` would fail inside code the user cannot see, which R4
+forbids — but that is a rule, and validate rejects it anchored at the `()`
+itself. Reading it as an empty override list here would instead fail as a
+decoding error, and because the entries of one attribute parse as a single list,
+that failure would discard every other entry in the attribute along with it.
+
 ### `Model`
 
 `Model` is a validated error type, ready to generate from: the identifier, the
@@ -159,6 +175,14 @@ style and the fields in declaration order, **split around** the one holding the
 core: those before it, the core itself, those after. It offers the core, every
 field in declaration order (what `Debug` prints, R1.3), and every field but the
 core (what constructors take and what a conversion initializes, R1.4 and R1.6).
+
+It also offers that same declaration order with each field carrying its
+*position*: the core marked as the core, and every other field **numbered** as
+the non-core list yields it. This is what generation walks. A generator that
+instead took the full field list and recovered the core by comparing members
+would be re-deciding, at every use, the question the split already answered —
+and one that carried its own counter alongside would hold a second alignment
+nothing checks.
 
 Splitting around the core rather than carrying an index into one list removes a
 class of check. An index can dangle, so a generator using one would have to
@@ -183,6 +207,12 @@ read is one form either way. Style is consulted by exactly two things — `Debug
 which needs `debug_struct` for a named struct and `debug_tuple` for a tuple one
 (R1.3), and the shared builder that emits `Self { .. }` or `Self(..)`, which the
 constructors and every generated `From` go through.
+
+That builder takes the core's initializer **apart from** the rest and places it
+itself, and asks its caller only for the initializer of a numbered non-core
+field. Both callers need the core built differently from every other field —
+defaulted, or built from the source error — and this is what spares each of them
+from finding the core in order to say so.
 
 ### `Message`
 
@@ -294,9 +324,11 @@ non-core fields, so the core is skipped and declaration order is kept, and both
 take each parameter as `impl Into<_>` of the field's type. `pub(crate)` is fixed
 by R1.4, settled by ADO 7675155.
 
-**`From<T>`** is emitted once per conversion, zipping the non-core fields with
-that conversion's initializers and building the core from the source error. The
-source binding is named `error`, which is the name a field expression refers to.
+**`From<T>`** is emitted once per conversion, taking that conversion's
+initializers in non-core field order and building the core from the source error.
+The source binding is named `error`, which is the name a field expression refers
+to. The initializers reach the fields by the number the builder hands out, which
+is the position of the tuple element holding the evaluated value.
 
 The data initializers are evaluated into one tuple before the struct literal is
 built. They may borrow `error` while the core consumes it, and a struct literal
@@ -467,6 +499,7 @@ would be a second copy that nothing checks.
 | R1.5 | `{` with no `}`, or `}` with no `{` | template literal |
 | R1.5 | a second `#[display(...)]` | attribute `Meta` |
 | R1.6 | `#[from]`, `#[from = "…"]`, `#[from()]` | attribute `Meta` |
+| R1.6 | `()` as a source type | the source type |
 | R1.6 | a key naming no non-core field | the key |
 | R1.6 | a key naming the core | the key |
 | R1.6 | a non-integer key on a tuple struct | the key |

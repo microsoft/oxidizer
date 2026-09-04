@@ -11,12 +11,11 @@
 //! reserved marker, not by which field selection picked, so a struct that marks two fields still
 //! gets its template checked. A concern whose own input failed is skipped, not guessed at.
 
-use syn::{Expr, Member};
+use syn::Type;
 
 use super::ast::{Ast, AstField};
 use super::display::{self, Referenceable};
 use super::model::{Conversion, Model, ModelField, Shape};
-use super::parse::is_ohno_core;
 use crate::diagnostics::Errors;
 
 /// The diagnostic for a second field carrying `#[error]`.
@@ -24,6 +23,10 @@ const MULTIPLE_MARKED: &str = "Multiple fields marked with `#[error]`. Mark only
 
 /// The diagnostic for a second `#[error]` on one field.
 const DUPLICATE_MARKER: &str = "Duplicate `#[error]` on the same field. Mark it once";
+
+/// The diagnostic for `#[from(())]`.
+const UNIT_SOURCE: &str = "`#[from(...)]` cannot convert from `()`, which is not an error type. Name the type the \
+     conversion converts from, such as `#[from(std::io::Error)]`";
 
 /// Applies the rules to `ast`.
 ///
@@ -49,13 +52,12 @@ pub(crate) fn validate(ast: Ast, errors: &mut Errors) -> Option<Model> {
         .conversions
         .iter()
         .filter_map(|conversion| {
-            let overrides: Vec<(Member, Expr)> = conversion
-                .overrides
-                .iter()
-                .map(|entry| (entry.key.clone(), entry.value.clone()))
-                .collect();
+            if is_unit(&conversion.source) {
+                errors.add(&conversion.source, UNIT_SOURCE);
+                return None;
+            }
 
-            Conversion::new(&shape, conversion.source.clone(), &overrides, errors)
+            Conversion::new(&shape, conversion.source.clone(), &conversion.overrides, errors)
         })
         .collect();
 
@@ -83,8 +85,7 @@ fn select_core(ast: &Ast, errors: &mut Errors) -> Option<usize> {
         return Some(index);
     }
 
-    let mut marked = ast.fields.iter().enumerate().filter(|(_, field)| !field.marks.is_empty());
-    if let Some((index, _)) = marked.next() {
+    if let Some(index) = ast.fields.iter().position(|field| !field.marks.is_empty()) {
         return Some(index);
     }
 
@@ -133,5 +134,28 @@ fn report_duplicate_markers(fields: &[AstField], errors: &mut Errors) {
         for repeated in marks {
             errors.add(repeated, DUPLICATE_MARKER);
         }
+    }
+}
+
+/// Whether the last segment of the type's path is `OhnoCore`.
+///
+/// Nothing is resolved, so a core reached through a type alias or a renamed import is invisible
+/// here and has to be marked.
+fn is_ohno_core(ty: &Type) -> bool {
+    let Type::Path(path) = ty else {
+        return false;
+    };
+
+    path.qself.is_none() && path.path.segments.last().is_some_and(|segment| segment.ident == "OhnoCore")
+}
+
+/// Whether `ty` is the unit type, however many redundant parentheses surround it.
+///
+/// A one-element tuple such as `((),)` is a different type and is not matched.
+fn is_unit(ty: &Type) -> bool {
+    match ty {
+        Type::Tuple(tuple) => tuple.elems.is_empty(),
+        Type::Paren(paren) => is_unit(&paren.elem),
+        _ => false,
     }
 }

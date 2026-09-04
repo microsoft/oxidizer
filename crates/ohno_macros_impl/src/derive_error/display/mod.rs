@@ -15,7 +15,7 @@ use quote::quote;
 use syn::{Expr, Member};
 
 use super::ast::{AstField, DisplayAttr};
-use super::parse::member_name;
+use super::member_name;
 use crate::diagnostics::Errors;
 use crate::message::Message;
 

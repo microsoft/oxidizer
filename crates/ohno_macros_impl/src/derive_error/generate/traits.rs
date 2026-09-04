@@ -13,6 +13,7 @@ use syn::LitStr;
 
 use super::core_member;
 use crate::derive_error::ast::Style;
+use crate::derive_error::member_name;
 use crate::derive_error::model::Model;
 use crate::paths;
 
@@ -134,7 +135,7 @@ pub(crate) fn debug(model: &Model) -> TokenStream {
         Style::Named => {
             let fields = model.shape.all().map(|field| {
                 let member = &field.member;
-                let label = LitStr::new(&crate::derive_error::parse::member_name(member), model.ident.span());
+                let label = LitStr::new(&member_name(member), model.ident.span());
                 quote!(.field(#label, &self.#member))
             });
             quote!(f.debug_struct(#name) #(#fields)* .finish())

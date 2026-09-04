@@ -53,4 +53,9 @@ fn display_diagnostics() {
 
     // An unbalanced brace is reported rather than parsed into a different, valid template.
     t.compile_fail("tests/ui/display_unbalanced_brace.rs");
+
+    // `()` names no error, so it is rejected as a source type rather than expanded into a
+    // `From<()>` that fails inside generated code. The second struct pins that one rejected entry
+    // does not discard the entry beside it.
+    t.compile_fail("tests/ui/from_unit_source.rs");
 }

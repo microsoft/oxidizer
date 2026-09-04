@@ -143,8 +143,9 @@ by field name for a named struct and by index for a tuple struct.
 The core field is built with `OhnoCore::from(error)`. Every other field takes
 its expression if one was given and `Default::default()` otherwise.
 
-Rejected: `#[from]`, `#[from()]`, `#[from = "…"]`, and a non-integer key for a
-tuple field. Several `#[from(...)]` attributes on one struct accumulate.
+Rejected: `#[from]`, `#[from()]`, `#[from = "…"]`, `()` as a source type, and a
+non-integer key for a tuple field. Several `#[from(...)]` attributes on one
+struct accumulate.
 
 ### R1.7 `#[no_debug]` and `#[no_constructors]`
 

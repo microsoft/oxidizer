@@ -323,6 +323,81 @@ impl ::core::convert::From<::core::convert::Infallible> for T {
     }
 }
 
+// ======== a tuple core in the middle keeps declaration order ========
+
+#[derive(Error)]
+struct T(String, ohno::OhnoCore, u32);
+// ---- expands to ----
+
+#[automatically_derived]
+impl ::core::fmt::Display for T {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        self.1.format_error(f, "T", ::core::option::Option::None)
+    }
+}
+#[automatically_derived]
+impl ::std::error::Error for T {
+    fn source(&self) -> ::core::option::Option<&(dyn ::std::error::Error + 'static)> {
+        self.1.source()
+    }
+}
+#[automatically_derived]
+impl ::ohno::Enrichable for T {
+    fn add_enrichment(&mut self, entry: ::ohno::EnrichmentEntry) {
+        ::ohno::Enrichable::add_enrichment(&mut self.1, entry);
+    }
+}
+#[automatically_derived]
+impl ::ohno::ErrorExt for T {
+    fn message(&self) -> ::std::string::String {
+        self.1.format_message("T", ::core::option::Option::None)
+    }
+    fn backtrace(&self) -> &::std::backtrace::Backtrace {
+        self.1.backtrace()
+    }
+}
+impl ::core::fmt::Debug for T {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.debug_tuple("T").field(&self.0).field(&self.1).field(&self.2).finish()
+    }
+}
+#[automatically_derived]
+impl T {
+    /// Creates the error with no source.
+    #[allow(
+        dead_code,
+        reason = "generated for every error type, used at the author's discretion"
+    )]
+    pub(crate) fn new(
+        param_0: impl ::core::convert::Into<String>,
+        param_2: impl ::core::convert::Into<u32>,
+    ) -> Self {
+        Self(param_0.into(), ::ohno::OhnoCore::default(), param_2.into())
+    }
+    /// Creates the error wrapping `error` as its source.
+    #[allow(
+        dead_code,
+        reason = "generated for every error type, used at the author's discretion"
+    )]
+    pub(crate) fn caused_by(
+        param_0: impl ::core::convert::Into<String>,
+        param_2: impl ::core::convert::Into<u32>,
+        error: impl ::core::convert::Into<
+            ::std::boxed::Box<
+                dyn ::std::error::Error + ::core::marker::Send + ::core::marker::Sync,
+            >,
+        >,
+    ) -> Self {
+        Self(param_0.into(), ::ohno::OhnoCore::from(error), param_2.into())
+    }
+}
+#[automatically_derived]
+impl ::core::convert::From<::core::convert::Infallible> for T {
+    fn from(_value: ::core::convert::Infallible) -> Self {
+        ::core::unreachable!("Infallible cannot be constructed")
+    }
+}
+
 // ======== a marked core need not be named OhnoCore ========
 
 #[derive(Error)]
