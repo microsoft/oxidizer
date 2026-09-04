@@ -199,6 +199,14 @@ and bidirectional RPCs have no `google.api.http` mapping and are rejected by
 Requests are buffered and parsed as JSON, so there is no incremental request
 body path and binary payloads must fit JSON-friendly encoding.
 
+Query parameter field paths are limited to 64 levels of nesting. A dotted
+key such as `?a.b.c=1` builds one level per segment, so a path deeper than
+the limit is rejected as an invalid request rather than decoded, truncated,
+or allowed to exhaust the stack. The limit is fixed and not configurable: it
+bounds the recursion an untrusted request can drive, and a bound a caller
+could raise would not bound anything. It stays far above the nesting any
+real proto message uses.
+
 ## Cargo features
 
 * `serving` (default): [`serve_http`][__link29], [`serve_http_fn`][__link30], and [`RestBody`][__link31].
@@ -218,7 +226,7 @@ as an Axum fallback service.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/rest_over_grpc">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb4yyDbhLmywUbUgoeDyjY0hYb_gBd7xtnrJEbm_ruDQCrgu9hZIOCZ2xheWVyZWRlMC4zLjaCbnJlc3Rfb3Zlcl9ncnBjZTAuMi4wgm10b3dlcl9zZXJ2aWNlZTAuMy4z
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG705H0ZGUhe-GxZIkdl02LFVGzaVf60fYr6-G0KoiaJwaM4fYWSDgmdsYXllcmVkZTAuMy42gm5yZXN0X292ZXJfZ3JwY2UwLjIuMIJtdG93ZXJfc2VydmljZWUwLjMuMw
  [__link0]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=handling::Status
  [__link1]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=serving::RestService::new
  [__link10]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=transcoding::Transcode::try_transcode
