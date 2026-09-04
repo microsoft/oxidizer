@@ -28,21 +28,16 @@
 /// Foundational runtime and thread-awareness types.
 pub mod core {
     #[doc(inline)]
-    pub use thread_aware_core::*;
+    pub use thread_aware_core::{NumaNode, Owner, Thread, ThreadAware};
 }
 
 /// Time primitives for the runtime.
-#[cfg(feature = "time")]
-#[cfg_attr(docsrs, doc(cfg(feature = "time")))]
+#[cfg(any(test, feature = "time"))]
 pub mod time {
     #[doc(inline)]
-    pub use tick::{
-        Clock, Delay, Error, FutureExt, PeriodicTimer, Result, SimpleClock, Stopwatch,
-        SystemTimeExt, Timeout,
-    };
+    pub use tick::{Clock, Delay, FutureExt, PeriodicTimer, SimpleClock, Stopwatch, Timeout};
 
-    #[cfg(feature = "test-util")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
+    #[cfg(any(test, feature = "test-util"))]
     #[doc(inline)]
     pub use tick::ClockControl;
 }

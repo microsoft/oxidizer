@@ -17,7 +17,20 @@ include = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/arty"
 
 [package.metadata.cargo_check_external_types]
-allowed_external_types = ["thread_aware_core::*", "tick::*"]
+allowed_external_types = [
+    "thread_aware_core::NumaNode",
+    "thread_aware_core::Owner",
+    "thread_aware_core::Thread",
+    "thread_aware_core::ThreadAware",
+    "tick::Clock",
+    "tick::ClockControl",
+    "tick::Delay",
+    "tick::FutureExt",
+    "tick::PeriodicTimer",
+    "tick::SimpleClock",
+    "tick::Stopwatch",
+    "tick::Timeout",
+]
 
 [package.metadata.docs.rs]
 all-features = true
@@ -31,6 +44,9 @@ test-util = ["tick?/test-util"]
 arty_core = { workspace = true }
 thread_aware_core = { workspace = true, features = ["std"] }
 tick = { workspace = true, optional = true }
+
+[dev-dependencies]
+tick = { workspace = true, features = ["test-util"] }
 
 # >>> anvil-managed: anvil-lints
 [lints]
