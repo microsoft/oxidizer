@@ -5525,7 +5525,6 @@ dependencies = [
  "futures",
  "opentelemetry",
  "opentelemetry_sdk",
- "performables",
  "prettyplease 0.3.0",
  "proc-macro2",
  "serial_test",

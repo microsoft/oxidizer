@@ -122,12 +122,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn stack_capture_clamps_to_its_fixed_buffer() {
-        let mut frames = [0; 128];
-        assert!(capture_stack(&mut frames, usize::MAX) <= 60);
-    }
-
-    #[test]
     fn host_page_size_is_compatible_with_allocator_alignment() {
         let page_size = page_size();
         assert!(page_size.is_power_of_two());

@@ -969,11 +969,13 @@ fn ownership_and_lock_operations_emit_runtime_telemetry() {
     assert_eq!(once.get_or_init(|| 17), &17);
     let waiting_once = Arc::new(OnceLock::new());
     let waiting_once_id = recorder::ObjectId::from_ptr(std::ptr::from_ref(&*waiting_once).cast::<()>());
-    let waiter_once = Arc::clone(&waiting_once);
-    let once_waiter = std::thread::spawn(move || *waiter_once.wait());
-    std::thread::sleep(std::time::Duration::from_millis(10));
-    waiting_once.set(19).unwrap();
-    assert_eq!(once_waiter.join().unwrap(), 19);
+    let setter_once = Arc::clone(&waiting_once);
+    let once_setter = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        setter_once.set(19).unwrap();
+    });
+    assert_eq!(waiting_once.wait(), &19);
+    once_setter.join().unwrap();
 
     let (channel_sender, channel_receiver) = performables::sync::channel::unbounded::<usize>();
     assert!(channel_receiver.try_recv().unwrap_err().is_empty());

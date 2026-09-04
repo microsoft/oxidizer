@@ -58,12 +58,11 @@ include = [
 ahash = { version = "0.8.4", default-features = false }
 all_the_time = { version = "0.6.2", default-features = false }
 alloc_tracker = { version = "0.7.0", default-features = false }
-allocator-api2 = { version = "0.4.0", default-features = false }
-anyhow = { version = "1.0.100", default-features = false }
-backtrace = { version = "0.3.76", default-features = false }
 
 # local dependencies
 allocation_hints = { path = "crates/allocation_hints", default-features = false, version = "0.1.0" }
+allocator-api2 = { version = "0.4.0", default-features = false }
+anyhow = { version = "1.0.100", default-features = false }
 anyspawn = { path = "crates/anyspawn", default-features = false, version = "0.8.0" }
 anyspawn_azure = { path = "crates/anyspawn_azure", default-features = false, version = "0.3.0" }
 argh = { version = "0.1.13", default-features = false }
@@ -75,6 +74,7 @@ axum-core = { version = "0.5.6", default-features = false }
 azure_core = { version = "1.0.0", default-features = false }
 azure_identity = { version = "1.0.0", default-features = false }
 azure_storage_blob = { version = "1.0.0", default-features = false }
+backtrace = { version = "0.3.76", default-features = false }
 base64 = { version = "0.23.0", default-features = false, features = ["alloc"] }
 bolero = { version = "0.13.4", default-features = false }
 bumpalo = { version = "3.20.2", default-features = false }

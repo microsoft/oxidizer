@@ -17,6 +17,15 @@ homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/performables"
 
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "serde_core::de::Deserialize",
+    "serde_core::ser::Serialize",
+    "thread_aware_core::thread::NumaNode",
+    "thread_aware_core::thread::Thread",
+    "thread_aware_core::thread_aware::ThreadAware",
+]
+
 [features]
 default = ["seismograph"]
 seismograph = ["dep:seismograph"]
