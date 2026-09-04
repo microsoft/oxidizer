@@ -23,8 +23,9 @@ const ARRIVAL_PERIOD: Duration = Duration::from_millis(1);
 /// Stands in for an upstream that produces a body gradually, such as a socket.
 ///
 /// Takes its clock rather than choosing one, so a caller can drive the arrivals in simulated time
-/// instead of waiting for them.
-fn body(clock: Clock, memory: GlobalPool) -> impl Stream<Item = Result<BytesView, std::io::Error>> {
+/// instead of waiting for them. Input views come from the same [`Resources`] the engines do, so one
+/// caller-owned provider covers the whole pipeline.
+fn body(clock: Clock, resources: Resources) -> impl Stream<Item = Result<BytesView, std::io::Error>> {
     let (sender, receiver) = mpsc::channel(4);
 
     tokio::spawn(async move {
@@ -34,7 +35,7 @@ fn body(clock: Clock, memory: GlobalPool) -> impl Stream<Item = Result<BytesView
             arrivals.next().await;
 
             let line = format!("{{\"event\":{event},\"message\":\"a log line\"}}\n");
-            let chunk = BytesView::copied_from_slice(line.as_bytes(), &memory);
+            let chunk = BytesView::copied_from_slice(line.as_bytes(), resources.memory());
 
             if sender.send(Ok(chunk)).await.is_err() {
                 break;
@@ -47,7 +48,9 @@ fn body(clock: Clock, memory: GlobalPool) -> impl Stream<Item = Result<BytesView
 
 #[tokio::main]
 async fn main() -> Result<(), compressors::Error> {
-    let memory = GlobalPool::new();
+    // Held once and handed to everything: the arriving chunks, the compressor and the decompressor
+    // all draw on this provider and share its pool of recycled engines.
+    let resources = Resources::new(GlobalPool::new());
 
     // Under `scripts/run-examples.rs` this runs as an automated check, where waiting out 200 real
     // arrivals would be two seconds of wall clock and a dependency on runtime scheduling. A clock
@@ -58,8 +61,8 @@ async fn main() -> Result<(), compressors::Error> {
         Clock::new_tokio()
     };
 
-    let compressed = CompressionStream::compress(body(clock, memory.clone()), gzip::Compressor::new(&Resources::default()));
-    let mut plain = CompressionStream::decompress(compressed, gzip::Decompressor::new(&Resources::default()));
+    let compressed = CompressionStream::compress(body(clock, resources.clone()), gzip::Compressor::new(&resources));
+    let mut plain = CompressionStream::decompress(compressed, gzip::Decompressor::new(&resources));
 
     let mut bytes = 0;
     while let Some(chunk) = plain.next().await {

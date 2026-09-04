@@ -242,12 +242,18 @@ impl Error {
 
     /// The input ended in the middle of a compressed stream.
     ///
-    /// The bytes decompressed so far are valid; the producer stopped early or the transport truncated
-    /// them. This is distinct from [`is_corrupt_data`][Self::is_corrupt_data] because fetching the
-    /// body again may well produce a complete one, whereas corrupt data stays corrupt.
+    /// Input ended before the decoder reported a complete stream.
     ///
-    /// That is advice for whoever owns the byte source, not for a retry of this call: decompressing
-    /// the same buffer again is deterministic and fails the same way, which is why
+    /// That is all this establishes. It does not say why the input ended -- a producer stopping
+    /// early and a transport truncating the body are indistinguishable from here -- and it does not
+    /// certify the bytes already handed back: a framed decoder can emit output before the framing
+    /// or checksum that would have rejected the stream. Treat that output as provisional, exactly
+    /// as when the operation has not reported that it is done.
+    ///
+    /// It is distinct from [`is_corrupt_data`][Self::is_corrupt_data] in what it licenses: corrupt
+    /// data stays corrupt, whereas fetching the body again may produce a complete one. That is
+    /// advice for whoever owns the byte source, not for a retry of this call -- decompressing the
+    /// same buffer again is deterministic and fails the same way, which is why
     /// [`recovery`][recoverable::Recovery::recovery] reports this as
     /// [`Unknown`][recoverable::RecoveryKind::Unknown] rather than asserting a retry to middleware
     /// that cannot re-drive the transport.
@@ -280,12 +286,15 @@ impl Error {
         self.kind == Kind::InvalidConfiguration
     }
 
-    /// The stream feeding the engine failed.
+    /// A failure that did not come from this crate.
     ///
-    /// The compressed data itself was fine as far as it went; the source could not deliver more.
-    /// The original failure is available from [`source`][std::error::Error::source]. Produced by
-    /// [`other`][Self::other] and [`other_with_recovery`][Self::other_with_recovery], and by the
-    /// adapters behind the `futures-stream` feature.
+    /// Carries whatever [`other`][Self::other] or
+    /// [`other_with_recovery`][Self::other_with_recovery] was given, which the adapters behind the
+    /// `futures-stream` feature use for a source stream's own error. Because those constructors
+    /// accept any foreign failure, this kind says only that the failure was foreign -- it does not
+    /// establish that a source stream was involved, nor that the compressed bytes seen so far were
+    /// valid. The original failure is available from [`source`][std::error::Error::source], and is
+    /// the only thing that can say more.
     #[must_use]
     pub fn is_source(&self) -> bool {
         self.kind == Kind::Source
@@ -295,9 +304,11 @@ impl Error {
 impl Recovery for Error {
     /// Whether retrying could help, and how soon.
     ///
-    /// Kinds this crate raises itself are classified by what they mean: a truncated stream is worth
-    /// another attempt, while corrupt data, an exceeded bound, misuse and a rejected setting are
-    /// not. A wrapped foreign error reports whatever [`other`][Self::other] detected or
+    /// Kinds this crate raises itself are classified by what they mean. Corrupt data, an exceeded
+    /// bound, misuse and a rejected setting are never worth another attempt. A truncated stream
+    /// reports [`Unknown`][recoverable::RecoveryKind::Unknown]: re-decoding the same bytes is
+    /// deterministic, so whether asking again helps depends on a transport this crate does not own.
+    /// A wrapped foreign error reports whatever [`other`][Self::other] detected or
     /// [`other_with_recovery`][Self::other_with_recovery] was given.
     fn recovery(&self) -> RecoveryInfo {
         self.recovery.clone()
