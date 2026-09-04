@@ -48,6 +48,10 @@ pub(crate) const DEFAULT_MAX_OUTPUT_LEN: u64 = 64 * 1024 * 1024;
 /// only where output accumulates: formats that treat concatenated members as one logical stream are
 /// used incrementally for exactly the block-oriented archive workloads that run to many thousands
 /// of members, and those must keep passing through.
+///
+/// The rule the number encodes: comfortably above any plausible count for a single buffered HTTP
+/// body, and far enough below an archive's member count that the two cases stay distinguishable. It
+/// is a policy guardrail chosen for that separation rather than a measured threshold.
 pub(crate) const DEFAULT_MAX_STREAMS: u64 = 1024;
 
 /// One configurable bound, in one of three states.

@@ -15,9 +15,19 @@ use crate::error::{Error, Result};
 /// A megabyte, written as a plain literal rather than as `1024 * 1024` so the constant carries no
 /// arithmetic: this is tuning that bounds how much work one call does, never what it produces, so a
 /// mutation of that arithmetic would change no observable result.
+///
+/// Chosen as a conservative starting point rather than from measurement, and it is free to move.
+/// The rule it has to satisfy is that one `pull` returns soon enough not to monopolize the caller's
+/// thread or task, while staying far enough above a typical chunk size that ordinary messages are
+/// never split across calls for want of budget.
 const MAX_INPUT_PER_PULL: usize = 1_048_576;
 
 /// Maximum engine calls made by one public `pull` call.
+///
+/// The same rule as [`MAX_INPUT_PER_PULL`], for the case where an engine consumes little per step:
+/// a pathological input must not turn one `pull` into an unbounded loop. Small enough to yield
+/// promptly, large enough that a well-behaved engine never hits it. Also a starting point rather
+/// than a measured optimum.
 const MAX_STEPS_PER_PULL: usize = 64;
 
 /// Enough room for the largest deflate sync-flush marker plus one spare byte.

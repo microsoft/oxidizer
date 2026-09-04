@@ -29,6 +29,12 @@ use crate::trailing::TrailingData;
 /// This bounds pending output only: a caller streaming hundreds of gigabytes never accumulates
 /// more than one chunk of it. Pending input and the engine's own window and tables are additional,
 /// and their size depends on the format and its configuration.
+///
+/// 64 KiB is chosen to sit above the point where per-call overhead dominates while staying small
+/// enough that a chunk is cheap to hold and to hand on -- the `chunk_size` benchmark group is what
+/// this trade is measured with. It is a default for the common case, not a tuned optimum for any
+/// particular one; a caller with a different latency or memory budget sets its own with
+/// [`output_chunk_size`][CompressorBuilder::output_chunk_size].
 pub(crate) const DEFAULT_CHUNK_SIZE: usize = 64 * 1024;
 
 /// Configures a compressor.

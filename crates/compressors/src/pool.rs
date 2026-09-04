@@ -13,7 +13,13 @@ use std::sync::{Arc, OnceLock};
 #[cfg(any(test, feature = "deflate", feature = "gzip", feature = "zlib"))]
 use crate::flate::Wrapper;
 
-/// How many idle engines the pool keeps per distinct configuration, unless told otherwise.
+/// How many idle engines the pool keeps per interchangeable group, unless told otherwise.
+///
+/// Sized for a service handling a moderate number of concurrent messages: high enough that an
+/// ordinary request burst is served from the pool rather than rebuilding, low enough that idle
+/// engine state is not retained indefinitely for a workload that has gone quiet. A conservative
+/// starting point rather than a measured optimum -- a caller who knows its concurrency should say
+/// so with [`Resources::with_pool_capacity`][crate::Resources::with_pool_capacity].
 const DEFAULT_CAPACITY: usize = 16;
 
 /// Identifies engines that are interchangeable with one another.

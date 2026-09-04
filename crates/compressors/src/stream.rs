@@ -18,6 +18,12 @@ use crate::core::{Compress, Compression, Decompress, Output};
 use crate::error::{Error, Result};
 
 /// Bounds the amount of immediately-ready work one `poll_next` performs.
+///
+/// A stream whose source is always ready would otherwise let one poll run until the data ends,
+/// starving the executor's other tasks. The rule is to yield often enough to stay fair while
+/// amortizing the wake machinery over more than a single chunk; the value is a conservative
+/// starting point, not a measured optimum, and matches the engine's per-`pull` step budget so the
+/// two layers bound work on the same scale.
 const MAX_OPERATIONS_PER_POLL: usize = 64;
 
 /// Drives one poll of a compression stream, whichever direction it runs in.
