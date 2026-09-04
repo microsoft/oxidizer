@@ -1,0 +1,33 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "arty_core"
+description = "Foundational traits and types for the Arty runtime."
+version = "0.2.0"
+readme = "README.md"
+keywords = ["arty", "async", "runtime"]
+categories = ["asynchronous"]
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/arty_core"
+
+[package.metadata.docs.rs]
+all-features = true
+
+# Empty foundation crate: it has no executable source lines until foundational
+# runtime contracts are introduced.
+[package.metadata.coverage-gate]
+min-lines-percent = 0
+
+[features]
+default = []
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

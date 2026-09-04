@@ -1,0 +1,59 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "arty"
+description = "Single-threaded, thread-aware application runtime."
+version = "0.2.0"
+readme = "README.md"
+keywords = ["arty", "async", "runtime"]
+categories = ["asynchronous"]
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/arty"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "thread_aware_core::thread::NumaNode",
+    "thread_aware_core::thread::Owner",
+    "thread_aware_core::thread::Thread",
+    "thread_aware_core::thread_aware::ThreadAware",
+    "tick::clock::Clock",
+    "tick::clock_control::ClockControl",
+    "tick::delay::Delay",
+    "tick::future_ext::FutureExt",
+    "tick::periodic_timer::PeriodicTimer",
+    "tick::simple_clock::SimpleClock",
+    "tick::stopwatch::Stopwatch",
+    "tick::timeout::Timeout",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+
+# Facade-only crate: its public surface consists of re-exports, so it has no
+# instrumented source lines for the per-package coverage gate.
+[package.metadata.coverage-gate]
+min-lines-percent = 0
+
+[features]
+default = []
+time = ["dep:tick"]
+test-util = ["tick?/test-util"]
+
+[dependencies]
+arty_core = { workspace = true }
+thread_aware_core = { workspace = true, features = ["std"] }
+tick = { workspace = true, optional = true }
+
+[dev-dependencies]
+tick = { workspace = true, features = ["test-util"] }
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints
