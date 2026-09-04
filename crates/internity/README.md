@@ -164,7 +164,7 @@ the number of distinct strings is bounded by the 4-byte handle (approximately
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/internity">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb281XdqumF0Qbsj1N6LNUN7gb44baYjiHKVEbLkcFMQULRvFhZIKCaWludGVybml0eWUwLjIuMIJlc2VyZGVnMS4wLjIyOA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb281XdqumF0Qbsj1N6LNUN7gb44baYjiHKVEbLkcFMQULRvFhZIKCaWludGVybml0eWUwLjIuMIJlc2VyZGVnMS4wLjIyOA
  [__link0]: https://github.com/microsoft/oxidizer/blob/main/crates/internity/docs/PERF.md
  [__link1]: https://github.com/microsoft/oxidizer/blob/main/crates/internity/docs/COMPARISON.md
  [__link10]: https://doc.rust-lang.org/stable/core/?search=hash::BuildHasher

@@ -20,5 +20,7 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/rallocator_
 [lib]
 path = "src/lib.rs"
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

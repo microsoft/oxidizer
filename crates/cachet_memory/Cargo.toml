@@ -38,7 +38,7 @@ thread_aware = { workspace = true, features = ["derive", "std"] }
 criterion = { workspace = true }
 mutants = { workspace = true }
 ohno = { path = "../ohno", features = ["test-util"] }
-tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
 
 [[bench]]
 name = "overhead"

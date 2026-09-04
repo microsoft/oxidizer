@@ -43,9 +43,6 @@ hashbrown = { workspace = true, features = ["default-hasher"] }
 mimalloc.workspace = true
 multitude = { workspace = true, features = ["hashbrown"] }
 
-[lints]
-workspace = true
-
 [[bench]]
 name = "mimalloc"
 harness = false
@@ -101,3 +98,8 @@ harness = false
 [[bench]]
 name = "tracking_all_callers"
 harness = false
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

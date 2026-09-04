@@ -49,7 +49,7 @@ assert!(generated.contains("GetBook"));
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/routerama_build">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbhew8pv6r7HAblYEJpTRkXpAbADOjUkxD6robydXdnodrq0xhZIGCb3JvdXRlcmFtYV9idWlsZGUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbhew8pv6r7HAblYEJpTRkXpAbADOjUkxD6robydXdnodrq0xhZIGCb3JvdXRlcmFtYV9idWlsZGUwLjEuMA
  [__link0]: https://docs.rs/routerama
  [__link1]: https://docs.rs/routerama_build/0.1.0/routerama_build/?search=Route
  [__link2]: https://docs.rs/routerama_build/latest/routerama_build/?search=Generator

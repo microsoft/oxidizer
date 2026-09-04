@@ -14,10 +14,10 @@
 # per-seed crashes, so coverage matters more than depth-per-seed.
 
 # Run Miri tests with race coverage tracking.
-[script("pwsh")]
-anvil-miri-race-coverage: anvil-miri-race-coverage-validate-prereqs
+[script("pwsh", "-NoProfile")]
+anvil-miri-race-coverage: anvil-miri-race-coverage-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
-    if ($env:ANVIL_INCLUDE_AFFECTED -eq '--skip') { exit 0 }
+    if ((& "{{ just_executable() }}" _anvil-impact-include affected) -eq '--skip') { exit 0 }
     $day = (Get-Date).Day
     $low = (2 * $day) - 1
     $high = (2 * $day) + 1

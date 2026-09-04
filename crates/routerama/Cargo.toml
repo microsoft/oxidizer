@@ -62,9 +62,6 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net"] }
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 gungraun = { workspace = true, features = ["default"] }
 
-[lints]
-workspace = true
-
 [[bench]]
 name = "criterion_routers"
 harness = false
@@ -122,3 +119,8 @@ required-features = ["query"]
 [[test]]
 name = "query_allocations"
 required-features = ["query"]
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

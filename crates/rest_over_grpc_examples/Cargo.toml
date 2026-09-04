@@ -63,11 +63,6 @@ tokio = { workspace = true, features = ["rt", "macros"] }
 tower = { workspace = true, features = ["util"] }
 tower-service = { workspace = true }
 
-[lints]
-workspace = true
-
-# --- serving-layer examples ---
-
 [[example]]
 name = "generated_tower_service"
 path = "examples/serving/generated_tower_service.rs"
@@ -113,3 +108,8 @@ path = "examples/handling/client_streaming_upload.rs"
 [[example]]
 name = "openapi_document"
 path = "examples/build/openapi_document.rs"
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints
