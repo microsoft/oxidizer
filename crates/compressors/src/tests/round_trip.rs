@@ -8,7 +8,6 @@
 
 use std::num::NonZeroU64;
 
-use bytesbuf::mem::GlobalPool;
 use bytesbuf::{BytesBuf, BytesView};
 
 use crate::core::{CompressionInternal as _, Output};
@@ -297,16 +296,23 @@ fn empty_input_round_trips() {
 
 #[test]
 fn a_custom_memory_provider_is_used_for_output() {
-    // Anything implementing `MemoryShared` works; the codec never reaches for a global allocator
-    // of its own.
-    let memory = GlobalPool::new();
-    let buf = memory.reserve(1);
-    drop(buf);
+    // Anything implementing `MemoryShared` works; the engine never reaches for a global allocator
+    // of its own. Counting the reservations is what proves it, rather than merely building a
+    // provider and hoping.
+    let (memory, activity) = crate::testing::counting_memory();
+    let resources = Resources::new(memory);
 
-    let compressed = gzip::compress(view(b"provider supplied"), &Resources::default()).expect("compression succeeds");
-    let plain = gzip::decompress(compressed, &Resources::default()).expect("decompression succeeds");
+    let compressed = gzip::compress(view(b"provider supplied"), &resources).expect("compression succeeds");
+    let after_compress = activity.reservations();
+    assert!(after_compress > 0, "compression must draw its output from the caller's provider");
+
+    let plain = gzip::decompress(compressed, &resources).expect("decompression succeeds");
 
     assert_eq!(plain.to_vec(), b"provider supplied".to_vec());
+    assert!(
+        activity.reservations() > after_compress,
+        "decompression must draw its output from the caller's provider too"
+    );
 }
 
 #[test]

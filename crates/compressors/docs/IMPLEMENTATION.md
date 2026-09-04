@@ -65,9 +65,15 @@ The three backend families split two to one on how they satisfy this:
 | brotli | initializes the slice first, because its encoder takes `&mut [u8]` |
 
 Brotli's zero-fill is a real cost that the other two do not pay, so it is done
-with a bulk `fill` rather than per element. `UninitOutput::filled_until` clamps
-the reported count against the backing slice, so an engine that over-reports is
-rejected before `advance` is reached rather than trusted.
+with a bulk `fill` rather than per element.
+
+What actually enforces the contract is engine-independent and lives in
+`Pump::pull`: before anything is advanced, a step that reports
+`consumed > supplied` or `produced > provided_output` is rejected and the pump
+is put into its failed state. That check is what stops an over-reporting engine
+from marking uninitialized output as initialized, for every backend. (zstd's
+`WriteBuf::filled_until` is a different thing: it records how much of the buffer
+zstd may read back, and does not reject a count.)
 
 Each family implements the trait twice, once per direction, giving six adapters.
 

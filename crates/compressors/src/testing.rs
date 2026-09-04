@@ -10,11 +10,71 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use bytesbuf::BytesView;
-use bytesbuf::mem::GlobalPool;
+use bytesbuf::mem::{CallbackMemory, GlobalPool};
+use bytesbuf::{BytesBuf, BytesView};
+use thread_aware::{Thread, ThreadAware};
 
 use crate::core::{Compress, Compression, CompressionInternal, Output};
 use crate::{Error, Result};
+
+/// What a [`counting_memory`] provider has been asked to do.
+///
+/// A cloneable handle onto the counters, so a test can hold one after the provider has been moved
+/// into a [`Resources`][crate::Resources].
+#[derive(Clone, Debug, Default)]
+pub(crate) struct MemoryActivity {
+    reservations: Arc<AtomicUsize>,
+    relocations: Arc<AtomicUsize>,
+}
+
+impl MemoryActivity {
+    /// How many times a buffer has been reserved from the provider.
+    pub(crate) fn reservations(&self) -> usize {
+        self.reservations.load(Ordering::SeqCst)
+    }
+
+    /// How many times the provider has been told it moved.
+    pub(crate) fn relocations(&self) -> usize {
+        self.relocations.load(Ordering::SeqCst)
+    }
+}
+
+/// The state a [`counting_memory`] provider carries: the wrapped provider and the counters.
+///
+/// `CallbackMemory`'s reservation function is a bare `fn` pointer and cannot capture, so everything
+/// it needs lives here.
+#[derive(Clone, Debug)]
+pub(crate) struct CountingData {
+    inner: GlobalPool,
+    activity: MemoryActivity,
+}
+
+impl ThreadAware for CountingData {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+        self.activity.relocations.fetch_add(1, Ordering::SeqCst);
+        self.inner.relocate(source, destination);
+    }
+}
+
+fn count_reserve(data: &CountingData, min_bytes: usize) -> BytesBuf {
+    data.activity.reservations.fetch_add(1, Ordering::SeqCst);
+    data.inner.reserve(min_bytes)
+}
+
+/// A memory provider that records what is asked of it.
+///
+/// For tests that need to prove the crate drew its buffers from the caller's provider rather than
+/// one of its own, or that a relocation reached it. Built on `bytesbuf`'s own `CallbackMemory`
+/// rather than a hand-written [`Memory`] impl, which is the extension point that exists for this.
+pub(crate) fn counting_memory() -> (CallbackMemory<CountingData>, MemoryActivity) {
+    let activity = MemoryActivity::default();
+    let data = CountingData {
+        inner: GlobalPool::new(),
+        activity: activity.clone(),
+    };
+
+    (CallbackMemory::new(data, count_reserve), activity)
+}
 
 /// A view over `bytes`, allocated from a throwaway pool.
 pub(crate) fn view(bytes: &[u8]) -> BytesView {

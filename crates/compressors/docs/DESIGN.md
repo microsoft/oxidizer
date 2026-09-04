@@ -74,10 +74,12 @@ configuration — the chunk size is not a total-memory ceiling.
 
 Two consumption models are offered and they differ in what the *caller* retains:
 
-- Driving a compressor directly yields one bounded chunk at a time, so a consumer
-  that processes and drops each chunk stays bounded however long the stream is.
-  `CompressionStream`, behind the `futures-stream` feature, presents this as a
-  `Stream`.
+- `CompressionStream`, behind the `futures-stream` feature, yields one bounded
+  chunk at a time, so a consumer that processes and drops each chunk stays
+  bounded however long the stream is. This is the incremental model available to
+  callers: the push/pull mechanics underneath it are crate-private (see
+  §10), so a downstream crate reaches them through this adapter rather than
+  directly.
 - The whole-buffer conveniences accumulate the entire result, which is what makes
   them convenient and also what makes them the APIs that need bounding.
 

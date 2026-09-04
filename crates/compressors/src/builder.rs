@@ -156,9 +156,9 @@ impl Default for CompressorBuilder<()> {
 ///
 /// Compressed data can expand by orders of magnitude, so a decompressor pointed at untrusted input
 /// is a memory-exhaustion vector. What bounds that exposure is how much decompressed output is
-/// *retained*, not how much passes through: a decompressor driven directly hands back one bounded
-/// chunk at a time, so a consumer that processes and drops each chunk stays bounded however long
-/// the stream is.
+/// *retained*, not how much passes through: consumed through `CompressionStream` a decompressor
+/// hands back one bounded chunk at a time, so a consumer that processes and drops each chunk stays
+/// bounded however long the stream is.
 ///
 /// Set [`limits`][DecompressorBuilder::limits] with
 /// [`max_output_len`][DecompressorLimits::max_output_len] to what you can afford whenever

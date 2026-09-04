@@ -219,47 +219,16 @@ mod tests {
 
     #[test]
     fn relocating_moves_the_memory_provider_and_leaves_the_pool_alone() {
-        use std::sync::Arc;
-        use std::sync::atomic::{AtomicUsize, Ordering};
-
-        use bytesbuf::BytesBuf;
-        use bytesbuf::mem::Memory;
         use thread_aware::Relocator;
 
-        /// A provider whose relocation is observable, so the forwarding can be asserted.
-        #[derive(Clone, Debug)]
-        struct TrackingMemory {
-            relocations: Arc<AtomicUsize>,
-            inner: GlobalPool,
-        }
+        use crate::testing::counting_memory;
 
-        impl Memory for TrackingMemory {
-            fn reserve(&self, min_bytes: usize) -> BytesBuf {
-                self.inner.reserve(min_bytes)
-            }
-        }
-
-        impl ThreadAware for TrackingMemory {
-            fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
-                self.relocations.fetch_add(1, Ordering::SeqCst);
-                self.inner.relocate(source, destination);
-            }
-        }
-
-        let relocations = Arc::new(AtomicUsize::new(0));
-        let mut resources = Resources::new(TrackingMemory {
-            relocations: Arc::clone(&relocations),
-            inner: GlobalPool::new(),
-        })
-        .with_pool_capacity(4);
+        let (memory, activity) = counting_memory();
+        let mut resources = Resources::new(memory).with_pool_capacity(4);
 
         _ = Relocator::between_threads().relocate(&mut resources);
 
-        assert_eq!(
-            relocations.load(Ordering::SeqCst),
-            1,
-            "the memory provider must be told where it now runs"
-        );
+        assert_eq!(activity.relocations(), 1, "the memory provider must be told where it now runs");
         assert_eq!(
             resources.pool().capacity(),
             4,

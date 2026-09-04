@@ -175,10 +175,11 @@
 //! # Security
 //!
 //! Every one of these formats can expand its input by orders of magnitude, so a decompressor
-//! pointed at untrusted data is a memory-exhaustion vector. A decompressor driven directly never
-//! accumulates -- each chunk it hands back is bounded -- so the exposure is in what the caller
-//! keeps, which makes it the conveniences that buffer a whole result that need bounding. Those add
-//! a 64 MiB output cap and a 1024 concatenated-stream cap to whatever the caller did not set.
+//! pointed at untrusted data is a memory-exhaustion vector. A decompressor consumed through
+//! [`CompressionStream`] never accumulates -- each chunk it hands back is bounded -- so the
+//! exposure is in what the caller keeps, which makes it the conveniences that buffer a whole result
+//! that need bounding. Those add a 64 MiB output cap and a 1024 concatenated-stream cap to whatever
+//! the caller did not set.
 //!
 //! When you buffer decompressed output yourself, set
 //! [`max_output_len`][DecompressorLimits::max_output_len] to what you can afford. That
@@ -295,8 +296,8 @@ use crate::core::{Compress, Compression, Decompress, process};
 /// `format::Compressor` that [`CompressorBuilder::build_format`] returns for a format chosen at
 /// runtime. The direction is part of the bound, so a decompressor will not compile here.
 ///
-/// Prefer driving the engine directly for data that arrives incrementally: this buffers the
-/// entire result before returning.
+/// Prefer [`CompressionStream`] for data that arrives incrementally: this buffers the entire
+/// result before returning.
 ///
 /// # Errors
 ///
