@@ -118,8 +118,7 @@ pin_project! {
     /// use bytesbuf::BytesView;
     /// use bytesbuf::mem::GlobalPool;
     /// use compressors::{CompressionStream, Resources, gzip};
-    /// use futures::StreamExt;
-    /// use futures::stream;
+    /// use futures::{StreamExt, stream};
     ///
     /// # futures::executor::block_on(async {
     /// let memory = GlobalPool::new();
@@ -253,12 +252,13 @@ where
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroU64;
+    use std::pin::pin;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use bytesbuf::BytesBuf;
     use futures::executor::block_on;
-    use futures::task::noop_waker;
+    use futures::task::{ArcWake, noop_waker};
     use futures::{StreamExt, stream};
 
     use super::*;
@@ -270,15 +270,47 @@ mod tests {
         stream::iter(chunks.into_iter().map(Ok))
     }
 
-    fn collect(stream: impl Stream<Item = Result<BytesView>>) -> Result<BytesView> {
-        block_on(async {
-            let chunks: Vec<_> = stream.collect().await;
-            let mut collected = BytesBuf::new();
-            for chunk in chunks {
-                collected.put_bytes(chunk?);
+    /// Caps the polls any test here may need.
+    ///
+    /// A conforming stream terminates, so exceeding this means the code under test is spinning or
+    /// emitting endlessly. Draining without a bound would hang or exhaust memory instead, and a
+    /// hanging test reports nothing at all -- which is also what stops mutation testing from
+    /// reaching a verdict rather than a timeout.
+    const MAX_POLLS: usize = 10_000;
+
+    /// A waker that records whether it was asked to wake anything.
+    #[derive(Debug, Default)]
+    struct CountingWaker(AtomicUsize);
+
+    impl ArcWake for CountingWaker {
+        fn wake_by_ref(arc_self: &Arc<Self>) {
+            arc_self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Drives `stream` to completion and returns everything it yielded.
+    ///
+    /// Polls directly rather than through an executor, so the number of polls is bounded and a
+    /// `Pending` that arranged no wake is a failure rather than a hang.
+    fn drain(stream: impl Stream<Item = Result<BytesView>>) -> Result<BytesView> {
+        let wakes = Arc::new(CountingWaker::default());
+        let waker = futures::task::waker(Arc::clone(&wakes));
+        let mut context = Context::from_waker(&waker);
+        let mut stream = pin!(stream);
+        let mut collected = BytesBuf::new();
+
+        for poll in 0..MAX_POLLS {
+            match stream.as_mut().poll_next(&mut context) {
+                Poll::Ready(Some(item)) => collected.put_bytes(item?),
+                Poll::Ready(None) => return Ok(collected.consume_all()),
+                Poll::Pending => assert!(
+                    wakes.0.load(Ordering::Relaxed) > 0,
+                    "the stream returned Pending on poll {poll} without arranging a wake"
+                ),
             }
-            Ok(collected.consume_all())
-        })
+        }
+
+        panic!("the stream did not finish within {MAX_POLLS} polls");
     }
 
     #[test]
@@ -286,10 +318,9 @@ mod tests {
         let payload = b"streaming round trip ".repeat(500);
 
         let source = ok_stream(payload.chunks(97).map(view).collect());
-        let gzip =
-            collect(CompressionStream::compress(source, gzip::Compressor::new(&Resources::default()))).expect("compression succeeds");
+        let gzip = drain(CompressionStream::compress(source, gzip::Compressor::new(&Resources::default()))).expect("compression succeeds");
 
-        let plain = collect(CompressionStream::decompress(
+        let plain = drain(CompressionStream::decompress(
             ok_stream(vec![gzip]),
             gzip::Decompressor::new(&Resources::default()),
         ))
@@ -310,12 +341,12 @@ mod tests {
             let compressor = crate::CompressorBuilder::new()
                 .build_format(format, &Resources::default())
                 .expect("the default settings are accepted");
-            let compressed = collect(CompressionStream::compress(chunks(), compressor)).expect("compression succeeds");
+            let compressed = drain(CompressionStream::compress(chunks(), compressor)).expect("compression succeeds");
 
             let decompressor = crate::DecompressorBuilder::new()
                 .build_format(format, &Resources::default())
                 .expect("the default settings are accepted");
-            let plain = collect(CompressionStream::decompress(ok_stream(vec![compressed]), decompressor)).expect("decompression succeeds");
+            let plain = drain(CompressionStream::decompress(ok_stream(vec![compressed]), decompressor)).expect("decompression succeeds");
 
             assert_eq!(plain.to_vec(), payload, "{format:?} failed to round trip");
         }
@@ -324,8 +355,7 @@ mod tests {
     #[test]
     fn compresses_an_empty_source() {
         let source = ok_stream(Vec::new());
-        let gzip =
-            collect(CompressionStream::compress(source, gzip::Compressor::new(&Resources::default()))).expect("compression succeeds");
+        let gzip = drain(CompressionStream::compress(source, gzip::Compressor::new(&Resources::default()))).expect("compression succeeds");
 
         assert_eq!(gzip.range(0..2).to_vec(), vec![0x1f, 0x8b]);
     }
@@ -335,7 +365,7 @@ mod tests {
         let compressed = crate::gzip::compress(view(b"one byte at a time"), &Resources::default()).expect("compression succeeds");
         let single_bytes = (0..compressed.len()).map(|i| compressed.range(i..=i)).collect();
 
-        let plain = collect(CompressionStream::decompress(
+        let plain = drain(CompressionStream::decompress(
             ok_stream(single_bytes),
             gzip::Decompressor::new(&Resources::default()),
         ))
@@ -349,7 +379,7 @@ mod tests {
         let first = crate::gzip::compress(view(b"first"), &Resources::default()).expect("compression succeeds");
         let second = crate::gzip::compress(view(b"second"), &Resources::default()).expect("compression succeeds");
 
-        let plain = collect(CompressionStream::decompress(
+        let plain = drain(CompressionStream::decompress(
             ok_stream(vec![first, second]),
             gzip::Decompressor::new(&Resources::default()),
         ))
@@ -362,7 +392,7 @@ mod tests {
     fn reports_a_failing_source_as_a_source_error() {
         let failing = stream::iter(vec![Err(std::io::Error::other("transport died"))]);
 
-        let error = collect(CompressionStream::compress(failing, gzip::Compressor::new(&Resources::default())))
+        let error = drain(CompressionStream::compress(failing, gzip::Compressor::new(&Resources::default())))
             .expect_err("the source failure surfaces");
 
         assert!(error.is_source(), "got {error}");
@@ -377,7 +407,7 @@ mod tests {
     fn accepts_source_errors_convertible_to_a_boxed_error() {
         let failing = stream::iter(vec![Err("transport died".to_owned())]);
 
-        let error = collect(CompressionStream::compress(failing, gzip::Compressor::new(&Resources::default())))
+        let error = drain(CompressionStream::compress(failing, gzip::Compressor::new(&Resources::default())))
             .expect_err("the source failure surfaces");
 
         assert!(error.is_source(), "got {error}");
@@ -392,7 +422,7 @@ mod tests {
         use crate::testing::RejectsPush;
 
         let source = ok_stream(vec![view(b"chunk")]);
-        let error = collect(CompressionStream::compress(source, RejectsPush)).expect_err("the push failure surfaces");
+        let error = drain(CompressionStream::compress(source, RejectsPush)).expect_err("the push failure surfaces");
 
         assert!(error.is_invalid_state(), "got {error}");
     }
@@ -404,7 +434,7 @@ mod tests {
         use crate::testing::RejectsPush;
 
         let source = ok_stream(Vec::new());
-        let error = collect(CompressionStream::compress(source, RejectsPush)).expect_err("a codec that never stops asking is rejected");
+        let error = drain(CompressionStream::compress(source, RejectsPush)).expect_err("a codec that never stops asking is rejected");
 
         assert!(error.is_invalid_state(), "got {error}");
     }
@@ -440,22 +470,34 @@ mod tests {
     #[test]
     fn stays_ended_after_completion() {
         let gzip = crate::gzip::compress(view(b"done"), &Resources::default()).expect("compression succeeds");
-        let mut stream = Box::pin(CompressionStream::decompress(
+        let mut stream = pin!(CompressionStream::decompress(
             ok_stream(vec![gzip]),
             gzip::Decompressor::new(&Resources::default()),
         ));
 
-        block_on(async {
-            while stream.next().await.is_some() {}
-            assert!(stream.next().await.is_none(), "a completed stream stays ended");
-        });
+        let waker = noop_waker();
+        let mut context = Context::from_waker(&waker);
+
+        let mut ended = false;
+        for _ in 0..MAX_POLLS {
+            if matches!(stream.as_mut().poll_next(&mut context), Poll::Ready(None)) {
+                ended = true;
+                break;
+            }
+        }
+        assert!(ended, "the stream did not end within {MAX_POLLS} polls");
+
+        assert!(
+            matches!(stream.as_mut().poll_next(&mut context), Poll::Ready(None)),
+            "a completed stream stays ended"
+        );
     }
 
     #[test]
     fn reports_corrupt_input_from_decompression() {
         let source = ok_stream(vec![view(b"this is not gzip")]);
 
-        let error = collect(CompressionStream::decompress(
+        let error = drain(CompressionStream::decompress(
             source,
             gzip::Decompressor::new(&Resources::default()),
         ))
@@ -472,7 +514,7 @@ mod tests {
             .limits(DecompressorLimits::new().max_output_len(NonZeroU64::new(1024).unwrap()))
             .build(&Resources::default());
 
-        let error = collect(CompressionStream::decompress(ok_stream(vec![gzip]), decompressor)).expect_err("the cap fires");
+        let error = drain(CompressionStream::decompress(ok_stream(vec![gzip]), decompressor)).expect_err("the cap fires");
 
         assert!(error.is_limit_exceeded(), "got {error}");
     }
@@ -482,9 +524,9 @@ mod tests {
         let payload = b"the quick brown fox ".repeat(400);
 
         let compressor = gzip::Compressor::builder().level(Level::HIGH).build(&Resources::default());
-        let gzip = collect(CompressionStream::compress(ok_stream(vec![view(&payload)]), compressor)).expect("compression succeeds");
+        let gzip = drain(CompressionStream::compress(ok_stream(vec![view(&payload)]), compressor)).expect("compression succeeds");
 
-        let plain = collect(CompressionStream::decompress(
+        let plain = drain(CompressionStream::decompress(
             ok_stream(vec![gzip]),
             gzip::Decompressor::new(&Resources::default()),
         ))
@@ -497,9 +539,8 @@ mod tests {
     fn tolerates_empty_chunks_from_the_source() {
         let source = ok_stream(vec![BytesView::new(), view(b"data"), BytesView::new()]);
 
-        let gzip =
-            collect(CompressionStream::compress(source, gzip::Compressor::new(&Resources::default()))).expect("compression succeeds");
-        let plain = collect(CompressionStream::decompress(
+        let gzip = drain(CompressionStream::compress(source, gzip::Compressor::new(&Resources::default()))).expect("compression succeeds");
+        let plain = drain(CompressionStream::decompress(
             ok_stream(vec![gzip]),
             gzip::Decompressor::new(&Resources::default()),
         ))
@@ -522,8 +563,7 @@ mod tests {
             Poll::Pending
         });
 
-        let gzip =
-            collect(CompressionStream::compress(source, gzip::Compressor::new(&Resources::default()))).expect("compression succeeds");
+        let gzip = drain(CompressionStream::compress(source, gzip::Compressor::new(&Resources::default()))).expect("compression succeeds");
 
         assert_eq!(gzip.range(0..2).to_vec(), vec![0x1f, 0x8b]);
     }
