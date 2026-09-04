@@ -267,7 +267,7 @@ checksum = "sha256:ba7456ca88da39f72024dd0616e56d49d1aef7a5d26b81a8b33efccb13321
 [[region]]
 host = ".delta.toml"
 id = "anvil-delta"
-checksum = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+checksum = "sha256:198e5de2539f0c70a5fbb56077b280c6adc6c427dc4899580c050d7d898560d0"
 
 [[region]]
 host = ".gitattributes"
