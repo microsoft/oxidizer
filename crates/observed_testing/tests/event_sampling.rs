@@ -14,8 +14,7 @@ use data_privacy::{DataClass, Sensitive};
 use observed::interop::{DynEvent, emit_dyn_event};
 use observed::metadata::{EventDescription, LogDescription};
 use observed::processing::FieldVisitorFn;
-use observed::sampling::{EventContext, EventSampler, EventSamplingDecision};
-use observed::{Severity, Sink, SinkId, emit, event};
+use observed::{EventSampler, EventSamplingContext, EventSamplingDecision, Severity, Sink, SinkId, emit, event};
 use observed_testing::types::{PiiString, PublicI64};
 use observed_testing::{ExpectedEvent, MockProcessor, TEST_ID, test_emitter};
 
@@ -54,9 +53,9 @@ struct ProbeSampler<F> {
 
 impl<F> EventSampler for ProbeSampler<F>
 where
-    F: for<'a> Fn(&EventContext<'a>) -> EventSamplingDecision + Send + Sync + 'static,
+    F: for<'a> Fn(&EventSamplingContext<'a>) -> EventSamplingDecision + Send + Sync + 'static,
 {
-    fn sample(&self, event: &EventContext<'_>) -> EventSamplingDecision {
+    fn sample(&self, event: &EventSamplingContext<'_>) -> EventSamplingDecision {
         _ = self.calls.fetch_add(1, Ordering::Relaxed);
         (self.decide)(event)
     }
@@ -64,7 +63,7 @@ where
 
 fn probe_sampler<F>(decide: F) -> (Arc<dyn EventSampler>, Arc<AtomicUsize>)
 where
-    F: for<'a> Fn(&EventContext<'a>) -> EventSamplingDecision + Send + Sync + 'static,
+    F: for<'a> Fn(&EventSamplingContext<'a>) -> EventSamplingDecision + Send + Sync + 'static,
 {
     let calls = Arc::new(AtomicUsize::new(0));
     (

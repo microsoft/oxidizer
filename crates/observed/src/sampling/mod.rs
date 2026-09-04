@@ -4,8 +4,8 @@
 //! Event sampling for [`Sink`](crate::Sink)s.
 //!
 //! An [`EventSampler`] decides whether an event reaches a Sink's processors.
-//! The sampler receives an [`EventContext`] with the event description, Sink
-//! identity, and timestamp. Attach one with
+//! The sampler receives an [`EventSamplingContext`] with the event description,
+//! Sink identity, and timestamp. Attach one with
 //! [`Sink::with_event_sampler`](crate::Sink::with_event_sampler).
 //!
 //! The context is borrowed and read-only. A sampler owns its own
@@ -18,8 +18,9 @@
 //!
 //! use observed::metadata::EventDescription;
 //! use observed::processing::{EventProcessor, EventView};
-//! use observed::sampling::{EventContext, EventSampler, EventSamplingDecision};
-//! use observed::{FlushError, Sink, emit, event};
+//! use observed::{
+//!     EventSampler, EventSamplingContext, EventSamplingDecision, FlushError, Sink, emit, event,
+//! };
 //!
 //! #[event("health.check")]
 //! #[info("Health check")]
@@ -34,7 +35,7 @@
 //! struct DropHealthChecks;
 //!
 //! impl EventSampler for DropHealthChecks {
-//!     fn sample(&self, event: &EventContext<'_>) -> EventSamplingDecision {
+//!     fn sample(&self, event: &EventSamplingContext<'_>) -> EventSamplingDecision {
 //!         if event.description().name() == "health.check" {
 //!             EventSamplingDecision::Drop
 //!         } else {
@@ -60,13 +61,13 @@ use crate::metadata::EventDescription;
 
 /// Read-only inputs for one [`EventSampler`] decision.
 #[derive(Debug)]
-pub struct EventContext<'a> {
+pub struct EventSamplingContext<'a> {
     description: &'a EventDescription,
     sink_id: SinkId,
     timestamp: SystemTime,
 }
 
-impl<'a> EventContext<'a> {
+impl<'a> EventSamplingContext<'a> {
     /// Creates context for evaluating an [`EventSampler`] directly.
     #[must_use]
     pub const fn new(description: &'a EventDescription, sink_id: SinkId, timestamp: SystemTime) -> Self {
@@ -114,7 +115,7 @@ pub enum EventSamplingDecision {
 /// Attach an implementation with
 /// [`Sink::with_event_sampler`](crate::Sink::with_event_sampler). The same
 /// sampler instance may be attached to multiple Sinks; use
-/// [`EventContext::sink_id`] to distinguish them.
+/// [`EventSamplingContext::sink_id`] to distinguish them.
 pub trait EventSampler: Send + Sync + 'static {
     /// Decides whether `event` continues to this Sink's processors.
     ///
@@ -125,5 +126,5 @@ pub trait EventSampler: Send + Sync + 'static {
     ///
     /// The call runs on the emitting thread. Emitting internal telemetry from
     /// here is not supported.
-    fn sample(&self, event: &EventContext<'_>) -> EventSamplingDecision;
+    fn sample(&self, event: &EventSamplingContext<'_>) -> EventSamplingDecision;
 }

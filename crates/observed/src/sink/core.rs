@@ -13,7 +13,7 @@ use crate::enrichment::{EnrichmentEntry, EnrichmentTransfer, Guard, Slot};
 use crate::interop::DynEvent;
 use crate::metadata::{EventDescription, SourceLocation};
 use crate::processing::{EventProcessor, EventView, IntermediateEvent};
-use crate::sampling::{EventContext, EventSampler, EventSamplingDecision};
+use crate::sampling::{EventSampler, EventSamplingContext, EventSamplingDecision};
 use crate::{Event, FlushError, SinkFlushError, SinkId};
 
 /// The no-op sink's id returned by [`Sink::noop`]'s `id()` accessor
@@ -228,7 +228,7 @@ impl Sink {
     /// # use observed::metadata::EventDescription;
     /// # use observed::processing::{EventProcessor, EventView};
     /// # use observed::{FlushError, Sink};
-    /// use observed::sampling::{EventContext, EventSampler, EventSamplingDecision};
+    /// use observed::{EventSampler, EventSamplingContext, EventSamplingDecision};
     ///
     /// # struct Exporter;
     /// # impl EventProcessor for Exporter {
@@ -239,7 +239,7 @@ impl Sink {
     /// struct DropHealthChecks;
     ///
     /// impl EventSampler for DropHealthChecks {
-    ///     fn sample(&self, event: &EventContext<'_>) -> EventSamplingDecision {
+    ///     fn sample(&self, event: &EventSamplingContext<'_>) -> EventSamplingDecision {
     ///         if event.description().name() == "health.check" {
     ///             EventSamplingDecision::Drop
     ///         } else {
@@ -539,7 +539,7 @@ impl SingleSinkState {
         let timestamp = self.clock.system_time();
 
         if let Some(sampler) = &self.sampler
-            && sampler.sample(&EventContext::new(description, self.id, timestamp)) == EventSamplingDecision::Drop
+            && sampler.sample(&EventSamplingContext::new(description, self.id, timestamp)) == EventSamplingDecision::Drop
         {
             return;
         }
@@ -704,7 +704,7 @@ mod tests {
     struct AlwaysOffSampler;
 
     impl EventSampler for AlwaysOffSampler {
-        fn sample(&self, _event: &EventContext<'_>) -> EventSamplingDecision {
+        fn sample(&self, _event: &EventSamplingContext<'_>) -> EventSamplingDecision {
             EventSamplingDecision::Drop
         }
     }
