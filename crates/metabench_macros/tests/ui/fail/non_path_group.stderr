@@ -1,0 +1,5 @@
+error: benchmark group type must be a path
+ --> tests/ui/fail/non_path_group.rs:7:6
+  |
+7 | impl [u8; 4] {
+  |      ^^^^^^^

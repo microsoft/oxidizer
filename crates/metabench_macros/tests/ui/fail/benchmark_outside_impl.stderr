@@ -1,0 +1,5 @@
+error: `benchmark` may only be used on a method inside a `benchmarks` impl
+ --> tests/ui/fail/benchmark_outside_impl.rs:7:1
+  |
+7 | fn misplaced() {}
+  | ^^^^^^^^^^^^^^^^^

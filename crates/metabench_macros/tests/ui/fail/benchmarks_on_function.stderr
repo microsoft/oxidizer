@@ -1,0 +1,5 @@
+error: expected `impl`
+ --> tests/ui/fail/benchmarks_on_function.rs:7:1
+  |
+7 | fn misplaced() {}
+  | ^^

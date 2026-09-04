@@ -147,7 +147,6 @@ jobs:
       - name: Examples
         if: success() || failure()
         run: cargo +${{ env.RUST_NIGHTLY }} -Zscript ./scripts/run-examples.rs --cargo-profile dev ${{ needs.delta.outputs.exclude_not_affected }}
-
   static-analysis:
     needs: [delta]
     if: needs.delta.outputs.skip != 'true'
@@ -362,7 +361,7 @@ jobs:
         run: cargo +${{ env.RUST_NIGHTLY }} careful nextest run --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --color always --target ${{ matrix.target }} --no-tests=pass
       - name: Miri (stacked borrows)
         if: success() || failure()
-        # Excluded crates generate code rather than run it, so Miri has no
+        # Most excluded crates generate code rather than run it, so Miri has no
         # aliasing or provenance violations to find in them:
         #
         #   * the `*_macros_impl` crates are proc-macro implementations whose
@@ -371,6 +370,8 @@ jobs:
         #     component, the `trie` module, is used by `routerama` (which depends
         #     on it with `default-features = false`) and is therefore still
         #     interpreted by Miri through `routerama`'s own tests.
+        #   * `metabench` forbids unsafe code and its integration tests exercise
+        #     host filesystem and subprocess orchestration that Miri cannot run.
         #
         # Any `unsafe` these crates *emit* -- for example `data_privacy_macros_impl`
         # emitting `str::from_utf8_unchecked` -- is executed, and so checked, in
@@ -383,7 +384,7 @@ jobs:
         # already `#[cfg_attr(miri, ignore)]`, and the tests that do run cover the
         # runtime transcoding path over `bytes`/`hyper`, which is exactly the kind
         # of buffer handling Miri needs to check.
-        run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --exclude data_privacy_macros_impl --exclude fundle_macros_impl --exclude internity_macros_impl --exclude multitude_macros_impl --exclude observed_macros_impl --exclude ohno_macros_impl --exclude routerama_build --exclude templated_uri_macros_impl --exclude thread_aware_macros_impl --lib --tests
+        run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --exclude data_privacy_macros_impl --exclude fundle_macros_impl --exclude internity_macros_impl --exclude metabench --exclude metabench_macros_impl --exclude multitude_macros_impl --exclude observed_macros_impl --exclude ohno_macros_impl --exclude routerama_build --exclude templated_uri_macros_impl --exclude thread_aware_macros_impl --lib --tests
 
   model-checking:
     if: (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.delta.outputs.skip != 'true'

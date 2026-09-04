@@ -1,0 +1,5 @@
+error: benchmark methods must be synchronous, safe, non-const, and non-generic
+  --> tests/ui/fail/invalid_signature.rs:11:5
+   |
+11 |     async fn work() {}
+   |     ^^^^^^^^^^^^^^^

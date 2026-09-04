@@ -1,0 +1,5 @@
+error: benchmark group names must be non-empty and cannot contain `/`
+ --> tests/ui/fail/invalid_group_name.rs:8:21
+  |
+8 | #[benchmarks(name = "invalid/name")]
+  |                     ^^^^^^^^^^^^^^

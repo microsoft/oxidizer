@@ -1,0 +1,5 @@
+error: duplicate benchmark argument
+ --> tests/ui/fail/duplicate_argument.rs:8:30
+  |
+8 | #[benchmarks(name = "first", name = "second")]
+  |                              ^^^^

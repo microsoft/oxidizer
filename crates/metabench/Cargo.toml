@@ -1,0 +1,83 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "metabench"
+description = "Unified Criterion, Gungraun, perf, and allocation benchmarks."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["benchmark", "criterion", "callgrind", "perf", "oxidizer"]
+categories = ["development-tools::profiling"]
+
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/metabench"
+
+[package.metadata.anvil.miri]
+exclude = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "bitflags::iter::*",
+    "bitflags::traits::*",
+    "metabench_macros::*",
+    "serde_core::de::*",
+    "serde_core::ser::*",
+    "serde_json::error::Error",
+]
+
+# Benchmark-harness crate: external-engine execution is exercised by harness-free
+# benchmark targets rather than the regular test suite.
+[package.metadata.coverage-gate]
+min-lines-percent = 0
+
+[package.metadata.docs.rs]
+all-features = true
+
+[lib]
+bench = false
+
+[dependencies]
+alloc_tracker = { workspace = true }
+bitflags = { workspace = true }
+command-group = { workspace = true }
+criterion = { workspace = true }
+gungraun = { workspace = true, features = ["default"] }
+gungraun-summary = { workspace = true }
+metabench_macros = { workspace = true }
+serde = { workspace = true, features = ["derive", "std"] }
+serde_json = { workspace = true, features = ["std"] }
+tempfile = { workspace = true, features = ["getrandom"] }
+time = { workspace = true, features = ["formatting"] }
+xxhash-rust = { workspace = true, features = ["xxh3"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nix = { workspace = true, features = ["fs", "poll"] }
+
+[dev-dependencies]
+bolero = { workspace = true }
+
+[[bench]]
+name = "stateless_no_cases"
+harness = false
+
+[[bench]]
+name = "stateful_no_cases"
+harness = false
+
+[[bench]]
+name = "stateless_cases"
+harness = false
+
+[[bench]]
+name = "stateful_cases"
+harness = false
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

@@ -1,0 +1,5 @@
+error: benchmark impl blocks may contain only methods
+  --> tests/ui/fail/associated_item.rs:10:5
+   |
+10 |     const VALUE: usize = 1;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^

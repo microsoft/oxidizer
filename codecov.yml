@@ -19,5 +19,6 @@ coverage:
         threshold: "0"
         base: auto
 ignore:
+- "crates/metabench/**/*"
 - "crates/rest_over_grpc_examples/**/*"
 - "crates/rest_over_grpc_tests/**/*"

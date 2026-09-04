@@ -1,0 +1,7 @@
+error: `benchmarks` requires an inherent impl
+  --> tests/ui/fail/trait_impl.rs:13:1
+   |
+13 | / impl Work for Group {
+14 | |     fn work() {}
+15 | | }
+   | |_^
