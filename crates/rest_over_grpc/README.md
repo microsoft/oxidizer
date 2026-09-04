@@ -226,7 +226,7 @@ as an Axum fallback service.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/rest_over_grpc">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb4yyDbhLmywUbUgoeDyjY0hYb_gBd7xtnrJEbm_ruDQCrgu9hZIOCZ2xheWVyZWRlMC4zLjaCbnJlc3Rfb3Zlcl9ncnBjZTAuMi4wg210b3dlci1zZXJ2aWNlZTAuMy4zbXRvd2VyX3NlcnZpY2U
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbvTkfRkZSF74bFkiR2XTYsVUbNpV_rR9ivr4bQqiJonBozh9hZIOCZ2xheWVyZWRlMC4zLjaCbnJlc3Rfb3Zlcl9ncnBjZTAuMi4wg210b3dlci1zZXJ2aWNlZTAuMy4zbXRvd2VyX3NlcnZpY2U
  [__link0]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=handling::Status
  [__link1]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=serving::RestService::new
  [__link10]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=transcoding::Transcode::try_transcode
