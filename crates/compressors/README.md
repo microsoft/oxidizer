@@ -165,15 +165,16 @@ is skipped for the rest, so calling code never has to know which engines benefit
 ## Security
 
 Every one of these formats can expand its input by orders of magnitude, so a decompressor
-pointed at untrusted data is a memory-exhaustion vector. A decompressor driven directly never
-accumulates – each chunk it hands back is bounded – so the exposure is in what the caller
-keeps, which makes it the conveniences that buffer a whole result that need bounding. Those add
-a 64 MiB output cap and a 1024 concatenated-stream cap to whatever the caller did not set.
+pointed at untrusted data is a memory-exhaustion vector. A decompressor consumed through
+[`CompressionStream`][__link16] never accumulates – each chunk it hands back is bounded – so the
+exposure is in what the caller keeps, which makes it the conveniences that buffer a whole result
+that need bounding. Those add a 64 MiB output cap and a 1024 concatenated-stream cap to whatever
+the caller did not set.
 
 When you buffer decompressed output yourself, set
-[`max_output_len`][__link16] to what you can afford. That
+[`max_output_len`][__link17] to what you can afford. That
 guardrail is for the common case, not a substitute for bounding how many bodies you decompress
-at once. [`DecompressorLimits`][__link17] documents what each format bounds by default, and why a ratio
+at once. [`DecompressorLimits`][__link18] documents what each format bounds by default, and why a ratio
 alone is not protection.
 
 Decompression can yield bytes before a checksum or trailer has rejected the stream, so treat
@@ -197,8 +198,8 @@ engines it names:
 
 The deflate-family features share one dependency, so enabling more than one of them costs no
 more than enabling one. A build that needs only `brotli` or only `zstd` never compiles `flate2`
-at all, and a build that names no format at all still gets [`Compression`][__link18], the builders and
-[`Resources`][__link19], which is what a crate that only passes compressors and decompressors around
+at all, and a build that names no format at all still gets [`Compression`][__link19], the builders and
+[`Resources`][__link20], which is what a crate that only passes compressors and decompressors around
 needs.
 
 ## Further reading
@@ -206,10 +207,10 @@ needs.
 Two guides cover the decisions that span several APIs, which no single item’s documentation can
 carry:
 
-* [DESIGN.md][__link20] – the user-visible policies: format selection, what is uniform across formats and
+* [DESIGN.md][__link21] – the user-visible policies: format selection, what is uniform across formats and
   what is not, how decompression is bounded, stream framing, and why the public surface is
   sealed.
-* [IMPLEMENTATION.md][__link21] – the mechanisms behind them: the pump state machine, the unsafe
+* [IMPLEMENTATION.md][__link22] – the mechanisms behind them: the pump state machine, the unsafe
   initialized-output contract every backend adapter must honour, engine pooling and why some
   engines are excluded, and the async driving rules.
 
@@ -219,7 +220,7 @@ carry:
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/compressors">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbvGyq9exCWHYbsh4rqrifGz8bOkCYgdTtkKAbPxEOSl9bOUFhZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbJmPTohdJCH4bCzPyvHmu8aQb6dSQEn7GOrEbgEEeRSMruI9hZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
  [__link0]: https://crates.io/crates/bytesbuf/0.9.0
  [__link1]: https://docs.rs/compressors/0.1.0/compressors/?search=Result
  [__link10]: https://docs.rs/compressors/0.1.0/compressors/fn.decompress.html
@@ -228,13 +229,14 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link13]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressorBuilder::build_format
  [__link14]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
  [__link15]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources::with_pool_capacity
- [__link16]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits::max_output_len
- [__link17]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits
- [__link18]: https://docs.rs/compressors/0.1.0/compressors/?search=core::Compression
- [__link19]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
+ [__link16]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressionStream
+ [__link17]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits::max_output_len
+ [__link18]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits
+ [__link19]: https://docs.rs/compressors/0.1.0/compressors/?search=core::Compression
  [__link2]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
- [__link20]: https://github.com/microsoft/oxidizer/blob/main/crates/compressors/docs/DESIGN.md
- [__link21]: https://github.com/microsoft/oxidizer/blob/main/crates/compressors/docs/IMPLEMENTATION.md
+ [__link20]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
+ [__link21]: https://github.com/microsoft/oxidizer/blob/main/crates/compressors/docs/DESIGN.md
+ [__link22]: https://github.com/microsoft/oxidizer/blob/main/crates/compressors/docs/IMPLEMENTATION.md
  [__link3]: https://crates.io/crates/bytesbuf/0.9.0
  [__link4]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesView
  [__link5]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesBuf
