@@ -491,6 +491,7 @@ impl<A: Allocator + Clone> Arena<A> {
 
     #[inline]
     fn record_reset(&self) {
+        let _ = self;
         #[cfg(feature = "stats")]
         {
             self.provider.reset_generation_stats();

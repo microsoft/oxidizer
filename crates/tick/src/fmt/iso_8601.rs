@@ -194,7 +194,10 @@ mod tests {
     fn parse_err() {
         let err = "date".parse::<Iso8601>().unwrap_err();
 
-        assert!(err.to_string().starts_with("failed to parse year in date"));
+        assert_eq!(
+            err.to_string(),
+            "failed to parse four digit integer as year: invalid digit, expected 0-9 but got d"
+        );
     }
 
     #[test]

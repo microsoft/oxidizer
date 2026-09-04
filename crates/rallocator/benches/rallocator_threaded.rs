@@ -10,6 +10,5 @@ mod rallocator_threaded_workloads;
 rallocator::rallocator!();
 
 fn main() {
-    rallocator::initialize();
     rallocator_threaded_workloads::run("rallocator_threaded");
 }

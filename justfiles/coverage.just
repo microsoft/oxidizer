@@ -14,7 +14,7 @@ coverage-measure:
     cargo +$env:RUST_NIGHTLY llvm-cov clean --workspace
 
     # This will run tests and generate test coverage data files, to be analyzed separately by coverage-report.
-    cargo +$env:RUST_NIGHTLY llvm-cov nextest {{ target_package }} --no-fail-fast --all-targets --no-report --all-features --locked
+    cargo +$env:RUST_NIGHTLY llvm-cov nextest {{ target_package }} --no-fail-fast --lib --bins --tests --examples --no-report --all-features --locked
 
 [script]
 coverage-report:

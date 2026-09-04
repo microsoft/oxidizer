@@ -93,6 +93,7 @@ chumsky = { version = "0.13.0", default-features = false }
 clap = { version = "4.6.4", default-features = false }
 const-hex = { version = "1.15.0", default-features = false }
 criterion = { version = "0.8.1", default-features = false }
+crossterm = { version = "0.29.0", default-features = false }
 ctor = { version = "1.0.8", default-features = false, features = ["proc_macro"] }
 darling = { version = "0.24.0", default-features = false }
 dashmap = { version = "6.1.0", default-features = false }
@@ -121,6 +122,7 @@ futures = { version = "0.3.31", default-features = false }
 futures-channel = { version = "0.3.31", default-features = false }
 futures-core = { version = "0.3.31", default-features = false }
 futures-util = { version = "0.3.31", default-features = false }
+getrandom = { version = "0.3.4", default-features = false }
 gungraun = { version = "0.19.2", default-features = false }
 h3 = { version = "0.0.8", default-features = false }
 h3-quinn = { version = "0.0.10", default-features = false }
@@ -180,6 +182,7 @@ pbjson = { version = "0.9.0", default-features = false }
 pbjson-build = { version = "0.9.0", default-features = false }
 pbjson-types = { version = "0.9.0", default-features = false }
 pct-str = { version = "3.0.1", default-features = false }
+performables = { path = "crates/performables", default-features = false, version = "0.1.0" }
 pin-project = { version = "1.1.8", default-features = false }
 pin-project-lite = { version = "0.2.13", default-features = false }
 plurality = { path = "crates/plurality", default-features = false, version = "0.2.2" }
@@ -197,10 +200,8 @@ ptr_meta = { version = "0.3.1", default-features = false }
 quinn = { version = "0.11.11", default-features = false }
 quote = { version = "1.0.42", default-features = false }
 rallocator = { path = "crates/rallocator", default-features = false, version = "0.1.0" }
-rallocator_cli = { path = "crates/rallocator_cli", default-features = false, version = "0.1.0" }
-rallocator_telemetry = { path = "crates/rallocator_telemetry", default-features = false, version = "0.1.0" }
-rallocator_wire = { path = "crates/rallocator_wire", default-features = false, version = "0.1.0" }
 rapidhash = { version = "4.1.1", default-features = false }
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }
 rcgen = { version = "0.14.5", default-features = false }
 recoverable = { path = "crates/recoverable", default-features = false, version = "0.2.0" }
 regex = { version = "1.12.2", default-features = false }
@@ -218,6 +219,12 @@ same-file = { version = "1.0.6", default-features = false }
 scopeguard = { version = "1.2.0", default-features = false }
 seatbelt = { path = "crates/seatbelt", default-features = false, version = "0.8.0" }
 seatbelt_http = { path = "crates/seatbelt_http", default-features = false, version = "0.8.0" }
+seismograph = { path = "crates/seismograph", default-features = false, version = "0.1.0" }
+seismograph_cli = { path = "crates/seismograph_cli", default-features = false, version = "0.1.0" }
+seismograph_io = { path = "crates/seismograph_io", default-features = false, version = "0.1.0" }
+seismograph_protocol = { path = "crates/seismograph_protocol", default-features = false, version = "0.1.0" }
+seismograph_rallocator = { path = "crates/seismograph_rallocator", default-features = false, version = "0.1.0" }
+seismograph_runtime = { path = "crates/seismograph_runtime", default-features = false, version = "0.1.0" }
 serde = { version = "1.0.228", default-features = false }
 serde_core = { version = "1.0.228", default-features = false }
 serde_html_form = { version = "0.4.1", default-features = false }

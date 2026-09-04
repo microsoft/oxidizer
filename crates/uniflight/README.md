@@ -136,7 +136,7 @@ Use `--save-baseline` and `--baseline` flags to track regressions over time.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/uniflight">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbY6wXwvRz0pQbx6KzuUtboiQbugWkMR1TOusbWXF-IL5rJU9hZIKCbHRocmVhZF9hd2FyZWYwLjExLjCCaXVuaWZsaWdodGUwLjUuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG2OsF8L0c9KUG8eis7lLW6IkG7oFpDEdUzrrG1lxfiC-ayVPYWSCgmx0aHJlYWRfYXdhcmVmMC4xMS4wgml1bmlmbGlnaHRlMC41LjA
  [__link0]: https://docs.rs/uniflight/0.5.0/uniflight/struct.Merger.html
  [__link1]: https://docs.rs/uniflight/0.5.0/uniflight/?search=Merger::execute
  [__link10]: https://doc.rust-lang.org/stable/std/?search=hash::Hash

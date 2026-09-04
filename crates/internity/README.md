@@ -164,7 +164,7 @@ the number of distinct strings is bounded by the 4-byte handle (approximately
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/internity">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb281XdqumF0Qbsj1N6LNUN7gb44baYjiHKVEbLkcFMQULRvFhZIKCaWludGVybml0eWUwLjIuMIJlc2VyZGVnMS4wLjIyOA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG9vNV3arphdEG7I9TeizVDe4G-OG2mI4hylRGy5HBTEFC0bxYWSCgmlpbnRlcm5pdHllMC4yLjCCZXNlcmRlZzEuMC4yMjk
  [__link0]: https://github.com/microsoft/oxidizer/blob/main/crates/internity/docs/PERF.md
  [__link1]: https://github.com/microsoft/oxidizer/blob/main/crates/internity/docs/COMPARISON.md
  [__link10]: https://doc.rust-lang.org/stable/core/?search=hash::BuildHasher
@@ -179,7 +179,7 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link19]: https://docs.rs/internity/0.2.0/internity/?search=LocalLexicon::freeze
  [__link2]: https://docs.rs/internity/0.2.0/internity/?search=Sym
  [__link20]: https://docs.rs/internity/0.2.0/internity/?search=Sym
- [__link21]: https://docs.rs/serde/1.0.228/serde/?search=Serialize
+ [__link21]: https://docs.rs/serde/1.0.229/serde/?search=Serialize
  [__link22]: https://docs.rs/internity/0.2.0/internity/?search=se::SerializeIn
  [__link23]: https://docs.rs/internity/0.2.0/internity/?search=de::DeserializeIn
  [__link24]: https://docs.rs/internity/0.2.0/internity/?search=Reader

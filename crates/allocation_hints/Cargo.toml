@@ -4,10 +4,11 @@
 [package]
 name = "allocation_hints"
 version = "0.1.0"
-description = "Allocator-independent heap ownership and scoped allocation hints."
+description = "Passive allocator-independent scoped allocation hints."
 readme = "README.md"
 keywords = ["allocator", "heap", "memory", "bump"]
 categories = ["memory-management"]
+links = "allocation_hints_runtime"
 
 edition.workspace = true
 rust-version.workspace = true
@@ -16,11 +17,10 @@ license.workspace = true
 homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/allocation_hints"
-links = "allocation_hints_backend"
 
-[dev-dependencies]
-mutants.workspace = true
-static_assertions.workspace = true
+[dependencies]
+performables.workspace = true
+pin-project-lite.workspace = true
 
 [lints]
 workspace = true

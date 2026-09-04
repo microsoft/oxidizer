@@ -48,7 +48,7 @@ type aliases and an extension trait:
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt_http">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbTOk4e6Z0lGUbu-9zWu8YZcwbyVvoEicMTCUbJQkpemmNhqlhZIOCb2h0dHBfZXh0ZW5zaW9uc2YwLjEwLjCCaHNlYXRiZWx0ZTAuOC4wgm1zZWF0YmVsdF9odHRwZTAuOC4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG0zpOHumdJRlG7vvc1rvGGXMG8lb6BInDEwlGyUJKXppjYapYWSDgm9odHRwX2V4dGVuc2lvbnNmMC4xMC4wgmhzZWF0YmVsdGUwLjguMIJtc2VhdGJlbHRfaHR0cGUwLjguMA
  [__link0]: https://crates.io/crates/seatbelt/0.8.0
  [__link1]: https://crates.io/crates/seatbelt/0.8.0
  [__link2]: https://docs.rs/http_extensions/0.10.0/http_extensions/?search=HttpRequest

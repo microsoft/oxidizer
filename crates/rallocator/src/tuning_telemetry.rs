@@ -4,7 +4,7 @@
 use std::fmt;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
-use crate::tunables::{MAX_SIZE_CLASSES, SizeClassLayout, StandardSizeClasses};
+use crate::config::{MAX_SIZE_CLASSES, SizeClassLayout, StandardSizeClasses};
 
 static ACTIVE_SESSION: AtomicUsize = AtomicUsize::new(0);
 static TRANSITION: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -432,13 +432,11 @@ fn recommendations(classes: &[ClassTuningTelemetry], medium: &MediumTuningTeleme
 #[cfg(test)]
 mod tests {
     use std::alloc::{GlobalAlloc, Layout};
-    use std::sync::Mutex;
 
     use super::*;
     use crate::Rallocator;
     use crate::config::Standard;
-
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
+    use crate::telemetry::TEST_LOCK;
 
     struct FailAfter {
         remaining: usize,
@@ -500,7 +498,6 @@ mod tests {
 
     #[test]
     fn allocator_paths_produce_tuning_recommendations() {
-        crate::initialize();
         let _test = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         TuningTelemetry::disable();
         let session_id = TuningTelemetry::enable();
@@ -538,7 +535,6 @@ mod tests {
 
     #[test]
     fn reports_the_selected_size_class_layout() {
-        crate::initialize();
         let _test = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         TuningTelemetry::disable();
         TuningTelemetry::enable();
@@ -552,8 +548,6 @@ mod tests {
     #[test]
     fn records_every_event_and_restores_collection_state() {
         const TEST_CLASS: usize = MAX_SIZE_CLASSES - 1;
-
-        crate::initialize();
 
         let _test = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         TuningTelemetry::disable();
@@ -641,7 +635,6 @@ mod tests {
 
     #[test]
     fn counter_constructors_and_resets_clear_every_field() {
-        crate::initialize();
         let class_counters = ClassCounters::new();
         class_counters.allocations.store(1, Ordering::Relaxed);
         class_counters.tls_cache_hits.store(1, Ordering::Relaxed);
@@ -710,7 +703,6 @@ mod tests {
 
     #[test]
     fn display_includes_active_classes_and_both_scan_recommendations() {
-        crate::initialize();
         let visible = ClassTuningTelemetry {
             allocations: 1,
             tls_cache_hits: 2,
@@ -755,7 +747,6 @@ mod tests {
 
     #[test]
     fn display_propagates_errors_from_every_write() {
-        crate::initialize();
         let mut report = TuningTelemetryReport {
             session_id: 7,
             classes: vec![ClassTuningTelemetry {
@@ -792,7 +783,6 @@ mod tests {
 
     #[test]
     fn recommendations_cover_threshold_scan_and_purge_branches() {
-        crate::initialize();
         let mut classes = vec![class(64), class(256), class(512)];
         classes[0].recycled_batch_hits = 31;
         classes[1].recycled_word_refills = 32;
@@ -828,7 +818,6 @@ mod tests {
 
     #[test]
     fn recommendations_use_bitmap_refills_and_report_missing_scan_data() {
-        crate::initialize();
         let mut classes = StandardSizeClasses::SIZES
             .iter()
             .enumerate()

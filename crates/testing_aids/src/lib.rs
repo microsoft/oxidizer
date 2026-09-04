@@ -13,9 +13,10 @@
 #![allow(clippy::panic, clippy::unwrap_used, missing_docs, reason = "Test code")]
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::mpsc;
 use std::time::Duration;
 use std::{env, process, thread};
+
+use performables::sync::channel::unbounded;
 
 mod io;
 mod macro_expansion;
@@ -66,7 +67,7 @@ where
         return Some(f());
     }
 
-    let (sender, receiver) = mpsc::channel();
+    let (sender, receiver) = unbounded();
 
     // There are multiple ways for the called function to fail:
     // 1. It fails to finish in the allowed time span.
@@ -76,10 +77,10 @@ where
     // will signal an error saying the channel is broken.
     thread::spawn(move || {
         let result = f();
-        sender.send(result).unwrap();
+        let _receiver_abandoned = sender.send_sync(result);
     });
 
-    receiver.recv_timeout(TEST_TIMEOUT).ok()
+    receiver.recv_timeout_sync(TEST_TIMEOUT).ok()
 }
 
 /// Executes a function on the current thread and sets up a watchdog timer that terminates the
@@ -103,12 +104,12 @@ where
         return f();
     }
 
-    let (sender, receiver) = mpsc::channel();
+    let (sender, receiver) = unbounded();
 
     let watchdog = thread::Builder::new()
         .name("test watchdog".to_string())
         .spawn(move || {
-            if receiver.recv_timeout(TEST_TIMEOUT) == Ok(()) {
+            if receiver.recv_timeout_sync(TEST_TIMEOUT) == Ok(()) {
             } else {
                 eprintln!("Test timed out, terminating process.");
                 #[expect(
@@ -124,7 +125,7 @@ where
     let result = catch_unwind(AssertUnwindSafe(f));
 
     // We signal "done" no matter whether it panics or succeeds, all we care about is timeout.
-    sender.send(()).unwrap();
+    sender.send_sync(()).unwrap();
 
     // We must wait for this to finish, otherwise Miri leak detection will be angry at us.
     watchdog.join().unwrap();

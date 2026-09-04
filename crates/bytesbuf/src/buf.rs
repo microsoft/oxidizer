@@ -15,6 +15,7 @@ use smallvec::SmallVec;
 #[cfg(feature = "std")]
 use crate::BytesBufWriter;
 use crate::mem::{Block, BlockMeta, BlockSize, Memory};
+use crate::telemetry::BufferIdentity;
 use crate::{BytesView, MAX_INLINE_SPANS, MemoryGuard, Span, SpanBuilder};
 
 /// Assembles byte sequences, exposing them as [`BytesView`]s.
@@ -90,6 +91,8 @@ use crate::{BytesView, MAX_INLINE_SPANS, MemoryGuard, Span, SpanBuilder};
 /// [Producing Byte Sequences]: crate#producing-byte-sequences
 #[derive(Default)]
 pub struct BytesBuf {
+    identity: BufferIdentity,
+
     // The frozen spans are at the front of the sequence being built and have already become
     // immutable (or already arrived in that form). They will be consumed first.
     //
@@ -193,6 +196,7 @@ impl BytesBuf {
         span_builders_reversed.push(span_builder);
 
         Self {
+            identity: BufferIdentity::new(),
             frozen_spans: SmallVec::new_const(),
             span_builders_reversed,
             len: 0,
@@ -214,6 +218,7 @@ impl BytesBuf {
         let available = span_builders.iter().map(SpanBuilder::remaining_capacity).sum();
 
         Self {
+            identity: BufferIdentity::new(),
             frozen_spans: SmallVec::new_const(),
             // We do not expect the order that we use the span builders to matter,
             // so we do not reverse them here before storing.
@@ -321,6 +326,13 @@ impl BytesBuf {
         let new_len = self.len.checked_add(bytes_len).expect("buffer capacity cannot exceed usize::MAX");
         assert_capacity_within_bounds(new_len, self.available);
 
+        let transferred_identity = if self.is_empty() {
+            bytes.take_identity()
+        } else {
+            self.identity.clear();
+            BufferIdentity::empty_transfer()
+        };
+
         // Only the first span builder may hold unfrozen data (the rest are for spare capacity).
         let total_unfrozen_bytes = NonZero::new(self.span_builders_reversed.last().map_or(0, SpanBuilder::len));
 
@@ -340,6 +352,7 @@ impl BytesBuf {
         self.frozen = self.frozen.wrapping_add(bytes_len);
 
         self.frozen_spans.extend(bytes.into_spans_reversed().into_iter().rev());
+        self.identity.replace(transferred_identity);
     }
 
     /// Tries to write a small byte slice into the buffer by fusing the common case where it fits
@@ -682,7 +695,11 @@ impl BytesBuf {
         // which we guarantee via ensure_frozen() above.
         self.frozen = self.frozen.wrapping_sub(len);
 
-        Some(BytesView::from_spans_reversed(result_spans_reversed))
+        let result = BytesView::from_spans_reversed(result_spans_reversed);
+        if len != 0 {
+            result.replace_identity(self.identity.take());
+        }
+        Some(result)
     }
 
     fn prepare_consume(&self, mut len: usize) -> ConsumeManifest {
@@ -1234,6 +1251,10 @@ impl BytesBuf {
     }
 }
 
+#[expect(
+    clippy::missing_fields_in_debug,
+    reason = "telemetry identity is intentionally excluded from logical buffer formatting"
+)]
 impl core::fmt::Debug for BytesBuf {
     #[cfg_attr(test, mutants::skip)] // We have no API contract here.
     #[cfg_attr(coverage_nightly, coverage(off))] // We have no API contract here.
@@ -1254,7 +1275,8 @@ impl core::fmt::Debug for BytesBuf {
             .collect::<Vec<_>>()
             .join(", ");
 
-        f.debug_struct(type_name::<Self>())
+        let mut debug = f.debug_struct(type_name::<Self>());
+        debug
             .field("len", &self.len)
             .field("frozen", &self.frozen)
             .field("available", &self.available)
@@ -1481,6 +1503,17 @@ impl From<BytesView> for BytesBuf {
     }
 }
 
+#[cfg(feature = "seismograph")]
+impl seismograph_io::Buffer for BytesBuf {
+    fn recording_state(&self) -> seismograph_io::BufferState {
+        seismograph_io::BufferState::new(
+            Some(self.identity.get_or_allocate()),
+            self.len(),
+            self.frozen_spans.len() + usize::from(self.span_builders_reversed.last().is_some_and(|span| !span.is_empty())),
+        )
+    }
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
@@ -1502,6 +1535,25 @@ mod tests {
     const THREE_U64_SIZE: usize = size_of::<u64>() + size_of::<u64>() + size_of::<u64>();
 
     assert_impl_all!(BytesBuf: Send, Sync);
+
+    #[cfg(feature = "seismograph")]
+    #[test]
+    fn seismograph_identity_follows_consumed_data() {
+        use seismograph_io::Buffer;
+
+        let memory = GlobalPool::new();
+        let mut buffer = memory.reserve(16);
+        buffer.put_slice(*b"abcd");
+        let original_id = buffer.recording_state().id();
+
+        let view = buffer.consume(2);
+        let cloned = view.clone();
+
+        assert_eq!(view.recording_state().id(), original_id);
+        assert_ne!(buffer.recording_state().id(), original_id);
+        assert_ne!(cloned.recording_state().id(), original_id);
+        assert_ne!(view.range(..1).recording_state().id(), original_id);
+    }
 
     #[test]
     fn smoke_test() {
@@ -2324,7 +2376,7 @@ mod tests {
         // The point of this is not to say that we expect it to have a specific size but to allow
         // us to easily detect when the size changes and (if we choose to) bless the change.
         // We assume 64-bit pointers - any support for 32-bit is problem for the future.
-        assert_eq!(size_of::<BytesBuf>(), 552);
+        assert_eq!(size_of::<BytesBuf>(), 552 + size_of::<BufferIdentity>());
     }
 
     #[test]

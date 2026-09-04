@@ -163,7 +163,7 @@ impl Service {
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb9z2pqG1bszUbabeCCubn-R0bfUZvm19TIJcbjYMpnR-xLbJhZIOCbHRocmVhZF9hd2FyZWYwLjExLjCCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4wgnN0aHJlYWRfYXdhcmVfbWFjcm9zZjAuMTEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG_c9qahtW7M1G2m3ggrm5_kdG31Gb5tfUyCXG42DKZ0fsS2yYWSDgmx0aHJlYWRfYXdhcmVmMC4xMS4wgnF0aHJlYWRfYXdhcmVfY29yZWUwLjEuMIJzdGhyZWFkX2F3YXJlX21hY3Jvc2YwLjExLjA
  [__link0]: https://docs.rs/thread_aware_core
  [__link1]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
  [__link10]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html

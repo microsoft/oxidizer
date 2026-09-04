@@ -23,11 +23,11 @@ pub(crate) use miri::{
 };
 #[cfg(not(miri))]
 pub(crate) use native::{
-    MEDIUM_MAX_SLICES, MEDIUM_REGION_SIZE, allocation_prefix_for_write, initialize_storage, peek_free_requested, read_free_next,
-    read_free_requested, release_free_metadata, release_storage, write_free_next, write_free_requested,
+    MEDIUM_MAX_SLICES, MEDIUM_REGION_SIZE, allocation_prefix_for_write, initialize_storage, read_free_next, read_free_requested,
+    release_free_metadata, release_storage, write_free_next, write_free_requested,
 };
 #[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
-pub(crate) use platform::{capture_stack, monotonic_millis, unmap};
+pub(crate) use platform::{monotonic_millis, unmap};
 #[cfg(all(not(miri), target_os = "windows"))]
 use win64 as platform;
 

@@ -43,7 +43,7 @@ let options = ClientOptions {
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_azure">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbbmImiFehOUcbSWj7AJ0Zo0QbEU03KDZjzxUbIR9apRz2JO5hZIOCamF6dXJlX2NvcmVlMS4wLjCCZWZldGNoZjAuMTYuMYJrZmV0Y2hfYXp1cmVlMC42LjE
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG25iJohXoTlHG0lo-wCdGaNEGxFNNyg2Y88VGyEfWqUc9iTuYWSDgmphenVyZV9jb3JlZTEuMS4wgmVmZXRjaGYwLjE2LjGCa2ZldGNoX2F6dXJlZTAuNi4x
  [__link0]: https://docs.rs/fetch/0.16.1/fetch/?search=HttpClient
- [__link1]: https://docs.rs/azure_core/1.0.0/azure_core/?search=http::HttpClient
+ [__link1]: https://docs.rs/azure_core/1.1.0/azure_core/?search=http::HttpClient
  [__link2]: https://docs.rs/fetch_azure/0.6.1/fetch_azure/?search=HttpClient

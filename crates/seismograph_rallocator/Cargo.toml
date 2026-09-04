@@ -1,0 +1,28 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "seismograph_rallocator"
+version = "0.1.0"
+description = "Rallocator snapshot source for seismograph."
+readme = "README.md"
+keywords = ["allocator", "memory", "telemetry", "diagnostics"]
+categories = ["development-tools::debugging", "memory-management"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/seismograph_rallocator"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["seismograph::*"]
+
+[dependencies]
+backtrace = { workspace = true, features = ["std"] }
+seismograph.workspace = true
+
+[lints]
+workspace = true

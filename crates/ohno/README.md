@@ -461,7 +461,7 @@ uniformly via [`Labeled::label`][__link26].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/ohno">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbPt0s3Sb8yJUbtV_MElvrqIMbHWX1B21g8MIbor0e9qvU6hVhZIKCZG9obm9lMC41LjCCa29obm9fbWFjcm9zZTAuNS4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEGz7dLN0m_MiVG7VfzBJb66iDGx1l9QdtYPDCG6K9Hvar1OoVYWSCgmRvaG5vZTAuNS4wgmtvaG5vX21hY3Jvc2UwLjQuMA
  [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
  [__link10]: https://doc.rust-lang.org/stable/std/macro.unreachable.html
@@ -470,8 +470,8 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link13]: https://docs.rs/ohno/0.5.0/ohno/?search=ErrorExt::message
  [__link14]: https://docs.rs/ohno/0.5.0/ohno/?search=OhnoCore
  [__link15]: https://doc.rust-lang.org/stable/std/?search=error::Error::source
- [__link16]: https://docs.rs/ohno_macros/0.5.0/ohno_macros/?search=enrich_err
- [__link17]: https://docs.rs/ohno_macros/0.5.0/ohno_macros/?search=enrich_err
+ [__link16]: https://docs.rs/ohno_macros/0.4.0/ohno_macros/?search=enrich_err
+ [__link17]: https://docs.rs/ohno_macros/0.4.0/ohno_macros/?search=enrich_err
  [__link18]: https://docs.rs/ohno/0.5.0/ohno/?search=Enrichable
  [__link19]: https://docs.rs/ohno/0.5.0/ohno/?search=AppError
  [__link2]: https://docs.rs/ohno/0.5.0/ohno/?search=ErrorExt

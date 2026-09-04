@@ -52,7 +52,7 @@ a [`BackendError`][__link7].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_tls">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbQA960tEbzWQbaOpko_VXWgAbMI3Hi90EGwIb3WsswbPp-xVhZIGCaWZldGNoX3Rsc2UwLjQuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG0APetLRG81kG2jqZKP1V1oAGzCNx4vdBBsCG91rLMGz6fsVYWSBgmlmZXRjaF90bHNlMC40LjA
  [__link0]: https://docs.rs/fetch_tls/0.4.0/fetch_tls/?search=TlsOptions
  [__link1]: https://docs.rs/fetch_tls/0.4.0/fetch_tls/?search=TlsOptionsBuilder
  [__link2]: https://docs.rs/fetch_tls/0.4.0/fetch_tls/?search=TlsOptions::builder

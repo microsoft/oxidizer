@@ -45,7 +45,7 @@ let tier = ServiceAdapter::new(my_service);
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet_service">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbcrlL8sHnAG4b1ofYj6gT3UEbqnvnufpKEjIbZAmyA7kxTiRhZIKCbmNhY2hldF9zZXJ2aWNlZTAuNS4wgmtjYWNoZXRfdGllcmUwLjUuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG3K5S_LB5wBuG9aH2I-oE91BG6p757n6ShIyG2QJsgO5MU4kYWSCgm5jYWNoZXRfc2VydmljZWUwLjUuMIJrY2FjaGV0X3RpZXJlMC41LjA
  [__link0]: https://docs.rs/cachet_service/0.5.0/cachet_service/?search=ServiceAdapter
  [__link1]: https://docs.rs/cachet_tier/0.5.0/cachet_tier/?search=CacheTier
  [__link2]: https://docs.rs/cachet_service/0.5.0/cachet_service/?search=ServiceAdapter

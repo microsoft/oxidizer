@@ -25,6 +25,7 @@ allowed_external_types = [
     "bytes::buf::buf_mut::BufMut",
     "thread_aware_core::thread::Thread",
     "thread_aware_core::thread_aware::ThreadAware",
+    "seismograph_io::*",
 ]
 
 [package.metadata.docs.rs]
@@ -37,12 +38,14 @@ default = ["std"]
 std = ["dep:nm", "dep:plurality", "thread_aware/std", "bytes?/std"]
 # Interoperability with the `bytes` crate.
 bytes-compat = ["dep:bytes"]
+seismograph = ["std", "dep:seismograph_io"]
 test-util = ["std"]
 
 [dependencies]
 bytes = { workspace = true, optional = true }
 nm = { workspace = true, optional = true }
 plurality = { workspace = true, optional = true }
+seismograph_io = { workspace = true, optional = true }
 smallvec = { workspace = true, features = ["const_new", "union"] }
 thread_aware = { workspace = true, default-features = false, features = ["derive"] }
 

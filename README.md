@@ -28,7 +28,6 @@ These are the primary crates built out of this repo:
 
 - [`anyspawn`](./crates/anyspawn/README.md) - A generic task spawner compatible with any async runtime.
 - [`anyspawn_azure`](./crates/anyspawn_azure/README.md) - Azure SDK async runtime and process executor backed by an anyspawn spawner and a tick clock.
-- [`allocation_hints`](./crates/allocation_hints/README.md) - Allocator-independent heap ownership and scoped allocation hints.
 - [`bytesbuf`](./crates/bytesbuf/README.md) - Types for creating and manipulating byte sequences.
 - [`bytesbuf_io`](./crates/bytesbuf_io/README.md) - Asynchronous I/O abstractions expressed via `bytesbuf` types.
 - [`cachet`](./crates/cachet/README.md) - A composable, customizable multi-tier caching library with rich feature support.
@@ -49,13 +48,14 @@ These are the primary crates built out of this repo:
 - [`multitude`](./crates/multitude/README.md) - Fast and flexible arena allocator.
 - [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.
 - [`plurality`](./crates/plurality/README.md) - A highly efficient pooling memory allocator.
-- [`rallocator`](./crates/rallocator/README.md) - A high-performance global allocator with scoped heap hints and telemetry.
+- [`rallocator`](./crates/rallocator/README.md) - A high-performance global allocator with passive allocation hints and telemetry.
   - [Supported platforms](./crates/rallocator/README.md#supported-platforms)
   - [Design guide](./crates/rallocator/README.md#design-guide)
   - [Implementation guide](./crates/rallocator/README.md#implementation-guide)
-- [`rallocator_cli`](./crates/rallocator_cli/README.md) - Command-line tools for rallocator telemetry snapshots.
-- [`rallocator_telemetry`](./crates/rallocator_telemetry/README.md) - Owned rallocator snapshot schema and binary encoding.
-- [`rallocator_wire`](./crates/rallocator_wire/README.md) - Allocation-free wire primitives for rallocator telemetry.
+- [`seismograph_cli`](./crates/seismograph_cli/README.md) - Live monitoring and snapshot tools for seismograph telemetry.
+- [`seismograph`](./crates/seismograph/README.md) - High-performance process telemetry with extensible snapshot sources.
+- [`seismograph_protocol`](./crates/seismograph_protocol/README.md) - Local monitor protocol and discovery model for Seismograph.
+- [`seismograph_rallocator`](./crates/seismograph_rallocator/README.md) - Rallocator snapshot source for seismograph.
 - [`recoverable`](./crates/recoverable/README.md) - Recovery information and classification for resilience patterns.
 - [`rest_over_grpc`](./crates/rest_over_grpc/README.md) - Automatically transcode gRPC services to REST/JSON endpoints.
 - [`routerama`](./crates/routerama/README.md) - Blazingly fast HTTP route resolution and query string processing.

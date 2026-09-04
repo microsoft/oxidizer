@@ -29,6 +29,7 @@ min-lines-percent = 0
 
 [dependencies]
 ohno = { workspace = true, features = ["app-err"] }
+performables = { workspace = true, features = ["seismograph"] }
 
 duct = { workspace = true }
 serde = { workspace = true, features = ["derive", "alloc"] }

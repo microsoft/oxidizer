@@ -22,6 +22,7 @@ Types for creating and manipulating byte sequences.
   `alloc` and pointer-width atomics.
 * **`bytes-compat`** enables interoperability with the `bytes` crate and is available with or
   without `std`.
+* **`seismograph`** enables lazy logical buffer identities for I/O recording and implies `std`.
 * **`test-util`** enables memory providers intended for tests and implies `std`.
 
 <img src="https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf/docs/diagrams/Introduction.png" alt="Diagram showing byte sequences inside BytesView and BytesBuf" />
@@ -487,7 +488,7 @@ See the `mem::testing` module for details (requires `test-util` Cargo feature).
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/bytesbuf">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbfyF05lgqtFgbrQha6QGqA3AbwqFDXpFbd_wbL166axa7WHZhZIGCaGJ5dGVzYnVmZTAuOS4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG5jNMLa9cgsrG3FkSiEE4MwkG27dR25FYNAWGxOFHPLxd2YDYWSBgmhieXRlc2J1ZmUwLjkuMA
  [__link0]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesBuf
  [__link1]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesView
  [__link10]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesView

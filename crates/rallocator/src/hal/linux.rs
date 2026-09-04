@@ -59,23 +59,6 @@ pub(crate) fn monotonic_millis() -> u64 {
         .saturating_add(time.tv_nsec as u64 / 1_000_000)
 }
 
-pub(crate) fn capture_stack(frames: &mut [usize], limit: usize) -> usize {
-    const SKIPPED_FRAMES: usize = 4;
-    const MAX_CAPTURED_FRAMES: usize = 64;
-
-    let limit = limit.min(frames.len()).min(MAX_CAPTURED_FRAMES - SKIPPED_FRAMES);
-    if limit == 0 {
-        return 0;
-    }
-    let mut captured_frames = [0_usize; MAX_CAPTURED_FRAMES];
-    let frame_count = i32::try_from(limit + SKIPPED_FRAMES).expect("frame count is bounded by the 64-entry local array");
-    let captured = unsafe { libc::backtrace(captured_frames.as_mut_ptr().cast(), frame_count) }.max(0) as usize;
-    let skipped = captured.min(SKIPPED_FRAMES);
-    let retained = (captured - skipped).min(limit);
-    frames[..retained].copy_from_slice(&captured_frames[skipped..skipped + retained]);
-    retained
-}
-
 fn map_aligned(size: usize, protection: i32) -> *mut u8 {
     map_aligned_with_page_size(size, protection, page_size())
 }
@@ -140,7 +123,6 @@ mod tests {
 
     #[test]
     fn stack_capture_clamps_to_its_fixed_buffer() {
-        crate::initialize();
         let mut frames = [0; 128];
         assert!(capture_stack(&mut frames, usize::MAX) <= 60);
     }

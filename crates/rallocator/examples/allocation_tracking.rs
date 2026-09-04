@@ -14,21 +14,21 @@ use std::collections::HashMap;
 use std::hint::black_box;
 use std::sync::Arc;
 
-use allocation_hints::heap::Heap;
-use allocation_hints::heap::bump::Options as BumpOptions;
+use allocation_hints::heaps::{Heap, bump};
 use allocation_hints::with_hint;
-use rallocator::telemetry::{snapshot, track_callers};
+use seismograph::recorder::Configuration;
 
-rallocator::config!(TrackingConfig {
-    track_callers: true,
-    track_aggregates: true,
-});
-
-rallocator::rallocator!(TrackingConfig);
+rallocator::rallocator!();
 
 fn main() {
-    rallocator::initialize();
-    track_callers(true);
+    seismograph::recorder(Configuration {
+        allocations: seismograph::recorder::RecordingPolicy {
+            enabled: true,
+            capture_backtraces: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    });
 
     let workers: Vec<_> = (0..4)
         .map(|worker| std::thread::spawn(move || worker_allocations(worker)))
@@ -38,16 +38,16 @@ fn main() {
         .map(|worker| worker.join().expect("worker must not panic"))
         .collect();
 
-    let heap = Heap::from_thread_pool(BumpOptions::new());
+    let heap = Heap::bump(bump::Options::new());
     let scoped = with_hint(&heap, || vec![1, 2, 3]);
-    let live = snapshot().unwrap();
-    live.write_file("snapshot-live.rallocator").unwrap();
+    let live = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+    live.write_file("snapshot-live.seismograph").unwrap();
 
     drop((scoped, retained));
-    track_callers(false);
+    seismograph::recorder(Configuration::default());
 
-    let after_drop = snapshot().unwrap();
-    after_drop.write_file("snapshot-after-drop.rallocator").unwrap();
+    let after_drop = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+    after_drop.write_file("snapshot-after-drop.seismograph").unwrap();
 }
 
 #[inline(never)]

@@ -3,11 +3,11 @@
 
 use std::io::Read;
 use std::process::{Command, Stdio};
-use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
 use ohno::{AppError, IntoAppError};
+use performables::sync::channel;
 
 /// Outcome of running a child process with a timeout
 #[derive(Debug)]
@@ -56,12 +56,12 @@ pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<RunResult
     // Spawn a thread that blocks on child.wait() and forwards the exit status
     // via a channel. The calling thread then uses recv_timeout as the timer,
     // eliminating polling with short sleeps entirely.
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = channel::unbounded();
     let wait_handle = thread::spawn(move || {
-        let _ = tx.send(child.wait());
+        let _receiver_closed = tx.send_sync(child.wait());
     });
 
-    let outcome = match rx.recv_timeout(timeout) {
+    let outcome = match rx.recv_timeout_sync(timeout) {
         Ok(Ok(status)) => {
             if status.success() {
                 Outcome::Success
@@ -70,14 +70,15 @@ pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<RunResult
             }
         }
         Ok(Err(e)) => return Err(e).into_app_err("failed to wait for child process"),
-        Err(mpsc::RecvTimeoutError::Timeout) => {
+        Err(error) if error.is_timeout() => {
             kill_by_pid(pid);
             let _ = wait_handle.join();
             Outcome::TimedOut
         }
-        Err(mpsc::RecvTimeoutError::Disconnected) => {
+        Err(error) if error.is_closed() => {
             ohno::bail!("wait thread exited unexpectedly without sending a result");
         }
+        Err(error) => ohno::bail!("unexpected wait channel failure: {error}"),
     };
 
     // Reader threads finish once the child closes its pipes (always true after
