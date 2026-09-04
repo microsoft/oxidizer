@@ -13,7 +13,7 @@
 //! A `Compressor` is reached through its builder and driven through
 //! [`Compression`][crate::core::Compression]; it has no inherent
 //! methods of its own. That is what lets code be written once against the trait and used with
-//! any format, including a boxed one whose format was chosen at runtime.
+//! any format, including the runtime-format `Compressor` the `format` module provides.
 //!
 //! # Format-specific settings
 //!
@@ -29,8 +29,9 @@
 //! # Fallible builds
 //!
 //! Most engines take their configuration without validating it, so their builders cannot fail.
-//! Brotli and zstd validate as they apply it, so theirs return a [`BuildError`][crate::BuildError].
-//! Each format declares which of the two it is and gets the matching signatures.
+//! zstd's native library validates as it applies it, so its compressor build returns a
+//! [`BuildError`][crate::BuildError]. Each format declares which of the two it is and gets the
+//! matching signatures.
 
 /// Generates one format's compressor builds and its whole-buffer `compress`.
 ///
@@ -141,11 +142,16 @@ macro_rules! define_compressor_build {
         ///
         /// # Errors
         ///
-        /// Returns an error if the underlying compression engine fails.
+        /// Returns an error if the engine rejects the default configuration, or if compression
+        /// itself fails.
         pub fn compress(input: impl $crate::InputData, resources: &$crate::Resources) -> Result<BytesView> {
             let input = $crate::InputData::into_view(input, resources);
+            // Built through the fallible path rather than `Compressor::new`, which panics on a
+            // rejection: this function already returns `Result`, so a caller should never have to
+            // catch a panic for something it can be told about.
+            let compressor = Compressor::builder().build(resources)?;
 
-            $crate::compress(input, Compressor::new(resources))
+            $crate::compress(input, compressor)
         }
     };
 }
@@ -406,7 +412,7 @@ macro_rules! define_format {
         /// compressed with a bounded working set.
         ///
         /// The methods live on the trait rather than here, so code written against it works with
-        /// every format, and with a boxed compressor whose format was picked at runtime.
+        /// every format, and with the runtime-format compressor that `build_format` returns.
         #[derive(Debug)]
         pub struct Compressor {
             pump: Pump,

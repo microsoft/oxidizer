@@ -15,6 +15,26 @@ use crate::limits::FormatLimits;
 use crate::pool::{EngineKey, Pool};
 use crate::trailing::TrailingData;
 
+/// Narrows one engine-counter delta to the `usize` the pump works in.
+///
+/// Both slices handed to the engine are bounded by `usize`, so a delta that does not fit means the
+/// engine's counters disagree with the buffers it was given. Saturating would be the wrong answer:
+/// `produced` is the count [`Pump::pull`][crate::engine::Pump::pull] declares initialized, so
+/// over-reporting it is a soundness question rather than a cosmetic one, and `consumed` decides
+/// whether the pump believes it made progress.
+///
+/// On a 64-bit target the conversion is a no-op and this cannot fail, which is why it is excluded
+/// from coverage; it earns its place on narrower targets.
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn step_count(delta: u64) -> Result<usize> {
+    usize::try_from(delta).map_err(|error| {
+        Error::invalid_state(format!(
+            "the flate engine reported a {delta}-byte step, which does not fit in a pointer-sized count"
+        ))
+        .with_source(error)
+    })
+}
+
 /// Drives `flate2`'s encoder for one compressed stream.
 ///
 /// Owns the engine for the whole operation and hands it back to the pool on drop, so `compress` is
@@ -73,8 +93,8 @@ unsafe impl Codec for FlateCompress {
             .compress_uninit(input, output, flush)
             .map_err(|error| Error::invalid_state("the compression engine reported a failure").with_source(error))?;
 
-        let consumed = usize::try_from(compress.total_in() - before_in).unwrap_or(usize::MAX);
-        let produced = usize::try_from(compress.total_out() - before_out).unwrap_or(usize::MAX);
+        let consumed = step_count(compress.total_in() - before_in)?;
+        let produced = step_count(compress.total_out() - before_out)?;
 
         let step = match operation {
             _ if status == Status::StreamEnd => Step::StreamEnd,
@@ -191,8 +211,8 @@ unsafe impl Codec for FlateDecompress {
                 Error::corrupt_data(format!("the compressed data is not a valid {} stream", wrapper.name())).with_source(error)
             })?;
 
-        let consumed = usize::try_from(decompress.total_in() - before_in).unwrap_or(usize::MAX);
-        let produced = usize::try_from(decompress.total_out() - before_out).unwrap_or(usize::MAX);
+        let consumed = step_count(decompress.total_in() - before_in)?;
+        let produced = step_count(decompress.total_out() - before_out)?;
 
         let step = if status == Status::StreamEnd {
             Step::StreamEnd
