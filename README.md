@@ -35,6 +35,7 @@ These are the primary crates built out of this repo:
 - [`cachet_memory`](./crates/cachet_memory/README.md) - In-memory cache tier backed by Moka for the cachet caching library.
 - [`cachet_service`](./crates/cachet_service/README.md) - Layered service integration for the cachet caching library.
 - [`cachet_tier`](./crates/cachet_tier/README.md) - Core cache tier trait and abstractions for building cache backends.
+- [`compressors`](./crates/compressors/README.md) - Streaming compression and decompression over bytesbuf byte sequences.
 - [`data_privacy`](./crates/data_privacy/README.md) - Mechanisms to classify, manipulate, and redact sensitive data.
 - [`fetch`](./crates/fetch/README.md) - "Universal, composable and resilient HTTP client."
 - [`fetch_azure`](./crates/fetch_azure/README.md) - Azure SDK HTTP transport backed by the fetch HTTP client.

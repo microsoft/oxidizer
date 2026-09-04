@@ -1,0 +1,98 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "compressors"
+version = "0.1.0"
+description = "Streaming compression and decompression over bytesbuf byte sequences"
+readme = "README.md"
+keywords = ["compression", "gzip", "streaming", "zero-copy"]
+categories = ["compression", "network-programming"]
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/compressors"
+
+# Miri cannot run all of this crate's backends. `zstd-safe` binds the native zstd library, and Miri
+# cannot call foreign functions; `flate2`'s `zlib-rs` backend has an open soundness bug that trips
+# Stacked Borrows whenever a Deflate or Inflate is dropped
+# (https://github.com/trifectatechfoundation/zlib-rs/issues/491). Brotli is pure Rust and would run;
+# excluding the whole crate rather than maintaining a brotli-only Miri configuration is a separate
+# decision, taken because the per-format `cfg(miri)` scaffolding the rest would need costs more than
+# the remaining coverage is worth.
+[package.metadata.anvil.miri]
+exclude = true
+
+[package.metadata.docs.rs]
+all-features = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "bytesbuf::*",
+    "futures_core::stream::Stream",
+    "recoverable::*",
+    "thread_aware_core::thread_aware::ThreadAware",
+]
+
+[features]
+brotli = ["dep:brotli"]
+# No format is enabled by default: a dependent names the ones it actually speaks, so a build that
+# only needs brotli never compiles flate2, and vice versa. A build with no format at all still gets
+# the shared contract and builders, which is what a crate that only re-exports them needs.
+default = []
+deflate = ["dep:flate2"]
+futures-stream = ["dep:futures-core", "dep:pin-project-lite"]
+gzip = ["dep:flate2"]
+zlib = ["dep:flate2"]
+zstd = ["dep:zstd-safe"]
+
+[dependencies]
+brotli = { workspace = true, features = ["std"], optional = true }
+bytesbuf = { workspace = true, features = ["std"] }
+# `zlib-rs` rather than flate2's default `miniz_oxide`: it is the fastest of flate2's backends and,
+# unlike the `zlib`/`zlib-ng` bindings, is pure Rust, so the deflate family stays free of C on a path
+# that parses untrusted input. The cost is recorded above -- it is what keeps this crate out of Miri.
+flate2 = { workspace = true, features = ["zlib-rs"], optional = true }
+futures-core = { workspace = true, optional = true }
+pin-project-lite = { workspace = true, optional = true }
+recoverable = { workspace = true }
+thread_aware = { workspace = true, features = ["std"] }
+zstd-safe = { workspace = true, features = ["std"], optional = true }
+
+[build-dependencies]
+cfg_aliases = { workspace = true }
+
+[dev-dependencies]
+alloc_tracker = { workspace = true }
+brotli = { workspace = true, features = ["std"] }
+bytesbuf = { workspace = true, features = ["std", "test-util"] }
+criterion = { workspace = true }
+flate2 = { workspace = true, features = ["zlib-rs"] }
+futures = { workspace = true, features = ["executor"] }
+futures-core = { workspace = true }
+mutants = { workspace = true }
+pin-project-lite = { workspace = true }
+thread_aware = { path = "../thread_aware", default-features = false, features = ["std", "test-utils"] }
+tick = { path = "../tick", features = ["tokio", "test-util"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }
+tokio-stream = { workspace = true }
+zstd-safe = { workspace = true, features = ["std"] }
+
+[[example]]
+name = "round_trip"
+required-features = ["brotli", "deflate", "gzip", "zlib", "zstd"]
+
+[[example]]
+name = "tokio_stream"
+required-features = ["futures-stream", "gzip"]
+
+[[bench]]
+harness = false
+name = "compressors_codec"
+required-features = ["brotli", "deflate", "futures-stream", "gzip", "zlib", "zstd"]
+
+[lints]
+workspace = true
