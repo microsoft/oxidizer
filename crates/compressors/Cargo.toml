@@ -30,7 +30,13 @@ exclude = true
 all-features = true
 
 [package.metadata.cargo_check_external_types]
-allowed_external_types = ["bytesbuf::*", "futures_core::stream::Stream", "recoverable::*"]
+allowed_external_types = [
+    "bytesbuf::*",
+    "futures_core::stream::Stream",
+    "recoverable::*",
+    "thread_aware_core::thread::Thread",
+    "thread_aware_core::thread_aware::ThreadAware",
+]
 
 [features]
 brotli = ["dep:brotli"]
@@ -54,6 +60,7 @@ flate2 = { workspace = true, features = ["zlib-rs"], optional = true }
 futures-core = { workspace = true, optional = true }
 pin-project-lite = { workspace = true, optional = true }
 recoverable = { workspace = true }
+thread_aware = { workspace = true, features = ["std"] }
 zstd-safe = { workspace = true, features = ["std"], optional = true }
 
 [dev-dependencies]
@@ -66,6 +73,7 @@ futures = { workspace = true, features = ["executor"] }
 futures-core = { workspace = true }
 mutants = { workspace = true }
 pin-project-lite = { workspace = true }
+thread_aware = { path = "../thread_aware", default-features = false, features = ["std", "test-utils"] }
 tick = { path = "../tick", features = ["tokio", "test-util"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }
 tokio-stream = { workspace = true }

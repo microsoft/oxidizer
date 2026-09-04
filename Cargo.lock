@@ -1155,6 +1155,7 @@ dependencies = [
  "mutants",
  "pin-project-lite",
  "recoverable",
+ "thread_aware",
  "tick",
  "tokio",
  "tokio-stream",

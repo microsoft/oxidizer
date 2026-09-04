@@ -11,6 +11,7 @@
 use std::sync::OnceLock;
 
 use bytesbuf::mem::{GlobalPool, MemoryShared, OpaqueMemory};
+use thread_aware::{Thread, ThreadAware};
 
 use crate::pool::Pool;
 
@@ -32,6 +33,15 @@ use crate::pool::Pool;
 /// Recycling is transparent: it applies to the engines that benefit and quietly skips the rest, so
 /// calling code never has to know which is which, and which engines those are can change without
 /// any change to calling code.
+///
+/// # Relocation
+///
+/// [`ThreadAware`] is implemented, so a runtime that moves work between threads can tell these
+/// resources where they now run. The two halves are treated differently on purpose: the memory
+/// provider is relocated, since a NUMA-aware or per-thread provider will want to allocate from the
+/// destination's memory, while the engine pool is left untouched. Every clone shares one pool, an
+/// idle engine is plain memory with no affinity to where it was built, and discarding it on a move
+/// would throw away exactly what this type exists to retain.
 ///
 /// # Examples
 ///
@@ -136,6 +146,24 @@ impl Default for Resources {
     }
 }
 
+/// Written out rather than derived, because the two halves want opposite treatment and the
+/// difference is the interesting part.
+impl ThreadAware for Resources {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+        // The memory provider is the half that can act on a move: a NUMA-aware or per-thread
+        // provider wants to allocate from the destination's memory from here on. Forwarding is all
+        // this type has to do -- what that means is the provider's decision, not ours.
+        self.memory.relocate(source, destination);
+
+        // The pool deliberately does nothing. Every clone of these resources shares one pool, by
+        // design, so a pool is not owned by the thread that happens to be moving and has no
+        // per-thread state to migrate. An idle engine is a window and a set of hash tables -- plain
+        // memory, reachable from anywhere, with no affinity to where it was built. Draining or
+        // re-homing it on relocation would discard exactly the state this type exists to retain,
+        // and would do so on every move.
+    }
+}
+
 /// The one global memory provider this crate creates, shared by every [`Resources`] that does not
 /// name its own.
 fn global_memory() -> &'static GlobalPool {
@@ -181,5 +209,55 @@ mod tests {
             "the memory provider must be reachable"
         );
         assert!(format!("{resources:?}").contains("Resources"));
+    }
+
+    #[test]
+    fn relocating_moves_the_memory_provider_and_leaves_the_pool_alone() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        use bytesbuf::BytesBuf;
+        use bytesbuf::mem::Memory;
+        use thread_aware::Relocator;
+
+        /// A provider whose relocation is observable, so the forwarding can be asserted.
+        #[derive(Clone, Debug)]
+        struct TrackingMemory {
+            relocations: Arc<AtomicUsize>,
+            inner: GlobalPool,
+        }
+
+        impl Memory for TrackingMemory {
+            fn reserve(&self, min_bytes: usize) -> BytesBuf {
+                self.inner.reserve(min_bytes)
+            }
+        }
+
+        impl ThreadAware for TrackingMemory {
+            fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+                self.relocations.fetch_add(1, Ordering::SeqCst);
+                self.inner.relocate(source, destination);
+            }
+        }
+
+        let relocations = Arc::new(AtomicUsize::new(0));
+        let mut resources = Resources::new(TrackingMemory {
+            relocations: Arc::clone(&relocations),
+            inner: GlobalPool::new(),
+        })
+        .with_pool_capacity(4);
+
+        _ = Relocator::between_threads().relocate(&mut resources);
+
+        assert_eq!(
+            relocations.load(Ordering::SeqCst),
+            1,
+            "the memory provider must be told where it now runs"
+        );
+        assert_eq!(
+            resources.pool().capacity(),
+            4,
+            "relocation must not disturb the pool, whose whole purpose is to outlive a move"
+        );
     }
 }

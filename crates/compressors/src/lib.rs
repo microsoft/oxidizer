@@ -216,15 +216,15 @@
 //! Two guides cover the decisions that span several APIs, which no single item's documentation can
 //! carry:
 //!
-//! * [design.md] -- the user-visible policies: format selection, what is uniform across formats and
+//! * [DESIGN.md] -- the user-visible policies: format selection, what is uniform across formats and
 //!   what is not, how decompression is bounded, stream framing, and why the public surface is
 //!   sealed.
-//! * [implementation.md] -- the mechanisms behind them: the pump state machine, the unsafe
+//! * [IMPLEMENTATION.md] -- the mechanisms behind them: the pump state machine, the unsafe
 //!   initialized-output contract every backend adapter must honour, engine pooling and why some
 //!   engines are excluded, and the async driving rules.
 //!
-//! [design.md]: https://github.com/microsoft/oxidizer/blob/main/crates/compressors/docs/design.md
-//! [implementation.md]: https://github.com/microsoft/oxidizer/blob/main/crates/compressors/docs/implementation.md
+//! [DESIGN.md]: https://github.com/microsoft/oxidizer/blob/main/crates/compressors/docs/DESIGN.md
+//! [IMPLEMENTATION.md]: https://github.com/microsoft/oxidizer/blob/main/crates/compressors/docs/IMPLEMENTATION.md
 
 #[cfg(any(test, feature = "brotli"))]
 pub mod brotli;

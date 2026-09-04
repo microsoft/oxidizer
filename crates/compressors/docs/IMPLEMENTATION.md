@@ -1,7 +1,7 @@
 # `compressors` implementation
 
 This document describes the internal mechanisms that enforce the policies in
-[design.md](design.md): the pump, the codec safety boundary, backend lifecycle,
+[DESIGN.md](DESIGN.md): the pump, the codec safety boundary, backend lifecycle,
 pooling, and the async driving rules. It covers the invariants that span modules;
 anything explainable from one source file is documented there instead.
 

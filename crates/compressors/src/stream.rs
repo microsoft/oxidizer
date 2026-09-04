@@ -293,8 +293,8 @@ mod tests {
     /// Polls directly rather than through an executor, so the number of polls is bounded and a
     /// `Pending` that arranged no wake is a failure rather than a hang.
     fn drain(stream: impl Stream<Item = Result<BytesView>>) -> Result<BytesView> {
-        let wakes = Arc::new(CountingWaker::default());
-        let waker = futures::task::waker(Arc::clone(&wakes));
+        let scheduled = Arc::new(CountingWaker::default());
+        let waker = futures::task::waker(Arc::clone(&scheduled));
         let mut context = Context::from_waker(&waker);
         let mut stream = pin!(stream);
         let mut collected = BytesBuf::new();
@@ -304,7 +304,7 @@ mod tests {
                 Poll::Ready(Some(item)) => collected.put_bytes(item?),
                 Poll::Ready(None) => return Ok(collected.consume_all()),
                 Poll::Pending => assert!(
-                    wakes.0.load(Ordering::Relaxed) > 0,
+                    scheduled.0.load(Ordering::Relaxed) > 0,
                     "the stream returned Pending on poll {poll} without arranging a wake"
                 ),
             }

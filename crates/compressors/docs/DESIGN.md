@@ -4,7 +4,7 @@ This document records the cross-cutting, user-visible decisions of the
 `compressors` crate — the ones that span several APIs and cannot be read off any
 single item. Per-item behaviour lives in the rustdoc and is not repeated here.
 The mechanisms that enforce these decisions are described separately in
-[implementation.md](implementation.md).
+[IMPLEMENTATION.md](IMPLEMENTATION.md).
 
 ## 1. Purpose
 
@@ -134,8 +134,16 @@ disabling it.
 Which engines are recycled is deliberately *not* part of the contract. The pool
 retains the state that is expensive enough to be worth retaining and rebuilds the
 rest, so calling code never has to know which is which and the set can change
-without any change to calling code. [implementation.md](implementation.md)
+without any change to calling code. [IMPLEMENTATION.md](IMPLEMENTATION.md)
 records the current set and why each entry is where it is.
+
+`Resources` implements `ThreadAware`, and the two halves are treated
+differently. The memory provider is relocated, because a NUMA-aware or
+per-thread provider will want to allocate from the destination's memory from
+then on. The pool is not: every clone shares one, an idle engine is a window and
+a set of hash tables with no affinity to where it was built, and re-homing or
+draining it on a move would discard the very state the type exists to retain —
+on every move.
 
 ## 9. Errors
 
