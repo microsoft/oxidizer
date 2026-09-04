@@ -125,6 +125,7 @@ gungraun = { version = "0.19.2", default-features = false }
 h3 = { version = "0.0.8", default-features = false }
 h3-quinn = { version = "0.0.10", default-features = false }
 hashbrown = { version = "0.17.0", default-features = false }
+heapwatch = { path = "crates/heapwatch", default-features = false, version = "0.1.0" }
 heck = { version = "0.5.0", default-features = false }
 http = { version = "1.4.1", default-features = false, features = ["std"] }
 http-body = { version = "1.0.1", default-features = false }
