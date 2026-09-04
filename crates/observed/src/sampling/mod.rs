@@ -89,7 +89,7 @@ impl<'a> EventContext<'a> {
 
     /// Returns the timestamp this Sink assigned to the event.
     #[must_use]
-    pub fn timestamp(&self) -> SystemTime {
+    pub const fn timestamp(&self) -> SystemTime {
         self.timestamp
     }
 }
