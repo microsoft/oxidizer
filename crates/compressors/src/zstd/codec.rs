@@ -27,7 +27,12 @@ use crate::zstd::{CompressionLevel, Zstd};
 /// Reach the levels outside this range, including zstd's negative fast levels, with
 /// [`CompressorBuilder::compression_level`][crate::zstd::CompressorBuilder::compression_level].
 fn compression_level(level: Level) -> i32 {
-    // 0..=6 spans zstd 1..=3 (its default); 7..=9 climbs to 12, past which cost rises sharply.
+    // Two fixed points and an interpolation, rather than a measured curve. `Level::DEFAULT` must
+    // land on zstd's own default of 3, and `Level::MAX` must stop short of the expensive top of the
+    // native range. The entries between them are chosen for a smooth, monotonic climb with the
+    // steps widening towards the top, where each additional level costs more; they are not
+    // individually derived from a benchmark, so retuning one is a policy change rather than a
+    // regression against a recorded measurement.
     const MAPPING: [i32; 10] = [1, 1, 2, 2, 3, 3, 3, 6, 9, 12];
 
     MAPPING[usize::from(level.get().min(9))]

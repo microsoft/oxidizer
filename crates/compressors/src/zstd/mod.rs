@@ -41,6 +41,13 @@ use crate::zstd::codec::{ZstdCompress, ZstdDecompress};
 /// deflate family. That ratio is a coarse backstop rather than real protection; what bounds
 /// untrusted zstd is the cap the buffering conveniences apply, see
 /// [`DecompressorLimits`][crate::DecompressorLimits].
+///
+/// The number itself is a policy choice, not a property of the format: any sufficiently
+/// compressible input can legitimately expand by a very large factor, so no ratio both admits
+/// legitimate data and excludes a bomb. The rule it encodes is "high enough that no realistic
+/// payload trips it, low enough to still catch an obviously degenerate stream", and it is one
+/// significant figure on purpose -- treat it as adjustable, not as a measured boundary. Anything of
+/// the same order of magnitude would serve equally well.
 pub(crate) const DEFAULT_LIMITS: FormatLimits = FormatLimits::new(Some(250_000), None, None);
 
 /// Selects zstd as the format of a [`CompressorBuilder`][crate::CompressorBuilder] or [`DecompressorBuilder`][crate::DecompressorBuilder], and carries
