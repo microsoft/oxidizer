@@ -176,13 +176,13 @@ pub mod interop;
 pub(crate) mod key;
 pub mod metadata;
 pub mod processing;
-pub mod sampling;
 pub(crate) mod severity;
 pub(crate) mod sink;
 pub(crate) mod text;
 pub(crate) mod value;
-
-// Re-export the derive macro and proc macros.
+pub(crate) mod sampling;
+#[doc(inline)]
+pub use sampling::{EventSampler, EventSamplingContext, EventSamplingDecision};
 
 // Re-export core types at the crate root for convenience.
 pub use error::{FlushError, SinkFlushError};
@@ -448,7 +448,6 @@ pub use observed_macros::Enrichment;
 /// instrument attribute — useful for custom processors that define dynamic
 /// metrics and need pre-declared dimension keys on the field descriptor.
 pub use observed_macros::event;
-pub use sampling::{EventSampler, EventSamplingContext, EventSamplingDecision};
 pub use severity::Severity;
 pub use sink::{Sink, SinkId};
 pub use text::Text;
