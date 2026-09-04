@@ -373,18 +373,33 @@ thread-local guard flag.
 flowchart TD
     emit["<b>Emit Site</b><br/>emit!(sink, HttpRequest { method, url, status, duration_ms })"]
     filter["<b>Interest pass</b><br/>EventProcessor::is_interested, before construction and again while routing"]
-    dimensions["<b>Collect dimensions</b><br/>Event fields + enrichment from the sink's thread-local slot"]
+    stop["<b>Stop</b><br/>No processor is interested"]
+    construct["<b>Construct event</b><br/>Evaluate the event expression once"]
 
-    emit --> filter --> dimensions
+    emit --> filter
+    filter -- "None interested" --> stop
+    filter -- "Any interested" --> construct
+    construct --> timestamp
 
-    dimensions --> loop
+    subgraph sink ["For each interested sink"]
+        timestamp["<b>Read timestamp</b><br/>Use this sink's clock"]
+        sample{"<b>EventSampler::sample</b><br/>When configured"}
+        dropped["<b>Stop this sink</b><br/>Run no processor"]
+        view["<b>Build EventView</b><br/>Capture this sink's visible enrichment"]
 
-    subgraph loop ["For each interested processor of the emitting sink"]
-        redact["<b>Redaction</b><br/>Pull field values through the processor's own RedactionEngine"]
-        redact --> etw["<b>ETW Provider</b><br/>Logs via ETW"]
-        redact --> metrics["<b>Metrics Exporter</b><br/>Metric observations + dimensions"]
-        redact --> file["<b>File Logger</b><br/>Structured log records to file"]
-        redact --> stdout["<b>stdout</b><br/>Human-readable log output"]
+        timestamp --> sample
+        sample -- "Drop" --> dropped
+        sample -- "Continue or no sampler" --> view
+
+        view --> loop
+
+        subgraph loop ["For each interested processor"]
+            redact["<b>Pull and redact</b><br/>Event fields + enrichment through the processor's RedactionEngine"]
+            redact --> etw["<b>ETW Provider</b><br/>Logs via ETW"]
+            redact --> metrics["<b>Metrics Exporter</b><br/>Metric observations + dimensions"]
+            redact --> file["<b>File Logger</b><br/>Structured log records to file"]
+            redact --> stdout["<b>stdout</b><br/>Human-readable log output"]
+        end
     end
 :::
 
