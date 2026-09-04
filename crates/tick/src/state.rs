@@ -4,8 +4,7 @@
 use std::sync::Mutex;
 use std::time::Instant;
 
-use thread_aware::affinity::Affinity;
-use thread_aware::{PerCore, ThreadAware};
+use thread_aware::{PerThread, Thread, ThreadAware};
 
 use crate::timers::Timers;
 
@@ -17,7 +16,7 @@ pub(crate) enum ClockState {
 }
 
 impl ThreadAware for ClockState {
-    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         match self {
             Self::System(synchronized_timers) => synchronized_timers.relocate(source, destination),
             #[cfg(any(feature = "test-util", test))]
@@ -78,19 +77,21 @@ impl ClockState {
 #[derive(Debug, Clone)]
 pub(crate) enum SynchronizedTimers {
     /// A single shared timer set. [`ThreadAware::relocate`] is a no-op, so all clones observe
-    /// the same timers regardless of thread affinity. Used by clocks driven by a single global
+    /// the same timers regardless of thread coordinate. Used by clocks driven by a single global
     /// driver task (e.g. the Tokio-driven clock created by [`Clock::new_tokio`][crate::Clock::new_tokio]).
     #[cfg(any(feature = "rt-shared", test))]
     Shared(std::sync::Arc<Mutex<Timers>>),
 
-    /// Per-core isolated timer storage. [`ThreadAware::relocate`] creates a fresh timer set on
-    /// the destination core, enabling thread-per-core runtimes to operate on independent timers
-    /// with no cross-thread lock contention.
-    Isolated(thread_aware::Arc<Mutex<Timers>, PerCore>),
+    /// Per-thread isolated timer storage. Within one runtime owner,
+    /// [`ThreadAware::relocate`] creates a fresh timer set on the destination
+    /// thread, enabling thread-isolated runtimes to operate on independent
+    /// timers with no cross-thread lock contention. A cross-owner move retains
+    /// the current set instead.
+    Isolated(thread_aware::Arc<Mutex<Timers>, PerThread>),
 }
 
 impl ThreadAware for SynchronizedTimers {
-    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         match self {
             #[cfg(any(feature = "rt-shared", test))]
             Self::Shared(_) => {}

@@ -36,7 +36,7 @@ allowed_external_types = [
     "opentelemetry::metrics::meter::MeterProvider",
     "recoverable::Recovery",
     "recoverable::RecoveryInfo",
-    "thread_aware::core::ThreadAware",
+    "thread_aware_core::thread_aware::ThreadAware",
     "tick::clock::Clock",
     "tick::simple_clock::SimpleClock",
     "tower_layer::Layer",
@@ -136,6 +136,7 @@ fetch_tls = { path = "../fetch_tls", features = ["rustls", "native-tls"] }
 http_extensions = { path = "../http_extensions", features = ["test-util", "json"] }
 ohno = { path = "../ohno", features = ["test-util", "app-err"] }
 testing_aids = { path = "../testing_aids" }
+thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
 tick = { path = "../tick", features = [
     "test-util",
     "tokio",

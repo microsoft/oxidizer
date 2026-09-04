@@ -6,8 +6,9 @@ use alloc::boxed::Box;
 use core::any::type_name;
 use core::fmt;
 
+use thread_aware_core::Thread;
+
 use crate::ThreadAware;
-use crate::affinity::Affinity;
 use crate::closure::ThreadAwareFnOnce;
 
 /// A closure with erased bounds.
@@ -44,7 +45,7 @@ impl<T> ThreadAwareFnOnce<T> for ErasedClosureOnce<T> {
 }
 
 impl<T> ThreadAware for ErasedClosureOnce<T> {
-    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         self.inner.transfer_boxed_mut(source, destination);
     }
 }
@@ -60,7 +61,7 @@ impl<T> Clone for ErasedClosureOnce<T> {
 trait Erased<T>: Sync + Send {
     fn call_boxed_once(self: Box<Self>) -> T;
     fn clone_boxed(&self) -> Box<dyn Erased<T>>;
-    fn transfer_boxed_mut(&mut self, source: Option<Affinity>, destination: Affinity);
+    fn transfer_boxed_mut(&mut self, source: Option<&Thread>, destination: &Thread);
 }
 
 struct Wrapper<C> {
@@ -81,12 +82,12 @@ where
         })
     }
 
-    fn transfer_boxed_mut(&mut self, source: Option<Affinity>, destination: Affinity) {
+    fn transfer_boxed_mut(&mut self, source: Option<&Thread>, destination: &Thread) {
         self.closure.relocate(source, destination);
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
     use crate::closure::closure_once;
@@ -109,7 +110,7 @@ mod tests {
     #[test]
     fn test_erased_closure_once_debug_with_string() {
         // Create an ErasedClosureOnce that returns a String
-        let closure = closure_once("test", |s: &str| s.to_string());
+        let closure = closure_once("test".to_string(), |s: String| s);
         let erased = ErasedClosureOnce::new(closure);
 
         // Format using Debug trait
@@ -125,23 +126,22 @@ mod tests {
     struct Tracker(bool);
 
     impl crate::ThreadAware for Tracker {
-        fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
             self.0 = true;
         }
     }
 
     #[test]
     fn erased_closure_once_relocate_forwards_to_inner() {
-        use crate::affinity::pinned_affinities;
         use crate::closure::ThreadAwareFnOnce;
 
-        let affinities = pinned_affinities(&[2]);
-        let src = Some(affinities[0]);
-        let dst = affinities[1];
+        let threads = crate::test_threads(&[2]);
+        let src = Some(threads[0].clone());
+        let dst = threads[1].clone();
 
         let c = closure_once(Tracker(false), |t: Tracker| t.0);
         let mut erased = ErasedClosureOnce::new(c);
-        erased.relocate(src, dst);
+        erased.relocate(src.as_ref(), &dst);
 
         let result = erased.call_once();
         assert!(result, "ErasedClosureOnce must forward relocate to inner closure");

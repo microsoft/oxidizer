@@ -5283,18 +5283,12 @@ dependencies = [
 name = "thread_aware"
 version = "0.11.0"
 dependencies = [
- "bytes",
- "criterion",
+ "dashmap",
  "futures",
- "gungraun",
- "http",
- "jiff",
- "many_cpus",
  "mutants",
- "nm",
- "static_assertions",
+ "rustc-hash",
+ "thread_aware_core",
  "thread_aware_macros",
- "uuid",
 ]
 
 [[package]]
@@ -5860,6 +5854,7 @@ dependencies = [
  "dashmap",
  "futures-util",
  "mutants",
+ "static_assertions",
  "thread_aware",
  "tokio",
 ]

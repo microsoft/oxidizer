@@ -25,7 +25,7 @@ allowed_external_types = [
     # from here; this crate is the supported surface for all of it.
     "fetch_winhttp_impl::*",
     "observed::*",
-    "thread_aware::core::ThreadAware",
+    "thread_aware_core::thread_aware::ThreadAware",
     "tick::clock::Clock",
 ]
 

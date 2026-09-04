@@ -4,8 +4,9 @@
 #![expect(missing_docs, reason = "This is a test module")]
 #![allow(dead_code, unused_variables, unused_assignments, reason = "compile-only derive test")]
 
-use thread_aware::ThreadAware;
-use thread_aware::affinity::pinned_affinities;
+use std::thread;
+
+use thread_aware::{ThreadAware, ThreadBuilder};
 
 #[derive(ThreadAware)]
 struct Simple {
@@ -31,9 +32,12 @@ enum E {
 
 #[test]
 fn derive_compiles_and_runs() {
-    let affinities = pinned_affinities(&[2]);
-    let d0 = Some(affinities[0]);
-    let d1 = affinities[1];
+    let builder = ThreadBuilder::default();
+    let source = builder.build(thread::current().id());
+    let destination_id = thread::spawn(|| thread::current().id()).join().unwrap();
+    let destination = builder.build(destination_id);
+    let d0 = Some(&source);
+    let d1 = &destination;
 
     let mut s = Simple {
         a: 10,

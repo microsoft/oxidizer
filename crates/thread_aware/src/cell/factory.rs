@@ -5,19 +5,20 @@
 use alloc::boxed::Box;
 use std::{fmt, sync};
 
+use thread_aware_core::Thread;
+
 use super::clone_fn::ErasedCloneFn;
-use crate::affinity::Affinity;
 use crate::closure::ErasedClosureOnce;
 
 /// A function that clones data and optionally relocates the clone.
 ///
 /// For `ThreadAware` types, the function clones and calls `relocate()`.
 /// For non-`ThreadAware` types, it just clones (ignoring source/destination).
-pub(crate) type DataFn<T> = fn(&T, Option<Affinity>, Affinity) -> Box<T>;
+pub(crate) type DataFn<T> = fn(&T, Option<&Thread>, &Thread) -> Box<T>;
 
 pub(crate) enum Factory<T: ?Sized> {
     /// An external closure was provided to create the data.
-    Closure(sync::Arc<ErasedClosureOnce<Box<T>>>, Option<Affinity>),
+    Closure(sync::Arc<ErasedClosureOnce<Box<T>>>, Option<Thread>),
 
     /// The data will be cloned and relocated via `DataFn`.
     Data(DataFn<T>),
@@ -43,7 +44,7 @@ impl<T: ?Sized> fmt::Debug for Factory<T> {
 impl<T: ?Sized> Clone for Factory<T> {
     fn clone(&self) -> Self {
         match self {
-            Self::Closure(closure, closure_source) => Self::Closure(sync::Arc::clone(closure), *closure_source),
+            Self::Closure(closure, closure_source) => Self::Closure(sync::Arc::clone(closure), closure_source.clone()),
             Self::Data(data_fn) => Self::Data(*data_fn),
             Self::ErasedCloneFn(erased) => Self::ErasedCloneFn(erased.clone()),
             Self::Manual => Self::Manual,

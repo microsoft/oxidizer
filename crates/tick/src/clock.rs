@@ -4,8 +4,7 @@
 use std::task::Waker;
 use std::time::{Duration, Instant, SystemTime};
 
-use thread_aware::ThreadAware;
-use thread_aware::affinity::Affinity;
+use thread_aware::{Thread, ThreadAware};
 
 use crate::simple_clock::SimpleClock;
 use crate::state::ClockState;
@@ -84,15 +83,20 @@ use crate::timers::TimerKey;
 ///
 /// # Thread-aware relocation
 ///
-/// `Clock` implements [`ThreadAware`](thread_aware::ThreadAware), enabling per-core timer isolation
-/// in thread-per-core runtime architectures.
+/// `Clock` implements [`ThreadAware`](thread_aware::ThreadAware), enabling per-thread timer isolation
+/// in thread-isolated runtime architectures.
+///
+/// Per-thread locality is established only when the source and destination
+/// coordinates have the same runtime [`Owner`](thread_aware::Owner). Relocation
+/// across owners keeps the current timer storage: the clock remains functional,
+/// but its storage is not made local to the destination.
 ///
 /// How relocation affects the clock depends on the underlying clock variant:
 ///
-/// - **System clocks**: Relocation creates per-core timer storage. After relocation, each core
+/// - **System clocks**: Relocation creates per-thread timer storage. After relocation, each thread
 ///   maintains its own independent set of timers, eliminating cross-thread lock contention. Clones
-///   of a clock on the same core share timers, while clocks relocated to different cores are fully
-///   isolated. Each core's timers must be advanced by its own
+///   of a clock on the same thread share timers, while clocks relocated to different threads are
+///   fully isolated. Each thread's timers must be advanced by its own
 ///   [`ClockDriver`][crate::runtime::ClockDriver].
 ///
 /// - **`ClockControl` clocks** (`test-util`): Relocation is a no-op. All clones share the same
@@ -102,11 +106,11 @@ use crate::timers::TimerKey;
 ///
 /// - **Tokio clocks** (created via [`Clock::new_tokio()`]): Relocation is a no-op. The Tokio clock
 ///   is driven by a single background task that advances a shared set of timers, so all clones
-///   share the same timer storage regardless of which thread they are on. Per-core relocation
+///   share the same timer storage regardless of which thread they are on. Per-thread relocation
 ///   would create independent timer storage on the destination thread that the background driver
 ///   does not advance, so relocation is intentionally suppressed.
 ///
-/// For thread-per-core setups, the typical pattern is to clone an
+/// For thread-isolated setups, the typical pattern is to clone an
 /// [`InactiveClock`][crate::runtime::InactiveClock], relocate each clone to its target thread,
 /// and then activate it. See the [`runtime`][crate::runtime] module for details.
 ///
@@ -180,7 +184,6 @@ use crate::timers::TimerKey;
 pub struct Clock {
     state: ClockState,
     time: SimpleClock,
-    affinity: Option<Affinity>,
 }
 
 impl std::fmt::Debug for Clock {
@@ -195,15 +198,13 @@ impl std::fmt::Debug for Clock {
             .field("kind", &kind)
             .field("timers", &self.state.timers_len())
             .field("alive", &self.state.alive())
-            .field("affinity", &self.affinity)
             .finish_non_exhaustive()
     }
 }
 
 impl ThreadAware for Clock {
-    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         self.state.relocate(source, destination);
-        self.affinity = Some(destination);
     }
 }
 
@@ -224,7 +225,6 @@ impl Clock {
         Self {
             time: SimpleClock::from_state(&state),
             state,
-            affinity: None,
         }
     }
 
@@ -578,7 +578,7 @@ mod tests {
     use std::thread::sleep;
 
     use futures::FutureExt;
-    use thread_aware::affinity::pinned_affinities;
+    use thread_aware::Relocator;
 
     use super::*;
     use crate::ClockControl;
@@ -671,10 +671,9 @@ mod tests {
     async fn tokio_ensure_timers_advancing_after_relocate() {
         // Relocation must be a no-op for Tokio clocks: the background driver task drives a
         // shared timer set, so a relocated clone must still observe timers being advanced.
-        let affinities = pinned_affinities(&[2]);
         let clock = Clock::new_tokio();
         let mut clock = clock;
-        clock.relocate(Some(affinities[0]), affinities[1]);
+        _ = Relocator::between_numa_nodes().relocate(&mut clock);
         clock.delay(Duration::from_millis(15)).await;
     }
 
@@ -763,19 +762,16 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn thread_aware() {
-        let affinites = pinned_affinities(&[1, 1]);
-        let source = Some(affinites[0]);
-        let pinned_1 = affinites[0];
-        let pinned_2 = affinites[1];
-
         // root clock
         let root = InactiveClock::default();
 
         let mut inactive_1 = root.clone();
-        inactive_1.relocate(source, pinned_1);
         let mut inactive_2 = root;
-        inactive_2.relocate(source, pinned_2);
+        let (source, thread_2) = Relocator::between_numa_nodes().relocate(&mut inactive_2);
+        let thread_1 = source.as_ref().unwrap();
+        inactive_1.relocate(source.as_ref(), thread_1);
 
         let (clock_1, mut driver_1) = inactive_1.activate();
         let (clock_2, mut driver_2) = inactive_2.activate();
@@ -789,7 +785,7 @@ mod tests {
         assert_eq!(driver_2.state.timers_len(), 0);
         {
             let mut relocated_clock = clock_1.clone();
-            relocated_clock.relocate(source, pinned_2);
+            relocated_clock.relocate(source.as_ref(), &thread_2);
             assert_eq!(relocated_clock.state.timers_len(), 0);
         }
 
@@ -821,18 +817,14 @@ mod tests {
 
     #[test]
     fn thread_aware_clock_control() {
-        let affinites = pinned_affinities(&[1, 1]);
-        let source = Some(affinites[0]);
-        let pinned_1 = affinites[0];
-        let pinned_2 = affinites[1];
-
         // root clock
         let root: InactiveClock = ClockControl::default().into();
 
         let mut inactive_1 = root.clone();
-        inactive_1.relocate(source, pinned_1);
         let mut inactive_2 = root;
-        inactive_2.relocate(source, pinned_2);
+        let (source, _thread_2) = Relocator::between_numa_nodes().relocate(&mut inactive_2);
+        let thread_1 = source.as_ref().unwrap();
+        inactive_1.relocate(source.as_ref(), thread_1);
 
         let (clock_1, driver_1) = inactive_1.activate();
         let (clock_2, driver_2) = inactive_2.activate();
@@ -857,20 +849,9 @@ mod tests {
     #[tokio::test]
     #[cfg_attr(miri, ignore)]
     async fn debug_alive_system_clock() {
-        let _affinites = pinned_affinities(&[2]);
         let clock = Clock::new_tokio();
 
         clock.delay(Duration::from_millis(1)).await;
-
-        insta::assert_debug_snapshot!(clock);
-    }
-
-    #[tokio::test]
-    #[cfg_attr(miri, ignore)]
-    async fn debug_alive_system_clock_relocated() {
-        let affinites = pinned_affinities(&[2]);
-        let mut clock = Clock::new_system_frozen();
-        clock.relocate(Some(affinites[0]), affinites[1]);
 
         insta::assert_debug_snapshot!(clock);
     }

@@ -30,17 +30,17 @@
 //! # The `thread_aware` family
 //!
 //! Downstream libraries need one small contract they can implement and expose in public APIs
-//! without also adopting derive macros, policy wrappers, registries, or runtime integration.
-//! Keeping that contract here lets unrelated libraries interoperate while the larger utility
-//! surface evolves independently.
+//! without also adopting derive macros, closure adapters, policy wrappers, partitioned storage,
+//! or runtime integration. Keeping that contract here lets unrelated libraries interoperate while
+//! the larger utility surface evolves independently.
 //!
 //! - **`thread_aware_core`** (this crate) — the vocabulary that two unrelated libraries must
 //!   agree on before either can relocate a value defined by the other. It evolves
 //!   conservatively, reducing how much public APIs couple to changes in the utility crate.
 //! - **[`thread_aware`]** — the utilities that make relocation convenient: a
-//!   [`#[derive(ThreadAware)]`][derive] macro, wrappers for foreign types, a per-core
-//!   [`Arc`][arc], containers and registries. Free to evolve, and not meant to appear in a
-//!   public API.
+//!   [`#[derive(ThreadAware)]`][derive] macro, closure adapters, wrappers for foreign types,
+//!   runtime coordinate construction, and strategy-partitioned [`Arc`][arc] storage. Free to
+//!   evolve, and not meant to appear in a public API.
 //!
 //! [`thread_aware`]: https://docs.rs/thread_aware
 //! [derive]: https://docs.rs/thread_aware/latest/thread_aware/derive.ThreadAware.html
@@ -52,7 +52,7 @@
 //!
 //! # Why relocation exists
 //!
-//! Thread-per-core and non-uniform memory access (NUMA)-aware runtimes are fast because each
+//! Thread-isolated and non-uniform memory access (NUMA)-aware runtimes are fast because each
 //! worker keeps to itself: it uses memory close to its own thread, talks to its own I/O
 //! driver, and does not synchronize with other workers. When a value moves to another
 //! worker, what used to be close by is now in the wrong place: a cache line shared between
@@ -70,8 +70,8 @@
 //! both and then invokes the implementation. It is a callback, like [`Drop::drop`].
 //!
 //! The derive lives in [`thread_aware`], so a library that wants it depends on that crate.
-//! Only the trait and [`Thread`] cross the public boundary, and both come from here, so the
-//! dependency stays an implementation detail:
+//! Only the trait, [`Thread`], and its component identifiers cross the public boundary, and all
+//! come from here, so the dependency stays an implementation detail:
 //!
 //! ```ignore
 //! // A build dependency, not part of what this library promises.
@@ -131,9 +131,11 @@
 //! Values with no thread-local state use an empty implementation. Containers forward
 //! relocation to their values, while map keys remain unchanged.
 //!
-//! References, sets, `Cow`, and `Arc` have no implementation because relocation would be
-//! ambiguous or could violate their invariants. [`thread_aware`] provides wrappers for cases
-//! that need an explicit policy, including its per-core [`Arc`][arc].
+//! General references, sets, `Cow`, and `Arc` have no implementation because relocation would be
+//! ambiguous or could violate their invariants. The narrow reference exception is `&'static str`:
+//! immutable process-lifetime labels cannot dangle and carry no referent state to relocate.
+//! [`thread_aware`] provides wrappers for cases that need an explicit policy, including its
+//! strategy-partitioned [`Arc`][arc].
 //!
 //! # Features
 //!

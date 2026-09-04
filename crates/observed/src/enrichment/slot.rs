@@ -10,7 +10,7 @@ use std::cell::RefCell;
 use std::sync::Arc;
 
 use smallvec::{SmallVec, smallvec};
-use thread_aware::ThreadAware;
+use thread_aware::{Thread, ThreadAware};
 use thread_local::ThreadLocal;
 
 use crate::SinkId;
@@ -35,7 +35,7 @@ pub(crate) struct EnrichmentNode {
 pub(crate) struct Slot(Arc<ThreadLocal<RefCell<OptEnrichmentNode>>>);
 
 impl thread_aware::ThreadAware for Slot {
-    fn relocate(&mut self, _source: Option<thread_aware::affinity::Affinity>, _destination: thread_aware::affinity::Affinity) {
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
         // Enrichment slot is thread local, it doesn't need to be relocated
     }
 }
@@ -324,6 +324,19 @@ mod coverage_tests {
         assert!(slot.current().is_none());
     }
 
+    static_assertions::assert_impl_all!(Slot: thread_aware::ThreadAware);
+
+    #[test]
+    fn relocation_preserves_thread_local_storage_identity() {
+        let slot = Slot::new();
+        let mut relocated = slot.clone();
+        let destination = thread_aware::ThreadBuilder::default().build(std::thread::current().id());
+
+        relocated.relocate(None, &destination);
+
+        assert!(slot.ptr_eq(&relocated));
+    }
+
     #[test]
     fn transfer_ignores_empty_enrichment_layers() {
         let slot = Slot::new();
@@ -341,13 +354,8 @@ mod coverage_tests {
     }
 
     #[test]
-    fn debug_impls_and_relocate() {
-        let mut slot = Slot::new();
-
-        // `relocate` is a documented no-op for thread-local slots.
-        let affinity = thread_aware::affinity::pinned_affinities(&[1])[0];
-        <Slot as thread_aware::ThreadAware>::relocate(&mut slot, None, affinity);
-
+    fn debug_impls() {
+        let slot = Slot::new();
         assert!(format!("{slot:?}").contains("Slot"));
 
         let mut transfer = EnrichmentTransfer::default();

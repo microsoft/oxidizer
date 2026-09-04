@@ -21,9 +21,8 @@ allowed_external_types = [
     "serde_core::de::*",
     "serde_core::ser::*",
     "futures_core::stream::Stream",
-    "thread_aware::core::ThreadAware",
-    "thread_aware::affinity::MemoryAffinity",
-    "thread_aware::affinity::PinnedAffinity",
+    "thread_aware_core::thread_aware::ThreadAware",
+    "thread_aware_core::thread::Thread",
 ]
 
 [package.metadata.docs.rs]
@@ -62,6 +61,7 @@ windows-sys = { workspace = true, optional = true, features = ["Win32_System_Sys
 [dev-dependencies]
 alloc_tracker = { workspace = true }
 ohno = { path = "../ohno", features = ["app-err"] }
+thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
 
 #external
 chrono = { workspace = true, features = ["clock"] }

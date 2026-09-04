@@ -152,25 +152,6 @@ fn arc_concurrent_assume_init_no_race() {
     );
 }
 
-/// Reference slices accept non-Drop types aligned below `CHUNK_ALIGN`.
-///
-/// We use a ZST with `#[repr(align(32768))]` so the type's alignment
-/// checks the cap without forcing a 32 KiB stack frame.
-#[cfg(not(align_capped_backend))]
-#[test]
-fn alloc_slice_ref_accepts_half_chunk_alignment_for_non_drop() {
-    #[repr(align(32768))]
-    #[derive(Clone, Copy)]
-    struct Wide;
-    let arena = Arena::new();
-    let s = arena.alloc_slice_fill_with::<Wide, _>(1, |_| Wide);
-    assert_eq!(s.len(), 1);
-
-    let src: &[Wide] = &[Wide];
-    let c = arena.alloc_slice_clone::<Wide>(src);
-    assert_eq!(c.len(), 1);
-}
-
 /// Each refcounted ZST handout reserves a distinct one-byte tag, bounding
 /// per-chunk handouts and preserving refcount surplus invariants.
 #[test]

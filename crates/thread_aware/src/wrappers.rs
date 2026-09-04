@@ -4,8 +4,9 @@
 use alloc::sync::Arc;
 use core::ops::{Deref, DerefMut};
 
+use thread_aware_core::Thread;
+
 use crate::ThreadAware;
-use crate::affinity::Affinity;
 
 /// Allows transferring a value that doesn't implement [`trait@ThreadAware`].
 ///
@@ -23,7 +24,7 @@ use crate::affinity::Affinity;
 ///
 /// In addition, if the wrapped value contains an [`alloc::sync::Arc`] with interior mutability
 /// somewhere inside, this wrapper should not be used. With the `std` feature, a thread-aware
-/// [`Arc`](crate::Arc) using [`PerCore`](crate::PerCore) or [`PerNuma`](crate::PerNuma) with
+/// [`Arc`](crate::Arc) using [`PerThread`](crate::PerThread) or [`PerNumaNode`](crate::PerNumaNode) with
 /// independent initialization per strategy partition is a better option.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Default)]
 #[repr(transparent)]
@@ -52,7 +53,7 @@ impl<T> DerefMut for Unaware<T> {
 }
 
 impl<T: Send> ThreadAware for Unaware<T> {
-    fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
 }
 
 impl<T> Unaware<T> {
@@ -63,8 +64,10 @@ impl<T> Unaware<T> {
 
     /// Converts an `Arc<Unaware<T>>` into an `Arc<T>`.
     pub fn into_arc(self: Arc<Self>) -> Arc<T> {
-        // SAFETY: `Unaware` is a transparent wrapper around `T`,
-        unsafe { core::mem::transmute(self) }
+        let raw = Arc::into_raw(self).cast::<T>();
+        // SAFETY: `Unaware<T>` is `repr(transparent)` over `T`, so `raw` points to a valid `T`.
+        // `Arc::into_raw` transfers the consumed strong reference to this reconstruction.
+        unsafe { Arc::from_raw(raw) }
     }
 }
 
@@ -78,10 +81,9 @@ pub const fn unaware<T>(value: T) -> Unaware<T> {
     Unaware(value)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
-    use crate::affinity::pinned_affinities;
 
     #[test]
     fn test_unaware_construction() {
@@ -172,18 +174,18 @@ mod tests {
     fn test_unaware_thread_aware() {
         use std::collections::HashMap;
 
-        let affinities = pinned_affinities(&[2]);
-        let source = Some(affinities[0]);
-        let destination = affinities[1];
+        let threads = crate::test_threads(&[2]);
+        let source = Some(threads[0].clone());
+        let destination = threads[1].clone();
 
         // Test with simple type
         let mut value = Unaware(42);
-        value.relocate(source, destination);
+        value.relocate(source.as_ref(), &destination);
         assert_eq!(value.0, 42);
 
         // Test with String
         let mut value = Unaware("test string".to_string());
-        value.relocate(source, destination);
+        value.relocate(source.as_ref(), &destination);
         assert_eq!(value.0, "test string");
 
         // Test with complex type (HashMap)
@@ -191,7 +193,7 @@ mod tests {
         map.insert("key1", 100);
         map.insert("key2", 200);
         let mut value = Unaware(map);
-        value.relocate(source, destination);
+        value.relocate(source.as_ref(), &destination);
         assert_eq!(value.0.get("key1"), Some(&100));
         assert_eq!(value.0.get("key2"), Some(&200));
     }
@@ -241,11 +243,11 @@ mod tests {
         let mut unaware_wrapper = Unaware(Arc::clone(&inner_arc));
 
         // Should work, but this is the case the docs warn about
-        let affinities = pinned_affinities(&[2]);
-        let source = Some(affinities[0]);
-        let destination = affinities[1];
+        let threads = crate::test_threads(&[2]);
+        let source = Some(threads[0].clone());
+        let destination = threads[1].clone();
 
-        unaware_wrapper.relocate(source, destination);
+        unaware_wrapper.relocate(source.as_ref(), &destination);
 
         // Both should still point to the same underlying data
         // Original + clone in wrapper = 2, relocated is a copy (since Unaware<Arc<_>> implements Copy)
@@ -288,11 +290,11 @@ mod tests {
         assert_eq!(unaware_complex.0.values, vec![1, 2, 3]);
 
         // Test with relocation
-        let affinities = pinned_affinities(&[2]);
-        let source = Some(affinities[0]);
-        let destination = affinities[1];
+        let threads = crate::test_threads(&[2]);
+        let source = Some(threads[0].clone());
+        let destination = threads[1].clone();
 
-        unaware_complex.relocate(source, destination);
+        unaware_complex.relocate(source.as_ref(), &destination);
         assert_eq!(unaware_complex.0.id, 1);
         assert_eq!(unaware_complex.0.name, "test");
     }

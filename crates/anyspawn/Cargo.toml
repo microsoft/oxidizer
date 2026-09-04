@@ -20,8 +20,8 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/anyspawn"
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
     "tokio::runtime::handle::Handle",
-    "thread_aware::core::ThreadAware",
-    "thread_aware::affinity::Affinity",
+    "thread_aware_core::thread_aware::ThreadAware",
+    "thread_aware_core::thread::Thread",
     "thread_aware::closure::ThreadAwareAsyncFnOnce",
 ]
 
@@ -43,6 +43,7 @@ futures = { workspace = true, features = ["executor"] }
 opentelemetry = { workspace = true, features = ["futures"] }
 smol = { workspace = true }
 static_assertions = { workspace = true }
+thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
 
 [[test]]
@@ -72,10 +73,6 @@ required-features = ["tokio"]
 
 [[example]]
 name = "otel_context"
-required-features = ["tokio"]
-
-[[example]]
-name = "thread_aware"
 required-features = ["tokio"]
 
 # >>> anvil-managed: anvil-lints

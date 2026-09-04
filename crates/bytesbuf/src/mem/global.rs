@@ -22,7 +22,8 @@ use crate::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, Me
 /// For clarity, the pool itself is not in any way global - rather the word "global" in the name
 /// refers to the fact that all the memory capacity is obtained from the Rust global memory allocator.
 ///
-/// Clones of this type are equivalent and share the same pool of memory as long as they remain on the same thread.
+/// Clones initially share the same pool. Within one runtime owner, thread-aware relocation selects
+/// one pool per reached thread partition, and clones relocated to the same partition share it.
 #[doc = include_str!("../../docs/snippets/choosing_memory_provider.md")]
 ///
 /// # Multithreaded use
@@ -31,14 +32,17 @@ use crate::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, Me
 /// handing to `thread::spawn()` or `tokio::spawn()`). While the pool will still operate correctly, it will
 /// suffer degraded performance in all clones from the same family.
 ///
-/// This type is [thread-aware]. If moved across threads using thread-aware APIs, the performance
-/// penalty is not incurred. If no suitable thread-aware API is available, use a thread-local pool
-/// via the `thread_local!` macro.
+/// This type is [thread-aware]. When the source and destination coordinates belong to the same
+/// runtime [`Owner`], thread-aware APIs select the destination thread's pool and avoid the penalty.
+/// Relocation across runtime owners intentionally retains the source pool: it remains fully
+/// functional, but does not establish destination-local storage and may be slower. If no suitable
+/// thread-aware API is available, use a thread-local pool via the `thread_local!` macro.
 ///
 /// [thread-aware]: https://docs.rs/thread_aware
+/// [`Owner`]: thread_aware::Owner
 #[derive(Clone, Debug, ThreadAware)]
 pub struct GlobalPool {
-    inner: thread_aware::Arc<GlobalPoolInner, thread_aware::PerCore>,
+    inner: thread_aware::Arc<GlobalPoolInner, thread_aware::PerThread>,
 }
 
 impl GlobalPool {
@@ -58,7 +62,7 @@ impl GlobalPool {
     )]
     pub fn new() -> Self {
         Self {
-            inner: thread_aware::Arc::<_, thread_aware::PerCore>::new(GlobalPoolInner::new),
+            inner: thread_aware::Arc::<_, thread_aware::PerThread>::new(GlobalPoolInner::new),
         }
     }
 
@@ -476,8 +480,8 @@ std::thread_local! {
 
     // Counts how many GlobalPoolInner instances have been created. Each instance owns its own
     // memory capacity, so creating many of them defeats the purpose of pooling. In typical usage
-    // with a thread-aware GlobalPool backed by thread_aware::PerCore, there is at most one
-    // instance per core/affinity (for pinned worker threads), so application owners can use this
+    // with a thread-aware GlobalPool backed by thread_aware::PerThread, there is at most one
+    // instance per worker thread, so application owners can use this
     // metric to detect if something is inadvertently creating an excessive number of pools instead
     // of reusing existing ones.
     static INSTANCES_CREATED: Event = Event::builder()
@@ -493,7 +497,7 @@ mod tests {
     use std::thread;
 
     use static_assertions::assert_impl_all;
-    use thread_aware::affinity::pinned_affinities;
+    use thread_aware::Relocator;
 
     use super::*;
     use crate::mem::MemoryShared;
@@ -808,10 +812,6 @@ mod tests {
 
     #[test]
     fn relocated_pool_works() {
-        let affinities = pinned_affinities(&[2]);
-        let source = Some(affinities[0]);
-        let destination = affinities[1];
-
         let mut memory = GlobalPool::new();
 
         // Allocate from the original pool.
@@ -820,8 +820,8 @@ mod tests {
         let view = buf.consume_all();
         assert_eq!(view.first_slice()[0], 42);
 
-        // Relocate the pool to a different affinity.
-        memory.relocate(source, destination);
+        // Relocate the pool to a different thread coordinate.
+        _ = Relocator::between_threads().relocate(&mut memory);
 
         // The relocated pool should work independently.
         let mut buf2 = memory.reserve(200);

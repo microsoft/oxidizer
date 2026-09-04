@@ -30,9 +30,8 @@ allowed_external_types = [
     "tick::clock::Clock",
     "tower_layer::Layer",
     "tower_service::Service",
-    "thread_aware::core::ThreadAware",
-    "thread_aware::affinity::MemoryAffinity",
-    "thread_aware::affinity::PinnedAffinity",
+    "thread_aware_core::thread_aware::ThreadAware",
+    "thread_aware_core::thread::Thread",
 ]
 
 [package.metadata.docs.rs]
@@ -93,6 +92,7 @@ serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }
 static_assertions = { workspace = true }
 testing_aids = { path = "../testing_aids" }
+thread_aware = { path = "../thread_aware", default-features = false, features = ["std", "test-utils"] }
 tick = { path = "../tick", features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 tower = { workspace = true, features = ["util"] }

@@ -2,21 +2,100 @@
 // Licensed under the MIT License.
 
 #![allow(missing_docs, clippy::items_after_statements, reason = "test code")]
-#![cfg(not(miri))] // miri does not support OS threads and CPU affinity helpers
+#![cfg(not(miri))] // Miri does not support the OS threads used by these tests.
 
 //! Tests for [`Spawner`] relocation behavior with [`ThreadAware`].
 //!
 //! Per-process spawners with a no-op [`ThreadAware`] are unaffected by
 //! relocation. Thread-aware spawners (custom [`SpawnCustom`] impls) create
-//! per-core state through `clone` + `relocate`.
+//! per-thread state through `clone` + `relocate`.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use anyspawn::{BoxedBlockingTask, BoxedFuture, SpawnCustom, Spawner};
-use thread_aware::ThreadAware;
-use thread_aware::affinity::{self, pinned_affinities};
+use anyspawn::{BoxedBlockingTask, BoxedFuture, CustomSpawnerBuilder, SpawnCustom, Spawner};
 use thread_aware::closure::ThreadAwareAsyncFnOnce;
+use thread_aware::{Relocator, Thread, ThreadAware};
+
+#[test]
+fn layered_public_spawner_preserves_layers_after_relocation() {
+    #[derive(Clone)]
+    struct InlineSpawner;
+
+    impl ThreadAware for InlineSpawner {
+        fn relocate(&mut self, _: Option<&Thread>, _: &Thread) {}
+    }
+
+    impl SpawnCustom for InlineSpawner {
+        fn spawn(&self, task: BoxedFuture) {
+            futures::executor::block_on(task);
+        }
+
+        fn spawn_anywhere(&self, task: Box<dyn ThreadAwareAsyncFnOnce<()>>) {
+            futures::executor::block_on(task.call_once());
+        }
+
+        fn spawn_blocking(&self, task: BoxedBlockingTask) {
+            task();
+        }
+    }
+
+    let future_layers = Arc::new(AtomicUsize::new(0));
+    let blocking_layers = Arc::new(AtomicUsize::new(0));
+    let mut spawner = CustomSpawnerBuilder::new(InlineSpawner)
+        .layer(
+            {
+                let future_layers = Arc::clone(&future_layers);
+                move |task: BoxedFuture| {
+                    let future_layers = Arc::clone(&future_layers);
+                    Box::pin(async move {
+                        future_layers.fetch_add(1, Ordering::SeqCst);
+                        task.await;
+                    }) as BoxedFuture
+                }
+            },
+            {
+                let blocking_layers = Arc::clone(&blocking_layers);
+                move |task: BoxedBlockingTask| {
+                    let blocking_layers = Arc::clone(&blocking_layers);
+                    Box::new(move || {
+                        blocking_layers.fetch_add(1, Ordering::SeqCst);
+                        task();
+                    }) as BoxedBlockingTask
+                }
+            },
+        )
+        .layer(
+            {
+                let future_layers = Arc::clone(&future_layers);
+                move |task: BoxedFuture| {
+                    let future_layers = Arc::clone(&future_layers);
+                    Box::pin(async move {
+                        future_layers.fetch_add(1, Ordering::SeqCst);
+                        task.await;
+                    }) as BoxedFuture
+                }
+            },
+            {
+                let blocking_layers = Arc::clone(&blocking_layers);
+                move |task: BoxedBlockingTask| {
+                    let blocking_layers = Arc::clone(&blocking_layers);
+                    Box::new(move || {
+                        blocking_layers.fetch_add(1, Ordering::SeqCst);
+                        task();
+                    }) as BoxedBlockingTask
+                }
+            },
+        )
+        .build();
+
+    _ = Relocator::between_threads().relocate(&mut spawner);
+
+    assert_eq!(futures::executor::block_on(spawner.spawn(async { 42 })), 42);
+    assert_eq!(futures::executor::block_on(spawner.spawn_blocking(|| 7)), 7);
+    assert_eq!(future_layers.load(Ordering::SeqCst), 2);
+    assert_eq!(blocking_layers.load(Ordering::SeqCst), 2);
+}
 
 /// Per-process spawner: relocation must not change which spawn function is used.
 ///
@@ -30,7 +109,7 @@ fn per_process_relocation_preserves_spawn_function() {
     struct CountingSpawner(Arc<AtomicUsize>);
 
     impl ThreadAware for CountingSpawner {
-        fn relocate(&mut self, _: Option<affinity::Affinity>, _: affinity::Affinity) {}
+        fn relocate(&mut self, _: Option<&Thread>, _: &Thread) {}
     }
 
     impl SpawnCustom for CountingSpawner {
@@ -50,10 +129,9 @@ fn per_process_relocation_preserves_spawn_function() {
 
     let spawner = Spawner::new_custom("shared", CountingSpawner(Arc::clone(&call_count)));
 
-    let affinities = pinned_affinities(&[2]);
     let original = spawner.clone();
     let mut spawner = spawner;
-    spawner.relocate(Some(affinities[0]), affinities[1]);
+    _ = Relocator::between_threads().relocate(&mut spawner);
 
     let r1 = futures::executor::block_on(original.spawn(async { 1 }));
     let r2 = futures::executor::block_on(spawner.spawn(async { 2 }));
@@ -68,16 +146,16 @@ fn per_process_relocation_preserves_spawn_function() {
 }
 
 /// Thread-aware spawner: relocation must invoke `relocate` to create fresh
-/// per-core state.
+/// per-thread state.
 #[test]
-fn thread_aware_relocation_invokes_relocated_for_new_core() {
+fn thread_aware_relocation_invokes_relocated_for_new_thread() {
     static RELOCATE_CALLS: AtomicUsize = AtomicUsize::new(0);
 
     #[derive(Clone)]
     struct CountingSpawner;
 
     impl ThreadAware for CountingSpawner {
-        fn relocate(&mut self, _: Option<affinity::Affinity>, _: affinity::Affinity) {
+        fn relocate(&mut self, _: Option<&Thread>, _: &Thread) {
             RELOCATE_CALLS.fetch_add(1, Ordering::SeqCst);
         }
     }
@@ -97,18 +175,17 @@ fn thread_aware_relocation_invokes_relocated_for_new_core() {
         }
     }
 
-    let spawner = Spawner::new_custom("per-core", CountingSpawner);
+    let spawner = Spawner::new_custom("per-thread", CountingSpawner);
 
     let before = RELOCATE_CALLS.load(Ordering::SeqCst);
 
-    let affinities = pinned_affinities(&[2]);
     let original = spawner.clone();
     let mut spawner = spawner;
-    spawner.relocate(Some(affinities[0]), affinities[1]);
+    _ = Relocator::between_threads().relocate(&mut spawner);
 
     assert!(
         RELOCATE_CALLS.load(Ordering::SeqCst) > before,
-        "relocated must be called for the destination core"
+        "relocated must be called for the destination thread"
     );
 
     let r1 = futures::executor::block_on(original.spawn(async { 10 }));
@@ -118,7 +195,7 @@ fn thread_aware_relocation_invokes_relocated_for_new_core() {
 }
 
 /// Thread-aware spawner: after relocation, spawning must dispatch through the
-/// spawn function associated with the destination core, not the source.
+/// spawn function associated with the destination thread, not the source.
 ///
 /// Each instance gets a unique ID on construction via `relocate`. When a spawn
 /// function is invoked it records its ID in a shared log. After spawning on both
@@ -134,7 +211,7 @@ fn thread_aware_relocated_spawner_dispatches_through_destination() {
     }
 
     impl ThreadAware for IdSpawner {
-        fn relocate(&mut self, _: Option<affinity::Affinity>, _: affinity::Affinity) {
+        fn relocate(&mut self, _: Option<&Thread>, _: &Thread) {
             self.id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
         }
     }
@@ -154,12 +231,11 @@ fn thread_aware_relocated_spawner_dispatches_through_destination() {
         }
     }
 
-    let spawner = Spawner::new_custom("per-core", IdSpawner { id: 0 });
+    let spawner = Spawner::new_custom("per-thread", IdSpawner { id: 0 });
 
-    let affinities = pinned_affinities(&[2]);
     let original = spawner.clone();
     let mut spawner = spawner;
-    spawner.relocate(Some(affinities[0]), affinities[1]);
+    _ = Relocator::between_threads().relocate(&mut spawner);
 
     futures::executor::block_on(original.spawn(async {}));
     futures::executor::block_on(spawner.spawn(async {}));
@@ -176,7 +252,7 @@ fn thread_aware_relocated_spawner_dispatches_through_destination() {
 /// Verify that `spawn_anywhere` relocates the task data before execution.
 ///
 /// Uses a custom spawner whose `spawn_anywhere` relocates the task to a
-/// different affinity before calling `call_once`, exercising
+/// different thread coordinate before calling `call_once`, exercising
 /// `SpawnAnywhereTask::relocate`.
 #[test]
 fn spawn_anywhere_relocates_task_data() {
@@ -188,7 +264,7 @@ fn spawn_anywhere_relocates_task_data() {
     struct Tracker(bool);
 
     impl ThreadAware for Tracker {
-        fn relocate(&mut self, _: Option<affinity::Affinity>, _: affinity::Affinity) {
+        fn relocate(&mut self, _: Option<&Thread>, _: &Thread) {
             self.0 = true;
             DATA_WAS_RELOCATED.store(true, Ordering::SeqCst);
         }
@@ -199,7 +275,7 @@ fn spawn_anywhere_relocates_task_data() {
     struct RelocatingSpawner;
 
     impl ThreadAware for RelocatingSpawner {
-        fn relocate(&mut self, _: Option<affinity::Affinity>, _: affinity::Affinity) {}
+        fn relocate(&mut self, _: Option<&Thread>, _: &Thread) {}
     }
 
     impl SpawnCustom for RelocatingSpawner {
@@ -208,8 +284,7 @@ fn spawn_anywhere_relocates_task_data() {
         }
 
         fn spawn_anywhere(&self, mut task: Box<dyn ThreadAwareAsyncFnOnce<()>>) {
-            let affinities = pinned_affinities(&[2]);
-            task.relocate(Some(affinities[0]), affinities[1]);
+            _ = Relocator::between_threads().relocate(&mut *task);
             self.spawn(task.call_once());
         }
 

@@ -9,14 +9,14 @@
 //! threads, which the single-threaded Callgrind simulator cannot model.
 //!
 //! The instruction counts here are a regression guard, not a demonstration of
-//! the concurrency win. Single-threaded, a hit is a cheap lock-free read and a miss
-//! adds a second load, the factory call, and the write-once publish; those cost
-//! nearly the same whether or not other threads are relocating, so the benefit
-//! of the lock-free cells only appears under contention, which the simulator
-//! cannot model. What this file does catch is the extra work a cross-slot miss
-//! pays over a hit — the re-probe load, the factory call, and the two cell
-//! writes — and any future growth of either branch. The slot table is sized
-//! before timing, so the one-time table allocation stays out of the counts.
+//! the concurrency behavior. A hit acquires a `DashMap` shard read guard; a miss
+//! takes the destination shard's entry path, runs the factory while holding the
+//! vacant write guard, and inserts the source value. Callgrind measures the
+//! single-threaded synchronization and instruction overhead of those operations,
+//! but it cannot model waiting caused by another thread holding the shard. What
+//! this file catches is the extra work a cross-key miss pays over a hit and any
+//! future growth of either branch. Storage is populated before timing, so its
+//! initial setup stays out of the counts.
 //!
 //! Run with: `cargo bench -p thread_aware_benchmarking --bench thread_aware_relocate_cg`
 //! on a Linux host with Valgrind installed.
@@ -42,148 +42,150 @@ mod linux {
     use std::hint::black_box;
 
     use gungraun::{library_benchmark, library_benchmark_group};
-    use thread_aware::affinity::{Affinity, pinned_affinities};
-    use thread_aware::{Arc, PerCore, ThreadAware};
+    use thread_aware::{Arc, PerThread, Thread, ThreadAware, ThreadBuilder};
     use thread_aware_benchmarking::{Payload, Tree};
 
-    fn affinities() -> Vec<Affinity> {
-        pinned_affinities(&[2])
+    fn threads(count: usize) -> Vec<Thread> {
+        let builder = ThreadBuilder::default();
+        (0..count)
+            .map(|_| {
+                let builder = builder.clone();
+                std::thread::spawn(move || builder.build(std::thread::current().id()))
+                    .join()
+                    .expect("benchmark coordinate thread must finish")
+            })
+            .collect()
     }
 
-    // Destination affinity already holds a value.
-    fn materialized() -> (Arc<Payload, PerCore>, Affinity, Affinity) {
-        let affinities = affinities();
-        let mut arc = Arc::<Payload, PerCore>::new(Payload::new);
+    // Destination thread already holds a value.
+    fn materialized() -> (Arc<Payload, PerThread>, Thread, Thread) {
+        let threads = threads(2);
+        let mut arc = Arc::<Payload, PerThread>::new(Payload::new);
 
-        for &affinity in &affinities {
+        for thread in &threads {
             let mut probe = arc.clone();
-            probe.relocate(None, affinity);
+            probe.relocate(None, thread);
         }
 
-        arc.relocate(None, affinities[0]);
-        (arc, affinities[0], affinities[1])
+        arc.relocate(None, &threads[0]);
+        (arc, threads[0].clone(), threads[1].clone())
     }
 
-    // Destination affinity holds the value carried by the returned Arc.
-    fn materialized_at_destination() -> (Arc<Payload, PerCore>, Affinity, Affinity) {
+    // Destination thread holds the value carried by the returned Arc.
+    fn materialized_at_destination() -> (Arc<Payload, PerThread>, Thread, Thread) {
         let (mut arc, source, destination) = materialized();
-        arc.relocate(Some(source), destination);
+        arc.relocate(Some(&source), &destination);
 
-        (arc, destination, destination)
+        (arc, destination.clone(), destination)
     }
 
-    // A primer affinity sizes the shared slot table before timing; the source and
-    // destination slots stay empty, so the timed relocation is a genuine cross-slot
-    // miss that materializes the destination and records the carried value in the
-    // empty source, without the one-time table allocation.
-    fn empty() -> (Arc<Payload, PerCore>, Affinity, Affinity) {
-        let affinities = pinned_affinities(&[3]);
-        let arc = Arc::<Payload, PerCore>::new(Payload::new);
+    // A primer thread populates shared storage before timing; the source and destination keys stay
+    // empty, so the timed relocation is a genuine cross-key miss that materializes the destination
+    // and records the carried value under the empty source key.
+    fn empty() -> (Arc<Payload, PerThread>, Thread, Thread) {
+        let threads = threads(3);
+        let arc = Arc::<Payload, PerThread>::new(Payload::new);
 
         let mut seed = arc.clone();
-        seed.relocate(None, affinities[0]);
+        seed.relocate(None, &threads[0]);
 
-        (arc, affinities[1], affinities[2])
+        (arc, threads[1].clone(), threads[2].clone())
     }
 
-    // Every layer of the tree already holds a value for both affinities.
-    fn materialized_tree() -> (Tree, Affinity, Affinity) {
-        let affinities = affinities();
+    // Every layer of the tree already holds a value for both threads.
+    fn materialized_tree() -> (Tree, Thread, Thread) {
+        let threads = threads(2);
         let tree = Tree::new();
         let mut ids = Vec::new();
 
-        for &affinity in &affinities {
+        for thread in &threads {
             let mut probe = tree.clone();
-            probe.relocate(None, affinity);
+            probe.relocate(None, thread);
             ids.extend(probe.leaf_ids());
         }
 
-        // Proves the tree really has one independent slot table per layer, which
+        // Proves the tree really has one independent storage map per layer, which
         // is the only reason its instruction count differs from the bare payload.
         ids.sort_unstable();
         let distinct = ids.len();
         ids.dedup();
-        assert_eq!(
-            ids.len(),
-            distinct,
-            "every layer of every affinity's partition must hold its own value"
-        );
+        assert_eq!(ids.len(), distinct, "every layer of every thread partition must hold its own value");
 
         let mut tree = tree;
-        tree.relocate(None, affinities[0]);
-        (tree, affinities[0], affinities[1])
+        tree.relocate(None, &threads[0]);
+        (tree, threads[0].clone(), threads[1].clone())
     }
 
-    // Every layer's slot table is sized by the primer relocation, but no layer
-    // holds a value for the source or destination affinities yet.
-    fn empty_tree() -> (Tree, Affinity, Affinity) {
-        let affinities = pinned_affinities(&[3]);
+    // Every layer's storage is populated by the primer relocation, but no layer
+    // holds a value for the source or destination threads yet.
+    fn empty_tree() -> (Tree, Thread, Thread) {
+        let threads = threads(3);
         let tree = Tree::new();
 
         let mut seed = tree.clone();
-        seed.relocate(None, affinities[0]);
+        seed.relocate(None, &threads[0]);
 
-        (tree, affinities[1], affinities[2])
+        (tree, threads[1].clone(), threads[2].clone())
     }
 
     #[library_benchmark]
     #[bench::run(materialized())]
-    fn hit_path_pre_materialized(input: (Arc<Payload, PerCore>, Affinity, Affinity)) -> u64 {
+    fn hit_path_pre_materialized(input: (Arc<Payload, PerThread>, Thread, Thread)) -> u64 {
         let (mut arc, source, destination) = input;
 
-        arc.relocate(black_box(Some(source)), black_box(destination));
+        arc.relocate(black_box(Some(&source)), black_box(&destination));
 
         black_box(arc.id)
     }
 
     #[library_benchmark]
     #[bench::run(materialized_at_destination())]
-    fn hit_path_same_affinity(input: (Arc<Payload, PerCore>, Affinity, Affinity)) -> u64 {
+    fn hit_path_same_thread(input: (Arc<Payload, PerThread>, Thread, Thread)) -> u64 {
         let (mut arc, source, destination) = input;
 
-        arc.relocate(black_box(Some(source)), black_box(destination));
+        arc.relocate(black_box(Some(&source)), black_box(&destination));
 
         black_box(arc.id)
     }
 
     #[library_benchmark]
     #[bench::run(empty())]
-    fn miss_path_new_affinity(input: (Arc<Payload, PerCore>, Affinity, Affinity)) -> u64 {
+    fn miss_path_new_thread(input: (Arc<Payload, PerThread>, Thread, Thread)) -> u64 {
         let (mut arc, source, destination) = input;
 
-        arc.relocate(black_box(Some(source)), black_box(destination));
+        arc.relocate(black_box(Some(&source)), black_box(&destination));
 
         black_box(arc.id)
     }
 
     #[library_benchmark]
     #[bench::run(materialized_tree())]
-    fn hit_path_tree(input: (Tree, Affinity, Affinity)) -> u64 {
+    fn hit_path_tree(input: (Tree, Thread, Thread)) -> u64 {
         let (mut tree, source, destination) = input;
 
-        tree.relocate(black_box(Some(source)), black_box(destination));
+        tree.relocate(black_box(Some(&source)), black_box(&destination));
 
         black_box(tree.leaf_id())
     }
 
     #[library_benchmark]
     #[bench::run(empty_tree())]
-    fn miss_path_tree(input: (Tree, Affinity, Affinity)) -> u64 {
+    fn miss_path_tree(input: (Tree, Thread, Thread)) -> u64 {
         let (mut tree, source, destination) = input;
 
-        tree.relocate(black_box(Some(source)), black_box(destination));
+        tree.relocate(black_box(Some(&source)), black_box(&destination));
 
         black_box(tree.leaf_id())
     }
 
     library_benchmark_group!(
         name = hit_path;
-        benchmarks = hit_path_pre_materialized, hit_path_same_affinity, hit_path_tree
+        benchmarks = hit_path_pre_materialized, hit_path_same_thread, hit_path_tree
     );
 
     library_benchmark_group!(
         name = miss_path;
-        benchmarks = miss_path_new_affinity, miss_path_tree
+        benchmarks = miss_path_new_thread, miss_path_tree
     );
 }
 
