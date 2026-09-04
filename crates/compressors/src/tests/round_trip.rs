@@ -19,7 +19,6 @@ use crate::{DecompressorLimits, Resources, gzip};
 const FIXTURE_PLAINTEXT: &[u8] = b"The quick brown fox jumps over the lazy dog.\nPack my box with five dozen liquor jugs.\n";
 
 const SYSTEM_GZIP: &[u8] = include_bytes!("fixtures/system_gzip.gz");
-const SYSTEM_GZIP_TWO_MEMBERS: &[u8] = include_bytes!("fixtures/system_gzip_two_members.gz");
 
 /// Caps every drain loop in this file.
 ///
@@ -85,7 +84,12 @@ fn decompresses_a_stream_produced_by_the_system_gzip() {
 
 #[test]
 fn decompresses_concatenated_members_produced_by_the_system_gzip() {
-    let plain = gzip::decompress(view(SYSTEM_GZIP_TWO_MEMBERS), &Resources::default()).expect("the fixture decompresses");
+    // Concatenation is what is under test, not a second producer: both members of the packaged
+    // two-member file were byte-identical copies of this one, so assembling the input here keeps
+    // one independently generated fixture as the source of truth.
+    let two_members = [SYSTEM_GZIP, SYSTEM_GZIP].concat();
+
+    let plain = gzip::decompress(view(&two_members), &Resources::default()).expect("the fixture decompresses");
 
     assert_eq!(plain.to_vec(), [FIXTURE_PLAINTEXT, FIXTURE_PLAINTEXT].concat());
 }
@@ -321,12 +325,16 @@ fn a_custom_memory_provider_is_used_for_output() {
 #[test]
 fn a_stream_of_many_tiny_members_is_rejected_without_the_caller_setting_any_limit() {
     // Each member costs engine setup its own payload never pays for, so a stream of empty members
-    // amplifies work out of all proportion to its size. The default stream cap is what bounds it.
+    // amplifies work out of all proportion to its size. The default stream cap is what bounds it,
+    // so the count is derived from that constant rather than restated: this is the smallest input
+    // that crosses the boundary, whatever the boundary currently is.
+    let members = usize::try_from(crate::limits::DEFAULT_MAX_STREAMS).expect("the cap fits a count") + 1;
+
     let member = gzip::compress(BytesView::new(), &Resources::default())
         .expect("compression succeeds")
         .to_vec();
-    let mut many = Vec::with_capacity(member.len() * 1100);
-    for _ in 0..1100 {
+    let mut many = Vec::with_capacity(member.len() * members);
+    for _ in 0..members {
         many.extend_from_slice(&member);
     }
 

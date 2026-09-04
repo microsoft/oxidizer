@@ -1533,12 +1533,24 @@ mod zstd_specific_settings {
 
     #[test]
     fn native_level_and_decompressor_window_limit_are_wired() {
-        let data = b"zstd format-specific settings ".repeat(400);
+        // Large enough that the frame has to declare a window well above the smallest zstd offers.
+        // A short payload would not: zstd sizes the window to the content, so the restricted
+        // decompressor below would accept it and prove nothing.
+        let data = b"zstd format-specific settings ".repeat(200_000);
         let compressor = zstd::Compressor::builder()
             .compression_level(CompressionLevel::min())
             .build(resources())
             .built();
         let compressed = crate::compress(view(&data), compressor).expect("compression succeeds");
+
+        // The limit has to be observable, or this test would pass even if the setting were dropped
+        // on the floor: the default decompressor accepts this frame either way.
+        let restricted = zstd::Decompressor::builder()
+            .max_window_log(WindowLog::MIN)
+            .build(resources())
+            .built();
+        let error = crate::decompress(compressed.clone(), restricted).expect_err("a window below the frame's is refused");
+        assert!(error.is_corrupt_data(), "got {error}");
 
         let decompressor = zstd::Decompressor::builder()
             .max_window_log(WindowLog::DEFAULT)
