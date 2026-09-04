@@ -34,10 +34,9 @@ pub mod core {
 /// Time primitives for the runtime.
 #[cfg(any(test, feature = "time"))]
 pub mod time {
-    #[doc(inline)]
-    pub use tick::{Clock, Delay, FutureExt, PeriodicTimer, SimpleClock, Stopwatch, Timeout};
-
     #[cfg(any(test, feature = "test-util"))]
     #[doc(inline)]
     pub use tick::ClockControl;
+    #[doc(inline)]
+    pub use tick::{Clock, Delay, FutureExt, PeriodicTimer, SimpleClock, Stopwatch, Timeout};
 }
