@@ -72,9 +72,6 @@ tower-service = { workspace = true }
 gungraun = { workspace = true, features = ["default"] }
 matchit = { workspace = true }
 
-[lints]
-workspace = true
-
 [[bench]]
 name = "rog_router_cg"
 harness = false
@@ -82,3 +79,8 @@ harness = false
 [[bench]]
 name = "rog_transcode_cg"
 harness = false
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

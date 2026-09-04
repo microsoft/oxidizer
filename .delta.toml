@@ -1,3 +1,6 @@
+# >>> anvil-managed: anvil-delta
+# <<< anvil-managed: anvil-delta
+
 # cargo-delta configuration file
 
 # Patterns for files and folders to exclude from analysis.
@@ -82,14 +85,3 @@ assume_patterns = [
 # The remote branch to compare against for determining changed files
 # If not specified, uses the default branch detection
 remote_branch = "origin/main"
-
-# >>> anvil-managed: anvil-delta
-[delta]
-# Include the workspace root files that should invalidate every member's
-# impact analysis when changed (lockfile, root manifest, toolchain).
-root-files = [
-    "Cargo.lock",
-    "Cargo.toml",
-    "rust-toolchain.toml",
-]
-# <<< anvil-managed: anvil-delta

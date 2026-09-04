@@ -106,7 +106,7 @@ assert!(book.segments().eq([Segment::Rest]));
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_path_template">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbi6Iwi6yia9cb-_nab-IwSV0bii4s3u_Erlgbh-UNpgxvX8phZIGCcmh0dHBfcGF0aF90ZW1wbGF0ZWUwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbi6Iwi6yia9cb-_nab-IwSV0bii4s3u_Erlgbh-UNpgxvX8phZIGCcmh0dHBfcGF0aF90ZW1wbGF0ZWUwLjIuMA
  [__link0]: https://github.com/googleapis/googleapis/blob/master/google/api/http.proto
  [__link1]: https://docs.rs/http_path_template/0.2.0/http_path_template/?search=PathTemplate
  [__link10]: https://docs.rs/http_path_template/0.2.0/http_path_template/?search=Grammar
