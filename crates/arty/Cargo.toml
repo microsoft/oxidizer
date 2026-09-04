@@ -18,18 +18,18 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/arty"
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
-    "thread_aware_core::NumaNode",
-    "thread_aware_core::Owner",
-    "thread_aware_core::Thread",
-    "thread_aware_core::ThreadAware",
-    "tick::Clock",
-    "tick::ClockControl",
-    "tick::Delay",
-    "tick::FutureExt",
-    "tick::PeriodicTimer",
-    "tick::SimpleClock",
-    "tick::Stopwatch",
-    "tick::Timeout",
+    "thread_aware_core::thread::NumaNode",
+    "thread_aware_core::thread::Owner",
+    "thread_aware_core::thread::Thread",
+    "thread_aware_core::thread_aware::ThreadAware",
+    "tick::clock::Clock",
+    "tick::clock_control::ClockControl",
+    "tick::delay::Delay",
+    "tick::future_ext::FutureExt",
+    "tick::periodic_timer::PeriodicTimer",
+    "tick::simple_clock::SimpleClock",
+    "tick::stopwatch::Stopwatch",
+    "tick::timeout::Timeout",
 ]
 
 [package.metadata.docs.rs]
