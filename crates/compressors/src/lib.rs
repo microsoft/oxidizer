@@ -280,14 +280,6 @@ pub use builder::{CompressorBuilder, DecompressorBuilder};
 use bytesbuf::BytesView;
 pub use error::{BuildError, Error, Result};
 pub use input::InputData;
-#[cfg(any(
-    test,
-    feature = "brotli",
-    feature = "deflate",
-    feature = "gzip",
-    feature = "zlib",
-    feature = "zstd"
-))]
 pub use level::Level;
 pub use limits::DecompressorLimits;
 pub use resources::Resources;
@@ -299,9 +291,9 @@ use crate::core::{Compress, Compression, Decompress, process};
 
 /// Compresses one complete byte sequence that is already in memory.
 ///
-/// Takes any compressor: a concrete one such as a `gzip::Compressor`, or a
-/// boxed one whose format was chosen at runtime. The direction is part of the bound, so a
-/// decompressor will not compile here.
+/// Takes any compressor: a concrete one such as a `gzip::Compressor`, or the
+/// `format::Compressor` that [`CompressorBuilder::build_format`] returns for a format chosen at
+/// runtime. The direction is part of the bound, so a decompressor will not compile here.
 ///
 /// Prefer driving the engine directly for data that arrives incrementally: this buffers the
 /// entire result before returning.
