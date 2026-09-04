@@ -32,13 +32,13 @@ allowed_external_types = [
 all-features = true
 
 [dependencies]
-# oxidizer
-data_privacy = { workspace = true }
-observed = { workspace = true }
 
 # 3rd-party
 arrayvec = { workspace = true }
 const-hex = { workspace = true }
+# oxidizer
+data_privacy = { workspace = true }
+observed = { workspace = true }
 opentelemetry = { workspace = true, features = ["logs"] }
 
 [dev-dependencies]

@@ -150,6 +150,10 @@ fn platform_monitor_directory() -> Result<PathBuf, Error> {
 }
 
 #[cfg(unix)]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "The platform implementations share a fallible interface because Windows can lack a runtime directory"
+)]
 fn platform_monitor_directory() -> Result<PathBuf, Error> {
     if let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR") {
         return Ok(PathBuf::from(runtime).join("seismograph"));
@@ -160,6 +164,10 @@ fn platform_monitor_directory() -> Result<PathBuf, Error> {
 }
 
 #[cfg(not(any(target_os = "windows", unix)))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "The platform implementations share a fallible interface because Windows can lack a runtime directory"
+)]
 fn platform_monitor_directory() -> Result<PathBuf, Error> {
     Ok(std::env::temp_dir().join("seismograph"))
 }

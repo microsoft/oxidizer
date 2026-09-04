@@ -20,6 +20,13 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/seismograph
 [target.'cfg(target_os = "linux")'.dependencies]
 libc.workspace = true
 
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "getrandom::error::Error",
+    "seismograph_protocol::Error",
+    "seismograph_protocol::monitor::MonitorDescriptor",
+]
+
 [features]
 monitor = ["dep:getrandom", "dep:seismograph_protocol"]
 
