@@ -16,7 +16,8 @@
 //! # Features
 //!
 //! - **`time`** - Exposes time primitives through `arty::time`.
-//! - **`test-util`** - Exposes `time::ClockControl` when `time` is also enabled.
+//! - **`test-util`** - Enables test-only runtime utilities. With `time`, this includes
+//!   `arty::time::ClockControl`.
 //!
 //! # Project policies
 //!

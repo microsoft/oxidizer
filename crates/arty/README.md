@@ -22,7 +22,8 @@ established.
 ## Features
 
 * **`time`** - Exposes time primitives through `arty::time`.
-* **`test-util`** - Exposes `time::ClockControl` when `time` is also enabled.
+* **`test-util`** - Enables test-only runtime utilities. With `time`, this includes
+  `arty::time::ClockControl`.
 
 ## Project policies
 
@@ -37,7 +38,7 @@ established.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbVwyeVLFSO68b1R3yOQcfYiwbakqCi1YB3uIbJnq7wcCXYGJhZIGCaWFydHlfY29yZWUwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbUCJNbmEm3o4bEGpzQYEPn1cbPdtoysJJTTAbmG5FQvTrxU1hZIGCaWFydHlfY29yZWUwLjIuMA
  [__link0]: https://crates.io/crates/arty_core/0.2.0
  [__link1]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/DESIGN.md
  [__link2]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/IO.md
