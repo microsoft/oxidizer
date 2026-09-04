@@ -17,7 +17,7 @@ use std::borrow::Cow;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use bytesbuf::mem::GlobalPool;
+use bytesbuf::mem::OpaqueMemory;
 use http_extensions::{HttpBodyBuilder, RequestHandler};
 use opentelemetry::metrics::Meter;
 use thread_aware::{PerThread, ThreadAware, unaware};
@@ -53,7 +53,7 @@ where
     /// Clock for timing operations and timeouts.
     pub clock: Clock,
     /// Memory pool for usage-neutral memory allocations.
-    pub global_pool: GlobalPool,
+    pub memory: OpaqueMemory,
     /// Extra dependencies forwarded verbatim to [`CustomContext::extras`].
     pub extras: Extras,
 }
@@ -213,12 +213,12 @@ impl HttpClient {
             runtime_name: runtime.into(),
             name: transport.into(),
             clock: deps.clock.clone(),
-            global_pool: deps.global_pool.clone(),
+            memory: deps.memory.clone(),
             isolation,
             inner: thread_aware::Arc::new_with((deps, unaware(factory)), |(deps, factory)| {
                 Arc::new(move |options, meter, pool_index| {
                     let context = CustomContext {
-                        body_builder: create_body_builder(&deps.global_pool, &deps.clock, &options),
+                        body_builder: create_body_builder(&deps.memory, &deps.clock, &options),
                         clock: deps.clock.clone(),
                         pool_index,
                         extras: deps.extras.clone(),
@@ -245,7 +245,7 @@ pub(crate) struct Transport {
     name: Cow<'static, str>,
     inner: thread_aware::Arc<TransportFn, PerThread>,
     clock: Clock,
-    global_pool: GlobalPool,
+    memory: OpaqueMemory,
     isolation: Isolation,
 }
 
@@ -271,7 +271,7 @@ impl Transport {
     }
 
     pub(crate) fn create_body_builder(&self, options: &ClientOptions) -> HttpBodyBuilder {
-        create_body_builder(&self.global_pool, &self.clock, options)
+        create_body_builder(&self.memory, &self.clock, options)
     }
 }
 
@@ -281,7 +281,7 @@ impl Debug for Transport {
     }
 }
 
-pub(crate) fn create_body_builder(pool: &GlobalPool, clock: &Clock, options: &ClientOptions) -> HttpBodyBuilder {
+pub(crate) fn create_body_builder(pool: &OpaqueMemory, clock: &Clock, options: &ClientOptions) -> HttpBodyBuilder {
     HttpBodyBuilder::new(pool.clone(), clock).with_options(options.response_body_options)
 }
 
@@ -291,9 +291,11 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use bytesbuf::BytesBuf;
+    use bytesbuf::mem::{GlobalPool, Memory, OpaqueMemory};
     use http::StatusCode;
     use http_extensions::FakeHandler;
-    use thread_aware::unaware;
+    use thread_aware::{ThreadAware, unaware};
 
     use super::{CustomContext, CustomDeps, Isolation, create_builder};
     use crate::HttpResponseBuilder;
@@ -304,7 +306,7 @@ mod tests {
     fn custom_deps() -> CustomDeps {
         CustomDeps {
             clock: FakeDeps::default().clock,
-            global_pool: bytesbuf::mem::GlobalPool::new(),
+            memory: bytesbuf::mem::OpaqueMemory::new(bytesbuf::mem::GlobalPool::new()),
             extras: (),
         }
     }
@@ -312,6 +314,36 @@ mod tests {
     #[mutants::skip]
     fn ok_factory(_ctx: CustomContext) -> FakeHandler {
         FakeHandler::from_fn(|_req| HttpResponseBuilder::new_fake().status(StatusCode::OK).build())
+    }
+
+    #[derive(Clone, Debug, ThreadAware)]
+    struct CustomMemory {
+        inner: GlobalPool,
+    }
+
+    impl Memory for CustomMemory {
+        fn reserve(&self, min_bytes: usize) -> BytesBuf {
+            self.inner.reserve(min_bytes)
+        }
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn custom_deps_accept_custom_opaque_memory() {
+        let deps = CustomDeps {
+            clock: FakeDeps::default().clock,
+            memory: OpaqueMemory::new(CustomMemory { inner: GlobalPool::new() }),
+            extras: (),
+        };
+
+        let client = create_builder("test-runtime", "test", ok_factory, Isolation::Shared, deps)
+            .insecure_allow_http()
+            .minimal_pipeline()
+            .build();
+
+        let response = client.post("http://example.com").text("custom pool").fetch().await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[cfg_attr(miri, ignore)]
@@ -351,7 +383,7 @@ mod tests {
         let counter = Arc::new(AtomicUsize::new(0));
         let deps = CustomDeps {
             clock: FakeDeps::default().clock,
-            global_pool: bytesbuf::mem::GlobalPool::new(),
+            memory: bytesbuf::mem::OpaqueMemory::new(bytesbuf::mem::GlobalPool::new()),
             extras: unaware(Arc::clone(&counter)),
         };
 
