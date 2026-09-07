@@ -57,9 +57,6 @@ pub mod snapshot;
 pub mod topology;
 mod wire;
 
-/// Error produced by low-level snapshot framing.
-pub use wire::Error as WireError;
-
 /// Stable identity and schema metadata for the rallocator snapshot source.
 pub mod source {
     /// Stable seismograph source identity for rallocator snapshots.
@@ -125,6 +122,7 @@ const STATS_PAYLOAD_LEN: usize = 13 * 8;
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct Error {
     kind: ErrorKind,
+    wire: Option<wire::Error>,
 }
 
 /// Stable category of a telemetry encoding or decoding error.
@@ -138,7 +136,7 @@ pub enum ErrorKind {
     /// The output buffer does not have the exact encoded length.
     OutputLengthMismatch,
     /// The wire container is invalid.
-    Wire(WireError),
+    Wire,
     /// The telemetry schema version is unsupported.
     UnsupportedSchema(u16),
     /// A required section is missing.
@@ -166,7 +164,7 @@ impl Error {
     const INTEGER_OVERFLOW: Self = Self::new(ErrorKind::IntegerOverflow);
 
     const fn new(kind: ErrorKind) -> Self {
-        Self { kind }
+        Self { kind, wire: None }
     }
 
     /// Returns the stable category of this error.
@@ -176,7 +174,10 @@ impl Error {
     }
 
     const fn wire(error: wire::Error) -> Self {
-        Self::new(ErrorKind::Wire(error))
+        Self {
+            kind: ErrorKind::Wire,
+            wire: Some(error),
+        }
     }
 
     const fn unsupported_schema(version: u16) -> Self {
@@ -224,7 +225,10 @@ impl std::fmt::Display for Error {
             ErrorKind::LengthOverflow => formatter.write_str("the encoded snapshot length cannot be represented"),
             ErrorKind::OutputTooSmall => formatter.write_str("the snapshot output buffer is too small"),
             ErrorKind::OutputLengthMismatch => formatter.write_str("the snapshot output buffer must have the exact encoded length"),
-            ErrorKind::Wire(error) => write!(formatter, "invalid wire container: {error}"),
+            ErrorKind::Wire => match self.wire {
+                Some(error) => write!(formatter, "invalid wire container: {error}"),
+                None => formatter.write_str("invalid wire container"),
+            },
             ErrorKind::UnsupportedSchema(version) => write!(formatter, "telemetry schema version {version} is unsupported"),
             ErrorKind::MissingSection(section) => write!(formatter, "required telemetry section {section} is missing"),
             ErrorKind::DuplicateSection(section) => write!(formatter, "telemetry section {section} appears more than once"),
@@ -246,10 +250,7 @@ impl std::fmt::Debug for Error {
 
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match &self.kind {
-            ErrorKind::Wire(error) => Some(error),
-            _ => None,
-        }
+        self.wire.as_ref().map(|error| error as &(dyn std::error::Error + 'static))
     }
 }
 
@@ -1792,6 +1793,7 @@ mod tests {
             Error::malformed_section(SECTION_CALLERS).kind(),
             ErrorKind::MalformedSection(SECTION_CALLERS)
         );
+        assert_eq!(Error::wire(wire_source).kind(), ErrorKind::Wire);
 
         assert!(std::error::Error::source(&Error::wire(wire_source)).is_some());
         assert!(std::error::Error::source(&Error::LENGTH_OVERFLOW).is_none());
@@ -2013,7 +2015,8 @@ mod tests {
             assert!(matches!(
                 validate_runtime_payload(kind, payload),
                 Err(Error {
-                    kind: ErrorKind::MalformedSection(SECTION_RUNTIME_EVENTS)
+                    kind: ErrorKind::MalformedSection(SECTION_RUNTIME_EVENTS),
+                    ..
                 })
             ));
         }
@@ -2031,14 +2034,16 @@ mod tests {
             assert!(matches!(
                 decode_runtime_payload(tag, fields),
                 Err(Error {
-                    kind: ErrorKind::MalformedSection(SECTION_RUNTIME_EVENTS)
+                    kind: ErrorKind::MalformedSection(SECTION_RUNTIME_EVENTS),
+                    ..
                 })
             ));
         }
         assert!(matches!(
             decode_runtime_heap_kind(0),
             Err(Error {
-                kind: ErrorKind::MalformedSection(SECTION_RUNTIME_EVENTS)
+                kind: ErrorKind::MalformedSection(SECTION_RUNTIME_EVENTS),
+                ..
             })
         ));
     }
