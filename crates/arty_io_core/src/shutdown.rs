@@ -10,24 +10,19 @@ use crate::Driver;
 /// A future that drives one driver's graceful shutdown.
 #[must_use = "futures do nothing unless polled"]
 pub struct Shutdown<'a, D: Driver + ?Sized> {
-    driver: &'a mut D,
+    driver: &'a D,
     started: bool,
 }
 
 impl<'a, D: Driver + ?Sized> Shutdown<'a, D> {
-    pub(crate) fn new(driver: &'a mut D) -> Self {
-        Self {
-            driver,
-            started: false,
-        }
+    pub(crate) fn new(driver: &'a D) -> Self {
+        Self { driver, started: false }
     }
 }
 
 impl<D: Driver + ?Sized> fmt::Debug for Shutdown<'_, D> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Shutdown")
-            .field("started", &self.started)
-            .finish_non_exhaustive()
+        f.debug_struct("Shutdown").field("started", &self.started).finish_non_exhaustive()
     }
 }
 

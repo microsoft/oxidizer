@@ -258,6 +258,10 @@ dependencies = [
 [[package]]
 name = "arty_io_core"
 version = "0.2.0"
+dependencies = [
+ "static_assertions",
+ "thread_aware_core",
+]
 
 [[package]]
 name = "asn1-rs"

@@ -10,8 +10,8 @@ The crate is the semver chokepoint for the driver ecosystem.
 
 - A runtime and every driver it hosts name the same `arty_io_core` types.
 - Public signatures prefer standard-library types.
-- Thread placement uses the exact `thread_aware_core` types re-exported by this
-  crate.
+- Thread placement uses `thread_aware_core` directly; this crate does not
+  re-export its types.
 - Runtime-only helpers, registries, and scheduling policy stay outside this
   crate.
 
@@ -19,10 +19,12 @@ The crate is the semver chokepoint for the driver ecosystem.
 
 The contract supports registration after runtime startup.
 
+- The requested context type identifies its provider and driver.
+- `get_context::<MyContext>()` needs no provider value or runtime configuration.
 - A provider remains sufficient to create every per-worker driver instance.
-- Registration is keyed by Rust type identity.
+- Registration is keyed by the context's Rust type identity.
 - Semver-incompatible versions of one driver crate can be registered together
-  because their provider and driver types have distinct identities.
+  because their context types have distinct identities.
 - The runtime owns synchronization, cancellation, rollback, and caching for
   registration.
 
@@ -41,18 +43,22 @@ serves.
 
 The runtime does not dictate how an I/O subsystem distributes work.
 
-- A driver may expose a `Parker` and create no thread of its own.
-- A driver may use runtime-owned blocking workers.
+- Every `Driver` method takes `&self`; runtime invocation requires neither
+  mutable storage access nor a synchronization wrapper.
+- Drivers use thread-local interior mutability when callbacks change state.
+- Every driver exposes a `Parker` through a shared reference.
+- The runtime decides where each `Parker` is driven.
+- A driver may delegate `SystemTask` work to runtime-owned workers.
 - A driver or provider may create any number of private threads.
 - Primary, satellite, and thread-pinning policy are runtime implementation
   details and are not public driver roles.
 
-## R5: Reliable wakeup
+## R5: Reliable wake-up
 
-A `Parker` wakeup has the following semantics:
+A `Parker` wake-up has the following semantics:
 
 - A wake raised before a wait is latched for the next wait.
-- A wake raised by the parker's own thread is honored.
+- A wake raised by the `Parker`'s own thread is honored.
 - Redundant wakes may be coalesced.
 - A wake is never dropped.
 - A waker remains memory-safe after its driver is gone.
@@ -69,21 +75,22 @@ Shutdown must not rely on an unsafe trait or a caller-checked inertness flag.
 - The runtime bounds shutdown and reports or terminates on a liveness failure.
   Shutdown completion is not a memory-safety precondition.
 
-## R7: Explicit initialization failure
+## R7: Initialization failure is fatal
 
-Driver creation returns a typed error.
+Driver creation is infallible at the type level.
 
-- Drivers with conditional platform or permission requirements do not need to
-  panic during lazy registration.
-- The runtime decides how a partial multi-worker registration is rolled back.
-- Infallible providers use `std::convert::Infallible`.
+- A provider panics when its driver cannot be initialized.
+- The runtime does not continue after a worker fails to initialize a registered
+  driver.
+- A driver with conditional availability exposes a capability check that a
+  consumer calls before requesting its context.
 
-## R8: Blocking work is named honestly
+## R8: System work is named explicitly
 
-The runtime facility for synchronous work is named around blocking, not around
-system or async tasks.
+The runtime facility for synchronous I/O work uses `SystemTask` terminology.
 
 - Submitted work may block.
+- It is system work owned by an I/O driver, not an async application task.
 - It does not run on an async worker.
 - Submission returns before the work completes.
 - The facility remains available through driver shutdown.

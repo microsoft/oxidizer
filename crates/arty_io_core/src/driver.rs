@@ -1,16 +1,20 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::task::{Context as TaskContext, Poll, Waker};
+use std::task::{Context as TaskContext, Poll};
 
-use crate::{Parker, Shutdown, ThreadAware};
+use crate::{DriverContext, Parker, Shutdown};
 
 /// One async worker's adapter to an I/O subsystem.
 ///
 /// A driver is created on the thread that owns it and remains on that thread for its entire
-/// lifetime. It deliberately has no [`Send`] or [`Sync`] requirement. A driver may delegate all
-/// work to threads owned by its provider, use runtime blocking workers, or expose a [`Parker`] so
-/// the runtime worker drives completions while waiting.
+/// lifetime. It deliberately has no [`Send`] or [`Sync`] requirement. A driver may delegate work
+/// to threads owned by its provider, use runtime system workers, or process completions directly
+/// through its [`Parker`].
+///
+/// Every runtime callback takes `&self`. A driver uses thread-local interior mutability when a
+/// callback changes state, so the runtime never needs mutable driver access or a synchronization
+/// wrapper merely to invoke the contract.
 ///
 /// # Context
 ///
@@ -26,25 +30,19 @@ use crate::{Parker, Shutdown, ThreadAware};
 /// progress; it is never a memory-safety gate.
 pub trait Driver: 'static {
     /// The handle through which consumers start operations on this driver.
-    type Context: Clone + ThreadAware + 'static;
+    type Context: DriverContext;
 
     /// Returns a context bound to this driver instance.
     fn context(&self) -> Self::Context;
 
-    /// Returns the waiting point this driver chose to provide, if any.
-    ///
-    /// A driver returns `Some` only when creation reported that a waiting point was
-    /// [`Available`](crate::WaitingPoint::Available). Returning `None` means the driver arranges
-    /// progress through runtime blocking workers or threads of its own.
-    fn parker(&mut self) -> Option<&mut dyn Parker> {
-        None
-    }
+    /// Returns the completion-aware waiting point for this driver.
+    fn parker(&self) -> &dyn Parker;
 
     /// Prevents new operations from starting and begins graceful cleanup.
     ///
     /// In-flight operations may continue. This method is idempotent and returns promptly without
     /// waiting for external progress.
-    fn begin_shutdown(&mut self);
+    fn begin_shutdown(&self);
 
     /// Polls graceful cleanup to completion.
     ///
@@ -54,23 +52,17 @@ pub trait Driver: 'static {
     ///
     /// The runtime calls [`begin_shutdown`](Self::begin_shutdown) before the first poll and bounds
     /// the total shutdown duration. Repeated calls after completion return [`Poll::Ready`].
-    fn poll_shutdown(&mut self, cx: &mut TaskContext<'_>) -> Poll<()>;
+    fn poll_shutdown(&self, cx: &mut TaskContext<'_>) -> Poll<()>;
 
     /// Returns a future that begins and then polls graceful shutdown.
     ///
     /// Runtime implementations that erase driver types can call
     /// [`begin_shutdown`](Self::begin_shutdown) and [`poll_shutdown`](Self::poll_shutdown)
     /// directly. This adapter is the ergonomic form for callers holding a concrete driver.
-    fn shutdown(&mut self) -> Shutdown<'_, Self>
+    fn shutdown(&self) -> Shutdown<'_, Self>
     where
         Self: Sized,
     {
         Shutdown::new(self)
     }
-
-    /// Returns a handle that wakes this driver when it does not expose a [`Parker`].
-    ///
-    /// Drivers whose progress is entirely self-scheduled may return a no-op waker. The returned
-    /// waker remains safe to invoke after the driver is dropped.
-    fn waker(&self) -> Waker;
 }

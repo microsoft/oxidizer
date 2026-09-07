@@ -25,8 +25,8 @@ DriverProvider
         v
 Driver + Context
         |
-        +-- optional Parker for the worker's wait
-        +-- optional BlockingTaskSpawner use
+        +-- Parker for completion progress and waiting
+        +-- optional SystemTaskSpawner use
         +-- optional provider-owned threads
 ```
 
@@ -38,34 +38,43 @@ clone creates one `Driver`.
 hold. `ThreadAware` relocation lets the context optimize for the destination
 worker, but correctness cannot depend on relocation being called.
 
+Every `Driver` method takes `&self`. This does not make a driver `Sync`: the
+runtime still invokes it only from its owning thread. Implementations use
+thread-local interior mutability for state changes, which lets the runtime store
+and erase drivers without wrapping them in a mutex solely for method access.
+
+Every context implements `DriverContext`, whose associated `Provider` and
+`provider()` function are the complete registration recipe. A runtime method
+such as `get_context::<MyContext>()` therefore needs only the context type. The
+first request constructs and registers the provider; later requests reuse it.
+
 ## Registration stays in the runtime
 
 Lazy registration requires a type-keyed registry, synchronization between
 workers, caching, and rollback after failed creation. None of these mechanisms
 need to be shared with a driver, so none belong in this crate.
 
-The contract enables lazy registration by making the provider self-contained.
-The runtime can store a provider when a type is first requested and use it to
-create all current or future worker instances.
+The contract enables lazy registration by making the context select a
+self-contained provider. The runtime can store that provider when the context
+type is first requested and use it to create all current or future worker
+instances.
 
 Different major versions of one driver crate naturally have different Rust
-types and `TypeId` values. They coexist as long as both versions use the same
-`arty_io_core` contract.
+context types and `TypeId` values. They coexist as long as both versions use
+the same `arty_io_core` contract.
 
 ## Execution and waiting
 
-An I/O subsystem chooses its own execution strategy.
+An I/O subsystem chooses its own execution strategy. Every driver exposes a
+`Parker` through a shared reference. The runtime decides whether to integrate a
+parker into an async worker's idle wait or drive it from another runtime-owned
+thread. Internally, the driver may process completions there, delegate system
+work, or coordinate with threads managed by its provider.
 
-A driver that can efficiently combine completion processing with the async
-worker's idle wait may expose `Parker`. The runtime offers this opportunity
-through `DriverInit::waiting_point`. If unavailable or declined, the driver
-uses runtime blocking workers or threads managed by its provider.
+This avoids exposing primary or satellite roles as public API. Those are
+placement choices the runtime may change later.
 
-This avoids making the runtime spawn one thread per additional driver. It also
-avoids exposing primary or satellite roles as public API. Those are placement
-choices the runtime may change later.
-
-The parker's `Waker` follows a strict latched contract. Without latching, a wake
+The `Parker` waker follows a strict latched contract. Without latching, a wake
 between the runtime's final work check and the actual wait can be lost and the
 worker can sleep forever.
 
@@ -88,21 +97,20 @@ The lower-level methods remain available because a runtime will usually erase
 unrelated drivers behind an internal object-safe shim and poll them alongside
 executor shutdown.
 
-## Creation errors
+## Creation failure
 
-Creation is fallible because lazy registration may discover unavailable
-platform features, missing permissions, or exhausted resources after the
-runtime has already started. A typed `Result` lets the requesting library choose
-another implementation or surface a useful error.
+Creation is infallible at the type level. A provider that cannot initialize its
+driver panics because the runtime cannot continue coherently with a driver
+registered on only part of its worker set.
 
-The runtime owns the harder transactional problem. If one worker fails after
-others succeeded, it begins shutdown for the created instances and reports the
-provider error only after rollback is safe.
+A driver with conditional platform or permission requirements exposes a
+capability check. The consumer calls that check before
+`get_context::<MyContext>()`, while it can still choose another context type.
 
-## Blocking tasks
+## System tasks
 
 Some I/O mechanisms need synchronous calls that cannot run on an async worker.
-`BlockingTaskSpawner` is intentionally narrower than an async scheduler:
+`SystemTaskSpawner` is intentionally narrower than an async scheduler:
 
 - it accepts only synchronous `FnOnce` work;
 - work is explicitly allowed to block;
@@ -120,9 +128,9 @@ compatible drivers resolve to different copies of the contract. The initial API
 therefore depends only on `thread_aware_core`, whose `Thread` and `ThreadAware`
 types are essential for per-worker placement.
 
-Those types are re-exported from `arty_io_core`, along with `Owner` and
-`NumaNode`, so driver authors do not need to name a second package in public
-signatures. `arty_io_core` must not stabilize before `thread_aware_core`.
+`arty_io_core` references those types directly but does not re-export them.
+Driver authors depend on `thread_aware_core` when implementing relocation.
+`arty_io_core` must not stabilize before `thread_aware_core`.
 
 Future additions follow these rules:
 
