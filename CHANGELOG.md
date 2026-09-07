@@ -4,6 +4,8 @@ Please see each crate's change log below:
 
 - [`anyspawn`](./crates/anyspawn/CHANGELOG.md)
 - [`anyspawn_azure`](./crates/anyspawn_azure/CHANGELOG.md)
+- [`arty`](./crates/arty/CHANGELOG.md)
+- [`arty_io_core`](./crates/arty_io_core/CHANGELOG.md)
 - [`bytesbuf`](./crates/bytesbuf/CHANGELOG.md)
 - [`bytesbuf_io`](./crates/bytesbuf_io/CHANGELOG.md)
 - [`cachet`](./crates/cachet/CHANGELOG.md)
