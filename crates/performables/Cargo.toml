@@ -28,16 +28,24 @@ allowed_external_types = [
 
 [features]
 default = ["seismograph"]
+# Marker feature selecting the Loom model-checking test target. The model itself
+# is compiled under `--cfg loom` by the workspace's `just loom` recipe.
+loom = []
 seismograph = ["dep:seismograph"]
+serde = ["dep:serde"]
 
 [dependencies]
 seismograph = { workspace = true, optional = true }
-serde = { workspace = true, features = ["std"] }
-thread_aware = { workspace = true, features = ["std"] }
+serde = { workspace = true, features = ["std"], optional = true }
+thread_aware_core = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 criterion.workspace = true
+serde = { workspace = true, features = ["std"] }
 thread_aware = { workspace = true, features = ["test-utils"] }
+
+[target.'cfg(loom)'.dev-dependencies]
+loom = { workspace = true }
 
 [[bench]]
 name = "performables_uncontended"
@@ -47,6 +55,11 @@ harness = false
 name = "performables_telemetry_sampling"
 harness = false
 required-features = ["seismograph"]
+
+[[test]]
+name = "loom_arc_affinity"
+path = "tests/loom_arc_affinity.rs"
+required-features = ["loom"]
 
 [lints]
 workspace = true

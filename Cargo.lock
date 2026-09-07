@@ -3899,9 +3899,11 @@ name = "performables"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "loom",
  "seismograph",
  "serde",
  "thread_aware",
+ "thread_aware_core",
 ]
 
 [[package]]

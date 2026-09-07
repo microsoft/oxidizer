@@ -4,7 +4,7 @@
 use std::fmt::Debug;
 use std::pin::Pin;
 
-use performables::arc::{Arc, PerCore};
+use performables::arc::{Arc, PerThread};
 use performables::sync::channel::{OneshotReceiver, OneshotSender, oneshot};
 use thread_aware::closure::ThreadAwareAsyncFnOnce;
 use thread_aware::{Thread, ThreadAware};
@@ -84,7 +84,7 @@ where
 /// Internal wrapper for custom spawn functions.
 #[derive(Clone, ThreadAware)]
 pub(crate) struct CustomSpawner {
-    spawn: Arc<dyn SpawnCustom, PerCore>,
+    spawn: Arc<dyn SpawnCustom, PerThread>,
     name: &'static str,
 }
 

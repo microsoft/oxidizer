@@ -5,6 +5,7 @@
 
 //! Integration tests for executor-independent synchronization.
 
+#[cfg(feature = "serde")]
 #[path = "support/serializer.rs"]
 mod serializer_support;
 #[path = "support/waker.rs"]
@@ -18,7 +19,7 @@ use std::task::{Context, Poll, Wake, Waker};
 
 use performables::arc::Arc;
 #[cfg(feature = "seismograph")]
-use performables::arc::PerCore;
+use performables::arc::PerThread;
 use performables::sync::barrier::Barrier;
 use performables::sync::condition::Condvar;
 use performables::sync::lock::RwLock;
@@ -28,8 +29,11 @@ use performables::sync::once::{LazyLock, OnceLock};
 use seismograph::recorder::Configuration;
 #[cfg(feature = "seismograph")]
 use seismograph::recorder::event::{self as recorder, EventKind};
+#[cfg(feature = "serde")]
 use serde::de::value::{Error as ValueError, U64Deserializer};
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "serde")]
 use serializer_support::ValueSerializer;
 #[cfg(feature = "seismograph")]
 use thread_aware::Relocator;
@@ -139,6 +143,7 @@ fn mutex_supports_owned_access_defaults_and_formatting() {
     assert_eq!(Mutex::<usize>::default().into_inner(), 0);
 }
 
+#[cfg(feature = "serde")]
 #[test]
 fn arc_and_mutex_serde_delegate_to_their_values() {
     let arc = Arc::new(42_u64);
@@ -967,7 +972,7 @@ fn ownership_and_lock_operations_emit_runtime_telemetry() {
     let dropped_id = Arc::telemetry_object_id(&dropped);
     drop(dropped);
 
-    let mut relocated = Arc::<u64, PerCore>::new_with(|| 13);
+    let mut relocated = Arc::<u64, PerThread>::new_with(|| 13);
     let relocated_id = Arc::telemetry_object_id(&relocated);
     _ = Relocator::between_threads().relocate(&mut relocated);
 

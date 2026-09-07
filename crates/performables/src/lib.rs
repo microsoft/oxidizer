@@ -20,7 +20,7 @@
 //! feature enables runtime ownership and synchronization telemetry.
 //!
 //! [`arc::Arc`] defaults to a process-wide allocation with the same
-//! representation size as [`std::sync::Arc`]. Its thread-aware per-core and
+//! representation size as [`std::sync::Arc`]. Its thread-aware per-thread and
 //! per-NUMA strategies lazily materialize and reuse affinity-local values.
 
 pub mod arc;

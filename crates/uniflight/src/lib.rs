@@ -62,7 +62,7 @@
 //!
 //! - [`PerProcess`] (default): Single global state, maximum deduplication
 //! - [`PerNuma`]: Separate state per NUMA node, NUMA-local memory access
-//! - [`PerCore`]: Separate state per runtime thread; the same key coalesces within one partition
+//! - [`PerThread`]: Separate state per runtime thread; the same key coalesces within one partition
 //!   partition, with no sharing across thread partitions
 //!
 //! ```
@@ -142,7 +142,7 @@ use async_once_cell::OnceCell;
 use dashmap::DashMap;
 use dashmap::Entry::{Occupied, Vacant};
 use futures_util::FutureExt; // catch_unwind, map
-use performables::arc::{Arc as PerformableArc, PerCore, PerNuma, PerProcess, Strategy};
+use performables::arc::{Arc as PerformableArc, PerNuma, PerProcess, PerThread, Strategy};
 use thread_aware::{Thread, ThreadAware};
 
 /// Strategy-partitioned state used by [`Merger`].
@@ -175,7 +175,7 @@ impl<K: Eq + Hash, T> MergerState<K, T> {
 /// The `S` type parameter controls the thread-aware scoping strategy:
 /// - [`PerProcess`]: Single global scope (default, maximum deduplication)
 /// - [`PerNuma`]: Per-NUMA-node scope (NUMA-local memory access)
-/// - [`PerCore`]: Per-thread scope (same-key work coalesces only within one thread partition)
+/// - [`PerThread`]: Per-thread scope (same-key work coalesces only within one thread partition)
 pub struct Merger<K, T, S = PerProcess>
 where
     S: Strategy<MergerState<K, T>>,
@@ -225,13 +225,13 @@ where
     /// The scoping strategy is determined by the type parameter `S`:
     /// - [`PerProcess`] (default): Process-wide scope, maximum deduplication
     /// - [`PerNuma`]: Per-NUMA-node scope, NUMA-local memory access
-    /// - [`PerCore`]: Per-thread scope, with same-key coalescing inside each thread partition
+    /// - [`PerThread`]: Per-thread scope, with same-key coalescing inside each thread partition
     ///   and no sharing across thread partitions
     ///
     /// # Examples
     ///
     /// ```
-    /// use performables::arc::{PerCore, PerNuma};
+    /// use performables::arc::{PerNuma, PerThread};
     /// use uniflight::Merger;
     ///
     /// // Default (PerProcess) - type can be inferred
@@ -241,7 +241,7 @@ where
     /// let numa: Merger<String, String, PerNuma> = Merger::new();
     ///
     /// // Per-thread scope
-    /// let thread: Merger<String, String, PerCore> = Merger::new();
+    /// let thread: Merger<String, String, PerThread> = Merger::new();
     /// ```
     #[inline]
     #[must_use]
@@ -300,7 +300,7 @@ where
     }
 }
 
-impl<K, T> Merger<K, T, PerCore>
+impl<K, T> Merger<K, T, PerThread>
 where
     K: Hash + Eq + Send + Sync + 'static,
     T: Send + Sync + 'static,
@@ -549,7 +549,7 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)]
     fn merger_can_be_relocated_between_threads() {
-        let mut merger = Merger::<String, String, PerCore>::new();
+        let mut merger = Merger::<String, String, PerThread>::new();
         let cell = Arc::new(PanicAwareCell::new());
         merger.inner.entries.insert("key".to_owned(), Arc::downgrade(&cell));
         assert_eq!(merger.len(), 1);

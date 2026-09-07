@@ -16,8 +16,9 @@ use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::{Arc as StdArc, RwLock, Weak as StdWeak};
 
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use thread_aware::{Owner, Thread, ThreadAware};
+use thread_aware_core::{Owner, Thread, ThreadAware};
 
 use self::factory::Factory;
 use crate::telemetry::{self, EventKind};
@@ -28,7 +29,7 @@ pub struct PerProcess;
 
 /// Materializes and shares one value per runtime thread.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct PerCore;
+pub struct PerThread;
 
 /// Materializes and shares one value per NUMA node.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -39,11 +40,11 @@ mod private {
     use std::hash::Hash;
     use std::thread::ThreadId;
 
-    use thread_aware::{NumaNode, Thread};
+    use thread_aware_core::{NumaNode, Thread};
 
     pub trait Sealed {}
 
-    impl Sealed for super::PerCore {}
+    impl Sealed for super::PerThread {}
     impl Sealed for super::PerNuma {}
     impl Sealed for super::PerProcess {}
 
@@ -53,7 +54,7 @@ mod private {
         fn key(thread: &Thread) -> Self::Key;
     }
 
-    impl AffinityStrategy for super::PerCore {
+    impl AffinityStrategy for super::PerThread {
         type Key = ThreadId;
 
         fn key(thread: &Thread) -> Self::Key {
@@ -155,7 +156,7 @@ impl MakeMutTarget for str {
 ///
 /// ```
 /// use performables::arc::{Arc, PerProcess};
-/// use thread_aware::ThreadAware;
+/// use thread_aware_core::ThreadAware;
 ///
 /// fn require_thread_aware<T: ThreadAware>() {}
 ///
@@ -430,42 +431,49 @@ fn relocate_affinity<T: ?Sized, S: private::AffinityStrategy>(
         return;
     }
 
-    let mut inner = state.shared.inner.write().expect("Arc affinity state lock was poisoned");
-    if !inner.storage.bind_owner(destination.owner()) {
-        return;
-    }
-
-    if let Some(factory) = inner.factory.as_mut() {
-        factory.record_source(source);
-    }
-
     let destination_key = S::key(destination);
+    let source_key = source.map(S::key);
+    let current = StdArc::clone(&state.current);
+    let factory = {
+        let mut inner = state.shared.inner.write().expect("Arc affinity state lock was poisoned");
+        if !inner.storage.bind_owner(destination.owner()) {
+            return;
+        }
+
+        if let Some(factory) = inner.factory.as_mut() {
+            factory.record_source(source);
+        }
+
+        if let Some(value) = inner.storage.get_clone(&destination_key) {
+            state.current = value;
+            state.current_owner = Some(destination.owner().clone());
+            return;
+        }
+
+        if source_key.as_ref() == Some(&destination_key) {
+            _ = inner.storage.insert(destination_key, current);
+            state.current_owner = Some(destination.owner().clone());
+            return;
+        }
+
+        if let Some(source_key) = source_key.as_ref() {
+            _ = inner.storage.insert(source_key.clone(), StdArc::clone(&current));
+        }
+        inner.factory.clone()
+    };
+
+    let next = factory.as_ref().map_or_else(
+        || StdArc::clone(&current),
+        |factory| factory.materialize(&current, source, destination),
+    );
+    let mut inner = state.shared.inner.write().expect("Arc affinity state lock was poisoned");
     if let Some(value) = inner.storage.get_clone(&destination_key) {
         state.current = value;
-        state.current_owner = Some(destination.owner().clone());
-        return;
+    } else {
+        _ = inner.storage.insert(destination_key, StdArc::clone(&next));
+        state.current = next;
     }
-
-    let source_key = source.map(S::key);
-    if source_key.as_ref() == Some(&destination_key) {
-        _ = inner.storage.insert(destination_key, StdArc::clone(&state.current));
-        state.current_owner = Some(destination.owner().clone());
-        return;
-    }
-
-    let next = inner.factory.as_ref().map_or_else(
-        || StdArc::clone(&state.current),
-        |factory| factory.materialize(&state.current, source, destination),
-    );
-    let previous = std::mem::replace(&mut state.current, next);
     state.current_owner = Some(destination.owner().clone());
-    let result = inner.storage.insert(destination_key.clone(), StdArc::clone(&state.current));
-    assert!(result.is_ok(), "destination was checked while holding the same write lock");
-    if let Some(source_key) = source_key
-        && source_key != destination_key
-    {
-        _ = inner.storage.insert(source_key, previous);
-    }
 }
 
 impl<T> Arc<T, PerProcess> {
@@ -716,8 +724,8 @@ where
     }
 }
 
-impl<T: ?Sized> Arc<T, PerCore> {
-    /// Constructs a per-core pointer from prebuilt values for runtime threads.
+impl<T: ?Sized> Arc<T, PerThread> {
+    /// Constructs a per-thread pointer from prebuilt values for runtime threads.
     ///
     /// The values are sealed into the pointer's private thread-keyed storage.
     /// Threads owned by another runtime and duplicate thread partitions are
@@ -731,7 +739,7 @@ impl<T: ?Sized> Arc<T, PerCore> {
     where
         I: IntoIterator<Item = (Thread, Arc<T, PerProcess>)>,
     {
-        affinity_state_from_values::<T, PerCore, I>(current_thread, values).map(Self::from_state)
+        affinity_state_from_values::<T, PerThread, I>(current_thread, values).map(Self::from_state)
     }
 }
 
@@ -1033,6 +1041,7 @@ impl<'a, T: Clone> From<Cow<'a, [T]>> for Arc<[T], PerProcess> {
     }
 }
 
+#[cfg(feature = "serde")]
 impl<T: ?Sized + Serialize, S: Strategy<T>> Serialize for Arc<T, S> {
     fn serialize<SerializerType>(&self, serializer: SerializerType) -> Result<SerializerType::Ok, SerializerType::Error>
     where
@@ -1042,6 +1051,7 @@ impl<T: ?Sized + Serialize, S: Strategy<T>> Serialize for Arc<T, S> {
     }
 }
 
+#[cfg(feature = "serde")]
 impl<'de, T> Deserialize<'de> for Arc<T, PerProcess>
 where
     T: Deserialize<'de>,
@@ -1054,6 +1064,7 @@ where
     }
 }
 
+#[cfg(feature = "serde")]
 impl<'de, T> Deserialize<'de> for Arc<[T], PerProcess>
 where
     T: Deserialize<'de>,
@@ -1066,6 +1077,7 @@ where
     }
 }
 
+#[cfg(feature = "serde")]
 impl<'de> Deserialize<'de> for Arc<str, PerProcess> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -1136,6 +1148,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::task::Wake;
 
+    #[cfg(feature = "serde")]
     use serde::de::value::{Error as ValueError, SeqDeserializer, StrDeserializer, U64Deserializer};
     use thread_aware::Relocator;
 
@@ -1444,6 +1457,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "serde")]
     #[test]
     fn per_process_deserializes_sized_slice_and_str_values() {
         let decoded = Arc::<u64>::deserialize(U64Deserializer::<ValueError>::new(42)).unwrap();
@@ -1454,7 +1468,7 @@ mod tests {
     }
 
     #[test]
-    fn per_core_relocation_reuses_the_destination_value() {
+    fn per_thread_relocation_reuses_the_destination_value() {
         struct Counter(AtomicUsize);
 
         impl Counter {
@@ -1466,7 +1480,7 @@ mod tests {
         let relocator = Relocator::between_threads();
         let (source, destination) = relocator.relocate(&mut ());
         let source = source.unwrap();
-        let mut first = Arc::<Counter, PerCore>::new_with(Counter::new);
+        let mut first = Arc::<Counter, PerThread>::new_with(Counter::new);
         let mut second = first.clone();
         first.0.store(42, Ordering::Relaxed);
 
@@ -1479,11 +1493,38 @@ mod tests {
     }
 
     #[test]
-    fn per_core_adopts_prebuilt_values() {
+    fn affinity_constructor_panic_does_not_poison_shared_state() {
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+
+        fn panic_once_after_initial_construction() -> usize {
+            match CALLS.fetch_add(1, Ordering::Relaxed) {
+                1 => panic!("constructor panic"),
+                call => call,
+            }
+        }
+
+        CALLS.store(0, Ordering::Relaxed);
+        let (source, destination) = Relocator::between_threads().relocate(&mut ());
+        let source = source.unwrap();
+        let mut value = Arc::<usize, PerThread>::new_with(panic_once_after_initial_construction);
+
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ThreadAware::relocate(&mut value, Some(&source), &destination);
+        }));
+        assert!(panic.is_err());
+        assert_eq!(Arc::strong_count(&value), 1);
+
+        ThreadAware::relocate(&mut value, Some(&source), &destination);
+
+        assert_eq!(*value, 2);
+    }
+
+    #[test]
+    fn per_thread_adopts_prebuilt_values() {
         let (source, destination) = Relocator::between_threads().relocate(&mut ());
         let source = source.unwrap();
         let mut value =
-            Arc::<u64, PerCore>::try_from_values(&source, [(source.clone(), Arc::new(10)), (destination.clone(), Arc::new(20))]).unwrap();
+            Arc::<u64, PerThread>::try_from_values(&source, [(source.clone(), Arc::new(10)), (destination.clone(), Arc::new(20))]).unwrap();
 
         assert_eq!(*value, 10);
         ThreadAware::relocate(&mut value, Some(&source), &destination);
@@ -1508,7 +1549,7 @@ mod tests {
     fn prebuilt_values_reject_duplicate_partitions() {
         let (source, _) = Relocator::between_threads().relocate(&mut ());
         let source = source.unwrap();
-        let result = Arc::<u64, PerCore>::try_from_values(&source, [(source.clone(), Arc::new(10)), (source.clone(), Arc::new(20))]);
+        let result = Arc::<u64, PerThread>::try_from_values(&source, [(source.clone(), Arc::new(10)), (source.clone(), Arc::new(20))]);
 
         assert_eq!(result.unwrap_err(), Error::Duplicate);
     }
@@ -1517,7 +1558,7 @@ mod tests {
     fn prebuilt_values_allow_sparse_partitions_and_reuse_the_current_value() {
         let (source, destination) = Relocator::between_threads().relocate(&mut ());
         let source = source.unwrap();
-        let mut value = Arc::<u64, PerCore>::try_from_values(&source, [(source.clone(), Arc::new(10))]).unwrap();
+        let mut value = Arc::<u64, PerThread>::try_from_values(&source, [(source.clone(), Arc::new(10))]).unwrap();
 
         ThreadAware::relocate(&mut value, Some(&source), &destination);
 
@@ -1528,11 +1569,11 @@ mod tests {
     fn prebuilt_values_reject_missing_current_and_foreign_owners() {
         let (source, destination) = Relocator::between_threads().relocate(&mut ());
         let source = source.unwrap();
-        let missing_current = Arc::<u64, PerCore>::try_from_values(&source, [(destination, Arc::new(20))]);
+        let missing_current = Arc::<u64, PerThread>::try_from_values(&source, [(destination, Arc::new(20))]);
 
         let (source, foreign) = Relocator::between_threads().different_owner().relocate(&mut ());
         let source = source.unwrap();
-        let foreign_owner = Arc::<u64, PerCore>::try_from_values(&source, [(source.clone(), Arc::new(10)), (foreign, Arc::new(30))]);
+        let foreign_owner = Arc::<u64, PerThread>::try_from_values(&source, [(source.clone(), Arc::new(10)), (foreign, Arc::new(30))]);
 
         assert_eq!(
             (missing_current.unwrap_err(), foreign_owner.unwrap_err()),
@@ -1558,7 +1599,7 @@ mod tests {
     fn logical_count_excludes_storage_after_another_clone_relocates() {
         let (source, destination) = Relocator::between_threads().relocate(&mut ());
         let source = source.unwrap();
-        let first = Arc::<u64, PerCore>::new_with(|| 42);
+        let first = Arc::<u64, PerThread>::new_with(|| 42);
         let mut second = first.clone();
 
         ThreadAware::relocate(&mut second, Some(&source), &destination);
@@ -1568,7 +1609,7 @@ mod tests {
 
     #[test]
     fn affinity_relocation_across_owners_keeps_the_carried_value() {
-        let mut value = Arc::<u64, PerCore>::new_with(|| 42);
+        let mut value = Arc::<u64, PerThread>::new_with(|| 42);
         let original = value.clone();
 
         _ = Relocator::between_threads().different_owner().relocate(&mut value);
@@ -1580,7 +1621,7 @@ mod tests {
     fn affinity_relocation_rejects_a_second_move_into_a_foreign_owner() {
         let (source, foreign) = Relocator::between_threads().different_owner().relocate(&mut ());
         let source = source.unwrap();
-        let mut value = Arc::<u64, PerCore>::new_with(|| 42);
+        let mut value = Arc::<u64, PerThread>::new_with(|| 42);
         let original = value.clone();
 
         ThreadAware::relocate(&mut value, Some(&source), &foreign);
@@ -1594,7 +1635,7 @@ mod tests {
         let (source, destination) = Relocator::between_threads().relocate(&mut ());
         let source = source.unwrap();
         let (_, foreign) = Relocator::between_threads().different_owner().relocate(&mut ());
-        let first = Arc::<u64, PerCore>::new_with(|| 42);
+        let first = Arc::<u64, PerThread>::new_with(|| 42);
         let mut bound = first.clone();
         let mut unbound = first.clone();
 
@@ -1608,7 +1649,7 @@ mod tests {
     fn affinity_relocation_with_the_same_key_keeps_the_carried_value() {
         let (source, _) = Relocator::between_threads().relocate(&mut ());
         let source = source.unwrap();
-        let mut value = Arc::<u64, PerCore>::new_with(|| 42);
+        let mut value = Arc::<u64, PerThread>::new_with(|| 42);
         let original = value.clone();
 
         ThreadAware::relocate(&mut value, Some(&source), &source);
@@ -1618,7 +1659,7 @@ mod tests {
 
     #[test]
     fn affinity_constructor_does_not_require_sync() {
-        let value = Arc::<Cell<u64>, PerCore>::new_with(|| Cell::new(42));
+        let value = Arc::<Cell<u64>, PerThread>::new_with(|| Cell::new(42));
 
         assert_eq!(value.get(), 42);
     }
@@ -1636,7 +1677,7 @@ mod tests {
 
         let (source, destination) = Relocator::between_threads().relocate(&mut ());
         let source = source.unwrap();
-        let mut value = Arc::<Option<std::thread::ThreadId>, PerCore>::new_with_data(Input(None), |input| input.0);
+        let mut value = Arc::<Option<std::thread::ThreadId>, PerThread>::new_with_data(Input(None), |input| input.0);
 
         ThreadAware::relocate(&mut value, Some(&source), &destination);
 
@@ -1657,7 +1698,7 @@ mod tests {
 
         let (source, destination) = Relocator::between_threads().relocate(&mut ());
         let source = source.unwrap();
-        let mut value = Arc::<dyn Value, PerCore>::new_boxed(|| Box::new(42));
+        let mut value = Arc::<dyn Value, PerThread>::new_boxed(|| Box::new(42));
 
         ThreadAware::relocate(&mut value, Some(&source), &destination);
 
@@ -1668,7 +1709,7 @@ mod tests {
     fn affinity_from_unaware_clones_the_current_value() {
         let (source, destination) = Relocator::between_threads().relocate(&mut ());
         let source = source.unwrap();
-        let mut value = Arc::<String, PerCore>::from_unaware(String::from("value"));
+        let mut value = Arc::<String, PerThread>::from_unaware(String::from("value"));
         let original = value.clone();
 
         ThreadAware::relocate(&mut value, Some(&source), &destination);
@@ -1700,7 +1741,7 @@ mod tests {
 
         let (source, destination) = Relocator::between_threads().relocate(&mut ());
         let source = source.unwrap();
-        let mut value = Arc::<dyn Value, PerCore>::with_clone_fn(ConcreteValue(None), |value| Box::new(value.clone()));
+        let mut value = Arc::<dyn Value, PerThread>::with_clone_fn(ConcreteValue(None), |value| Box::new(value.clone()));
 
         ThreadAware::relocate(&mut value, Some(&source), &destination);
 
@@ -1709,14 +1750,14 @@ mod tests {
 
     #[test]
     fn affinity_into_arc_returns_the_current_value() {
-        let value = Arc::<u64, PerCore>::new_with(|| 42);
+        let value = Arc::<u64, PerThread>::new_with(|| 42);
 
         assert_eq!(*Arc::into_arc(value), 42);
     }
 
     #[test]
     fn affinity_internal_state_and_factory_have_stable_debug_shapes() {
-        let value = Arc::<u64, PerCore>::new_with(|| 42);
+        let value = Arc::<u64, PerThread>::new_with(|| 42);
         let state_debug = format!("{:?}", value.state);
         let inner = value.state.shared.inner.read().unwrap();
         let factory_debug = format!("{:?}", inner.factory.as_ref().unwrap());

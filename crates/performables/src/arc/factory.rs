@@ -5,11 +5,20 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use thread_aware::{Thread, ThreadAware};
+use thread_aware_core::{Thread, ThreadAware};
 
 pub(super) struct Factory<T: ?Sized> {
     materializer: Arc<dyn Materializer<T>>,
     source: Option<Thread>,
+}
+
+impl<T: ?Sized> Clone for Factory<T> {
+    fn clone(&self) -> Self {
+        Self {
+            materializer: Arc::clone(&self.materializer),
+            source: self.source.clone(),
+        }
+    }
 }
 
 impl<T> Factory<T> {

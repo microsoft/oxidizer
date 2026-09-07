@@ -69,7 +69,7 @@ type parameter. This controls how the internal state is partitioned across threa
 
 * [`PerProcess`][__link4] (default): Single global state, maximum deduplication
 * [`PerNuma`][__link5]: Separate state per NUMA node, NUMA-local memory access
-* [`PerCore`][__link6]: Separate state per runtime thread; the same key coalesces within one partition
+* [`PerThread`][__link6]: Separate state per runtime thread; the same key coalesces within one partition
   partition, with no sharing across thread partitions
 
 ```rust
@@ -136,7 +136,7 @@ Use `--save-baseline` and `--baseline` flags to track regressions over time.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/uniflight">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG_J9xsc0_S50G65QmwQwVAaaG83zzq0PvhGoG2rTuz6W8icYYWSCgmxwZXJmb3JtYWJsZXNlMC4xLjCCaXVuaWZsaWdodGUwLjUuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG1Oloxyv6Xj1G_ZwFJOiwxcWG7IXMVAap5apG8HWCqgNGDbEYWSCgmxwZXJmb3JtYWJsZXNlMC4xLjCCaXVuaWZsaWdodGUwLjUuMA
  [__link0]: https://docs.rs/uniflight/0.5.0/uniflight/struct.Merger.html
  [__link1]: https://docs.rs/uniflight/0.5.0/uniflight/?search=Merger::execute
  [__link10]: https://doc.rust-lang.org/stable/std/?search=hash::Hash
@@ -146,7 +146,7 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link3]: https://docs.rs/performables/0.1.0/performables/?search=arc::Strategy
  [__link4]: https://docs.rs/performables/0.1.0/performables/?search=arc::PerProcess
  [__link5]: https://docs.rs/performables/0.1.0/performables/?search=arc::PerNuma
- [__link6]: https://docs.rs/performables/0.1.0/performables/?search=arc::PerCore
+ [__link6]: https://docs.rs/performables/0.1.0/performables/?search=arc::PerThread
  [__link7]: https://docs.rs/uniflight/0.5.0/uniflight/struct.LeaderPanicked.html
  [__link8]: https://docs.rs/uniflight/0.5.0/uniflight/?search=LeaderPanicked::message
  [__link9]: https://doc.rust-lang.org/stable/std/clone/trait.Clone.html

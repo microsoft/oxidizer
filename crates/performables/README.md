@@ -30,7 +30,7 @@ independently versioned latest-value observation. The default `seismograph`
 feature enables runtime ownership and synchronization telemetry.
 
 [`arc::Arc`][__link6] defaults to a process-wide allocation with the same
-representation size as [`std::sync::Arc`][__link7]. Its thread-aware per-core and
+representation size as [`std::sync::Arc`][__link7]. Its thread-aware per-thread and
 per-NUMA strategies lazily materialize and reuse affinity-local values.
 
 
@@ -39,7 +39,7 @@ per-NUMA strategies lazily materialize and reuse affinity-local values.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/performables">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEGzLtA9EtpaABGzhygmK3kZAMG9eziizuCMKCGyVd_bkn6prXYWSBgmxwZXJmb3JtYWJsZXNlMC4xLjA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG79B_wmBTYZkG-wjANB7ORWPGzn2o76RZJN2G5WPUT4gCtkwYWSBgmxwZXJmb3JtYWJsZXNlMC4xLjA
  [__link0]: https://docs.rs/performables/0.1.0/performables/?search=sync::PoisonError
  [__link1]: https://docs.rs/performables/0.1.0/performables/?search=sync::barrier::Barrier
  [__link2]: https://docs.rs/performables/0.1.0/performables/?search=sync::condition::Condvar

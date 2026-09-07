@@ -42,7 +42,7 @@ mod linux {
     use std::hint::black_box;
 
     use gungraun::{library_benchmark, library_benchmark_group};
-    use performables::arc::{Arc, PerCore};
+    use performables::arc::{Arc, PerThread};
     use thread_aware::{Thread, ThreadAware, ThreadBuilder};
     use thread_aware_benchmarking::{Payload, Tree};
 
@@ -59,9 +59,9 @@ mod linux {
     }
 
     // Destination thread already holds a value.
-    fn materialized() -> (Arc<Payload, PerCore>, Thread, Thread) {
+    fn materialized() -> (Arc<Payload, PerThread>, Thread, Thread) {
         let threads = threads(2);
-        let mut arc = Arc::<Payload, PerCore>::new_with(Payload::new);
+        let mut arc = Arc::<Payload, PerThread>::new_with(Payload::new);
 
         for thread in &threads {
             let mut probe = arc.clone();
@@ -73,7 +73,7 @@ mod linux {
     }
 
     // Destination thread holds the value carried by the returned Arc.
-    fn materialized_at_destination() -> (Arc<Payload, PerCore>, Thread, Thread) {
+    fn materialized_at_destination() -> (Arc<Payload, PerThread>, Thread, Thread) {
         let (mut arc, source, destination) = materialized();
         arc.relocate(Some(&source), &destination);
 
@@ -83,9 +83,9 @@ mod linux {
     // A primer thread populates shared storage before timing; the source and destination keys stay
     // empty, so the timed relocation is a genuine cross-key miss that materializes the destination
     // and records the carried value under the empty source key.
-    fn empty() -> (Arc<Payload, PerCore>, Thread, Thread) {
+    fn empty() -> (Arc<Payload, PerThread>, Thread, Thread) {
         let threads = threads(3);
-        let arc = Arc::<Payload, PerCore>::new_with(Payload::new);
+        let arc = Arc::<Payload, PerThread>::new_with(Payload::new);
 
         let mut seed = arc.clone();
         seed.relocate(None, &threads[0]);
@@ -131,7 +131,7 @@ mod linux {
 
     #[library_benchmark]
     #[bench::run(materialized())]
-    fn hit_path_pre_materialized(input: (Arc<Payload, PerCore>, Thread, Thread)) -> u64 {
+    fn hit_path_pre_materialized(input: (Arc<Payload, PerThread>, Thread, Thread)) -> u64 {
         let (mut arc, source, destination) = input;
 
         arc.relocate(black_box(Some(&source)), black_box(&destination));
@@ -141,7 +141,7 @@ mod linux {
 
     #[library_benchmark]
     #[bench::run(materialized_at_destination())]
-    fn hit_path_same_thread(input: (Arc<Payload, PerCore>, Thread, Thread)) -> u64 {
+    fn hit_path_same_thread(input: (Arc<Payload, PerThread>, Thread, Thread)) -> u64 {
         let (mut arc, source, destination) = input;
 
         arc.relocate(black_box(Some(&source)), black_box(&destination));
@@ -151,7 +151,7 @@ mod linux {
 
     #[library_benchmark]
     #[bench::run(empty())]
-    fn miss_path_new_thread(input: (Arc<Payload, PerCore>, Thread, Thread)) -> u64 {
+    fn miss_path_new_thread(input: (Arc<Payload, PerThread>, Thread, Thread)) -> u64 {
         let (mut arc, source, destination) = input;
 
         arc.relocate(black_box(Some(&source)), black_box(&destination));

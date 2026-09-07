@@ -4,14 +4,14 @@
 //! Criterion wall-clock benchmarks for `performables::arc::Arc<T, S>::relocate`.
 //!
 //! `relocate` is the hot path of the crate: a thread-per-core runtime calls it
-//! once per cross-thread spawn, for every `Arc<_, PerCore>` reachable in the
+//! once per cross-thread spawn, for every `Arc<_, PerThread>` reachable in the
 //! relocated object graph. The steady state is that the destination thread
 //! already holds its value, so the call reduces to cloning a `sync::Arc` out of
 //! a keyed storage entry.
 //!
 //! The following subjects are relocated throughout:
 //!
-//! * A bare `Arc<Payload, PerCore>`, which isolates the cost of a single
+//! * A bare `Arc<Payload, PerThread>`, which isolates the cost of a single
 //!   relocation.
 //! * A five-layer object tree, which is what actually crosses threads in
 //!   practice. Relocating it walks the whole graph and reads one storage map per
@@ -43,7 +43,7 @@ use std::{sync, thread};
 
 use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
 use many_cpus::SystemHardware;
-use performables::arc::{Arc, PerCore};
+use performables::arc::{Arc, PerThread};
 use thread_aware::{Thread, ThreadAware, ThreadBuilder};
 use thread_aware_benchmarking::{Payload, TREE_DEPTH, Tree};
 
@@ -72,13 +72,13 @@ fn threads(count: usize) -> Vec<Thread> {
         .collect()
 }
 
-/// Builds an `Arc<Payload, PerCore>` whose key is already materialized for every
+/// Builds an `Arc<Payload, PerThread>` whose key is already materialized for every
 /// thread in `threads`.
 ///
 /// Every benchmark that measures the hit path needs this, because a key is only
 /// filled by a relocation that misses first.
-fn materialized(threads: &[Thread]) -> Arc<Payload, PerCore> {
-    let arc = Arc::<Payload, PerCore>::new_with(Payload::new);
+fn materialized(threads: &[Thread]) -> Arc<Payload, PerThread> {
+    let arc = Arc::<Payload, PerThread>::new_with(Payload::new);
 
     let mut ids = Vec::with_capacity(threads.len());
 
@@ -200,7 +200,7 @@ fn bench_miss_path(c: &mut Criterion) {
     group.bench_function("new_thread", |b| {
         b.iter_batched(
             || {
-                let arc = Arc::<Payload, PerCore>::new_with(Payload::new);
+                let arc = Arc::<Payload, PerThread>::new_with(Payload::new);
                 seed_storage(&arc, primer);
                 arc
             },

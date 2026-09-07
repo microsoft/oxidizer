@@ -4,7 +4,7 @@
 use std::sync::Mutex;
 use std::time::Instant;
 
-use performables::arc::{Arc, PerCore};
+use performables::arc::{Arc, PerThread};
 use thread_aware::{Thread, ThreadAware};
 
 use crate::timers::Timers;
@@ -88,7 +88,7 @@ pub(crate) enum SynchronizedTimers {
     /// thread, enabling thread-isolated runtimes to operate on independent
     /// timers with no cross-thread lock contention. A cross-owner move retains
     /// the current set instead.
-    Isolated(Arc<Mutex<Timers>, PerCore>),
+    Isolated(Arc<Mutex<Timers>, PerThread>),
 }
 
 impl ThreadAware for SynchronizedTimers {

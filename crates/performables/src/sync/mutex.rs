@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll};
 
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::wait_queue::{WaitQueue, Waiter, block_on};
@@ -222,6 +223,7 @@ impl<T: Default> Default for Mutex<T> {
     }
 }
 
+#[cfg(feature = "serde")]
 impl<T: ?Sized + Serialize> Serialize for Mutex<T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -231,6 +233,7 @@ impl<T: ?Sized + Serialize> Serialize for Mutex<T> {
     }
 }
 
+#[cfg(feature = "serde")]
 impl<'de, T: Deserialize<'de>> Deserialize<'de> for Mutex<T> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
