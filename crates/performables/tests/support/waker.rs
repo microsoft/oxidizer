@@ -20,6 +20,7 @@ pub(crate) fn clone_hook_waker(hook: impl FnOnce() + Send + 'static) -> Waker {
 
 unsafe fn clone_waker(data: *const ()) -> RawWaker {
     // SAFETY: data was created by Arc::into_raw in clone_hook_waker or this function.
+    // ManuallyDrop preserves the RawWaker-owned reference if the clone hook panics.
     let state = ManuallyDrop::new(unsafe { Arc::<CloneHook>::from_raw(data.cast()) });
     let hook = state.hook.lock().expect("the clone hook mutex must not be poisoned").take();
     if let Some(hook) = hook {
@@ -34,6 +35,8 @@ unsafe fn wake(data: *const ()) {
     drop(unsafe { Arc::<CloneHook>::from_raw(data.cast()) });
 }
 
+// This test waker observes waiter registration through Waker::clone. Waking is
+// intentionally inert so it cannot trigger the registration hook.
 unsafe fn wake_by_ref(_data: *const ()) {}
 
 unsafe fn drop_waker(data: *const ()) {

@@ -32,11 +32,20 @@ impl<T> Future for JoinHandle<T> {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match &mut self.get_mut().0 {
             #[cfg(feature = "tokio")]
-            JoinHandleInner::Tokio(jh) => Pin::new(jh).poll(cx).map(|res| res.expect("spawned task panicked")),
+            JoinHandleInner::Tokio(jh) => Pin::new(jh).poll(cx).map(unwrap_tokio_result),
             JoinHandleInner::Custom(rx) => Pin::new(rx)
                 .poll(cx)
                 .map(|res| res.expect("spawned task did not produce a result because its channel closed")),
         }
+    }
+}
+
+#[cfg(feature = "tokio")]
+#[expect(clippy::panic, reason = "JoinHandle documents runtime join failures as panics")]
+fn unwrap_tokio_result<T>(result: Result<T, tokio::task::JoinError>) -> T {
+    match result {
+        Ok(value) => value,
+        Err(error) => panic!("spawned task did not complete: {error}"),
     }
 }
 
@@ -48,11 +57,21 @@ impl<T> Debug for JoinHandle<T> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "tokio")]
+    use std::future;
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     use performables::sync::channel;
 
     use super::*;
+
+    fn panic_message(panic: &(dyn std::any::Any + Send)) -> &str {
+        panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .unwrap()
+    }
 
     #[test]
     fn closed_custom_channel_reports_the_channel_error() {
@@ -61,12 +80,19 @@ mod tests {
         let handle = JoinHandle(JoinHandleInner::Custom(receiver));
 
         let panic = catch_unwind(AssertUnwindSafe(|| futures::executor::block_on(handle))).unwrap_err();
-        let message = panic
-            .downcast_ref::<String>()
-            .map(String::as_str)
-            .or_else(|| panic.downcast_ref::<&str>().copied())
-            .unwrap();
 
-        assert!(message.contains("channel closed"));
+        assert!(panic_message(&*panic).contains("channel closed"));
+    }
+
+    #[cfg(feature = "tokio")]
+    #[tokio::test]
+    async fn cancelled_tokio_task_reports_the_join_error() {
+        let task = tokio::spawn(future::pending::<()>());
+        task.abort();
+        let handle = JoinHandle(JoinHandleInner::Tokio(task));
+
+        let panic = tokio::spawn(handle).await.unwrap_err().into_panic();
+
+        assert!(panic_message(&*panic).contains("was cancelled"));
     }
 }
