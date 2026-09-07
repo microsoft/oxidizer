@@ -385,7 +385,7 @@ mod fetch_and_promote_tests {
             fallback.fail_when(|_| true);
             let fc = FallbackCache::new("test", primary, fallback, clock, None, telemetry);
 
-            // Fallback errors → handle_fallback_miss Err branch
+            // Fallback errors route through handle_fallback_error.
             fc.inner.fetch_and_promote("key".to_string()).await;
 
             capture.assert_contains(attributes::FIELD_EVENT);

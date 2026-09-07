@@ -5,7 +5,7 @@
 #![cfg(not(miri))]
 #![expect(clippy::too_many_lines, reason = "Migration fixtures are intentionally explicit")]
 
-use seismograph_rallocator::callers::{AddressLookup, Callers, Event, EventKind, HeapKind};
+use seismograph_rallocator::callers::{AddressLookup, Callers, Event, EventKind, HeapKind, ThreadLog};
 use seismograph_rallocator::snapshot::{Domain, Estimate, Region, SizeClass, Snapshot, Stats, Version};
 use seismograph_rallocator::topology::{Segment, Slice, SliceKind, TopologyRegion};
 
@@ -127,8 +127,14 @@ fn callers_render_live_and_empty_stack_summaries() {
     snapshot.callers = Some(schema!(
         Callers::default(),
         session_id: 9,
-        total_events: 3,
+        total_events: 5,
         lost_events: 1,
+        threads: vec![schema!(
+            ThreadLog::default(),
+            thread_log_id: 1,
+            total_events: 5,
+            lost_events: 1,
+        )],
         events: vec![
             allocated_event(1, 0x1000, 64, vec![0x1234]),
             allocated_event(2, 0x2000, 32, vec![0x5678]),
