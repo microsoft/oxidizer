@@ -37,7 +37,7 @@ drivers live in [`arty_io_core`][__link0].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbvQUsvsxw3aMb3ltq8ELONs8bDOGus7kuoVYbr5grKcqlQcVhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG70FLL7McN2jG95bavBCzjbPGwzhrrO5LqFWG6-YKynKpUHFYWSBgmxhcnR5X2lvX2NvcmVlMC4yLjA
  [__link0]: https://crates.io/crates/arty_io_core/0.2.0
  [__link1]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/DESIGN.md
  [__link2]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/IO.md
