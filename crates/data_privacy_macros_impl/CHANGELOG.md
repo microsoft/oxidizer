@@ -2,6 +2,10 @@
 
 ## [0.11.0] - 2026-09-07
 
+### Breaking
+
+- Public macro helper results now use Syn 3 rather than Syn 2 error types.
+
 - ✨ Features
 
   - add REST transcoding for gRPC services ([#600](https://github.com/microsoft/oxidizer/pull/600))
@@ -21,7 +25,7 @@
 
 - ♻️ Code Refactoring
 
-  - split the implementation into observed_macros_impl ([#686](https://github.com/microsoft/oxidizer/pull/686))
+  - adopt shared macro test helpers from `testing_aids` ([#686](https://github.com/microsoft/oxidizer/pull/686))
 
 - 🏗️ Build System
 
