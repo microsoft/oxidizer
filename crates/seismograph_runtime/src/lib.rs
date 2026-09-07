@@ -526,6 +526,7 @@ fn resolve_runtime_addresses(runtimes: &[Runtime]) -> Vec<snapshot::AddressLooku
             if cache.contains_key(&address) {
                 continue;
             }
+            #[cfg_attr(miri, expect(unused_mut, reason = "Miri cannot resolve native symbols"))]
             let mut lookup = snapshot::AddressLookup {
                 address,
                 ..snapshot::AddressLookup::default()
@@ -780,6 +781,10 @@ mod tests {
 
     static TEST_LOCK: Mutex<()> = Mutex::new(());
 
+    fn test_lock() -> std::sync::MutexGuard<'static, ()> {
+        TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     fn type_descriptor_id(value: u64) -> TypeDescriptorId {
         TypeDescriptorId::from_raw(value).unwrap()
     }
@@ -797,7 +802,7 @@ mod tests {
         reason = "all registration threads must start before joins serialize their completion"
     )]
     fn concurrent_runtime_registrations_have_unique_ids() {
-        let _test = TEST_LOCK.lock().unwrap();
+        let _test = test_lock();
         let registrations = (0..16)
             .map(|index| {
                 thread::spawn(move || {
@@ -817,7 +822,7 @@ mod tests {
 
     #[test]
     fn worker_association_and_retirement_are_visible() {
-        let _test = TEST_LOCK.lock().unwrap();
+        let _test = test_lock();
         let runtime = register_runtime(RuntimeMetadata::new("worker-test", 1));
         let runtime_id = runtime.id();
         let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core).processor_index(3));
@@ -837,7 +842,7 @@ mod tests {
 
     #[test]
     fn task_poll_counters_accumulate() {
-        let _test = TEST_LOCK.lock().unwrap();
+        let _test = test_lock();
         let runtime = register_runtime(RuntimeMetadata::new("counters", 1));
         let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
         let task = runtime.handle().task_spawned(type_descriptor_id(1), None);
@@ -859,7 +864,7 @@ mod tests {
 
     #[test]
     fn task_readiness_retains_first_wake_until_poll() {
-        let _test = TEST_LOCK.lock().unwrap();
+        let _test = test_lock();
         seismograph::recorder(seismograph::recorder::Configuration {
             runtime_tasks: seismograph::recorder::RecordingPolicy {
                 enabled: true,
@@ -924,7 +929,7 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn live_task_snapshot_retains_spawn_backtrace() {
-        let _test = TEST_LOCK.lock().unwrap();
+        let _test = test_lock();
         seismograph::recorder(seismograph::recorder::Configuration {
             runtime_tasks: seismograph::recorder::RecordingPolicy {
                 enabled: true,
@@ -964,7 +969,7 @@ mod tests {
 
     #[test]
     fn typed_api_records_fixed_runtime_payloads() {
-        let _test = TEST_LOCK.lock().unwrap();
+        let _test = test_lock();
         seismograph::recorder(seismograph::recorder::Configuration {
             runtime_tasks: seismograph::recorder::RecordingPolicy {
                 enabled: true,
@@ -996,14 +1001,14 @@ mod tests {
                 enqueued.call_stack.is_empty(),
                 spawned.call_stack.is_empty(),
             ),
-            (Some(worker.id()), true, false)
+            (Some(worker.id()), true, cfg!(miri))
         );
         seismograph::recorder(seismograph::recorder::Configuration::default());
     }
 
     #[test]
     fn concurrent_snapshot_and_drop_are_safe() {
-        let _test = TEST_LOCK.lock().unwrap();
+        let _test = test_lock();
         let registrations = (0..16)
             .map(|index| {
                 let name = format!("runtime-{index}");
@@ -1022,7 +1027,7 @@ mod tests {
 
     #[test]
     fn lifecycle_transfer_and_terminal_paths_are_visible() {
-        let _test = TEST_LOCK.lock().unwrap();
+        let _test = test_lock();
         seismograph::recorder(seismograph::recorder::Configuration {
             runtime_tasks: seismograph::recorder::RecordingPolicy {
                 enabled: true,

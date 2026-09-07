@@ -1492,6 +1492,7 @@ mod tests {
         assert!(Arc::ptr_eq(&first, &second));
     }
 
+    #[cfg(not(miri))]
     #[test]
     fn affinity_constructor_panic_does_not_poison_shared_state() {
         static CALLS: AtomicUsize = AtomicUsize::new(0);
