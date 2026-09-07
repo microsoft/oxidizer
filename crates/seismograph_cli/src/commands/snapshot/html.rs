@@ -45,10 +45,16 @@ pub(crate) fn verb(args: VerbArgs) -> Result<(), Error> {
 }
 
 fn decode_snapshot(bytes: &[u8]) -> Result<(Snapshot, Vec<seismograph::snapshot::SourceSnapshot>), Error> {
-    let Ok(seismograph) = seismograph::snapshot::decode(bytes) else {
-        return seismograph_rallocator::decode(bytes)
-            .map(|snapshot| (snapshot, Vec::new()))
-            .map_err(Error::Decode);
+    let seismograph = match seismograph::snapshot::decode(bytes) {
+        Ok(snapshot) => snapshot,
+        Err(seismograph_error) => {
+            return seismograph_rallocator::decode(bytes)
+                .map(|snapshot| (snapshot, Vec::new()))
+                .map_err(|legacy_error| Error::DecodeContainer {
+                    seismograph: seismograph_error,
+                    legacy: legacy_error,
+                });
+        }
     };
 
     let mut snapshot = match seismograph
@@ -56,7 +62,7 @@ fn decode_snapshot(bytes: &[u8]) -> Result<(Snapshot, Vec<seismograph::snapshot:
         .iter()
         .find(|source| source.id == seismograph_rallocator::source::ID)
     {
-        Some(source) => seismograph_rallocator::decode(&source.data).map_err(Error::Decode)?,
+        Some(source) => seismograph_rallocator::decode(&source.data).map_err(Error::DecodeAllocator)?,
         None => empty_allocator_snapshot(),
     };
     if !seismograph.events.threads.is_empty() || !seismograph.events.events.is_empty() {
@@ -92,7 +98,11 @@ fn map_create_error(error: io::Error, output: &Path) -> Error {
 #[derive(Debug)]
 pub(crate) enum Error {
     Io(io::Error),
-    Decode(seismograph_rallocator::Error),
+    DecodeContainer {
+        seismograph: seismograph::Error,
+        legacy: seismograph_rallocator::Error,
+    },
+    DecodeAllocator(seismograph_rallocator::Error),
     SamePath(PathBuf),
     OutputExists(PathBuf),
 }
@@ -101,7 +111,13 @@ impl std::fmt::Display for Error {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Io(error) => write!(formatter, "{error}"),
-            Self::Decode(error) => write!(formatter, "invalid snapshot: {error}"),
+            Self::DecodeContainer { seismograph, legacy } => {
+                write!(
+                    formatter,
+                    "invalid Seismograph snapshot: {seismograph}; legacy allocator snapshot decode also failed: {legacy}"
+                )
+            }
+            Self::DecodeAllocator(error) => write!(formatter, "invalid allocator snapshot: {error}"),
             Self::SamePath(path) => write!(formatter, "input and output refer to the same path: {}", path.display()),
             Self::OutputExists(path) => write!(formatter, "refusing to overwrite existing output: {}", path.display()),
         }
@@ -119,7 +135,7 @@ mod tests {
     use seismograph_rallocator::snapshot::{SkippedSection, SkippedSectionFields, Snapshot, Version};
     use seismograph_rallocator::{encode, encoded_len};
 
-    use super::{Error, VerbArgs, empty_allocator_snapshot, map_create_error, paths_refer_to_same_file, verb};
+    use super::{Error, VerbArgs, decode_snapshot, empty_allocator_snapshot, map_create_error, paths_refer_to_same_file, verb};
 
     static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
     static ALLOCATOR_SOURCE: seismograph::snapshot::Source =
@@ -147,6 +163,11 @@ mod tests {
         let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
         encode(&snapshot, &mut bytes).unwrap();
         fs::write(path, bytes).unwrap();
+    }
+
+    #[test]
+    fn invalid_container_preserves_both_decode_errors() {
+        assert!(matches!(decode_snapshot(b"invalid"), Err(Error::DecodeContainer { .. })));
     }
 
     #[test]
