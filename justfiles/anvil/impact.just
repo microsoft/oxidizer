@@ -14,7 +14,7 @@
 # it, so the checks read the cache instead of recomputing.
 #
 # The base ref is resolved by the shared _anvil-base-ref helper (helpers.just,
-# also reused by anvil-mutants-diff). The impact -> `--package <package-id>`
+# also reused by anvil-mutants-diff). The impact -> `--package name@version`
 # tier projection is _anvil-impact-format, defined in THIS file next to its
 # sole caller; this recipe orchestrates the snapshots + caching around both so
 # the exact same projection is used locally and in CI.
@@ -324,7 +324,7 @@ _anvil-impact-snapshot:
     }
 
 # Public. Computes the impact set from the two snapshots and projects each
-# tier into a pre-built `--package <package-id> ...` string (or the sentinel
+# tier into a pre-built `--package name@version ...` string (or the sentinel
 # `--skip` when the tier is empty) via the shared _anvil-impact-format
 # helper, written to include_<tier>.txt. Per-crate checks depend on this
 # recipe and read those files via _anvil-impact-include. Cache-aware: no-ops
@@ -440,9 +440,9 @@ anvil-impact: _anvil-impact-snapshot
     if ([string]::IsNullOrWhiteSpace($impactOut)) { $impactOut = '{}' }
     Set-Content -LiteralPath $impactJson -Value $impactOut.Trim() -Encoding UTF8
 
-    # Project each tier into its `--package <package-id> ...` / `--skip`
-    # string via the shared formatter (package IDs + lib-name -> package
-    # translation live there, used identically by the cloud
+    # Project each tier into its `--package name@version ...` / `--skip`
+    # string via the shared formatter (version-qualified specs + lib-name ->
+    # package-name translation live there, used identically by the cloud
     # impact steps).
     foreach ($tier in @('modified', 'affected', 'required')) {
         $value = (& "{{ just_executable() }}" _anvil-impact-format $tier $impactJson)
@@ -453,7 +453,7 @@ anvil-impact: _anvil-impact-snapshot
     Set-Content -LiteralPath $impactStateFile -Value $wantState -Encoding UTF8 -NoNewline
 
 # _anvil-impact-format: turns a cargo-delta impact report into the
-# `--package <package-id> ...` string the scoped checks consume, projected per
+# `--package <spec> ...` string the scoped checks consume, projected per
 # tier into include_<tier>.txt by `anvil-impact` above -- its only caller,
 # next to which it now lives (impact analysis stays in one place).
 #
@@ -464,10 +464,9 @@ anvil-impact: _anvil-impact-snapshot
 #                `cargo delta impact --format json`.
 #
 # Output (stdout, exactly one line so the caller can capture it):
-#   * "--package package-id --package package-id2 ..." when the tier has
-#     members. Each value is the full workspace package ID from
-#     `cargo metadata --no-deps`, which disambiguates a workspace member even
-#     when a registry dependency has the same name and version.
+#   * "--package name@version --package name2@version2 ..." when the
+#     tier has members. Each package is a portable, version-qualified Cargo
+#     specification.
 #   * "--skip" when the tier is empty (recipes treat this as a no-op).
 # Metadata failures and unknown/ambiguous package names are written to
 # STDERR and fail the recipe, so callers never continue with an incomplete
@@ -589,7 +588,7 @@ _anvil-impact-format tier impactJson:
             exit 1
         }
         $p = $candidates[0]
-        $specs.Add("--package $($p.id)")
+        $specs.Add("--package $($p.name)@$($p.version)")
     }
     if ($specs.Count -eq 0) {
         Write-Output '--skip'

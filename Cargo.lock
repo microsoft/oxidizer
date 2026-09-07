@@ -874,7 +874,7 @@ dependencies = [
  "new_zealand",
  "nm",
  "performables",
- "plurality 0.2.2",
+ "plurality",
  "seismograph_io",
  "smallvec",
  "static_assertions",
@@ -1707,7 +1707,7 @@ version = "0.5.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c6dcf28e31e79d3d202465109c4947b68e8e3132411204b774d12a7ae2c3e17c"
 dependencies = [
- "plurality 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "plurality",
 ]
 
 [[package]]
@@ -1912,7 +1912,7 @@ dependencies = [
  "observed",
  "observed_testing",
  "ohno 0.5.0",
- "plurality 0.2.2",
+ "plurality",
  "quinn",
  "rcgen",
  "recoverable",
@@ -2961,7 +2961,7 @@ dependencies = [
  "futures",
  "mutants",
  "pin-project-lite",
- "plurality 0.2.2",
+ "plurality",
  "static_assertions",
  "tokio",
  "tower",
@@ -4007,16 +4007,6 @@ dependencies = [
  "slab",
  "slotmap",
  "static_assertions",
-]
-
-[[package]]
-name = "plurality"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68994c15ad6f41972c9a5fc132f3467bf222353962d4c9827900c0e571e54ba4"
-dependencies = [
- "allocator-api2 0.4.0",
- "loom",
 ]
 
 [[package]]

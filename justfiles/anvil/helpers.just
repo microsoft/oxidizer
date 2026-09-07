@@ -50,9 +50,8 @@
 #     "--workspace" (an empty string is NOT $null, so recipes test truthiness
 #     rather than `?? "--workspace"`, which would splat an empty arg cargo
 #     rejects).
-#   * "--package <package-id> ..." - the tier has members. Full workspace
-#     package IDs resolve uniquely even when a registry dependency has the same
-#     name and version.
+#   * "--package A@v --package B@v" - the tier has members. Packages are
+#     version-qualified cargo specs so they remain portable between CI jobs.
 #   * "--skip" - the tier is empty for this change (recipe exits 0).
 #
 # This keeps the per-recipe boilerplate to a single capture, a one-line skip
