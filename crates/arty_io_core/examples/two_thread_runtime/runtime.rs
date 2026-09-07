@@ -59,6 +59,7 @@ struct Worker {
 pub(super) struct Runtime {
     workers: Vec<Worker>,
     contexts: Mutex<ContextCache>,
+    stopped: bool,
 }
 
 impl Runtime {
@@ -99,6 +100,7 @@ impl Runtime {
         Ok(Self {
             workers,
             contexts: Mutex::default(),
+            stopped: false,
         })
     }
 
@@ -153,6 +155,15 @@ impl Runtime {
     }
 
     pub(super) fn shutdown(mut self) -> Result<(), RuntimeError> {
+        self.stop()
+    }
+
+    fn stop(&mut self) -> Result<(), RuntimeError> {
+        if self.stopped {
+            return Ok(());
+        }
+        self.stopped = true;
+
         self.contexts.get_mut().unwrap_or_else(PoisonError::into_inner).clear();
 
         let mut failure = None;
@@ -196,6 +207,12 @@ impl Runtime {
             Some(error) => Err(error),
             None => Ok(()),
         }
+    }
+}
+
+impl Drop for Runtime {
+    fn drop(&mut self) {
+        let _ = self.stop();
     }
 }
 
