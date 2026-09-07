@@ -14,10 +14,11 @@
 # explicitly avoid for udeps/miri/careful/external-types.
 
 # Check Rust source formatting.
-[script("pwsh")]
-anvil-fmt: anvil-fmt-validate-prereqs
+[script("pwsh", "-NoProfile")]
+anvil-fmt: anvil-fmt-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
-    if ($env:ANVIL_INCLUDE_MODIFIED -eq '--skip') { exit 0 }
+    $include = (& "{{ just_executable() }}" _anvil-impact-include modified)
+    if ($include -eq '--skip') { Write-Host 'anvil-fmt: no modified packages; skipping'; exit 0 }
     $packages = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages.name
     foreach ($package in $packages) {
         cargo '+{{ rust_nightly }}' fmt --package $package --check

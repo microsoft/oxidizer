@@ -36,5 +36,7 @@ tick = { workspace = true, features = ["test-util"] }
 testing_aids = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

@@ -26,5 +26,7 @@ routerama_build = { workspace = true, default-features = false, features = ["cod
 [dev-dependencies]
 mutants = { workspace = true }
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

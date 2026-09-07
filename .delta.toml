@@ -1,3 +1,30 @@
+# >>> anvil-managed: anvil-delta
+# Changes to these workspace-level inputs conservatively affect every package.
+trip_wire_patterns = [
+    ".ado/**",
+    ".cargo/**",
+    ".delta.toml",
+    ".editorconfig",
+    ".github/**",
+    ".pipelines/**",
+    "*.just",
+    "Cargo.lock",
+    "Cargo.toml",
+    "Justfile",
+    "clippy.toml",
+    "codecov.yml",
+    "constants.env",
+    "deny.toml",
+    "justfile",
+    "justfiles/**",
+    "rust-toolchain.toml",
+    "rustfmt.toml",
+    "scripts/**",
+    "spellcheck.toml",
+    "unstable-rustfmt.toml",
+]
+# <<< anvil-managed: anvil-delta
+
 # cargo-delta configuration file
 
 # Patterns for files and folders to exclude from analysis.
@@ -13,29 +40,6 @@ file_exclude_patterns = [
      "*.svg",
      "LICENSE",
      "target"
-]
-
-# Trip wire patterns - if any changed file matches these patterns,
-# all crates in the workspace are going to be considered impacted.
-trip_wire_patterns = [
-     ".ado/*",
-     ".cargo/*",
-     ".delta.toml",
-     ".editorconfig",
-     ".github/*",
-     "*.just",
-     "Cargo.lock",
-     "Cargo.toml",
-     "clippy.toml",
-     "codecov.yml",
-     "constants.env",
-     "deny.toml",
-     "justfile",
-     "rust-toolchain.toml",
-     "rustfmt.toml",
-     "scripts/*",
-     "spellcheck.toml",
-     "unstable-rustfmt.toml"
 ]
 
 [parser]
@@ -82,14 +86,3 @@ assume_patterns = [
 # The remote branch to compare against for determining changed files
 # If not specified, uses the default branch detection
 remote_branch = "origin/main"
-
-# >>> anvil-managed: anvil-delta
-[delta]
-# Include the workspace root files that should invalidate every member's
-# impact analysis when changed (lockfile, root manifest, toolchain).
-root-files = [
-    "Cargo.lock",
-    "Cargo.toml",
-    "rust-toolchain.toml",
-]
-# <<< anvil-managed: anvil-delta

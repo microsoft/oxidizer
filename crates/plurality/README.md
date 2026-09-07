@@ -157,7 +157,7 @@ Runnable programs covering larger scenarios:
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/plurality">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbbdeMU7IMMGYbOQEy8TTZ9ZgbRc-RXf2PBOgbI0s5F2a98nFhZIGCaXBsdXJhbGl0eWUwLjIuMg
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbbdeMU7IMMGYbOQEy8TTZ9ZgbRc-RXf2PBOgbI0s5F2a98nFhZIGCaXBsdXJhbGl0eWUwLjIuMg
  [__link0]: https://docs.rs/plurality/0.2.2/plurality/?search=Pool
  [__link1]: https://docs.rs/plurality/0.2.2/plurality/?search=Box
  [__link10]: https://docs.rs/plurality/0.2.2/plurality/?search=MultiPool

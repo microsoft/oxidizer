@@ -74,7 +74,7 @@ for multi-tier caches with heterogeneous storage backends.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet_tier">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbkK3ZIh7H21Qb8RI07wzt6w4b6hwplYQCIE0bNBusZa2PFF9hZIGCa2NhY2hldF90aWVyZTAuNS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbkK3ZIh7H21Qb8RI07wzt6w4b6hwplYQCIE0bNBusZa2PFF9hZIGCa2NhY2hldF90aWVyZTAuNS4w
  [__link0]: https://docs.rs/cachet_tier/0.5.0/cachet_tier/?search=CacheTier
  [__link1]: https://docs.rs/cachet_tier/0.5.0/cachet_tier/?search=CacheEntry
  [__link2]: https://docs.rs/cachet_tier/0.5.0/cachet_tier/?search=Error

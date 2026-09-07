@@ -40,7 +40,7 @@ and always use `data_privacy`.**
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/data_privacy_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbJMSGY2z7YbEblsBSe-58K48b62Bomn7PG1Ebw8HBurz5KcZhZIGCcWRhdGFfcHJpdmFjeV9jb3JlZTAuMS4y
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbJMSGY2z7YbEblsBSe-58K48b62Bomn7PG1Ebw8HBurz5KcZhZIGCcWRhdGFfcHJpdmFjeV9jb3JlZTAuMS4y
  [__link0]: https://docs.rs/data_privacy_core/0.1.2/data_privacy_core/?search=DataClass
  [__link1]: https://docs.rs/data_privacy
  [__link2]: https://docs.rs/data_privacy_core/0.1.2/data_privacy_core/?search=DataClass

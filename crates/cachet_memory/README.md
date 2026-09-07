@@ -91,7 +91,7 @@ TTL/TTI unset or set them to a sufficiently high ceiling.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet_memory">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbejeJIJ3wjSIbQ4FD8_ZrIe0bdNSA5y85nYcbNmCiuslgqq1hZIKCbWNhY2hldF9tZW1vcnllMC43LjCCa2NhY2hldF90aWVyZTAuNS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbejeJIJ3wjSIbQ4FD8_ZrIe0bdNSA5y85nYcbNmCiuslgqq1hZIKCbWNhY2hldF9tZW1vcnllMC43LjCCa2NhY2hldF90aWVyZTAuNS4w
  [__link0]: https://docs.rs/cachet_memory/0.7.0/cachet_memory/?search=InMemoryCache
  [__link1]: https://docs.rs/cachet_memory/0.7.0/cachet_memory/?search=InMemoryCacheBuilder
  [__link10]: https://docs.rs/cachet_tier/0.5.0/cachet_tier/?search=CacheEntry::expires_after

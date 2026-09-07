@@ -44,9 +44,8 @@ unused-allowed-license = "allow"
 # >>> anvil-managed: anvil-deny-bans
 [bans]
 multiple-versions = "warn"
-# Adopter-owned: internal workspace crates use wildcard (`*`) version
-# requirements; warn rather than deny so the established convention keeps working.
-wildcards = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
 # <<< anvil-managed: anvil-deny-bans
 
 # >>> anvil-managed: anvil-deny-sources

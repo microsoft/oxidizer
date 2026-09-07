@@ -40,7 +40,7 @@ This crate is less stable than `observed` itself and may have breaking changes.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/observed_utils">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbRrqGsb3cxdEbOysBQ_WLZMwbnd9RXJQ5msMbnMdmNajwvJBhZIOCaG9ic2VydmVkZjAuMjUuMIJub2JzZXJ2ZWRfdXRpbHNlMC4yLjCCbW9wZW50ZWxlbWV0cnlmMC4zMi4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbRrqGsb3cxdEbOysBQ_WLZMwbnd9RXJQ5msMbnMdmNajwvJBhZIOCaG9ic2VydmVkZjAuMjUuMIJub2JzZXJ2ZWRfdXRpbHNlMC4yLjCCbW9wZW50ZWxlbWV0cnlmMC4zMi4w
  [__link0]: https://crates.io/crates/observed/0.25.0
  [__link1]: https://docs.rs/observed_utils/0.2.0/observed_utils/?search=any_value_of
  [__link2]: https://docs.rs/observed_utils/0.2.0/observed_utils/?search=otel_value_of
