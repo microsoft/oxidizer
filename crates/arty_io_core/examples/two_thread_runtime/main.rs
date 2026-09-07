@@ -24,6 +24,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         assert_eq!(context, same_context);
         assert_eq!(created_driver_count(), Runtime::WORKER_COUNT);
         println!("sample I/O context uses driver on {:?}", context.driver_thread());
+
+        let output = context.perform_io(41);
+        assert_eq!(output, 42);
+        assert_eq!(context.operation_count(), 1);
     }
 
     runtime.shutdown()?;

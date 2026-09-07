@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll, Waker};
 use std::thread;
@@ -12,16 +13,40 @@ use thread_aware_core::{Thread, ThreadAware};
 static CREATED_DRIVERS: AtomicUsize = AtomicUsize::new(0);
 static SHUTDOWN_DRIVERS: AtomicUsize = AtomicUsize::new(0);
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub(super) struct SampleContext {
+    state: Arc<SampleState>,
+}
+
+#[derive(Debug)]
+struct SampleState {
     driver_thread: thread::ThreadId,
+    operations: AtomicUsize,
 }
 
 impl SampleContext {
-    pub(super) const fn driver_thread(&self) -> thread::ThreadId {
-        self.driver_thread
+    pub(super) fn driver_thread(&self) -> thread::ThreadId {
+        self.state.driver_thread
+    }
+
+    pub(super) fn perform_io(&self, input: usize) -> usize {
+        let operation = self.state.operations.fetch_add(1, Ordering::Relaxed) + 1;
+        println!("in-memory I/O operation #{operation} handled by {:?}", self.state.driver_thread);
+        input + 1
+    }
+
+    pub(super) fn operation_count(&self) -> usize {
+        self.state.operations.load(Ordering::Relaxed)
     }
 }
+
+impl PartialEq for SampleContext {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.state, &other.state)
+    }
+}
+
+impl Eq for SampleContext {}
 
 impl ThreadAware for SampleContext {
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
@@ -48,17 +73,21 @@ impl DriverProvider for SampleProvider {
 
     fn create(self, _init: DriverInit) -> Self::Driver {
         CREATED_DRIVERS.fetch_add(1, Ordering::Relaxed);
+        let driver_thread = thread::current().id();
+        println!("initializing sample I/O driver on {driver_thread:?}");
+
         SampleDriver {
-            context: SampleContext {
-                driver_thread: thread::current().id(),
-            },
+            state: Arc::new(SampleState {
+                driver_thread,
+                operations: AtomicUsize::new(0),
+            }),
             parker: SampleParker,
         }
     }
 }
 
 pub(super) struct SampleDriver {
-    context: SampleContext,
+    state: Arc<SampleState>,
     parker: SampleParker,
 }
 
@@ -66,7 +95,9 @@ impl Driver for SampleDriver {
     type Context = SampleContext;
 
     fn context(&self) -> Self::Context {
-        self.context.clone()
+        SampleContext {
+            state: Arc::clone(&self.state),
+        }
     }
 
     fn parker(&self) -> &dyn Parker {
