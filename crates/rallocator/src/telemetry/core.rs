@@ -1846,6 +1846,7 @@ mod tests {
 
         AGGREGATES_AVAILABLE.store(false, Ordering::Release);
         assert!(stats().is_none());
+        begin_remote_free();
         let _ = try_snapshot_with_runtime_events(None, true);
         assert_eq!(snapshot_stats(None), Stats::default());
         assert_eq!(snapshot_stats(Some(sample_stats())), sample_stats());

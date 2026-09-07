@@ -22,7 +22,7 @@ pub struct Error {
 /// Stable category of a wire-format error.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
-pub(crate) enum ErrorKind {
+pub enum ErrorKind {
     /// The input or output ended before the operation completed.
     UnexpectedEnd,
     /// The container magic bytes are invalid.
@@ -53,8 +53,7 @@ impl Error {
 
     /// Returns the stable category of this error.
     #[must_use]
-    #[cfg(test)]
-    pub(crate) const fn kind(self) -> ErrorKind {
+    pub const fn kind(self) -> ErrorKind {
         self.kind
     }
 

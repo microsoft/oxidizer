@@ -1043,27 +1043,7 @@ fn snapshot_session(session: u64) -> Option<Events> {
     if session == 0 {
         return None;
     }
-    let mut recorder = RECORDERS.load(Ordering::Acquire);
-    if recorder.is_null() {
-        return None;
-    }
-    let mut snapshot = Events {
-        recording: last_recording_policies(),
-        ..Events::default()
-    };
-    while !recorder.is_null() {
-        // SAFETY: published recorders are retained for process lifetime.
-        let current = unsafe { &*recorder };
-        if current.session.load(Ordering::Acquire) == session {
-            let thread = current.snapshot();
-            snapshot.total_events = snapshot.total_events.saturating_add(thread.log.total_events);
-            snapshot.lost_events = snapshot.lost_events.saturating_add(thread.log.lost_events);
-            snapshot.threads.push(thread.log);
-            snapshot.events.extend(thread.events);
-        }
-        recorder = current.next.load(Ordering::Acquire);
-    }
-    Some(snapshot)
+    snapshot_from_recorders(session, RECORDERS.load(Ordering::Acquire))
 }
 
 fn local_recorder() -> *const ThreadRecorder {

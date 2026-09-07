@@ -171,6 +171,15 @@ mod tests {
     }
 
     #[test]
+    fn allocator_decode_errors_have_specific_messages() {
+        let error = seismograph_rallocator::decode(b"invalid").unwrap_err();
+        assert_eq!(
+            Error::DecodeAllocator(error).to_string(),
+            format!("invalid allocator snapshot: {error}")
+        );
+    }
+
+    #[test]
     #[cfg_attr(miri, ignore = "filesystem path identity is exercised by native tests")]
     fn explicit_output_must_not_refer_to_input() {
         let directory = directory("same-explicit");
