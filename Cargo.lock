@@ -223,6 +223,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 
 [[package]]
+name = "arty"
+version = "0.2.0"
+dependencies = [
+ "arty_io_core",
+ "thread_aware_core",
+ "tick",
+]
+
+[[package]]
 name = "arty_executor"
 version = "0.1.1"
 dependencies = [
@@ -245,6 +254,10 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
 ]
+
+[[package]]
+name = "arty_io_core"
+version = "0.2.0"
 
 [[package]]
 name = "asn1-rs"
