@@ -16,100 +16,87 @@ static CREATED_DRIVERS: AtomicUsize = AtomicUsize::new(0);
 static SHUTDOWN_DRIVERS: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Clone, Debug)]
-pub(super) struct SampleContext {
-    state: Arc<SampleState>,
+pub(super) struct EchoContext {
+    state: Arc<EchoState>,
 }
 
 #[derive(Debug)]
-struct SampleState {
+struct EchoState {
     driver_thread: thread::ThreadId,
-    operations: AtomicUsize,
     shutdown_started: AtomicBool,
-    shutdown_complete: AtomicBool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) struct SampleIoError;
+pub(super) struct EchoIoError;
 
-impl SampleContext {
-    pub(super) fn driver_thread(&self) -> thread::ThreadId {
-        self.state.driver_thread
-    }
-
-    pub(super) fn perform_io(&self, input: usize) -> Result<usize, SampleIoError> {
+impl EchoContext {
+    pub(super) fn perform_io(&self, input: &str) -> Result<String, EchoIoError> {
         if self.state.shutdown_started.load(Ordering::Acquire) {
-            println!("in-memory I/O operation rejected after shutdown on {:?}", self.state.driver_thread);
-            return Err(SampleIoError);
+            println!("echo I/O operation rejected after shutdown on {:?}", self.state.driver_thread);
+            return Err(EchoIoError);
         }
 
-        let operation = self.state.operations.fetch_add(1, Ordering::Relaxed) + 1;
-        println!("in-memory I/O operation #{operation} handled by {:?}", self.state.driver_thread);
-        Ok(input + 1)
-    }
-
-    pub(super) fn operation_count(&self) -> usize {
-        self.state.operations.load(Ordering::Relaxed)
+        println!("echo I/O operation handled by {:?}", self.state.driver_thread);
+        Ok(input.to_ascii_uppercase())
     }
 }
 
-impl PartialEq for SampleContext {
+impl PartialEq for EchoContext {
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.state, &other.state)
     }
 }
 
-impl Eq for SampleContext {}
+impl Eq for EchoContext {}
 
-impl ThreadAware for SampleContext {
+impl ThreadAware for EchoContext {
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
 }
 
-impl DriverContext for SampleContext {
-    type Provider = SampleProvider;
+impl DriverContext for EchoContext {
+    type Provider = EchoProvider;
 
     fn provider() -> Self::Provider {
-        SampleProvider
+        EchoProvider
     }
 }
 
 #[derive(Clone)]
-pub(super) struct SampleProvider;
+pub(super) struct EchoProvider;
 
-impl ThreadAware for SampleProvider {
+impl ThreadAware for EchoProvider {
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
 }
 
-impl DriverProvider for SampleProvider {
-    type Context = SampleContext;
-    type Driver = SampleDriver;
+impl DriverProvider for EchoProvider {
+    type Context = EchoContext;
+    type Driver = EchoDriver;
 
     fn create(self, _init: DriverInit) -> Self::Driver {
         CREATED_DRIVERS.fetch_add(1, Ordering::Relaxed);
         let driver_thread = thread::current().id();
-        println!("initializing sample I/O driver on {driver_thread:?}");
+        println!("initializing echo I/O driver on {driver_thread:?}");
 
-        SampleDriver {
-            state: Arc::new(SampleState {
+        EchoDriver {
+            state: Arc::new(EchoState {
                 driver_thread,
-                operations: AtomicUsize::new(0),
                 shutdown_started: AtomicBool::new(false),
-                shutdown_complete: AtomicBool::new(false),
             }),
             parker: NoopParker,
         }
     }
 }
 
-pub(super) struct SampleDriver {
-    state: Arc<SampleState>,
+pub(super) struct EchoDriver {
+    state: Arc<EchoState>,
     parker: NoopParker,
 }
 
-impl Driver for SampleDriver {
-    type Context = SampleContext;
+impl Driver for EchoDriver {
+    type Context = EchoContext;
 
     fn context(&self) -> Self::Context {
-        SampleContext {
+        EchoContext {
             state: Arc::clone(&self.state),
         }
     }
@@ -121,12 +108,10 @@ impl Driver for SampleDriver {
     fn begin_shutdown(&self) -> Pin<Box<dyn Future<Output = ()> + '_>> {
         self.state.shutdown_started.store(true, Ordering::Release);
         SHUTDOWN_DRIVERS.fetch_add(1, Ordering::Relaxed);
-        println!("shutting down sample I/O driver on {:?}", self.state.driver_thread);
-        Box::pin(std::future::poll_fn(move |_cx| {
-            if !self.state.shutdown_complete.swap(true, Ordering::Relaxed) {
-                println!("sample I/O driver shutdown complete on {:?}", self.state.driver_thread);
-            }
+        println!("shutting down echo I/O driver on {:?}", self.state.driver_thread);
 
+        Box::pin(std::future::poll_fn(move |_cx| {
+            println!("echo I/O driver shutdown complete on {:?}", self.state.driver_thread);
             Poll::Ready(())
         }))
     }
