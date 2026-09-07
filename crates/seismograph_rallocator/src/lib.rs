@@ -57,6 +57,9 @@ pub mod snapshot;
 pub mod topology;
 mod wire;
 
+/// Error produced by low-level snapshot framing.
+pub use wire::Error as WireError;
+
 /// Stable identity and schema metadata for the rallocator snapshot source.
 pub mod source {
     /// Stable seismograph source identity for rallocator snapshots.
@@ -135,7 +138,7 @@ pub enum ErrorKind {
     /// The output buffer does not have the exact encoded length.
     OutputLengthMismatch,
     /// The wire container is invalid.
-    Wire(wire::Error),
+    Wire(WireError),
     /// The telemetry schema version is unsupported.
     UnsupportedSchema(u16),
     /// A required section is missing.
