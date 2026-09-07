@@ -61,7 +61,15 @@ pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<RunResult
         let _receiver_closed = tx.send_sync(child.wait());
     });
 
-    let outcome = match rx.recv_timeout_sync(timeout) {
+    let wait_result = rx.recv_timeout_sync(timeout);
+    if wait_result.as_ref().is_err_and(channel::Error::is_timeout) {
+        kill_by_pid(pid);
+    }
+    wait_handle
+        .join()
+        .map_err(|error| ohno::app_err!("child wait thread panicked: {error:?}"))?;
+
+    let outcome = match wait_result {
         Ok(Ok(status)) => {
             if status.success() {
                 Outcome::Success
@@ -70,11 +78,7 @@ pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<RunResult
             }
         }
         Ok(Err(e)) => return Err(e).into_app_err("failed to wait for child process"),
-        Err(error) if error.is_timeout() => {
-            kill_by_pid(pid);
-            let _ = wait_handle.join();
-            Outcome::TimedOut
-        }
+        Err(error) if error.is_timeout() => Outcome::TimedOut,
         Err(error) if error.is_closed() => {
             ohno::bail!("wait thread exited unexpectedly without sending a result");
         }
