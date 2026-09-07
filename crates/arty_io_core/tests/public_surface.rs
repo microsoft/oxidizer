@@ -12,21 +12,22 @@ use std::task::{Context, Poll, Wake, Waker};
 use std::time::Duration;
 use std::{fmt, thread};
 
-use arty_io_core::{Driver, DriverContext, DriverInit, DriverProvider, Parker, SystemTask, SystemTaskSpawner};
+use arty_io_core::{Driver, DriverContext, DriverInit, DriverProvider, Parker, SystemTasks};
 use static_assertions::{assert_impl_all, assert_not_impl_any, assert_obj_safe};
 use thread_aware_core::{Thread, ThreadAware};
 
 assert_obj_safe!(Parker);
-assert_obj_safe!(SystemTaskSpawner);
-assert_impl_all!(DriverInit: Clone, Send, Sync, fmt::Debug);
+assert_impl_all!(DriverInit: Send, Sync, fmt::Debug);
+assert_impl_all!(SystemTasks: Clone, Send, Sync, fmt::Debug);
 
 #[test]
 fn public_traits_have_expected_object_safety() {
     let parker = TestParker::default();
-    let system_tasks = InlineSystemTasks::default();
+    let system_tasks = SystemTasks::new(|task| task());
 
     let _: &dyn Parker = &parker;
-    let _: &dyn SystemTaskSpawner = &system_tasks;
+    let _: &SystemTasks = &system_tasks;
+    assert!(format!("{system_tasks:?}").contains("SystemTasks"));
 }
 
 #[test]
@@ -46,15 +47,19 @@ fn driver_is_boxable_with_its_context_type() {
 
 #[test]
 fn driver_init_exposes_runtime_facilities() {
-    let system_tasks = Arc::new(InlineSystemTasks::default());
-    let system_tasks_for_init = Arc::clone(&system_tasks);
+    let accepted = Arc::new(AtomicUsize::new(0));
+    let accepted_by_callback = Arc::clone(&accepted);
+    let system_tasks = SystemTasks::new(move |task| {
+        accepted_by_callback.fetch_add(1, Ordering::Relaxed);
+        task();
+    });
     let worker = worker_thread();
-    let init = DriverInit::new(worker.clone(), system_tasks_for_init);
+    let init = DriverInit::new(worker.clone(), system_tasks);
 
-    init.system_tasks().spawn(Box::new(|| {}));
+    init.system_tasks().spawn(|| {});
 
     assert_eq!(init.thread(), &worker);
-    assert_eq!(system_tasks.accepted.load(Ordering::Relaxed), 1);
+    assert_eq!(accepted.load(Ordering::Relaxed), 1);
     assert!(format!("{init:?}").contains("DriverInit"));
 }
 
@@ -125,18 +130,6 @@ fn parker_contract_supports_latched_wakeup() {
     parker.park(Duration::MAX);
 
     assert_eq!(parker.waits.load(Ordering::Relaxed), 1);
-}
-
-#[derive(Default)]
-struct InlineSystemTasks {
-    accepted: AtomicUsize,
-}
-
-impl SystemTaskSpawner for InlineSystemTasks {
-    fn spawn(&self, task: SystemTask) {
-        self.accepted.fetch_add(1, Ordering::Relaxed);
-        task();
-    }
 }
 
 #[derive(Debug, Default)]
@@ -359,7 +352,7 @@ impl Wake for CountingWake {
 }
 
 fn driver_init() -> DriverInit {
-    DriverInit::new(worker_thread(), Arc::new(InlineSystemTasks::default()))
+    DriverInit::new(worker_thread(), SystemTasks::new(|task| task()))
 }
 
 fn worker_thread() -> Thread {

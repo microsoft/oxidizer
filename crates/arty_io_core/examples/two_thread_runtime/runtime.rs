@@ -6,15 +6,15 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex, PoisonError, mpsc};
+use std::sync::{Mutex, PoisonError, mpsc};
 use std::task::{Context, Poll};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use arty_io_core::{Driver, DriverContext, DriverInit, DriverProvider, Parker, SystemTaskSpawner};
+use arty_io_core::{Driver, DriverContext, DriverInit, DriverProvider, Parker, SystemTasks};
 use thread_aware_core::{Thread, ThreadAware};
 
-use super::system_tasks::RuntimeSystemTasks;
+use super::system_tasks::runtime_system_tasks;
 
 type ContextBox = Box<dyn Any + Send>;
 type ContextCache = HashMap<TypeId, ContextBox>;
@@ -68,14 +68,14 @@ impl Runtime {
 
     pub(super) fn start() -> Result<Self, RuntimeError> {
         let owner = thread_aware_core::__private::v1::new_owner();
-        let system_tasks: Arc<dyn SystemTaskSpawner> = Arc::new(RuntimeSystemTasks);
+        let system_tasks = runtime_system_tasks();
         let mut workers = Vec::with_capacity(Self::WORKER_COUNT);
 
         for numa_node_id in Self::NUMA_NODES {
             let (commands_tx, commands_rx) = mpsc::channel();
             let (ready_tx, ready_rx) = mpsc::channel();
             let worker_owner = owner.clone();
-            let worker_system_tasks = Arc::clone(&system_tasks);
+            let worker_system_tasks = system_tasks.clone();
 
             let thread = thread::spawn(move || {
                 let numa_node = thread_aware_core::__private::v1::new_numa_node(numa_node_id);
@@ -216,13 +216,13 @@ impl Drop for Runtime {
     }
 }
 
-fn run_worker(worker: &Thread, system_tasks: &Arc<dyn SystemTaskSpawner>, commands: &mpsc::Receiver<Command>) {
+fn run_worker(worker: &Thread, system_tasks: &SystemTasks, commands: &mpsc::Receiver<Command>) {
     let mut drivers = DriverStore::new();
 
     while let Ok(command) = commands.recv() {
         match command {
             Command::Install { install, reply } => {
-                let init = DriverInit::new(worker.clone(), Arc::clone(system_tasks));
+                let init = DriverInit::new(worker.clone(), system_tasks.clone());
                 let context = install(init, &mut drivers);
                 let _ = reply.send(context);
             }

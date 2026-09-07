@@ -52,5 +52,7 @@ pub trait Driver: 'static {
     /// The returned future resolves once the driver has released everything it held on behalf of
     /// consumers and the operating system. While pending, it arranges for the task waker to be
     /// notified when shutdown can make progress. The runtime bounds the total shutdown duration.
+    /// The boxed return keeps this method object-safe, so runtimes can store
+    /// `Box<dyn Driver<Context = C>>`.
     fn begin_shutdown(&self) -> Pin<Box<dyn Future<Output = ()> + '_>>;
 }

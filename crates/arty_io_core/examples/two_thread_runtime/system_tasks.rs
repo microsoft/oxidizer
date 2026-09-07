@@ -3,12 +3,10 @@
 
 use std::thread;
 
-use arty_io_core::{SystemTask, SystemTaskSpawner};
+use arty_io_core::SystemTasks;
 
-pub(super) struct RuntimeSystemTasks;
-
-impl SystemTaskSpawner for RuntimeSystemTasks {
-    fn spawn(&self, task: SystemTask) {
+pub(super) fn runtime_system_tasks() -> SystemTasks {
+    SystemTasks::new(|task| {
         drop(thread::spawn(task));
-    }
+    })
 }

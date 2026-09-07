@@ -55,7 +55,7 @@ The runtime does not dictate how an I/O subsystem distributes work.
 - Every driver exposes a `Parker` through a shared reference.
 - The runtime chooses the driver-owning thread before creation and drives the
   `Parker` only from that thread.
-- A driver may delegate `SystemTask` work to runtime-owned workers.
+- A driver may delegate work through the runtime-owned `SystemTasks` handle.
 - A driver or provider may create any number of private threads.
 - Primary, satellite, and thread-pinning policy are runtime implementation
   details and are not public driver roles.
@@ -110,6 +110,8 @@ The runtime facility for synchronous I/O work uses `SystemTask` terminology.
 - It does not run on an async worker.
 - Submission returns before the work completes.
 - The facility remains available through driver shutdown.
+- `DriverInit` exposes a crate-owned cloneable handle rather than the runtime's
+  shared-ownership implementation type.
 
 ## R9: Scope of the initial API
 

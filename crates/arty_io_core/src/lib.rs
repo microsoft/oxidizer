@@ -17,7 +17,7 @@
 //! - [`DriverProvider`] creates and connects the per-worker adapters for a driver.
 //! - [`DriverInit`] describes the worker and runtime facilities available during creation.
 //! - [`Parker`] lets a driver provide a waiting point for the worker.
-//! - [`SystemTaskSpawner`] lets a driver delegate blocking system work to the runtime.
+//! - [`SystemTasks`] lets a driver delegate blocking system work to the runtime.
 //!
 //! Registration and driver placement are runtime behavior, not part of this crate. Keeping those
 //! policies outside the contract allows the runtime and drivers to evolve independently.
@@ -45,4 +45,4 @@ pub use driver::Driver;
 pub use init::DriverInit;
 pub use parker::Parker;
 pub use provider::DriverProvider;
-pub use system_tasks::{SystemTask, SystemTaskSpawner};
+pub use system_tasks::{SystemTask, SystemTasks};

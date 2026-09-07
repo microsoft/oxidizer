@@ -26,7 +26,7 @@ DriverProvider
 Driver + Context
         |
         +-- Parker for completion progress and waiting
-        +-- optional SystemTaskSpawner use
+        +-- optional SystemTasks use
         +-- optional provider-owned threads
 ```
 
@@ -133,16 +133,16 @@ capability check. The consumer calls that check before
 ## System tasks
 
 Some I/O mechanisms need synchronous calls that cannot run on an async worker.
-`SystemTaskSpawner` is intentionally narrower than an async scheduler:
+`SystemTasks` is intentionally narrower than an async scheduler:
 
 - it accepts only synchronous `FnOnce` work;
 - work is explicitly allowed to block;
 - it returns after acceptance, not completion;
 - it stays alive through driver shutdown.
 
-The boxed task allocates on each submission. Removing that allocation without
-making the trait non-object-safe or expanding the compatibility surface is
-deferred until a real driver demonstrates that it matters.
+The cloneable handle hides the runtime's shared-ownership mechanism instead of
+exposing `Arc<dyn ...>` in `DriverInit`. Its generic `spawn` method boxes only
+at the internal callback boundary.
 
 ## Compatibility
 
