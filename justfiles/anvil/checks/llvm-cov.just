@@ -50,11 +50,10 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs anvil-impact
         if ($optedOut.Count -gt 0) {
             $filtered = [System.Collections.Generic.List[string]]::new()
             for ($i = 0; $i -lt $pkg.Count; $i++) {
-                # Impact emits version-qualified specs (name@version);
-                # compare the bare name against the opt-out set, but keep
-                # the full name@version token in $pkg so the llvm-cov
+                # Compare the bare name against the opt-out set, but keep the
+                # full package ID in $pkg so the llvm-cov
                 # measurement below resolves unambiguously.
-                if ($pkg[$i] -eq '--package' -and ($i + 1) -lt $pkg.Count -and $optedOut -contains (($pkg[$i + 1] -split '@', 2)[0])) {
+                if ($pkg[$i] -eq '--package' -and ($i + 1) -lt $pkg.Count -and $optedOut -contains ((($pkg[$i + 1] -split '#', 2)[-1] -split '@', 2)[0])) {
                     $testOnlyPkg.Add('--package')
                     $testOnlyPkg.Add($pkg[$i + 1])
                     $i++

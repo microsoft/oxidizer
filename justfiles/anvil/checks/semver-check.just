@@ -92,9 +92,8 @@ anvil-semver-check: anvil-semver-check-validate-prereqs anvil-impact
         $packages = @()
         for ($i = 0; $i -lt $pkg.Count; $i++) {
             if ($pkg[$i] -eq '--package' -and ($i + 1) -lt $pkg.Count) {
-                # Impact emits version-qualified specs (name@version);
-                # strip the @version to recover the bare package name.
-                $name = ($pkg[$i + 1] -split '@', 2)[0]
+                # Recover the bare package name from the full package ID.
+                $name = (($pkg[$i + 1] -split '#', 2)[-1] -split '@', 2)[0]
                 if ($libPkgs[$name]) { $packages += $name }
                 $i++
             }

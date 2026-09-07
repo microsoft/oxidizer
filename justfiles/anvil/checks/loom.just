@@ -60,8 +60,8 @@ anvil-loom: anvil-loom-validate-prereqs anvil-impact
     $meta = & cargo {{_anvil_stable_toolchain_args}} metadata --no-deps --format-version 1 | ConvertFrom-Json
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-    # Optional impact-scoping: recover bare package names from the
-    # impact step's version-qualified `--package name@version` pairs.
+    # Optional impact-scoping: recover bare package names from the impact
+    # step's full package IDs.
     # Full-workspace modes (`--workspace` -- e.g. the scheduled tier,
     # ANVIL_IMPACT=off, or no impact cache) carry no `--package` tokens,
     # so $affected stays $null and the package set is left unfiltered
@@ -71,7 +71,7 @@ anvil-loom: anvil-loom-validate-prereqs anvil-impact
     for ($i = 0; $i -lt $tokens.Count; $i++) {
         if ($tokens[$i] -eq '--package' -and ($i + 1) -lt $tokens.Count) {
             if ($null -eq $affected) { $affected = @() }
-            $affected += ($tokens[$i + 1] -split '@', 2)[0]
+            $affected += (($tokens[$i + 1] -split '#', 2)[-1] -split '@', 2)[0]
             $i++
         }
     }
