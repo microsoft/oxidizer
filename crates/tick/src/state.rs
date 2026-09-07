@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::sync::Mutex;
 use std::time::Instant;
 
 use performables::arc::{Arc, PerThread};
+use performables::sync::mutex::Mutex;
 use thread_aware::{Thread, ThreadAware};
 
 use crate::timers::Timers;
@@ -117,8 +117,8 @@ impl SynchronizedTimers {
     {
         let mut timers = match self {
             #[cfg(any(feature = "rt-shared", test))]
-            Self::Shared(timers) => timers.lock().expect("timers lock poisoned"),
-            Self::Isolated(timers) => timers.lock().expect("timers lock poisoned"),
+            Self::Shared(timers) => timers.lock_sync(),
+            Self::Isolated(timers) => timers.lock_sync(),
         };
         f(&mut timers)
     }
