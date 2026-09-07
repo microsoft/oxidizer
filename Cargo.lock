@@ -1146,6 +1146,7 @@ name = "compressors"
 version = "0.1.0"
 dependencies = [
  "alloc_tracker",
+ "bolero",
  "brotli",
  "bytesbuf",
  "cfg_aliases",

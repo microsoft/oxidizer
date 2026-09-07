@@ -158,11 +158,19 @@ Claims above are held up by tests rather than by review alone:
   configurations, and `cargo-mutants` runs on every pull request; the limit
   comparisons are mutation-covered, so a bound that stopped being enforced would
   fail rather than pass quietly.
+* **Fuzzing.** `tests/bolero_compressors.rs` is a bounded campaign over the
+  decompression surface, run on every pull request. It generates a format, a
+  payload, a corruption (truncate, bit flip, append, concatenate), a span layout,
+  an output chunk size and a bound placed at or beside the real output size, and
+  asserts that decompression never panics and never fails to terminate, that an
+  unmutated stream round-trips, and that a bound below the real output is refused.
+  It covers what the deterministic tests cannot: the product of those dimensions,
+  where a member boundary coincides with a span boundary, an exact limit and
+  trailing bytes at once.
 
-**Known gap.** There is no fuzz target yet. The suite covers chosen cuts, chunk
-sizes and corruption offsets, but not arbitrary combinations of malformed bytes,
-segment layouts and operation order. A bounded state-machine target is tracked
-separately.
+Compressor-side operation ordering -- where a flush falls, a repeated
+`end_input` -- is not fuzzed. That ordering is chosen by trusted calling code
+rather than by input bytes, so it is covered by the deterministic suite instead.
 
 [`max_output_len`]: https://docs.rs/compressors/latest/compressors/struct.DecompressorLimits.html#method.max_output_len
 [`max_ratio`]: https://docs.rs/compressors/latest/compressors/struct.DecompressorLimits.html#method.max_ratio
