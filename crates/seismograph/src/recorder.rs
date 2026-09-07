@@ -414,26 +414,33 @@ pub(crate) fn statistics() -> Statistics {
 /// Lazily constructs and records an event in a known class.
 #[inline]
 pub(crate) fn record(class: EventClass, event: impl FnOnce() -> Record) {
+    let _ = record_session(class, event);
+}
+
+/// Lazily constructs an event and returns the session that accepted it.
+#[inline]
+pub(crate) fn record_session(class: EventClass, event: impl FnOnce() -> Record) -> Option<RecordingSession> {
     let policy = policy_atomic(class).load(Ordering::Relaxed);
     if !policy_enabled(policy) || is_suppressed() {
-        return;
+        return None;
     }
     let session = ACTIVE_SESSION.load(Ordering::Relaxed);
     if session == 0 {
-        return;
+        return None;
     }
     let record = event();
     if record.class() != class {
-        return;
+        return None;
     }
     if record
         .sampling_object_id()
         .is_some_and(|object_id| !decode_sampling(policy).includes(object_id))
     {
-        return;
+        return None;
     }
     let capacity = EVENT_CAPACITY.load(Ordering::Relaxed);
-    record_enabled(session, class, record, policy, capacity);
+    record_enabled(session, class, record, policy, capacity)
+        .then(|| RecordingSession::from_raw(session).expect("recording requires a nonzero active session"))
 }
 
 /// Records an event only while its originating session remains active.

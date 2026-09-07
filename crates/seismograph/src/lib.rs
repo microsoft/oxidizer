@@ -157,6 +157,15 @@ pub fn record(class: recorder::event::EventClass, event: impl FnOnce() -> record
     recorder::record(class, event);
 }
 
+/// Lazily constructs an event and returns the session that accepted it.
+#[doc(hidden)]
+pub fn record_session(
+    class: recorder::event::EventClass,
+    event: impl FnOnce() -> recorder::event::Record,
+) -> Option<recorder::RecordingSession> {
+    recorder::record_session(class, event)
+}
+
 /// Records an event only while its originating session remains active.
 #[doc(hidden)]
 pub fn record_in_session(session: recorder::RecordingSession, event: impl FnOnce() -> recorder::event::Record) -> bool {

@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{fmt, fs, io};
 
 #[cfg(test)]
@@ -24,6 +24,7 @@ use seismograph_protocol::monitor::{AuthenticationToken, InstanceId, MonitorDesc
 use crate::recorder::SuppressionGuard;
 
 const ACCEPT_RETRY_DELAY: Duration = Duration::from_millis(50);
+const CLIENT_AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(5);
 const CLIENT_READ_TIMEOUT: Duration = Duration::from_millis(250);
 const CLIENT_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -284,7 +285,8 @@ fn handle_client(mut stream: TcpStream, descriptor: &MonitorDescriptor, stop: &A
     stream.set_read_timeout(Some(CLIENT_READ_TIMEOUT)).map_err(ClientError::Io)?;
     stream.set_write_timeout(Some(CLIENT_WRITE_TIMEOUT)).map_err(ClientError::Io)?;
 
-    let (request_id, request) = read_request_retry(&mut stream, stop)?;
+    let authentication_deadline = Instant::now() + CLIENT_AUTHENTICATION_TIMEOUT;
+    let (request_id, request) = read_request_retry_until(&mut stream, stop, Some(authentication_deadline))?;
     let Request::Hello { authentication } = request else {
         return Err(ClientError::HandshakeRequired);
     };
@@ -440,11 +442,16 @@ fn snapshot_response(snapshot: Result<crate::snapshot::Snapshot, crate::Error>) 
 }
 
 fn read_request_retry(stream: &mut TcpStream, stop: &AtomicBool) -> Result<(u64, Request), ClientError> {
-    read_request_retry_with(stop, || seismograph_protocol::read_request(stream))
+    read_request_retry_until(stream, stop, None)
+}
+
+fn read_request_retry_until(stream: &mut TcpStream, stop: &AtomicBool, deadline: Option<Instant>) -> Result<(u64, Request), ClientError> {
+    read_request_retry_with(stop, deadline, || seismograph_protocol::read_request(stream))
 }
 
 fn read_request_retry_with(
     stop: &AtomicBool,
+    deadline: Option<Instant>,
     mut read: impl FnMut() -> Result<(u64, Request), seismograph_protocol::Error>,
 ) -> Result<(u64, Request), ClientError> {
     loop {
@@ -453,7 +460,12 @@ fn read_request_retry_with(
             Err(error) => {
                 if let seismograph_protocol::Error::Io(io_error) = &error {
                     match io_error_action(io_error.kind(), stop.load(Ordering::Acquire)) {
-                        IoErrorAction::Retry => continue,
+                        IoErrorAction::Retry => {
+                            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                                return Err(ClientError::AuthenticationTimedOut);
+                            }
+                            continue;
+                        }
                         IoErrorAction::Stopped => return Err(ClientError::Stopped),
                         IoErrorAction::Disconnected => return Err(ClientError::Disconnected),
                         IoErrorAction::Protocol => {}
@@ -499,6 +511,7 @@ enum ClientError {
     Protocol(seismograph_protocol::Error),
     HandshakeRequired,
     Authentication,
+    AuthenticationTimedOut,
     Disconnected,
     Stopped,
 }
@@ -510,6 +523,7 @@ impl fmt::Display for ClientError {
             Self::Protocol(error) => write!(f, "{error}"),
             Self::HandshakeRequired => f.write_str("monitor handshake is required"),
             Self::Authentication => f.write_str("monitor authentication failed"),
+            Self::AuthenticationTimedOut => f.write_str("monitor authentication timed out"),
             Self::Disconnected => f.write_str("monitor client disconnected"),
             Self::Stopped => f.write_str("monitor stopped"),
         }
@@ -940,7 +954,7 @@ mod tests {
 
         let mut attempts = 0;
         assert!(matches!(
-            read_request_retry_with(&AtomicBool::new(false), || {
+            read_request_retry_with(&AtomicBool::new(false), None, || {
                 attempts += 1;
                 if attempts == 1 {
                     Err(seismograph_protocol::Error::Io(io::Error::new(io::ErrorKind::TimedOut, "retry")))
@@ -951,10 +965,16 @@ mod tests {
             Ok((1, Request::ReadRecorderStatistics))
         ));
         assert!(matches!(
-            read_request_retry_with(&AtomicBool::new(false), || {
+            read_request_retry_with(&AtomicBool::new(false), None, || {
                 Err(seismograph_protocol::Error::Io(io::Error::other("protocol")))
             }),
             Err(ClientError::Protocol(_))
+        ));
+        assert!(matches!(
+            read_request_retry_with(&AtomicBool::new(false), Some(Instant::now()), || {
+                Err(seismograph_protocol::Error::Io(io::Error::new(io::ErrorKind::TimedOut, "retry")))
+            }),
+            Err(ClientError::AuthenticationTimedOut)
         ));
     }
 
@@ -967,6 +987,7 @@ mod tests {
             ClientError::Protocol(protocol_error()),
             ClientError::HandshakeRequired,
             ClientError::Authentication,
+            ClientError::AuthenticationTimedOut,
             ClientError::Disconnected,
             ClientError::Stopped,
         ];
@@ -975,6 +996,7 @@ mod tests {
             "invalid Seismograph monitor message",
             "monitor handshake is required",
             "monitor authentication failed",
+            "monitor authentication timed out",
             "monitor client disconnected",
             "monitor stopped",
         ];
