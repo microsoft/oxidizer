@@ -21,12 +21,16 @@ The contract supports registration after runtime startup.
 
 - The requested context type identifies its provider and driver.
 - `get_context::<MyContext>()` needs no provider value or runtime configuration.
+- The first lookup returns only after every active worker has initialized the
+  associated driver.
 - A provider remains sufficient to create every per-worker driver instance.
 - Registration is keyed by the context's Rust type identity.
 - Semver-incompatible versions of one driver crate can be registered together
   because their context types have distinct identities.
 - The runtime owns synchronization, cancellation, rollback, and caching for
   registration.
+- Later lookups return the cached worker-local context without creating more
+  driver instances.
 
 ## R3: Per-worker initialization
 

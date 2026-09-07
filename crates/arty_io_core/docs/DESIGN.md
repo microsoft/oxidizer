@@ -46,7 +46,10 @@ and erase drivers without wrapping them in a mutex solely for method access.
 Every context implements `DriverContext`, whose associated `Provider` and
 `provider()` function are the complete registration recipe. A runtime method
 such as `get_context::<MyContext>()` therefore needs only the context type. The
-first request constructs and registers the provider; later requests reuse it.
+first request constructs the provider, initializes its driver on every active
+worker, and returns only after all workers acknowledge completion. Later
+requests reuse the registered driver and return the cached context for the
+calling worker.
 
 ## Registration stays in the runtime
 

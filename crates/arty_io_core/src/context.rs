@@ -14,8 +14,9 @@ use crate::DriverProvider;
 /// ```
 ///
 /// On the first request, the runtime calls [`provider`](Self::provider), registers that provider,
-/// and creates its per-worker driver instances. Later requests reuse the registered driver and do
-/// not call `provider` again.
+/// and creates its driver instance on every active worker. The request completes only after all
+/// workers have initialized the driver. Later requests reuse the registered driver and do not call
+/// `provider` again.
 pub trait DriverContext: Clone + ThreadAware + 'static {
     /// The provider that creates the driver behind this context.
     type Provider: DriverProvider<Context = Self>;

@@ -18,8 +18,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     {
         let context = runtime.get_context::<SampleContext>();
-        let same_context = runtime.get_context::<SampleContext>();
+        assert_eq!(created_driver_count(), Runtime::WORKER_COUNT);
 
+        let same_context = runtime.get_context::<SampleContext>();
         assert_eq!(context, same_context);
         assert_eq!(created_driver_count(), Runtime::WORKER_COUNT);
         println!("sample I/O context uses driver on {:?}", context.driver_thread());
