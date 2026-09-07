@@ -16,7 +16,8 @@ use performables::sync::channel::OneshotReceiver;
 ///
 /// # Panics
 ///
-/// Awaiting a `JoinHandle` will panic if the spawned task panicked.
+/// Awaiting a `JoinHandle` will panic if the spawned task panicked or its
+/// runtime stopped before delivering the result.
 pub struct JoinHandle<T>(pub(crate) JoinHandleInner<T>);
 
 pub(crate) enum JoinHandleInner<T> {
@@ -32,7 +33,9 @@ impl<T> Future for JoinHandle<T> {
         match &mut self.get_mut().0 {
             #[cfg(feature = "tokio")]
             JoinHandleInner::Tokio(jh) => Pin::new(jh).poll(cx).map(|res| res.expect("spawned task panicked")),
-            JoinHandleInner::Custom(rx) => Pin::new(rx).poll(cx).map(|res| res.expect("spawned task panicked")),
+            JoinHandleInner::Custom(rx) => Pin::new(rx)
+                .poll(cx)
+                .map(|res| res.expect("spawned task did not produce a result because its channel closed")),
         }
     }
 }
@@ -40,5 +43,29 @@ impl<T> Future for JoinHandle<T> {
 impl<T> Debug for JoinHandle<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JoinHandle").finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    use performables::sync::channel;
+
+    use super::*;
+
+    #[test]
+    fn closed_custom_channel_reports_the_channel_error() {
+        let (sender, receiver) = channel::oneshot::<()>();
+        drop(sender);
+        let handle = JoinHandle(JoinHandleInner::Custom(receiver));
+
+        let panic = catch_unwind(AssertUnwindSafe(|| futures::executor::block_on(handle))).unwrap_err();
+        let message = panic.downcast_ref::<String>().unwrap();
+
+        assert_eq!(
+            message,
+            "spawned task did not produce a result because its channel closed: Error { .. }"
+        );
     }
 }

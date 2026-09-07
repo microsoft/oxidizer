@@ -114,7 +114,7 @@ impl std::fmt::Display for Error {
             Self::DecodeContainer { seismograph, legacy } => {
                 write!(
                     formatter,
-                    "invalid Seismograph snapshot: {seismograph}; legacy allocator snapshot decode also failed: {legacy}"
+                    "invalid snapshot: {seismograph}; legacy allocator snapshot decode also failed: {legacy}"
                 )
             }
             Self::DecodeAllocator(error) => write!(formatter, "invalid allocator snapshot: {error}"),
