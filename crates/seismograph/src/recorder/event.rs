@@ -781,7 +781,7 @@ impl Record {
             kind,
             payload: EventPayload::Runtime(runtime),
             backtrace,
-            sample_object: false,
+            sample_object: true,
         }
     }
 
@@ -820,7 +820,7 @@ impl Record {
             EventPayload::Object(object_id) => Some(object_id),
             EventPayload::Numeric(payload) => Some(payload.object_id),
             EventPayload::Allocation(allocation) => Some(ObjectId::new(AllocationId::get(allocation.allocation_id))),
-            EventPayload::Runtime(_) => None,
+            EventPayload::Runtime(runtime) => Some(ObjectId::new(runtime.subject_id)),
             EventPayload::Io(io) => Some(ObjectId::new(io.resource_id.get())),
         }
     }
@@ -946,18 +946,13 @@ mod tests {
             RuntimeEvent {
                 runtime_id: RuntimeId::from_raw(1).unwrap(),
                 worker_id: None,
-                subject_id: 0,
+                subject_id: 7,
                 related_id: 0,
                 value_0: 0,
                 value_1: 0,
             },
             BacktraceCapture::Never,
         );
-        let sampled_runtime = Record {
-            sample_object: true,
-            ..runtime
-        };
-
         assert_eq!(
             (
                 object.sampling_object_id(),
@@ -966,7 +961,6 @@ mod tests {
                 deallocated.kind,
                 deallocated.sampling_object_id(),
                 runtime.sampling_object_id(),
-                sampled_runtime.sampling_object_id(),
             ),
             (
                 Some(ObjectId::new(1)),
@@ -974,8 +968,7 @@ mod tests {
                 Some(ObjectId::new(11)),
                 EventKind::Deallocation,
                 Some(ObjectId::new(11)),
-                None,
-                None,
+                Some(ObjectId::new(7)),
             )
         );
     }

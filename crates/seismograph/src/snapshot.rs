@@ -71,6 +71,12 @@ pub struct SnapshotOptions {
 pub struct SourceId(u64);
 
 impl SourceId {
+    /// Tries to create a source identity from its stable numeric representation.
+    #[must_use]
+    pub const fn from_raw(value: u64) -> Option<Self> {
+        if value == 0 { None } else { Some(Self(value)) }
+    }
+
     /// Creates a source identity from a stable numeric value.
     ///
     /// # Panics
@@ -329,7 +335,7 @@ pub fn decode(bytes: &[u8]) -> Result<DecodedSnapshot, Error> {
     validate_count_fits(source_count, reader.remaining().len(), SOURCE_HEADER_LEN)?;
     let mut sources = Vec::with_capacity(source_count);
     for _ in 0..source_count {
-        let id = SourceId::new(reader.u64()?);
+        let id = SourceId::from_raw(reader.u64()?).ok_or_else(Error::invalid_format)?;
         let schema_version = reader.u16()?;
         let name_len = reader.u16()? as usize;
         let data_len = usize::try_from(reader.u64()?).map_err(|_error| Error::invalid_format())?;
@@ -351,8 +357,12 @@ pub fn decode(bytes: &[u8]) -> Result<DecodedSnapshot, Error> {
         return Err(Error::invalid_format());
     }
 
-    let total_events = threads.iter().map(|thread| thread.total_events).sum();
-    let lost_events = threads.iter().map(|thread| thread.lost_events).sum();
+    let total_events = threads.iter().try_fold(0_u64, |total, thread| {
+        total.checked_add(thread.total_events).ok_or_else(Error::invalid_format)
+    })?;
+    let lost_events = threads.iter().try_fold(0_u64, |total, thread| {
+        total.checked_add(thread.lost_events).ok_or_else(Error::invalid_format)
+    })?;
     Ok(DecodedSnapshot {
         capture_duration_nanos,
         events: Events {
@@ -1598,9 +1608,37 @@ mod tests {
         let mut invalid_source = valid.as_bytes().to_vec();
         invalid_source[28..32].copy_from_slice(&1_u32.to_le_bytes());
         invalid_source.extend_from_slice(&[0; SOURCE_HEADER_LEN]);
+        assert!(decode(&invalid_source).is_err());
         invalid_source[HEADER_LEN..HEADER_LEN + 8].copy_from_slice(&1_u64.to_le_bytes());
         invalid_source[HEADER_LEN + 20] = 1;
         assert!(decode(&invalid_source).is_err());
+
+        for (total_events, lost_events) in [(u64::MAX, 0), (0, u64::MAX)] {
+            let overflowing = encode_snapshot(&DecodedSnapshot {
+                capture_duration_nanos: 0,
+                events: Events {
+                    clock: EventClock::CURRENT,
+                    threads: vec![
+                        ThreadLog {
+                            thread_id: ThreadId::new(1),
+                            total_events,
+                            lost_events,
+                            name: String::new(),
+                        },
+                        ThreadLog {
+                            thread_id: ThreadId::new(2),
+                            total_events: u64::from(total_events != 0),
+                            lost_events: u64::from(lost_events != 0),
+                            name: String::new(),
+                        },
+                    ],
+                    ..Events::default()
+                },
+                sources: Vec::new(),
+            })
+            .unwrap();
+            assert!(decode(overflowing.as_bytes()).is_err());
+        }
 
         for (tag, fields) in [
             (1, [0, 1, 0, 0, 0, 0, 0, 0]),

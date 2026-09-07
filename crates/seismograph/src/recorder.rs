@@ -423,7 +423,9 @@ pub(crate) fn record(class: EventClass, event: impl FnOnce() -> Record) {
         return;
     }
     let record = event();
-    debug_assert_eq!(record.class(), class);
+    if record.class() != class {
+        return;
+    }
     if record
         .sampling_object_id()
         .is_some_and(|object_id| !decode_sampling(policy).includes(object_id))
@@ -448,7 +450,9 @@ pub(crate) fn record_in_session_classified(session: RecordingSession, class: Eve
         return false;
     }
     let record = event();
-    debug_assert_eq!(record.class(), class);
+    if record.class() != class {
+        return false;
+    }
     if record
         .sampling_object_id()
         .is_some_and(|object_id| !decode_sampling(policy).includes(object_id))
@@ -1167,6 +1171,7 @@ mod platform {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::recorder::event::EventTimestamp;
 
     #[test]
     fn zero_initialized_policy_uses_default_sampling() {
@@ -1235,6 +1240,50 @@ mod tests {
             captured.events.iter().map(|event| event.kind).collect::<Vec<_>>(),
             vec![EventKind::ArcDeref]
         );
+        configure(Configuration::default());
+    }
+
+    #[test]
+    fn record_rejects_events_from_a_different_class() {
+        let _test = TEST_LOCK.lock().unwrap();
+        configure(Configuration {
+            general_events: RecordingPolicy::all(false),
+            ..Default::default()
+        });
+        let session = RecordingSession::from_raw(ACTIVE_SESSION.load(Ordering::Acquire)).unwrap();
+
+        record(EventClass::General, || {
+            Record::runtime(
+                EventTimestamp::from_ticks(1),
+                EventKind::TaskSpawned,
+                runtime::RuntimeEvent {
+                    runtime_id: runtime::RuntimeId::from_raw(1).unwrap(),
+                    worker_id: None,
+                    subject_id: 1,
+                    related_id: 0,
+                    value_0: 0,
+                    value_1: 0,
+                },
+                BacktraceCapture::Never,
+            )
+        });
+        assert!(!record_in_session_classified(session, EventClass::General, || {
+            Record::runtime(
+                EventTimestamp::from_ticks(2),
+                EventKind::TaskSpawned,
+                runtime::RuntimeEvent {
+                    runtime_id: runtime::RuntimeId::from_raw(1).unwrap(),
+                    worker_id: None,
+                    subject_id: 2,
+                    related_id: 0,
+                    value_0: 0,
+                    value_1: 0,
+                },
+                BacktraceCapture::Never,
+            )
+        }));
+
+        assert!(snapshot(crate::snapshot::EventBufferDisposition::Release).is_none_or(|captured| captured.events.is_empty()));
         configure(Configuration::default());
     }
 
@@ -1433,6 +1482,57 @@ mod tests {
                 captured.events.iter().filter_map(Event::object_id).collect::<Vec<_>>(),
             ),
             (20, vec![sampled, sampled])
+        );
+        configure(Configuration::default());
+    }
+
+    #[test]
+    fn runtime_sampling_uses_the_subject_identity() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let sampling = EventSampling::one_in(20).unwrap();
+        let sampled = (1..10_000)
+            .find(|subject_id| sampling.includes(ObjectId::new(*subject_id)))
+            .unwrap();
+        let skipped = (1..10_000)
+            .find(|subject_id| !sampling.includes(ObjectId::new(*subject_id)))
+            .unwrap();
+        configure(Configuration {
+            runtime_tasks: RecordingPolicy {
+                enabled: true,
+                event_sampling: sampling,
+                ..Default::default()
+            },
+            event_capacity_per_thread: EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD).unwrap(),
+            ..Default::default()
+        });
+
+        for subject_id in [sampled, skipped] {
+            record(EventClass::RuntimeTask, || {
+                Record::runtime(
+                    EventTimestamp::from_ticks(subject_id),
+                    EventKind::TaskSpawned,
+                    runtime::RuntimeEvent {
+                        runtime_id: runtime::RuntimeId::from_raw(1).unwrap(),
+                        worker_id: None,
+                        subject_id,
+                        related_id: 0,
+                        value_0: 0,
+                        value_1: 0,
+                    },
+                    BacktraceCapture::Never,
+                )
+            });
+        }
+        let captured = snapshot(crate::snapshot::EventBufferDisposition::Release).unwrap();
+
+        assert_eq!(
+            captured
+                .events
+                .iter()
+                .filter_map(Event::runtime)
+                .map(|event| event.subject_id)
+                .collect::<Vec<_>>(),
+            vec![sampled]
         );
         configure(Configuration::default());
     }
