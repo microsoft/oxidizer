@@ -6,8 +6,8 @@ use std::time::Duration;
 
 /// A completion-aware waiting point that an I/O driver lends to an async worker.
 ///
-/// Every driver provides one. The runtime decides whether to integrate it into an async worker's
-/// idle wait or drive it from another runtime-owned thread. The driver remains free to delegate
+/// Every driver provides one. Before creating a driver, the runtime chooses the thread that owns
+/// it and then invokes its [`Parker`] only from that thread. The driver remains free to delegate
 /// actual completion work to system tasks or threads of its own.
 pub trait Parker {
     /// Waits for at most `max_wait`, processes available completions, and returns.

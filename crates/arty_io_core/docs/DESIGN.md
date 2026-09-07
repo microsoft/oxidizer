@@ -66,10 +66,11 @@ the same `arty_io_core` contract.
 ## Execution and waiting
 
 An I/O subsystem chooses its own execution strategy. Every driver exposes a
-`Parker` through a shared reference. The runtime decides whether to integrate a
-parker into an async worker's idle wait or drive it from another runtime-owned
-thread. Internally, the driver may process completions there, delegate system
-work, or coordinate with threads managed by its provider.
+`Parker` through a shared reference. Before calling `DriverProvider::create`,
+the runtime chooses the thread that will own the driver. Every driver callback,
+including `Parker::park`, runs only on that thread. Internally, the driver may
+process completions there, delegate system work, or coordinate with threads
+managed by its provider.
 
 This avoids exposing primary or satellite roles as public API. Those are
 placement choices the runtime may change later.
@@ -144,7 +145,10 @@ Driver authors depend on `thread_aware_core` when implementing relocation.
 
 Future additions follow these rules:
 
-- Add runtime facilities through private `DriverInit` fields and new accessors.
+- Add optional runtime facilities through private `DriverInit` fields, defaults
+  in the existing constructor, and new accessors.
+- Adding a new mandatory constructor input is a breaking change and requires
+  explicit stabilization review.
 - Add trait methods only with compatible defaults when possible.
 - Prefer standard-library types over ecosystem dependencies.
 - Keep erasure, registration, and placement helpers private to the runtime.

@@ -47,7 +47,8 @@ The runtime does not dictate how an I/O subsystem distributes work.
   mutable storage access nor a synchronization wrapper.
 - Drivers use thread-local interior mutability when callbacks change state.
 - Every driver exposes a `Parker` through a shared reference.
-- The runtime decides where each `Parker` is driven.
+- The runtime chooses the driver-owning thread before creation and drives the
+  `Parker` only from that thread.
 - A driver may delegate `SystemTask` work to runtime-owned workers.
 - A driver or provider may create any number of private threads.
 - Primary, satellite, and thread-pinning policy are runtime implementation

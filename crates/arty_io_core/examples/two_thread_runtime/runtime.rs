@@ -110,7 +110,12 @@ impl Runtime {
     where
         C: DriverContext,
     {
-        let mut cache = self.contexts.lock().unwrap_or_else(PoisonError::into_inner);
+        // Keep the guard for the entire registration. If any worker fails to initialize, the
+        // resulting panic poisons this mutex and permanently prevents another registration attempt.
+        let mut cache = self
+            .contexts
+            .lock()
+            .expect("a failed driver registration makes the runtime unusable");
 
         if let Some(context) = cache.get(&TypeId::of::<C>()).and_then(|context| context.downcast_ref::<C>()) {
             return context.clone();
@@ -154,33 +159,47 @@ impl Runtime {
     pub(super) fn shutdown(mut self) -> Result<(), RuntimeError> {
         self.contexts.get_mut().unwrap_or_else(PoisonError::into_inner).clear();
 
+        let mut failure = None;
         let mut shutdowns = Vec::with_capacity(self.workers.len());
         for worker in &self.workers {
             let (reply_tx, reply_rx) = mpsc::channel();
-            worker
-                .commands
-                .send(Command::Stop { reply: reply_tx })
-                .map_err(|error| RuntimeError(format!("worker stopped before shutdown: {error}")))?;
-            shutdowns.push(reply_rx);
+            match worker.commands.send(Command::Stop { reply: reply_tx }) {
+                Ok(()) => shutdowns.push(reply_rx),
+                Err(error) => {
+                    failure.get_or_insert_with(|| RuntimeError(format!("worker stopped before shutdown: {error}")));
+                }
+            }
         }
 
         for shutdown in shutdowns {
-            shutdown
-                .recv()
-                .map_err(|error| RuntimeError(format!("worker stopped during driver shutdown: {error}")))?
-                .map_err(RuntimeError)?;
+            match shutdown.recv() {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    failure.get_or_insert(RuntimeError(error));
+                }
+                Err(error) => {
+                    failure.get_or_insert_with(|| RuntimeError(format!("worker stopped during driver shutdown: {error}")));
+                }
+            }
         }
 
         for worker in &mut self.workers {
-            worker
-                .thread
-                .take()
-                .ok_or_else(|| RuntimeError("worker thread was already joined".into()))?
-                .join()
-                .map_err(|_panic| RuntimeError("worker thread panicked".into()))?;
+            match worker.thread.take() {
+                Some(thread) => {
+                    if thread.join().is_err() {
+                        failure.get_or_insert_with(|| RuntimeError("worker thread panicked".into()));
+                    }
+                }
+                None => {
+                    failure.get_or_insert_with(|| RuntimeError("worker thread was already joined".into()));
+                }
+            }
         }
 
-        Ok(())
+        match failure {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 }
 
