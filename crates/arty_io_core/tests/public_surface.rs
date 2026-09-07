@@ -4,14 +4,13 @@
 //! Public surface contract tests.
 
 use std::cell::Cell;
-use std::fmt;
 use std::pin::pin;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::task::{Context, Poll, Wake, Waker};
-use std::thread;
 use std::time::Duration;
+use std::{fmt, thread};
 
 use arty_io_core::{Driver, DriverContext, DriverInit, DriverProvider, Parker, SystemTask, SystemTaskSpawner};
 use static_assertions::{assert_impl_all, assert_not_impl_any, assert_obj_safe};
