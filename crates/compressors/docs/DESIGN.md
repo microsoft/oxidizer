@@ -85,6 +85,10 @@ Two consumption models are offered and they differ in what the *caller* retains:
 
 ## 6. Bounding untrusted decompression
 
+[SECURITY.md](SECURITY.md) is the threat model this section summarises: which
+resource each budget bounds and which it does not, which defaults apply to which
+consumption mode, what the caller still owns, and how the claims are verified.
+
 Every supported format can expand its input by orders of magnitude, so a
 decompressor pointed at untrusted data is a memory-exhaustion vector.
 

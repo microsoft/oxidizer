@@ -188,7 +188,11 @@
 //! alone is not protection.
 //!
 //! Decompression can yield bytes before a checksum or trailer has rejected the stream, so treat
-//! them as provisional until the decompressor reports that it is done.
+//! them as provisional until the decompressor reports that it is done. A checksum match is not an
+//! authenticity claim either -- none of these formats is authenticated -- so decompressing does not
+//! make the content any more trustworthy than it was.
+//!
+//! See [`documentation`] for the full threat model.
 //!
 //! # Features
 //!
@@ -214,21 +218,13 @@
 //!
 //! # Further reading
 //!
-//! Two guides cover the decisions that span several APIs, which no single item's documentation can
-//! carry:
-//!
-//! * [DESIGN.md] -- the user-visible policies: format selection, what is uniform across formats and
-//!   what is not, how decompression is bounded, stream framing, and why the public surface is
-//!   sealed.
-//! * [IMPLEMENTATION.md] -- the mechanisms behind them: the pump state machine, the unsafe
-//!   initialized-output contract every backend adapter must honour, engine pooling and why some
-//!   engines are excluded, and the async driving rules.
-//!
-//! [DESIGN.md]: https://github.com/microsoft/oxidizer/blob/main/crates/compressors/docs/DESIGN.md
-//! [IMPLEMENTATION.md]: https://github.com/microsoft/oxidizer/blob/main/crates/compressors/docs/IMPLEMENTATION.md
+//! See [`documentation`] for the longer form guides.
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/compressors/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/compressors/favicon.ico")]
+
+#[cfg(any(doc, test))]
+pub mod documentation;
 
 #[cfg(any(test, feature = "brotli"))]
 pub mod brotli;

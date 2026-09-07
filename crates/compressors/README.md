@@ -178,7 +178,11 @@ at once. [`DecompressorLimits`][__link18] documents what each format bounds by d
 alone is not protection.
 
 Decompression can yield bytes before a checksum or trailer has rejected the stream, so treat
-them as provisional until the decompressor reports that it is done.
+them as provisional until the decompressor reports that it is done. A checksum match is not an
+authenticity claim either – none of these formats is authenticated – so decompressing does not
+make the content any more trustworthy than it was.
+
+See [`documentation`][__link19] for the full threat model.
 
 ## Features
 
@@ -198,21 +202,13 @@ engines it names:
 
 The deflate-family features share one dependency, so enabling more than one of them costs no
 more than enabling one. A build that needs only `brotli` or only `zstd` never compiles `flate2`
-at all, and a build that names no format at all still gets [`Compression`][__link19], the builders and
-[`Resources`][__link20], which is what a crate that only passes compressors and decompressors around
+at all, and a build that names no format at all still gets [`Compression`][__link20], the builders and
+[`Resources`][__link21], which is what a crate that only passes compressors and decompressors around
 needs.
 
 ## Further reading
 
-Two guides cover the decisions that span several APIs, which no single item’s documentation can
-carry:
-
-* [DESIGN.md][__link21] – the user-visible policies: format selection, what is uniform across formats and
-  what is not, how decompression is bounded, stream framing, and why the public surface is
-  sealed.
-* [IMPLEMENTATION.md][__link22] – the mechanisms behind them: the pump state machine, the unsafe
-  initialized-output contract every backend adapter must honour, engine pooling and why some
-  engines are excluded, and the async driving rules.
+See [`documentation`][__link22] for the longer form guides.
 
 
 <hr/>
@@ -220,7 +216,7 @@ carry:
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/compressors">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbJmPTohdJCH4bCzPyvHmu8aQb6dSQEn7GOrEbgEEeRSMruI9hZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbjojVXQIV2Ewb89V-5l67DvobDbwJEokPYgIb-ONYOqfWe4RhZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
  [__link0]: https://crates.io/crates/bytesbuf/0.9.0
  [__link1]: https://docs.rs/compressors/0.1.0/compressors/?search=Result
  [__link10]: https://docs.rs/compressors/0.1.0/compressors/fn.decompress.html
@@ -232,11 +228,11 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link16]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressionStream
  [__link17]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits::max_output_len
  [__link18]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits
- [__link19]: https://docs.rs/compressors/0.1.0/compressors/?search=core::Compression
+ [__link19]: https://docs.rs/compressors/0.1.0/compressors/documentation/index.html
  [__link2]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
- [__link20]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
- [__link21]: https://github.com/microsoft/oxidizer/blob/main/crates/compressors/docs/DESIGN.md
- [__link22]: https://github.com/microsoft/oxidizer/blob/main/crates/compressors/docs/IMPLEMENTATION.md
+ [__link20]: https://docs.rs/compressors/0.1.0/compressors/?search=core::Compression
+ [__link21]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
+ [__link22]: https://docs.rs/compressors/0.1.0/compressors/documentation/index.html
  [__link3]: https://crates.io/crates/bytesbuf/0.9.0
  [__link4]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesView
  [__link5]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesBuf
