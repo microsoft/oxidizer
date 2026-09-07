@@ -54,9 +54,10 @@ pub(crate) fn monotonic_millis() -> u64 {
     let mut time = timespec { tv_sec: 0, tv_nsec: 0 };
     let result = unsafe { clock_gettime(CLOCK_MONOTONIC, &raw mut time) };
     abort_on_failure(result);
-    (time.tv_sec as u64)
+    u64::try_from(time.tv_sec)
+        .expect("CLOCK_MONOTONIC seconds are nonnegative")
         .saturating_mul(1_000)
-        .saturating_add(time.tv_nsec as u64 / 1_000_000)
+        .saturating_add(u64::try_from(time.tv_nsec).expect("CLOCK_MONOTONIC nanoseconds are nonnegative") / 1_000_000)
 }
 
 fn map_aligned(size: usize, protection: i32) -> *mut u8 {

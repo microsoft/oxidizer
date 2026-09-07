@@ -542,12 +542,16 @@ fn try_snapshot_with_runtime_events(
 }
 
 #[cfg(all(not(miri), feature = "caller-symbolization"))]
+#[expect(
+    clippy::fn_to_numeric_cast_any,
+    reason = "the function address seeds backtrace's process-lifetime module cache before snapshot arenas are active"
+)]
 fn prepare_address_resolution() {
     static PREPARE: std::sync::Once = std::sync::Once::new();
 
     PREPARE.call_once(|| {
         let _suppression = seismograph::recorder::SuppressionGuard::enter();
-        let address = prepare_address_resolution as *mut c_void;
+        let address = (prepare_address_resolution as *const ()).cast_mut().cast::<c_void>();
         backtrace::resolve(address, |_| {});
         backtrace::clear_symbol_cache();
     });

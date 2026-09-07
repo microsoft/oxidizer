@@ -39,13 +39,13 @@ seismograph = { workspace = true, optional = true }
 serde = { workspace = true, features = ["std"], optional = true }
 thread_aware_core = { workspace = true, features = ["std"] }
 
+[target.'cfg(loom)'.dev-dependencies]
+loom = { workspace = true }
+
 [dev-dependencies]
 criterion.workspace = true
 serde = { workspace = true, features = ["std"] }
 thread_aware = { workspace = true, features = ["test-utils"] }
-
-[target.'cfg(loom)'.dev-dependencies]
-loom = { workspace = true }
 
 [[bench]]
 name = "performables_uncontended"
