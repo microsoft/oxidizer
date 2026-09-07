@@ -171,8 +171,8 @@ where
 
     async fn promote_to_primary(&self, key: K, value: CacheEntry<V>) {
         // Insert errors are intentionally swallowed - a failed promotion should not
-        // affect the refresh. The CacheWrapper around the primary tier already
-        // records telemetry for the insert (Inserted or Rejected).
+        // affect the refresh. CacheWrapper records the insert outcome, while this
+        // match records the corresponding promotion outcome.
         match self.primary.insert(key, value).await {
             Ok(cachet_tier::InsertOutcome::Accepted) => self.telemetry.record_promotion_accepted(self.name),
             Ok(cachet_tier::InsertOutcome::Rejected) => self.telemetry.record_promotion_rejected(self.name),

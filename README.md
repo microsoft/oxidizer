@@ -49,6 +49,7 @@ These are the primary crates built out of this repo:
 - [`layered`](./crates/layered/README.md) - A foundational service abstraction for building composable, middleware-driven systems.
 - [`multitude`](./crates/multitude/README.md) - Fast and flexible arena allocator.
 - [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.
+- [`performables`](./crates/performables/README.md) - Thread-aware synchronization and ownership primitives.
 - [`plurality`](./crates/plurality/README.md) - A highly efficient pooling memory allocator.
 - [`rallocator`](./crates/rallocator/README.md) - A high-performance global allocator with passive allocation hints and telemetry.
   - [Supported platforms](./crates/rallocator/README.md#supported-platforms)
@@ -56,8 +57,10 @@ These are the primary crates built out of this repo:
   - [Implementation guide](./crates/rallocator/README.md#implementation-guide)
 - [`seismograph_cli`](./crates/seismograph_cli/README.md) - Live monitoring and snapshot tools for seismograph telemetry.
 - [`seismograph`](./crates/seismograph/README.md) - High-performance process telemetry with extensible snapshot sources.
+- [`seismograph_io`](./crates/seismograph_io/README.md) - Structured I/O event instrumentation for Seismograph.
 - [`seismograph_protocol`](./crates/seismograph_protocol/README.md) - Local monitor protocol and discovery model for Seismograph.
 - [`seismograph_rallocator`](./crates/seismograph_rallocator/README.md) - Rallocator snapshot source for seismograph.
+- [`seismograph_runtime`](./crates/seismograph_runtime/README.md) - Runtime and task lifecycle instrumentation for Seismograph.
 - [`recoverable`](./crates/recoverable/README.md) - Recovery information and classification for resilience patterns.
 - [`rest_over_grpc`](./crates/rest_over_grpc/README.md) - Automatically transcode gRPC services to REST/JSON endpoints.
 - [`routerama`](./crates/routerama/README.md) - Blazingly fast HTTP route resolution and query string processing.
