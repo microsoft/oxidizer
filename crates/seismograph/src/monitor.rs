@@ -804,6 +804,7 @@ mod tests {
 
     #[test]
     fn authenticated_client_handles_repeat_hello_and_all_snapshot_modes() {
+        let _test = crate::recorder::TEST_LOCK.lock().unwrap();
         let descriptor = MonitorDescriptor {
             name: "test".into(),
             instance: None,
