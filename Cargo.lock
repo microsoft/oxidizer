@@ -492,7 +492,6 @@ version = "0.1.0"
 dependencies = [
  "duct",
  "ohno 0.5.0",
- "performables",
  "serde",
  "serde_json",
 ]

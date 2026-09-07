@@ -31,7 +31,6 @@ min-lines-percent = 0
 
 duct = { workspace = true }
 ohno = { workspace = true, features = ["app-err"] }
-performables = { workspace = true, features = ["seismograph"] }
 serde = { workspace = true, features = ["derive", "alloc"] }
 serde_json = { workspace = true, features = ["std"] }
 
