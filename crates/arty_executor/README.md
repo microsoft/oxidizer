@@ -43,5 +43,5 @@ reused for new tasks when old ones complete.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_executor">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbVwz61IbZe5QbF4vbEa1LIsAbVDxflkNvtrIbD-TpXycN1glhZIGCakpvaW5IYW5kbGX2
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbVwz61IbZe5QbF4vbEa1LIsAbVDxflkNvtrIbD-TpXycN1glhZIGCakpvaW5IYW5kbGX2
  [__link0]: https://crates.io/crates/JoinHandle

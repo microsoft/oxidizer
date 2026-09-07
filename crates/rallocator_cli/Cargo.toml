@@ -26,5 +26,7 @@ clap = { workspace = true, features = ["color", "derive", "error-context", "help
 rallocator_telemetry.workspace = true
 same-file.workspace = true
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

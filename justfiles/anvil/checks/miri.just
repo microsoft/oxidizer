@@ -6,8 +6,8 @@
 
 # See https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/checks.md
 
-# Nightly checks always run full-workspace; impact env vars aren't set
-# by the scheduled workflow, so the affected-tier default (--workspace)
+# Nightly checks always run full-workspace; the scheduled workflow
+# publishes no impact cache, so the affected-tier default (--workspace)
 # applies. Skip guards are still included for local diff-scoped runs.
 
 # Compile all selected packages together, then run their Miri test artifacts in
@@ -22,10 +22,11 @@
 # a runner class.
 
 # Run selected Miri test artifacts with CPU-based parallelism.
-[script("pwsh")]
+[script("pwsh", "-NoProfile")]
 _anvil-miri-test:
     $ErrorActionPreference = 'Stop'
-    if ($env:ANVIL_INCLUDE_AFFECTED -eq '--skip') { exit 0 }
+    $include = (& "{{ just_executable() }}" _anvil-impact-include affected)
+    if ($include -eq '--skip') { exit 0 }
 
     $metadata = & cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -40,8 +41,8 @@ _anvil-miri-test:
         }
     }
 
-    if ($env:ANVIL_INCLUDE_AFFECTED) {
-        $tokens = @(-split $env:ANVIL_INCLUDE_AFFECTED)
+    if ($include) {
+        $tokens = @(-split $include)
         $filtered = [System.Collections.Generic.List[string]]::new()
         for ($i = 0; $i -lt $tokens.Count; $i++) {
             if ($tokens[$i] -eq '--package') {
@@ -213,10 +214,10 @@ _anvil-miri-test:
     }
 
 # Run Miri tests for affected workspace packages.
-[script("pwsh")]
-anvil-miri: anvil-miri-validate-prereqs
+[script("pwsh", "-NoProfile")]
+anvil-miri: anvil-miri-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
-    if ($env:ANVIL_INCLUDE_AFFECTED -eq '--skip') { exit 0 }
+    if ((& "{{ just_executable() }}" _anvil-impact-include affected) -eq '--skip') { exit 0 }
     # Run miri via libtest (`cargo miri test`), NOT `cargo miri nextest
     # run`. nextest uses a process-per-test model; under miri every
     # process pays the full cost of re-interpreting std initialization,
