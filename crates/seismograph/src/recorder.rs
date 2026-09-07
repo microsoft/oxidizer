@@ -1145,8 +1145,10 @@ mod platform {
         const SKIPPED_FRAMES: usize = 4;
         const CAPACITY: usize = super::MAX_STACK_FRAMES + SKIPPED_FRAMES;
         let mut addresses = [0usize; CAPACITY];
+        let capacity = i32::try_from(CAPACITY).expect("the fixed frame buffer fits in i32");
         // SAFETY: addresses is writable for CAPACITY pointers.
-        let count = unsafe { libc::backtrace(addresses.as_mut_ptr().cast(), CAPACITY as i32) }.max(0) as usize;
+        let count = unsafe { libc::backtrace(addresses.as_mut_ptr().cast(), capacity) }.max(0);
+        let count = usize::try_from(count).expect("the nonnegative frame count fits in usize");
         let retained = count.saturating_sub(SKIPPED_FRAMES).min(frames.len());
         for (destination, address) in frames.iter_mut().zip(addresses.into_iter().skip(SKIPPED_FRAMES)).take(retained) {
             *destination = address as u64;

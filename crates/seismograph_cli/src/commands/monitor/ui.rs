@@ -2610,7 +2610,7 @@ mod tests {
                 format_event_loss(0, 0),
                 format_event_loss(1, 3),
                 format_age(Duration::from_secs(1)),
-                format_age(Duration::from_secs(3_600)),
+                format_age(Duration::from_hours(1)),
                 format_count(1_234_567),
                 format_bytes(1),
                 format_bytes(1_024),

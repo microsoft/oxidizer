@@ -502,6 +502,7 @@ fn try_snapshot_with_runtime_events(
     runtime_events: Option<&runtime_event::Events>,
     include_runtime_events: bool,
 ) -> Result<Snapshot, SnapshotError> {
+    seismograph::snapshot::with_snapshot_arena_suspended(prepare_address_resolution);
     with_snapshot_arena(|| {
         with_telemetry_suppressed(|| {
             let started_at = Instant::now();
@@ -525,6 +526,10 @@ fn try_snapshot_with_runtime_events(
             encoded.runtime_events = include_runtime_events.then(|| runtime_events.cloned()).flatten();
             encoded.histograms = encode_histograms();
             encoded.addresses = resolve_addresses(callers.as_ref(), encoded.runtime_events.as_ref());
+            #[cfg(all(not(miri), feature = "caller-symbolization"))]
+            // Backtrace retains process-global caches allocated from the active
+            // snapshot arena, so release them before that arena is unmapped.
+            backtrace::clear_symbol_cache();
             encoded.metadata.capture_duration_nanos = u64::try_from(started_at.elapsed().as_nanos()).unwrap_or(u64::MAX);
 
             let len = seismograph_rallocator::encoded_len(&encoded).map_err(|_error| SnapshotError::sizing_failed())?;
@@ -535,6 +540,21 @@ fn try_snapshot_with_runtime_events(
         })
     })
 }
+
+#[cfg(all(not(miri), feature = "caller-symbolization"))]
+fn prepare_address_resolution() {
+    static PREPARE: std::sync::Once = std::sync::Once::new();
+
+    PREPARE.call_once(|| {
+        let _suppression = seismograph::recorder::SuppressionGuard::enter();
+        let address = prepare_address_resolution as *mut c_void;
+        backtrace::resolve(address, |_| {});
+        backtrace::clear_symbol_cache();
+    });
+}
+
+#[cfg(any(miri, not(feature = "caller-symbolization")))]
+fn prepare_address_resolution() {}
 
 pub(crate) fn register_seismograph_source() {
     seismograph::snapshot::register_source(&RALLOCATOR_SOURCE);

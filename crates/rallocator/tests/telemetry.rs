@@ -100,6 +100,7 @@ fn passive_bump_hints_detach_and_reuse_native_state() {
 fn snapshot_capture_does_not_add_allocator_mappings() {
     let _test = test_lock();
     track_callers(false);
+    drop(snapshot().unwrap());
     let before = stats().unwrap();
 
     let captured = snapshot().unwrap();
@@ -370,6 +371,19 @@ fn retained_call_stacks_are_encoded() {
             .iter()
             .all(|address| { snapshot.addresses.iter().any(|lookup| lookup.address == *address) })
     );
+}
+
+#[cfg(all(not(miri), feature = "caller-symbolization"))]
+#[test]
+fn symbolization_cache_survives_repeated_snapshots() {
+    let _test = test_lock();
+    track_callers(false);
+    track_callers(true);
+    drop(Box::new(7_u64));
+    track_callers(false);
+
+    assert!(!decoded_snapshot().addresses.is_empty());
+    assert!(!decoded_snapshot().addresses.is_empty());
 }
 
 #[test]
