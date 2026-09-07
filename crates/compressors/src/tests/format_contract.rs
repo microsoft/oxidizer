@@ -1549,10 +1549,30 @@ mod pooling {
     use crate::gzip;
 
     /// Resources whose engines are recycled, shared by the tests in this module.
+    ///
+    /// Only for tests that do not depend on *which* engine they get: a shared pool cannot promise
+    /// that the engine one test dirtied is the engine the next call receives, because tests run
+    /// concurrently. Anything asserting a specific engine history uses [`solo_resources`].
     fn pooled_resources() -> &'static Resources {
         static POOLED: OnceLock<Resources> = OnceLock::new();
 
         POOLED.get_or_init(|| Resources::new(GlobalPool::new()))
+    }
+
+    /// A private pool holding exactly one idle engine.
+    ///
+    /// This is what makes a reuse sequence deterministic. Capacity one means the engine returned by
+    /// a drop is the engine the next build receives, and a pool of its own means no concurrently
+    /// running test can take it in between. Dirtying through one `Resources` and verifying through
+    /// another proves nothing at all -- each owns its own pool, so the engine under test would be a
+    /// fresh one and the assertion would pass however broken the reset was.
+    fn solo_resources() -> Resources {
+        Resources::new(GlobalPool::new()).with_pool_capacity(1)
+    }
+
+    /// Resources that recycle nothing, for the baseline a pooled run has to match.
+    fn unpooled_resources() -> Resources {
+        Resources::new(GlobalPool::new()).with_pool_capacity(0)
     }
 
     fn compress_with(resources: &Resources, level: Level, data: &[u8]) -> BytesView {
@@ -1563,7 +1583,10 @@ mod pooling {
     #[test]
     fn a_recycled_engine_produces_byte_identical_output() {
         // The whole safety argument for pooling: reset state must leave no trace of the previous
-        // stream. Compare many pooled rounds against a fresh-engine baseline.
+        // stream. A private capacity-one pool means every round after the first genuinely receives
+        // the engine the previous round returned, rather than whichever one a shared pool happened
+        // to hold.
+        let solo = solo_resources();
         let payloads = [
             b"first request body".repeat(50),
             b"a completely different second body, longer".repeat(80),
@@ -1572,8 +1595,8 @@ mod pooling {
 
         for round in 0..4 {
             for payload in &payloads {
-                let pooled = compress_with(pooled_resources(), Level::DEFAULT, payload);
-                let fresh = compress_with(&Resources::new(GlobalPool::new()).with_pool_capacity(0), Level::DEFAULT, payload);
+                let pooled = compress_with(&solo, Level::DEFAULT, payload);
+                let fresh = compress_with(&unpooled_resources(), Level::DEFAULT, payload);
 
                 assert_eq!(
                     pooled.to_vec(),
@@ -1588,21 +1611,19 @@ mod pooling {
     #[test]
     fn a_compressor_abandoned_mid_stream_does_not_poison_the_pool() {
         // A request cancelled part-way through returns a dirty engine. The next user must still
-        // get a clean stream.
+        // get a clean stream -- and must actually receive *that* engine, which is what one private
+        // capacity-one pool used for both halves guarantees.
+        let solo = solo_resources();
 
         {
-            let mut abandoned = gzip::Compressor::builder().build(resources()).built();
+            let mut abandoned = gzip::Compressor::builder().build(&solo).built();
             abandoned.push(view(&b"half a stream ".repeat(100))).unwrap();
             let _ = CompressionInternal::pull(&mut abandoned, Destination::Stream).unwrap();
-            // Dropped without `end_input`, so its engine is mid-stream.
+            // Dropped without `end_input`, so its engine goes back to the pool mid-stream.
         }
 
-        let recovered = compress_with(pooled_resources(), Level::DEFAULT, b"a fresh stream");
-        let fresh = compress_with(
-            &Resources::new(GlobalPool::new()).with_pool_capacity(0),
-            Level::DEFAULT,
-            b"a fresh stream",
-        );
+        let recovered = compress_with(&solo, Level::DEFAULT, b"a fresh stream");
+        let fresh = compress_with(&unpooled_resources(), Level::DEFAULT, b"a fresh stream");
 
         assert_eq!(recovered.to_vec(), fresh.to_vec(), "a recycled dirty engine must be reset");
         assert_eq!(
@@ -1613,20 +1634,18 @@ mod pooling {
 
     #[test]
     fn levels_do_not_share_engines() {
-        // Reset preserves the level, so a level-9 request must never receive a level-1 engine.
+        // Reset preserves the level, so a level-9 request must never receive a level-1 engine. The
+        // private capacity-one pool is what makes that a real test: with one slot, the level-9
+        // request is offered the engine the level-1 run just returned, so a pool that ignored the
+        // level would hand it over here rather than merely being able to.
+        let solo = solo_resources();
         let payload = b"the quick brown fox jumps over the lazy dog ".repeat(200);
 
-        let fast = compress_with(pooled_resources(), Level::FAST, &payload);
-        let best = compress_with(pooled_resources(), Level::HIGH, &payload);
+        let fast = compress_with(&solo, Level::FAST, &payload);
+        let best = compress_with(&solo, Level::HIGH, &payload);
 
-        assert_eq!(
-            fast.to_vec(),
-            compress_with(&Resources::new(GlobalPool::new()).with_pool_capacity(0), Level::FAST, &payload).to_vec()
-        );
-        assert_eq!(
-            best.to_vec(),
-            compress_with(&Resources::new(GlobalPool::new()).with_pool_capacity(0), Level::HIGH, &payload).to_vec()
-        );
+        assert_eq!(fast.to_vec(), compress_with(&unpooled_resources(), Level::FAST, &payload).to_vec());
+        assert_eq!(best.to_vec(), compress_with(&unpooled_resources(), Level::HIGH, &payload).to_vec());
         // Inequality of the bytes is what proves the level reached the engine at all: the size
         // comparison below is satisfied by equality, so a backend that dropped the level would
         // pass it, and the `assert_eq!` pair above would still hold because pooled and fresh
@@ -1677,17 +1696,22 @@ mod pooling {
     #[test]
     fn a_decompressor_abandoned_mid_stream_does_not_poison_the_pool() {
         use crate::zlib;
+
+        // zlib rather than gzip, because gzip decompressors are deliberately not recycled -- there
+        // would be no dirty engine to hand back. One private capacity-one pool for both halves, so
+        // the engine cut short is provably the engine that then has to decode a whole stream.
+        let solo = solo_resources();
         let payload = b"a stream that gets cut short ".repeat(200);
-        let compressed = zlib::compress(view(&payload), resources()).unwrap();
+        let compressed = zlib::compress(view(&payload), &solo).unwrap();
 
         {
-            let mut abandoned = zlib::Decompressor::builder().build(resources()).built();
+            let mut abandoned = zlib::Decompressor::builder().build(&solo).built();
             abandoned.push(compressed.range(0..compressed.len() / 2)).unwrap();
             let _ = CompressionInternal::pull(&mut abandoned, Destination::Stream).unwrap();
-            // Dropped mid-stream, so its engine is dirty.
+            // Dropped mid-stream, so its engine goes back dirty.
         }
 
-        let mut recovered = zlib::Decompressor::builder().build(resources()).built();
+        let mut recovered = zlib::Decompressor::builder().build(&solo).built();
         let plain = decompress(&mut recovered, &compressed, usize::MAX).unwrap();
 
         assert_eq!(plain.to_vec(), payload, "a recycled dirty decompressor must be reset");
