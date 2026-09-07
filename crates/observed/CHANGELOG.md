@@ -5,6 +5,16 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Initial release of Event sampling API through `EventSampler` and
+  `Sink::with_event_sampler`. Each interested Sink calls its sampler once with
+  a read-only `EventSamplingContext` which returns either
+  `EventSamplingDecision::Continue` to continue normal event processing or
+  `EventSamplingDecision::Drop` to discard the whole event for that Sink.
+
 ## [0.25.0] - 2026-08-27
 
 - ⚠️ Breaking

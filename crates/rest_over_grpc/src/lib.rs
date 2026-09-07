@@ -197,6 +197,14 @@
 //! Requests are buffered and parsed as JSON, so there is no incremental request
 //! body path and binary payloads must fit JSON-friendly encoding.
 //!
+//! Query parameter field paths are limited to 64 levels of nesting. A dotted
+//! key such as `?a.b.c=1` builds one level per segment, so a path deeper than
+//! the limit is rejected as an invalid request rather than decoded, truncated,
+//! or allowed to exhaust the stack. The limit is fixed and not configurable: it
+//! bounds the recursion an untrusted request can drive, and a bound a caller
+//! could raise would not bound anything. It stays far above the nesting any
+//! real proto message uses.
+//!
 //! # Cargo features
 //!
 //! - `serving` (default): [`serve_http`](serving::serve_http), [`serve_http_fn`](serving::serve_http_fn), and [`RestBody`](serving::RestBody).

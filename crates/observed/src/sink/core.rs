@@ -13,6 +13,7 @@ use crate::enrichment::{EnrichmentEntry, EnrichmentTransfer, Guard, Slot};
 use crate::interop::DynEvent;
 use crate::metadata::{EventDescription, SourceLocation};
 use crate::processing::{EventProcessor, EventView, IntermediateEvent};
+use crate::sampling::{EventSampler, EventSamplingContext, EventSamplingDecision};
 use crate::{Event, FlushError, SinkFlushError, SinkId};
 
 /// The no-op sink's id returned by [`Sink::noop`]'s `id()` accessor
@@ -115,6 +116,7 @@ impl Sink {
                 isolated_enrichment,
                 enrichment: Slot::new(),
                 clock: clock.as_ref().clone(),
+                sampler: None,
             })),
         }
     }
@@ -198,6 +200,40 @@ impl Sink {
     pub fn noop() -> Self {
         Self {
             inner: thread_aware::Arc::from_unaware(SinkInner::Noop { enrichment: Slot::new() }),
+        }
+    }
+
+    /// Attaches one [`EventSampler`] to this sink, replacing any sampler
+    /// already attached.
+    ///
+    /// For a composite, the new sampler replaces every sampler previously
+    /// attached to its leaves. Only the new sampler runs. A [`Sink::noop`]
+    /// value is returned unchanged. A sink that is not interested in an event
+    /// never calls the sampler.
+    ///
+    /// See [`EventSampler::sample`] for the invocation and decision contract.
+    ///
+    /// # Sharing
+    ///
+    /// Clones made from the returned sink share its sampler configuration.
+    /// Existing clones keep their prior configuration and remain subject to
+    /// [`Sink::composite`]'s normal duplicate-sink restriction.
+    #[must_use]
+    pub fn with_event_sampler(self, sampler: Arc<dyn EventSampler>) -> Self {
+        let inner = match &*self.inner {
+            SinkInner::Single(state) => SinkInner::Single(state.clone().with_sampler(sampler)),
+            SinkInner::Composite { children } => SinkInner::Composite {
+                children: children
+                    .iter()
+                    .cloned()
+                    .map(|state| state.with_sampler(Arc::clone(&sampler)))
+                    .collect(),
+            },
+            SinkInner::Noop { .. } => return self,
+        };
+
+        Self {
+            inner: thread_aware::Arc::from_unaware(inner),
         }
     }
 
@@ -446,20 +482,34 @@ struct SingleSinkState {
     isolated_enrichment: bool,
     enrichment: Slot,
     clock: SimpleClock,
+    sampler: Option<Arc<dyn EventSampler>>,
 }
 
 impl SingleSinkState {
+    fn with_sampler(mut self, sampler: Arc<dyn EventSampler>) -> Self {
+        self.sampler = Some(sampler);
+        self
+    }
+
     /// Returns `true` if any of this leaf's processors is interested in the event.
     fn is_interested(&self, description: &EventDescription) -> bool {
         self.processors.iter().any(|p| p.is_interested(description))
     }
 
-    /// Builds an [`EventView`] rooted at this leaf's enrichment slot and
-    /// hands it to every interested processor.
+    /// Offers the event context to this leaf's [`EventSampler`], then builds an
+    /// [`EventView`] rooted at this leaf's enrichment slot and hands it to each
+    /// interested processor unless the sampler dropped it.
     fn dispatch(&self, event: &dyn DynEvent, description: &EventDescription) {
         // Reading the leaf's clock keeps timestamps off `SystemTime::now()`,
         // so frozen clocks make this Miri-safe.
         let timestamp = self.clock.system_time();
+
+        if let Some(sampler) = &self.sampler
+            && sampler.sample(&EventSamplingContext::new(description, self.id, timestamp)) == EventSamplingDecision::Drop
+        {
+            return;
+        }
+
         let view = EventView::new(event, self.enrichment.current(), self.isolated_enrichment, self.id, timestamp);
         for processor in self.processors.iter() {
             if processor.is_interested(description) {
@@ -617,6 +667,14 @@ mod tests {
         }
     }
 
+    struct AlwaysOffSampler;
+
+    impl EventSampler for AlwaysOffSampler {
+        fn sample(&self, _event: &EventSamplingContext<'_>) -> EventSamplingDecision {
+            EventSamplingDecision::Drop
+        }
+    }
+
     /// A processor that never wants anything, used to pin per-processor routing.
     #[derive(Default)]
     struct NeverInterestedProcessor {
@@ -639,6 +697,21 @@ mod tests {
 
     fn dummy_description() -> EventDescription {
         EventDescription::new("dummy", None, None, None, false, false)
+    }
+
+    #[test]
+    fn always_off_sampler_always_drops() {
+        let processor = Arc::new(AlwaysInterestedProcessor::default());
+        let sink = Sink::new(
+            "sampled",
+            vec![Arc::clone(&processor) as Arc<dyn EventProcessor>],
+            SimpleClock::new_frozen(),
+        )
+        .with_event_sampler(Arc::new(AlwaysOffSampler));
+
+        crate::interop::emit_dyn_event(&sink, &DummyDyn);
+
+        assert_eq!(processor.processed.load(Ordering::Relaxed), 0);
     }
 
     /// `is_interested` is the per-processor routing decision, not merely a
