@@ -49,6 +49,7 @@ fn driver_init_exposes_runtime_facilities() {
 
     assert_eq!(init.thread(), &worker);
     assert_eq!(system_tasks.accepted.load(Ordering::Relaxed), 1);
+    assert!(format!("{init:?}").contains("DriverInit"));
 }
 
 #[test]
@@ -79,12 +80,14 @@ fn shutdown_future_begins_and_polls_shutdown() {
     let mut cx = Context::from_waker(&waker);
     let mut shutdown = pin!(driver.shutdown());
 
+    assert!(format!("{shutdown:?}").contains("started: false"));
     assert_eq!(shutdown.as_mut().poll(&mut cx), Poll::Pending);
     assert_eq!(state.begin_calls.get(), 1);
     assert_eq!(state.poll_calls.get(), 1);
     assert_eq!(wake_count.count.load(Ordering::Relaxed), 1);
 
     assert_eq!(shutdown.as_mut().poll(&mut cx), Poll::Ready(()));
+    assert!(format!("{shutdown:?}").contains("started: true"));
     assert_eq!(state.begin_calls.get(), 1);
     assert_eq!(state.poll_calls.get(), 2);
 }
