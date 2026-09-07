@@ -3,6 +3,8 @@
 
 //! Verifies the feature-gated public facade.
 
+use std::mem::size_of;
+
 #[test]
 fn core_types_are_reexported() {
     use arty::core::{NumaNode, Owner, Thread, ThreadAware};
