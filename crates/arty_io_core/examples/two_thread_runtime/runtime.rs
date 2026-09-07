@@ -6,29 +6,52 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use std::sync::{Arc, Mutex, PoisonError, mpsc};
+use std::task::{Context, Poll};
 use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
-use arty_io_core::{Driver, DriverContext, DriverInit, DriverProvider, SystemTaskSpawner};
+use arty_io_core::{Driver, DriverContext, DriverInit, DriverProvider, Parker, SystemTaskSpawner};
 use thread_aware_core::{Thread, ThreadAware};
 
 use super::system_tasks::RuntimeSystemTasks;
 
 type ContextBox = Box<dyn Any + Send>;
 type ContextCache = HashMap<TypeId, ContextBox>;
-type DriverStore = Vec<Box<dyn Any>>;
+type DriverStore = Vec<Box<dyn ErasedDriver>>;
 type Install = Box<dyn FnOnce(DriverInit, &mut DriverStore) -> ContextBox + Send>;
+type ShutdownResult = Result<(), String>;
 
 enum Command {
     Install { install: Install, reply: mpsc::Sender<ContextBox> },
-    Stop,
+    Stop { reply: mpsc::Sender<ShutdownResult> },
 }
 
 impl fmt::Debug for Command {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Install { .. } => f.write_str("Install"),
-            Self::Stop => f.write_str("Stop"),
+            Self::Stop { .. } => f.write_str("Stop"),
         }
+    }
+}
+
+trait ErasedDriver {
+    fn begin_shutdown(&self);
+    fn poll_shutdown(&self, cx: &mut Context<'_>) -> Poll<()>;
+    fn parker(&self) -> &dyn Parker;
+}
+
+impl<D: Driver> ErasedDriver for D {
+    fn begin_shutdown(&self) {
+        Driver::begin_shutdown(self);
+    }
+
+    fn poll_shutdown(&self, cx: &mut Context<'_>) -> Poll<()> {
+        Driver::poll_shutdown(self, cx)
+    }
+
+    fn parker(&self) -> &dyn Parker {
+        Driver::parker(self)
     }
 }
 
@@ -129,11 +152,23 @@ impl Runtime {
     }
 
     pub(super) fn shutdown(mut self) -> Result<(), RuntimeError> {
+        self.contexts.get_mut().unwrap_or_else(PoisonError::into_inner).clear();
+
+        let mut shutdowns = Vec::with_capacity(self.workers.len());
         for worker in &self.workers {
+            let (reply_tx, reply_rx) = mpsc::channel();
             worker
                 .commands
-                .send(Command::Stop)
+                .send(Command::Stop { reply: reply_tx })
                 .map_err(|error| RuntimeError(format!("worker stopped before shutdown: {error}")))?;
+            shutdowns.push(reply_rx);
+        }
+
+        for shutdown in shutdowns {
+            shutdown
+                .recv()
+                .map_err(|error| RuntimeError(format!("worker stopped during driver shutdown: {error}")))?
+                .map_err(RuntimeError)?;
         }
 
         for worker in &mut self.workers {
@@ -159,7 +194,45 @@ fn run_worker(worker: &Thread, system_tasks: &Arc<dyn SystemTaskSpawner>, comman
                 let context = install(init, &mut drivers);
                 let _ = reply.send(context);
             }
-            Command::Stop => return,
+            Command::Stop { reply } => {
+                let result = shutdown_drivers(&drivers);
+                let _ = reply.send(result);
+                return;
+            }
+        }
+    }
+}
+
+fn shutdown_drivers(drivers: &DriverStore) -> ShutdownResult {
+    const TIMEOUT: Duration = Duration::from_secs(1);
+    const MAX_PARK: Duration = Duration::from_millis(10);
+
+    for driver in drivers {
+        driver.begin_shutdown();
+    }
+
+    let deadline = Instant::now() + TIMEOUT;
+    loop {
+        let mut all_ready = true;
+
+        for driver in drivers {
+            let waker = driver.parker().waker();
+            let mut cx = Context::from_waker(&waker);
+
+            if driver.poll_shutdown(&mut cx).is_pending() {
+                all_ready = false;
+                let remaining = deadline.saturating_duration_since(Instant::now());
+
+                if remaining.is_zero() {
+                    return Err("driver shutdown timed out".into());
+                }
+
+                driver.parker().park(remaining.min(MAX_PARK));
+            }
+        }
+
+        if all_ready {
+            return Ok(());
         }
     }
 }

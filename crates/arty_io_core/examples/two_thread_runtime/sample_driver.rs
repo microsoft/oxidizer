@@ -10,6 +10,7 @@ use arty_io_core::{Driver, DriverContext, DriverInit, DriverProvider, Parker};
 use thread_aware_core::{Thread, ThreadAware};
 
 static CREATED_DRIVERS: AtomicUsize = AtomicUsize::new(0);
+static SHUTDOWN_DRIVERS: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct SampleContext {
@@ -72,7 +73,9 @@ impl Driver for SampleDriver {
         &self.parker
     }
 
-    fn begin_shutdown(&self) {}
+    fn begin_shutdown(&self) {
+        SHUTDOWN_DRIVERS.fetch_add(1, Ordering::Relaxed);
+    }
 
     fn poll_shutdown(&self, _cx: &mut Context<'_>) -> Poll<()> {
         Poll::Ready(())
@@ -91,4 +94,8 @@ impl Parker for SampleParker {
 
 pub(super) fn created_driver_count() -> usize {
     CREATED_DRIVERS.load(Ordering::Relaxed)
+}
+
+pub(super) fn shutdown_driver_count() -> usize {
+    SHUTDOWN_DRIVERS.load(Ordering::Relaxed)
 }
