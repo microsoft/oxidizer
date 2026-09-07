@@ -23,18 +23,27 @@ pub(super) struct SampleContext {
 struct SampleState {
     driver_thread: thread::ThreadId,
     operations: AtomicUsize,
+    shutdown_started: AtomicBool,
     shutdown_complete: AtomicBool,
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct SampleIoError;
 
 impl SampleContext {
     pub(super) fn driver_thread(&self) -> thread::ThreadId {
         self.state.driver_thread
     }
 
-    pub(super) fn perform_io(&self, input: usize) -> usize {
+    pub(super) fn perform_io(&self, input: usize) -> Result<usize, SampleIoError> {
+        if self.state.shutdown_started.load(Ordering::Acquire) {
+            println!("in-memory I/O operation rejected after shutdown on {:?}", self.state.driver_thread);
+            return Err(SampleIoError);
+        }
+
         let operation = self.state.operations.fetch_add(1, Ordering::Relaxed) + 1;
         println!("in-memory I/O operation #{operation} handled by {:?}", self.state.driver_thread);
-        input + 1
+        Ok(input + 1)
     }
 
     pub(super) fn operation_count(&self) -> usize {
@@ -82,6 +91,7 @@ impl DriverProvider for SampleProvider {
             state: Arc::new(SampleState {
                 driver_thread,
                 operations: AtomicUsize::new(0),
+                shutdown_started: AtomicBool::new(false),
                 shutdown_complete: AtomicBool::new(false),
             }),
             parker: SampleParker,
@@ -108,6 +118,7 @@ impl Driver for SampleDriver {
     }
 
     fn begin_shutdown(&self) -> Pin<Box<dyn Future<Output = ()> + '_>> {
+        self.state.shutdown_started.store(true, Ordering::Release);
         SHUTDOWN_DRIVERS.fetch_add(1, Ordering::Relaxed);
         println!("shutting down sample I/O driver on {:?}", self.state.driver_thread);
         Box::pin(std::future::poll_fn(move |_cx| {
