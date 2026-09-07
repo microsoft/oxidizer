@@ -90,6 +90,20 @@ fn shutdown_future_begins_and_polls_shutdown() {
 }
 
 #[test]
+fn shutdown_waits_for_context_owned_state() {
+    let driver = LeaseDriver::new();
+    let context = driver.context();
+    let mut cx = Context::from_waker(Waker::noop());
+
+    assert_eq!(Arc::strong_count(&context.state), 2);
+    driver.begin_shutdown();
+    assert_eq!(driver.poll_shutdown(&mut cx), Poll::Pending);
+
+    drop(context);
+    assert_eq!(driver.poll_shutdown(&mut cx), Poll::Ready(()));
+}
+
+#[test]
 fn different_driver_types_have_distinct_identity() {
     use std::any::TypeId;
 
@@ -251,6 +265,79 @@ impl DriverProvider for TestProvider {
 
     fn create(self, _init: DriverInit) -> Self::Driver {
         LocalDriver::new(Rc::default())
+    }
+}
+
+#[derive(Clone, Debug)]
+struct LeaseContext {
+    state: Arc<()>,
+}
+
+impl ThreadAware for LeaseContext {
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+}
+
+impl DriverContext for LeaseContext {
+    type Provider = LeaseProvider;
+
+    fn provider() -> Self::Provider {
+        LeaseProvider
+    }
+}
+
+#[derive(Clone, Debug)]
+struct LeaseProvider;
+
+impl ThreadAware for LeaseProvider {
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+}
+
+impl DriverProvider for LeaseProvider {
+    type Context = LeaseContext;
+    type Driver = LeaseDriver;
+
+    fn create(self, _init: DriverInit) -> Self::Driver {
+        LeaseDriver::new()
+    }
+}
+
+#[derive(Debug)]
+struct LeaseDriver {
+    state: Arc<()>,
+    parker: TestParker,
+}
+
+impl LeaseDriver {
+    fn new() -> Self {
+        Self {
+            state: Arc::new(()),
+            parker: TestParker::default(),
+        }
+    }
+}
+
+impl Driver for LeaseDriver {
+    type Context = LeaseContext;
+
+    fn context(&self) -> Self::Context {
+        LeaseContext {
+            state: Arc::clone(&self.state),
+        }
+    }
+
+    fn parker(&self) -> &dyn Parker {
+        &self.parker
+    }
+
+    fn begin_shutdown(&self) {}
+
+    fn poll_shutdown(&self, cx: &mut Context<'_>) -> Poll<()> {
+        if Arc::strong_count(&self.state) == 1 {
+            Poll::Ready(())
+        } else {
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        }
     }
 }
 

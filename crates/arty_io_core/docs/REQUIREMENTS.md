@@ -68,10 +68,15 @@ A `Parker` wake-up has the following semantics:
 Shutdown must not rely on an unsafe trait or a caller-checked inertness flag.
 
 - A driver is memory-safe to drop at every point in its lifecycle.
+- Contexts and in-flight operations retain ownership of the state they access
+  through reference counts, pool leases, or equivalent safe handles.
 - `begin_shutdown` prevents new operations and is idempotent.
 - `poll_shutdown` reports graceful drain progress and wakes the supplied waker
   when progress becomes possible.
 - Contexts may outlive drivers; later operations fail safely.
+- The stable contract has no `unsafe Driver` implementation requirement and no
+  `is_inert` query.
+- Platform-specific unsafe code remains private to the driver implementation.
 - The runtime bounds shutdown and reports or terminates on a liveness failure.
   Shutdown completion is not a memory-safety precondition.
 

@@ -28,6 +28,11 @@ use crate::{DriverContext, Parker, Shutdown};
 /// the operating system can still access a resource, dropping the driver must retain that resource
 /// rather than invalidate it. [`poll_shutdown`](Self::poll_shutdown) reports graceful cleanup
 /// progress; it is never a memory-safety gate.
+///
+/// Contexts and in-flight operations should own reference-counted handles or pool leases for the
+/// state they access. Shutdown closes admission, then waits for those owners to drain. Any unsafe
+/// code needed by a platform driver stays private to that implementation rather than spreading
+/// into this stable contract or its runtime caller.
 pub trait Driver: 'static {
     /// The handle through which consumers start operations on this driver.
     type Context: DriverContext;

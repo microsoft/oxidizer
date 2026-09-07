@@ -88,9 +88,19 @@ its memory. This contract moves soundness back to the owning type:
 - `begin_shutdown` stops new operations.
 - `poll_shutdown` tracks graceful cleanup.
 
-If a driver cannot safely release a resource yet, dropping it retains that
-resource instead of invalidating it. This can leak during abrupt termination,
-but it cannot cause undefined behavior.
+Contexts and in-flight operations own the state they can access through
+reference-counted handles, pool leases, or equivalent safe ownership tokens.
+The driver keeps its own owner while running. Shutdown closes admission and
+waits until the external owners have drained before releasing the final owner.
+Dropping early releases only the driver's owner; outstanding handles keep their
+state alive.
+
+This model supports high-performance implementations without putting unsafe
+lifecycle obligations in the stable API. Drivers can build it from standard
+reference counting or ecosystem storage such as `multitude`, `plurality`,
+`infinity_pool`, and `rallocator`. The contract does not depend on those crates,
+so implementations can evolve independently. Platform-specific unsafe code, if
+needed, remains isolated behind the driver's private ownership types.
 
 `Driver::shutdown` adapts the explicit begin-and-poll protocol into a future.
 The lower-level methods remain available because a runtime will usually erase
