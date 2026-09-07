@@ -35,7 +35,13 @@ all-features = true
 default = ["std"]
 # Enables the global memory pool, standard I/O adapters, and metrics. Disable for `#![no_std]`
 # environments; the crate still requires `alloc`.
-std = ["dep:nm", "dep:performables", "dep:plurality", "thread_aware/std", "bytes?/std"]
+std = [
+    "dep:nm",
+    "dep:performables",
+    "dep:plurality",
+    "thread_aware/std",
+    "bytes?/std",
+]
 # Interoperability with the `bytes` crate.
 bytes-compat = ["dep:bytes"]
 seismograph = ["std", "dep:seismograph_io"]

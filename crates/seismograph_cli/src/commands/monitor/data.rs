@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::Path;
 use std::time::{Duration, Instant, SystemTime};
 
 pub(super) struct CapturedSnapshot {
@@ -2473,7 +2472,7 @@ fn format_hotspot_frame(address: u64, lookup: Option<&seismograph_rallocator::ca
     let Some(filename) = &lookup.filename else {
         return symbol.to_owned();
     };
-    let filename = Path::new(filename).file_name().and_then(|name| name.to_str()).unwrap_or(filename);
+    let filename = filename.rsplit(['/', '\\']).next().unwrap_or(filename);
     match lookup.line {
         Some(line) => format!("{symbol} ({filename}:{line})"),
         None => format!("{symbol} ({filename})"),

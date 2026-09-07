@@ -281,11 +281,6 @@ wiremock = { version = "0.6.5", default-features = false }
 xxhash-rust = { version = "0.8.15", default-features = false }
 zerocopy = { version = "0.8.26", default-features = false }
 
-[patch.crates-io]
-# `events_once` depends on the published crate. Reuse this workspace member so
-# Cargo package selectors remain unambiguous in impact-scoped CI.
-plurality = { path = "crates/plurality" }
-
 # >>> anvil-managed: anvil-workspace-lints
 [workspace.lints]
 # Catalog of opinionated lints, in dotted-key form so users can extend the
@@ -381,6 +376,11 @@ clippy.significant_drop_tightening = "allow"
 clippy.wildcard_imports = "allow"
 clippy.empty_structs_with_brackets = "warn"
 clippy.panic = "warn"
+
+[patch.crates-io]
+# `events_once` depends on the published crate. Reuse this workspace member so
+# Cargo package selectors remain unambiguous in impact-scoped CI.
+plurality = { path = "crates/plurality" }
 
 # A bit of debugging support for release builds.
 [profile.release]

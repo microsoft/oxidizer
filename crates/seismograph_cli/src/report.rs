@@ -833,15 +833,14 @@ fn format_runtime_frame(address: u64, lookup: Option<&AddressLookup>) -> String 
         .as_deref()
         .map_or_else(|| format!("0x{address:016x}"), compact_runtime_symbol);
     if let Some(filename) = &lookup.filename {
-        let path = std::path::Path::new(filename);
-        let short_path = path
-            .components()
+        let short_path = filename
+            .split(['/', '\\'])
+            .filter(|component| !component.is_empty())
             .rev()
             .take(4)
             .collect::<Vec<_>>()
             .into_iter()
             .rev()
-            .map(|component| component.as_os_str().to_string_lossy())
             .collect::<Vec<_>>()
             .join("\\");
         write!(frame, " ({short_path}").unwrap();

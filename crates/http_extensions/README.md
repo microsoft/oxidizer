@@ -170,7 +170,7 @@ for future requests. This makes the crate particularly efficient for high-throug
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_extensions">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG_MLOQQsiV6zG7SjqsDGgd-WG03lILZ1aMTjG5fuakLrAwKLYWSFgmVieXRlc2YxLjEyLjGCaGJ5dGVzYnVmZTAuOS4wgmRodHRwZTEuNS4wgmlodHRwX2JvZHllMS4xLjCCb2h0dHBfZXh0ZW5zaW9uc2YwLjEwLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb8ws5BCyJXrMbtKOqwMaB35YbTeUgtnVoxOMbl-5qQusDAothZIWCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZlMC45LjCCZGh0dHBlMS41LjCDaWh0dHAtYm9keWUxLjEuMGlodHRwX2JvZHmCb2h0dHBfZXh0ZW5zaW9uc2YwLjEwLjA
  [__link0]: https://crates.io/crates/http/1.5.0
  [__link1]: https://docs.rs/http_extensions/0.10.0/http_extensions/type.HttpRequest.html
  [__link10]: https://docs.rs/http_extensions/0.10.0/http_extensions/?search=StatusExt
@@ -193,7 +193,7 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link26]: https://docs.rs/http/1.5.0/http/?search=Method
  [__link27]: https://docs.rs/http/1.5.0/http/?search=StatusCode
  [__link28]: https://docs.rs/http/1.5.0/http/?search=HeaderMap
- [__link29]: https://docs.rs/http_body/1.1.0/http_body/?search=Body
+ [__link29]: https://docs.rs/http-body/1.1.0/http_body/?search=Body
  [__link3]: https://docs.rs/http_extensions/0.10.0/http_extensions/?search=HttpBody
  [__link30]: https://docs.rs/http_extensions/0.10.0/http_extensions/?search=HttpBodyBuilder
  [__link31]: https://crates.io/crates/bytesbuf/0.9.0

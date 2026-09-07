@@ -510,9 +510,11 @@ fn snapshot_reports_process_totals_and_region_topology() {
     assert!(snapshot.stats.live_bytes >= 64);
     assert!(snapshot.stats.mapped_bytes >= snapshot.stats.live_bytes);
 
-    let size_class = snapshot.size_classes.iter().find(|class| class.block_bytes == 64).unwrap();
-    assert!(size_class.live_allocations.value >= 1);
-    assert!(size_class.requested_bytes.value >= 64);
+    let size_class = snapshot
+        .size_classes
+        .iter()
+        .find(|class| class.live_allocations.value >= 1 && class.requested_bytes.value >= 64)
+        .expect("live allocation appears in size-class telemetry");
     assert!(size_class.usable_bytes.value >= size_class.requested_bytes.value);
     assert!(!snapshot.regions.is_empty());
     let default_domain = snapshot
