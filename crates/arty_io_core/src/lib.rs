@@ -38,7 +38,6 @@ mod driver;
 mod init;
 mod parker;
 mod provider;
-mod shutdown;
 mod system_tasks;
 
 pub use context::DriverContext;
@@ -46,5 +45,4 @@ pub use driver::Driver;
 pub use init::DriverInit;
 pub use parker::Parker;
 pub use provider::DriverProvider;
-pub use shutdown::Shutdown;
 pub use system_tasks::{SystemTask, SystemTaskSpawner};

@@ -1,9 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::task::{Context, Poll, Waker};
+use std::task::{Poll, Waker};
 use std::thread;
 use std::time::Duration;
 
@@ -106,17 +107,16 @@ impl Driver for SampleDriver {
         &self.parker
     }
 
-    fn begin_shutdown(&self) {
+    fn begin_shutdown(&self) -> Pin<Box<dyn Future<Output = ()> + '_>> {
         SHUTDOWN_DRIVERS.fetch_add(1, Ordering::Relaxed);
         println!("shutting down sample I/O driver on {:?}", self.state.driver_thread);
-    }
+        Box::pin(std::future::poll_fn(move |_cx| {
+            if !self.state.shutdown_complete.swap(true, Ordering::Relaxed) {
+                println!("sample I/O driver shutdown complete on {:?}", self.state.driver_thread);
+            }
 
-    fn poll_shutdown(&self, _cx: &mut Context<'_>) -> Poll<()> {
-        if !self.state.shutdown_complete.swap(true, Ordering::Relaxed) {
-            println!("sample I/O driver shutdown complete on {:?}", self.state.driver_thread);
-        }
-
-        Poll::Ready(())
+            Poll::Ready(())
+        }))
     }
 }
 

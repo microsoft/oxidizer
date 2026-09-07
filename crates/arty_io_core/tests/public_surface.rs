@@ -4,7 +4,7 @@
 //! Public surface contract tests.
 
 use std::cell::Cell;
-use std::pin::pin;
+use std::pin::{Pin, pin};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
@@ -35,6 +35,13 @@ fn driver_can_remain_thread_local() {
 
     fn assert_driver<T: Driver>() {}
     assert_driver::<LocalDriver>();
+}
+
+#[test]
+fn driver_is_boxable_with_its_context_type() {
+    let driver: Box<dyn Driver<Context = TestContext>> = Box::new(LocalDriver::new(Rc::default()));
+
+    assert_eq!(driver.context(), TestContext(7));
 }
 
 #[test]
@@ -71,22 +78,20 @@ fn context_type_selects_provider_and_driver() {
 }
 
 #[test]
-fn shutdown_future_begins_and_polls_shutdown() {
+fn begin_shutdown_returns_completion_future() {
     let state = Rc::new(ShutdownState::default());
     let driver = LocalDriver::new(Rc::clone(&state));
     let wake_count = Arc::new(CountingWake::default());
     let waker = Waker::from(Arc::clone(&wake_count));
     let mut cx = Context::from_waker(&waker);
-    let mut shutdown = pin!(driver.shutdown());
+    let mut shutdown = pin!(driver.begin_shutdown());
 
-    assert!(format!("{shutdown:?}").contains("started: false"));
-    assert_eq!(shutdown.as_mut().poll(&mut cx), Poll::Pending);
     assert_eq!(state.begin_calls.get(), 1);
+    assert_eq!(shutdown.as_mut().poll(&mut cx), Poll::Pending);
     assert_eq!(state.poll_calls.get(), 1);
     assert_eq!(wake_count.count.load(Ordering::Relaxed), 1);
 
     assert_eq!(shutdown.as_mut().poll(&mut cx), Poll::Ready(()));
-    assert!(format!("{shutdown:?}").contains("started: true"));
     assert_eq!(state.begin_calls.get(), 1);
     assert_eq!(state.poll_calls.get(), 2);
 }
@@ -96,13 +101,13 @@ fn shutdown_waits_for_context_owned_state() {
     let driver = LeaseDriver::new();
     let context = driver.context();
     let mut cx = Context::from_waker(Waker::noop());
+    let mut shutdown = pin!(driver.begin_shutdown());
 
     assert_eq!(Arc::strong_count(&context.state), 2);
-    driver.begin_shutdown();
-    assert_eq!(driver.poll_shutdown(&mut cx), Poll::Pending);
+    assert_eq!(shutdown.as_mut().poll(&mut cx), Poll::Pending);
 
     drop(context);
-    assert_eq!(driver.poll_shutdown(&mut cx), Poll::Ready(()));
+    assert_eq!(shutdown.as_mut().poll(&mut cx), Poll::Ready(()));
 }
 
 #[test]
@@ -223,19 +228,18 @@ impl Driver for LocalDriver {
         &self.parker
     }
 
-    fn begin_shutdown(&self) {
+    fn begin_shutdown(&self) -> Pin<Box<dyn Future<Output = ()> + '_>> {
         self.state.begin_calls.update(|calls| calls + 1);
-    }
+        Box::pin(std::future::poll_fn(move |cx| {
+            self.state.poll_calls.update(|calls| calls + 1);
 
-    fn poll_shutdown(&self, cx: &mut Context<'_>) -> Poll<()> {
-        self.state.poll_calls.update(|calls| calls + 1);
-
-        if self.state.poll_calls.get() == 1 {
-            cx.waker().wake_by_ref();
-            Poll::Pending
-        } else {
-            Poll::Ready(())
-        }
+            if self.state.poll_calls.get() == 1 {
+                cx.waker().wake_by_ref();
+                Poll::Pending
+            } else {
+                Poll::Ready(())
+            }
+        }))
     }
 }
 
@@ -331,15 +335,15 @@ impl Driver for LeaseDriver {
         &self.parker
     }
 
-    fn begin_shutdown(&self) {}
-
-    fn poll_shutdown(&self, cx: &mut Context<'_>) -> Poll<()> {
-        if Arc::strong_count(&self.state) == 1 {
-            Poll::Ready(())
-        } else {
-            cx.waker().wake_by_ref();
-            Poll::Pending
-        }
+    fn begin_shutdown(&self) -> Pin<Box<dyn Future<Output = ()> + '_>> {
+        Box::pin(std::future::poll_fn(move |cx| {
+            if Arc::strong_count(&self.state) == 1 {
+                Poll::Ready(())
+            } else {
+                cx.waker().wake_by_ref();
+                Poll::Pending
+            }
+        }))
     }
 }
 

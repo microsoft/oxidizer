@@ -43,6 +43,11 @@ runtime still invokes it only from its owning thread. Implementations use
 thread-local interior mutability for state changes, which lets the runtime store
 and erase drivers without wrapping them in a mutex solely for method access.
 
+`Driver` is dyn-compatible once its `Context` associated type is specified. The
+shutdown method returns `Pin<Box<dyn Future<Output = ()> + '_>>` rather than an
+anonymous future so a runtime can store `Box<dyn Driver<Context = C>>` and invoke
+every lifecycle method through the trait object.
+
 Every context implements `DriverContext`, whose associated `Provider` and
 `provider()` function are the complete registration recipe. A runtime method
 such as `get_context::<MyContext>()` therefore needs only the context type. The
@@ -89,8 +94,8 @@ prevent the runtime from dropping a driver while external code still referenced
 its memory. This contract moves soundness back to the owning type:
 
 - `Driver::Drop` is always safe.
-- The runtime calls `begin_shutdown` exactly once to stop new operations.
-- `poll_shutdown` tracks graceful cleanup.
+- The runtime calls `begin_shutdown` exactly once to stop new operations and
+  obtain the graceful cleanup future.
 
 Shutdown initiation is a runtime coordination guarantee rather than an
 idempotence requirement on every driver. The runtime records the lifecycle
@@ -110,10 +115,10 @@ reference counting or ecosystem storage such as `multitude`, `plurality`,
 so implementations can evolve independently. Platform-specific unsafe code, if
 needed, remains isolated behind the driver's private ownership types.
 
-`Driver::shutdown` adapts the explicit begin-and-poll protocol into a future.
-The lower-level methods remain available because a runtime will usually erase
-unrelated drivers behind an internal object-safe shim and poll them alongside
-executor shutdown.
+There is no separate convenience method that can create another shutdown
+future. The runtime owns the only call to `begin_shutdown`, records the
+lifecycle transition before invoking it, and polls the returned future
+alongside executor shutdown.
 
 ## Creation failure
 

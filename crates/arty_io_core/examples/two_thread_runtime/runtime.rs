@@ -5,6 +5,7 @@ use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::task::{Context, Poll};
 use std::thread::{self, JoinHandle};
@@ -36,18 +37,13 @@ impl fmt::Debug for Command {
 }
 
 trait ErasedDriver {
-    fn begin_shutdown(&self);
-    fn poll_shutdown(&self, cx: &mut Context<'_>) -> Poll<()>;
+    fn begin_shutdown(&self) -> Pin<Box<dyn Future<Output = ()> + '_>>;
     fn parker(&self) -> &dyn Parker;
 }
 
 impl<D: Driver> ErasedDriver for D {
-    fn begin_shutdown(&self) {
-        Driver::begin_shutdown(self);
-    }
-
-    fn poll_shutdown(&self, cx: &mut Context<'_>) -> Poll<()> {
-        Driver::poll_shutdown(self, cx)
+    fn begin_shutdown(&self) -> Pin<Box<dyn Future<Output = ()> + '_>> {
+        Driver::begin_shutdown(self)
     }
 
     fn parker(&self) -> &dyn Parker {
@@ -226,27 +222,35 @@ fn shutdown_drivers(drivers: &DriverStore) -> ShutdownResult {
     const TIMEOUT: Duration = Duration::from_secs(1);
     const MAX_PARK: Duration = Duration::from_millis(10);
 
-    for driver in drivers {
-        driver.begin_shutdown();
-    }
+    let mut shutdowns = drivers
+        .iter()
+        .map(|driver| (driver.parker(), driver.begin_shutdown(), false))
+        .collect::<Vec<_>>();
 
     let deadline = Instant::now() + TIMEOUT;
     loop {
         let mut all_ready = true;
 
-        for driver in drivers {
-            let waker = driver.parker().waker();
+        for (parker, shutdown, complete) in &mut shutdowns {
+            if *complete {
+                continue;
+            }
+
+            let waker = parker.waker();
             let mut cx = Context::from_waker(&waker);
 
-            if driver.poll_shutdown(&mut cx).is_pending() {
-                all_ready = false;
-                let remaining = deadline.saturating_duration_since(Instant::now());
+            match shutdown.as_mut().poll(&mut cx) {
+                Poll::Ready(()) => *complete = true,
+                Poll::Pending => {
+                    all_ready = false;
+                    let remaining = deadline.saturating_duration_since(Instant::now());
 
-                if remaining.is_zero() {
-                    return Err("driver shutdown timed out".into());
+                    if remaining.is_zero() {
+                        return Err("driver shutdown timed out".into());
+                    }
+
+                    parker.park(remaining.min(MAX_PARK));
                 }
-
-                driver.parker().park(remaining.min(MAX_PARK));
             }
         }
 

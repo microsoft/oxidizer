@@ -49,6 +49,8 @@ The runtime does not dictate how an I/O subsystem distributes work.
 
 - Every `Driver` method takes `&self`; runtime invocation requires neither
   mutable storage access nor a synchronization wrapper.
+- `Driver` remains dyn-compatible when its `Context` associated type is
+  specified, so it can be stored as `Box<dyn Driver<Context = C>>`.
 - Drivers use thread-local interior mutability when callbacks change state.
 - Every driver exposes a `Parker` through a shared reference.
 - The runtime chooses the driver-owning thread before creation and drives the
@@ -77,8 +79,11 @@ Shutdown must not rely on an unsafe trait or a caller-checked inertness flag.
   through reference counts, pool leases, or equivalent safe handles.
 - The runtime calls `begin_shutdown` exactly once per driver; implementations
   do not need to handle a second call.
-- `poll_shutdown` reports graceful drain progress and wakes the supplied waker
-  when progress becomes possible. It may be called repeatedly until ready.
+- Calling `begin_shutdown` closes admission and returns a future that reports
+  graceful drain progress.
+- The shutdown future is boxed so `begin_shutdown` remains object-safe.
+- The shutdown future wakes its task when progress becomes possible and may be
+  polled repeatedly until ready.
 - Contexts may outlive drivers; later operations fail safely.
 - The stable contract has no `unsafe Driver` implementation requirement and no
   `is_inert` query.

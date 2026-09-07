@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::task::{Context as TaskContext, Poll};
+use std::pin::Pin;
 
-use crate::{DriverContext, Parker, Shutdown};
+use crate::{DriverContext, Parker};
 
 /// One async worker's adapter to an I/O subsystem.
 ///
@@ -26,8 +26,8 @@ use crate::{DriverContext, Parker, Shutdown};
 ///
 /// A driver must always be safe to drop, even when shutdown has not completed. If external code or
 /// the operating system can still access a resource, dropping the driver must retain that resource
-/// rather than invalidate it. [`poll_shutdown`](Self::poll_shutdown) reports graceful cleanup
-/// progress; it is never a memory-safety gate.
+/// rather than invalidate it. The future returned by [`begin_shutdown`](Self::begin_shutdown)
+/// reports graceful cleanup progress; it is never a memory-safety gate.
 ///
 /// Contexts and in-flight operations should own reference-counted handles or pool leases for the
 /// state they access. Shutdown closes admission, then waits for those owners to drain. Any unsafe
@@ -47,30 +47,10 @@ pub trait Driver: 'static {
     ///
     /// In-flight operations may continue. The runtime calls this method exactly once for each
     /// driver and never calls it again. Implementations do not need to tolerate repeated shutdown
-    /// initiation. The method returns promptly without waiting for external progress.
-    fn begin_shutdown(&self);
-
-    /// Polls graceful cleanup to completion.
+    /// initiation. Calling the method closes admission before it returns.
     ///
-    /// [`Poll::Ready`] means the driver has released everything it held on behalf of consumers and
-    /// the operating system. While returning [`Poll::Pending`], the driver arranges for
-    /// `cx.waker()` to be woken when shutdown can make progress.
-    ///
-    /// The runtime calls [`begin_shutdown`](Self::begin_shutdown) before the first poll and bounds
-    /// the total shutdown duration. It may poll repeatedly until completion; calls after completion
-    /// return [`Poll::Ready`].
-    fn poll_shutdown(&self, cx: &mut TaskContext<'_>) -> Poll<()>;
-
-    /// Returns a future that begins and then polls graceful shutdown.
-    ///
-    /// Runtime implementations that erase driver types can call
-    /// [`begin_shutdown`](Self::begin_shutdown) and [`poll_shutdown`](Self::poll_shutdown)
-    /// directly. This adapter is the ergonomic form for callers holding a concrete driver. The
-    /// caller ensures no previous shutdown was started for the same driver.
-    fn shutdown(&self) -> Shutdown<'_, Self>
-    where
-        Self: Sized,
-    {
-        Shutdown::new(self)
-    }
+    /// The returned future resolves once the driver has released everything it held on behalf of
+    /// consumers and the operating system. While pending, it arranges for the task waker to be
+    /// notified when shutdown can make progress. The runtime bounds the total shutdown duration.
+    fn begin_shutdown(&self) -> Pin<Box<dyn Future<Output = ()> + '_>>;
 }
