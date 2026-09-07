@@ -373,15 +373,23 @@ mod fetch_and_promote_tests {
     }
 
     #[test]
-    fn fallback_error() {
+    fn fallback_error_logs_refresh_error_telemetry() {
         block_on(async {
+            let capture = Capture::new();
+            let _guard = tracing::subscriber::set_default(capture.subscriber());
+
+            let clock = Clock::new_frozen();
+            let telemetry = CacheTelemetry::with_logging();
             let primary = MockCache::<String, i32>::new();
             let fallback = MockCache::<String, i32>::new();
             fallback.fail_when(|_| true);
-            let fc = build_fallback_cache(primary, fallback);
+            let fc = FallbackCache::new("test", primary, fallback, clock, None, telemetry);
 
             // Fallback errors → handle_fallback_miss Err branch
             fc.inner.fetch_and_promote("key".to_string()).await;
+
+            capture.assert_contains(attributes::FIELD_EVENT);
+            capture.assert_contains(attributes::EVENT_REFRESH_ERROR);
         });
     }
 

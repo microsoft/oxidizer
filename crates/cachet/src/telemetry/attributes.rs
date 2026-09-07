@@ -95,6 +95,9 @@ pub const EVENT_REFRESH_HIT: &str = "cache.refresh_hit";
 /// A background refresh did not find data in the fallback tier.
 pub const EVENT_REFRESH_MISS: &str = "cache.refresh_miss";
 
+/// A background refresh failed to read from the fallback tier.
+pub const EVENT_REFRESH_ERROR: &str = "cache.refresh_error";
+
 /// An entry was evicted/removed due to cache size constraints.
 /// Only emitted when eviction telemetry is enabled.
 pub const EVENT_EVICTION: &str = "cache.eviction";
@@ -129,6 +132,7 @@ mod tests {
             EVENT_CLEAR_ERROR,
             EVENT_REFRESH_HIT,
             EVENT_REFRESH_MISS,
+            EVENT_REFRESH_ERROR,
             EVENT_EVICTION,
         ];
 

@@ -338,11 +338,11 @@ impl CacheTelemetry {
     /// Records a background refresh that failed to read from the fallback tier.
     pub(crate) fn record_refresh_error(&self, cache_name: CacheName, duration: Duration) {
         record_cache_event!(cache_name, true, CacheRefreshError);
-        self.record_info_with_duration(cache_name, attributes::EVENT_REFRESH_MISS, duration);
+        self.record_error_with_duration(cache_name, attributes::EVENT_REFRESH_ERROR, duration);
         self.emit_tier_event(
             Self::current_request_id(),
             cache_name,
-            attributes::EVENT_REFRESH_MISS,
+            attributes::EVENT_REFRESH_ERROR,
             duration,
             true,
         );
@@ -702,6 +702,17 @@ mod tests {
         assert_emits(attributes::EVENT_EVICTION, |t, request_id| {
             futures::executor::block_on(async {
                 async { t.record_eviction("c") }.with_request_id(request_id).await;
+            });
+        });
+    }
+
+    #[test]
+    fn refresh_error_helper_emits_error_event() {
+        assert_emits(attributes::EVENT_REFRESH_ERROR, |telemetry, request_id| {
+            futures::executor::block_on(async {
+                async { telemetry.record_refresh_error("c", Duration::ZERO) }
+                    .with_request_id(request_id)
+                    .await;
             });
         });
     }
