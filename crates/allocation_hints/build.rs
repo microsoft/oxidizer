@@ -1,6 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Ensures Cargo resolves one passive hint TLS instance per dependency graph.
+//! Ensures Cargo treats every `allocation_hints` version as one passive hint runtime.
 
 fn main() {}

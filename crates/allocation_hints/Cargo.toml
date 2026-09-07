@@ -8,7 +8,7 @@ description = "Passive allocator-independent scoped allocation hints."
 readme = "README.md"
 keywords = ["allocator", "heap", "memory", "bump"]
 categories = ["memory-management"]
-links = "allocation_hints_runtime"
+links = "allocation_hints_backend"
 
 edition.workspace = true
 rust-version.workspace = true
