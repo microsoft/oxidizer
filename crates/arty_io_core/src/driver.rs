@@ -45,8 +45,9 @@ pub trait Driver: 'static {
 
     /// Prevents new operations from starting and begins graceful cleanup.
     ///
-    /// In-flight operations may continue. This method is idempotent and returns promptly without
-    /// waiting for external progress.
+    /// In-flight operations may continue. The runtime calls this method exactly once for each
+    /// driver and never calls it again. Implementations do not need to tolerate repeated shutdown
+    /// initiation. The method returns promptly without waiting for external progress.
     fn begin_shutdown(&self);
 
     /// Polls graceful cleanup to completion.
@@ -56,14 +57,16 @@ pub trait Driver: 'static {
     /// `cx.waker()` to be woken when shutdown can make progress.
     ///
     /// The runtime calls [`begin_shutdown`](Self::begin_shutdown) before the first poll and bounds
-    /// the total shutdown duration. Repeated calls after completion return [`Poll::Ready`].
+    /// the total shutdown duration. It may poll repeatedly until completion; calls after completion
+    /// return [`Poll::Ready`].
     fn poll_shutdown(&self, cx: &mut TaskContext<'_>) -> Poll<()>;
 
     /// Returns a future that begins and then polls graceful shutdown.
     ///
     /// Runtime implementations that erase driver types can call
     /// [`begin_shutdown`](Self::begin_shutdown) and [`poll_shutdown`](Self::poll_shutdown)
-    /// directly. This adapter is the ergonomic form for callers holding a concrete driver.
+    /// directly. This adapter is the ergonomic form for callers holding a concrete driver. The
+    /// caller ensures no previous shutdown was started for the same driver.
     fn shutdown(&self) -> Shutdown<'_, Self>
     where
         Self: Sized,

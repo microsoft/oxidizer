@@ -89,8 +89,12 @@ prevent the runtime from dropping a driver while external code still referenced
 its memory. This contract moves soundness back to the owning type:
 
 - `Driver::Drop` is always safe.
-- `begin_shutdown` stops new operations.
+- The runtime calls `begin_shutdown` exactly once to stop new operations.
 - `poll_shutdown` tracks graceful cleanup.
+
+Shutdown initiation is a runtime coordination guarantee rather than an
+idempotence requirement on every driver. The runtime records the lifecycle
+transition before invoking the driver, and never dispatches it again.
 
 Contexts and in-flight operations own the state they can access through
 reference-counted handles, pool leases, or equivalent safe ownership tokens.

@@ -22,7 +22,6 @@ pub(super) struct SampleContext {
 struct SampleState {
     driver_thread: thread::ThreadId,
     operations: AtomicUsize,
-    shutdown_started: AtomicBool,
     shutdown_complete: AtomicBool,
 }
 
@@ -82,7 +81,6 @@ impl DriverProvider for SampleProvider {
             state: Arc::new(SampleState {
                 driver_thread,
                 operations: AtomicUsize::new(0),
-                shutdown_started: AtomicBool::new(false),
                 shutdown_complete: AtomicBool::new(false),
             }),
             parker: SampleParker,
@@ -109,10 +107,8 @@ impl Driver for SampleDriver {
     }
 
     fn begin_shutdown(&self) {
-        if !self.state.shutdown_started.swap(true, Ordering::Relaxed) {
-            SHUTDOWN_DRIVERS.fetch_add(1, Ordering::Relaxed);
-            println!("shutting down sample I/O driver on {:?}", self.state.driver_thread);
-        }
+        SHUTDOWN_DRIVERS.fetch_add(1, Ordering::Relaxed);
+        println!("shutting down sample I/O driver on {:?}", self.state.driver_thread);
     }
 
     fn poll_shutdown(&self, _cx: &mut Context<'_>) -> Poll<()> {

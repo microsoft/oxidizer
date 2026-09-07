@@ -75,9 +75,10 @@ Shutdown must not rely on an unsafe trait or a caller-checked inertness flag.
 - A driver is memory-safe to drop at every point in its lifecycle.
 - Contexts and in-flight operations retain ownership of the state they access
   through reference counts, pool leases, or equivalent safe handles.
-- `begin_shutdown` prevents new operations and is idempotent.
+- The runtime calls `begin_shutdown` exactly once per driver; implementations
+  do not need to handle a second call.
 - `poll_shutdown` reports graceful drain progress and wakes the supplied waker
-  when progress becomes possible.
+  when progress becomes possible. It may be called repeatedly until ready.
 - Contexts may outlive drivers; later operations fail safely.
 - The stable contract has no `unsafe Driver` implementation requirement and no
   `is_inert` query.
