@@ -305,7 +305,6 @@ fn handle_client(mut stream: TcpStream, descriptor: &MonitorDescriptor, stop: &A
                 configuration.arc_dereferences,
                 configuration.runtime_tasks,
                 configuration.io,
-                configuration.cache,
                 configuration.event_capacity_per_thread.get(),
             ),
         },
@@ -390,7 +389,6 @@ fn recorder_statistics_response() -> Response {
             statistics.recording.arc_dereferences,
             statistics.recording.runtime_tasks,
             statistics.recording.io,
-            statistics.recording.cache,
             usize::try_from(statistics.event_capacity_per_thread).unwrap_or(usize::MAX),
         ),
     })
@@ -402,7 +400,6 @@ fn protocol_recording_configuration(
     arc_dereferences: crate::recorder::RecordingPolicy,
     runtime_tasks: crate::recorder::RecordingPolicy,
     io: crate::recorder::RecordingPolicy,
-    cache: crate::recorder::RecordingPolicy,
     event_capacity_per_thread: usize,
 ) -> RecordingConfiguration {
     RecordingConfiguration {
@@ -411,7 +408,7 @@ fn protocol_recording_configuration(
         arc_dereferences: protocol_recording_policy(arc_dereferences),
         runtime_tasks: protocol_recording_policy(runtime_tasks),
         io: protocol_recording_policy(io),
-        cache: protocol_recording_policy(cache),
+        cache: seismograph_protocol::message::RecordingPolicy::default(),
         event_capacity_per_thread: u32::try_from(event_capacity_per_thread).unwrap_or(u32::MAX),
     }
 }
@@ -920,7 +917,7 @@ mod tests {
             capture_backtraces: true,
             event_sampling: crate::recorder::EventSampling::one_in(7).unwrap(),
         };
-        let configuration = protocol_recording_configuration(policy, policy, policy, policy, policy, policy, usize::MAX);
+        let configuration = protocol_recording_configuration(policy, policy, policy, policy, policy, usize::MAX);
         assert_eq!(configuration.event_capacity_per_thread, u32::MAX);
         assert_eq!(configuration.allocations.sampling_one_in, 7);
         assert_eq!(recorder_policy(configuration.allocations), policy);

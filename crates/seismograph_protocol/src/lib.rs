@@ -66,7 +66,7 @@ impl std::error::Error for Error {
 ///
 /// Returns an error when the request is too large or writing fails.
 pub fn write_request(writer: &mut impl Write, request_id: u64, request: &Request) -> Result<(), Error> {
-    let (kind, payload) = message::encode_request(request);
+    let (kind, payload) = message::encode_request(request)?;
     write_frame(writer, kind, request_id, &payload)
 }
 

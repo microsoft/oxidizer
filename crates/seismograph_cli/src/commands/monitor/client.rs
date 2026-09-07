@@ -56,7 +56,11 @@ pub(super) fn set_recording(descriptor: &MonitorDescriptor, configuration: Recor
     if !cache_supported && configuration.cache != RecordingPolicy::default() {
         return Err(Error::Remote("cache recording is not supported by this monitor".into()));
     }
-    match command(descriptor, &Request::SetRecording(configuration))? {
+    let legacy_configuration = RecordingConfiguration {
+        cache: RecordingPolicy::default(),
+        ..configuration
+    };
+    match command(descriptor, &Request::SetRecording(legacy_configuration))? {
         Response::Acknowledged => {}
         _ => return Err(Error::UnexpectedResponse),
     }

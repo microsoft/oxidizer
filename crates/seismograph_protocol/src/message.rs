@@ -151,14 +151,17 @@ pub enum Response {
     Error(String),
 }
 
-pub(crate) fn encode_request(request: &Request) -> (u16, Vec<u8>) {
-    match request {
+pub(crate) fn encode_request(request: &Request) -> Result<(u16, Vec<u8>), Error> {
+    Ok(match request {
         Request::Hello { authentication } => {
             let mut payload = Vec::with_capacity(32);
             payload.extend_from_slice(&authentication.as_bytes());
             (1, payload)
         }
-        Request::SetRecording(configuration) => (2, encode_recording(*configuration)),
+        Request::SetRecording(configuration) => {
+            validate_legacy_recording(*configuration)?;
+            (2, encode_recording(*configuration))
+        }
         Request::CaptureSnapshot(options) => (3, vec![encode_event_buffer_disposition(options.event_buffers)]),
         Request::ReadRecorderStatistics => (4, Vec::new()),
         Request::SetCacheRecording(policy) => {
@@ -167,7 +170,7 @@ pub(crate) fn encode_request(request: &Request) -> (u16, Vec<u8>) {
             (5, payload)
         }
         Request::ReadCacheRecording => (6, Vec::new()),
-    }
+    })
 }
 
 pub(crate) fn decode_request(kind: u16, payload: &[u8]) -> Result<Request, Error> {
@@ -193,6 +196,7 @@ pub(crate) fn decode_request(kind: u16, payload: &[u8]) -> Result<Request, Error
 pub(crate) fn encode_response(response: &Response) -> Result<(u16, Vec<u8>), Error> {
     match response {
         Response::Hello { instance_id, recording } => {
+            validate_legacy_recording(*recording)?;
             let mut payload = Vec::with_capacity(50);
             payload.extend_from_slice(&instance_id.as_bytes());
             payload.extend_from_slice(&encode_recording(*recording));
@@ -201,6 +205,7 @@ pub(crate) fn encode_response(response: &Response) -> Result<(u16, Vec<u8>), Err
         Response::Acknowledged => Ok((102, Vec::new())),
         Response::Snapshot(bytes) => Ok((103, bytes.clone())),
         Response::RecorderStatistics(statistics) => {
+            validate_legacy_recording(statistics.recording)?;
             let mut payload = Vec::with_capacity(82);
             push_u64(&mut payload, statistics.thread_count);
             push_u64(&mut payload, statistics.total_events);
@@ -259,6 +264,13 @@ pub(crate) fn decode_response(kind: u16, payload: &[u8]) -> Result<Response, Err
         }
         _ => Err(Error::InvalidMessage),
     }
+}
+
+fn validate_legacy_recording(configuration: RecordingConfiguration) -> Result<(), Error> {
+    if configuration.cache != RecordingPolicy::default() {
+        return Err(Error::InvalidMessage);
+    }
+    Ok(())
 }
 
 fn encode_recording(configuration: RecordingConfiguration) -> Vec<u8> {
@@ -437,14 +449,7 @@ mod tests {
 
     #[test]
     fn legacy_recording_message_sizes_remain_stable() {
-        let configuration = RecordingConfiguration {
-            cache: RecordingPolicy {
-                enabled: true,
-                capture_backtraces: true,
-                sampling_one_in: 8,
-            },
-            ..RecordingConfiguration::default()
-        };
+        let configuration = RecordingConfiguration::default();
         let (_, hello) = encode_response(&Response::Hello {
             instance_id: InstanceId::from_bytes([1; 16]),
             recording: configuration,
@@ -465,6 +470,44 @@ mod tests {
             ),
             (34, 50, 82, RecordingPolicy::default())
         );
+    }
+
+    #[test]
+    fn legacy_recording_messages_reject_cache_policy_instead_of_discarding_it() {
+        let configuration = RecordingConfiguration {
+            cache: RecordingPolicy {
+                enabled: true,
+                ..RecordingPolicy::default()
+            },
+            ..RecordingConfiguration::default()
+        };
+
+        assert!(matches!(
+            write_request(&mut Vec::new(), 1, &Request::SetRecording(configuration)),
+            Err(Error::InvalidMessage)
+        ));
+        assert!(matches!(
+            write_response(
+                &mut Vec::new(),
+                1,
+                &Response::Hello {
+                    instance_id: InstanceId::from_bytes([1; 16]),
+                    recording: configuration,
+                },
+            ),
+            Err(Error::InvalidMessage)
+        ));
+        assert!(matches!(
+            write_response(
+                &mut Vec::new(),
+                1,
+                &Response::RecorderStatistics(RecorderStatistics {
+                    recording: configuration,
+                    ..RecorderStatistics::default()
+                }),
+            ),
+            Err(Error::InvalidMessage)
+        ));
     }
 
     #[test]
@@ -496,11 +539,7 @@ mod tests {
                 capture_backtraces: false,
                 sampling_one_in: 32,
             },
-            cache: RecordingPolicy {
-                enabled: true,
-                capture_backtraces: true,
-                sampling_one_in: 64,
-            },
+            cache: RecordingPolicy::default(),
         };
 
         assert_eq!(
