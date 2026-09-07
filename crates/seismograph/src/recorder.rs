@@ -492,6 +492,7 @@ fn record_enabled_with_recorder(
         BacktraceCapture::Always => true,
     };
     let (frames, frame_count) = if capture_backtrace {
+        let _suppression = SuppressionGuard::enter();
         capture_stack()
     } else {
         ([0; MAX_STACK_FRAMES], 0)

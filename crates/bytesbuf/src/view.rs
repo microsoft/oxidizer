@@ -810,7 +810,14 @@ impl BytesView {
             .len
             .checked_add(other.len)
             .expect("attempted to create a BytesView larger than usize::MAX bytes");
-        self.identity.clear();
+        if other.is_empty() {
+            return;
+        }
+        if self.is_empty() {
+            self.identity.replace(other.take_identity());
+        } else {
+            self.identity.clear();
+        }
         self.len = new_len;
 
         self.spans_reversed.insert_many(0, other.spans_reversed);
@@ -1882,6 +1889,25 @@ mod tests {
         view3.append(view4);
         assert_eq!(view3.len(), 5);
         assert_eq!(view3, b"world");
+    }
+
+    #[cfg(feature = "seismograph")]
+    #[test]
+    fn append_preserves_identity_when_only_one_view_has_data() {
+        let memory = TransparentMemory::new();
+        let mut populated = BytesView::copied_from_slice(b"Hello", &memory);
+        let populated_id = populated.identity.get_or_allocate();
+        populated.append(BytesView::new());
+
+        let mut empty = BytesView::new();
+        let transferred = BytesView::copied_from_slice(b"world", &memory);
+        let transferred_id = transferred.identity.get_or_allocate();
+        empty.append(transferred);
+
+        assert_eq!(
+            (populated.identity.get_or_allocate(), empty.identity.get_or_allocate()),
+            (populated_id, transferred_id)
+        );
     }
 
     #[test]

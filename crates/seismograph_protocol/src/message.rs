@@ -25,7 +25,10 @@ pub struct RecordingConfiguration {
     pub runtime_tasks: RecordingPolicy,
     /// I/O primitive operation recording policy.
     pub io: RecordingPolicy,
-    /// Cache operation recording policy.
+    /// Cache operation recording policy, transported through the dedicated cache messages.
+    ///
+    /// The legacy fixed-size recording block used by `Hello`, `SetRecording`, and recorder
+    /// statistics does not contain this field.
     pub cache: RecordingPolicy,
     /// Events retained by each participating thread.
     pub event_capacity_per_thread: u32,
@@ -112,7 +115,9 @@ pub enum Request {
         /// Descriptor-provided authentication token.
         authentication: AuthenticationToken,
     },
-    /// Changes process-wide recording configuration.
+    /// Changes process-wide non-cache recording configuration.
+    ///
+    /// Cache recording is changed independently with [`Request::SetCacheRecording`].
     SetRecording(RecordingConfiguration),
     /// Changes cache-event recording configuration.
     SetCacheRecording(RecordingPolicy),
@@ -459,6 +464,50 @@ mod tests {
                 decode_recording(&encode_recording(configuration)).unwrap().cache,
             ),
             (34, 50, 82, RecordingPolicy::default())
+        );
+    }
+
+    #[test]
+    fn legacy_recording_block_has_stable_wire_layout() {
+        let configuration = RecordingConfiguration {
+            event_capacity_per_thread: 1_024,
+            allocations: RecordingPolicy {
+                enabled: true,
+                capture_backtraces: false,
+                sampling_one_in: 2,
+            },
+            general_events: RecordingPolicy {
+                enabled: false,
+                capture_backtraces: true,
+                sampling_one_in: 4,
+            },
+            arc_dereferences: RecordingPolicy {
+                enabled: true,
+                capture_backtraces: true,
+                sampling_one_in: 8,
+            },
+            runtime_tasks: RecordingPolicy {
+                enabled: false,
+                capture_backtraces: false,
+                sampling_one_in: 16,
+            },
+            io: RecordingPolicy {
+                enabled: true,
+                capture_backtraces: false,
+                sampling_one_in: 32,
+            },
+            cache: RecordingPolicy {
+                enabled: true,
+                capture_backtraces: true,
+                sampling_one_in: 64,
+            },
+        };
+
+        assert_eq!(
+            encode_recording(configuration),
+            [
+                0, 4, 0, 0, 1, 0, 2, 0, 0, 0, 0, 1, 4, 0, 0, 0, 1, 1, 8, 0, 0, 0, 0, 0, 16, 0, 0, 0, 1, 0, 32, 0, 0, 0,
+            ]
         );
     }
 

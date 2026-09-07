@@ -15,6 +15,7 @@ use message::{Request, Response};
 
 const FRAME_MAGIC: [u8; 4] = *b"SGMP";
 const FRAME_HEADER_BYTES: usize = 20;
+const FRAME_READ_CHUNK_BYTES: usize = 8 * 1024;
 const MAX_CONTROL_BYTES: usize = 64 * 1024;
 const MAX_SNAPSHOT_BYTES: usize = u32::MAX as usize;
 
@@ -138,8 +139,14 @@ fn read_frame(reader: &mut impl Read, maximum: usize) -> Result<Frame, Error> {
     if len > maximum {
         return Err(Error::MessageTooLarge);
     }
-    let mut payload = vec![0; len];
-    reader.read_exact(&mut payload).map_err(Error::Io)?;
+    let mut payload = Vec::new();
+    let mut chunk = [0_u8; FRAME_READ_CHUNK_BYTES];
+    while payload.len() < len {
+        let chunk_len = (len - payload.len()).min(chunk.len());
+        payload.try_reserve_exact(chunk_len).map_err(|_error| Error::MessageTooLarge)?;
+        reader.read_exact(&mut chunk[..chunk_len]).map_err(Error::Io)?;
+        payload.extend_from_slice(&chunk[..chunk_len]);
+    }
     Ok(Frame { kind, request_id, payload })
 }
 
@@ -223,6 +230,44 @@ mod tests {
         oversized[4..6].copy_from_slice(&VERSION.to_le_bytes());
         oversized[16..20].copy_from_slice(&2_u32.to_le_bytes());
         assert!(matches!(read_frame(&mut oversized.as_slice(), 1), Err(Error::MessageTooLarge)));
+
+        let mut truncated_snapshot = [0_u8; FRAME_HEADER_BYTES];
+        truncated_snapshot[..4].copy_from_slice(&FRAME_MAGIC);
+        truncated_snapshot[4..6].copy_from_slice(&VERSION.to_le_bytes());
+        truncated_snapshot[6..8].copy_from_slice(&103_u16.to_le_bytes());
+        truncated_snapshot[16..20].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(matches!(read_response(&mut truncated_snapshot.as_slice()), Err(Error::Io(_))));
+    }
+
+    #[test]
+    fn request_and_response_frames_have_stable_wire_layouts() {
+        let request = Request::SetCacheRecording(message::RecordingPolicy {
+            enabled: true,
+            capture_backtraces: false,
+            sampling_one_in: 16,
+        });
+        let mut request_bytes = Vec::new();
+        write_request(&mut request_bytes, 0x0102_0304_0506_0708, &request).unwrap();
+        assert_eq!(
+            request_bytes,
+            [
+                b'S', b'G', b'M', b'P', 7, 0, 5, 0, 8, 7, 6, 5, 4, 3, 2, 1, 6, 0, 0, 0, 1, 0, 16, 0, 0, 0,
+            ]
+        );
+
+        let response = Response::CacheRecording(message::RecordingPolicy {
+            enabled: false,
+            capture_backtraces: true,
+            sampling_one_in: 256,
+        });
+        let mut response_bytes = Vec::new();
+        write_response(&mut response_bytes, 9, &response).unwrap();
+        assert_eq!(
+            response_bytes,
+            [
+                b'S', b'G', b'M', b'P', 7, 0, 105, 0, 9, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 1, 0, 1, 0, 0,
+            ]
+        );
     }
 
     #[test]

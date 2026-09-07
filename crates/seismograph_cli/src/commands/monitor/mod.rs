@@ -38,6 +38,7 @@ pub(crate) fn verb(_args: VerbArgs) -> Result<(), Error> {
         app.poll_discovery();
         app.poll_snapshot_capture();
         app.poll_recorder_statistics();
+        app.poll_recording_configuration();
         terminal.draw(|frame| app.draw(frame)).map_err(Error::Io)?;
         let wait = app
             .next_refresh()

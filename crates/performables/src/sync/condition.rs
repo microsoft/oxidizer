@@ -158,6 +158,7 @@ impl<'mutex, T: ?Sized> Future for CondvarWait<'_, 'mutex, T> {
         let lock = self.lock.as_mut().expect("notified waits always reacquire their mutex");
         match Pin::new(lock).poll(cx) {
             Poll::Ready(guard) => {
+                self.waiter.take();
                 self.condition.record(EventKind::CondvarAccess);
                 Poll::Ready(guard)
             }
@@ -168,8 +169,10 @@ impl<'mutex, T: ?Sized> Future for CondvarWait<'_, 'mutex, T> {
 
 impl<T: ?Sized> Drop for CondvarWait<'_, '_, T> {
     fn drop(&mut self) {
-        if let Some(waiter) = &self.waiter {
-            self.condition.waiters.cancel(waiter);
+        if let Some(waiter) = &self.waiter
+            && !self.condition.waiters.cancel(waiter)
+        {
+            self.condition.waiters.wake_one();
         }
     }
 }

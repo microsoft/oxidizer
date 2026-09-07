@@ -154,7 +154,7 @@ pub struct LazyLock<T, F = fn() -> T> {
 // SAFETY: ownership of the initializer and initialized value can move between threads.
 unsafe impl<T: Send, F: Send> Send for LazyLock<T, F> {}
 // SAFETY: `OnceLock` serializes initialization and only the initializer accesses `initialize`.
-unsafe impl<T: Sync, F: Send> Sync for LazyLock<T, F> {}
+unsafe impl<T: Send + Sync, F: Send> Sync for LazyLock<T, F> {}
 
 impl<T, F> LazyLock<T, F>
 where

@@ -183,6 +183,16 @@ mod tests {
     }
 
     #[test]
+    fn descriptor_has_stable_wire_layout() {
+        let expected: [u8; 78] = [
+            b'S', b'G', b'M', b'D', 7, 0, 42, 0, 0, 0, 0xa3, 0x1c, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 9, 9, 9, 9, 9, 9, 9, 9,
+            9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 6, 0, b'o', b'r', b'd', b'e', b'r', b's', 1, 7, 0,
+            b's', b'h', b'a', b'r', b'd', b'-', b'3',
+        ];
+        assert_eq!(encode_descriptor(&descriptor()).unwrap(), expected);
+    }
+
+    #[test]
     fn authentication_debug_is_redacted() {
         assert_eq!(
             format!("{:?}", AuthenticationToken::from_bytes([0x42; 32])),

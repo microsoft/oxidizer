@@ -592,6 +592,7 @@ pub(super) struct App {
     capture_receiver: Option<Receiver<CaptureMessage>>,
     discovery_receiver: Option<Receiver<Result<Vec<Instance>, String>>>,
     statistics_receiver: Option<Receiver<Result<RecorderStatistics, String>>>,
+    recording_receiver: Option<Receiver<Result<RecordingUpdate, String>>>,
     next_refresh: Instant,
 }
 
@@ -640,6 +641,11 @@ struct CaptureOutcome {
     status: String,
 }
 
+struct RecordingUpdate {
+    descriptor: MonitorDescriptor,
+    configuration: RecordingConfiguration,
+}
+
 impl App {
     pub(super) fn new() -> Self {
         Self {
@@ -665,6 +671,7 @@ impl App {
             capture_receiver: None,
             discovery_receiver: None,
             statistics_receiver: None,
+            recording_receiver: None,
             next_refresh: Instant::now(),
         }
     }
@@ -677,7 +684,7 @@ impl App {
     pub(super) fn refresh(&mut self) {
         self.next_refresh = Instant::now() + REFRESH_INTERVAL;
         if let Screen::Connected { descriptor, .. } = &self.screen {
-            if self.capture_receiver.is_none() && self.statistics_receiver.is_none() {
+            if self.capture_receiver.is_none() && self.statistics_receiver.is_none() && self.recording_receiver.is_none() {
                 self.start_recorder_statistics(descriptor.clone());
             }
             return;
@@ -761,7 +768,7 @@ impl App {
                     self.snapshot_options.event_buffers = next_buffer_disposition(self.snapshot_options.event_buffers);
                     self.status = format!("Snapshot buffers: {:?}", self.snapshot_options.event_buffers);
                 }
-                KeyCode::Char('c') if !capture_in_progress => {
+                KeyCode::Char('c') if !capture_in_progress && self.recording_receiver.is_none() => {
                     self.recording_configuration_popup = Some(RecordingConfigurationPopup {
                         draft: *recording,
                         selected: 0,
@@ -802,17 +809,30 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn apply_recording_configuration(&mut self, configuration: RecordingConfiguration) {
-        let Screen::Connected { descriptor, recording, .. } = &mut self.screen else {
+        let Screen::Connected { descriptor, .. } = &self.screen else {
             self.recording_configuration_popup = None;
             return;
         };
-        match set_recording(descriptor, configuration) {
-            Ok(()) => {
-                *recording = configuration;
-                self.recording_configuration_popup = None;
+        let descriptor = descriptor.clone();
+        self.recording_configuration_popup = None;
+        self.start_recording_configuration(descriptor, configuration);
+    }
+
+    pub(super) fn poll_recording_configuration(&mut self) {
+        let Some(result) = receive_worker_result(self.recording_receiver.as_ref(), "Recording configuration") else {
+            return;
+        };
+        self.recording_receiver = None;
+        match result {
+            Ok(update) => {
+                if let Screen::Connected { descriptor, recording, .. } = &mut self.screen
+                    && descriptor.instance_id == update.descriptor.instance_id
+                {
+                    *recording = update.configuration;
+                }
                 self.status = "Recording configuration applied".into();
             }
-            Err(error) => self.status = error.to_string(),
+            Err(error) => self.status = error,
         }
     }
 
@@ -937,6 +957,23 @@ impl App {
         }) {
             Ok(_worker) => self.statistics_receiver = Some(receiver),
             Err(error) => self.status = format!("failed to start recorder statistics worker: {error}"),
+        }
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn start_recording_configuration(&mut self, descriptor: MonitorDescriptor, configuration: RecordingConfiguration) {
+        let (sender, receiver) = unbounded();
+        match thread::Builder::new().name("seismograph-recording".into()).spawn(move || {
+            let result = set_recording(&descriptor, configuration)
+                .map(|()| RecordingUpdate { descriptor, configuration })
+                .map_err(|error| error.to_string());
+            let _receiver_closed = sender.send_sync(result);
+        }) {
+            Ok(_worker) => {
+                self.recording_receiver = Some(receiver);
+                self.status = "Applying recording configuration...".into();
+            }
+            Err(error) => self.status = format!("failed to start recording configuration worker: {error}"),
         }
     }
 
@@ -2303,6 +2340,28 @@ mod tests {
         app.statistics_receiver = Some(receiver);
         app.poll_recorder_statistics();
         assert_eq!(app.status, "Recorder statistics worker stopped unexpectedly");
+    }
+
+    #[test]
+    fn recording_configuration_messages_update_the_connected_instance() {
+        let mut app = connected_app(MonitorTab::Info);
+        let mut configuration = RecordingConfiguration::default();
+        configuration.io.enabled = true;
+        let (sender, receiver) = unbounded();
+        sender
+            .send_sync(Ok(RecordingUpdate {
+                descriptor: descriptor(1),
+                configuration,
+            }))
+            .unwrap();
+        app.recording_receiver = Some(receiver);
+
+        app.poll_recording_configuration();
+
+        assert_eq!(
+            connected_fields(&app.screen).map(|(_, recording, _, _)| recording.io.enabled),
+            Some(true)
+        );
     }
 
     #[test]

@@ -30,6 +30,10 @@ const FORMAT_VERSION: u16 = 8;
 const HEADER_LEN: usize = 92;
 const SOURCE_HEADER_LEN: usize = 24;
 const EVENT_FIXED_LEN: usize = 92;
+const LEGACY_EVENT_V1_FIXED_LEN: usize = 28;
+const LEGACY_EVENT_V2_FIXED_LEN: usize = 76;
+const THREAD_FIXED_LEN: usize = 24;
+const THREAD_NAMED_FIXED_LEN: usize = 26;
 const SNAPSHOT_ARENA_CHUNK_BYTES: usize = 4 * 1024 * 1024;
 
 static SOURCES: AtomicPtr<Source> = AtomicPtr::new(ptr::null_mut());
@@ -295,8 +299,10 @@ pub fn decode(bytes: &[u8]) -> Result<DecodedSnapshot, Error> {
     let recording = decode_recording_policies(&mut reader, format_version)?;
     let clock = decode_clock(&mut reader, format_version)?;
 
+    validate_count_fits(thread_count, reader.remaining().len(), thread_fixed_len(format_version))?;
     let threads = decode_threads(&mut reader, thread_count, format_version)?;
 
+    validate_count_fits(event_count, reader.remaining().len(), event_fixed_len(format_version))?;
     let mut events = Vec::with_capacity(event_count);
     for _ in 0..event_count {
         let thread_id = ThreadId::new(reader.u64()?);
@@ -320,6 +326,7 @@ pub fn decode(bytes: &[u8]) -> Result<DecodedSnapshot, Error> {
         });
     }
 
+    validate_count_fits(source_count, reader.remaining().len(), SOURCE_HEADER_LEN)?;
     let mut sources = Vec::with_capacity(source_count);
     for _ in 0..source_count {
         let id = SourceId::new(reader.u64()?);
@@ -358,6 +365,32 @@ pub fn decode(bytes: &[u8]) -> Result<DecodedSnapshot, Error> {
         },
         sources,
     })
+}
+
+fn validate_count_fits(count: usize, remaining_bytes: usize, minimum_item_bytes: usize) -> Result<(), Error> {
+    debug_assert!(minimum_item_bytes != 0);
+    if count > remaining_bytes / minimum_item_bytes {
+        return Err(Error::invalid_format());
+    }
+    Ok(())
+}
+
+const fn thread_fixed_len(format_version: u16) -> usize {
+    if format_version >= 2 {
+        THREAD_NAMED_FIXED_LEN
+    } else {
+        THREAD_FIXED_LEN
+    }
+}
+
+const fn event_fixed_len(format_version: u16) -> usize {
+    if format_version >= 4 {
+        EVENT_FIXED_LEN
+    } else if format_version >= 2 {
+        LEGACY_EVENT_V2_FIXED_LEN
+    } else {
+        LEGACY_EVENT_V1_FIXED_LEN
+    }
 }
 
 fn decode_sampling(reader: &mut Reader<'_>, format_version: u16) -> Result<u64, Error> {
@@ -1581,6 +1614,25 @@ mod tests {
             assert!(decode_payload(tag, fields).is_err());
         }
         assert!(decode_heap_kind(0).is_err());
+    }
+
+    #[test]
+    fn declared_collection_counts_must_fit_in_remaining_bytes() {
+        let snapshot = encode_snapshot(&DecodedSnapshot {
+            capture_duration_nanos: 0,
+            events: Events {
+                clock: EventClock::CURRENT,
+                ..Events::default()
+            },
+            sources: Vec::new(),
+        })
+        .unwrap();
+
+        for offset in [20, 24, 28] {
+            let mut bytes = snapshot.as_bytes().to_vec();
+            bytes[offset..offset + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+            assert!(decode(&bytes).is_err());
+        }
     }
 
     #[test]

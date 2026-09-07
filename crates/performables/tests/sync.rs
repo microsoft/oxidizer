@@ -760,6 +760,55 @@ fn condvar_notify_all_wakes_every_waiter() {
 }
 
 #[test]
+fn condvar_cancelled_notified_waiter_forwards_notification() {
+    let mutex = Mutex::new(());
+    let condition = Condvar::new();
+    let first_counter = StdArc::new(WakeCounter::default());
+    let first_waker = waker(&first_counter);
+    let mut first_context = Context::from_waker(&first_waker);
+    let second_counter = StdArc::new(WakeCounter::default());
+    let second_waker = waker(&second_counter);
+    let mut second_context = Context::from_waker(&second_waker);
+    let mut first = Box::pin(condition.wait(mutex.lock_sync()));
+    assert!(first.as_mut().poll(&mut first_context).is_pending());
+    let mut second = Box::pin(condition.wait(mutex.lock_sync()));
+    assert!(second.as_mut().poll(&mut second_context).is_pending());
+
+    condition.notify_one();
+    drop(first);
+
+    assert_eq!(
+        (first_counter.0.load(Ordering::Relaxed), second_counter.0.load(Ordering::Relaxed),),
+        (1, 1)
+    );
+}
+
+#[test]
+fn condvar_completed_notified_waiter_does_not_forward_notification() {
+    let mutex = Mutex::new(());
+    let condition = Condvar::new();
+    let first_counter = StdArc::new(WakeCounter::default());
+    let first_waker = waker(&first_counter);
+    let mut first_context = Context::from_waker(&first_waker);
+    let second_counter = StdArc::new(WakeCounter::default());
+    let second_waker = waker(&second_counter);
+    let mut second_context = Context::from_waker(&second_waker);
+    let mut first = Box::pin(condition.wait(mutex.lock_sync()));
+    assert!(first.as_mut().poll(&mut first_context).is_pending());
+    let mut second = Box::pin(condition.wait(mutex.lock_sync()));
+    assert!(second.as_mut().poll(&mut second_context).is_pending());
+
+    condition.notify_one();
+    assert!(first.as_mut().poll(&mut first_context).is_ready());
+    drop(first);
+
+    assert_eq!(
+        (first_counter.0.load(Ordering::Relaxed), second_counter.0.load(Ordering::Relaxed),),
+        (1, 0)
+    );
+}
+
+#[test]
 fn condvar_wait_reacquires_after_lock_contention() {
     let mutex = Mutex::new(());
     let condition = Condvar::new();
