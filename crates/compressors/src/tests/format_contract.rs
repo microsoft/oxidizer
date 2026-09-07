@@ -533,8 +533,21 @@ macro_rules! format_contract {
 
             #[test]
             fn pooling_does_not_change_the_output() {
-                // Reuse is an optimisation, so it must change nothing a caller can observe. The
-                // baseline and the pooled runs share one input view on purpose: some engines
+                // Reuse is an optimisation, so it must change nothing a caller can observe. That is
+                // what this section asserts, and it is why it stays in the universal contract even
+                // though the formats differ in what they actually recycle -- brotli recycles nothing
+                // and a gzip decompressor is deliberately never recycled.
+                //
+                // Naming these for the observable property rather than for recycling is deliberate:
+                // a test that claimed to exercise a recycled engine would be a lie for brotli, and
+                // gating them on which formats currently pool would mean editing this suite every
+                // time an engine gains or loses a reset. The property holds either way, so the tests
+                // keep passing unchanged when pooling arrives for a format that lacks it today.
+                //
+                // The exact pool mechanics -- retention, keying, capacity, poisoning -- are tested
+                // next to `Pool` itself. What lives here is the caller-visible contract.
+                //
+                // The baseline and the pooled runs share one input view on purpose: some engines
                 // legitimately vary with input segmentation (zstd records the content size in its
                 // frame header only when the whole input arrives in one call), so a fresh view per
                 // run would compare allocator behaviour rather than pooling.
@@ -567,7 +580,7 @@ macro_rules! format_contract {
             }
 
             #[test]
-            fn an_engine_abandoned_mid_stream_is_cleaned_before_reuse() {
+            fn an_abandoned_engine_does_not_affect_the_next_stream() {
                 // A request cancelled part-way through returns a half-used engine.
                 let input = view(&payload());
                 let baseline = {
@@ -600,7 +613,7 @@ macro_rules! format_contract {
             }
 
             #[test]
-            fn an_engine_left_dirty_by_a_failed_decompression_is_cleaned_before_reuse() {
+            fn a_failed_decompression_does_not_affect_the_next_one() {
                 let compressed = $module::compress(view(&payload()), resources()).unwrap();
                 let garbage = view(&b"definitely not a valid stream".repeat(20));
 
@@ -622,7 +635,7 @@ macro_rules! format_contract {
             }
 
             #[test]
-            fn levels_never_share_engines() {
+            fn each_level_still_produces_its_own_output() {
                 // Resetting a compressor preserves its level, so engines must be keyed by it.
                 let input = view(&payload());
                 let levels = [Level::MIN, Level::FAST, Level::DEFAULT, Level::HIGH];
@@ -658,7 +671,7 @@ macro_rules! format_contract {
             }
 
             #[test]
-            fn two_live_codecs_get_distinct_engines() {
+            fn two_live_codecs_do_not_interfere() {
                 // All three compressors are driven by exactly the same sequence, so any difference in
                 // their output is the engine and nothing else.
                 fn run(compressor: &mut $module::Compressor, input: &BytesView) -> Vec<u8> {
@@ -755,7 +768,7 @@ macro_rules! format_contract {
             }
 
             #[test]
-            fn pool_capacity_bounds_retention_without_changing_output() {
+            fn pool_capacity_does_not_change_the_output() {
                 let input = view(&payload());
                 let baseline = {
                     let mut compressor = $module::Compressor::builder()
