@@ -298,6 +298,12 @@ impl<'a, T: ?Sized> Future for MutexLockResult<'a, T> {
             self.mutex.record(EventKind::MutexContention);
             self.contention_recorded = true;
         }
+        self.poll_registered(cx)
+    }
+}
+
+impl<'a, T: ?Sized> MutexLockResult<'a, T> {
+    fn poll_registered(&mut self, cx: &Context<'_>) -> Poll<Result<MutexGuard<'a, T>, PoisonError<MutexGuard<'a, T>>>> {
         let mutex = self.mutex;
         let waiter = Arc::clone(self.waiter.get_or_insert_with(|| Arc::new(Waiter::new())));
         waiter.register(cx.waker());
@@ -368,5 +374,21 @@ impl<T: ?Sized + fmt::Debug> fmt::Debug for MutexGuard<'_, T> {
 impl<T: ?Sized + fmt::Display> fmt::Display for MutexGuard<'_, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&**self, f)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::task::Waker;
+
+    use super::*;
+
+    #[test]
+    fn unlock_during_waiter_registration_completes_acquisition() {
+        let mutex = Mutex::new(());
+        let mut lock = mutex.lock_result();
+        let context = Context::from_waker(Waker::noop());
+
+        assert!(matches!(lock.poll_registered(&context), Poll::Ready(Ok(_))));
     }
 }

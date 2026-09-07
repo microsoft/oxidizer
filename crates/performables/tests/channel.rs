@@ -588,6 +588,7 @@ fn channel_futures_are_send_for_send_values() {
 #[test]
 #[cfg(feature = "seismograph")]
 fn channel_operations_share_runtime_telemetry_identity() {
+    let thread_id = seismograph::recorder::current_thread_id();
     seismograph::recorder(Configuration {
         general_events: seismograph::recorder::RecordingPolicy {
             enabled: true,
@@ -618,6 +619,7 @@ fn channel_operations_share_runtime_telemetry_identity() {
     let channel_ids = snapshot
         .events
         .iter()
+        .filter(|event| event.thread_id == thread_id)
         .filter(|event| event.kind == EventKind::ChannelSend)
         .filter_map(seismograph::recorder::event::Event::object_id)
         .collect::<std::collections::HashSet<_>>();
@@ -625,23 +627,26 @@ fn channel_operations_share_runtime_telemetry_identity() {
         snapshot
             .events
             .iter()
+            .filter(|event| event.thread_id == thread_id)
             .filter(|event| event.object_id() == Some(*object_id))
             .any(|event| event.kind == EventKind::ChannelReceive)
             && snapshot
                 .events
                 .iter()
+                .filter(|event| event.thread_id == thread_id)
                 .filter(|event| event.object_id() == Some(*object_id))
                 .any(|event| event.kind == EventKind::ChannelSendContention)
             && snapshot
                 .events
                 .iter()
+                .filter(|event| event.thread_id == thread_id)
                 .filter(|event| event.object_id() == Some(*object_id))
                 .any(|event| event.kind == EventKind::ChannelClose)
     }));
     let watermark_object = snapshot
         .events
         .iter()
-        .find(|event| event.kind == EventKind::ChannelHighWatermark && event.measurement() == Some(3))
+        .find(|event| event.thread_id == thread_id && event.kind == EventKind::ChannelHighWatermark && event.measurement() == Some(3))
         .unwrap()
         .object_id()
         .unwrap();
@@ -649,6 +654,7 @@ fn channel_operations_share_runtime_telemetry_identity() {
         snapshot
             .events
             .iter()
+            .filter(|event| event.thread_id == thread_id)
             .filter(|event| event.object_id() == Some(watermark_object) && event.kind == EventKind::ChannelHighWatermark)
             .filter_map(seismograph::recorder::event::Event::measurement)
             .collect::<Vec<_>>(),

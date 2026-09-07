@@ -205,6 +205,9 @@ pub(crate) fn request_thread_heap(thread_id: heaps::ThreadId) {
 
 #[cfg(test)]
 mod tests {
+    use std::future::{poll_fn, ready};
+    use std::task::Waker;
+
     use super::*;
     use crate::heaps::{Heap, Kind, bump, thread_heap, thread_heap_request};
 
@@ -236,31 +239,23 @@ mod tests {
     fn thread_heap_captures_the_originating_thread() {
         let first = thread_heap();
         let second = thread_heap();
-        let Kind::Thread(first_thread) = first.kind() else {
-            panic!("thread_heap must create a thread-target descriptor");
-        };
-        let Kind::Thread(second_thread) = second.kind() else {
-            panic!("thread_heap must create a thread-target descriptor");
-        };
 
-        assert_eq!(first_thread, second_thread);
-        assert_eq!(first.id(), second.id());
-        assert_eq!(thread_heap_request(), Some(first_thread));
+        assert_eq!(
+            (first.kind(), first.id(), thread_heap_request().map(Kind::Thread)),
+            (second.kind(), second.id(), Some(first.kind()))
+        );
     }
 
     #[test]
     fn allocator_hints_return_scoped_and_thread_requests_together() {
         let thread = thread_heap();
-        let Kind::Thread(thread_id) = thread.kind() else {
-            panic!("thread_heap must create a thread-target descriptor");
-        };
         let scoped = Heap::bump(bump::Options::new());
 
         with_hint(&scoped, || {
             let hints = allocator_hints();
             assert_eq!(
-                (hints.active().map(heaps::ActiveHint::id), hints.thread_heap()),
-                (Some(scoped.id()), Some(thread_id))
+                (hints.active().map(heaps::ActiveHint::id), hints.thread_heap().map(Kind::Thread),),
+                (Some(scoped.id()), Some(thread.kind()))
             );
         });
     }
@@ -270,5 +265,29 @@ mod tests {
         let heap = Heap::bump(bump::Options::new());
         let values = with_hint(&heap, || vec![1, 2, 3]);
         assert_eq!(values, [1, 2, 3]);
+    }
+
+    #[test]
+    fn async_hint_is_active_only_while_polling() {
+        let heap = Heap::new();
+        let future = poll_fn(|_| Poll::Ready(active_hint().map(heaps::ActiveHint::id)));
+        let mut future = Box::pin(with_hint_async(&heap, future));
+        let mut context = Context::from_waker(Waker::noop());
+
+        assert_eq!(
+            (future.as_mut().poll(&mut context), active_hint()),
+            (Poll::Ready(Some(heap.id())), None)
+        );
+    }
+
+    #[test]
+    fn async_hint_debug_includes_heap_and_future() {
+        let heap = Heap::new();
+        let future = with_hint_async(&heap, ready(42));
+
+        assert_eq!(
+            format!("{future:?}"),
+            format!("WithHint {{ heap: {heap:?}, future: Ready(Some(42)) }}")
+        );
     }
 }

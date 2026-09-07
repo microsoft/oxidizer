@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 //! Low-overhead I/O event instrumentation for [`seismograph`].
 //!
 //! [`Resource`] lazily acquires its identity when an enabled I/O event is first
@@ -44,11 +46,17 @@ impl Resource {
         }
 
         let allocated = IoResourceId::allocate();
-        match self.id.compare_exchange(0, allocated.get(), Ordering::Relaxed, Ordering::Relaxed) {
-            Ok(_) => allocated,
-            Err(existing) => IoResourceId::from_raw(existing).expect("resource identity can only transition from zero to a valid ID"),
-        }
+        let selected = self
+            .id
+            .compare_exchange(0, allocated.get(), Ordering::Relaxed, Ordering::Relaxed)
+            .map_or_else(identity_after_allocation_race, |_| allocated.get());
+        IoResourceId::from_raw(selected).expect("resource identity can only transition from zero to a valid ID")
     }
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))] // Requires winning the narrow compare-exchange race after both callers observe zero.
+const fn identity_after_allocation_race(existing: u64) -> u64 {
+    existing
 }
 
 /// Buffer metadata captured for an I/O event.
@@ -267,7 +275,6 @@ mod tests {
     use std::sync::Mutex;
     use std::sync::atomic::AtomicUsize;
 
-    use seismograph::recorder::event::EventPayload;
     use seismograph::recorder::{Configuration, EventBufferCapacity, RecordingPolicy};
     use seismograph::snapshot::SnapshotOptions;
 
@@ -276,6 +283,7 @@ mod tests {
     static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
+    #[cfg_attr(coverage_nightly, coverage(off))] // The disabled-session closures are deliberately asserted not to execute.
     fn recording_gates_work_and_enabled_operations_emit_pairs() {
         let _test = TEST_LOCK.lock().unwrap();
         seismograph::recorder(Configuration::default());
@@ -301,7 +309,7 @@ mod tests {
         let resource = Resource::new(IoResourceKind::TcpStream);
         let operation = Operation::write_started(&resource, 8, BufferState::none);
         assert!(operation.was_recorded());
-        operation.finish_without_buffer(8, IoOutcome::Success);
+        operation.finish(8, IoOutcome::Success, BufferState::none);
 
         let snapshot = seismograph::snapshot(SnapshotOptions::default()).unwrap();
         let decoded = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap();
@@ -309,12 +317,8 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].kind, EventKind::IoWriteStarted);
         assert_eq!(events[1].kind, EventKind::IoWriteFinished);
-        let EventPayload::Io(start) = events[0].payload else {
-            panic!("expected I/O payload");
-        };
-        let EventPayload::Io(finish) = events[1].payload else {
-            panic!("expected I/O payload");
-        };
+        let start = events[0].io().unwrap();
+        let finish = events[1].io().unwrap();
         assert_eq!(start.operation_id, finish.operation_id);
         assert_eq!(start.resource_id, finish.resource_id);
         assert!(events[1].timestamp.ticks() >= events[0].timestamp.ticks());
@@ -327,6 +331,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(coverage_nightly, coverage(off))] // The stale-session closure is deliberately asserted not to execute.
     fn operation_finish_does_not_cross_recording_sessions() {
         let _test = TEST_LOCK.lock().unwrap();
         let capacity = EventBufferCapacity::new(64).unwrap();
@@ -359,6 +364,68 @@ mod tests {
         assert_eq!(decoded.events.events[0].kind, EventKind::IoReadStarted);
         assert_eq!(decoded.events.events[1].kind, EventKind::IoReadFinished);
 
+        seismograph::recorder(Configuration::default());
+    }
+
+    #[test]
+    fn resource_and_buffer_accessors_preserve_metadata() {
+        let id = BufferId::allocate();
+        let state = BufferState::new(Some(id), usize::MAX, usize::MAX);
+        let none = BufferState::none();
+        let resource = Resource::new(IoResourceKind::NamedPipe);
+
+        assert_eq!(
+            (
+                resource.kind(),
+                state.id(),
+                state.len(),
+                state.is_empty(),
+                state.span_count(),
+                none.id(),
+                none.len(),
+                none.is_empty(),
+                none.span_count(),
+            ),
+            (
+                IoResourceKind::NamedPipe,
+                Some(id),
+                u64::try_from(usize::MAX).unwrap_or(u64::MAX),
+                false,
+                u32::try_from(usize::MAX).unwrap_or(u32::MAX),
+                None,
+                0,
+                true,
+                0,
+            )
+        );
+    }
+
+    #[test]
+    fn dropping_recorded_operation_emits_cancellation() {
+        let _test = TEST_LOCK.lock().unwrap();
+        seismograph::recorder(Configuration {
+            io: RecordingPolicy::all(false),
+            event_capacity_per_thread: EventBufferCapacity::new(64).unwrap(),
+            ..Configuration::default()
+        });
+        let resource = Resource::new(IoResourceKind::TcpListener);
+
+        drop(Operation::read_started(&resource, 16, BufferState::none));
+
+        let snapshot = seismograph::snapshot(SnapshotOptions::default()).unwrap();
+        let decoded = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap();
+        assert_eq!(
+            decoded
+                .events
+                .events
+                .iter()
+                .map(|event| (event.kind, event.io().unwrap().outcome))
+                .collect::<Vec<_>>(),
+            [
+                (EventKind::IoReadStarted, IoOutcome::Pending),
+                (EventKind::IoReadFinished, IoOutcome::Canceled),
+            ]
+        );
         seismograph::recorder(Configuration::default());
     }
 }

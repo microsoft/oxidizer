@@ -19,7 +19,6 @@ include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/allocation_hints"
 
 [dependencies]
-performables.workspace = true
 pin-project-lite.workspace = true
 
 # >>> anvil-managed: anvil-lints

@@ -557,6 +557,18 @@ impl<'a, T> QueueWait<'a, T> {
             QueueWaitKind::Receive => &self.shared.receive_waiters,
         }
     }
+
+    fn poll_registered(&mut self, cx: &Context<'_>) -> Poll<()> {
+        let waiter = Arc::clone(self.waiter.get_or_insert_with(|| Arc::new(Waiter::new())));
+        waiter.register(cx.waker());
+        if self.waiters().enqueue_if_needed(&waiter, || self.complete()) {
+            self.waiter.take();
+            self.completed = true;
+            Poll::Ready(())
+        } else {
+            Poll::Pending
+        }
+    }
 }
 
 impl<T> Future for QueueWait<'_, T> {
@@ -567,15 +579,7 @@ impl<T> Future for QueueWait<'_, T> {
             self.completed = true;
             return Poll::Ready(());
         }
-        let waiter = Arc::clone(self.waiter.get_or_insert_with(|| Arc::new(Waiter::new())));
-        waiter.register(cx.waker());
-        if self.waiters().enqueue_if_needed(&waiter, || self.complete()) {
-            self.waiter.take();
-            self.completed = true;
-            Poll::Ready(())
-        } else {
-            Poll::Pending
-        }
+        self.poll_registered(cx)
     }
 }
 
@@ -1222,7 +1226,9 @@ impl<T: fmt::Display> fmt::Display for WatchRef<'_, T> {
 
 #[cfg(test)]
 mod tests {
-    use super::Error;
+    use std::task::{Context, Poll, Waker};
+
+    use super::{Error, QueueWait, bounded};
 
     #[test]
     fn unknown_error_codes_use_the_defensive_message() {
@@ -1232,5 +1238,21 @@ mod tests {
         };
 
         assert_eq!(error.to_string(), "channel operation failed");
+    }
+
+    #[test]
+    fn dropping_unpolled_queue_wait_has_no_registration_to_cancel() {
+        let (sender, _receiver) = bounded::<()>(1);
+
+        drop(QueueWait::send(&sender.shared));
+    }
+
+    #[test]
+    fn capacity_change_during_waiter_registration_completes_wait() {
+        let (sender, _receiver) = bounded::<()>(1);
+        let mut wait = QueueWait::send(&sender.shared);
+        let context = Context::from_waker(Waker::noop());
+
+        assert_eq!(wait.poll_registered(&context), Poll::Ready(()));
     }
 }

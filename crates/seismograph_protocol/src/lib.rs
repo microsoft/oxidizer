@@ -162,15 +162,21 @@ fn platform_monitor_directory() -> Result<PathBuf, Error> {
     reason = "The platform implementations share a fallible interface because Windows can lack a runtime directory"
 )]
 fn platform_monitor_directory() -> Result<PathBuf, Error> {
-    if let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR") {
-        return Ok(PathBuf::from(runtime).join("seismograph"));
-    }
     // SAFETY: geteuid has no preconditions and does not access Rust-owned memory.
     let user_id = unsafe { libc::geteuid() };
-    Ok(std::env::temp_dir().join(format!("seismograph-{user_id}")))
+    Ok(unix_monitor_directory(std::env::var_os("XDG_RUNTIME_DIR"), user_id))
+}
+
+#[cfg(unix)]
+fn unix_monitor_directory(runtime: Option<std::ffi::OsString>, user_id: libc::uid_t) -> PathBuf {
+    runtime.map_or_else(
+        || std::env::temp_dir().join(format!("seismograph-{user_id}")),
+        |runtime| PathBuf::from(runtime).join("seismograph"),
+    )
 }
 
 #[cfg(not(any(target_os = "windows", unix)))]
+#[cfg_attr(coverage_nightly, coverage(off))] // This fallback cannot be built on the Tier 1 platforms used for coverage.
 #[expect(
     clippy::unnecessary_wraps,
     reason = "The platform implementations share a fallible interface because Windows can lack a runtime directory"
@@ -275,7 +281,22 @@ mod tests {
         let directory = monitor_directory().unwrap();
         #[cfg(target_os = "windows")]
         assert_eq!(directory.file_name().unwrap(), "monitor");
-        #[cfg(not(target_os = "windows"))]
-        assert_eq!(directory.file_name().unwrap(), "seismograph");
+        #[cfg(unix)]
+        assert!(directory.file_name().unwrap().to_string_lossy().starts_with("seismograph"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn unix_monitor_directory_uses_runtime_directory_or_user_fallback() {
+        assert_eq!(
+            (
+                unix_monitor_directory(Some("/run/user/example".into()), 42),
+                unix_monitor_directory(None, 42),
+            ),
+            (
+                PathBuf::from("/run/user/example/seismograph"),
+                std::env::temp_dir().join("seismograph-42"),
+            )
+        );
     }
 }

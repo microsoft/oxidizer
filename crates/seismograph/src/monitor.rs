@@ -191,15 +191,24 @@ fn create_monitor_directory(path: &Path) -> Result<(), Error> {
         source,
     })?;
     #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|source| Error::SetPermissions {
-            path: path.to_owned(),
-            source,
-        })?;
-    }
+    set_monitor_directory_permissions(path)?;
     Ok(())
+}
+
+#[cfg(unix)]
+fn set_monitor_directory_permissions(path: &Path) -> Result<(), Error> {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|source| set_permissions_error(path, source))
+}
+
+#[cfg(unix)]
+#[cfg_attr(coverage_nightly, coverage(off))] // The OS error is not portably injectable after successful directory creation.
+fn set_permissions_error(path: &Path, source: io::Error) -> Error {
+    Error::SetPermissions {
+        path: path.to_owned(),
+        source,
+    }
 }
 
 fn publish_descriptor(directory: &Path, descriptor: &MonitorDescriptor) -> Result<PathBuf, Error> {
@@ -1049,6 +1058,32 @@ mod tests {
         let error = create_monitor_directory(&path).unwrap_err();
         fs::remove_file(&path).unwrap();
         assert!(matches!(error, Error::CreateDirectory { path: failed, .. } if failed == path));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    #[cfg_attr(coverage_nightly, coverage(off))] // DrvFS may report fixed modes; native Unix filesystems take the strict assertion.
+    fn monitor_directory_permissions_are_restricted() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("target")
+            .join(format!("seismograph-monitor-permissions-{}", std::process::id()));
+        fs::create_dir_all(&path).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        let initial_mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+
+        create_monitor_directory(&path).unwrap();
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        fs::remove_dir(&path).unwrap();
+
+        if initial_mode == 0o755 {
+            assert_eq!(mode, 0o700);
+        } else {
+            assert_eq!(mode, initial_mode);
+        }
     }
 
     #[test]

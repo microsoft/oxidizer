@@ -230,4 +230,14 @@ mod tests {
 
         assert!(!queue.has_waiters.load(Ordering::Acquire));
     }
+
+    #[test]
+    fn wake_one_tolerates_a_stale_waiter_hint() {
+        let queue = WaitQueue::new();
+        queue.has_waiters.store(true, Ordering::Release);
+
+        queue.wake_one();
+
+        assert!(!queue.has_waiters.load(Ordering::Acquire));
+    }
 }

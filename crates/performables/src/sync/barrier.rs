@@ -135,6 +135,12 @@ impl Future for BarrierWait<'_> {
             return Poll::Ready(BarrierWaitResult { leader: false });
         }
 
+        self.poll_registered(cx, generation)
+    }
+}
+
+impl BarrierWait<'_> {
+    fn poll_registered(&mut self, cx: &Context<'_>, generation: u32) -> Poll<BarrierWaitResult> {
         let barrier = self.barrier;
         let waiter = Arc::clone(self.waiter.get_or_insert_with(|| Arc::new(Waiter::new())));
         waiter.register(cx.waker());
@@ -173,5 +179,21 @@ impl BarrierWaitResult {
     #[must_use]
     pub const fn is_leader(self) -> bool {
         self.leader
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::task::Waker;
+
+    use super::*;
+
+    #[test]
+    fn generation_change_during_waiter_registration_completes_wait() {
+        let barrier = Barrier::new(2);
+        let mut wait = barrier.wait();
+        let context = Context::from_waker(Waker::noop());
+
+        assert_eq!(wait.poll_registered(&context, 1), Poll::Ready(BarrierWaitResult { leader: false }));
     }
 }

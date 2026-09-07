@@ -21,7 +21,6 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/seismograph
 allowed_external_types = ["seismograph::*"]
 
 [dependencies]
-backtrace = { workspace = true, features = ["std"] }
 seismograph.workspace = true
 
 # >>> anvil-managed: anvil-lints

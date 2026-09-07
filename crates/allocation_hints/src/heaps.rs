@@ -365,3 +365,67 @@ pub fn current_thread_id() -> ThreadId {
 pub fn thread_heap_request() -> Option<ThreadId> {
     crate::allocator_hints().thread_heap()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn general_options_round_trip() {
+        let options = general::Options::default()
+            .with_locality_segment_bytes(128 * 1024)
+            .with_medium_cache_max_bytes(256 * 1024);
+
+        assert_eq!(
+            (options.locality_segment_bytes(), options.medium_cache_max_bytes()),
+            (128 * 1024, 256 * 1024)
+        );
+    }
+
+    #[test]
+    fn bump_options_round_trip() {
+        let options = bump::Options::default()
+            .with_max_allocation_bytes(1024)
+            .with_max_alignment(128)
+            .with_retained_chunks(2)
+            .with_max_retained_chunks(8);
+
+        assert_eq!(
+            (
+                options.max_allocation_bytes(),
+                options.max_alignment(),
+                options.retained_chunks(),
+                options.max_retained_chunks(),
+            ),
+            (1024, 128, 2, 8)
+        );
+    }
+
+    #[test]
+    fn heap_accessors_and_debug_report_descriptor() {
+        let options = general::Options::new();
+        let heap = Heap::general(options);
+        let active = ActiveHint::new(heap.id(), heap.kind());
+
+        assert_eq!(
+            (heap.id().get(), heap.kind(), active.id(), active.kind(), format!("{heap:?}")),
+            (
+                active.id().get(),
+                Kind::General(options),
+                heap.id(),
+                Kind::General(options),
+                format!("Heap {{ id: {:?}, kind: General({options:?}) }}", heap.id()),
+            )
+        );
+    }
+
+    #[test]
+    fn default_heap_is_general_purpose() {
+        assert!(matches!(Heap::default().kind(), Kind::General(_)));
+    }
+
+    #[test]
+    fn thread_identity_is_nonzero() {
+        assert_ne!(current_thread_id().get(), 0);
+    }
+}

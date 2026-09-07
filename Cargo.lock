@@ -74,7 +74,6 @@ dependencies = [
 name = "allocation_hints"
 version = "0.1.0"
 dependencies = [
- "performables",
  "pin-project-lite",
 ]
 
@@ -5066,7 +5065,6 @@ dependencies = [
 name = "seismograph_rallocator"
 version = "0.1.0"
 dependencies = [
- "backtrace",
  "seismograph",
 ]
 

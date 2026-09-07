@@ -730,7 +730,6 @@ pub struct Record {
     pub(super) kind: EventKind,
     pub(super) payload: EventPayload,
     pub(super) backtrace: BacktraceCapture,
-    pub(super) sample_object: bool,
 }
 
 impl Record {
@@ -742,7 +741,6 @@ impl Record {
             kind,
             payload: EventPayload::Object(object_id),
             backtrace: BacktraceCapture::Configured,
-            sample_object: true,
         }
     }
 
@@ -757,7 +755,6 @@ impl Record {
                 value: measurement,
             }),
             backtrace: BacktraceCapture::Configured,
-            sample_object: true,
         }
     }
 
@@ -781,7 +778,6 @@ impl Record {
             kind,
             payload: EventPayload::Runtime(runtime),
             backtrace,
-            sample_object: true,
         }
     }
 
@@ -794,7 +790,6 @@ impl Record {
             kind,
             payload: EventPayload::Io(io),
             backtrace: BacktraceCapture::Configured,
-            sample_object: true,
         }
     }
 
@@ -804,7 +799,6 @@ impl Record {
             kind,
             payload: EventPayload::Allocation(allocation),
             backtrace: BacktraceCapture::Configured,
-            sample_object: true,
         }
     }
 
@@ -812,16 +806,13 @@ impl Record {
         self.kind.class()
     }
 
-    pub(super) const fn sampling_object_id(self) -> Option<ObjectId> {
-        if !self.sample_object {
-            return None;
-        }
+    pub(super) const fn sampling_object_id(self) -> ObjectId {
         match self.payload {
-            EventPayload::Object(object_id) => Some(object_id),
-            EventPayload::Numeric(payload) => Some(payload.object_id),
-            EventPayload::Allocation(allocation) => Some(ObjectId::new(AllocationId::get(allocation.allocation_id))),
-            EventPayload::Runtime(runtime) => Some(ObjectId::new(runtime.subject_id)),
-            EventPayload::Io(io) => Some(ObjectId::new(io.resource_id.get())),
+            EventPayload::Object(object_id) => object_id,
+            EventPayload::Numeric(payload) => payload.object_id,
+            EventPayload::Allocation(allocation) => ObjectId::new(AllocationId::get(allocation.allocation_id)),
+            EventPayload::Runtime(runtime) => ObjectId::new(runtime.subject_id),
+            EventPayload::Io(io) => ObjectId::new(io.resource_id.get()),
         }
     }
 }
@@ -855,9 +846,48 @@ mod tests {
 
     #[test]
     fn clocks_report_metadata_and_reject_unknown_values() {
-        assert_eq!(EventClock::Unspecified.ticks_per_second(), None);
-        assert_eq!(EventClock::Unspecified.wire_value(), 0);
-        assert_eq!(EventClock::from_wire_value(2), None);
+        assert_eq!(
+            (
+                EventClock::Unspecified.ticks_per_second(),
+                EventClock::Unspecified.wire_value(),
+                EventClock::ProcessMonotonic.ticks_per_second(),
+                EventClock::ProcessMonotonic.wire_value(),
+                EventClock::from_wire_value(0),
+                EventClock::from_wire_value(2),
+                EventTimestamp::from_ticks(9).duration_since(EventTimestamp::from_ticks(4)),
+            ),
+            (
+                None,
+                0,
+                Some(1_000_000_000),
+                1,
+                Some(EventClock::Unspecified),
+                None,
+                Duration::from_nanos(5)
+            )
+        );
+    }
+
+    #[test]
+    fn representative_event_kinds_report_each_class() {
+        assert_eq!(
+            [
+                EventKind::Allocation.class(),
+                EventKind::ArcDeref.class(),
+                EventKind::TaskSpawned.class(),
+                EventKind::IoReadStarted.class(),
+                EventKind::CacheExpired.class(),
+                EventKind::MutexAccess.class(),
+            ],
+            [
+                EventClass::Allocation,
+                EventClass::ArcDereference,
+                EventClass::RuntimeTask,
+                EventClass::Io,
+                EventClass::Cache,
+                EventClass::General,
+            ]
+        );
     }
 
     #[test]
@@ -963,12 +993,12 @@ mod tests {
                 runtime.sampling_object_id(),
             ),
             (
-                Some(ObjectId::new(1)),
+                ObjectId::new(1),
                 EventKind::Allocation,
-                Some(ObjectId::new(11)),
+                ObjectId::new(11),
                 EventKind::Deallocation,
-                Some(ObjectId::new(11)),
-                Some(ObjectId::new(7)),
+                ObjectId::new(11),
+                ObjectId::new(7),
             )
         );
     }

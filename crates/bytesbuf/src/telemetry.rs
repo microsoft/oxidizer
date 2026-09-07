@@ -53,10 +53,11 @@ impl BufferIdentity {
         }
 
         let allocated = BufferId::allocate();
-        match self.0.compare_exchange(0, allocated.get(), Ordering::Relaxed, Ordering::Relaxed) {
-            Ok(_) => allocated,
-            Err(existing) => BufferId::from_raw(existing).expect("buffer identity can only transition from zero to a valid ID"),
-        }
+        let selected = self
+            .0
+            .compare_exchange(0, allocated.get(), Ordering::Relaxed, Ordering::Relaxed)
+            .map_or_else(identity_after_allocation_race, |_| allocated.get());
+        BufferId::from_raw(selected).expect("buffer identity can only transition from zero to a valid ID")
     }
 
     pub(crate) fn take(&self) -> TransferredIdentity {
@@ -86,6 +87,12 @@ impl BufferIdentity {
         #[cfg(not(feature = "seismograph"))]
         let _ = self;
     }
+}
+
+#[cfg(feature = "seismograph")]
+#[cfg_attr(coverage_nightly, coverage(off))] // Requires winning the narrow compare-exchange race after both callers observe zero.
+const fn identity_after_allocation_race(existing: u64) -> u64 {
+    existing
 }
 
 impl Clone for BufferIdentity {

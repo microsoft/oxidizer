@@ -2345,6 +2345,7 @@ mod tests {
     #[test]
     fn recording_configuration_messages_update_the_connected_instance() {
         let mut app = connected_app(MonitorTab::Info);
+        app.poll_recording_configuration();
         let mut configuration = RecordingConfiguration::default();
         configuration.io.enabled = true;
         let (sender, receiver) = unbounded();
@@ -2362,6 +2363,12 @@ mod tests {
             connected_fields(&app.screen).map(|(_, recording, _, _)| recording.io.enabled),
             Some(true)
         );
+
+        let (sender, receiver) = unbounded();
+        sender.send_sync(Err("configuration failed".into())).unwrap();
+        app.recording_receiver = Some(receiver);
+        app.poll_recording_configuration();
+        assert_eq!(app.status, "configuration failed");
     }
 
     #[test]
@@ -2477,6 +2484,13 @@ mod tests {
     fn io_and_cache_keys_move_between_summary_and_operation_views() {
         let mut io = IoViewState::new();
         let mut cache = CacheViewState::new();
+        io.resource_selected = 2;
+        cache.tier_selected = 2;
+        assert!(handle_io_key(KeyCode::Up, &mut io, None));
+        assert!(handle_cache_key(KeyCode::Up, &mut cache, None));
+        assert_eq!((io.resource_selected, cache.tier_selected), (1, 1));
+        io = IoViewState::new();
+        cache = CacheViewState::new();
         for key in [KeyCode::Down, KeyCode::Enter, KeyCode::Down, KeyCode::Up, KeyCode::Backspace] {
             assert!(handle_io_key(key, &mut io, None));
             assert!(handle_cache_key(key, &mut cache, None));

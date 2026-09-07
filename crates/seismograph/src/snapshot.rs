@@ -1226,6 +1226,7 @@ mod tests {
     fn snapshot_round_trips_events_and_sources() {
         let _test = recorder::TEST_LOCK.lock().unwrap();
         register_source(&TEST_SOURCE);
+        register_source(&TEST_SOURCE);
         recorder::configure(recorder::Configuration {
             arc_dereferences: recorder::RecordingPolicy {
                 enabled: true,
@@ -1311,7 +1312,7 @@ mod tests {
             kind: EventKind::TaskPollFinished,
             payload: EventPayload::Runtime(RuntimeEvent {
                 runtime_id: RuntimeId::from_raw(1).unwrap(),
-                worker_id: Some(WorkerId::from_raw(2).unwrap()),
+                worker_id: None,
                 subject_id: 3,
                 related_id: 4,
                 value_0: 5,
@@ -1541,7 +1542,7 @@ mod tests {
                 payload: EventPayload::Io(IoEvent {
                     operation_id: IoOperationId::from_raw(1).unwrap(),
                     resource_id: IoResourceId::from_raw(2).unwrap(),
-                    buffer_id: Some(BufferId::from_raw(3).unwrap()),
+                    buffer_id: None,
                     requested_bytes: 4,
                     completed_bytes: 5,
                     buffer_len: 6,
@@ -1563,6 +1564,37 @@ mod tests {
         };
         let encoded = encode_snapshot(&decoded).unwrap();
         assert_eq!(decode(encoded.as_bytes()).unwrap(), decoded);
+    }
+
+    #[test]
+    fn optional_runtime_and_io_identities_encode_and_decode() {
+        let runtime = EventPayload::Runtime(RuntimeEvent {
+            runtime_id: RuntimeId::from_raw(1).unwrap(),
+            worker_id: Some(WorkerId::from_raw(2).unwrap()),
+            subject_id: 3,
+            related_id: 4,
+            value_0: 5,
+            value_1: 6,
+        });
+        let io = EventPayload::Io(IoEvent {
+            operation_id: IoOperationId::from_raw(7).unwrap(),
+            resource_id: IoResourceId::from_raw(8).unwrap(),
+            buffer_id: Some(BufferId::from_raw(9).unwrap()),
+            requested_bytes: 10,
+            completed_bytes: 11,
+            buffer_len: 12,
+            buffer_span_count: 13,
+            resource_kind: IoResourceKind::File,
+            outcome: IoOutcome::Pending,
+        });
+
+        assert_eq!(
+            (
+                decode_payload(4, encode_payload(runtime)).unwrap(),
+                decode_payload(5, encode_payload(io)).unwrap(),
+            ),
+            (runtime, io)
+        );
     }
 
     #[test]
@@ -1652,6 +1684,9 @@ mod tests {
             assert!(decode_payload(tag, fields).is_err());
         }
         assert!(decode_heap_kind(0).is_err());
+
+        let invalid_clock_metadata = [1, 0, 1, 0, 0, 202, 154, 59, 0, 0, 0, 0];
+        assert!(decode_clock(&mut Reader::new(&invalid_clock_metadata), FORMAT_VERSION).is_err());
     }
 
     #[test]

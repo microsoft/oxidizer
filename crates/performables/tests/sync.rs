@@ -429,6 +429,10 @@ fn cancelled_rw_lock_waiters_leave_the_lock_available() {
     let waker = waker(&counter);
     let mut context = Context::from_waker(&waker);
     {
+        let mut read = pin!(lock.read());
+        assert!(read.as_mut().poll(&mut context).is_pending());
+    }
+    {
         let mut read = pin!(lock.read_result());
         assert!(read.as_mut().poll(&mut context).is_pending());
     }

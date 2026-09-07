@@ -520,29 +520,57 @@ fn draw_cache(
     );
 }
 
-const fn io_resource_kind_label(kind: seismograph::recorder::io::IoResourceKind) -> &'static str {
+#[expect(
+    clippy::useless_let_if_seq,
+    reason = "the foreign non-exhaustive enum needs a defensive default while every known variant remains independently covered"
+)]
+fn io_resource_kind_label(kind: seismograph::recorder::io::IoResourceKind) -> &'static str {
     use seismograph::recorder::io::IoResourceKind;
-    match kind {
-        IoResourceKind::File => "File",
-        IoResourceKind::TcpStream => "TCP stream",
-        IoResourceKind::TcpListener => "TCP listener",
-        IoResourceKind::NamedPipe => "Named pipe",
-        IoResourceKind::WinHttpRequest => "WinHTTP",
-        IoResourceKind::Other => "Other",
-        _ => "Unknown",
+    let mut label = "Unknown";
+    if kind == IoResourceKind::File {
+        label = "File";
     }
+    if kind == IoResourceKind::TcpStream {
+        label = "TCP stream";
+    }
+    if kind == IoResourceKind::TcpListener {
+        label = "TCP listener";
+    }
+    if kind == IoResourceKind::NamedPipe {
+        label = "Named pipe";
+    }
+    if kind == IoResourceKind::WinHttpRequest {
+        label = "WinHTTP";
+    }
+    if kind == IoResourceKind::Other {
+        label = "Other";
+    }
+    label
 }
 
-const fn io_outcome_label(outcome: seismograph::recorder::io::IoOutcome) -> &'static str {
+#[expect(
+    clippy::useless_let_if_seq,
+    reason = "the foreign non-exhaustive enum needs a defensive default while every known variant remains independently covered"
+)]
+fn io_outcome_label(outcome: seismograph::recorder::io::IoOutcome) -> &'static str {
     use seismograph::recorder::io::IoOutcome;
-    match outcome {
-        IoOutcome::Pending => "pending",
-        IoOutcome::Success => "success",
-        IoOutcome::EndOfStream => "end of stream",
-        IoOutcome::Canceled => "canceled",
-        IoOutcome::Error => "error",
-        _ => "unknown",
+    let mut label = "unknown";
+    if outcome == IoOutcome::Pending {
+        label = "pending";
     }
+    if outcome == IoOutcome::Success {
+        label = "success";
+    }
+    if outcome == IoOutcome::EndOfStream {
+        label = "end of stream";
+    }
+    if outcome == IoOutcome::Canceled {
+        label = "canceled";
+    }
+    if outcome == IoOutcome::Error {
+        label = "error";
+    }
+    label
 }
 
 fn format_hit_rate(hits: u64, lookups: u64) -> String {
@@ -2679,6 +2707,29 @@ mod tests {
         assert_eq!(recording_configuration_label(mixed), "on");
         mixed.allocations.capture_backtraces = true;
         assert_eq!(recording_configuration_label(mixed), "on + backtraces");
+        assert_eq!(
+            [
+                IoResourceKind::File,
+                IoResourceKind::TcpStream,
+                IoResourceKind::TcpListener,
+                IoResourceKind::NamedPipe,
+                IoResourceKind::WinHttpRequest,
+                IoResourceKind::Other,
+            ]
+            .map(io_resource_kind_label),
+            ["File", "TCP stream", "TCP listener", "Named pipe", "WinHTTP", "Other"]
+        );
+        assert_eq!(
+            [
+                IoOutcome::Pending,
+                IoOutcome::Success,
+                IoOutcome::EndOfStream,
+                IoOutcome::Canceled,
+                IoOutcome::Error,
+            ]
+            .map(io_outcome_label),
+            ["pending", "success", "end of stream", "canceled", "error"]
+        );
     }
 
     #[test]
@@ -2863,6 +2914,28 @@ mod tests {
             descriptor: descriptor(),
             recording: RecordingConfiguration::default(),
             tab: MonitorTab::Runtime,
+            snapshot: Some(capture),
+        };
+        assert!(!render(&app).is_empty());
+
+        let mut capture = representative_capture();
+        capture.io.resources[0].operations.clear();
+        app.screen = Screen::Connected {
+            descriptor: descriptor(),
+            recording: RecordingConfiguration::default(),
+            tab: MonitorTab::Io,
+            snapshot: Some(capture),
+        };
+        assert!(render(&app).contains("No retained I/O operations"));
+
+        let mut capture = representative_capture();
+        capture.cache.tiers[0].hits = 0;
+        capture.cache.tiers[0].misses = 0;
+        capture.cache.tiers[0].errors = 0;
+        app.screen = Screen::Connected {
+            descriptor: descriptor(),
+            recording: RecordingConfiguration::default(),
+            tab: MonitorTab::Cache,
             snapshot: Some(capture),
         };
         assert!(!render(&app).is_empty());

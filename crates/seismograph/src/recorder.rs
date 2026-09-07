@@ -432,10 +432,7 @@ pub(crate) fn record_session(class: EventClass, event: impl FnOnce() -> Record) 
     if record.class() != class {
         return None;
     }
-    if record
-        .sampling_object_id()
-        .is_some_and(|object_id| !decode_sampling(policy).includes(object_id))
-    {
+    if !decode_sampling(policy).includes(record.sampling_object_id()) {
         return None;
     }
     let capacity = EVENT_CAPACITY.load(Ordering::Relaxed);
@@ -460,10 +457,7 @@ pub(crate) fn record_in_session_classified(session: RecordingSession, class: Eve
     if record.class() != class {
         return false;
     }
-    if record
-        .sampling_object_id()
-        .is_some_and(|object_id| !decode_sampling(policy).includes(object_id))
-    {
+    if !decode_sampling(policy).includes(record.sampling_object_id()) {
         return false;
     }
     let capacity = EVENT_CAPACITY.load(Ordering::Relaxed);
@@ -1208,6 +1202,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(coverage_nightly, coverage(off))] // The closures are deliberately asserted not to execute.
     fn disabled_recording_does_not_construct_events() {
         let _test = TEST_LOCK.lock().unwrap();
         let constructed = AtomicUsize::new(0);
@@ -1669,16 +1664,19 @@ mod tests {
             general_events: RecordingPolicy::all(false),
             ..Default::default()
         });
+        assert!(recording_enabled());
         assert!(recording_enabled_for(EventClass::General));
         let session = select_object(ObjectId::new(1)).unwrap();
         {
             let _suppression = SuppressionGuard::enter();
+            assert!(!recording_enabled());
             assert!(!recording_enabled_for(EventClass::General));
             assert_eq!(select_object(ObjectId::new(1)), None);
             let event = Record::object(EventKind::MutexAccess, ObjectId::new(1));
             assert!(!record_in_session(session, || event));
         }
         configure(Configuration::default());
+        assert!(!recording_enabled());
         assert_eq!(select_object(ObjectId::new(1)), None);
         let event = Record::object(EventKind::MutexAccess, ObjectId::new(1));
         assert!(!record_in_session(session, || event));
@@ -1726,6 +1724,13 @@ mod tests {
     #[test]
     fn backtrace_and_empty_recorder_paths_are_explicit() {
         let _test = TEST_LOCK.lock().unwrap();
+        configure(Configuration::default());
+        assert_eq!(capture_backtrace(BacktraceCapture::Configured), Vec::new());
+        configure(Configuration {
+            runtime_tasks: RecordingPolicy::all(false),
+            ..Default::default()
+        });
+        assert_eq!(capture_backtrace(BacktraceCapture::Configured), Vec::new());
         configure(Configuration {
             runtime_tasks: RecordingPolicy::all(true),
             ..Default::default()
@@ -1749,6 +1754,19 @@ mod tests {
 
         let local = LocalRecorder::new();
         drop(local);
+        configure(Configuration::default());
+    }
+
+    #[test]
+    fn cache_policy_participates_in_global_enablement() {
+        let _test = TEST_LOCK.lock().unwrap();
+        configure(Configuration::default());
+        configure(Configuration {
+            cache: RecordingPolicy::all(false),
+            ..Default::default()
+        });
+
+        assert_eq!((recording_enabled(), recording_enabled_for(EventClass::Cache)), (true, true));
         configure(Configuration::default());
     }
 

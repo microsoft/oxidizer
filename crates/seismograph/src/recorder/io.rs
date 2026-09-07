@@ -175,3 +175,43 @@ pub struct IoEvent {
     /// Current operation outcome.
     pub outcome: IoOutcome,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resource_kinds_round_trip_wire_values() {
+        let kinds = [
+            IoResourceKind::File,
+            IoResourceKind::TcpStream,
+            IoResourceKind::TcpListener,
+            IoResourceKind::NamedPipe,
+            IoResourceKind::WinHttpRequest,
+            IoResourceKind::Other,
+        ];
+
+        assert_eq!(
+            kinds.map(|kind| IoResourceKind::from_wire_value(kind.wire_value())),
+            kinds.map(Some)
+        );
+        assert_eq!(IoResourceKind::from_wire_value(0), None);
+    }
+
+    #[test]
+    fn outcomes_round_trip_wire_values() {
+        let outcomes = [
+            IoOutcome::Pending,
+            IoOutcome::Success,
+            IoOutcome::EndOfStream,
+            IoOutcome::Canceled,
+            IoOutcome::Error,
+        ];
+
+        assert_eq!(
+            outcomes.map(|outcome| IoOutcome::from_wire_value(outcome.wire_value())),
+            outcomes.map(Some)
+        );
+        assert_eq!(IoOutcome::from_wire_value(0), None);
+    }
+}

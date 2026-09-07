@@ -404,6 +404,12 @@ impl<'a, T: ?Sized> Future for RwLockReadResult<'a, T> {
             self.lock.record(EventKind::RwLockReadContention);
             self.contention_recorded = true;
         }
+        self.poll_registered(cx)
+    }
+}
+
+impl<'a, T: ?Sized> RwLockReadResult<'a, T> {
+    fn poll_registered(&mut self, cx: &Context<'_>) -> Poll<Result<RwLockReadGuard<'a, T>, PoisonError<RwLockReadGuard<'a, T>>>> {
         let lock = self.lock;
         let waiter = Arc::clone(self.waiter.get_or_insert_with(|| Arc::new(Waiter::new())));
         waiter.register(cx.waker());
@@ -480,6 +486,12 @@ impl<'a, T: ?Sized> Future for RwLockWriteResult<'a, T> {
             self.lock.record(EventKind::RwLockWriteContention);
             self.contention_recorded = true;
         }
+        self.poll_registered(cx)
+    }
+}
+
+impl<'a, T: ?Sized> RwLockWriteResult<'a, T> {
+    fn poll_registered(&mut self, cx: &Context<'_>) -> Poll<Result<RwLockWriteGuard<'a, T>, PoisonError<RwLockWriteGuard<'a, T>>>> {
         let lock = self.lock;
         let waiter = Arc::clone(self.waiter.get_or_insert_with(|| Arc::new(Waiter::new())));
         waiter.register(cx.waker());
@@ -585,5 +597,32 @@ impl<T: ?Sized + fmt::Debug> fmt::Debug for RwLockWriteGuard<'_, T> {
 impl<T: ?Sized + fmt::Display> fmt::Display for RwLockWriteGuard<'_, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&**self, f)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::task::Waker;
+
+    use super::*;
+
+    #[test]
+    fn writer_acquires_state_with_registered_waiters() {
+        let lock = RwLock::new(());
+        lock.state.store(WAITERS, Ordering::Relaxed);
+
+        assert!(lock.try_acquire_write());
+        lock.state.store(0, Ordering::Relaxed);
+    }
+
+    #[test]
+    fn lock_release_during_waiter_registration_completes_acquisition() {
+        let lock = RwLock::new(());
+        let context = Context::from_waker(Waker::noop());
+        let mut read = lock.read_result();
+        assert!(matches!(read.poll_registered(&context), Poll::Ready(Ok(_))));
+
+        let mut write = lock.write_result();
+        assert!(matches!(write.poll_registered(&context), Poll::Ready(Ok(_))));
     }
 }

@@ -1551,24 +1551,23 @@ fn decode_runtime_payload(tag: u8, fields: [u64; 8]) -> Result<RuntimeEventPaylo
                 value_1: fields[5],
             }))
         }
-        5 if fields[5] == 0 && fields[7] >> 48 == 0 => Ok(RuntimeEventPayload::Io(RuntimeIoEvent {
-            operation_id: RuntimeIoOperationId::from_raw(fields[0]).ok_or_else(|| Error::malformed_section(SECTION_RUNTIME_EVENTS))?,
-            resource_id: RuntimeIoResourceId::from_raw(fields[1]).ok_or_else(|| Error::malformed_section(SECTION_RUNTIME_EVENTS))?,
-            buffer_id: match fields[2] {
-                0 => None,
-                value => Some(RuntimeBufferId::from_raw(value).ok_or_else(|| Error::malformed_section(SECTION_RUNTIME_EVENTS))?),
-            },
-            requested_bytes: fields[3],
-            completed_bytes: fields[4],
-            buffer_len: fields[6],
-            buffer_span_count: u32::try_from(fields[7] & u64::from(u32::MAX)).map_err(|_error| Error::INTEGER_OVERFLOW)?,
-            resource_kind: decode_runtime_io_resource_kind(
-                u8::try_from((fields[7] >> 32) & u64::from(u8::MAX)).map_err(|_error| Error::INTEGER_OVERFLOW)?,
-            )?,
-            outcome: decode_runtime_io_outcome(
-                u8::try_from((fields[7] >> 40) & u64::from(u8::MAX)).map_err(|_error| Error::INTEGER_OVERFLOW)?,
-            )?,
-        })),
+        5 if fields[5] == 0 && fields[7] >> 48 == 0 => {
+            let metadata = fields[7].to_le_bytes();
+            Ok(RuntimeEventPayload::Io(RuntimeIoEvent {
+                operation_id: RuntimeIoOperationId::from_raw(fields[0]).ok_or_else(|| Error::malformed_section(SECTION_RUNTIME_EVENTS))?,
+                resource_id: RuntimeIoResourceId::from_raw(fields[1]).ok_or_else(|| Error::malformed_section(SECTION_RUNTIME_EVENTS))?,
+                buffer_id: match fields[2] {
+                    0 => None,
+                    value => Some(RuntimeBufferId::from_raw(value).ok_or_else(|| Error::malformed_section(SECTION_RUNTIME_EVENTS))?),
+                },
+                requested_bytes: fields[3],
+                completed_bytes: fields[4],
+                buffer_len: fields[6],
+                buffer_span_count: u32::from_le_bytes([metadata[0], metadata[1], metadata[2], metadata[3]]),
+                resource_kind: decode_runtime_io_resource_kind(metadata[4])?,
+                outcome: decode_runtime_io_outcome(metadata[5])?,
+            }))
+        }
         _ => Err(Error::malformed_section(SECTION_RUNTIME_EVENTS)),
     }
 }
@@ -1593,16 +1592,31 @@ fn validate_runtime_payload(kind: seismograph::recorder::event::EventKind, paylo
     }
 }
 
+#[expect(
+    clippy::useless_let_if_seq,
+    reason = "the foreign non-exhaustive enum needs a defensive default while every known variant remains independently covered"
+)]
 fn encode_runtime_io_resource_kind(kind: RuntimeIoResourceKind) -> Result<u8, Error> {
-    match kind {
-        RuntimeIoResourceKind::File => Ok(1),
-        RuntimeIoResourceKind::TcpStream => Ok(2),
-        RuntimeIoResourceKind::TcpListener => Ok(3),
-        RuntimeIoResourceKind::NamedPipe => Ok(4),
-        RuntimeIoResourceKind::WinHttpRequest => Ok(5),
-        RuntimeIoResourceKind::Other => Ok(6),
-        _ => Err(Error::malformed_section(SECTION_RUNTIME_EVENTS)),
+    let mut encoded = Err(Error::malformed_section(SECTION_RUNTIME_EVENTS));
+    if kind == RuntimeIoResourceKind::File {
+        encoded = Ok(1);
     }
+    if kind == RuntimeIoResourceKind::TcpStream {
+        encoded = Ok(2);
+    }
+    if kind == RuntimeIoResourceKind::TcpListener {
+        encoded = Ok(3);
+    }
+    if kind == RuntimeIoResourceKind::NamedPipe {
+        encoded = Ok(4);
+    }
+    if kind == RuntimeIoResourceKind::WinHttpRequest {
+        encoded = Ok(5);
+    }
+    if kind == RuntimeIoResourceKind::Other {
+        encoded = Ok(6);
+    }
+    encoded
 }
 
 fn decode_runtime_io_resource_kind(value: u8) -> Result<RuntimeIoResourceKind, Error> {
@@ -1617,15 +1631,28 @@ fn decode_runtime_io_resource_kind(value: u8) -> Result<RuntimeIoResourceKind, E
     }
 }
 
+#[expect(
+    clippy::useless_let_if_seq,
+    reason = "the foreign non-exhaustive enum needs a defensive default while every known variant remains independently covered"
+)]
 fn encode_runtime_io_outcome(outcome: RuntimeIoOutcome) -> Result<u8, Error> {
-    match outcome {
-        RuntimeIoOutcome::Pending => Ok(1),
-        RuntimeIoOutcome::Success => Ok(2),
-        RuntimeIoOutcome::EndOfStream => Ok(3),
-        RuntimeIoOutcome::Canceled => Ok(4),
-        RuntimeIoOutcome::Error => Ok(5),
-        _ => Err(Error::malformed_section(SECTION_RUNTIME_EVENTS)),
+    let mut encoded = Err(Error::malformed_section(SECTION_RUNTIME_EVENTS));
+    if outcome == RuntimeIoOutcome::Pending {
+        encoded = Ok(1);
     }
+    if outcome == RuntimeIoOutcome::Success {
+        encoded = Ok(2);
+    }
+    if outcome == RuntimeIoOutcome::EndOfStream {
+        encoded = Ok(3);
+    }
+    if outcome == RuntimeIoOutcome::Canceled {
+        encoded = Ok(4);
+    }
+    if outcome == RuntimeIoOutcome::Error {
+        encoded = Ok(5);
+    }
+    encoded
 }
 
 fn decode_runtime_io_outcome(value: u8) -> Result<RuntimeIoOutcome, Error> {
@@ -2014,6 +2041,61 @@ mod tests {
     }
 
     #[test]
+    fn runtime_io_enums_and_absent_buffer_round_trip_wire_values() {
+        let resource_kinds = [
+            RuntimeIoResourceKind::File,
+            RuntimeIoResourceKind::TcpStream,
+            RuntimeIoResourceKind::TcpListener,
+            RuntimeIoResourceKind::NamedPipe,
+            RuntimeIoResourceKind::WinHttpRequest,
+            RuntimeIoResourceKind::Other,
+        ];
+        let outcomes = [
+            RuntimeIoOutcome::Pending,
+            RuntimeIoOutcome::Success,
+            RuntimeIoOutcome::EndOfStream,
+            RuntimeIoOutcome::Canceled,
+            RuntimeIoOutcome::Error,
+        ];
+        assert_eq!(
+            resource_kinds.map(|kind| {
+                let value = encode_runtime_io_resource_kind(kind).unwrap();
+                decode_runtime_io_resource_kind(value).unwrap()
+            }),
+            resource_kinds
+        );
+        assert_eq!(
+            outcomes.map(|outcome| {
+                let value = encode_runtime_io_outcome(outcome).unwrap();
+                decode_runtime_io_outcome(value).unwrap()
+            }),
+            outcomes
+        );
+        assert!(decode_runtime_io_resource_kind(0).is_err());
+        assert!(decode_runtime_io_outcome(0).is_err());
+
+        let mut fields = [0; 8];
+        fields[0] = 1;
+        fields[1] = 2;
+        fields[7] = u64::from(encode_runtime_io_resource_kind(RuntimeIoResourceKind::File).unwrap()) << 32
+            | u64::from(encode_runtime_io_outcome(RuntimeIoOutcome::Pending).unwrap()) << 40;
+        assert_eq!(
+            decode_runtime_payload(5, fields).unwrap(),
+            RuntimeEventPayload::Io(RuntimeIoEvent {
+                operation_id: RuntimeIoOperationId::from_raw(1).unwrap(),
+                resource_id: RuntimeIoResourceId::from_raw(2).unwrap(),
+                buffer_id: None,
+                requested_bytes: 0,
+                completed_bytes: 0,
+                buffer_len: 0,
+                buffer_span_count: 0,
+                resource_kind: RuntimeIoResourceKind::File,
+                outcome: RuntimeIoOutcome::Pending,
+            })
+        );
+    }
+
+    #[test]
     fn legacy_runtime_events_decode_sampling_threads_and_events() {
         let mut payload = vec![1];
         payload.extend_from_slice(&3_u64.to_le_bytes());
@@ -2103,6 +2185,12 @@ mod tests {
                 if section_version >= RUNTIME_EVENTS_RUNTIME_POLICY_VERSION {
                     bytes.extend_from_slice(&policy(true, 8));
                 }
+                if section_version >= RUNTIME_EVENTS_IO_VERSION {
+                    bytes.extend_from_slice(&policy(false, 16));
+                }
+                if section_version >= RUNTIME_EVENTS_CACHE_VERSION {
+                    bytes.extend_from_slice(&policy(false, 32));
+                }
             }
             bytes.extend_from_slice(&RuntimeEventClock::ProcessMonotonic.wire_value().to_le_bytes());
             bytes.extend_from_slice(&0_u16.to_le_bytes());
@@ -2117,9 +2205,11 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(decoded.recording.runtime_tasks, decoded.recording.general_events);
+        drop(payload_prefix(1));
 
         let mut invalid_clock = payload_prefix(RUNTIME_EVENTS_SECTION_VERSION);
-        invalid_clock[49..51].copy_from_slice(&0_u16.to_le_bytes());
+        let clock_offset = invalid_clock.len() - 12;
+        invalid_clock[clock_offset..clock_offset + 2].copy_from_slice(&0_u16.to_le_bytes());
         assert!(read_runtime_events(&mut Reader::new(&invalid_clock), RUNTIME_EVENTS_SECTION_VERSION).is_err());
 
         let mut excessive_threads = payload_prefix(RUNTIME_EVENTS_SECTION_VERSION);
@@ -2130,6 +2220,11 @@ mod tests {
         excessive_events.extend_from_slice(&0_u32.to_le_bytes());
         excessive_events.extend_from_slice(&1_u32.to_le_bytes());
         assert!(read_runtime_events(&mut Reader::new(&excessive_events), RUNTIME_EVENTS_SECTION_VERSION).is_err());
+
+        let mut mismatched_totals = payload_prefix(RUNTIME_EVENTS_SECTION_VERSION);
+        mismatched_totals[1..9].copy_from_slice(&1_u64.to_le_bytes());
+        mismatched_totals.extend_from_slice(&0_u32.to_le_bytes());
+        assert!(read_runtime_events(&mut Reader::new(&mismatched_totals), RUNTIME_EVENTS_SECTION_VERSION).is_err());
 
         let mut reserved_event_byte = payload_prefix(RUNTIME_EVENTS_SECTION_VERSION);
         reserved_event_byte.extend_from_slice(&0_u32.to_le_bytes());
@@ -2240,6 +2335,11 @@ mod tests {
         payload.extend_from_slice(&1_u64.to_le_bytes());
         payload.extend_from_slice(&100_u64.to_le_bytes());
         payload.extend_from_slice(&0_u64.to_le_bytes());
+        payload.extend_from_slice(&1_u32.to_le_bytes());
+        payload.extend_from_slice(&1_u64.to_le_bytes());
+        payload.extend_from_slice(&100_u64.to_le_bytes());
+        payload.extend_from_slice(&0_u64.to_le_bytes());
+        payload.extend_from_slice(&0_u32.to_le_bytes());
         payload.extend_from_slice(&0_u32.to_le_bytes());
         payload.extend_from_slice(&1_u32.to_le_bytes());
         payload.extend_from_slice(&64_u32.to_le_bytes());
@@ -2264,6 +2364,17 @@ mod tests {
 
         let error = read_callers(&mut Reader::new(&payload), CALLERS_STACK_TABLE_VERSION).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::MalformedSection(SECTION_CALLERS));
+    }
+
+    #[test]
+    fn caller_thread_totals_must_match_header() {
+        let mut payload = vec![1];
+        payload.extend_from_slice(&1_u64.to_le_bytes());
+        payload.extend_from_slice(&1_u64.to_le_bytes());
+        payload.extend_from_slice(&0_u64.to_le_bytes());
+        payload.extend_from_slice(&0_u32.to_le_bytes());
+
+        assert!(read_callers(&mut Reader::new(&payload), CALLERS_STACK_TABLE_VERSION).is_err());
     }
 
     #[test]

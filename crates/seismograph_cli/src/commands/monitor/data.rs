@@ -411,12 +411,12 @@ impl IoMonitorSnapshot {
             let Some(kind) = operation.kind else {
                 continue;
             };
-            let Some(resource_kind) = operation.resource_kind else {
-                continue;
-            };
-            let Some(outcome) = operation.outcome else {
-                continue;
-            };
+            let resource_kind = operation
+                .resource_kind
+                .expect("resource kind is stored whenever an I/O operation builder is created");
+            let outcome = operation
+                .outcome
+                .expect("outcome is stored whenever an I/O operation builder is created");
             operations_by_resource
                 .entry(operation.resource_id)
                 .or_default()
@@ -2591,6 +2591,39 @@ mod tests {
     }
 
     #[test]
+    fn io_and_cache_labels_cover_every_supported_variant() {
+        assert_eq!([IoOperationKind::Read.label(), IoOperationKind::Write.label()], ["Read", "Write"]);
+        assert_eq!(
+            CACHE_EVENT_KINDS.map(cache_event_label),
+            [
+                "Hit",
+                "Miss",
+                "Expired",
+                "Get error",
+                "Inserted",
+                "Insert rejected",
+                "Insert error",
+                "Invalidated",
+                "Invalidate error",
+                "Cleared",
+                "Clear error",
+                "Refresh hit",
+                "Refresh miss",
+                "Refresh error",
+                "Evicted",
+                "Compute succeeded",
+                "Compute failed",
+                "Compute returned none",
+                "Promotion accepted",
+                "Promotion rejected",
+                "Promotion failed",
+                "Refresh suppressed",
+            ]
+        );
+        assert_eq!(cache_event_label(RuntimeEventKind::MutexAccess), "Unknown");
+    }
+
+    #[test]
     fn primitive_operation_metadata_covers_every_variant() {
         let operations = [
             PrimitiveOperationKind::ArcCreate,
@@ -3704,7 +3737,7 @@ mod tests {
         };
         let events = Events {
             clock: EventClock::ProcessMonotonic,
-            total_events: 8,
+            total_events: 10,
             lost_events: 1,
             recording: RecordingPolicies::default(),
             threads: Vec::new(),
@@ -3717,6 +3750,20 @@ mod tests {
                 event(6, 60, RuntimeEventKind::CacheMiss, cache(10, false)),
                 event(7, 70, RuntimeEventKind::CacheGetError, cache(10, false)),
                 event(8, 80, RuntimeEventKind::CacheRefreshHit, cache(20, true)),
+                event(9, 90, RuntimeEventKind::MutexAccess, io(3, 1, 1, 0, IoOutcome::Pending)),
+                event(
+                    10,
+                    100,
+                    RuntimeEventKind::CacheHit,
+                    EventPayload::Runtime(RuntimeEventPayload {
+                        runtime_id: RuntimeId::from_raw(1).unwrap(),
+                        worker_id: None,
+                        subject_id: 0,
+                        related_id: 0,
+                        value_0: 0,
+                        value_1: 0,
+                    }),
+                ),
             ],
         };
 
@@ -3749,11 +3796,11 @@ mod tests {
                     .collect::<Vec<_>>(),
             ),
             (
-                8,
-                4,
+                10,
+                5,
                 1,
                 vec![(1, 1, 0, 80, 0, Some(20)), (2, 0, 1, 0, 1, Some(20))],
-                8,
+                10,
                 4,
                 1,
                 vec![(10, false, 3, 1, 1, 1), (20, true, 1, 1, 0, 0)],

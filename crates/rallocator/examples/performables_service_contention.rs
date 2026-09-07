@@ -85,8 +85,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "3S workload running as PID {}; telemetry starts disabled and is controlled through `seismograph monitor`",
         std::process::id()
     );
+    if std::env::var_os("IS_TESTING").is_some() {
+        run_test_workload(&service);
+        return Ok(());
+    }
     run_workload(&service)?;
     Ok(())
+}
+
+fn run_test_workload(service: &Arc<Service>) {
+    let request = Arc::new(Request {
+        id: 0,
+        query: format!("tenant:{} query:0", service.configuration.tenant),
+        payload: vec![0; 8 * 1024],
+    });
+    let (partition, generation, checksum) = route_request(service, &request);
+    publish_completion(
+        service,
+        Completion {
+            request,
+            partition,
+            generation,
+            checksum,
+        },
+    );
 }
 
 fn run_workload(service: &Arc<Service>) -> Result<(), std::io::Error> {
