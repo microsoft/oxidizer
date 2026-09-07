@@ -32,5 +32,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     runtime.shutdown()?;
     assert_eq!(shutdown_driver_count(), Runtime::WORKER_COUNT);
+    println!("runtime shutdown complete");
     Ok(())
 }

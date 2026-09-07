@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::{Context, Poll, Waker};
 use std::thread;
 use std::time::Duration;
@@ -22,6 +22,8 @@ pub(super) struct SampleContext {
 struct SampleState {
     driver_thread: thread::ThreadId,
     operations: AtomicUsize,
+    shutdown_started: AtomicBool,
+    shutdown_complete: AtomicBool,
 }
 
 impl SampleContext {
@@ -80,6 +82,8 @@ impl DriverProvider for SampleProvider {
             state: Arc::new(SampleState {
                 driver_thread,
                 operations: AtomicUsize::new(0),
+                shutdown_started: AtomicBool::new(false),
+                shutdown_complete: AtomicBool::new(false),
             }),
             parker: SampleParker,
         }
@@ -105,10 +109,17 @@ impl Driver for SampleDriver {
     }
 
     fn begin_shutdown(&self) {
-        SHUTDOWN_DRIVERS.fetch_add(1, Ordering::Relaxed);
+        if !self.state.shutdown_started.swap(true, Ordering::Relaxed) {
+            SHUTDOWN_DRIVERS.fetch_add(1, Ordering::Relaxed);
+            println!("shutting down sample I/O driver on {:?}", self.state.driver_thread);
+        }
     }
 
     fn poll_shutdown(&self, _cx: &mut Context<'_>) -> Poll<()> {
+        if !self.state.shutdown_complete.swap(true, Ordering::Relaxed) {
+            println!("sample I/O driver shutdown complete on {:?}", self.state.driver_thread);
+        }
+
         Poll::Ready(())
     }
 }
