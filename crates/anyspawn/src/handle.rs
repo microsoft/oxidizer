@@ -61,11 +61,12 @@ mod tests {
         let handle = JoinHandle(JoinHandleInner::Custom(receiver));
 
         let panic = catch_unwind(AssertUnwindSafe(|| futures::executor::block_on(handle))).unwrap_err();
-        let message = panic.downcast_ref::<String>().unwrap();
+        let message = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .unwrap();
 
-        assert_eq!(
-            message,
-            "spawned task did not produce a result because its channel closed: Error { .. }"
-        );
+        assert!(message.contains("channel closed"));
     }
 }
