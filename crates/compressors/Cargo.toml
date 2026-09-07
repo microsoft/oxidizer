@@ -29,6 +29,11 @@ exclude = true
 [package.metadata.docs.rs]
 all-features = true
 
+# `cfg_aliases` is used only by `build.rs`. cargo-machete does not scan build
+# scripts, so it reports a false positive; ignore it here.
+[package.metadata.cargo-machete]
+ignored = ["cfg_aliases"]
+
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
     "bytesbuf::*",

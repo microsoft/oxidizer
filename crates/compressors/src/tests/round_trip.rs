@@ -13,7 +13,7 @@ use bytesbuf::{BytesBuf, BytesView};
 
 use crate::core::{CompressionInternal as _, Destination, Output};
 use crate::format::Format;
-use crate::limits::DEFAULT_MAX_OUTPUT_LEN;
+use crate::limits::{DEFAULT_MAX_OUTPUT_LEN, DEFAULT_MAX_STREAMS};
 use crate::testing::{chunk, fragmented, view};
 use crate::{DecompressorLimits, Resources, gzip};
 
@@ -374,6 +374,42 @@ fn the_crate_level_decompress_applies_the_default_ceiling_unless_the_caller_deci
 
     // Lowered explicitly: still the caller's decision, in the other direction.
     let lowered = DecompressorLimits::new().max_output_len(NonZeroU64::new(1024).unwrap());
+    assert!(decompress_with(lowered).unwrap_err().is_limit_exceeded());
+}
+
+#[test]
+fn the_crate_level_decompress_applies_the_default_stream_cap_unless_the_caller_decided() {
+    // The companion to the output ceiling, and the case it cannot cover: many tiny members each
+    // pay a full engine setup while producing almost no output, so no output bound ever trips.
+    // gzip decompresses concatenated members by default, so a default-built decompressor handed to
+    // `decompress` is exactly the exposed shape.
+    let member = gzip::compress(b"".as_slice(), &Resources::default()).unwrap();
+    let mut concatenated = BytesBuf::new();
+    for _ in 0..=DEFAULT_MAX_STREAMS {
+        concatenated.put_bytes(member.clone());
+    }
+    let over_the_cap = concatenated.consume_all();
+
+    let decompress_with = |limits: DecompressorLimits| {
+        crate::decompress(
+            over_the_cap.clone(),
+            gzip::Decompressor::builder().limits(limits).build(&Resources::default()),
+        )
+    };
+
+    // Bound left unset: our 1024 stands in, so this is refused.
+    let error = decompress_with(DecompressorLimits::new()).unwrap_err();
+    assert!(error.is_limit_exceeded(), "got {error}");
+
+    // Removed explicitly: the caller's decision, so nothing is added on top.
+    assert!(decompress_with(DecompressorLimits::UNLIMITED).unwrap().is_empty());
+
+    // Raised explicitly: also the caller's decision.
+    let raised = DecompressorLimits::new().max_streams(NonZeroU64::new(DEFAULT_MAX_STREAMS * 2).unwrap());
+    assert!(decompress_with(raised).unwrap().is_empty());
+
+    // Lowered explicitly: still the caller's decision, in the other direction.
+    let lowered = DecompressorLimits::new().max_streams(NonZeroU64::new(4).unwrap());
     assert!(decompress_with(lowered).unwrap_err().is_limit_exceeded());
 }
 

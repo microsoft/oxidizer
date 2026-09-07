@@ -109,9 +109,17 @@ Because the boundary is retained output rather than throughput, the bound cannot
 be a property of the decompressor alone: the same decompressor is safe to stream
 unbounded and unsafe to buffer unbounded. So every `pull` states which it is,
 and the engine — not the caller — decides. Given a buffering destination, a
-decompressor whose output length the caller left unset applies the shared 64 MiB
-ceiling, alongside whatever bounds it was configured with; whichever is tighter
-decides. Given a streaming destination it applies only its configured bounds.
+decompressor applies the shared defaults for whichever bounds the caller left
+unset — 64 MiB of output and 1024 concatenated streams — alongside whatever it
+was configured with; whichever is tighter decides. Given a streaming destination
+it applies only its configured bounds.
+
+The two travel together in one value rather than as separate accessors, because
+they once did not: the entry point that retrofits them onto an already-built
+decompressor picked up the output half and silently kept no stream bound. That
+gap mattered precisely because the two bounds cover different attacks — many tiny
+members each cost a full engine setup while producing almost no output, so an
+output ceiling never trips on them.
 
 Putting that in the engine rather than in each buffering caller is what makes the
 bound load-bearing. The engine already narrows the output slice it offers per

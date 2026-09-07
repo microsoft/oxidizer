@@ -550,19 +550,19 @@ mod tests {
         }
     }
 
-    fn compressed_len(builder: CompressorBuilder<()>, format: Format, payload: &[u8]) -> usize {
+    fn compressed_bytes(builder: CompressorBuilder<()>, format: Format, payload: &[u8]) -> Vec<u8> {
         let mut compressor = builder.build_format(format, &Resources::default()).unwrap();
         compressor.push(view(payload)).unwrap();
         compressor.end_input();
 
-        let mut total = 0;
+        let mut collected = Vec::new();
         let mut finished = false;
         for _ in 0..MAX_STEPS {
             let output = compressor.pull(Destination::Stream).unwrap();
             assert!(!output.is_need_input(), "compressor requested input after end");
             let done = output.is_done();
             if let Some(chunk) = output.into_data() {
-                total += chunk.len();
+                collected.extend_from_slice(&chunk.to_vec());
             }
             if done {
                 finished = true;
@@ -571,7 +571,7 @@ mod tests {
         }
         assert!(finished, "compression did not finish within {MAX_STEPS} steps");
 
-        total
+        collected
     }
 
     #[test]
@@ -726,15 +726,55 @@ mod tests {
         assert_eq!(Format::from_content_encoding("identity"), None);
     }
 
+    /// A payload with real matching work in it, for distinguishing compression levels.
+    ///
+    /// A trivially repetitive payload cannot: every level finds the same single long match and
+    /// emits identical bytes, even though the level did reach the engine. Sixteen symbols over 64
+    /// KiB leaves enough redundancy to compress and enough structure for a stronger level to find
+    /// more of it.
+    fn varied_payload() -> Vec<u8> {
+        let mut payload = Vec::with_capacity(1 << 16);
+        let mut state = 0x2545_F491_4F6C_DD1D_u64;
+
+        while payload.len() < (1 << 16) {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            payload.push(b'a' + u8::try_from((state >> 33) & 0x0f).unwrap());
+        }
+
+        payload
+    }
+
     #[test]
     fn the_compressor_builder_applies_its_level() {
-        let payload = b"the quick brown fox jumps over the lazy dog ".repeat(400);
-
+        // Inequality of the bytes is the load-bearing assertion. A size comparison alone is
+        // satisfied by equality, so a backend that dropped the level and always compressed at its
+        // default would pass it while the `Level` knob silently did nothing.
+        let varied = varied_payload();
         for &format in Format::ALL {
-            let fast = compressed_len(CompressorBuilder::new().level(Level::FAST), format, &payload);
-            let best = compressed_len(CompressorBuilder::new().level(Level::HIGH), format, &payload);
+            let fast = compressed_bytes(CompressorBuilder::new().level(Level::FAST), format, &varied);
+            let best = compressed_bytes(CompressorBuilder::new().level(Level::HIGH), format, &varied);
 
-            assert!(best <= fast, "{format:?}: best={best} should not exceed fast={fast}");
+            assert_ne!(best, fast, "{format:?}: the level did not reach the engine");
+        }
+
+        // The size property, kept as a secondary check and on its own payload. It needs one where a
+        // stronger level can actually pay off: on the high-entropy payload above, zstd's top level
+        // legitimately emits *more* bytes than its fast one, so this is not a property of the
+        // portable scale in general. Only `<=` even here -- strict monotonicity is not promised
+        // across backends and payloads.
+        let repetitive = b"the quick brown fox jumps over the lazy dog ".repeat(400);
+        for &format in Format::ALL {
+            let fast = compressed_bytes(CompressorBuilder::new().level(Level::FAST), format, &repetitive);
+            let best = compressed_bytes(CompressorBuilder::new().level(Level::HIGH), format, &repetitive);
+
+            assert!(
+                best.len() <= fast.len(),
+                "{format:?}: best={} should not exceed fast={}",
+                best.len(),
+                fast.len()
+            );
         }
     }
 

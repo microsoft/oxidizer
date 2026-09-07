@@ -81,11 +81,7 @@ unsafe impl zstd_safe::WriteBuf for UninitOutput<'_> {
     // written, which is exactly what a nonsense report gives no reason to believe -- so an
     // out-of-range count aborts instead.
     unsafe fn filled_until(&mut self, n: usize) {
-        assert!(
-            n <= self.buffer.len(),
-            "zstd reported writing {n} bytes into a {}-byte buffer",
-            self.buffer.len()
-        );
+        self.check_reported_count(n);
         self.filled = n;
     }
 }
@@ -93,6 +89,23 @@ unsafe impl zstd_safe::WriteBuf for UninitOutput<'_> {
 impl<'a> UninitOutput<'a> {
     fn new(buffer: &'a mut [MaybeUninit<u8>]) -> Self {
         Self { buffer, filled: 0 }
+    }
+}
+
+impl UninitOutput<'_> {
+    /// Rejects a reported write count that the buffer could not have held.
+    ///
+    /// Split out from [`filled_until`][zstd_safe::WriteBuf::filled_until] so this bound can be
+    /// tested without an unsafe call that could not honour its contract: that method requires the
+    /// caller to have initialized `n` bytes, and a count past the end of the buffer is by
+    /// definition one no caller could have initialized. Checking is safe on its own; recording the
+    /// count is not, which is why only the check moved.
+    fn check_reported_count(&self, n: usize) {
+        assert!(
+            n <= self.buffer.len(),
+            "zstd reported writing {n} bytes into a {}-byte buffer",
+            self.buffer.len()
+        );
     }
 }
 
@@ -415,12 +428,15 @@ mod tests {
         // this is an `assert!` rather than a `debug_assert!`, and why it does not clamp: clamping
         // would claim the whole buffer was written, which a nonsense report gives no reason to
         // believe.
+        //
+        // Driven through the safe check rather than through `filled_until`. That method requires
+        // its caller to have initialized `n` bytes, and nine bytes cannot be initialized in an
+        // eight-byte allocation, so calling it here could not have honoured its contract -- the
+        // assertion happening to run first does not make the call legitimate.
         let mut raw = [MaybeUninit::new(0xff_u8); 8];
-        let mut out = UninitOutput::new(&mut raw);
+        let out = UninitOutput::new(&mut raw);
 
-        // SAFETY: the contract is deliberately violated to prove the check fires. Nothing
-        // uninitialized is read: the assertion runs before `filled` is touched.
-        unsafe { zstd_safe::WriteBuf::filled_until(&mut out, 9) };
+        out.check_reported_count(9);
     }
 
     #[test]

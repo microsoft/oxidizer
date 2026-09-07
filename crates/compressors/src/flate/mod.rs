@@ -43,9 +43,18 @@ pub(crate) enum Wrapper {
     Gzip,
 }
 
+/// Maps the portable scale onto flate's.
+///
+/// The identity: both run 0 to 9 and mean the same thing at each step. Named and tested anyway,
+/// because "the scales happen to agree" is a mapping decision like any other, and this passthrough
+/// is the only thing standing between [`Level`] and the engine.
+fn compression_for(level: Level) -> Compression {
+    Compression::new(u32::from(level.get()))
+}
+
 impl Wrapper {
     pub(crate) fn compressor(self, level: Level) -> Compress {
-        let compression = Compression::new(u32::from(level.get()));
+        let compression = compression_for(level);
 
         match self {
             #[cfg(any(test, feature = "deflate"))]
@@ -130,5 +139,19 @@ mod tests {
         assert!(Wrapper::Raw.reset_restores_framing());
         assert!(Wrapper::Zlib.reset_restores_framing());
         assert!(!Wrapper::Gzip.reset_restores_framing());
+    }
+
+    #[test]
+    fn the_level_maps_onto_flates_scale_unchanged() {
+        // Brotli and zstd pin the arithmetic of their mappings; this is flate's, and it being the
+        // identity is exactly why it is worth pinning -- a passthrough is the easiest thing to
+        // replace with a constant without anything noticing.
+        assert_eq!(compression_for(Level::MIN).level(), 0, "the floor must line up");
+        assert_eq!(compression_for(Level::HIGH).level(), 9, "the ceiling must line up");
+
+        for raw in 0..=Level::MAX.get() {
+            let level = Level::new(raw).unwrap();
+            assert_eq!(compression_for(level).level(), u32::from(raw), "every step must map to itself");
+        }
     }
 }

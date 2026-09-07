@@ -227,6 +227,9 @@
 //! [DESIGN.md]: https://github.com/microsoft/oxidizer/blob/main/crates/compressors/docs/DESIGN.md
 //! [IMPLEMENTATION.md]: https://github.com/microsoft/oxidizer/blob/main/crates/compressors/docs/IMPLEMENTATION.md
 
+#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/compressors/logo.png")]
+#![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/compressors/favicon.ico")]
+
 #[cfg(any(test, feature = "brotli"))]
 pub mod brotli;
 mod builder;
@@ -334,17 +337,20 @@ pub fn compress(input: BytesView, compressor: impl Compression<Mode = Compress>)
 /// # Security
 ///
 /// Buffering the whole result is a memory-exhaustion vector on untrusted input, so a decompressor
-/// that was left unbounded is held to the same 64 MiB ceiling every format's own `decompress`
-/// applies. Without it, a decompressor for a format that declares no defaults -- brotli declares
-/// none -- would let a hundred compressed bytes expand without limit here.
+/// that was left unbounded is held to the same defaults every format's own `decompress` applies:
+/// a 64 MiB output ceiling and a 1024 concatenated-stream cap. Without the first, a decompressor
+/// for a format that declares no defaults -- brotli declares none -- would let a hundred
+/// compressed bytes expand without limit here. The second covers what the first cannot: many tiny
+/// members each pay a full engine setup while producing almost no output, so no output bound ever
+/// trips.
 ///
-/// The ceiling is a fallback, not an override. Whatever the caller asked for on the decompressor's
-/// [`limits`][DecompressorBuilder::limits] wins:
+/// Both are fallbacks, not overrides, and each is decided independently. Whatever the caller asked
+/// for on the decompressor's [`limits`][DecompressorBuilder::limits] wins:
 ///
-/// | Built with | Ceiling applied here |
+/// | That bound was built with | Applied here |
 /// |---|---|
-/// | nothing, or [`DecompressorLimits::new`] | 64 MiB |
-/// | [`max_output_len`][DecompressorLimits::max_output_len] | the caller's value |
+/// | nothing, or [`DecompressorLimits::new`] | 64 MiB output, 1024 streams |
+/// | [`max_output_len`][DecompressorLimits::max_output_len] or [`max_streams`][DecompressorLimits::max_streams] | the caller's value |
 /// | [`DecompressorLimits::UNLIMITED`] | none -- removing the bound is a decision too |
 pub fn decompress(input: BytesView, decompressor: impl Compression<Mode = Decompress>) -> Result<BytesView> {
     process(decompressor, input)

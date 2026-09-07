@@ -182,7 +182,7 @@ macro_rules! define_decompressor_build {
             #[inline]
             pub fn build(self, resources: &$crate::Resources) -> Decompressor {
                 Decompressor {
-                    pump: Pump::new(resources.memory().clone(), self.chunk_size).with_buffered_ceiling(self.limits.buffered_ceiling()),
+                    pump: Pump::new(resources.memory().clone(), self.chunk_size).with_buffered_fallbacks(self.limits.buffered_fallbacks()),
                     codec: $new_decompressor(
                         self.limits.resolve($default_limits),
                         self.multi_stream.unwrap_or($multi_stream_default),
@@ -216,8 +216,9 @@ macro_rules! define_decompressor_build {
         /// # Errors
         ///
         /// Returns an error if the data is malformed, truncated, or exceeds the bounds this convenience
-        /// applies: the format's own ratio, plus 64 MiB of output and 1024 concatenated streams because it
-        /// buffers the whole result. Use `decompress_with_limits` to choose your own.
+        /// applies: the format's own ratio, plus the shared output and stream caps that
+        /// [`DecompressorLimits`][crate::DecompressorLimits] documents, because it buffers the whole
+        /// result. Use `decompress_with_limits` to choose your own.
         pub fn decompress(input: impl $crate::InputData, resources: &$crate::Resources) -> Result<BytesView> {
             let input = $crate::InputData::into_view(input, resources);
 
@@ -289,7 +290,7 @@ macro_rules! define_decompressor_build {
             #[inline]
             pub fn build(self, resources: &$crate::Resources) -> ::core::result::Result<Decompressor, $crate::BuildError> {
                 Ok(Decompressor {
-                    pump: Pump::new(resources.memory().clone(), self.chunk_size).with_buffered_ceiling(self.limits.buffered_ceiling()),
+                    pump: Pump::new(resources.memory().clone(), self.chunk_size).with_buffered_fallbacks(self.limits.buffered_fallbacks()),
                     codec: $new_decompressor(
                         self.limits.resolve($default_limits),
                         self.multi_stream.unwrap_or($multi_stream_default),
@@ -327,8 +328,9 @@ macro_rules! define_decompressor_build {
         ///
         /// Returns an error if the decompressor cannot be built, or if the data is malformed,
         /// truncated, or exceeds the bounds this convenience applies: the format's own ratio, plus
-        /// 64 MiB of output and 1024 concatenated streams because it buffers the whole result. Use
-        /// `decompress_with_limits` to choose your own.
+        /// the shared output and stream caps that [`DecompressorLimits`][crate::DecompressorLimits]
+        /// documents, because it buffers the whole result. Use `decompress_with_limits` to choose
+        /// your own.
         pub fn decompress(input: impl $crate::InputData, resources: &$crate::Resources) -> Result<BytesView> {
             let input = $crate::InputData::into_view(input, resources);
 

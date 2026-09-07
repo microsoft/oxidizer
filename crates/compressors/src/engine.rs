@@ -9,6 +9,7 @@ use bytesbuf::{BytesBuf, BytesView};
 
 use crate::core::{Destination, Output};
 use crate::error::{Error, Result};
+use crate::limits::BufferedFallbacks;
 
 /// Maximum input consumed by one public `pull` call.
 ///
@@ -177,7 +178,7 @@ pub(crate) struct Pump {
     total_out: u64,
     streams: u64,
     state: State,
-    buffered_ceiling: Option<NonZeroU64>,
+    buffered: BufferedFallbacks,
 }
 
 /// Whether one `pull` has done enough work and should hand control back.
@@ -200,6 +201,21 @@ fn made_no_progress(consumed: usize, produced: usize) -> bool {
     consumed == 0 && produced == 0
 }
 
+/// The tighter of two optional bounds, where absent means unbounded.
+// Excluded for the same reason as its output-budget caller: a mutant answering a small constant is
+// not wrong, only slow. Through `remaining_output` it shrinks the per-step slice to the probe byte,
+// so the pump produces the right bytes one at a time and the harness times out instead of reaching
+// a verdict. Nothing is hidden by this -- `tighter => None`, the answer that actually loosens a
+// bound, is caught, and `Pump::max_streams`, its other caller, is mutated and caught in its own
+// right.
+#[cfg_attr(test, mutants::skip)]
+fn tighter(engine: Option<u64>, buffered: Option<u64>) -> Option<u64> {
+    match (engine, buffered) {
+        (Some(engine), Some(buffered)) => Some(engine.min(buffered)),
+        (bound, None) | (None, bound) => bound,
+    }
+}
+
 impl Pump {
     pub(crate) fn new(memory: OpaqueMemory, chunk_size: NonZeroUsize) -> Self {
         Self {
@@ -215,28 +231,32 @@ impl Pump {
             total_out: 0,
             streams: 0,
             state: State::Open,
-            buffered_ceiling: None,
+            buffered: BufferedFallbacks::default(),
         }
     }
 
-    /// Sets the output ceiling that applies while a caller accumulates the whole output.
+    /// Sets the bounds that apply while a caller accumulates the whole output.
     ///
-    /// Separate from the engine's own limits because it is not a property of the format: the same
-    /// decompressor is safe to stream unbounded and unsafe to buffer unbounded, so this bound
-    /// exists only for [`Destination::Buffer`] and the engine's own bound applies either way.
-    pub(crate) const fn with_buffered_ceiling(mut self, ceiling: Option<NonZeroU64>) -> Self {
-        self.buffered_ceiling = ceiling;
+    /// Separate from the engine's own limits because they are not properties of the format: the
+    /// same decompressor is safe to stream unbounded and unsafe to buffer unbounded, so these
+    /// exist only for [`Destination::Buffer`] and the engine's own bounds apply either way.
+    pub(crate) const fn with_buffered_fallbacks(mut self, fallbacks: BufferedFallbacks) -> Self {
+        self.buffered = fallbacks;
         self
     }
 
-    /// The buffering ceiling in force for this destination.
+    /// The buffering fallbacks in force for this destination.
     ///
-    /// `None` for [`Destination::Stream`]: each chunk is consumed and dropped, so cumulative output
-    /// is not what the caller retains and bounding it would cap stream length for no benefit.
-    const fn buffered_ceiling(&self, into: Destination) -> Option<NonZeroU64> {
+    /// Empty for [`Destination::Stream`]: each chunk is consumed and dropped, so neither cumulative
+    /// output nor stream count measures anything the caller retains, and bounding them would cut
+    /// off long streams for no benefit.
+    const fn buffered(&self, into: Destination) -> BufferedFallbacks {
         match into {
-            Destination::Buffer => self.buffered_ceiling,
-            Destination::Stream => None,
+            Destination::Buffer => self.buffered,
+            Destination::Stream => BufferedFallbacks {
+                output_len: None,
+                streams: None,
+            },
         }
     }
 
@@ -250,25 +270,36 @@ impl Pump {
     #[cfg_attr(test, mutants::skip)]
     fn remaining_output(&self, codec: &impl Codec, into: Destination) -> Option<u64> {
         let buffered = self
-            .buffered_ceiling(into)
+            .buffered(into)
+            .output_len
             .map(|ceiling| ceiling.get().saturating_sub(self.total_out));
 
-        match (codec.remaining_output(self.total_out), buffered) {
-            (Some(engine), Some(buffered)) => Some(engine.min(buffered)),
-            (bound, None) | (None, bound) => bound,
-        }
+        tighter(codec.remaining_output(self.total_out), buffered)
+    }
+
+    /// The stream cap in force, narrowing the engine's own bound by the buffering fallback.
+    ///
+    /// The counterpart of [`Pump::remaining_output`] for concatenated streams. A buffering caller
+    /// needs this bound even when the output ceiling is generous: many tiny members each pay engine
+    /// setup while producing almost no output, so the output cap never trips.
+    fn max_streams(&self, codec: &impl Codec, into: Destination) -> Option<u64> {
+        tighter(codec.max_streams(), self.buffered(into).streams.map(NonZeroU64::get))
     }
 
     /// Validates the cumulative counts against the engine's own limits and the buffering ceiling.
     ///
-    /// One method so the two call sites below cannot drift apart on which bounds they test. Both
-    /// bounds are tested the same way the engines test theirs -- against a count that the probe
+    /// One method so the two call sites below cannot drift apart on which bounds they test. The
+    /// output bound is tested the same way the engines test theirs -- against a count that the probe
     /// byte in the step loop lets exceed the bound by one, which is what proves the stream needed
     /// more output than the bound allows rather than ending exactly at it.
+    ///
+    /// The stream bound needs no such test. It is enforced by narrowing
+    /// [`max_streams`][Pump::max_streams], which stops the pump at the bound and refuses the *next*
+    /// stream before it starts, so the count can never run past it the way output can.
     fn check_limits(&self, codec: &impl Codec, into: Destination) -> Result<()> {
         codec.check_limits(self.total_in, self.total_out, self.streams)?;
 
-        if let Some(ceiling) = self.buffered_ceiling(into)
+        if let Some(ceiling) = self.buffered(into).output_len
             && self.total_out > ceiling.get()
         {
             return Err(Error::output_limit_exceeded(self.total_out, ceiling.get()));
@@ -519,7 +550,7 @@ impl Pump {
                 // One read of the codec's stream cap, already narrowed to "and we are at it", so the
                 // three arms below cannot drift apart on how the limit is tested and none of them
                 // has to re-open the `Option` it just matched on.
-                let stream_limit = codec.max_streams().filter(|maximum| self.streams >= *maximum);
+                let stream_limit = self.max_streams(codec, into).filter(|maximum| self.streams >= *maximum);
 
                 // Paired with the state so the match below stays exhaustive over exactly the
                 // states this match can actually produce, with no catch-all for a state this
@@ -1289,7 +1320,17 @@ mod tests {
     }
 
     fn ceiling(pump: Pump, bytes: u64) -> Pump {
-        pump.with_buffered_ceiling(Some(NonZeroU64::new(bytes).unwrap()))
+        pump.with_buffered_fallbacks(BufferedFallbacks {
+            output_len: Some(NonZeroU64::new(bytes).unwrap()),
+            streams: None,
+        })
+    }
+
+    fn stream_cap(pump: Pump, streams: u64) -> Pump {
+        pump.with_buffered_fallbacks(BufferedFallbacks {
+            output_len: None,
+            streams: Some(NonZeroU64::new(streams).unwrap()),
+        })
     }
 
     #[test]
@@ -1323,6 +1364,95 @@ mod tests {
 
         let output = drain(&mut pump, &mut Passthrough::default(), Destination::Buffer).unwrap();
         assert_eq!(output, b"exactly!".to_vec());
+    }
+
+    /// Reports `NextStream` and declares no stream bound of its own, consuming its input and
+    /// producing nothing -- the shape a stream cap exists for, since an output ceiling never trips.
+    #[derive(Debug)]
+    struct Members;
+
+    // SAFETY: this fixture never writes to the slice and reports producing nothing.
+
+    unsafe impl Codec for Members {
+        fn step(&mut self, input: &[u8], _output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
+            Ok((Step::StreamEnd, input.len(), 0))
+        }
+
+        fn stream_ended(&mut self) -> Result<StreamEnd> {
+            Ok(StreamEnd::NextStream)
+        }
+    }
+
+    /// Feeds `count` one-member pushes, returning the first error.
+    fn feed_members(pump: &mut Pump, count: usize, into: Destination) -> Result<()> {
+        for _ in 0..count {
+            pump.push(view(b"member"))?;
+            pump.pull(&mut Members, into)?;
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn the_buffered_stream_cap_rejects_more_members_than_the_bound() {
+        let mut pump = stream_cap(Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64)), 2);
+
+        let error = feed_members(&mut pump, 3, Destination::Buffer).unwrap_err();
+        assert!(error.is_limit_exceeded(), "got {error}");
+    }
+
+    #[test]
+    fn the_buffered_stream_cap_admits_exactly_the_bound() {
+        let mut pump = stream_cap(Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64)), 2);
+
+        feed_members(&mut pump, 2, Destination::Buffer).unwrap();
+    }
+
+    #[test]
+    fn the_buffered_stream_cap_does_not_bound_a_streaming_destination() {
+        // The same pump and a higher member count than the rejecting case above: only the
+        // destination differs, which is what makes this the proof that the cap is not a property
+        // of the engine.
+        let mut pump = stream_cap(Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64)), 2);
+
+        feed_members(&mut pump, 5, Destination::Stream).unwrap();
+    }
+
+    #[test]
+    fn the_tighter_of_the_engine_stream_bound_and_the_buffering_cap_decides() {
+        /// Declares its own stream bound, the way configured decompressor limits do.
+        #[derive(Debug)]
+        struct BoundedMembers(u64);
+
+        // SAFETY: delegates to `Members`, which never writes and reports producing nothing.
+
+        unsafe impl Codec for BoundedMembers {
+            fn step(&mut self, input: &[u8], output: &mut [MaybeUninit<u8>], operation: Operation) -> Result<(Step, usize, usize)> {
+                Members.step(input, output, operation)
+            }
+
+            fn stream_ended(&mut self) -> Result<StreamEnd> {
+                Members.stream_ended()
+            }
+
+            fn max_streams(&self) -> Option<u64> {
+                Some(self.0)
+            }
+        }
+
+        // Whichever side is tighter must be the one that stops it at two members.
+        for (engine, buffered) in [(2_u64, 4_u64), (4, 2)] {
+            let mut pump = stream_cap(Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64)), buffered);
+            let mut codec = BoundedMembers(engine);
+
+            pump.push(view(b"member")).unwrap();
+            pump.pull(&mut codec, Destination::Buffer).unwrap();
+            pump.push(view(b"member")).unwrap();
+            pump.pull(&mut codec, Destination::Buffer).unwrap();
+
+            let error = pump.push(view(b"member")).unwrap_err();
+            assert!(error.is_limit_exceeded(), "got {error} for engine {engine} and buffered {buffered}");
+        }
     }
 
     #[test]

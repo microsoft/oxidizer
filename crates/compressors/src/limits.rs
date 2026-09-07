@@ -243,20 +243,31 @@ impl DecompressorLimits {
         self
     }
 
-    /// The ceiling a caller that buffers this decompressor's whole output should apply on top.
+    /// The bounds a caller that buffers this decompressor's whole output should apply on top.
     ///
-    /// `Some` only when the caller left the output bound [`Limit::Unset`], in which case the shared
-    /// 64 MiB cap stands in. An explicit value -- or an explicit
+    /// Each is `Some` only when the caller left that bound [`Limit::Unset`], in which case the
+    /// shared default stands in. An explicit value -- or an explicit
     /// [`UNLIMITED`][DecompressorLimits::UNLIMITED] -- is the caller's decision, and the
     /// decompressor already enforces it, so nothing is added on top.
+    ///
+    /// Both travel together in one value on purpose. They were once two separate accessors, and
+    /// the entry point that retrofits them onto an already-built decompressor picked up the output
+    /// half and silently kept no stream bound at all -- which is the case the stream cap exists
+    /// for, since many tiny members cost engine setup while producing almost no output.
     #[cfg_attr(
         not(any(test, any_format)),
-        expect(dead_code, reason = "only a decompressor's pump carries the ceiling, and no format is enabled")
+        expect(dead_code, reason = "only a decompressor's pump carries these, and no format is enabled")
     )]
-    pub(crate) const fn buffered_ceiling(self) -> Option<NonZeroU64> {
-        match self.output_len {
-            Limit::Unset => NonZeroU64::new(DEFAULT_MAX_OUTPUT_LEN),
-            Limit::Unlimited | Limit::Value(_) => None,
+    pub(crate) const fn buffered_fallbacks(self) -> BufferedFallbacks {
+        BufferedFallbacks {
+            output_len: match self.output_len {
+                Limit::Unset => NonZeroU64::new(DEFAULT_MAX_OUTPUT_LEN),
+                Limit::Unlimited | Limit::Value(_) => None,
+            },
+            streams: match self.streams {
+                Limit::Unset => NonZeroU64::new(DEFAULT_MAX_STREAMS),
+                Limit::Unlimited | Limit::Value(_) => None,
+            },
         }
     }
 
@@ -272,6 +283,23 @@ impl DecompressorLimits {
             streams: self.streams.resolve(defaults.streams),
         }
     }
+}
+
+/// The bounds added on top of a decompressor's own for a caller that buffers the whole result.
+///
+/// One value rather than two accessors so a caller that applies these cannot pick up one bound and
+/// silently drop the other.
+#[cfg_attr(
+    not(any(test, any_format)),
+    expect(dead_code, reason = "only a decompressor's pump carries these, and no format is enabled")
+)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct BufferedFallbacks {
+    /// Stands in for an unset total-output bound.
+    pub(crate) output_len: Option<NonZeroU64>,
+
+    /// Stands in for an unset concatenated-stream bound.
+    pub(crate) streams: Option<NonZeroU64>,
 }
 
 /// A format's bounds after the caller's overrides have been applied.

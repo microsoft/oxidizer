@@ -75,15 +75,9 @@ fn payload(size: usize) -> Vec<u8> {
 /// The backend the segmentation and chunk-size groups measure against.
 ///
 /// Both groups are about this crate's own buffer handling rather than any engine's compression, so
-/// they fix one format instead of sweeping all five. Deflate is preferred when it is compiled in;
-/// otherwise the first available format stands in so the benchmark still runs.
-fn representative_format() -> Format {
-    Format::ALL
-        .iter()
-        .copied()
-        .find(|format| matches!(format!("{format:?}").as_str(), "Deflate"))
-        .unwrap_or_else(|| *Format::ALL.first().expect("at least one format is compiled in"))
-}
+/// they fix one format instead of sweeping all five. This benchmark declares every format in its
+/// `required-features`, so deflate is always compiled in and can be named directly.
+const REPRESENTATIVE_FORMAT: Format = Format::Deflate;
 
 /// The native zstd level this crate's portable [`Level`] maps to.
 ///
@@ -277,7 +271,7 @@ fn segmentation(criterion: &mut Criterion, session: &Session) {
     // widely deployed of the five and its engine takes the uninitialized output slice directly, so
     // what these groups measure is this crate's own segment handling rather than a backend quirk.
     // Sweeping every format here would multiply runtime without changing the conclusion.
-    let format = representative_format();
+    let format = REPRESENTATIVE_FORMAT;
     let memory = GlobalPool::new();
     let resources = Resources::new(memory.clone());
 
@@ -308,7 +302,7 @@ fn segmentation(criterion: &mut Criterion, session: &Session) {
 
 /// The output chunk size trades per-call overhead against buffer churn.
 ///
-/// Measured on one backend (see [`representative_format`]), so the numbers describe deflate rather
+/// Measured on one backend (see [`REPRESENTATIVE_FORMAT`]), so the numbers describe deflate rather
 /// than every engine. That is enough to settle a shared default -- the trade-off is a property of
 /// how often this crate hands the engine a slice, not of what the engine does with it -- but a
 /// claim about brotli or zstd specifically would need its own measurement.
@@ -317,7 +311,7 @@ fn chunk_size(criterion: &mut Criterion, session: &Session) {
     let bytes = payload(256 * 1024);
     group.throughput(Throughput::Bytes(bytes.len() as u64));
 
-    let format = representative_format();
+    let format = REPRESENTATIVE_FORMAT;
     let memory = GlobalPool::new();
     let resources = Resources::new(memory.clone());
     let input = view(&bytes, &memory);

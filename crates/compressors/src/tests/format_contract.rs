@@ -1627,6 +1627,11 @@ mod pooling {
             best.to_vec(),
             compress_with(&Resources::new(GlobalPool::new()).with_pool_capacity(0), Level::HIGH, &payload).to_vec()
         );
+        // Inequality of the bytes is what proves the level reached the engine at all: the size
+        // comparison below is satisfied by equality, so a backend that dropped the level would
+        // pass it, and the `assert_eq!` pair above would still hold because pooled and fresh
+        // engines would agree on the same wrong output.
+        assert_ne!(best.to_vec(), fast.to_vec(), "the level did not reach the engine");
         assert!(best.len() <= fast.len(), "Level::HIGH must still out-compress Level::FAST");
     }
 
