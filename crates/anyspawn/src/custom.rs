@@ -4,9 +4,10 @@
 use std::fmt::Debug;
 use std::pin::Pin;
 
+use performables::arc::{Arc, PerCore};
 use performables::sync::channel::{OneshotReceiver, OneshotSender, oneshot};
 use thread_aware::closure::ThreadAwareAsyncFnOnce;
-use thread_aware::{PerThread, Thread, ThreadAware};
+use thread_aware::{Thread, ThreadAware};
 
 /// Trait for implementing custom task spawners.
 ///
@@ -83,13 +84,13 @@ where
 /// Internal wrapper for custom spawn functions.
 #[derive(Clone, ThreadAware)]
 pub(crate) struct CustomSpawner {
-    spawn: thread_aware::Arc<dyn SpawnCustom, PerThread>,
+    spawn: Arc<dyn SpawnCustom, PerCore>,
     name: &'static str,
 }
 
 impl CustomSpawner {
     pub(crate) fn new<T: SpawnCustom + Clone>(name: &'static str, t: T) -> Self {
-        let spawn = thread_aware::Arc::with_clone_fn(t, |x| Box::new(x.clone()) as Box<dyn SpawnCustom>);
+        let spawn = Arc::with_clone_fn(t, |x| Box::new(x.clone()) as Box<dyn SpawnCustom>);
         Self { spawn, name }
     }
 

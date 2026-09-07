@@ -2600,10 +2600,6 @@ mod tests {
     }
 
     #[test]
-    #[expect(
-        clippy::duration_suboptimal_units,
-        reason = "the test exercises the seconds-based formatter exactly at its one-hour boundary"
-    )]
     fn pure_formatters_cover_boundaries() {
         assert_eq!(
             [

@@ -3,7 +3,7 @@
 
 //! Object model shared by the wall-clock and instruction-count relocation benchmarks.
 //!
-//! Both harnesses relocate the same two subjects — a bare `Arc<Payload, PerThread>`
+//! Both harnesses relocate the same two subjects — a bare `Arc<Payload, PerCore>`
 //! and a multi-layer object tree — so their reported shapes describe the same
 //! object. Defining that object once keeps the two targets from drifting apart.
 
@@ -11,13 +11,14 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use thread_aware::{Arc, PerThread, Unaware};
+use performables::arc::{Arc, PerCore};
+use thread_aware::Unaware;
 
 /// Source of distinct strategy-partition identities.
 static NEXT_VALUE_ID: AtomicU64 = AtomicU64::new(0);
 
 /// Stand-in for strategy-partitioned state behind an
-/// `Arc<T, PerThread>`, such as a connection pipeline or a cache shard.
+/// `Arc<T, PerCore>`, such as a connection pipeline or a cache shard.
 ///
 /// Relocation never inspects the payload. The identity exists so the setup can
 /// verify that a relocation really swapped in the destination thread's value,
@@ -58,7 +59,7 @@ impl Default for Payload {
 /// This remains nonzero because every [`Tree`] has a root layer.
 pub const TREE_DEPTH: usize = 5;
 
-/// Strategy-partitioned state behind one `Arc<_, PerThread>` node of the tree.
+/// Strategy-partitioned state behind one `Arc<_, PerCore>` node of the tree.
 #[derive(Debug)]
 struct Leaf {
     id: u64,
@@ -85,7 +86,7 @@ struct Layer {
     id: u64,
     name: &'static str,
     flags: Unaware<u32>,
-    shared: Arc<Leaf, PerThread>,
+    shared: Arc<Leaf, PerCore>,
     child: Option<Box<Self>>,
 }
 
@@ -108,7 +109,7 @@ impl Tree {
             id: 0,
             name: "layer",
             flags: Unaware(0),
-            shared: Arc::<Leaf, PerThread>::new(Leaf::new),
+            shared: Arc::<Leaf, PerCore>::new_with(Leaf::new),
             child: None,
         });
 
@@ -117,7 +118,7 @@ impl Tree {
                 id: depth as u64,
                 name: "layer",
                 flags: Unaware(0),
-                shared: Arc::<Leaf, PerThread>::new(Leaf::new),
+                shared: Arc::<Leaf, PerCore>::new_with(Leaf::new),
                 child: Some(root),
             });
         }
@@ -125,19 +126,19 @@ impl Tree {
         Self { root }
     }
 
-    /// Number of `Arc<_, PerThread>` nodes a relocation of this tree has to visit.
+    /// Number of `Arc<_, PerCore>` nodes a relocation of this tree has to visit.
     #[must_use]
     pub fn node_count(&self) -> usize {
         self.leaf_ids().len()
     }
 
-    /// Identity of the root `Arc<_, PerThread>` node.
+    /// Identity of the root `Arc<_, PerCore>` node.
     #[must_use]
     pub fn leaf_id(&self) -> u64 {
         self.root.shared.id
     }
 
-    /// Identity of every `Arc<_, PerThread>` node, in layer order.
+    /// Identity of every `Arc<_, PerCore>` node, in layer order.
     #[must_use]
     pub fn leaf_ids(&self) -> Vec<u64> {
         let mut ids = Vec::with_capacity(TREE_DEPTH);

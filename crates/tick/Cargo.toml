@@ -47,6 +47,7 @@ fmt = ["dep:jiff"]
 [dependencies]
 futures-core = { workspace = true }
 jiff = { workspace = true, features = ["std"], optional = true }
+performables = { workspace = true }
 pin-project-lite = { workspace = true }
 serde_core = { workspace = true, features = ["std"], optional = true }
 thread_aware = { workspace = true, default-features = false, features = ["std"] }

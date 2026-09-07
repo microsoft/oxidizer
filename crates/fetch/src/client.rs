@@ -14,8 +14,9 @@ use http_extensions::routing::{BaseUriConflict, Router, RouterContext};
 use http_extensions::timeout::ResponseTimeout;
 use http_extensions::{HttpRequestBuilder, HttpRequestBuilderExt};
 use layered::Service;
+use performables::arc::{Arc as PerformableArc, PerCore};
 use templated_uri::{BaseUri, Uri};
-use thread_aware::{PerThread, ThreadAware};
+use thread_aware::ThreadAware;
 use tick::{Clock, FutureExt as TimeoutExt};
 
 use crate::pipeline::Pipeline;
@@ -373,7 +374,7 @@ impl Service<HttpRequest> for HttpClient {
 #[derive(ThreadAware, Clone, Debug)]
 pub(super) enum HttpClientPipeline {
     Shared(#[thread_aware(skip)] Arc<Pipeline>),
-    Isolated(thread_aware::Arc<Pipeline, PerThread>),
+    Isolated(PerformableArc<Pipeline, PerCore>),
 }
 
 #[cfg(test)]

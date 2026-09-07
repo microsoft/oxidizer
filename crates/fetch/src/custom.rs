@@ -20,7 +20,8 @@ use std::sync::Arc;
 use bytesbuf::mem::GlobalPool;
 use http_extensions::{HttpBodyBuilder, RequestHandler};
 use opentelemetry::metrics::Meter;
-use thread_aware::{PerThread, ThreadAware, unaware};
+use performables::arc::{Arc as PerformableArc, PerCore};
+use thread_aware::{ThreadAware, unaware};
 use tick::Clock;
 
 use crate::handlers::TransportHandler;
@@ -215,7 +216,7 @@ impl HttpClient {
             clock: deps.clock.clone(),
             global_pool: deps.global_pool.clone(),
             isolation,
-            inner: thread_aware::Arc::new_with((deps, unaware(factory)), |(deps, factory)| {
+            inner: PerformableArc::new_with_data((deps, unaware(factory)), |(deps, factory)| {
                 Arc::new(move |options, meter, pool_index| {
                     let context = CustomContext {
                         body_builder: create_body_builder(&deps.global_pool, &deps.clock, &options),
@@ -243,7 +244,7 @@ pub(crate) struct Transport {
     runtime_name: Cow<'static, str>,
     #[thread_aware(skip)]
     name: Cow<'static, str>,
-    inner: thread_aware::Arc<TransportFn, PerThread>,
+    inner: PerformableArc<TransportFn, PerCore>,
     clock: Clock,
     global_pool: GlobalPool,
     isolation: Isolation,

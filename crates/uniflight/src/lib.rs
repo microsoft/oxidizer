@@ -61,17 +61,17 @@
 //! type parameter. This controls how the internal state is partitioned across threads/NUMA nodes:
 //!
 //! - [`PerProcess`] (default): Single global state, maximum deduplication
-//! - [`PerNumaNode`]: Separate state per NUMA node, NUMA-local memory access
-//! - [`PerThread`]: Separate state per thread; the same key coalesces within one thread
+//! - [`PerNuma`]: Separate state per NUMA node, NUMA-local memory access
+//! - [`PerCore`]: Separate state per runtime thread; the same key coalesces within one partition
 //!   partition, with no sharing across thread partitions
 //!
 //! ```
-//! use thread_aware::PerNumaNode;
+//! use performables::arc::PerNuma;
 //! use uniflight::Merger;
 //!
 //! # async fn example() {
 //! // NUMA-aware merger - each NUMA node gets its own deduplication scope
-//! let merger: Merger<String, String, PerNumaNode> = Merger::new_per_numa();
+//! let merger: Merger<String, String, PerNuma> = Merger::new_per_numa();
 //! # }
 //! ```
 //!
@@ -142,26 +142,60 @@ use async_once_cell::OnceCell;
 use dashmap::DashMap;
 use dashmap::Entry::{Occupied, Vacant};
 use futures_util::FutureExt; // catch_unwind, map
-use thread_aware::storage::Strategy;
-use thread_aware::{Arc as TaArc, PerNumaNode, PerProcess, PerThread, Thread, ThreadAware};
+use performables::arc::{Arc as PerformableArc, PerCore, PerNuma, PerProcess, Strategy};
+use thread_aware::{Thread, ThreadAware};
+
+/// Strategy-partitioned state used by [`Merger`].
+///
+/// This type is public only because it appears in the strategy bound of `Merger`'s public type
+/// parameter. Its contents are intentionally private.
+#[doc(hidden)]
+pub struct MergerState<K, T> {
+    entries: DashMap<K, Weak<PanicAwareCell<T>>, RandomState>,
+}
+
+impl<K, T> Debug for MergerState<K, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MergerState")
+            .field("entries", &format_args!("DashMap<...>"))
+            .finish()
+    }
+}
+
+impl<K: Eq + Hash, T> MergerState<K, T> {
+    fn new() -> Self {
+        Self {
+            entries: DashMap::with_hasher(RandomState::new()),
+        }
+    }
+}
 
 /// Suppresses duplicate async operations identified by a key.
 ///
 /// The `S` type parameter controls the thread-aware scoping strategy:
 /// - [`PerProcess`]: Single global scope (default, maximum deduplication)
-/// - [`PerNumaNode`]: Per-NUMA-node scope (NUMA-local memory access)
-/// - [`PerThread`]: Per-thread scope (same-key work coalesces only within one thread partition)
-pub struct Merger<K, T, S: Strategy = PerProcess> {
-    inner: TaArc<DashMap<K, Weak<PanicAwareCell<T>>, RandomState>, S>,
+/// - [`PerNuma`]: Per-NUMA-node scope (NUMA-local memory access)
+/// - [`PerCore`]: Per-thread scope (same-key work coalesces only within one thread partition)
+pub struct Merger<K, T, S = PerProcess>
+where
+    S: Strategy<MergerState<K, T>>,
+{
+    inner: PerformableArc<MergerState<K, T>, S>,
 }
 
-impl<K, T, S: Strategy> Debug for Merger<K, T, S> {
+impl<K, T, S> Debug for Merger<K, T, S>
+where
+    S: Strategy<MergerState<K, T>>,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Merger").field("inner", &format_args!("DashMap<...>")).finish()
     }
 }
 
-impl<K, T, S: Strategy> Clone for Merger<K, T, S> {
+impl<K, T, S> Clone for Merger<K, T, S>
+where
+    S: Strategy<MergerState<K, T>>,
+{
     fn clone(&self) -> Self {
         Self { inner: self.inner.clone() }
     }
@@ -171,11 +205,11 @@ impl<K, T, S> Default for Merger<K, T, S>
 where
     K: Hash + Eq + Send + Sync + 'static,
     T: Send + Sync + 'static,
-    S: Strategy,
+    S: Strategy<MergerState<K, T>>,
 {
     fn default() -> Self {
         Self {
-            inner: TaArc::new(|| DashMap::with_hasher(RandomState::new())),
+            inner: PerformableArc::new_with(MergerState::new),
         }
     }
 }
@@ -184,30 +218,30 @@ impl<K, T, S> Merger<K, T, S>
 where
     K: Hash + Eq + Send + Sync + 'static,
     T: Send + Sync + 'static,
-    S: Strategy,
+    S: Strategy<MergerState<K, T>>,
 {
     /// Creates a new `Merger` instance.
     ///
     /// The scoping strategy is determined by the type parameter `S`:
     /// - [`PerProcess`] (default): Process-wide scope, maximum deduplication
-    /// - [`PerNumaNode`]: Per-NUMA-node scope, NUMA-local memory access
-    /// - [`PerThread`]: Per-thread scope, with same-key coalescing inside each thread partition
+    /// - [`PerNuma`]: Per-NUMA-node scope, NUMA-local memory access
+    /// - [`PerCore`]: Per-thread scope, with same-key coalescing inside each thread partition
     ///   and no sharing across thread partitions
     ///
     /// # Examples
     ///
     /// ```
-    /// use thread_aware::{PerNumaNode, PerThread};
+    /// use performables::arc::{PerCore, PerNuma};
     /// use uniflight::Merger;
     ///
     /// // Default (PerProcess) - type can be inferred
     /// let global: Merger<String, String> = Merger::new();
     ///
     /// // NUMA-local scope
-    /// let numa: Merger<String, String, PerNumaNode> = Merger::new();
+    /// let numa: Merger<String, String, PerNuma> = Merger::new();
     ///
     /// // Per-thread scope
-    /// let thread: Merger<String, String, PerThread> = Merger::new();
+    /// let thread: Merger<String, String, PerCore> = Merger::new();
     /// ```
     #[inline]
     #[must_use]
@@ -241,7 +275,7 @@ where
     }
 }
 
-impl<K, T> Merger<K, T, PerNumaNode>
+impl<K, T> Merger<K, T, PerNuma>
 where
     K: Hash + Eq + Send + Sync + 'static,
     T: Send + Sync + 'static,
@@ -266,7 +300,7 @@ where
     }
 }
 
-impl<K, T> Merger<K, T, PerThread>
+impl<K, T> Merger<K, T, PerCore>
 where
     K: Hash + Eq + Send + Sync + 'static,
     T: Send + Sync + 'static,
@@ -293,20 +327,21 @@ where
     }
 }
 
-impl<K, T, S: Strategy> Merger<K, T, S>
+impl<K, T, S> Merger<K, T, S>
 where
+    S: Strategy<MergerState<K, T>>,
     K: Hash + Eq,
 {
     /// Returns the number of in-flight operations.
     #[cfg(test)]
     fn len(&self) -> usize {
-        self.inner.len()
+        self.inner.entries.len()
     }
 
     /// Returns `true` if there are no in-flight operations.
     #[cfg(test)]
     fn is_empty(&self) -> bool {
-        self.inner.is_empty()
+        self.inner.entries.is_empty()
     }
 }
 
@@ -314,7 +349,8 @@ impl<K, T, S> ThreadAware for Merger<K, T, S>
 where
     K: Send + Sync,
     T: Send + Sync,
-    S: Strategy + Send + Sync,
+    S: Strategy<MergerState<K, T>> + Send + Sync,
+    S::State: Send,
 {
     #[cfg_attr(test, mutants::skip)]
     fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
@@ -326,7 +362,8 @@ impl<K, T, S> Merger<K, T, S>
 where
     K: Hash + Eq + Send + Sync,
     T: Send + Sync,
-    S: Strategy + Send + Sync,
+    S: Strategy<MergerState<K, T>> + Send + Sync,
+    S::State: Send + Sync,
 {
     /// Execute and return the value for a given function, making sure that only one
     /// operation is in-flight at a given moment. If a duplicate call comes in,
@@ -360,7 +397,7 @@ where
     {
         // Clone the TaArc - the async block owns this clone
         let inner = self.inner.clone();
-        let cell = Self::get_or_create_cell(&inner, key);
+        let cell = Self::get_or_create_cell(&inner.entries, key);
         let owned_key = key.to_owned();
         async move {
             // Box the future immediately to keep state machine size small.
@@ -370,7 +407,7 @@ where
             let result = cell.get_or_init(boxed).await.clone();
             drop(cell); // Release our Arc before cleanup check
             // Remove entry if no one else is using it (weak can't upgrade)
-            inner.remove_if(owned_key.borrow(), |_, weak| weak.upgrade().is_none());
+            inner.entries.remove_if(owned_key.borrow(), |_, weak| weak.upgrade().is_none());
             result
         }
     }
@@ -503,11 +540,18 @@ mod tests {
     static_assertions::assert_impl_all!(Merger<String, String>: ThreadAware);
 
     #[test]
+    fn merger_state_debug_is_opaque() {
+        let state = MergerState::<String, String>::new();
+
+        assert_eq!(format!("{state:?}"), "MergerState { entries: DashMap<...> }");
+    }
+
+    #[test]
     #[cfg_attr(miri, ignore)]
     fn merger_can_be_relocated_between_threads() {
-        let mut merger = Merger::<String, String, PerThread>::new();
+        let mut merger = Merger::<String, String, PerCore>::new();
         let cell = Arc::new(PanicAwareCell::new());
-        merger.inner.insert("key".to_owned(), Arc::downgrade(&cell));
+        merger.inner.entries.insert("key".to_owned(), Arc::downgrade(&cell));
         assert_eq!(merger.len(), 1);
 
         _ = Relocator::between_threads().relocate(&mut merger);

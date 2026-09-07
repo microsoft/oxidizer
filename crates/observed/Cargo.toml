@@ -39,6 +39,7 @@ test-util = []
 data_privacy = { workspace = true }
 observed_macros = { workspace = true }
 ohno = { workspace = true }
+performables = { workspace = true }
 
 # 3rd-party
 pin-project = { workspace = true }

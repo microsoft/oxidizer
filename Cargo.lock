@@ -873,6 +873,7 @@ dependencies = [
  "mutants",
  "new_zealand",
  "nm",
+ "performables",
  "plurality 0.2.2",
  "seismograph_io",
  "smallvec",
@@ -938,6 +939,7 @@ dependencies = [
  "moka",
  "mutants",
  "ohno 0.5.0",
+ "performables",
  "thread_aware",
  "tokio",
 ]
@@ -1755,6 +1757,7 @@ dependencies = [
  "opentelemetry-semantic-conventions",
  "opentelemetry-stdout",
  "opentelemetry_sdk",
+ "performables",
  "rustls",
  "rustls-platform-verifier",
  "seatbelt",
@@ -3532,6 +3535,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-stdout",
  "opentelemetry_sdk",
+ "performables",
  "pin-project",
  "smallvec",
  "static_assertions",
@@ -5570,10 +5574,8 @@ dependencies = [
 name = "thread_aware"
 version = "0.11.0"
 dependencies = [
- "dashmap",
  "futures",
  "mutants",
- "rustc-hash",
  "thread_aware_core",
  "thread_aware_macros",
 ]
@@ -5586,6 +5588,7 @@ dependencies = [
  "gungraun",
  "many_cpus",
  "mutants",
+ "performables",
  "thread_aware",
 ]
 
@@ -5640,6 +5643,7 @@ dependencies = [
  "libc",
  "mutants",
  "ohno 0.5.0",
+ "performables",
  "pin-project-lite",
  "serde",
  "serde_core",
@@ -6159,6 +6163,7 @@ dependencies = [
  "dashmap",
  "futures-util",
  "mutants",
+ "performables",
  "static_assertions",
  "thread_aware",
  "tokio",

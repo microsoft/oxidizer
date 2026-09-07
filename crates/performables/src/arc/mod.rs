@@ -114,6 +114,11 @@ pub trait Strategy<T: ?Sized>: private::Sealed {
     where
         T: ThreadAware + 'static,
         V: Send + Sync + 'static;
+
+    /// Relocates the strategy-owned state to the destination thread.
+    fn relocate(state: &mut Self::State, source: Option<&Thread>, destination: &Thread)
+    where
+        T: Send + Sync;
 }
 
 /// Internal cloning contract for process-wide [`Arc::make_mut`].
@@ -145,10 +150,10 @@ impl MakeMutTarget for str {
 ///
 /// `Arc<T, PerProcess>` has the same representation size as
 /// `std::sync::Arc<T>`. Per-core and per-NUMA strategies keep their factory and
-/// affinity storage in strategy-owned state shared by all clones. Only those
-/// affinity-backed strategies implement [`ThreadAware`]; `PerProcess` does not.
+/// affinity storage in strategy-owned state shared by all clones. Every strategy
+/// implements [`ThreadAware`]; relocation is a no-op for `PerProcess`.
 ///
-/// ```compile_fail
+/// ```
 /// use performables::arc::{Arc, PerProcess};
 /// use thread_aware::ThreadAware;
 ///
@@ -314,6 +319,12 @@ impl<T: ?Sized> Strategy<T> for PerProcess {
     {
         StdArc::from(clone_function(&value))
     }
+
+    fn relocate(_state: &mut Self::State, _source: Option<&Thread>, _destination: &Thread)
+    where
+        T: Send + Sync,
+    {
+    }
 }
 
 impl<T: ?Sized, S: private::AffinityStrategy> Strategy<T> for S {
@@ -382,16 +393,24 @@ impl<T: ?Sized, S: private::AffinityStrategy> Strategy<T> for S {
         let (current, factory) = Factory::from_clone_function(value, clone_function);
         affinity_state(current, factory)
     }
+
+    fn relocate(state: &mut Self::State, source: Option<&Thread>, destination: &Thread)
+    where
+        T: Send + Sync,
+    {
+        relocate_affinity::<T, S>(state, source, destination);
+    }
 }
 
 impl<T, S> ThreadAware for Arc<T, S>
 where
     T: Send + Sync + ?Sized,
-    S: private::AffinityStrategy,
+    S: Strategy<T>,
+    S::State: Send,
 {
     fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         telemetry::record(EventKind::ArcRelocate, Self::as_ptr(self).cast::<()>());
-        relocate_affinity::<T, S>(&mut self.state, source, destination);
+        S::relocate(&mut self.state, source, destination);
     }
 }
 
@@ -1137,6 +1156,15 @@ mod tests {
     }
 
     #[test]
+    fn per_process_relocation_keeps_the_value() {
+        let mut value = Arc::<_, PerProcess>::new(42);
+        let original = value.clone();
+        _ = Relocator::between_threads().relocate(&mut value);
+
+        assert!(Arc::ptr_eq(&value, &original));
+    }
+
+    #[test]
     fn per_process_new_with_uses_the_constructor() {
         let value = Arc::<_, PerProcess>::new_with(|| 42);
 
@@ -1544,6 +1572,46 @@ mod tests {
         let original = value.clone();
 
         _ = Relocator::between_threads().different_owner().relocate(&mut value);
+
+        assert!(Arc::ptr_eq(&value, &original));
+    }
+
+    #[test]
+    fn affinity_relocation_rejects_a_second_move_into_a_foreign_owner() {
+        let (source, foreign) = Relocator::between_threads().different_owner().relocate(&mut ());
+        let source = source.unwrap();
+        let mut value = Arc::<u64, PerCore>::new_with(|| 42);
+        let original = value.clone();
+
+        ThreadAware::relocate(&mut value, Some(&source), &foreign);
+        ThreadAware::relocate(&mut value, None, &foreign);
+
+        assert!(Arc::ptr_eq(&value, &original));
+    }
+
+    #[test]
+    fn affinity_relocation_rejects_storage_bound_to_another_owner() {
+        let (source, destination) = Relocator::between_threads().relocate(&mut ());
+        let source = source.unwrap();
+        let (_, foreign) = Relocator::between_threads().different_owner().relocate(&mut ());
+        let first = Arc::<u64, PerCore>::new_with(|| 42);
+        let mut bound = first.clone();
+        let mut unbound = first.clone();
+
+        ThreadAware::relocate(&mut bound, Some(&source), &destination);
+        ThreadAware::relocate(&mut unbound, None, &foreign);
+
+        assert!(Arc::ptr_eq(&unbound, &first));
+    }
+
+    #[test]
+    fn affinity_relocation_with_the_same_key_keeps_the_carried_value() {
+        let (source, _) = Relocator::between_threads().relocate(&mut ());
+        let source = source.unwrap();
+        let mut value = Arc::<u64, PerCore>::new_with(|| 42);
+        let original = value.clone();
+
+        ThreadAware::relocate(&mut value, Some(&source), &source);
 
         assert!(Arc::ptr_eq(&value, &original));
     }

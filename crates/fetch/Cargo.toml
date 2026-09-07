@@ -110,6 +110,7 @@ opentelemetry = { workspace = true, features = ["futures", "metrics"] }
 opentelemetry-semantic-conventions = { workspace = true, features = [
     "semconv_experimental",
 ] }
+performables = { workspace = true }
 rustls = { workspace = true, features = [
     "tls12",
     "std",

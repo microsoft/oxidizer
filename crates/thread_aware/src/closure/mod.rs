@@ -3,16 +3,11 @@
 
 //! Helpers for defining and calling [`trait@ThreadAware`] closures.
 
-#[cfg(any(test, feature = "std"))]
-mod erased;
-
 #[cfg(not(test))]
 use alloc::boxed::Box;
 use core::fmt;
 use core::pin::Pin;
 
-#[cfg(any(test, feature = "std"))]
-pub(crate) use erased::ErasedClosureOnce;
 use thread_aware_core::Thread;
 
 use crate::ThreadAware;

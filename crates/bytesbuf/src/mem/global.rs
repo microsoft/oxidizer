@@ -10,6 +10,7 @@ use std::sync::atomic::{self, AtomicUsize};
 use std::sync::{Arc, Mutex};
 
 use nm::{Event, Magnitude};
+use performables::arc::{Arc as PerformableArc, PerCore};
 use plurality::Pool;
 use thread_aware::ThreadAware;
 
@@ -42,7 +43,7 @@ use crate::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, Me
 /// [`Owner`]: thread_aware::Owner
 #[derive(Clone, Debug, ThreadAware)]
 pub struct GlobalPool {
-    inner: thread_aware::Arc<GlobalPoolInner, thread_aware::PerThread>,
+    inner: PerformableArc<GlobalPoolInner, PerCore>,
 }
 
 impl GlobalPool {
@@ -62,7 +63,7 @@ impl GlobalPool {
     )]
     pub fn new() -> Self {
         Self {
-            inner: thread_aware::Arc::<_, thread_aware::PerThread>::new(GlobalPoolInner::new),
+            inner: PerformableArc::<_, PerCore>::new_with(GlobalPoolInner::new),
         }
     }
 
@@ -480,7 +481,7 @@ std::thread_local! {
 
     // Counts how many GlobalPoolInner instances have been created. Each instance owns its own
     // memory capacity, so creating many of them defeats the purpose of pooling. In typical usage
-    // with a thread-aware GlobalPool backed by thread_aware::PerThread, there is at most one
+    // with a thread-aware GlobalPool backed by performables::arc::PerCore, there is at most one
     // instance per worker thread, so application owners can use this
     // metric to detect if something is inadvertently creating an excessive number of pools instead
     // of reusing existing ones.
