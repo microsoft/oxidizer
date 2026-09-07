@@ -273,6 +273,9 @@ mod tests {
     #[test]
     fn monitor_directory_is_platform_specific() {
         let directory = monitor_directory().unwrap();
+        #[cfg(target_os = "windows")]
         assert_eq!(directory.file_name().unwrap(), "monitor");
+        #[cfg(not(target_os = "windows"))]
+        assert_eq!(directory.file_name().unwrap(), "seismograph");
     }
 }

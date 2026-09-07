@@ -24,7 +24,7 @@ pub(crate) fn push_string(bytes: &mut Vec<u8>, value: &str) -> Result<(), Error>
 pub(crate) fn hex(bytes: &[u8]) -> String {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
     let mut output = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
+    for &byte in bytes {
         output.push(DIGITS[(byte >> 4) as usize] as char);
         output.push(DIGITS[(byte & 0x0f) as usize] as char);
     }
