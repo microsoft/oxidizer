@@ -2,8 +2,8 @@
 # Licensed under the MIT License.
 
 [package]
-name = "arty_core"
-description = "Foundational traits and types for the Arty runtime."
+name = "arty_io_core"
+description = "Stable contracts for integrating external I/O drivers with the Arty runtime."
 version = "0.2.0"
 readme = "README.md"
 keywords = ["arty", "async", "runtime"]
@@ -14,13 +14,13 @@ authors = { workspace = true }
 license = { workspace = true }
 homepage = { workspace = true }
 include = { workspace = true }
-repository = "https://github.com/microsoft/oxidizer/tree/main/crates/arty_core"
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_core"
 
 [package.metadata.docs.rs]
 all-features = true
 
-# Empty foundation crate: it has no executable source lines until foundational
-# runtime contracts are introduced.
+# Empty contract crate: it has no executable source lines until I/O integration
+# contracts are introduced.
 [package.metadata.coverage-gate]
 min-lines-percent = 0
 

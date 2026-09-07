@@ -15,9 +15,8 @@
 
 Single-threaded, thread-aware application runtime.
 
-Arty is being developed as a small runtime whose foundational contracts live in
-[`arty_core`][__link0]. Its public surface is intentionally limited while those contracts are being
-established.
+Arty is being developed as a small runtime. Stable contracts for integrating external I/O
+drivers live in [`arty_io_core`][__link0].
 
 ## Features
 
@@ -38,8 +37,8 @@ established.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbUCJNbmEm3o4bEGpzQYEPn1cbPdtoysJJTTAbmG5FQvTrxU1hZIGCaWFydHlfY29yZWUwLjIuMA
- [__link0]: https://crates.io/crates/arty_core/0.2.0
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbvQUsvsxw3aMb3ltq8ELONs8bDOGus7kuoVYbr5grKcqlQcVhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
+ [__link0]: https://crates.io/crates/arty_io_core/0.2.0
  [__link1]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/DESIGN.md
  [__link2]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/IO.md
  [__link3]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/PANICS.md

@@ -29,6 +29,7 @@ These are the primary crates built out of this repo:
 - [`anyspawn`](./crates/anyspawn/README.md) - A generic task spawner compatible with any async runtime.
 - [`anyspawn_azure`](./crates/anyspawn_azure/README.md) - Azure SDK async runtime and process executor backed by an anyspawn spawner and a tick clock.
 - [`allocation_hints`](./crates/allocation_hints/README.md) - Allocator-independent heap ownership and scoped allocation hints.
+- <img src="./arty.svg" alt="Arty logo" width="24" align="center"> [`arty`](./crates/arty/README.md) - Single-threaded, thread-aware application runtime.
 - [`bytesbuf`](./crates/bytesbuf/README.md) - Types for creating and manipulating byte sequences.
 - [`bytesbuf_io`](./crates/bytesbuf_io/README.md) - Asynchronous I/O abstractions expressed via `bytesbuf` types.
 - [`cachet`](./crates/cachet/README.md) - A composable, customizable multi-tier caching library with rich feature support.

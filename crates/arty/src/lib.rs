@@ -4,14 +4,13 @@
 #![deny(missing_docs)]
 #![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![doc(html_logo_url = "https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg")]
-#![doc(html_favicon_url = "https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg")]
+#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty/logo.png")]
+#![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty/favicon.ico")]
 
 //! Single-threaded, thread-aware application runtime.
 //!
-//! Arty is being developed as a small runtime whose foundational contracts live in
-//! [`arty_core`]. Its public surface is intentionally limited while those contracts are being
-//! established.
+//! Arty is being developed as a small runtime. Stable contracts for integrating external I/O
+//! drivers live in [`arty_io_core`].
 //!
 //! # Features
 //!
@@ -26,7 +25,7 @@
 //! - [Panics](https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/PANICS.md)
 //! - [Stabilization](https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/STABILIZATION.md)
 
-use arty_core as _;
+use arty_io_core as _;
 
 /// Foundational runtime and thread-awareness types.
 pub mod core {

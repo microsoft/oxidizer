@@ -46,7 +46,7 @@ time = ["dep:tick"]
 test-util = ["tick?/test-util"]
 
 [dependencies]
-arty_core = { workspace = true }
+arty_io_core = { workspace = true }
 thread_aware_core = { workspace = true, features = ["std"] }
 tick = { workspace = true, optional = true }
 
