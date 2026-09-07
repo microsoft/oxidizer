@@ -16,13 +16,13 @@ use seismograph_protocol::message::{EventBufferDisposition, RecorderStatistics, 
 use seismograph_protocol::monitor::MonitorDescriptor;
 
 use super::app::{
-    ActivitySample, AllocationViewState, App, CaptureStep, HeapFocus, HeapViewState, MonitorTab, PrimitiveFocus, PrimitiveViewState,
-    RecordingConfigurationField, RecordingConfigurationPopup, RuntimeDetailView, RuntimeFocus, RuntimeViewState, Screen, ThreadFocus,
-    ThreadViewState, format_sampling_percentage,
+    ActivitySample, AllocationViewState, App, CacheFocus, CacheViewState, CaptureStep, HeapFocus, HeapViewState, IoFocus, IoViewState,
+    MonitorTab, PrimitiveFocus, PrimitiveViewState, RecordingConfigurationField, RecordingConfigurationPopup, RuntimeDetailView,
+    RuntimeFocus, RuntimeViewState, Screen, ThreadFocus, ThreadViewState, format_sampling_percentage,
 };
 use super::data::{
     AllocationHotspot, AllocationSnapshot, AllocationSort, AllocationStackFilter, CapturedSnapshot, MemorySnapshot, MemoryTier,
-    PrimitiveSnapshot, PrimitiveSort, ThreadSnapshot,
+    PrimitiveSnapshot, PrimitiveSort, ThreadSnapshot, cache_event_label,
 };
 
 const KEY_COLOR: Color = Color::Cyan;
@@ -52,6 +52,8 @@ impl App {
                     primitive_view: self.primitive_view,
                     thread_view: self.thread_view,
                     runtime_view: self.runtime_view,
+                    io_view: self.io_view,
+                    cache_view: self.cache_view,
                     activity_samples: &self.activity_samples,
                     recorder_statistics: self.recorder_statistics.as_ref(),
                 },
@@ -182,6 +184,8 @@ struct ConnectedView<'a> {
     primitive_view: PrimitiveViewState,
     thread_view: ThreadViewState,
     runtime_view: RuntimeViewState,
+    io_view: IoViewState,
+    cache_view: CacheViewState,
     activity_samples: &'a VecDeque<ActivitySample>,
     recorder_statistics: Option<&'a RecorderStatistics>,
 }
@@ -189,11 +193,20 @@ struct ConnectedView<'a> {
 fn draw_connected(frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect, view: &ConnectedView<'_>) {
     let [tabs, content] = Layout::vertical([Constraint::Length(3), Constraint::Min(1)]).areas(area);
     frame.render_widget(
-        Tabs::new([" Info ", " Heaps ", " Allocations ", " Primitives ", " Threads ", " Runtime "])
-            .select(view.tab.index())
-            .block(Block::default().borders(Borders::ALL))
-            .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD))
-            .divider("│"),
+        Tabs::new([
+            " Info ",
+            " Heaps ",
+            " Allocations ",
+            " Primitives ",
+            " Threads ",
+            " Runtime ",
+            " I/O ",
+            " Cache ",
+        ])
+        .select(view.tab.index())
+        .block(Block::default().borders(Borders::ALL))
+        .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .divider("│"),
         tabs,
     );
     match view.tab {
@@ -247,7 +260,294 @@ fn draw_connected(frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect, v
             view.snapshot_error,
             view.runtime_view,
         ),
+        MonitorTab::Io => draw_io(
+            frame,
+            content,
+            view.snapshot.map(|snapshot| &snapshot.io),
+            view.snapshot_error,
+            view.io_view,
+        ),
+        MonitorTab::Cache => draw_cache(
+            frame,
+            content,
+            view.snapshot.map(|snapshot| &snapshot.cache),
+            view.snapshot_error,
+            view.cache_view,
+        ),
     }
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "the paired resource and operation panes share selection and layout state that is clearest in one renderer"
+)]
+fn draw_io(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    io: Option<&super::data::IoMonitorSnapshot>,
+    unavailable: Option<&str>,
+    view: IoViewState,
+) {
+    let [resources_area, operations_area] = Layout::horizontal([Constraint::Percentage(48), Constraint::Percentage(52)]).areas(area);
+    let Some(io) = io else {
+        draw_empty_panel_with_message(frame, resources_area, " I/O Resources ", unavailable);
+        draw_empty_panel_with_message(frame, operations_area, " Operations ", unavailable);
+        return;
+    };
+
+    let resource_selected = view.resource_selected.min(io.resources.len().saturating_sub(1));
+    let resource = io.resources.get(resource_selected);
+    let visible_resources = usize::from(resources_area.height.saturating_sub(3));
+    let first_resource = resource_selected.saturating_sub(visible_resources.saturating_sub(1));
+    let mut resource_lines = vec![Line::from(Span::styled(
+        format!(
+            "{:<12} {:<12} {:>7} {:>7} {:>10} {:>10} {:>7}",
+            "Resource", "Kind", "Reads", "Writes", "Requested", "Completed", "Errors"
+        ),
+        Style::default().add_modifier(Modifier::BOLD),
+    ))];
+    resource_lines.extend(
+        io.resources
+            .iter()
+            .skip(first_resource)
+            .take(visible_resources)
+            .enumerate()
+            .map(|(index, resource)| {
+                primitive_selection_line(
+                    Line::from(format!(
+                        "#{:<11} {:<12} {:>7} {:>7} {:>10} {:>10} {:>7}",
+                        resource.resource_id,
+                        io_resource_kind_label(resource.kind),
+                        format_count(resource.reads),
+                        format_count(resource.writes),
+                        format_bytes(resource.requested_bytes),
+                        format_bytes(resource.completed_bytes),
+                        format_count(resource.errors.saturating_add(resource.canceled)),
+                    )),
+                    first_resource + index == resource_selected,
+                    view.focus == IoFocus::Resources,
+                )
+            }),
+    );
+    frame.render_widget(
+        Paragraph::new(resource_lines).block(
+            Block::default()
+                .title(Line::from(vec![
+                    Span::raw(format!(
+                        " I/O Resources · retained {} / {} events · {} lost ({}) · ",
+                        format_count(io.retained_events),
+                        format_count(io.total_events),
+                        format_count(io.lost_events),
+                        format_event_loss(io.lost_events, io.total_events),
+                    )),
+                    key_span("Enter"),
+                    Span::raw(" operations "),
+                ]))
+                .borders(Borders::ALL),
+        ),
+        resources_area,
+    );
+
+    let operations = resource.map_or(&[][..], |resource| resource.operations.as_slice());
+    let operation_selected = view.operation_selected.min(operations.len().saturating_sub(1));
+    let visible_operations = usize::from(operations_area.height.saturating_sub(3));
+    let first_operation = operation_selected.saturating_sub(visible_operations.saturating_sub(1));
+    let mut operation_lines = vec![Line::from(Span::styled(
+        format!(
+            "{:<11} {:<6} {:<12} {:>8} {:>10} {:>10} {:>10}",
+            "Operation", "Type", "Outcome", "Thread", "Requested", "Completed", "Duration"
+        ),
+        Style::default().add_modifier(Modifier::BOLD),
+    ))];
+    operation_lines.extend(
+        operations
+            .iter()
+            .skip(first_operation)
+            .take(visible_operations)
+            .enumerate()
+            .map(|(index, operation)| {
+                primitive_selection_line(
+                    Line::from(format!(
+                        "#{:<10} {:<6} {:<12} #{:<7} {:>10} {:>10} {:>10}",
+                        operation.operation_id,
+                        operation.kind.label(),
+                        io_outcome_label(operation.outcome),
+                        operation.thread_id,
+                        format_bytes(operation.requested_bytes),
+                        format_bytes(operation.completed_bytes),
+                        operation.duration_nanos.map_or_else(|| "-".into(), format_runtime_duration),
+                    )),
+                    first_operation + index == operation_selected,
+                    view.focus == IoFocus::Operations,
+                )
+            }),
+    );
+    let details = operations.get(operation_selected).map_or_else(
+        || "No retained I/O operations".to_owned(),
+        |operation| {
+            format!(
+                "buffer {} · {} across {} span(s) · resource {}",
+                operation.buffer_id.map_or_else(|| "-".into(), |id| format!("#{id}")),
+                format_bytes(operation.buffer_len),
+                format_count(u64::from(operation.buffer_span_count)),
+                io_resource_kind_label(operation.resource_kind),
+            )
+        },
+    );
+    frame.render_widget(
+        Paragraph::new(operation_lines).block(
+            Block::default()
+                .title(" Operations ")
+                .title_bottom(Line::from(vec![
+                    Span::raw(format!(" {details} · ")),
+                    key_span("Backspace"),
+                    Span::raw(" resources "),
+                ]))
+                .borders(Borders::ALL),
+        ),
+        operations_area,
+    );
+}
+
+fn draw_cache(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    cache: Option<&super::data::CacheMonitorSnapshot>,
+    unavailable: Option<&str>,
+    view: CacheViewState,
+) {
+    let [tiers_area, operations_area] = Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)]).areas(area);
+    let Some(cache) = cache else {
+        draw_empty_panel_with_message(frame, tiers_area, " Cache Tiers ", unavailable);
+        draw_empty_panel_with_message(frame, operations_area, " Outcomes ", unavailable);
+        return;
+    };
+
+    let tier_selected = view.tier_selected.min(cache.tiers.len().saturating_sub(1));
+    let tier = cache.tiers.get(tier_selected);
+    let visible_tiers = usize::from(tiers_area.height.saturating_sub(3));
+    let first_tier = tier_selected.saturating_sub(visible_tiers.saturating_sub(1));
+    let mut tier_lines = vec![Line::from(Span::styled(
+        format!(
+            "{:<19} {:<10} {:>9} {:>9} {:>9} {:>9} {:>9}",
+            "Tier identity", "Role", "Events", "Hits", "Misses", "Errors", "Hit rate"
+        ),
+        Style::default().add_modifier(Modifier::BOLD),
+    ))];
+    tier_lines.extend(
+        cache
+            .tiers
+            .iter()
+            .skip(first_tier)
+            .take(visible_tiers)
+            .enumerate()
+            .map(|(index, tier)| {
+                let lookups = tier.hits.saturating_add(tier.misses).saturating_add(tier.errors);
+                let hit_rate = if lookups == 0 {
+                    "-".into()
+                } else {
+                    format_hit_rate(tier.hits, lookups)
+                };
+                primitive_selection_line(
+                    Line::from(format!(
+                        "0x{:<17x} {:<10} {:>9} {:>9} {:>9} {:>9} {:>9}",
+                        tier.tier_id,
+                        if tier.fallback { "fallback" } else { "primary" },
+                        format_count(tier.events),
+                        format_count(tier.hits),
+                        format_count(tier.misses),
+                        format_count(tier.errors),
+                        hit_rate,
+                    )),
+                    first_tier + index == tier_selected,
+                    view.focus == CacheFocus::Tiers,
+                )
+            }),
+    );
+    frame.render_widget(
+        Paragraph::new(tier_lines).block(
+            Block::default()
+                .title(Line::from(vec![
+                    Span::raw(format!(
+                        " Cache Tiers · retained {} / {} events · {} lost ({}) · ",
+                        format_count(cache.retained_events),
+                        format_count(cache.total_events),
+                        format_count(cache.lost_events),
+                        format_event_loss(cache.lost_events, cache.total_events),
+                    )),
+                    key_span("Enter"),
+                    Span::raw(" outcomes "),
+                ]))
+                .borders(Borders::ALL),
+        ),
+        tiers_area,
+    );
+
+    let operations = tier.map_or(&[][..], |tier| tier.operations.as_slice());
+    let operation_selected = view.operation_selected.min(operations.len().saturating_sub(1));
+    let visible_operations = usize::from(operations_area.height.saturating_sub(3));
+    let first_operation = operation_selected.saturating_sub(visible_operations.saturating_sub(1));
+    let mut operation_lines = vec![Line::from(Span::styled(
+        format!("{:<28} {:>12}", "Outcome", "Events"),
+        Style::default().add_modifier(Modifier::BOLD),
+    ))];
+    operation_lines.extend(
+        operations
+            .iter()
+            .skip(first_operation)
+            .take(visible_operations)
+            .enumerate()
+            .map(|(index, operation)| {
+                primitive_selection_line(
+                    Line::from(format!(
+                        "{:<28} {:>12}",
+                        cache_event_label(operation.kind),
+                        format_count(operation.events)
+                    )),
+                    first_operation + index == operation_selected,
+                    view.focus == CacheFocus::Operations,
+                )
+            }),
+    );
+    frame.render_widget(
+        Paragraph::new(operation_lines).block(
+            Block::default()
+                .title(" Outcomes ")
+                .title_bottom(Line::from(vec![key_span("Backspace"), Span::raw(" tiers ")]))
+                .borders(Borders::ALL),
+        ),
+        operations_area,
+    );
+}
+
+const fn io_resource_kind_label(kind: seismograph::recorder::io::IoResourceKind) -> &'static str {
+    use seismograph::recorder::io::IoResourceKind;
+    match kind {
+        IoResourceKind::File => "File",
+        IoResourceKind::TcpStream => "TCP stream",
+        IoResourceKind::TcpListener => "TCP listener",
+        IoResourceKind::NamedPipe => "Named pipe",
+        IoResourceKind::WinHttpRequest => "WinHTTP",
+        IoResourceKind::Other => "Other",
+        _ => "Unknown",
+    }
+}
+
+const fn io_outcome_label(outcome: seismograph::recorder::io::IoOutcome) -> &'static str {
+    use seismograph::recorder::io::IoOutcome;
+    match outcome {
+        IoOutcome::Pending => "pending",
+        IoOutcome::Success => "success",
+        IoOutcome::EndOfStream => "end of stream",
+        IoOutcome::Canceled => "canceled",
+        IoOutcome::Error => "error",
+        _ => "unknown",
+    }
+}
+
+fn format_hit_rate(hits: u64, lookups: u64) -> String {
+    let tenths = u128::from(hits).saturating_mul(1_000) / u128::from(lookups.max(1));
+    format!("{}.{:01}%", tenths / 10, tenths % 10)
 }
 
 #[expect(
@@ -1796,7 +2096,7 @@ fn connected_footer(
             .add_modifier(Modifier::BOLD)
     };
     let mut spans = vec![
-        Span::raw(" A/E/X/R: "),
+        Span::raw(" A/E/X/R/I/C: "),
         Span::styled(
             if configuration.allocations.enabled { "A" } else { "-" },
             state_style(configuration.allocations.enabled),
@@ -1812,6 +2112,14 @@ fn connected_footer(
         Span::styled(
             if configuration.runtime_tasks.enabled { "R" } else { "-" },
             state_style(configuration.runtime_tasks.enabled),
+        ),
+        Span::styled(
+            if configuration.io.enabled { "I" } else { "-" },
+            state_style(configuration.io.enabled),
+        ),
+        Span::styled(
+            if configuration.cache.enabled { "C" } else { "-" },
+            state_style(configuration.cache.enabled),
         ),
         Span::raw(" "),
         key_span("[c configure]"),
@@ -1878,6 +2186,7 @@ fn recording_configuration_label(configuration: RecordingConfiguration) -> &'sta
         configuration.arc_dereferences,
         configuration.runtime_tasks,
         configuration.io,
+        configuration.cache,
     ];
     if policies.iter().all(|policy| !policy.enabled) {
         "off"
@@ -1900,8 +2209,9 @@ mod tests {
     use ratatui::backend::TestBackend;
     use seismograph::recorder::RecordingPolicies;
     use seismograph::recorder::event::{
-        Address, Event, EventClock, EventKind, EventPayload, EventSequence, EventTimestamp, Events, ObjectId,
+        Address, Event, EventClock, EventKind, EventPayload, EventSequence, EventTimestamp, Events, NumericEvent, ObjectId,
     };
+    use seismograph::recorder::io::{BufferId, IoEvent, IoOperationId, IoOutcome, IoResourceId, IoResourceKind};
     use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, WorkerId};
     use seismograph::recorder::thread::{ThreadId, ThreadLog};
     use seismograph_rallocator::callers::{
@@ -2094,6 +2404,60 @@ mod tests {
                 runtime_event(2, 13, EventKind::Deallocation, EventPayload::Object(ObjectId::new(10)), &[]),
                 runtime_event(
                     1,
+                    14,
+                    EventKind::IoReadStarted,
+                    EventPayload::Io(IoEvent {
+                        operation_id: IoOperationId::from_raw(1).unwrap(),
+                        resource_id: IoResourceId::from_raw(2).unwrap(),
+                        buffer_id: BufferId::from_raw(3),
+                        requested_bytes: 4_096,
+                        completed_bytes: 0,
+                        buffer_len: 8_192,
+                        buffer_span_count: 2,
+                        resource_kind: IoResourceKind::File,
+                        outcome: IoOutcome::Pending,
+                    }),
+                    &[],
+                ),
+                runtime_event(
+                    1,
+                    15,
+                    EventKind::IoReadFinished,
+                    EventPayload::Io(IoEvent {
+                        operation_id: IoOperationId::from_raw(1).unwrap(),
+                        resource_id: IoResourceId::from_raw(2).unwrap(),
+                        buffer_id: BufferId::from_raw(3),
+                        requested_bytes: 4_096,
+                        completed_bytes: 2_048,
+                        buffer_len: 10_240,
+                        buffer_span_count: 3,
+                        resource_kind: IoResourceKind::File,
+                        outcome: IoOutcome::Success,
+                    }),
+                    &[],
+                ),
+                runtime_event(
+                    2,
+                    16,
+                    EventKind::CacheHit,
+                    EventPayload::Numeric(NumericEvent {
+                        object_id: ObjectId::new(0x1234),
+                        value: 0,
+                    }),
+                    &[],
+                ),
+                runtime_event(
+                    2,
+                    17,
+                    EventKind::CacheMiss,
+                    EventPayload::Numeric(NumericEvent {
+                        object_id: ObjectId::new(0x1234),
+                        value: 0,
+                    }),
+                    &[],
+                ),
+                runtime_event(
+                    1,
                     7,
                     EventKind::TaskSpawned,
                     EventPayload::Runtime(RuntimeEvent {
@@ -2163,6 +2527,8 @@ mod tests {
             heap_error: None,
             primitives: runtime.primitives,
             runtime: runtime.runtime,
+            io: runtime.io,
+            cache: runtime.cache,
             threads: runtime.threads,
             captured_at: SystemTime::UNIX_EPOCH,
             captured_instant: Instant::now(),
@@ -2584,6 +2950,8 @@ mod tests {
             MonitorTab::Primitives,
             MonitorTab::Threads,
             MonitorTab::Runtime,
+            MonitorTab::Io,
+            MonitorTab::Cache,
         ] {
             app.screen = Screen::Connected {
                 descriptor: descriptor(),
@@ -2700,6 +3068,16 @@ mod tests {
                 snapshot: Some(representative_capture()),
             };
             assert!(render(&app).contains("Task"));
+        }
+
+        for (tab, expected) in [(MonitorTab::Io, "I/O Resources"), (MonitorTab::Cache, "Cache Tiers")] {
+            app.screen = Screen::Connected {
+                descriptor: descriptor(),
+                recording: RecordingConfiguration::default(),
+                tab,
+                snapshot: Some(representative_capture()),
+            };
+            assert!(render(&app).contains(expected));
         }
     }
 }

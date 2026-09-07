@@ -449,6 +449,64 @@ impl RuntimeDetailView {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct IoViewState {
+    pub(super) focus: IoFocus,
+    pub(super) resource_selected: usize,
+    pub(super) operation_selected: usize,
+}
+
+impl IoViewState {
+    const fn new() -> Self {
+        Self {
+            focus: IoFocus::Resources,
+            resource_selected: 0,
+            operation_selected: 0,
+        }
+    }
+
+    fn reset(&mut self) {
+        self.focus = IoFocus::Resources;
+        self.resource_selected = 0;
+        self.operation_selected = 0;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum IoFocus {
+    Resources,
+    Operations,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct CacheViewState {
+    pub(super) focus: CacheFocus,
+    pub(super) tier_selected: usize,
+    pub(super) operation_selected: usize,
+}
+
+impl CacheViewState {
+    const fn new() -> Self {
+        Self {
+            focus: CacheFocus::Tiers,
+            tier_selected: 0,
+            operation_selected: 0,
+        }
+    }
+
+    fn reset(&mut self) {
+        self.focus = CacheFocus::Tiers;
+        self.tier_selected = 0;
+        self.operation_selected = 0;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum CacheFocus {
+    Tiers,
+    Operations,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum MonitorTab {
     Info,
     Heaps,
@@ -456,6 +514,8 @@ pub(super) enum MonitorTab {
     Primitives,
     Threads,
     Runtime,
+    Io,
+    Cache,
 }
 
 impl MonitorTab {
@@ -467,6 +527,8 @@ impl MonitorTab {
             Self::Primitives => 3,
             Self::Threads => 4,
             Self::Runtime => 5,
+            Self::Io => 6,
+            Self::Cache => 7,
         }
     }
 
@@ -477,18 +539,22 @@ impl MonitorTab {
             Self::Allocations => Self::Primitives,
             Self::Primitives => Self::Threads,
             Self::Threads => Self::Runtime,
-            Self::Runtime => Self::Info,
+            Self::Runtime => Self::Io,
+            Self::Io => Self::Cache,
+            Self::Cache => Self::Info,
         }
     }
 
     const fn previous(self) -> Self {
         match self {
-            Self::Info => Self::Runtime,
+            Self::Info => Self::Cache,
             Self::Heaps => Self::Info,
             Self::Allocations => Self::Heaps,
             Self::Primitives => Self::Allocations,
             Self::Threads => Self::Primitives,
             Self::Runtime => Self::Threads,
+            Self::Io => Self::Runtime,
+            Self::Cache => Self::Io,
         }
     }
 }
@@ -513,6 +579,8 @@ pub(super) struct App {
     pub(super) primitive_view: PrimitiveViewState,
     pub(super) thread_view: ThreadViewState,
     pub(super) runtime_view: RuntimeViewState,
+    pub(super) io_view: IoViewState,
+    pub(super) cache_view: CacheViewState,
     pub(super) activity_samples: VecDeque<ActivitySample>,
     pub(super) recorder_statistics: Option<RecorderStatistics>,
     pub(super) snapshot_options: SnapshotOptions,
@@ -584,6 +652,8 @@ impl App {
             primitive_view: PrimitiveViewState::new(),
             thread_view: ThreadViewState::new(),
             runtime_view: RuntimeViewState::new(),
+            io_view: IoViewState::new(),
+            cache_view: CacheViewState::new(),
             activity_samples: VecDeque::new(),
             recorder_statistics: None,
             snapshot_options: SnapshotOptions::default(),
@@ -671,6 +741,8 @@ impl App {
                 _ if *tab == MonitorTab::Primitives && handle_primitive_key(code, &mut self.primitive_view, snapshot.as_deref()) => {}
                 _ if *tab == MonitorTab::Threads && handle_thread_key(code, &mut self.thread_view, snapshot.as_deref()) => {}
                 _ if *tab == MonitorTab::Runtime && handle_runtime_key(code, &mut self.runtime_view, snapshot.as_deref()) => {}
+                _ if *tab == MonitorTab::Io && handle_io_key(code, &mut self.io_view, snapshot.as_deref()) => {}
+                _ if *tab == MonitorTab::Cache && handle_cache_key(code, &mut self.cache_view, snapshot.as_deref()) => {}
                 KeyCode::Esc => {
                     self.screen = Screen::Browse;
                     self.refresh();
@@ -683,6 +755,8 @@ impl App {
                 KeyCode::Char('4') => *tab = MonitorTab::Primitives,
                 KeyCode::Char('5') => *tab = MonitorTab::Threads,
                 KeyCode::Char('6') => *tab = MonitorTab::Runtime,
+                KeyCode::Char('7') => *tab = MonitorTab::Io,
+                KeyCode::Char('8') => *tab = MonitorTab::Cache,
                 KeyCode::Char('d') => {
                     self.snapshot_options.event_buffers = next_buffer_disposition(self.snapshot_options.event_buffers);
                     self.status = format!("Snapshot buffers: {:?}", self.snapshot_options.event_buffers);
@@ -812,6 +886,8 @@ impl App {
                     self.allocation_view.reset_position();
                     self.thread_view.reset();
                     self.runtime_view.reset();
+                    self.io_view.reset();
+                    self.cache_view.reset();
                 }
                 self.status = outcome.status;
             }
@@ -1218,6 +1294,74 @@ fn handle_runtime_key(code: KeyCode, view: &mut RuntimeViewState, snapshot: Opti
     true
 }
 
+fn handle_io_key(code: KeyCode, view: &mut IoViewState, snapshot: Option<&CapturedSnapshot>) -> bool {
+    let io = snapshot.map(|snapshot| &snapshot.io);
+    let resource = io.and_then(|io| io.resources.get(view.resource_selected));
+    match code {
+        KeyCode::Up => match view.focus {
+            IoFocus::Resources => {
+                view.resource_selected = view.resource_selected.saturating_sub(1);
+                view.operation_selected = 0;
+            }
+            IoFocus::Operations => view.operation_selected = view.operation_selected.saturating_sub(1),
+        },
+        KeyCode::Down => match view.focus {
+            IoFocus::Resources => {
+                let count = io.map_or(0, |io| io.resources.len());
+                view.resource_selected = (view.resource_selected + 1).min(count.saturating_sub(1));
+                view.operation_selected = 0;
+            }
+            IoFocus::Operations => {
+                let count = resource.map_or(0, |resource| resource.operations.len());
+                view.operation_selected = (view.operation_selected + 1).min(count.saturating_sub(1));
+            }
+        },
+        KeyCode::Enter => view.focus = IoFocus::Operations,
+        KeyCode::Backspace => {
+            if view.focus == IoFocus::Resources {
+                return false;
+            }
+            view.focus = IoFocus::Resources;
+        }
+        _ => return false,
+    }
+    true
+}
+
+fn handle_cache_key(code: KeyCode, view: &mut CacheViewState, snapshot: Option<&CapturedSnapshot>) -> bool {
+    let cache = snapshot.map(|snapshot| &snapshot.cache);
+    let tier = cache.and_then(|cache| cache.tiers.get(view.tier_selected));
+    match code {
+        KeyCode::Up => match view.focus {
+            CacheFocus::Tiers => {
+                view.tier_selected = view.tier_selected.saturating_sub(1);
+                view.operation_selected = 0;
+            }
+            CacheFocus::Operations => view.operation_selected = view.operation_selected.saturating_sub(1),
+        },
+        KeyCode::Down => match view.focus {
+            CacheFocus::Tiers => {
+                let count = cache.map_or(0, |cache| cache.tiers.len());
+                view.tier_selected = (view.tier_selected + 1).min(count.saturating_sub(1));
+                view.operation_selected = 0;
+            }
+            CacheFocus::Operations => {
+                let count = tier.map_or(0, |tier| tier.operations.len());
+                view.operation_selected = (view.operation_selected + 1).min(count.saturating_sub(1));
+            }
+        },
+        KeyCode::Enter => view.focus = CacheFocus::Operations,
+        KeyCode::Backspace => {
+            if view.focus == CacheFocus::Tiers {
+                return false;
+            }
+            view.focus = CacheFocus::Tiers;
+        }
+        _ => return false,
+    }
+    true
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn capture_connected_snapshot(
     descriptor: &MonitorDescriptor,
@@ -1290,6 +1434,8 @@ fn capture_connected_snapshot(
         heap_error,
         primitives: runtime.primitives,
         runtime: runtime.runtime,
+        io: runtime.io,
+        cache: runtime.cache,
         threads: runtime.threads,
         captured_at: SystemTime::now(),
         captured_instant: Instant::now(),
@@ -1334,7 +1480,7 @@ const fn next_buffer_disposition(disposition: EventBufferDisposition) -> EventBu
 
 #[cfg(test)]
 mod tests {
-    use super::super::data::{PrimitiveSnapshot, RuntimeMonitorSnapshot, ThreadSnapshot};
+    use super::super::data::{CacheMonitorSnapshot, IoMonitorSnapshot, PrimitiveSnapshot, RuntimeMonitorSnapshot, ThreadSnapshot};
     use super::*;
 
     fn descriptor(id: u8) -> MonitorDescriptor {
@@ -1359,6 +1505,8 @@ mod tests {
                 groups: Vec::new(),
             },
             runtime: RuntimeMonitorSnapshot::default(),
+            io: IoMonitorSnapshot::default(),
+            cache: CacheMonitorSnapshot::default(),
             threads: ThreadSnapshot { threads: Vec::new() },
             captured_at: SystemTime::UNIX_EPOCH,
             captured_instant: Instant::now(),
@@ -1522,15 +1670,29 @@ mod tests {
         runtime.detail_view = RuntimeDetailView::SpawnStack;
         runtime.detail_scroll = 4;
         runtime.reset();
+        let mut io = IoViewState {
+            focus: IoFocus::Operations,
+            resource_selected: 2,
+            operation_selected: 3,
+        };
+        io.reset();
+        let mut cache = CacheViewState {
+            focus: CacheFocus::Operations,
+            tier_selected: 2,
+            operation_selected: 3,
+        };
+        cache.reset();
 
         assert_eq!(
-            (allocation, primitive, heap, thread, runtime),
+            (allocation, primitive, heap, thread, runtime, io, cache),
             (
                 AllocationViewState::new(),
                 PrimitiveViewState::new(),
                 HeapViewState::new(),
                 ThreadViewState::new(),
                 RuntimeViewState::new(),
+                IoViewState::new(),
+                CacheViewState::new(),
             )
         );
     }
@@ -1545,15 +1707,19 @@ mod tests {
                 MonitorTab::Primitives,
                 MonitorTab::Threads,
                 MonitorTab::Runtime,
+                MonitorTab::Io,
+                MonitorTab::Cache,
             ]
             .map(|tab| (tab.index(), tab.next(), tab.previous())),
             [
-                (0, MonitorTab::Heaps, MonitorTab::Runtime),
+                (0, MonitorTab::Heaps, MonitorTab::Cache),
                 (1, MonitorTab::Allocations, MonitorTab::Info),
                 (2, MonitorTab::Primitives, MonitorTab::Heaps),
                 (3, MonitorTab::Threads, MonitorTab::Allocations),
                 (4, MonitorTab::Runtime, MonitorTab::Primitives),
-                (5, MonitorTab::Info, MonitorTab::Threads),
+                (5, MonitorTab::Io, MonitorTab::Threads),
+                (6, MonitorTab::Cache, MonitorTab::Runtime),
+                (7, MonitorTab::Info, MonitorTab::Io),
             ]
         );
         assert_eq!(
@@ -1570,12 +1736,12 @@ mod tests {
 
     #[test]
     fn next_tab_wraps_to_info() {
-        assert_eq!(MonitorTab::Runtime.next(), MonitorTab::Info);
+        assert_eq!(MonitorTab::Cache.next(), MonitorTab::Info);
     }
 
     #[test]
-    fn previous_tab_wraps_to_runtime() {
-        assert_eq!(MonitorTab::Info.previous(), MonitorTab::Runtime);
+    fn previous_tab_wraps_to_cache() {
+        assert_eq!(MonitorTab::Info.previous(), MonitorTab::Cache);
     }
 
     #[test]
@@ -1815,12 +1981,14 @@ mod tests {
             (KeyCode::Char('4'), MonitorTab::Primitives),
             (KeyCode::Char('5'), MonitorTab::Threads),
             (KeyCode::Char('6'), MonitorTab::Runtime),
+            (KeyCode::Char('7'), MonitorTab::Io),
+            (KeyCode::Char('8'), MonitorTab::Cache),
             (KeyCode::Char('1'), MonitorTab::Info),
-            (KeyCode::Left, MonitorTab::Runtime),
+            (KeyCode::Left, MonitorTab::Cache),
             (KeyCode::Right, MonitorTab::Info),
-            (KeyCode::Char('h'), MonitorTab::Runtime),
+            (KeyCode::Char('h'), MonitorTab::Cache),
             (KeyCode::Char('l'), MonitorTab::Info),
-            (KeyCode::BackTab, MonitorTab::Runtime),
+            (KeyCode::BackTab, MonitorTab::Cache),
             (KeyCode::Tab, MonitorTab::Info),
         ] {
             app.handle_key(key);
@@ -2013,6 +2181,8 @@ mod tests {
         app.allocation_view.selected = 3;
         app.thread_view.focus = ThreadFocus::Objects;
         app.runtime_view.focus = RuntimeFocus::Details;
+        app.io_view.focus = IoFocus::Operations;
+        app.cache_view.focus = CacheFocus::Operations;
         app.finish_snapshot_capture(Ok(CaptureOutcome {
             snapshot: empty_capture(),
             status: "saved".into(),
@@ -2025,6 +2195,8 @@ mod tests {
                 app.allocation_view,
                 app.thread_view,
                 app.runtime_view,
+                app.io_view,
+                app.cache_view,
                 app.status.as_str(),
             ),
             (
@@ -2033,6 +2205,8 @@ mod tests {
                 AllocationViewState::new(),
                 ThreadViewState::new(),
                 RuntimeViewState::new(),
+                IoViewState::new(),
+                CacheViewState::new(),
                 "saved",
             )
         );
@@ -2238,6 +2412,19 @@ mod tests {
         }
         assert!(!handle_runtime_key(KeyCode::Backspace, &mut view, None));
         assert!(!handle_runtime_key(KeyCode::Char('x'), &mut view, None));
+    }
+
+    #[test]
+    fn io_and_cache_keys_move_between_summary_and_operation_views() {
+        let mut io = IoViewState::new();
+        let mut cache = CacheViewState::new();
+        for key in [KeyCode::Down, KeyCode::Enter, KeyCode::Down, KeyCode::Up, KeyCode::Backspace] {
+            assert!(handle_io_key(key, &mut io, None));
+            assert!(handle_cache_key(key, &mut cache, None));
+        }
+        assert_eq!((io, cache), (IoViewState::new(), CacheViewState::new()));
+        assert!(!handle_io_key(KeyCode::Backspace, &mut io, None));
+        assert!(!handle_cache_key(KeyCode::Backspace, &mut cache, None));
     }
 
     fn recorder_statistics_with_total(total_events: u64) -> RecorderStatistics {

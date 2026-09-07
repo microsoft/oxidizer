@@ -11,6 +11,8 @@ pub(super) struct CapturedSnapshot {
     pub(super) heap_error: Option<String>,
     pub(super) primitives: PrimitiveSnapshot,
     pub(super) runtime: RuntimeMonitorSnapshot,
+    pub(super) io: IoMonitorSnapshot,
+    pub(super) cache: CacheMonitorSnapshot,
     pub(super) threads: ThreadSnapshot,
     pub(super) captured_at: SystemTime,
     pub(super) captured_instant: Instant,
@@ -19,6 +21,8 @@ pub(super) struct CapturedSnapshot {
 pub(super) struct RuntimeSnapshot {
     pub(super) primitives: PrimitiveSnapshot,
     pub(super) runtime: RuntimeMonitorSnapshot,
+    pub(super) io: IoMonitorSnapshot,
+    pub(super) cache: CacheMonitorSnapshot,
     pub(super) threads: ThreadSnapshot,
 }
 
@@ -36,6 +40,8 @@ impl RuntimeSnapshot {
                 addresses,
             ),
             runtime: RuntimeMonitorSnapshot::from_events(&decoded.events, runtime_source, addresses),
+            io: IoMonitorSnapshot::from_events(&decoded.events),
+            cache: CacheMonitorSnapshot::from_events(&decoded.events),
             threads: ThreadSnapshot::from_events(&decoded.events, addresses),
         }
     }
@@ -300,6 +306,367 @@ fn record_task_spawn(
     task.spawned_at = Some(timestamp);
     let stack = event.call_stack.iter().map(|address| address.get()).collect::<Vec<_>>();
     task.spawn_stack = primitive_stack(&stack, lookups, AllocationStackFilter::All);
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(super) struct IoMonitorSnapshot {
+    pub(super) total_events: u64,
+    pub(super) retained_events: u64,
+    pub(super) lost_events: u64,
+    pub(super) resources: Vec<IoResourceSummary>,
+}
+
+impl IoMonitorSnapshot {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "I/O start and finish events are paired in one ordered pass so partial retained operations remain explicit"
+    )]
+    fn from_events(events: &seismograph::recorder::event::Events) -> Self {
+        use seismograph::recorder::event::EventKind;
+        use seismograph::recorder::io::IoOutcome;
+
+        #[derive(Default)]
+        struct ResourceBuilder {
+            kind: Option<seismograph::recorder::io::IoResourceKind>,
+            events: u64,
+            reads: u64,
+            writes: u64,
+            completed: u64,
+            errors: u64,
+            canceled: u64,
+            requested_bytes: u64,
+            completed_bytes: u64,
+        }
+
+        #[derive(Default)]
+        struct OperationBuilder {
+            resource_id: u64,
+            resource_kind: Option<seismograph::recorder::io::IoResourceKind>,
+            kind: Option<IoOperationKind>,
+            thread_id: u64,
+            buffer_id: Option<u64>,
+            requested_bytes: u64,
+            completed_bytes: u64,
+            buffer_len: u64,
+            buffer_span_count: u32,
+            outcome: Option<IoOutcome>,
+            started_at: Option<u64>,
+            finished_at: Option<u64>,
+        }
+
+        let mut resources = BTreeMap::<u64, ResourceBuilder>::new();
+        let mut operations = BTreeMap::<u64, OperationBuilder>::new();
+        let mut retained_events = 0_u64;
+        for event in &events.events {
+            let Some(io) = event.io() else {
+                continue;
+            };
+            retained_events = retained_events.saturating_add(1);
+            let resource_id = io.resource_id.get();
+            let resource = resources.entry(resource_id).or_default();
+            resource.kind = Some(io.resource_kind);
+            resource.events = resource.events.saturating_add(1);
+
+            let operation = operations.entry(io.operation_id.get()).or_default();
+            operation.resource_id = resource_id;
+            operation.resource_kind = Some(io.resource_kind);
+            operation.thread_id = event.thread_id.get();
+            operation.buffer_id = io.buffer_id.map(seismograph::recorder::io::BufferId::get);
+            operation.requested_bytes = io.requested_bytes;
+            operation.completed_bytes = io.completed_bytes;
+            operation.buffer_len = io.buffer_len;
+            operation.buffer_span_count = io.buffer_span_count;
+            operation.outcome = Some(io.outcome);
+
+            match event.kind {
+                EventKind::IoReadStarted => {
+                    resource.reads = resource.reads.saturating_add(1);
+                    resource.requested_bytes = resource.requested_bytes.saturating_add(io.requested_bytes);
+                    operation.kind = Some(IoOperationKind::Read);
+                    operation.started_at = Some(event.timestamp.ticks());
+                }
+                EventKind::IoWriteStarted => {
+                    resource.writes = resource.writes.saturating_add(1);
+                    resource.requested_bytes = resource.requested_bytes.saturating_add(io.requested_bytes);
+                    operation.kind = Some(IoOperationKind::Write);
+                    operation.started_at = Some(event.timestamp.ticks());
+                }
+                EventKind::IoReadFinished | EventKind::IoWriteFinished => {
+                    operation.kind = Some(if event.kind == EventKind::IoReadFinished {
+                        IoOperationKind::Read
+                    } else {
+                        IoOperationKind::Write
+                    });
+                    operation.finished_at = Some(event.timestamp.ticks());
+                    resource.completed = resource.completed.saturating_add(1);
+                    resource.completed_bytes = resource.completed_bytes.saturating_add(io.completed_bytes);
+                    resource.errors = resource.errors.saturating_add(u64::from(io.outcome == IoOutcome::Error));
+                    resource.canceled = resource.canceled.saturating_add(u64::from(io.outcome == IoOutcome::Canceled));
+                }
+                _ => {}
+            }
+        }
+
+        let mut operations_by_resource = BTreeMap::<u64, Vec<IoOperationSummary>>::new();
+        for (operation_id, operation) in operations {
+            let Some(kind) = operation.kind else {
+                continue;
+            };
+            let Some(resource_kind) = operation.resource_kind else {
+                continue;
+            };
+            let Some(outcome) = operation.outcome else {
+                continue;
+            };
+            operations_by_resource
+                .entry(operation.resource_id)
+                .or_default()
+                .push(IoOperationSummary {
+                    operation_id,
+                    kind,
+                    thread_id: operation.thread_id,
+                    buffer_id: operation.buffer_id,
+                    requested_bytes: operation.requested_bytes,
+                    completed_bytes: operation.completed_bytes,
+                    buffer_len: operation.buffer_len,
+                    buffer_span_count: operation.buffer_span_count,
+                    resource_kind,
+                    outcome,
+                    duration_nanos: operation
+                        .started_at
+                        .zip(operation.finished_at)
+                        .map(|(started, finished)| finished.saturating_sub(started)),
+                    timestamp: operation.finished_at.or(operation.started_at).unwrap_or_default(),
+                });
+        }
+        for operations in operations_by_resource.values_mut() {
+            operations.sort_unstable_by_key(|operation| std::cmp::Reverse((operation.timestamp, operation.operation_id)));
+        }
+
+        let mut resources = resources
+            .into_iter()
+            .filter_map(|(resource_id, resource)| {
+                Some(IoResourceSummary {
+                    resource_id,
+                    kind: resource.kind?,
+                    events: resource.events,
+                    reads: resource.reads,
+                    writes: resource.writes,
+                    completed: resource.completed,
+                    errors: resource.errors,
+                    canceled: resource.canceled,
+                    requested_bytes: resource.requested_bytes,
+                    completed_bytes: resource.completed_bytes,
+                    operations: operations_by_resource.remove(&resource_id).unwrap_or_default(),
+                })
+            })
+            .collect::<Vec<_>>();
+        resources.sort_unstable_by_key(|resource| std::cmp::Reverse((resource.completed_bytes, resource.events, resource.resource_id)));
+
+        Self {
+            total_events: events.total_events,
+            retained_events,
+            lost_events: events.lost_events,
+            resources,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct IoResourceSummary {
+    pub(super) resource_id: u64,
+    pub(super) kind: seismograph::recorder::io::IoResourceKind,
+    pub(super) events: u64,
+    pub(super) reads: u64,
+    pub(super) writes: u64,
+    pub(super) completed: u64,
+    pub(super) errors: u64,
+    pub(super) canceled: u64,
+    pub(super) requested_bytes: u64,
+    pub(super) completed_bytes: u64,
+    pub(super) operations: Vec<IoOperationSummary>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct IoOperationSummary {
+    pub(super) operation_id: u64,
+    pub(super) kind: IoOperationKind,
+    pub(super) thread_id: u64,
+    pub(super) buffer_id: Option<u64>,
+    pub(super) requested_bytes: u64,
+    pub(super) completed_bytes: u64,
+    pub(super) buffer_len: u64,
+    pub(super) buffer_span_count: u32,
+    pub(super) resource_kind: seismograph::recorder::io::IoResourceKind,
+    pub(super) outcome: seismograph::recorder::io::IoOutcome,
+    pub(super) duration_nanos: Option<u64>,
+    timestamp: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum IoOperationKind {
+    Read,
+    Write,
+}
+
+impl IoOperationKind {
+    pub(super) const fn label(self) -> &'static str {
+        match self {
+            Self::Read => "Read",
+            Self::Write => "Write",
+        }
+    }
+}
+
+const CACHE_EVENT_KINDS: [seismograph::recorder::event::EventKind; 22] = {
+    use seismograph::recorder::event::EventKind;
+    [
+        EventKind::CacheHit,
+        EventKind::CacheMiss,
+        EventKind::CacheExpired,
+        EventKind::CacheGetError,
+        EventKind::CacheInserted,
+        EventKind::CacheInsertRejected,
+        EventKind::CacheInsertError,
+        EventKind::CacheInvalidated,
+        EventKind::CacheInvalidateError,
+        EventKind::CacheCleared,
+        EventKind::CacheClearError,
+        EventKind::CacheRefreshHit,
+        EventKind::CacheRefreshMiss,
+        EventKind::CacheRefreshError,
+        EventKind::CacheEvicted,
+        EventKind::CacheComputeSucceeded,
+        EventKind::CacheComputeFailed,
+        EventKind::CacheComputeReturnedNone,
+        EventKind::CachePromotionAccepted,
+        EventKind::CachePromotionRejected,
+        EventKind::CachePromotionFailed,
+        EventKind::CacheRefreshSuppressed,
+    ]
+};
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(super) struct CacheMonitorSnapshot {
+    pub(super) total_events: u64,
+    pub(super) retained_events: u64,
+    pub(super) lost_events: u64,
+    pub(super) tiers: Vec<CacheTierSummary>,
+}
+
+impl CacheMonitorSnapshot {
+    fn from_events(events: &seismograph::recorder::event::Events) -> Self {
+        use seismograph::recorder::event::EventKind;
+
+        #[derive(Default)]
+        struct TierBuilder {
+            counts: [u64; CACHE_EVENT_KINDS.len()],
+        }
+
+        let mut tiers = BTreeMap::<(u64, bool), TierBuilder>::new();
+        let mut retained_events = 0_u64;
+        for event in &events.events {
+            let Some(index) = CACHE_EVENT_KINDS.iter().position(|kind| *kind == event.kind) else {
+                continue;
+            };
+            let Some(tier_id) = event.object_id().map(seismograph::recorder::event::ObjectId::get) else {
+                continue;
+            };
+            let fallback = event.measurement().is_some_and(|value| value != 0);
+            let tier = tiers.entry((tier_id, fallback)).or_default();
+            tier.counts[index] = tier.counts[index].saturating_add(1);
+            retained_events = retained_events.saturating_add(1);
+        }
+
+        let mut tiers = tiers
+            .into_iter()
+            .map(|((tier_id, fallback), tier)| {
+                let count = |kind| {
+                    CACHE_EVENT_KINDS
+                        .iter()
+                        .position(|candidate| *candidate == kind)
+                        .map_or(0, |index| tier.counts[index])
+                };
+                let operations = CACHE_EVENT_KINDS
+                    .into_iter()
+                    .zip(tier.counts)
+                    .filter_map(|(kind, events)| (events != 0).then_some(CacheOperationSummary { kind, events }))
+                    .collect::<Vec<_>>();
+                CacheTierSummary {
+                    tier_id,
+                    fallback,
+                    events: operations.iter().map(|operation| operation.events).sum(),
+                    hits: count(EventKind::CacheHit).saturating_add(count(EventKind::CacheRefreshHit)),
+                    misses: count(EventKind::CacheMiss)
+                        .saturating_add(count(EventKind::CacheExpired))
+                        .saturating_add(count(EventKind::CacheRefreshMiss))
+                        .saturating_add(count(EventKind::CacheComputeReturnedNone)),
+                    errors: count(EventKind::CacheGetError)
+                        .saturating_add(count(EventKind::CacheInsertError))
+                        .saturating_add(count(EventKind::CacheInvalidateError))
+                        .saturating_add(count(EventKind::CacheClearError))
+                        .saturating_add(count(EventKind::CacheRefreshError))
+                        .saturating_add(count(EventKind::CacheComputeFailed))
+                        .saturating_add(count(EventKind::CachePromotionFailed)),
+                    operations,
+                }
+            })
+            .collect::<Vec<_>>();
+        tiers.sort_unstable_by_key(|tier| std::cmp::Reverse((tier.events, tier.tier_id, tier.fallback)));
+
+        Self {
+            total_events: events.total_events,
+            retained_events,
+            lost_events: events.lost_events,
+            tiers,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct CacheTierSummary {
+    pub(super) tier_id: u64,
+    pub(super) fallback: bool,
+    pub(super) events: u64,
+    pub(super) hits: u64,
+    pub(super) misses: u64,
+    pub(super) errors: u64,
+    pub(super) operations: Vec<CacheOperationSummary>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct CacheOperationSummary {
+    pub(super) kind: seismograph::recorder::event::EventKind,
+    pub(super) events: u64,
+}
+
+pub(super) const fn cache_event_label(kind: seismograph::recorder::event::EventKind) -> &'static str {
+    use seismograph::recorder::event::EventKind;
+    match kind {
+        EventKind::CacheHit => "Hit",
+        EventKind::CacheMiss => "Miss",
+        EventKind::CacheExpired => "Expired",
+        EventKind::CacheGetError => "Get error",
+        EventKind::CacheInserted => "Inserted",
+        EventKind::CacheInsertRejected => "Insert rejected",
+        EventKind::CacheInsertError => "Insert error",
+        EventKind::CacheInvalidated => "Invalidated",
+        EventKind::CacheInvalidateError => "Invalidate error",
+        EventKind::CacheCleared => "Cleared",
+        EventKind::CacheClearError => "Clear error",
+        EventKind::CacheRefreshHit => "Refresh hit",
+        EventKind::CacheRefreshMiss => "Refresh miss",
+        EventKind::CacheRefreshError => "Refresh error",
+        EventKind::CacheEvicted => "Evicted",
+        EventKind::CacheComputeSucceeded => "Compute succeeded",
+        EventKind::CacheComputeFailed => "Compute failed",
+        EventKind::CacheComputeReturnedNone => "Compute returned none",
+        EventKind::CachePromotionAccepted => "Promotion accepted",
+        EventKind::CachePromotionRejected => "Promotion rejected",
+        EventKind::CachePromotionFailed => "Promotion failed",
+        EventKind::CacheRefreshSuppressed => "Refresh suppressed",
+        _ => "Unknown",
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2118,8 +2485,9 @@ mod tests {
     use seismograph::recorder::RecordingPolicies;
     use seismograph::recorder::event::{
         Address as RuntimeAddress, Event as RuntimeEvent, EventClock, EventKind as RuntimeEventKind, EventPayload, EventSequence,
-        EventTimestamp, Events, ObjectId,
+        EventTimestamp, Events, NumericEvent, ObjectId,
     };
+    use seismograph::recorder::io::{IoEvent, IoOperationId, IoOutcome, IoResourceId, IoResourceKind};
     use seismograph::recorder::runtime::{RuntimeEvent as RuntimeEventPayload, RuntimeId, WorkerId};
     use seismograph::recorder::thread::{ThreadId, ThreadLog};
     use seismograph_rallocator::callers::{
@@ -3299,6 +3667,98 @@ mod tests {
                 runtime.threads.threads.len(),
             ),
             (1, 1)
+        );
+    }
+
+    #[test]
+    fn io_and_cache_snapshots_aggregate_resources_operations_and_outcomes() {
+        let event = |sequence, timestamp, kind, payload| RuntimeEvent {
+            thread_id: ThreadId::new(7),
+            sequence: EventSequence::new(sequence),
+            timestamp: EventTimestamp::from_ticks(timestamp),
+            kind,
+            payload,
+            call_stack: Vec::new(),
+        };
+        let io = |operation, resource, requested, completed, outcome| {
+            EventPayload::Io(IoEvent {
+                operation_id: IoOperationId::from_raw(operation).unwrap(),
+                resource_id: IoResourceId::from_raw(resource).unwrap(),
+                buffer_id: None,
+                requested_bytes: requested,
+                completed_bytes: completed,
+                buffer_len: requested,
+                buffer_span_count: 1,
+                resource_kind: if resource == 1 {
+                    IoResourceKind::File
+                } else {
+                    IoResourceKind::TcpStream
+                },
+                outcome,
+            })
+        };
+        let cache = |tier, fallback| {
+            EventPayload::Numeric(NumericEvent {
+                object_id: ObjectId::new(tier),
+                value: u64::from(fallback),
+            })
+        };
+        let events = Events {
+            clock: EventClock::ProcessMonotonic,
+            total_events: 8,
+            lost_events: 1,
+            recording: RecordingPolicies::default(),
+            threads: Vec::new(),
+            events: vec![
+                event(1, 10, RuntimeEventKind::IoReadStarted, io(1, 1, 100, 0, IoOutcome::Pending)),
+                event(2, 30, RuntimeEventKind::IoReadFinished, io(1, 1, 100, 80, IoOutcome::Success)),
+                event(3, 20, RuntimeEventKind::IoWriteStarted, io(2, 2, 50, 0, IoOutcome::Pending)),
+                event(4, 40, RuntimeEventKind::IoWriteFinished, io(2, 2, 50, 0, IoOutcome::Error)),
+                event(5, 50, RuntimeEventKind::CacheHit, cache(10, false)),
+                event(6, 60, RuntimeEventKind::CacheMiss, cache(10, false)),
+                event(7, 70, RuntimeEventKind::CacheGetError, cache(10, false)),
+                event(8, 80, RuntimeEventKind::CacheRefreshHit, cache(20, true)),
+            ],
+        };
+
+        let io = IoMonitorSnapshot::from_events(&events);
+        let cache = CacheMonitorSnapshot::from_events(&events);
+
+        assert_eq!(
+            (
+                io.total_events,
+                io.retained_events,
+                io.lost_events,
+                io.resources
+                    .iter()
+                    .map(|resource| (
+                        resource.resource_id,
+                        resource.reads,
+                        resource.writes,
+                        resource.completed_bytes,
+                        resource.errors,
+                        resource.operations[0].duration_nanos,
+                    ))
+                    .collect::<Vec<_>>(),
+                cache.total_events,
+                cache.retained_events,
+                cache.lost_events,
+                cache
+                    .tiers
+                    .iter()
+                    .map(|tier| (tier.tier_id, tier.fallback, tier.events, tier.hits, tier.misses, tier.errors))
+                    .collect::<Vec<_>>(),
+            ),
+            (
+                8,
+                4,
+                1,
+                vec![(1, 1, 0, 80, 0, Some(20)), (2, 0, 1, 0, 1, Some(20))],
+                8,
+                4,
+                1,
+                vec![(10, false, 3, 1, 1, 1), (20, true, 1, 1, 0, 0)],
+            )
         );
     }
 
