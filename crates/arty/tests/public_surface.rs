@@ -3,8 +3,6 @@
 
 //! Verifies the feature-gated public facade.
 
-use std::mem::size_of;
-
 #[test]
 fn core_types_are_reexported() {
     use arty::core::{NumaNode, Owner, Thread, ThreadAware};
@@ -22,17 +20,17 @@ fn time_types_are_reexported() {
 
     fn assert_future_ext<T: FutureExt>() {}
 
-    let _ = size_of::<Clock>();
-    let _ = size_of::<Delay>();
-    let _ = size_of::<PeriodicTimer>();
-    let _ = size_of::<SimpleClock>();
-    let _ = size_of::<Stopwatch>();
-    let _ = size_of::<Timeout<(), ()>>();
+    let _ = std::mem::size_of::<Clock>();
+    let _ = std::mem::size_of::<Delay>();
+    let _ = std::mem::size_of::<PeriodicTimer>();
+    let _ = std::mem::size_of::<SimpleClock>();
+    let _ = std::mem::size_of::<Stopwatch>();
+    let _ = std::mem::size_of::<Timeout<(), ()>>();
     assert_future_ext::<std::future::Ready<()>>();
 }
 
 #[cfg(all(feature = "time", feature = "test-util"))]
 #[test]
 fn clock_control_is_reexported_with_both_features() {
-    let _ = size_of::<arty::time::ClockControl>();
+    let _ = std::mem::size_of::<arty::time::ClockControl>();
 }
