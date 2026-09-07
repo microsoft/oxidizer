@@ -16,14 +16,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     let runtime = Runtime::start()?;
     println!("runtime started with {} workers", Runtime::WORKER_COUNT);
 
-    let contexts = runtime.get_context::<SampleContext>();
-    let same_contexts = runtime.get_context::<SampleContext>();
+    let context = runtime.get_context::<SampleContext>();
+    let same_context = runtime.get_context::<SampleContext>();
 
-    assert_eq!(contexts, same_contexts);
+    assert_eq!(context, same_context);
     assert_eq!(created_driver_count(), Runtime::WORKER_COUNT);
-    for context in &contexts {
-        println!("sample I/O driver installed on {:?}", context.driver_thread());
-    }
+    println!("sample I/O context uses driver on {:?}", context.driver_thread());
 
     runtime.shutdown()?;
     Ok(())

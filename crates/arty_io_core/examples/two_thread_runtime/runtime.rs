@@ -83,18 +83,18 @@ impl Runtime {
         })
     }
 
-    pub(super) fn get_context<C>(&self) -> Vec<C>
+    pub(super) fn get_context<C>(&self) -> C
     where
         C: DriverContext,
     {
         let mut cache = self.contexts.lock().unwrap_or_else(PoisonError::into_inner);
 
-        if let Some(contexts) = cache.get(&TypeId::of::<C>()).and_then(|contexts| contexts.downcast_ref::<Vec<C>>()) {
-            return contexts.clone();
+        if let Some(context) = cache.get(&TypeId::of::<C>()).and_then(|context| context.downcast_ref::<C>()) {
+            return context.clone();
         }
 
         let provider = C::provider();
-        let mut contexts = Vec::with_capacity(self.workers.len());
+        let mut caller_context = None;
 
         for worker in &self.workers {
             let mut worker_provider = provider.clone();
@@ -115,15 +115,17 @@ impl Runtime {
             let context = reply_rx
                 .recv()
                 .expect("driver initialization failure must terminate context registration");
-            contexts.push(
-                *context
-                    .downcast::<C>()
-                    .expect("the install closure always boxes the requested context type"),
-            );
+            let context = *context
+                .downcast::<C>()
+                .expect("the install closure always boxes the requested context type");
+            caller_context.get_or_insert(context);
         }
 
-        cache.insert(TypeId::of::<C>(), Box::new(contexts.clone()));
-        contexts
+        // This small control-thread example represents calls as belonging to worker 0. A real
+        // runtime selects the context of the worker on which get_context is called.
+        let context = caller_context.expect("the fixed runtime always has at least one worker");
+        cache.insert(TypeId::of::<C>(), Box::new(context.clone()));
+        context
     }
 
     pub(super) fn shutdown(mut self) -> Result<(), RuntimeError> {
