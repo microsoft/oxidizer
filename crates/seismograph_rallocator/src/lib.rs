@@ -941,6 +941,12 @@ fn read_callers(reader: &mut Reader<'_>, version: u16) -> Result<Option<Callers>
             },
         });
     }
+    validate_event_totals(
+        total_events,
+        lost_events,
+        threads.iter().map(|thread| (thread.total_events, thread.lost_events)),
+        SECTION_CALLERS,
+    )?;
     let stacks = if version >= CALLERS_STACK_TABLE_VERSION {
         let stack_count = usize_count(reader.read_u32()?)?;
         if stack_count > reader.remaining() / 4 {
@@ -1338,6 +1344,12 @@ fn read_runtime_events(reader: &mut Reader<'_>, section_version: u16) -> Result<
             },
         });
     }
+    validate_event_totals(
+        total_events,
+        lost_events,
+        threads.iter().map(|thread| (thread.total_events, thread.lost_events)),
+        SECTION_RUNTIME_EVENTS,
+    )?;
     let event_count = usize_count(reader.read_u32()?)?;
     let minimum_event_len = if section_version >= RUNTIME_EVENTS_PAYLOAD_VERSION {
         8 + 8 + 8 + 1 + 1 + 1 + 1 + 8 * 8
@@ -1672,6 +1684,24 @@ fn read_string_in_section(reader: &mut Reader<'_>, section_id: u16) -> Result<St
 
 fn read_bool(reader: &mut Reader<'_>, section_id: u16) -> Result<bool, Error> {
     bool::try_from(reader.read_u8()?).map_err(|_| Error::malformed_section(section_id))
+}
+
+fn validate_event_totals(
+    expected_total: u64,
+    expected_lost: u64,
+    thread_totals: impl IntoIterator<Item = (u64, u64)>,
+    section_id: u16,
+) -> Result<(), Error> {
+    let actual = thread_totals
+        .into_iter()
+        .try_fold((0_u64, 0_u64), |(total, lost), (thread_total, thread_lost)| {
+            Some((total.checked_add(thread_total)?, lost.checked_add(thread_lost)?))
+        });
+    if actual == Some((expected_total, expected_lost)) {
+        Ok(())
+    } else {
+        Err(Error::malformed_section(section_id))
+    }
 }
 
 fn count(value: usize) -> Result<u32, Error> {
@@ -2048,6 +2078,10 @@ mod tests {
             ..RuntimeEvents::default()
         };
         assert!(runtime_events_encoded_len(Some(&events)).is_err());
+
+        assert!(validate_event_totals(3, 1, [(1, 0), (2, 1)], SECTION_RUNTIME_EVENTS).is_ok());
+        assert!(validate_event_totals(4, 1, [(1, 0), (2, 1)], SECTION_RUNTIME_EVENTS).is_err());
+        assert!(validate_event_totals(u64::MAX, 0, [(u64::MAX, 0), (1, 0)], SECTION_RUNTIME_EVENTS).is_err());
     }
 
     #[test]
@@ -2141,8 +2175,8 @@ mod tests {
     #[test]
     fn legacy_runtime_events_default_to_recording_every_object() {
         let mut payload = vec![1];
-        payload.extend_from_slice(&3_u64.to_le_bytes());
-        payload.extend_from_slice(&1_u64.to_le_bytes());
+        payload.extend_from_slice(&0_u64.to_le_bytes());
+        payload.extend_from_slice(&0_u64.to_le_bytes());
         payload.extend_from_slice(&0_u32.to_le_bytes());
         payload.extend_from_slice(&0_u32.to_le_bytes());
 
