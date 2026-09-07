@@ -113,7 +113,7 @@ assert_eq!(SpectreArch::from_target_arch("riscv64"), None);
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/msvc_spectre_libs_build">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbC52U2RKb8ycb6eQqnl9haVYb52EFsO7a-swbt-X_H4uXCoJhZIGCd21zdmNfc3BlY3RyZV9saWJzX2J1aWxkZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbC52U2RKb8ycb6eQqnl9haVYb52EFsO7a-swbt-X_H4uXCoJhZIGCd21zdmNfc3BlY3RyZV9saWJzX2J1aWxkZTAuMS4w
  [__link0]: https://docs.rs/msvc_spectre_libs
  [__link1]: https://docs.rs/msvc_spectre_libs
  [__link10]: https://docs.rs/msvc_spectre_libs_build/0.1.0/msvc_spectre_libs_build/flags/index.html

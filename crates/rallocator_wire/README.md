@@ -24,6 +24,6 @@ and writers are available through [`io`][__link1].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/rallocator_wire">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG9bCyjV93vPWG0p2g2uiElGqGx8jyd94I2btG_s8PVqISculYWSBgm9yYWxsb2NhdG9yX3dpcmVlMC4xLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb1sLKNX3e89YbSnaDa6ISUaobHyPJ33gjZu0b-zw9WohJy6VhZIGCb3JhbGxvY2F0b3Jfd2lyZWUwLjEuMA
  [__link0]: https://docs.rs/rallocator_wire/0.1.0/rallocator_wire/format/index.html
  [__link1]: https://docs.rs/rallocator_wire/0.1.0/rallocator_wire/io/index.html

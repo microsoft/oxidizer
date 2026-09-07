@@ -41,5 +41,7 @@ syn = { workspace = true, features = ["full", "derive", "printing", "parsing", "
 [dev-dependencies]
 mutants = { workspace = true }
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

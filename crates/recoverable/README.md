@@ -86,7 +86,7 @@ assert_eq!(immediate.get_delay(), Some(Duration::ZERO));
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/recoverable">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbxaQaV3R0B1MbWgDMOblL7IUbuaxOIQfTtggbdNk5pSVLORFhZIGCa3JlY292ZXJhYmxlZTAuMi4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbxaQaV3R0B1MbWgDMOblL7IUbuaxOIQfTtggbdNk5pSVLORFhZIGCa3JlY292ZXJhYmxlZTAuMi4w
  [__link0]: https://docs.rs/recoverable/0.2.0/recoverable/?search=RecoveryInfo::never
  [__link1]: https://docs.rs/recoverable/0.2.0/recoverable/struct.RecoveryInfo.html
  [__link2]: https://docs.rs/recoverable/0.2.0/recoverable/trait.Recovery.html

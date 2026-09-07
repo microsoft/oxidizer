@@ -15,15 +15,15 @@
 # (regions/cargo-lints-body.toml) so non-miri builds don't warn.
 #
 # These profiles always run full-workspace (scheduled-runtime-analysis
-# does not set ANVIL_INCLUDE_AFFECTED); the --skip / affected guards
-# below only apply if an adopter invokes them locally with the env
-# vars set.
+# publishes no impact cache); the --skip / affected guards below only
+# apply if an adopter invokes them locally after a diff-scoped
+# `anvil-impact` run.
 
 # Run Miri tests with the Tree Borrows model.
-[script("pwsh")]
-anvil-miri-tree-borrows: anvil-miri-tree-borrows-validate-prereqs
+[script("pwsh", "-NoProfile")]
+anvil-miri-tree-borrows: anvil-miri-tree-borrows-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
-    if ($env:ANVIL_INCLUDE_AFFECTED -eq '--skip') { exit 0 }
+    if ((& "{{ just_executable() }}" _anvil-impact-include affected) -eq '--skip') { exit 0 }
     $env:MIRIFLAGS = "-Zmiri-tree-borrows $($env:MIRIFLAGS)".Trim()
     $env:RUSTFLAGS = "--cfg miri_tree_borrows $($env:RUSTFLAGS)".Trim()
     & "{{just_executable()}}" _anvil-miri-test

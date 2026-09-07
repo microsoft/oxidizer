@@ -13,3 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `observed` procedural macros (`#[event(...)]` and `#[derive(Enrichment)]`).
   `observed_macros` is now a thin `proc-macro` shim that delegates here. Use the
   re-exports from `observed` rather than depending on this crate directly.
+
+### Fixed
+
+- `#[event(...)]` now rejects a field holding a mutable reference (`&mut T` or
+  `Option<&mut T>`) while parsing, naming the offending field, rather than
+  accepting it and failing later inside the generated code. Event fields are read
+  through `&self` when the event is visited, so only shared references work.
