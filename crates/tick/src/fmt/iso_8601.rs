@@ -183,6 +183,7 @@ fn with_rounded_nanos(timestamp: Timestamp) -> Timestamp {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    use std::error::Error as _;
     use std::hash::Hash;
     use std::time::Duration;
 
@@ -192,7 +193,10 @@ mod tests {
 
     #[test]
     fn parse_err() {
-        _ = "date".parse::<Iso8601>().unwrap_err();
+        let error = "date".parse::<Iso8601>().unwrap_err();
+
+        assert!(error.source().is_some());
+        assert!(!error.to_string().is_empty());
     }
 
     #[test]
