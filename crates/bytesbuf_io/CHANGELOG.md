@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.10.0] - 2026-09-07
+
+- ⚠️ Breaking
+
+  - Now requires `0.10.0` of `bytesbuf`
+  - Now requires `0.5.1` of `ohno`
+
+- ✨ Features
+
+  - add a WinHTTP-backed fetch transport for Windows ([#687](https://github.com/microsoft/oxidizer/pull/687))
+
+- 🔄 Continuous Integration
+
+  - update to cargo-anvil 0.7.0 ([#728](https://github.com/microsoft/oxidizer/pull/728))
+
 ## [0.9.0] - 2026-08-27
 
 - ⚠️ Breaking

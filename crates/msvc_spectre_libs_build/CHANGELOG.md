@@ -1,9 +1,10 @@
 # Changelog
+
 ## [0.1.1] - 2026-09-07
 
-- ⚠️ Breaking
+- 🔧 Maintenance
 
-  - adopt thread_aware_core across workspace ([#721](https://github.com/microsoft/oxidizer/pull/721))
+  - Now requires `0.5.1` of `ohno`
 
 - 🔄 Continuous Integration
 

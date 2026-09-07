@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.10.0] - 2026-09-07
+
+- ⚠️ Breaking
+
+  - Now requires `0.10.0` of `bytesbuf`
+  - Now requires `0.1.2` of `multitude_macros`
+
+- ⚡ Performance
+
+  - parallelize scheduled Miri and reduce resource outliers ([#706](https://github.com/microsoft/oxidizer/pull/706))
+
+- ✔️ Tasks
+
+  - raise MSRV to Rust 1.95 ([#716](https://github.com/microsoft/oxidizer/pull/716))
+
+- 🔄 Continuous Integration
+
+  - update to cargo-anvil 0.7.0 ([#728](https://github.com/microsoft/oxidizer/pull/728))
+
 ## [0.9.0] - 2026-08-27
 
 - ⚠️ Breaking

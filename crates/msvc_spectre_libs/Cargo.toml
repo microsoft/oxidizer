@@ -4,7 +4,7 @@
 [package]
 name = "msvc_spectre_libs"
 description = "Link against the Spectre-mitigated CRT import libraries for Windows MSVC targets; a no-op on every other target."
-version = "0.2.0"
+version = "0.2.1"
 readme = "README.md"
 keywords = ["spectre", "msvc", "mitigated", "crt", "oxidizer"]
 categories = ["development-tools::build-utils"]

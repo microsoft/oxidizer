@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.6] - 2026-09-07
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.6` of `fundle_macros`
+
+- 🐛 Bug Fixes
+
+  - silence newly-firing clippy lints from Rust 1.98 ([#700](https://github.com/microsoft/oxidizer/pull/700))
+
 ## [0.3.5] - 2026-07-24
 
 - 🔧 Maintenance

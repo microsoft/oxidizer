@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.6] - 2026-09-07
+
+- 🔧 Maintenance
+
+  - Now requires `0.4.0` of `fundle_macros_impl`
+
 ## [0.3.5] - 2026-07-24
 
 - 🔧 Maintenance

@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.0] - 2026-09-07
+
+- ⚡ Performance
+
+  - parallelize scheduled Miri and reduce resource outliers ([#706](https://github.com/microsoft/oxidizer/pull/706))
+
+- ♻️ Code Refactoring
+
+  - split the implementation into observed_macros_impl ([#686](https://github.com/microsoft/oxidizer/pull/686))
+
 ## [0.3.5] - 2026-07-24
 
 - ✨ Features

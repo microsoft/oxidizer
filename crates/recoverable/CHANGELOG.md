@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.1] - 2026-09-07
+
+- 🔄 Continuous Integration
+
+  - update to cargo-anvil 0.7.0 ([#728](https://github.com/microsoft/oxidizer/pull/728))
+
 ## [0.2.0] - 2026-08-09
 
 - 🔧 Maintenance

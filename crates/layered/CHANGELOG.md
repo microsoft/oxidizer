@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.7] - 2026-09-07
+
+- 🔧 Maintenance
+
+  - Now requires `0.2.3` of `plurality`
+
+- 🐛 Bug Fixes
+
+  - silence newly-firing clippy lints from Rust 1.98 ([#700](https://github.com/microsoft/oxidizer/pull/700))
+  - declare optional dependencies as dev-dependencies ([#658](https://github.com/microsoft/oxidizer/pull/658))
+  - migrate to alloc_tracker 0.7 ([#568](https://github.com/microsoft/oxidizer/pull/568))
+
+- 🔄 Continuous Integration
+
+  - update to cargo-anvil 0.7.0 ([#728](https://github.com/microsoft/oxidizer/pull/728))
+
 ## [0.3.6] - 2026-07-24
 
 - ✨ Features

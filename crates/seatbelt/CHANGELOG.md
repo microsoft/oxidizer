@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.0] - 2026-09-07
+
+- ⚠️ Breaking
+
+  - adopt thread_aware_core across workspace ([#721](https://github.com/microsoft/oxidizer/pull/721))
+  - Now requires `0.3.7` of `layered`
+  - Now requires `0.2.1` of `recoverable`
+  - Now requires `0.12.0` of `thread_aware`
+  - Now requires `0.7.0` of `tick`
+
+- 🔄 Continuous Integration
+
+  - update to cargo-anvil 0.7.0 ([#728](https://github.com/microsoft/oxidizer/pull/728))
+
 ## [0.8.0] - 2026-08-27
 
 - ⚠️ Breaking

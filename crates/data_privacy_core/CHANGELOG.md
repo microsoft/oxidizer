@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.1.3] - 2026-09-07
+
+- ✨ Features
+
+  - add REST transcoding for gRPC services ([#600](https://github.com/microsoft/oxidizer/pull/600))
+
+- 🐛 Bug Fixes
+
+  - declare optional dependencies as dev-dependencies ([#658](https://github.com/microsoft/oxidizer/pull/658))
+  - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
+
+- ✔️ Tasks
+
+  - re-release all packages with LFS-free tarballs ([#531](https://github.com/microsoft/oxidizer/pull/531))
+
+- 🏗️ Build System
+
+  - adopt cargo-anvil check catalog (github backend) ([#534](https://github.com/microsoft/oxidizer/pull/534))
+
+- 🔄 Continuous Integration
+
+  - update to cargo-anvil 0.7.0 ([#728](https://github.com/microsoft/oxidizer/pull/728))
+  - add cargo-machete for workspace-wide unused-dependency detection ([#578](https://github.com/microsoft/oxidizer/pull/578))
+
 ## [0.1.2] - 2026-06-26
 
 - 🐛 Bug Fixes

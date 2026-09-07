@@ -4,7 +4,7 @@
 [package]
 name = "observed_macros"
 description = "Procedural macros for the observed crate. You should not add this as a direct dependency; use the re-exports from observed."
-version = "0.24.0"
+version = "0.25.0"
 readme = "README.md"
 keywords = ["observed", "proc-macro", "macros", "telemetry", "events"]
 categories = ["development-tools::debugging"]

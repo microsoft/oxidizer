@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.12.0] - 2026-09-07
+
+- ⚠️ Breaking
+
+  - adopt thread_aware_core across workspace ([#721](https://github.com/microsoft/oxidizer/pull/721))
+
+- ⚡ Performance
+
+  - parallelize scheduled Miri and reduce resource outliers ([#706](https://github.com/microsoft/oxidizer/pull/706))
+
 ## [0.11.0] - 2026-08-27
 
 - ⚠️ Breaking

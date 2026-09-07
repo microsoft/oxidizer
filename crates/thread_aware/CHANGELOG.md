@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.12.0] - 2026-09-07
+
+- 🔧 Maintenance
+
+  - Now requires `0.1.1` of `thread_aware_core`
+  - Now requires `0.12.0` of `thread_aware_macros`
+
+- ⚠️ Breaking
+
+  - adopt thread_aware_core across workspace ([#721](https://github.com/microsoft/oxidizer/pull/721))
+
+- 🔄 Continuous Integration
+
+  - update to cargo-anvil 0.7.0 ([#728](https://github.com/microsoft/oxidizer/pull/728))
+
 ## [0.11.0] - 2026-08-27
 
 - 🔧 Maintenance
