@@ -104,42 +104,70 @@ fn mutex_never_admits_two_owners() {
     });
 }
 
+const MUTEX_LOCKED: usize = 1;
+const MUTEX_WAITERS: usize = 2;
+
+fn try_acquire_mutex(state: &AtomicUsize) -> bool {
+    let mut current = state.load(Ordering::Relaxed);
+    while current & MUTEX_LOCKED == 0 {
+        match state.compare_exchange_weak(current, current | MUTEX_LOCKED, Ordering::Acquire, Ordering::Relaxed) {
+            Ok(_) => return true,
+            Err(observed) => current = observed,
+        }
+    }
+    false
+}
+
 #[test]
 fn mutex_registration_cannot_lose_unlock_publication() {
     loom::model(|| {
-        let locked = Arc::new(AtomicBool::new(true));
+        let state = Arc::new(AtomicUsize::new(MUTEX_LOCKED));
         let payload = Arc::new(AtomicUsize::new(0));
         let registration = Arc::new(Registration::new());
 
         let waiter = {
-            let locked = Arc::clone(&locked);
+            let state = Arc::clone(&state);
             let payload = Arc::clone(&payload);
             let registration = Arc::clone(&registration);
             thread::spawn(move || {
-                let parked = if locked.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {
+                let parked = if try_acquire_mutex(&state) {
                     false
                 } else {
-                    registration.park_if_not_ready(|| locked.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok())
+                    registration.park_if_not_ready_marked(
+                        || {
+                            state.fetch_or(MUTEX_WAITERS, Ordering::Release);
+                        },
+                        || try_acquire_mutex(&state),
+                        || {
+                            state.fetch_and(!MUTEX_WAITERS, Ordering::Release);
+                        },
+                    )
                 };
                 if parked {
                     while !registration.was_woken() {
                         thread::yield_now();
                     }
-                    acquire_flag(&locked);
+                    while !try_acquire_mutex(&state) {
+                        thread::yield_now();
+                    }
                 }
                 let observed = payload.load(Ordering::Relaxed);
-                locked.store(false, Ordering::Release);
+                state.fetch_and(!MUTEX_LOCKED, Ordering::Release);
                 observed
             })
         };
         let unlocker = {
-            let locked = Arc::clone(&locked);
+            let state = Arc::clone(&state);
             let payload = Arc::clone(&payload);
             let registration = Arc::clone(&registration);
             thread::spawn(move || {
                 payload.store(7, Ordering::Relaxed);
-                locked.store(false, Ordering::Release);
-                registration.wake();
+                let previous = state.fetch_and(!MUTEX_LOCKED, Ordering::Release);
+                if previous & MUTEX_WAITERS != 0 {
+                    registration.wake_marked(|| {
+                        state.fetch_and(!MUTEX_WAITERS, Ordering::Release);
+                    });
+                }
             })
         };
 

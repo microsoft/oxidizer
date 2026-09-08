@@ -131,6 +131,10 @@ impl WaitQueue {
         if !self.has_waiters.load(Ordering::Acquire) {
             return;
         }
+        self.wake_one_marked(|| {});
+    }
+
+    pub(super) fn wake_one_marked(&self, clear_waiting: impl FnOnce()) {
         let waker = {
             let mut waiters = self.waiters.lock().unwrap_or_else(PoisonError::into_inner);
             let waker = loop {
@@ -143,6 +147,9 @@ impl WaitQueue {
                 }
             };
             self.has_waiters.store(!waiters.is_empty(), Ordering::Release);
+            if waiters.is_empty() {
+                clear_waiting();
+            }
             waker
         };
         if let Some(waker) = waker {

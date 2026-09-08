@@ -89,7 +89,7 @@ impl Condvar {
     pub fn notify_one(&self) {
         self.generation.fetch_add(1, Ordering::Release);
         self.record(EventKind::CondvarNotify);
-        self.waiters.wake_one();
+        self.waiters.wake_one_marked(|| {});
     }
 
     /// Wakes all waiting tasks and threads.

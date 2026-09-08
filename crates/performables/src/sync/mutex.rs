@@ -7,7 +7,7 @@ use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::task::{Context, Poll};
 
 #[cfg(feature = "serde")]
@@ -17,13 +17,16 @@ use super::wait_queue::{WaitQueue, Waiter, block_on};
 use super::{PoisonError, panic_poisoned};
 use crate::telemetry::{self, EventKind};
 
+const LOCKED: u8 = 1;
+const WAITERS: u8 = 2;
+
 /// An executor-independent asynchronous mutual-exclusion lock.
 ///
-/// The uncontended path uses one atomic compare-exchange and does not allocate.
+/// The uncontended path uses atomic operations and does not allocate.
 /// The lock is poisoned when an exclusive guard is dropped during an unwind
 /// that began after the guard was acquired.
 pub struct Mutex<T: ?Sized> {
-    locked: AtomicBool,
+    state: AtomicU8,
     poisoned: AtomicBool,
     waiters: WaitQueue,
     value: UnsafeCell<T>,
@@ -39,7 +42,7 @@ impl<T> Mutex<T> {
     #[must_use]
     pub const fn new(value: T) -> Self {
         Self {
-            locked: AtomicBool::new(false),
+            state: AtomicU8::new(0),
             poisoned: AtomicBool::new(false),
             waiters: WaitQueue::new(),
             value: UnsafeCell::new(value),
@@ -167,9 +170,17 @@ impl<T: ?Sized> Mutex<T> {
     }
 
     fn try_acquire(&self) -> bool {
-        self.locked
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_ok()
+        let mut state = self.state.load(Ordering::Relaxed);
+        while state & LOCKED == 0 {
+            match self
+                .state
+                .compare_exchange_weak(state, state | LOCKED, Ordering::Acquire, Ordering::Relaxed)
+            {
+                Ok(_) => return true,
+                Err(current) => state = current,
+            }
+        }
+        false
     }
 
     fn acquired(&self) -> Result<MutexGuard<'_, T>, PoisonError<MutexGuard<'_, T>>> {
@@ -200,8 +211,12 @@ impl<T: ?Sized> Mutex<T> {
     }
 
     fn unlock(&self) {
-        self.locked.store(false, Ordering::Release);
-        self.waiters.wake_one();
+        let previous = self.state.fetch_and(!LOCKED, Ordering::Release);
+        if previous & WAITERS != 0 {
+            self.waiters.wake_one_marked(|| {
+                self.state.fetch_and(!WAITERS, Ordering::Release);
+            });
+        }
         self.record(EventKind::MutexRelease);
     }
 
@@ -289,7 +304,9 @@ impl<'a, T: ?Sized> Future for MutexLockResult<'a, T> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if self.mutex.try_acquire() {
             if let Some(waiter) = self.waiter.take() {
-                self.mutex.waiters.cancel(&waiter);
+                self.mutex.waiters.cancel_marked(&waiter, || {
+                    self.mutex.state.fetch_and(!WAITERS, Ordering::Release);
+                });
             }
             return Poll::Ready(self.mutex.acquired());
         }
@@ -307,7 +324,16 @@ impl<'a, T: ?Sized> MutexLockResult<'a, T> {
         let mutex = self.mutex;
         let waiter = Arc::clone(self.waiter.get_or_insert_with(|| Arc::new(Waiter::new())));
         waiter.register(cx.waker());
-        if mutex.waiters.enqueue_if_needed(&waiter, || mutex.try_acquire()) {
+        if mutex.waiters.enqueue_if_needed_marked(
+            &waiter,
+            || {
+                mutex.state.fetch_or(WAITERS, Ordering::Release);
+            },
+            || mutex.try_acquire(),
+            || {
+                mutex.state.fetch_and(!WAITERS, Ordering::Release);
+            },
+        ) {
             self.waiter.take();
             Poll::Ready(mutex.acquired())
         } else {
@@ -319,9 +345,13 @@ impl<'a, T: ?Sized> MutexLockResult<'a, T> {
 impl<T: ?Sized> Drop for MutexLockResult<'_, T> {
     fn drop(&mut self) {
         if let Some(waiter) = &self.waiter {
-            let removed = self.mutex.waiters.cancel(waiter);
-            if !removed && !self.mutex.locked.load(Ordering::Acquire) {
-                self.mutex.waiters.wake_one();
+            let removed = self.mutex.waiters.cancel_marked(waiter, || {
+                self.mutex.state.fetch_and(!WAITERS, Ordering::Release);
+            });
+            if !removed && self.mutex.state.load(Ordering::Acquire) & LOCKED == 0 {
+                self.mutex.waiters.wake_one_marked(|| {
+                    self.mutex.state.fetch_and(!WAITERS, Ordering::Release);
+                });
             }
         }
     }
