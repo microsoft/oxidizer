@@ -41,7 +41,7 @@ pub struct Monitor {
 impl Monitor {
     /// Creates a monitor builder.
     #[must_use]
-    pub fn builder() -> Builder {
+    pub const fn builder() -> Builder {
         Builder {
             name: None,
             instance: None,
@@ -90,7 +90,7 @@ impl Drop for Monitor {
 }
 
 /// Builder for a localhost monitor.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Builder {
     name: Option<String>,
     instance: Option<String>,
@@ -785,6 +785,10 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[test]
     fn builder_identity_debug_and_last_error_are_exposed() {
+        const BUILDER: Builder = Monitor::builder();
+        let default = Builder::default();
+        assert_eq!((&BUILDER.name, &BUILDER.instance), (&default.name, &default.instance));
+
         assert!(matches!(Monitor::builder().name("").start(), Err(Error::InvalidIdentity)));
         assert!(matches!(
             Monitor::builder().name("valid").instance("").start(),
