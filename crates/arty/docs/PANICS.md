@@ -3,12 +3,14 @@
 Arty types must be unwind-safe unless documented otherwise. Foundational I/O contracts in
 `arty_io_core` must also be panic-safe.
 
-Every spawned task has a join handle whose result includes a `JoinError` when the task does not
-complete normally. The error distinguishes a task panic from a task that stopped because the
-runtime shut down.
+Every spawned task has a join handle that returns a `JoinError` when the task does not complete
+normally. The error distinguishes a task panic from a task that stopped because the runtime shut
+down.
 
-The first task panic encountered by the runtime starts runtime shutdown. The panic remains
-observable through the panicking task's join handle.
+The first task panic encountered by the runtime starts runtime shutdown. The panicking task's
+join handle retains the panic form of `JoinError`, so the runtime host or a critical task that
+awaits it can inspect the cause. Tasks stopped by the resulting shutdown instead return the
+shutdown form of `JoinError`.
 
 ## Critical tasks
 
