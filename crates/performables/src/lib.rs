@@ -17,7 +17,7 @@
 //! asynchronous and blocking waits, while [`sync::once::OnceLock`] and
 //! [`sync::once::LazyLock`] instrument one-time initialization.
 //! [`sync::channel`] provides multi-producer queues, oneshot transfer, and
-//! independently versioned latest-value observation. The default `seismograph`
+//! independently versioned latest-value observation. The optional `seismograph`
 //! feature enables runtime ownership and synchronization telemetry.
 //!
 //! [`arc::Arc`] defaults to a process-wide allocation with the same
