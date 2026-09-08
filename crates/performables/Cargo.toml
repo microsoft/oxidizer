@@ -27,7 +27,7 @@ allowed_external_types = [
 ]
 
 [features]
-default = ["seismograph"]
+default = []
 # Marker feature selecting the Loom model-checking test target. The model itself
 # is compiled under `--cfg loom` by the workspace's `just loom` recipe.
 loom = []
@@ -59,6 +59,11 @@ required-features = ["seismograph"]
 [[test]]
 name = "loom_arc_affinity"
 path = "tests/loom_arc_affinity.rs"
+required-features = ["loom"]
+
+[[test]]
+name = "loom_sync_primitives"
+path = "tests/loom_sync_primitives.rs"
 required-features = ["loom"]
 
 [lints]

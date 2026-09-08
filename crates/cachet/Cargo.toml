@@ -48,7 +48,13 @@ test-util = ["cachet_tier/test-util", "tick/test-util"]
 memory = ["dep:cachet_memory"]
 service = ["dep:cachet_service", "dep:layered"]
 serialize = ["dep:serde", "dep:postcard", "dep:bytesbuf"]
-seismograph = ["dep:seismograph"]
+seismograph = [
+    "anyspawn/seismograph",
+    "cachet_memory?/seismograph",
+    "dep:seismograph",
+    "tick/seismograph",
+    "uniflight/seismograph",
+]
 telemetry = []
 
 [dependencies]

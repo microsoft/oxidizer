@@ -62,6 +62,12 @@ rustls = [
 ]
 native-tls = ["dep:native-tls", "fetch_hyper?/native-tls", "fetch_tls/native-tls"]
 json = ["http_extensions/json"]
+seismograph = [
+    "anyspawn?/seismograph",
+    "bytesbuf/seismograph",
+    "performables/seismograph",
+    "tick/seismograph",
+]
 test-util = ["tick/test-util", "http_extensions/test-util"]
 tokio = [
     "dep:tokio",

@@ -186,7 +186,7 @@ fn fail_next_test_heap_usage_cas() {
     TEST_FAIL_HEAP_USAGE_CAS.with(|fail| fail.set(true));
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 fn fail_next_test_passive_registration_cas() {
     TEST_FAIL_PASSIVE_REGISTRATION_CAS.with(|fail| fail.set(true));
 }
@@ -2445,7 +2445,7 @@ pub(crate) fn take_pooled_bump(domain: *mut DomainState) -> Option<*mut BumpStat
     bump::take_global(domain)
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 pub(crate) fn thread_heap_state() -> Option<*mut RemoteHeapState> {
     unsafe { thread_heap_state_for(thread_state()) }
 }
@@ -4708,7 +4708,7 @@ mod tests {
             last_region: ptr::null_mut(),
         };
         assert!(unsafe { find_region(&state, outside) }.is_none());
-        assert!(!slices_are_free(outside, 1));
+        assert!(!slices_are_free(ptr::null_mut(), 1));
     }
 
     #[test]

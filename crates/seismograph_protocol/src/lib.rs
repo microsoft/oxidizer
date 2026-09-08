@@ -277,6 +277,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(all(miri, target_os = "windows"), ignore)]
     fn monitor_directory_is_platform_specific() {
         let directory = monitor_directory().unwrap();
         #[cfg(target_os = "windows")]

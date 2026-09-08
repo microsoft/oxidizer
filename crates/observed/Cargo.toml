@@ -32,6 +32,8 @@ allowed_external_types = [
 all-features = true
 
 [features]
+default = []
+seismograph = ["performables/seismograph", "tick/seismograph"]
 test-util = []
 
 [dependencies]

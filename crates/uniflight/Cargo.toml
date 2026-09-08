@@ -26,6 +26,10 @@ allowed_external_types = [
     "thread_aware_core::thread_aware::ThreadAware",
 ]
 
+[features]
+default = []
+seismograph = ["performables/seismograph"]
+
 [dependencies]
 ahash = { workspace = true, default-features = false, features = ["std"] }
 async-once-cell = { workspace = true }

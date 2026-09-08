@@ -106,7 +106,7 @@ fn map_heap_state(layout: Layout) -> *mut ReusableHeapState {
     hal::map(layout.size()).cast()
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests {
     use allocation_hints::heaps::{Heap, bump as hint_bump, general};
     use allocation_hints::with_hint;

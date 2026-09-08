@@ -166,7 +166,7 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs anvil-impact
         if ($pkg[$i] -eq '--workspace') { continue }
         if ($pkg[$i] -eq '--package' -and ($i + 1) -lt $pkg.Count) {
             $gateArgs.Add('--package')
-            $gateArgs.Add(($pkg[$i + 1] -split '@', 2)[0])
+            $gateArgs.Add((($pkg[$i + 1] -split '#', 2)[-1] -split '@', 2)[0])
             $i++
             continue
         }

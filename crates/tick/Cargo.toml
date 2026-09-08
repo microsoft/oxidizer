@@ -36,6 +36,8 @@ fast-instant = ["dep:libc", "dep:windows-sys"]
 test-util = []
 # Serialization support for serde
 serde = ["dep:serde_core"]
+# Seismograph recording for synchronization and ownership primitives
+seismograph = ["performables/seismograph"]
 # Integration with tokio runtime
 tokio = ["dep:tokio", "rt-shared"]
 # Enables primitives for runtimes that drive the clock from a single shared driver task,

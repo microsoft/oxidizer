@@ -27,6 +27,10 @@ allowed_external_types = [
     "thread_aware_core::thread_aware::ThreadAware",
 ]
 
+[features]
+default = []
+seismograph = ["performables/seismograph"]
+
 [dependencies]
 cachet_tier = { workspace = true }
 foldhash = { workspace = true }

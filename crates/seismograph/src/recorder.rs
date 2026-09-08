@@ -1032,7 +1032,7 @@ fn wait_for_writers() {
     while !recorder.is_null() {
         // SAFETY: recorders remain registered for process lifetime.
         let current = unsafe { &*recorder };
-        while current.writer_active.load(Ordering::Acquire) {
+        while current.writer_active.load(Ordering::SeqCst) {
             std::hint::spin_loop();
         }
         recorder = current.next.load(Ordering::Acquire);

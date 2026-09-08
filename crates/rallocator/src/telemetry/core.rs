@@ -1403,7 +1403,7 @@ pub(crate) struct PendingTracking {
     recording_session: seismograph::recorder::RecordingSession,
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 pub(crate) fn pending_tracking_for_test() -> PendingTracking {
     PendingTracking {
         allocation_id: usize::MAX,
@@ -1522,7 +1522,10 @@ fn with_telemetry_suppressed<R>(operation: impl FnOnce() -> R) -> R {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Barrier, PoisonError};
+    #[cfg(not(miri))]
+    use std::sync::Barrier;
+    use std::sync::PoisonError;
+    #[cfg(not(miri))]
     use std::thread;
 
     use super::*;
