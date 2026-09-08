@@ -206,10 +206,20 @@ impl WaitQueue {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-    use std::sync::atomic::Ordering;
-    use std::task::Waker;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::task::{Context, Poll, Wake, Waker};
+    use std::time::{Duration, Instant};
 
-    use super::{WaitQueue, Waiter};
+    use super::{WaitQueue, Waiter, block_on_timeout};
+
+    #[derive(Default)]
+    struct WakeCounter(AtomicUsize);
+
+    impl Wake for WakeCounter {
+        fn wake(self: Arc<Self>) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
 
     #[test]
     fn retry_removes_an_already_queued_waiter() {
@@ -246,5 +256,90 @@ mod tests {
         queue.wake_one();
 
         assert!(!queue.has_waiters.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn registering_a_new_waker_replaces_the_old_one() {
+        let queue = WaitQueue::new();
+        let waiter = Arc::new(Waiter::new());
+        let first = Arc::new(WakeCounter::default());
+        let second = Arc::new(WakeCounter::default());
+        waiter.register(&Waker::from(Arc::clone(&first)));
+        waiter.register(&Waker::from(Arc::clone(&second)));
+        assert!(!queue.enqueue_if_needed(&waiter, || false));
+
+        queue.wake_one();
+
+        assert_eq!((first.0.load(Ordering::Relaxed), second.0.load(Ordering::Relaxed)), (0, 1));
+    }
+
+    #[test]
+    fn enqueueing_the_same_waiter_twice_keeps_one_queue_entry() {
+        let queue = WaitQueue::new();
+        let waiter = Arc::new(Waiter::new());
+        waiter.register(Waker::noop());
+
+        assert!(!queue.enqueue_if_needed(&waiter, || false));
+        assert!(!queue.enqueue_if_needed(&waiter, || false));
+
+        assert_eq!(queue.waiters.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn wake_all_wakes_every_registered_waiter() {
+        let queue = WaitQueue::new();
+        let first_waiter = Arc::new(Waiter::new());
+        let first = Arc::new(WakeCounter::default());
+        first_waiter.register(&Waker::from(Arc::clone(&first)));
+        assert!(!queue.enqueue_if_needed(&first_waiter, || false));
+        let second_waiter = Arc::new(Waiter::new());
+        let second = Arc::new(WakeCounter::default());
+        second_waiter.register(&Waker::from(Arc::clone(&second)));
+        assert!(!queue.enqueue_if_needed(&second_waiter, || false));
+
+        queue.wake_all_marked(|| {});
+
+        assert_eq!((first.0.load(Ordering::Relaxed), second.0.load(Ordering::Relaxed)), (1, 1));
+    }
+
+    #[test]
+    fn blocking_executor_is_woken_by_another_thread() {
+        struct WakeAfterSpawn {
+            ready: Arc<AtomicBool>,
+            spawned: bool,
+        }
+
+        impl Future for WakeAfterSpawn {
+            type Output = ();
+
+            fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+                if self.ready.load(Ordering::Acquire) {
+                    return Poll::Ready(());
+                }
+                if !self.spawned {
+                    self.spawned = true;
+                    let ready = Arc::clone(&self.ready);
+                    let waker = cx.waker().clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(Duration::from_millis(20));
+                        ready.store(true, Ordering::Release);
+                        waker.wake();
+                    });
+                }
+                Poll::Pending
+            }
+        }
+
+        let started = Instant::now();
+        let completed = block_on_timeout(
+            WakeAfterSpawn {
+                ready: Arc::new(AtomicBool::new(false)),
+                spawned: false,
+            },
+            Duration::from_secs(1),
+        );
+
+        assert_eq!(completed, Some(()));
+        assert!(started.elapsed() < Duration::from_millis(500));
     }
 }

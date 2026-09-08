@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![expect(clippy::panic, reason = "bounded deadlines turn deadlocks and lost wakeups into test failures")]
+
 //! Integration tests for executor-independent channels.
 
 #[path = "support/waker.rs"]
@@ -10,7 +12,7 @@ use std::pin::{Pin, pin};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll, Wake, Waker};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use performables::sync::channel::{bounded, oneshot, unbounded, watch};
 #[cfg(feature = "seismograph")]
@@ -41,15 +43,36 @@ fn test_waker(counter: &Arc<WakeCounter>) -> Waker {
 }
 
 fn block_on<F: Future>(future: F) -> F::Output {
+    let deadline = Instant::now() + Duration::from_secs(2);
     let waker = Waker::from(Arc::new(ThreadWaker(std::thread::current())));
     let mut context = Context::from_waker(&waker);
     let mut future = pin!(future);
     loop {
         match future.as_mut().poll(&mut context) {
             Poll::Ready(output) => return output,
-            Poll::Pending => std::thread::park(),
+            Poll::Pending => {
+                let remaining = deadline
+                    .checked_duration_since(Instant::now())
+                    .unwrap_or_else(|| panic!("future did not complete within the bounded test deadline"));
+                std::thread::park_timeout(remaining);
+                assert!(
+                    Instant::now() < deadline,
+                    "future did not receive a wake before the bounded test deadline"
+                );
+            }
         }
     }
+}
+
+fn join_with_timeout<T>(thread: std::thread::JoinHandle<T>) -> T {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !thread.is_finished() {
+        assert!(Instant::now() < deadline, "thread did not finish within the bounded test deadline");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    #[expect(clippy::unwrap_used, reason = "a thread panic should fail the test with its captured backtrace")]
+    let result = thread.join().unwrap();
+    result
 }
 
 #[test]
@@ -88,7 +111,7 @@ fn bounded_channel_applies_blocking_backpressure() {
     std::thread::sleep(Duration::from_millis(10));
     assert!(!thread.is_finished());
     assert_eq!(receiver.recv_sync(), Ok(1));
-    assert_eq!(thread.join().unwrap(), Ok(()));
+    assert_eq!(join_with_timeout(thread), Ok(()));
     assert_eq!(receiver.recv_sync(), Ok(2));
 }
 
@@ -194,14 +217,12 @@ fn unbounded_channel_supports_multiple_producers_and_consumers() {
         }
     });
     drop(sender);
-    first_producer.join().unwrap();
-    second_producer.join().unwrap();
+    join_with_timeout(first_producer);
+    join_with_timeout(second_producer);
 
-    let values = first_consumer
-        .join()
-        .unwrap()
+    let values = join_with_timeout(first_consumer)
         .into_iter()
-        .chain(second_consumer.join().unwrap())
+        .chain(join_with_timeout(second_consumer))
         .collect::<Vec<_>>();
     assert_eq!((values.len(), values.into_iter().sum::<usize>()), (400, 79_800));
 }
@@ -564,7 +585,7 @@ fn watch_blocking_change_wakes_for_updates() {
     });
 
     sender.send(2).unwrap();
-    assert_eq!(waiter.join().unwrap(), 2);
+    assert_eq!(join_with_timeout(waiter), 2);
 }
 
 #[test]

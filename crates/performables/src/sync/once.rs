@@ -57,8 +57,14 @@ impl<T> OnceLock<T> {
     where
         F: FnOnce() -> T,
     {
-        if self.inner.get().is_none() && self.initializing.load(Ordering::Acquire) {
-            self.record(EventKind::OnceContention);
+        #[expect(
+            clippy::collapsible_if,
+            reason = "the initialization and contention states are intentionally evaluated independently"
+        )]
+        if self.inner.get().is_none() {
+            if self.initializing.load(Ordering::Acquire) {
+                self.record(EventKind::OnceContention);
+            }
         }
 
         let value = self.inner.get_or_init(|| {
@@ -208,5 +214,39 @@ impl<T: fmt::Debug, F> fmt::Debug for LazyLock<T, F> {
 impl<T: Default> Default for LazyLock<T> {
     fn default() -> Self {
         Self::new(T::default)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::sync::atomic::Ordering;
+
+    use super::OnceLock;
+
+    #[test]
+    fn successful_set_stores_the_value_and_rejects_replacement() {
+        let once = OnceLock::new();
+
+        assert_eq!(once.set(7), Ok(()));
+        assert_eq!(once.get(), Some(&7));
+        assert_eq!(once.set(9), Err(9));
+    }
+
+    #[test]
+    fn equality_distinguishes_different_values() {
+        assert_ne!(OnceLock::from(7), OnceLock::from(9));
+    }
+
+    #[test]
+    fn panicking_initializer_clears_the_initializing_marker() {
+        let once = OnceLock::<usize>::new();
+
+        let panic = catch_unwind(AssertUnwindSafe(|| {
+            once.get_or_init(|| panic!("initializer panic"));
+        }));
+
+        assert!(panic.is_err());
+        assert!(!once.initializing.load(Ordering::Acquire));
     }
 }

@@ -9,8 +9,6 @@ use std::task::{Context, Poll};
 use super::wait_queue::{WaitQueue, Waiter, block_on};
 use crate::telemetry::{self, EventKind};
 
-const COUNT_MASK: u64 = u32::MAX as u64;
-
 /// An executor-independent reusable barrier.
 #[derive(Debug)]
 pub struct Barrier {
@@ -59,12 +57,17 @@ impl Barrier {
         (self.state.load(Ordering::Acquire) >> 32) as u32
     }
 
+    #[expect(clippy::cast_possible_truncation, reason = "the low 32 state bits contain the participant count")]
+    const fn count(state: u64) -> u32 {
+        state as u32
+    }
+
     fn arrive(&self) -> Arrival {
         let state = self
             .state
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
                 let generation = (state >> 32) as u32;
-                let count = (state & COUNT_MASK) as u32;
+                let count = Self::count(state);
                 Some(if count + 1 == self.parties {
                     u64::from(generation.wrapping_add(1)) << 32
                 } else {
@@ -73,7 +76,7 @@ impl Barrier {
             })
             .expect("barrier arrival always supplies a next state");
         let generation = (state >> 32) as u32;
-        let count = (state & COUNT_MASK) as u32;
+        let count = Self::count(state);
         if count + 1 == self.parties {
             self.record(EventKind::BarrierAccess);
             self.record(EventKind::BarrierRelease);
@@ -91,7 +94,7 @@ impl Barrier {
                 if (state >> 32) as u32 != generation {
                     return None;
                 }
-                let count = (state & COUNT_MASK) as u32;
+                let count = Self::count(state);
                 debug_assert!(count > 0);
                 Some(state - 1)
             })
@@ -195,5 +198,42 @@ mod tests {
         let context = Context::from_waker(Waker::noop());
 
         assert_eq!(wait.poll_registered(&context, 1), Poll::Ready(BarrierWaitResult { leader: false }));
+    }
+
+    #[test]
+    fn generation_reads_the_upper_state_bits() {
+        let barrier = Barrier::new(3);
+        barrier.state.store((7_u64 << 32) | 2, Ordering::Relaxed);
+
+        assert_eq!(barrier.generation(), 7);
+    }
+
+    #[test]
+    fn arrival_advances_count_without_changing_generation() {
+        let barrier = Barrier::new(3);
+        barrier.state.store((7_u64 << 32) | 1, Ordering::Relaxed);
+
+        assert!(matches!(barrier.arrive(), Arrival::Waiting(7)));
+        assert_eq!(barrier.state.load(Ordering::Relaxed), (7_u64 << 32) | 2);
+    }
+
+    #[test]
+    fn final_arrival_advances_generation_and_resets_count() {
+        let barrier = Barrier::new(3);
+        barrier.state.store((7_u64 << 32) | 2, Ordering::Relaxed);
+
+        assert!(matches!(barrier.arrive(), Arrival::Leader));
+        assert_eq!(barrier.state.load(Ordering::Relaxed), 8_u64 << 32);
+    }
+
+    #[test]
+    fn cancellation_withdraws_only_from_the_observed_generation() {
+        let barrier = Barrier::new(3);
+        barrier.state.store((7_u64 << 32) | 2, Ordering::Relaxed);
+
+        assert!(!barrier.cancel(6));
+        assert_eq!(barrier.state.load(Ordering::Relaxed), (7_u64 << 32) | 2);
+        assert!(barrier.cancel(7));
+        assert_eq!(barrier.state.load(Ordering::Relaxed), (7_u64 << 32) | 1);
     }
 }

@@ -190,3 +190,60 @@ impl WaitTimeoutResult {
         self.timed_out
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc as StdArc;
+    use std::sync::atomic::AtomicUsize;
+    use std::task::{Wake, Waker};
+
+    use super::*;
+    use crate::sync::mutex::Mutex;
+
+    #[derive(Default)]
+    struct WakeCounter(AtomicUsize);
+
+    impl Wake for WakeCounter {
+        fn wake(self: StdArc<Self>) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    #[test]
+    fn notify_one_advances_generation_and_wakes_a_waiter() {
+        let mutex = Mutex::new(());
+        let condition = Condvar::new();
+        let counter = StdArc::new(WakeCounter::default());
+        let waker = Waker::from(StdArc::clone(&counter));
+        let mut context = Context::from_waker(&waker);
+        let mut wait = Box::pin(condition.wait(mutex.lock_sync()));
+        assert!(wait.as_mut().poll(&mut context).is_pending());
+
+        condition.notify_one();
+
+        assert_eq!(
+            (
+                condition.generation.load(Ordering::Relaxed),
+                counter.0.load(Ordering::Relaxed),
+                wait.as_mut().poll(&mut context).is_ready(),
+            ),
+            (1, 1, true)
+        );
+    }
+
+    #[test]
+    fn notified_wait_reacquires_only_after_the_mutex_is_available() {
+        let mutex = Mutex::new(());
+        let condition = Condvar::new();
+        let mut context = Context::from_waker(Waker::noop());
+        let mut wait = Box::pin(condition.wait(mutex.lock_sync()));
+        assert!(wait.as_mut().poll(&mut context).is_pending());
+        let held = mutex.lock_sync();
+
+        condition.notify_one();
+        assert!(wait.as_mut().poll(&mut context).is_pending());
+        drop(held);
+
+        assert!(wait.as_mut().poll(&mut context).is_ready());
+    }
+}

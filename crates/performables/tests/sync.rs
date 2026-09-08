@@ -16,6 +16,7 @@ use std::pin::pin;
 use std::sync::Arc as StdArc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll, Wake, Waker};
+use std::time::{Duration, Instant};
 
 use performables::arc::Arc;
 #[cfg(feature = "seismograph")]
@@ -61,15 +62,36 @@ fn waker(counter: &StdArc<WakeCounter>) -> Waker {
 }
 
 fn block_on<F: Future>(future: F) -> F::Output {
+    let deadline = Instant::now() + Duration::from_secs(2);
     let waker = Waker::from(StdArc::new(ThreadWaker(std::thread::current())));
     let mut context = Context::from_waker(&waker);
     let mut future = pin!(future);
     loop {
         match future.as_mut().poll(&mut context) {
             Poll::Ready(output) => return output,
-            Poll::Pending => std::thread::park(),
+            Poll::Pending => {
+                let remaining = deadline
+                    .checked_duration_since(Instant::now())
+                    .unwrap_or_else(|| panic!("future did not complete within the bounded test deadline"));
+                std::thread::park_timeout(remaining);
+                assert!(
+                    Instant::now() < deadline,
+                    "future did not receive a wake before the bounded test deadline"
+                );
+            }
         }
     }
+}
+
+fn join_with_timeout<T>(thread: std::thread::JoinHandle<T>) -> T {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !thread.is_finished() {
+        assert!(Instant::now() < deadline, "thread did not finish within the bounded test deadline");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    #[expect(clippy::unwrap_used, reason = "a thread panic should fail the test with its captured backtrace")]
+    let result = thread.join().unwrap();
+    result
 }
 
 #[test]
@@ -117,7 +139,7 @@ fn mutex_sync_lock_waits_for_release() {
 
     std::thread::yield_now();
     drop(held);
-    thread.join().unwrap();
+    join_with_timeout(thread);
 
     assert_eq!(*mutex.lock_sync(), 7);
 }
@@ -183,7 +205,7 @@ fn mutex_sync_result_waits_for_release() {
     assert!(!thread.is_finished());
 
     drop(held);
-    thread.join().unwrap();
+    join_with_timeout(thread);
 
     assert_eq!(*mutex.lock_sync(), 9);
 }
@@ -343,7 +365,7 @@ fn rw_lock_sync_access_waits_for_conflicting_guards() {
 
     std::thread::yield_now();
     drop(reader);
-    thread.join().unwrap();
+    join_with_timeout(thread);
 
     assert_eq!(*lock.read_sync(), 11);
 }
@@ -403,7 +425,7 @@ fn rw_lock_sync_results_wait_for_conflicting_guards() {
     std::thread::sleep(std::time::Duration::from_millis(10));
     assert!(!reader.is_finished());
     drop(writer);
-    assert_eq!(reader.join().unwrap(), 0);
+    assert_eq!(join_with_timeout(reader), 0);
 
     let reader = lock.read_sync();
     let write_lock = Arc::clone(&lock);
@@ -416,7 +438,7 @@ fn rw_lock_sync_results_wait_for_conflicting_guards() {
     std::thread::sleep(std::time::Duration::from_millis(10));
     assert!(!writer.is_finished());
     drop(reader);
-    writer.join().unwrap();
+    join_with_timeout(writer);
 
     assert_eq!(*lock.read_sync(), 12);
 }
@@ -573,7 +595,7 @@ fn barrier_supports_async_and_blocking_waiters() {
     let blocking_thread = std::thread::spawn(move || blocking_barrier.wait_sync());
 
     let result = block_on(barrier.wait());
-    let results = [result, async_thread.join().unwrap(), blocking_thread.join().unwrap()];
+    let results = [result, join_with_timeout(async_thread), join_with_timeout(blocking_thread)];
 
     assert_eq!(results.iter().filter(|result| result.is_leader()).count(), 1);
 }
@@ -659,7 +681,7 @@ fn condvar_supports_async_and_blocking_waiters() {
     let (mutex, condition) = &*pair;
     *mutex.lock_sync() = true;
     condition.notify_one();
-    waiter.join().unwrap();
+    join_with_timeout(waiter);
 }
 
 #[test]
@@ -706,7 +728,7 @@ fn condvar_direct_waits_support_blocking_and_async_notification() {
         pair.1.notify_one();
         std::thread::yield_now();
     }
-    waiter.join().unwrap();
+    join_with_timeout(waiter);
 
     let mutex = Mutex::new(());
     let condition = Condvar::new();
@@ -736,7 +758,7 @@ fn condvar_wait_while_sync_rechecks_the_predicate() {
     *pair.0.lock_sync() = true;
     pair.1.notify_one();
 
-    waiter.join().unwrap();
+    join_with_timeout(waiter);
 }
 
 #[test]
@@ -848,7 +870,7 @@ fn condvar_timeout_can_observe_notification() {
     });
 
     let (_guard, result) = pair.1.wait_timeout_sync(pair.0.lock_sync(), std::time::Duration::from_secs(1));
-    thread.join().unwrap();
+    join_with_timeout(thread);
 
     assert!(!result.timed_out());
 }
@@ -912,7 +934,7 @@ fn once_lock_waits_for_concurrent_initialization() {
 
     once.set(17).unwrap();
 
-    assert_eq!(waiter.join().unwrap(), 17);
+    assert_eq!(join_with_timeout(waiter), 17);
 }
 
 #[test]
@@ -935,7 +957,7 @@ fn once_lock_records_concurrent_get_or_init_contention() {
     std::thread::sleep(std::time::Duration::from_millis(10));
     release_sender.send(()).unwrap();
 
-    assert_eq!((initializer.join().unwrap(), contender.join().unwrap()), (19, 19));
+    assert_eq!((join_with_timeout(initializer), join_with_timeout(contender)), (19, 19));
 }
 
 #[test]
@@ -974,7 +996,7 @@ fn ownership_and_lock_operations_emit_runtime_telemetry() {
     let value = Arc::new(7_u64);
     let arc_id = Arc::telemetry_object_id(&value);
     let other_thread = Arc::clone(&value);
-    std::thread::spawn(move || std::hint::black_box(*other_thread)).join().unwrap();
+    join_with_timeout(std::thread::spawn(move || std::hint::black_box(*other_thread)));
     std::hint::black_box(*value);
     let dropped = Arc::new(8_u64);
     let dropped_id = Arc::telemetry_object_id(&dropped);
@@ -1012,7 +1034,7 @@ fn ownership_and_lock_operations_emit_runtime_telemetry() {
     let other_barrier = Arc::clone(&barrier);
     let barrier_thread = std::thread::spawn(move || other_barrier.wait_sync());
     let barrier_result = barrier.wait_sync();
-    let other_barrier_result = barrier_thread.join().unwrap();
+    let other_barrier_result = join_with_timeout(barrier_thread);
     assert_ne!(barrier_result.is_leader(), other_barrier_result.is_leader());
 
     let condition = Condvar::new();
@@ -1037,7 +1059,7 @@ fn ownership_and_lock_operations_emit_runtime_telemetry() {
         setter_once.set(19).unwrap();
     });
     assert_eq!(waiting_once.wait(), &19);
-    once_setter.join().unwrap();
+    join_with_timeout(once_setter);
 
     let (channel_sender, channel_receiver) = performables::sync::channel::unbounded::<usize>();
     assert!(channel_receiver.try_recv().unwrap_err().is_empty());

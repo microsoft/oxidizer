@@ -260,10 +260,12 @@ impl<T> Sender<T> {
                 Err((ERROR_CLOSED, value)) => return Err(Error::with_value(ERROR_CLOSED, value)),
                 Err((_code, returned)) => {
                     value = returned;
-                    if !contention_recorded {
-                        self.shared.record(EventKind::ChannelSendContention);
-                        contention_recorded = true;
+                    if contention_recorded {
+                        QueueWait::send(&self.shared).await;
+                        continue;
                     }
+                    self.shared.record(EventKind::ChannelSendContention);
+                    contention_recorded = true;
                     QueueWait::send(&self.shared).await;
                 }
             }
@@ -385,13 +387,21 @@ impl<T> Receiver<T> {
         loop {
             match self.shared.try_receive() {
                 Ok(value) => return Ok(value),
-                Err(error) if error.is_closed() => return Err(error),
-                Err(_) => {
-                    if !contention_recorded {
-                        self.shared.record(EventKind::ChannelReceiveContention);
-                        contention_recorded = true;
+                Err(error) =>
+                {
+                    #[expect(clippy::single_match_else, reason = "closed is terminal while every other code retries")]
+                    match error.code {
+                        ERROR_CLOSED => return Err(error),
+                        _ => {
+                            if contention_recorded {
+                                QueueWait::receive(&self.shared).await;
+                                continue;
+                            }
+                            self.shared.record(EventKind::ChannelReceiveContention);
+                            contention_recorded = true;
+                            QueueWait::receive(&self.shared).await;
+                        }
                     }
-                    QueueWait::receive(&self.shared).await;
                 }
             }
         }
@@ -522,7 +532,6 @@ struct QueueWait<'a, T> {
     shared: &'a QueueShared<T>,
     kind: QueueWaitKind,
     waiter: Option<Arc<Waiter>>,
-    completed: bool,
 }
 
 impl<'a, T> QueueWait<'a, T> {
@@ -531,7 +540,6 @@ impl<'a, T> QueueWait<'a, T> {
             shared,
             kind: QueueWaitKind::Send,
             waiter: None,
-            completed: false,
         }
     }
 
@@ -540,7 +548,6 @@ impl<'a, T> QueueWait<'a, T> {
             shared,
             kind: QueueWaitKind::Receive,
             waiter: None,
-            completed: false,
         }
     }
 
@@ -563,7 +570,6 @@ impl<'a, T> QueueWait<'a, T> {
         waiter.register(cx.waker());
         if self.waiters().enqueue_if_needed(&waiter, || self.complete()) {
             self.waiter.take();
-            self.completed = true;
             Poll::Ready(())
         } else {
             Poll::Pending
@@ -576,7 +582,6 @@ impl<T> Future for QueueWait<'_, T> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if self.complete() {
-            self.completed = true;
             return Poll::Ready(());
         }
         self.poll_registered(cx)
@@ -587,7 +592,7 @@ impl<T> Drop for QueueWait<'_, T> {
     fn drop(&mut self) {
         if let Some(waiter) = &self.waiter {
             let removed = self.waiters().cancel(waiter);
-            if !self.completed && !removed && self.complete() {
+            if !removed && self.complete() {
                 self.waiters().wake_one();
             }
         }
@@ -636,10 +641,6 @@ impl<T> OneshotShared<T> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn record(&self, kind: EventKind) {
-        telemetry::record(kind, std::ptr::from_ref(self).cast::<()>());
-    }
-
     fn receiver_ready(&self) -> bool {
         let state = self.state();
         state.value.is_some() || !state.sender_alive
@@ -667,7 +668,7 @@ impl<T> OneshotSender<T> {
         }
         state.value = Some(value);
         drop(state);
-        self.shared.record(EventKind::ChannelSend);
+        telemetry::record(EventKind::ChannelSend, std::ptr::from_ref(&*self.shared).cast::<()>());
         self.shared.receiver_waiters.wake_all_marked(|| {});
         Ok(())
     }
@@ -685,7 +686,7 @@ impl<T> Drop for OneshotSender<T> {
             return;
         }
         self.shared.state().sender_alive = false;
-        self.shared.record(EventKind::ChannelClose);
+        telemetry::record(EventKind::ChannelClose, std::ptr::from_ref(&*self.shared).cast::<()>());
         self.shared.receiver_waiters.wake_all_marked(|| {});
     }
 }
@@ -745,10 +746,11 @@ impl<T> OneshotReceiver<T> {
             Some(Ok(value)) => Ok(value),
             Some(Err(error)) => Err(error),
             None => {
-                if !self.contention_recorded {
-                    self.shared.record(EventKind::ChannelReceiveContention);
-                    self.contention_recorded = true;
+                if self.contention_recorded {
+                    return Err(Error::without_value(ERROR_EMPTY));
                 }
+                telemetry::record(EventKind::ChannelReceiveContention, std::ptr::from_ref(&*self.shared).cast::<()>());
+                self.contention_recorded = true;
                 Err(Error::without_value(ERROR_EMPTY))
             }
         }
@@ -770,8 +772,8 @@ impl<T> OneshotReceiver<T> {
             if let Some(waiter) = self.waiter.take() {
                 self.shared.receiver_waiters.cancel(&waiter);
             }
-            self.shared.record(EventKind::ChannelReceive);
-            self.shared.record(EventKind::ChannelClose);
+            telemetry::record(EventKind::ChannelReceive, std::ptr::from_ref(&*self.shared).cast::<()>());
+            telemetry::record(EventKind::ChannelClose, std::ptr::from_ref(&*self.shared).cast::<()>());
             return Some(Ok(value));
         }
         if !state.sender_alive {
@@ -794,10 +796,17 @@ impl<T> Future for OneshotReceiver<T> {
         if let Some(result) = self.take_result() {
             return Poll::Ready(result);
         }
-        if !self.contention_recorded {
-            self.shared.record(EventKind::ChannelReceiveContention);
-            self.contention_recorded = true;
+        if self.contention_recorded {
+            return self.poll_waiter(cx);
         }
+        telemetry::record(EventKind::ChannelReceiveContention, std::ptr::from_ref(&*self.shared).cast::<()>());
+        self.contention_recorded = true;
+        self.poll_waiter(cx)
+    }
+}
+
+impl<T> OneshotReceiver<T> {
+    fn poll_waiter(&mut self, cx: &Context<'_>) -> Poll<Result<T, Error>> {
         let waiter = Arc::clone(self.waiter.get_or_insert_with(|| Arc::new(Waiter::new())));
         waiter.register(cx.waker());
         if self
@@ -826,7 +835,7 @@ impl<T> Drop for OneshotReceiver<T> {
             state.receiver_alive = false;
             state.value.take()
         };
-        self.shared.record(EventKind::ChannelClose);
+        telemetry::record(EventKind::ChannelClose, std::ptr::from_ref(&*self.shared).cast::<()>());
         drop(value);
     }
 }
@@ -880,10 +889,6 @@ impl<T> WatchShared<T> {
     fn state(&self) -> StdMutexGuard<'_, WatchState<T>> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
-
-    fn record(&self, kind: EventKind) {
-        telemetry::record(kind, std::ptr::from_ref(self).cast::<()>());
-    }
 }
 
 /// Sending endpoint of a latest-value watch channel.
@@ -905,7 +910,7 @@ impl<T> WatchSender<T> {
         let previous = std::mem::replace(&mut state.value, value);
         state.version = state.version.wrapping_add(1);
         drop(state);
-        self.shared.record(EventKind::ChannelSend);
+        telemetry::record(EventKind::ChannelSend, std::ptr::from_ref(&*self.shared).cast::<()>());
         self.shared.receiver_waiters.wake_all_marked(|| {});
         drop(previous);
         Ok(())
@@ -917,7 +922,7 @@ impl<T> WatchSender<T> {
         let previous = std::mem::replace(&mut state.value, value);
         state.version = state.version.wrapping_add(1);
         drop(state);
-        self.shared.record(EventKind::ChannelSend);
+        telemetry::record(EventKind::ChannelSend, std::ptr::from_ref(&*self.shared).cast::<()>());
         self.shared.receiver_waiters.wake_all_marked(|| {});
         previous
     }
@@ -931,7 +936,7 @@ impl<T> WatchSender<T> {
         modify(&mut state.value);
         state.version = state.version.wrapping_add(1);
         drop(state);
-        self.shared.record(EventKind::ChannelSend);
+        telemetry::record(EventKind::ChannelSend, std::ptr::from_ref(&*self.shared).cast::<()>());
         self.shared.receiver_waiters.wake_all_marked(|| {});
     }
 
@@ -940,7 +945,7 @@ impl<T> WatchSender<T> {
     /// Holding the returned guard blocks sender updates.
     #[must_use]
     pub fn borrow(&self) -> WatchRef<'_, T> {
-        self.shared.record(EventKind::ChannelReceive);
+        telemetry::record(EventKind::ChannelReceive, std::ptr::from_ref(&*self.shared).cast::<()>());
         WatchRef {
             guard: self.shared.state(),
         }
@@ -984,7 +989,7 @@ impl<T> Drop for WatchSender<T> {
             state.senders == 0
         };
         if final_sender {
-            self.shared.record(EventKind::ChannelClose);
+            telemetry::record(EventKind::ChannelClose, std::ptr::from_ref(&*self.shared).cast::<()>());
             self.shared.receiver_waiters.wake_all_marked(|| {});
         }
     }
@@ -1006,12 +1011,19 @@ pub struct WatchReceiver<T> {
     observed: AtomicU64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WatchChange {
+    Version(u64),
+    Closed,
+    Pending,
+}
+
 impl<T> WatchReceiver<T> {
     /// Borrows the latest value without marking its version observed.
     ///
     /// Holding the returned guard blocks sender updates.
     pub fn borrow(&self) -> WatchRef<'_, T> {
-        self.shared.record(EventKind::ChannelReceive);
+        telemetry::record(EventKind::ChannelReceive, std::ptr::from_ref(&*self.shared).cast::<()>());
         WatchRef {
             guard: self.shared.state(),
         }
@@ -1023,7 +1035,7 @@ impl<T> WatchReceiver<T> {
     pub fn borrow_and_update(&self) -> WatchRef<'_, T> {
         let guard = self.shared.state();
         self.observed.store(guard.version, Ordering::Release);
-        self.shared.record(EventKind::ChannelReceive);
+        telemetry::record(EventKind::ChannelReceive, std::ptr::from_ref(&*self.shared).cast::<()>());
         WatchRef { guard }
     }
 
@@ -1036,13 +1048,10 @@ impl<T> WatchReceiver<T> {
     /// Returns [`Error`] when all senders are gone and no newer
     /// version remains unobserved.
     pub fn has_changed(&self) -> Result<bool, Error> {
-        let state = self.shared.state();
-        if state.version != self.observed.load(Ordering::Acquire) {
-            Ok(true)
-        } else if state.senders == 0 {
-            Err(Error::without_value(ERROR_CLOSED))
-        } else {
-            Ok(false)
+        match self.change_status() {
+            WatchChange::Version(_) => Ok(true),
+            WatchChange::Closed => Err(Error::without_value(ERROR_CLOSED)),
+            WatchChange::Pending => Ok(false),
         }
     }
 
@@ -1055,22 +1064,25 @@ impl<T> WatchReceiver<T> {
     pub async fn changed(&self) -> Result<(), Error> {
         let mut contention_recorded = false;
         loop {
-            {
-                let state = self.shared.state();
-                if state.version != self.observed.load(Ordering::Acquire) {
-                    self.observed.store(state.version, Ordering::Release);
-                    drop(state);
-                    self.shared.record(EventKind::ChannelReceive);
+            match self.change_status() {
+                WatchChange::Version(version) => {
+                    self.observed.store(version, Ordering::Release);
+                    telemetry::record(EventKind::ChannelReceive, std::ptr::from_ref(&*self.shared).cast::<()>());
                     return Ok(());
                 }
-                if state.senders == 0 {
-                    return Err(Error::without_value(ERROR_CLOSED));
+                WatchChange::Closed => return Err(Error::without_value(ERROR_CLOSED)),
+                WatchChange::Pending => {}
+            }
+            if contention_recorded {
+                WatchChanged {
+                    receiver: self,
+                    waiter: None,
                 }
+                .await;
+                continue;
             }
-            if !contention_recorded {
-                self.shared.record(EventKind::ChannelReceiveContention);
-                contention_recorded = true;
-            }
+            telemetry::record(EventKind::ChannelReceiveContention, std::ptr::from_ref(&*self.shared).cast::<()>());
+            contention_recorded = true;
             WatchChanged {
                 receiver: self,
                 waiter: None,
@@ -1095,7 +1107,7 @@ impl<T> WatchReceiver<T> {
                 let state = self.shared.state();
                 self.observed.store(state.version, Ordering::Release);
                 if predicate(&state.value) {
-                    self.shared.record(EventKind::ChannelReceive);
+                    telemetry::record(EventKind::ChannelReceive, std::ptr::from_ref(&*self.shared).cast::<()>());
                     return Ok(WatchRef { guard: state });
                 }
                 if state.senders == 0 {
@@ -1123,8 +1135,16 @@ impl<T> WatchReceiver<T> {
     }
 
     fn change_ready(&self) -> bool {
+        self.change_status() != WatchChange::Pending
+    }
+
+    fn change_status(&self) -> WatchChange {
         let state = self.shared.state();
-        state.version != self.observed.load(Ordering::Acquire) || state.senders == 0
+        match (state.version == self.observed.load(Ordering::Acquire), state.senders) {
+            (false, _) => WatchChange::Version(state.version),
+            (true, 0) => WatchChange::Closed,
+            (true, _) => WatchChange::Pending,
+        }
     }
 }
 
@@ -1140,13 +1160,15 @@ impl<T> Clone for WatchReceiver<T> {
 
 impl<T> Drop for WatchReceiver<T> {
     fn drop(&mut self) {
-        let final_receiver = {
+        let remaining_receivers = {
             let mut state = self.shared.state();
             state.receivers -= 1;
-            state.receivers == 0
+            state.receivers
         };
-        if final_receiver {
-            self.shared.record(EventKind::ChannelClose);
+        #[expect(clippy::single_match, reason = "only the transition to zero emits channel-close telemetry")]
+        match remaining_receivers {
+            0 => telemetry::record(EventKind::ChannelClose, std::ptr::from_ref(&*self.shared).cast::<()>()),
+            _ => {}
         }
     }
 }
@@ -1226,9 +1248,24 @@ impl<T: fmt::Display> fmt::Display for WatchRef<'_, T> {
 
 #[cfg(test)]
 mod tests {
-    use std::task::{Context, Poll, Waker};
+    use std::collections::VecDeque;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::{Context, Poll, Wake, Waker};
 
-    use super::{Error, QueueWait, bounded};
+    use super::{
+        ERROR_CLOSED, ERROR_EMPTY, ERROR_FULL, ERROR_TIMEOUT, Error, OneshotShared, OneshotState, QueueState, QueueWait, WaitQueue,
+        WatchChange, WatchChanged, bounded, oneshot, watch,
+    };
+
+    #[derive(Default)]
+    struct WakeCounter(AtomicUsize);
+
+    impl Wake for WakeCounter {
+        fn wake(self: Arc<Self>) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
 
     #[test]
     fn unknown_error_codes_use_the_defensive_message() {
@@ -1254,5 +1291,250 @@ mod tests {
         let context = Context::from_waker(Waker::noop());
 
         assert_eq!(wait.poll_registered(&context), Poll::Ready(()));
+    }
+
+    #[test]
+    fn unavailable_capacity_during_waiter_registration_stays_pending() {
+        let (sender, _receiver) = bounded::<()>(1);
+        sender.try_send(()).unwrap();
+        let mut wait = QueueWait::send(&sender.shared);
+        let context = Context::from_waker(Waker::noop());
+
+        assert_eq!(wait.poll_registered(&context), Poll::Pending);
+    }
+
+    #[test]
+    fn error_predicates_match_only_their_own_error_code() {
+        let errors = [ERROR_FULL, ERROR_EMPTY, ERROR_CLOSED, ERROR_TIMEOUT].map(Error::without_value);
+
+        assert_eq!(
+            errors.map(|error| { (error.is_full(), error.is_empty(), error.is_closed(), error.is_timeout(),) }),
+            [
+                (true, false, false, false),
+                (false, true, false, false),
+                (false, false, true, false),
+                (false, false, false, true),
+            ]
+        );
+    }
+
+    #[test]
+    fn queue_closure_accounts_for_explicit_close_and_sender_lifetime() {
+        let explicitly_closed = QueueState::<()> {
+            values: VecDeque::new(),
+            capacity: None,
+            senders: 1,
+            receivers: 1,
+            closed: true,
+            high_watermark: 0,
+        };
+        let no_senders = QueueState::<()> {
+            values: VecDeque::new(),
+            capacity: None,
+            closed: false,
+            senders: 0,
+            receivers: 1,
+            high_watermark: 0,
+        };
+
+        assert!(explicitly_closed.receive_is_closed());
+        assert!(no_senders.receive_is_closed());
+    }
+
+    #[test]
+    fn queue_try_send_stores_values_and_rejects_full_capacity() {
+        let (sender, _receiver) = bounded(1);
+
+        assert_eq!(sender.shared.try_send(7), Ok(()));
+        assert_eq!(sender.shared.state().values.front(), Some(&7));
+        assert_eq!(sender.shared.try_send(9), Err((ERROR_FULL, 9)));
+    }
+
+    #[test]
+    fn queue_wait_completion_tracks_capacity_values_and_closure() {
+        let (sender, receiver) = bounded(1);
+        let shared = Arc::clone(&sender.shared);
+        let send_wait = QueueWait::send(&shared);
+        let receive_wait = QueueWait::receive(&shared);
+        assert!(send_wait.complete());
+        assert!(!receive_wait.complete());
+
+        sender.try_send(1).unwrap();
+        assert!(!send_wait.complete());
+        assert!(receive_wait.complete());
+        assert_eq!(receiver.try_recv(), Ok(1));
+        drop(sender);
+        assert!(receive_wait.complete());
+    }
+
+    #[test]
+    fn queue_endpoint_closed_state_tracks_the_opposite_endpoint() {
+        let (sender, receiver) = bounded::<()>(1);
+        assert!(!sender.is_closed());
+        assert!(!receiver.is_closed());
+
+        let (sender_without_receiver, receiver) = bounded::<()>(1);
+        drop(receiver);
+        assert!(sender_without_receiver.is_closed());
+
+        let (sender, receiver_without_sender) = bounded::<()>(1);
+        drop(sender);
+        assert!(receiver_without_sender.is_closed());
+    }
+
+    #[test]
+    fn cancelled_selected_queue_waiter_wakes_the_next_waiter() {
+        let (sender, receiver) = bounded(1);
+        sender.try_send(1).unwrap();
+        let first_counter = Arc::new(WakeCounter::default());
+        let first_waker = Waker::from(Arc::clone(&first_counter));
+        let mut first_context = Context::from_waker(&first_waker);
+        let second_counter = Arc::new(WakeCounter::default());
+        let second_waker = Waker::from(Arc::clone(&second_counter));
+        let mut second_context = Context::from_waker(&second_waker);
+        let mut first = Box::pin(QueueWait::send(&sender.shared));
+        let mut second = Box::pin(QueueWait::send(&sender.shared));
+        assert!(first.as_mut().poll(&mut first_context).is_pending());
+        assert!(second.as_mut().poll(&mut second_context).is_pending());
+
+        assert_eq!(receiver.try_recv(), Ok(1));
+        assert_eq!(
+            (
+                first_counter.0.load(Ordering::Relaxed),
+                second_counter.0.load(Ordering::Relaxed),
+                first.as_ref().get_ref().complete(),
+            ),
+            (1, 0, true)
+        );
+        drop(first);
+
+        assert_eq!(second_counter.0.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn cancelling_a_still_queued_waiter_does_not_wake_the_next() {
+        let (sender, _receiver) = bounded(1);
+        sender.try_send(1).unwrap();
+        let first_counter = Arc::new(WakeCounter::default());
+        let first_waker = Waker::from(Arc::clone(&first_counter));
+        let mut first_context = Context::from_waker(&first_waker);
+        let second_counter = Arc::new(WakeCounter::default());
+        let second_waker = Waker::from(Arc::clone(&second_counter));
+        let mut second_context = Context::from_waker(&second_waker);
+        let mut first = Box::pin(QueueWait::send(&sender.shared));
+        let mut second = Box::pin(QueueWait::send(&sender.shared));
+        assert!(first.as_mut().poll(&mut first_context).is_pending());
+        assert!(second.as_mut().poll(&mut second_context).is_pending());
+        assert_eq!(sender.shared.state().values.pop_front(), Some(1));
+
+        drop(first);
+
+        assert_eq!(
+            (first_counter.0.load(Ordering::Relaxed), second_counter.0.load(Ordering::Relaxed),),
+            (0, 0)
+        );
+    }
+
+    #[test]
+    fn oneshot_readiness_tracks_both_value_and_sender_lifetime() {
+        let shared = OneshotShared {
+            state: std::sync::Mutex::new(OneshotState {
+                value: Some(7),
+                sender_alive: true,
+                receiver_alive: true,
+            }),
+            receiver_waiters: WaitQueue::new(),
+        };
+        assert!(shared.receiver_ready());
+        shared.state().value = None;
+        assert!(!shared.receiver_ready());
+        shared.state().sender_alive = false;
+        assert!(shared.receiver_ready());
+    }
+
+    #[test]
+    fn oneshot_take_result_distinguishes_value_pending_and_closed() {
+        let (sender, mut receiver) = oneshot();
+        assert_eq!(receiver.take_result(), None);
+        sender.send(7).unwrap();
+        assert_eq!(receiver.take_result(), Some(Ok(7)));
+
+        let (sender, mut receiver) = oneshot::<usize>();
+        drop(sender);
+        assert!(receiver.take_result().unwrap().unwrap_err().is_closed());
+    }
+
+    #[test]
+    fn oneshot_closed_state_requires_a_dead_sender_without_a_value() {
+        let (sender, receiver) = oneshot::<usize>();
+        assert!(!receiver.is_closed());
+        sender.send(7).unwrap();
+        assert!(!receiver.is_closed());
+
+        let (sender, receiver) = oneshot::<usize>();
+        drop(sender);
+        assert!(receiver.is_closed());
+    }
+
+    #[test]
+    fn watch_readiness_tracks_versions_and_sender_lifetime() {
+        let (sender, receiver) = watch(1);
+        assert!(!receiver.change_ready());
+        sender.send(2).unwrap();
+        assert!(receiver.change_ready());
+        receiver.observed.store(1, Ordering::Release);
+        assert!(!receiver.change_ready());
+        drop(sender);
+        assert!(receiver.change_ready());
+    }
+
+    #[test]
+    fn watch_change_status_distinguishes_pending_updated_and_closed() {
+        let (sender, receiver) = watch(1);
+        assert_eq!(receiver.change_status(), WatchChange::Pending);
+        sender.send(2).unwrap();
+        assert_eq!(receiver.change_status(), WatchChange::Version(1));
+        receiver.observed.store(1, Ordering::Release);
+        drop(sender);
+        assert_eq!(receiver.change_status(), WatchChange::Closed);
+    }
+
+    #[test]
+    fn dropping_watch_endpoints_updates_counts_without_premature_close() {
+        let (sender, receiver) = watch(1);
+        let sender_clone = sender.clone();
+        let receiver_clone = receiver.clone();
+
+        drop(sender);
+        assert!(!receiver.is_closed());
+        drop(sender_clone);
+        assert!(receiver.is_closed());
+        drop(receiver_clone);
+
+        let (sender, receiver) = watch(1);
+        let receiver_clone = receiver.clone();
+        drop(receiver);
+        assert!(!sender.is_closed());
+        drop(receiver_clone);
+        assert!(sender.is_closed());
+    }
+
+    #[test]
+    fn dropping_watch_changed_releases_its_registered_waker() {
+        let (_sender, receiver) = watch(1);
+        let counter = Arc::new(WakeCounter::default());
+        let weak = Arc::downgrade(&counter);
+        {
+            let waker = Waker::from(Arc::clone(&counter));
+            let mut context = Context::from_waker(&waker);
+            let mut changed = Box::pin(WatchChanged {
+                receiver: &receiver,
+                waiter: None,
+            });
+            assert!(changed.as_mut().poll(&mut context).is_pending());
+        }
+        drop(counter);
+
+        assert!(weak.upgrade().is_none());
     }
 }

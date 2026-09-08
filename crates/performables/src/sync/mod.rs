@@ -68,3 +68,16 @@ impl<G: fmt::Debug> Error for PoisonError<G> {}
 pub(super) fn panic_poisoned<G>(error: &PoisonError<G>) -> ! {
     panic!("{error}");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::PoisonError;
+
+    #[test]
+    fn poison_error_display_explains_the_failure() {
+        assert_eq!(
+            PoisonError::new(()).to_string(),
+            "poisoned lock: another thread panicked while holding the lock"
+        );
+    }
+}

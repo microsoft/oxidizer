@@ -174,7 +174,7 @@ impl<T: ?Sized> Mutex<T> {
         while state & LOCKED == 0 {
             match self
                 .state
-                .compare_exchange_weak(state, state | LOCKED, Ordering::Acquire, Ordering::Relaxed)
+                .compare_exchange_weak(state, state + LOCKED, Ordering::Acquire, Ordering::Relaxed)
             {
                 Ok(_) => return true,
                 Err(current) => state = current,
@@ -212,10 +212,14 @@ impl<T: ?Sized> Mutex<T> {
 
     fn unlock(&self) {
         let previous = self.state.fetch_and(!LOCKED, Ordering::Release);
-        if previous & WAITERS != 0 {
-            self.waiters.wake_one_marked(|| {
-                self.state.fetch_and(!WAITERS, Ordering::Release);
-            });
+        match previous & WAITERS {
+            0 => {}
+            WAITERS => {
+                self.waiters.wake_one_marked(|| {
+                    self.state.fetch_and(!WAITERS, Ordering::Release);
+                });
+            }
+            _ => unreachable!("waiter marker occupies exactly one state bit"),
         }
         self.record(EventKind::MutexRelease);
     }
@@ -311,10 +315,11 @@ impl<'a, T: ?Sized> Future for MutexLockResult<'a, T> {
             return Poll::Ready(self.mutex.acquired());
         }
 
-        if !self.contention_recorded {
-            self.mutex.record(EventKind::MutexContention);
-            self.contention_recorded = true;
+        if self.contention_recorded {
+            return self.poll_registered(cx);
         }
+        self.mutex.record(EventKind::MutexContention);
+        self.contention_recorded = true;
         self.poll_registered(cx)
     }
 }
@@ -409,9 +414,20 @@ impl<T: ?Sized + fmt::Display> fmt::Display for MutexGuard<'_, T> {
 
 #[cfg(test)]
 mod tests {
-    use std::task::Waker;
+    use std::sync::Arc as StdArc;
+    use std::sync::atomic::AtomicUsize;
+    use std::task::{Wake, Waker};
 
     use super::*;
+
+    #[derive(Default)]
+    struct WakeCounter(AtomicUsize);
+
+    impl Wake for WakeCounter {
+        fn wake(self: StdArc<Self>) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
 
     #[test]
     fn unlock_during_waiter_registration_completes_acquisition() {
@@ -419,6 +435,131 @@ mod tests {
         let mut lock = mutex.lock_result();
         let context = Context::from_waker(Waker::noop());
 
-        assert!(matches!(lock.poll_registered(&context), Poll::Ready(Ok(_))));
+        let Poll::Ready(Ok(guard)) = lock.poll_registered(&context) else {
+            panic!("an unlocked mutex must complete registration immediately");
+        };
+        assert_eq!(mutex.state.load(Ordering::Relaxed), LOCKED);
+        drop(guard);
+    }
+
+    #[test]
+    fn acquisition_preserves_the_waiter_marker() {
+        let mutex = Mutex::new(());
+        mutex.state.store(WAITERS, Ordering::Relaxed);
+
+        assert!(mutex.try_acquire());
+        assert_eq!(mutex.state.load(Ordering::Relaxed), WAITERS | LOCKED);
+    }
+
+    #[test]
+    fn unlock_clears_the_lock_and_waiter_marker_and_wakes_one() {
+        let mutex = Mutex::new(());
+        mutex.state.store(WAITERS | LOCKED, Ordering::Relaxed);
+        let waiter = StdArc::new(Waiter::new());
+        let counter = StdArc::new(WakeCounter::default());
+        waiter.register(&Waker::from(StdArc::clone(&counter)));
+        assert!(!mutex.waiters.enqueue_if_needed(&waiter, || false));
+
+        mutex.unlock();
+
+        assert_eq!((mutex.state.load(Ordering::Relaxed), counter.0.load(Ordering::Relaxed)), (0, 1));
+    }
+
+    #[test]
+    fn dropping_a_selected_waiter_hands_the_unlocked_mutex_to_the_next() {
+        let mutex = Mutex::new(());
+        let held = mutex.try_lock().unwrap();
+        let first_counter = StdArc::new(WakeCounter::default());
+        let first_waker = Waker::from(StdArc::clone(&first_counter));
+        let mut first_context = Context::from_waker(&first_waker);
+        let second_counter = StdArc::new(WakeCounter::default());
+        let second_waker = Waker::from(StdArc::clone(&second_counter));
+        let mut second_context = Context::from_waker(&second_waker);
+        let mut first = Box::pin(mutex.lock_result());
+        let mut second = Box::pin(mutex.lock_result());
+        assert!(first.as_mut().poll(&mut first_context).is_pending());
+        assert!(second.as_mut().poll(&mut second_context).is_pending());
+
+        drop(held);
+        drop(first);
+
+        assert_eq!(
+            (
+                mutex.state.load(Ordering::Relaxed),
+                first_counter.0.load(Ordering::Relaxed),
+                second_counter.0.load(Ordering::Relaxed),
+            ),
+            (0, 1, 1)
+        );
+        assert!(second.as_mut().poll(&mut second_context).is_ready());
+    }
+
+    #[test]
+    fn cancelling_a_queued_waiter_does_not_wake_another_waiter() {
+        let mutex = Mutex::new(());
+        let _held = std::mem::ManuallyDrop::new(mutex.try_lock().unwrap());
+        let first_counter = StdArc::new(WakeCounter::default());
+        let first_waker = Waker::from(StdArc::clone(&first_counter));
+        let mut first_context = Context::from_waker(&first_waker);
+        let second_counter = StdArc::new(WakeCounter::default());
+        let second_waker = Waker::from(StdArc::clone(&second_counter));
+        let mut second_context = Context::from_waker(&second_waker);
+        let mut first = Box::pin(mutex.lock_result());
+        let mut second = Box::pin(mutex.lock_result());
+        assert!(first.as_mut().poll(&mut first_context).is_pending());
+        assert!(second.as_mut().poll(&mut second_context).is_pending());
+        mutex.state.store(WAITERS, Ordering::Release);
+
+        drop(first);
+
+        assert_eq!(
+            (
+                mutex.state.load(Ordering::Relaxed),
+                first_counter.0.load(Ordering::Relaxed),
+                second_counter.0.load(Ordering::Relaxed),
+            ),
+            (WAITERS, 0, 0)
+        );
+    }
+
+    #[test]
+    fn dropping_a_queued_waiter_clears_only_the_waiter_marker() {
+        let mutex = Mutex::new(());
+        let held = mutex.try_lock().unwrap();
+        let mut context = Context::from_waker(Waker::noop());
+        let mut pending = Box::pin(mutex.lock_result());
+        assert!(pending.as_mut().poll(&mut context).is_pending());
+
+        drop(pending);
+
+        assert_eq!(mutex.state.load(Ordering::Relaxed), LOCKED);
+        drop(held);
+    }
+
+    #[test]
+    fn successful_acquisition_after_registration_clears_only_the_waiter_marker() {
+        let mutex = Mutex::new(());
+        let _held = std::mem::ManuallyDrop::new(mutex.try_lock().unwrap());
+        let mut context = Context::from_waker(Waker::noop());
+        let mut pending = Box::pin(mutex.lock_result());
+        assert!(pending.as_mut().poll(&mut context).is_pending());
+        mutex.state.store(WAITERS, Ordering::Release);
+
+        let Poll::Ready(Ok(guard)) = pending.as_mut().poll(&mut context) else {
+            panic!("released mutex must allow the registered waiter to acquire");
+        };
+
+        assert_eq!(mutex.state.load(Ordering::Relaxed), LOCKED);
+        drop(guard);
+    }
+
+    #[test]
+    fn dropping_a_guard_releases_the_mutex() {
+        let mutex = Mutex::new(());
+        let guard = mutex.try_lock().unwrap();
+
+        drop(guard);
+
+        assert_eq!(mutex.state.load(Ordering::Relaxed), 0);
     }
 }

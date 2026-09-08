@@ -1457,6 +1457,11 @@ mod tests {
         );
     }
 
+    #[test]
+    fn arc_equality_distinguishes_unequal_values() {
+        assert_ne!(Arc::new(7_u64), Arc::new(9_u64));
+    }
+
     #[cfg(feature = "serde")]
     #[test]
     fn per_process_deserializes_sized_slice_and_str_values() {
@@ -1606,6 +1611,35 @@ mod tests {
         ThreadAware::relocate(&mut second, Some(&source), &destination);
 
         assert_eq!(Arc::strong_count(&first), 1);
+    }
+
+    #[test]
+    fn affinity_strong_count_includes_each_logical_clone() {
+        let first = Arc::<u64, PerThread>::new_with(|| 42);
+        let second = first.clone();
+
+        assert_eq!((Arc::strong_count(&first), Arc::strong_count(&second)), (2, 2));
+    }
+
+    #[test]
+    fn affinity_strong_count_excludes_every_matching_storage_entry() {
+        let (source, destination) = Relocator::between_threads().relocate(&mut ());
+        let source = source.unwrap();
+        let shared = Arc::new(42);
+        let value = Arc::<u64, PerThread>::try_from_values(&source, [(source.clone(), shared.clone()), (destination, shared)]).unwrap();
+
+        assert_eq!(Arc::strong_count(&value), 1);
+    }
+
+    #[test]
+    fn weak_counts_and_identity_distinguish_live_allocations() {
+        let first = Arc::new(1_u64);
+        let second = Arc::new(2_u64);
+        let first_weak = Arc::downgrade(&first);
+        let second_weak = Arc::downgrade(&second);
+
+        assert_eq!(first_weak.strong_count(), 1);
+        assert!(!first_weak.ptr_eq(&second_weak));
     }
 
     #[test]

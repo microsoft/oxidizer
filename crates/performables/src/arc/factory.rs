@@ -183,3 +183,23 @@ where
         value
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use thread_aware::Relocator;
+    use thread_aware_core::Thread;
+
+    use super::Factory;
+
+    #[test]
+    fn factory_records_only_the_first_source() {
+        let (first_source, second_source) = Relocator::between_threads().relocate(&mut ());
+        let first_source = first_source.unwrap();
+        let mut factory = Factory::<usize>::clone_current();
+
+        factory.record_source(Some(&first_source));
+        factory.record_source(Some(&second_source));
+
+        assert_eq!(factory.source.as_ref().map(Thread::id), Some(first_source.id()));
+    }
+}

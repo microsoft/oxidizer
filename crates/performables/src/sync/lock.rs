@@ -267,7 +267,7 @@ impl<T: ?Sized> RwLock<T> {
             Ok(_) => true,
             Err(WAITERS) => self
                 .state
-                .compare_exchange(WAITERS, WAITERS | WRITER, Ordering::Acquire, Ordering::Relaxed)
+                .compare_exchange(WAITERS, WAITERS + WRITER, Ordering::Acquire, Ordering::Relaxed)
                 .is_ok(),
             Err(_) => false,
         }
@@ -316,16 +316,22 @@ impl<T: ?Sized> RwLock<T> {
 
     fn unlock_read(&self) {
         let previous = self.state.fetch_sub(1, Ordering::Release);
-        if previous & READERS == 1 && previous & WAITERS != 0 {
-            self.wake_waiters();
+        if previous & READERS == 1 {
+            match previous & WAITERS {
+                0 => {}
+                WAITERS => self.wake_waiters(),
+                _ => unreachable!("waiter marker occupies exactly one state bit"),
+            }
         }
         self.record(EventKind::RwLockReadRelease);
     }
 
     fn unlock_write(&self) {
         let previous = self.state.fetch_and(!WRITER, Ordering::Release);
-        if previous & WAITERS != 0 {
-            self.wake_waiters();
+        match previous & WAITERS {
+            0 => {}
+            WAITERS => self.wake_waiters(),
+            _ => unreachable!("waiter marker occupies exactly one state bit"),
         }
         self.record(EventKind::RwLockWriteRelease);
     }
@@ -400,10 +406,11 @@ impl<'a, T: ?Sized> Future for RwLockReadResult<'a, T> {
             return Poll::Ready(self.lock.acquired_read());
         }
 
-        if !self.contention_recorded {
-            self.lock.record(EventKind::RwLockReadContention);
-            self.contention_recorded = true;
+        if self.contention_recorded {
+            return self.poll_registered(cx);
         }
+        self.lock.record(EventKind::RwLockReadContention);
+        self.contention_recorded = true;
         self.poll_registered(cx)
     }
 }
@@ -482,10 +489,11 @@ impl<'a, T: ?Sized> Future for RwLockWriteResult<'a, T> {
             return Poll::Ready(self.lock.acquired_write());
         }
 
-        if !self.contention_recorded {
-            self.lock.record(EventKind::RwLockWriteContention);
-            self.contention_recorded = true;
+        if self.contention_recorded {
+            return self.poll_registered(cx);
         }
+        self.lock.record(EventKind::RwLockWriteContention);
+        self.contention_recorded = true;
         self.poll_registered(cx)
     }
 }
@@ -602,9 +610,19 @@ impl<T: ?Sized + fmt::Display> fmt::Display for RwLockWriteGuard<'_, T> {
 
 #[cfg(test)]
 mod tests {
-    use std::task::Waker;
+    use std::sync::Arc as StdArc;
+    use std::task::{Wake, Waker};
 
     use super::*;
+
+    #[derive(Default)]
+    struct WakeCounter(AtomicUsize);
+
+    impl Wake for WakeCounter {
+        fn wake(self: StdArc<Self>) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
 
     #[test]
     fn writer_acquires_state_with_registered_waiters() {
@@ -620,9 +638,138 @@ mod tests {
         let lock = RwLock::new(());
         let context = Context::from_waker(Waker::noop());
         let mut read = lock.read_result();
-        assert!(matches!(read.poll_registered(&context), Poll::Ready(Ok(_))));
+        let Poll::Ready(Ok(read_guard)) = read.poll_registered(&context) else {
+            panic!("an unlocked rwlock must complete read registration immediately");
+        };
+        assert_eq!(lock.state.load(Ordering::Relaxed), 1);
+        drop(read_guard);
 
         let mut write = lock.write_result();
-        assert!(matches!(write.poll_registered(&context), Poll::Ready(Ok(_))));
+        let Poll::Ready(Ok(write_guard)) = write.poll_registered(&context) else {
+            panic!("an unlocked rwlock must complete write registration immediately");
+        };
+        assert_eq!(lock.state.load(Ordering::Relaxed), WRITER);
+        drop(write_guard);
+    }
+
+    #[test]
+    fn last_reader_clears_the_waiter_marker_and_wakes_waiters() {
+        let lock = RwLock::new(());
+        lock.state.store(WAITERS | 1, Ordering::Relaxed);
+        let waiter = StdArc::new(Waiter::new());
+        let counter = StdArc::new(WakeCounter::default());
+        waiter.register(&Waker::from(StdArc::clone(&counter)));
+        assert!(!lock.waiters.enqueue_if_needed(&waiter, || false));
+
+        lock.unlock_read();
+
+        assert_eq!((lock.state.load(Ordering::Relaxed), counter.0.load(Ordering::Relaxed)), (0, 1));
+    }
+
+    #[test]
+    fn nonfinal_reader_preserves_the_waiter_marker_without_waking() {
+        let lock = RwLock::new(());
+        lock.state.store(WAITERS | 2, Ordering::Relaxed);
+        let waiter = StdArc::new(Waiter::new());
+        let counter = StdArc::new(WakeCounter::default());
+        waiter.register(&Waker::from(StdArc::clone(&counter)));
+        assert!(!lock.waiters.enqueue_if_needed(&waiter, || false));
+
+        lock.unlock_read();
+
+        assert_eq!(
+            (lock.state.load(Ordering::Relaxed), counter.0.load(Ordering::Relaxed)),
+            (WAITERS | 1, 0)
+        );
+    }
+
+    #[test]
+    fn writer_unlock_clears_state_and_wakes_all_waiters() {
+        let lock = RwLock::new(());
+        lock.state.store(WAITERS | WRITER, Ordering::Relaxed);
+        let first_waiter = StdArc::new(Waiter::new());
+        let first = StdArc::new(WakeCounter::default());
+        first_waiter.register(&Waker::from(StdArc::clone(&first)));
+        assert!(!lock.waiters.enqueue_if_needed(&first_waiter, || false));
+        let second_waiter = StdArc::new(Waiter::new());
+        let second = StdArc::new(WakeCounter::default());
+        second_waiter.register(&Waker::from(StdArc::clone(&second)));
+        assert!(!lock.waiters.enqueue_if_needed(&second_waiter, || false));
+
+        lock.unlock_write();
+
+        assert_eq!(
+            (
+                lock.state.load(Ordering::Relaxed),
+                first.0.load(Ordering::Relaxed),
+                second.0.load(Ordering::Relaxed),
+            ),
+            (0, 1, 1)
+        );
+    }
+
+    #[test]
+    fn dropping_pending_futures_removes_the_waiter_marker() {
+        let lock = RwLock::new(());
+        let writer = lock.try_write().unwrap();
+        let mut context = Context::from_waker(Waker::noop());
+        let mut read = Box::pin(lock.read_result());
+        assert!(read.as_mut().poll(&mut context).is_pending());
+        drop(read);
+        assert_eq!(lock.state.load(Ordering::Relaxed), WRITER);
+        drop(writer);
+
+        let reader = lock.try_read().unwrap();
+        let mut write = Box::pin(lock.write_result());
+        assert!(write.as_mut().poll(&mut context).is_pending());
+        drop(write);
+        assert_eq!(lock.state.load(Ordering::Relaxed), 1);
+        drop(reader);
+    }
+
+    #[test]
+    fn successful_read_after_registration_clears_only_the_waiter_marker() {
+        let lock = RwLock::new(());
+        let _writer = std::mem::ManuallyDrop::new(lock.try_write().unwrap());
+        let mut context = Context::from_waker(Waker::noop());
+        let mut read = Box::pin(lock.read_result());
+        assert!(read.as_mut().poll(&mut context).is_pending());
+        lock.state.store(WAITERS, Ordering::Release);
+
+        let Poll::Ready(Ok(read_guard)) = read.as_mut().poll(&mut context) else {
+            panic!("released writer must allow the registered reader to acquire");
+        };
+
+        assert_eq!(lock.state.load(Ordering::Relaxed), 1);
+        drop(read_guard);
+    }
+
+    #[test]
+    fn successful_write_after_registration_clears_only_the_waiter_marker() {
+        let lock = RwLock::new(());
+        let _reader = std::mem::ManuallyDrop::new(lock.try_read().unwrap());
+        let mut context = Context::from_waker(Waker::noop());
+        let mut write = Box::pin(lock.write_result());
+        assert!(write.as_mut().poll(&mut context).is_pending());
+        lock.state.store(WAITERS, Ordering::Release);
+
+        let Poll::Ready(Ok(write_guard)) = write.as_mut().poll(&mut context) else {
+            panic!("released reader must allow the registered writer to acquire");
+        };
+
+        assert_eq!(lock.state.load(Ordering::Relaxed), WRITER);
+        drop(write_guard);
+    }
+
+    #[test]
+    fn dropping_guards_releases_read_and_write_ownership() {
+        let lock = RwLock::new(());
+        let read = lock.try_read().unwrap();
+        drop(read);
+        assert_eq!(lock.state.load(Ordering::Relaxed), 0);
+
+        let write = lock.try_write().unwrap();
+        drop(write);
+        assert_eq!(lock.state.load(Ordering::Relaxed), 0);
     }
 }
