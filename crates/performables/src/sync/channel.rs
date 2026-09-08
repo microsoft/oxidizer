@@ -1064,9 +1064,8 @@ impl<T> WatchReceiver<T> {
     pub async fn changed(&self) -> Result<(), Error> {
         let mut contention_recorded = false;
         loop {
-            match self.change_status() {
-                WatchChange::Version(version) => {
-                    self.observed.store(version, Ordering::Release);
+            match self.observe_change() {
+                WatchChange::Version(_) => {
                     telemetry::record(EventKind::ChannelReceive, std::ptr::from_ref(&*self.shared).cast::<()>());
                     return Ok(());
                 }
@@ -1145,6 +1144,19 @@ impl<T> WatchReceiver<T> {
             (true, 0) => WatchChange::Closed,
             (true, _) => WatchChange::Pending,
         }
+    }
+
+    fn observe_change(&self) -> WatchChange {
+        let state = self.shared.state();
+        let change = match (state.version == self.observed.load(Ordering::Acquire), state.senders) {
+            (false, _) => WatchChange::Version(state.version),
+            (true, 0) => WatchChange::Closed,
+            (true, _) => WatchChange::Pending,
+        };
+        if let WatchChange::Version(version) = change {
+            self.observed.store(version, Ordering::Release);
+        }
+        change
     }
 }
 
@@ -1497,6 +1509,16 @@ mod tests {
         receiver.observed.store(1, Ordering::Release);
         drop(sender);
         assert_eq!(receiver.change_status(), WatchChange::Closed);
+    }
+
+    #[test]
+    fn observing_a_watch_change_updates_the_version_while_state_is_locked() {
+        let (sender, receiver) = watch(1);
+        sender.send(2).unwrap();
+
+        assert_eq!(receiver.observe_change(), WatchChange::Version(1));
+        assert_eq!(receiver.observed.load(Ordering::Acquire), 1);
+        assert_eq!(receiver.observe_change(), WatchChange::Pending);
     }
 
     #[test]

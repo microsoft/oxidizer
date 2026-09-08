@@ -21,6 +21,15 @@ use seismograph::recorder::Configuration;
 use seismograph::recorder::event::EventKind;
 use waker_support::clone_hook_waker;
 
+#[cfg(miri)]
+const TEST_DEADLINE: Duration = Duration::from_secs(120);
+#[cfg(not(miri))]
+const TEST_DEADLINE: Duration = Duration::from_secs(2);
+#[cfg(miri)]
+const THREAD_POLL_INTERVAL: Duration = Duration::from_millis(10);
+#[cfg(not(miri))]
+const THREAD_POLL_INTERVAL: Duration = Duration::from_millis(1);
+
 #[derive(Default)]
 struct WakeCounter(AtomicUsize);
 
@@ -43,7 +52,7 @@ fn test_waker(counter: &Arc<WakeCounter>) -> Waker {
 }
 
 fn block_on<F: Future>(future: F) -> F::Output {
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + TEST_DEADLINE;
     let waker = Waker::from(Arc::new(ThreadWaker(std::thread::current())));
     let mut context = Context::from_waker(&waker);
     let mut future = pin!(future);
@@ -65,10 +74,10 @@ fn block_on<F: Future>(future: F) -> F::Output {
 }
 
 fn join_with_timeout<T>(thread: std::thread::JoinHandle<T>) -> T {
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + TEST_DEADLINE;
     while !thread.is_finished() {
         assert!(Instant::now() < deadline, "thread did not finish within the bounded test deadline");
-        std::thread::sleep(Duration::from_millis(1));
+        std::thread::sleep(THREAD_POLL_INTERVAL);
     }
     #[expect(clippy::unwrap_used, reason = "a thread panic should fail the test with its captured backtrace")]
     let result = thread.join().unwrap();
