@@ -2990,6 +2990,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     #[expect(
         clippy::too_many_lines,
