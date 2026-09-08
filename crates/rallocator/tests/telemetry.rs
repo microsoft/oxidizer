@@ -37,6 +37,7 @@ fn track_callers(enabled: bool) {
 
 static TEST_LOCK: Mutex<()> = Mutex::new(());
 
+#[cfg(not(miri))]
 const OVERWRITE_TEST_ALLOCATIONS: usize = 64 * 1024;
 
 rallocator::rallocator!();
