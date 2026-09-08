@@ -130,6 +130,16 @@ mod tests {
 
     #[test]
     fn default_uses_the_standard_bump_configuration() {
-        assert_eq!(Options::default(), Options::new());
+        let options = Options::default();
+        assert_eq!(options, Options::new());
+        assert_eq!(
+            (
+                options.max_allocation_bytes(),
+                options.max_alignment(),
+                options.retained_chunks(),
+                options.max_retained_chunks(),
+            ),
+            (32 * 1024, 4 * 1024, 4, 16)
+        );
     }
 }

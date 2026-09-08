@@ -120,6 +120,8 @@ fn abort_invalid_page_size<T>() -> T {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
 
     #[test]
@@ -127,6 +129,15 @@ mod tests {
         let page_size = page_size();
         assert!(page_size.is_power_of_two());
         assert!(ALLOCATION_ALIGNMENT.is_multiple_of(page_size));
+    }
+
+    #[test]
+    fn monotonic_milliseconds_track_elapsed_wall_time_at_millisecond_scale() {
+        let before = monotonic_millis();
+        std::thread::sleep(Duration::from_millis(10));
+        let elapsed = monotonic_millis().saturating_sub(before);
+
+        assert!((5..1_000).contains(&elapsed), "unexpected monotonic millisecond delta: {elapsed}");
     }
 
     #[test]

@@ -383,6 +383,52 @@ mod tests {
     }
 
     #[test]
+    fn option_defaults_have_exact_documented_values() {
+        let general = general::Options::new();
+        let bump = bump::Options::new();
+
+        assert_eq!(
+            (
+                general.locality_segment_bytes(),
+                general.medium_cache_max_bytes(),
+                bump.max_allocation_bytes(),
+                bump.max_alignment(),
+                bump.retained_chunks(),
+                bump.max_retained_chunks(),
+            ),
+            (4 * 1024 * 1024, 8 * 1024 * 1024, 32 * 1024, 4 * 1024, 4, 16)
+        );
+    }
+
+    #[test]
+    fn general_option_boundaries_accept_the_exact_documented_maxima() {
+        let options = general::Options::new()
+            .with_locality_segment_bytes(0x4000_0000)
+            .with_medium_cache_max_bytes(0x0080_0000);
+
+        assert_eq!(
+            (options.locality_segment_bytes(), options.medium_cache_max_bytes()),
+            (0x4000_0000, 0x0080_0000)
+        );
+        std::panic::catch_unwind(|| general::Options::new().with_locality_segment_bytes(0x8000_0000)).unwrap_err();
+        std::panic::catch_unwind(|| general::Options::new().with_medium_cache_max_bytes(0x0100_0000)).unwrap_err();
+    }
+
+    #[test]
+    fn general_option_boundaries_accept_the_exact_documented_minima() {
+        let options = general::Options::new()
+            .with_locality_segment_bytes(0x0001_0000)
+            .with_medium_cache_max_bytes(0x0001_0000);
+
+        assert_eq!(
+            (options.locality_segment_bytes(), options.medium_cache_max_bytes()),
+            (0x0001_0000, 0x0001_0000)
+        );
+        std::panic::catch_unwind(|| general::Options::new().with_locality_segment_bytes(0x0000_8000)).unwrap_err();
+        std::panic::catch_unwind(|| general::Options::new().with_medium_cache_max_bytes(0x0000_8000)).unwrap_err();
+    }
+
+    #[test]
     fn bump_options_round_trip() {
         let options = bump::Options::default()
             .with_max_allocation_bytes(1024)
@@ -420,6 +466,24 @@ mod tests {
     }
 
     #[test]
+    fn identity_accessors_preserve_arbitrary_values() {
+        assert_eq!((HeapId(42).get(), ThreadId(73).get()), (42, 73));
+    }
+
+    #[test]
+    fn heap_constructors_preserve_kinds_and_allocate_distinct_ids() {
+        let bump_options = bump::Options::new().with_retained_chunks(3);
+        let bump = Heap::bump(bump_options);
+        let general = Heap::new();
+
+        assert_eq!(bump.kind(), Kind::Bump(bump_options));
+        assert!(matches!(general.kind(), Kind::General(_)));
+        assert_ne!(bump.id(), general.id());
+        assert_ne!(bump.id().get(), 0);
+        assert_ne!(general.id().get(), 0);
+    }
+
+    #[test]
     fn default_heap_is_general_purpose() {
         assert!(matches!(Heap::default().kind(), Kind::General(_)));
     }
@@ -427,5 +491,14 @@ mod tests {
     #[test]
     fn thread_identity_is_nonzero() {
         assert_ne!(current_thread_id().get(), 0);
+    }
+
+    #[test]
+    fn thread_identities_are_stable_per_thread_and_distinct_between_threads() {
+        let current = current_thread_id();
+        let other = std::thread::spawn(|| (current_thread_id(), current_thread_id())).join().unwrap();
+
+        assert_eq!(other.0, other.1);
+        assert_ne!(current, other.0);
     }
 }

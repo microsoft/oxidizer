@@ -322,6 +322,8 @@ static REMOTE_FREES: AtomicUsize = AtomicUsize::new(0);
 static PENDING_REMOTE_BLOCKS: AtomicUsize = AtomicUsize::new(0);
 static REMOTE_PUSHES_IN_PROGRESS: AtomicUsize = AtomicUsize::new(0);
 static DRAINED_REMOTE_BLOCKS: AtomicUsize = AtomicUsize::new(0);
+#[cfg(test)]
+static PREPARE_ADDRESS_RESOLUTION_CALLS: AtomicUsize = AtomicUsize::new(0);
 const HISTOGRAM_BUCKETS: usize = usize::BITS as usize + 1;
 static AGGREGATE_REGISTRY: AtomicPtr<AggregateShard> = AtomicPtr::new(ptr::null_mut());
 static FALLBACK_AGGREGATE_REGISTERED: AtomicBool = AtomicBool::new(false);
@@ -528,7 +530,10 @@ fn try_snapshot_with_runtime_events(
             encoded.domains = encode_domains(&domains, &regions);
             encoded.callers = callers.as_ref().map(encode_callers);
             encoded.runtime_events = include_runtime_events.then(|| runtime_events.cloned()).flatten();
-            encoded.histograms = encode_histograms();
+            encoded.histograms = EncodedHistograms::from_fields(EncodedHistogramsFields {
+                allocated: Vec::new(),
+                live: Vec::new(),
+            });
             encoded.addresses = resolve_addresses(callers.as_ref(), encoded.runtime_events.as_ref());
             #[cfg(all(not(miri), feature = "caller-symbolization"))]
             // Backtrace retains process-global caches allocated from the active
@@ -557,6 +562,8 @@ fn try_snapshot_with_runtime_events(
 fn prepare_address_resolution() {
     static PREPARE: std::sync::Once = std::sync::Once::new();
 
+    #[cfg(test)]
+    PREPARE_ADDRESS_RESOLUTION_CALLS.fetch_add(1, Ordering::Relaxed);
     PREPARE.call_once(|| {
         let _suppression = seismograph::recorder::SuppressionGuard::enter();
         let address = ptr::without_provenance_mut::<c_void>(prepare_address_resolution as usize);
@@ -806,13 +813,6 @@ fn encode_callers(callers: &CallerSnapshot) -> EncodedCallers {
         threads,
         events,
         thread_names,
-    })
-}
-
-fn encode_histograms() -> EncodedHistograms {
-    EncodedHistograms::from_fields(EncodedHistogramsFields {
-        allocated: Vec::new(),
-        live: Vec::new(),
     })
 }
 
@@ -1582,11 +1582,19 @@ mod tests {
 
         let small_layout = Layout::from_size_align(64, 64).unwrap();
         let first = arena.allocate(small_layout);
+        let reusable_chunk = arena.head;
         let second = arena.allocate(small_layout);
         assert!(!first.is_null());
         assert!(!second.is_null());
+        assert_eq!(arena.head, reusable_chunk);
         assert_eq!(first.addr() % small_layout.align(), 0);
         assert_eq!(second.addr() % small_layout.align(), 0);
+
+        let mut half_chunk_arena = SnapshotArena::new();
+        let half_chunk_layout = Layout::from_size_align(SNAPSHOT_ARENA_CHUNK_BYTES / 2 - size_of::<SnapshotArenaChunk>(), 1).unwrap();
+        assert!(!half_chunk_arena.allocate(half_chunk_layout).is_null());
+        assert!(!unsafe { (*half_chunk_arena.head).dedicated });
+        assert_eq!(unsafe { (*half_chunk_arena.head).mapping_bytes }, SNAPSHOT_ARENA_CHUNK_BYTES);
 
         let dedicated_layout = Layout::from_size_align(SNAPSHOT_ARENA_CHUNK_BYTES, 4_096).unwrap();
         let dedicated = arena.allocate(dedicated_layout);
@@ -1605,6 +1613,8 @@ mod tests {
 
         let chunk = arena.head;
         let original_cursor = unsafe { (*chunk).cursor };
+        unsafe { (*chunk).cursor = (*chunk).mapping_bytes - 1 };
+        assert!(!unsafe { allocate_from_snapshot_chunk(chunk, 1, 1) }.is_null());
         unsafe { (*chunk).cursor = usize::MAX };
         assert!(unsafe { allocate_from_snapshot_chunk(chunk, 1, 2) }.is_null());
         unsafe { (*chunk).cursor = usize::MAX - 1 };
@@ -1612,6 +1622,9 @@ mod tests {
         unsafe { (*chunk).cursor = (*chunk).mapping_bytes };
         assert!(unsafe { allocate_from_snapshot_chunk(chunk, 1, 1) }.is_null());
         unsafe { (*chunk).cursor = original_cursor };
+
+        let mapping_end = unsafe { chunk.cast::<u8>().add((*chunk).mapping_bytes) };
+        assert!(!arena.deallocate(mapping_end));
     }
 
     #[test]
@@ -1621,13 +1634,54 @@ mod tests {
         assert!(!snapshot_arena_deallocate(ptr::without_provenance_mut(1)));
 
         with_snapshot_arena(|| {
+            let outer_arena = ACTIVE_SNAPSHOT_ARENA.with(Cell::get);
             let outer = snapshot_arena_allocate(layout).unwrap();
             with_snapshot_arena(|| assert!(snapshot_arena_deallocate(outer)));
+            assert_eq!(ACTIVE_SNAPSHOT_ARENA.with(Cell::get), outer_arena);
             let inner = with_snapshot_arena(|| snapshot_arena_allocate(layout).unwrap());
             assert!(!snapshot_arena_deallocate(inner));
         });
 
+        assert!(ACTIVE_SNAPSHOT_ARENA.with(Cell::get).is_null());
         assert!(snapshot_arena_allocate(layout).is_none());
+    }
+
+    #[test]
+    fn snapshot_arena_size_calculation_is_exact() {
+        assert_eq!(SNAPSHOT_ARENA_CHUNK_BYTES, 4 * 1024 * 1024);
+        assert_eq!(
+            snapshot_required_bytes(Layout::from_size_align(17, 64).unwrap(), 17),
+            size_of::<SnapshotArenaChunk>() + 63 + 17
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn dropping_snapshot_arena_unmaps_its_chunks() {
+        let mapping = {
+            let mut arena = SnapshotArena::new();
+            let address = arena.allocate(Layout::new::<u64>());
+            assert!(!address.is_null());
+            arena.head.cast::<u8>()
+        };
+        let mut resident = 0_u8;
+        let result = unsafe { libc::mincore(mapping.cast(), 1, &raw mut resident) };
+
+        assert_eq!(result, -1);
+        assert_eq!(std::io::Error::last_os_error().raw_os_error(), Some(libc::ENOMEM));
+    }
+
+    #[test]
+    fn aggregate_stats_add_mapped_and_bump_bytes_exactly() {
+        let _test = TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+        let mapped = MAPPED_BYTES.swap(1_000, Ordering::Relaxed);
+        let bump = BUMP_COMMITTED_BYTES.swap(234, Ordering::Relaxed);
+        let stats = aggregate_stats(&AggregateSnapshot::new());
+        MAPPED_BYTES.store(mapped, Ordering::Relaxed);
+        BUMP_COMMITTED_BYTES.store(bump, Ordering::Relaxed);
+
+        assert_eq!(stats.mapped_bytes, 1_234);
+        assert_eq!(HISTOGRAM_BUCKETS, usize::BITS as usize + 1);
     }
 
     #[test]
@@ -1838,6 +1892,109 @@ mod tests {
     }
 
     #[test]
+    fn runtime_allocation_events_produce_exact_caller_deltas() {
+        let allocation = |allocation_id, event_thread_id, size, freed_after_heap_release| {
+            runtime_event::EventPayload::Allocation(runtime_alloc::Allocation {
+                allocation_id: runtime_alloc::AllocationId::new(allocation_id),
+                event_thread_id: runtime_alloc::EventThreadId::new(event_thread_id),
+                heap_id: runtime_alloc::HeapId::new(13),
+                heap_kind: runtime_alloc::HeapKind::Bump,
+                freed_after_heap_release,
+                address: runtime_event::Address::new(0x1000),
+                size,
+                alignment: 8,
+            })
+        };
+        let runtime = runtime_event::Events {
+            clock: runtime_event::EventClock::ProcessMonotonic,
+            total_events: 3,
+            lost_events: 0,
+            recording: seismograph::recorder::RecordingPolicies::default(),
+            threads: vec![
+                runtime_thread::ThreadLog {
+                    thread_id: runtime_thread::ThreadId::new(7),
+                    total_events: 2,
+                    lost_events: 0,
+                    name: "allocator".to_owned(),
+                },
+                runtime_thread::ThreadLog {
+                    thread_id: runtime_thread::ThreadId::new(9),
+                    total_events: 1,
+                    lost_events: 0,
+                    name: "reclaimer".to_owned(),
+                },
+            ],
+            events: vec![
+                runtime_event::Event {
+                    thread_id: runtime_thread::ThreadId::new(7),
+                    sequence: runtime_event::EventSequence::new(1),
+                    timestamp: runtime_event::EventTimestamp::from_ticks(1),
+                    kind: runtime_event::EventKind::Allocation,
+                    payload: allocation(11, 70, 16, false),
+                    call_stack: vec![runtime_event::Address::new(0xAAAA)],
+                },
+                runtime_event::Event {
+                    thread_id: runtime_thread::ThreadId::new(7),
+                    sequence: runtime_event::EventSequence::new(2),
+                    timestamp: runtime_event::EventTimestamp::from_ticks(2),
+                    kind: runtime_event::EventKind::Allocation,
+                    payload: allocation(12, 71, 32, false),
+                    call_stack: Vec::new(),
+                },
+                runtime_event::Event {
+                    thread_id: runtime_thread::ThreadId::new(9),
+                    sequence: runtime_event::EventSequence::new(3),
+                    timestamp: runtime_event::EventTimestamp::from_ticks(3),
+                    kind: runtime_event::EventKind::Deallocation,
+                    payload: allocation(11, 90, 16, true),
+                    call_stack: Vec::new(),
+                },
+            ],
+        };
+
+        let mut snapshot = caller_snapshot_from_runtime(Some(&runtime)).unwrap();
+        snapshot.threads.sort_unstable_by_key(|thread| thread.thread_log_id);
+        snapshot.thread_names.sort_unstable_by_key(|thread| thread.thread_id);
+
+        assert_eq!((snapshot.total_events, snapshot.lost_events), (3, 0));
+        assert_eq!(snapshot.events.len(), 3);
+        assert_eq!(
+            snapshot
+                .events
+                .iter()
+                .map(|event| (
+                    event.thread_log_id,
+                    event.event_thread_id,
+                    event.sequence,
+                    event.kind,
+                    event.heap_kind,
+                    event.freed_after_heap_release,
+                    event.size,
+                    event.call_stack.len(),
+                ))
+                .collect::<Vec<_>>(),
+            [
+                (7, 70, 1, EventKind::Allocated, HeapKind::Bump, false, 16, 1),
+                (7, 71, 2, EventKind::Allocated, HeapKind::Bump, false, 32, 0),
+                (7, 90, 3, EventKind::Deallocated, HeapKind::Bump, true, 16, 0),
+            ]
+        );
+        assert_eq!(snapshot.threads.len(), 2);
+        assert_eq!(snapshot.threads[0].allocated_histogram[5], 1);
+        assert_eq!(snapshot.threads[0].live_histogram[5], 0);
+        assert_eq!(snapshot.threads[0].allocated_histogram[6], 1);
+        assert_eq!(snapshot.threads[0].live_histogram[6], 1);
+        assert_eq!(
+            snapshot
+                .thread_names
+                .iter()
+                .map(|thread| (thread.thread_id, thread.name.as_str()))
+                .collect::<Vec<_>>(),
+            [(70, "allocator"), (71, "allocator"), (90, "reclaimer")]
+        );
+    }
+
+    #[test]
     fn suppression_and_counter_recorders_cover_disabled_paths() {
         let _test = TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
         assert!(!telemetry_suppressed());
@@ -1854,7 +2011,9 @@ mod tests {
         AGGREGATES_AVAILABLE.store(false, Ordering::Release);
         assert!(stats().is_none());
         begin_remote_free();
+        let prepare_calls = PREPARE_ADDRESS_RESOLUTION_CALLS.load(Ordering::Relaxed);
         let _ = try_snapshot_with_runtime_events(None, true);
+        assert_eq!(PREPARE_ADDRESS_RESOLUTION_CALLS.load(Ordering::Relaxed), prepare_calls + 1);
         assert_eq!(snapshot_stats(None), Stats::default());
         assert_eq!(snapshot_stats(Some(sample_stats())), sample_stats());
         assert_eq!(histogram_bucket(0), 0);
@@ -1887,6 +2046,7 @@ mod tests {
         let selected = (0..10_000).filter(|_| begin_allocation().is_some()).count();
 
         assert!((70..=130).contains(&selected), "selected {selected} allocations");
+        with_telemetry_suppressed(|| assert!(begin_allocation().is_none()));
         seismograph::recorder(seismograph::recorder::Configuration::default());
     }
 

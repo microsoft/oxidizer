@@ -294,6 +294,7 @@ mod tests {
             calls.fetch_add(1, Ordering::Relaxed);
             BufferState::none()
         });
+        assert!(!operation.was_recorded());
         operation.finish(0, IoOutcome::EndOfStream, || {
             calls.fetch_add(1, Ordering::Relaxed);
             BufferState::none()
@@ -321,6 +322,10 @@ mod tests {
         let finish = events[1].io().unwrap();
         assert_eq!(start.operation_id, finish.operation_id);
         assert_eq!(start.resource_id, finish.resource_id);
+        assert_eq!(
+            (finish.requested_bytes, finish.completed_bytes, finish.outcome),
+            (8, 8, IoOutcome::Success)
+        );
         assert!(events[1].timestamp.ticks() >= events[0].timestamp.ticks());
 
         seismograph::recorder(Configuration {
@@ -363,6 +368,13 @@ mod tests {
         assert_eq!(decoded.events.events.len(), 2);
         assert_eq!(decoded.events.events[0].kind, EventKind::IoReadStarted);
         assert_eq!(decoded.events.events[1].kind, EventKind::IoReadFinished);
+        assert_eq!(
+            (
+                decoded.events.events[1].io().unwrap().completed_bytes,
+                decoded.events.events[1].io().unwrap().outcome,
+            ),
+            (8, IoOutcome::Success)
+        );
 
         seismograph::recorder(Configuration::default());
     }
@@ -427,5 +439,10 @@ mod tests {
             ]
         );
         seismograph::recorder(Configuration::default());
+    }
+
+    #[test]
+    fn identity_race_selector_preserves_existing_identity() {
+        assert_eq!(identity_after_allocation_race(42), 42);
     }
 }

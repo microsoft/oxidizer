@@ -95,8 +95,25 @@ const fn identity_after_allocation_race(existing: u64) -> u64 {
     existing
 }
 
-impl Clone for BufferIdentity {
-    fn clone(&self) -> Self {
-        Self::new()
+#[cfg(all(test, feature = "seismograph"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identity_transfer_clear_and_clone_have_exact_semantics() {
+        assert_eq!(identity_after_allocation_race(42), 42);
+        let identity = BufferIdentity::new();
+        let original = identity.get_or_allocate();
+        assert_eq!(identity.get_or_allocate(), original);
+
+        let transferred = identity.take();
+        assert_eq!(transferred, Some(original));
+        let replacement = identity.get_or_allocate();
+        assert_ne!(replacement, original);
+
+        identity.replace(transferred);
+        assert_eq!(identity.get_or_allocate(), original);
+        identity.clear();
+        assert_ne!(identity.get_or_allocate(), original);
     }
 }

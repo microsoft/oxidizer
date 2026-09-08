@@ -290,7 +290,10 @@ pub fn decode(bytes: &[u8]) -> Result<Snapshot, Error> {
     }
     let runtime_count = reader.u32()? as usize;
     let address_count = reader.u32()? as usize;
-    if schema_version < 3 && address_count != 0 || runtime_count > reader.remaining().len() / RUNTIME_FIXED_LEN {
+    if schema_version == 2 && address_count != 0 {
+        return Err(Error::new(ErrorKind::Malformed));
+    }
+    if !count_fits(runtime_count, RUNTIME_FIXED_LEN, reader.remaining().len()) {
         return Err(Error::new(ErrorKind::Malformed));
     }
 
@@ -298,7 +301,7 @@ pub fn decode(bytes: &[u8]) -> Result<Snapshot, Error> {
     for _ in 0..runtime_count {
         runtimes.push(read_runtime(&mut reader, schema_version)?);
     }
-    if address_count > reader.remaining().len() / ADDRESS_LOOKUP_FIXED_LEN {
+    if !count_fits(address_count, ADDRESS_LOOKUP_FIXED_LEN, reader.remaining().len()) {
         return Err(Error::new(ErrorKind::Malformed));
     }
     let addresses = (0..address_count)
@@ -348,7 +351,7 @@ pub(crate) fn encode(snapshot: &Snapshot, output: &mut [u8]) -> Result<(), ()> {
     for lookup in &snapshot.addresses {
         write_address_lookup(&mut writer, lookup)?;
     }
-    if writer.remaining().is_empty() { Ok(()) } else { Err(()) }
+    if writer.remaining.is_empty() { Ok(()) } else { Err(()) }
 }
 
 fn write_runtime(writer: &mut Writer<'_>, runtime: &Runtime) -> Result<(), ()> {
@@ -392,12 +395,15 @@ fn read_runtime(reader: &mut Reader<'_>, schema_version: u16) -> Result<Runtime,
     }
     let counters = read_counters(reader)?;
     let name = std::str::from_utf8(reader.read(name_len)?).map_err(|_| malformed())?.to_owned();
-    if worker_count > reader.remaining().len() / WORKER_FIXED_LEN {
+    if !count_fits(worker_count, WORKER_FIXED_LEN, reader.remaining().len()) {
         return Err(malformed());
     }
     let workers = (0..worker_count).map(|_| read_worker(reader)).collect::<Result<Vec<_>, _>>()?;
-    let task_fixed_len = if schema_version >= 3 { TASK_FIXED_LEN } else { TASK_V2_FIXED_LEN };
-    if task_count > reader.remaining().len() / task_fixed_len {
+    let task_fixed_len = match schema_version {
+        2 => TASK_V2_FIXED_LEN,
+        _ => TASK_FIXED_LEN,
+    };
+    if !count_fits(task_count, task_fixed_len, reader.remaining().len()) {
         return Err(malformed());
     }
     let tasks = (0..task_count)
@@ -494,7 +500,7 @@ fn read_task(reader: &mut Reader<'_>, schema_version: u16) -> Result<Task, Error
     };
     let type_descriptor = TypeDescriptorId::from_raw(reader.u64()?).ok_or_else(malformed)?;
     let frame_count = reader.u32()? as usize;
-    if reader.u32()? != 0 || frame_count > reader.remaining().len() / std::mem::size_of::<u64>() {
+    if reader.u32()? != 0 || !count_fits(frame_count, std::mem::size_of::<u64>(), reader.remaining().len()) {
         return Err(malformed());
     }
     let (spawned_at, last_worker_id, metrics) = if schema_version >= 3 {
@@ -578,6 +584,13 @@ const fn optional_u32(value: u32) -> Option<u32> {
     if value == u32::MAX { None } else { Some(value) }
 }
 
+const fn count_fits(count: usize, item_bytes: usize, remaining_bytes: usize) -> bool {
+    match count.checked_mul(item_bytes) {
+        Some(required) => required <= remaining_bytes,
+        None => false,
+    }
+}
+
 fn write_counters(writer: &mut Writer<'_>, counters: Counters) -> Result<(), ()> {
     writer.u64(counters.spawned_tasks)?;
     writer.u64(counters.live_tasks)?;
@@ -635,10 +648,6 @@ struct Writer<'a> {
 impl<'a> Writer<'a> {
     fn new(bytes: &'a mut [u8]) -> Self {
         Self { remaining: bytes }
-    }
-
-    fn remaining(&self) -> &[u8] {
-        self.remaining
     }
 
     fn write(&mut self, bytes: &[u8]) -> Result<(), ()> {
@@ -774,7 +783,27 @@ mod tests {
         let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
         encode(&snapshot, &mut bytes).unwrap();
 
+        assert_eq!(bytes.len(), 371);
         assert_eq!(decode(&bytes).unwrap(), snapshot);
+    }
+
+    #[test]
+    fn every_truncated_source_payload_is_rejected() {
+        let snapshot = fixture();
+        let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
+        encode(&snapshot, &mut bytes).unwrap();
+
+        for len in 0..bytes.len() {
+            assert_eq!(decode(&bytes[..len]).unwrap_err().kind(), ErrorKind::Malformed);
+        }
+    }
+
+    #[test]
+    fn fixed_record_count_boundaries_are_exact() {
+        assert!(count_fits(0, RUNTIME_FIXED_LEN, 0));
+        assert!(count_fits(2, WORKER_FIXED_LEN, 2 * WORKER_FIXED_LEN));
+        assert!(!count_fits(2, WORKER_FIXED_LEN, 2 * WORKER_FIXED_LEN - 1));
+        assert!(!count_fits(usize::MAX, TASK_FIXED_LEN, usize::MAX));
     }
 
     #[test]
@@ -798,6 +827,28 @@ mod tests {
         bytes.extend_from_slice(&0_u32.to_le_bytes());
 
         assert_eq!(decode(&bytes).unwrap(), Snapshot::default());
+    }
+
+    #[test]
+    fn version_two_task_payload_uses_the_legacy_fixed_length() {
+        let mut snapshot = fixture();
+        snapshot.addresses.clear();
+        let runtime = &mut snapshot.runtimes[0];
+        runtime.name.clear();
+        runtime.workers.clear();
+        runtime.tasks.truncate(1);
+
+        let task_start = HEADER_LEN + RUNTIME_FIXED_LEN;
+        let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
+        encode(&snapshot, &mut bytes).unwrap();
+        bytes[10..12].copy_from_slice(&2_u16.to_le_bytes());
+        bytes.drain(task_start + TASK_V2_FIXED_LEN..task_start + TASK_FIXED_LEN);
+
+        let task = &mut snapshot.runtimes[0].tasks[0];
+        task.spawned_at = EventTimestamp::from_ticks(0);
+        task.last_worker_id = None;
+        task.metrics = TaskMetrics::default();
+        assert_eq!(decode(&bytes).unwrap(), snapshot);
     }
 
     #[test]
@@ -961,6 +1012,8 @@ mod tests {
         let snapshot = fixture();
         let mut short = vec![0; encoded_len(&snapshot).unwrap() - 1];
         assert_eq!(encode(&snapshot, &mut short), Err(()));
+        let mut long = vec![0; encoded_len(&snapshot).unwrap() + 1];
+        assert_eq!(encode(&snapshot, &mut long), Err(()));
 
         let mut writer_bytes = [0_u8; 1];
         assert_eq!(Writer::new(&mut writer_bytes).u64(1), Err(()));

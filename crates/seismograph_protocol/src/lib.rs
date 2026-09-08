@@ -15,8 +15,8 @@ use message::{Request, Response};
 
 const FRAME_MAGIC: [u8; 4] = *b"SGMP";
 const FRAME_HEADER_BYTES: usize = 20;
-const FRAME_READ_CHUNK_BYTES: usize = 8 * 1024;
-const MAX_CONTROL_BYTES: usize = 64 * 1024;
+const FRAME_READ_CHUNK_BYTES: usize = 8_192;
+const MAX_CONTROL_BYTES: usize = 65_536;
 const MAX_SNAPSHOT_BYTES: usize = u32::MAX as usize;
 
 const VERSION: u16 = 7;
@@ -105,8 +105,27 @@ pub fn read_response(reader: &mut impl Read) -> Result<(u64, Response), Error> {
 /// # Errors
 ///
 /// Returns an error when the platform does not expose a per-user directory.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the cross-platform API reports the Windows missing-directory failure even when the current target cannot produce it"
+)]
 pub fn monitor_directory() -> Result<PathBuf, Error> {
-    platform_monitor_directory()
+    #[cfg(target_os = "windows")]
+    {
+        return std::env::var_os("LOCALAPPDATA")
+            .map(|local| PathBuf::from(local).join("seismograph").join("monitor"))
+            .ok_or(Error::MissingRuntimeDirectory);
+    }
+    #[cfg(unix)]
+    {
+        // SAFETY: geteuid has no preconditions and does not access Rust-owned memory.
+        let user_id = unsafe { libc::geteuid() };
+        Ok(unix_monitor_directory(std::env::var_os("XDG_RUNTIME_DIR"), user_id))
+    }
+    #[cfg(not(any(target_os = "windows", unix)))]
+    {
+        Ok(std::env::temp_dir().join("seismograph"))
+    }
 }
 
 fn write_frame(writer: &mut impl Write, kind: u16, request_id: u64, payload: &[u8]) -> Result<(), Error> {
@@ -141,30 +160,18 @@ fn read_frame(reader: &mut impl Read, maximum: usize) -> Result<Frame, Error> {
     }
     let mut payload = Vec::new();
     let mut chunk = [0_u8; FRAME_READ_CHUNK_BYTES];
-    while payload.len() < len {
-        let chunk_len = (len - payload.len()).min(chunk.len());
-        payload.try_reserve_exact(chunk_len).map_err(|_error| Error::MessageTooLarge)?;
-        reader.read_exact(&mut chunk[..chunk_len]).map_err(Error::Io)?;
-        payload.extend_from_slice(&chunk[..chunk_len]);
+    for _ in 0..len / chunk.len() {
+        payload.try_reserve_exact(chunk.len()).map_err(|_error| Error::MessageTooLarge)?;
+        reader.read_exact(&mut chunk).map_err(Error::Io)?;
+        payload.extend_from_slice(&chunk);
+    }
+    let tail_len = len % chunk.len();
+    if tail_len != 0 {
+        payload.try_reserve_exact(tail_len).map_err(|_error| Error::MessageTooLarge)?;
+        reader.read_exact(&mut chunk[..tail_len]).map_err(Error::Io)?;
+        payload.extend_from_slice(&chunk[..tail_len]);
     }
     Ok(Frame { kind, request_id, payload })
-}
-
-#[cfg(target_os = "windows")]
-fn platform_monitor_directory() -> Result<PathBuf, Error> {
-    let local = std::env::var_os("LOCALAPPDATA").ok_or(Error::MissingRuntimeDirectory)?;
-    Ok(PathBuf::from(local).join("seismograph").join("monitor"))
-}
-
-#[cfg(unix)]
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "The platform implementations share a fallible interface because Windows can lack a runtime directory"
-)]
-fn platform_monitor_directory() -> Result<PathBuf, Error> {
-    // SAFETY: geteuid has no preconditions and does not access Rust-owned memory.
-    let user_id = unsafe { libc::geteuid() };
-    Ok(unix_monitor_directory(std::env::var_os("XDG_RUNTIME_DIR"), user_id))
 }
 
 #[cfg(unix)]
@@ -173,16 +180,6 @@ fn unix_monitor_directory(runtime: Option<std::ffi::OsString>, user_id: libc::ui
         || std::env::temp_dir().join(format!("seismograph-{user_id}")),
         |runtime| PathBuf::from(runtime).join("seismograph"),
     )
-}
-
-#[cfg(not(any(target_os = "windows", unix)))]
-#[cfg_attr(coverage_nightly, coverage(off))] // This fallback cannot be built on the Tier 1 platforms used for coverage.
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "The platform implementations share a fallible interface because Windows can lack a runtime directory"
-)]
-fn platform_monitor_directory() -> Result<PathBuf, Error> {
-    Ok(std::env::temp_dir().join("seismograph"))
 }
 
 struct Frame {
@@ -243,6 +240,44 @@ mod tests {
         truncated_snapshot[6..8].copy_from_slice(&103_u16.to_le_bytes());
         truncated_snapshot[16..20].copy_from_slice(&u32::MAX.to_le_bytes());
         assert!(matches!(read_response(&mut truncated_snapshot.as_slice()), Err(Error::Io(_))));
+    }
+
+    #[test]
+    fn frame_size_boundaries_and_chunking_are_exact() {
+        assert_eq!(
+            (FRAME_HEADER_BYTES, FRAME_READ_CHUNK_BYTES, MAX_CONTROL_BYTES),
+            (20, 8 * 1024, 64 * 1024)
+        );
+
+        for payload_len in [0, FRAME_READ_CHUNK_BYTES - 1, FRAME_READ_CHUNK_BYTES, FRAME_READ_CHUNK_BYTES + 1] {
+            let payload = vec![0xA5; payload_len];
+            let mut encoded = Vec::new();
+            write_frame(&mut encoded, 103, 42, &payload).unwrap();
+            assert_eq!(encoded.len(), FRAME_HEADER_BYTES + payload_len);
+            let decoded = read_frame(&mut encoded.as_slice(), payload_len).unwrap();
+            assert_eq!((decoded.kind, decoded.request_id, decoded.payload), (103, 42, payload));
+        }
+
+        let payload = [1, 2, 3];
+        let mut encoded = Vec::new();
+        write_frame(&mut encoded, 103, 7, &payload).unwrap();
+        assert!(matches!(
+            read_frame(&mut encoded.as_slice(), payload.len() - 1),
+            Err(Error::MessageTooLarge)
+        ));
+    }
+
+    #[test]
+    fn every_truncated_frame_is_rejected() {
+        let mut encoded = Vec::new();
+        write_frame(&mut encoded, 103, 42, &[7; 32]).unwrap();
+
+        for len in 0..encoded.len() {
+            assert!(matches!(
+                read_frame(&mut encoded[..len].as_ref(), MAX_CONTROL_BYTES),
+                Err(Error::Io(_))
+            ));
+        }
     }
 
     #[test]

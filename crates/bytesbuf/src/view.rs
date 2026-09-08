@@ -62,7 +62,7 @@ use crate::{MAX_INLINE_SPANS, MemoryGuard, Span};
 /// [`from_views()`]: Self::from_views
 /// [`clone()`]: Self::clone
 /// [obtain access to a memory provider]: crate#producing-byte-sequences
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct BytesView {
     identity: BufferIdentity,
 
@@ -72,6 +72,16 @@ pub struct BytesView {
 
     /// We cache the length so we do not have to recalculate it every time it is queried.
     len: usize,
+}
+
+impl Clone for BytesView {
+    fn clone(&self) -> Self {
+        Self {
+            identity: BufferIdentity::new(),
+            spans_reversed: self.spans_reversed.clone(),
+            len: self.len,
+        }
+    }
 }
 
 impl BytesView {

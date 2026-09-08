@@ -197,34 +197,11 @@ fn force_next_test_remote_refill_contention() {
     TEST_CLEAR_REMOTE_REFILL_AFTER_SPIN.with(|clear| clear.set(true));
 }
 
-#[cfg(all(test, not(miri)))]
-fn test_remote_refill_spin(class: &RemoteClass) {
-    TEST_CLEAR_REMOTE_REFILL_AFTER_SPIN.with(|clear| {
-        if clear.replace(false) {
-            class.refilling.store(false, Ordering::Release);
-        }
-    });
-}
-
-#[cfg(any(not(test), miri))]
-#[cfg_attr(coverage_nightly, coverage(off))] // Production half of a unit-test fault-injection hook.
-const fn test_remote_refill_spin(_: &RemoteClass) {}
-
-#[cfg(test)]
 fn compare_heap_usage_operation(retirement: &RetirementState, state: usize) -> Result<usize, usize> {
-    TEST_FAIL_HEAP_USAGE_CAS.with(|fail| {
-        if fail.replace(false) {
-            Err(retirement.operations.load(Ordering::Acquire))
-        } else {
-            retirement
-                .operations
-                .compare_exchange_weak(state, state + 1, Ordering::AcqRel, Ordering::Acquire)
-        }
-    })
-}
-
-#[cfg(not(test))]
-fn compare_heap_usage_operation(retirement: &RetirementState, state: usize) -> Result<usize, usize> {
+    #[cfg(test)]
+    if TEST_FAIL_HEAP_USAGE_CAS.with(|fail| fail.replace(false)) {
+        return Err(retirement.operations.load(Ordering::Acquire));
+    }
     retirement
         .operations
         .compare_exchange_weak(state, state + 1, Ordering::AcqRel, Ordering::Acquire)
@@ -252,19 +229,11 @@ fn compare_passive_registration(
     PASSIVE_THREAD_HEAPS.compare_exchange_weak(head, remote, Ordering::Release, Ordering::Acquire)
 }
 
-#[cfg(test)]
 fn acquire_remote_pop_lock(class: &RemoteClass) -> bool {
-    TEST_FAIL_REMOTE_POP_LOCK_CAS.with(|fail| {
-        !fail.replace(false)
-            && class
-                .popping
-                .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
-                .is_ok()
-    })
-}
-
-#[cfg(not(test))]
-fn acquire_remote_pop_lock(class: &RemoteClass) -> bool {
+    #[cfg(test)]
+    if TEST_FAIL_REMOTE_POP_LOCK_CAS.with(|fail| fail.replace(false)) {
+        return false;
+    }
     class
         .popping
         .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -1015,7 +984,12 @@ where
             if refill.is_err() {
                 while class.refilling.load(Ordering::Acquire) {
                     spin_loop();
-                    test_remote_refill_spin(class);
+                    #[cfg(all(test, not(miri)))]
+                    TEST_CLEAR_REMOTE_REFILL_AFTER_SPIN.with(|clear| {
+                        if clear.replace(false) {
+                            class.refilling.store(false, Ordering::Release);
+                        }
+                    });
                 }
                 continue;
             }
@@ -3926,6 +3900,41 @@ mod tests {
     }
 
     #[test]
+    fn allocator_bit_layout_constants_are_exact() {
+        assert_eq!(OPERATION_RETIRED, usize::MAX ^ (usize::MAX >> 1));
+        assert_eq!(AGGREGATE_ALLOCATION_COUNT_INCREMENT, 512);
+        assert_eq!(AGGREGATE_OPERATION_COUNT_MASK, 511);
+    }
+
+    #[test]
+    fn test_fault_hooks_change_only_the_next_operation() {
+        fail_next_test_passive_registration_cas();
+        assert!(TEST_FAIL_PASSIVE_REGISTRATION_CAS.with(std::cell::Cell::get));
+        TEST_FAIL_PASSIVE_REGISTRATION_CAS.with(|fail| fail.set(false));
+
+        force_next_test_remote_refill_contention();
+        assert!(TEST_FAIL_REMOTE_REFILL_CAS.with(std::cell::Cell::get));
+        assert!(TEST_CLEAR_REMOTE_REFILL_AFTER_SPIN.with(std::cell::Cell::get));
+        TEST_FAIL_REMOTE_REFILL_CAS.with(|fail| fail.set(false));
+        TEST_CLEAR_REMOTE_REFILL_AFTER_SPIN.with(|clear| clear.set(false));
+
+        let retirement = RetirementState::new();
+        retirement.operations.store(7, Ordering::Relaxed);
+        fail_next_test_heap_usage_cas();
+        assert_eq!(compare_heap_usage_operation(&retirement, 7), Err(7));
+        assert_eq!(retirement.operations.load(Ordering::Relaxed), 7);
+        assert_eq!(compare_heap_usage_operation(&retirement, 7), Ok(7));
+        assert_eq!(retirement.operations.load(Ordering::Relaxed), 8);
+
+        let class = RemoteClass::new();
+        fail_next_test_remote_pop_lock_cas();
+        assert!(!acquire_remote_pop_lock(&class));
+        assert!(!class.popping.load(Ordering::Relaxed));
+        assert!(acquire_remote_pop_lock(&class));
+        assert!(class.popping.load(Ordering::Relaxed));
+    }
+
+    #[test]
     fn global_wrapper_constructs_and_routes_snapshot_arena_allocations() {
         let allocator = unsafe { GlobalRallocator::<Standard>::new() };
         let _: &Rallocator<Standard> = &allocator;
@@ -3997,13 +4006,53 @@ mod tests {
         let (first_block, block_count) = slab_block_layout(ConfigSizeClasses::<Standard>::SIZES[0]);
         assert!(first_block < block_count);
 
+        let allocator = unsafe { Rallocator::<Standard>::new() };
+        let tracked_domain = new_domain();
+        let tracked_domain_pointer = crate::domain::state(tracked_domain);
+        let tracked_domain = unsafe { &mut *tracked_domain_pointer };
+        let tracked_regions = &tracked_domain.regions;
+        let mut tracked_heap = ReusableHeapState::new(GeneralOptions::new(), tracked_domain_pointer);
+        let tracked = tracked_regions.allocate_slices(tracked_domain_pointer, 1).unwrap();
+        assert!(unsafe { hal::commit(tracked, SLAB_SIZE) });
+        assert!(
+            !allocator
+                .initialize_slab(
+                    SlabAllocation {
+                        address: tracked,
+                        segment_slices: 1,
+                        committed_bytes: SLAB_SIZE,
+                    },
+                    0,
+                    &mut tracked_heap,
+                    SLAB_MARKER,
+                )
+                .is_null()
+        );
+        let region = tracked_regions.state.lock().regions;
+        assert!(!region.is_null());
+        let offset = tracked.addr() - unsafe { (*region).base.addr() };
+        let slice_index = offset / MEDIUM_SLICE_SIZE;
+        let segment_index = (offset % MEDIUM_SLICE_SIZE) / SLAB_SIZE;
+        assert_eq!(
+            unsafe { (*region).physical[slice_index].segment_usable_blocks[segment_index].load(Ordering::Relaxed) },
+            block_count - first_block
+        );
+        let mut tracked_state = tracked_regions.state.lock();
+        clear_region_cache();
+        unsafe {
+            hal::unmap((*region).base, MEDIUM_REGION_SIZE);
+            hal::unmap(region.cast(), size_of::<RegionState>());
+        }
+        tracked_state.regions = ptr::null_mut();
+        tracked_state.last_region = ptr::null_mut();
+        tracked_regions.regions.store(ptr::null_mut(), Ordering::Relaxed);
+
         let mut domain = DomainState::new();
         let mut heap = ReusableHeapState::new(GeneralOptions::new(), ptr::from_mut(&mut domain));
         let domain_pointer = ptr::from_mut(&mut domain);
         let regions = &domain.regions;
         assert!(regions.allocate_slices(domain_pointer, MEDIUM_REGION_SLICE_COUNT + 1).is_none());
         let full = regions.allocate_slices(domain_pointer, MEDIUM_REGION_SLICE_COUNT).unwrap();
-        let allocator = unsafe { Rallocator::<Standard>::new() };
         hal::fail_next_reserve();
         hal::fail_next_map();
         let fallback = allocator.allocate_slab(&mut heap);
@@ -4030,6 +4079,7 @@ mod tests {
         let allocator = unsafe { Rallocator::<Standard>::new() };
         let mut domain = DomainState::new();
         let mut heap = ReusableHeapState::new(GeneralOptions::new(), ptr::from_mut(&mut domain));
+        let (first_block, block_count) = slab_block_layout(ConfigSizeClasses::<Standard>::SIZES[0]);
 
         let normal = hal::map(SLAB_SIZE);
         let first = allocator.initialize_slab(
@@ -4043,8 +4093,12 @@ mod tests {
             SLAB_MARKER,
         );
         assert!(!first.is_null());
-        assert!(!allocator.pop_or_refill_slow(0, &mut heap).is_null());
         let normal_header = normal.cast::<SlabHeader>();
+        assert_eq!(
+            unsafe { ((*normal_header).free_count, (*normal_header).usable_blocks) },
+            (block_count - first_block - 1, (block_count - first_block) as u16)
+        );
+        assert!(!allocator.pop_or_refill_slow(0, &mut heap).is_null());
         heap.classes[0].active = ptr::null_mut();
         heap.class_lists[0].partial = normal_header;
         assert!(!allocator.pop_or_refill_slow(0, &mut heap).is_null());

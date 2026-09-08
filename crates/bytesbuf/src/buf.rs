@@ -1555,6 +1555,23 @@ mod tests {
         assert_ne!(view.range(..1).recording_state().id(), original_id);
     }
 
+    #[cfg(feature = "seismograph")]
+    #[test]
+    fn seismograph_recording_state_reports_exact_buffer_shape() {
+        use seismograph_io::Buffer;
+
+        let memory = FixedBlockMemory::new(nz!(4));
+        let mut buffer = memory.reserve(8);
+        buffer.put_slice(*b"abcdef");
+
+        let state = buffer.recording_state();
+        assert_eq!((state.len(), state.span_count()), (6, 2));
+
+        let empty = BytesBuf::new();
+        let state = empty.recording_state();
+        assert_eq!((state.len(), state.span_count()), (0, 0));
+    }
+
     #[test]
     fn smoke_test() {
         let memory = FixedBlockMemory::new(nz!(1234));

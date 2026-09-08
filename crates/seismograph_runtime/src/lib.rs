@@ -835,8 +835,14 @@ mod tests {
         let runtime = snapshot.runtimes.iter().find(|runtime| runtime.id == runtime_id).unwrap();
         let worker = runtime.workers.iter().find(|worker| worker.id == worker_id).unwrap();
         assert_eq!(
-            (runtime.state, runtime.retired_at.is_some(), worker.state, worker.processor_index),
-            (RuntimeState::Stopped, true, WorkerState::Stopped, Some(3))
+            (
+                runtime.state,
+                runtime.retired_at.is_some(),
+                worker.state,
+                worker.processor_index,
+                worker.thread_id.is_some(),
+            ),
+            (RuntimeState::Stopped, true, WorkerState::Stopped, Some(3), true)
         );
     }
 
@@ -883,8 +889,10 @@ mod tests {
 
         let poll = task.poll_started(&worker.handle());
         task.poll_finished(&worker.handle(), poll);
-        let poll = task.poll_started(&worker.handle());
-        task.poll_finished(&worker.handle(), poll);
+        for _ in 0..2 {
+            let poll = task.poll_started(&worker.handle());
+            task.poll_finished(&worker.handle(), poll);
+        }
         let runtime_snapshot = source_snapshot();
         let task_snapshot = runtime_snapshot
             .runtimes
@@ -898,7 +906,7 @@ mod tests {
                 task_snapshot.metrics.resume_count,
                 task_snapshot.metrics.ready_wait_count,
             ),
-            (2, 1, 1)
+            (3, 2, 1)
         );
         assert!(task_snapshot.metrics.poll_duration_nanos > 0);
         assert!(task_snapshot.metrics.max_poll_duration_nanos > 0);
@@ -919,10 +927,11 @@ mod tests {
             .filter(|event| event.subject_id == task.id().get())
             .collect::<Vec<_>>();
 
-        assert_eq!(poll_starts.len(), 2);
+        assert_eq!(poll_starts.len(), 3);
         assert_eq!(poll_starts[0].value_1, 1);
         assert!(poll_starts[0].value_0 > 0);
         assert_eq!((poll_starts[1].value_0, poll_starts[1].value_1), (0, 0));
+        assert_eq!((poll_starts[2].value_0, poll_starts[2].value_1), (0, 0));
         seismograph::recorder(seismograph::recorder::Configuration::default());
     }
 
@@ -1026,6 +1035,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::too_many_lines, reason = "one lifecycle scenario asserts one ordered event sequence")]
     fn lifecycle_transfer_and_terminal_paths_are_visible() {
         let _test = test_lock();
         seismograph::recorder(seismograph::recorder::Configuration {
@@ -1052,9 +1062,24 @@ mod tests {
             WorkerState::Parked
         );
         source.handle().unparked();
+        let running = source_snapshot();
+        assert_eq!(
+            running
+                .runtimes
+                .iter()
+                .find(|candidate| candidate.id == runtime_id)
+                .unwrap()
+                .workers
+                .iter()
+                .find(|worker| worker.id == source.id())
+                .unwrap()
+                .state,
+            WorkerState::Running
+        );
 
         let handle = runtime.handle();
         let transferred = handle.register_task(type_descriptor_id(1), None);
+        let survivor = handle.register_task(type_descriptor_id(3), Some(transferred.id()));
         let transfer = source.handle().transfer_started(transferred.id(), destination.id());
         source.handle().instance_relocated(&transfer);
         source.handle().transfer_finished(transfer);
@@ -1076,6 +1101,15 @@ mod tests {
         );
         transferred.poll_finished(&destination.handle(), poll);
         handle.task_canceled(transferred.id(), Some(destination.id()));
+        let after_cancellation = source_snapshot();
+        let live_tasks = &after_cancellation
+            .runtimes
+            .iter()
+            .find(|candidate| candidate.id == runtime_id)
+            .unwrap()
+            .tasks;
+        assert!(!live_tasks.iter().any(|task| task.id == transferred.id()));
+        assert!(live_tasks.iter().any(|task| task.id == survivor.id()));
 
         let panicked = handle.register_task(type_descriptor_id(2), None);
         handle.task_panicked(panicked.id(), Some(source.id()));
@@ -1087,6 +1121,8 @@ mod tests {
             ),
             (1, 2)
         );
+        drop(source);
+        drop(destination);
 
         runtime.stopping();
         runtime.stopping();
@@ -1097,6 +1133,16 @@ mod tests {
         );
         runtime.stopped();
         runtime.stopped();
+        let explicitly_stopped = source_snapshot();
+        assert_eq!(
+            explicitly_stopped
+                .runtimes
+                .iter()
+                .find(|candidate| candidate.id == runtime_id)
+                .unwrap()
+                .state,
+            RuntimeState::Stopped
+        );
         drop(runtime);
 
         let retired = source_snapshot();
@@ -1104,7 +1150,37 @@ mod tests {
             retired.runtimes.iter().find(|candidate| candidate.id == runtime_id).unwrap().state,
             RuntimeState::Stopped
         );
+        let events = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+        let events = seismograph::snapshot::decode(events.as_bytes()).unwrap().events.events;
+        let lifecycle_kinds = events
+            .iter()
+            .filter_map(|event| event.runtime().map(|context| (event.kind, context)))
+            .filter(|(_, context)| context.runtime_id == runtime_id)
+            .map(|(kind, _)| kind)
+            .collect::<Vec<_>>();
+        for expected in [
+            EventKind::WorkerUnparked,
+            EventKind::InstanceRelocated,
+            EventKind::TransferFinished,
+            EventKind::TaskMaterialized,
+            EventKind::RuntimeStopped,
+        ] {
+            assert_eq!(
+                lifecycle_kinds.iter().filter(|&&kind| kind == expected).count(),
+                1,
+                "unexpected count for {expected:?}"
+            );
+        }
+        assert_eq!(lifecycle_kinds.iter().filter(|&&kind| kind == EventKind::WorkerStopped).count(), 2);
         seismograph::recorder(seismograph::recorder::Configuration::default());
+    }
+
+    #[test]
+    fn duration_conversion_preserves_exact_nanoseconds() {
+        assert_eq!(
+            duration_nanos(EventTimestamp::from_ticks(1_000_000_123), EventTimestamp::from_ticks(1_000_000_000)),
+            123
+        );
     }
 
     #[test]

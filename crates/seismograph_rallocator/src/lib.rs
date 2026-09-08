@@ -121,6 +121,10 @@ const RUNTIME_EVENTS_RUNTIME_POLICY_VERSION: u16 = 6;
 const RUNTIME_EVENTS_IO_VERSION: u16 = 7;
 const RUNTIME_EVENTS_CACHE_VERSION: u16 = 8;
 const RUNTIME_EVENTS_SECTION_VERSION: u16 = RUNTIME_EVENTS_CACHE_VERSION;
+const RUNTIME_EVENTS_FIXED_LEN: usize = 81;
+const RUNTIME_THREAD_FIXED_LEN: usize = 24;
+const RUNTIME_EVENT_FIXED_LEN: usize = 92;
+const LEGACY_RUNTIME_EVENT_FIXED_LEN: usize = 26;
 const STATS_PAYLOAD_LEN: usize = 13 * 8;
 
 /// An error reported while encoding or decoding a telemetry snapshot.
@@ -1204,7 +1208,7 @@ fn runtime_events_encoded_len(events: Option<&RuntimeEvents>) -> Result<usize, E
     if events.clock != RuntimeEventClock::ProcessMonotonic {
         return Err(Error::malformed_section(SECTION_RUNTIME_EVENTS));
     }
-    let mut length = 1 + 8 + 8 + 6 * 8 + 2 + 2 + 8 + 4;
+    let mut length = RUNTIME_EVENTS_FIXED_LEN;
     for thread in &events.threads {
         count(thread.name.len())?;
         length = checked_add(length, 3 * 8 + 4 + thread.name.len())?;
@@ -1325,7 +1329,13 @@ fn read_runtime_events(reader: &mut Reader<'_>, section_version: u16) -> Result<
     let clock = if section_version >= RUNTIME_EVENTS_PAYLOAD_VERSION {
         let clock_value = reader.read_u16()?;
         let clock = RuntimeEventClock::from_wire_value(clock_value).ok_or_else(|| Error::malformed_section(SECTION_RUNTIME_EVENTS))?;
-        if reader.read_u16()? != 0 || clock != RuntimeEventClock::ProcessMonotonic || reader.read_u64()? != 1_000_000_000 {
+        if reader.read_u16()? != 0 {
+            return Err(Error::malformed_section(SECTION_RUNTIME_EVENTS));
+        }
+        if clock != RuntimeEventClock::ProcessMonotonic {
+            return Err(Error::malformed_section(SECTION_RUNTIME_EVENTS));
+        }
+        if reader.read_u64()? != 1_000_000_000 {
             return Err(Error::malformed_section(SECTION_RUNTIME_EVENTS));
         }
         clock
@@ -1333,7 +1343,7 @@ fn read_runtime_events(reader: &mut Reader<'_>, section_version: u16) -> Result<
         RuntimeEventClock::Unspecified
     };
     let thread_count = usize_count(reader.read_u32()?)?;
-    if thread_count > reader.remaining() / (3 * 8) {
+    if !count_fits_remaining(thread_count, RUNTIME_THREAD_FIXED_LEN, reader.remaining()) {
         return Err(Error::malformed_section(SECTION_RUNTIME_EVENTS));
     }
     let mut threads = Vec::with_capacity(thread_count);
@@ -1357,11 +1367,11 @@ fn read_runtime_events(reader: &mut Reader<'_>, section_version: u16) -> Result<
     )?;
     let event_count = usize_count(reader.read_u32()?)?;
     let minimum_event_len = if section_version >= RUNTIME_EVENTS_PAYLOAD_VERSION {
-        8 + 8 + 8 + 1 + 1 + 1 + 1 + 8 * 8
+        RUNTIME_EVENT_FIXED_LEN
     } else {
-        8 + 8 + 8 + 1 + 1
+        LEGACY_RUNTIME_EVENT_FIXED_LEN
     };
-    if event_count > reader.remaining() / minimum_event_len {
+    if !count_fits_remaining(event_count, minimum_event_len, reader.remaining()) {
         return Err(Error::malformed_section(SECTION_RUNTIME_EVENTS));
     }
     let mut events = Vec::with_capacity(event_count);
@@ -1392,7 +1402,7 @@ fn read_runtime_events(reader: &mut Reader<'_>, section_version: u16) -> Result<
                 usize::from(reader.read_u8()?),
             )
         };
-        if frame_count > reader.remaining() / 8 {
+        if !count_fits_remaining(frame_count, std::mem::size_of::<u64>(), reader.remaining()) {
             return Err(Error::malformed_section(SECTION_RUNTIME_EVENTS));
         }
         let mut call_stack = Vec::with_capacity(frame_count);
@@ -1424,6 +1434,13 @@ fn write_runtime_recording_policy(writer: &mut Writer<'_>, policy: seismograph::
     writer.write_u16(0)?;
     writer.write_u32(u32::try_from(policy.event_sampling.get()).map_err(|_error| Error::malformed_section(SECTION_RUNTIME_EVENTS))?)?;
     Ok(())
+}
+
+const fn count_fits_remaining(count: usize, item_bytes: usize, remaining_bytes: usize) -> bool {
+    match count.checked_mul(item_bytes) {
+        Some(required) => required <= remaining_bytes,
+        None => false,
+    }
 }
 
 fn read_runtime_recording_policy(reader: &mut Reader<'_>) -> Result<seismograph::recorder::RecordingPolicy, Error> {
@@ -1480,6 +1497,7 @@ fn encode_runtime_payload(payload: RuntimeEventPayload) -> Result<[u64; 8], Erro
         fields = Ok([payload.object_id.get(), payload.value, 0, 0, 0, 0, 0, 0]);
     }
     if let RuntimeEventPayload::Allocation(allocation) = payload {
+        let heap_flags = encode_runtime_heap_kind(allocation.heap_kind)? + if allocation.freed_after_heap_release { 1 << 8 } else { 0 };
         fields = Ok([
             allocation.allocation_id.get(),
             allocation.event_thread_id.get(),
@@ -1487,7 +1505,7 @@ fn encode_runtime_payload(payload: RuntimeEventPayload) -> Result<[u64; 8], Erro
             allocation.address.get(),
             allocation.size,
             allocation.alignment,
-            encode_runtime_heap_kind(allocation.heap_kind)? | (if allocation.freed_after_heap_release { 1 << 8 } else { 0 }),
+            heap_flags,
             0,
         ]);
     }
@@ -1507,6 +1525,10 @@ fn encode_runtime_payload(payload: RuntimeEventPayload) -> Result<[u64; 8], Erro
         ]);
     }
     if let RuntimeEventPayload::Io(io) = payload {
+        let mut metadata = [0_u8; 8];
+        metadata[..4].copy_from_slice(&io.buffer_span_count.to_le_bytes());
+        metadata[4] = encode_runtime_io_resource_kind(io.resource_kind)?;
+        metadata[5] = encode_runtime_io_outcome(io.outcome)?;
         fields = Ok([
             io.operation_id.get(),
             io.resource_id.get(),
@@ -1515,9 +1537,7 @@ fn encode_runtime_payload(payload: RuntimeEventPayload) -> Result<[u64; 8], Erro
             io.completed_bytes,
             0,
             io.buffer_len,
-            u64::from(encode_runtime_io_resource_kind(io.resource_kind)?) << 32
-                | u64::from(encode_runtime_io_outcome(io.outcome)?) << 40
-                | u64::from(io.buffer_span_count),
+            u64::from_le_bytes(metadata),
         ]);
     }
     fields
@@ -1842,6 +1862,7 @@ mod tests {
         let mut encoded = vec![0; encoded_len(&snapshot).unwrap()];
         encode(&snapshot, &mut encoded).unwrap();
 
+        assert_eq!(runtime_events_encoded_len(snapshot.runtime_events.as_ref()).unwrap(), 227);
         assert_eq!(decode(&encoded).unwrap(), snapshot);
     }
 
@@ -1979,6 +2000,15 @@ mod tests {
         encode(&snapshot, &mut encoded).unwrap();
 
         assert_eq!(decode(&encoded).unwrap(), snapshot);
+        let events = snapshot.runtime_events.as_ref().unwrap();
+        let mut runtime_payload = vec![0; runtime_events_encoded_len(Some(events)).unwrap()];
+        write_runtime_events(&mut Writer::new(&mut runtime_payload), Some(events)).unwrap();
+        for len in 0..runtime_payload.len() {
+            assert!(
+                read_runtime_events(&mut Reader::new(&runtime_payload[..len]), RUNTIME_EVENTS_SECTION_VERSION).is_err(),
+                "truncated runtime payload length {len}"
+            );
+        }
     }
 
     #[test]
@@ -2024,10 +2054,12 @@ mod tests {
         let invalid_fields = [
             (1, [0, 1, 0, 0, 0, 0, 0, 0]),
             (2, [0, 0, 1, 0, 0, 0, 0, 0]),
-            (3, [0, 0, 0, 0, 0, 0, 0, 1]),
+            (3, [1, 2, 3, 4, 5, 8, 1, 1]),
             (3, [0, 0, 0, 0, 0, 0, 9, 0]),
             (4, [0, 0, 0, 0, 0, 0, 0, 0]),
             (4, [1, 0, 0, 0, 0, 0, 1, 0]),
+            (5, [1, 2, 0, 0, 0, 1, 0, 1_u64 << 32 | 1_u64 << 40]),
+            (5, [1, 2, 0, 0, 0, 0, 0, 1_u64 << 48 | 1_u64 << 32 | 1_u64 << 40]),
             (9, [0; 8]),
         ];
         for (tag, fields) in invalid_fields {
@@ -2160,6 +2192,14 @@ mod tests {
         for policy in [[2, 0, 0, 0, 1, 0, 0, 0], [1, 0, 1, 0, 1, 0, 0, 0]] {
             assert!(read_runtime_recording_policy(&mut Reader::new(&policy)).is_err());
         }
+        assert_eq!(
+            read_runtime_recording_policy(&mut Reader::new(&[1, 1, 0, 0, 1, 0, 0, 0])).unwrap(),
+            seismograph::recorder::RecordingPolicy {
+                enabled: true,
+                capture_backtraces: true,
+                event_sampling: EventSampling::one_in(1).unwrap(),
+            }
+        );
 
         let events = RuntimeEvents {
             clock: RuntimeEventClock::Unspecified,
@@ -2170,6 +2210,9 @@ mod tests {
         assert!(validate_event_totals(3, 1, [(1, 0), (2, 1)], SECTION_RUNTIME_EVENTS).is_ok());
         assert!(validate_event_totals(4, 1, [(1, 0), (2, 1)], SECTION_RUNTIME_EVENTS).is_err());
         assert!(validate_event_totals(u64::MAX, 0, [(u64::MAX, 0), (1, 0)], SECTION_RUNTIME_EVENTS).is_err());
+        assert!(count_fits_remaining(2, 24, 48));
+        assert!(!count_fits_remaining(2, 24, 47));
+        assert!(!count_fits_remaining(usize::MAX, 24, usize::MAX));
     }
 
     #[test]

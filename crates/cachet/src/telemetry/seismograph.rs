@@ -67,4 +67,60 @@ mod tests {
         assert_eq!(EventKind::CacheHit.class(), EventClass::Cache);
         seismograph::recorder(Configuration::default());
     }
+
+    #[test]
+    fn cache_name_hash_has_stable_fnv_value() {
+        assert_eq!(cache_name_id("seismograph-cache-event-test"), 0xa91f_4287_e04c_d570);
+    }
+
+    #[test]
+    #[serial]
+    fn aggregate_cache_helpers_emit_exact_event_deltas() {
+        use crate::telemetry::cache::CacheTelemetry;
+
+        const CACHE_NAME: CacheName = "aggregate-cache-event-test";
+        let telemetry = CacheTelemetry::new();
+        seismograph::recorder(Configuration {
+            cache: RecordingPolicy::all(false),
+            ..Configuration::default()
+        });
+        let _ = seismograph::snapshot(SnapshotOptions {
+            event_buffers: EventBufferDisposition::Release,
+        });
+
+        telemetry.record_compute_succeeded(CACHE_NAME);
+        telemetry.record_compute_failed(CACHE_NAME);
+        telemetry.record_compute_returned_none(CACHE_NAME);
+        telemetry.record_promotion_accepted(CACHE_NAME);
+        telemetry.record_promotion_rejected(CACHE_NAME);
+        telemetry.record_promotion_failed(CACHE_NAME);
+        telemetry.record_refresh_suppressed(CACHE_NAME);
+
+        let snapshot = seismograph::snapshot(SnapshotOptions {
+            event_buffers: EventBufferDisposition::Release,
+        })
+        .unwrap();
+        let decoded = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap();
+        let tier_id = ObjectId::new(cache_name_id(CACHE_NAME));
+        assert_eq!(
+            decoded
+                .events
+                .events
+                .iter()
+                .filter(|event| event.object_id() == Some(tier_id))
+                .map(|event| (event.kind, event.measurement()))
+                .collect::<Vec<_>>(),
+            [
+                (EventKind::CacheComputeSucceeded, Some(0)),
+                (EventKind::CacheComputeFailed, Some(0)),
+                (EventKind::CacheComputeReturnedNone, Some(0)),
+                (EventKind::CachePromotionAccepted, Some(0)),
+                (EventKind::CachePromotionRejected, Some(0)),
+                (EventKind::CachePromotionFailed, Some(0)),
+                (EventKind::CacheRefreshSuppressed, Some(1)),
+            ]
+        );
+
+        seismograph::recorder(Configuration::default());
+    }
 }

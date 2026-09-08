@@ -231,7 +231,10 @@ pub(crate) fn encode_response(response: &Response) -> Result<(u16, Vec<u8>), Err
 
 pub(crate) fn decode_response(kind: u16, payload: &[u8]) -> Result<Response, Error> {
     match kind {
-        101 if payload.len() == 50 => {
+        101 => {
+            if payload.len() != 50 {
+                return Err(Error::InvalidMessage);
+            }
             let mut instance = [0; 16];
             instance.copy_from_slice(&payload[..16]);
             Ok(Response::Hello {
@@ -241,7 +244,10 @@ pub(crate) fn decode_response(kind: u16, payload: &[u8]) -> Result<Response, Err
         }
         102 if payload.is_empty() => Ok(Response::Acknowledged),
         103 => Ok(Response::Snapshot(payload.to_vec())),
-        104 if payload.len() == 82 => {
+        104 => {
+            if payload.len() != 82 {
+                return Err(Error::InvalidMessage);
+            }
             let mut reader = SliceReader::new(payload);
             let statistics = RecorderStatistics {
                 thread_count: reader.u64()?,
@@ -612,6 +618,54 @@ mod tests {
         let mut invalid_boolean = encode_recording(RecordingConfiguration::default());
         invalid_boolean[4] = 2;
         assert!(matches!(decode_recording(&invalid_boolean), Err(Error::InvalidMessage)));
+    }
+
+    #[test]
+    fn fixed_size_messages_reject_every_adjacent_invalid_length() {
+        for (kind, expected_len) in [(1, 32_usize), (3, 1), (4, 0), (6, 0)] {
+            for len in [expected_len.saturating_sub(1), expected_len + 1] {
+                if len != expected_len {
+                    assert!(matches!(decode_request(kind, &vec![0; len]), Err(Error::InvalidMessage)));
+                }
+            }
+        }
+
+        for (kind, expected_len) in [(101, 50_usize), (102, 0), (104, 82)] {
+            for len in [expected_len.saturating_sub(1), expected_len + 1] {
+                if len != expected_len {
+                    assert!(
+                        matches!(decode_response(kind, &vec![0; len]), Err(Error::InvalidMessage)),
+                        "response kind {kind} unexpectedly accepted length {len}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn recording_policy_rejects_noncanonical_booleans_and_boundary_sampling() {
+        for offset in [0, 1] {
+            let mut payload = [0, 0, 1, 0, 0, 0];
+            payload[offset] = 2;
+            assert!(matches!(decode_recording_policy(&payload), Err(Error::InvalidMessage)));
+        }
+        for sampling in [0, MAX_EVENT_SAMPLING_ONE_IN + 1] {
+            let mut payload = [0, 0, 0, 0, 0, 0];
+            payload[2..].copy_from_slice(&sampling.to_le_bytes());
+            assert!(matches!(decode_recording_policy(&payload), Err(Error::InvalidMessage)));
+        }
+        let mut maximum = [0, 0, 0, 0, 0, 0];
+        maximum[2..].copy_from_slice(&MAX_EVENT_SAMPLING_ONE_IN.to_le_bytes());
+        assert_eq!(
+            decode_recording_policy(&maximum).unwrap().sampling_one_in,
+            MAX_EVENT_SAMPLING_ONE_IN
+        );
+        for len in [0, 5, 7] {
+            assert!(matches!(
+                decode_recording_policy(&[0, 0, 1, 0, 0, 0, 0][..len]),
+                Err(Error::InvalidMessage)
+            ));
+        }
     }
 
     #[test]

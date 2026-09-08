@@ -106,4 +106,13 @@ mod tests {
         std::panic::catch_unwind(|| Options::from_values(MEDIUM_SLICE_BYTES - 1, 0)).unwrap_err();
         std::panic::catch_unwind(|| Options::from_values(MEDIUM_SLICE_BYTES, 1)).unwrap_err();
     }
+
+    #[test]
+    fn defaults_have_exact_documented_sizes() {
+        let options = Options::new();
+        assert_eq!(
+            (options.locality_segment_bytes(), options.medium_cache_max_bytes()),
+            (4 * 1024 * 1024, 8 * 1024 * 1024)
+        );
+    }
 }
