@@ -113,7 +113,7 @@ impl EventSampling {
         if denominator.is_power_of_two() {
             mixed & (denominator - 1) == 0
         } else {
-            u128::from(mixed) * u128::from(denominator) < 1_u128 << 64
+            mixed <= u64::MAX / denominator
         }
     }
 }
@@ -291,9 +291,13 @@ pub(crate) fn configure(configuration: Configuration) {
         || RUNTIME_TASK_POLICY.load(Ordering::Acquire) != runtime_task_policy
         || IO_POLICY.load(Ordering::Acquire) != io_policy
         || CACHE_POLICY.load(Ordering::Acquire) != cache_policy;
-    if changed || !enabled {
-        ACTIVE_SESSION.store(0, Ordering::SeqCst);
+    if !changed {
+        if !enabled {
+            ACTIVE_SESSION.store(0, Ordering::SeqCst);
+        }
+        return;
     }
+    ACTIVE_SESSION.store(0, Ordering::SeqCst);
     EVENT_CAPACITY.store(capacity, Ordering::SeqCst);
     ALLOCATION_POLICY.store(allocation_policy, Ordering::SeqCst);
     GENERAL_POLICY.store(general_policy, Ordering::SeqCst);
@@ -301,7 +305,7 @@ pub(crate) fn configure(configuration: Configuration) {
     RUNTIME_TASK_POLICY.store(runtime_task_policy, Ordering::SeqCst);
     IO_POLICY.store(io_policy, Ordering::SeqCst);
     CACHE_POLICY.store(cache_policy, Ordering::SeqCst);
-    if enabled && changed {
+    if enabled {
         let session = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
         LAST_ALLOCATION_POLICY.store(allocation_policy, Ordering::Release);
         LAST_GENERAL_POLICY.store(general_policy, Ordering::Release);
@@ -368,11 +372,16 @@ pub fn select_object_for(class: EventClass, object_id: ObjectId) -> Option<Recor
         return None;
     }
     let session = ACTIVE_SESSION.load(Ordering::Relaxed);
-    if session == 0
-        || !decode_sampling(policy).includes(object_id)
-        || policy_atomic(class).load(Ordering::Acquire) != policy
-        || ACTIVE_SESSION.load(Ordering::Acquire) != session
-    {
+    if session == 0 {
+        return None;
+    }
+    if !decode_sampling(policy).includes(object_id) {
+        return None;
+    }
+    if policy_atomic(class).load(Ordering::Acquire) != policy {
+        return None;
+    }
+    if ACTIVE_SESSION.load(Ordering::Acquire) != session {
         return None;
     }
     RecordingSession::from_raw(session)
@@ -926,7 +935,7 @@ const fn encode_policy(policy: RecordingPolicy) -> u64 {
     if policy.capture_backtraces {
         flags |= BACKTRACES_ENABLED;
     }
-    (flags as u64) | ((policy.event_sampling.get() as u64) << SAMPLING_SHIFT)
+    (flags as u64) + ((policy.event_sampling.get() as u64) << SAMPLING_SHIFT)
 }
 
 const fn decode_policy(policy: u64) -> RecordingPolicy {
@@ -988,19 +997,13 @@ fn destructive_snapshot(disposition: crate::snapshot::EventBufferDisposition) ->
     let runtime_task_policy = RUNTIME_TASK_POLICY.load(Ordering::SeqCst);
     let io_policy = IO_POLICY.load(Ordering::SeqCst);
     let cache_policy = CACHE_POLICY.load(Ordering::SeqCst);
-    let was_enabled = policy_enabled(allocation_policy)
-        || policy_enabled(general_policy)
-        || policy_enabled(arc_dereference_policy)
-        || policy_enabled(runtime_task_policy)
-        || policy_enabled(io_policy)
-        || policy_enabled(cache_policy);
-    ALLOCATION_POLICY.store(allocation_policy & !u64::from(RECORDING_ENABLED), Ordering::SeqCst);
-    GENERAL_POLICY.store(general_policy & !u64::from(RECORDING_ENABLED), Ordering::SeqCst);
-    ARC_DEREFERENCE_POLICY.store(arc_dereference_policy & !u64::from(RECORDING_ENABLED), Ordering::SeqCst);
-    RUNTIME_TASK_POLICY.store(runtime_task_policy & !u64::from(RECORDING_ENABLED), Ordering::SeqCst);
-    IO_POLICY.store(io_policy & !u64::from(RECORDING_ENABLED), Ordering::SeqCst);
-    CACHE_POLICY.store(cache_policy & !u64::from(RECORDING_ENABLED), Ordering::SeqCst);
-    ACTIVE_SESSION.store(0, Ordering::SeqCst);
+    let was_enabled = ACTIVE_SESSION.swap(0, Ordering::SeqCst) != 0;
+    ALLOCATION_POLICY.store(disabled_policy(allocation_policy), Ordering::SeqCst);
+    GENERAL_POLICY.store(disabled_policy(general_policy), Ordering::SeqCst);
+    ARC_DEREFERENCE_POLICY.store(disabled_policy(arc_dereference_policy), Ordering::SeqCst);
+    RUNTIME_TASK_POLICY.store(disabled_policy(runtime_task_policy), Ordering::SeqCst);
+    IO_POLICY.store(disabled_policy(io_policy), Ordering::SeqCst);
+    CACHE_POLICY.store(disabled_policy(cache_policy), Ordering::SeqCst);
 
     wait_for_writers();
     let snapshot = snapshot_session(LAST_SESSION.load(Ordering::Acquire));
@@ -1025,6 +1028,10 @@ fn destructive_snapshot(disposition: crate::snapshot::EventBufferDisposition) ->
     IO_POLICY.store(io_policy, Ordering::SeqCst);
     CACHE_POLICY.store(cache_policy, Ordering::SeqCst);
     snapshot
+}
+
+const fn disabled_policy(policy: u64) -> u64 {
+    policy & !(RECORDING_ENABLED as u64)
 }
 
 fn wait_for_writers() {
@@ -1095,19 +1102,19 @@ fn allocate_thread_recorder(layout: Layout) -> *mut ThreadRecorder {
 
 fn capture_stack() -> ([u64; MAX_STACK_FRAMES], u8) {
     let mut frames = [0; MAX_STACK_FRAMES];
-    let frame_count = platform::capture_stack(&mut frames);
+    let frame_count = capture_platform_stack(&mut frames);
     (
         frames,
         u8::try_from(frame_count).expect("frame count is bounded by the 24-element capture buffer"),
     )
 }
 
-#[cfg(all(target_os = "windows", not(miri)))]
-mod platform {
-    use windows_sys::Win32::System::Diagnostics::Debug::RtlCaptureStackBackTrace;
+fn capture_platform_stack(frames: &mut [u64]) -> usize {
+    #[cfg(all(target_os = "windows", not(miri)))]
+    {
+        use windows_sys::Win32::System::Diagnostics::Debug::RtlCaptureStackBackTrace;
 
-    pub(super) fn capture_stack(frames: &mut [u64]) -> usize {
-        let mut addresses = [0usize; super::MAX_STACK_FRAMES];
+        let mut addresses = [0usize; MAX_STACK_FRAMES];
         // SAFETY: addresses is writable for the requested number of entries.
         let count = unsafe {
             RtlCaptureStackBackTrace(
@@ -1122,13 +1129,11 @@ mod platform {
         }
         count
     }
-}
 
-#[cfg(all(target_os = "linux", not(miri)))]
-mod platform {
-    pub(super) fn capture_stack(frames: &mut [u64]) -> usize {
+    #[cfg(all(target_os = "linux", not(miri)))]
+    {
         const SKIPPED_FRAMES: usize = 4;
-        const CAPACITY: usize = super::MAX_STACK_FRAMES + SKIPPED_FRAMES;
+        const CAPACITY: usize = 28;
         let mut addresses = [0usize; CAPACITY];
         let capacity = i32::try_from(CAPACITY).expect("the fixed frame buffer fits in i32");
         // SAFETY: addresses is writable for CAPACITY pointers.
@@ -1140,11 +1145,10 @@ mod platform {
         }
         retained
     }
-}
 
-#[cfg(any(miri, not(any(target_os = "windows", target_os = "linux"))))]
-mod platform {
-    pub(super) fn capture_stack(_frames: &mut [u64]) -> usize {
+    #[cfg(any(miri, not(any(target_os = "windows", target_os = "linux"))))]
+    {
+        let _ = frames;
         0
     }
 }
@@ -1378,8 +1382,10 @@ mod tests {
     #[test]
     fn current_thread_id_is_stable() {
         let _test = TEST_LOCK.lock().unwrap();
+        let current = current_thread_id();
+        let other = std::thread::spawn(current_thread_id).join().unwrap();
 
-        assert_eq!(current_thread_id(), current_thread_id());
+        assert_eq!((current_thread_id(), current != other, current.get() != 0), (current, true, true));
     }
 
     #[test]
@@ -1423,6 +1429,148 @@ mod tests {
                 None
             )
         );
+    }
+
+    #[test]
+    fn object_sampling_hash_has_stable_decisions() {
+        let decisions = [2, 3, 7, 16].map(|denominator| {
+            let sampling = EventSampling::one_in(denominator).unwrap();
+            (1..=32)
+                .filter(|value| sampling.includes(ObjectId::new(*value)))
+                .collect::<Vec<_>>()
+        });
+
+        assert_eq!(
+            decisions,
+            [
+                vec![2, 4, 5, 6, 8, 9, 10, 14, 18, 19, 20, 22, 23, 24, 26, 27, 28, 29, 30, 31],
+                vec![3, 10, 11, 18, 20, 21],
+                vec![3, 10, 18, 21],
+                vec![6, 29],
+            ]
+        );
+    }
+
+    #[test]
+    fn configuration_changes_rotate_sessions_and_preserve_exact_policies() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let base_policy = RecordingPolicy {
+            enabled: true,
+            capture_backtraces: false,
+            event_sampling: EventSampling::one_in(3).unwrap(),
+        };
+        let base = Configuration {
+            general_events: base_policy,
+            event_capacity_per_thread: EventBufferCapacity::new(64).unwrap(),
+            ..Default::default()
+        };
+        configure(base);
+        let unchanged_session = ACTIVE_SESSION.load(Ordering::Acquire);
+        configure(base);
+        assert_eq!(ACTIVE_SESSION.load(Ordering::Acquire), unchanged_session);
+
+        let variants = [
+            Configuration {
+                allocations: RecordingPolicy::all(false),
+                ..base
+            },
+            Configuration {
+                general_events: RecordingPolicy {
+                    capture_backtraces: true,
+                    ..base_policy
+                },
+                ..base
+            },
+            Configuration {
+                arc_dereferences: RecordingPolicy::all(false),
+                ..base
+            },
+            Configuration {
+                runtime_tasks: RecordingPolicy::all(false),
+                ..base
+            },
+            Configuration {
+                io: RecordingPolicy::all(false),
+                ..base
+            },
+            Configuration {
+                cache: RecordingPolicy::all(false),
+                ..base
+            },
+            Configuration {
+                event_capacity_per_thread: EventBufferCapacity::new(128).unwrap(),
+                ..base
+            },
+        ];
+        for variant in variants {
+            configure(base);
+            let before = ACTIVE_SESSION.load(Ordering::Acquire);
+            configure(variant);
+            assert_ne!(ACTIVE_SESSION.load(Ordering::Acquire), before);
+            assert_eq!(configuration(), variant);
+        }
+
+        configure(Configuration::default());
+        assert_eq!(ACTIVE_SESSION.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn every_recording_class_controls_global_and_class_enablement() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let cases = [
+            (
+                EventClass::Allocation,
+                Configuration {
+                    allocations: RecordingPolicy::all(false),
+                    ..Default::default()
+                },
+            ),
+            (
+                EventClass::General,
+                Configuration {
+                    general_events: RecordingPolicy::all(false),
+                    ..Default::default()
+                },
+            ),
+            (
+                EventClass::ArcDereference,
+                Configuration {
+                    arc_dereferences: RecordingPolicy::all(false),
+                    ..Default::default()
+                },
+            ),
+            (
+                EventClass::RuntimeTask,
+                Configuration {
+                    runtime_tasks: RecordingPolicy::all(false),
+                    ..Default::default()
+                },
+            ),
+            (
+                EventClass::Io,
+                Configuration {
+                    io: RecordingPolicy::all(false),
+                    ..Default::default()
+                },
+            ),
+            (
+                EventClass::Cache,
+                Configuration {
+                    cache: RecordingPolicy::all(false),
+                    ..Default::default()
+                },
+            ),
+        ];
+
+        for (enabled_class, configuration) in cases {
+            configure(configuration);
+            assert!(recording_enabled());
+            assert!(select_object_for(enabled_class, ObjectId::new(1)).is_some());
+            for (class, _) in cases {
+                assert_eq!(recording_enabled_for(class), class == enabled_class);
+            }
+        }
+        configure(Configuration::default());
     }
 
     #[test]
@@ -1553,6 +1701,300 @@ mod tests {
             (1, 0, active_bytes, 1, 0, true)
         );
         configure(Configuration::default());
+    }
+
+    #[test]
+    fn bounded_ring_wraparound_preserves_generation_and_thread_metadata() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let capacity = EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD).unwrap();
+        configure(Configuration {
+            general_events: RecordingPolicy::all(false),
+            event_capacity_per_thread: capacity,
+            ..Default::default()
+        });
+        let _initial = snapshot(crate::snapshot::EventBufferDisposition::Release);
+        let baseline_allocated_bytes = statistics().allocated_bytes;
+
+        let thread = std::thread::Builder::new()
+            .name("seismograph-wraparound".into())
+            .spawn(|| {
+                for object_id in 1..=70 {
+                    record(EventClass::General, || {
+                        Record::object(EventKind::MutexAccess, ObjectId::new(object_id))
+                    });
+                }
+            })
+            .unwrap();
+        thread.join().unwrap();
+
+        let statistics = statistics();
+        let captured = snapshot(crate::snapshot::EventBufferDisposition::Retain).unwrap();
+        let retained = captured
+            .events
+            .iter()
+            .map(|event| (event.sequence.get(), event.object_id().unwrap().get()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            (
+                statistics.thread_count,
+                statistics.total_events,
+                statistics.retained_events,
+                statistics.lost_events,
+                statistics.event_capacity_per_thread,
+                statistics.allocated_bytes - baseline_allocated_bytes,
+            ),
+            (
+                1,
+                70,
+                64,
+                6,
+                64,
+                (std::mem::size_of::<ThreadRecorder>() + 64 * std::mem::size_of::<Slot>()) as u64,
+            )
+        );
+        assert_eq!(
+            statistics.recording,
+            RecordingPolicies {
+                general_events: RecordingPolicy::all(false),
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            (
+                captured.clock,
+                captured.total_events,
+                captured.lost_events,
+                captured.threads.len(),
+                captured.threads[0].name.as_str(),
+                captured.threads[0].thread_id,
+                retained,
+            ),
+            (
+                EventClock::CURRENT,
+                70,
+                6,
+                1,
+                "seismograph-wraparound",
+                captured.events[0].thread_id,
+                (7..=70).map(|value| (value, value)).collect(),
+            )
+        );
+        configure(Configuration::default());
+    }
+
+    #[test]
+    fn destructive_snapshot_restores_policies_and_starts_a_new_generation() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let policy = |sampling, capture_backtraces| RecordingPolicy {
+            enabled: true,
+            capture_backtraces,
+            event_sampling: EventSampling::one_in(sampling).unwrap(),
+        };
+        let expected_configuration = Configuration {
+            allocations: policy(2, false),
+            general_events: policy(3, true),
+            arc_dereferences: policy(4, false),
+            runtime_tasks: policy(5, true),
+            io: policy(6, false),
+            cache: policy(7, true),
+            event_capacity_per_thread: EventBufferCapacity::new(128).unwrap(),
+        };
+        configure(expected_configuration);
+        let before = ACTIVE_SESSION.load(Ordering::Acquire);
+        record(EventClass::General, || Record::object(EventKind::MutexAccess, ObjectId::new(3)));
+
+        let captured = snapshot(crate::snapshot::EventBufferDisposition::Clear).unwrap();
+        let after = ACTIVE_SESSION.load(Ordering::Acquire);
+
+        assert_eq!(
+            (
+                captured.recording,
+                captured.events.len(),
+                configuration(),
+                after != 0 && after != before,
+                decode_policy(disabled_policy(encode_policy(expected_configuration.general_events))),
+            ),
+            (
+                RecordingPolicies {
+                    allocations: expected_configuration.allocations,
+                    general_events: expected_configuration.general_events,
+                    arc_dereferences: expected_configuration.arc_dereferences,
+                    runtime_tasks: expected_configuration.runtime_tasks,
+                    io: expected_configuration.io,
+                    cache: expected_configuration.cache,
+                },
+                1,
+                expected_configuration,
+                true,
+                RecordingPolicy {
+                    enabled: false,
+                    ..expected_configuration.general_events
+                },
+            )
+        );
+        configure(Configuration::default());
+    }
+
+    #[test]
+    fn recorder_rejects_each_stale_state_dimension() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let configuration = Configuration {
+            general_events: RecordingPolicy {
+                enabled: true,
+                event_sampling: EventSampling::one_in(3).unwrap(),
+                ..Default::default()
+            },
+            event_capacity_per_thread: EventBufferCapacity::new(64).unwrap(),
+            ..Default::default()
+        };
+        configure(configuration);
+        let session = ACTIVE_SESSION.load(Ordering::Acquire);
+        let policy = GENERAL_POLICY.load(Ordering::Acquire);
+        let capacity = EVENT_CAPACITY.load(Ordering::Acquire);
+        let recorder = local_recorder();
+        let selected = (1..100)
+            .map(ObjectId::new)
+            .find(|object| configuration.general_events.event_sampling.includes(*object))
+            .unwrap();
+        let record = || Record::object(EventKind::MutexAccess, selected);
+
+        assert_eq!(
+            (
+                record_enabled_with_recorder(
+                    Some(recorder),
+                    session,
+                    EventClass::General,
+                    record(),
+                    policy ^ u64::from(RECORDING_ENABLED),
+                    capacity
+                ),
+                record_enabled_with_recorder(Some(recorder), session, EventClass::General, record(), policy, capacity + 1),
+                record_enabled_with_recorder(Some(recorder), session + 1, EventClass::General, record(), policy, capacity),
+                record_enabled_with_recorder(None, session, EventClass::General, record(), policy, capacity),
+            ),
+            (false, false, false, false)
+        );
+        // SAFETY: local_recorder returns this thread's process-lifetime recorder.
+        assert!(!unsafe { &*recorder }.writer_active.load(Ordering::Acquire));
+        configure(Configuration::default());
+    }
+
+    #[cfg(all(any(target_os = "windows", target_os = "linux"), not(miri)))]
+    #[test]
+    fn stack_capture_returns_real_frames_within_the_fixed_capacity() {
+        let (frames, count) = capture_stack();
+        let count = usize::from(count);
+
+        assert!(count > 1);
+        assert!(count <= MAX_STACK_FRAMES);
+        assert!(frames[..count].iter().all(|frame| *frame != 0));
+        assert!(frames[count..].iter().all(|frame| *frame == 0));
+    }
+
+    #[test]
+    fn lock_guards_and_slots_publish_each_state_transition() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let previous_general_policy = LAST_GENERAL_POLICY.swap(
+            encode_policy(RecordingPolicy {
+                enabled: true,
+                capture_backtraces: true,
+                event_sampling: EventSampling::one_in(3).unwrap(),
+            }),
+            Ordering::AcqRel,
+        );
+        let statistics = statistics();
+        let expected_recording = last_recording_policies();
+        let mut registered = RECORDERS.load(Ordering::Acquire);
+        while !registered.is_null() {
+            // SAFETY: registered recorders are retained for process lifetime.
+            let current = unsafe { &*registered };
+            current.ring_locked.store(false, Ordering::Release);
+            registered = current.next.load(Ordering::Acquire);
+        }
+        assert_eq!(
+            (statistics.event_capacity_per_thread, statistics.recording),
+            (
+                u64::try_from(configuration().event_capacity_per_thread.get()).unwrap(),
+                expected_recording
+            )
+        );
+
+        let snapshot_recorder = ThreadRecorder::new();
+        snapshot_recorder.session.store(1, Ordering::Release);
+        let events = snapshot_from_recorders(1, ptr::from_ref(&snapshot_recorder).cast_mut()).unwrap();
+        snapshot_recorder.ring_locked.store(false, Ordering::Release);
+        assert_eq!((events.clock, events.recording), (EventClock::CURRENT, expected_recording));
+
+        let recorder = ThreadRecorder::new();
+        assert!(!recorder.ring_locked.load(Ordering::Acquire));
+        {
+            let _guard = recorder.ring_lock();
+            assert!(recorder.ring_locked.load(Ordering::Acquire));
+        }
+        let ring_unlocked = !recorder.ring_locked.load(Ordering::Acquire);
+        recorder.ring_locked.store(false, Ordering::Release);
+        assert!(ring_unlocked);
+
+        let slot = Slot::new();
+        assert!(!slot.locked.load(Ordering::Acquire));
+        slot.lock();
+        assert!(slot.locked.load(Ordering::Acquire));
+        slot.unlock();
+        let slot_unlocked = !slot.locked.load(Ordering::Acquire);
+        slot.locked.store(false, Ordering::Release);
+        assert!(slot_unlocked);
+
+        assert!(!CONFIGURATION_LOCKED.load(Ordering::Acquire));
+        {
+            let _guard = ConfigurationLock::acquire();
+            assert!(CONFIGURATION_LOCKED.load(Ordering::Acquire));
+        }
+        let configuration_unlocked = !CONFIGURATION_LOCKED.load(Ordering::Acquire);
+        CONFIGURATION_LOCKED.store(false, Ordering::Release);
+        LAST_GENERAL_POLICY.store(previous_general_policy, Ordering::Release);
+        assert!(configuration_unlocked);
+    }
+
+    #[test]
+    fn destructive_snapshot_waits_until_an_active_writer_finishes() {
+        let _test = TEST_LOCK.lock().unwrap();
+        configure(Configuration {
+            general_events: RecordingPolicy::all(false),
+            ..Default::default()
+        });
+        let recorder = local_recorder();
+        // SAFETY: local_recorder returns this thread's process-lifetime recorder.
+        let recorder = unsafe { &*recorder };
+        recorder.writer_active.store(true, Ordering::Release);
+        let (started_sender, started_receiver) = std::sync::mpsc::channel();
+        let (finished_sender, finished_receiver) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                started_sender.send(()).unwrap();
+                let captured = destructive_snapshot(crate::snapshot::EventBufferDisposition::Clear);
+                finished_sender.send(captured).unwrap();
+            });
+            started_receiver.recv().unwrap();
+            assert_eq!(
+                finished_receiver.recv_timeout(std::time::Duration::from_millis(20)).unwrap_err(),
+                std::sync::mpsc::RecvTimeoutError::Timeout
+            );
+            recorder.writer_active.store(false, Ordering::Release);
+            let _captured = finished_receiver.recv_timeout(std::time::Duration::from_secs(1)).unwrap();
+        });
+        configure(Configuration::default());
+    }
+
+    #[test]
+    fn equal_capacity_reuses_the_existing_ring_between_sessions() {
+        let recorder = ThreadRecorder::new();
+        let capacity = EventBufferCapacity::new(64).unwrap();
+        recorder.begin_session(1, capacity);
+        let first = recorder.ring().unwrap().slots.as_ptr();
+        recorder.begin_session(2, capacity);
+        let second = recorder.ring().unwrap().slots.as_ptr();
+
+        assert_eq!((first, second, recorder.session.load(Ordering::Acquire)), (first, first, 2));
     }
 
     #[test]
@@ -1716,7 +2158,10 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(capture_backtrace(BacktraceCapture::Never), Vec::new());
-        assert!(capture_backtrace(BacktraceCapture::Always).len() <= MAX_STACK_FRAMES);
+        let captured = capture_backtrace(BacktraceCapture::Always);
+        #[cfg(all(any(target_os = "windows", target_os = "linux"), not(miri)))]
+        assert!(!captured.is_empty());
+        assert!(captured.len() <= MAX_STACK_FRAMES);
 
         let recorder = ThreadRecorder::new();
         let snapshot = recorder.snapshot();
@@ -1781,6 +2226,7 @@ mod tests {
         });
         drop(ConfigurationLock::acquire());
         thread.join().unwrap();
+        CONFIGURATION_LOCKED.store(false, Ordering::Release);
 
         let recorder = local_recorder();
         // SAFETY: local_recorder returns this thread's process-lifetime recorder.

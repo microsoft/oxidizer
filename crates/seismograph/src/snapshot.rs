@@ -9,11 +9,12 @@
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
-use std::fmt;
 use std::path::Path;
-use std::ptr::{self, NonNull};
+#[cfg(test)]
+use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::time::Instant;
+use std::{fmt, ptr};
 
 use crate::Error;
 use crate::recorder::alloc::{Allocation, AllocationId, EventThreadId, HeapId, HeapKind};
@@ -24,6 +25,7 @@ use crate::recorder::io::{BufferId, IoEvent, IoOperationId, IoOutcome, IoResourc
 use crate::recorder::runtime::{RuntimeEvent, RuntimeId, WorkerId};
 use crate::recorder::thread::{ThreadId, ThreadLog};
 use crate::recorder::{self, EventSampling, MAX_STACK_FRAMES, RecordingPolicies, RecordingPolicy, SuppressionGuard};
+use crate::system::SystemSlice;
 
 const MAGIC: [u8; 8] = *b"SEISMOG\0";
 const FORMAT_VERSION: u16 = 8;
@@ -34,13 +36,16 @@ const LEGACY_EVENT_V1_FIXED_LEN: usize = 28;
 const LEGACY_EVENT_V2_FIXED_LEN: usize = 76;
 const THREAD_FIXED_LEN: usize = 24;
 const THREAD_NAMED_FIXED_LEN: usize = 26;
-const SNAPSHOT_ARENA_CHUNK_BYTES: usize = 4 * 1024 * 1024;
+const SNAPSHOT_ARENA_CHUNK_BYTES: usize = 4_194_304;
+const SNAPSHOT_ARENA_DEDICATED_THRESHOLD: usize = 2_097_152;
 
 static SOURCES: AtomicPtr<Source> = AtomicPtr::new(ptr::null_mut());
 
 thread_local! {
     static ACTIVE_SNAPSHOT_ARENA: Cell<*mut SnapshotArena> = const { Cell::new(ptr::null_mut()) };
     static SNAPSHOT_ARENA_SUSPENSION_DEPTH: Cell<usize> = const { Cell::new(0) };
+    #[cfg(test)]
+    static LIVE_SNAPSHOT_ARENA_CHUNKS: Cell<usize> = const { Cell::new(0) };
 }
 
 /// Treatment of recorder event buffers after a snapshot captures them.
@@ -205,7 +210,9 @@ impl SourceData {
 
 impl fmt::Debug for SourceData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SourceData").field("bytes", &self.bytes.len).finish_non_exhaustive()
+        f.debug_struct("SourceData")
+            .field("bytes", &self.bytes.as_slice().len())
+            .finish_non_exhaustive()
     }
 }
 
@@ -259,7 +266,9 @@ impl Snapshot {
 
 impl fmt::Debug for Snapshot {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Snapshot").field("bytes", &self.bytes.len).finish_non_exhaustive()
+        f.debug_struct("Snapshot")
+            .field("bytes", &self.bytes.as_slice().len())
+            .finish_non_exhaustive()
     }
 }
 
@@ -781,7 +790,7 @@ const fn encode_payload(payload: EventPayload) -> [u64; 8] {
             allocation.address.get(),
             allocation.size,
             allocation.alignment,
-            encode_heap_kind(allocation.heap_kind) | (if allocation.freed_after_heap_release { 1 << 8 } else { 0 }),
+            encode_heap_kind(allocation.heap_kind) + if allocation.freed_after_heap_release { 1 << 8 } else { 0 },
             0,
         ],
         EventPayload::Runtime(runtime) => [
@@ -808,7 +817,7 @@ const fn encode_payload(payload: EventPayload) -> [u64; 8] {
             io.completed_bytes,
             0,
             io.buffer_len,
-            io.buffer_span_count as u64 | ((io.resource_kind.wire_value() as u64) << 32) | ((io.outcome.wire_value() as u64) << 40),
+            io.buffer_span_count as u64 + ((io.resource_kind.wire_value() as u64) << 32) + ((io.outcome.wire_value() as u64) << 40),
         ],
     }
 }
@@ -831,29 +840,12 @@ fn decode_heap_kind(value: u8) -> Result<HeapKind, Error> {
 }
 
 struct SystemBytes {
-    address: NonNull<u8>,
-    len: usize,
+    bytes: SystemSlice<u8>,
 }
-
-// SAFETY: SystemBytes exclusively owns a System allocation and exposes no
-// thread-affine state.
-unsafe impl Send for SystemBytes {}
-// SAFETY: shared access exposes only initialized immutable bytes.
-unsafe impl Sync for SystemBytes {}
 
 impl SystemBytes {
     fn zeroed(len: usize) -> Option<Self> {
-        if len == 0 {
-            return Some(Self {
-                address: NonNull::dangling(),
-                len,
-            });
-        }
-        let layout = Layout::array::<u8>(len).ok()?;
-        // SAFETY: layout is nonzero and valid. The returned pointer is owned by
-        // this value and released with the same allocator and layout.
-        let address = NonNull::new(unsafe { System.alloc_zeroed(layout) })?;
-        Some(Self { address, len })
+        SystemSlice::try_zeroed(len).map(|bytes| Self { bytes })
     }
 
     fn copy_from(bytes: &[u8]) -> Option<Self> {
@@ -863,24 +855,11 @@ impl SystemBytes {
     }
 
     fn as_slice(&self) -> &[u8] {
-        // SAFETY: address owns len initialized bytes for this value's lifetime.
-        unsafe { std::slice::from_raw_parts(self.address.as_ptr(), self.len) }
+        &self.bytes
     }
 
     fn as_mut_slice(&mut self) -> &mut [u8] {
-        // SAFETY: this value exclusively owns len initialized bytes.
-        unsafe { std::slice::from_raw_parts_mut(self.address.as_ptr(), self.len) }
-    }
-}
-
-impl Drop for SystemBytes {
-    fn drop(&mut self) {
-        if self.len == 0 {
-            return;
-        }
-        let layout = Layout::array::<u8>(self.len).expect("the allocation was created from this representable layout");
-        // SAFETY: address was allocated by System with this exact layout.
-        unsafe { System.dealloc(self.address.as_ptr(), layout) };
+        &mut self.bytes
     }
 }
 
@@ -921,8 +900,11 @@ impl SnapshotArena {
         }
         // Layout guarantees that size rounded up to alignment fits in isize;
         // adding the small chunk header therefore fits in usize.
-        let required = size_of::<SnapshotArenaChunk>() + layout.align() - 1 + size;
-        let dedicated = required > SNAPSHOT_ARENA_CHUNK_BYTES / 2;
+        let required = size_of::<SnapshotArenaChunk>()
+            .checked_add(layout.align().saturating_sub(1))
+            .and_then(|required| required.checked_add(size))
+            .expect("Layout guarantees that its padded size fits in isize");
+        let dedicated = required > SNAPSHOT_ARENA_DEDICATED_THRESHOLD;
         let bytes = if dedicated {
             required
         } else {
@@ -937,6 +919,8 @@ impl SnapshotArena {
         if mapping.is_null() {
             return ptr::null_mut();
         }
+        #[cfg(test)]
+        LIVE_SNAPSHOT_ARENA_CHUNKS.with(|count| count.set(count.get() + 1));
         let chunk = mapping.cast::<SnapshotArenaChunk>();
         // SAFETY: the mapping is writable and large enough for this header.
         unsafe {
@@ -975,6 +959,8 @@ impl SnapshotArena {
                     // SAFETY: dedicated chunks can be released independently and
                     // were allocated by System with chunk_layout.
                     unsafe { System.dealloc(chunk.cast(), chunk_layout) };
+                    #[cfg(test)]
+                    LIVE_SNAPSHOT_ARENA_CHUNKS.with(|count| count.set(count.get() - 1));
                 }
                 return true;
             }
@@ -1001,6 +987,8 @@ impl Drop for SnapshotArena {
             let layout = unsafe { (*chunk).layout };
             // SAFETY: chunk was allocated by System with layout.
             unsafe { System.dealloc(chunk.cast(), layout) };
+            #[cfg(test)]
+            LIVE_SNAPSHOT_ARENA_CHUNKS.with(|count| count.set(count.get() - 1));
             chunk = previous;
         }
     }
@@ -1713,6 +1701,25 @@ mod tests {
             bytes[offset..offset + 4].copy_from_slice(&u32::MAX.to_le_bytes());
             assert!(decode(&bytes).is_err());
         }
+
+        assert!(validate_count_fits(3, 24, 8).is_ok());
+        assert!(validate_count_fits(4, 24, 8).is_err());
+        assert_eq!(
+            (
+                thread_fixed_len(1),
+                thread_fixed_len(2),
+                event_fixed_len(1),
+                event_fixed_len(2),
+                event_fixed_len(4),
+            ),
+            (
+                THREAD_FIXED_LEN,
+                THREAD_NAMED_FIXED_LEN,
+                LEGACY_EVENT_V1_FIXED_LEN,
+                LEGACY_EVENT_V2_FIXED_LEN,
+                EVENT_FIXED_LEN,
+            )
+        );
     }
 
     #[test]
@@ -1757,6 +1764,123 @@ mod tests {
                 .2,
             EventPayload::Object(ObjectId::new(1))
         );
+
+        for index in 0..6 {
+            let mut fields = [0; 6];
+            fields[index] = 1;
+            assert!(
+                decode_legacy_event(&mut Reader::new(&legacy_event(EventKind::MutexAccess, fields)), 3).is_err(),
+                "legacy object field {index} must be reserved"
+            );
+        }
+        for index in 1..6 {
+            let mut fields = [0; 6];
+            fields[index] = 1;
+            assert!(
+                decode_legacy_event(&mut Reader::new(&legacy_event(EventKind::ChannelHighWatermark, fields)), 3,).is_err(),
+                "legacy numeric field {index} must be reserved"
+            );
+        }
+
+        let not_released = decode_legacy_event(&mut Reader::new(&legacy_event(EventKind::Allocation, [2, 3, 4, 5, 8, 2])), 3).unwrap();
+        assert!(matches!(
+            not_released.2,
+            EventPayload::Allocation(Allocation {
+                heap_kind: HeapKind::Bump,
+                freed_after_heap_release: false,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn policy_clock_and_event_boundaries_accept_only_exact_wire_shapes() {
+        for bytes in [[2, 0, 0, 0, 1, 0, 0, 0], [0, 2, 0, 0, 1, 0, 0, 0], [0, 0, 1, 0, 1, 0, 0, 0]] {
+            assert!(decode_recording_policy(&mut Reader::new(&bytes)).is_err());
+        }
+        assert_eq!(decode_clock(&mut Reader::new(&[]), 3).unwrap(), EventClock::Unspecified);
+
+        let mut clock = Vec::new();
+        clock.extend_from_slice(&EventClock::CURRENT.wire_value().to_le_bytes());
+        clock.extend_from_slice(&0_u16.to_le_bytes());
+        clock.extend_from_slice(&1_000_000_000_u64.to_le_bytes());
+        assert_eq!(decode_clock(&mut Reader::new(&clock), 4).unwrap(), EventClock::CURRENT);
+
+        let mut event = Vec::new();
+        event.extend_from_slice(&1_u64.to_le_bytes());
+        event.push(EventKind::MutexAccess.wire_value());
+        event.push(1);
+        event.push(u8::try_from(MAX_STACK_FRAMES).unwrap());
+        event.push(0);
+        event.extend_from_slice(&1_u64.to_le_bytes());
+        event.extend_from_slice(&[0; 7 * 8]);
+        assert_eq!(decode_event_v4(&mut Reader::new(&event)).unwrap().3, MAX_STACK_FRAMES);
+
+        let mut legacy = Vec::new();
+        legacy.extend_from_slice(&1_u64.to_le_bytes());
+        legacy.push(EventKind::MutexAccess.wire_value());
+        legacy.push(u8::try_from(MAX_STACK_FRAMES).unwrap());
+        legacy.extend_from_slice(&0_u16.to_le_bytes());
+        assert_eq!(decode_legacy_event(&mut Reader::new(&legacy), 1).unwrap().3, MAX_STACK_FRAMES);
+    }
+
+    #[test]
+    fn payload_reserved_fields_and_packed_metadata_are_enforced() {
+        for index in 1..8 {
+            let mut fields = [0; 8];
+            fields[0] = 1;
+            fields[index] = 1;
+            assert!(decode_payload(1, fields).is_err(), "object field {index} must be reserved");
+        }
+        for index in 2..8 {
+            let mut fields = [0; 8];
+            fields[0] = 1;
+            fields[index] = 1;
+            assert!(decode_payload(2, fields).is_err(), "numeric field {index} must be reserved");
+        }
+        let mut allocation = [1, 2, 3, 4, 5, 8, 1, 0];
+        allocation[7] = 1;
+        assert!(decode_payload(3, allocation).is_err());
+
+        let mut runtime = [1, 0, 2, 3, 4, 5, 0, 0];
+        runtime[6] = 1;
+        assert!(decode_payload(4, runtime).is_err());
+        runtime[6] = 0;
+        runtime[7] = 1;
+        assert!(decode_payload(4, runtime).is_err());
+
+        let io = EventPayload::Io(IoEvent {
+            operation_id: IoOperationId::from_raw(1).unwrap(),
+            resource_id: IoResourceId::from_raw(2).unwrap(),
+            buffer_id: Some(BufferId::from_raw(3).unwrap()),
+            requested_bytes: 4,
+            completed_bytes: 5,
+            buffer_len: 6,
+            buffer_span_count: 0x1122_3344,
+            resource_kind: IoResourceKind::NamedPipe,
+            outcome: IoOutcome::Canceled,
+        });
+        let encoded = encode_payload(io);
+        assert_eq!(encoded[7], 0x0000_0404_1122_3344);
+        assert_eq!(decode_payload(5, encoded).unwrap(), io);
+        let mut reserved = encoded;
+        reserved[5] = 1;
+        assert!(decode_payload(5, reserved).is_err());
+        let mut high_bits = encoded;
+        high_bits[7] |= 1 << 48;
+        assert!(decode_payload(5, high_bits).is_err());
+
+        let allocation = EventPayload::Allocation(Allocation {
+            allocation_id: AllocationId::new(1),
+            event_thread_id: EventThreadId::new(2),
+            heap_id: HeapId::new(3),
+            heap_kind: HeapKind::Thread,
+            freed_after_heap_release: true,
+            address: Address::new(4),
+            size: 5,
+            alignment: 8,
+        });
+        assert_eq!(encode_payload(allocation)[6], 0x103);
     }
 
     #[test]
@@ -1810,6 +1934,31 @@ mod tests {
         assert!(unsafe { (*dedicated_arena.head).dedicated });
         assert!(dedicated_arena.deallocate(dedicated));
 
+        let mut reuse_arena = SnapshotArena::new();
+        assert!(!reuse_arena.allocate(Layout::from_size_align(64, 8).unwrap()).is_null());
+        let first_head = reuse_arena.head;
+        assert!(!reuse_arena.allocate(Layout::from_size_align(64, 8).unwrap()).is_null());
+        assert_eq!(reuse_arena.head, first_head);
+
+        let header = size_of::<SnapshotArenaChunk>();
+        let exact_shared_size = SNAPSHOT_ARENA_DEDICATED_THRESHOLD - header;
+        let mut boundary_arena = SnapshotArena::new();
+        assert!(
+            !boundary_arena
+                .allocate(Layout::from_size_align(exact_shared_size, 1).unwrap())
+                .is_null()
+        );
+        // SAFETY: a non-null arena head points to its live chunk.
+        assert!(!unsafe { (*boundary_arena.head).dedicated });
+        let mut over_boundary_arena = SnapshotArena::new();
+        assert!(
+            !over_boundary_arena
+                .allocate(Layout::from_size_align(exact_shared_size + 1, 1).unwrap())
+                .is_null()
+        );
+        // SAFETY: a non-null arena head points to its live chunk.
+        assert!(unsafe { (*over_boundary_arena.head).dedicated });
+
         let shared = Layout::from_size_align(SNAPSHOT_ARENA_CHUNK_BYTES / 3, 16).unwrap();
         assert!(!arena.allocate(shared).is_null());
         assert!(!arena.allocate(shared).is_null());
@@ -1819,31 +1968,77 @@ mod tests {
             let address = snapshot_arena_allocate(Layout::from_size_align(64, 8).unwrap()).unwrap();
             with_snapshot_arena(|| assert!(snapshot_arena_deallocate(address)));
         });
+        assert_eq!(snapshot_arena_allocate(Layout::from_size_align(8, 8).unwrap()), None);
+    }
+
+    #[test]
+    fn snapshot_arena_releases_all_owned_chunks() {
+        let initial = LIVE_SNAPSHOT_ARENA_CHUNKS.get();
+        {
+            let mut arena = SnapshotArena::new();
+            assert!(
+                !arena
+                    .allocate(Layout::from_size_align(SNAPSHOT_ARENA_CHUNK_BYTES / 3, 16).unwrap())
+                    .is_null()
+            );
+            assert!(
+                !arena
+                    .allocate(Layout::from_size_align(SNAPSHOT_ARENA_CHUNK_BYTES / 3, 16).unwrap())
+                    .is_null()
+            );
+            assert_eq!(LIVE_SNAPSHOT_ARENA_CHUNKS.get(), initial + 1);
+        }
+        assert_eq!(LIVE_SNAPSHOT_ARENA_CHUNKS.get(), initial);
     }
 
     #[test]
     fn fixed_buffer_reader_and_writer_reject_short_storage() {
-        let mut byte = [0_u8; 1];
-        assert!(Writer::new(&mut byte).u64(1).is_err());
+        let mut bytes = [0_u8; 9];
+        let mut writer = Writer::new(&mut bytes);
+        writer.u64(1).unwrap();
+        assert_eq!(writer.remaining(), &[0]);
+        assert!(writer.u64(1).is_err());
         assert!(Reader::new(&[]).u64().is_err());
     }
 
     #[test]
     fn version_five_policies_and_legacy_thread_names_are_compatible() {
-        let policy = RecordingPolicy {
-            enabled: true,
-            capture_backtraces: false,
-            event_sampling: EventSampling::one_in(3).unwrap(),
-        };
+        let policies = [
+            RecordingPolicy {
+                enabled: true,
+                capture_backtraces: false,
+                event_sampling: EventSampling::one_in(3).unwrap(),
+            },
+            RecordingPolicy {
+                enabled: false,
+                capture_backtraces: true,
+                event_sampling: EventSampling::one_in(5).unwrap(),
+            },
+            RecordingPolicy {
+                enabled: true,
+                capture_backtraces: true,
+                event_sampling: EventSampling::one_in(7).unwrap(),
+            },
+        ];
         let mut bytes = Vec::new();
-        for value in [policy, policy, policy] {
+        for value in policies {
             bytes.push(u8::from(value.enabled));
             bytes.push(u8::from(value.capture_backtraces));
             bytes.extend_from_slice(&0_u16.to_le_bytes());
             bytes.extend_from_slice(&u32::try_from(value.event_sampling.get()).unwrap().to_le_bytes());
         }
         let decoded = decode_recording_policies(&mut Reader::new(&bytes), 5).unwrap();
-        assert_eq!(decoded.runtime_tasks, decoded.general_events);
+        assert_eq!(
+            decoded,
+            RecordingPolicies {
+                allocations: policies[0],
+                general_events: policies[1],
+                arc_dereferences: policies[2],
+                runtime_tasks: policies[1],
+                io: RecordingPolicy::default(),
+                cache: RecordingPolicy::default(),
+            }
+        );
 
         let mut thread = Vec::new();
         thread.extend_from_slice(&1_u64.to_le_bytes());
@@ -1928,6 +2123,34 @@ mod tests {
             )
             .is_err()
         );
+
+        let first = Source::new(SourceId::new(103), "first", 2, capture);
+        let second = Source::new(SourceId::new(104), "second", 3, capture);
+        first.next.store(ptr::from_ref(&second).cast_mut(), Ordering::Relaxed);
+        let captured = capture_sources_from(
+            ptr::from_ref(&first).cast_mut(),
+            SnapshotContext {
+                events: &Events::default(),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            captured,
+            vec![
+                SourceSnapshot {
+                    id: SourceId::new(103),
+                    name: "first".into(),
+                    schema_version: 2,
+                    data: b"ok".to_vec(),
+                },
+                SourceSnapshot {
+                    id: SourceId::new(104),
+                    name: "second".into(),
+                    schema_version: 3,
+                    data: b"ok".to_vec(),
+                },
+            ]
+        );
     }
 
     #[test]
@@ -1949,5 +2172,19 @@ mod tests {
         assert_eq!(snapshot_chunk_address(usize::MAX - 1, 0, 1, 4, usize::MAX), None);
         assert_eq!(snapshot_chunk_address(0, 0, usize::MAX, 1, usize::MAX - 1), None);
         assert_eq!(snapshot_chunk_address(10, 0, 1, 1, 0), None);
+        assert_eq!(snapshot_chunk_address(100, 3, 5, 8, 16), Some((104, 9)));
+        assert_eq!(snapshot_chunk_address(100, 3, 8, 8, 12), Some((104, 12)));
+        assert_eq!(snapshot_chunk_address(100, 3, 9, 8, 12), None);
+        assert_eq!(snapshot_chunk_address(100, 4, 5, 8, 16), Some((104, 9)));
+
+        let mut arena = SnapshotArena::new();
+        let layout = Layout::from_size_align(64, 8).unwrap();
+        let address = arena.allocate(layout);
+        assert!(!address.is_null());
+        // SAFETY: head identifies the live chunk containing address.
+        let chunk_size = unsafe { (*arena.head).layout.size() };
+        // SAFETY: adding the allocation's exact size produces its one-past-the-end pointer.
+        let end = unsafe { arena.head.byte_add(chunk_size) }.cast::<u8>();
+        assert!(!arena.deallocate(end));
     }
 }

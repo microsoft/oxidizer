@@ -214,4 +214,20 @@ mod tests {
         );
         assert_eq!(IoOutcome::from_wire_value(0), None);
     }
+
+    #[test]
+    fn allocated_identities_are_nonzero_and_process_monotonic() {
+        let buffer = [BufferId::allocate(), BufferId::allocate()];
+        let operation = [IoOperationId::allocate(), IoOperationId::allocate()];
+        let resource = [IoResourceId::allocate(), IoResourceId::allocate()];
+
+        assert_eq!(
+            (
+                buffer[1].get() > buffer[0].get(),
+                operation[1].get() > operation[0].get(),
+                resource[1].get() > resource[0].get(),
+            ),
+            (true, true, true)
+        );
+    }
 }

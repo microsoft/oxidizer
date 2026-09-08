@@ -193,6 +193,8 @@ pub fn snapshot(options: snapshot::SnapshotOptions) -> Result<snapshot::Snapshot
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::*;
     use crate::recorder::event::{EventKind, ObjectId, Record};
 
@@ -244,12 +246,12 @@ mod tests {
             ..Default::default()
         });
         let object_id = ObjectId::new(41);
-        let general = recorder::select_object(object_id).unwrap();
+        let general = record_session(recorder::event::EventClass::General, || {
+            Record::object(EventKind::MutexAccess, object_id)
+        })
+        .unwrap();
         let runtime = recorder::select_object_for(recorder::event::EventClass::RuntimeTask, object_id).unwrap();
 
-        record(recorder::event::EventClass::General, || {
-            Record::object(EventKind::MutexAccess, object_id)
-        });
         assert!(record_in_session(general, || { Record::object(EventKind::MutexAccess, object_id) }));
         assert!(record_in_session_classified(
             runtime,
@@ -269,5 +271,32 @@ mod tests {
             )
         ));
         recorder(recorder::Configuration::default());
+
+        let constructed = AtomicUsize::new(0);
+        assert!(!record_in_session(general, || {
+            constructed.fetch_add(1, Ordering::Relaxed);
+            Record::object(EventKind::MutexAccess, object_id)
+        }));
+        assert!(!record_in_session_classified(
+            runtime,
+            recorder::event::EventClass::RuntimeTask,
+            || {
+                constructed.fetch_add(1, Ordering::Relaxed);
+                Record::runtime(
+                    recorder::event::EventTimestamp::now(),
+                    EventKind::RuntimeCreated,
+                    recorder::runtime::RuntimeEvent {
+                        runtime_id: recorder::runtime::RuntimeId::from_raw(1).unwrap(),
+                        worker_id: None,
+                        subject_id: 0,
+                        related_id: 0,
+                        value_0: 0,
+                        value_1: 0,
+                    },
+                    recorder::event::BacktraceCapture::Never,
+                )
+            }
+        ));
+        assert_eq!(constructed.load(Ordering::Relaxed), 0);
     }
 }

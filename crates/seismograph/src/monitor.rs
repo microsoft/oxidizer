@@ -42,7 +42,10 @@ impl Monitor {
     /// Creates a monitor builder.
     #[must_use]
     pub fn builder() -> Builder {
-        Builder::default()
+        Builder {
+            name: None,
+            instance: None,
+        }
     }
 
     /// Returns this process instance's published descriptor.
@@ -87,7 +90,7 @@ impl Drop for Monitor {
 }
 
 /// Builder for a localhost monitor.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Builder {
     name: Option<String>,
     instance: Option<String>,
@@ -191,24 +194,15 @@ fn create_monitor_directory(path: &Path) -> Result<(), Error> {
         source,
     })?;
     #[cfg(unix)]
-    set_monitor_directory_permissions(path)?;
-    Ok(())
-}
+    {
+        use std::os::unix::fs::PermissionsExt as _;
 
-#[cfg(unix)]
-fn set_monitor_directory_permissions(path: &Path) -> Result<(), Error> {
-    use std::os::unix::fs::PermissionsExt as _;
-
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|source| set_permissions_error(path, source))
-}
-
-#[cfg(unix)]
-#[cfg_attr(coverage_nightly, coverage(off))] // The OS error is not portably injectable after successful directory creation.
-fn set_permissions_error(path: &Path, source: io::Error) -> Error {
-    Error::SetPermissions {
-        path: path.to_owned(),
-        source,
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|source| Error::SetPermissions {
+            path: path.to_owned(),
+            source,
+        })?;
     }
+    Ok(())
 }
 
 fn publish_descriptor(directory: &Path, descriptor: &MonitorDescriptor) -> Result<PathBuf, Error> {
@@ -235,7 +229,10 @@ fn run_listener(
     last_error: &Mutex<Option<String>>,
 ) {
     let _suppression = SuppressionGuard::enter();
-    while !stop.load(Ordering::Acquire) {
+    loop {
+        if stop.load(Ordering::Acquire) {
+            break;
+        }
         match listener.accept() {
             Ok((stream, _peer)) => {
                 if let Err(error) = stream.set_nonblocking(false) {
@@ -255,13 +252,20 @@ fn run_listener(
                 }
                 *active_client.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
             }
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => thread::sleep(ACCEPT_RETRY_DELAY),
             Err(error) => {
-                *last_error.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error.to_string());
-                break;
+                if listener_accept_should_retry(error.kind()) {
+                    thread::sleep(ACCEPT_RETRY_DELAY);
+                } else {
+                    *last_error.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error.to_string());
+                    break;
+                }
             }
         }
     }
+}
+
+const fn listener_accept_should_retry(kind: io::ErrorKind) -> bool {
+    matches!(kind, io::ErrorKind::WouldBlock)
 }
 
 fn spawn_listener_thread(
@@ -294,7 +298,9 @@ fn handle_client(mut stream: TcpStream, descriptor: &MonitorDescriptor, stop: &A
     stream.set_read_timeout(Some(CLIENT_READ_TIMEOUT)).map_err(ClientError::Io)?;
     stream.set_write_timeout(Some(CLIENT_WRITE_TIMEOUT)).map_err(ClientError::Io)?;
 
-    let authentication_deadline = Instant::now() + CLIENT_AUTHENTICATION_TIMEOUT;
+    let authentication_deadline = Instant::now()
+        .checked_add(CLIENT_AUTHENTICATION_TIMEOUT)
+        .expect("the five-second authentication timeout fits in Instant");
     let (request_id, request) = read_request_retry_until(&mut stream, stop, Some(authentication_deadline))?;
     let Request::Hello { authentication } = request else {
         return Err(ClientError::HandshakeRequired);
@@ -322,7 +328,10 @@ fn handle_client(mut stream: TcpStream, descriptor: &MonitorDescriptor, stop: &A
     )
     .map_err(ClientError::Protocol)?;
 
-    while !stop.load(Ordering::Acquire) {
+    loop {
+        if stop.load(Ordering::Acquire) {
+            break;
+        }
         let (request_id, request) = match read_request_retry(&mut stream, stop) {
             Ok(request) => request,
             Err(ClientError::Stopped | ClientError::Disconnected) => return Ok(()),
@@ -781,13 +790,28 @@ mod tests {
             Monitor::builder().name("valid").instance("").start(),
             Err(Error::InvalidIdentity)
         ));
-        assert!(!default_application_name().is_empty());
+        assert_eq!(
+            default_application_name(),
+            std::env::current_exe().unwrap().file_name().unwrap().to_string_lossy().into_owned()
+        );
 
         let monitor = Monitor::builder().name("monitor-debug").start().unwrap();
         assert_eq!(monitor.last_error(), None);
         let debug = format!("{monitor:?}");
         assert!(debug.contains("Monitor"));
         assert!(debug.contains("descriptor_path"));
+
+        let mut stream = TcpStream::connect(monitor.descriptor().socket_address()).unwrap();
+        seismograph_protocol::write_request(&mut stream, 1, &Request::ReadRecorderStatistics).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Some(error) = monitor.last_error() {
+                assert_eq!(error, "monitor handshake is required");
+                break;
+            }
+            assert!(Instant::now() < deadline, "listener did not publish its client error");
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[cfg_attr(miri, ignore)]
@@ -818,8 +842,9 @@ mod tests {
             },
         )
         .unwrap();
+        let stop = AtomicBool::new(true);
         assert!(matches!(
-            handle_client(server, &descriptor, &AtomicBool::new(false)),
+            handle_client(server, &descriptor, &stop),
             Err(ClientError::Authentication)
         ));
         assert_eq!(
@@ -965,6 +990,8 @@ mod tests {
         );
         assert_eq!(io_error_action(io::ErrorKind::Other, false), IoErrorAction::Protocol);
         assert_eq!(io_error_action(io::ErrorKind::Other, true), IoErrorAction::Stopped);
+        assert!(listener_accept_should_retry(io::ErrorKind::WouldBlock));
+        assert!(!listener_accept_should_retry(io::ErrorKind::Other));
 
         let mut attempts = 0;
         assert!(matches!(
@@ -986,6 +1013,8 @@ mod tests {
         ));
         assert!(matches!(
             read_request_retry_with(&AtomicBool::new(false), Some(Instant::now()), || {
+                attempts += 1;
+                assert!(attempts <= 3, "expired authentication reads must not retry");
                 Err(seismograph_protocol::Error::Io(io::Error::new(io::ErrorKind::TimedOut, "retry")))
             }),
             Err(ClientError::AuthenticationTimedOut)
@@ -1045,8 +1074,21 @@ mod tests {
             },
             Error::Spawn(io_error()),
         ];
-        for error in startup_cases {
-            let _message = error.to_string();
+        let expected = [
+            "monitor application and instance names must not be empty".to_owned(),
+            "failed to bind Seismograph monitor to localhost: socket failed".to_owned(),
+            "failed to configure Seismograph monitor listener: socket failed".to_owned(),
+            "failed to read Seismograph monitor address: socket failed".to_owned(),
+            format!("failed to generate Seismograph monitor identity: {}", getrandom::Error::UNSUPPORTED),
+            "Seismograph monitor protocol failed: invalid Seismograph monitor message".to_owned(),
+            "failed to create monitor directory monitor: socket failed".to_owned(),
+            "failed to secure monitor directory monitor: socket failed".to_owned(),
+            "failed to publish monitor descriptor monitor: invalid Seismograph monitor message".to_owned(),
+            "failed to publish monitor descriptor temporary as monitor: socket failed".to_owned(),
+            "failed to start Seismograph monitor thread: socket failed".to_owned(),
+        ];
+        for (error, expected) in startup_cases.into_iter().zip(expected) {
+            assert_eq!(error.to_string(), expected);
             let expected_source = !matches!(error, Error::InvalidIdentity | Error::Random(_));
             assert_eq!(std::error::Error::source(&error).is_some(), expected_source);
         }

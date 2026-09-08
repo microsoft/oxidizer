@@ -51,6 +51,24 @@ impl<T> SystemSlice<T> {
     }
 }
 
+impl SystemSlice<u8> {
+    /// Allocates `len` zeroed bytes through [`System`], returning `None` on allocation failure.
+    #[must_use]
+    pub fn try_zeroed(len: usize) -> Option<Self> {
+        if len == 0 {
+            return Some(Self {
+                pointer: NonNull::dangling(),
+                len,
+            });
+        }
+        let layout = Layout::array::<u8>(len).ok()?;
+        // SAFETY: layout is nonzero and valid. The returned pointer is owned by
+        // this value and released with the same allocator and layout.
+        let pointer = NonNull::new(unsafe { System.alloc_zeroed(layout) })?;
+        Some(Self { pointer, len })
+    }
+}
+
 impl<T> Deref for SystemSlice<T> {
     type Target = [T];
 

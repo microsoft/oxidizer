@@ -846,6 +846,9 @@ mod tests {
 
     #[test]
     fn clocks_report_metadata_and_reject_unknown_values() {
+        let before = EventTimestamp::now();
+        std::thread::sleep(Duration::from_millis(1));
+        let after = EventTimestamp::now();
         assert_eq!(
             (
                 EventClock::Unspecified.ticks_per_second(),
@@ -855,6 +858,7 @@ mod tests {
                 EventClock::from_wire_value(0),
                 EventClock::from_wire_value(2),
                 EventTimestamp::from_ticks(9).duration_since(EventTimestamp::from_ticks(4)),
+                after > before,
             ),
             (
                 None,
@@ -863,7 +867,8 @@ mod tests {
                 1,
                 Some(EventClock::Unspecified),
                 None,
-                Duration::from_nanos(5)
+                Duration::from_nanos(5),
+                true,
             )
         );
     }
@@ -912,6 +917,17 @@ mod tests {
             value_0: 4,
             value_1: 5,
         };
+        let io = IoEvent {
+            operation_id: super::super::io::IoOperationId::from_raw(1).unwrap(),
+            resource_id: super::super::io::IoResourceId::from_raw(2).unwrap(),
+            buffer_id: Some(super::super::io::BufferId::from_raw(3).unwrap()),
+            requested_bytes: 4,
+            completed_bytes: 5,
+            buffer_len: 6,
+            buffer_span_count: 7,
+            resource_kind: super::super::io::IoResourceKind::File,
+            outcome: super::super::io::IoOutcome::Success,
+        };
         let events = [
             Event {
                 thread_id: ThreadId::new(1),
@@ -948,18 +964,35 @@ mod tests {
                 payload: EventPayload::Runtime(runtime),
                 call_stack: Vec::new(),
             },
+            Event {
+                thread_id: ThreadId::new(1),
+                sequence: EventSequence::new(5),
+                timestamp: EventTimestamp::from_ticks(5),
+                kind: EventKind::IoReadFinished,
+                payload: EventPayload::Io(io),
+                call_stack: Vec::new(),
+            },
         ];
 
         assert_eq!(
             events
                 .iter()
-                .map(|event| (event.object_id(), event.measurement(), event.allocation(), event.runtime(),))
+                .map(|event| {
+                    (
+                        event.object_id(),
+                        event.measurement(),
+                        event.allocation(),
+                        event.runtime(),
+                        event.io(),
+                    )
+                })
                 .collect::<Vec<_>>(),
             vec![
-                (Some(ObjectId::new(7)), None, None, None),
-                (Some(ObjectId::new(8)), Some(9), None, None),
-                (Some(ObjectId::new(11)), None, Some(allocation), None),
-                (None, None, None, Some(runtime)),
+                (Some(ObjectId::new(7)), None, None, None, None),
+                (Some(ObjectId::new(8)), Some(9), None, None, None),
+                (Some(ObjectId::new(11)), None, Some(allocation), None, None),
+                (None, None, None, Some(runtime), None),
+                (Some(ObjectId::new(2)), None, None, None, Some(io)),
             ]
         );
     }
