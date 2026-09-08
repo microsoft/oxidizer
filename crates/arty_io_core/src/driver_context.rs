@@ -11,13 +11,13 @@ use crate::SystemTasks;
 ///
 /// The fields are private so that future versions can add facilities without preventing existing
 /// driver implementations from compiling.
-pub struct DriverInit {
+pub struct DriverContext {
     thread: Thread,
     system_tasks: SystemTasks,
 }
 
-impl DriverInit {
-    /// Creates initialization data for one driver instance.
+impl DriverContext {
+    /// Creates the context for one driver instance.
     ///
     /// This constructor is intended for runtime implementations and driver tests.
     #[must_use]
@@ -38,8 +38,10 @@ impl DriverInit {
     }
 }
 
-impl fmt::Debug for DriverInit {
+impl fmt::Debug for DriverContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("DriverInit").field("thread", &self.thread).finish_non_exhaustive()
+        f.debug_struct("DriverContext")
+            .field("thread", &self.thread)
+            .finish_non_exhaustive()
     }
 }

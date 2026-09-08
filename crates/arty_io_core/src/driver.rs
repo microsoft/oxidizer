@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::task::{Context as TaskContext, Poll, Waker};
+use std::task::Waker;
 use std::time::Duration;
 
-use crate::DriverContext;
+use crate::{IoContext, ShutdownError};
 
 /// One async worker's adapter to an I/O subsystem.
 ///
@@ -28,9 +28,8 @@ use crate::DriverContext;
 ///
 /// Completion buffers, queue-reader state, batching state, and lifecycle state used only on the
 /// owning thread remain ordinary driver fields. Exclusive runtime ownership lets
-/// [`process_completions`](Self::process_completions),
-/// [`begin_shutdown`](Self::begin_shutdown), and [`poll_shutdown`](Self::poll_shutdown) access
-/// that state through `&mut self` without interior mutability.
+/// [`process_completions`](Self::process_completions) access that state through `&mut self`
+/// without interior mutability.
 ///
 /// # Shutdown safety
 ///
@@ -46,7 +45,7 @@ use crate::DriverContext;
 /// into this stable contract or its runtime caller.
 pub trait Driver: 'static {
     /// The handle through which consumers start operations on this driver.
-    type Context: DriverContext;
+    type Context: IoContext;
 
     /// Returns a context bound to this driver instance.
     ///
@@ -72,24 +71,28 @@ pub trait Driver: 'static {
     #[must_use]
     fn waker(&self) -> Waker;
 
-    /// Prevents new operations from starting and begins graceful cleanup.
+    /// Shuts down the driver.
     ///
-    /// In-flight operations may continue. This method is idempotent and closes admission before
-    /// returning.
-    fn begin_shutdown(&mut self);
-
-    /// Reports graceful drain progress.
+    /// This method consumes the driver, closes admission to new operations, and blocks while
+    /// existing operations and operating-system callbacks drain. Context handles do not
+    /// themselves delay shutdown because they remain valid in a closed state.
     ///
-    /// [`Poll::Ready`] means the driver has released everything it held on behalf of active
-    /// operations and the operating system. Context handles do not by themselves prevent
-    /// completion because they remain valid in a closed state.
+    /// The implementation remains responsible for making progress on its own completions and for
+    /// bounding the wait. It must not wait indefinitely or depend on work that can run only after
+    /// this call returns, such as another driver on the same runtime thread. When graceful cleanup
+    /// cannot complete within the driver's policy, it returns an error.
     ///
-    /// Calling this method before [`begin_shutdown`](Self::begin_shutdown) begins shutdown as if
-    /// that method had been called first.
+    /// [`Drop::drop`] still runs on the consumed value after this method returns. Cleanup shared by
+    /// shutdown and `Drop` must therefore be idempotent or guarded. A driver that needs ownership
+    /// of one of its fields during shutdown can store that field in an [`Option`] and take it
+    /// before waiting.
     ///
-    /// While returning [`Poll::Pending`], the driver arranges for `cx.waker()` to be woken when
-    /// shutdown can make progress. Calls after completion continue to return [`Poll::Ready`].
-    /// The runtime bounds the total shutdown duration. Completion is a liveness signal and never
-    /// authorizes otherwise-unsafe destruction.
-    fn poll_shutdown(&mut self, cx: &mut TaskContext<'_>) -> Poll<()>;
+    /// Regardless of the result, the consumed driver must remain safe to drop and contexts must
+    /// reject new operations.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when graceful cleanup exceeds the driver's liveness policy or an
+    /// underlying cleanup operation fails.
+    fn shutdown(self) -> Result<(), ShutdownError>;
 }

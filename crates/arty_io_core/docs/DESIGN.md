@@ -19,12 +19,13 @@ The contract follows four design rules:
 one registered driver type
         |
         v
-DriverProvider
+IoContext::provider(ProviderContext)
         |
         | clone, relocate, consume once per worker
         v
-Driver + Context
+DriverProvider::create(DriverContext)
         |
+        +-- Driver + IoContext
         +-- completion processing and wake-up
         +-- optional SystemTasks use
         +-- optional provider-owned threads
@@ -38,22 +39,26 @@ clone creates one `Driver`.
 hold. `ThreadAware` relocation lets the context optimize for the destination
 worker, but correctness cannot depend on relocation being called.
 
-The runtime owns each driver exclusively, so completion processing and shutdown
-receive `&mut self`. This lets a driver mutate thread-local state directly
-without adding synchronization or dynamic borrow checks solely to satisfy the
-contract.
+The runtime owns each driver exclusively, so completion processing receives
+`&mut self`. This lets a driver mutate thread-local state directly without
+adding synchronization or dynamic borrow checks solely to satisfy the contract.
 
-`Driver` is dyn-compatible once its `Context` associated type is specified, so
-a runtime can store `Box<dyn Driver<Context = C>>` and invoke every lifecycle
-method through the trait object.
+`Driver` is dyn-compatible once its `Context` associated type is specified.
+Runtimes that erase unrelated context types use a private owning shim, which is
+also where they adapt the by-value `shutdown` method to boxed storage.
 
-Every context implements `DriverContext`, whose associated `Provider` and
-`provider()` function are the complete registration recipe. A runtime method
-such as `get_context::<MyContext>()` therefore needs only the context type. The
-first request constructs the provider, initializes its driver on every active
-worker, and returns only after all workers acknowledge completion. Later
-requests reuse the registered driver and return the cached context for the
+Every consumer context implements `IoContext`, whose associated `Provider` and
+`provider(ProviderContext)` function are the complete registration recipe. A
+runtime method such as `get_context::<MyContext>()` therefore needs only the
+context type. The first request creates the provider, initializes its driver on
+every active worker, and returns only after all workers acknowledge completion.
+Later requests reuse the registered driver and return the cached context for the
 calling worker.
+
+`ProviderContext` is the runtime-to-provider extension point. It is empty in the
+initial contract. `DriverContext` is the separate per-worker extension point
+passed to `DriverProvider::create`; it identifies the owning worker and exposes
+runtime facilities needed by the driver.
 
 ## Registration stays in the runtime
 
@@ -74,7 +79,7 @@ the same `arty_io_core` contract.
 
 An I/O subsystem chooses its own execution strategy. Before calling
 `DriverProvider::create`, the runtime chooses the thread that will own the
-driver. Completion processing and shutdown polling run only on that thread.
+driver. Completion processing and blocking shutdown run only on that thread.
 Internally, the driver may process completions there, delegate system work, or
 coordinate with threads managed by its provider.
 
@@ -92,13 +97,9 @@ prevent the runtime from dropping a driver while external code still referenced
 its memory. This contract moves soundness back to the owning type:
 
 - `Driver::Drop` is always safe.
-- `begin_shutdown` idempotently stops new operations.
-- `poll_shutdown` reports graceful cleanup progress.
-
-The runtime records the lifecycle transition before invoking the driver, but
-idempotence keeps duplicate calls from becoming an implicit safety precondition
-on runtime control flow. Polling shutdown also begins it when necessary, so call
-ordering is not a safety or liveness precondition either.
+- `Driver::shutdown` consumes the driver.
+- Shutdown closes admission and blocks until cleanup completes or fails.
+- Failure is reported through `ShutdownError`.
 
 Contexts remain usable as closed handles after shutdown and therefore do not
 participate in the drain count. In-flight operations and operating-system
@@ -119,10 +120,19 @@ reference counting or ecosystem storage such as `multitude`, `plurality`,
 so implementations can evolve independently. Platform-specific unsafe code, if
 needed, remains isolated behind the driver's private ownership types.
 
-The runtime begins shutdown for every driver before polling any one of them.
-While a driver reports `Pending`, the runtime continues bounded completion
-processing. A shutdown timeout may terminate graceful cleanup, but it never
-changes whether dropping the driver is memory-safe.
+The runtime removes a driver from its normal completion loop and transfers
+ownership into `shutdown`. The call performs whatever completion processing,
+waiting, cancellation, and cleanup the implementation requires. `SystemTasks`
+remains available until the call returns. The driver owns the liveness policy
+for this blocking phase and returns an error instead of waiting indefinitely.
+It does not depend on work that can run only after its own shutdown returns,
+including another driver serialized on the same runtime thread. A returned
+error reports incomplete graceful cleanup but never changes whether dropping
+the consumed driver is memory-safe.
+
+`ShutdownError` accepts either a message or an underlying error. This keeps the
+stable contract independent of driver-specific error taxonomies while preserving
+an ordinary error source chain.
 
 ## Creation failure
 
@@ -145,7 +155,7 @@ Some I/O mechanisms need synchronous calls that cannot run on an async worker.
 - it stays alive through driver shutdown.
 
 The cloneable handle hides the runtime's shared-ownership mechanism instead of
-exposing `Arc<dyn ...>` in `DriverInit`. Its generic `spawn` method boxes only
+exposing `Arc<dyn ...>` in `DriverContext`. Its generic `spawn` method boxes only
 at the internal callback boundary.
 
 ## Compatibility
@@ -161,8 +171,10 @@ Driver authors depend on `thread_aware_core` when implementing relocation.
 
 Future additions follow these rules:
 
-- Add optional runtime facilities through private `DriverInit` fields, defaults
-  in the existing constructor, and new accessors.
+- Add optional provider facilities through private `ProviderContext` fields and
+  new accessors.
+- Add optional per-driver facilities through private `DriverContext` fields and
+  new accessors.
 - Adding a new mandatory constructor input is a breaking change and requires
   explicit stabilization review.
 - Add trait methods only with compatible defaults when possible.
@@ -176,7 +188,7 @@ The initial API does not decide:
 - how a runtime selects the driver that provides its waiting point;
 - whether workers or drivers are pinned to processors;
 - whether registrations cover existing workers atomically;
-- how runtime shutdown timeouts are configured;
+- how runtimes order independent driver shutdown calls;
 - whether a reusable latched-waker implementation belongs in a later utility
   crate;
 - which memory pool, clock, or telemetry facilities drivers may eventually

@@ -6,11 +6,9 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use std::sync::{Mutex, PoisonError, mpsc};
-use std::task::{Context, Poll, Waker};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
 
-use arty_io_core::{Driver, DriverContext, DriverInit, DriverProvider, SystemTasks};
+use arty_io_core::{Driver, DriverContext, DriverProvider, IoContext, ProviderContext, ShutdownError, SystemTasks};
 use thread_aware_core::{Thread, ThreadAware};
 
 use super::system_tasks::runtime_system_tasks;
@@ -18,8 +16,8 @@ use super::system_tasks::runtime_system_tasks;
 type ContextBox = Box<dyn Any + Send>;
 type ContextCache = HashMap<TypeId, ContextBox>;
 type DriverStore = Vec<Box<dyn ErasedDriver>>;
-type Install = Box<dyn FnOnce(DriverInit, &mut DriverStore) -> ContextBox + Send>;
-type ShutdownResult = Result<(), String>;
+type Install = Box<dyn FnOnce(DriverContext, &mut DriverStore) -> ContextBox + Send>;
+type ShutdownResult = Result<(), ShutdownError>;
 
 enum Command {
     Install { install: Install, reply: mpsc::Sender<ContextBox> },
@@ -36,27 +34,12 @@ impl fmt::Debug for Command {
 }
 
 trait ErasedDriver {
-    fn process_completions(&mut self, max_wait: Duration);
-    fn waker(&self) -> Waker;
-    fn begin_shutdown(&mut self);
-    fn poll_shutdown(&mut self, cx: &mut Context<'_>) -> Poll<()>;
+    fn shutdown(self: Box<Self>) -> Result<(), ShutdownError>;
 }
 
 impl<D: Driver> ErasedDriver for D {
-    fn process_completions(&mut self, max_wait: Duration) {
-        Driver::process_completions(self, max_wait);
-    }
-
-    fn waker(&self) -> Waker {
-        Driver::waker(self)
-    }
-
-    fn begin_shutdown(&mut self) {
-        Driver::begin_shutdown(self);
-    }
-
-    fn poll_shutdown(&mut self, cx: &mut Context<'_>) -> Poll<()> {
-        Driver::poll_shutdown(self, cx)
+    fn shutdown(self: Box<Self>) -> Result<(), ShutdownError> {
+        Driver::shutdown(*self)
     }
 }
 
@@ -99,7 +82,7 @@ impl Runtime {
 
             ready_rx
                 .recv()
-                .map_err(|error| RuntimeError(format!("worker stopped during startup: {error}")))?;
+                .map_err(|error| RuntimeError::message(format!("worker stopped during startup: {error}")))?;
             workers.push(Worker {
                 commands: commands_tx,
                 thread: Some(thread),
@@ -115,7 +98,7 @@ impl Runtime {
 
     pub(super) fn get_context<C>(&self) -> C
     where
-        C: DriverContext,
+        C: IoContext,
     {
         // Keep the guard for the entire registration. If any worker fails to initialize, the
         // resulting panic poisons this mutex and permanently prevents another registration attempt.
@@ -128,15 +111,15 @@ impl Runtime {
             return context.clone();
         }
 
-        let provider = C::provider();
+        let provider = C::provider(ProviderContext::new());
         let mut caller_context = None;
 
         for worker in &self.workers {
             let mut worker_provider = provider.clone();
             let (reply_tx, reply_rx) = mpsc::channel();
-            let install = Box::new(move |init: DriverInit, drivers: &mut DriverStore| {
-                worker_provider.relocate(None, init.thread());
-                let driver = worker_provider.create(init);
+            let install = Box::new(move |context: DriverContext, drivers: &mut DriverStore| {
+                worker_provider.relocate(None, context.thread());
+                let driver = worker_provider.create(context);
                 let context = driver.context();
                 drivers.push(Box::new(driver));
                 Box::new(context) as ContextBox
@@ -182,7 +165,7 @@ impl Runtime {
             match worker.commands.send(Command::Stop { reply: reply_tx }) {
                 Ok(()) => shutdowns.push(reply_rx),
                 Err(error) => {
-                    failure.get_or_insert_with(|| RuntimeError(format!("worker stopped before shutdown: {error}")));
+                    failure.get_or_insert_with(|| RuntimeError::message(format!("worker stopped before shutdown: {error}")));
                 }
             }
         }
@@ -191,10 +174,10 @@ impl Runtime {
             match shutdown.recv() {
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => {
-                    failure.get_or_insert(RuntimeError(error));
+                    failure.get_or_insert_with(|| RuntimeError::DriverShutdown(error));
                 }
                 Err(error) => {
-                    failure.get_or_insert_with(|| RuntimeError(format!("worker stopped during driver shutdown: {error}")));
+                    failure.get_or_insert_with(|| RuntimeError::message(format!("worker stopped during driver shutdown: {error}")));
                 }
             }
         }
@@ -203,11 +186,11 @@ impl Runtime {
             match worker.thread.take() {
                 Some(thread) => {
                     if thread.join().is_err() {
-                        failure.get_or_insert_with(|| RuntimeError("worker thread panicked".into()));
+                        failure.get_or_insert_with(|| RuntimeError::message("worker thread panicked"));
                     }
                 }
                 None => {
-                    failure.get_or_insert_with(|| RuntimeError("worker thread was already joined".into()));
+                    failure.get_or_insert_with(|| RuntimeError::message("worker thread was already joined"));
                 }
             }
         }
@@ -231,12 +214,12 @@ fn run_worker(worker: &Thread, system_tasks: &SystemTasks, commands: &mpsc::Rece
     while let Ok(command) = commands.recv() {
         match command {
             Command::Install { install, reply } => {
-                let init = DriverInit::new(worker.clone(), system_tasks.clone());
-                let context = install(init, &mut drivers);
+                let context = DriverContext::new(worker.clone(), system_tasks.clone());
+                let context = install(context, &mut drivers);
                 let _ = reply.send(context);
             }
             Command::Stop { reply } => {
-                let result = shutdown_drivers(&mut drivers);
+                let result = shutdown_drivers(drivers);
                 let _ = reply.send(result);
                 return;
             }
@@ -244,55 +227,47 @@ fn run_worker(worker: &Thread, system_tasks: &SystemTasks, commands: &mpsc::Rece
     }
 }
 
-fn shutdown_drivers(drivers: &mut DriverStore) -> ShutdownResult {
-    const TIMEOUT: Duration = Duration::from_secs(1);
-    const MAX_PARK: Duration = Duration::from_millis(10);
+fn shutdown_drivers(drivers: DriverStore) -> ShutdownResult {
+    let mut failure = None;
 
-    for driver in drivers.iter_mut() {
-        driver.begin_shutdown();
+    for driver in drivers {
+        if let Err(error) = driver.shutdown() {
+            failure.get_or_insert(error);
+        }
     }
 
-    let mut complete = vec![false; drivers.len()];
-    let deadline = Instant::now() + TIMEOUT;
-    loop {
-        let mut all_ready = true;
-
-        for (driver, is_complete) in drivers.iter_mut().zip(&mut complete) {
-            if *is_complete {
-                continue;
-            }
-
-            let waker = driver.waker();
-            let mut cx = Context::from_waker(&waker);
-
-            match driver.poll_shutdown(&mut cx) {
-                Poll::Ready(()) => *is_complete = true,
-                Poll::Pending => {
-                    all_ready = false;
-                    let remaining = deadline.saturating_duration_since(Instant::now());
-
-                    if remaining.is_zero() {
-                        return Err("driver shutdown timed out".into());
-                    }
-
-                    driver.process_completions(remaining.min(MAX_PARK));
-                }
-            }
-        }
-
-        if all_ready {
-            return Ok(());
-        }
+    match failure {
+        Some(error) => Err(error),
+        None => Ok(()),
     }
 }
 
 #[derive(Debug)]
-pub(super) struct RuntimeError(String);
+pub(super) enum RuntimeError {
+    Message(Box<str>),
+    DriverShutdown(ShutdownError),
+}
 
-impl fmt::Display for RuntimeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
+impl RuntimeError {
+    fn message(message: impl Into<String>) -> Self {
+        Self::Message(message.into().into_boxed_str())
     }
 }
 
-impl Error for RuntimeError {}
+impl fmt::Display for RuntimeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Message(message) => f.write_str(message),
+            Self::DriverShutdown(_) => f.write_str("runtime shutdown failed"),
+        }
+    }
+}
+
+impl Error for RuntimeError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Message(_) => None,
+            Self::DriverShutdown(error) => Some(error),
+        }
+    }
+}

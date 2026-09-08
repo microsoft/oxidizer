@@ -3,7 +3,7 @@
 
 use thread_aware_core::ThreadAware;
 
-use crate::{Driver, DriverContext, DriverInit};
+use crate::{Driver, DriverContext, IoContext};
 
 /// Creates and connects one driver type's per-worker instances.
 ///
@@ -12,7 +12,7 @@ use crate::{Driver, DriverContext, DriverInit};
 /// Shared queues, registries, and driver-owned threads remain private provider state.
 pub trait DriverProvider: Clone + ThreadAware + Sized + 'static {
     /// The context type whose request selects this provider.
-    type Context: DriverContext<Provider = Self>;
+    type Context: IoContext<Provider = Self>;
 
     /// The driver type created by this provider.
     type Driver: Driver<Context = Self::Context>;
@@ -28,5 +28,5 @@ pub trait DriverProvider: Clone + ThreadAware + Sized + 'static {
     /// Panics when this worker's driver instance cannot be initialized. Driver registration is
     /// runtime-fundamental: after one worker fails to initialize, the runtime cannot continue in a
     /// coherent partially registered state.
-    fn create(self, init: DriverInit) -> Self::Driver;
+    fn create(self, context: DriverContext) -> Self::Driver;
 }

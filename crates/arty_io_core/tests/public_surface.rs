@@ -4,26 +4,41 @@
 //! Public surface contract tests.
 
 use std::cell::Cell;
+use std::error::Error;
+use std::io;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex, PoisonError};
-use std::task::{Context, Poll, Wake, Waker};
-use std::time::Duration;
+use std::sync::{Arc, Condvar, Mutex, PoisonError, mpsc};
+use std::task::{Wake, Waker};
+use std::time::{Duration, Instant};
 use std::{fmt, thread};
 
-use arty_io_core::{Driver, DriverContext, DriverInit, DriverProvider, SystemTasks};
+use arty_io_core::{Driver, DriverContext, DriverProvider, IoContext, ProviderContext, ShutdownError, SystemTasks};
 use static_assertions::{assert_impl_all, assert_not_impl_any};
 use thread_aware_core::{Thread, ThreadAware};
 
-assert_impl_all!(DriverInit: Send, Sync, fmt::Debug);
+assert_impl_all!(DriverContext: Send, Sync, fmt::Debug);
+assert_impl_all!(ProviderContext: Send, Sync, fmt::Debug);
+assert_impl_all!(ShutdownError: Send, Sync, fmt::Debug, fmt::Display, Error);
 assert_impl_all!(SystemTasks: Clone, Send, Sync, fmt::Debug);
 
 #[test]
-fn public_handles_have_expected_traits() {
-    let system_tasks = SystemTasks::new(|task| task());
+fn public_contexts_expose_runtime_facilities() {
+    let accepted = Arc::new(AtomicUsize::new(0));
+    let accepted_by_callback = Arc::clone(&accepted);
+    let system_tasks = SystemTasks::new(move |task| {
+        accepted_by_callback.fetch_add(1, Ordering::Relaxed);
+        task();
+    });
+    let worker = worker_thread();
+    let context = DriverContext::new(worker.clone(), system_tasks);
 
-    let _: &SystemTasks = &system_tasks;
-    assert!(format!("{system_tasks:?}").contains("SystemTasks"));
+    context.system_tasks().spawn(|| {});
+
+    assert_eq!(context.thread(), &worker);
+    assert_eq!(accepted.load(Ordering::Relaxed), 1);
+    assert!(format!("{context:?}").contains("DriverContext"));
+    assert!(format!("{:?}", ProviderContext::default()).contains("ProviderContext"));
 }
 
 #[test]
@@ -42,84 +57,53 @@ fn driver_is_boxable_with_its_context_type() {
 }
 
 #[test]
-fn driver_init_exposes_runtime_facilities() {
-    let accepted = Arc::new(AtomicUsize::new(0));
-    let accepted_by_callback = Arc::clone(&accepted);
-    let system_tasks = SystemTasks::new(move |task| {
-        accepted_by_callback.fetch_add(1, Ordering::Relaxed);
-        task();
-    });
-    let worker = worker_thread();
-    let init = DriverInit::new(worker.clone(), system_tasks);
-
-    init.system_tasks().spawn(|| {});
-
-    assert_eq!(init.thread(), &worker);
-    assert_eq!(accepted.load(Ordering::Relaxed), 1);
-    assert!(format!("{init:?}").contains("DriverInit"));
-}
-
-#[test]
-fn provider_creation_is_typed_and_infallible() {
-    let init = driver_init();
-    let driver = TestProvider.create(init);
-    assert_eq!(driver.context(), TestContext(7));
-}
-
-#[test]
-fn context_type_selects_provider_and_driver() {
-    fn provider_for<C: DriverContext>() -> C::Provider {
-        C::provider()
+fn provider_creation_uses_both_contexts() {
+    fn provider_for<C: IoContext>(context: ProviderContext) -> C::Provider {
+        C::provider(context)
     }
 
-    let provider: TestProvider = provider_for::<TestContext>();
-    let driver = provider.create(driver_init());
+    let provider: TestProvider = provider_for::<TestContext>(ProviderContext::new());
+    let driver = provider.create(driver_context());
 
     assert_eq!(driver.context(), TestContext(7));
 }
 
 #[test]
-fn shutdown_is_idempotent_and_pollable() {
+fn shutdown_consumes_the_driver() {
     let state = Rc::new(ShutdownState::default());
-    let mut driver = LocalDriver::new(Rc::clone(&state));
-    let wake_count = Arc::new(CountingWake::default());
-    let waker = Waker::from(Arc::clone(&wake_count));
-    let mut cx = Context::from_waker(&waker);
+    let driver = LocalDriver::new(Rc::clone(&state));
 
-    driver.begin_shutdown();
-    driver.begin_shutdown();
-    assert_eq!(state.begin_calls.get(), 1);
-    assert_eq!(driver.poll_shutdown(&mut cx), Poll::Pending);
-    assert_eq!(state.poll_calls.get(), 1);
-    assert_eq!(wake_count.count.load(Ordering::Relaxed), 1);
+    driver.shutdown().unwrap();
 
-    assert_eq!(driver.poll_shutdown(&mut cx), Poll::Ready(()));
-    assert_eq!(state.begin_calls.get(), 1);
-    assert_eq!(state.poll_calls.get(), 2);
-    assert_eq!(driver.poll_shutdown(&mut cx), Poll::Ready(()));
+    assert_eq!(state.shutdown_calls.get(), 1);
+    assert_eq!(state.drop_calls.get(), 1);
 }
 
 #[test]
 fn shutdown_waits_for_active_operations_not_contexts() {
-    let mut driver = LeaseDriver::new();
+    let driver = LeaseDriver::new();
     let context = driver.context();
     let operation = context.begin_operation().expect("admission is open before shutdown");
-    let wake_count = Arc::new(CountingWake::default());
-    let waker = Waker::from(Arc::clone(&wake_count));
-    let mut cx = Context::from_waker(&waker);
+    let (shutdown_tx, shutdown_rx) = mpsc::channel();
 
-    driver.begin_shutdown();
+    let shutdown_thread = thread::spawn(move || {
+        shutdown_tx.send(driver.shutdown()).unwrap();
+    });
+
+    {
+        let mut lifecycle = context.state.lifecycle.lock().unwrap_or_else(PoisonError::into_inner);
+        while !lifecycle.shutdown_started {
+            lifecycle = context.state.changed.wait(lifecycle).unwrap_or_else(PoisonError::into_inner);
+        }
+    }
 
     assert!(context.begin_operation().is_none());
-    assert!(driver.context().begin_operation().is_none());
-    assert_eq!(driver.poll_shutdown(&mut cx), Poll::Pending);
+    assert!(matches!(shutdown_rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
 
     drop(operation);
-    assert_eq!(wake_count.count.load(Ordering::Relaxed), 1);
-    assert_eq!(driver.poll_shutdown(&mut cx), Poll::Ready(()));
 
-    drop(driver);
-    assert!(context.begin_operation().is_none());
+    shutdown_rx.recv_timeout(Duration::from_secs(1)).unwrap().unwrap();
+    shutdown_thread.join().unwrap();
 }
 
 #[test]
@@ -133,13 +117,19 @@ fn dropping_driver_closes_context_admission() {
 }
 
 #[test]
-fn polling_shutdown_closes_admission() {
-    let mut driver = LeaseDriver::new();
-    let context = driver.context();
-    let mut cx = Context::from_waker(Waker::noop());
+fn shutdown_error_can_be_created_from_message() {
+    let error = ShutdownError::from_message("driver drain timed out");
 
-    assert_eq!(driver.poll_shutdown(&mut cx), Poll::Ready(()));
-    assert!(context.begin_operation().is_none());
+    assert!(error.to_string().contains("timed out"));
+    assert!(error.source().is_none());
+}
+
+#[test]
+fn shutdown_error_can_be_created_from_cause() {
+    let error = ShutdownError::from_cause(io::Error::other("completion queue failed"));
+
+    assert!(error.to_string().contains("shutdown"));
+    assert!(error.source().is_some_and(|cause| cause.to_string().contains("completion queue")));
 }
 
 #[test]
@@ -225,9 +215,8 @@ impl TestCompletionQueue {
 
 #[derive(Debug, Default)]
 struct ShutdownState {
-    started: Cell<bool>,
-    begin_calls: Cell<usize>,
-    poll_calls: Cell<usize>,
+    shutdown_calls: Cell<usize>,
+    drop_calls: Cell<usize>,
 }
 
 #[derive(Debug)]
@@ -235,6 +224,7 @@ struct LocalDriver {
     state: Rc<ShutdownState>,
     context: TestContext,
     completion_queue: TestCompletionQueue,
+    owned_resource: Option<Box<()>>,
 }
 
 impl LocalDriver {
@@ -243,7 +233,15 @@ impl LocalDriver {
             state,
             context: TestContext(7),
             completion_queue: TestCompletionQueue::default(),
+            owned_resource: Some(Box::new(())),
         }
+    }
+}
+
+impl Drop for LocalDriver {
+    fn drop(&mut self) {
+        let _ = self.owned_resource.take();
+        self.state.drop_calls.update(|calls| calls + 1);
     }
 }
 
@@ -262,24 +260,10 @@ impl Driver for LocalDriver {
         self.completion_queue.waker()
     }
 
-    fn begin_shutdown(&mut self) {
-        if self.state.started.replace(true) {
-            return;
-        }
-
-        self.state.begin_calls.update(|calls| calls + 1);
-    }
-
-    fn poll_shutdown(&mut self, cx: &mut Context<'_>) -> Poll<()> {
-        self.begin_shutdown();
-        self.state.poll_calls.update(|calls| calls + 1);
-
-        if self.state.poll_calls.get() == 1 {
-            cx.waker().wake_by_ref();
-            Poll::Pending
-        } else {
-            Poll::Ready(())
-        }
+    fn shutdown(mut self) -> Result<(), ShutdownError> {
+        let _ = self.owned_resource.take();
+        self.state.shutdown_calls.update(|calls| calls + 1);
+        Ok(())
     }
 }
 
@@ -290,10 +274,10 @@ impl ThreadAware for TestContext {
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
 }
 
-impl DriverContext for TestContext {
+impl IoContext for TestContext {
     type Provider = TestProvider;
 
-    fn provider() -> Self::Provider {
+    fn provider(_context: ProviderContext) -> Self::Provider {
         TestProvider
     }
 }
@@ -309,7 +293,7 @@ impl DriverProvider for TestProvider {
     type Context = TestContext;
     type Driver = LocalDriver;
 
-    fn create(self, _init: DriverInit) -> Self::Driver {
+    fn create(self, _context: DriverContext) -> Self::Driver {
         LocalDriver::new(Rc::default())
     }
 }
@@ -338,10 +322,10 @@ impl ThreadAware for LeaseContext {
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
 }
 
-impl DriverContext for LeaseContext {
+impl IoContext for LeaseContext {
     type Provider = LeaseProvider;
 
-    fn provider() -> Self::Provider {
+    fn provider(_context: ProviderContext) -> Self::Provider {
         LeaseProvider
     }
 }
@@ -357,7 +341,7 @@ impl DriverProvider for LeaseProvider {
     type Context = LeaseContext;
     type Driver = LeaseDriver;
 
-    fn create(self, _init: DriverInit) -> Self::Driver {
+    fn create(self, _context: DriverContext) -> Self::Driver {
         LeaseDriver::new()
     }
 }
@@ -365,13 +349,13 @@ impl DriverProvider for LeaseProvider {
 #[derive(Debug, Default)]
 struct LeaseState {
     lifecycle: Mutex<LeaseLifecycle>,
+    changed: Condvar,
 }
 
 #[derive(Debug, Default)]
 struct LeaseLifecycle {
     shutdown_started: bool,
     active_operations: usize,
-    shutdown_waker: Option<Waker>,
 }
 
 #[derive(Debug)]
@@ -384,13 +368,11 @@ impl Drop for OperationLease {
         let mut lifecycle = self.state.lifecycle.lock().unwrap_or_else(PoisonError::into_inner);
 
         lifecycle.active_operations -= 1;
-        let waker = (lifecycle.active_operations == 0)
-            .then(|| lifecycle.shutdown_waker.take())
-            .flatten();
+        let drained = lifecycle.active_operations == 0;
         drop(lifecycle);
 
-        if let Some(waker) = waker {
-            waker.wake();
+        if drained {
+            self.state.changed.notify_all();
         }
     }
 }
@@ -409,6 +391,7 @@ impl LeaseDriver {
 impl Drop for LeaseDriver {
     fn drop(&mut self) {
         self.state.lifecycle.lock().unwrap_or_else(PoisonError::into_inner).shutdown_started = true;
+        self.state.changed.notify_all();
     }
 }
 
@@ -427,36 +410,42 @@ impl Driver for LeaseDriver {
         Waker::noop().clone()
     }
 
-    fn begin_shutdown(&mut self) {
-        self.state.lifecycle.lock().unwrap_or_else(PoisonError::into_inner).shutdown_started = true;
-    }
+    fn shutdown(self) -> Result<(), ShutdownError> {
+        const TIMEOUT: Duration = Duration::from_secs(1);
 
-    fn poll_shutdown(&mut self, cx: &mut Context<'_>) -> Poll<()> {
-        self.begin_shutdown();
         let mut lifecycle = self.state.lifecycle.lock().unwrap_or_else(PoisonError::into_inner);
+        lifecycle.shutdown_started = true;
+        self.state.changed.notify_all();
 
-        if lifecycle.active_operations == 0 {
-            Poll::Ready(())
-        } else {
-            lifecycle.shutdown_waker = Some(cx.waker().clone());
-            Poll::Pending
+        let deadline = Instant::now() + TIMEOUT;
+        while lifecycle.active_operations != 0 {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(ShutdownError::from_message(
+                    "active operations did not drain before the shutdown deadline",
+                ));
+            }
+
+            let (next, wait_result) = self
+                .state
+                .changed
+                .wait_timeout(lifecycle, remaining)
+                .unwrap_or_else(PoisonError::into_inner);
+            lifecycle = next;
+
+            if wait_result.timed_out() && lifecycle.active_operations != 0 {
+                return Err(ShutdownError::from_message(
+                    "active operations did not drain before the shutdown deadline",
+                ));
+            }
         }
+
+        Ok(())
     }
 }
 
-#[derive(Debug, Default)]
-struct CountingWake {
-    count: AtomicUsize,
-}
-
-impl Wake for CountingWake {
-    fn wake(self: Arc<Self>) {
-        self.count.fetch_add(1, Ordering::Relaxed);
-    }
-}
-
-fn driver_init() -> DriverInit {
-    DriverInit::new(worker_thread(), SystemTasks::new(|task| task()))
+fn driver_context() -> DriverContext {
+    DriverContext::new(worker_thread(), SystemTasks::new(|task| task()))
 }
 
 fn worker_thread() -> Thread {

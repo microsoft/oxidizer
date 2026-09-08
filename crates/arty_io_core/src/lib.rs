@@ -13,9 +13,12 @@
 //! I/O implementation. This crate contains the small vocabulary both sides share:
 //!
 //! - [`Driver`] is the adapter between one worker and an I/O subsystem.
-//! - [`DriverContext`] associates a requested context type with its provider.
+//! - [`IoContext`] is the consumer handle that selects its provider.
+//! - [`ProviderContext`] supplies runtime facilities when that provider is created.
 //! - [`DriverProvider`] creates and connects the per-worker adapters for a driver.
-//! - [`DriverInit`] describes the worker and runtime facilities available during creation.
+//! - [`DriverContext`] describes the worker and runtime facilities available during driver
+//!   creation.
+//! - [`ShutdownError`] reports unsuccessful graceful shutdown.
 //! - [`SystemTasks`] lets a driver delegate blocking system work to the runtime.
 //!
 //! Registration and driver placement are runtime behavior, not part of this crate. Keeping those
@@ -30,11 +33,11 @@
 //! context request
 //!       |
 //!       v
-//! DriverContext::provider()
+//! IoContext::provider(ProviderContext)
 //!       |
 //!       | clone and relocate once per worker
 //!       v
-//! DriverProvider::create(DriverInit)
+//! DriverProvider::create(DriverContext)
 //!       |
 //!       +-- Driver: owned and driven by that worker
 //!       +-- Context: obtained from the driver, then cached for consumers
@@ -42,13 +45,13 @@
 //!
 //! ## Registration and initialization
 //!
-//! A consumer asks the runtime for a concrete [`DriverContext`] type. On the first request for
-//! that type, the runtime calls [`DriverContext::provider`] and registers the resulting
-//! [`DriverProvider`]. Registration, synchronization, rollback, and caching remain runtime
-//! concerns.
+//! A consumer asks the runtime for a concrete [`IoContext`] type. On the first request for that
+//! type, the runtime creates a [`ProviderContext`], calls [`IoContext::provider`], and registers
+//! the resulting [`DriverProvider`]. Registration, synchronization, rollback, and caching remain
+//! runtime concerns.
 //!
 //! The runtime clones the provider for each active worker, relocates each clone to that worker,
-//! and invokes [`DriverProvider::create`] on the worker thread. [`DriverInit`] identifies the
+//! and invokes [`DriverProvider::create`] on the worker thread. [`DriverContext`] identifies the
 //! worker and supplies runtime facilities such as [`SystemTasks`]. The returned [`Driver`] stays
 //! on that thread for its entire lifetime; it is deliberately not required to be [`Send`] or
 //! [`Sync`]. Creation runs inline and must return promptly; waiting there for another worker to
@@ -97,25 +100,20 @@
 //!
 //! Shutdown is cooperative, but it is not a memory-safety protocol:
 //!
-//! 1. The runtime calls [`Driver::begin_shutdown`] on every driver, closing admission before it
-//!    polls any one driver for drain progress. The method is idempotent.
-//! 2. Existing operations continue making progress through [`Driver::process_completions`].
-//!    Contexts remain valid but reject new operations.
-//! 3. The runtime calls [`Driver::poll_shutdown`] for each driver. A pending driver registers the
-//!    supplied task waker, and the runtime continues processing completions with bounded waits.
-//!    Calling `poll_shutdown` before `begin_shutdown` starts shutdown as part of the poll.
-//! 4. [`Poll::Ready`][std::task::Poll::Ready] reports that active operations and
-//!    operating-system callbacks have drained. Context handles do not themselves delay this
-//!    transition, and later polls remain ready.
-//! 5. [`SystemTasks`] remains available through the graceful drain. The runtime bounds the total
-//!    drain duration and reports or terminates on a liveness failure. A driver's premature-drop
-//!    soundness must not depend on system work submitted after that deadline.
+//! 1. The runtime removes the driver from its normal completion loop and calls
+//!    [`Driver::shutdown`], transferring ownership of the driver.
+//! 2. `shutdown` closes admission, blocks while active operations and operating-system callbacks
+//!    drain, and performs graceful cleanup. It owns the liveness policy for that wait and returns
+//!    an error rather than blocking indefinitely. Contexts remain valid but reject new operations.
+//! 3. [`SystemTasks`] remains available until `shutdown` returns.
+//! 4. `shutdown` returns [`ShutdownError`] when graceful cleanup cannot be completed. The runtime
+//!    records or reports the error and continues shutting down its remaining drivers.
 //!
 //! A driver must nevertheless be safe to drop at any point, including during unwinding or after a
-//! shutdown timeout. Dropping closes admission if necessary. Storage that an operating system can
+//! shutdown error. Dropping closes admission if necessary. Storage that an operating system can
 //! reach only by raw pointer must have an independent owner that is retained rather than
-//! invalidated on a premature drop. Shutdown completion determines whether cleanup was graceful,
-//! never whether destruction is sound.
+//! invalidated on a premature drop. A successful shutdown determines whether cleanup was
+//! graceful, never whether destruction is sound.
 //!
 //! # Example
 //!
@@ -128,14 +126,18 @@
 //! - [Requirements](https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/REQUIREMENTS.md)
 //! - [Design](https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/DESIGN.md)
 
-mod context;
 mod driver;
-mod init;
+mod driver_context;
+mod io_context;
 mod provider;
+mod provider_context;
+mod shutdown_error;
 mod system_tasks;
 
-pub use context::DriverContext;
 pub use driver::Driver;
-pub use init::DriverInit;
+pub use driver_context::DriverContext;
+pub use io_context::IoContext;
 pub use provider::DriverProvider;
+pub use provider_context::ProviderContext;
+pub use shutdown_error::ShutdownError;
 pub use system_tasks::{SystemTask, SystemTasks};

@@ -19,7 +19,10 @@ The crate is the semver chokepoint for the driver ecosystem.
 
 The contract supports registration after runtime startup.
 
-- The requested context type identifies its provider and driver.
+- The requested `IoContext` type identifies its provider and driver.
+- The runtime supplies a `ProviderContext` when creating the provider.
+- `ProviderContext` is empty in the initial contract and can gain optional
+  runtime facilities later without changing the provider factory signature.
 - `get_context::<MyContext>()` needs no provider value or runtime configuration.
 - The first lookup returns only after every active worker has initialized the
   associated driver.
@@ -38,7 +41,7 @@ The runtime explicitly initializes a driver adapter for each async worker it
 serves.
 
 - A provider clone is relocated to the worker before creation.
-- `DriverInit::thread` identifies that worker and its runtime owner.
+- `DriverContext::thread` identifies that worker and its runtime owner.
 - A relocated provider clone is consumed exactly once.
 - The provider decides whether instances share queues, memory, threads, or
   nothing.
@@ -47,11 +50,12 @@ serves.
 
 The runtime does not dictate how an I/O subsystem distributes work.
 
-- Completion processing and shutdown methods take `&mut self`, reflecting the
-  runtime's exclusive ownership of a thread-local driver without forcing
-  implementations to add interior mutability.
+- Completion processing takes `&mut self`, reflecting the runtime's exclusive
+  ownership of a thread-local driver without forcing implementations to add
+  interior mutability.
 - `Driver` remains dyn-compatible when its `Context` associated type is
-  specified, so it can be stored as `Box<dyn Driver<Context = C>>`.
+  specified. A runtime may use a private owning shim to erase context types and
+  adapt consuming shutdown to boxed storage.
 - The runtime chooses the driver-owning thread before creation and invokes
   `process_completions` only from that thread.
 - A driver may delegate work through the runtime-owned `SystemTasks` handle.
@@ -69,7 +73,7 @@ A driver wake-up has the following semantics:
 - A wake is never dropped.
 - A waker remains memory-safe after its driver is gone.
 
-## R6: Safe and cooperative shutdown
+## R6: Safe and blocking shutdown
 
 Shutdown must not rely on an unsafe trait or a caller-checked inertness flag.
 
@@ -81,18 +85,24 @@ Shutdown must not rely on an unsafe trait or a caller-checked inertness flag.
   reference counts, pool leases, or equivalent safe handles.
 - If an operating system retains only a raw pointer into pooled storage, the
   storage owner remains alive independently of the driver.
-- Calling `begin_shutdown` idempotently closes admission.
-- `poll_shutdown` reports graceful drain progress and wakes its task when
-  progress becomes possible.
-- Calling `poll_shutdown` before `begin_shutdown` closes admission before
-  checking drain progress.
-- Once `poll_shutdown` returns `Ready`, later calls also return `Ready`.
+- `Driver::shutdown` consumes the driver and blocks until graceful cleanup
+  completes or fails.
+- Shutdown closes admission before waiting for active operations and
+  operating-system callbacks to drain.
+- Shutdown may return `ShutdownError`, constructed from either a descriptive
+  message or an underlying cause.
+- The driver bounds its own shutdown wait and returns `ShutdownError` rather
+  than blocking indefinitely.
+- A driver does not wait for work that can run only after its shutdown returns,
+  including another driver serialized on the same runtime thread.
+- Returning an error does not relax the requirement that consuming and dropping
+  the driver is memory-safe.
 - Contexts may outlive drivers; later operations fail safely.
 - The stable contract has no `unsafe Driver` implementation requirement and no
   `is_inert` query.
 - Platform-specific unsafe code remains private to the driver implementation.
-- The runtime bounds shutdown and reports or terminates on a liveness failure.
-  Shutdown completion is not a memory-safety precondition.
+- The runtime reports shutdown failures and continues shutting down its
+  remaining drivers. Shutdown completion is not a memory-safety precondition.
 
 ## R7: Initialization failure is fatal
 
@@ -113,7 +123,7 @@ The runtime facility for synchronous I/O work uses `SystemTask` terminology.
 - It does not run on an async worker.
 - Submission returns before the work completes.
 - The facility remains available through driver shutdown.
-- `DriverInit` exposes a crate-owned cloneable handle rather than the runtime's
+- `DriverContext` exposes a crate-owned cloneable handle rather than the runtime's
   shared-ownership implementation type.
 
 ## R9: Scope of the initial API

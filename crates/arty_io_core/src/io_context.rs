@@ -3,7 +3,7 @@
 
 use thread_aware_core::ThreadAware;
 
-use crate::DriverProvider;
+use crate::{DriverProvider, ProviderContext};
 
 /// A consumer-facing I/O handle that identifies the provider used to create it.
 ///
@@ -17,15 +17,18 @@ use crate::DriverProvider;
 /// and creates its driver instance on every active worker. The request completes only after all
 /// workers have initialized the driver. Later requests reuse the registered driver and do not call
 /// `provider` again.
-pub trait DriverContext: Clone + ThreadAware + 'static {
+pub trait IoContext: Clone + ThreadAware + 'static {
     /// The provider that creates the driver behind this context.
     type Provider: DriverProvider<Context = Self>;
 
     /// Returns the provider used when this context type is first requested.
     ///
+    /// `context` supplies runtime facilities for provider creation. It is empty in this version of
+    /// the contract and exists so facilities can be added without changing this method's shape.
+    ///
     /// The runtime gives this function once-semantics per context type. Implementations should
     /// therefore return an equivalent provider on every call and should not rely on calls after
     /// successful registration.
     #[must_use]
-    fn provider() -> Self::Provider;
+    fn provider(context: ProviderContext) -> Self::Provider;
 }
