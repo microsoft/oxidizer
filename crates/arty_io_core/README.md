@@ -63,12 +63,12 @@ on that thread for its entire lifetime; it is deliberately not required to be [`
 [`Sync`][__link16]. Creation runs inline and must return promptly; waiting there for another worker to
 make progress can deadlock registration.
 
-After creation, the runtime obtains the worker’s context through [`Driver::context`][__link17] and
-may cache both that context and the driver’s [waker][__link18]. The waker honors wakes
-raised by the driver’s own thread and remains safe to invoke after the driver is gone. The
-first context request completes only after every active worker has created its driver instance.
-Later requests reuse the registration and return the context cached for the calling worker. A
-runtime may retain the provider to initialize workers created later.
+After creation, the runtime obtains the worker’s context through [`Driver::context`][__link17] and may
+cache both that context and the driver’s [interruptor][__link18]. The interruptor
+honors interrupts raised by the driver’s own thread and remains safe to invoke after the driver
+is gone. The first context request completes only after every active worker has created its
+driver instance. Later requests reuse the registration and return the context cached for the
+calling worker. A runtime may retain the provider to initialize workers created later.
 
 Driver creation is infallible at the type level. If [`DriverProvider::create`][__link19] panics, the
 runtime does not continue with a driver registered on only part of its worker set. A driver
@@ -82,16 +82,18 @@ workers, and retained after their original driver is gone. Relocation may improv
 correctness must not depend on it.
 
 The runtime exclusively owns each driver and calls every [`Driver`][__link20] method only on its owning
-thread. A zero wait to [`Driver::process_completions`][__link21] performs a non-blocking completion pass;
-a bounded or unbounded wait lets the same call provide the worker’s idle point. The driver’s
-waker is latched, so it ends either the current wait or the next one. Runtime policy decides
-which driver supplies a worker’s waiting point and how additional drivers are scheduled.
+thread. A zero wait to [`Driver::process_completions`][__link21] performs a non-blocking completion pass
+without consuming a pending interrupt; a bounded or unbounded wait lets the same call provide
+the worker’s idle point. The driver’s interruptor is latched, so it ends either the current
+blocking wait or the next one without preventing pending completions from being processed.
+Runtime policy decides which driver supplies a worker’s waiting point and how additional
+drivers are scheduled.
 
 Operations may be submitted from other threads while the driver waits. A driver therefore
 separates its state into two parts:
 
-* State reached by contexts, wakers, background threads, or operating-system callbacks is
-  shared independently of the driver and uses appropriate reference counting and
+* State reached by contexts, interruptors, background threads, or operating-system callbacks
+  is shared independently of the driver and uses appropriate reference counting and
   synchronization. Each in-flight operation owns every resource it uses through a reference
   count, pool lease, or equivalent handle; contexts themselves hold no per-operation state and
   therefore do not delay shutdown.
@@ -138,7 +140,7 @@ inject its associated driver.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbfQqsFm1tbx8btUr7VWswbbMbPGpk8J0Eep0baHa4zHR4iY1hZIGCbGFydHlfaW9fY29yZWUwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbXHvW0KP2pNsbpAluTL3rKBwb7CkYGkSYEf0byc-sL65ysCdhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
  [__link0]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver
  [__link1]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=IoContext
  [__link10]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverProvider
@@ -149,7 +151,7 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link15]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link16]: https://doc.rust-lang.org/stable/std/marker/trait.Sync.html
  [__link17]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::context
- [__link18]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::waker
+ [__link18]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::interruptor
  [__link19]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverProvider::create
  [__link2]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=ProviderContext
  [__link20]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver

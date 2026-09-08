@@ -108,7 +108,7 @@ impl Driver for EchoDriver {
 
     fn process_completions(&mut self, _max_wait: Duration) {}
 
-    fn waker(&self) -> Waker {
+    fn interruptor(&self) -> Waker {
         Waker::noop().clone()
     }
 

@@ -121,7 +121,7 @@ impl Driver for SampleDriver {
 
     fn process_completions(&mut self, _max_wait: Duration) {}
 
-    fn waker(&self) -> Waker {
+    fn interruptor(&self) -> Waker {
         Waker::noop().clone()
     }
 

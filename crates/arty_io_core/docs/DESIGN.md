@@ -86,9 +86,12 @@ coordinate with threads managed by its provider.
 This avoids exposing primary or satellite roles as public API. Those are
 placement choices the runtime may change later.
 
-The driver's waker follows a strict latched contract. Without latching, a wake
-between the runtime's final work check and the actual wait can be lost and the
-worker can sleep forever.
+The driver's interruptor follows a strict latched contract. Without latching,
+an interrupt between the runtime's final work check and the actual wait can be
+lost and the worker can sleep forever. A non-blocking completion pass does not
+consume the latch; the next call that is willing to block observes it. An
+interrupt changes only the wait behavior, so already-pending completions are
+still processed.
 
 ## Shutdown
 
@@ -189,7 +192,7 @@ The initial API does not decide:
 - whether workers or drivers are pinned to processors;
 - whether registrations cover existing workers atomically;
 - how runtimes order independent driver shutdown calls;
-- whether a reusable latched-waker implementation belongs in a later utility
-  crate;
+- whether a reusable latched-interruptor implementation belongs in a later
+  utility crate;
 - which memory pool, clock, or telemetry facilities drivers may eventually
   receive.

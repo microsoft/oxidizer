@@ -57,12 +57,12 @@
 //! [`Sync`]. Creation runs inline and must return promptly; waiting there for another worker to
 //! make progress can deadlock registration.
 //!
-//! After creation, the runtime obtains the worker's context through [`Driver::context`] and
-//! may cache both that context and the driver's [waker][Driver::waker]. The waker honors wakes
-//! raised by the driver's own thread and remains safe to invoke after the driver is gone. The
-//! first context request completes only after every active worker has created its driver instance.
-//! Later requests reuse the registration and return the context cached for the calling worker. A
-//! runtime may retain the provider to initialize workers created later.
+//! After creation, the runtime obtains the worker's context through [`Driver::context`] and may
+//! cache both that context and the driver's [interruptor][Driver::interruptor]. The interruptor
+//! honors interrupts raised by the driver's own thread and remains safe to invoke after the driver
+//! is gone. The first context request completes only after every active worker has created its
+//! driver instance. Later requests reuse the registration and return the context cached for the
+//! calling worker. A runtime may retain the provider to initialize workers created later.
 //!
 //! Driver creation is infallible at the type level. If [`DriverProvider::create`] panics, the
 //! runtime does not continue with a driver registered on only part of its worker set. A driver
@@ -76,16 +76,18 @@
 //! correctness must not depend on it.
 //!
 //! The runtime exclusively owns each driver and calls every [`Driver`] method only on its owning
-//! thread. A zero wait to [`Driver::process_completions`] performs a non-blocking completion pass;
-//! a bounded or unbounded wait lets the same call provide the worker's idle point. The driver's
-//! waker is latched, so it ends either the current wait or the next one. Runtime policy decides
-//! which driver supplies a worker's waiting point and how additional drivers are scheduled.
+//! thread. A zero wait to [`Driver::process_completions`] performs a non-blocking completion pass
+//! without consuming a pending interrupt; a bounded or unbounded wait lets the same call provide
+//! the worker's idle point. The driver's interruptor is latched, so it ends either the current
+//! blocking wait or the next one without preventing pending completions from being processed.
+//! Runtime policy decides which driver supplies a worker's waiting point and how additional
+//! drivers are scheduled.
 //!
 //! Operations may be submitted from other threads while the driver waits. A driver therefore
 //! separates its state into two parts:
 //!
-//! - State reached by contexts, wakers, background threads, or operating-system callbacks is
-//!   shared independently of the driver and uses appropriate reference counting and
+//! - State reached by contexts, interruptors, background threads, or operating-system callbacks
+//!   is shared independently of the driver and uses appropriate reference counting and
 //!   synchronization. Each in-flight operation owns every resource it uses through a reference
 //!   count, pool lease, or equivalent handle; contexts themselves hold no per-operation state and
 //!   therefore do not delay shutdown.

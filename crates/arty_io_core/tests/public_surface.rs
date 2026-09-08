@@ -140,22 +140,36 @@ fn different_driver_types_have_distinct_identity() {
 }
 
 #[test]
-fn completion_processing_supports_latched_wakeup() {
+fn completion_processing_supports_latched_interrupt() {
     let mut driver = LocalDriver::new(Rc::default());
 
-    driver.waker().wake_by_ref();
+    driver.interruptor().wake_by_ref();
     driver.process_completions(Duration::MAX);
 
     assert_eq!(driver.completion_queue.waits.load(Ordering::Relaxed), 1);
 }
 
 #[test]
-fn waker_remains_valid_after_driver_drop() {
+fn non_blocking_completion_processing_preserves_latched_interrupt() {
+    let mut driver = LocalDriver::new(Rc::default());
+
+    driver.interruptor().wake_by_ref();
+    driver.process_completions(Duration::ZERO);
+
+    assert!(*driver.completion_queue.latch.raised.lock().unwrap());
+
+    driver.process_completions(Duration::MAX);
+
+    assert!(!*driver.completion_queue.latch.raised.lock().unwrap());
+}
+
+#[test]
+fn interruptor_remains_valid_after_driver_drop() {
     let driver = LocalDriver::new(Rc::default());
-    let waker = driver.waker();
+    let interruptor = driver.interruptor();
 
     drop(driver);
-    waker.wake();
+    interruptor.wake();
 }
 
 #[derive(Debug, Default)]
@@ -181,14 +195,15 @@ struct TestCompletionQueue {
 impl TestCompletionQueue {
     fn process_completions(&self, max_wait: Duration) {
         self.waits.fetch_add(1, Ordering::Relaxed);
+
+        if max_wait.is_zero() {
+            return;
+        }
+
         let mut raised = self.latch.raised.lock().unwrap_or_else(PoisonError::into_inner);
 
         if *raised {
             *raised = false;
-            return;
-        }
-
-        if max_wait.is_zero() {
             return;
         }
 
@@ -208,7 +223,7 @@ impl TestCompletionQueue {
         *raised = false;
     }
 
-    fn waker(&self) -> Waker {
+    fn interruptor(&self) -> Waker {
         Waker::from(Arc::clone(&self.latch))
     }
 }
@@ -256,8 +271,8 @@ impl Driver for LocalDriver {
         self.completion_queue.process_completions(max_wait);
     }
 
-    fn waker(&self) -> Waker {
-        self.completion_queue.waker()
+    fn interruptor(&self) -> Waker {
+        self.completion_queue.interruptor()
     }
 
     fn shutdown(mut self) -> Result<(), ShutdownError> {
@@ -406,7 +421,7 @@ impl Driver for LeaseDriver {
 
     fn process_completions(&mut self, _max_wait: Duration) {}
 
-    fn waker(&self) -> Waker {
+    fn interruptor(&self) -> Waker {
         Waker::noop().clone()
     }
 

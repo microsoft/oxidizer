@@ -21,9 +21,9 @@ use crate::{IoContext, ShutdownError};
 ///
 /// # Driver state
 ///
-/// State reached by contexts, wakers, background threads, or operating-system callbacks is shared
-/// independently of the driver and uses appropriate reference counting and synchronization. Each
-/// in-flight operation owns every resource it uses through a reference count, pool lease, or
+/// State reached by contexts, interruptors, background threads, or operating-system callbacks is
+/// shared independently of the driver and uses appropriate reference counting and synchronization.
+/// Each in-flight operation owns every resource it uses through a reference count, pool lease, or
 /// equivalent handle.
 ///
 /// Completion buffers, queue-reader state, batching state, and lifecycle state used only on the
@@ -55,9 +55,9 @@ pub trait Driver: 'static {
 
     /// Waits for and processes completion events.
     ///
-    /// [`Duration::ZERO`] requests a non-blocking poll and [`Duration::MAX`] an unbounded wait.
-    /// A mechanism with coarser timing rounds finite waits up without converting one into an
-    /// unbounded wait.
+    /// [`Duration::ZERO`] requests a non-blocking poll and does not consume a pending interrupt.
+    /// [`Duration::MAX`] requests an unbounded wait. A mechanism with coarser timing rounds finite
+    /// waits up without converting one into an unbounded wait.
     ///
     /// Operations may be submitted from other threads while this method waits. The implementation
     /// must not hold anything across the wait that a submitter needs.
@@ -65,11 +65,13 @@ pub trait Driver: 'static {
 
     /// Returns a handle that causes the current or next completion wait to return.
     ///
-    /// Wake-ups are latched: a wake raised before a wait makes the next wait return immediately.
-    /// Same-thread wake-ups are honored. Redundant wake-ups may be coalesced, but a wake-up is never
-    /// dropped. The returned waker remains safe to invoke after the driver is dropped.
+    /// Interrupts are latched: an interrupt raised before a blocking wait makes the next blocking
+    /// wait behave like a non-blocking poll. An interrupt only ends the wait; pending completions
+    /// are still processed. Same-thread interrupts are honored. Redundant interrupts may be
+    /// coalesced, but an interrupt is never dropped. The returned interruptor remains safe to
+    /// invoke after the driver is dropped.
     #[must_use]
-    fn waker(&self) -> Waker;
+    fn interruptor(&self) -> Waker;
 
     /// Shuts down the driver.
     ///

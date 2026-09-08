@@ -63,15 +63,17 @@ The runtime does not dictate how an I/O subsystem distributes work.
 - Primary, satellite, and thread-pinning policy are runtime implementation
   details and are not public driver roles.
 
-## R5: Reliable wake-up
+## R5: Reliable interruption
 
-A driver wake-up has the following semantics:
+A driver interrupt has the following semantics:
 
-- A wake raised before a wait is latched for the next wait.
-- A wake raised by the driver's own thread is honored.
-- Redundant wakes may be coalesced.
-- A wake is never dropped.
-- A waker remains memory-safe after its driver is gone.
+- An interrupt raised before a blocking wait is latched for the next blocking wait.
+- A non-blocking completion pass does not consume a pending interrupt.
+- An interrupt does not prevent pending completions from being processed.
+- An interrupt raised by the driver's own thread is honored.
+- Redundant interrupts may be coalesced.
+- An interrupt is never dropped.
+- An interruptor remains memory-safe after its driver is gone.
 
 ## R6: Safe and blocking shutdown
 
