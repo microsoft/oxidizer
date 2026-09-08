@@ -200,6 +200,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn descriptor_helpers_and_file_persistence_work() {
         let descriptor = descriptor();

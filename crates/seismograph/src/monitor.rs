@@ -772,6 +772,7 @@ mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn builder_identity_debug_and_last_error_are_exposed() {
         assert!(matches!(Monitor::builder().name("").start(), Err(Error::InvalidIdentity)));
@@ -788,6 +789,7 @@ mod tests {
         assert!(debug.contains("descriptor_path"));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn handshakes_are_required_and_authenticated() {
         let descriptor = MonitorDescriptor {
@@ -825,6 +827,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn authenticated_client_handles_repeat_hello_and_all_snapshot_modes() {
         let _test = crate::recorder::TEST_LOCK.lock().unwrap();
@@ -890,6 +893,7 @@ mod tests {
         server_thread.join().unwrap().unwrap();
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn stopped_client_and_protocol_failures_are_reported() {
         let (mut client, mut server) = connected_pair();
@@ -1047,6 +1051,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn monitor_directory_creation_failure_preserves_path() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1086,6 +1091,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn descriptor_publication_reports_write_and_rename_failures() {
         let descriptor = MonitorDescriptor {
@@ -1113,6 +1119,7 @@ mod tests {
         fs::remove_dir(base).unwrap();
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn listener_spawn_failure_removes_published_descriptor() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1128,6 +1135,7 @@ mod tests {
         assert!(!path.exists());
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn builder_propagates_listener_spawn_failure() {
         let error = Monitor::builder()
@@ -1140,6 +1148,7 @@ mod tests {
         assert!(matches!(error, Error::Spawn(_)));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn authenticated_client_stops_after_handshake_and_propagates_bad_frames() {
         let descriptor = MonitorDescriptor {

@@ -1027,9 +1027,13 @@ impl Drop for SnapshotArenaSuspension {
 fn with_snapshot_arena<R>(operation: impl FnOnce() -> R) -> R {
     let mut arena = SnapshotArena::new();
     let previous = ACTIVE_SNAPSHOT_ARENA
-        .try_with(|active| active.replace(ptr::from_mut(&mut arena)))
+        .try_with(|active| {
+            let previous = active.get();
+            arena.parent = previous;
+            active.set(ptr::from_mut(&mut arena));
+            previous
+        })
         .unwrap_or(ptr::null_mut());
-    arena.parent = previous;
     let _activation = SnapshotArenaActivation { previous };
     operation()
 }

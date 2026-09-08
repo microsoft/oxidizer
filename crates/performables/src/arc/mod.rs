@@ -1706,6 +1706,7 @@ mod tests {
         assert_eq!(value.get(), 42);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn affinity_from_unaware_clones_the_current_value() {
         let (source, destination) = Relocator::between_threads().relocate(&mut ());

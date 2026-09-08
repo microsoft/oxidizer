@@ -702,8 +702,10 @@ fn condvar_direct_waits_support_blocking_and_async_notification() {
         drop(condition.wait_sync(guard));
     });
     started_receiver.recv().unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(10));
-    pair.1.notify_one();
+    while !waiter.is_finished() {
+        pair.1.notify_one();
+        std::thread::yield_now();
+    }
     waiter.join().unwrap();
 
     let mutex = Mutex::new(());
@@ -717,6 +719,7 @@ fn condvar_direct_waits_support_blocking_and_async_notification() {
     assert!(wait.as_mut().poll(&mut context).is_ready());
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn condvar_wait_while_sync_rechecks_the_predicate() {
     let pair = Arc::new((Mutex::new(false), Condvar::new()));
@@ -951,6 +954,7 @@ fn lazy_lock_supports_debug_default_and_poisoning() {
 }
 #[test]
 #[cfg(feature = "seismograph")]
+#[cfg_attr(miri, ignore)]
 #[expect(clippy::too_many_lines, reason = "one scenario verifies all telemetry-enabled primitives")]
 fn ownership_and_lock_operations_emit_runtime_telemetry() {
     seismograph::recorder(Configuration {

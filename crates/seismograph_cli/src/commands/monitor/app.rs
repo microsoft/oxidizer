@@ -1990,6 +1990,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn browser_and_connected_keys_update_screen_state() {
         let mut app = App::new();
