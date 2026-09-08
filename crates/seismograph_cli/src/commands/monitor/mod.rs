@@ -6,6 +6,7 @@ mod client;
 mod data;
 mod ui;
 
+use std::io::Write;
 use std::time::{Duration, Instant};
 use std::{fmt, io};
 
@@ -59,9 +60,12 @@ fn should_exit(app: &mut app::App, key: crossterm::event::KeyEvent) -> bool {
     key.kind == KeyEventKind::Press && (control_c || app.handle_key(key.code))
 }
 
-struct TerminalGuard;
+struct TerminalGuard<W: Write, D: FnMut() -> io::Result<()>> {
+    output: W,
+    disable_raw_mode: D,
+}
 
-impl TerminalGuard {
+impl TerminalGuard<io::Stdout, fn() -> io::Result<()>> {
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn enter() -> Result<Self, Error> {
         enable_raw_mode().map_err(Error::Io)?;
@@ -69,22 +73,20 @@ impl TerminalGuard {
             let _ = disable_raw_mode();
             return Err(Error::Io(error));
         }
-        Ok(Self)
+        Ok(Self {
+            output: io::stdout(),
+            disable_raw_mode,
+        })
     }
 }
 
-impl Drop for TerminalGuard {
+impl<W: Write, D: FnMut() -> io::Result<()>> Drop for TerminalGuard<W, D> {
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn drop(&mut self) {
-        let _ = execute!(io::stdout(), LeaveAlternateScreen);
-        let _ = disable_raw_mode();
-        #[cfg(test)]
-        TERMINAL_GUARD_DROPPED.store(true, std::sync::atomic::Ordering::Relaxed);
+        let _ = execute!(self.output, LeaveAlternateScreen);
+        let _ = (self.disable_raw_mode)();
     }
 }
-
-#[cfg(test)]
-static TERMINAL_GUARD_DROPPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Live monitor failure.
 #[derive(Debug)]
@@ -125,13 +127,13 @@ impl std::error::Error for Error {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
     use std::error::Error as _;
     use std::io;
-    use std::sync::atomic::Ordering;
 
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
-    use super::{Error, TERMINAL_GUARD_DROPPED, TerminalGuard, app, should_exit};
+    use super::{Error, TerminalGuard, app, should_exit};
 
     #[test]
     fn monitor_errors_have_specific_messages() {
@@ -191,10 +193,17 @@ mod tests {
 
     #[test]
     fn terminal_guard_restores_terminal_when_dropped() {
-        TERMINAL_GUARD_DROPPED.store(false, Ordering::Relaxed);
+        let mut output = Vec::new();
+        let raw_mode_disabled = Cell::new(false);
+        drop(TerminalGuard {
+            output: &mut output,
+            disable_raw_mode: || {
+                raw_mode_disabled.set(true);
+                Ok(())
+            },
+        });
 
-        drop(TerminalGuard);
-
-        assert!(TERMINAL_GUARD_DROPPED.load(Ordering::Relaxed));
+        assert_eq!(output, b"\x1b[?1049l");
+        assert!(raw_mode_disabled.get());
     }
 }

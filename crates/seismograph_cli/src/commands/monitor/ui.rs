@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use std::collections::VecDeque;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Local};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -30,6 +30,10 @@ const CONTENTION_COLOR: Color = Color::Yellow;
 
 impl App {
     pub(super) fn draw(&self, frame: &mut ratatui::Frame<'_>) {
+        self.draw_with_snapshot_time(frame, snapshot_time);
+    }
+
+    fn draw_with_snapshot_time(&self, frame: &mut ratatui::Frame<'_>, format_snapshot_time: impl Fn(&CapturedSnapshot) -> String) {
         let [body, footer] = Layout::vertical([Constraint::Min(4), Constraint::Length(1)]).areas(frame.area());
         match &self.screen {
             Screen::Browse => self.draw_browser(frame, body),
@@ -62,7 +66,13 @@ impl App {
         let line = match &self.screen {
             Screen::Browse => browse_footer(&self.status),
             Screen::Connected { recording, snapshot, .. } => {
-                connected_footer(*recording, self.snapshot_options.event_buffers, snapshot.as_deref(), &self.status)
+                let snapshot_time = snapshot.as_deref().map(format_snapshot_time);
+                connected_footer(
+                    *recording,
+                    self.snapshot_options.event_buffers,
+                    snapshot_time.as_deref(),
+                    &self.status,
+                )
             }
         };
         frame.render_widget(Paragraph::new(line).style(Style::default().bg(Color::DarkGray)), footer);
@@ -2116,7 +2126,7 @@ fn browse_footer(status: &str) -> Line<'static> {
 fn connected_footer(
     configuration: RecordingConfiguration,
     event_buffers: EventBufferDisposition,
-    snapshot: Option<&CapturedSnapshot>,
+    snapshot_time: Option<&str>,
     status: &str,
 ) -> Line<'static> {
     let snapshot_buffers = match event_buffers {
@@ -2171,8 +2181,8 @@ fn connected_footer(
         key_span("q"),
         Span::raw(" quit"),
     ];
-    if let Some(snapshot) = snapshot {
-        spans.push(Span::raw(format!(" {}", snapshot_time(snapshot))));
+    if let Some(snapshot_time) = snapshot_time {
+        spans.push(Span::raw(format!(" {snapshot_time}")));
     }
     if !status.is_empty() {
         spans.push(Span::raw(format!(" │ {status}")));
@@ -2189,8 +2199,16 @@ fn key_style() -> Style {
 }
 
 fn snapshot_time(snapshot: &CapturedSnapshot) -> String {
+    snapshot_time_at(snapshot, Instant::now())
+}
+
+fn snapshot_time_at(snapshot: &CapturedSnapshot, now: Instant) -> String {
     let local: DateTime<Local> = snapshot.captured_at.into();
-    format!("{} ({})", local.format("%H:%M:%S"), format_age(snapshot.captured_instant.elapsed()))
+    format!(
+        "{} ({})",
+        local.format("%H:%M:%S"),
+        format_age(now.saturating_duration_since(snapshot.captured_instant))
+    )
 }
 
 fn format_age(age: Duration) -> String {
@@ -2237,7 +2255,7 @@ fn recording_configuration_label(configuration: RecordingConfiguration) -> &'sta
 
 #[cfg(test)]
 mod tests {
-    use std::time::{Instant, SystemTime};
+    use std::time::SystemTime;
 
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
@@ -2645,6 +2663,13 @@ mod tests {
     #[test]
     fn snapshot_age_uses_compact_units() {
         assert_eq!(format_age(Duration::from_secs(125)), "2m ago");
+
+        let snapshot = representative_capture();
+        let local: DateTime<Local> = snapshot.captured_at.into();
+        assert_eq!(
+            snapshot_time_at(&snapshot, snapshot.captured_instant + Duration::from_secs(125)),
+            format!("{} (2m ago)", local.format("%H:%M:%S"))
+        );
     }
 
     #[test]
@@ -3229,6 +3254,7 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     #[test]
+    #[expect(clippy::too_many_lines, reason = "one digest covers every monitor panel and nested focus state")]
     fn monitor_rendering_matches_the_complete_reference_buffer() {
         let mut output = String::new();
         let mut app = App::new();
@@ -3236,7 +3262,9 @@ mod tests {
             descriptor: descriptor(),
             recording: RecordingConfiguration::default(),
         });
-        output.push_str(&render_debug(|frame| app.draw(frame)));
+        output.push_str(&render_debug(|frame| {
+            app.draw_with_snapshot_time(frame, |_| "12:34:56 (now)".into());
+        }));
         output.push_str(&render_debug(|frame| {
             App::draw_capture_popup(frame, Duration::from_millis(450), CaptureStep::Decode);
         }));
@@ -3273,7 +3301,9 @@ mod tests {
                 tab,
                 snapshot: Some(representative_capture()),
             };
-            output.push_str(&render_debug(|frame| app.draw(frame)));
+            output.push_str(&render_debug(|frame| {
+                app.draw_with_snapshot_time(frame, |_| "12:34:56 (now)".into());
+            }));
         }
 
         for focus in [PrimitiveFocus::Types, PrimitiveFocus::Operations, PrimitiveFocus::Hotspots] {
@@ -3284,7 +3314,9 @@ mod tests {
                 tab: MonitorTab::Primitives,
                 snapshot: Some(representative_capture()),
             };
-            output.push_str(&render_debug(|frame| app.draw(frame)));
+            output.push_str(&render_debug(|frame| {
+                app.draw_with_snapshot_time(frame, |_| "12:34:56 (now)".into());
+            }));
         }
         for focus in [
             ThreadFocus::Threads,
@@ -3299,7 +3331,9 @@ mod tests {
                 tab: MonitorTab::Threads,
                 snapshot: Some(representative_capture()),
             };
-            output.push_str(&render_debug(|frame| app.draw(frame)));
+            output.push_str(&render_debug(|frame| {
+                app.draw_with_snapshot_time(frame, |_| "12:34:56 (now)".into());
+            }));
         }
         for focus in [RuntimeFocus::Workers, RuntimeFocus::Tasks, RuntimeFocus::Details] {
             app.runtime_view.focus = focus;
@@ -3309,7 +3343,9 @@ mod tests {
                 tab: MonitorTab::Runtime,
                 snapshot: Some(representative_capture()),
             };
-            output.push_str(&render_debug(|frame| app.draw(frame)));
+            output.push_str(&render_debug(|frame| {
+                app.draw_with_snapshot_time(frame, |_| "12:34:56 (now)".into());
+            }));
         }
         for focus in [IoFocus::Resources, IoFocus::Operations] {
             app.io_view.focus = focus;
@@ -3319,7 +3355,9 @@ mod tests {
                 tab: MonitorTab::Io,
                 snapshot: Some(representative_capture()),
             };
-            output.push_str(&render_debug(|frame| app.draw(frame)));
+            output.push_str(&render_debug(|frame| {
+                app.draw_with_snapshot_time(frame, |_| "12:34:56 (now)".into());
+            }));
         }
         for focus in [CacheFocus::Tiers, CacheFocus::Operations] {
             app.cache_view.focus = focus;
@@ -3329,9 +3367,11 @@ mod tests {
                 tab: MonitorTab::Cache,
                 snapshot: Some(representative_capture()),
             };
-            output.push_str(&render_debug(|frame| app.draw(frame)));
+            output.push_str(&render_debug(|frame| {
+                app.draw_with_snapshot_time(frame, |_| "12:34:56 (now)".into());
+            }));
         }
 
-        assert_eq!(stable_digest(&output), (430_412, 3_960_316_965_083_143_886));
+        assert_eq!(stable_digest(&output), (430_412, 3_899_769_936_188_636_598));
     }
 }
