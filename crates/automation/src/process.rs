@@ -101,6 +101,7 @@ fn outcome_from_status(status: std::process::ExitStatus) -> Outcome {
 mod tests {
     use super::*;
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn captures_successful_process_output() {
         let result = run_with_timeout(fixture_command("success"), Duration::from_secs(5)).unwrap();
@@ -110,6 +111,7 @@ mod tests {
         assert!(String::from_utf8_lossy(&result.stderr).contains("fixture stderr"));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn preserves_process_failure_code() {
         let result = run_with_timeout(fixture_command("failure"), Duration::from_secs(5)).unwrap();
@@ -117,6 +119,7 @@ mod tests {
         assert!(matches!(result.outcome, Outcome::Failed(Some(7))));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn terminates_timed_out_process() {
         let started = Instant::now();
