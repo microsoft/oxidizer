@@ -213,8 +213,14 @@
 //!         skipped: Tracker::default(),
 //!     };
 //!     value.relocate(from, to);
-//!     assert_eq!(value.tracked.relocations, 1, "non-skipped fields must be relocated");
-//!     assert_eq!(value.skipped.relocations, 0, "skipped fields must not be relocated");
+//!     assert_eq!(
+//!         value.tracked.relocations, 1,
+//!         "non-skipped fields must be relocated"
+//!     );
+//!     assert_eq!(
+//!         value.skipped.relocations, 0,
+//!         "skipped fields must not be relocated"
+//!     );
 //! }
 //! ```
 //!
