@@ -1936,8 +1936,11 @@ mod tests {
         let mut arena = SnapshotArena::new();
         let huge = Layout::from_size_align(isize::MAX as usize, 1).unwrap();
         assert!(arena.allocate(huge).is_null());
-        let unallocatable = Layout::from_size_align(1_usize << 60, 1).unwrap();
-        assert!(arena.allocate(unallocatable).is_null());
+        #[cfg(not(miri))]
+        {
+            let unallocatable = Layout::from_size_align(1_usize << 60, 1).unwrap();
+            assert!(arena.allocate(unallocatable).is_null());
+        }
 
         assert_eq!(snapshot_chunk_address(usize::MAX, 1, 1, 1, usize::MAX), None);
         assert_eq!(snapshot_chunk_address(usize::MAX - 1, 0, 1, 4, usize::MAX), None);
