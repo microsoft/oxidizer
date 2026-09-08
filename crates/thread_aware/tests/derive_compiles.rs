@@ -638,6 +638,34 @@ fn payloads_invisible_to_a_syntactic_scan_need_no_escape_hatch() {
     assert_eq!(hidden.tracked.relocations, 1);
 }
 
+// A field whose type implements `ThreadAware` unconditionally must keep deriving for parameters
+// that type ignores. Bounding a parameter reached inside the field - rather than the field type
+// itself - was a compile regression against the merge base of PR #678, which rejected
+// `OuterWrapper<Rc<()>>` even though the wrapper's own impl asks nothing of the parameter. See
+// AB#7783612.
+
+/// A wrapper that is `ThreadAware` for every `T`, delegating to nothing.
+struct UnconditionalWrapper<T>(PhantomData<fn() -> T>);
+
+impl<T> thread_aware::ThreadAware for UnconditionalWrapper<T> {
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+}
+
+/// The derive owes `UnconditionalWrapper<PhantomData<T>>: ThreadAware`, which that impl satisfies
+/// for every `T` - not `T: ThreadAware`, which `Rc<()>` cannot meet.
+#[derive(ThreadAware)]
+struct OuterWrapper<T>(UnconditionalWrapper<PhantomData<T>>);
+
+#[test]
+fn field_type_bound_lets_an_unconditional_wrapper_derive_for_any_argument() {
+    // `Rc<()>` is neither `Send` nor `ThreadAware`; the field-type bound still holds.
+    assert_thread_aware::<OuterWrapper<Rc<()>>>();
+
+    let (source, destination) = thread_pair();
+    let mut value = OuterWrapper::<Rc<()>>(UnconditionalWrapper(PhantomData));
+    value.relocate(source.as_ref(), &destination);
+}
+
 /// A trait of the user's own that happens to be called `ThreadAware`, named by a qualified
 /// path.
 ///

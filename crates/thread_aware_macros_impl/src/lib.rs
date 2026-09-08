@@ -20,7 +20,7 @@
 use std::collections::HashSet;
 
 use proc_macro2::TokenStream as TokenStream2;
-use quote::quote;
+use quote::{ToTokens, quote};
 use syn::{Data, DeriveInput, Fields, GenericParam, Path, PathArguments, Type, TypePath, parse_quote};
 
 mod enum_gen;
@@ -104,33 +104,64 @@ pub(crate) fn param_idents() -> (syn::Ident, syn::Ident) {
 
 fn add_bounds(input: &DeriveInput, root_path: &Path) -> syn::Result<syn::Generics> {
     let mut generics = input.generics.clone();
-    let mut usage = GenericUsage::default();
-    match &input.data {
-        Data::Struct(s) => collect_generics_in_fields(&s.fields, &generics, &mut usage)?,
-        Data::Enum(e) => {
-            for v in &e.variants {
-                collect_generics_in_fields(&v.fields, &generics, &mut usage)?;
-            }
-        }
-        Data::Union(_) => {}
-    }
+
+    let generic_idents: HashSet<syn::Ident> = generics
+        .params
+        .iter()
+        .filter_map(|gp| match gp {
+            GenericParam::Type(t) => Some(t.ident.clone()),
+            _ => None,
+        })
+        .collect();
 
     let mut thread_aware_path = root_path.clone();
     thread_aware_path.segments.push(parse_quote!(ThreadAware));
 
-    for param in &mut generics.params {
-        let GenericParam::Type(ty_param) = param else {
-            continue;
-        };
+    // Gather the relocated (non-skipped) field types in declaration order, and note whether any
+    // field is skipped.
+    let mut relocated_fields: Vec<Type> = Vec::new();
+    let mut has_skipped_field = false;
+    collect_relocated_fields(&input.data, &mut relocated_fields, &mut has_skipped_field)?;
 
-        if usage.relocated.contains(&ty_param.ident) {
-            let already = ty_param
-                .bounds
-                .iter()
-                .any(|b| matches!(b, syn::TypeParamBound::Trait(t) if is_same_trait(&t.path, &thread_aware_path)));
-            if !already {
-                ty_param.bounds.push(parse_quote!(#thread_aware_path));
-            }
+    // The generated body relocates each field by calling `<field type>::relocate`, so the impl
+    // owes `<field type>: ThreadAware` for every field whose relocation depends on a generic
+    // parameter. Bounding the field type - rather than the parameters inside it - lets a type
+    // with an unconditional impl, such as a wrapper that ignores its parameter, satisfy the
+    // predicate for arguments no per-parameter bound could admit. A field type that reaches no
+    // parameter is `ThreadAware` (or not) at the definition site and needs no predicate.
+    let mut emitted_keys: Vec<String> = Vec::new();
+    let mut predicates: Vec<syn::WherePredicate> = Vec::new();
+    for field_ty in &relocated_fields {
+        if !type_reaches_param(field_ty, &generic_idents) {
+            continue;
+        }
+
+        let bound_ty = strip_group_paren(field_ty);
+
+        // Two fields of the same type owe a single predicate; repeating it trips
+        // `clippy::trait_duplication_in_bounds`.
+        let key = bound_ty.to_token_stream().to_string();
+        if emitted_keys.iter().any(|seen| seen == &key) {
+            continue;
+        }
+        emitted_keys.push(key);
+
+        // A field that is exactly a parameter the author already bounded by `ThreadAware` needs
+        // no generated predicate: emitting one would duplicate the author's own bound and trip
+        // `clippy::trait_duplication_in_bounds` at their declaration.
+        if let Some(param) = as_bare_param(bound_ty, &generic_idents)
+            && param_has_thread_aware_bound(&generics, param, &thread_aware_path)
+        {
+            continue;
+        }
+
+        predicates.push(parse_quote!(#bound_ty: #thread_aware_path));
+    }
+
+    if !predicates.is_empty() {
+        let where_clause = generics.make_where_clause();
+        for predicate in predicates {
+            where_clause.predicates.push(predicate);
         }
     }
 
@@ -142,7 +173,7 @@ fn add_bounds(input: &DeriveInput, root_path: &Path) -> syn::Result<syn::Generic
     // the field type would be strictly stronger: a type that is `Send` only through such an
     // `unsafe impl` would carry something like `where *const T: Send`, which no instantiation
     // can prove.
-    if usage.has_skipped_field {
+    if has_skipped_field {
         let name = &input.ident;
         let (_, ty_generics, _) = input.generics.split_for_impl();
         let self_ty: Type = parse_quote!(#name #ty_generics);
@@ -172,80 +203,116 @@ fn is_same_trait(candidate: &Path, emitted: &Path) -> bool {
     candidate_idents == emitted_idents || candidate_idents == ["ThreadAware"]
 }
 
-/// How the fields of a type contribute to the bounds of the generated impl.
-#[derive(Default)]
-struct GenericUsage {
-    /// Type parameters the traversal reaches through a relocated field; each is bound by
-    /// `ThreadAware`.
-    relocated: HashSet<syn::Ident>,
-
-    /// Whether any field carries `#[thread_aware(skip)]`, which is what makes the
-    /// `Self: Send` predicate necessary.
-    has_skipped_field: bool,
-}
-
-#[cfg_attr(coverage_nightly, coverage(off))] // can't figure out how to get to 100% coverage of this function
-fn collect_generics_in_fields(fields: &Fields, generics: &syn::Generics, usage: &mut GenericUsage) -> syn::Result<()> {
-    let generic_idents: HashSet<_> = generics
-        .params
-        .iter()
-        .filter_map(|gp| match gp {
-            syn::GenericParam::Type(t) => Some(t.ident.clone()),
-            _ => None,
-        })
-        .collect();
-    for field in fields {
-        // Mirror exactly what the body generators skip. A skipped field is absent from the
-        // generated body, so it needs no `ThreadAware` bound; the `Self: Send` predicate
-        // covers it instead. Keeping this test identical to the one in `struct_gen`/`enum_gen`
-        // is what stops the header and the body disagreeing about which fields are relocated.
-        if parse_field_attrs(&field.attrs)?.skip {
-            usage.has_skipped_field = true;
-            continue;
+/// Collects the relocated (non-skipped) field types of a struct or enum, in declaration order,
+/// and records whether any field carries `#[thread_aware(skip)]`.
+///
+/// Mirrors exactly what the body generators relocate: a skipped field is absent from the
+/// generated body, so it owes no `ThreadAware` predicate - only the `Self: Send` one. Keeping
+/// this in step with `struct_gen`/`enum_gen` is what stops the header and the body disagreeing
+/// about which fields are relocated.
+fn collect_relocated_fields(data: &Data, out: &mut Vec<Type>, has_skipped_field: &mut bool) -> syn::Result<()> {
+    match data {
+        Data::Struct(s) => collect_relocated_from_fields(&s.fields, out, has_skipped_field)?,
+        Data::Enum(e) => {
+            for v in &e.variants {
+                collect_relocated_from_fields(&v.fields, out, has_skipped_field)?;
+            }
         }
-        collect_generics_in_type(&field.ty, &generic_idents, usage)?;
+        Data::Union(_) => {}
     }
     Ok(())
 }
 
+fn collect_relocated_from_fields(fields: &Fields, out: &mut Vec<Type>, has_skipped_field: &mut bool) -> syn::Result<()> {
+    for field in fields {
+        if parse_field_attrs(&field.attrs)?.skip {
+            *has_skipped_field = true;
+            continue;
+        }
+        out.push(field.ty.clone());
+    }
+    Ok(())
+}
+
+/// Strips any outer `Type::Group` and `Type::Paren` layers.
+///
+/// A `Type::Group` is the invisible wrapper macro expansion leaves around a captured type; a
+/// `Type::Paren` is an explicit `(T)`. Neither changes the type, so the emitted predicate reads
+/// more naturally written on what they wrap.
+fn strip_group_paren(ty: &Type) -> &Type {
+    let mut current = ty;
+    loop {
+        match current {
+            Type::Group(g) => current = &g.elem,
+            Type::Paren(p) => current = &p.elem,
+            other => return other,
+        }
+    }
+}
+
+/// Returns the parameter a field type names directly, when the field type is exactly one of the
+/// generic parameters. The caller has already stripped any `Group`/`Paren` layers.
+fn as_bare_param<'a>(ty: &'a Type, generic_idents: &HashSet<syn::Ident>) -> Option<&'a syn::Ident> {
+    if let Type::Path(TypePath { qself: None, path, .. }) = ty
+        && let Some(ident) = path.get_ident()
+        && generic_idents.contains(ident)
+    {
+        return Some(ident);
+    }
+    None
+}
+
+/// Reports whether the parameter's own declaration already carries a `ThreadAware` bound.
+///
+/// Only the inline bounds on the parameter are inspected - where an author most naturally writes
+/// such a bound, and the case the snapshots pin. A bound expressed in a `where` clause is left to
+/// the author's judgment, exactly as it was before the derive emitted field-type predicates.
+fn param_has_thread_aware_bound(generics: &syn::Generics, ident: &syn::Ident, thread_aware_path: &Path) -> bool {
+    generics.params.iter().any(|param| {
+        matches!(param, GenericParam::Type(ty_param)
+            if &ty_param.ident == ident
+                && ty_param
+                    .bounds
+                    .iter()
+                    .any(|b| matches!(b, syn::TypeParamBound::Trait(t) if is_same_trait(&t.path, thread_aware_path))))
+    })
+}
+
+/// Reports whether `ty` reaches a generic parameter through a shape the generated body relocates
+/// through: a path's type arguments, a reference, a tuple, an array, or a `Group`/`Paren` wrapper.
+///
+/// When it does, the field's `ThreadAware`-ness depends on that parameter and the impl owes
+/// `<field type>: ThreadAware`. The shapes deliberately left out - `Slice`, `Ptr`, `BareFn`,
+/// `TraitObject`, `ImplTrait` - are the ones a parameter cannot make the field conditionally
+/// `ThreadAware` through: a safe `fn` pointer implements `ThreadAware` unconditionally, so a
+/// parameter carried only for variance inside one (`PhantomData<fn(*const T)>`) owes no bound, and
+/// the rest have no impl at all. This keeps the marker-payload idiom bound-free, exactly as the
+/// per-parameter collector did before.
 #[cfg_attr(coverage_nightly, coverage(off))] // can't figure out how to get to 100% coverage of this function
-fn collect_generics_in_type(ty: &Type, generic_idents: &HashSet<syn::Ident>, acc: &mut GenericUsage) -> syn::Result<()> {
+fn type_reaches_param(ty: &Type, generic_idents: &HashSet<syn::Ident>) -> bool {
     match ty {
         Type::Path(TypePath { path, .. }) => {
             for segment in &path.segments {
                 if generic_idents.contains(&segment.ident) {
-                    acc.relocated.insert(segment.ident.clone());
+                    return true;
                 }
                 if let PathArguments::AngleBracketed(ab) = &segment.arguments {
                     for arg in &ab.args {
-                        if let syn::GenericArgument::Type(t) = arg {
-                            collect_generics_in_type(t, generic_idents, acc)?;
+                        if let syn::GenericArgument::Type(t) = arg
+                            && type_reaches_param(t, generic_idents)
+                        {
+                            return true;
                         }
                     }
                 }
             }
+            false
         }
-        Type::Reference(r) => collect_generics_in_type(&r.elem, generic_idents, acc)?,
-        Type::Tuple(t) => {
-            for elem in &t.elems {
-                collect_generics_in_type(elem, generic_idents, acc)?;
-            }
-        }
-        Type::Array(a) => collect_generics_in_type(&a.elem, generic_idents, acc)?,
-        Type::Group(g) => collect_generics_in_type(&g.elem, generic_idents, acc)?,
-        Type::Paren(p) => collect_generics_in_type(&p.elem, generic_idents, acc)?,
-        // Not traversed: `Type::Slice`, `Type::Ptr`, `Type::BareFn`, `Type::TraitObject` and
-        // `Type::ImplTrait`. A bare `fn` pointer has `ThreadAware` impls in `impls.rs`, but
-        // they are unconditional - no bound on the argument or return types - so descending
-        // would emit a bound nothing requires. The rest have no impl, so an enclosing field
-        // cannot be relocated through one and no bound is owed.
-        //
-        // This list is not a mirror of `impls.rs` and should not be read as one: `Array` and
-        // `Reference` are traversed here although `impls.rs` implements neither, so those emit
-        // a bound for a field that cannot be relocated at all. The maintenance rule runs one
-        // way only - adding a *conditional* impl in `impls.rs` for any shape listed above
-        // means adding the matching arm here, or the header will under-constrain the body.
-        _ => {}
+        Type::Reference(r) => type_reaches_param(&r.elem, generic_idents),
+        Type::Tuple(t) => t.elems.iter().any(|elem| type_reaches_param(elem, generic_idents)),
+        Type::Array(a) => type_reaches_param(&a.elem, generic_idents),
+        Type::Group(g) => type_reaches_param(&g.elem, generic_idents),
+        Type::Paren(p) => type_reaches_param(&p.elem, generic_idents),
+        _ => false,
     }
-    Ok(())
 }

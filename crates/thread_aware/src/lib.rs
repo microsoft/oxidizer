@@ -161,18 +161,22 @@ mod thread;
 /// * `#[thread_aware(skip)]`: Prevents a field from being recursively transferred.
 ///
 /// # Generic Bounds
-/// Every field except a `#[thread_aware(skip)]` one is relocated, and the bounds follow from
-/// that:
-/// * a generic type parameter the traversal reaches through a relocated field receives a
-///   `::thread_aware::ThreadAware` bound;
+/// Every field except a `#[thread_aware(skip)]` one is relocated by calling its own
+/// `ThreadAware::relocate`, and the bounds follow from that:
+/// * each relocated field whose type reaches a generic parameter contributes a
+///   `where <field type>: ::thread_aware::ThreadAware` predicate - the obligation the generated
+///   body actually has, discharged by that field type's own impl;
 /// * if any field carries `#[thread_aware(skip)]`, a `where Self: Send` predicate is added,
 ///   since the `ThreadAware: Send` supertrait still has to hold.
 ///
-/// A `PhantomData<..>` field is no exception: it relocates through the no-op
-/// `impl<T: ?Sized + Send> ThreadAware for PhantomData<T>`, and a parameter the traversal
-/// reaches inside it - the `U` of `PhantomData<U>` - is bound like any other. The traversal
-/// does not enter a function pointer, so writing the payload as one carries the parameter for
-/// variance, stays `Send` for every argument, and emits no bound at all:
+/// The predicate lands on the field type as written, not on the parameters inside it. A
+/// `PhantomData<U>` field yields `where PhantomData<U>: ThreadAware` (which reduces to `U: Send`
+/// through the no-op `impl<T: ?Sized> ThreadAware for PhantomData<T> where Self: Send`), and a
+/// wrapper `W<U>` yields `where W<U>: ThreadAware`, governed by `W`'s own impl rather than by a
+/// bound on `U` - so a wrapper that implements the trait unconditionally keeps deriving for
+/// arguments no bound on `U` would admit. The traversal does not enter a function pointer, so
+/// writing a marker payload as one carries the parameter for variance, stays `Send` for every
+/// argument, and emits no bound at all:
 ///
 /// ```rust
 /// # use core::marker::PhantomData;

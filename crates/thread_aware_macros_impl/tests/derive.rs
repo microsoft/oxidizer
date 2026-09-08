@@ -54,8 +54,9 @@ fn tuple_struct_and_enum() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn generics_add_bounds() {
-    // Both parameters gain a ThreadAware bound: the traversal reaches U through the marker's
-    // type argument exactly as it reaches T directly.
+    // Each relocated field owes a bound on its own type: the `T` field a bound on `T`, and the
+    // `PhantomData<U>` field a bound on `PhantomData<U>` (which reduces to `U: Send`), rather than
+    // a bound on `U` itself.
     let input = quote! {
         #[derive(ThreadAware)]
         struct Gen<T, U>(T, core::marker::PhantomData<U>);
@@ -128,8 +129,8 @@ fn error_unknown_attr() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn phantom_data_named_fields() {
-    // PhantomData in named fields is relocated through its own no-op impl, and the parameter
-    // inside it takes the ordinary bound.
+    // The `PhantomData<T>` field is relocated through its own no-op impl and owes
+    // `PhantomData<T>: ThreadAware` (which reduces to `T: Send`).
     let input = quote! {
         #[derive(ThreadAware)]
         struct WithPhantom<T> {
@@ -143,8 +144,8 @@ fn phantom_data_named_fields() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn phantom_data_unnamed_fields() {
-    // PhantomData in tuple fields is relocated through its own no-op impl, and the parameter
-    // inside it takes the ordinary bound.
+    // The `PhantomData<T>` field is relocated through its own no-op impl and owes
+    // `PhantomData<T>: ThreadAware` (which reduces to `T: Send`).
     let input = quote! {
         #[derive(ThreadAware)]
         struct TupleWithPhantom<T>(Vec<u8>, core::marker::PhantomData<T>);
@@ -262,8 +263,9 @@ fn generics_paren_adds_bound() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn phantom_only_generic_gets_thread_aware_bound() {
-    // A parameter named only inside `PhantomData` takes the ordinary bound, like one reached
-    // anywhere else. Without it the impl cannot satisfy the `ThreadAware: Send` supertrait.
+    // The `PhantomData<U>` field owes `PhantomData<U>: ThreadAware`, which reduces to `U: Send` -
+    // the exact obligation the generated body needs, and enough for the `ThreadAware: Send`
+    // supertrait.
     let input = quote! {
         #[derive(ThreadAware)]
         struct DirectPhantom<T, U>(T, core::marker::PhantomData<U>);
@@ -302,8 +304,9 @@ fn skipped_generic_field_gets_self_send_predicate() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn relocated_and_phantom_param_shares_one_bound() {
-    // A parameter reached both directly and through a marker's type argument takes a single
-    // `ThreadAware` bound - the two traversal paths converge on the same parameter.
+    // The direct `T` field owes `T: ThreadAware`; the `PhantomData<fn(&'a T)>` marker reaches the
+    // parameter only through a function pointer, which is `ThreadAware` unconditionally, so it owes
+    // no bound. The parameter is bound exactly once.
     let input = quote! {
         #[derive(ThreadAware)]
         struct RelocatedAndPhantom<'a, T: 'a>(T, core::marker::PhantomData<fn(&'a T)>);
@@ -338,7 +341,7 @@ fn prebound_bare_thread_aware_assumed_real() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn no_skipped_field_means_no_self_send_predicate() {
-    // Every field is relocated, so `Self: Send` follows from the per-parameter bounds.
+    // Every field is relocated, so `Self: Send` follows from the field-type bounds.
     let input = quote! {
         #[derive(ThreadAware)]
         struct AllRelocated<T, U>(T, U);
@@ -367,9 +370,10 @@ fn user_where_clause_is_preserved() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn generics_lifetime_and_const_params_untouched() {
-    // Only type parameters can carry bounds; lifetimes and const generics are skipped.
-    // The field shape is one the crate can actually relocate, so the pinned expansion is one
-    // that compiles - a snapshot of an uncompilable expansion proves nothing.
+    // The generated predicate lands on the field type, leaving the lifetime and const parameters
+    // untouched in the impl header. The field shape is one the crate can actually relocate, so the
+    // pinned expansion is one that compiles - a snapshot of an uncompilable expansion proves
+    // nothing.
     let input = quote! {
         #[derive(ThreadAware)]
         struct Mixed<'a, const N: usize, T: Sync>(Tracker, core::marker::PhantomData<(&'a T, [u8; N])>);
