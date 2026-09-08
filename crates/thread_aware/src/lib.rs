@@ -133,6 +133,10 @@ extern crate std;
 
 mod wrappers;
 
+/// A guide to authoring thread-aware types: how to implement, test, and debug them, and the
+/// anti-patterns to avoid. See [the guide](_documentation).
+pub mod _documentation;
+
 pub mod closure;
 
 #[cfg(feature = "test-utils")]
