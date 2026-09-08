@@ -20,6 +20,10 @@ const IO_TIMEOUT: Duration = Duration::from_secs(10);
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn discover() -> Result<Vec<Instance>, Error> {
     let directory = seismograph_protocol::monitor_directory().map_err(Error::Protocol)?;
+    discover_in(&directory)
+}
+
+fn discover_in(directory: &std::path::Path) -> Result<Vec<Instance>, Error> {
     let entries = match fs::read_dir(directory) {
         Ok(entries) => entries,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -91,14 +95,17 @@ pub(super) fn recorder_statistics(descriptor: &MonitorDescriptor) -> Result<Reco
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn save_snapshot(descriptor: &MonitorDescriptor, bytes: &[u8]) -> Result<PathBuf, Error> {
+    let directory = std::env::current_dir().map_err(Error::Io)?;
+    save_snapshot_to(&directory, descriptor, bytes)
+}
+
+fn save_snapshot_to(directory: &std::path::Path, descriptor: &MonitorDescriptor, bytes: &[u8]) -> Result<PathBuf, Error> {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|error| Error::Clock(error.to_string()))?
         .as_nanos();
     let name = sanitize(&descriptor.name);
-    let path = std::env::current_dir()
-        .map_err(Error::Io)?
-        .join(format!("{name}-{}-{timestamp}.seismograph", descriptor.process_id));
+    let path = directory.join(format!("{name}-{}-{timestamp}.seismograph", descriptor.process_id));
     let mut file = fs::File::create(&path).map_err(Error::Io)?;
     file.write_all(bytes).map_err(Error::Io)?;
     Ok(path)
@@ -209,7 +216,89 @@ fn sanitize(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Read;
+    use std::net::{Shutdown, TcpListener};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Instant;
+
+    use seismograph_protocol::message::EventBufferDisposition;
+    use seismograph_protocol::monitor::{AuthenticationToken, InstanceId};
+    use seismograph_protocol::{read_request, write_response};
+
     use super::*;
+
+    static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
+    type ScriptedServer = (MonitorDescriptor, mpsc::Receiver<Vec<(u64, Request)>>, thread::JoinHandle<()>);
+
+    fn test_descriptor(port: u16) -> MonitorDescriptor {
+        MonitorDescriptor {
+            name: "worker west/europe".into(),
+            instance: Some("test".into()),
+            process_id: 42,
+            instance_id: InstanceId::from_bytes([1; 16]),
+            port,
+            authentication: AuthenticationToken::from_bytes([2; 32]),
+        }
+    }
+
+    fn directory(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join(format!(
+            "client-unit-{name}-{}-{}",
+            std::process::id(),
+            NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
+
+    fn serve(conversations: Vec<Vec<(u64, Response)>>) -> ScriptedServer {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let mut descriptor = test_descriptor(listener.local_addr().unwrap().port());
+        descriptor.name = "worker".into();
+        let (sender, receiver) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            let mut requests = Vec::new();
+            for conversation in conversations {
+                let deadline = Instant::now() + Duration::from_secs(2);
+                let mut stream = loop {
+                    match listener.accept() {
+                        Ok((stream, _)) => break Some(stream),
+                        Err(error) if error.kind() == io::ErrorKind::WouldBlock && Instant::now() < deadline => {
+                            thread::sleep(Duration::from_millis(5));
+                        }
+                        Err(error) if error.kind() == io::ErrorKind::WouldBlock => break None,
+                        Err(error) => panic!("test server accept failed: {error}"),
+                    }
+                };
+                let Some(mut stream) = stream.take() else {
+                    break;
+                };
+                stream.set_nonblocking(false).unwrap();
+                stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+                for (response_id, response) in conversation {
+                    let Ok(request) = read_request(&mut stream) else {
+                        break;
+                    };
+                    requests.push(request);
+                    write_response(&mut stream, response_id, &response).unwrap();
+                }
+                stream.shutdown(Shutdown::Write).unwrap();
+                let mut trailing = Vec::new();
+                stream.read_to_end(&mut trailing).unwrap();
+                assert!(trailing.is_empty());
+            }
+            sender.send(requests).unwrap();
+        });
+        (descriptor, receiver, worker)
+    }
+
+    fn hello(descriptor: &MonitorDescriptor, recording: RecordingConfiguration) -> Response {
+        Response::Hello {
+            instance_id: descriptor.instance_id,
+            recording,
+        }
+    }
 
     #[test]
     fn snapshot_file_names_replace_unsupported_characters() {
@@ -219,5 +308,381 @@ mod tests {
     #[test]
     fn empty_snapshot_file_name_uses_fallback() {
         assert_eq!(sanitize(""), "seismograph");
+    }
+
+    #[test]
+    fn handshake_reads_legacy_and_cache_recording_state() {
+        let mut recording = RecordingConfiguration::default();
+        recording.allocations.enabled = true;
+        let cache = RecordingPolicy {
+            enabled: true,
+            capture_backtraces: true,
+            sampling_one_in: 8,
+        };
+        let (descriptor, requests, worker) = serve(vec![vec![
+            (1, hello(&test_descriptor(0), recording)),
+            (2, Response::CacheRecording(cache)),
+        ]]);
+        // The scripted response needs the listener's instance identity, not its port.
+        let result = handshake(&descriptor).unwrap();
+        let requests = requests.recv().unwrap();
+        worker.join().unwrap();
+
+        recording.cache = cache;
+        assert_eq!(
+            (result, requests),
+            (
+                recording,
+                vec![
+                    (
+                        1,
+                        Request::Hello {
+                            authentication: descriptor.authentication,
+                        },
+                    ),
+                    (2, Request::ReadCacheRecording),
+                ],
+            )
+        );
+    }
+
+    #[test]
+    fn handshake_rejects_remote_wrong_identity_and_unexpected_responses() {
+        let cases = [
+            Response::Error("denied".into()),
+            Response::Hello {
+                instance_id: InstanceId::from_bytes([9; 16]),
+                recording: RecordingConfiguration::default(),
+            },
+            Response::Acknowledged,
+        ];
+        let actual = cases.map(|response| {
+            let (descriptor, requests, worker) = serve(vec![vec![(1, response)]]);
+            let error = handshake(&descriptor).unwrap_err().to_string();
+            requests.recv().unwrap();
+            worker.join().unwrap();
+            error
+        });
+
+        assert_eq!(
+            actual,
+            [
+                "monitor rejected the request: denied",
+                "monitor returned an unexpected response",
+                "monitor returned an unexpected response",
+            ]
+        );
+    }
+
+    #[test]
+    fn cache_recording_distinguishes_supported_unsupported_and_rejected_monitors() {
+        let policy = RecordingPolicy {
+            enabled: true,
+            capture_backtraces: false,
+            sampling_one_in: 4,
+        };
+        let (descriptor, requests, worker) = serve(vec![vec![
+            (1, hello(&test_descriptor(0), RecordingConfiguration::default())),
+            (2, Response::CacheRecording(policy)),
+        ]]);
+        let supported = cache_recording(&descriptor).unwrap();
+        requests.recv().unwrap();
+        worker.join().unwrap();
+
+        let (descriptor, requests, worker) = serve(vec![vec![
+            (1, hello(&test_descriptor(0), RecordingConfiguration::default())),
+            (3, Response::CacheRecording(policy)),
+        ]]);
+        let unsupported = cache_recording(&descriptor).unwrap();
+        requests.recv().unwrap();
+        worker.join().unwrap();
+
+        let (descriptor, requests, worker) = serve(vec![vec![(1, Response::Error("denied".into()))]]);
+        let rejected = cache_recording(&descriptor).unwrap_err().to_string();
+        requests.recv().unwrap();
+        worker.join().unwrap();
+
+        let (descriptor, requests, worker) = serve(vec![vec![(
+            1,
+            Response::Hello {
+                instance_id: InstanceId::from_bytes([9; 16]),
+                recording: RecordingConfiguration::default(),
+            },
+        )]]);
+        let wrong_identity = cache_recording(&descriptor).unwrap_err().to_string();
+        requests.recv().unwrap();
+        worker.join().unwrap();
+
+        assert_eq!(
+            (supported, unsupported, rejected, wrong_identity),
+            (
+                Some(policy),
+                None,
+                "monitor rejected the request: denied".to_owned(),
+                "monitor returned an unexpected response".to_owned(),
+            )
+        );
+    }
+
+    #[test]
+    fn set_recording_sends_legacy_and_cache_requests() {
+        let mut configuration = RecordingConfiguration::default();
+        configuration.allocations.enabled = true;
+        configuration.cache = RecordingPolicy {
+            enabled: true,
+            capture_backtraces: true,
+            sampling_one_in: 16,
+        };
+        let (descriptor, requests, worker) = serve(vec![
+            vec![
+                (1, hello(&test_descriptor(0), RecordingConfiguration::default())),
+                (2, Response::CacheRecording(RecordingPolicy::default())),
+            ],
+            vec![
+                (1, hello(&test_descriptor(0), RecordingConfiguration::default())),
+                (2, Response::Acknowledged),
+            ],
+            vec![
+                (1, hello(&test_descriptor(0), RecordingConfiguration::default())),
+                (2, Response::Acknowledged),
+            ],
+        ]);
+
+        set_recording(&descriptor, configuration).unwrap();
+        let requests = requests.recv().unwrap();
+        worker.join().unwrap();
+        let mut legacy = configuration;
+        legacy.cache = RecordingPolicy::default();
+
+        assert_eq!(
+            requests,
+            vec![
+                (
+                    1,
+                    Request::Hello {
+                        authentication: descriptor.authentication,
+                    },
+                ),
+                (2, Request::ReadCacheRecording),
+                (
+                    1,
+                    Request::Hello {
+                        authentication: descriptor.authentication,
+                    },
+                ),
+                (2, Request::SetRecording(legacy)),
+                (
+                    1,
+                    Request::Hello {
+                        authentication: descriptor.authentication,
+                    },
+                ),
+                (2, Request::SetCacheRecording(configuration.cache)),
+            ]
+        );
+    }
+
+    #[test]
+    fn set_recording_rejects_cache_configuration_for_legacy_monitor() {
+        let (descriptor, requests, worker) = serve(vec![vec![
+            (1, hello(&test_descriptor(0), RecordingConfiguration::default())),
+            (2, Response::Acknowledged),
+        ]]);
+        let mut configuration = RecordingConfiguration::default();
+        configuration.cache.enabled = true;
+
+        let error = set_recording(&descriptor, configuration).unwrap_err().to_string();
+        let observed = requests.recv().unwrap();
+        worker.join().unwrap();
+
+        assert_eq!(
+            (error, observed.len()),
+            (
+                "monitor rejected the request: cache recording is not supported by this monitor".to_owned(),
+                2,
+            )
+        );
+    }
+
+    #[test]
+    fn set_recording_accepts_default_cache_configuration_for_legacy_monitor() {
+        let configuration = RecordingConfiguration::default();
+        let (descriptor, requests, worker) = serve(vec![
+            vec![(1, hello(&test_descriptor(0), configuration)), (2, Response::Acknowledged)],
+            vec![(1, hello(&test_descriptor(0), configuration)), (2, Response::Acknowledged)],
+        ]);
+
+        set_recording(&descriptor, configuration).unwrap();
+        let observed = requests.recv().unwrap();
+        worker.join().unwrap();
+
+        assert_eq!(
+            observed
+                .iter()
+                .filter(|(_, request)| matches!(request, Request::SetRecording(_)))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn snapshot_and_statistics_commands_return_complete_payloads() {
+        let options = SnapshotOptions {
+            event_buffers: EventBufferDisposition::Release,
+        };
+        let (descriptor, requests, worker) = serve(vec![vec![
+            (1, hello(&test_descriptor(0), RecordingConfiguration::default())),
+            (2, Response::Snapshot(vec![1, 2, 3])),
+        ]]);
+        let bytes = capture_snapshot(&descriptor, options).unwrap();
+        let snapshot_requests = requests.recv().unwrap();
+        worker.join().unwrap();
+
+        let statistics = RecorderStatistics {
+            thread_count: 2,
+            total_events: 3,
+            retained_events: 4,
+            lost_events: 5,
+            event_capacity_per_thread: 6,
+            allocated_bytes: 7,
+            recording: RecordingConfiguration::default(),
+        };
+        let (descriptor, requests, worker) = serve(vec![vec![
+            (1, hello(&test_descriptor(0), RecordingConfiguration::default())),
+            (2, Response::RecorderStatistics(statistics)),
+        ]]);
+        let actual_statistics = recorder_statistics(&descriptor).unwrap();
+        let statistics_requests = requests.recv().unwrap();
+        worker.join().unwrap();
+
+        assert_eq!(
+            (
+                bytes,
+                snapshot_requests[1].clone(),
+                actual_statistics,
+                statistics_requests[1].clone()
+            ),
+            (
+                vec![1, 2, 3],
+                (2, Request::CaptureSnapshot(options)),
+                statistics,
+                (2, Request::ReadRecorderStatistics),
+            )
+        );
+    }
+
+    #[test]
+    fn command_rejects_wrong_ids_remote_errors_and_unexpected_payloads() {
+        let cases = [
+            (3, Response::Acknowledged, "monitor returned an unexpected response"),
+            (2, Response::Error("failed".into()), "monitor rejected the request: failed"),
+        ];
+        let expected = cases.each_ref().map(|(_, _, expected)| (*expected).to_owned());
+        let actual = cases.map(|(response_id, response, _)| {
+            let (descriptor, requests, worker) = serve(vec![vec![
+                (1, hello(&test_descriptor(0), RecordingConfiguration::default())),
+                (response_id, response),
+            ]]);
+            let error = command(&descriptor, &Request::ReadRecorderStatistics).unwrap_err().to_string();
+            requests.recv().unwrap();
+            worker.join().unwrap();
+            error
+        });
+
+        assert_eq!(actual, expected);
+
+        let handshakes = [
+            Response::Hello {
+                instance_id: InstanceId::from_bytes([9; 16]),
+                recording: RecordingConfiguration::default(),
+            },
+            Response::Error("hello failed".into()),
+        ];
+        let actual = handshakes.map(|response| {
+            let (descriptor, requests, worker) = serve(vec![vec![(1, response)]]);
+            let error = command(&descriptor, &Request::ReadRecorderStatistics).unwrap_err().to_string();
+            requests.recv().unwrap();
+            worker.join().unwrap();
+            error
+        });
+        assert_eq!(
+            actual,
+            [
+                "monitor returned an unexpected response",
+                "monitor rejected the request: hello failed",
+            ]
+        );
+    }
+
+    #[test]
+    fn discover_filters_files_and_sorts_reachable_monitors() {
+        let directory = directory("discover");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("ignored.txt"), b"not a descriptor").unwrap();
+        fs::write(directory.join("invalid.monitor"), b"invalid").unwrap();
+
+        let (mut second, second_requests, second_worker) = serve(vec![vec![
+            (1, hello(&test_descriptor(0), RecordingConfiguration::default())),
+            (2, Response::Acknowledged),
+        ]]);
+        second.name = "zeta".into();
+        second.write_file(directory.join("second.monitor")).unwrap();
+        let (mut first, first_requests, first_worker) = serve(vec![vec![
+            (1, hello(&test_descriptor(0), RecordingConfiguration::default())),
+            (2, Response::Acknowledged),
+        ]]);
+        first.name = "alpha".into();
+        first.write_file(directory.join("first.monitor")).unwrap();
+
+        let instances = discover_in(&directory).unwrap();
+        first_requests.recv().unwrap();
+        second_requests.recv().unwrap();
+        first_worker.join().unwrap();
+        second_worker.join().unwrap();
+        fs::remove_dir_all(&directory).unwrap();
+
+        assert_eq!(
+            instances
+                .iter()
+                .map(|instance| (instance.descriptor.name.as_str(), instance.recording))
+                .collect::<Vec<_>>(),
+            vec![
+                ("alpha", RecordingConfiguration::default()),
+                ("zeta", RecordingConfiguration::default()),
+            ]
+        );
+    }
+
+    #[test]
+    fn discover_handles_missing_directories_and_snapshot_saves_exact_bytes() {
+        let directory = directory("filesystem");
+        assert!(discover_in(&directory).unwrap().is_empty());
+        fs::create_dir_all(&directory).unwrap();
+        let regular_file = directory.join("not-a-directory");
+        fs::write(&regular_file, []).unwrap();
+        assert!(matches!(
+            discover_in(&regular_file),
+            Err(Error::Io(error)) if error.kind() == io::ErrorKind::NotADirectory
+        ));
+        let descriptor = test_descriptor(0);
+
+        let path = save_snapshot_to(&directory, &descriptor, &[1, 2, 3]).unwrap();
+        let contents = fs::read(&path).unwrap();
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        let current_directory_path = save_snapshot(&descriptor, &[4, 5, 6]).unwrap();
+        let current_directory_contents = fs::read(&current_directory_path).unwrap();
+        fs::remove_file(current_directory_path).unwrap();
+        fs::remove_dir_all(&directory).unwrap();
+
+        assert_eq!(
+            (
+                path.parent(),
+                name.starts_with("worker-west-europe-42-"),
+                name.ends_with(".seismograph"),
+                contents,
+                current_directory_contents,
+            ),
+            (Some(directory.as_path()), true, true, vec![1, 2, 3], vec![4, 5, 6])
+        );
     }
 }

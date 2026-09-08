@@ -19,6 +19,13 @@ macro_rules! schema {
     }};
 }
 
+fn stable_digest(value: &str) -> (usize, u64) {
+    let hash = value.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+        hash.wrapping_mul(0x0000_0100_0000_01b3) ^ u64::from(byte)
+    });
+    (value.len(), hash)
+}
+
 #[test]
 fn html_report_contains_required_sections() {
     let mut snapshot = Snapshot::new(Version::new(1, 2, 3));
@@ -251,6 +258,7 @@ fn html_report_contains_required_sections() {
     assert!(!html.contains("Size-class occupancy"));
     assert!(!html.contains("http://"));
     assert!(!html.contains("https://"));
+    assert_eq!(stable_digest(&html), (51_516, 2_830_809_008_930_878_494));
 }
 
 #[test]

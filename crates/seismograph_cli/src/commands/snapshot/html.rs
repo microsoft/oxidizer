@@ -57,19 +57,23 @@ fn decode_snapshot(bytes: &[u8]) -> Result<(Snapshot, Vec<seismograph::snapshot:
         }
     };
 
-    let mut snapshot = match seismograph
-        .sources
-        .iter()
-        .find(|source| source.id == seismograph_rallocator::source::ID)
-    {
+    let mut snapshot = match allocator_source(&seismograph.sources) {
         Some(source) => seismograph_rallocator::decode(&source.data).map_err(Error::DecodeAllocator)?,
         None => empty_allocator_snapshot(),
     };
-    if !seismograph.events.threads.is_empty() || !seismograph.events.events.is_empty() {
+    if contains_runtime_events(&seismograph.events) {
         snapshot.runtime_events = Some(seismograph.events);
     }
     snapshot.metadata.capture_duration_nanos = seismograph.capture_duration_nanos;
     Ok((snapshot, seismograph.sources))
+}
+
+fn allocator_source(sources: &[seismograph::snapshot::SourceSnapshot]) -> Option<&seismograph::snapshot::SourceSnapshot> {
+    sources.iter().find(|source| source.id == seismograph_rallocator::source::ID)
+}
+
+fn contains_runtime_events(events: &seismograph::recorder::event::Events) -> bool {
+    !(events.threads.is_empty() && events.events.is_empty())
 }
 
 fn empty_allocator_snapshot() -> Snapshot {
@@ -135,7 +139,10 @@ mod tests {
     use seismograph_rallocator::snapshot::{SkippedSection, SkippedSectionFields, Snapshot, Version};
     use seismograph_rallocator::{encode, encoded_len};
 
-    use super::{Error, VerbArgs, decode_snapshot, empty_allocator_snapshot, map_create_error, paths_refer_to_same_file, verb};
+    use super::{
+        Error, VerbArgs, allocator_source, contains_runtime_events, decode_snapshot, empty_allocator_snapshot, map_create_error,
+        paths_refer_to_same_file, verb,
+    };
 
     static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
     static ALLOCATOR_SOURCE: seismograph::snapshot::Source =
@@ -365,6 +372,50 @@ mod tests {
                 sources.iter().any(|source| source.id == seismograph_rallocator::source::ID),
             ),
             (1, true)
+        );
+    }
+
+    #[test]
+    fn native_source_and_event_detection_require_the_expected_content() {
+        let allocator = seismograph::snapshot::SourceSnapshot {
+            id: seismograph_rallocator::source::ID,
+            name: "allocator".into(),
+            schema_version: 1,
+            data: Vec::new(),
+        };
+        let other = seismograph::snapshot::SourceSnapshot {
+            id: seismograph::snapshot::SourceId::new(999),
+            name: "other".into(),
+            schema_version: 1,
+            data: Vec::new(),
+        };
+        let empty = seismograph::recorder::event::Events::default();
+        let mut threads = empty.clone();
+        threads.threads.push(seismograph::recorder::thread::ThreadLog {
+            thread_id: seismograph::recorder::thread::ThreadId::new(1),
+            total_events: 0,
+            lost_events: 0,
+            name: "worker".into(),
+        });
+        let mut events = empty.clone();
+        events.events.push(seismograph::recorder::event::Event {
+            thread_id: seismograph::recorder::thread::ThreadId::new(1),
+            sequence: seismograph::recorder::event::EventSequence::new(1),
+            timestamp: seismograph::recorder::event::EventTimestamp::from_ticks(1),
+            kind: seismograph::recorder::event::EventKind::ArcClone,
+            payload: seismograph::recorder::event::EventPayload::Object(seismograph::recorder::event::ObjectId::new(1)),
+            call_stack: Vec::new(),
+        });
+
+        assert_eq!(
+            (
+                allocator_source(std::slice::from_ref(&allocator)).map(|source| source.name.as_str()),
+                allocator_source(std::slice::from_ref(&other)).map(|source| source.name.as_str()),
+                contains_runtime_events(&empty),
+                contains_runtime_events(&threads),
+                contains_runtime_events(&events),
+            ),
+            (Some("allocator"), None, false, true, true)
         );
     }
 }

@@ -2661,15 +2661,50 @@ mod tests {
         ];
 
         assert_eq!(
-            operations
-                .map(|operation| (
-                    operation.label(),
-                    operation.event_kind(),
-                    operation.is_lock_poison(),
-                    operation.is_contention()
-                ))
-                .len(),
-            32
+            operations.map(PrimitiveOperationKind::label),
+            [
+                "Create",
+                "Clone",
+                "Deref",
+                "Final drop",
+                "Relocate",
+                "Acquisition",
+                "Contention",
+                "Release",
+                "Read acquisition",
+                "Read contention",
+                "Read release",
+                "Write acquisition",
+                "Write contention",
+                "Write release",
+                "Completed wait",
+                "Blocked wait",
+                "Generation release",
+                "Completed wait",
+                "Blocked wait",
+                "Notification",
+                "Access",
+                "Contention",
+                "Initialization",
+                "Send",
+                "Send contention",
+                "Receive",
+                "Receive contention",
+                "Close",
+                "High watermark",
+                "Poisoned",
+                "Poison observed",
+                "Poison cleared",
+            ]
+        );
+        assert_eq!(
+            (
+                PrimitiveOperationKind::MutexContention.is_contention(),
+                PrimitiveOperationKind::ArcClone.is_contention(),
+                PrimitiveOperationKind::LockPoisoned.is_lock_poison(),
+                PrimitiveOperationKind::ArcClone.is_lock_poison(),
+            ),
+            (true, false, true, false)
         );
         for kind in PrimitiveKind::ALL {
             for operation in operations {
@@ -2680,16 +2715,58 @@ mod tests {
 
     #[test]
     fn thread_operation_metadata_covers_every_variant() {
-        let event_kinds = ThreadOperationKind::ALL.map(ThreadOperationKind::event_kind);
-        for operation in ThreadOperationKind::ALL {
-            assert!(!operation.label().is_empty());
-            assert!(!operation.relationship_label().is_empty());
-            let _ = operation.is_contention();
-            let _ = operation.is_allocation();
-            for event_kind in event_kinds {
-                let _ = operation.is_related(event_kind);
-            }
-        }
+        assert_eq!(ThreadOperationKind::Allocation.label(), "Allocation");
+        assert_eq!(ThreadOperationKind::ChannelHighWatermark.label(), "Channel high watermark");
+        assert_eq!(
+            ThreadOperationKind::Allocation.relationship_label(),
+            "Threads that deallocated these allocations"
+        );
+        assert_eq!(
+            ThreadOperationKind::MutexAccess.relationship_label(),
+            "Other threads observed on the same Mutex objects"
+        );
+        assert_eq!(
+            (
+                ThreadOperationKind::MutexContention.is_contention(),
+                ThreadOperationKind::ArcClone.is_contention(),
+                ThreadOperationKind::Allocation.is_allocation(),
+                ThreadOperationKind::ArcClone.is_allocation(),
+                ThreadOperationKind::ArcClone.is_related(RuntimeEventKind::ArcDeref),
+                ThreadOperationKind::ArcClone.is_related(RuntimeEventKind::MutexAccess),
+            ),
+            (true, false, true, false, true, false)
+        );
+    }
+
+    #[test]
+    fn identical_thread_stacks_are_counted() {
+        let events = [
+            RuntimeEvent {
+                thread_id: ThreadId::new(1),
+                sequence: EventSequence::new(1),
+                timestamp: EventTimestamp::from_ticks(1),
+                kind: RuntimeEventKind::ArcClone,
+                payload: EventPayload::Object(ObjectId::new(7)),
+                call_stack: vec![RuntimeAddress::new(0x1000)],
+            },
+            RuntimeEvent {
+                thread_id: ThreadId::new(1),
+                sequence: EventSequence::new(2),
+                timestamp: EventTimestamp::from_ticks(2),
+                kind: RuntimeEventKind::ArcClone,
+                payload: EventPayload::Object(ObjectId::new(7)),
+                call_stack: vec![RuntimeAddress::new(0x1000)],
+            },
+        ];
+
+        assert_eq!(
+            thread_stacks(events.iter(), ThreadOperationKind::ArcClone, &HashMap::new()),
+            vec![ThreadStack {
+                count: 2,
+                application_stack: vec!["0x0000000000001000".into()],
+                complete_stack: vec!["0x0000000000001000".into()],
+            }]
+        );
     }
 
     #[test]
@@ -2911,7 +2988,7 @@ mod tests {
             assert_eq!(allocations.sorted_hotspots(sort, false)[0].allocations, 1);
             assert_eq!(allocations.sorted_hotspots(sort, true)[0].allocations, 2);
         }
-        assert_eq!(average_bytes(&hotspot(0, 10, 0, 0)), 0);
+        assert_eq!((average_bytes(&hotspot(0, 10, 0, 0)), average_bytes(&hotspot(4, 10, 0, 0))), (0, 2));
     }
 
     #[test]
@@ -2967,8 +3044,43 @@ mod tests {
     fn retained_memory_totals_and_task_ids_handle_missing_inputs() {
         let snapshot = seismograph_rallocator::snapshot::Snapshot::new(seismograph_rallocator::snapshot::Version::new(1, 0, 0));
         assert!(retained_memory_totals(&snapshot, &[]).is_empty());
+        let tier = MemoryTierData {
+            kind: MemoryTier::Small,
+            current_allocations: 0,
+            current_bytes: 0,
+            buckets: vec![
+                MemoryBucket {
+                    lower_bytes: 1,
+                    upper_bytes: 8,
+                    allocations: 2,
+                    allocated_bytes: 20,
+                    live_allocations: 1,
+                    live_bytes: 10,
+                    topology_live_allocations: None,
+                    capacity_blocks: None,
+                    requested_bytes: None,
+                    usable_bytes: None,
+                    hotspots: Vec::new(),
+                },
+                MemoryBucket {
+                    lower_bytes: 9,
+                    upper_bytes: 16,
+                    allocations: 3,
+                    allocated_bytes: 60,
+                    live_allocations: 2,
+                    live_bytes: 40,
+                    topology_live_allocations: None,
+                    capacity_blocks: None,
+                    requested_bytes: None,
+                    usable_bytes: None,
+                    hotspots: Vec::new(),
+                },
+            ],
+        };
         assert_eq!(
             (
+                tier.retained_allocations(),
+                tier.retained_bytes(),
                 runtime_task_id(RuntimeEventKind::TaskSpawned, 1, 0),
                 runtime_task_id(RuntimeEventKind::TaskPollFinished, 2, 0),
                 runtime_task_id(RuntimeEventKind::TransferStarted, 0, 3),
@@ -2977,7 +3089,7 @@ mod tests {
                 runtime_task_id(RuntimeEventKind::ArcClone, 6, 7),
                 runtime_task_id(RuntimeEventKind::TaskCanceled, 0, 0),
             ),
-            (Some(1), Some(2), Some(3), Some(4), Some(5), None, None)
+            (5, 80, Some(1), Some(2), Some(3), Some(4), Some(5), None, None)
         );
     }
 
@@ -3159,9 +3271,17 @@ mod tests {
         assert_eq!(
             tasks
                 .iter()
-                .map(|task| (task.task_id, task.state.as_str(), task.transfer_count))
+                .map(|task| {
+                    (
+                        task.task_id,
+                        task.state.as_str(),
+                        task.enqueue_count,
+                        task.materialization_count,
+                        task.transfer_count,
+                    )
+                })
                 .collect::<Vec<_>>(),
-            vec![(1, "Canceled", 3), (2, "Panicked", 0), (3, "Completed", 0)]
+            vec![(1, "Canceled", 1, 1, 3), (2, "Panicked", 0, 0, 0), (3, "Completed", 0, 0, 0),]
         );
     }
 
@@ -3309,12 +3429,25 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the single assertion covers every retained allocation routing boundary"
+    )]
     fn memory_snapshot_groups_retained_allocations_by_routing_shape() {
         let mut snapshot = seismograph_rallocator::snapshot::Snapshot::new(seismograph_rallocator::snapshot::Version::new(0, 1, 0));
         snapshot.size_classes.push(seismograph_rallocator::snapshot::SizeClass::from_fields(
             seismograph_rallocator::snapshot::SizeClassFields {
                 class_index: 0,
                 block_bytes: 64,
+                live_allocations: seismograph_rallocator::snapshot::Estimate::default(),
+                requested_bytes: seismograph_rallocator::snapshot::Estimate::default(),
+                usable_bytes: seismograph_rallocator::snapshot::Estimate::default(),
+            },
+        ));
+        snapshot.size_classes.push(seismograph_rallocator::snapshot::SizeClass::from_fields(
+            seismograph_rallocator::snapshot::SizeClassFields {
+                class_index: 1,
+                block_bytes: 4_096,
                 live_allocations: seismograph_rallocator::snapshot::Estimate::default(),
                 requested_bytes: seismograph_rallocator::snapshot::Estimate::default(),
                 usable_bytes: seismograph_rallocator::snapshot::Estimate::default(),
@@ -3338,13 +3471,16 @@ mod tests {
         };
         snapshot.callers = Some(Callers::from_fields(CallersFields {
             session_id: 1,
-            total_events: 3,
+            total_events: 6,
             lost_events: 0,
             threads: Vec::new(),
             events: vec![
                 event(1, 32, 8, 0x1000),
                 event(2, 100_000, 8, 0x2000),
                 event(3, 32, 128 * 1024, 0x3000),
+                event(4, 2_000, 2_048, 0x1000),
+                event(5, 64, 65_540, 0x3000),
+                event(6, 3_000_000, 8, 0x2000),
             ],
             thread_names: Vec::new(),
         }));
@@ -3377,6 +3513,9 @@ mod tests {
                                     bucket.lower_bytes,
                                     bucket.upper_bytes,
                                     bucket.allocations,
+                                    bucket.allocated_bytes,
+                                    bucket.live_allocations,
+                                    bucket.live_bytes,
                                     bucket.hotspots[0].location(AllocationStackFilter::Application),
                                 )
                             })
@@ -3385,10 +3524,78 @@ mod tests {
                 })
                 .collect::<Vec<_>>(),
             vec![
-                (MemoryTier::Small, vec![(1, 64, 1, "app::small")]),
-                (MemoryTier::Medium, vec![(65_536, 131_071, 1, "app::medium")]),
-                (MemoryTier::Direct, vec![(32, 63, 1, "app::direct")]),
+                (
+                    MemoryTier::Small,
+                    vec![(1, 64, 1, 32, 1, 32, "app::small"), (65, 4_096, 1, 2_000, 1, 2_000, "app::small"),],
+                ),
+                (
+                    MemoryTier::Medium,
+                    vec![
+                        (65_536, 131_071, 1, 100_000, 1, 100_000, "app::medium"),
+                        (2_097_152, 4_194_303, 1, 3_000_000, 1, 3_000_000, "app::medium"),
+                    ],
+                ),
+                (
+                    MemoryTier::Direct,
+                    vec![(32, 63, 1, 32, 1, 32, "app::direct"), (64, 127, 1, 64, 1, 64, "app::direct"),],
+                ),
             ]
+        );
+    }
+
+    #[test]
+    fn every_internal_frame_marker_is_filtered_independently() {
+        let lookup = |symbol: Option<&str>, filename: Option<&str>| {
+            AddressLookup::from_fields(AddressLookupFields {
+                address: 1,
+                symbol: symbol.map(str::to_owned),
+                filename: filename.map(str::to_owned),
+                line: None,
+                column: None,
+            })
+        };
+        let primitive_symbols = [
+            "performables::operation",
+            "seismograph::record",
+            "std::thread::spawn",
+            "alloc::vec::Vec",
+            "core::option::Option",
+            "backtrace::trace",
+        ];
+        let primitive_files = [
+            "/repo/performables/src/lib.rs",
+            "/repo/seismograph/src/lib.rs",
+            "/rust/library/std/src/thread.rs",
+            "/rust/library/alloc/src/vec.rs",
+            "/rust/library/core/src/option.rs",
+        ];
+        let allocation_symbols = [
+            "rallocator::allocate",
+            "seismograph::record",
+            "seismograph_rallocator::capture",
+            "std::alloc::alloc",
+            "alloc::alloc::alloc",
+            "core::ptr::write",
+        ];
+        let allocation_files = [
+            "/repo/rallocator/src/lib.rs",
+            "/repo/seismograph/src/lib.rs",
+            "/repo/seismograph_rallocator/src/lib.rs",
+            "/rust/library/std/src/alloc.rs",
+            "/rust/library/alloc/src/alloc.rs",
+            "/rust/library/core/src/ptr.rs",
+        ];
+
+        assert_eq!(
+            (
+                primitive_symbols.map(|symbol| is_internal_primitive_frame(Some(&lookup(Some(symbol), None)))),
+                primitive_files.map(|filename| is_internal_primitive_frame(Some(&lookup(None, Some(filename))))),
+                allocation_symbols.map(|symbol| is_internal_allocation_frame(Some(&lookup(Some(symbol), None)))),
+                allocation_files.map(|filename| is_internal_allocation_frame(Some(&lookup(None, Some(filename))))),
+                is_internal_primitive_frame(Some(&lookup(Some("app::run"), Some("/repo/app.rs")))),
+                is_internal_allocation_frame(Some(&lookup(Some("app::run"), Some("/repo/app.rs")))),
+            ),
+            ([true; 6], [true; 5], [true; 6], [true; 6], false, false)
         );
     }
 
@@ -3950,6 +4157,66 @@ mod tests {
                     }),
                     call_stack: Vec::new(),
                 },
+                RuntimeEvent {
+                    thread_id: ThreadId::new(7),
+                    sequence: EventSequence::new(3),
+                    timestamp: EventTimestamp::from_ticks(300),
+                    kind: RuntimeEventKind::TaskCompleted,
+                    payload: EventPayload::Runtime(RuntimeEventPayload {
+                        runtime_id: RuntimeId::from_raw(1).unwrap(),
+                        worker_id: Some(WorkerId::from_raw(2).unwrap()),
+                        subject_id: 10,
+                        related_id: 0,
+                        value_0: 0,
+                        value_1: 0,
+                    }),
+                    call_stack: Vec::new(),
+                },
+                RuntimeEvent {
+                    thread_id: ThreadId::new(7),
+                    sequence: EventSequence::new(4),
+                    timestamp: EventTimestamp::from_ticks(400),
+                    kind: RuntimeEventKind::TaskCanceled,
+                    payload: EventPayload::Runtime(RuntimeEventPayload {
+                        runtime_id: RuntimeId::from_raw(1).unwrap(),
+                        worker_id: Some(WorkerId::from_raw(2).unwrap()),
+                        subject_id: 10,
+                        related_id: 0,
+                        value_0: 0,
+                        value_1: 0,
+                    }),
+                    call_stack: Vec::new(),
+                },
+                RuntimeEvent {
+                    thread_id: ThreadId::new(7),
+                    sequence: EventSequence::new(5),
+                    timestamp: EventTimestamp::from_ticks(500),
+                    kind: RuntimeEventKind::TaskPanicked,
+                    payload: EventPayload::Runtime(RuntimeEventPayload {
+                        runtime_id: RuntimeId::from_raw(1).unwrap(),
+                        worker_id: Some(WorkerId::from_raw(2).unwrap()),
+                        subject_id: 10,
+                        related_id: 0,
+                        value_0: 0,
+                        value_1: 0,
+                    }),
+                    call_stack: Vec::new(),
+                },
+                RuntimeEvent {
+                    thread_id: ThreadId::new(7),
+                    sequence: EventSequence::new(6),
+                    timestamp: EventTimestamp::from_ticks(600),
+                    kind: RuntimeEventKind::TaskMaterialized,
+                    payload: EventPayload::Runtime(RuntimeEventPayload {
+                        runtime_id: RuntimeId::from_raw(1).unwrap(),
+                        worker_id: Some(WorkerId::from_raw(2).unwrap()),
+                        subject_id: 10,
+                        related_id: 0,
+                        value_0: 0,
+                        value_1: 0,
+                    }),
+                    call_stack: Vec::new(),
+                },
             ],
         };
         let source = RuntimeSourceSnapshot {
@@ -3969,7 +4236,7 @@ mod tests {
                         state: WorkerState::Running,
                         processor_index: None,
                         thread_id: Some(ThreadId::new(7)),
-                        current_task: Some(seismograph::recorder::runtime::TaskId::from_raw(10).unwrap()),
+                        current_task: Some(seismograph::recorder::runtime::TaskId::from_raw(12).unwrap()),
                     },
                     Worker {
                         id: WorkerId::from_raw(3).unwrap(),
@@ -4015,21 +4282,62 @@ mod tests {
         };
 
         let snapshot = RuntimeMonitorSnapshot::from_events(&events, Some(&source), &[]);
-        let task = &snapshot.workers[0].tasks[0];
-
         assert_eq!(
             (
                 snapshot.retained_events,
                 snapshot.lost_events,
-                task.metric_scope,
-                task.state.as_str(),
-                task.poll_count,
-                task.poll_nanos,
-                task.max_poll_nanos,
-                task.resume_count,
-                task.ready_wait_count,
+                snapshot
+                    .workers
+                    .iter()
+                    .map(|worker| {
+                        (
+                            worker.runtime_id,
+                            worker.runtime_name.as_str(),
+                            worker.worker_id,
+                            worker.role.as_str(),
+                            worker.state.as_str(),
+                            worker.thread_id,
+                            worker.current_task,
+                            worker.tasks.iter().map(|task| task.task_id).collect::<Vec<_>>(),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+                snapshot.workers[0].tasks[0].clone(),
             ),
-            (2, 998, RuntimeTaskMetricScope::Lifetime, "Running", 500, 10_000, 300, 499, 450,)
+            (
+                6,
+                998,
+                vec![
+                    (1, "runtime", 2, "Core", "Running", Some(7), Some(12), vec![10, 12]),
+                    (1, "runtime", 3, "Blocking", "Parked", None, None, Vec::new()),
+                ],
+                RuntimeTaskSummary {
+                    task_id: 10,
+                    runtime_id: 1,
+                    parent_id: None,
+                    type_descriptor_id: Some(42),
+                    metric_scope: RuntimeTaskMetricScope::Lifetime,
+                    state: "Pending".into(),
+                    spawned_at: Some(5),
+                    completed_at: None,
+                    poll_count: 500,
+                    poll_nanos: 10_000,
+                    average_poll_nanos: 20,
+                    max_poll_nanos: 300,
+                    resume_count: 499,
+                    average_resume_nanos: 40,
+                    max_resume_nanos: 400,
+                    ready_wait_count: 450,
+                    ready_wait_nanos: 9_000,
+                    average_ready_wait_nanos: 20,
+                    max_ready_wait_nanos: 200,
+                    enqueue_count: 0,
+                    materialization_count: 1,
+                    transfer_count: 0,
+                    worker_ids: vec![2],
+                    spawn_stack: Vec::new(),
+                },
+            )
         );
     }
 
@@ -4139,6 +4447,7 @@ mod tests {
                     .unwrap()
                     .stack(AllocationStackFilter::Application)
                     .to_vec(),
+                allocated_object.selected_stack().unwrap().count,
                 (contention.thread_id, contention.objects[0].object_id),
                 (arc.thread_id, arc.objects[0].object_id),
             ),
@@ -4147,6 +4456,7 @@ mod tests {
                 (2, 100, 1, 1),
                 vec!["app::allocate (producer.rs:10)".to_owned()],
                 vec!["app::free (consumer.rs:20)".to_owned()],
+                1,
                 (2, 200),
                 (3, 300),
             )

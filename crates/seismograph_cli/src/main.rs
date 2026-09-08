@@ -62,7 +62,7 @@ fn execute(args: Vec<OsString>) -> ExitCode {
             return ExitCode::from(u8::try_from(code).unwrap_or(1));
         }
     };
-    ExitCode::from(exit_code(run(cli), &program))
+    ExitCode::from(exit_code(run(cli, commands::monitor::verb), &program))
 }
 
 fn exit_code(result: Result<(), Box<dyn std::error::Error>>, program: &str) -> u8 {
@@ -75,28 +75,16 @@ fn exit_code(result: Result<(), Box<dyn std::error::Error>>, program: &str) -> u
     }
 }
 
-fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
+fn run(
+    cli: Cli,
+    run_monitor: impl FnOnce(commands::monitor::VerbArgs) -> Result<(), commands::monitor::Error>,
+) -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
-        Command::Monitor(args) => run_monitor(args),
+        Command::Monitor(args) => run_monitor(args).map_err(Into::into),
         Command::Snapshot { command } => match command {
             SnapshotCommand::Html(args) => commands::snapshot::html::verb(args).map_err(Into::into),
         },
     }
-}
-
-#[cfg(not(test))]
-#[cfg_attr(coverage_nightly, coverage(off))]
-fn run_monitor(args: commands::monitor::VerbArgs) -> Result<(), Box<dyn std::error::Error>> {
-    commands::monitor::verb(args).map_err(Into::into)
-}
-
-#[cfg(test)]
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "the test stub preserves the production dispatch function signature"
-)]
-fn run_monitor(_args: commands::monitor::VerbArgs) -> Result<(), Box<dyn std::error::Error>> {
-    Ok(())
 }
 
 #[cfg(test)]
@@ -104,10 +92,22 @@ mod tests {
     use super::{Cli, Command, run};
 
     #[test]
-    fn monitor_command_dispatches_without_entering_the_terminal_in_tests() {
-        run(Cli {
-            command: Command::Monitor(crate::commands::monitor::VerbArgs),
-        })
+    fn monitor_command_dispatches_and_propagates_failures() {
+        run(
+            Cli {
+                command: Command::Monitor(crate::commands::monitor::VerbArgs),
+            },
+            |_| Ok(()),
+        )
         .unwrap();
+
+        let error = run(
+            Cli {
+                command: Command::Monitor(crate::commands::monitor::VerbArgs),
+            },
+            |_| Err(crate::commands::monitor::Error::UnexpectedResponse),
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "monitor returned an unexpected response");
     }
 }

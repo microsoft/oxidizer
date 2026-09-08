@@ -440,6 +440,7 @@ fn render_runtime_events(html: &mut String, snapshot: &Snapshot) {
     html.push_str("</div></details></section>");
 }
 
+#[derive(Debug, Eq, PartialEq)]
 struct RuntimeMetric {
     id: String,
     label: String,
@@ -451,12 +452,14 @@ struct RuntimeMetric {
     contention_pairs: Vec<RuntimeContentionPair>,
 }
 
+#[derive(Debug, Eq, PartialEq)]
 struct RuntimeStackTotal {
     kind: String,
     stack: Vec<u64>,
     count: u64,
 }
 
+#[derive(Debug, Eq, PartialEq)]
 struct RuntimeContentionPair {
     kind: String,
     blocked: Vec<u64>,
@@ -868,7 +871,6 @@ fn compact_runtime_symbol(symbol: &str) -> String {
 
 fn is_runtime_recorder_frame(symbol: &str) -> bool {
     symbol.starts_with("backtrace::")
-        || symbol.contains("seismograph::recorder::")
         || symbol.contains("seismograph::recorder::")
         || symbol.contains("performables::arc::")
         || symbol.contains("performables::sync::mutex::")
@@ -2086,9 +2088,50 @@ mod tests {
         };
         render_runtime_stack_panel(&mut html, &empty_metric, &HashMap::new());
 
-        assert!(html.contains("&lt;title&gt;"));
-        assert!(html.contains("width:0.00%"));
-        assert!(html.contains("No retained call stacks"));
+        assert_eq!(
+            html,
+            "<article class=\"runtime-cluster\"><h3>&lt;title&gt;</h3><p class=\"muted\">a &amp; b</p><div class=\"runtime-metrics\"><button type=\"button\" class=\"runtime-metric\" data-runtime-panel=\"metric\" aria-controls=\"metric\"><span class=\"runtime-metric-heading\"><span>&lt;metric&gt;</span><strong>0</strong></span><span class=\"runtime-metric-bar\"><i style=\"width:0.00%\"></i></span><span class=\"runtime-metric-detail\">none &amp; none</span><span class=\"runtime-thread-heading\">Thread participation: 0 threads</span><span class=\"runtime-thread-bar\"></span></button></div></article><div class=\"runtime-stack-panel\" id=\"empty\" hidden><h3>Empty call sites</h3><p class=\"muted\">No retained call stacks for this graph item.</p></div>"
+        );
+
+        let metrics = [
+            RuntimeMetric {
+                id: "one".into(),
+                label: "One".into(),
+                value: "1".into(),
+                magnitude: 1,
+                detail: String::new(),
+                threads: BTreeMap::new(),
+                stacks: Vec::new(),
+                contention_pairs: Vec::new(),
+            },
+            RuntimeMetric {
+                id: "four".into(),
+                label: "Four".into(),
+                value: "4".into(),
+                magnitude: 4,
+                detail: String::new(),
+                threads: BTreeMap::new(),
+                stacks: Vec::new(),
+                contention_pairs: Vec::new(),
+            },
+        ];
+        let mut cluster = String::new();
+        render_runtime_cluster(&mut cluster, "Rates", "relative", &metrics);
+        let mut thread_bar = String::new();
+        render_runtime_thread_bar(&mut thread_bar, &BTreeMap::from([(7, 1), (9, 2)]));
+
+        assert_eq!(
+            (
+                cluster.matches("width:25.00%").count(),
+                cluster.matches("width:100.00%").count(),
+                thread_bar,
+            ),
+            (
+                1,
+                1,
+                "<span class=\"runtime-thread-heading\">Thread participation: 2 threads</span><span class=\"runtime-thread-bar\"><i style=\"width:33.33%;background:hsl(195 70% 60%)\" title=\"thread #7: 1 events\"></i><i style=\"width:66.67%;background:hsl(262 70% 60%)\" title=\"thread #9: 2 events\"></i></span>".to_owned(),
+            )
+        );
     }
 
     #[test]
@@ -2155,10 +2198,21 @@ mod tests {
         let event_refs = events.iter().collect::<Vec<_>>();
 
         assert_eq!(
-            ["arc", "mutex", "rwlock", "barrier", "condvar", "once", "channel", "unknown",]
-                .map(|prefix| runtime_object_detail(prefix, &event_refs, 2))
-                .map(|detail| detail.is_empty()),
-            [false; 8]
+            ["arc", "mutex", "rwlock", "barrier", "condvar", "once", "channel", "unknown",].map(|prefix| runtime_object_detail(
+                prefix,
+                &event_refs,
+                2
+            )),
+            [
+                "1 derefs · 1 clones · 1 relocations · 2 threads",
+                "1 locks · 1 contentions · 1 poisonings · 1 observations · 1 clears · 2 threads",
+                "1 reads · 1 writes · 2 contentions · 1 poisonings · 1 observations · 1 clears · 2 threads",
+                "1 waits · 1 blocked · 1 releases · 2 threads",
+                "1 waits · 1 blocked · 1 notifications · 2 threads",
+                "1 accesses · 1 initializations · 1 contentions · 2 threads",
+                "1 sends · 1 receives · 2 contentions · high watermark 0 · 1 closes · 2 threads",
+                "2 threads",
+            ]
         );
 
         let metrics = runtime_object_metrics(
@@ -2169,7 +2223,27 @@ mod tests {
             &[RuntimeEventKind::BarrierAccess],
             &[RuntimeEventKind::BarrierAccess],
         );
-        assert_eq!(metrics.len(), 1);
+        assert_eq!(
+            (
+                metrics.len(),
+                metrics[0].magnitude,
+                metrics[0].threads.clone(),
+                metrics[0].stacks.iter().map(|stack| stack.count).sum::<u64>(),
+            ),
+            (1, 1, BTreeMap::from([(1, 2)]), 2)
+        );
+
+        for prefix in ["mutex", "rwlock"] {
+            let metrics = runtime_object_metrics(
+                prefix,
+                "Lock",
+                &events,
+                &[RuntimeEventKind::MutexAccess],
+                &[RuntimeEventKind::MutexAccess],
+                &[RuntimeEventKind::MutexAccess],
+            );
+            assert_eq!(metrics[0].value, "1 locks");
+        }
 
         let ranked = runtime_object_metrics(
             "arc",
@@ -2183,7 +2257,16 @@ mod tests {
             &[RuntimeEventKind::ArcDeref, RuntimeEventKind::ArcClone],
             &[RuntimeEventKind::ArcDeref],
         );
-        assert_eq!((ranked[0].magnitude, ranked[0].stacks.len()), (1, 2));
+        assert_eq!(
+            (
+                ranked[0].label.as_str(),
+                ranked[0].value.as_str(),
+                ranked[0].magnitude,
+                ranked[0].threads.clone(),
+                ranked[0].stacks.iter().map(|stack| stack.count).sum::<u64>(),
+            ),
+            ("#1 · Arc 0x000000000000000b", "1 derefs", 1, BTreeMap::from([(1, 2)]), 2)
+        );
     }
 
     #[test]
@@ -2198,18 +2281,72 @@ mod tests {
             runtime_event(1, 7, RuntimeEventKind::RwLockReadAccess, 1, &[50]),
             runtime_event(1, 8, RuntimeEventKind::RwLockWriteContention, 1, &[60]),
             runtime_event(1, 9, RuntimeEventKind::RwLockReadRelease, 1, &[]),
+            runtime_event(1, 10, RuntimeEventKind::MutexContention, 1, &[70]),
+            runtime_event(1, 11, RuntimeEventKind::RwLockWriteContention, 1, &[80]),
         ];
         let references = events.iter().collect::<Vec<_>>();
 
-        let pairs = runtime_contention_pairs(&references);
+        let mut pairs = runtime_contention_pairs(&references);
+        pairs.sort_unstable_by(|left, right| left.kind.cmp(&right.kind).then_with(|| left.blocked.cmp(&right.blocked)));
 
-        assert_eq!(pairs.len(), 3);
-        assert!(pairs.iter().all(|pair| pair.holder.is_some()));
+        assert_eq!(
+            pairs,
+            vec![
+                RuntimeContentionPair {
+                    kind: "Mutex contention".into(),
+                    blocked: vec![20],
+                    holder: Some(vec![10]),
+                    count: 1,
+                },
+                RuntimeContentionPair {
+                    kind: "Mutex contention".into(),
+                    blocked: vec![70],
+                    holder: None,
+                    count: 1,
+                },
+                RuntimeContentionPair {
+                    kind: "Read contention".into(),
+                    blocked: vec![40],
+                    holder: Some(vec![30]),
+                    count: 1,
+                },
+                RuntimeContentionPair {
+                    kind: "Write contention".into(),
+                    blocked: vec![60],
+                    holder: Some(vec![50]),
+                    count: 1,
+                },
+                RuntimeContentionPair {
+                    kind: "Write contention".into(),
+                    blocked: vec![80],
+                    holder: None,
+                    count: 1,
+                },
+            ]
+        );
 
         let second_thread = runtime_event(2, 10, RuntimeEventKind::MutexContention, 1, &[70]);
         let unordered_write = runtime_event(2, 11, RuntimeEventKind::RwLockWriteContention, 1, &[80]);
         let unordered = [references[0], &second_thread, &unordered_write];
-        assert!(runtime_contention_pairs(&unordered).iter().all(|pair| pair.holder.is_none()));
+        let mut unordered_pairs = runtime_contention_pairs(&unordered);
+        unordered_pairs.sort_unstable_by(|left, right| left.kind.cmp(&right.kind));
+        assert_eq!(
+            unordered_pairs,
+            vec![
+                RuntimeContentionPair {
+                    kind: "Mutex contention".into(),
+                    blocked: vec![70],
+                    holder: None,
+                    count: 1,
+                },
+                RuntimeContentionPair {
+                    kind: "Write contention".into(),
+                    blocked: vec![80],
+                    holder: None,
+                    count: 1,
+                },
+            ]
+        );
     }
 
     #[test]
@@ -2246,6 +2383,8 @@ mod tests {
                 format_runtime_frame(3, lookups.get(&3).copied()),
                 format_runtime_frame(4, None),
                 compact_runtime_symbol("outer::<inner<u8>>::run"),
+                compact_runtime_symbol("outer<inner<u8>>::run"),
+                compact_runtime_symbol("outer>run"),
                 is_runtime_recorder_frame("backtrace::trace"),
                 is_runtime_recorder_frame("app::run"),
                 ratio(1, 0),
@@ -2260,6 +2399,8 @@ mod tests {
                 "0x0000000000000003".to_owned(),
                 "0x0000000000000004".to_owned(),
                 "outer::::run".to_owned(),
+                "outer::run".to_owned(),
+                "outer>run".to_owned(),
                 true,
                 false,
                 0.0,
@@ -2267,6 +2408,35 @@ mod tests {
             )
         );
         assert!(render_runtime_party_stack(&[2], &lookups).contains("Full stack"));
+    }
+
+    #[test]
+    fn every_runtime_frame_marker_is_filtered_independently() {
+        for symbol in [
+            "backtrace::trace",
+            "seismograph::recorder::record",
+            "performables::arc::Arc::clone",
+            "performables::sync::mutex::Mutex::lock",
+            "performables::sync::lock::Lock::read",
+        ] {
+            assert!(is_runtime_recorder_frame(symbol), "{symbol}");
+        }
+        assert!(!is_runtime_recorder_frame("application::run"));
+
+        let lookup = |filename: &str| {
+            AddressLookup::from_fields(AddressLookupFields {
+                address: 1,
+                symbol: Some("application::run".into()),
+                filename: Some(filename.into()),
+                line: None,
+                column: None,
+            })
+        };
+        for filename in [r"C:\repo\performables\src\sync\mutex.rs", "/repo/performables/src/sync/mutex.rs"] {
+            let entry = lookup(filename);
+            let lookups = HashMap::from([(1, &entry)]);
+            assert!(runtime_stack_frames(&[1], &lookups).is_empty(), "{filename}");
+        }
     }
 
     #[test]
@@ -2290,9 +2460,10 @@ mod tests {
             ],
         );
 
-        assert!(html.contains("allocator&lt;&amp;"));
-        assert!(html.contains("Specialized allocator panels"));
-        assert!(html.contains("Generic source metadata only"));
+        assert_eq!(
+            html,
+            "<section><h2>Snapshot sources</h2><table><tr><th>Source</th><th>Schema</th><th>Payload</th><th>Rendering</th></tr><tr><td>allocator&lt;&amp;</td><td>2</td><td>1.00 KiB</td><td>Specialized allocator panels</td></tr><tr><td>custom</td><td>3</td><td>0 B</td><td>Generic source metadata only</td></tr></table></section>"
+        );
     }
 
     #[test]

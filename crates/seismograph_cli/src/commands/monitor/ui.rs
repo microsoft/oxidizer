@@ -96,15 +96,7 @@ impl App {
 
     fn draw_capture_popup(frame: &mut ratatui::Frame<'_>, elapsed: Duration, active_step: CaptureStep) {
         const SPINNER: [&str; 4] = ["|", "/", "-", "\\"];
-        let area = frame.area();
-        let width = area.width.min(60);
-        let height = area.height.min(9);
-        let popup_area = Rect::new(
-            area.x + area.width.saturating_sub(width) / 2,
-            area.y + area.height.saturating_sub(height) / 2,
-            width,
-            height,
-        );
+        let popup_area = centered_rect(frame.area(), 60, 9);
         let frame_index = usize::try_from(elapsed.as_millis() / 150).unwrap_or(usize::MAX) % SPINNER.len();
         frame.render_widget(Clear, popup_area);
         let block = Block::default()
@@ -141,14 +133,9 @@ impl App {
     fn draw_recording_configuration_popup(frame: &mut ratatui::Frame<'_>, popup: RecordingConfigurationPopup) {
         let area = frame.area();
         let width = area.width.min(72);
-        let desired_height = u16::try_from(RecordingConfigurationField::ALL.len() + 2).unwrap_or(u16::MAX);
+        let desired_height = u16::try_from(RecordingConfigurationField::ALL.len().saturating_add(2)).unwrap_or(u16::MAX);
         let height = area.height.saturating_sub(2).min(desired_height).max(3);
-        let popup_area = Rect::new(
-            area.x + area.width.saturating_sub(width) / 2,
-            area.y + area.height.saturating_sub(height) / 2,
-            width,
-            height,
-        );
+        let popup_area = centered_rect(area, width, height);
         let items = RecordingConfigurationField::ALL.into_iter().map(|field| {
             let value = field.value(popup.draft);
             if value.is_empty() {
@@ -188,6 +175,21 @@ struct ConnectedView<'a> {
     cache_view: CacheViewState,
     activity_samples: &'a VecDeque<ActivitySample>,
     recorder_statistics: Option<&'a RecorderStatistics>,
+}
+
+fn centered_rect(area: Rect, maximum_width: u16, maximum_height: u16) -> Rect {
+    let width = area.width.min(maximum_width);
+    let height = area.height.min(maximum_height);
+    Rect::new(
+        area.x.saturating_add(area.width.saturating_sub(width) / 2),
+        area.y.saturating_add(area.height.saturating_sub(height) / 2),
+        width,
+        height,
+    )
+}
+
+fn row_is_selected(first: usize, index: usize, selected: usize) -> bool {
+    first.checked_add(index) == Some(selected)
 }
 
 fn draw_connected(frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect, view: &ConnectedView<'_>) {
@@ -324,7 +326,7 @@ fn draw_io(
                         format_bytes(resource.completed_bytes),
                         format_count(resource.errors.saturating_add(resource.canceled)),
                     )),
-                    first_resource + index == resource_selected,
+                    row_is_selected(first_resource, index, resource_selected),
                     view.focus == IoFocus::Resources,
                 )
             }),
@@ -377,7 +379,7 @@ fn draw_io(
                         format_bytes(operation.completed_bytes),
                         operation.duration_nanos.map_or_else(|| "-".into(), format_runtime_duration),
                     )),
-                    first_operation + index == operation_selected,
+                    row_is_selected(first_operation, index, operation_selected),
                     view.focus == IoFocus::Operations,
                 )
             }),
@@ -459,7 +461,7 @@ fn draw_cache(
                         format_count(tier.errors),
                         hit_rate,
                     )),
-                    first_tier + index == tier_selected,
+                    row_is_selected(first_tier, index, tier_selected),
                     view.focus == CacheFocus::Tiers,
                 )
             }),
@@ -504,7 +506,7 @@ fn draw_cache(
                         cache_event_label(operation.kind),
                         format_count(operation.events)
                     )),
-                    first_operation + index == operation_selected,
+                    row_is_selected(first_operation, index, operation_selected),
                     view.focus == CacheFocus::Operations,
                 )
             }),
@@ -629,7 +631,7 @@ fn draw_runtime(
                         format_runtime_duration(worker.average_poll_nanos),
                         format_runtime_duration(worker.max_poll_nanos),
                     )),
-                    first_worker + index == worker_selected,
+                    row_is_selected(first_worker, index, worker_selected),
                     view.focus == RuntimeFocus::Workers,
                 )
             }),
@@ -683,7 +685,7 @@ fn draw_runtime(
                         format_runtime_duration(task.average_ready_wait_nanos),
                         format_runtime_duration(task.max_ready_wait_nanos),
                     )),
-                    first_task + index == task_selected,
+                    row_is_selected(first_task, index, task_selected),
                     view.focus == RuntimeFocus::Tasks,
                 )
             }),
@@ -1158,7 +1160,7 @@ fn draw_primitive_types(frame: &mut ratatui::Frame<'_>, area: Rect, primitives: 
                             Style::default().fg(CONTENTION_COLOR),
                         ),
                     ]),
-                    first + index == selected,
+                    row_is_selected(first, index, selected),
                     view.focus == PrimitiveFocus::Types,
                 )
             }),
@@ -1225,7 +1227,11 @@ fn draw_primitive_operations(
             } else {
                 line
             };
-            primitive_selection_line(line, index == view.operation_selected, view.focus == PrimitiveFocus::Operations)
+            primitive_selection_line(
+                line,
+                row_is_selected(0, index, view.operation_selected),
+                view.focus == PrimitiveFocus::Operations,
+            )
         }));
     }
     frame.render_widget(
@@ -1278,7 +1284,7 @@ fn draw_primitive_hotspots(
                             format_count(hotspot.count),
                             hotspot.location(view.stack_filter)
                         )),
-                        first + index == selected,
+                        row_is_selected(first, index, selected),
                         view.focus == PrimitiveFocus::Hotspots,
                     )
                 }),
@@ -1405,7 +1411,7 @@ fn draw_thread_list(frame: &mut ratatui::Frame<'_>, area: Rect, threads: &Thread
                 format_count(thread.retained_events),
                 format_count(thread.lost_events),
             )),
-            first + index == selected,
+            row_is_selected(first, index, selected),
             view.focus == ThreadFocus::Threads,
         )
     }));
@@ -1453,7 +1459,7 @@ fn draw_thread_operations(frame: &mut ratatui::Frame<'_>, area: Rect, thread: Op
                 } else {
                     line
                 };
-                primitive_selection_line(line, first + index == selected, view.focus == ThreadFocus::Operations)
+                primitive_selection_line(line, row_is_selected(first, index, selected), view.focus == ThreadFocus::Operations)
             }),
     );
     frame.render_widget(
@@ -1506,7 +1512,7 @@ fn draw_thread_participants(
                         format_count(u64::try_from(participant.objects.len()).unwrap_or(u64::MAX)),
                         format_count(participant.events),
                     )),
-                    first + index == selected,
+                    row_is_selected(first, index, selected),
                     view.focus == ThreadFocus::Participants,
                 )
             }),
@@ -1562,7 +1568,7 @@ fn draw_thread_objects(
                         format_count(object.selected_events),
                         format_count(object.related_events),
                     )),
-                    first + index == selected,
+                    row_is_selected(first, index, selected),
                     view.focus == ThreadFocus::Objects,
                 )
             }),
@@ -1934,7 +1940,7 @@ fn draw_memory_hotspots(frame: &mut ratatui::Frame<'_>, area: Rect, bucket: Opti
                             format_count(hotspot.live_allocations),
                             hotspot.location(view.stack_filter),
                         )),
-                        first + index == selected,
+                        row_is_selected(first, index, selected),
                         view.focus == HeapFocus::Hotspots,
                     )
                 }),
@@ -2576,6 +2582,20 @@ mod tests {
             .collect()
     }
 
+    fn render_debug(draw: impl FnOnce(&mut ratatui::Frame<'_>)) -> String {
+        let backend = TestBackend::new(180, 60);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(draw).unwrap();
+        format!("{:?}", terminal.backend().buffer())
+    }
+
+    fn stable_digest(value: &str) -> (usize, u64) {
+        let hash = value.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+            hash.wrapping_mul(0x0000_0100_0000_01b3) ^ u64::from(byte)
+        });
+        (value.len(), hash)
+    }
+
     fn render_frame(draw: impl FnOnce(&mut ratatui::Frame<'_>)) -> String {
         let backend = TestBackend::new(180, 60);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -2633,30 +2653,40 @@ mod tests {
             [
                 format_runtime_duration(1),
                 format_runtime_duration(1_000),
+                format_runtime_duration(1_234),
                 format_runtime_duration(1_000_000),
                 format_runtime_duration(1_000_000_000),
                 format_event_loss(0, 0),
                 format_event_loss(1, 3),
+                format_hit_rate(7, 16),
                 format_age(Duration::from_secs(1)),
+                format_age(Duration::from_secs(59)),
+                format_age(Duration::from_mins(1)),
                 format_age(Duration::from_hours(1)),
                 format_count(1_234_567),
                 format_bytes(1),
                 format_bytes(1_024),
+                format_bytes(1_536),
                 format_bytes(1_048_576),
                 format_bytes(1_073_741_824),
             ],
             [
                 "1ns".to_owned(),
                 "1.00us".to_owned(),
+                "1.23us".to_owned(),
                 "1.00ms".to_owned(),
                 "1.00s".to_owned(),
                 "0.0%".to_owned(),
                 "33.3%".to_owned(),
+                "43.7%".to_owned(),
                 "1s ago".to_owned(),
+                "59s ago".to_owned(),
+                "1m ago".to_owned(),
                 "1h ago".to_owned(),
                 "1,234,567".to_owned(),
                 "1 B".to_owned(),
                 "1.00 KiB".to_owned(),
+                "1.50 KiB".to_owned(),
                 "1.00 MiB".to_owned(),
                 "1.00 GiB".to_owned(),
             ]
@@ -2699,6 +2729,39 @@ mod tests {
                 "#7".into(),
                 "#7 wo".into(),
                 "off",
+            )
+        );
+        assert_eq!(
+            (
+                centered_rect(Rect::new(10, 20, 100, 40), 60, 10),
+                centered_rect(Rect::new(10, 20, 20, 4), 60, 10),
+                row_is_selected(7, 3, 10),
+                row_is_selected(7, 2, 10),
+                line_text(&primitive_selection_line(Line::from("row"), true, true)),
+                line_text(&metric_line("Metric", "42".into())),
+                line_text(&recording_policy_line(
+                    "Policy",
+                    RecordingPolicy {
+                        enabled: true,
+                        capture_backtraces: true,
+                        sampling_one_in: 8,
+                    },
+                )),
+                line_text(&browse_footer("ready")),
+                key_span("key").content.into_owned(),
+                key_style(),
+            ),
+            (
+                Rect::new(30, 35, 60, 10),
+                Rect::new(10, 20, 20, 4),
+                true,
+                false,
+                "row".to_owned(),
+                "Metric: 42".to_owned(),
+                "Policy: on; backtraces on; sample 1/8 (12.5%)".to_owned(),
+                " ready  ↑/↓ select  Enter connect  r refresh  q quit".to_owned(),
+                "key".to_owned(),
+                Style::default().fg(KEY_COLOR).add_modifier(Modifier::BOLD),
             )
         );
 
@@ -2899,8 +2962,20 @@ mod tests {
         assert!(render(&app).contains("lifetime counters"));
 
         let mut capture = representative_capture();
-        capture.runtime.workers[0].tasks[0].spawn_stack.clear();
+        capture.runtime.workers[0].tasks[0].spawn_stack = vec!["app::spawn".into()];
         app.runtime_view.detail_view = RuntimeDetailView::SpawnStack;
+        app.screen = Screen::Connected {
+            descriptor: descriptor(),
+            recording: RecordingConfiguration::default(),
+            tab: MonitorTab::Runtime,
+            snapshot: Some(capture),
+        };
+        let rendered = render(&app);
+        assert!(rendered.contains("0  app::spawn"));
+        assert!(!rendered.contains("Backtrace not captured"));
+
+        let mut capture = representative_capture();
+        capture.runtime.workers[0].tasks[0].spawn_stack.clear();
         app.screen = Screen::Connected {
             descriptor: descriptor(),
             recording: RecordingConfiguration::default(),
@@ -3150,5 +3225,113 @@ mod tests {
             };
             assert!(render(&app).contains(expected));
         }
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn monitor_rendering_matches_the_complete_reference_buffer() {
+        let mut output = String::new();
+        let mut app = App::new();
+        app.instances.push(super::super::app::Instance {
+            descriptor: descriptor(),
+            recording: RecordingConfiguration::default(),
+        });
+        output.push_str(&render_debug(|frame| app.draw(frame)));
+        output.push_str(&render_debug(|frame| {
+            App::draw_capture_popup(frame, Duration::from_millis(450), CaptureStep::Decode);
+        }));
+        output.push_str(&render_debug(|frame| {
+            App::draw_recording_configuration_popup(
+                frame,
+                RecordingConfigurationPopup {
+                    draft: RecordingConfiguration {
+                        allocations: RecordingPolicy {
+                            enabled: true,
+                            capture_backtraces: true,
+                            sampling_one_in: 8,
+                        },
+                        ..Default::default()
+                    },
+                    selected: 2,
+                },
+            );
+        }));
+
+        for tab in [
+            MonitorTab::Info,
+            MonitorTab::Heaps,
+            MonitorTab::Allocations,
+            MonitorTab::Primitives,
+            MonitorTab::Threads,
+            MonitorTab::Runtime,
+            MonitorTab::Io,
+            MonitorTab::Cache,
+        ] {
+            app.screen = Screen::Connected {
+                descriptor: descriptor(),
+                recording: RecordingConfiguration::default(),
+                tab,
+                snapshot: Some(representative_capture()),
+            };
+            output.push_str(&render_debug(|frame| app.draw(frame)));
+        }
+
+        for focus in [PrimitiveFocus::Types, PrimitiveFocus::Operations, PrimitiveFocus::Hotspots] {
+            app.primitive_view.focus = focus;
+            app.screen = Screen::Connected {
+                descriptor: descriptor(),
+                recording: RecordingConfiguration::default(),
+                tab: MonitorTab::Primitives,
+                snapshot: Some(representative_capture()),
+            };
+            output.push_str(&render_debug(|frame| app.draw(frame)));
+        }
+        for focus in [
+            ThreadFocus::Threads,
+            ThreadFocus::Operations,
+            ThreadFocus::Participants,
+            ThreadFocus::Objects,
+        ] {
+            app.thread_view.focus = focus;
+            app.screen = Screen::Connected {
+                descriptor: descriptor(),
+                recording: RecordingConfiguration::default(),
+                tab: MonitorTab::Threads,
+                snapshot: Some(representative_capture()),
+            };
+            output.push_str(&render_debug(|frame| app.draw(frame)));
+        }
+        for focus in [RuntimeFocus::Workers, RuntimeFocus::Tasks, RuntimeFocus::Details] {
+            app.runtime_view.focus = focus;
+            app.screen = Screen::Connected {
+                descriptor: descriptor(),
+                recording: RecordingConfiguration::default(),
+                tab: MonitorTab::Runtime,
+                snapshot: Some(representative_capture()),
+            };
+            output.push_str(&render_debug(|frame| app.draw(frame)));
+        }
+        for focus in [IoFocus::Resources, IoFocus::Operations] {
+            app.io_view.focus = focus;
+            app.screen = Screen::Connected {
+                descriptor: descriptor(),
+                recording: RecordingConfiguration::default(),
+                tab: MonitorTab::Io,
+                snapshot: Some(representative_capture()),
+            };
+            output.push_str(&render_debug(|frame| app.draw(frame)));
+        }
+        for focus in [CacheFocus::Tiers, CacheFocus::Operations] {
+            app.cache_view.focus = focus;
+            app.screen = Screen::Connected {
+                descriptor: descriptor(),
+                recording: RecordingConfiguration::default(),
+                tab: MonitorTab::Cache,
+                snapshot: Some(representative_capture()),
+            };
+            output.push_str(&render_debug(|frame| app.draw(frame)));
+        }
+
+        assert_eq!(stable_digest(&output), (430_412, 3_960_316_965_083_143_886));
     }
 }

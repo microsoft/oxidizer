@@ -12,7 +12,7 @@ use seismograph_protocol::monitor::MonitorDescriptor;
 
 use super::client::{capture_snapshot, discover, recorder_statistics, save_snapshot, set_recording};
 use super::data::{
-    AllocationSnapshot, AllocationSort, AllocationStackFilter, CapturedSnapshot, MemorySnapshot, MemoryTier, PrimitiveSort,
+    AllocationSnapshot, AllocationSort, AllocationStackFilter, CapturedSnapshot, MemorySnapshot, MemoryTier, MemoryTierData, PrimitiveSort,
     RuntimeSnapshot, RuntimeTaskSort,
 };
 
@@ -210,12 +210,14 @@ fn sampling_label(sampling_one_in: u32) -> String {
 }
 
 fn adjusted_value(current: u32, values: &[u32], direction: isize) -> u32 {
-    let index = values
-        .iter()
-        .position(|candidate| *candidate >= current)
-        .unwrap_or(values.len() - 1);
-    let adjusted = index.saturating_add_signed(direction).min(values.len() - 1);
+    let last_index = values.len().saturating_sub(1);
+    let index = values.iter().position(|candidate| *candidate >= current).unwrap_or(last_index);
+    let adjusted = index.saturating_add_signed(direction).min(last_index);
     values[adjusted]
+}
+
+fn advance_selection(selected: usize, item_count: usize) -> usize {
+    selected.saturating_add(1).min(item_count.saturating_sub(1))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -682,9 +684,13 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub(super) fn refresh(&mut self) {
-        self.next_refresh = Instant::now() + REFRESH_INTERVAL;
+        self.next_refresh = Instant::now().checked_add(REFRESH_INTERVAL).unwrap_or_else(Instant::now);
         if let Screen::Connected { descriptor, .. } = &self.screen {
-            if self.capture_receiver.is_none() && self.statistics_receiver.is_none() && self.recording_receiver.is_none() {
+            if workers_are_idle(
+                self.capture_receiver.is_some(),
+                self.statistics_receiver.is_some(),
+                self.recording_receiver.is_some(),
+            ) {
                 self.start_recorder_statistics(descriptor.clone());
             }
             return;
@@ -720,7 +726,7 @@ impl App {
             Screen::Browse => match code {
                 KeyCode::Up => self.selected = self.selected.saturating_sub(1),
                 KeyCode::Down => {
-                    self.selected = (self.selected + 1).min(self.instances.len().saturating_sub(1));
+                    self.selected = advance_selection(self.selected, self.instances.len());
                 }
                 KeyCode::Enter => {
                     if let Some(instance) = self.instances.get(self.selected) {
@@ -742,40 +748,48 @@ impl App {
             },
             Screen::Connected {
                 recording, tab, snapshot, ..
-            } => match code {
-                _ if *tab == MonitorTab::Heaps && handle_heap_key(code, &mut self.heap_view, snapshot.as_deref()) => {}
-                _ if *tab == MonitorTab::Allocations && handle_allocation_key(code, &mut self.allocation_view, snapshot.as_deref()) => {}
-                _ if *tab == MonitorTab::Primitives && handle_primitive_key(code, &mut self.primitive_view, snapshot.as_deref()) => {}
-                _ if *tab == MonitorTab::Threads && handle_thread_key(code, &mut self.thread_view, snapshot.as_deref()) => {}
-                _ if *tab == MonitorTab::Runtime && handle_runtime_key(code, &mut self.runtime_view, snapshot.as_deref()) => {}
-                _ if *tab == MonitorTab::Io && handle_io_key(code, &mut self.io_view, snapshot.as_deref()) => {}
-                _ if *tab == MonitorTab::Cache && handle_cache_key(code, &mut self.cache_view, snapshot.as_deref()) => {}
-                KeyCode::Esc => {
-                    self.screen = Screen::Browse;
-                    self.refresh();
+            } => {
+                let handled_by_tab = match *tab {
+                    MonitorTab::Heaps => handle_heap_key(code, &mut self.heap_view, snapshot.as_deref()),
+                    MonitorTab::Allocations => handle_allocation_key(code, &mut self.allocation_view, snapshot.as_deref()),
+                    MonitorTab::Primitives => handle_primitive_key(code, &mut self.primitive_view, snapshot.as_deref()),
+                    MonitorTab::Threads => handle_thread_key(code, &mut self.thread_view, snapshot.as_deref()),
+                    MonitorTab::Runtime => handle_runtime_key(code, &mut self.runtime_view, snapshot.as_deref()),
+                    MonitorTab::Io => handle_io_key(code, &mut self.io_view, snapshot.as_deref()),
+                    MonitorTab::Cache => handle_cache_key(code, &mut self.cache_view, snapshot.as_deref()),
+                    MonitorTab::Info => false,
+                };
+                if handled_by_tab {
+                    return false;
                 }
-                KeyCode::Left | KeyCode::Char('h') | KeyCode::BackTab => *tab = tab.previous(),
-                KeyCode::Right | KeyCode::Char('l') | KeyCode::Tab => *tab = tab.next(),
-                KeyCode::Char('1') => *tab = MonitorTab::Info,
-                KeyCode::Char('2') => *tab = MonitorTab::Heaps,
-                KeyCode::Char('3') => *tab = MonitorTab::Allocations,
-                KeyCode::Char('4') => *tab = MonitorTab::Primitives,
-                KeyCode::Char('5') => *tab = MonitorTab::Threads,
-                KeyCode::Char('6') => *tab = MonitorTab::Runtime,
-                KeyCode::Char('7') => *tab = MonitorTab::Io,
-                KeyCode::Char('8') => *tab = MonitorTab::Cache,
-                KeyCode::Char('d') => {
-                    self.snapshot_options.event_buffers = next_buffer_disposition(self.snapshot_options.event_buffers);
-                    self.status = format!("Snapshot buffers: {:?}", self.snapshot_options.event_buffers);
+                match code {
+                    KeyCode::Esc => {
+                        self.screen = Screen::Browse;
+                        self.refresh();
+                    }
+                    KeyCode::Left | KeyCode::Char('h') | KeyCode::BackTab => *tab = tab.previous(),
+                    KeyCode::Right | KeyCode::Char('l') | KeyCode::Tab => *tab = tab.next(),
+                    KeyCode::Char('1') => *tab = MonitorTab::Info,
+                    KeyCode::Char('2') => *tab = MonitorTab::Heaps,
+                    KeyCode::Char('3') => *tab = MonitorTab::Allocations,
+                    KeyCode::Char('4') => *tab = MonitorTab::Primitives,
+                    KeyCode::Char('5') => *tab = MonitorTab::Threads,
+                    KeyCode::Char('6') => *tab = MonitorTab::Runtime,
+                    KeyCode::Char('7') => *tab = MonitorTab::Io,
+                    KeyCode::Char('8') => *tab = MonitorTab::Cache,
+                    KeyCode::Char('d') => {
+                        self.snapshot_options.event_buffers = next_buffer_disposition(self.snapshot_options.event_buffers);
+                        self.status = format!("Snapshot buffers: {:?}", self.snapshot_options.event_buffers);
+                    }
+                    KeyCode::Char('c') if !capture_in_progress && self.recording_receiver.is_none() => {
+                        self.recording_configuration_popup = Some(RecordingConfigurationPopup {
+                            draft: *recording,
+                            selected: 0,
+                        });
+                    }
+                    _ => {}
                 }
-                KeyCode::Char('c') if !capture_in_progress && self.recording_receiver.is_none() => {
-                    self.recording_configuration_popup = Some(RecordingConfigurationPopup {
-                        draft: *recording,
-                        selected: 0,
-                    });
-                }
-                _ => {}
-            },
+            }
         }
         false
     }
@@ -787,7 +801,7 @@ impl App {
         match code {
             KeyCode::Up => popup.selected = popup.selected.saturating_sub(1),
             KeyCode::Down => {
-                popup.selected = (popup.selected + 1).min(RecordingConfigurationField::ALL.len() - 1);
+                popup.selected = advance_selection(popup.selected, RecordingConfigurationField::ALL.len());
             }
             KeyCode::Left => popup.field().adjust(&mut popup.draft, -1),
             KeyCode::Right | KeyCode::Char(' ') => popup.field().adjust(&mut popup.draft, 1),
@@ -987,9 +1001,8 @@ impl App {
                 total_events: statistics.total_events,
             });
         }
-        while self.activity_samples.len() > MAX_ACTIVITY_SAMPLES {
-            self.activity_samples.pop_front();
-        }
+        let excess = self.activity_samples.len().saturating_sub(MAX_ACTIVITY_SAMPLES);
+        drop(self.activity_samples.drain(..excess));
         self.activity_observed_at = Some(captured_at);
         self.recorder_statistics = Some(statistics);
     }
@@ -1001,8 +1014,7 @@ fn receive_capture_message(receiver: Option<&Receiver<CaptureMessage>>) -> Resul
         Some(Ok(message)) => Ok(Some(message)),
         Some(Err(error)) if error.is_empty() => Ok(None),
         None => Ok(None),
-        Some(Err(error)) if error.is_closed() => Err("Snapshot capture worker stopped unexpectedly".into()),
-        Some(Err(error)) => Err(format!("Snapshot capture channel failed: {error}")),
+        Some(Err(_)) => Err("Snapshot capture worker stopped unexpectedly".into()),
     }
 }
 
@@ -1012,9 +1024,12 @@ fn receive_worker_result<T>(receiver: Option<&Receiver<Result<T, String>>>, work
         Some(Ok(result)) => Some(result),
         Some(Err(error)) if error.is_empty() => None,
         None => None,
-        Some(Err(error)) if error.is_closed() => Some(Err(format!("{worker} worker stopped unexpectedly"))),
-        Some(Err(error)) => Some(Err(format!("{worker} channel failed: {error}"))),
+        Some(Err(_)) => Some(Err(format!("{worker} worker stopped unexpectedly"))),
     }
+}
+
+const fn workers_are_idle(capturing: bool, fetching_statistics: bool, updating_recording: bool) -> bool {
+    !capturing && !fetching_statistics && !updating_recording
 }
 
 fn activity_rate(previous_total: u64, current_total: u64, elapsed: Duration) -> u64 {
@@ -1037,7 +1052,7 @@ fn handle_allocation_key(code: KeyCode, view: &mut AllocationViewState, snapshot
             let hotspot_count = snapshot
                 .and_then(|capture| capture.allocations.as_ref())
                 .map_or(0, |allocations| allocations.hotspots.len());
-            view.selected = (view.selected + 1).min(hotspot_count.saturating_sub(1));
+            view.selected = advance_selection(view.selected, hotspot_count);
             view.stack_scroll = 0;
         }
         KeyCode::PageUp => view.stack_scroll = view.stack_scroll.saturating_sub(1),
@@ -1063,15 +1078,20 @@ fn handle_allocation_key(code: KeyCode, view: &mut AllocationViewState, snapshot
     true
 }
 
+fn tier_with_kind(tiers: &[MemoryTierData], kind: MemoryTier) -> Option<&MemoryTierData> {
+    tiers.iter().find(|tier| tier.kind == kind)
+}
+
 fn handle_heap_key(code: KeyCode, view: &mut HeapViewState, snapshot: Option<&CapturedSnapshot>) -> bool {
     let memory = snapshot.and_then(|snapshot| snapshot.memory.as_ref());
-    let tier = memory.and_then(|memory| memory.tiers.iter().find(|tier| tier.kind == view.tier));
+    let tier = memory.and_then(|memory| tier_with_kind(&memory.tiers, view.tier));
     let bucket = tier.and_then(|tier| tier.buckets.get(view.bucket_selected));
     match code {
         KeyCode::Char('[') => {
             view.tier = view.tier.previous();
             view.reset();
         }
+
         KeyCode::Char(']') => {
             view.tier = view.tier.next();
             view.reset();
@@ -1089,12 +1109,12 @@ fn handle_heap_key(code: KeyCode, view: &mut HeapViewState, snapshot: Option<&Ca
         KeyCode::Down => match view.focus {
             HeapFocus::Buckets => {
                 let count = tier.map_or(0, |tier| tier.buckets.len());
-                view.bucket_selected = (view.bucket_selected + 1).min(count.saturating_sub(1));
+                view.bucket_selected = advance_selection(view.bucket_selected, count);
                 view.reset_hotspot();
             }
             HeapFocus::Hotspots => {
                 let count = bucket.map_or(0, |bucket| bucket.hotspots.len());
-                view.hotspot_selected = (view.hotspot_selected + 1).min(count.saturating_sub(1));
+                view.hotspot_selected = advance_selection(view.hotspot_selected, count);
                 view.stack_scroll = 0;
             }
         },
@@ -1142,17 +1162,17 @@ fn handle_primitive_key(code: KeyCode, view: &mut PrimitiveViewState, snapshot: 
         KeyCode::Down => match view.focus {
             PrimitiveFocus::Types => {
                 let count = primitives.map_or(0, |primitives| primitives.groups.len());
-                view.primitive_selected = (view.primitive_selected + 1).min(count.saturating_sub(1));
+                view.primitive_selected = advance_selection(view.primitive_selected, count);
                 view.reset_operations();
             }
             PrimitiveFocus::Operations => {
                 let count = operations.as_ref().map_or(0, Vec::len);
-                view.operation_selected = (view.operation_selected + 1).min(count.saturating_sub(1));
+                view.operation_selected = advance_selection(view.operation_selected, count);
                 view.reset_hotspots();
             }
             PrimitiveFocus::Hotspots => {
                 let count = operation.map_or(0, |operation| operation.hotspots.len());
-                view.hotspot_selected = (view.hotspot_selected + 1).min(count.saturating_sub(1));
+                view.hotspot_selected = advance_selection(view.hotspot_selected, count);
                 view.stack_scroll = 0;
             }
         },
@@ -1220,22 +1240,22 @@ fn handle_thread_key(code: KeyCode, view: &mut ThreadViewState, snapshot: Option
         KeyCode::Down => match view.focus {
             ThreadFocus::Threads => {
                 let count = threads.map_or(0, |threads| threads.threads.len());
-                view.thread_selected = (view.thread_selected + 1).min(count.saturating_sub(1));
+                view.thread_selected = advance_selection(view.thread_selected, count);
                 view.reset_operation();
             }
             ThreadFocus::Operations => {
                 let count = thread.map_or(0, |thread| thread.operations.len());
-                view.operation_selected = (view.operation_selected + 1).min(count.saturating_sub(1));
+                view.operation_selected = advance_selection(view.operation_selected, count);
                 view.reset_participant();
             }
             ThreadFocus::Participants => {
                 let count = operation.map_or(0, |operation| operation.participants.len());
-                view.participant_selected = (view.participant_selected + 1).min(count.saturating_sub(1));
+                view.participant_selected = advance_selection(view.participant_selected, count);
                 view.reset_object();
             }
             ThreadFocus::Objects => {
                 let count = participant.map_or(0, |participant| participant.objects.len());
-                view.object_selected = (view.object_selected + 1).min(count.saturating_sub(1));
+                view.object_selected = advance_selection(view.object_selected, count);
                 view.stack_scroll = 0;
             }
         },
@@ -1284,12 +1304,12 @@ fn handle_runtime_key(code: KeyCode, view: &mut RuntimeViewState, snapshot: Opti
         KeyCode::Down => match view.focus {
             RuntimeFocus::Workers => {
                 let count = runtime.map_or(0, |runtime| runtime.workers.len());
-                view.worker_selected = (view.worker_selected + 1).min(count.saturating_sub(1));
+                view.worker_selected = advance_selection(view.worker_selected, count);
                 view.reset_task();
             }
             RuntimeFocus::Tasks => {
                 let count = worker.map_or(0, |worker| worker.tasks.len());
-                view.task_selected = (view.task_selected + 1).min(count.saturating_sub(1));
+                view.task_selected = advance_selection(view.task_selected, count);
                 view.detail_view = RuntimeDetailView::Details;
                 view.detail_scroll = 0;
             }
@@ -1345,12 +1365,12 @@ fn handle_io_key(code: KeyCode, view: &mut IoViewState, snapshot: Option<&Captur
         KeyCode::Down => match view.focus {
             IoFocus::Resources => {
                 let count = io.map_or(0, |io| io.resources.len());
-                view.resource_selected = (view.resource_selected + 1).min(count.saturating_sub(1));
+                view.resource_selected = advance_selection(view.resource_selected, count);
                 view.operation_selected = 0;
             }
             IoFocus::Operations => {
                 let count = resource.map_or(0, |resource| resource.operations.len());
-                view.operation_selected = (view.operation_selected + 1).min(count.saturating_sub(1));
+                view.operation_selected = advance_selection(view.operation_selected, count);
             }
         },
         KeyCode::Enter => view.focus = IoFocus::Operations,
@@ -1379,12 +1399,12 @@ fn handle_cache_key(code: KeyCode, view: &mut CacheViewState, snapshot: Option<&
         KeyCode::Down => match view.focus {
             CacheFocus::Tiers => {
                 let count = cache.map_or(0, |cache| cache.tiers.len());
-                view.tier_selected = (view.tier_selected + 1).min(count.saturating_sub(1));
+                view.tier_selected = advance_selection(view.tier_selected, count);
                 view.operation_selected = 0;
             }
             CacheFocus::Operations => {
                 let count = tier.map_or(0, |tier| tier.operations.len());
-                view.operation_selected = (view.operation_selected + 1).min(count.saturating_sub(1));
+                view.operation_selected = advance_selection(view.operation_selected, count);
             }
         },
         KeyCode::Enter => view.focus = CacheFocus::Operations,
@@ -1409,16 +1429,10 @@ fn capture_connected_snapshot(
     let bytes = capture_snapshot(descriptor, options).map_err(|error| error.to_string())?;
     report_capture_step(progress, CaptureStep::Decode)?;
     let decoded = seismograph::snapshot::decode(&bytes).map_err(|error| format!("invalid Seismograph snapshot: {error}"))?;
-    let allocator = decoded
-        .sources
-        .iter()
-        .find(|source| source.id == seismograph_rallocator::source::ID)
+    let allocator = source_with_id(&decoded.sources, seismograph_rallocator::source::ID)
         .ok_or(super::Error::MissingMemorySource)
         .and_then(|source| seismograph_rallocator::decode(&source.data).map_err(super::Error::MemorySnapshot));
-    let runtime_source = decoded
-        .sources
-        .iter()
-        .find(|source| source.id == seismograph_runtime::snapshot::source::ID)
+    let runtime_source = source_with_id(&decoded.sources, seismograph_runtime::snapshot::source::ID)
         .and_then(|source| seismograph_runtime::snapshot::decode(&source.data).ok());
     let runtime_addresses = runtime_source
         .iter()
@@ -1482,6 +1496,13 @@ fn capture_connected_snapshot(
         status = error.to_string();
     }
     Ok(CaptureOutcome { snapshot, status })
+}
+
+fn source_with_id(
+    sources: &[seismograph::snapshot::SourceSnapshot],
+    id: seismograph::snapshot::SourceId,
+) -> Option<&seismograph::snapshot::SourceSnapshot> {
+    sources.iter().find(|source| source.id == id)
 }
 
 fn report_capture_step(progress: &Sender<CaptureMessage>, step: CaptureStep) -> Result<(), String> {
@@ -1814,12 +1835,31 @@ mod tests {
             (
                 EVENT_BUFFER_CAPACITIES.first().copied(),
                 EVENT_BUFFER_CAPACITIES.last().copied(),
+                adjusted_value(1, &EVENT_BUFFER_CAPACITIES, -1),
                 adjusted_value(1_000, &EVENT_BUFFER_CAPACITIES, 0),
+                adjusted_value(u32::MAX, &EVENT_BUFFER_CAPACITIES, 1),
                 EVENT_SAMPLING_RATES.first().copied(),
                 EVENT_SAMPLING_RATES.last().copied(),
+                adjusted_value(20, &EVENT_SAMPLING_RATES, -1),
                 adjusted_value(1_000, &EVENT_SAMPLING_RATES, 0),
+                advance_selection(0, 0),
+                advance_selection(0, 3),
+                advance_selection(2, 3),
             ),
-            (Some(64), Some(1_048_576), 1_024, Some(1), Some(65_536), 1_024)
+            (
+                Some(64),
+                Some(1_048_576),
+                64,
+                1_024,
+                1_048_576,
+                Some(1),
+                Some(65_536),
+                16,
+                1_024,
+                0,
+                1,
+                2,
+            )
         );
     }
 
@@ -1869,19 +1909,42 @@ mod tests {
         let mut app = App::new();
         app.recording_configuration_popup = Some(RecordingConfigurationPopup {
             draft: RecordingConfiguration::default(),
-            selected: 0,
+            selected: 1,
         });
         app.handle_key(KeyCode::Right);
+        let after_right = app.recording_configuration_popup.unwrap();
         app.handle_key(KeyCode::Left);
+        let after_left = app.recording_configuration_popup.unwrap();
         app.handle_key(KeyCode::Char(' '));
+        let after_space = app.recording_configuration_popup.unwrap();
         app.handle_key(KeyCode::Up);
+        let after_up = app.recording_configuration_popup.unwrap();
         app.handle_key(KeyCode::Down);
+        let after_down = app.recording_configuration_popup.unwrap();
+        app.recording_configuration_popup.as_mut().unwrap().selected = 2;
+        app.handle_key(KeyCode::Right);
+        let sampling_after_right = app.recording_configuration_popup.unwrap().draft.allocations.sampling_one_in;
+        app.handle_key(KeyCode::Left);
+        let sampling_after_left = app.recording_configuration_popup.unwrap().draft.allocations.sampling_one_in;
         app.recording_configuration_popup.as_mut().unwrap().selected = RecordingConfigurationField::ALL.len() - 1;
         app.handle_key(KeyCode::Enter);
 
         assert_eq!(
-            (app.recording_configuration_popup, app.status.as_str()),
-            (None, "Recording configuration unchanged")
+            (
+                after_right.selected,
+                after_right.draft.allocations.capture_backtraces,
+                after_left.selected,
+                after_left.draft.allocations.capture_backtraces,
+                after_space.selected,
+                after_space.draft.allocations.capture_backtraces,
+                after_up.selected,
+                after_down.selected,
+                sampling_after_right,
+                sampling_after_left,
+                app.recording_configuration_popup,
+                app.status.as_str(),
+            ),
+            (1, true, 1, false, 1, true, 0, 1, 2, 1, None, "Recording configuration unchanged")
         );
 
         app.recording_configuration_popup = Some(RecordingConfigurationPopup {
@@ -2008,8 +2071,11 @@ mod tests {
         assert!(app.handle_key(KeyCode::Char('Q')));
         assert!(!app.handle_key(KeyCode::Char('x')));
         app.handle_key(KeyCode::Down);
+        assert_eq!(app.selected, 1);
         app.handle_key(KeyCode::Down);
+        assert_eq!(app.selected, 1);
         app.handle_key(KeyCode::Up);
+        assert_eq!(app.selected, 0);
         app.handle_key(KeyCode::Enter);
         assert_eq!(connected_fields(&app.screen).unwrap().0, descriptor(1).instance_id);
 
@@ -2037,7 +2103,162 @@ mod tests {
         app.handle_key(KeyCode::Char('x'));
         app.handle_key(KeyCode::Esc);
         assert!(matches!(app.screen, Screen::Browse));
-        app.handle_key(KeyCode::Char('r'));
+
+        let mut browser = App::new();
+        browser.handle_key(KeyCode::Char('r'));
+        assert!(browser.discovery_receiver.is_some());
+    }
+
+    #[test]
+    fn connected_tab_dispatch_updates_only_the_active_view() {
+        let cases = [
+            (MonitorTab::Heaps, KeyCode::Char(']')),
+            (MonitorTab::Allocations, KeyCode::Char(']')),
+            (MonitorTab::Primitives, KeyCode::Char(']')),
+            (MonitorTab::Threads, KeyCode::Char('f')),
+            (MonitorTab::Runtime, KeyCode::Char(']')),
+            (MonitorTab::Io, KeyCode::Enter),
+            (MonitorTab::Cache, KeyCode::Enter),
+        ];
+
+        let actual = cases.map(|(tab, key)| {
+            let mut app = connected_app(tab);
+            app.handle_key(key);
+            (
+                app.heap_view.tier,
+                app.allocation_view.sort,
+                app.primitive_view.sort,
+                app.thread_view.stack_filter,
+                app.runtime_view.task_sort,
+                app.io_view.focus,
+                app.cache_view.focus,
+                connected_fields(&app.screen).unwrap().2,
+            )
+        });
+
+        assert_eq!(
+            actual,
+            [
+                (
+                    MemoryTier::Medium,
+                    AllocationSort::Allocations,
+                    PrimitiveSort::Events,
+                    AllocationStackFilter::Application,
+                    RuntimeTaskSort::Polls,
+                    IoFocus::Resources,
+                    CacheFocus::Tiers,
+                    MonitorTab::Heaps,
+                ),
+                (
+                    MemoryTier::Small,
+                    AllocationSort::AllocatedBytes,
+                    PrimitiveSort::Events,
+                    AllocationStackFilter::Application,
+                    RuntimeTaskSort::Polls,
+                    IoFocus::Resources,
+                    CacheFocus::Tiers,
+                    MonitorTab::Allocations,
+                ),
+                (
+                    MemoryTier::Small,
+                    AllocationSort::Allocations,
+                    PrimitiveSort::Objects,
+                    AllocationStackFilter::Application,
+                    RuntimeTaskSort::Polls,
+                    IoFocus::Resources,
+                    CacheFocus::Tiers,
+                    MonitorTab::Primitives,
+                ),
+                (
+                    MemoryTier::Small,
+                    AllocationSort::Allocations,
+                    PrimitiveSort::Events,
+                    AllocationStackFilter::All,
+                    RuntimeTaskSort::Polls,
+                    IoFocus::Resources,
+                    CacheFocus::Tiers,
+                    MonitorTab::Threads,
+                ),
+                (
+                    MemoryTier::Small,
+                    AllocationSort::Allocations,
+                    PrimitiveSort::Events,
+                    AllocationStackFilter::Application,
+                    RuntimeTaskSort::AveragePoll,
+                    IoFocus::Resources,
+                    CacheFocus::Tiers,
+                    MonitorTab::Runtime,
+                ),
+                (
+                    MemoryTier::Small,
+                    AllocationSort::Allocations,
+                    PrimitiveSort::Events,
+                    AllocationStackFilter::Application,
+                    RuntimeTaskSort::Polls,
+                    IoFocus::Operations,
+                    CacheFocus::Tiers,
+                    MonitorTab::Io,
+                ),
+                (
+                    MemoryTier::Small,
+                    AllocationSort::Allocations,
+                    PrimitiveSort::Events,
+                    AllocationStackFilter::Application,
+                    RuntimeTaskSort::Polls,
+                    IoFocus::Resources,
+                    CacheFocus::Operations,
+                    MonitorTab::Cache,
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn recording_popup_is_blocked_by_capture_and_recording_updates() {
+        let mut app = connected_app(MonitorTab::Info);
+        let (_capture_sender, capture_receiver) = unbounded();
+        app.capture_receiver = Some(capture_receiver);
+        app.handle_key(KeyCode::Char('c'));
+        let while_capturing = app.recording_configuration_popup;
+        app.capture_receiver = None;
+        let (_recording_sender, recording_receiver) = unbounded();
+        app.recording_receiver = Some(recording_receiver);
+        app.handle_key(KeyCode::Char('c'));
+        let while_recording = app.recording_configuration_popup;
+        app.recording_receiver = None;
+        app.handle_key(KeyCode::Char('c'));
+
+        assert_eq!(
+            (while_capturing, while_recording, app.recording_configuration_popup.is_some()),
+            (None, None, true)
+        );
+    }
+
+    #[test]
+    fn refresh_schedules_the_next_worker_for_each_screen() {
+        let mut browse = App::new();
+        let before = browse.next_refresh();
+        browse.refresh();
+        let browse_state = (browse.next_refresh() > before, browse.discovery_receiver.is_some());
+
+        let mut connected = connected_app(MonitorTab::Info);
+        connected.refresh();
+        let connected_state = (connected.statistics_receiver.is_some(), connected.discovery_receiver.is_none());
+
+        assert_eq!((browse_state, connected_state), ((true, true), (true, true)));
+        assert_eq!(
+            [
+                workers_are_idle(false, false, false),
+                workers_are_idle(true, false, false),
+                workers_are_idle(false, true, false),
+                workers_are_idle(false, false, true),
+                workers_are_idle(true, true, false),
+                workers_are_idle(true, false, true),
+                workers_are_idle(false, true, true),
+                workers_are_idle(true, true, true),
+            ],
+            [true, false, false, false, false, false, false, false]
+        );
     }
 
     #[test]
@@ -2107,6 +2328,7 @@ mod tests {
             assert!(handle_allocation_key(key, &mut view, None));
         }
         assert!(!handle_allocation_key(KeyCode::Char('x'), &mut view, None));
+        assert!(!view.descending);
     }
 
     #[test]
@@ -2139,6 +2361,25 @@ mod tests {
         }
         assert!(!handle_heap_key(KeyCode::Backspace, &mut view, None));
         assert!(!handle_heap_key(KeyCode::Char('x'), &mut view, None));
+
+        let tiers = [
+            MemoryTierData {
+                kind: MemoryTier::Small,
+                current_allocations: 0,
+                current_bytes: 0,
+                buckets: Vec::new(),
+            },
+            MemoryTierData {
+                kind: MemoryTier::Medium,
+                current_allocations: 0,
+                current_bytes: 0,
+                buckets: Vec::new(),
+            },
+        ];
+        assert_eq!(
+            tier_with_kind(&tiers, MemoryTier::Medium).map(|tier| tier.kind),
+            Some(MemoryTier::Medium)
+        );
     }
 
     #[test]
@@ -2188,7 +2429,14 @@ mod tests {
             app.record_activity(recorder_statistics_with_total(total));
         }
 
-        assert_eq!(app.activity_samples.len(), MAX_ACTIVITY_SAMPLES);
+        assert_eq!(
+            (
+                app.activity_samples.len(),
+                app.activity_samples.front().map(|sample| sample.total_events),
+                app.activity_samples.back().map(|sample| sample.total_events),
+            ),
+            (MAX_ACTIVITY_SAMPLES, Some(2), Some(MAX_ACTIVITY_SAMPLES as u64 + 1))
+        );
     }
 
     #[test]
@@ -2265,6 +2513,34 @@ mod tests {
         app.capture_receiver = Some(receiver);
         app.poll_snapshot_capture();
         assert_eq!(app.snapshot_error.as_deref(), Some("Snapshot capture worker stopped unexpectedly"));
+    }
+
+    #[test]
+    fn worker_receivers_distinguish_empty_closed_and_available_channels() {
+        let (capture_sender, capture_receiver) = unbounded();
+        assert!(matches!(receive_capture_message(Some(&capture_receiver)), Ok(None)));
+        capture_sender.send_sync(CaptureMessage::Progress(CaptureStep::Save)).unwrap();
+        assert!(matches!(
+            receive_capture_message(Some(&capture_receiver)),
+            Ok(Some(CaptureMessage::Progress(CaptureStep::Save)))
+        ));
+        drop(capture_sender);
+        assert!(matches!(
+            receive_capture_message(Some(&capture_receiver)),
+            Err(error) if error == "Snapshot capture worker stopped unexpectedly"
+        ));
+        assert!(matches!(receive_capture_message(None), Ok(None)));
+
+        let (worker_sender, worker_receiver) = unbounded();
+        assert!(receive_worker_result::<u64>(Some(&worker_receiver), "test").is_none());
+        worker_sender.send_sync(Ok(42)).unwrap();
+        assert_eq!(receive_worker_result(Some(&worker_receiver), "test"), Some(Ok(42)));
+        drop(worker_sender);
+        assert_eq!(
+            receive_worker_result::<u64>(Some(&worker_receiver), "test"),
+            Some(Err("test worker stopped unexpectedly".into()))
+        );
+        assert_eq!(receive_worker_result::<u64>(None, "test"), None);
     }
 
     #[test]
@@ -2435,6 +2711,7 @@ mod tests {
         }
         assert!(!handle_primitive_key(KeyCode::Backspace, &mut view, None));
         assert!(!handle_primitive_key(KeyCode::Char('x'), &mut view, None));
+        assert!(!view.descending);
     }
 
     #[test]
@@ -2479,6 +2756,12 @@ mod tests {
         }
         assert!(!handle_runtime_key(KeyCode::Backspace, &mut view, None));
         assert!(!handle_runtime_key(KeyCode::Char('x'), &mut view, None));
+        assert!(!view.task_sort_descending);
+
+        let original = RuntimeViewState::new();
+        let mut unchanged = original;
+        assert!(!handle_runtime_key(KeyCode::Tab, &mut unchanged, None));
+        assert_eq!(unchanged, original);
     }
 
     #[test]
@@ -2561,11 +2844,37 @@ mod tests {
     fn progress_reporting_succeeds_and_reports_closed_receiver() {
         let (sender, receiver) = unbounded();
         report_capture_step(&sender, CaptureStep::Save).unwrap();
-        assert!(matches!(receiver.recv_sync().unwrap(), CaptureMessage::Progress(CaptureStep::Save)));
+        assert!(matches!(receiver.try_recv().unwrap(), CaptureMessage::Progress(CaptureStep::Save)));
         drop(receiver);
         assert_eq!(
             report_capture_step(&sender, CaptureStep::Save),
             Err("snapshot progress receiver closed".into())
+        );
+    }
+
+    #[test]
+    fn snapshot_sources_are_selected_by_exact_identifier() {
+        let allocator = seismograph::snapshot::SourceSnapshot {
+            id: seismograph_rallocator::source::ID,
+            name: "allocator".into(),
+            schema_version: 1,
+            data: Vec::new(),
+        };
+        let runtime = seismograph::snapshot::SourceSnapshot {
+            id: seismograph_runtime::snapshot::source::ID,
+            name: "runtime".into(),
+            schema_version: 1,
+            data: Vec::new(),
+        };
+        let sources = [allocator, runtime];
+
+        assert_eq!(
+            (
+                source_with_id(&sources, seismograph_rallocator::source::ID).map(|source| source.name.as_str()),
+                source_with_id(&sources, seismograph_runtime::snapshot::source::ID).map(|source| source.name.as_str()),
+                source_with_id(&sources, seismograph::snapshot::SourceId::new(999)).map(|source| source.name.as_str()),
+            ),
+            (Some("allocator"), Some("runtime"), None)
         );
     }
 }
