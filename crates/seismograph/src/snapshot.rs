@@ -1493,15 +1493,18 @@ mod tests {
         })
         .unwrap();
         assert!(format!("{snapshot:?}").contains("bytes"));
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("..")
-            .join("target")
-            .join(format!("seismograph-snapshot-{}.bin", std::process::id()));
-        snapshot.write_file(&path).unwrap();
-        assert_eq!(std::fs::read(&path).unwrap(), snapshot.as_bytes());
-        std::fs::remove_file(&path).unwrap();
-        assert!(snapshot.write_file(Path::new(env!("CARGO_MANIFEST_DIR"))).is_err());
+        #[cfg(not(miri))]
+        {
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join("..")
+                .join("target")
+                .join(format!("seismograph-snapshot-{}.bin", std::process::id()));
+            snapshot.write_file(&path).unwrap();
+            assert_eq!(std::fs::read(&path).unwrap(), snapshot.as_bytes());
+            std::fs::remove_file(&path).unwrap();
+            assert!(snapshot.write_file(Path::new(env!("CARGO_MANIFEST_DIR"))).is_err());
+        }
     }
 
     #[test]
