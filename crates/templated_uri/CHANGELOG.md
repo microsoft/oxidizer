@@ -1,16 +1,17 @@
 # Changelog
 
-## [0.5.1] - 2026-09-07
+## [0.6.0] - 2026-09-07
+
+### Breaking
+
+- Public APIs now use `Sensitive` from `data_privacy 0.13.0`, matching the
+  coordinated data-privacy release line.
 
 - 🔧 Maintenance
 
-  - Now requires `0.12.5` of `data_privacy`
+  - Now requires `0.13.0` of `data_privacy`
   - Now requires `0.5.1` of `ohno`
   - Now requires `0.5.1` of `templated_uri_macros`
-
-- 🔄 Continuous Integration
-
-  - update to cargo-anvil 0.7.0 ([#728](https://github.com/microsoft/oxidizer/pull/728))
 
 ## [0.5.0] - 2026-08-27
 

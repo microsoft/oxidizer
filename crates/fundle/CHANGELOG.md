@@ -1,10 +1,15 @@
 # Changelog
 
-## [0.3.6] - 2026-09-07
+## [0.4.0] - 2026-09-07
+
+### Changed
+
+- Align `fundle`, `fundle_macros`, and `fundle_macros_impl` on the `0.4.0`
+  release line.
 
 - 🔧 Maintenance
 
-  - Now requires `0.3.6` of `fundle_macros`
+  - Now requires `0.4.0` of `fundle_macros`
 
 - 🐛 Bug Fixes
 
@@ -168,4 +173,3 @@
 - ✔️ Tasks
 
   - Add logo files and other readme cleanup ([#40](https://github.com/microsoft/oxidizer/pull/40))
-

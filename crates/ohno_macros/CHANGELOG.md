@@ -127,4 +127,3 @@
 - ✨ Features
 
   - Introduce the ohno and ohno_macros crates ([#53](https://github.com/microsoft/oxidizer/pull/53))
-

@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.3.6] - 2026-09-07
+## [0.4.0] - 2026-09-07
 
 - 🔧 Maintenance
 
@@ -151,4 +151,3 @@
 - ✔️ Tasks
 
   - Add logo files and other readme cleanup ([#40](https://github.com/microsoft/oxidizer/pull/40))
-

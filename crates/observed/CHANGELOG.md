@@ -13,8 +13,8 @@
 - ⚠️ Breaking
 
   - adopt thread_aware_core across workspace ([#721](https://github.com/microsoft/oxidizer/pull/721))
-  - Now requires `0.12.5` of `data_privacy`
-  - Now requires `0.25.0` of `observed_macros`
+  - Now requires `0.13.0` of `data_privacy`
+  - Now requires `0.26.0` of `observed_macros`
   - Now requires `0.5.1` of `ohno`
   - Now requires `0.12.0` of `thread_aware`
   - Now requires `0.7.0` of `tick`
@@ -36,10 +36,6 @@
   - add event sampling example ([#731](https://github.com/microsoft/oxidizer/pull/731))
   - align documentation with the runtime contract ([#710](https://github.com/microsoft/oxidizer/pull/710))
   - correct example and benchmark commentary ([#711](https://github.com/microsoft/oxidizer/pull/711))
-
-- 🔄 Continuous Integration
-
-  - update to cargo-anvil 0.7.0 ([#728](https://github.com/microsoft/oxidizer/pull/728))
 
 All notable changes to this project are documented here.
 

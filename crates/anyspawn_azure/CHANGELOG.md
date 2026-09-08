@@ -7,10 +7,6 @@
   - Now requires `0.9.0` of `anyspawn`
   - Now requires `0.7.0` of `tick`
 
-- 🔄 Continuous Integration
-
-  - update to cargo-anvil 0.7.0 ([#728](https://github.com/microsoft/oxidizer/pull/728))
-
 ## [0.3.0] - 2026-08-27
 
 - ⚠️ Breaking

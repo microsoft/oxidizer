@@ -11,12 +11,8 @@
   - Now requires `0.3.7` of `layered`
   - Now requires `0.5.1` of `ohno`
   - Now requires `0.9.0` of `seatbelt`
-  - Now requires `0.5.1` of `templated_uri`
+  - Now requires `0.6.0` of `templated_uri`
   - Now requires `0.7.0` of `tick`
-
-- 🔄 Continuous Integration
-
-  - update to cargo-anvil 0.7.0 ([#728](https://github.com/microsoft/oxidizer/pull/728))
 
 ## [0.7.1] - 2026-08-28
 

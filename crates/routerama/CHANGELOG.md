@@ -19,10 +19,4 @@
 
 - ⚡ Performance
 
-  - parallelize scheduled Miri and reduce resource outliers ([#706](https://github.com/microsoft/oxidizer/pull/706))
   - cut the PR Miri step from 3h16m to about 1h15m ([#674](https://github.com/microsoft/oxidizer/pull/674))
-
-- 🔄 Continuous Integration
-
-  - update to cargo-anvil 0.7.0 ([#728](https://github.com/microsoft/oxidizer/pull/728))
-

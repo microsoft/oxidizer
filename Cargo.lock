@@ -1432,7 +1432,7 @@ checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
 
 [[package]]
 name = "data_privacy"
-version = "0.12.5"
+version = "0.13.0"
 dependencies = [
  "data_privacy_core",
  "data_privacy_macros",
@@ -1449,7 +1449,7 @@ dependencies = [
 
 [[package]]
 name = "data_privacy_core"
-version = "0.1.3"
+version = "0.1.2"
 dependencies = [
  "insta",
  "mutants",
@@ -1459,7 +1459,7 @@ dependencies = [
 
 [[package]]
 name = "data_privacy_macros"
-version = "0.10.4"
+version = "0.13.0"
 dependencies = [
  "data_privacy_macros_impl",
  "mutants",
@@ -1467,7 +1467,7 @@ dependencies = [
 
 [[package]]
 name = "data_privacy_macros_impl"
-version = "0.11.0"
+version = "0.13.0"
 dependencies = [
  "insta",
  "proc-macro2",
@@ -2035,7 +2035,7 @@ checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
 
 [[package]]
 name = "fundle"
-version = "0.3.6"
+version = "0.4.0"
 dependencies = [
  "fundle_macros",
  "trybuild",
@@ -2043,7 +2043,7 @@ dependencies = [
 
 [[package]]
 name = "fundle_macros"
-version = "0.3.6"
+version = "0.4.0"
 dependencies = [
  "fundle_macros_impl",
  "mutants",
@@ -3647,7 +3647,7 @@ dependencies = [
 
 [[package]]
 name = "observed_macros"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "mutants",
  "observed_macros_impl",
@@ -3655,7 +3655,7 @@ dependencies = [
 
 [[package]]
 name = "observed_macros_impl"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "insta",
  "proc-macro2",
@@ -5572,7 +5572,7 @@ dependencies = [
 
 [[package]]
 name = "templated_uri"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "criterion",
  "data_privacy",

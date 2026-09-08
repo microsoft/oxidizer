@@ -18,8 +18,3 @@
 
   - raise MSRV to Rust 1.95 ([#716](https://github.com/microsoft/oxidizer/pull/716))
   - bump syn to 3.0.2 and align proc-macro dependencies ([#621](https://github.com/microsoft/oxidizer/pull/621))
-
-- 🔄 Continuous Integration
-
-  - update to cargo-anvil 0.7.0 ([#728](https://github.com/microsoft/oxidizer/pull/728))
-

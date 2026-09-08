@@ -8,10 +8,6 @@
   - Now requires `0.17.0` of `fetch`
   - Now requires `0.3.7` of `layered`
 
-- 🔄 Continuous Integration
-
-  - update to cargo-anvil 0.7.0 ([#728](https://github.com/microsoft/oxidizer/pull/728))
-
 ## [0.6.1] - 2026-08-28
 
 - 🔧 Maintenance

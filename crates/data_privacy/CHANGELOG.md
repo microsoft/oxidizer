@@ -1,19 +1,19 @@
 # Changelog
 
-## [0.12.5] - 2026-09-07
+## [0.13.0] - 2026-09-07
+
+### Changed
+
+- Align `data_privacy`, `data_privacy_macros`, and `data_privacy_macros_impl`
+  on the `0.13.0` release line. `data_privacy_core` remains at `0.1.2`.
 
 - 🔧 Maintenance
 
-  - Now requires `0.1.3` of `data_privacy_core`
-  - Now requires `0.10.4` of `data_privacy_macros`
+  - Now requires `0.13.0` of `data_privacy_macros`
 
 - 🐛 Bug Fixes
 
   - declare optional dependencies as dev-dependencies ([#658](https://github.com/microsoft/oxidizer/pull/658))
-
-- 🔄 Continuous Integration
-
-  - update to cargo-anvil 0.7.0 ([#728](https://github.com/microsoft/oxidizer/pull/728))
 
 ## [0.12.4] - 2026-07-24
 
@@ -270,4 +270,3 @@
 - 🧩 Miscellaneous
 
   - Finish repo setup and checkin data_privacy crate ([#4](https://github.com/microsoft/oxidizer/pull/4))
-

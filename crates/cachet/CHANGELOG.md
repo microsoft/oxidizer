@@ -13,10 +13,6 @@
   - Now requires `0.7.0` of `tick`
   - Now requires `0.6.0` of `uniflight`
 
-- 🔄 Continuous Integration
-
-  - update to cargo-anvil 0.7.0 ([#728](https://github.com/microsoft/oxidizer/pull/728))
-
 ## [0.13.0] - 2026-08-27
 
 - ⚠️ Breaking

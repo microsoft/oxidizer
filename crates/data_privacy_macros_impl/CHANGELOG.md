@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.11.0] - 2026-09-07
+## [0.13.0] - 2026-09-07
 
 ### Breaking
 
@@ -14,10 +14,6 @@
 - 🐛 Bug Fixes
 
   - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
-
-- ⚡ Performance
-
-  - parallelize scheduled Miri and reduce resource outliers ([#706](https://github.com/microsoft/oxidizer/pull/706))
 
 - ✔️ Tasks
 

@@ -21,13 +21,8 @@
 
   - correct enrichment and test-harness behavior ([#712](https://github.com/microsoft/oxidizer/pull/712))
 
-- 🔄 Continuous Integration
-
-  - update to cargo-anvil 0.7.0 ([#728](https://github.com/microsoft/oxidizer/pull/728))
-
 ## [0.1.1] - 2026-09-01
 
 - ✨ Features
 
   - add a WinHTTP-backed fetch transport for Windows ([#687](https://github.com/microsoft/oxidizer/pull/687))
-

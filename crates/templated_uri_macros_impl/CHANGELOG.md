@@ -6,10 +6,6 @@
 
   - Now requires `0.5.1` of `ohno`
 
-- ⚡ Performance
-
-  - parallelize scheduled Miri and reduce resource outliers ([#706](https://github.com/microsoft/oxidizer/pull/706))
-
 ## [0.5.0] - 2026-08-27
 
 - ⚠️ Breaking

@@ -12,7 +12,3 @@
   relocation and coordinate lifetime guarantees. These changes are compatible
   with `0.1.0`; the breaking workspace adoption affects `thread_aware` and its
   consumers, not this core crate ([#721](https://github.com/microsoft/oxidizer/pull/721)).
-
-- 🔄 Continuous Integration
-
-  - update to cargo-anvil 0.7.0 ([#728](https://github.com/microsoft/oxidizer/pull/728))

@@ -15,10 +15,6 @@
 
   - raise MSRV to Rust 1.95 ([#716](https://github.com/microsoft/oxidizer/pull/716))
 
-- 🔄 Continuous Integration
-
-  - update to cargo-anvil 0.7.0 ([#728](https://github.com/microsoft/oxidizer/pull/728))
-
 ## [0.9.0] - 2026-08-27
 
 - ⚠️ Breaking

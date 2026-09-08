@@ -1,10 +1,10 @@
 # Changelog
 
-## [0.10.4] - 2026-09-07
+## [0.13.0] - 2026-09-07
 
 - 🔧 Maintenance
 
-  - Now requires `0.11.0` of `data_privacy_macros_impl`
+  - Now requires `0.13.0` of `data_privacy_macros_impl`
 
 - ✨ Features
 
@@ -208,4 +208,3 @@
 - 🧩 Miscellaneous
 
   - Finish repo setup and checkin data_privacy crate ([#4](https://github.com/microsoft/oxidizer/pull/4))
-

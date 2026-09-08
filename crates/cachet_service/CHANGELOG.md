@@ -7,10 +7,6 @@
   - Now requires `0.5.1` of `cachet_tier`
   - Now requires `0.3.7` of `layered`
 
-- 🔄 Continuous Integration
-
-  - update to cargo-anvil 0.7.0 ([#728](https://github.com/microsoft/oxidizer/pull/728))
-
 ## [0.5.0] - 2026-08-27
 
 - ⚠️ Breaking

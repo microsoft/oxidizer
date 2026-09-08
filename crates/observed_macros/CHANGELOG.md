@@ -1,30 +1,18 @@
 # Changelog
 
-## [0.25.0] - 2026-09-07
+## [0.26.0] - 2026-09-07
 
 ### Breaking
 
 - `#[event(...)]` now rejects mutable-reference fields, including previously
   valid unredacted fields. Use shared references or owned values instead.
 
-### Added
+### Changed
 
-- Initial release of `observed_macros`, the procedural macros backing the
-  `observed` crate (`#[event(...)]`, `#[derive(Enrichment)]`, and related
-  attributes). Use the re-exports from `observed` rather than depending on this
-  crate directly.
-
-- 🔧 Maintenance
-
-  - Now requires `0.25.0` of `observed_macros_impl`
-
-- ♻️ Code Refactoring
-
-  - split the implementation into observed_macros_impl ([#686](https://github.com/microsoft/oxidizer/pull/686))
-
-- 🔄 Continuous Integration
-
-  - update to cargo-anvil 0.7.0 ([#728](https://github.com/microsoft/oxidizer/pull/728))
+- Delegate macro expansion to `observed_macros_impl`, leaving this crate as a
+  thin procedural-macro entry point ([#686](https://github.com/microsoft/oxidizer/pull/686)).
+- Align the macro family with `observed 0.26.0`.
+- Now requires `0.26.0` of `observed_macros_impl`.
 
 All notable changes to this project are documented here.
 

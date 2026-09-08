@@ -6,10 +6,6 @@
 
 - Public macro helper results now use Syn 3 rather than Syn 2 error types.
 
-- ⚡ Performance
-
-  - parallelize scheduled Miri and reduce resource outliers ([#706](https://github.com/microsoft/oxidizer/pull/706))
-
 - ♻️ Code Refactoring
 
   - adopt shared macro test helpers from `testing_aids` ([#686](https://github.com/microsoft/oxidizer/pull/686))
@@ -143,4 +139,3 @@
 - ✔️ Tasks
 
   - Add logo files and other readme cleanup ([#40](https://github.com/microsoft/oxidizer/pull/40))
-

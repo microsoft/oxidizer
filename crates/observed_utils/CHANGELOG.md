@@ -4,12 +4,8 @@
 
 - ⚠️ Breaking
 
-  - Now requires `0.12.5` of `data_privacy`
+  - Now requires `0.13.0` of `data_privacy`
   - Now requires `0.26.0` of `observed`
-
-- 🔄 Continuous Integration
-
-  - update to cargo-anvil 0.7.0 ([#728](https://github.com/microsoft/oxidizer/pull/728))
 
 All notable changes to this project are documented here.
 

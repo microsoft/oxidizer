@@ -6,10 +6,6 @@
 
   - correct the syntax context of a rewritten unit struct and the `#[automatically_derived]` placements ([#723](https://github.com/microsoft/oxidizer/pull/723))
 
-- ⚡ Performance
-
-  - parallelize scheduled Miri and reduce resource outliers ([#706](https://github.com/microsoft/oxidizer/pull/706))
-
 - 📚 Documentation
 
   - reconcile the design with the two-crate split ([#698](https://github.com/microsoft/oxidizer/pull/698))

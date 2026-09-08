@@ -6,10 +6,6 @@
 
   - Now requires `0.7.0` of `tick`
 
-- 🔄 Continuous Integration
-
-  - update to cargo-anvil 0.7.0 ([#728](https://github.com/microsoft/oxidizer/pull/728))
-
 ## [0.1.1] - 2026-08-27
 
 - 🔧 Maintenance

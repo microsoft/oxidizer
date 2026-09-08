@@ -1,13 +1,12 @@
 # Changelog
 
-## [0.25.0] - 2026-09-07
+## [0.26.0] - 2026-09-07
 
-### Added
+### Changed
 
-- Initial release of `observed_macros_impl`, holding the implementation of the
-  `observed` procedural macros (`#[event(...)]` and `#[derive(Enrichment)]`).
-  `observed_macros` is now a thin `proc-macro` shim that delegates here. Use the
-  re-exports from `observed` rather than depending on this crate directly.
+- Align the macro implementation package with `observed 0.26.0`. This crate
+  continues to implement `#[event(...)]` and `#[derive(Enrichment)]` behind the
+  `observed_macros` entry points.
 
 ### Breaking
 
@@ -19,14 +18,6 @@
 - 🐛 Bug Fixes
 
   - reject mutable-reference event fields ([#730](https://github.com/microsoft/oxidizer/pull/730))
-
-- ⚡ Performance
-
-  - parallelize scheduled Miri and reduce resource outliers ([#706](https://github.com/microsoft/oxidizer/pull/706))
-
-- 🔄 Continuous Integration
-
-  - update to cargo-anvil 0.7.0 ([#728](https://github.com/microsoft/oxidizer/pull/728))
 
 All notable changes to this project are documented here.
 
