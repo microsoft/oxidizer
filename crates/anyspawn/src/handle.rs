@@ -85,14 +85,17 @@ mod tests {
     }
 
     #[cfg(feature = "tokio")]
-    #[tokio::test]
-    async fn cancelled_tokio_task_reports_the_join_error() {
-        let task = tokio::spawn(future::pending::<()>());
-        task.abort();
-        let handle = JoinHandle(JoinHandleInner::Tokio(task));
+    #[test]
+    fn cancelled_tokio_task_reports_the_join_error() -> std::io::Result<()> {
+        tokio::runtime::Builder::new_current_thread().build()?.block_on(async {
+            let task = tokio::spawn(future::pending::<()>());
+            task.abort();
+            let handle = JoinHandle(JoinHandleInner::Tokio(task));
 
-        let panic = tokio::spawn(handle).await.unwrap_err().into_panic();
+            let panic = tokio::spawn(handle).await.unwrap_err().into_panic();
 
-        assert!(panic_message(&*panic).contains("was cancelled"));
+            assert!(panic_message(&*panic).contains("was cancelled"));
+        });
+        Ok(())
     }
 }

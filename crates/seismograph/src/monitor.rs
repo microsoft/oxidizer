@@ -1068,6 +1068,7 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
+    #[cfg_attr(miri, ignore)]
     #[cfg_attr(coverage_nightly, coverage(off))] // DrvFS may report fixed modes; native Unix filesystems take the strict assertion.
     fn monitor_directory_permissions_are_restricted() {
         use std::os::unix::fs::PermissionsExt as _;

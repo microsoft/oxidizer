@@ -2755,6 +2755,7 @@ mod tests {
         assert!(rendered.contains("Recording configuration"));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     #[expect(
         clippy::too_many_lines,
