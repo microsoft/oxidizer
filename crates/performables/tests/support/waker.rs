@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::mem::ManuallyDrop;
 use std::sync::{Arc, Mutex};
 use std::task::{RawWaker, RawWakerVTable, Waker};
 
@@ -20,14 +19,15 @@ pub(crate) fn clone_hook_waker(hook: impl FnOnce() + Send + 'static) -> Waker {
 
 unsafe fn clone_waker(data: *const ()) -> RawWaker {
     // SAFETY: data was created by Arc::into_raw in clone_hook_waker or this function.
-    // ManuallyDrop preserves the RawWaker-owned reference if the clone hook panics.
-    let state = ManuallyDrop::new(unsafe { Arc::<CloneHook>::from_raw(data.cast()) });
+    let state = unsafe { &*data.cast::<CloneHook>() };
     let hook = state.hook.lock().expect("the clone hook mutex must not be poisoned").take();
     if let Some(hook) = hook {
         hook();
     }
-    let clone = Arc::clone(&state);
-    RawWaker::new(Arc::into_raw(clone).cast(), &VTABLE)
+    // SAFETY: the source RawWaker still owns a strong reference, and the new
+    // RawWaker takes ownership of the incremented reference.
+    unsafe { Arc::increment_strong_count(data.cast::<CloneHook>()) };
+    RawWaker::new(data, &VTABLE)
 }
 
 unsafe fn wake(data: *const ()) {
