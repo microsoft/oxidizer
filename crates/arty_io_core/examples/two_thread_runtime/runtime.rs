@@ -5,13 +5,12 @@ use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
-use std::pin::Pin;
 use std::sync::{Mutex, PoisonError, mpsc};
-use std::task::{Context, Poll};
+use std::task::{Context, Poll, Waker};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use arty_io_core::{Driver, DriverContext, DriverInit, DriverProvider, Parker, SystemTasks};
+use arty_io_core::{Driver, DriverContext, DriverInit, DriverProvider, SystemTasks};
 use thread_aware_core::{Thread, ThreadAware};
 
 use super::system_tasks::runtime_system_tasks;
@@ -37,17 +36,27 @@ impl fmt::Debug for Command {
 }
 
 trait ErasedDriver {
-    fn begin_shutdown(&self) -> Pin<Box<dyn Future<Output = ()> + '_>>;
-    fn parker(&self) -> &dyn Parker;
+    fn process_completions(&mut self, max_wait: Duration);
+    fn waker(&self) -> Waker;
+    fn begin_shutdown(&mut self);
+    fn poll_shutdown(&mut self, cx: &mut Context<'_>) -> Poll<()>;
 }
 
 impl<D: Driver> ErasedDriver for D {
-    fn begin_shutdown(&self) -> Pin<Box<dyn Future<Output = ()> + '_>> {
-        Driver::begin_shutdown(self)
+    fn process_completions(&mut self, max_wait: Duration) {
+        Driver::process_completions(self, max_wait);
     }
 
-    fn parker(&self) -> &dyn Parker {
-        Driver::parker(self)
+    fn waker(&self) -> Waker {
+        Driver::waker(self)
+    }
+
+    fn begin_shutdown(&mut self) {
+        Driver::begin_shutdown(self);
+    }
+
+    fn poll_shutdown(&mut self, cx: &mut Context<'_>) -> Poll<()> {
+        Driver::poll_shutdown(self, cx)
     }
 }
 
@@ -227,7 +236,7 @@ fn run_worker(worker: &Thread, system_tasks: &SystemTasks, commands: &mpsc::Rece
                 let _ = reply.send(context);
             }
             Command::Stop { reply } => {
-                let result = shutdown_drivers(&drivers);
+                let result = shutdown_drivers(&mut drivers);
                 let _ = reply.send(result);
                 return;
             }
@@ -235,29 +244,29 @@ fn run_worker(worker: &Thread, system_tasks: &SystemTasks, commands: &mpsc::Rece
     }
 }
 
-fn shutdown_drivers(drivers: &DriverStore) -> ShutdownResult {
+fn shutdown_drivers(drivers: &mut DriverStore) -> ShutdownResult {
     const TIMEOUT: Duration = Duration::from_secs(1);
     const MAX_PARK: Duration = Duration::from_millis(10);
 
-    let mut shutdowns = drivers
-        .iter()
-        .map(|driver| (driver.parker(), driver.begin_shutdown(), false))
-        .collect::<Vec<_>>();
+    for driver in drivers.iter_mut() {
+        driver.begin_shutdown();
+    }
 
+    let mut complete = vec![false; drivers.len()];
     let deadline = Instant::now() + TIMEOUT;
     loop {
         let mut all_ready = true;
 
-        for (parker, shutdown, complete) in &mut shutdowns {
-            if *complete {
+        for (driver, is_complete) in drivers.iter_mut().zip(&mut complete) {
+            if *is_complete {
                 continue;
             }
 
-            let waker = parker.waker();
+            let waker = driver.waker();
             let mut cx = Context::from_waker(&waker);
 
-            match shutdown.as_mut().poll(&mut cx) {
-                Poll::Ready(()) => *complete = true,
+            match driver.poll_shutdown(&mut cx) {
+                Poll::Ready(()) => *is_complete = true,
                 Poll::Pending => {
                     all_ready = false;
                     let remaining = deadline.saturating_duration_since(Instant::now());
@@ -266,7 +275,7 @@ fn shutdown_drivers(drivers: &DriverStore) -> ShutdownResult {
                         return Err("driver shutdown timed out".into());
                     }
 
-                    parker.park(remaining.min(MAX_PARK));
+                    driver.process_completions(remaining.min(MAX_PARK));
                 }
             }
         }

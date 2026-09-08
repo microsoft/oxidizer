@@ -22,22 +22,21 @@ I/O implementation. This crate contains the small vocabulary both sides share:
 * [`DriverContext`][__link1] associates a requested context type with its provider.
 * [`DriverProvider`][__link2] creates and connects the per-worker adapters for a driver.
 * [`DriverInit`][__link3] describes the worker and runtime facilities available during creation.
-* [`Parker`][__link4] lets a driver provide a waiting point for the worker.
-* [`SystemTasks`][__link5] lets a driver delegate blocking system work to the runtime.
+* [`SystemTasks`][__link4] lets a driver delegate blocking system work to the runtime.
 
 Registration and driver placement are runtime behavior, not part of this crate. Keeping those
 policies outside the contract allows the runtime and drivers to evolve independently.
 
 ## Example
 
-The [fixed two-thread runtime example][__link6]
+The [fixed two-thread runtime example][__link5]
 starts both worker threads before `get_context::<SampleContext>()` uses the context type to
 inject its associated driver.
 
 ## Project documents
 
-* [Requirements][__link7]
-* [Design][__link8]
+* [Requirements][__link6]
+* [Design][__link7]
 
 
 <hr/>
@@ -45,13 +44,12 @@ inject its associated driver.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbO1AzS4FRPc0b-NoBV25qap4bdwMN640GsKIb3spxj9WsgAphZIGCbGFydHlfaW9fY29yZWUwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb36KB2NObzDEb6W_o1opCjNwbOnRX5ag2HJ4bErB6SbO8DiFhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
  [__link0]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver
  [__link1]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverContext
  [__link2]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverProvider
  [__link3]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverInit
- [__link4]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Parker
- [__link5]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=SystemTasks
- [__link6]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/examples/two_thread_runtime/main.rs
- [__link7]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/REQUIREMENTS.md
- [__link8]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/DESIGN.md
+ [__link4]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=SystemTasks
+ [__link5]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/examples/two_thread_runtime/main.rs
+ [__link6]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/REQUIREMENTS.md
+ [__link7]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/DESIGN.md

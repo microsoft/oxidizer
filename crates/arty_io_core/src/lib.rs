@@ -16,7 +16,6 @@
 //! - [`DriverContext`] associates a requested context type with its provider.
 //! - [`DriverProvider`] creates and connects the per-worker adapters for a driver.
 //! - [`DriverInit`] describes the worker and runtime facilities available during creation.
-//! - [`Parker`] lets a driver provide a waiting point for the worker.
 //! - [`SystemTasks`] lets a driver delegate blocking system work to the runtime.
 //!
 //! Registration and driver placement are runtime behavior, not part of this crate. Keeping those
@@ -36,13 +35,11 @@
 mod context;
 mod driver;
 mod init;
-mod parker;
 mod provider;
 mod system_tasks;
 
 pub use context::DriverContext;
 pub use driver::Driver;
 pub use init::DriverInit;
-pub use parker::Parker;
 pub use provider::DriverProvider;
 pub use system_tasks::{SystemTask, SystemTasks};

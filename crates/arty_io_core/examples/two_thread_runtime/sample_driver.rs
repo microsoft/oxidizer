@@ -1,16 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::task::Poll;
+use std::task::{Context as TaskContext, Poll, Waker};
 use std::thread;
+use std::time::Duration;
 
-use arty_io_core::{Driver, DriverContext, DriverInit, DriverProvider, Parker};
+use arty_io_core::{Driver, DriverContext, DriverInit, DriverProvider};
 use thread_aware_core::{Thread, ThreadAware};
-
-use super::parker::NoopParker;
 
 static CREATED_DRIVERS: AtomicUsize = AtomicUsize::new(0);
 static SHUTDOWN_DRIVERS: AtomicUsize = AtomicUsize::new(0);
@@ -25,7 +23,6 @@ struct SampleState {
     driver_thread: thread::ThreadId,
     operations: AtomicUsize,
     shutdown_started: AtomicBool,
-    shutdown_complete: AtomicBool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -37,17 +34,20 @@ impl SampleContext {
     }
 
     pub(super) fn perform_io(&self, input: usize) -> Result<usize, SampleIoError> {
+        // Acquire observes admission closure published by driver shutdown or drop.
         if self.state.shutdown_started.load(Ordering::Acquire) {
             println!("in-memory I/O operation rejected after shutdown on {:?}", self.state.driver_thread);
             return Err(SampleIoError);
         }
 
+        // The count is diagnostic only and does not synchronize other state.
         let operation = self.state.operations.fetch_add(1, Ordering::Relaxed) + 1;
         println!("in-memory I/O operation #{operation} handled by {:?}", self.state.driver_thread);
         Ok(input + 1)
     }
 
     pub(super) fn operation_count(&self) -> usize {
+        // The count is diagnostic only and does not synchronize other state.
         self.state.operations.load(Ordering::Relaxed)
     }
 }
@@ -84,6 +84,7 @@ impl DriverProvider for SampleProvider {
     type Driver = SampleDriver;
 
     fn create(self, _init: DriverInit) -> Self::Driver {
+        // The count is diagnostic only and does not synchronize driver creation.
         CREATED_DRIVERS.fetch_add(1, Ordering::Relaxed);
         let driver_thread = thread::current().id();
         println!("initializing sample I/O driver on {driver_thread:?}");
@@ -93,16 +94,22 @@ impl DriverProvider for SampleProvider {
                 driver_thread,
                 operations: AtomicUsize::new(0),
                 shutdown_started: AtomicBool::new(false),
-                shutdown_complete: AtomicBool::new(false),
             }),
-            parker: NoopParker,
+            shutdown_complete: false,
         }
     }
 }
 
 pub(super) struct SampleDriver {
     state: Arc<SampleState>,
-    parker: NoopParker,
+    shutdown_complete: bool,
+}
+
+impl Drop for SampleDriver {
+    fn drop(&mut self) {
+        // Release publishes the closed state to contexts that may outlive this driver.
+        self.state.shutdown_started.store(true, Ordering::Release);
+    }
 }
 
 impl Driver for SampleDriver {
@@ -114,28 +121,41 @@ impl Driver for SampleDriver {
         }
     }
 
-    fn parker(&self) -> &dyn Parker {
-        &self.parker
+    fn process_completions(&mut self, _max_wait: Duration) {}
+
+    fn waker(&self) -> Waker {
+        Waker::noop().clone()
     }
 
-    fn begin_shutdown(&self) -> Pin<Box<dyn Future<Output = ()> + '_>> {
-        self.state.shutdown_started.store(true, Ordering::Release);
+    fn begin_shutdown(&mut self) {
+        // AcqRel publishes admission closure and makes repeated calls observe the first call.
+        if self.state.shutdown_started.swap(true, Ordering::AcqRel) {
+            return;
+        }
+
+        // The count is diagnostic only and does not synchronize shutdown.
         SHUTDOWN_DRIVERS.fetch_add(1, Ordering::Relaxed);
         println!("shutting down sample I/O driver on {:?}", self.state.driver_thread);
-        Box::pin(std::future::poll_fn(move |_cx| {
-            if !self.state.shutdown_complete.swap(true, Ordering::Relaxed) {
-                println!("sample I/O driver shutdown complete on {:?}", self.state.driver_thread);
-            }
+    }
 
-            Poll::Ready(())
-        }))
+    fn poll_shutdown(&mut self, _cx: &mut TaskContext<'_>) -> Poll<()> {
+        self.begin_shutdown();
+
+        if !self.shutdown_complete {
+            self.shutdown_complete = true;
+            println!("sample I/O driver shutdown complete on {:?}", self.state.driver_thread);
+        }
+
+        Poll::Ready(())
     }
 }
 
 pub(super) fn created_driver_count() -> usize {
+    // The count is diagnostic only and does not synchronize driver creation.
     CREATED_DRIVERS.load(Ordering::Relaxed)
 }
 
 pub(super) fn shutdown_driver_count() -> usize {
+    // The count is diagnostic only and does not synchronize shutdown.
     SHUTDOWN_DRIVERS.load(Ordering::Relaxed)
 }

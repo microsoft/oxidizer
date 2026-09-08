@@ -47,14 +47,13 @@ serves.
 
 The runtime does not dictate how an I/O subsystem distributes work.
 
-- Every `Driver` method takes `&self`; runtime invocation requires neither
-  mutable storage access nor a synchronization wrapper.
+- Completion processing and shutdown methods take `&mut self`, reflecting the
+  runtime's exclusive ownership of a thread-local driver without forcing
+  implementations to add interior mutability.
 - `Driver` remains dyn-compatible when its `Context` associated type is
   specified, so it can be stored as `Box<dyn Driver<Context = C>>`.
-- Drivers use thread-local interior mutability when callbacks change state.
-- Every driver exposes a `Parker` through a shared reference.
-- The runtime chooses the driver-owning thread before creation and drives the
-  `Parker` only from that thread.
+- The runtime chooses the driver-owning thread before creation and invokes
+  `process_completions` only from that thread.
 - A driver may delegate work through the runtime-owned `SystemTasks` handle.
 - A driver or provider may create any number of private threads.
 - Primary, satellite, and thread-pinning policy are runtime implementation
@@ -62,10 +61,10 @@ The runtime does not dictate how an I/O subsystem distributes work.
 
 ## R5: Reliable wake-up
 
-A `Parker` wake-up has the following semantics:
+A driver wake-up has the following semantics:
 
 - A wake raised before a wait is latched for the next wait.
-- A wake raised by the `Parker`'s own thread is honored.
+- A wake raised by the driver's own thread is honored.
 - Redundant wakes may be coalesced.
 - A wake is never dropped.
 - A waker remains memory-safe after its driver is gone.
@@ -75,15 +74,19 @@ A `Parker` wake-up has the following semantics:
 Shutdown must not rely on an unsafe trait or a caller-checked inertness flag.
 
 - A driver is memory-safe to drop at every point in its lifecycle.
-- Contexts and in-flight operations retain ownership of the state they access
-  through reference counts, pool leases, or equivalent safe handles.
-- The runtime calls `begin_shutdown` exactly once per driver; implementations
-  do not need to handle a second call.
-- Calling `begin_shutdown` closes admission and returns a future that reports
-  graceful drain progress.
-- The shutdown future is boxed so `begin_shutdown` remains object-safe.
-- The shutdown future wakes its task when progress becomes possible and may be
-  polled repeatedly until ready.
+- Dropping a driver closes admission if shutdown has not already started.
+- Contexts remain valid in a closed state and do not by themselves prevent
+  shutdown completion.
+- In-flight operations retain ownership of the state they access through
+  reference counts, pool leases, or equivalent safe handles.
+- If an operating system retains only a raw pointer into pooled storage, the
+  storage owner remains alive independently of the driver.
+- Calling `begin_shutdown` idempotently closes admission.
+- `poll_shutdown` reports graceful drain progress and wakes its task when
+  progress becomes possible.
+- Calling `poll_shutdown` before `begin_shutdown` closes admission before
+  checking drain progress.
+- Once `poll_shutdown` returns `Ready`, later calls also return `Ready`.
 - Contexts may outlive drivers; later operations fail safely.
 - The stable contract has no `unsafe Driver` implementation requirement and no
   `is_inert` query.

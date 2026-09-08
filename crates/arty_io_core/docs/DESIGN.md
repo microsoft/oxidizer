@@ -25,7 +25,7 @@ DriverProvider
         v
 Driver + Context
         |
-        +-- Parker for completion progress and waiting
+        +-- completion processing and wake-up
         +-- optional SystemTasks use
         +-- optional provider-owned threads
 ```
@@ -38,15 +38,14 @@ clone creates one `Driver`.
 hold. `ThreadAware` relocation lets the context optimize for the destination
 worker, but correctness cannot depend on relocation being called.
 
-Every `Driver` method takes `&self`. This does not make a driver `Sync`: the
-runtime still invokes it only from its owning thread. Implementations use
-thread-local interior mutability for state changes, which lets the runtime store
-and erase drivers without wrapping them in a mutex solely for method access.
+The runtime owns each driver exclusively, so completion processing and shutdown
+receive `&mut self`. This lets a driver mutate thread-local state directly
+without adding synchronization or dynamic borrow checks solely to satisfy the
+contract.
 
-`Driver` is dyn-compatible once its `Context` associated type is specified. The
-shutdown method returns `Pin<Box<dyn Future<Output = ()> + '_>>` rather than an
-anonymous future so a runtime can store `Box<dyn Driver<Context = C>>` and invoke
-every lifecycle method through the trait object.
+`Driver` is dyn-compatible once its `Context` associated type is specified, so
+a runtime can store `Box<dyn Driver<Context = C>>` and invoke every lifecycle
+method through the trait object.
 
 Every context implements `DriverContext`, whose associated `Provider` and
 `provider()` function are the complete registration recipe. A runtime method
@@ -73,17 +72,16 @@ the same `arty_io_core` contract.
 
 ## Execution and waiting
 
-An I/O subsystem chooses its own execution strategy. Every driver exposes a
-`Parker` through a shared reference. Before calling `DriverProvider::create`,
-the runtime chooses the thread that will own the driver. Every driver callback,
-including `Parker::park`, runs only on that thread. Internally, the driver may
-process completions there, delegate system work, or coordinate with threads
-managed by its provider.
+An I/O subsystem chooses its own execution strategy. Before calling
+`DriverProvider::create`, the runtime chooses the thread that will own the
+driver. Completion processing and shutdown polling run only on that thread.
+Internally, the driver may process completions there, delegate system work, or
+coordinate with threads managed by its provider.
 
 This avoids exposing primary or satellite roles as public API. Those are
 placement choices the runtime may change later.
 
-The `Parker` waker follows a strict latched contract. Without latching, a wake
+The driver's waker follows a strict latched contract. Without latching, a wake
 between the runtime's final work check and the actual wait can be lost and the
 worker can sleep forever.
 
@@ -94,19 +92,25 @@ prevent the runtime from dropping a driver while external code still referenced
 its memory. This contract moves soundness back to the owning type:
 
 - `Driver::Drop` is always safe.
-- The runtime calls `begin_shutdown` exactly once to stop new operations and
-  obtain the graceful cleanup future.
+- `begin_shutdown` idempotently stops new operations.
+- `poll_shutdown` reports graceful cleanup progress.
 
-Shutdown initiation is a runtime coordination guarantee rather than an
-idempotence requirement on every driver. The runtime records the lifecycle
-transition before invoking the driver, and never dispatches it again.
+The runtime records the lifecycle transition before invoking the driver, but
+idempotence keeps duplicate calls from becoming an implicit safety precondition
+on runtime control flow. Polling shutdown also begins it when necessary, so call
+ordering is not a safety or liveness precondition either.
 
-Contexts and in-flight operations own the state they can access through
-reference-counted handles, pool leases, or equivalent safe ownership tokens.
-The driver keeps its own owner while running. Shutdown closes admission and
-waits until the external owners have drained before releasing the final owner.
-Dropping early releases only the driver's owner; outstanding handles keep their
-state alive.
+Contexts remain usable as closed handles after shutdown and therefore do not
+participate in the drain count. In-flight operations and operating-system
+callbacks own the state they can access through reference-counted handles, pool
+leases, or equivalent safe ownership tokens. Shutdown closes admission and
+waits for those active owners to drain.
+
+An operating system may retain only a raw pointer rather than an ownership
+token. A pooled implementation therefore keeps the pool's owner alive
+independently of `Driver::Drop`, releasing it after a clean drain and retaining
+it on premature drop. Dropping a driver closes admission before releasing or
+retaining this owner.
 
 This model supports high-performance implementations without putting unsafe
 lifecycle obligations in the stable API. Drivers can build it from standard
@@ -115,10 +119,10 @@ reference counting or ecosystem storage such as `multitude`, `plurality`,
 so implementations can evolve independently. Platform-specific unsafe code, if
 needed, remains isolated behind the driver's private ownership types.
 
-There is no separate convenience method that can create another shutdown
-future. The runtime owns the only call to `begin_shutdown`, records the
-lifecycle transition before invoking it, and polls the returned future
-alongside executor shutdown.
+The runtime begins shutdown for every driver before polling any one of them.
+While a driver reports `Pending`, the runtime continues bounded completion
+processing. A shutdown timeout may terminate graceful cleanup, but it never
+changes whether dropping the driver is memory-safe.
 
 ## Creation failure
 

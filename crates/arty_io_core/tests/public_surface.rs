@@ -4,7 +4,6 @@
 //! Public surface contract tests.
 
 use std::cell::Cell;
-use std::pin::{Pin, pin};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
@@ -12,20 +11,17 @@ use std::task::{Context, Poll, Wake, Waker};
 use std::time::Duration;
 use std::{fmt, thread};
 
-use arty_io_core::{Driver, DriverContext, DriverInit, DriverProvider, Parker, SystemTasks};
-use static_assertions::{assert_impl_all, assert_not_impl_any, assert_obj_safe};
+use arty_io_core::{Driver, DriverContext, DriverInit, DriverProvider, SystemTasks};
+use static_assertions::{assert_impl_all, assert_not_impl_any};
 use thread_aware_core::{Thread, ThreadAware};
 
-assert_obj_safe!(Parker);
 assert_impl_all!(DriverInit: Send, Sync, fmt::Debug);
 assert_impl_all!(SystemTasks: Clone, Send, Sync, fmt::Debug);
 
 #[test]
-fn public_traits_have_expected_object_safety() {
-    let parker = TestParker::default();
+fn public_handles_have_expected_traits() {
     let system_tasks = SystemTasks::new(|task| task());
 
-    let _: &dyn Parker = &parker;
     let _: &SystemTasks = &system_tasks;
     assert!(format!("{system_tasks:?}").contains("SystemTasks"));
 }
@@ -83,36 +79,67 @@ fn context_type_selects_provider_and_driver() {
 }
 
 #[test]
-fn begin_shutdown_returns_completion_future() {
+fn shutdown_is_idempotent_and_pollable() {
     let state = Rc::new(ShutdownState::default());
-    let driver = LocalDriver::new(Rc::clone(&state));
+    let mut driver = LocalDriver::new(Rc::clone(&state));
     let wake_count = Arc::new(CountingWake::default());
     let waker = Waker::from(Arc::clone(&wake_count));
     let mut cx = Context::from_waker(&waker);
-    let mut shutdown = pin!(driver.begin_shutdown());
 
+    driver.begin_shutdown();
+    driver.begin_shutdown();
     assert_eq!(state.begin_calls.get(), 1);
-    assert_eq!(shutdown.as_mut().poll(&mut cx), Poll::Pending);
+    assert_eq!(driver.poll_shutdown(&mut cx), Poll::Pending);
     assert_eq!(state.poll_calls.get(), 1);
     assert_eq!(wake_count.count.load(Ordering::Relaxed), 1);
 
-    assert_eq!(shutdown.as_mut().poll(&mut cx), Poll::Ready(()));
+    assert_eq!(driver.poll_shutdown(&mut cx), Poll::Ready(()));
     assert_eq!(state.begin_calls.get(), 1);
     assert_eq!(state.poll_calls.get(), 2);
+    assert_eq!(driver.poll_shutdown(&mut cx), Poll::Ready(()));
 }
 
 #[test]
-fn shutdown_waits_for_context_owned_state() {
+fn shutdown_waits_for_active_operations_not_contexts() {
+    let mut driver = LeaseDriver::new();
+    let context = driver.context();
+    let operation = context.begin_operation().expect("admission is open before shutdown");
+    let wake_count = Arc::new(CountingWake::default());
+    let waker = Waker::from(Arc::clone(&wake_count));
+    let mut cx = Context::from_waker(&waker);
+
+    driver.begin_shutdown();
+
+    assert!(context.begin_operation().is_none());
+    assert!(driver.context().begin_operation().is_none());
+    assert_eq!(driver.poll_shutdown(&mut cx), Poll::Pending);
+
+    drop(operation);
+    assert_eq!(wake_count.count.load(Ordering::Relaxed), 1);
+    assert_eq!(driver.poll_shutdown(&mut cx), Poll::Ready(()));
+
+    drop(driver);
+    assert!(context.begin_operation().is_none());
+}
+
+#[test]
+fn dropping_driver_closes_context_admission() {
     let driver = LeaseDriver::new();
     let context = driver.context();
+
+    drop(driver);
+
+    assert!(context.begin_operation().is_none());
+}
+
+#[test]
+fn polling_shutdown_closes_admission() {
+    let mut driver = LeaseDriver::new();
+    let context = driver.context();
     let mut cx = Context::from_waker(Waker::noop());
-    let mut shutdown = pin!(driver.begin_shutdown());
 
-    assert_eq!(Arc::strong_count(&context.state), 2);
-    assert_eq!(shutdown.as_mut().poll(&mut cx), Poll::Pending);
-
-    drop(context);
-    assert_eq!(shutdown.as_mut().poll(&mut cx), Poll::Ready(()));
+    assert_eq!(driver.poll_shutdown(&mut cx), Poll::Ready(()));
+    assert!(context.begin_operation().is_none());
 }
 
 #[test]
@@ -123,13 +150,22 @@ fn different_driver_types_have_distinct_identity() {
 }
 
 #[test]
-fn parker_contract_supports_latched_wakeup() {
-    let parker = TestParker::default();
+fn completion_processing_supports_latched_wakeup() {
+    let mut driver = LocalDriver::new(Rc::default());
 
-    parker.waker().wake_by_ref();
-    parker.park(Duration::MAX);
+    driver.waker().wake_by_ref();
+    driver.process_completions(Duration::MAX);
 
-    assert_eq!(parker.waits.load(Ordering::Relaxed), 1);
+    assert_eq!(driver.completion_queue.waits.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn waker_remains_valid_after_driver_drop() {
+    let driver = LocalDriver::new(Rc::default());
+    let waker = driver.waker();
+
+    drop(driver);
+    waker.wake();
 }
 
 #[derive(Debug, Default)]
@@ -147,13 +183,13 @@ impl Wake for Latch {
 }
 
 #[derive(Debug, Default)]
-struct TestParker {
+struct TestCompletionQueue {
     latch: Arc<Latch>,
     waits: AtomicUsize,
 }
 
-impl Parker for TestParker {
-    fn park(&self, max_wait: Duration) {
+impl TestCompletionQueue {
+    fn process_completions(&self, max_wait: Duration) {
         self.waits.fetch_add(1, Ordering::Relaxed);
         let mut raised = self.latch.raised.lock().unwrap_or_else(PoisonError::into_inner);
 
@@ -189,6 +225,7 @@ impl Parker for TestParker {
 
 #[derive(Debug, Default)]
 struct ShutdownState {
+    started: Cell<bool>,
     begin_calls: Cell<usize>,
     poll_calls: Cell<usize>,
 }
@@ -197,7 +234,7 @@ struct ShutdownState {
 struct LocalDriver {
     state: Rc<ShutdownState>,
     context: TestContext,
-    parker: TestParker,
+    completion_queue: TestCompletionQueue,
 }
 
 impl LocalDriver {
@@ -205,7 +242,7 @@ impl LocalDriver {
         Self {
             state,
             context: TestContext(7),
-            parker: TestParker::default(),
+            completion_queue: TestCompletionQueue::default(),
         }
     }
 }
@@ -217,22 +254,32 @@ impl Driver for LocalDriver {
         self.context.clone()
     }
 
-    fn parker(&self) -> &dyn Parker {
-        &self.parker
+    fn process_completions(&mut self, max_wait: Duration) {
+        self.completion_queue.process_completions(max_wait);
     }
 
-    fn begin_shutdown(&self) -> Pin<Box<dyn Future<Output = ()> + '_>> {
-        self.state.begin_calls.update(|calls| calls + 1);
-        Box::pin(std::future::poll_fn(move |cx| {
-            self.state.poll_calls.update(|calls| calls + 1);
+    fn waker(&self) -> Waker {
+        self.completion_queue.waker()
+    }
 
-            if self.state.poll_calls.get() == 1 {
-                cx.waker().wake_by_ref();
-                Poll::Pending
-            } else {
-                Poll::Ready(())
-            }
-        }))
+    fn begin_shutdown(&mut self) {
+        if self.state.started.replace(true) {
+            return;
+        }
+
+        self.state.begin_calls.update(|calls| calls + 1);
+    }
+
+    fn poll_shutdown(&mut self, cx: &mut Context<'_>) -> Poll<()> {
+        self.begin_shutdown();
+        self.state.poll_calls.update(|calls| calls + 1);
+
+        if self.state.poll_calls.get() == 1 {
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        } else {
+            Poll::Ready(())
+        }
     }
 }
 
@@ -269,7 +316,22 @@ impl DriverProvider for TestProvider {
 
 #[derive(Clone, Debug)]
 struct LeaseContext {
-    state: Arc<()>,
+    state: Arc<LeaseState>,
+}
+
+impl LeaseContext {
+    fn begin_operation(&self) -> Option<OperationLease> {
+        let mut lifecycle = self.state.lifecycle.lock().unwrap_or_else(PoisonError::into_inner);
+
+        if lifecycle.shutdown_started {
+            return None;
+        }
+
+        lifecycle.active_operations += 1;
+        Some(OperationLease {
+            state: Arc::clone(&self.state),
+        })
+    }
 }
 
 impl ThreadAware for LeaseContext {
@@ -300,18 +362,53 @@ impl DriverProvider for LeaseProvider {
     }
 }
 
+#[derive(Debug, Default)]
+struct LeaseState {
+    lifecycle: Mutex<LeaseLifecycle>,
+}
+
+#[derive(Debug, Default)]
+struct LeaseLifecycle {
+    shutdown_started: bool,
+    active_operations: usize,
+    shutdown_waker: Option<Waker>,
+}
+
+#[derive(Debug)]
+struct OperationLease {
+    state: Arc<LeaseState>,
+}
+
+impl Drop for OperationLease {
+    fn drop(&mut self) {
+        let mut lifecycle = self.state.lifecycle.lock().unwrap_or_else(PoisonError::into_inner);
+
+        lifecycle.active_operations -= 1;
+        let waker = (lifecycle.active_operations == 0)
+            .then(|| lifecycle.shutdown_waker.take())
+            .flatten();
+        drop(lifecycle);
+
+        if let Some(waker) = waker {
+            waker.wake();
+        }
+    }
+}
+
 #[derive(Debug)]
 struct LeaseDriver {
-    state: Arc<()>,
-    parker: TestParker,
+    state: Arc<LeaseState>,
 }
 
 impl LeaseDriver {
     fn new() -> Self {
-        Self {
-            state: Arc::new(()),
-            parker: TestParker::default(),
-        }
+        Self { state: Arc::default() }
+    }
+}
+
+impl Drop for LeaseDriver {
+    fn drop(&mut self) {
+        self.state.lifecycle.lock().unwrap_or_else(PoisonError::into_inner).shutdown_started = true;
     }
 }
 
@@ -324,19 +421,26 @@ impl Driver for LeaseDriver {
         }
     }
 
-    fn parker(&self) -> &dyn Parker {
-        &self.parker
+    fn process_completions(&mut self, _max_wait: Duration) {}
+
+    fn waker(&self) -> Waker {
+        Waker::noop().clone()
     }
 
-    fn begin_shutdown(&self) -> Pin<Box<dyn Future<Output = ()> + '_>> {
-        Box::pin(std::future::poll_fn(move |cx| {
-            if Arc::strong_count(&self.state) == 1 {
-                Poll::Ready(())
-            } else {
-                cx.waker().wake_by_ref();
-                Poll::Pending
-            }
-        }))
+    fn begin_shutdown(&mut self) {
+        self.state.lifecycle.lock().unwrap_or_else(PoisonError::into_inner).shutdown_started = true;
+    }
+
+    fn poll_shutdown(&mut self, cx: &mut Context<'_>) -> Poll<()> {
+        self.begin_shutdown();
+        let mut lifecycle = self.state.lifecycle.lock().unwrap_or_else(PoisonError::into_inner);
+
+        if lifecycle.active_operations == 0 {
+            Poll::Ready(())
+        } else {
+            lifecycle.shutdown_waker = Some(cx.waker().clone());
+            Poll::Pending
+        }
     }
 }
 

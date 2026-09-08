@@ -4,7 +4,6 @@
 //! Injects a sample I/O driver after a fixed two-thread runtime has started.
 
 mod echo_driver;
-mod parker;
 mod runtime;
 mod sample_driver;
 mod system_tasks;
