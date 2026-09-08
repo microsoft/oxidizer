@@ -66,6 +66,18 @@ fn generics_add_bounds() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
+fn repeated_field_type_is_bounded_once() {
+    // Two fields of the same type owe a single predicate; the derive must not repeat it, which
+    // would trip `clippy::trait_duplication_in_bounds`.
+    let input = quote! {
+        #[derive(ThreadAware)]
+        struct TwoVecs<T>(Vec<T>, Vec<T>);
+    };
+    assert_snapshot!(expand(input));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
 fn generics_prebound_bare_no_dup() {
     // Ensures no duplicate ThreadAware bound when already present.
     let input = quote! {
