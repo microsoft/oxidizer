@@ -49,10 +49,9 @@ anvil-bolero: anvil-bolero-validate-prereqs anvil-impact
                 Write-Error "anvil-bolero: unsupported affected-package arguments: $include"
                 exit 1
             }
-            # cargo-bolero resolves workspace members by bare package name.
-            $spec = $pkgArgs[++$i]
-            $packageName = (($spec -split '#', 2)[-1] -split '@', 2)[0]
-            $packageNames.Add($packageName)
+            # Impact emits version-qualified specs (name@version); cargo-bolero
+            # resolves workspace members by bare package name.
+            $packageNames.Add(($pkgArgs[++$i] -split '@', 2)[0])
         }
     } else {
         $metadataJson = & cargo {{_anvil_stable_toolchain_args}} metadata --no-deps --format-version 1
