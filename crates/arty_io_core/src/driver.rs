@@ -19,6 +19,19 @@ use crate::DriverContext;
 /// between runtime workers and may outlive the driver. Operations attempted after driver shutdown
 /// must fail safely.
 ///
+/// # Driver state
+///
+/// State reached by contexts, wakers, background threads, or operating-system callbacks is shared
+/// independently of the driver and uses appropriate reference counting and synchronization. Each
+/// in-flight operation owns every resource it uses through a reference count, pool lease, or
+/// equivalent handle.
+///
+/// Completion buffers, queue-reader state, batching state, and lifecycle state used only on the
+/// owning thread remain ordinary driver fields. Exclusive runtime ownership lets
+/// [`process_completions`](Self::process_completions),
+/// [`begin_shutdown`](Self::begin_shutdown), and [`poll_shutdown`](Self::poll_shutdown) access
+/// that state through `&mut self` without interior mutability.
+///
 /// # Shutdown safety
 ///
 /// A driver must always be safe to drop, even when shutdown has not completed. Dropping a driver
@@ -38,6 +51,7 @@ pub trait Driver: 'static {
     /// Returns a context bound to this driver instance.
     ///
     /// After shutdown starts, the returned context is closed and rejects new operations.
+    #[must_use]
     fn context(&self) -> Self::Context;
 
     /// Waits for and processes completion events.
@@ -55,6 +69,7 @@ pub trait Driver: 'static {
     /// Wake-ups are latched: a wake raised before a wait makes the next wait return immediately.
     /// Same-thread wake-ups are honored. Redundant wake-ups may be coalesced, but a wake-up is never
     /// dropped. The returned waker remains safe to invoke after the driver is dropped.
+    #[must_use]
     fn waker(&self) -> Waker;
 
     /// Prevents new operations from starting and begins graceful cleanup.
