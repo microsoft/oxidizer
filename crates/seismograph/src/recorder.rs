@@ -1784,16 +1784,15 @@ mod tests {
 
         let recorder = local_recorder();
         // SAFETY: local_recorder returns this thread's process-lifetime recorder.
-        unsafe { &*recorder }.writer_active.store(true, Ordering::Release);
-        let address = recorder.addr();
-        let thread = std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(10));
-            // SAFETY: recorder storage is retained for process lifetime.
-            unsafe { &*(address as *const ThreadRecorder) }
-                .writer_active
-                .store(false, Ordering::Release);
+        let recorder = unsafe { &*recorder };
+        recorder.writer_active.store(true, Ordering::Release);
+        std::thread::scope(|scope| {
+            let thread = scope.spawn(|| {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                recorder.writer_active.store(false, Ordering::Release);
+            });
+            wait_for_writers();
+            thread.join().unwrap();
         });
-        wait_for_writers();
-        thread.join().unwrap();
     }
 }
