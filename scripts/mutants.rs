@@ -14,8 +14,8 @@ argh = "0.1.12"
 
 use std::path::{Path, PathBuf};
 
-use ohno::AppError;
 use argh::FromArgs;
+use ohno::AppError;
 
 const JOBS: u32 = 1;
 const BUILD_TIMEOUT_SEC: u32 = 600;
@@ -73,9 +73,15 @@ struct Args {
 // alone, which is exactly the gap grouping exists to close.
 const TEST_GROUPS: &[&[&str]] = &[
     &["bytesbuf"],
-    &["data_privacy", "data_privacy_core", "data_privacy_macros", "data_privacy_macros_impl"],
+    &[
+        "data_privacy",
+        "data_privacy_core",
+        "data_privacy_macros",
+        "data_privacy_macros_impl",
+    ],
     &["fetch_winhttp", "fetch_winhttp_impl"],
     &["fundle", "fundle_macros", "fundle_macros_impl"],
+    &["metabench", "metabench_macros", "metabench_macros_impl"],
     &["observed", "observed_macros", "observed_macros_impl"],
     &["ohno", "ohno_macros", "ohno_macros_impl"],
     &["templated_uri", "templated_uri_macros", "templated_uri_macros_impl"],

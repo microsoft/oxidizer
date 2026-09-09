@@ -1,0 +1,63 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "metabench"
+description = "Run Criterion, Gungraun, Linux perf, and allocation benchmarks together and combine their reports."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["benchmark", "criterion", "callgrind", "gungraun", "oxidizer"]
+categories = ["development-tools::profiling"]
+
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/metabench"
+
+[package.metadata.anvil.miri]
+exclude = true
+
+[package.metadata.coverage-gate]
+min-lines-percent = 1
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "alloc_tracker::allocator::Allocator",
+    "criterion",
+    "gungraun",
+    "metabench_macros::*",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[lib]
+bench = false
+
+[dependencies]
+alloc_tracker = { workspace = true }
+command-group = { workspace = true }
+criterion = { workspace = true }
+gungraun = { workspace = true, features = ["default"] }
+gungraun-summary = { workspace = true }
+jiff = { workspace = true, features = ["std"] }
+metabench_macros = { workspace = true }
+serde = { workspace = true, features = ["derive", "std"] }
+serde_json = { workspace = true, features = ["std"] }
+tempfile = { workspace = true, features = ["getrandom"] }
+terminal_size = { workspace = true }
+unicode-width = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nix = { workspace = true, features = ["fs", "poll"] }
+
+[dev-dependencies]
+bolero = { workspace = true, features = ["std"] }
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints
