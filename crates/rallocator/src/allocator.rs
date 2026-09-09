@@ -83,6 +83,19 @@ thread_local! {
     static LAST_REGION: std::cell::Cell<*mut RegionState> = const { std::cell::Cell::new(ptr::null_mut()) };
 }
 
+#[cfg(all(test, not(miri)))]
+macro_rules! check_remote_refill_contention {
+    ($class:expr) => {{
+        clear_injected_remote_refill_contention($class);
+        assert!(!TEST_CLEAR_REMOTE_REFILL_AFTER_SPIN.with(std::cell::Cell::get));
+    }};
+}
+
+#[cfg(not(all(test, not(miri))))]
+macro_rules! check_remote_refill_contention {
+    ($class:expr) => {};
+}
+
 /// A global allocator with thread-local general-purpose size-class slabs.
 ///
 /// Process-wide allocation totals are retained in batched thread-local counters.
@@ -955,10 +968,7 @@ where
             if refill.is_err() {
                 while class.refilling.load(Ordering::Acquire) {
                     spin_loop();
-                    #[cfg(all(test, not(miri)))]
-                    clear_injected_remote_refill_contention(class);
-                    #[cfg(all(test, not(miri)))]
-                    assert!(!TEST_CLEAR_REMOTE_REFILL_AFTER_SPIN.with(std::cell::Cell::get));
+                    check_remote_refill_contention!(class);
                 }
                 continue;
             }
