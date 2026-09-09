@@ -105,27 +105,41 @@ pub fn read_response(reader: &mut impl Read) -> Result<(u64, Response), Error> {
 /// # Errors
 ///
 /// Returns an error when the platform does not expose a per-user directory.
+#[cfg(target_os = "windows")]
+pub fn monitor_directory() -> Result<PathBuf, Error> {
+    std::env::var_os("LOCALAPPDATA")
+        .map(|local| PathBuf::from(local).join("seismograph").join("monitor"))
+        .ok_or(Error::MissingRuntimeDirectory)
+}
+
+/// Returns the per-user monitor discovery directory.
+///
+/// # Errors
+///
+/// Returns an error when the platform does not expose a per-user directory.
+#[cfg(unix)]
 #[expect(
     clippy::unnecessary_wraps,
-    reason = "the cross-platform API reports the Windows missing-directory failure even when the current target cannot produce it"
+    reason = "the cross-platform API reports the Windows missing-directory failure even when Unix always has a fallback"
 )]
 pub fn monitor_directory() -> Result<PathBuf, Error> {
-    #[cfg(target_os = "windows")]
-    {
-        return std::env::var_os("LOCALAPPDATA")
-            .map(|local| PathBuf::from(local).join("seismograph").join("monitor"))
-            .ok_or(Error::MissingRuntimeDirectory);
-    }
-    #[cfg(unix)]
-    {
-        // SAFETY: geteuid has no preconditions and does not access Rust-owned memory.
-        let user_id = unsafe { libc::geteuid() };
-        Ok(unix_monitor_directory(std::env::var_os("XDG_RUNTIME_DIR"), user_id))
-    }
-    #[cfg(not(any(target_os = "windows", unix)))]
-    {
-        Ok(std::env::temp_dir().join("seismograph"))
-    }
+    // SAFETY: geteuid has no preconditions and does not access Rust-owned memory.
+    let user_id = unsafe { libc::geteuid() };
+    Ok(unix_monitor_directory(std::env::var_os("XDG_RUNTIME_DIR"), user_id))
+}
+
+/// Returns the per-user monitor discovery directory.
+///
+/// # Errors
+///
+/// Returns an error when the platform does not expose a per-user directory.
+#[cfg(not(any(target_os = "windows", unix)))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the cross-platform API reports the Windows missing-directory failure even when this platform has a fallback"
+)]
+pub fn monitor_directory() -> Result<PathBuf, Error> {
+    Ok(std::env::temp_dir().join("seismograph"))
 }
 
 fn write_frame(writer: &mut impl Write, kind: u16, request_id: u64, payload: &[u8]) -> Result<(), Error> {
