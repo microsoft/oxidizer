@@ -1,5 +1,10 @@
 # Changelog
 
+All notable changes to this project are documented here.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
 ## [0.26.0] - 2026-09-07
 
 ### Added
@@ -10,37 +15,32 @@
   `EventSamplingDecision::Continue` to continue normal event processing or
   `EventSamplingDecision::Drop` to discard the whole event for that Sink.
 
-- ⚠️ Breaking
+### Breaking
 
-  - adopt thread_aware_core across workspace ([#721](https://github.com/microsoft/oxidizer/pull/721))
-  - Now requires `0.13.0` of `data_privacy`
-  - Now requires `0.26.0` of `observed_macros`
-  - Now requires `0.5.1` of `ohno`
-  - Now requires `0.12.0` of `thread_aware`
-  - Now requires `0.7.0` of `tick`
+- adopt thread_aware_core across workspace ([#721](https://github.com/microsoft/oxidizer/pull/721))
+- Now requires `0.13.0` of `data_privacy`
+- Now requires `0.26.0` of `observed_macros`
+- Now requires `0.5.1` of `ohno`
+- Now requires `0.12.0` of `thread_aware`
+- Now requires `0.7.0` of `tick`
 
-- ✨ Features
+### Features
 
-  - add event sampling support ([#725](https://github.com/microsoft/oxidizer/pull/725))
+- add event sampling support ([#725](https://github.com/microsoft/oxidizer/pull/725))
 
-- 🐛 Bug Fixes
+### Bug Fixes
 
-  - correct enrichment and test-harness behavior ([#712](https://github.com/microsoft/oxidizer/pull/712))
+- correct enrichment and test-harness behavior ([#712](https://github.com/microsoft/oxidizer/pull/712))
 
-- ⚡ Performance
+### Performance
 
-  - benchmark emit paths with the production clock ([#724](https://github.com/microsoft/oxidizer/pull/724))
+- benchmark emit paths with the production clock ([#724](https://github.com/microsoft/oxidizer/pull/724))
 
-- 📚 Documentation
+### Documentation
 
-  - add event sampling example ([#731](https://github.com/microsoft/oxidizer/pull/731))
-  - align documentation with the runtime contract ([#710](https://github.com/microsoft/oxidizer/pull/710))
-  - correct example and benchmark commentary ([#711](https://github.com/microsoft/oxidizer/pull/711))
-
-All notable changes to this project are documented here.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+- add event sampling example ([#731](https://github.com/microsoft/oxidizer/pull/731))
+- align documentation with the runtime contract ([#710](https://github.com/microsoft/oxidizer/pull/710))
+- correct example and benchmark commentary ([#711](https://github.com/microsoft/oxidizer/pull/711))
 
 ## [0.25.0] - 2026-08-27
 

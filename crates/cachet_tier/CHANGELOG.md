@@ -2,10 +2,9 @@
 
 ## [0.5.1] - 2026-09-07
 
-- 🔧 Maintenance
+### Maintenance
 
-  - Now requires `0.5.1` of `ohno`
-  - Now requires `0.2.1` of `recoverable`
+- Now requires `0.5.1` of `ohno`
 
 ## [0.5.0] - 2026-08-27
 

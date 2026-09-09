@@ -1,34 +1,33 @@
 # Changelog
 
+All notable changes to this project are documented here.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
 ## [0.2.1] - 2026-09-07
 
 ### Fixed
 
 - Query parameter field paths are now limited to 64 levels of nesting. A deeper
-  path is rejected with `Code::InvalidArgument` instead of being decoded.
+  path is rejected with `Code::InvalidArgument` instead of being decoded ([#729](https://github.com/microsoft/oxidizer/pull/729)).
 
-- 🔧 Maintenance
+### Maintenance
 
-  - Now requires `0.2.1` of `http_path_template`
-  - Now requires `0.3.7` of `layered`
-  - Now requires `0.1.1` of `routerama`
-  - Now requires `0.1.1` of `routerama_build`
+- Now requires `0.2.1` of `http_path_template`
+- Now requires `0.3.7` of `layered`
+- Now requires `0.1.1` of `routerama`
+- Now requires `0.1.1` of `routerama_build`
 
-- 🐛 Bug Fixes
+### Bug Fixes
 
-  - bound query field path nesting depth ([#729](https://github.com/microsoft/oxidizer/pull/729))
-  - silence newly-firing clippy lints from Rust 1.98 ([#700](https://github.com/microsoft/oxidizer/pull/700))
-  - declare optional dependencies as dev-dependencies ([#658](https://github.com/microsoft/oxidizer/pull/658))
+- silence newly-firing clippy lints from Rust 1.98 ([#700](https://github.com/microsoft/oxidizer/pull/700))
+- declare optional dependencies as dev-dependencies ([#658](https://github.com/microsoft/oxidizer/pull/658))
 
-- ✔️ Tasks
+### Tasks
 
-  - raise MSRV to Rust 1.95 ([#716](https://github.com/microsoft/oxidizer/pull/716))
-  - release bytesbuf v0.7.0 and 23 additional packages ([#599](https://github.com/microsoft/oxidizer/pull/599))
-
-All notable changes to this project are documented here.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+- raise MSRV to Rust 1.95 ([#716](https://github.com/microsoft/oxidizer/pull/716))
+- release bytesbuf v0.7.0 and 23 additional packages ([#599](https://github.com/microsoft/oxidizer/pull/599))
 
 ## [0.2.0] - 2026-07-24
 

@@ -2,9 +2,9 @@
 
 ## [0.4.0] - 2026-09-07
 
-- 🔧 Maintenance
+### Maintenance
 
-  - Now requires `0.4.0` of `fundle_macros_impl`
+- Now requires `0.4.0` of `fundle_macros_impl`
 
 ## [0.3.5] - 2026-07-24
 

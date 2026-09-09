@@ -2,9 +2,9 @@
 
 ## [0.12.0] - 2026-09-07
 
-- 🔧 Maintenance
+### Maintenance
 
-  - Now requires `0.12.0` of `thread_aware_macros_impl`
+- Now requires `0.12.0` of `thread_aware_macros_impl`
 
 ## [0.11.0] - 2026-08-27
 

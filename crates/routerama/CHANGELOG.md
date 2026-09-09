@@ -2,21 +2,17 @@
 
 ## [0.1.1] - 2026-09-07
 
-- 🔧 Maintenance
+### Maintenance
 
-  - Now requires `0.2.1` of `http_path_template`
-  - Now requires `0.1.1` of `routerama_build`
-  - Now requires `0.1.1` of `routerama_macros`
+- Now requires `0.2.1` of `http_path_template`
+- Now requires `0.1.1` of `routerama_build`
+- Now requires `0.1.1` of `routerama_macros`
 
-- ✨ Features
+### Bug Fixes
 
-  - add REST transcoding for gRPC services ([#600](https://github.com/microsoft/oxidizer/pull/600))
+- declare optional dependencies as dev-dependencies ([#658](https://github.com/microsoft/oxidizer/pull/658))
+- migrate to alloc_tracker 0.7 ([#568](https://github.com/microsoft/oxidizer/pull/568))
 
-- 🐛 Bug Fixes
+### Performance
 
-  - declare optional dependencies as dev-dependencies ([#658](https://github.com/microsoft/oxidizer/pull/658))
-  - migrate to alloc_tracker 0.7 ([#568](https://github.com/microsoft/oxidizer/pull/568))
-
-- ⚡ Performance
-
-  - cut the PR Miri step from 3h16m to about 1h15m ([#674](https://github.com/microsoft/oxidizer/pull/674))
+- cut the PR Miri step from 3h16m to about 1h15m ([#674](https://github.com/microsoft/oxidizer/pull/674))

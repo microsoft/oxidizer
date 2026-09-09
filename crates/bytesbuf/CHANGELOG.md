@@ -2,18 +2,17 @@
 
 ## [0.10.0] - 2026-09-07
 
-- 🔧 Maintenance
+### Maintenance
 
-  - Now requires `0.2.3` of `plurality`
-  - Now requires `0.12.0` of `thread_aware`
+- Now requires `0.12.0` of `thread_aware`
 
-- ⚠️ Breaking
+### Breaking
 
-  - adopt thread_aware_core across workspace ([#721](https://github.com/microsoft/oxidizer/pull/721))
+- adopt thread_aware_core across workspace ([#721](https://github.com/microsoft/oxidizer/pull/721))
 
-- ✔️ Tasks
+### Tasks
 
-  - raise MSRV to Rust 1.95 ([#716](https://github.com/microsoft/oxidizer/pull/716))
+- raise MSRV to Rust 1.95 ([#716](https://github.com/microsoft/oxidizer/pull/716))
 
 ## [0.9.0] - 2026-08-27
 

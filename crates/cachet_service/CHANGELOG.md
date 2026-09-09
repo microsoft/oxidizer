@@ -2,10 +2,10 @@
 
 ## [0.5.1] - 2026-09-07
 
-- 🔧 Maintenance
+### Maintenance
 
-  - Now requires `0.5.1` of `cachet_tier`
-  - Now requires `0.3.7` of `layered`
+- Now requires `0.5.1` of `cachet_tier`
+- Now requires `0.3.7` of `layered`
 
 ## [0.5.0] - 2026-08-27
 

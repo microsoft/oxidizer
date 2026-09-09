@@ -7,11 +7,11 @@
 - Public APIs now use `Sensitive` from `data_privacy 0.13.0`, matching the
   coordinated data-privacy release line.
 
-- 🔧 Maintenance
+### Maintenance
 
-  - Now requires `0.13.0` of `data_privacy`
-  - Now requires `0.5.1` of `ohno`
-  - Now requires `0.5.1` of `templated_uri_macros`
+- Now requires `0.13.0` of `data_privacy`
+- Now requires `0.5.1` of `ohno`
+- Now requires `0.5.1` of `templated_uri_macros`
 
 ## [0.5.0] - 2026-08-27
 

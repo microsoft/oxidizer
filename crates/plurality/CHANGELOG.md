@@ -1,7 +1,5 @@
 # Changelog
 
-## [0.2.3] - 2026-09-07
-
 All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

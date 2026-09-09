@@ -2,6 +2,6 @@
 
 ## [0.1.1] - 2026-09-07
 
-- 🔧 Maintenance
+### Maintenance
 
-  - Now requires `0.5.1` of `ohno`
+- Now requires `0.5.1` of `ohno`

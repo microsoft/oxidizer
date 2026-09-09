@@ -2,25 +2,9 @@
 
 ## [0.13.0] - 2026-09-07
 
-- 🔧 Maintenance
+### Maintenance
 
-  - Now requires `0.13.0` of `data_privacy_macros_impl`
-
-- ✨ Features
-
-  - add REST transcoding for gRPC services ([#600](https://github.com/microsoft/oxidizer/pull/600))
-
-- 🐛 Bug Fixes
-
-  - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
-
-- ✔️ Tasks
-
-  - re-release all packages with LFS-free tarballs ([#531](https://github.com/microsoft/oxidizer/pull/531))
-
-- 🏗️ Build System
-
-  - adopt cargo-anvil check catalog (github backend) ([#534](https://github.com/microsoft/oxidizer/pull/534))
+- Now requires `0.13.0` of `data_privacy_macros_impl`
 
 ## [0.10.3] - 2026-06-26
 

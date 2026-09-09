@@ -7,13 +7,13 @@
 - Align `data_privacy`, `data_privacy_macros`, and `data_privacy_macros_impl`
   on the `0.13.0` release line. `data_privacy_core` remains at `0.1.2`.
 
-- 🔧 Maintenance
+### Maintenance
 
-  - Now requires `0.13.0` of `data_privacy_macros`
+- Now requires `0.13.0` of `data_privacy_macros`
 
-- 🐛 Bug Fixes
+### Bug Fixes
 
-  - declare optional dependencies as dev-dependencies ([#658](https://github.com/microsoft/oxidizer/pull/658))
+- declare optional dependencies as dev-dependencies ([#658](https://github.com/microsoft/oxidizer/pull/658))
 
 ## [0.12.4] - 2026-07-24
 

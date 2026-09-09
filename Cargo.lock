@@ -3432,7 +3432,7 @@ dependencies = [
 
 [[package]]
 name = "multitude_macros"
-version = "0.1.2"
+version = "0.1.1"
 dependencies = [
  "multitude_macros_impl",
  "mutants",
@@ -3441,7 +3441,7 @@ dependencies = [
 
 [[package]]
 name = "multitude_macros_impl"
-version = "0.1.2"
+version = "0.1.1"
 dependencies = [
  "prettyplease 0.3.0",
  "proc-macro2",
@@ -4089,7 +4089,7 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
 name = "plurality"
-version = "0.2.3"
+version = "0.2.2"
 dependencies = [
  "alloc_tracker",
  "allocator-api2 0.4.0",
@@ -4654,7 +4654,7 @@ dependencies = [
 
 [[package]]
 name = "recoverable"
-version = "0.2.1"
+version = "0.2.0"
 dependencies = [
  "insta",
  "ohno 0.5.1",

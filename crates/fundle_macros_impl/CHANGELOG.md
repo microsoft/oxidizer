@@ -6,9 +6,9 @@
 
 - Public macro helper results now use Syn 3 rather than Syn 2 error types.
 
-- ♻️ Code Refactoring
+### Code Refactoring
 
-  - adopt shared macro test helpers from `testing_aids` ([#686](https://github.com/microsoft/oxidizer/pull/686))
+- adopt shared macro test helpers from `testing_aids` ([#686](https://github.com/microsoft/oxidizer/pull/686))
 
 ## [0.3.5] - 2026-07-24
 

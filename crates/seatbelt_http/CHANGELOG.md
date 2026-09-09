@@ -2,12 +2,12 @@
 
 ## [0.9.0] - 2026-09-07
 
-- ⚠️ Breaking
+### Breaking
 
-  - Now requires `0.11.0` of `http_extensions`
-  - Now requires `0.9.0` of `seatbelt`
-  - Now requires `0.6.0` of `templated_uri`
-  - Now requires `0.7.0` of `tick`
+- Now requires `0.11.0` of `http_extensions`
+- Now requires `0.9.0` of `seatbelt`
+- Now requires `0.6.0` of `templated_uri`
+- Now requires `0.7.0` of `tick`
 
 ## [0.8.0] - 2026-08-27
 

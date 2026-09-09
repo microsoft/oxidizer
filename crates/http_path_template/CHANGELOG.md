@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Adjust coverage and mutation-test annotations for the existing `no_std`
   backtrace fallback. The parser API and behavior are unchanged.
 
-## [0.2.0]
+## [0.2.0] - 2026-07-22
 
 ### Added
 

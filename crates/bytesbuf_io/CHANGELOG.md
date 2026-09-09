@@ -2,14 +2,14 @@
 
 ## [0.10.0] - 2026-09-07
 
-- ⚠️ Breaking
+### Breaking
 
-  - Now requires `0.10.0` of `bytesbuf`
-  - Now requires `0.5.1` of `ohno`
+- Now requires `0.10.0` of `bytesbuf`
+- Now requires `0.5.1` of `ohno`
 
-- ✨ Features
+### Features
 
-  - add a WinHTTP-backed fetch transport for Windows ([#687](https://github.com/microsoft/oxidizer/pull/687))
+- add a WinHTTP-backed fetch transport for Windows ([#687](https://github.com/microsoft/oxidizer/pull/687))
 
 ## [0.9.0] - 2026-08-27
 
