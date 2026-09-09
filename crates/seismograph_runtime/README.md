@@ -47,7 +47,7 @@ worker.attach_current_thread();
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seismograph_runtime">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEGxrgq-FeaBG5G1OvMD96rlnWG05j90Pu2h-JG7XJzqoihHN_YWSCgmtzZWlzbW9ncmFwaGUwLjEuMIJzc2Vpc21vZ3JhcGhfcnVudGltZWUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbGuCr4V5oEbkbU68wP3quWdYbTmP3Q-7aH4kbtcnOqiKEc39hZIKCa3NlaXNtb2dyYXBoZTAuMS4wgnNzZWlzbW9ncmFwaF9ydW50aW1lZTAuMS4w
  [__link0]: https://crates.io/crates/seismograph/0.1.0
  [__link1]: https://docs.rs/seismograph_runtime/0.1.0/seismograph_runtime/?search=snapshot::source::ID
  [__link2]: https://docs.rs/seismograph_runtime/0.1.0/seismograph_runtime/?search=snapshot::decode

@@ -1,0 +1,47 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "metabench_macros"
+description = "Procedural macros for the metabench crate. You should not add this as a direct dependency; use the re-exports from metabench."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["benchmark", "criterion", "gungraun", "procedural-macro"]
+categories = ["development-tools::profiling"]
+
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/metabench_macros"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = []
+
+[package.metadata.docs.rs]
+all-features = true
+
+# Thin proc-macro entry crate: the only coverage source for `#[proc_macro_attribute]`
+# entry points is compile-time expansion in consumers, which is non-deterministic under
+# impact-scoped `cargo llvm-cov nextest`. The shims carry `#[coverage(off)]` and the
+# delegated logic lives in `metabench_macros_impl` (gated normally), so this crate reports
+# no instrumented lines; opt it out of the per-package line gate.
+[package.metadata.coverage-gate]
+min-lines-percent = 0
+
+[lib]
+proc-macro = true
+
+[dependencies]
+metabench_macros_impl = { workspace = true }
+
+[dev-dependencies]
+mutants = { workspace = true }
+tempfile = { workspace = true }
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

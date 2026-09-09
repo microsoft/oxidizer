@@ -45,7 +45,7 @@ existing version.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seismograph_rallocator">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG084aOhB8DikGxjmFAEi5OCkGxxsTZui6JWoGzq4yt11uJTXYWSCgmtzZWlzbW9ncmFwaGUwLjEuMIJ2c2Vpc21vZ3JhcGhfcmFsbG9jYXRvcmUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbTzho6EHwOKQbGOYUASLk4KQbHGxNm6LolagbOrjK3XW4lNdhZIKCa3NlaXNtb2dyYXBoZTAuMS4wgnZzZWlzbW9ncmFwaF9yYWxsb2NhdG9yZTAuMS4w
  [__link0]: https://crates.io/crates/seismograph/0.1.0
  [__link1]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/snapshot/index.html
  [__link2]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/topology/index.html

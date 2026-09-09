@@ -198,7 +198,7 @@ and servers based on [`hyper`][__link16] like [`reqwest`][__link17].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/templated_uri">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG63iTBJYMadJG6nseEEoATCvG3YJS_EajemqG70n7pjeggIrYWSCgmRodHRwZTEuNS4wgm10ZW1wbGF0ZWRfdXJpZTAuNS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbreJMElgxp0kbqex4QSgBMK8bdglL8RqN6aobvSfumN6CAithZIKCZGh0dHBlMS41LjCCbXRlbXBsYXRlZF91cmllMC41LjA
  [__link0]: https://docs.rs/templated_uri/0.5.0/templated_uri/?search=Uri
  [__link1]: https://docs.rs/templated_uri/0.5.0/templated_uri/?search=BaseUri
  [__link10]: https://docs.rs/templated_uri/0.5.0/templated_uri/?search=Escape

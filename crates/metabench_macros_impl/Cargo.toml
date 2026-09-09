@@ -1,0 +1,44 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "metabench_macros_impl"
+description = "Implementation of the procedural macros for the metabench crate. You should not add this as a direct dependency; use the re-exports from metabench."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["benchmark", "criterion", "gungraun", "procedural-macro"]
+categories = ["development-tools::profiling"]
+
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/metabench_macros_impl"
+
+[package.metadata.coverage-gate]
+min-lines-percent = 1
+
+[package.metadata.anvil.miri]
+exclude = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["proc_macro2::*", "syn::*"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+proc-macro-crate = { workspace = true }
+proc-macro2 = { workspace = true }
+quote = { workspace = true }
+syn = { workspace = true, features = ["full", "parsing", "printing", "proc-macro"] }
+
+[dev-dependencies]
+bolero = { workspace = true, features = ["std"] }
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

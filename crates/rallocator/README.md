@@ -235,7 +235,7 @@ allocations.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/rallocator">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG8qaDMdVmwFaGxNz4HUXKxLfGz_RBjLGxzv0GyX9p4PlU3DEYWSCgnBhbGxvY2F0aW9uX2hpbnRzZTAuMS4wgmpyYWxsb2NhdG9yZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbypoMx1WbAVobE3PgdRcrEt8bP9EGMsbHO_QbJf2ng-VTcMRhZIKCcGFsbG9jYXRpb25faGludHNlMC4xLjCCanJhbGxvY2F0b3JlMC4xLjA
  [__link0]: https://docs.rs/rallocator/0.1.0/rallocator/?search=Rallocator::new
  [__link1]: https://crates.io/crates/allocation_hints/0.1.0
  [__link2]: https://docs.rs/rallocator/0.1.0/rallocator/macro.rallocator.html

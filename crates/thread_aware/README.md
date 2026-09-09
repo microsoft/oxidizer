@@ -131,7 +131,7 @@ struct Point {
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG-_QQmOqo3UBG9Kk3I0xmCnOG9iwaZ7MB_6yGzFzkTecCC_qYWSDgmx0aHJlYWRfYXdhcmVmMC4xMS4wgnF0aHJlYWRfYXdhcmVfY29yZWUwLjEuMIJzdGhyZWFkX2F3YXJlX21hY3Jvc2YwLjExLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb79BCY6qjdQEb0qTcjTGYKc4b2LBpnswH_rIbMXORN5wIL-phZIOCbHRocmVhZF9hd2FyZWYwLjExLjCCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4wgnN0aHJlYWRfYXdhcmVfbWFjcm9zZjAuMTEuMA
  [__link0]: https://docs.rs/thread_aware_core
  [__link1]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
  [__link10]: https://docs.rs/thread_aware/0.11.0/thread_aware/?search=Unaware

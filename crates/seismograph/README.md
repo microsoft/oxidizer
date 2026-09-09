@@ -59,5 +59,5 @@ let _monitor = seismograph::monitor::Monitor::builder()
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seismograph">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG5GAxQmVXmOAGwbYoFgg97cqG3iIALZ4J988G2Y5o21O-lQ_YWSBgmtzZWlzbW9ncmFwaGUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbkYDFCZVeY4AbBtigWCD3tyobeIgAtngn3zwbZjmjbU76VD9hZIGCa3NlaXNtb2dyYXBoZTAuMS4w
  [__link0]: https://docs.rs/seismograph/0.1.0/seismograph/fn.snapshot.html
