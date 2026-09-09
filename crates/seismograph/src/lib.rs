@@ -238,6 +238,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(coverage_nightly, coverage(off))] // Disabled sessions deliberately must not construct records.
     fn session_wrappers_record_only_in_the_selected_class() {
         let _test = recorder::TEST_LOCK.lock().unwrap();
         recorder(recorder::Configuration {

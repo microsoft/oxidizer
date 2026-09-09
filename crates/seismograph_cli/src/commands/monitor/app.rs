@@ -823,13 +823,20 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn apply_recording_configuration(&mut self, configuration: RecordingConfiguration) {
+        self.apply_recording_configuration_with(configuration, set_recording);
+    }
+
+    fn apply_recording_configuration_with<F>(&mut self, configuration: RecordingConfiguration, set_recording: F)
+    where
+        F: FnOnce(&MonitorDescriptor, RecordingConfiguration) -> Result<(), super::Error> + Send + 'static,
+    {
         let Screen::Connected { descriptor, .. } = &self.screen else {
             self.recording_configuration_popup = None;
             return;
         };
         let descriptor = descriptor.clone();
         self.recording_configuration_popup = None;
-        self.start_recording_configuration(descriptor, configuration);
+        self.start_recording_configuration_with(descriptor, configuration, set_recording);
     }
 
     pub(super) fn poll_recording_configuration(&mut self) {
@@ -974,8 +981,14 @@ impl App {
         }
     }
 
-    #[cfg_attr(coverage_nightly, coverage(off))]
-    fn start_recording_configuration(&mut self, descriptor: MonitorDescriptor, configuration: RecordingConfiguration) {
+    fn start_recording_configuration_with<F>(
+        &mut self,
+        descriptor: MonitorDescriptor,
+        configuration: RecordingConfiguration,
+        set_recording: F,
+    ) where
+        F: FnOnce(&MonitorDescriptor, RecordingConfiguration) -> Result<(), super::Error> + Send + 'static,
+    {
         let (sender, receiver) = unbounded();
         match thread::Builder::new().name("seismograph-recording".into()).spawn(move || {
             let result = set_recording(&descriptor, configuration)
@@ -2654,14 +2667,16 @@ mod tests {
         let mut configuration = RecordingConfiguration::default();
         configuration.io.enabled = true;
 
-        app.apply_recording_configuration(configuration);
+        app.apply_recording_configuration_with(configuration, |_descriptor, _configuration| Ok(()));
+        let result = app
+            .recording_receiver
+            .take()
+            .unwrap()
+            .recv_timeout_sync(Duration::from_secs(1))
+            .unwrap();
 
         assert_eq!(
-            (
-                app.recording_configuration_popup,
-                app.recording_receiver.is_some(),
-                app.status.as_str(),
-            ),
+            (app.recording_configuration_popup, result.is_ok(), app.status.as_str(),),
             (None, true, "Applying recording configuration...")
         );
     }

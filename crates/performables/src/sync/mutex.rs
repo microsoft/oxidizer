@@ -218,14 +218,10 @@ impl<T: ?Sized> Mutex<T> {
 
     fn unlock(&self) {
         let previous = self.state.fetch_sub(LOCKED, Ordering::Release);
-        match previous & WAITERS {
-            0 => {}
-            WAITERS => {
-                self.waiters.wake_one_marked(|| {
-                    self.state.fetch_and(!WAITERS, Ordering::Release);
-                });
-            }
-            _ => unreachable!("waiter marker occupies exactly one state bit"),
+        if previous & WAITERS != 0 {
+            self.waiters.wake_one_marked(|| {
+                self.state.fetch_and(!WAITERS, Ordering::Release);
+            });
         }
         self.record(EventKind::MutexRelease);
     }
@@ -436,6 +432,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(coverage_nightly, coverage(off))] // Failure arm deliberately remains unreachable.
     fn unlock_during_waiter_registration_completes_acquisition() {
         let mutex = Mutex::new(());
         let mut lock = mutex.lock_result();
@@ -558,6 +555,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(coverage_nightly, coverage(off))] // Failure arm deliberately remains unreachable.
     fn successful_acquisition_after_registration_clears_only_the_waiter_marker() {
         let mutex = Mutex::new(());
         let _held = std::mem::ManuallyDrop::new(mutex.try_lock().unwrap());

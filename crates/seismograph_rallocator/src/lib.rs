@@ -2261,6 +2261,14 @@ mod tests {
         invalid_clock[clock_offset..clock_offset + 2].copy_from_slice(&0_u16.to_le_bytes());
         assert!(read_runtime_events(&mut Reader::new(&invalid_clock), RUNTIME_EVENTS_SECTION_VERSION).is_err());
 
+        let mut reserved_clock_bits = payload_prefix(RUNTIME_EVENTS_SECTION_VERSION);
+        reserved_clock_bits[clock_offset + 2..clock_offset + 4].copy_from_slice(&1_u16.to_le_bytes());
+        assert!(read_runtime_events(&mut Reader::new(&reserved_clock_bits), RUNTIME_EVENTS_SECTION_VERSION).is_err());
+
+        let mut invalid_frequency = payload_prefix(RUNTIME_EVENTS_SECTION_VERSION);
+        invalid_frequency[clock_offset + 4..clock_offset + 12].copy_from_slice(&1_u64.to_le_bytes());
+        assert!(read_runtime_events(&mut Reader::new(&invalid_frequency), RUNTIME_EVENTS_SECTION_VERSION).is_err());
+
         let mut excessive_threads = payload_prefix(RUNTIME_EVENTS_SECTION_VERSION);
         excessive_threads.extend_from_slice(&1_u32.to_le_bytes());
         assert!(read_runtime_events(&mut Reader::new(&excessive_threads), RUNTIME_EVENTS_SECTION_VERSION).is_err());

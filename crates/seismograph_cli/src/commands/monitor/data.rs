@@ -2715,6 +2715,13 @@ mod tests {
 
     #[test]
     fn thread_operation_metadata_covers_every_variant() {
+        for kind in ThreadOperationKind::ALL {
+            assert!(!kind.label().is_empty());
+            assert!(!kind.relationship_label().is_empty());
+            for related in ThreadOperationKind::ALL {
+                let _ = kind.is_related(related.event_kind());
+            }
+        }
         assert_eq!(ThreadOperationKind::Allocation.label(), "Allocation");
         assert_eq!(ThreadOperationKind::ChannelHighWatermark.label(), "Channel high watermark");
         assert_eq!(

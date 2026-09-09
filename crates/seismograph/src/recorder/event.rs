@@ -1016,6 +1016,20 @@ mod tests {
             },
             BacktraceCapture::Never,
         );
+        let io = Record::io(
+            EventKind::IoReadFinished,
+            IoEvent {
+                operation_id: super::super::io::IoOperationId::from_raw(1).unwrap(),
+                resource_id: super::super::io::IoResourceId::from_raw(2).unwrap(),
+                buffer_id: Some(super::super::io::BufferId::from_raw(3).unwrap()),
+                requested_bytes: 4,
+                completed_bytes: 5,
+                buffer_len: 6,
+                buffer_span_count: 7,
+                resource_kind: super::super::io::IoResourceKind::File,
+                outcome: super::super::io::IoOutcome::Success,
+            },
+        );
         assert_eq!(
             (
                 object.sampling_object_id(),
@@ -1024,6 +1038,8 @@ mod tests {
                 deallocated.kind,
                 deallocated.sampling_object_id(),
                 runtime.sampling_object_id(),
+                io.class(),
+                io.sampling_object_id(),
             ),
             (
                 ObjectId::new(1),
@@ -1032,6 +1048,8 @@ mod tests {
                 EventKind::Deallocation,
                 ObjectId::new(11),
                 ObjectId::new(7),
+                EventClass::Io,
+                ObjectId::new(2),
             )
         );
     }

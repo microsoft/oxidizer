@@ -260,12 +260,10 @@ impl<T> Sender<T> {
                 Err((ERROR_CLOSED, value)) => return Err(Error::with_value(ERROR_CLOSED, value)),
                 Err((_code, returned)) => {
                     value = returned;
-                    if contention_recorded {
-                        QueueWait::send(&self.shared).await;
-                        continue;
+                    if !contention_recorded {
+                        self.shared.record(EventKind::ChannelSendContention);
+                        contention_recorded = true;
                     }
-                    self.shared.record(EventKind::ChannelSendContention);
-                    contention_recorded = true;
                     QueueWait::send(&self.shared).await;
                 }
             }
@@ -389,16 +387,14 @@ impl<T> Receiver<T> {
                 Ok(value) => return Ok(value),
                 Err(error) => match error.code {
                     ERROR_CLOSED => return Err(error),
-                    ERROR_EMPTY => {
-                        if contention_recorded {
-                            QueueWait::receive(&self.shared).await;
-                            continue;
+                    code => {
+                        debug_assert_eq!(code, ERROR_EMPTY, "queue receive reports only empty or closed");
+                        if !contention_recorded {
+                            self.shared.record(EventKind::ChannelReceiveContention);
+                            contention_recorded = true;
                         }
-                        self.shared.record(EventKind::ChannelReceiveContention);
-                        contention_recorded = true;
                         QueueWait::receive(&self.shared).await;
                     }
-                    _ => unreachable!("queue receive only reports empty or closed"),
                 },
             }
         }
@@ -1069,16 +1065,10 @@ impl<T> WatchReceiver<T> {
                 WatchChange::Closed => return Err(Error::without_value(ERROR_CLOSED)),
                 WatchChange::Pending => {}
             }
-            if contention_recorded {
-                WatchChanged {
-                    receiver: self,
-                    waiter: None,
-                }
-                .await;
-                continue;
+            if !contention_recorded {
+                telemetry::record(EventKind::ChannelReceiveContention, std::ptr::from_ref(&*self.shared).cast::<()>());
+                contention_recorded = true;
             }
-            telemetry::record(EventKind::ChannelReceiveContention, std::ptr::from_ref(&*self.shared).cast::<()>());
-            contention_recorded = true;
             WatchChanged {
                 receiver: self,
                 waiter: None,
@@ -1377,6 +1367,23 @@ mod tests {
     }
 
     #[test]
+    fn bounded_send_remains_pending_after_a_spurious_wake() {
+        let (sender, receiver) = bounded(1);
+        sender.try_send(1).unwrap();
+        let counter = Arc::new(WakeCounter::default());
+        let waker = Waker::from(Arc::clone(&counter));
+        let mut context = Context::from_waker(&waker);
+        let mut send = Box::pin(sender.send(2));
+        assert!(send.as_mut().poll(&mut context).is_pending());
+
+        sender.shared.send_waiters.wake_one_marked(|| {});
+        assert!(send.as_mut().poll(&mut context).is_pending());
+        assert_eq!(receiver.try_recv(), Ok(1));
+        assert!(send.as_mut().poll(&mut context).is_ready());
+        assert_eq!(receiver.try_recv(), Ok(2));
+    }
+
+    #[test]
     fn queue_endpoint_closed_state_tracks_the_opposite_endpoint() {
         let (sender, receiver) = bounded::<()>(1);
         assert!(!sender.is_closed());
@@ -1474,6 +1481,14 @@ mod tests {
     }
 
     #[test]
+    fn oneshot_try_recv_records_empty_contention_once() {
+        let (_sender, mut receiver) = oneshot::<usize>();
+
+        assert!(receiver.try_recv().unwrap_err().is_empty());
+        assert!(receiver.try_recv().unwrap_err().is_empty());
+    }
+
+    #[test]
     fn oneshot_closed_state_requires_a_dead_sender_without_a_value() {
         let (sender, receiver) = oneshot::<usize>();
         assert!(!receiver.is_closed());
@@ -1516,6 +1531,21 @@ mod tests {
         assert_eq!(receiver.observe_change(), WatchChange::Version(1));
         assert_eq!(receiver.observed.load(Ordering::Acquire), 1);
         assert_eq!(receiver.observe_change(), WatchChange::Pending);
+    }
+
+    #[test]
+    fn watch_changed_remains_pending_after_a_spurious_wake() {
+        let (sender, receiver) = watch(1);
+        let counter = Arc::new(WakeCounter::default());
+        let waker = Waker::from(Arc::clone(&counter));
+        let mut context = Context::from_waker(&waker);
+        let mut changed = Box::pin(receiver.changed());
+        assert!(changed.as_mut().poll(&mut context).is_pending());
+
+        receiver.shared.receiver_waiters.wake_all_marked(|| {});
+        assert!(changed.as_mut().poll(&mut context).is_pending());
+        sender.send(2).unwrap();
+        assert!(changed.as_mut().poll(&mut context).is_ready());
     }
 
     #[test]

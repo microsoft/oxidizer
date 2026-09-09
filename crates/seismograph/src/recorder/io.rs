@@ -230,4 +230,11 @@ mod tests {
             (true, true, true)
         );
     }
+
+    #[test]
+    fn identities_reject_zero_stable_values() {
+        assert_eq!(BufferId::from_raw(0), None);
+        assert_eq!(IoOperationId::from_raw(0), None);
+        assert_eq!(IoResourceId::from_raw(0), None);
+    }
 }

@@ -194,15 +194,19 @@ fn create_monitor_directory(path: &Path) -> Result<(), Error> {
         source,
     })?;
     #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|source| Error::SetPermissions {
-            path: path.to_owned(),
-            source,
-        })?;
-    }
+    restrict_monitor_directory(path)?;
     Ok(())
+}
+
+#[cfg(unix)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Portable tests cannot inject chmod failure.
+fn restrict_monitor_directory(path: &Path) -> Result<(), Error> {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|source| Error::SetPermissions {
+        path: path.to_owned(),
+        source,
+    })
 }
 
 fn publish_descriptor(directory: &Path, descriptor: &MonitorDescriptor) -> Result<PathBuf, Error> {

@@ -316,22 +316,16 @@ impl<T: ?Sized> RwLock<T> {
 
     fn unlock_read(&self) {
         let previous = self.state.fetch_sub(1, Ordering::Release);
-        if previous & READERS == 1 {
-            match previous & WAITERS {
-                0 => {}
-                WAITERS => self.wake_waiters(),
-                _ => unreachable!("waiter marker occupies exactly one state bit"),
-            }
+        if previous & READERS == 1 && previous & WAITERS != 0 {
+            self.wake_waiters();
         }
         self.record(EventKind::RwLockReadRelease);
     }
 
     fn unlock_write(&self) {
         let previous = self.state.fetch_and(!WRITER, Ordering::Release);
-        match previous & WAITERS {
-            0 => {}
-            WAITERS => self.wake_waiters(),
-            _ => unreachable!("waiter marker occupies exactly one state bit"),
+        if previous & WAITERS != 0 {
+            self.wake_waiters();
         }
         self.record(EventKind::RwLockWriteRelease);
     }
@@ -634,6 +628,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(coverage_nightly, coverage(off))] // Failure arms deliberately remain unreachable.
     fn lock_release_during_waiter_registration_completes_acquisition() {
         let lock = RwLock::new(());
         let context = Context::from_waker(Waker::noop());
@@ -728,6 +723,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(coverage_nightly, coverage(off))] // Failure arm deliberately remains unreachable.
     fn successful_read_after_registration_clears_only_the_waiter_marker() {
         let lock = RwLock::new(());
         let _writer = std::mem::ManuallyDrop::new(lock.try_write().unwrap());
@@ -745,6 +741,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(coverage_nightly, coverage(off))] // Failure arm deliberately remains unreachable.
     fn successful_write_after_registration_clears_only_the_waiter_marker() {
         let lock = RwLock::new(());
         let _reader = std::mem::ManuallyDrop::new(lock.try_read().unwrap());

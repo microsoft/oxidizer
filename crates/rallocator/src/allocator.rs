@@ -2322,17 +2322,23 @@ unsafe fn begin_heap_usage_operation(retirement: *mut RetirementState) -> bool {
             return false;
         }
         #[cfg(test)]
-        if TEST_FAIL_HEAP_USAGE_CAS.with(|fail| fail.replace(false)) {
-            continue;
+        let force_failure = TEST_FAIL_HEAP_USAGE_CAS.with(|fail| fail.replace(false));
+        #[cfg(test)]
+        if force_failure {
+            retirement.operations.fetch_add(1, Ordering::Relaxed);
         }
         let next_state = state
             .checked_add(1)
             .expect("retired operation flag keeps the active operation count below usize::MAX");
-        if retirement
+        let acquired = retirement
             .operations
             .compare_exchange_weak(state, next_state, Ordering::AcqRel, Ordering::Acquire)
-            .is_ok()
-        {
+            .is_ok();
+        #[cfg(test)]
+        if force_failure {
+            retirement.operations.fetch_sub(1, Ordering::Relaxed);
+        }
+        if acquired {
             return true;
         }
     }
@@ -3530,15 +3536,20 @@ unsafe fn take_most_free_slab<T: Tunables>(slot: &mut *mut SlabHeader, class_ind
 unsafe fn pop_remote_block(class: &RemoteClass) -> *mut u8 {
     loop {
         #[cfg(test)]
-        if TEST_FAIL_REMOTE_POP_LOCK_CAS.with(|fail| fail.replace(false)) {
-            spin_loop();
-            continue;
+        let force_failure = TEST_FAIL_REMOTE_POP_LOCK_CAS.with(|fail| fail.replace(false));
+        #[cfg(test)]
+        if force_failure {
+            class.popping.store(true, Ordering::Relaxed);
         }
-        if class
+        let acquired = class
             .popping
             .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_ok()
-        {
+            .is_ok();
+        #[cfg(test)]
+        if force_failure {
+            class.popping.store(false, Ordering::Release);
+        }
+        if acquired {
             break;
         }
         spin_loop();
@@ -3772,18 +3783,13 @@ unsafe fn read_header(address: *mut u8) -> *mut ExtraHeader {
     #[cfg(not(miri))]
     let header_address = unsafe { address.sub(HEADER_OFFSET).cast::<*mut ExtraHeader>() };
     #[cfg(all(debug_assertions, not(coverage_nightly)))]
-    {
-        if header_address.is_null() {
-            // SAFETY: GlobalAlloc::dealloc requires a non-null pointer previously returned by this allocator.
-            unsafe { std::hint::unreachable_unchecked() }
-        } else {
-            unsafe { header_address.read() }
-        }
-    }
-    #[cfg(any(not(debug_assertions), coverage_nightly))]
-    unsafe {
-        header_address.read()
-    }
+    assert!(
+        !header_address.is_null(),
+        "GlobalAlloc::dealloc requires a non-null pointer previously returned by this allocator"
+    );
+    // SAFETY: GlobalAlloc::dealloc requires a non-null pointer previously returned by this allocator.
+    let header_address = unsafe { ptr::NonNull::new_unchecked(header_address) };
+    unsafe { header_address.read() }
 }
 
 #[cfg(test)]
@@ -3931,12 +3937,12 @@ mod tests {
         let retirement = RetirementState::new();
         retirement.operations.store(7, Ordering::Relaxed);
         fail_next_test_heap_usage_cas();
-        assert!(TEST_FAIL_HEAP_USAGE_CAS.with(std::cell::Cell::get));
-        TEST_FAIL_HEAP_USAGE_CAS.with(|fail| fail.set(false));
+        assert!(unsafe { begin_heap_usage_operation(ptr::from_ref(&retirement).cast_mut()) });
+        assert_eq!(retirement.operations.load(Ordering::Relaxed), 8);
 
+        let class = RemoteClass::new();
         fail_next_test_remote_pop_lock_cas();
-        assert!(TEST_FAIL_REMOTE_POP_LOCK_CAS.with(std::cell::Cell::get));
-        TEST_FAIL_REMOTE_POP_LOCK_CAS.with(|fail| fail.set(false));
+        assert!(unsafe { pop_remote_block(&class) }.is_null());
     }
 
     #[test]
@@ -4147,7 +4153,9 @@ mod tests {
             PHYSICAL_SEGMENT_CONTEXT | (large_class + 1),
             large_block_count - large_first_block,
         );
-        unmap_test_region(regions, region);
+        // The domain is process-published, so its region metadata must remain valid
+        // for lock-free readers until process exit.
+        let _ = region;
     }
 
     #[cfg(not(miri))]

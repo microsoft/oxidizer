@@ -312,6 +312,7 @@ mod tests {
         impl Future for WakeAfterSpawn {
             type Output = ();
 
+            #[cfg_attr(coverage_nightly, coverage(off))] // Test-driver scheduling edges are not product behavior.
             fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
                 if self.ready.load(Ordering::Acquire) {
                     return Poll::Ready(());

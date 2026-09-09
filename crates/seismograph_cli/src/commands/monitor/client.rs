@@ -30,10 +30,7 @@ fn discover_in(directory: &std::path::Path) -> Result<Vec<Instance>, Error> {
         Err(error) => return Err(Error::Io(error)),
     };
     let mut instances = Vec::new();
-    for entry in entries {
-        let Ok(entry) = entry else {
-            continue;
-        };
+    for entry in entries.flatten() {
         if entry.path().extension().and_then(|extension| extension.to_str()) != Some("monitor") {
             continue;
         }
@@ -251,6 +248,7 @@ mod tests {
         ))
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))] // Defensive test-server failures are not product behavior.
     fn serve(conversations: Vec<Vec<(u64, Response)>>) -> ScriptedServer {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         listener.set_nonblocking(true).unwrap();

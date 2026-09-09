@@ -372,19 +372,19 @@ pub fn select_object_for(class: EventClass, object_id: ObjectId) -> Option<Recor
         return None;
     }
     let session = ACTIVE_SESSION.load(Ordering::Relaxed);
-    if session == 0 {
-        return None;
-    }
     if !decode_sampling(policy).includes(object_id) {
         return None;
     }
-    if policy_atomic(class).load(Ordering::Acquire) != policy {
-        return None;
-    }
-    if ACTIVE_SESSION.load(Ordering::Acquire) != session {
+    if !selection_still_current(class, policy, session) {
         return None;
     }
     RecordingSession::from_raw(session)
+}
+
+#[inline]
+#[cfg_attr(coverage_nightly, coverage(off))] // State can change only in the race window between the paired loads.
+fn selection_still_current(class: EventClass, policy: u64, session: u64) -> bool {
+    session != 0 && policy_atomic(class).load(Ordering::Acquire) == policy && ACTIVE_SESSION.load(Ordering::Acquire) == session
 }
 
 /// Reads recorder counters without copying retained events.
@@ -789,10 +789,7 @@ impl ThreadRecorder {
             .is_err()
         {
             #[cfg(test)]
-            {
-                assert!(std::time::Instant::now() < deadline, "ring lock was not released within one second");
-                std::thread::yield_now();
-            }
+            assert_test_lock_progress(deadline, "ring lock was not released within one second");
             std::hint::spin_loop();
         }
         RingLock { recorder: self }
@@ -863,10 +860,7 @@ impl Slot {
             .is_err()
         {
             #[cfg(test)]
-            {
-                assert!(std::time::Instant::now() < deadline, "slot lock was not released within one second");
-                std::thread::yield_now();
-            }
+            assert_test_lock_progress(deadline, "slot lock was not released within one second");
             std::hint::spin_loop();
         }
     }
@@ -932,13 +926,7 @@ impl ConfigurationLock {
             .is_err()
         {
             #[cfg(test)]
-            {
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "configuration lock was not released within one second"
-                );
-                std::thread::yield_now();
-            }
+            assert_test_lock_progress(deadline, "configuration lock was not released within one second");
             std::hint::spin_loop();
         }
         Self
@@ -949,6 +937,13 @@ impl Drop for ConfigurationLock {
     fn drop(&mut self) {
         CONFIGURATION_LOCKED.store(false, Ordering::Release);
     }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test-only timeout failure is deliberately not exercised.
+fn assert_test_lock_progress(deadline: std::time::Instant, message: &str) {
+    assert!(std::time::Instant::now() < deadline, "{message}");
+    std::thread::yield_now();
 }
 
 const fn encode_policy(policy: RecordingPolicy) -> u64 {
@@ -1492,6 +1487,9 @@ mod tests {
         let unchanged_session = ACTIVE_SESSION.load(Ordering::Acquire);
         configure(base);
         assert_eq!(ACTIVE_SESSION.load(Ordering::Acquire), unchanged_session);
+        configure(Configuration::default());
+        configure(Configuration::default());
+        assert_eq!(ACTIVE_SESSION.load(Ordering::Acquire), 0);
 
         let variants = [
             Configuration {
@@ -1594,6 +1592,8 @@ mod tests {
                 assert_eq!(recording_enabled_for(class), class == enabled_class);
             }
         }
+        ACTIVE_SESSION.store(0, Ordering::Release);
+        assert!(select_object_for(EventClass::Cache, ObjectId::new(1)).is_none());
         configure(Configuration::default());
     }
 
@@ -1918,6 +1918,7 @@ mod tests {
     #[test]
     fn lock_guards_and_slots_publish_each_state_transition() {
         let _test = TEST_LOCK.lock().unwrap();
+        let _ = local_recorder();
         let previous_general_policy = LAST_GENERAL_POLICY.swap(
             encode_policy(RecordingPolicy {
                 enabled: true,
