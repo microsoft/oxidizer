@@ -1010,7 +1010,14 @@ impl App {
                 .map_err(|error| error.to_string());
             let _receiver_closed = sender.send_sync(result);
         }) {
-            Ok(_worker) => {
+            Ok(_worker) => self.finish_start_recording_configuration(receiver, Ok(())),
+            Err(error) => self.finish_start_recording_configuration(receiver, Err(error)),
+        }
+    }
+
+    fn finish_start_recording_configuration(&mut self, receiver: Receiver<Result<RecordingUpdate, String>>, result: std::io::Result<()>) {
+        match result {
+            Ok(()) => {
                 self.recording_receiver = Some(receiver);
                 self.status = "Applying recording configuration...".into();
             }
@@ -2693,6 +2700,17 @@ mod tests {
             (app.recording_configuration_popup, result.is_ok(), app.status.as_str(),),
             (None, true, "Applying recording configuration...")
         );
+    }
+
+    #[test]
+    fn recording_configuration_worker_start_failure_is_reported() {
+        let mut app = connected_app(MonitorTab::Info);
+        let (_sender, receiver) = unbounded();
+
+        app.finish_start_recording_configuration(receiver, Err(std::io::Error::other("worker unavailable")));
+
+        assert_eq!(app.status, "failed to start recording configuration worker: worker unavailable");
+        assert!(app.recording_receiver.is_none());
     }
 
     #[test]

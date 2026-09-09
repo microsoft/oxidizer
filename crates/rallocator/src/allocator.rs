@@ -950,25 +950,13 @@ where
                 return block;
             }
             #[cfg(all(test, not(miri)))]
-            let refill = TEST_FAIL_REMOTE_REFILL_CAS.with(|fail| {
-                if fail.replace(false) {
-                    class.refilling.store(true, Ordering::Relaxed);
-                    Err(true)
-                } else {
-                    class.refilling.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-                }
-            });
-            #[cfg(any(not(test), miri))]
+            inject_remote_refill_contention(class);
             let refill = class.refilling.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed);
             if refill.is_err() {
                 while class.refilling.load(Ordering::Acquire) {
                     spin_loop();
                     #[cfg(all(test, not(miri)))]
-                    TEST_CLEAR_REMOTE_REFILL_AFTER_SPIN.with(|clear| {
-                        if clear.replace(false) {
-                            class.refilling.store(false, Ordering::Release);
-                        }
-                    });
+                    clear_injected_remote_refill_contention(class);
                 }
                 continue;
             }
@@ -3532,6 +3520,22 @@ unsafe fn take_most_free_slab<T: Tunables>(slot: &mut *mut SlabHeader, class_ind
         unsafe { (*best_previous).next_partial = next };
     }
     best
+}
+
+#[cfg(all(test, not(miri)))]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test-only contention injection has no production branch.
+fn inject_remote_refill_contention(class: &RemoteClass) {
+    if TEST_FAIL_REMOTE_REFILL_CAS.with(|fail| fail.replace(false)) {
+        class.refilling.store(true, Ordering::Relaxed);
+    }
+}
+
+#[cfg(all(test, not(miri)))]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test-only contention release has no production branch.
+fn clear_injected_remote_refill_contention(class: &RemoteClass) {
+    if TEST_CLEAR_REMOTE_REFILL_AFTER_SPIN.with(|clear| clear.replace(false)) {
+        class.refilling.store(false, Ordering::Release);
+    }
 }
 
 #[inline(always)]
