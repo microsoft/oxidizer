@@ -19,7 +19,7 @@ use linux as platform;
 pub(crate) use miri::{
     MEDIUM_MAX_SLICES, MEDIUM_REGION_SIZE, align_down, allocation_prefix_for_read, allocation_prefix_for_write, commit,
     commit_locality_segment, commit_locality_slab, decommit, initialize_storage, map, monotonic_millis, read_free_next,
-    read_free_requested, release_free_metadata, release_storage, reserve, unmap, write_free_next, write_free_requested,
+    read_free_requested, release_free_metadata, release_storage, reserve, write_free_next, write_free_requested,
 };
 #[cfg(not(miri))]
 pub(crate) use native::{
@@ -27,7 +27,7 @@ pub(crate) use native::{
     release_free_metadata, release_storage, write_free_next, write_free_requested,
 };
 #[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
-pub(crate) use platform::{monotonic_millis, unmap};
+pub(crate) use platform::monotonic_millis;
 #[cfg(all(not(miri), target_os = "windows"))]
 use win64 as platform;
 
@@ -123,6 +123,18 @@ pub(crate) unsafe fn decommit(address: *mut u8, size: usize) -> bool {
     unsafe { platform::decommit(address, size) }
 }
 
+#[cfg(miri)]
+pub(crate) unsafe fn unmap(address: *mut u8, size: usize) {
+    unsafe { miri::unmap(address, size) };
+}
+
+#[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
+pub(crate) unsafe fn unmap(address: *mut u8, size: usize) {
+    unsafe { platform::unmap(address, size) };
+    #[cfg(test)]
+    UNMAP_COUNT.set(UNMAP_COUNT.get() + 1);
+}
+
 #[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
 pub(crate) fn align_offset(address: *mut u8, alignment: usize) -> usize {
     #[cfg(test)]
@@ -180,6 +192,16 @@ pub(crate) fn fail_next_decommit() {
 #[cfg(all(test, not(miri)))]
 pub(crate) fn fail_next_align_offset() {
     faults::fail_next(faults::ALIGN_OFFSET);
+}
+
+#[cfg(all(test, not(miri)))]
+thread_local! {
+    static UNMAP_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(all(test, not(miri)))]
+pub(crate) fn unmap_count() -> usize {
+    UNMAP_COUNT.get()
 }
 
 #[cfg(all(not(miri), not(any(target_os = "windows", target_os = "linux"))))]

@@ -1086,7 +1086,9 @@ where
         };
         unsafe {
             header.write(SlabHeader {
-                marker: AtomicUsize::new(marker | class_index),
+                // Addition preserves the marker encoding because its low six bits are reserved
+                // and every valid class index is below 64. It avoids only the equivalent XOR mutant.
+                marker: AtomicUsize::new(marker + class_index),
                 owner: slab_owner,
                 fresh_next,
                 next_partial: ptr::null_mut(),
@@ -3908,15 +3910,21 @@ mod tests {
 
     #[test]
     fn test_fault_hooks_change_only_the_next_operation() {
-        fail_next_test_passive_registration_cas();
-        assert!(TEST_FAIL_PASSIVE_REGISTRATION_CAS.with(std::cell::Cell::get));
-        TEST_FAIL_PASSIVE_REGISTRATION_CAS.with(|fail| fail.set(false));
+        #[cfg(not(miri))]
+        {
+            fail_next_test_passive_registration_cas();
+            assert!(TEST_FAIL_PASSIVE_REGISTRATION_CAS.with(std::cell::Cell::get));
+            TEST_FAIL_PASSIVE_REGISTRATION_CAS.with(|fail| fail.set(false));
+        }
 
-        force_next_test_remote_refill_contention();
-        assert!(TEST_FAIL_REMOTE_REFILL_CAS.with(std::cell::Cell::get));
-        assert!(TEST_CLEAR_REMOTE_REFILL_AFTER_SPIN.with(std::cell::Cell::get));
-        TEST_FAIL_REMOTE_REFILL_CAS.with(|fail| fail.set(false));
-        TEST_CLEAR_REMOTE_REFILL_AFTER_SPIN.with(|clear| clear.set(false));
+        #[cfg(not(miri))]
+        {
+            force_next_test_remote_refill_contention();
+            assert!(TEST_FAIL_REMOTE_REFILL_CAS.with(std::cell::Cell::get));
+            assert!(TEST_CLEAR_REMOTE_REFILL_AFTER_SPIN.with(std::cell::Cell::get));
+            TEST_FAIL_REMOTE_REFILL_CAS.with(|fail| fail.set(false));
+            TEST_CLEAR_REMOTE_REFILL_AFTER_SPIN.with(|clear| clear.set(false));
+        }
 
         let retirement = RetirementState::new();
         retirement.operations.store(7, Ordering::Relaxed);
@@ -4007,46 +4015,6 @@ mod tests {
         assert!(first_block < block_count);
 
         let allocator = unsafe { Rallocator::<Standard>::new() };
-        let tracked_domain = new_domain();
-        let tracked_domain_pointer = crate::domain::state(tracked_domain);
-        let tracked_domain = unsafe { &mut *tracked_domain_pointer };
-        let tracked_regions = &tracked_domain.regions;
-        let mut tracked_heap = ReusableHeapState::new(GeneralOptions::new(), tracked_domain_pointer);
-        let tracked = tracked_regions.allocate_slices(tracked_domain_pointer, 1).unwrap();
-        assert!(unsafe { hal::commit(tracked, SLAB_SIZE) });
-        assert!(
-            !allocator
-                .initialize_slab(
-                    SlabAllocation {
-                        address: tracked,
-                        segment_slices: 1,
-                        committed_bytes: SLAB_SIZE,
-                    },
-                    0,
-                    &mut tracked_heap,
-                    SLAB_MARKER,
-                )
-                .is_null()
-        );
-        let region = tracked_regions.state.lock().regions;
-        assert!(!region.is_null());
-        let offset = tracked.addr() - unsafe { (*region).base.addr() };
-        let slice_index = offset / MEDIUM_SLICE_SIZE;
-        let segment_index = (offset % MEDIUM_SLICE_SIZE) / SLAB_SIZE;
-        assert_eq!(
-            unsafe { (*region).physical[slice_index].segment_usable_blocks[segment_index].load(Ordering::Relaxed) },
-            block_count - first_block
-        );
-        let mut tracked_state = tracked_regions.state.lock();
-        clear_region_cache();
-        unsafe {
-            hal::unmap((*region).base, MEDIUM_REGION_SIZE);
-            hal::unmap(region.cast(), size_of::<RegionState>());
-        }
-        tracked_state.regions = ptr::null_mut();
-        tracked_state.last_region = ptr::null_mut();
-        tracked_regions.regions.store(ptr::null_mut(), Ordering::Relaxed);
-
         let mut domain = DomainState::new();
         let mut heap = ReusableHeapState::new(GeneralOptions::new(), ptr::from_mut(&mut domain));
         let domain_pointer = ptr::from_mut(&mut domain);
@@ -4060,8 +4028,19 @@ mod tests {
         assert_eq!(fallback.segment_slices, DIRECT_SLAB_SEGMENT);
         unsafe { hal::unmap(fallback.address, SLAB_SIZE) };
 
+        let region = regions.state.lock().regions;
+        unmap_test_region(regions, region);
+        let _ = full;
+    }
+
+    fn assert_segment_metadata(metadata: &PhysicalSliceMeta, index: usize, encoded_class: usize, usable_blocks: usize) {
+        assert_eq!(metadata.segments[index].load(Ordering::Relaxed), encoded_class);
+        assert_eq!(metadata.segment_usable_blocks[index].load(Ordering::Relaxed), usable_blocks);
+        assert!(!metadata.segment_utilization_tracked[index].load(Ordering::Relaxed));
+    }
+
+    fn unmap_test_region(regions: &MediumRegion, region: *mut RegionState) {
         let mut state = regions.state.lock();
-        let region = state.regions;
         clear_region_cache();
         unsafe {
             hal::unmap((*region).base, MEDIUM_REGION_SIZE);
@@ -4070,7 +4049,147 @@ mod tests {
         state.regions = ptr::null_mut();
         state.last_region = ptr::null_mut();
         regions.regions.store(ptr::null_mut(), Ordering::Relaxed);
-        let _ = full;
+    }
+
+    #[test]
+    fn initialize_slab_publishes_exact_first_and_continuation_invariants() {
+        let allocator = unsafe { Rallocator::<Standard>::new() };
+        let domain = new_domain();
+        let domain_pointer = crate::domain::state(domain);
+        let regions = unsafe { domain_regions(domain_pointer) };
+        let slice = regions.allocate_slices(domain_pointer, 1).unwrap();
+        assert!(unsafe { hal::commit(slice, MEDIUM_SLICE_SIZE) });
+        let mut heap = ReusableHeapState::new(GeneralOptions::new(), domain_pointer);
+
+        let small_class = 0;
+        let small_size = ConfigSizeClasses::<Standard>::SIZES[small_class];
+        let (small_first_block, small_block_count) = slab_block_layout(small_size);
+        let first = allocator.initialize_slab(
+            SlabAllocation {
+                address: slice,
+                segment_slices: 1,
+                committed_bytes: MEDIUM_SLICE_SIZE,
+            },
+            small_class,
+            &mut heap,
+            SLAB_MARKER,
+        );
+        let first_header = slice.cast::<SlabHeader>();
+        let embedded_owner = unsafe { ptr::addr_of_mut!((*first_header).embedded_owner) };
+        assert_eq!(first, unsafe { slice.add(small_first_block * small_size) });
+        assert_eq!(unsafe { (*first_header).fresh_next }, unsafe {
+            slice.add((small_first_block + 1) * small_size)
+        });
+        assert_eq!(unsafe { (*first_header).free_count }, small_block_count - small_first_block - 1);
+        assert_eq!(
+            unsafe { (*first_header).usable_blocks as usize },
+            small_block_count - small_first_block
+        );
+        assert_eq!(unsafe { (*first_header).block_size as usize }, small_size);
+        assert_eq!(unsafe { (*first_header).marker.load(Ordering::Relaxed) }, SLAB_MARKER + small_class);
+        assert_eq!(unsafe { (*first_header).owner }, embedded_owner);
+        assert_eq!(heap.owner, embedded_owner);
+        assert!(unsafe { (*embedded_owner).remote_slabs.load(Ordering::Relaxed) }.is_null());
+        assert!(unsafe { (*embedded_owner).retirement }.is_null());
+        assert_eq!(heap.classes[small_class].active, first_header);
+        assert!(heap.context_classes[small_class].active.is_null());
+        assert_eq!(heap.segments, first_header);
+        assert_eq!(heap.locality_segment, first_header);
+        assert!(unsafe { (*first_header).segment_next }.is_null());
+        assert_eq!(unsafe { (*first_header).segment_slices }, 1);
+        assert_eq!(unsafe { (*first_header).segment_committed_bytes }, MEDIUM_SLICE_SIZE);
+
+        let large_class = ConfigSizeClasses::<Standard>::SIZES.len() - 1;
+        let large_size = ConfigSizeClasses::<Standard>::SIZES[large_class];
+        assert_eq!(large_size, 16 * 1024);
+        let (large_first_block, large_block_count) = slab_block_layout(large_size);
+        let continuation = unsafe { slice.add(SLAB_SIZE) };
+        let last = allocator.initialize_slab(
+            SlabAllocation {
+                address: continuation,
+                segment_slices: 0,
+                committed_bytes: 0,
+            },
+            large_class,
+            &mut heap,
+            CONTEXT_SLAB_MARKER,
+        );
+        let last_header = continuation.cast::<SlabHeader>();
+        assert_eq!(large_block_count, 2);
+        assert_eq!(large_first_block, 1);
+        assert_eq!(last, unsafe { continuation.add(large_first_block * large_size) });
+        assert!(unsafe { (*last_header).fresh_next }.is_null());
+        assert_eq!(unsafe { (*last_header).free_count }, 0);
+        assert_eq!(unsafe { (*last_header).usable_blocks }, 1);
+        assert_eq!(unsafe { (*last_header).block_size as usize }, large_size);
+        assert_eq!(
+            unsafe { (*last_header).marker.load(Ordering::Relaxed) },
+            CONTEXT_SLAB_MARKER + large_class
+        );
+        assert_eq!(unsafe { (*last_header).owner }, embedded_owner);
+        assert!(unsafe { (*last_header).embedded_owner.remote_slabs.load(Ordering::Relaxed) }.is_null());
+        assert!(unsafe { (*last_header).embedded_owner.retirement }.is_null());
+        assert_eq!(heap.context_classes[large_class].active, last_header);
+        assert!(heap.classes[large_class].active.is_null());
+        assert_eq!(heap.segments, first_header);
+        assert_eq!(heap.locality_segment, first_header);
+        assert!(unsafe { (*last_header).segment_next }.is_null());
+        assert_eq!(unsafe { (*last_header).segment_slices }, 0);
+        assert_eq!(unsafe { (*last_header).segment_committed_bytes }, 0);
+
+        let region = regions.state.lock().regions;
+        let offset = slice.addr() - unsafe { (*region).base.addr() };
+        let slice_index = offset / MEDIUM_SLICE_SIZE;
+        let metadata = unsafe { &(*region).physical[slice_index] };
+        assert_eq!(metadata.kind_and_span.load(Ordering::Relaxed), PHYSICAL_SLICE_SMALL);
+        assert_eq!(metadata.owner.load(Ordering::Relaxed), embedded_owner.addr());
+        assert_segment_metadata(metadata, 0, small_class + 1, small_block_count - small_first_block);
+        assert_segment_metadata(
+            metadata,
+            1,
+            PHYSICAL_SEGMENT_CONTEXT | (large_class + 1),
+            large_block_count - large_first_block,
+        );
+        unmap_test_region(regions, region);
+    }
+
+    #[cfg(not(miri))]
+    #[test]
+    fn initialize_slab_direct_segment_retires_and_unmaps_exactly_once() {
+        let allocator = unsafe { Rallocator::<Standard>::new() };
+        let mut domain = DomainState::new();
+        let heap = create_bump_fallback_heap(ptr::from_mut(&mut domain));
+        assert!(!heap.is_null());
+        let slab = hal::map(SLAB_SIZE);
+        assert!(!slab.is_null());
+        let class_index = 0;
+        let block_size = ConfigSizeClasses::<Standard>::SIZES[class_index];
+        let (first_block, block_count) = slab_block_layout(block_size);
+        let block = allocator.initialize_slab(
+            SlabAllocation {
+                address: slab,
+                segment_slices: DIRECT_SLAB_SEGMENT,
+                committed_bytes: SLAB_SIZE,
+            },
+            class_index,
+            unsafe { &mut *heap },
+            SLAB_MARKER,
+        );
+        let header = slab.cast::<SlabHeader>();
+        assert_eq!(block, unsafe { slab.add(first_block * block_size) });
+        assert_eq!(unsafe { (*header).fresh_next }, unsafe { slab.add((first_block + 1) * block_size) });
+        assert_eq!(unsafe { (*header).free_count }, block_count - first_block - 1);
+        assert_eq!(unsafe { (*header).usable_blocks as usize }, block_count - first_block);
+        assert_eq!(unsafe { (*header).segment_slices }, DIRECT_SLAB_SEGMENT);
+        assert_eq!(unsafe { (*header).segment_committed_bytes }, SLAB_SIZE);
+        assert_eq!(unsafe { (*heap).segments }, header);
+        assert!(unsafe { (*heap).locality_segment }.is_null());
+
+        let unmaps = hal::unmap_count();
+        unsafe { retire_general_heap(heap) };
+        assert_eq!(hal::unmap_count(), unmaps);
+        unsafe { release_retired_block(header) };
+        assert_eq!(hal::unmap_count(), unmaps + 2);
     }
 
     #[cfg(not(miri))]

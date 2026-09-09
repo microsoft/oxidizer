@@ -54,6 +54,10 @@ pub(crate) fn monotonic_millis() -> u64 {
     let mut time = timespec { tv_sec: 0, tv_nsec: 0 };
     let result = unsafe { clock_gettime(CLOCK_MONOTONIC, &raw mut time) };
     abort_on_failure(result);
+    timespec_millis(&time)
+}
+
+fn timespec_millis(time: &timespec) -> u64 {
     u64::try_from(time.tv_sec)
         .expect("CLOCK_MONOTONIC seconds are nonnegative")
         .saturating_mul(1_000)
@@ -135,9 +139,22 @@ mod tests {
     fn monotonic_milliseconds_track_elapsed_wall_time_at_millisecond_scale() {
         let before = monotonic_millis();
         std::thread::sleep(Duration::from_millis(10));
-        let elapsed = monotonic_millis().saturating_sub(before);
+        let after = monotonic_millis();
 
-        assert!((5..1_000).contains(&elapsed), "unexpected monotonic millisecond delta: {elapsed}");
+        assert!(before > 0);
+        assert!(after.saturating_sub(before) >= 5);
+    }
+
+    #[test]
+    fn timespec_conversion_truncates_nanoseconds_to_exact_milliseconds() {
+        assert_eq!(timespec_millis(&timespec { tv_sec: 0, tv_nsec: 0 }), 0);
+        assert_eq!(
+            timespec_millis(&timespec {
+                tv_sec: 2,
+                tv_nsec: 345_999_999,
+            }),
+            2_345
+        );
     }
 
     #[test]

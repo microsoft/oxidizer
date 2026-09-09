@@ -1655,20 +1655,17 @@ mod tests {
         );
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(not(miri))]
     #[test]
     fn dropping_snapshot_arena_unmaps_its_chunks() {
-        let mapping = {
+        let before = hal::unmap_count();
+        {
             let mut arena = SnapshotArena::new();
             let address = arena.allocate(Layout::new::<u64>());
             assert!(!address.is_null());
-            arena.head.cast::<u8>()
-        };
-        let mut resident = 0_u8;
-        let result = unsafe { libc::mincore(mapping.cast(), 1, &raw mut resident) };
+        }
 
-        assert_eq!(result, -1);
-        assert_eq!(std::io::Error::last_os_error().raw_os_error(), Some(libc::ENOMEM));
+        assert_eq!(hal::unmap_count(), before + 1);
     }
 
     #[test]
