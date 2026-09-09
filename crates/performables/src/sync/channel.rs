@@ -387,22 +387,19 @@ impl<T> Receiver<T> {
         loop {
             match self.shared.try_receive() {
                 Ok(value) => return Ok(value),
-                Err(error) =>
-                {
-                    #[expect(clippy::single_match_else, reason = "closed is terminal while every other code retries")]
-                    match error.code {
-                        ERROR_CLOSED => return Err(error),
-                        _ => {
-                            if contention_recorded {
-                                QueueWait::receive(&self.shared).await;
-                                continue;
-                            }
-                            self.shared.record(EventKind::ChannelReceiveContention);
-                            contention_recorded = true;
+                Err(error) => match error.code {
+                    ERROR_CLOSED => return Err(error),
+                    ERROR_EMPTY => {
+                        if contention_recorded {
                             QueueWait::receive(&self.shared).await;
+                            continue;
                         }
+                        self.shared.record(EventKind::ChannelReceiveContention);
+                        contention_recorded = true;
+                        QueueWait::receive(&self.shared).await;
                     }
-                }
+                    _ => unreachable!("queue receive only reports empty or closed"),
+                },
             }
         }
     }

@@ -20,6 +20,12 @@ use crate::telemetry::{self, EventKind};
 const LOCKED: u8 = 1;
 const WAITERS: u8 = 2;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Acquisition {
+    Acquired,
+    Contended,
+}
+
 /// An executor-independent asynchronous mutual-exclusion lock.
 ///
 /// The uncontended path uses atomic operations and does not allocate.
@@ -111,7 +117,7 @@ impl<T: ?Sized> Mutex<T> {
     /// Returns [`PoisonError`] with the acquired guard if another thread
     /// poisoned the mutex.
     pub fn lock_sync_result(&self) -> Result<MutexGuard<'_, T>, PoisonError<MutexGuard<'_, T>>> {
-        if self.try_acquire() {
+        if matches!(self.try_acquire(), Acquisition::Acquired) {
             return self.acquired();
         }
 
@@ -143,7 +149,7 @@ impl<T: ?Sized> Mutex<T> {
     /// Returns [`PoisonError`] with the acquired guard if the mutex was
     /// successfully acquired after another thread poisoned it.
     pub fn try_lock_result(&self) -> Result<Option<MutexGuard<'_, T>>, PoisonError<MutexGuard<'_, T>>> {
-        if self.try_acquire() {
+        if matches!(self.try_acquire(), Acquisition::Acquired) {
             self.acquired().map(Some)
         } else {
             self.record(EventKind::MutexContention);
@@ -169,18 +175,18 @@ impl<T: ?Sized> Mutex<T> {
         }
     }
 
-    fn try_acquire(&self) -> bool {
+    fn try_acquire(&self) -> Acquisition {
         let mut state = self.state.load(Ordering::Relaxed);
-        while state & LOCKED == 0 {
+        while matches!(state, 0 | WAITERS) {
             match self
                 .state
                 .compare_exchange_weak(state, state + LOCKED, Ordering::Acquire, Ordering::Relaxed)
             {
-                Ok(_) => return true,
+                Ok(_) => return Acquisition::Acquired,
                 Err(current) => state = current,
             }
         }
-        false
+        Acquisition::Contended
     }
 
     fn acquired(&self) -> Result<MutexGuard<'_, T>, PoisonError<MutexGuard<'_, T>>> {
@@ -211,7 +217,7 @@ impl<T: ?Sized> Mutex<T> {
     }
 
     fn unlock(&self) {
-        let previous = self.state.fetch_and(!LOCKED, Ordering::Release);
+        let previous = self.state.fetch_sub(LOCKED, Ordering::Release);
         match previous & WAITERS {
             0 => {}
             WAITERS => {
@@ -306,7 +312,7 @@ impl<'a, T: ?Sized> Future for MutexLockResult<'a, T> {
     type Output = Result<MutexGuard<'a, T>, PoisonError<MutexGuard<'a, T>>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if self.mutex.try_acquire() {
+        if matches!(self.mutex.try_acquire(), Acquisition::Acquired) {
             if let Some(waiter) = self.waiter.take() {
                 self.mutex.waiters.cancel_marked(&waiter, || {
                     self.mutex.state.fetch_and(!WAITERS, Ordering::Release);
@@ -334,7 +340,7 @@ impl<'a, T: ?Sized> MutexLockResult<'a, T> {
             || {
                 mutex.state.fetch_or(WAITERS, Ordering::Release);
             },
-            || mutex.try_acquire(),
+            || matches!(mutex.try_acquire(), Acquisition::Acquired),
             || {
                 mutex.state.fetch_and(!WAITERS, Ordering::Release);
             },
@@ -443,17 +449,32 @@ mod tests {
     }
 
     #[test]
-    fn acquisition_preserves_the_waiter_marker() {
+    fn acquisition_distinguishes_every_lock_state() {
         let mutex = Mutex::new(());
-        mutex.state.store(WAITERS, Ordering::Relaxed);
+        let outcomes = [0, WAITERS, LOCKED, WAITERS | LOCKED].map(|state| {
+            mutex.state.store(state, Ordering::Relaxed);
+            (mutex.try_acquire(), mutex.state.load(Ordering::Relaxed))
+        });
 
-        assert!(mutex.try_acquire());
-        assert_eq!(mutex.state.load(Ordering::Relaxed), WAITERS | LOCKED);
+        assert_eq!(
+            outcomes,
+            [
+                (Acquisition::Acquired, LOCKED),
+                (Acquisition::Acquired, WAITERS | LOCKED),
+                (Acquisition::Contended, LOCKED),
+                (Acquisition::Contended, WAITERS | LOCKED),
+            ]
+        );
     }
 
     #[test]
-    fn unlock_clears_the_lock_and_waiter_marker_and_wakes_one() {
+    fn unlock_clears_every_lock_state_and_wakes_a_waiter() {
         let mutex = Mutex::new(());
+
+        mutex.state.store(LOCKED, Ordering::Relaxed);
+        mutex.unlock();
+        assert_eq!(mutex.state.load(Ordering::Relaxed), 0);
+
         mutex.state.store(WAITERS | LOCKED, Ordering::Relaxed);
         let waiter = StdArc::new(Waiter::new());
         let counter = StdArc::new(WakeCounter::default());

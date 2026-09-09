@@ -644,8 +644,25 @@ fn channel_operations_share_runtime_telemetry_identity() {
     sender.try_send(4).unwrap();
     drop((bounded_sender, bounded_receiver, sender, receiver));
 
+    let (watch_sender, watch_receiver) = watch(1);
+    watch_sender.send(2).unwrap();
+    drop(watch_receiver);
+
     let encoded = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
     let snapshot = seismograph::snapshot::decode(encoded.as_bytes()).unwrap().events;
+    let watch_id = snapshot
+        .events
+        .iter()
+        .rev()
+        .find(|event| event.thread_id == thread_id && event.kind == EventKind::ChannelSend)
+        .and_then(seismograph::recorder::event::Event::object_id)
+        .unwrap();
+    assert!(
+        snapshot
+            .events
+            .iter()
+            .any(|event| event.object_id() == Some(watch_id) && event.kind == EventKind::ChannelClose)
+    );
     let channel_ids = snapshot
         .events
         .iter()
@@ -692,4 +709,5 @@ fn channel_operations_share_runtime_telemetry_identity() {
     );
 
     seismograph::recorder(Configuration::default());
+    drop(watch_sender);
 }
