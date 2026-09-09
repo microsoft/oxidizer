@@ -341,44 +341,41 @@ fn handle_client(mut stream: TcpStream, descriptor: &MonitorDescriptor, stop: &A
             Err(ClientError::Stopped | ClientError::Disconnected) => return Ok(()),
             Err(error) => return Err(error),
         };
-        match request {
-            Request::Hello { .. } => {
-                seismograph_protocol::write_response(&mut stream, request_id, &Response::Error("already authenticated".into()))
-                    .map_err(ClientError::Protocol)?;
-            }
-            Request::SetRecording(configuration) => {
-                apply_recording_configuration(configuration);
-                seismograph_protocol::write_response(&mut stream, request_id, &Response::Acknowledged).map_err(ClientError::Protocol)?;
-            }
-            Request::SetCacheRecording(policy) => {
-                let configuration = crate::recorder::configuration();
-                crate::recorder(crate::recorder::Configuration {
-                    cache: recorder_policy(policy),
-                    ..configuration
-                });
-                seismograph_protocol::write_response(&mut stream, request_id, &Response::Acknowledged).map_err(ClientError::Protocol)?;
-            }
-            Request::CaptureSnapshot(options) => {
-                let event_buffers = match options.event_buffers {
-                    EventBufferDisposition::Retain => crate::snapshot::EventBufferDisposition::Retain,
-                    EventBufferDisposition::Clear => crate::snapshot::EventBufferDisposition::Clear,
-                    EventBufferDisposition::Release => crate::snapshot::EventBufferDisposition::Release,
-                };
-                let response = snapshot_response(crate::snapshot(crate::snapshot::SnapshotOptions { event_buffers }));
-                seismograph_protocol::write_response(&mut stream, request_id, &response).map_err(ClientError::Protocol)?;
-            }
-            Request::ReadRecorderStatistics => {
-                seismograph_protocol::write_response(&mut stream, request_id, &recorder_statistics_response())
-                    .map_err(ClientError::Protocol)?;
-            }
-            Request::ReadCacheRecording => {
-                let policy = protocol_recording_policy(crate::recorder::configuration().cache);
-                seismograph_protocol::write_response(&mut stream, request_id, &Response::CacheRecording(policy))
-                    .map_err(ClientError::Protocol)?;
-            }
-        }
+        let response = authenticated_response(&request);
+        seismograph_protocol::write_response(&mut stream, request_id, &response).map_err(ClientError::Protocol)?;
     }
     Ok(())
+}
+
+fn authenticated_response(request: &Request) -> Response {
+    match request {
+        Request::Hello { .. } => Response::Error("already authenticated".into()),
+        Request::SetRecording(configuration) => {
+            apply_recording_configuration(*configuration);
+            Response::Acknowledged
+        }
+        Request::SetCacheRecording(policy) => {
+            let configuration = crate::recorder::configuration();
+            crate::recorder(crate::recorder::Configuration {
+                cache: recorder_policy(*policy),
+                ..configuration
+            });
+            Response::Acknowledged
+        }
+        Request::CaptureSnapshot(options) => {
+            let event_buffers = match options.event_buffers {
+                EventBufferDisposition::Retain => crate::snapshot::EventBufferDisposition::Retain,
+                EventBufferDisposition::Clear => crate::snapshot::EventBufferDisposition::Clear,
+                EventBufferDisposition::Release => crate::snapshot::EventBufferDisposition::Release,
+            };
+            snapshot_response(crate::snapshot(crate::snapshot::SnapshotOptions { event_buffers }))
+        }
+        Request::ReadRecorderStatistics => recorder_statistics_response(),
+        Request::ReadCacheRecording => {
+            let policy = protocol_recording_policy(crate::recorder::configuration().cache);
+            Response::CacheRecording(policy)
+        }
+    }
 }
 
 fn apply_recording_configuration(configuration: RecordingConfiguration) {
@@ -861,70 +858,26 @@ mod tests {
         );
     }
 
-    #[cfg_attr(miri, ignore)]
     #[test]
-    fn authenticated_client_handles_repeat_hello_and_all_snapshot_modes() {
+    fn authenticated_requests_handle_repeat_hello_and_all_snapshot_modes() {
         let _test = crate::recorder::TEST_LOCK.lock().unwrap();
-        let descriptor = MonitorDescriptor {
-            name: "test".into(),
-            instance: None,
-            process_id: 1,
-            instance_id: InstanceId::from_bytes([1; 16]),
-            port: 1,
-            authentication: AuthenticationToken::from_bytes([2; 32]),
-        };
-        let (mut client, server) = connected_pair();
-        let stop = Arc::new(AtomicBool::new(false));
-        let server_stop = Arc::clone(&stop);
-        let server_descriptor = descriptor.clone();
-        let server_thread = thread::spawn(move || handle_client(server, &server_descriptor, &server_stop));
-
-        seismograph_protocol::write_request(
-            &mut client,
-            1,
-            &Request::Hello {
-                authentication: descriptor.authentication,
-            },
-        )
-        .unwrap();
-        assert!(matches!(
-            seismograph_protocol::read_response(&mut client).unwrap(),
-            (1, Response::Hello { .. })
-        ));
-
-        seismograph_protocol::write_request(
-            &mut client,
-            2,
-            &Request::Hello {
-                authentication: descriptor.authentication,
-            },
-        )
-        .unwrap();
         assert_eq!(
-            seismograph_protocol::read_response(&mut client).unwrap(),
-            (2, Response::Error("already authenticated".into()))
+            authenticated_response(&Request::Hello {
+                authentication: AuthenticationToken::from_bytes([2; 32]),
+            }),
+            Response::Error("already authenticated".into())
         );
 
-        for (request_id, event_buffers) in [
-            (3, EventBufferDisposition::Retain),
-            (4, EventBufferDisposition::Clear),
-            (5, EventBufferDisposition::Release),
+        for event_buffers in [
+            EventBufferDisposition::Retain,
+            EventBufferDisposition::Clear,
+            EventBufferDisposition::Release,
         ] {
-            seismograph_protocol::write_request(
-                &mut client,
-                request_id,
-                &Request::CaptureSnapshot(SnapshotOptions { event_buffers }),
-            )
-            .unwrap();
             assert!(matches!(
-                seismograph_protocol::read_response(&mut client).unwrap(),
-                (response_id, Response::Snapshot(_)) if response_id == request_id
+                authenticated_response(&Request::CaptureSnapshot(SnapshotOptions { event_buffers })),
+                Response::Snapshot(_)
             ));
         }
-
-        stop.store(true, Ordering::Release);
-        client.shutdown(Shutdown::Both).unwrap();
-        server_thread.join().unwrap().unwrap();
     }
 
     #[cfg_attr(miri, ignore)]
