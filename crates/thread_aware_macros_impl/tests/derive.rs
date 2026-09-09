@@ -78,6 +78,18 @@ fn repeated_field_type_is_bounded_once() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
+fn user_where_clause_thread_aware_bound_is_not_duplicated() {
+    // A field-type predicate the author already wrote in a `where` clause must not be emitted a
+    // second time, which would trip `clippy::trait_duplication_in_bounds`.
+    let input = quote! {
+        #[derive(ThreadAware)]
+        struct Foo<T>(Vec<T>) where Vec<T>: ThreadAware;
+    };
+    assert_snapshot!(expand(input));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
 fn generics_prebound_bare_no_dup() {
     // Ensures no duplicate ThreadAware bound when already present.
     let input = quote! {

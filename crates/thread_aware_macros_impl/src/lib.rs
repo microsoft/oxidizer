@@ -130,6 +130,23 @@ fn add_bounds(input: &DeriveInput, root_path: &Path) -> syn::Result<syn::Generic
     // predicate for arguments no per-parameter bound could admit. A field type that reaches no
     // parameter is `ThreadAware` (or not) at the definition site and needs no predicate.
     let mut emitted_keys: Vec<String> = Vec::new();
+
+    // Seed with the field-type predicates the author already wrote in a `where` clause, so a
+    // generated one that duplicates it is suppressed - a redundant predicate trips
+    // `clippy::trait_duplication_in_bounds` at the author's own declaration.
+    if let Some(where_clause) = &input.generics.where_clause {
+        for predicate in &where_clause.predicates {
+            if let syn::WherePredicate::Type(pt) = predicate
+                && pt
+                    .bounds
+                    .iter()
+                    .any(|b| matches!(b, syn::TypeParamBound::Trait(t) if is_same_trait(&t.path, &thread_aware_path)))
+            {
+                emitted_keys.push(strip_group_paren(&pt.bounded_ty).to_token_stream().to_string());
+            }
+        }
+    }
+
     let mut predicates: Vec<syn::WherePredicate> = Vec::new();
     for field_ty in &relocated_fields {
         if !type_reaches_param(field_ty, &generic_idents) {
@@ -262,11 +279,11 @@ fn as_bare_param<'a>(ty: &'a Type, generic_idents: &HashSet<syn::Ident>) -> Opti
     None
 }
 
-/// Reports whether the parameter's own declaration already carries a `ThreadAware` bound.
+/// Reports whether the parameter's own declaration already carries an inline `ThreadAware` bound.
 ///
-/// Only the inline bounds on the parameter are inspected - where an author most naturally writes
-/// such a bound, and the case the snapshots pin. A bound expressed in a `where` clause is left to
-/// the author's judgment, exactly as it was before the derive emitted field-type predicates.
+/// Only the inline bounds on the parameter are inspected. An equivalent predicate the author wrote
+/// in a `where` clause is suppressed separately, by seeding the emitted-predicate set from that
+/// `where` clause in `add_bounds`.
 fn param_has_thread_aware_bound(generics: &syn::Generics, ident: &syn::Ident, thread_aware_path: &Path) -> bool {
     generics.params.iter().any(|param| {
         matches!(param, GenericParam::Type(ty_param)
