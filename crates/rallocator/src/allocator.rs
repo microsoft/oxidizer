@@ -953,18 +953,7 @@ where
             inject_remote_refill_contention(class);
             let refill = class.refilling.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed);
             if refill.is_err() {
-                while class.refilling.load(Ordering::Acquire) {
-                    spin_loop();
-                    #[cfg(all(test, not(miri)))]
-                    #[cfg_attr(coverage_nightly, coverage(off))] // Mutation-only assertion is not production behavior.
-                    {
-                        clear_injected_remote_refill_contention(class);
-                        assert!(
-                            !TEST_CLEAR_REMOTE_REFILL_AFTER_SPIN.with(std::cell::Cell::get),
-                            "remote refill contention injection must clear on its first spin",
-                        );
-                    }
-                }
+                wait_for_remote_refill(class);
                 continue;
             }
 
@@ -3537,6 +3526,26 @@ unsafe fn take_most_free_slab<T: Tunables>(slot: &mut *mut SlabHeader, class_ind
         None => *slot = next,
     }
     best_node.as_ptr()
+}
+
+#[cfg(any(not(test), miri))]
+fn wait_for_remote_refill(class: &RemoteClass) {
+    while class.refilling.load(Ordering::Acquire) {
+        spin_loop();
+    }
+}
+
+#[cfg(all(test, not(miri)))]
+#[cfg_attr(coverage_nightly, coverage(off))] // Mutation-only assertion is not production behavior.
+fn wait_for_remote_refill(class: &RemoteClass) {
+    while class.refilling.load(Ordering::Acquire) {
+        spin_loop();
+        clear_injected_remote_refill_contention(class);
+        assert!(
+            !TEST_CLEAR_REMOTE_REFILL_AFTER_SPIN.with(std::cell::Cell::get),
+            "remote refill contention injection must clear on its first spin",
+        );
+    }
 }
 
 #[cfg(all(test, not(miri)))]
