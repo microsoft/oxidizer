@@ -3494,32 +3494,42 @@ unsafe fn drain_remote_inbox<T: Tunables>(state: &mut ReusableHeapState) {
 #[cold]
 #[inline(never)]
 unsafe fn take_most_free_slab<T: Tunables>(slot: &mut *mut SlabHeader, class_index: usize) -> *mut SlabHeader {
-    let mut best = ptr::null_mut::<SlabHeader>();
-    let mut best_previous = ptr::null_mut::<SlabHeader>();
-    let mut previous = ptr::null_mut::<SlabHeader>();
-    let mut current = *slot;
+    let mut best = None;
+    let mut best_previous = None;
+    let mut previous = None;
+    let mut current = ptr::NonNull::new(*slot);
     let mut scanned = 0;
-    while !current.is_null() && scanned < T::PARTIAL_SLAB_SCAN_LIMIT {
-        if best.is_null() || unsafe { (*current).free_count > (*best).free_count } {
+    while let Some(current_node) = current
+        && scanned < T::PARTIAL_SLAB_SCAN_LIMIT
+    {
+        // SAFETY: the partial-slab list contains initialized headers owned by this heap.
+        let current_header = unsafe { current_node.as_ref() };
+        if best.is_none_or(|best_node: ptr::NonNull<SlabHeader>| {
+            // SAFETY: `best_node` was obtained from the same valid partial-slab list.
+            current_header.free_count > unsafe { best_node.as_ref() }.free_count
+        }) {
             best = current;
             best_previous = previous;
         }
         previous = current;
-        current = unsafe { (*current).next_partial };
+        current = ptr::NonNull::new(current_header.next_partial);
         scanned += 1;
     }
     record_partial_scan(class_index, scanned, T::PARTIAL_SLAB_SCAN_LIMIT);
-    if best.is_null() {
-        return best;
-    }
+    let Some(best_node) = best else {
+        return ptr::null_mut();
+    };
 
-    let next = unsafe { (*best).next_partial };
-    if best_previous.is_null() {
-        *slot = next;
-    } else {
-        unsafe { (*best_previous).next_partial = next };
+    // SAFETY: `best_node` remains linked in the valid partial-slab list.
+    let next = unsafe { best_node.as_ref() }.next_partial;
+    match best_previous {
+        Some(mut previous_node) => {
+            // SAFETY: `previous_node` is the valid predecessor of `best_node`.
+            unsafe { previous_node.as_mut() }.next_partial = next;
+        }
+        None => *slot = next,
     }
-    best
+    best_node.as_ptr()
 }
 
 #[cfg(all(test, not(miri)))]

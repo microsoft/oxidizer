@@ -995,6 +995,7 @@ impl App {
         }
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn start_recording_configuration_with<F>(
         &mut self,
         descriptor: MonitorDescriptor,
