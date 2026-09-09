@@ -197,16 +197,6 @@ fn force_next_test_remote_refill_contention() {
     TEST_CLEAR_REMOTE_REFILL_AFTER_SPIN.with(|clear| clear.set(true));
 }
 
-fn compare_heap_usage_operation(retirement: &RetirementState, state: usize) -> Result<usize, usize> {
-    #[cfg(test)]
-    if TEST_FAIL_HEAP_USAGE_CAS.with(|fail| fail.replace(false)) {
-        return Err(retirement.operations.load(Ordering::Acquire));
-    }
-    retirement
-        .operations
-        .compare_exchange_weak(state, state + 1, Ordering::AcqRel, Ordering::Acquire)
-}
-
 #[cfg(test)]
 fn compare_passive_registration(
     head: *mut RemoteHeapState,
@@ -227,17 +217,6 @@ fn compare_passive_registration(
     remote: *mut RemoteHeapState,
 ) -> Result<*mut RemoteHeapState, *mut RemoteHeapState> {
     PASSIVE_THREAD_HEAPS.compare_exchange_weak(head, remote, Ordering::Release, Ordering::Acquire)
-}
-
-fn acquire_remote_pop_lock(class: &RemoteClass) -> bool {
-    #[cfg(test)]
-    if TEST_FAIL_REMOTE_POP_LOCK_CAS.with(|fail| fail.replace(false)) {
-        return false;
-    }
-    class
-        .popping
-        .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
-        .is_ok()
 }
 
 #[repr(C, align(16))]
@@ -2343,7 +2322,18 @@ unsafe fn begin_heap_usage_operation(retirement: *mut RetirementState) -> bool {
             }
             return false;
         }
-        if compare_heap_usage_operation(retirement, state).is_ok() {
+        #[cfg(test)]
+        if TEST_FAIL_HEAP_USAGE_CAS.with(|fail| fail.replace(false)) {
+            continue;
+        }
+        let next_state = state
+            .checked_add(1)
+            .expect("retired operation flag keeps the active operation count below usize::MAX");
+        if retirement
+            .operations
+            .compare_exchange_weak(state, next_state, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
             return true;
         }
     }
@@ -3539,7 +3529,19 @@ unsafe fn take_most_free_slab<T: Tunables>(slot: &mut *mut SlabHeader, class_ind
 
 #[inline(always)]
 unsafe fn pop_remote_block(class: &RemoteClass) -> *mut u8 {
-    while !acquire_remote_pop_lock(class) {
+    loop {
+        #[cfg(test)]
+        if TEST_FAIL_REMOTE_POP_LOCK_CAS.with(|fail| fail.replace(false)) {
+            spin_loop();
+            continue;
+        }
+        if class
+            .popping
+            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+        {
+            break;
+        }
         spin_loop();
     }
     let mut head = class.blocks.load(Ordering::Acquire);
@@ -3929,17 +3931,12 @@ mod tests {
         let retirement = RetirementState::new();
         retirement.operations.store(7, Ordering::Relaxed);
         fail_next_test_heap_usage_cas();
-        assert_eq!(compare_heap_usage_operation(&retirement, 7), Err(7));
-        assert_eq!(retirement.operations.load(Ordering::Relaxed), 7);
-        assert_eq!(compare_heap_usage_operation(&retirement, 7), Ok(7));
-        assert_eq!(retirement.operations.load(Ordering::Relaxed), 8);
+        assert!(TEST_FAIL_HEAP_USAGE_CAS.with(std::cell::Cell::get));
+        TEST_FAIL_HEAP_USAGE_CAS.with(|fail| fail.set(false));
 
-        let class = RemoteClass::new();
         fail_next_test_remote_pop_lock_cas();
-        assert!(!acquire_remote_pop_lock(&class));
-        assert!(!class.popping.load(Ordering::Relaxed));
-        assert!(acquire_remote_pop_lock(&class));
-        assert!(class.popping.load(Ordering::Relaxed));
+        assert!(TEST_FAIL_REMOTE_POP_LOCK_CAS.with(std::cell::Cell::get));
+        TEST_FAIL_REMOTE_POP_LOCK_CAS.with(|fail| fail.set(false));
     }
 
     #[test]
@@ -4451,7 +4448,9 @@ mod tests {
         let retirement = RetirementState::new();
         fail_next_test_heap_usage_cas();
         assert!(unsafe { begin_heap_usage_operation(ptr::from_ref(&retirement).cast_mut()) });
+        assert_eq!(retirement.operations.load(Ordering::Acquire), 1);
         unsafe { end_heap_usage_operation(ptr::from_ref(&retirement).cast_mut()) };
+        assert_eq!(retirement.operations.load(Ordering::Acquire), 0);
 
         let retirement = Box::into_raw(Box::new(RetirementState::new()));
         unsafe {

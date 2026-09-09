@@ -1413,7 +1413,10 @@ pub(crate) fn pending_tracking_for_test() -> PendingTracking {
 
 #[inline(always)]
 pub(crate) fn begin_allocation() -> Option<PendingTracking> {
-    if !seismograph::recorder::recording_enabled_for(runtime_event::EventClass::Allocation) || telemetry_suppressed() {
+    if !seismograph::recorder::recording_enabled_for(runtime_event::EventClass::Allocation) {
+        return None;
+    }
+    if telemetry_suppressed() {
         return None;
     }
     let allocation_id = NEXT_ALLOCATION_ID.fetch_add(1, Ordering::Relaxed);
@@ -2044,6 +2047,26 @@ mod tests {
 
         assert!((70..=130).contains(&selected), "selected {selected} allocations");
         with_telemetry_suppressed(|| assert!(begin_allocation().is_none()));
+        seismograph::recorder(seismograph::recorder::Configuration::default());
+    }
+
+    #[test]
+    fn allocation_tracking_checks_recording_and_suppression_independently() {
+        let _test = TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+        seismograph::recorder(seismograph::recorder::Configuration::default());
+        assert!(begin_allocation().is_none());
+
+        seismograph::recorder(seismograph::recorder::Configuration {
+            allocations: seismograph::recorder::RecordingPolicy {
+                enabled: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        assert!(begin_allocation().is_some());
+        with_telemetry_suppressed(|| assert!(begin_allocation().is_none()));
+        assert!(begin_allocation().is_some());
+
         seismograph::recorder(seismograph::recorder::Configuration::default());
     }
 
