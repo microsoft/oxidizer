@@ -956,6 +956,7 @@ where
                 while class.refilling.load(Ordering::Acquire) {
                     spin_loop();
                     #[cfg(all(test, not(miri)))]
+                    #[cfg_attr(coverage_nightly, coverage(off))] // Mutation-only assertion is not production behavior.
                     {
                         clear_injected_remote_refill_contention(class);
                         assert!(
