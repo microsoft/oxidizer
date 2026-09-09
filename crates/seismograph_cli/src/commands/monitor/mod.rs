@@ -211,6 +211,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(all(miri, windows), ignore = "requires access to the Windows console")]
     fn terminal_guard_restores_terminal_when_dropped() {
         let mut output = Vec::new();
         let raw_mode_disabled = Cell::new(false);
