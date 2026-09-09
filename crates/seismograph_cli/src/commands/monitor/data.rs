@@ -3471,7 +3471,7 @@ mod tests {
         };
         snapshot.callers = Some(Callers::from_fields(CallersFields {
             session_id: 1,
-            total_events: 6,
+            total_events: 7,
             lost_events: 0,
             threads: Vec::new(),
             events: vec![
@@ -3481,6 +3481,7 @@ mod tests {
                 event(4, 2_000, 2_048, 0x1000),
                 event(5, 64, 65_540, 0x3000),
                 event(6, 3_000_000, 8, 0x2000),
+                event(7, 2_048, 8_192, 0x2000),
             ],
             thread_names: Vec::new(),
         }));
@@ -3531,6 +3532,7 @@ mod tests {
                 (
                     MemoryTier::Medium,
                     vec![
+                        (2_048, 4_095, 1, 2_048, 1, 2_048, "app::medium"),
                         (65_536, 131_071, 1, 100_000, 1, 100_000, "app::medium"),
                         (2_097_152, 4_194_303, 1, 3_000_000, 1, 3_000_000, "app::medium"),
                     ],

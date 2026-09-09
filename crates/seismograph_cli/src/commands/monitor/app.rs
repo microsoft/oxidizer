@@ -2649,6 +2649,24 @@ mod tests {
     }
 
     #[test]
+    fn recording_configuration_apply_starts_a_worker() {
+        let mut app = connected_app(MonitorTab::Info);
+        let mut configuration = RecordingConfiguration::default();
+        configuration.io.enabled = true;
+
+        app.apply_recording_configuration(configuration);
+
+        assert_eq!(
+            (
+                app.recording_configuration_popup,
+                app.recording_receiver.is_some(),
+                app.status.as_str(),
+            ),
+            (None, true, "Applying recording configuration...")
+        );
+    }
+
+    #[test]
     fn snapshot_capture_does_not_block_tab_navigation() {
         let mut app = App::new();
         let (_sender, receiver) = unbounded();

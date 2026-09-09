@@ -49,10 +49,14 @@ pub(crate) fn verb(_args: VerbArgs) -> Result<(), Error> {
                 return Ok(());
             }
         }
-        if Instant::now() >= app.next_refresh() {
+        if refresh_is_due(Instant::now(), app.next_refresh()) {
             app.refresh();
         }
     }
+}
+
+fn refresh_is_due(now: Instant, next_refresh: Instant) -> bool {
+    now >= next_refresh
 }
 
 fn should_exit(app: &mut app::App, key: crossterm::event::KeyEvent) -> bool {
@@ -130,10 +134,11 @@ mod tests {
     use std::cell::Cell;
     use std::error::Error as _;
     use std::io;
+    use std::time::Duration;
 
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
-    use super::{Error, TerminalGuard, app, should_exit};
+    use super::{Error, TerminalGuard, app, refresh_is_due, should_exit};
 
     #[test]
     fn monitor_errors_have_specific_messages() {
@@ -188,6 +193,20 @@ mod tests {
             ]
             .map(|key| should_exit(&mut app::App::new(), key)),
             [true, true, false, false]
+        );
+    }
+
+    #[test]
+    fn refresh_is_due_at_or_after_the_deadline() {
+        let deadline = std::time::Instant::now();
+
+        assert_eq!(
+            [
+                refresh_is_due(deadline.checked_sub(Duration::from_nanos(1)).unwrap(), deadline),
+                refresh_is_due(deadline, deadline),
+                refresh_is_due(deadline + Duration::from_nanos(1), deadline),
+            ],
+            [false, true, true]
         );
     }
 
