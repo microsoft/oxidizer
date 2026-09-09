@@ -781,11 +781,18 @@ impl ThreadRecorder {
     }
 
     fn ring_lock(&self) -> RingLock<'_> {
+        #[cfg(test)]
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
         while self
             .ring_locked
             .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_err()
         {
+            #[cfg(test)]
+            {
+                assert!(std::time::Instant::now() < deadline, "ring lock was not released within one second");
+                std::thread::yield_now();
+            }
             std::hint::spin_loop();
         }
         RingLock { recorder: self }
@@ -848,11 +855,18 @@ impl Slot {
     }
 
     fn lock(&self) {
+        #[cfg(test)]
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
         while self
             .locked
             .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_err()
         {
+            #[cfg(test)]
+            {
+                assert!(std::time::Instant::now() < deadline, "slot lock was not released within one second");
+                std::thread::yield_now();
+            }
             std::hint::spin_loop();
         }
     }
@@ -911,10 +925,20 @@ struct ConfigurationLock;
 
 impl ConfigurationLock {
     fn acquire() -> Self {
+        #[cfg(test)]
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
         while CONFIGURATION_LOCKED
             .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_err()
         {
+            #[cfg(test)]
+            {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "configuration lock was not released within one second"
+                );
+                std::thread::yield_now();
+            }
             std::hint::spin_loop();
         }
         Self
