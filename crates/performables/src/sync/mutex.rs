@@ -218,7 +218,7 @@ impl<T: ?Sized> Mutex<T> {
 
     fn unlock(&self) {
         let previous = self.state.fetch_sub(LOCKED, Ordering::Release);
-        if previous & WAITERS != 0 {
+        if previous & WAITERS == WAITERS {
             self.waiters.wake_one_marked(|| {
                 self.state.fetch_and(!WAITERS, Ordering::Release);
             });

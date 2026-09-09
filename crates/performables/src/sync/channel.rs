@@ -241,6 +241,12 @@ pub struct Sender<T> {
     shared: Arc<QueueShared<T>>,
 }
 
+#[derive(Clone, Copy)]
+enum ContentionRecording {
+    Pending,
+    Recorded,
+}
+
 impl<T> Sender<T> {
     /// Sends `value`, waiting asynchronously while a bounded channel is full.
     ///
@@ -253,16 +259,20 @@ impl<T> Sender<T> {
     /// channel was closed.
     pub async fn send(&self, value: T) -> Result<(), Error<T>> {
         let mut value = value;
-        let mut contention_recorded = false;
+        let mut contention_recording = ContentionRecording::Pending;
+        #[cfg(test)]
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
         loop {
+            #[cfg(test)]
+            assert_test_channel_progress(deadline, "queue send must make progress");
             match self.shared.try_send(value) {
                 Ok(()) => return Ok(()),
                 Err((ERROR_CLOSED, value)) => return Err(Error::with_value(ERROR_CLOSED, value)),
                 Err((_code, returned)) => {
                     value = returned;
-                    if !contention_recorded {
+                    if matches!(contention_recording, ContentionRecording::Pending) {
                         self.shared.record(EventKind::ChannelSendContention);
-                        contention_recorded = true;
+                        contention_recording = ContentionRecording::Recorded;
                     }
                     QueueWait::send(&self.shared).await;
                 }
@@ -381,17 +391,21 @@ impl<T> Receiver<T> {
     /// Returns [`Error`] after the channel closes and all buffered values
     /// have been received.
     pub async fn recv(&self) -> Result<T, Error> {
-        let mut contention_recorded = false;
+        let mut contention_recording = ContentionRecording::Pending;
+        #[cfg(test)]
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
         loop {
+            #[cfg(test)]
+            assert_test_channel_progress(deadline, "queue receive must make progress");
             match self.shared.try_receive() {
                 Ok(value) => return Ok(value),
                 Err(error) => match error.code {
                     ERROR_CLOSED => return Err(error),
                     code => {
                         debug_assert_eq!(code, ERROR_EMPTY, "queue receive reports only empty or closed");
-                        if !contention_recorded {
+                        if matches!(contention_recording, ContentionRecording::Pending) {
                             self.shared.record(EventKind::ChannelReceiveContention);
-                            contention_recorded = true;
+                            contention_recording = ContentionRecording::Recorded;
                         }
                         QueueWait::receive(&self.shared).await;
                     }
@@ -1055,8 +1069,12 @@ impl<T> WatchReceiver<T> {
     /// Returns [`Error`] when all senders are gone and no newer
     /// version remains unobserved.
     pub async fn changed(&self) -> Result<(), Error> {
-        let mut contention_recorded = false;
+        let mut contention_recording = ContentionRecording::Pending;
+        #[cfg(test)]
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
         loop {
+            #[cfg(test)]
+            assert_test_channel_progress(deadline, "watch receive must make progress");
             match self.observe_change() {
                 WatchChange::Version(_) => {
                     telemetry::record(EventKind::ChannelReceive, std::ptr::from_ref(&*self.shared).cast::<()>());
@@ -1065,9 +1083,9 @@ impl<T> WatchReceiver<T> {
                 WatchChange::Closed => return Err(Error::without_value(ERROR_CLOSED)),
                 WatchChange::Pending => {}
             }
-            if !contention_recorded {
+            if matches!(contention_recording, ContentionRecording::Pending) {
                 telemetry::record(EventKind::ChannelReceiveContention, std::ptr::from_ref(&*self.shared).cast::<()>());
-                contention_recorded = true;
+                contention_recording = ContentionRecording::Recorded;
             }
             WatchChanged {
                 receiver: self,
@@ -1216,6 +1234,12 @@ impl<T> Drop for WatchChanged<'_, T> {
             self.receiver.shared.receiver_waiters.cancel(waiter);
         }
     }
+}
+
+#[cfg(test)]
+fn assert_test_channel_progress(deadline: std::time::Instant, message: &str) {
+    assert!(std::time::Instant::now() < deadline, "{message}");
+    std::thread::yield_now();
 }
 
 /// Guard that borrows the current value of a watch channel.
@@ -1381,6 +1405,21 @@ mod tests {
         assert_eq!(receiver.try_recv(), Ok(1));
         assert!(send.as_mut().poll(&mut context).is_ready());
         assert_eq!(receiver.try_recv(), Ok(2));
+    }
+
+    #[test]
+    fn bounded_receive_remains_pending_after_a_spurious_wake() {
+        let (sender, receiver) = bounded(1);
+        let counter = Arc::new(WakeCounter::default());
+        let waker = Waker::from(Arc::clone(&counter));
+        let mut context = Context::from_waker(&waker);
+        let mut receive = Box::pin(receiver.recv());
+        assert!(receive.as_mut().poll(&mut context).is_pending());
+
+        receiver.shared.receive_waiters.wake_one_marked(|| {});
+        assert!(receive.as_mut().poll(&mut context).is_pending());
+        sender.try_send(1).unwrap();
+        assert_eq!(receive.as_mut().poll(&mut context), Poll::Ready(Ok(1)));
     }
 
     #[test]

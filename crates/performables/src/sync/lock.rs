@@ -316,7 +316,7 @@ impl<T: ?Sized> RwLock<T> {
 
     fn unlock_read(&self) {
         let previous = self.state.fetch_sub(1, Ordering::Release);
-        if previous & READERS == 1 && previous & WAITERS != 0 {
+        if previous & READERS == 1 && previous & WAITERS == WAITERS {
             self.wake_waiters();
         }
         self.record(EventKind::RwLockReadRelease);
@@ -324,7 +324,7 @@ impl<T: ?Sized> RwLock<T> {
 
     fn unlock_write(&self) {
         let previous = self.state.fetch_and(!WRITER, Ordering::Release);
-        if previous & WAITERS != 0 {
+        if previous & WAITERS == WAITERS {
             self.wake_waiters();
         }
         self.record(EventKind::RwLockWriteRelease);

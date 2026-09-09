@@ -95,7 +95,7 @@ mod tests {
     fn monitor_command_dispatches_and_propagates_failures() {
         run(
             Cli {
-                command: Command::Monitor(crate::commands::monitor::VerbArgs),
+                command: Command::Monitor(crate::commands::monitor::VerbArgs { terminal_error: None }),
             },
             |_| Ok(()),
         )
@@ -103,7 +103,7 @@ mod tests {
 
         let error = run(
             Cli {
-                command: Command::Monitor(crate::commands::monitor::VerbArgs),
+                command: Command::Monitor(crate::commands::monitor::VerbArgs { terminal_error: None }),
             },
             |_| Err(crate::commands::monitor::Error::UnexpectedResponse),
         )

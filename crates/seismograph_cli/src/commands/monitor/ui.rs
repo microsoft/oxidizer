@@ -2667,6 +2667,9 @@ mod tests {
 
         let snapshot = representative_capture();
         let local: DateTime<Local> = snapshot.captured_at.into();
+        let current = snapshot_time(&snapshot);
+        assert!(current.starts_with(&local.format("%H:%M:%S").to_string()));
+        assert!(current.ends_with(" ago)"));
         assert_eq!(
             snapshot_time_at(&snapshot, snapshot.captured_instant + Duration::from_secs(125)),
             format!("{} (2m ago)", local.format("%H:%M:%S"))

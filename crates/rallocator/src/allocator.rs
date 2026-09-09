@@ -956,7 +956,13 @@ where
                 while class.refilling.load(Ordering::Acquire) {
                     spin_loop();
                     #[cfg(all(test, not(miri)))]
-                    clear_injected_remote_refill_contention(class);
+                    {
+                        clear_injected_remote_refill_contention(class);
+                        assert!(
+                            !TEST_CLEAR_REMOTE_REFILL_AFTER_SPIN.with(std::cell::Cell::get),
+                            "remote refill contention injection must clear on its first spin",
+                        );
+                    }
                 }
                 continue;
             }
@@ -3947,8 +3953,11 @@ mod tests {
             force_next_test_remote_refill_contention();
             assert!(TEST_FAIL_REMOTE_REFILL_CAS.with(std::cell::Cell::get));
             assert!(TEST_CLEAR_REMOTE_REFILL_AFTER_SPIN.with(std::cell::Cell::get));
-            TEST_FAIL_REMOTE_REFILL_CAS.with(|fail| fail.set(false));
-            TEST_CLEAR_REMOTE_REFILL_AFTER_SPIN.with(|clear| clear.set(false));
+            let class = RemoteClass::new();
+            inject_remote_refill_contention(&class);
+            assert!(class.refilling.load(Ordering::Relaxed));
+            clear_injected_remote_refill_contention(&class);
+            assert!(!class.refilling.load(Ordering::Acquire));
         }
 
         let retirement = RetirementState::new();

@@ -2169,6 +2169,28 @@ mod tests {
     }
 
     #[test]
+    fn selection_revalidation_rejects_each_stale_dimension() {
+        let _test = TEST_LOCK.lock().unwrap();
+        configure(Configuration {
+            general_events: RecordingPolicy::all(false),
+            ..Default::default()
+        });
+        let policy = GENERAL_POLICY.load(Ordering::Relaxed);
+        let session = ACTIVE_SESSION.load(Ordering::Relaxed);
+
+        assert!(selection_still_current(EventClass::General, policy, session));
+        assert!(!selection_still_current(EventClass::General, policy, 0));
+        assert!(!selection_still_current(
+            EventClass::General,
+            policy ^ u64::from(RECORDING_ENABLED),
+            session,
+        ));
+        assert!(!selection_still_current(EventClass::General, policy, session + 1));
+
+        configure(Configuration::default());
+    }
+
+    #[test]
     fn backtrace_and_empty_recorder_paths_are_explicit() {
         let _test = TEST_LOCK.lock().unwrap();
         configure(Configuration::default());

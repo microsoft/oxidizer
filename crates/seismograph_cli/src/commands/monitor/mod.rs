@@ -18,12 +18,23 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
 /// Arguments for the live monitor TUI.
-#[derive(Args, Debug)]
-pub(crate) struct VerbArgs;
+#[derive(Args, Clone, Copy, Debug)]
+pub(crate) struct VerbArgs {
+    #[cfg(test)]
+    #[arg(skip)]
+    pub(crate) terminal_error: Option<io::ErrorKind>,
+}
 
 /// Runs the live monitor TUI.
 #[cfg_attr(coverage_nightly, coverage(off))]
-pub(crate) fn verb(_args: VerbArgs) -> Result<(), Error> {
+pub(crate) fn verb(args: VerbArgs) -> Result<(), Error> {
+    #[cfg(test)]
+    if let Some(kind) = args.terminal_error {
+        return Err(Error::Io(kind.into()));
+    }
+    #[cfg(not(test))]
+    let _ = args;
+
     let _terminal_guard = TerminalGuard::enter()?;
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend).map_err(Error::Io)?;
@@ -138,7 +149,17 @@ mod tests {
 
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
-    use super::{Error, TerminalGuard, app, refresh_is_due, should_exit};
+    use super::{Error, TerminalGuard, VerbArgs, app, refresh_is_due, should_exit, verb};
+
+    #[test]
+    fn verb_propagates_terminal_initialization_failure() {
+        assert!(matches!(
+            verb(VerbArgs {
+                terminal_error: Some(io::ErrorKind::PermissionDenied),
+            }),
+            Err(Error::Io(error)) if error.kind() == io::ErrorKind::PermissionDenied
+        ));
+    }
 
     #[test]
     fn monitor_errors_have_specific_messages() {

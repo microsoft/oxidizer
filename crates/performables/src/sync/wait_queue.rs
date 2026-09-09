@@ -21,10 +21,22 @@ pub(super) fn block_on<F: Future>(future: F) -> F::Output {
     let waker = Waker::from(Arc::new(ThreadWaker(std::thread::current())));
     let mut context = Context::from_waker(&waker);
     let mut future = pin!(future);
+    #[cfg(test)]
+    let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         match future.as_mut().poll(&mut context) {
             Poll::Ready(output) => return output,
-            Poll::Pending => std::thread::park(),
+            Poll::Pending => {
+                #[cfg(not(test))]
+                std::thread::park();
+                #[cfg(test)]
+                {
+                    let remaining = deadline
+                        .checked_duration_since(Instant::now())
+                        .expect("test future must make progress before the deadline");
+                    std::thread::park_timeout(remaining);
+                }
+            }
         }
     }
 }
@@ -205,12 +217,13 @@ impl WaitQueue {
 
 #[cfg(test)]
 mod tests {
+    use std::pin::Pin;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::task::{Context, Poll, Wake, Waker};
     use std::time::{Duration, Instant};
 
-    use super::{WaitQueue, Waiter, block_on_timeout};
+    use super::{WaitQueue, Waiter, block_on, block_on_timeout};
 
     #[derive(Default)]
     struct WakeCounter(AtomicUsize);
@@ -221,6 +234,27 @@ mod tests {
         }
     }
 
+    struct PendingOnce(bool);
+
+    impl Future for PendingOnce {
+        type Output = usize;
+
+        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            if self.0 {
+                Poll::Ready(7)
+            } else {
+                self.0 = true;
+                cx.waker().wake_by_ref();
+                Poll::Pending
+            }
+        }
+    }
+
+    #[test]
+    fn block_on_allows_a_woken_future_to_make_progress() {
+        assert_eq!(block_on(PendingOnce(false)), 7);
+    }
+
     #[test]
     fn retry_removes_an_already_queued_waiter() {
         let queue = WaitQueue::new();
@@ -229,6 +263,8 @@ mod tests {
         assert!(!queue.enqueue_if_needed(&waiter, || false));
 
         assert!(queue.enqueue_if_needed(&waiter, || true));
+        assert!(!queue.has_waiters.load(Ordering::Acquire));
+        assert!(queue.waiters.lock().unwrap().is_empty());
         assert!(!queue.cancel(&waiter));
     }
 

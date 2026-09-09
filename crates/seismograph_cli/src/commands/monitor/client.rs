@@ -17,8 +17,17 @@ use super::app::Instance;
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(300);
 const IO_TIMEOUT: Duration = Duration::from_secs(10);
 
+#[cfg(test)]
+thread_local! {
+    static TEST_MONITOR_DIRECTORY: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn discover() -> Result<Vec<Instance>, Error> {
+    #[cfg(test)]
+    if let Some(directory) = TEST_MONITOR_DIRECTORY.with(|directory| directory.borrow().clone()) {
+        return discover_in(&directory);
+    }
     let directory = seismograph_protocol::monitor_directory().map_err(Error::Protocol)?;
     discover_in(&directory)
 }
@@ -291,6 +300,22 @@ mod tests {
         (descriptor, receiver, worker)
     }
 
+    struct TestMonitorDirectory(PathBuf);
+
+    impl TestMonitorDirectory {
+        fn new(path: PathBuf) -> Self {
+            TEST_MONITOR_DIRECTORY.with(|directory| *directory.borrow_mut() = Some(path.clone()));
+            Self(path)
+        }
+    }
+
+    impl Drop for TestMonitorDirectory {
+        fn drop(&mut self) {
+            TEST_MONITOR_DIRECTORY.with(|directory| *directory.borrow_mut() = None);
+            fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+
     fn hello(descriptor: &MonitorDescriptor, recording: RecordingConfiguration) -> Response {
         Response::Hello {
             instance_id: descriptor.instance_id,
@@ -306,6 +331,32 @@ mod tests {
     #[test]
     fn empty_snapshot_file_name_uses_fallback() {
         assert_eq!(sanitize(""), "seismograph");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "requires filesystem access and real TCP sockets")]
+    fn discover_finds_a_published_monitor() {
+        let name = format!(
+            "client-discovery-{}-{}",
+            std::process::id(),
+            NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed)
+        );
+        let directory = directory("discovery");
+        fs::create_dir_all(&directory).unwrap();
+        let _directory = TestMonitorDirectory::new(directory.clone());
+        let (mut descriptor, requests, worker) = serve(vec![vec![
+            (1, hello(&test_descriptor(0), RecordingConfiguration::default())),
+            (2, Response::CacheRecording(RecordingPolicy::default())),
+        ]]);
+        descriptor.name.clone_from(&name);
+        let descriptor_path = directory.join(descriptor.file_name());
+        descriptor.write_file(&descriptor_path).unwrap();
+
+        let instances = discover().unwrap();
+
+        assert!(instances.iter().any(|instance| instance.descriptor.name == name));
+        requests.recv().unwrap();
+        worker.join().unwrap();
     }
 
     #[test]
