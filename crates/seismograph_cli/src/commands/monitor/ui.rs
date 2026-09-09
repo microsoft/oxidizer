@@ -2661,6 +2661,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "requires the host realtime clock and local timezone")]
     fn snapshot_age_uses_compact_units() {
         assert_eq!(format_age(Duration::from_secs(125)), "2m ago");
 

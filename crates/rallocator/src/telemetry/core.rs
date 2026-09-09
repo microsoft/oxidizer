@@ -2019,7 +2019,7 @@ mod tests {
         begin_remote_free();
         let prepare_calls = PREPARE_ADDRESS_RESOLUTION_CALLS.load(Ordering::Relaxed);
         let _ = try_snapshot_with_runtime_events(None, true);
-        let expected_prepare_calls = if cfg!(feature = "caller-symbolization") {
+        let expected_prepare_calls = if cfg!(all(feature = "caller-symbolization", not(miri))) {
             prepare_calls + 1
         } else {
             prepare_calls

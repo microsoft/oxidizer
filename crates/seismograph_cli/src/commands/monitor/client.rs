@@ -309,6 +309,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "requires real TCP sockets")]
     fn handshake_reads_legacy_and_cache_recording_state() {
         let mut recording = RecordingConfiguration::default();
         recording.allocations.enabled = true;
@@ -345,6 +346,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "requires real TCP sockets")]
     fn handshake_rejects_remote_wrong_identity_and_unexpected_responses() {
         let cases = [
             Response::Error("denied".into()),
@@ -373,6 +375,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "requires real TCP sockets")]
     fn cache_recording_distinguishes_supported_unsupported_and_rejected_monitors() {
         let policy = RecordingPolicy {
             enabled: true,
@@ -423,6 +426,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "requires real TCP sockets")]
     fn set_recording_sends_legacy_and_cache_requests() {
         let mut configuration = RecordingConfiguration::default();
         configuration.allocations.enabled = true;
@@ -481,6 +485,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "requires real TCP sockets")]
     fn set_recording_rejects_cache_configuration_for_legacy_monitor() {
         let (descriptor, requests, worker) = serve(vec![vec![
             (1, hello(&test_descriptor(0), RecordingConfiguration::default())),
@@ -503,6 +508,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "requires real TCP sockets")]
     fn set_recording_accepts_default_cache_configuration_for_legacy_monitor() {
         let configuration = RecordingConfiguration::default();
         let (descriptor, requests, worker) = serve(vec![
@@ -524,6 +530,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "requires real TCP sockets")]
     fn snapshot_and_statistics_commands_return_complete_payloads() {
         let options = SnapshotOptions {
             event_buffers: EventBufferDisposition::Release,
@@ -570,6 +577,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "requires real TCP sockets")]
     fn command_rejects_wrong_ids_remote_errors_and_unexpected_payloads() {
         let cases = [
             (3, Response::Acknowledged, "monitor returned an unexpected response"),
@@ -613,6 +621,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "requires filesystem access and real TCP sockets")]
     fn discover_filters_files_and_sorts_reachable_monitors() {
         let directory = directory("discover");
         fs::create_dir_all(&directory).unwrap();
@@ -652,6 +661,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "requires filesystem access")]
     fn discover_handles_missing_directories_and_snapshot_saves_exact_bytes() {
         let directory = directory("filesystem");
         assert!(discover_in(&directory).unwrap().is_empty());
