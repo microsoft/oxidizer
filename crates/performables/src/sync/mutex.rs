@@ -180,7 +180,7 @@ impl<T: ?Sized> Mutex<T> {
         while matches!(state, 0 | WAITERS) {
             match self
                 .state
-                .compare_exchange_weak(state, state + LOCKED, Ordering::Acquire, Ordering::Relaxed)
+                .compare_exchange_weak(state, state.wrapping_add(LOCKED), Ordering::Acquire, Ordering::Relaxed)
             {
                 Ok(_) => return Acquisition::Acquired,
                 Err(current) => state = current,
