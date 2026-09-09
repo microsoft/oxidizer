@@ -684,6 +684,14 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub(super) fn refresh(&mut self) {
+        self.refresh_with(discover, recorder_statistics);
+    }
+
+    fn refresh_with<D, S>(&mut self, discover: D, recorder_statistics: S)
+    where
+        D: FnOnce() -> Result<Vec<Instance>, super::Error> + Send + 'static,
+        S: FnOnce(&MonitorDescriptor) -> Result<RecorderStatistics, super::Error> + Send + 'static,
+    {
         self.next_refresh = Instant::now().checked_add(REFRESH_INTERVAL).unwrap_or_else(Instant::now);
         if let Screen::Connected { descriptor, .. } = &self.screen {
             if workers_are_idle(
@@ -691,12 +699,12 @@ impl App {
                 self.statistics_receiver.is_some(),
                 self.recording_receiver.is_some(),
             ) {
-                self.start_recorder_statistics(descriptor.clone());
+                self.start_recorder_statistics_with(descriptor.clone(), recorder_statistics);
             }
             return;
         }
         if self.discovery_receiver.is_none() {
-            self.start_discovery();
+            self.start_discovery_with(discover);
         }
     }
 
@@ -958,7 +966,10 @@ impl App {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    fn start_discovery(&mut self) {
+    fn start_discovery_with<F>(&mut self, discover: F)
+    where
+        F: FnOnce() -> Result<Vec<Instance>, super::Error> + Send + 'static,
+    {
         let (sender, receiver) = unbounded();
         match thread::Builder::new().name("seismograph-discovery".into()).spawn(move || {
             let result = discover().map_err(|error| error.to_string());
@@ -970,7 +981,10 @@ impl App {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    fn start_recorder_statistics(&mut self, descriptor: MonitorDescriptor) {
+    fn start_recorder_statistics_with<F>(&mut self, descriptor: MonitorDescriptor, recorder_statistics: F)
+    where
+        F: FnOnce(&MonitorDescriptor) -> Result<RecorderStatistics, super::Error> + Send + 'static,
+    {
         let (sender, receiver) = unbounded();
         match thread::Builder::new().name("seismograph-statistics".into()).spawn(move || {
             let result = recorder_statistics(&descriptor).map_err(|error| error.to_string());
@@ -2251,11 +2265,11 @@ mod tests {
     fn refresh_schedules_the_next_worker_for_each_screen() {
         let mut browse = App::new();
         let before = browse.next_refresh();
-        browse.refresh();
+        browse.refresh_with(|| Ok(Vec::new()), |_descriptor| Ok(recorder_statistics_with_total(0)));
         let browse_state = (browse.next_refresh() > before, browse.discovery_receiver.is_some());
 
         let mut connected = connected_app(MonitorTab::Info);
-        connected.refresh();
+        connected.refresh_with(|| Ok(Vec::new()), |_descriptor| Ok(recorder_statistics_with_total(0)));
         let connected_state = (connected.statistics_receiver.is_some(), connected.discovery_receiver.is_none());
 
         assert_eq!((browse_state, connected_state), ((true, true), (true, true)));

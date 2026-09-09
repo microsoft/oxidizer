@@ -1057,9 +1057,11 @@ where
         } else {
             ptr::null_mut()
         };
-        let mut header = ptr::NonNull::new(slab.cast::<SlabHeader>()).expect("initialize_slab callers must reject null slab allocations");
+        let header = ptr::NonNull::new(slab.cast::<SlabHeader>()).expect("initialize_slab callers must reject null slab allocations");
         let slab_owner = if state.owner.is_null() {
-            ptr::from_mut(&mut unsafe { header.as_mut() }.embedded_owner)
+            // SAFETY: `slab` points to writable storage for a `SlabHeader`; `addr_of_mut!`
+            // computes the embedded field address without reading or borrowing uninitialized data.
+            unsafe { ptr::addr_of_mut!((*header.as_ptr()).embedded_owner) }
         } else {
             state.owner
         };
@@ -1102,7 +1104,7 @@ where
             state.owner = slab_owner;
         }
         if allocation.segment_slices != 0 {
-            let header_ref = unsafe { header.as_mut() };
+            let header_ref = unsafe { &mut *header.as_ptr() };
             header_ref.segment_next = state.segments;
             header_ref.segment_slices = allocation.segment_slices;
             header_ref.segment_committed_bytes = allocation.committed_bytes;
@@ -3794,6 +3796,7 @@ unsafe fn read_header(address: *mut u8) -> *mut ExtraHeader {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(miri))]
     use std::ptr::NonNull;
     use std::sync::mpsc;
 
@@ -4042,6 +4045,7 @@ mod tests {
         assert!(!metadata.segment_utilization_tracked[index].load(Ordering::Relaxed));
     }
 
+    #[cfg(not(miri))]
     fn unmap_test_region(regions: &MediumRegion, region: *mut RegionState) {
         let mut state = regions.state.lock();
         clear_region_cache();
