@@ -153,26 +153,39 @@ fn add_bounds(input: &DeriveInput, root_path: &Path) -> syn::Result<syn::Generic
             continue;
         }
 
-        let bound_ty = strip_group_paren(field_ty);
+        // Choose what to bound. A field whose type names the type being derived (or `Self`) cannot
+        // be bounded by its own type: `where <field type>: ThreadAware` would be a bound on the impl
+        // under construction and the trait solver overflows on it. Bound the parameters it reaches
+        // instead - those bottom out at the concrete argument, proving the recursive impl
+        // inductively. Every other field is bounded by its own type.
+        let targets: Vec<Type> = if type_names_deriving_type(field_ty, &input.ident) {
+            let mut reached = Vec::new();
+            collect_params_reached(field_ty, &generic_idents, &mut reached);
+            reached.into_iter().map(|param| parse_quote!(#param)).collect()
+        } else {
+            vec![strip_group_paren(field_ty).clone()]
+        };
 
-        // Two fields of the same type owe a single predicate; repeating it trips
-        // `clippy::trait_duplication_in_bounds`.
-        let key = bound_ty.to_token_stream().to_string();
-        if emitted_keys.iter().any(|seen| seen == &key) {
-            continue;
+        for target in targets {
+            // Two fields owing the same predicate contribute it once; repeating it trips
+            // `clippy::trait_duplication_in_bounds`.
+            let key = target.to_token_stream().to_string();
+            if emitted_keys.iter().any(|seen| seen == &key) {
+                continue;
+            }
+            emitted_keys.push(key);
+
+            // A target that is exactly a parameter the author already bounded by `ThreadAware` needs
+            // no generated predicate: emitting one would duplicate the author's own bound and trip
+            // `clippy::trait_duplication_in_bounds` at their declaration.
+            if let Some(param) = as_bare_param(&target, &generic_idents)
+                && param_has_thread_aware_bound(&generics, param, &thread_aware_path)
+            {
+                continue;
+            }
+
+            predicates.push(parse_quote!(#target: #thread_aware_path));
         }
-        emitted_keys.push(key);
-
-        // A field that is exactly a parameter the author already bounded by `ThreadAware` needs
-        // no generated predicate: emitting one would duplicate the author's own bound and trip
-        // `clippy::trait_duplication_in_bounds` at their declaration.
-        if let Some(param) = as_bare_param(bound_ty, &generic_idents)
-            && param_has_thread_aware_bound(&generics, param, &thread_aware_path)
-        {
-            continue;
-        }
-
-        predicates.push(parse_quote!(#bound_ty: #thread_aware_path));
     }
 
     if !predicates.is_empty() {
@@ -296,15 +309,16 @@ fn param_has_thread_aware_bound(generics: &syn::Generics, ident: &syn::Ident, th
 }
 
 /// Reports whether `ty` reaches a generic parameter through a shape the generated body relocates
-/// through: a path's type arguments, a reference, a tuple, an array, or a `Group`/`Paren` wrapper.
+/// through: a path's type arguments, a reference, a tuple, an array, a slice, or a `Group`/`Paren`
+/// wrapper.
 ///
 /// When it does, the field's `ThreadAware`-ness depends on that parameter and the impl owes
-/// `<field type>: ThreadAware`. The shapes deliberately left out - `Slice`, `Ptr`, `BareFn`,
-/// `TraitObject`, `ImplTrait` - are the ones a parameter cannot make the field conditionally
-/// `ThreadAware` through: a safe `fn` pointer implements `ThreadAware` unconditionally, so a
+/// `<field type>: ThreadAware`. `Slice` is traversed because `thread_aware_core` implements
+/// `ThreadAware` for `[T]` conditionally on `T`, so a `[T]` (or `Box<[T]>`) field's obligation does
+/// reduce to one on the parameter. The shapes left out - `Ptr`, `BareFn`, `TraitObject`,
+/// `ImplTrait` - cannot: a safe `fn` pointer implements `ThreadAware` unconditionally, so a
 /// parameter carried only for variance inside one (`PhantomData<fn(*const T)>`) owes no bound, and
-/// the rest have no impl at all. This keeps the marker-payload idiom bound-free, exactly as the
-/// per-parameter collector did before.
+/// the rest have no impl at all. This keeps the marker-payload idiom bound-free.
 #[cfg_attr(coverage_nightly, coverage(off))] // can't figure out how to get to 100% coverage of this function
 fn type_reaches_param(ty: &Type, generic_idents: &HashSet<syn::Ident>) -> bool {
     match ty {
@@ -328,8 +342,79 @@ fn type_reaches_param(ty: &Type, generic_idents: &HashSet<syn::Ident>) -> bool {
         Type::Reference(r) => type_reaches_param(&r.elem, generic_idents),
         Type::Tuple(t) => t.elems.iter().any(|elem| type_reaches_param(elem, generic_idents)),
         Type::Array(a) => type_reaches_param(&a.elem, generic_idents),
+        Type::Slice(s) => type_reaches_param(&s.elem, generic_idents),
         Type::Group(g) => type_reaches_param(&g.elem, generic_idents),
         Type::Paren(p) => type_reaches_param(&p.elem, generic_idents),
         _ => false,
+    }
+}
+
+/// Reports whether `ty` names the type being derived (`self_ident`) or `Self` anywhere within it.
+///
+/// Such a field type turns `where <field type>: ThreadAware` into a bound on the impl under
+/// construction, which the trait solver cannot discharge; `add_bounds` bounds the parameters the
+/// field reaches instead.
+#[cfg_attr(coverage_nightly, coverage(off))] // structural walk; same coverage caveat as the others
+fn type_names_deriving_type(ty: &Type, self_ident: &syn::Ident) -> bool {
+    match ty {
+        Type::Path(TypePath { path, .. }) => {
+            for segment in &path.segments {
+                if &segment.ident == self_ident || segment.ident == "Self" {
+                    return true;
+                }
+                if let PathArguments::AngleBracketed(ab) = &segment.arguments {
+                    for arg in &ab.args {
+                        if let syn::GenericArgument::Type(t) = arg
+                            && type_names_deriving_type(t, self_ident)
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+            false
+        }
+        Type::Reference(r) => type_names_deriving_type(&r.elem, self_ident),
+        Type::Tuple(t) => t.elems.iter().any(|e| type_names_deriving_type(e, self_ident)),
+        Type::Array(a) => type_names_deriving_type(&a.elem, self_ident),
+        Type::Slice(s) => type_names_deriving_type(&s.elem, self_ident),
+        Type::Group(g) => type_names_deriving_type(&g.elem, self_ident),
+        Type::Paren(p) => type_names_deriving_type(&p.elem, self_ident),
+        _ => false,
+    }
+}
+
+/// Collects the generic parameters `ty` reaches, through the same shapes as `type_reaches_param`.
+///
+/// Used for the self-referential fallback: a field whose type names the deriving type is bounded by
+/// the parameters it reaches rather than by the field type itself.
+#[cfg_attr(coverage_nightly, coverage(off))] // mirrors type_reaches_param; same coverage caveat
+fn collect_params_reached(ty: &Type, generic_idents: &HashSet<syn::Ident>, out: &mut Vec<syn::Ident>) {
+    match ty {
+        Type::Path(TypePath { path, .. }) => {
+            for segment in &path.segments {
+                if generic_idents.contains(&segment.ident) && !out.contains(&segment.ident) {
+                    out.push(segment.ident.clone());
+                }
+                if let PathArguments::AngleBracketed(ab) = &segment.arguments {
+                    for arg in &ab.args {
+                        if let syn::GenericArgument::Type(t) = arg {
+                            collect_params_reached(t, generic_idents, out);
+                        }
+                    }
+                }
+            }
+        }
+        Type::Reference(r) => collect_params_reached(&r.elem, generic_idents, out),
+        Type::Tuple(t) => {
+            for elem in &t.elems {
+                collect_params_reached(elem, generic_idents, out);
+            }
+        }
+        Type::Array(a) => collect_params_reached(&a.elem, generic_idents, out),
+        Type::Slice(s) => collect_params_reached(&s.elem, generic_idents, out),
+        Type::Group(g) => collect_params_reached(&g.elem, generic_idents, out),
+        Type::Paren(p) => collect_params_reached(&p.elem, generic_idents, out),
+        _ => {}
     }
 }

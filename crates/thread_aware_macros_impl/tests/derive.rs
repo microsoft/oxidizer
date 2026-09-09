@@ -90,6 +90,33 @@ fn user_where_clause_thread_aware_bound_is_not_duplicated() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
+fn recursive_generic_bounds_the_reached_parameter() {
+    // A field naming the type being derived would make `where <field type>: ThreadAware`
+    // self-referential and overflow; the derive bounds the parameter the field reaches instead.
+    let input = quote! {
+        #[derive(ThreadAware)]
+        struct Node<T> {
+            value: T,
+            children: Vec<Node<T>>,
+        }
+    };
+    assert_snapshot!(expand(input));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn slice_field_reaches_its_parameter() {
+    // `[T]` has a conditional `ThreadAware` impl, so a `Box<[T]>` field owes a field-type bound
+    // rather than silently relying on a sibling to carry it.
+    let input = quote! {
+        #[derive(ThreadAware)]
+        struct SliceHolder<T>(Vec<T>, Box<[T]>);
+    };
+    assert_snapshot!(expand(input));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
 fn generics_prebound_bare_no_dup() {
     // Ensures no duplicate ThreadAware bound when already present.
     let input = quote! {

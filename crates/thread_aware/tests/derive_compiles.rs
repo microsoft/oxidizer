@@ -666,6 +666,57 @@ fn field_type_bound_lets_an_unconditional_wrapper_derive_for_any_argument() {
     value.relocate(source.as_ref(), &destination);
 }
 
+/// A recursive generic type: the `children: Vec<RecursiveNode<T>>` field names the type being
+/// derived, so the derive bounds the parameter it reaches (`T`) rather than the whole field type -
+/// a `where Vec<RecursiveNode<T>>: ThreadAware` predicate would be self-referential and overflow.
+#[expect(
+    clippy::use_self,
+    reason = "the explicit self-referential spelling is what this regression exercises"
+)]
+#[derive(ThreadAware)]
+struct RecursiveNode<T> {
+    value: T,
+    children: Vec<RecursiveNode<T>>,
+}
+
+/// A recursive generic enum, reached through `Box`.
+#[expect(
+    clippy::use_self,
+    reason = "the explicit self-referential spelling is what this regression exercises"
+)]
+#[derive(ThreadAware)]
+enum RecursiveList<T> {
+    Nil,
+    Cons(T, Box<RecursiveList<T>>),
+}
+
+/// A slice-bearing field whose sibling used to cover its bound under the per-parameter model.
+/// `Box<[T]>` reaches `T` through the conditional `[T]` impl, so it owes `Box<[T]>: ThreadAware`.
+#[derive(ThreadAware)]
+struct SliceSibling<T> {
+    values: Vec<T>,
+    rest: Box<[T]>,
+}
+
+#[test]
+fn recursive_and_slice_generics_compile_and_relocate() {
+    assert_thread_aware::<RecursiveNode<Tracker>>();
+    assert_thread_aware::<RecursiveList<Tracker>>();
+    assert_thread_aware::<SliceSibling<Tracker>>();
+
+    let (source, destination) = thread_pair();
+    let mut node = RecursiveNode {
+        value: Tracker::default(),
+        children: vec![RecursiveNode {
+            value: Tracker::default(),
+            children: Vec::new(),
+        }],
+    };
+    node.relocate(source.as_ref(), &destination);
+    assert_eq!(node.value.relocations, 1);
+    assert_eq!(node.children[0].value.relocations, 1, "relocation reaches recursive children");
+}
+
 /// A trait of the user's own that happens to be called `ThreadAware`, named by a qualified
 /// path.
 ///
