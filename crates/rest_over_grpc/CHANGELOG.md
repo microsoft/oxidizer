@@ -27,7 +27,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Tasks
 
 - raise MSRV to Rust 1.95 ([#716](https://github.com/microsoft/oxidizer/pull/716))
-- release bytesbuf v0.7.0 and 23 additional packages ([#599](https://github.com/microsoft/oxidizer/pull/599))
 
 ## [0.2.0] - 2026-07-24
 
