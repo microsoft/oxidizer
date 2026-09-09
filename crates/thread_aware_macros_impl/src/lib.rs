@@ -105,13 +105,21 @@ pub(crate) fn param_idents() -> (syn::Ident, syn::Ident) {
 fn add_bounds(input: &DeriveInput, root_path: &Path) -> syn::Result<syn::Generics> {
     let mut generics = input.generics.clone();
 
-    let generic_idents: HashSet<syn::Ident> = generics
+    // Type parameters in declaration order (for deterministic output) and as a set (for fast
+    // membership tests).
+    let generic_param_idents: Vec<syn::Ident> = generics
         .params
         .iter()
         .filter_map(|gp| match gp {
             GenericParam::Type(t) => Some(t.ident.clone()),
             _ => None,
         })
+        .collect();
+    let generic_idents: HashSet<syn::Ident> = generic_param_idents.iter().cloned().collect();
+
+    // The idents that make a field type self-referential: the type being derived, and `Self`.
+    let self_idents: HashSet<syn::Ident> = [input.ident.clone(), syn::Ident::new("Self", proc_macro2::Span::call_site())]
+        .into_iter()
         .collect();
 
     let mut thread_aware_path = root_path.clone();
@@ -149,7 +157,7 @@ fn add_bounds(input: &DeriveInput, root_path: &Path) -> syn::Result<syn::Generic
 
     let mut predicates: Vec<syn::WherePredicate> = Vec::new();
     for field_ty in &relocated_fields {
-        if !type_reaches_param(field_ty, &generic_idents) {
+        if !type_reaches_ident(field_ty, &generic_idents) {
             continue;
         }
 
@@ -158,10 +166,15 @@ fn add_bounds(input: &DeriveInput, root_path: &Path) -> syn::Result<syn::Generic
         // under construction and the trait solver overflows on it. Bound the parameters it reaches
         // instead - those bottom out at the concrete argument, proving the recursive impl
         // inductively. Every other field is bounded by its own type.
-        let targets: Vec<Type> = if type_names_deriving_type(field_ty, &input.ident) {
-            let mut reached = Vec::new();
-            collect_params_reached(field_ty, &generic_idents, &mut reached);
-            reached.into_iter().map(|param| parse_quote!(#param)).collect()
+        let targets: Vec<Type> = if type_reaches_ident(field_ty, &self_idents) {
+            generic_param_idents
+                .iter()
+                .filter(|&param| {
+                    let single: HashSet<syn::Ident> = std::iter::once(param.clone()).collect();
+                    type_reaches_ident(field_ty, &single)
+                })
+                .map(|param| parse_quote!(#param))
+                .collect()
         } else {
             vec![strip_group_paren(field_ty).clone()]
         };
@@ -308,29 +321,30 @@ fn param_has_thread_aware_bound(generics: &syn::Generics, ident: &syn::Ident, th
     })
 }
 
-/// Reports whether `ty` reaches a generic parameter through a shape the generated body relocates
+/// Reports whether `ty` reaches one of `targets` through a shape the generated body relocates
 /// through: a path's type arguments, a reference, a tuple, an array, a slice, or a `Group`/`Paren`
 /// wrapper.
 ///
-/// When it does, the field's `ThreadAware`-ness depends on that parameter and the impl owes
-/// `<field type>: ThreadAware`. `Slice` is traversed because `thread_aware_core` implements
-/// `ThreadAware` for `[T]` conditionally on `T`, so a `[T]` (or `Box<[T]>`) field's obligation does
-/// reduce to one on the parameter. The shapes left out - `Ptr`, `BareFn`, `TraitObject`,
-/// `ImplTrait` - cannot: a safe `fn` pointer implements `ThreadAware` unconditionally, so a
-/// parameter carried only for variance inside one (`PhantomData<fn(*const T)>`) owes no bound, and
-/// the rest have no impl at all. This keeps the marker-payload idiom bound-free.
+/// Used two ways: with the generic parameters, to decide whether a field owes a bound at all; and
+/// with the type being derived (plus `Self`), to decide whether that bound would be self-referential
+/// and must fall back to the reached parameters. `Slice` is traversed because `thread_aware_core`
+/// implements `ThreadAware` for `[T]` conditionally on `T`, so a `[T]` (or `Box<[T]>`) field's
+/// obligation does reduce to one on the parameter. The shapes left out - `Ptr`, `BareFn`,
+/// `TraitObject`, `ImplTrait` - cannot: a safe `fn` pointer implements `ThreadAware` unconditionally,
+/// so a parameter carried only for variance inside one (`PhantomData<fn(*const T)>`) owes no bound,
+/// and the rest have no impl at all. This keeps the marker-payload idiom bound-free.
 #[cfg_attr(coverage_nightly, coverage(off))] // can't figure out how to get to 100% coverage of this function
-fn type_reaches_param(ty: &Type, generic_idents: &HashSet<syn::Ident>) -> bool {
+fn type_reaches_ident(ty: &Type, targets: &HashSet<syn::Ident>) -> bool {
     match ty {
         Type::Path(TypePath { path, .. }) => {
             for segment in &path.segments {
-                if generic_idents.contains(&segment.ident) {
+                if targets.contains(&segment.ident) {
                     return true;
                 }
                 if let PathArguments::AngleBracketed(ab) = &segment.arguments {
                     for arg in &ab.args {
                         if let syn::GenericArgument::Type(t) = arg
-                            && type_reaches_param(t, generic_idents)
+                            && type_reaches_ident(t, targets)
                         {
                             return true;
                         }
@@ -339,82 +353,12 @@ fn type_reaches_param(ty: &Type, generic_idents: &HashSet<syn::Ident>) -> bool {
             }
             false
         }
-        Type::Reference(r) => type_reaches_param(&r.elem, generic_idents),
-        Type::Tuple(t) => t.elems.iter().any(|elem| type_reaches_param(elem, generic_idents)),
-        Type::Array(a) => type_reaches_param(&a.elem, generic_idents),
-        Type::Slice(s) => type_reaches_param(&s.elem, generic_idents),
-        Type::Group(g) => type_reaches_param(&g.elem, generic_idents),
-        Type::Paren(p) => type_reaches_param(&p.elem, generic_idents),
+        Type::Reference(r) => type_reaches_ident(&r.elem, targets),
+        Type::Tuple(t) => t.elems.iter().any(|elem| type_reaches_ident(elem, targets)),
+        Type::Array(a) => type_reaches_ident(&a.elem, targets),
+        Type::Slice(s) => type_reaches_ident(&s.elem, targets),
+        Type::Group(g) => type_reaches_ident(&g.elem, targets),
+        Type::Paren(p) => type_reaches_ident(&p.elem, targets),
         _ => false,
-    }
-}
-
-/// Reports whether `ty` names the type being derived (`self_ident`) or `Self` anywhere within it.
-///
-/// Such a field type turns `where <field type>: ThreadAware` into a bound on the impl under
-/// construction, which the trait solver cannot discharge; `add_bounds` bounds the parameters the
-/// field reaches instead.
-#[cfg_attr(coverage_nightly, coverage(off))] // structural walk; same coverage caveat as the others
-fn type_names_deriving_type(ty: &Type, self_ident: &syn::Ident) -> bool {
-    match ty {
-        Type::Path(TypePath { path, .. }) => {
-            for segment in &path.segments {
-                if &segment.ident == self_ident || segment.ident == "Self" {
-                    return true;
-                }
-                if let PathArguments::AngleBracketed(ab) = &segment.arguments {
-                    for arg in &ab.args {
-                        if let syn::GenericArgument::Type(t) = arg
-                            && type_names_deriving_type(t, self_ident)
-                        {
-                            return true;
-                        }
-                    }
-                }
-            }
-            false
-        }
-        Type::Reference(r) => type_names_deriving_type(&r.elem, self_ident),
-        Type::Tuple(t) => t.elems.iter().any(|e| type_names_deriving_type(e, self_ident)),
-        Type::Array(a) => type_names_deriving_type(&a.elem, self_ident),
-        Type::Slice(s) => type_names_deriving_type(&s.elem, self_ident),
-        Type::Group(g) => type_names_deriving_type(&g.elem, self_ident),
-        Type::Paren(p) => type_names_deriving_type(&p.elem, self_ident),
-        _ => false,
-    }
-}
-
-/// Collects the generic parameters `ty` reaches, through the same shapes as `type_reaches_param`.
-///
-/// Used for the self-referential fallback: a field whose type names the deriving type is bounded by
-/// the parameters it reaches rather than by the field type itself.
-#[cfg_attr(coverage_nightly, coverage(off))] // mirrors type_reaches_param; same coverage caveat
-fn collect_params_reached(ty: &Type, generic_idents: &HashSet<syn::Ident>, out: &mut Vec<syn::Ident>) {
-    match ty {
-        Type::Path(TypePath { path, .. }) => {
-            for segment in &path.segments {
-                if generic_idents.contains(&segment.ident) && !out.contains(&segment.ident) {
-                    out.push(segment.ident.clone());
-                }
-                if let PathArguments::AngleBracketed(ab) = &segment.arguments {
-                    for arg in &ab.args {
-                        if let syn::GenericArgument::Type(t) = arg {
-                            collect_params_reached(t, generic_idents, out);
-                        }
-                    }
-                }
-            }
-        }
-        Type::Reference(r) => collect_params_reached(&r.elem, generic_idents, out),
-        Type::Tuple(t) => {
-            for elem in &t.elems {
-                collect_params_reached(elem, generic_idents, out);
-            }
-        }
-        Type::Array(a) => collect_params_reached(&a.elem, generic_idents, out),
-        Type::Slice(s) => collect_params_reached(&s.elem, generic_idents, out),
-        Type::Group(g) => collect_params_reached(&g.elem, generic_idents, out),
-        Type::Paren(p) => collect_params_reached(&p.elem, generic_idents, out),
-        _ => {}
     }
 }

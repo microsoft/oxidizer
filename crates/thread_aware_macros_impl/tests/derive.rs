@@ -117,6 +117,30 @@ fn slice_field_reaches_its_parameter() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
+fn recursive_field_bounds_only_the_parameters_it_reaches() {
+    // The recursive field reaches `T` but not `U`, so only `T` is bounded (`U` comes from the
+    // marker field). Bounding every parameter rather than only the reached ones would be wrong.
+    let input = quote! {
+        #[derive(ThreadAware)]
+        struct Tree<T, U>(core::marker::PhantomData<U>, Vec<Tree<T, T>>);
+    };
+    assert_snapshot!(expand(input));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn self_reference_through_the_self_keyword_falls_back_to_parameters() {
+    // `Self` inside a parameter-reaching field is self-referential just like the type's own name,
+    // so the field must fall back to bounding the parameter it reaches.
+    let input = quote! {
+        #[derive(ThreadAware)]
+        struct SelfRef<T>((T, Vec<Self>));
+    };
+    assert_snapshot!(expand(input));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
 fn generics_prebound_bare_no_dup() {
     // Ensures no duplicate ThreadAware bound when already present.
     let input = quote! {
