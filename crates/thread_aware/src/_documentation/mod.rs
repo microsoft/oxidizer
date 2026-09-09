@@ -26,7 +26,7 @@
 //! ## Prefer the derive
 //!
 //! In almost all cases, implement [`ThreadAware`](crate::ThreadAware) with
-//! [the derive macro](macro@crate::ThreadAware). It generates a
+//! [the derive macro](derive@crate::ThreadAware). It generates a
 //! [`relocate`](crate::ThreadAware::relocate) that forwards the notification to every field, which
 //! is exactly what a compound type owes its parts:
 //!
@@ -76,7 +76,7 @@
 //! You rarely need to reason about this: the derive adds exactly the `ThreadAware` bounds its
 //! generated body needs and no more, so a correct type "just derives". When it matters - a generic
 //! wrapper, or a marker field that should stay bound-free - the derive's
-//! [Generic Bounds](macro@crate::ThreadAware#generic-bounds) reference has the rules.
+//! [Generic Bounds](derive@crate::ThreadAware#generic-bounds) reference has the rules.
 //!
 //! ## Implementing the trait by hand
 //!
@@ -103,12 +103,12 @@
 //! ## Per-worker state with `Arc`
 //!
 //! When several workers share a value but each should keep its *own* instance - a per-core cache, a
-//! pool you do not want contended across cores - wrap it in the strategy-partitioned
-//! [`Arc<T, PerThread>`](crate::Arc). Relocation materializes a separate `T` for the destination
-//! worker (lazily, on first use there), so the sharing is per-worker instead of process-wide. Reach
-//! for [`Arc<T, PerProcess>`](crate::Arc), which behaves as a vanilla `Arc`, when one shared
-//! instance is what you want, and [`Arc<T, PerNumaNode>`](crate::Arc) for one instance per NUMA
-//! node. This is also the usual bridge to a type that does not implement `ThreadAware` itself.
+//! pool you do not want contended across cores - wrap it in the strategy-partitioned `Arc<T, S>`
+//! that the crate's `std` feature provides (`thread_aware::Arc`). With the `PerThread` strategy,
+//! relocation materializes a separate `T` for the destination worker (lazily, on first use there),
+//! so the sharing is per-worker instead of process-wide. Use `PerProcess`, which behaves as a
+//! vanilla `Arc`, when one shared instance is what you want, and `PerNumaNode` for one instance per
+//! NUMA node. This is also the usual bridge to a type that does not implement `ThreadAware` itself.
 //!
 //! # Choosing an implementation
 //!
@@ -117,8 +117,8 @@
 //! | A compound of thread-aware fields | `#[derive(ThreadAware)]` | Forwards relocation to each field. |
 //! | A field with genuine per-core behavior | a hand-written impl | Only you know what "rebind" means. |
 //! | A foreign type that carries no affinity | [`Unaware<T>`](crate::Unaware) | A `MoveAsIs<T>`: implements the trait as a no-op. |
-//! | Shared state that should differ per worker | [`Arc<T, PerThread>`](crate::Arc) | Materializes a separate `T` per destination. |
-//! | Shared state that is the same everywhere | [`Arc<T, PerProcess>`](crate::Arc) | Behaves as a vanilla `Arc`. |
+//! | Shared state that should differ per worker | `Arc<T, PerThread>` (`std`) | Materializes a separate `T` per destination. |
+//! | Shared state that is the same everywhere | `Arc<T, PerProcess>` (`std`) | Behaves as a vanilla `Arc`. |
 //!
 //! [`Unaware`](crate::Unaware) wraps a value and satisfies `ThreadAware` without reacting to
 //! relocation - use it for inert, foreign, or allocation-free values that legitimately do not care
@@ -218,8 +218,8 @@
 //! }
 //! ```
 //!
-//! The `test-utils` feature's [`Relocator`](crate::Relocator) drives relocations without hand-built
-//! [`Thread`](crate::Thread) values, which is usually what a real test wants.
+//! The `test-utils` feature adds a `Relocator` (`thread_aware::Relocator`) that drives relocations
+//! without hand-built [`Thread`](crate::Thread) values, which is usually what a real test wants.
 //!
 //! # Validating correctness
 //!
