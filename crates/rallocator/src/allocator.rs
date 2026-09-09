@@ -1057,9 +1057,9 @@ where
         } else {
             ptr::null_mut()
         };
-        let header = slab.cast::<SlabHeader>();
+        let mut header = ptr::NonNull::new(slab.cast::<SlabHeader>()).expect("initialize_slab callers must reject null slab allocations");
         let slab_owner = if state.owner.is_null() {
-            unsafe { ptr::addr_of_mut!((*header).embedded_owner) }
+            ptr::from_mut(&mut unsafe { header.as_mut() }.embedded_owner)
         } else {
             state.owner
         };
@@ -1102,17 +1102,16 @@ where
             state.owner = slab_owner;
         }
         if allocation.segment_slices != 0 {
-            unsafe {
-                (*header).segment_next = state.segments;
-                (*header).segment_slices = allocation.segment_slices;
-                (*header).segment_committed_bytes = allocation.committed_bytes;
-            }
-            state.segments = header;
+            let header_ref = unsafe { header.as_mut() };
+            header_ref.segment_next = state.segments;
+            header_ref.segment_slices = allocation.segment_slices;
+            header_ref.segment_committed_bytes = allocation.committed_bytes;
+            state.segments = header.as_ptr();
             if allocation.segment_slices != DIRECT_SLAB_SEGMENT {
-                state.locality_segment = header;
+                state.locality_segment = header.as_ptr();
             }
         }
-        *active = header;
+        *active = header.as_ptr();
         result
     }
 
@@ -3789,6 +3788,7 @@ unsafe fn read_header(address: *mut u8) -> *mut ExtraHeader {
 
 #[cfg(test)]
 mod tests {
+    use std::ptr::NonNull;
     use std::sync::mpsc;
 
     use super::*;
@@ -4155,8 +4155,7 @@ mod tests {
     fn initialize_slab_direct_segment_retires_and_unmaps_exactly_once() {
         let allocator = unsafe { Rallocator::<Standard>::new() };
         let mut domain = DomainState::new();
-        let heap = create_bump_fallback_heap(ptr::from_mut(&mut domain));
-        assert!(!heap.is_null());
+        let mut heap = NonNull::new(create_bump_fallback_heap(ptr::from_mut(&mut domain))).unwrap();
         let slab = hal::map(SLAB_SIZE);
         assert!(!slab.is_null());
         let class_index = 0;
@@ -4169,23 +4168,25 @@ mod tests {
                 committed_bytes: SLAB_SIZE,
             },
             class_index,
-            unsafe { &mut *heap },
+            unsafe { heap.as_mut() },
             SLAB_MARKER,
         );
-        let header = slab.cast::<SlabHeader>();
+        let header = NonNull::new(slab.cast::<SlabHeader>()).unwrap();
+        let header_ref = unsafe { header.as_ref() };
         assert_eq!(block, unsafe { slab.add(first_block * block_size) });
-        assert_eq!(unsafe { (*header).fresh_next }, unsafe { slab.add((first_block + 1) * block_size) });
-        assert_eq!(unsafe { (*header).free_count }, block_count - first_block - 1);
-        assert_eq!(unsafe { (*header).usable_blocks as usize }, block_count - first_block);
-        assert_eq!(unsafe { (*header).segment_slices }, DIRECT_SLAB_SEGMENT);
-        assert_eq!(unsafe { (*header).segment_committed_bytes }, SLAB_SIZE);
-        assert_eq!(unsafe { (*heap).segments }, header);
-        assert!(unsafe { (*heap).locality_segment }.is_null());
+        assert_eq!(header_ref.fresh_next, unsafe { slab.add((first_block + 1) * block_size) });
+        assert_eq!(header_ref.free_count, block_count - first_block - 1);
+        assert_eq!(header_ref.usable_blocks as usize, block_count - first_block);
+        assert_eq!(header_ref.segment_slices, DIRECT_SLAB_SEGMENT);
+        assert_eq!(header_ref.segment_committed_bytes, SLAB_SIZE);
+        let heap_ref = unsafe { heap.as_ref() };
+        assert_eq!(heap_ref.segments, header.as_ptr());
+        assert!(heap_ref.locality_segment.is_null());
 
         let unmaps = hal::unmap_count();
-        unsafe { retire_general_heap(heap) };
+        unsafe { retire_general_heap(heap.as_ptr()) };
         assert_eq!(hal::unmap_count(), unmaps);
-        unsafe { release_retired_block(header) };
+        unsafe { release_retired_block(header.as_ptr()) };
         assert_eq!(hal::unmap_count(), unmaps + 2);
     }
 
@@ -4209,22 +4210,24 @@ mod tests {
             SLAB_MARKER,
         );
         assert!(!first.is_null());
-        let normal_header = normal.cast::<SlabHeader>();
+        let mut normal_header = NonNull::new(normal.cast::<SlabHeader>()).unwrap();
+        let normal_header_ref = unsafe { normal_header.as_ref() };
         assert_eq!(
-            unsafe { ((*normal_header).free_count, (*normal_header).usable_blocks) },
+            (normal_header_ref.free_count, normal_header_ref.usable_blocks),
             (block_count - first_block - 1, (block_count - first_block) as u16)
         );
         assert!(!allocator.pop_or_refill_slow(0, &mut heap).is_null());
         heap.classes[0].active = ptr::null_mut();
-        heap.class_lists[0].partial = normal_header;
+        heap.class_lists[0].partial = normal_header.as_ptr();
         assert!(!allocator.pop_or_refill_slow(0, &mut heap).is_null());
-        unsafe {
-            (*normal_header).fresh_next = ptr::null_mut();
-            (*normal_header).recycled_summary = 0;
-            (*normal_header).remote_free.store(ptr::null_mut(), Ordering::Relaxed);
+        {
+            let normal_header = unsafe { normal_header.as_mut() };
+            normal_header.fresh_next = ptr::null_mut();
+            normal_header.recycled_summary = 0;
+            normal_header.remote_free.store(ptr::null_mut(), Ordering::Relaxed);
         }
         heap.classes[0].active = ptr::null_mut();
-        heap.class_lists[0].partial = normal_header;
+        heap.class_lists[0].partial = normal_header.as_ptr();
         hal::fail_next_commit_locality_segment();
         assert!(allocator.pop_or_refill_slow(0, &mut heap).is_null());
 

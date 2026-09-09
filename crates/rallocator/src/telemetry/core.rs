@@ -421,7 +421,9 @@ fn aggregate_stats(aggregates: &AggregateSnapshot) -> Stats {
         deallocated_bytes: aggregates.deallocated_bytes,
         live_bytes,
         peak_live_bytes,
-        mapped_bytes: MAPPED_BYTES.load(Ordering::Relaxed) + BUMP_COMMITTED_BYTES.load(Ordering::Relaxed),
+        mapped_bytes: MAPPED_BYTES
+            .load(Ordering::Relaxed)
+            .saturating_add(BUMP_COMMITTED_BYTES.load(Ordering::Relaxed)),
         os_mappings: OS_MAPPINGS.load(Ordering::Relaxed),
         os_unmappings: OS_UNMAPPINGS.load(Ordering::Relaxed),
         allocations: aggregates.allocations,
@@ -1677,10 +1679,14 @@ mod tests {
         let mapped = MAPPED_BYTES.swap(1_000, Ordering::Relaxed);
         let bump = BUMP_COMMITTED_BYTES.swap(234, Ordering::Relaxed);
         let stats = aggregate_stats(&AggregateSnapshot::new());
+        MAPPED_BYTES.store(usize::MAX, Ordering::Relaxed);
+        BUMP_COMMITTED_BYTES.store(1, Ordering::Relaxed);
+        let saturated = aggregate_stats(&AggregateSnapshot::new());
         MAPPED_BYTES.store(mapped, Ordering::Relaxed);
         BUMP_COMMITTED_BYTES.store(bump, Ordering::Relaxed);
 
         assert_eq!(stats.mapped_bytes, 1_234);
+        assert_eq!(saturated.mapped_bytes, usize::MAX);
         assert_eq!(HISTOGRAM_BUCKETS, usize::BITS as usize + 1);
     }
 
@@ -2013,7 +2019,12 @@ mod tests {
         begin_remote_free();
         let prepare_calls = PREPARE_ADDRESS_RESOLUTION_CALLS.load(Ordering::Relaxed);
         let _ = try_snapshot_with_runtime_events(None, true);
-        assert_eq!(PREPARE_ADDRESS_RESOLUTION_CALLS.load(Ordering::Relaxed), prepare_calls + 1);
+        let expected_prepare_calls = if cfg!(feature = "caller-symbolization") {
+            prepare_calls + 1
+        } else {
+            prepare_calls
+        };
+        assert_eq!(PREPARE_ADDRESS_RESOLUTION_CALLS.load(Ordering::Relaxed), expected_prepare_calls);
         assert_eq!(snapshot_stats(None), Stats::default());
         assert_eq!(snapshot_stats(Some(sample_stats())), sample_stats());
         assert_eq!(histogram_bucket(0), 0);
