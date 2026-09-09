@@ -112,11 +112,27 @@ runs:
       uses: cargo-bins/cargo-binstall@v1.21.0 # pinned by tag: this release is an immutable release (GitHub locks the tag to a commit)
 
     - name: Install just
-      shell: bash
+      shell: pwsh -NoProfile -Command ". '{0}'"
       run: |
-        if ! command -v just >/dev/null 2>&1 ; then
-          cargo binstall --no-confirm --locked just || cargo install --locked just
-        fi
+        $minimum = [version]'1.46.0'
+        $installed = if (Get-Command just -ErrorAction SilentlyContinue) {
+          [version]((& just --version) -replace '^just\s+', '')
+        } else {
+          $null
+        }
+        if ($null -eq $installed -or $installed -lt $minimum) {
+          Write-Host "Installing just >= $minimum (installed: $(if ($installed) { $installed } else { 'not found' }))"
+          & cargo binstall --no-confirm --locked --version ">=$minimum" just
+          if ($LASTEXITCODE -ne 0) {
+            & cargo install --locked --version ">=$minimum" just
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+        }
+        $installed = [version]((& just --version) -replace '^just\s+', '')
+        if ($installed -lt $minimum) {
+          Write-Error "cargo-anvil requires just >= $minimum for recipe options; found '$installed'. Install with: cargo install --locked --version '>=$minimum' just"
+          exit 1
+        }
 
     # The catalog recipe `anvil-setup` (or `anvil-<group>-setup`
     # when a group is specified via the `group` input) uses the Just executable

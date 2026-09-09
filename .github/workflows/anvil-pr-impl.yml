@@ -41,8 +41,8 @@ on:
           configured at Codecov; required for private repos.
         required: false
 
-# Event-specific callers select permissions because a called workflow cannot
-# elevate beyond its caller. This implementation declares no broader scopes.
+# The root caller selects permissions because a called workflow cannot elevate
+# beyond its caller. This implementation declares no broader scopes.
 
 # Note on matrices: every multi-OS job below hardcodes its OS axis as
 # an inline YAML array. Per-leg runner *labels* are inputs (so adopters
@@ -96,7 +96,7 @@ jobs:
           BASE_REF: ${{ inputs.base_ref }}
 
   # These job display names form repository-ruleset contexts. Treat cosmetic
-  # changes as compatibility changes and keep PR and merge-group callers aligned.
+  # changes as compatibility changes across PR and merge-group events.
   pr-fast:
     name: "Check Group: Fast Checks (${{ matrix.os }})"
     # Cross-OS / cross-arch because pr-fast contains compile-sensitive
@@ -150,8 +150,8 @@ jobs:
       # only so the matrix doesn't race on the same comment, and we use
       # `always()` so the comment is updated even when an unrelated
       # check in pr-fast failed. The `head.repo.full_name ==
-      # github.repository` guard skips fork PRs (which can't be granted
-      # write tokens).
+      # github.repository` guard skips fork PRs even when an administrator
+      # has opted into sending write tokens to fork workflows.
       - name: Upsert anvil-semver advisory
         if: always() && github.event_name == 'pull_request' && matrix.os == 'linux' && github.event.pull_request.head.repo.full_name == github.repository && hashFiles('target/anvil/comments/semver.md') != ''
         uses: marocchino/sticky-pull-request-comment@v3.0.5 # pinned by tag: this release is an immutable release (GitHub locks the tag to a commit)
@@ -317,3 +317,48 @@ jobs:
           impact_mode: consume
         env:
           BASE_REF: ${{ inputs.base_ref }}
+
+  required-checks:
+    # This display name is the repository-ruleset context. Keep it stable
+    # across pull-request and merge-group callers.
+    name: Required Anvil checks
+    if: always()
+    needs:
+      - impact-linux
+      - impact-windows
+      - pr-fast
+      - pr-test
+      - pr-msrv
+      - pr-runtime-analysis
+      - pr-mutants
+    runs-on: ${{ inputs.linux_runner }}
+    steps:
+      - name: Verify every Anvil job family succeeded
+        shell: bash
+        env:
+          IMPACT_LINUX: ${{ needs.impact-linux.result }}
+          IMPACT_WINDOWS: ${{ needs.impact-windows.result }}
+          PR_FAST: ${{ needs.pr-fast.result }}
+          PR_TEST: ${{ needs.pr-test.result }}
+          PR_MSRV: ${{ needs.pr-msrv.result }}
+          PR_RUNTIME_ANALYSIS: ${{ needs.pr-runtime-analysis.result }}
+          PR_MUTANTS: ${{ needs.pr-mutants.result }}
+        run: |
+          status=0
+          for result in \
+            "impact-linux=$IMPACT_LINUX" \
+            "impact-windows=$IMPACT_WINDOWS" \
+            "pr-fast=$PR_FAST" \
+            "pr-test=$PR_TEST" \
+            "pr-msrv=$PR_MSRV" \
+            "pr-runtime-analysis=$PR_RUNTIME_ANALYSIS" \
+            "pr-mutants=$PR_MUTANTS"
+          do
+            name="${result%%=*}"
+            conclusion="${result#*=}"
+            if [[ "$conclusion" != "success" ]]; then
+              echo "::error::$name concluded $conclusion"
+              status=1
+            fi
+          done
+          exit "$status"
