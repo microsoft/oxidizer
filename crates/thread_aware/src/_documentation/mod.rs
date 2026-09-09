@@ -15,26 +15,20 @@
 //!
 //! # Why thread-awareness exists
 //!
-//! Oxidizer runtimes are thread-per-core: each worker owns its slice of the machine, and shared
-//! state that silently spans cores turns into cross-NUMA traffic and lock contention. A
-//! thread-aware type is told, through [`relocate`](crate::ThreadAware::relocate), that it has just
-//! moved from one worker to another, and is given the chance to *rebind* its affinity-bearing
-//! state - reconnect to the destination's I/O scheduler, re-home an allocation in the local NUMA
-//! node, or detach from memory it was sharing with the previous worker.
-//!
-//! Relocation is a **performance cooperation**, never a correctness guarantee. A type must remain
-//! correct if `relocate` is called at the wrong moment, called with the wrong threads, or never
-//! called at all - see [Performance vs. Correctness](crate#performance-vs-correctness). That
-//! single fact drives most of the guidance below: because nothing enforces relocation, a type that
-//! *silently* fails to relocate is the failure mode to design against.
+//! The crate-level [Theory of Operation](crate#theory-of-operation) covers what relocation is and
+//! why thread-per-core runtimes need it. The one idea this guide leans on: relocation is a
+//! **performance cooperation, never a correctness guarantee** (see
+//! [Performance vs. Correctness](crate#performance-vs-correctness)). Nothing enforces it, so the
+//! failure mode to design against is a type that *silently* fails to relocate.
 //!
 //! # Authoring a thread-aware type
 //!
 //! ## Prefer the derive
 //!
-//! In almost all cases, implement [`ThreadAware`](crate::ThreadAware) with the derive macro. It
-//! generates a [`relocate`](crate::ThreadAware::relocate) that forwards the notification to every
-//! field, which is exactly what a compound type owes its parts:
+//! In almost all cases, implement [`ThreadAware`](crate::ThreadAware) with
+//! [the derive macro](macro@crate::ThreadAware). It generates a
+//! [`relocate`](crate::ThreadAware::relocate) that forwards the notification to every field, which
+//! is exactly what a compound type owes its parts:
 //!
 //! ```rust
 //! use thread_aware::{Thread, ThreadAware};
@@ -79,15 +73,10 @@
 //!
 //! ## What the generated bounds mean
 //!
-//! The derive bounds the **field type**, not the parameters inside it. For every relocated field
-//! whose type mentions a generic parameter, it emits `where <field type>: ThreadAware` - the exact
-//! obligation the generated body discharges when it relocates that field. So a `Vec<T>` field
-//! yields `where Vec<T>: ThreadAware`, and a `Wrapper<T>` field yields
-//! `where Wrapper<T>: ThreadAware`, governed by that wrapper's own impl rather than by a bound on
-//! `T`. A field whose
-//! type reaches no parameter, and a marker payload behind a function pointer
-//! (`PhantomData<fn(*const T)>`), owe no bound at all. See
-//! [the derive's reference](crate::ThreadAware#generic-bounds) for the full rules.
+//! You rarely need to reason about this: the derive adds exactly the `ThreadAware` bounds its
+//! generated body needs and no more, so a correct type "just derives". When it matters - a generic
+//! wrapper, or a marker field that should stay bound-free - the derive's
+//! [Generic Bounds](macro@crate::ThreadAware#generic-bounds) reference has the rules.
 //!
 //! ## Implementing the trait by hand
 //!
@@ -111,6 +100,16 @@
 //! }
 //! ```
 //!
+//! ## Per-worker state with `Arc`
+//!
+//! When several workers share a value but each should keep its *own* instance - a per-core cache, a
+//! pool you do not want contended across cores - wrap it in the strategy-partitioned
+//! [`Arc<T, PerThread>`](crate::Arc). Relocation materializes a separate `T` for the destination
+//! worker (lazily, on first use there), so the sharing is per-worker instead of process-wide. Reach
+//! for [`Arc<T, PerProcess>`](crate::Arc), which behaves as a vanilla `Arc`, when one shared
+//! instance is what you want, and [`Arc<T, PerNumaNode>`](crate::Arc) for one instance per NUMA
+//! node. This is also the usual bridge to a type that does not implement `ThreadAware` itself.
+//!
 //! # Choosing an implementation
 //!
 //! | You have… | Reach for | Because |
@@ -125,10 +124,6 @@
 //! relocation - use it for inert, foreign, or allocation-free values that legitimately do not care
 //! which worker they are on. Wrapping a type that *does* implement the trait is discouraged: it
 //! silences that type's own relocation (a performance loss, not a correctness bug).
-//!
-//! The strategy-partitioned [`Arc`](crate::Arc) is the usual bridge to a type that does not
-//! implement the trait itself: an `Arc<Foo, PerThread>` gives each worker its own `Foo`, while an
-//! `Arc<Foo, PerProcess>` shares one - the same `Arc` API, differing only in what relocation does.
 //!
 //! # Anti-patterns
 //!
@@ -173,17 +168,16 @@
 //! When work crosses into a worker from the outside - an FFI entry, a hand-off from a foreign
 //! thread - relocate the entire long-lived dependency graph **once**, at that boundary, rather than
 //! special-casing each affinity-bearing dependency downstream. Make the graph's root `ThreadAware`
-//! (by
-//! derive) so a single `relocate` at the entry rebinds every affinity-bearing resource beneath it.
+//! (by derive) so a single `relocate` at the entry rebinds every affinity-bearing resource beneath
+//! it.
 //! Relocating a subtree while its parent was built from a stale clone (see above) is how affinity
 //! goes stale in practice.
 //!
 //! # Testing
 //!
-//! Because relocation is silent when it is wrong, test it by observation, not by trusting that the
-//! derive did the right thing. The reliable pattern is a leaf type whose `relocate` records that it
-//! was called, composed into the type under test; after one relocation, assert that every
-//! non-skipped field was reached and every skipped field was not.
+//! Relocation is silent when it is wrong, so test it by observation. Compose a leaf type whose
+//! `relocate` records that it ran, relocate the type under test once, and assert that every
+//! non-skipped field was reached and every skipped one was not:
 //!
 //! ```rust
 //! use thread_aware::{Thread, ThreadAware};
@@ -224,23 +218,8 @@
 //! }
 //! ```
 //!
-//! Construct the [`Thread`](crate::Thread) values a real test needs with
-//! [`ThreadBuilder`](crate::ThreadBuilder) (available with the default `std` feature). The
-//! `test-utils` feature additionally offers a [`Relocator`](crate::Relocator) helper for driving
-//! relocations in tests.
-//!
-//! # Debugging and telemetry
-//!
-//! When a value seems bound to the wrong worker, the question is almost always *was `relocate`
-//! called, and did it reach this field?* The `Tracker` pattern above answers it in a test; in a
-//! running system, a runtime that detects affinity-bearing state being touched from the wrong
-//! worker is the signal to watch - for example, a debug-build warning such as a `*.thread_mismatch`
-//! event with a backtrace at the offending access. Treat such a warning as a missing or too-late
-//! `relocate`, most often a [stale clone](#clone-does-not-relocate).
-//!
-//! Remember that the *absence* of a warning does not prove correctness: relocation is best-effort,
-//! so a value can be on the wrong worker with no diagnostic at all. Coverage of the relocation path
-//! belongs in your tests, not in production telemetry.
+//! The `test-utils` feature's [`Relocator`](crate::Relocator) drives relocations without hand-built
+//! [`Thread`](crate::Thread) values, which is usually what a real test wants.
 //!
 //! # Validating correctness
 //!
