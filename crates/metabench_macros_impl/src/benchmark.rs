@@ -359,7 +359,12 @@ fn expand_benchmark(arguments: BenchmarkArguments, mut function: ItemFn, metaben
             );
 
         #(#conditional_attributes)*
-        mod #adapter_module {
+            #[expect(
+                clippy::allow_attributes,
+                clippy::allow_attributes_without_reason,
+                reason = "the Gungraun adapter macro emits lint-control attributes"
+            )]
+            mod #adapter_module {
             use super::*;
             use #metabench::__private::gungraun;
 
@@ -491,6 +496,7 @@ mod tests {
         assert!(!output.contains("::metabench::gungraun"));
         assert_eq!(output.matches("BODY_SENTINEL").count(), 2);
         assert!(output.contains("config=config(),setup=setup,teardown=teardown"));
+        assert!(output.contains("#[expect(clippy::allow_attributes,clippy::allow_attributes_without_reason"));
     }
 
     #[test]
