@@ -51,6 +51,9 @@ include = [
 #   `cargo-release` can deal with them when path-based dependencies are used, they introduce cognitive overhead
 #   and tooling uncertainties (e.g. rust-analyzer issues warnings if cycles are present). Until a strong reason
 #   is found to allow cycles, we pre-emptively disallow them.
+# * Crates that re-export companion proc macros must pin every supporting macro crate to their own exact version
+#   (`=x.y.z`). Publish the entire family together at that same version. Before choosing the release version,
+#   check the registry and increment by at least one patch if any family member already published that version.
 
 [workspace.dependencies]
 
@@ -103,8 +106,8 @@ darling = { version = "0.24.0", default-features = false }
 dashmap = { version = "6.1.0", default-features = false }
 data_privacy = { path = "crates/data_privacy", default-features = false, version = "0.13.0" }
 data_privacy_core = { path = "crates/data_privacy_core", default-features = false, version = "0.1.2" }
-data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false, version = "0.13.0" }
-data_privacy_macros_impl = { path = "crates/data_privacy_macros_impl", default-features = false, version = "0.13.0" }
+data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false, version = "=0.13.0" }
+data_privacy_macros_impl = { path = "crates/data_privacy_macros_impl", default-features = false, version = "=0.13.0" }
 deadpool = { version = "0.13.0", default-features = false }
 derive_more = { version = "2.0.1", default-features = false }
 duct = { version = "1.1.1", default-features = false }
@@ -120,8 +123,8 @@ fetch_winhttp = { path = "crates/fetch_winhttp", default-features = false, versi
 fetch_winhttp_impl = { path = "crates/fetch_winhttp_impl", default-features = false, version = "0.2.0" }
 foldhash = { version = "0.2.0", default-features = false }
 fundle = { path = "crates/fundle", default-features = false, version = "0.4.0" }
-fundle_macros = { path = "crates/fundle_macros", default-features = false, version = "0.4.0" }
-fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = false, version = "0.4.0" }
+fundle_macros = { path = "crates/fundle_macros", default-features = false, version = "=0.4.0" }
+fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = false, version = "=0.4.0" }
 futures = { version = "0.3.31", default-features = false }
 futures-channel = { version = "0.3.31", default-features = false }
 futures-core = { version = "0.3.31", default-features = false }
@@ -145,9 +148,9 @@ hyper-tls = { version = "0.6.0", default-features = false }
 hyper-util = { version = "0.1.20", default-features = false }
 infinity_pool = { version = "0.8.1", default-features = false }
 insta = { version = "1.44.1", default-features = false }
-internity = { path = "crates/internity", default-features = false, version = "0.1.0" }
-internity_macros = { path = "crates/internity_macros", default-features = false, version = "0.1.0" }
-internity_macros_impl = { path = "crates/internity_macros_impl", default-features = false, version = "0.1.0" }
+internity = { path = "crates/internity", default-features = false, version = "0.2.1" }
+internity_macros = { path = "crates/internity_macros", default-features = false, version = "=0.2.1" }
+internity_macros_impl = { path = "crates/internity_macros_impl", default-features = false, version = "=0.2.1" }
 itoa = { version = "1.0.17", default-features = false }
 jiff = { version = "0.2.21", default-features = false }
 lasso = { version = "0.7.3", default-features = false }
@@ -156,16 +159,16 @@ libc = { version = "0.2.178", default-features = false }
 loom = { version = "0.7.2", default-features = false }
 many_cpus = { version = "2.1.0", default-features = false }
 matchit = { version = "0.9.2", default-features = false }
-metabench = { path = "crates/metabench", default-features = false, version = "0.1.0" }
-metabench_macros = { path = "crates/metabench_macros", default-features = false, version = "0.1.0" }
-metabench_macros_impl = { path = "crates/metabench_macros_impl", default-features = false, version = "0.1.0" }
+metabench = { path = "crates/metabench", default-features = false, version = "0.1.1" }
+metabench_macros = { path = "crates/metabench_macros", default-features = false, version = "=0.1.1" }
+metabench_macros_impl = { path = "crates/metabench_macros_impl", default-features = false, version = "=0.1.1" }
 mimalloc = { version = "0.1.52", default-features = false }
 mockall = { version = "0.14.0", default-features = false }
 moka = { version = "0.12.14", default-features = false }
 msvc_spectre_libs_build = { path = "crates/msvc_spectre_libs_build", default-features = false, version = "0.1.1" }
 multitude = { path = "crates/multitude", default-features = false, version = "0.10.0" }
-multitude_macros = { path = "crates/multitude_macros", default-features = false, version = "0.1.1" }
-multitude_macros_impl = { path = "crates/multitude_macros_impl", default-features = false, version = "0.1.1" }
+multitude_macros = { path = "crates/multitude_macros", default-features = false, version = "=0.10.0" }
+multitude_macros_impl = { path = "crates/multitude_macros_impl", default-features = false, version = "=0.10.0" }
 mutants = { version = "0.0.3", default-features = false }
 native-tls = { version = "0.2.18", default-features = false }
 new_zealand = { version = "1.0.4", default-features = false }
@@ -173,13 +176,13 @@ nix = { version = "0.31.3", default-features = false }
 nm = { version = "0.1.21", default-features = false }
 object-pool = { version = "0.6.0", default-features = false }
 observed = { path = "crates/observed", default-features = false, version = "0.26.0" }
-observed_macros = { path = "crates/observed_macros", default-features = false, version = "0.26.0" }
-observed_macros_impl = { path = "crates/observed_macros_impl", default-features = false, version = "0.26.0" }
+observed_macros = { path = "crates/observed_macros", default-features = false, version = "=0.26.0" }
+observed_macros_impl = { path = "crates/observed_macros_impl", default-features = false, version = "=0.26.0" }
 observed_testing = { path = "crates/observed_testing", default-features = false }
 observed_utils = { path = "crates/observed_utils", default-features = false, version = "0.3.0" }
-ohno = { path = "crates/ohno", default-features = false, version = "0.5.1" }
-ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.5.1" }
-ohno_macros_impl = { path = "crates/ohno_macros_impl", default-features = false, version = "0.5.2" }
+ohno = { path = "crates/ohno", default-features = false, version = "0.5.2" }
+ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "=0.5.2" }
+ohno_macros_impl = { path = "crates/ohno_macros_impl", default-features = false, version = "=0.5.2" }
 once_cell = { version = "1.21.3", default-features = false }
 opentelemetry = { version = "0.32.0", default-features = false }
 opentelemetry-semantic-conventions = { version = "0.32.0", default-features = false }
@@ -218,8 +221,8 @@ regex = { version = "1.12.2", default-features = false }
 rest_over_grpc = { path = "crates/rest_over_grpc", default-features = false, version = "0.2.1" }
 route-recognizer = { version = "0.3.1", default-features = false }
 routerama = { path = "crates/routerama", default-features = false, version = "0.1.1" }
-routerama_build = { path = "crates/routerama_build", default-features = false, version = "0.1.1" }
-routerama_macros = { path = "crates/routerama_macros", default-features = false, version = "0.1.1" }
+routerama_build = { path = "crates/routerama_build", default-features = false, version = "=0.1.1" }
+routerama_macros = { path = "crates/routerama_macros", default-features = false, version = "=0.1.1" }
 rstest = { version = "0.26.0", default-features = false }
 rustc-hash = { version = "2.1.0", default-features = false }
 rustls = { version = "0.23.40", default-features = false }
@@ -253,15 +256,15 @@ symbol_table = { version = "0.5.0", default-features = false }
 syn = { version = "3.0.2", default-features = false }
 tempfile = { version = "3.27.0", default-features = false }
 templated_uri = { path = "crates/templated_uri", default-features = false, version = "0.6.0" }
-templated_uri_macros = { path = "crates/templated_uri_macros", default-features = false, version = "0.5.1" }
-templated_uri_macros_impl = { path = "crates/templated_uri_macros_impl", default-features = false, version = "0.5.1" }
+templated_uri_macros = { path = "crates/templated_uri_macros", default-features = false, version = "=0.6.0" }
+templated_uri_macros_impl = { path = "crates/templated_uri_macros_impl", default-features = false, version = "=0.6.0" }
 terminal_size = { version = "0.4.4", default-features = false }
 testing_aids = { path = "crates/testing_aids", default-features = false }
 thiserror = { version = "2.0.17", default-features = false }
 thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.12.0" }
 thread_aware_core = { path = "crates/thread_aware_core", default-features = false, version = "0.1.1" }
-thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.12.0" }
-thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "0.12.0" }
+thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "=0.12.0" }
+thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "=0.12.0" }
 thread_local = { version = "1.1.8", default-features = false }
 tick = { path = "crates/tick", default-features = false, version = "0.7.0" }
 time = { version = "0.3.47", default-features = false }

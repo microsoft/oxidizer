@@ -1,10 +1,10 @@
 # Changelog
 
-## [0.4.1] - 2026-09-07
+## [0.4.1] - 2026-09-10
 
 ### Maintenance
 
-- Now requires `0.5.1` of `ohno`
+- Now requires `0.5.2` of `ohno`
 
 ## [0.4.0] - 2026-08-27
 

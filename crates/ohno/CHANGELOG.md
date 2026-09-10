@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.5.1] - 2026-09-07
+## [0.5.2] - 2026-09-10
 
 ### Compatibility
 
@@ -10,7 +10,7 @@
 
 ### Maintenance
 
-- Now requires `0.5.1` of `ohno_macros`
+- Now requires `0.5.2` of `ohno_macros`
 
 ### Bug Fixes
 

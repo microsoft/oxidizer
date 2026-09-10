@@ -491,7 +491,7 @@ name = "automation"
 version = "0.1.0"
 dependencies = [
  "duct",
- "ohno 0.5.1",
+ "ohno 0.5.2",
  "serde",
  "serde_json",
 ]
@@ -902,7 +902,7 @@ dependencies = [
  "futures-core",
  "mutants",
  "new_zealand",
- "ohno 0.5.1",
+ "ohno 0.5.2",
  "testing_aids",
  "trait-variant",
 ]
@@ -948,7 +948,7 @@ dependencies = [
  "foldhash 0.2.0",
  "moka",
  "mutants",
- "ohno 0.5.1",
+ "ohno 0.5.2",
  "performables",
  "thread_aware",
  "tokio",
@@ -968,7 +968,7 @@ name = "cachet_tier"
 version = "0.5.1"
 dependencies = [
  "dynosaur",
- "ohno 0.5.1",
+ "ohno 0.5.2",
  "parking_lot",
  "recoverable",
  "tick",
@@ -1772,7 +1772,7 @@ dependencies = [
  "layered",
  "mutants",
  "native-tls",
- "ohno 0.5.1",
+ "ohno 0.5.2",
  "opentelemetry",
  "opentelemetry-semantic-conventions",
  "opentelemetry-stdout",
@@ -1840,7 +1840,7 @@ dependencies = [
  "layered",
  "mutants",
  "native-tls",
- "ohno 0.5.1",
+ "ohno 0.5.2",
  "opentelemetry",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
@@ -1876,7 +1876,7 @@ dependencies = [
  "insta",
  "mutants",
  "native-tls",
- "ohno 0.5.1",
+ "ohno 0.5.2",
  "rstest",
  "rustls",
  "rustls-pki-types",
@@ -1902,7 +1902,7 @@ dependencies = [
  "http-body-util",
  "http_extensions",
  "observed",
- "ohno 0.5.1",
+ "ohno 0.5.2",
  "testing_aids",
  "tick",
  "tokio",
@@ -1931,7 +1931,7 @@ dependencies = [
  "mutants",
  "observed",
  "observed_testing",
- "ohno 0.5.1",
+ "ohno 0.5.2",
  "plurality",
  "quinn",
  "rcgen",
@@ -2464,7 +2464,7 @@ dependencies = [
  "hyper-util",
  "layered",
  "mutants",
- "ohno 0.5.1",
+ "ohno 0.5.2",
  "pin-project",
  "recoverable",
  "serde",
@@ -2765,7 +2765,7 @@ dependencies = [
 
 [[package]]
 name = "internity"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "bolero",
  "criterion",
@@ -2789,7 +2789,7 @@ dependencies = [
 
 [[package]]
 name = "internity_macros"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "internity_macros_impl",
  "mutants",
@@ -2798,7 +2798,7 @@ dependencies = [
 
 [[package]]
 name = "internity_macros_impl"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3233,7 +3233,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "metabench"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alloc_tracker",
  "bolero",
@@ -3253,7 +3253,7 @@ dependencies = [
 
 [[package]]
 name = "metabench_macros"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "metabench_macros_impl",
  "mutants",
@@ -3262,7 +3262,7 @@ dependencies = [
 
 [[package]]
 name = "metabench_macros_impl"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bolero",
  "proc-macro-crate 3.5.0",
@@ -3394,7 +3394,7 @@ version = "0.1.1"
 dependencies = [
  "cc",
  "mutants",
- "ohno 0.5.1",
+ "ohno 0.5.2",
 ]
 
 [[package]]
@@ -3432,7 +3432,7 @@ dependencies = [
 
 [[package]]
 name = "multitude_macros"
-version = "0.1.1"
+version = "0.10.0"
 dependencies = [
  "multitude_macros_impl",
  "mutants",
@@ -3441,7 +3441,7 @@ dependencies = [
 
 [[package]]
 name = "multitude_macros_impl"
-version = "0.1.1"
+version = "0.10.0"
 dependencies = [
  "prettyplease 0.3.0",
  "proc-macro2",
@@ -3631,7 +3631,7 @@ dependencies = [
  "criterion",
  "data_privacy",
  "observed_macros",
- "ohno 0.5.1",
+ "ohno 0.5.2",
  "opentelemetry",
  "opentelemetry-stdout",
  "opentelemetry_sdk",
@@ -3700,12 +3700,12 @@ dependencies = [
 
 [[package]]
 name = "ohno"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "futures",
  "insta",
  "mutants",
- "ohno_macros 0.5.1",
+ "ohno_macros 0.5.2",
  "regex",
  "testing_aids",
  "tokio",
@@ -3726,7 +3726,7 @@ dependencies = [
 
 [[package]]
 name = "ohno_macros"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "mutants",
  "ohno_macros_impl",
@@ -4657,7 +4657,7 @@ name = "recoverable"
 version = "0.2.0"
 dependencies = [
  "insta",
- "ohno 0.5.1",
+ "ohno 0.5.2",
  "static_assertions",
  "testing_aids",
 ]
@@ -5065,7 +5065,7 @@ dependencies = [
  "jiff",
  "layered",
  "mutants",
- "ohno 0.5.1",
+ "ohno 0.5.2",
  "opentelemetry",
  "opentelemetry-stdout",
  "opentelemetry_sdk",
@@ -5093,7 +5093,7 @@ dependencies = [
  "http_extensions",
  "layered",
  "mutants",
- "ohno 0.5.1",
+ "ohno 0.5.2",
  "seatbelt",
  "templated_uri",
  "tick",
@@ -5579,7 +5579,7 @@ dependencies = [
  "gungraun",
  "http",
  "mutants",
- "ohno 0.5.1",
+ "ohno 0.5.2",
  "serde",
  "serde_json",
  "static_assertions",
@@ -5591,7 +5591,7 @@ dependencies = [
 
 [[package]]
 name = "templated_uri_macros"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "mutants",
  "templated_uri_macros_impl",
@@ -5599,13 +5599,13 @@ dependencies = [
 
 [[package]]
 name = "templated_uri_macros_impl"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "chumsky",
  "darling",
  "insta",
  "mutants",
- "ohno 0.5.1",
+ "ohno 0.5.2",
  "prettyplease 0.3.0",
  "proc-macro2",
  "quote",
@@ -5745,7 +5745,7 @@ dependencies = [
  "jiff",
  "libc",
  "mutants",
- "ohno 0.5.1",
+ "ohno 0.5.2",
  "performables",
  "pin-project-lite",
  "serde",

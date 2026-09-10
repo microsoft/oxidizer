@@ -1,11 +1,11 @@
 # Changelog
 
-## [0.10.0] - 2026-09-07
+## [0.10.0] - 2026-09-10
 
 ### Breaking
 
 - Now requires `0.10.0` of `bytesbuf`
-- Now requires `0.5.1` of `ohno`
+- Now requires `0.5.2` of `ohno`
 
 ### Documentation
 

@@ -4,4 +4,4 @@
 
 ### Maintenance
 
-- Now requires `0.5.2` of `ohno`
+- Now requires `0.1.1` of `metabench_macros_impl`.

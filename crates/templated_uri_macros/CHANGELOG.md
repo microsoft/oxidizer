@@ -1,10 +1,10 @@
 # Changelog
 
-## [0.5.1] - 2026-09-07
+## [0.6.0] - 2026-09-10
 
 ### Maintenance
 
-- Now requires `0.5.1` of `templated_uri_macros_impl`
+- Now requires `0.6.0` of `templated_uri_macros_impl`
 
 ## [0.5.0] - 2026-08-27
 

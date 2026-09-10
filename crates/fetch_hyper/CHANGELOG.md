@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.8.0] - 2026-09-07
+## [0.8.0] - 2026-09-10
 
 ### Breaking
 
@@ -9,7 +9,7 @@
 - Now requires `0.4.1` of `fetch_tls`
 - Now requires `0.11.0` of `http_extensions`
 - Now requires `0.3.7` of `layered`
-- Now requires `0.5.1` of `ohno`
+- Now requires `0.5.2` of `ohno`
 - Now requires `0.9.0` of `seatbelt`
 - Now requires `0.6.0` of `templated_uri`
 - Now requires `0.7.0` of `tick`

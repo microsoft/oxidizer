@@ -1,10 +1,14 @@
 # Changelog
 
-## [0.10.0] - 2026-09-07
+## [0.10.0] - 2026-09-10
 
 ### Breaking
 
 - Now requires `0.10.0` of `bytesbuf`
+
+### Maintenance
+
+- Now requires `0.10.0` of `multitude_macros`
 
 ### Tasks
 

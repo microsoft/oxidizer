@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.17.0] - 2026-09-07
+## [0.17.0] - 2026-09-10
 
 ### Breaking
 
@@ -13,7 +13,7 @@
 - Now requires `0.4.0` of `fundle`
 - Now requires `0.11.0` of `http_extensions`
 - Now requires `0.3.7` of `layered`
-- Now requires `0.5.1` of `ohno`
+- Now requires `0.5.2` of `ohno`
 - Now requires `0.9.0` of `seatbelt`
 - Now requires `0.9.0` of `seatbelt_http`
 - Now requires `0.6.0` of `templated_uri`

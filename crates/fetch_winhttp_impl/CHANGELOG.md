@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.0] - 2026-09-07
+## [0.2.0] - 2026-09-10
 
 ### Breaking
 
@@ -11,7 +11,7 @@
 - Now requires `0.11.0` of `http_extensions`
 - Now requires `0.3.7` of `layered`
 - Now requires `0.26.0` of `observed`
-- Now requires `0.5.1` of `ohno`
+- Now requires `0.5.2` of `ohno`
 - Now requires `0.12.0` of `thread_aware`
 - Now requires `0.7.0` of `tick`
 
