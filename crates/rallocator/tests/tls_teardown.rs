@@ -28,7 +28,6 @@ thread_local! {
 
 #[test]
 fn allocator_remains_usable_by_later_tls_destructors() {
-    rallocator::initialize();
     std::thread::spawn(|| {
         ALLOCATING_TLS_DESTRUCTOR.with(|_| {});
 

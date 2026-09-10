@@ -1,0 +1,27 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "seismograph_io"
+version = "0.1.0"
+description = "Low-overhead I/O event instrumentation for seismograph."
+readme = "README.md"
+keywords = ["io", "telemetry", "diagnostics", "profiling"]
+categories = ["development-tools::debugging"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/seismograph_io"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["seismograph::*"]
+
+[dependencies]
+seismograph.workspace = true
+
+[lints]
+workspace = true

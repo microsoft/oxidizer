@@ -32,6 +32,8 @@ allowed_external_types = [
 all-features = true
 
 [features]
+default = []
+seismograph = ["performables/seismograph", "tick/seismograph"]
 test-util = []
 
 [dependencies]
@@ -39,6 +41,7 @@ test-util = []
 data_privacy = { workspace = true }
 observed_macros = { workspace = true }
 ohno = { workspace = true }
+performables = { workspace = true }
 
 # 3rd-party
 pin-project = { workspace = true }

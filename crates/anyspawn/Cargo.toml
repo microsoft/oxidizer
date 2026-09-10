@@ -30,10 +30,11 @@ all-features = true
 
 [features]
 default = []
+seismograph = ["performables/seismograph"]
 tokio = ["dep:tokio"]
 
 [dependencies]
-futures-channel = { workspace = true, features = ["alloc"] }
+performables = { workspace = true }
 thread_aware = { workspace = true, features = ["derive", "std"] }
 tokio = { workspace = true, features = ["rt"], optional = true }
 

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Criterion wall-clock benchmarks for `thread_aware::Arc<T, S>::relocate`.
+//! Criterion wall-clock benchmarks for `performables::arc::Arc<T, S>::relocate`.
 //!
 //! `relocate` is the hot path of the crate: a thread-per-core runtime calls it
 //! once per cross-thread spawn, for every `Arc<_, PerThread>` reachable in the
@@ -43,7 +43,8 @@ use std::{sync, thread};
 
 use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
 use many_cpus::SystemHardware;
-use thread_aware::{Arc, PerThread, Thread, ThreadAware, ThreadBuilder};
+use performables::arc::{Arc, PerThread};
+use thread_aware::{Thread, ThreadAware, ThreadBuilder};
 use thread_aware_benchmarking::{Payload, TREE_DEPTH, Tree};
 
 /// How far the oversubscribed case of the `concurrent` group exceeds the
@@ -77,7 +78,7 @@ fn threads(count: usize) -> Vec<Thread> {
 /// Every benchmark that measures the hit path needs this, because a key is only
 /// filled by a relocation that misses first.
 fn materialized(threads: &[Thread]) -> Arc<Payload, PerThread> {
-    let arc = Arc::<Payload, PerThread>::new(Payload::new);
+    let arc = Arc::<Payload, PerThread>::new_with(Payload::new);
 
     let mut ids = Vec::with_capacity(threads.len());
 
@@ -199,7 +200,7 @@ fn bench_miss_path(c: &mut Criterion) {
     group.bench_function("new_thread", |b| {
         b.iter_batched(
             || {
-                let arc = Arc::<Payload, PerThread>::new(Payload::new);
+                let arc = Arc::<Payload, PerThread>::new_with(Payload::new);
                 seed_storage(&arc, primer);
                 arc
             },

@@ -14,6 +14,7 @@
 //!   `alloc` and pointer-width atomics.
 //! * **`bytes-compat`** enables interoperability with the `bytes` crate and is available with or
 //!   without `std`.
+//! * **`seismograph`** enables lazy logical buffer identities for I/O recording and implies `std`.
 //! * **`test-util`** enables memory providers intended for tests and implies `std`.
 //!
 //! <img src="https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf/docs/diagrams/Introduction.png" alt="Diagram showing byte sequences inside BytesView and BytesBuf" />
@@ -646,6 +647,7 @@ mod constants;
 mod memory_guard;
 mod span;
 mod span_builder;
+mod telemetry;
 mod vec;
 mod view;
 mod view_get;

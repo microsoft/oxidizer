@@ -27,11 +27,16 @@ allowed_external_types = [
     "thread_aware_core::thread_aware::ThreadAware",
 ]
 
+[features]
+default = []
+seismograph = ["performables/seismograph"]
+
 [dependencies]
 cachet_tier = { workspace = true }
 foldhash = { workspace = true }
 moka = { workspace = true, features = ["future"] }
 ohno = { workspace = true }
+performables = { workspace = true }
 thread_aware = { workspace = true, features = ["derive", "std"] }
 
 [dev-dependencies]

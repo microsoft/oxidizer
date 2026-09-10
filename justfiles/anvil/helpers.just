@@ -51,8 +51,7 @@
 #     rather than `?? "--workspace"`, which would splat an empty arg cargo
 #     rejects).
 #   * "--package A@v --package B@v" - the tier has members. Packages are
-#     version-qualified cargo specs so they resolve uniquely even when a
-#     like-named crate is also a transitive dependency.
+#     version-qualified cargo specs so they remain portable between CI jobs.
 #   * "--skip" - the tier is empty for this change (recipe exits 0).
 #
 # This keeps the per-recipe boilerplate to a single capture, a one-line skip

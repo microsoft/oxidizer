@@ -114,6 +114,7 @@ where
         if let Some(refresh) = &self.inner.refresh {
             // Check if already in-flight on this thread
             if !refresh.try_start_refresh(key) {
+                self.inner.telemetry.record_refresh_suppressed(self.inner.name);
                 return;
             }
 
@@ -148,10 +149,10 @@ where
 {
     pub(crate) async fn fetch_and_promote(&self, key: K) {
         let watch = self.clock.stopwatch();
-        if let Ok(Some(value)) = self.fallback.get(&key).await {
-            self.handle_fallback_hit(key, value, watch.elapsed()).await;
-        } else {
-            self.handle_fallback_miss(watch.elapsed());
+        match self.fallback.get(&key).await {
+            Ok(Some(value)) => self.handle_fallback_hit(key, value, watch.elapsed()).await,
+            Ok(None) => self.handle_fallback_miss(watch.elapsed()),
+            Err(_) => self.handle_fallback_error(watch.elapsed()),
         }
         self.telemetry.complete_operation(
             CacheTelemetry::current_request_id(),
@@ -170,13 +171,21 @@ where
 
     async fn promote_to_primary(&self, key: K, value: CacheEntry<V>) {
         // Insert errors are intentionally swallowed - a failed promotion should not
-        // affect the refresh. The CacheWrapper around the primary tier already
-        // records telemetry for the insert (Inserted or Rejected).
-        let _ = self.primary.insert(key, value).await;
+        // affect the refresh. CacheWrapper records the insert outcome, while this
+        // match records the corresponding promotion outcome.
+        match self.primary.insert(key, value).await {
+            Ok(cachet_tier::InsertOutcome::Accepted) => self.telemetry.record_promotion_accepted(self.name),
+            Ok(cachet_tier::InsertOutcome::Rejected) => self.telemetry.record_promotion_rejected(self.name),
+            Err(_) => self.telemetry.record_promotion_failed(self.name),
+        }
     }
 
     fn handle_fallback_miss(&self, duration: Duration) {
         self.telemetry.record_refresh_miss(self.name, duration);
+    }
+
+    fn handle_fallback_error(&self, duration: Duration) {
+        self.telemetry.record_refresh_error(self.name, duration);
     }
 }
 
@@ -364,15 +373,23 @@ mod fetch_and_promote_tests {
     }
 
     #[test]
-    fn fallback_error() {
+    fn fallback_error_logs_refresh_error_telemetry() {
         block_on(async {
+            let capture = Capture::new();
+            let _guard = tracing::subscriber::set_default(capture.subscriber());
+
+            let clock = Clock::new_frozen();
+            let telemetry = CacheTelemetry::with_logging();
             let primary = MockCache::<String, i32>::new();
             let fallback = MockCache::<String, i32>::new();
             fallback.fail_when(|_| true);
-            let fc = build_fallback_cache(primary, fallback);
+            let fc = FallbackCache::new("test", primary, fallback, clock, None, telemetry);
 
-            // Fallback errors → handle_fallback_miss Err branch
+            // Fallback errors route through handle_fallback_error.
             fc.inner.fetch_and_promote("key".to_string()).await;
+
+            capture.assert_contains(attributes::FIELD_EVENT);
+            capture.assert_contains(attributes::EVENT_REFRESH_ERROR);
         });
     }
 

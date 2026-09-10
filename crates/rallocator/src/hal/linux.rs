@@ -50,30 +50,20 @@ pub(crate) unsafe fn unmap(address: *mut u8, size: usize) {
     abort_on_failure(released);
 }
 
+#[cfg_attr(test, mutants::skip)] // Windows mutation runs enumerate Linux-only source that cannot execute there.
 pub(crate) fn monotonic_millis() -> u64 {
     let mut time = timespec { tv_sec: 0, tv_nsec: 0 };
     let result = unsafe { clock_gettime(CLOCK_MONOTONIC, &raw mut time) };
     abort_on_failure(result);
-    (time.tv_sec as u64)
-        .saturating_mul(1_000)
-        .saturating_add(time.tv_nsec as u64 / 1_000_000)
+    timespec_millis(&time)
 }
 
-pub(crate) fn capture_stack(frames: &mut [usize], limit: usize) -> usize {
-    const SKIPPED_FRAMES: usize = 4;
-    const MAX_CAPTURED_FRAMES: usize = 64;
-
-    let limit = limit.min(frames.len()).min(MAX_CAPTURED_FRAMES - SKIPPED_FRAMES);
-    if limit == 0 {
-        return 0;
-    }
-    let mut captured_frames = [0_usize; MAX_CAPTURED_FRAMES];
-    let frame_count = i32::try_from(limit + SKIPPED_FRAMES).expect("frame count is bounded by the 64-entry local array");
-    let captured = unsafe { libc::backtrace(captured_frames.as_mut_ptr().cast(), frame_count) }.max(0) as usize;
-    let skipped = captured.min(SKIPPED_FRAMES);
-    let retained = (captured - skipped).min(limit);
-    frames[..retained].copy_from_slice(&captured_frames[skipped..skipped + retained]);
-    retained
+#[cfg_attr(test, mutants::skip)] // Windows mutation runs enumerate Linux-only source that cannot execute there.
+fn timespec_millis(time: &timespec) -> u64 {
+    u64::try_from(time.tv_sec)
+        .expect("CLOCK_MONOTONIC seconds are nonnegative")
+        .saturating_mul(1_000)
+        .saturating_add(u64::try_from(time.tv_nsec).expect("CLOCK_MONOTONIC nanoseconds are nonnegative") / 1_000_000)
 }
 
 fn map_aligned(size: usize, protection: i32) -> *mut u8 {
@@ -136,20 +126,37 @@ fn abort_invalid_page_size<T>() -> T {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::time::Duration;
 
-    #[test]
-    fn stack_capture_clamps_to_its_fixed_buffer() {
-        crate::initialize();
-        let mut frames = [0; 128];
-        assert!(capture_stack(&mut frames, usize::MAX) <= 60);
-    }
+    use super::*;
 
     #[test]
     fn host_page_size_is_compatible_with_allocator_alignment() {
         let page_size = page_size();
         assert!(page_size.is_power_of_two());
         assert!(ALLOCATION_ALIGNMENT.is_multiple_of(page_size));
+    }
+
+    #[test]
+    fn monotonic_milliseconds_track_elapsed_wall_time_at_millisecond_scale() {
+        let before = monotonic_millis();
+        std::thread::sleep(Duration::from_millis(10));
+        let after = monotonic_millis();
+
+        assert!(before > 0);
+        assert!(after.saturating_sub(before) >= 5);
+    }
+
+    #[test]
+    fn timespec_conversion_truncates_nanoseconds_to_exact_milliseconds() {
+        assert_eq!(timespec_millis(&timespec { tv_sec: 0, tv_nsec: 0 }), 0);
+        assert_eq!(
+            timespec_millis(&timespec {
+                tv_sec: 2,
+                tv_nsec: 345_999_999,
+            }),
+            2_345
+        );
     }
 
     #[test]

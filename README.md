@@ -51,14 +51,18 @@ These are the primary crates built out of this repo:
 - [`metabench`](./crates/metabench/README.md) - Run Criterion, Gungraun, Linux perf, and allocation benchmarks together and combine their reports.
 - [`multitude`](./crates/multitude/README.md) - Fast and flexible arena allocator.
 - [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.
+- [`performables`](./crates/performables/README.md) - Thread-aware synchronization and ownership primitives.
 - [`plurality`](./crates/plurality/README.md) - A highly efficient pooling memory allocator.
-- [`rallocator`](./crates/rallocator/README.md) - A high-performance global allocator with scoped heap hints and telemetry.
+- [`rallocator`](./crates/rallocator/README.md) - A high-performance global allocator with passive allocation hints and telemetry.
   - [Supported platforms](./crates/rallocator/README.md#supported-platforms)
   - [Design guide](./crates/rallocator/README.md#design-guide)
   - [Implementation guide](./crates/rallocator/README.md#implementation-guide)
-- [`rallocator_cli`](./crates/rallocator_cli/README.md) - Command-line tools for rallocator telemetry snapshots.
-- [`rallocator_telemetry`](./crates/rallocator_telemetry/README.md) - Owned rallocator snapshot schema and binary encoding.
-- [`rallocator_wire`](./crates/rallocator_wire/README.md) - Allocation-free wire primitives for rallocator telemetry.
+- [`seismograph_cli`](./crates/seismograph_cli/README.md) - Live monitoring and snapshot tools for seismograph telemetry.
+- [`seismograph`](./crates/seismograph/README.md) - High-performance process telemetry with extensible snapshot sources.
+- [`seismograph_io`](./crates/seismograph_io/README.md) - Structured I/O event instrumentation for Seismograph.
+- [`seismograph_protocol`](./crates/seismograph_protocol/README.md) - Local monitor protocol and discovery model for Seismograph.
+- [`seismograph_rallocator`](./crates/seismograph_rallocator/README.md) - Rallocator snapshot source for seismograph.
+- [`seismograph_runtime`](./crates/seismograph_runtime/README.md) - Runtime and task lifecycle instrumentation for Seismograph.
 - [`recoverable`](./crates/recoverable/README.md) - Recovery information and classification for resilience patterns.
 - [`rest_over_grpc`](./crates/rest_over_grpc/README.md) - Automatically transcode gRPC services to REST/JSON endpoints.
 - [`routerama`](./crates/routerama/README.md) - Blazingly fast HTTP route resolution and query string processing.

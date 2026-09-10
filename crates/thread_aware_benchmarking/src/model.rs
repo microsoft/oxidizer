@@ -11,7 +11,8 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use thread_aware::{Arc, PerThread, Unaware};
+use performables::arc::{Arc, PerThread};
+use thread_aware::Unaware;
 
 /// Source of distinct strategy-partition identities.
 static NEXT_VALUE_ID: AtomicU64 = AtomicU64::new(0);
@@ -108,7 +109,7 @@ impl Tree {
             id: 0,
             name: "layer",
             flags: Unaware(0),
-            shared: Arc::<Leaf, PerThread>::new(Leaf::new),
+            shared: Arc::<Leaf, PerThread>::new_with(Leaf::new),
             child: None,
         });
 
@@ -117,7 +118,7 @@ impl Tree {
                 id: depth as u64,
                 name: "layer",
                 flags: Unaware(0),
-                shared: Arc::<Leaf, PerThread>::new(Leaf::new),
+                shared: Arc::<Leaf, PerThread>::new_with(Leaf::new),
                 child: Some(root),
             });
         }
