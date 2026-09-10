@@ -6,7 +6,7 @@ name = "uniflight"
 description = "Coalesces duplicate async tasks into a single execution."
 version = "0.6.0"
 readme = "README.md"
-keywords = ["oxidizer", "coalescing", "stempede", "singleflight", "deduplication"]
+keywords = ["oxidizer", "coalescing", "stampede", "singleflight", "deduplication"]
 categories = ["concurrency"]
 
 edition = { workspace = true }

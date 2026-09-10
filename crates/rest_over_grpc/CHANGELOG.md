@@ -14,10 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Maintenance
 
-- Now requires `0.2.1` of `http_path_template`
-- Now requires `0.3.7` of `layered`
+- The `build` feature now requires `0.2.1` of `http_path_template`
+- The `layered` feature now requires `0.3.7` of `layered`
 - Now requires `0.1.1` of `routerama`
-- Now requires `0.1.1` of `routerama_build`
+- The `build` feature now requires `0.1.1` of `routerama_build`
 
 ### Bug Fixes
 
