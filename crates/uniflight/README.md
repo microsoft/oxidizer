@@ -136,17 +136,17 @@ Use `--save-baseline` and `--baseline` flags to track regressions over time.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/uniflight">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbU6WjHK_pePUb9nAUk6LDFxYbshcxUBqnlqkbwdYKqA0YNsRhZIKCbHBlcmZvcm1hYmxlc2UwLjEuMIJpdW5pZmxpZ2h0ZTAuNS4w
- [__link0]: https://docs.rs/uniflight/0.5.0/uniflight/struct.Merger.html
- [__link1]: https://docs.rs/uniflight/0.5.0/uniflight/?search=Merger::execute
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbU6WjHK_pePUb9nAUk6LDFxYbshcxUBqnlqkbwdYKqA0YNsRhZIKCbHBlcmZvcm1hYmxlc2UwLjEuMIJpdW5pZmxpZ2h0ZTAuNi4w
+ [__link0]: https://docs.rs/uniflight/0.6.0/uniflight/struct.Merger.html
+ [__link1]: https://docs.rs/uniflight/0.6.0/uniflight/?search=Merger::execute
  [__link10]: https://doc.rust-lang.org/stable/std/?search=hash::Hash
  [__link11]: https://doc.rust-lang.org/stable/std/cmp/trait.Eq.html
- [__link12]: https://docs.rs/uniflight/0.5.0/uniflight/struct.Merger.html
+ [__link12]: https://docs.rs/uniflight/0.6.0/uniflight/struct.Merger.html
  [__link2]: https://doc.rust-lang.org/stable/std/?search=borrow::Borrow
  [__link3]: https://docs.rs/performables/0.1.0/performables/?search=arc::Strategy
  [__link4]: https://docs.rs/performables/0.1.0/performables/?search=arc::PerProcess
  [__link5]: https://docs.rs/performables/0.1.0/performables/?search=arc::PerNuma
  [__link6]: https://docs.rs/performables/0.1.0/performables/?search=arc::PerThread
- [__link7]: https://docs.rs/uniflight/0.5.0/uniflight/struct.LeaderPanicked.html
- [__link8]: https://docs.rs/uniflight/0.5.0/uniflight/?search=LeaderPanicked::message
+ [__link7]: https://docs.rs/uniflight/0.6.0/uniflight/struct.LeaderPanicked.html
+ [__link8]: https://docs.rs/uniflight/0.6.0/uniflight/?search=LeaderPanicked::message
  [__link9]: https://doc.rust-lang.org/stable/std/clone/trait.Clone.html

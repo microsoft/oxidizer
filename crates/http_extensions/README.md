@@ -170,23 +170,23 @@ for future requests. This makes the crate particularly efficient for high-throug
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_extensions">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb8ws5BCyJXrMbtKOqwMaB35YbTeUgtnVoxOMbl-5qQusDAothZIWCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZlMC45LjCCZGh0dHBlMS41LjCDaWh0dHAtYm9keWUxLjEuMGlodHRwX2JvZHmCb2h0dHBfZXh0ZW5zaW9uc2YwLjEwLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb8ws5BCyJXrMbtKOqwMaB35YbTeUgtnVoxOMbl-5qQusDAothZIWCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xMC4wgmRodHRwZTEuNS4wg2lodHRwLWJvZHllMS4xLjBpaHR0cF9ib2R5gm9odHRwX2V4dGVuc2lvbnNmMC4xMS4w
  [__link0]: https://crates.io/crates/http/1.5.0
- [__link1]: https://docs.rs/http_extensions/0.10.0/http_extensions/type.HttpRequest.html
- [__link10]: https://docs.rs/http_extensions/0.10.0/http_extensions/?search=StatusExt
- [__link11]: https://docs.rs/http_extensions/0.10.0/http_extensions/?search=RequestExt
- [__link12]: https://docs.rs/http_extensions/0.10.0/http_extensions/?search=ResponseExt
- [__link13]: https://docs.rs/http_extensions/0.10.0/http_extensions/?search=HttpRequestExt
- [__link14]: https://docs.rs/http_extensions/0.10.0/http_extensions/?search=HeaderMapExt
- [__link15]: https://docs.rs/http_extensions/0.10.0/http_extensions/?search=HeaderValueExt
+ [__link1]: https://docs.rs/http_extensions/0.11.0/http_extensions/type.HttpRequest.html
+ [__link10]: https://docs.rs/http_extensions/0.11.0/http_extensions/?search=StatusExt
+ [__link11]: https://docs.rs/http_extensions/0.11.0/http_extensions/?search=RequestExt
+ [__link12]: https://docs.rs/http_extensions/0.11.0/http_extensions/?search=ResponseExt
+ [__link13]: https://docs.rs/http_extensions/0.11.0/http_extensions/?search=HttpRequestExt
+ [__link14]: https://docs.rs/http_extensions/0.11.0/http_extensions/?search=HeaderMapExt
+ [__link15]: https://docs.rs/http_extensions/0.11.0/http_extensions/?search=HeaderValueExt
  [__link16]: https://docs.rs/http/1.5.0/http/?search=HeaderValue
  [__link17]: https://docs.rs/bytes/1.12.1/bytes/?search=Bytes
- [__link18]: https://docs.rs/http_extensions/0.10.0/http_extensions/?search=ExtensionsExt
+ [__link18]: https://docs.rs/http_extensions/0.11.0/http_extensions/?search=ExtensionsExt
  [__link19]: https://docs.rs/http/1.5.0/http/?search=Extensions
- [__link2]: https://docs.rs/http_extensions/0.10.0/http_extensions/type.HttpResponse.html
- [__link20]: https://docs.rs/http_extensions/0.10.0/http_extensions/?search=RequestHandler
- [__link21]: https://docs.rs/http_extensions/0.10.0/http_extensions/?search=HttpRequestBuilder
- [__link22]: https://docs.rs/http_extensions/0.10.0/http_extensions/?search=StatusExt::ensure_success
+ [__link2]: https://docs.rs/http_extensions/0.11.0/http_extensions/type.HttpResponse.html
+ [__link20]: https://docs.rs/http_extensions/0.11.0/http_extensions/?search=RequestHandler
+ [__link21]: https://docs.rs/http_extensions/0.11.0/http_extensions/?search=HttpRequestBuilder
+ [__link22]: https://docs.rs/http_extensions/0.11.0/http_extensions/?search=StatusExt::ensure_success
  [__link23]: https://crates.io/crates/http/1.5.0
  [__link24]: https://docs.rs/http/1.5.0/http/?search=Request
  [__link25]: https://docs.rs/http/1.5.0/http/?search=Response
@@ -194,12 +194,12 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link27]: https://docs.rs/http/1.5.0/http/?search=StatusCode
  [__link28]: https://docs.rs/http/1.5.0/http/?search=HeaderMap
  [__link29]: https://docs.rs/http-body/1.1.0/http_body/?search=Body
- [__link3]: https://docs.rs/http_extensions/0.10.0/http_extensions/?search=HttpBody
- [__link30]: https://docs.rs/http_extensions/0.10.0/http_extensions/?search=HttpBodyBuilder
- [__link31]: https://crates.io/crates/bytesbuf/0.9.0
- [__link4]: https://docs.rs/http_extensions/0.10.0/http_extensions/?search=HttpRequestBuilder
- [__link5]: https://docs.rs/http_extensions/0.10.0/http_extensions/?search=HttpResponseBuilder
- [__link6]: https://docs.rs/http_extensions/0.10.0/http_extensions/?search=HttpBody
- [__link7]: https://docs.rs/http_extensions/0.10.0/http_extensions/?search=HttpBodyBuilder
- [__link8]: https://docs.rs/http_extensions/0.10.0/http_extensions/?search=HttpError
- [__link9]: https://docs.rs/http_extensions/0.10.0/http_extensions/?search=RequestHandler
+ [__link3]: https://docs.rs/http_extensions/0.11.0/http_extensions/?search=HttpBody
+ [__link30]: https://docs.rs/http_extensions/0.11.0/http_extensions/?search=HttpBodyBuilder
+ [__link31]: https://crates.io/crates/bytesbuf/0.10.0
+ [__link4]: https://docs.rs/http_extensions/0.11.0/http_extensions/?search=HttpRequestBuilder
+ [__link5]: https://docs.rs/http_extensions/0.11.0/http_extensions/?search=HttpResponseBuilder
+ [__link6]: https://docs.rs/http_extensions/0.11.0/http_extensions/?search=HttpBody
+ [__link7]: https://docs.rs/http_extensions/0.11.0/http_extensions/?search=HttpBodyBuilder
+ [__link8]: https://docs.rs/http_extensions/0.11.0/http_extensions/?search=HttpError
+ [__link9]: https://docs.rs/http_extensions/0.11.0/http_extensions/?search=RequestHandler
