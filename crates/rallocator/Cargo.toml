@@ -20,6 +20,9 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/rallocator"
 [target.'cfg(target_os = "linux")'.dependencies]
 libc.workspace = true
 
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+mutants.workspace = true
+
 [features]
 default = ["caller-symbolization"]
 caller-symbolization = ["dep:backtrace"]
@@ -42,7 +45,6 @@ criterion.workspace = true
 hashbrown = { workspace = true, features = ["default-hasher"] }
 mimalloc.workspace = true
 multitude = { workspace = true, features = ["hashbrown"] }
-mutants.workspace = true
 performables = { workspace = true, features = ["seismograph"] }
 seismograph = { workspace = true, features = ["monitor"] }
 seismograph_runtime.workspace = true

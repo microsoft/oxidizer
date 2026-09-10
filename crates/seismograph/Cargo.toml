@@ -20,6 +20,9 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/seismograph
 [target.'cfg(target_os = "linux")'.dependencies]
 libc.workspace = true
 
+[target.'cfg(unix)'.dev-dependencies]
+mutants.workspace = true
+
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
     "getrandom::error::Error",
@@ -36,9 +39,6 @@ seismograph_protocol = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_System_Diagnostics_Debug"] }
-
-[dev-dependencies]
-mutants.workspace = true
 
 [lints]
 workspace = true
