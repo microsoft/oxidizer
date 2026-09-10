@@ -1258,13 +1258,13 @@ dependencies = [
 
 [[package]]
 name = "cpulist"
-version = "1.1.9"
+version = "1.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56d30b1a5326cece413879ac2678e8f9b202e8bc1c5eb066b07f6e4479bff36d"
+checksum = "5d2a257bd765b4bbd5672cddaae6694db3238d970729bdec1da9aa8f3d6db529"
 dependencies = [
  "itertools 0.15.0",
  "new_zealand",
- "ohno 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "ohno 0.4.0",
 ]
 
 [[package]]
@@ -3177,18 +3177,18 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "many_cpus"
-version = "2.4.20"
+version = "2.4.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5fb1a150cf27558c33f7dd90c116851fc0c935974ac8bde293ebad041c5d7567"
+checksum = "8e9198cbdce622962e6ed4613fe33aada710a51548f7a926eb92b6a8bdbaf038"
 dependencies = [
  "many_cpus_impl",
 ]
 
 [[package]]
 name = "many_cpus_impl"
-version = "2.4.20"
+version = "2.4.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc21c062bf01106e5de0490e4b841db1edb97c1bb6697d3ed6cf3361d1ceca29"
+checksum = "1aca8183316dce060bfd11c2c99d098bc00ce686e1c6f0db00f1be11f3b2dc7b"
 dependencies = [
  "cpulist",
  "derive_more",
@@ -3690,6 +3690,16 @@ dependencies = [
 
 [[package]]
 name = "ohno"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4665329d9a246af05b488837c3736801fedbec2ef3a1b1484fde1bc47550cf63"
+dependencies = [
+ "ohno_macros 0.4.0",
+ "typeid",
+]
+
+[[package]]
+name = "ohno"
 version = "0.5.0"
 dependencies = [
  "futures",
@@ -3704,13 +3714,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "ohno"
-version = "0.5.0"
+name = "ohno_macros"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6f03365c20a62c82c5da4cd93abf43cec7115c7d9f84a55ea827e2b56d704a5"
+checksum = "565bae93429e274bfbb568535b43dd6458538908014e44faec44dddfafcb5fd3"
 dependencies = [
- "ohno_macros 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "typeid",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.5",
 ]
 
 [[package]]
@@ -3718,16 +3729,7 @@ name = "ohno_macros"
 version = "0.5.0"
 dependencies = [
  "mutants",
- "ohno_macros_impl 0.5.1",
-]
-
-[[package]]
-name = "ohno_macros"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a4ce72614cf218523160501f1c275d718c80083697d62d54186e41512429ba9"
-dependencies = [
- "ohno_macros_impl 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "ohno_macros_impl",
 ]
 
 [[package]]
@@ -3739,17 +3741,6 @@ dependencies = [
  "quote",
  "syn 3.0.5",
  "testing_aids",
-]
-
-[[package]]
-name = "ohno_macros_impl"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a2711e52bb0de91b2d6a3c60636bac1827fb109003e235ed827dc9021287d0d"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.5",
 ]
 
 [[package]]
@@ -5570,7 +5561,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
