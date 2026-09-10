@@ -6,6 +6,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.2.1] - 2026-09-10
 
+### Maintenance
+
+- Now requires `0.2.1` of `internity_macros`.
+
+## [0.2.0] - 2026-08-14
+
 ### Added
 
 - `LocalLexicon::with_capacity(strings, bytes)` and
