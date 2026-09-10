@@ -21,3 +21,7 @@ coverage:
 ignore:
 - "crates/rest_over_grpc_examples/**/*"
 - "crates/rest_over_grpc_tests/**/*"
+# These packages use explicit reduced thresholds enforced by cargo-coverage-gate.
+- "crates/metabench/**/*"
+- "crates/metabench_macros/**/*"
+- "crates/metabench_macros_impl/**/*"

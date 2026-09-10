@@ -462,6 +462,7 @@ openssl-devel
 oversized
 parameterized
 parameterless
+parens
 parser
 parsers
 passthrough
@@ -677,6 +678,8 @@ callsite
 callsites
 callsite's
 Callgrind
+Cachegrind
+DHAT
 matcher
 matchers
 stringified
@@ -756,6 +759,7 @@ unannotated
 doctype
 CSS
 Gungraun
+Gungraun's
 Valgrind
 lookups
 replayable
@@ -885,3 +889,18 @@ incompressible
 decompressor's
 recurse
 flate's
+metabench
+acknowledgement
+destructions
+FIFOs
+orchestrator
+perf
+PMU
+stateful
+uncompared
+unpopulated
+unscoped
+BBV
+DRD
+Helgrind
+Memcheck
