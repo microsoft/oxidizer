@@ -50,6 +50,7 @@ pub(crate) unsafe fn unmap(address: *mut u8, size: usize) {
     abort_on_failure(released);
 }
 
+#[cfg_attr(test, mutants::skip)] // Windows mutation runs enumerate Linux-only source that cannot execute there.
 pub(crate) fn monotonic_millis() -> u64 {
     let mut time = timespec { tv_sec: 0, tv_nsec: 0 };
     let result = unsafe { clock_gettime(CLOCK_MONOTONIC, &raw mut time) };
@@ -57,6 +58,7 @@ pub(crate) fn monotonic_millis() -> u64 {
     timespec_millis(&time)
 }
 
+#[cfg_attr(test, mutants::skip)] // Windows mutation runs enumerate Linux-only source that cannot execute there.
 fn timespec_millis(time: &timespec) -> u64 {
     u64::try_from(time.tv_sec)
         .expect("CLOCK_MONOTONIC seconds are nonnegative")

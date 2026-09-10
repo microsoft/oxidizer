@@ -200,6 +200,7 @@ fn create_monitor_directory(path: &Path) -> Result<(), Error> {
 
 #[cfg(unix)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Portable tests cannot inject chmod failure.
+#[cfg_attr(test, mutants::skip)] // Windows mutation runs enumerate Unix-only source that cannot execute there.
 fn restrict_monitor_directory(path: &Path) -> Result<(), Error> {
     use std::os::unix::fs::PermissionsExt as _;
 

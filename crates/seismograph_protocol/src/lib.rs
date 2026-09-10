@@ -168,6 +168,7 @@ fn read_frame(reader: &mut impl Read, maximum: usize) -> Result<Frame, Error> {
 }
 
 #[cfg(unix)]
+#[cfg_attr(test, mutants::skip)] // Windows mutation runs enumerate Unix-only source that cannot execute there.
 fn unix_monitor_directory(runtime: Option<std::ffi::OsString>, user_id: libc::uid_t) -> PathBuf {
     runtime.map_or_else(
         || std::env::temp_dir().join(format!("seismograph-{user_id}")),
