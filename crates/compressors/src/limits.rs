@@ -565,6 +565,17 @@ mod tests {
     }
 
     #[test]
+    fn ratio_guard_allows_exactly_the_configured_ratio() {
+        let limits = resolved(DecompressorLimits::new().max_ratio(ratio(2)));
+        let input = RATIO_FLOOR_BYTES;
+
+        limits.check(input, input * 2, 1).unwrap();
+        let error = limits.check(input, input * 2 + 1, 1).unwrap_err();
+
+        assert!(error.is_limit_exceeded());
+    }
+
+    #[test]
     fn absolute_bound_rejects_beyond_the_cap() {
         let limits = resolved(DecompressorLimits::new().max_output_len(NonZeroU64::new(100).unwrap()));
         let error = limits.check(1_000_000, 101, 1).unwrap_err();
