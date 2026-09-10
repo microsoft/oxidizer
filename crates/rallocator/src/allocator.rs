@@ -956,7 +956,7 @@ where
                 (*remote).classes.get_unchecked(class_index)
             }
         };
-        loop {
+        'retry: loop {
             let block = unsafe { pop_remote_block(class) };
             if !block.is_null() {
                 record_class_event(class_index, ClassEventKind::Allocation);
@@ -966,11 +966,8 @@ where
             inject_remote_refill_contention(class);
             let refill = class.refilling.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed);
             if refill.is_err() {
-                while class.refilling.load(Ordering::Acquire) {
-                    spin_loop();
-                    check_remote_refill_contention!(class);
-                }
-                continue;
+                let RemoteRefillReady = wait_for_remote_refill(class);
+                continue 'retry;
             }
 
             let regions = unsafe { domain_regions((*remote).domain) };
@@ -3544,6 +3541,18 @@ unsafe fn take_most_free_slab<T: Tunables>(slot: &mut *mut SlabHeader, class_ind
     best_node.as_ptr()
 }
 
+struct RemoteRefillReady;
+
+#[inline]
+#[cfg_attr(coverage_nightly, coverage(off))] // LLVM maps the exercised loop-closing region as uncovered.
+fn wait_for_remote_refill(class: &RemoteClass) -> RemoteRefillReady {
+    while class.refilling.load(Ordering::Acquire) {
+        spin_loop();
+        check_remote_refill_contention!(class);
+    }
+    RemoteRefillReady
+}
+
 #[cfg(all(test, not(miri)))]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test-only contention injection has no production branch.
 fn inject_remote_refill_contention(class: &RemoteClass) {
@@ -3962,7 +3971,7 @@ mod tests {
             let class = RemoteClass::new();
             inject_remote_refill_contention(&class);
             assert!(class.refilling.load(Ordering::Relaxed));
-            clear_injected_remote_refill_contention(&class);
+            let RemoteRefillReady = wait_for_remote_refill(&class);
             assert!(!class.refilling.load(Ordering::Acquire));
         }
 
