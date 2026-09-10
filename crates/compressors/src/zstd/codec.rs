@@ -365,6 +365,10 @@ unsafe impl Codec for ZstdDecompress {
         self.limits.check(total_in, total_out, streams)
     }
 
+    // Delegates to `FormatLimits::remaining_output`, and is excluded for the same reason: a mutant
+    // that answers a small constant only shrinks the slice offered per step, so the pump crawls and
+    // the harness times out rather than reaching a verdict.
+    #[cfg_attr(test, mutants::skip)]
     fn remaining_output(&self, total_out: u64) -> Option<u64> {
         self.limits.remaining_output(total_out)
     }
