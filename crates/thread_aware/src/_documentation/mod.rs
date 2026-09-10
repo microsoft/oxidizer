@@ -68,8 +68,9 @@
 //! ```
 //!
 //! `skip` is a claim that a field genuinely has nothing to rebind. It is not an escape hatch for
-//! "this field does not implement `ThreadAware` yet" - reach for [`Unaware`](crate::Unaware) or
-//! [`Arc`](crate::Arc) for that, so the intent is visible in the type.
+//! "this field does not implement `ThreadAware` yet" - reach for [`Unaware`](crate::Unaware) or the
+//! strategy-partitioned `Arc` (with the `std` feature) for that, so the intent is visible in the
+//! type.
 //!
 //! ## What the generated bounds mean
 //!
