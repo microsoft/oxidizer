@@ -161,15 +161,15 @@ mod thread;
 /// * `#[thread_aware(skip)]`: Prevents a field from being recursively transferred.
 ///
 /// # Generic Bounds
-/// The derive adds one bound per relocated field: `where <field type>: ThreadAware`. A
+/// The derive bounds each relocated field by its own type - `where <field type>: ThreadAware` -
+/// not by the type parameters inside it. A field that refers back to the type being derived is the
+/// exception: it bounds the parameters it reaches instead, so recursive types still compile. A
 /// `#[thread_aware(skip)]` field isn't relocated, so it contributes `where Self: Send` instead,
 /// which is all the `ThreadAware: Send` supertrait needs.
 ///
-/// Bounds are on the whole field type, not the parameters inside it. A `Wrapper<T>` field bounds
-/// `Wrapper<T>: ThreadAware` and defers to that wrapper's own impl, so a wrapper that is
-/// `ThreadAware` for every `T` keeps deriving even where `T` isn't.
-///
-/// The derive doesn't look inside function pointers, so a variance marker written as
+/// Bounding the field type means a `Wrapper<T>` field defers to that wrapper's own impl, so a
+/// wrapper that is `ThreadAware` for every `T` keeps deriving even where `T` isn't. The derive
+/// doesn't look inside function pointers, so a variance marker written as
 /// `PhantomData<fn(*const T)>` adds no bound at all:
 ///
 /// ```rust
@@ -182,21 +182,8 @@ mod thread;
 /// }
 /// ```
 ///
-/// If you already wrote a bare `ThreadAware` bound yourself, the derive assumes it's this trait
-/// and skips the duplicate; qualify the path to disambiguate.
-///
-/// ```rust
-/// # use core::marker::PhantomData;
-/// # use thread_aware::ThreadAware;
-/// #[derive(ThreadAware)]
-/// struct Marked<T> {
-///     // `PhantomData<*const T>` would make `Marked` `!Send`; this does not.
-///     marker: PhantomData<fn(*const T)>,
-/// }
-/// ```
-///
-/// A trait referred to by the bare name `ThreadAware` in your own bounds is assumed to be this
-/// crate's and suppresses the generated bound; qualify the path to disambiguate.
+/// If you already wrote a bare `ThreadAware` bound yourself, the derive assumes it's this trait and
+/// skips the duplicate; qualify the path to disambiguate.
 ///
 /// # Example
 /// ```rust
