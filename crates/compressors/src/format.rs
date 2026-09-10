@@ -815,7 +815,7 @@ mod tests {
             let mut decompressor = DecompressorBuilder::new()
                 .limits(
                     DecompressorLimits::new()
-                        .max_ratio(None)
+                        .unbounded_ratio()
                         .max_output_len(NonZeroU64::new(1024).unwrap()),
                 )
                 .output_chunk_size(NonZeroUsize::new(64).unwrap())
@@ -954,7 +954,7 @@ mod tests {
                 compressed,
                 &Resources::default(),
                 DecompressorLimits::new()
-                    .max_ratio(None)
+                    .unbounded_ratio()
                     .max_output_len(NonZeroU64::new(1024).unwrap()),
             )
             .unwrap_err();

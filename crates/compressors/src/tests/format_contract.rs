@@ -433,7 +433,7 @@ macro_rules! format_contract {
                 let mut decompressor = $module::Decompressor::builder()
                     .limits(
                         DecompressorLimits::new()
-                            .max_ratio(None)
+                            .unbounded_ratio()
                             .max_output_len(NonZeroU64::new(1024).unwrap()),
                     )
                     .build(resources())
@@ -1265,7 +1265,7 @@ macro_rules! format_contract {
                     compressed.clone(),
                     resources(),
                     DecompressorLimits::new()
-                        .max_ratio(None)
+                        .unbounded_ratio()
                         .max_output_len(NonZeroU64::new(data.len() as u64).unwrap()),
                 )
                 .unwrap();
@@ -1276,7 +1276,7 @@ macro_rules! format_contract {
                     compressed,
                     resources(),
                     DecompressorLimits::new()
-                        .max_ratio(None)
+                        .unbounded_ratio()
                         .max_output_len(NonZeroU64::new(maximum).unwrap()),
                 )
                 .unwrap_err();

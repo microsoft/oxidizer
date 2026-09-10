@@ -81,8 +81,9 @@ chunk however long the stream is; a consumer that accumulates retains everything
 | `<format>::decompress` and `decompress_with_limits`, and the same pair on `Format` | Yours, else 64 MiB output and 1024 streams | Buffers the whole result |
 
 The defaults are **fallbacks, not overrides**: they fill only bounds left unset.
-Each limit setter accepts a non-zero value or `Some(value)` to set a bound, and
-`None` to remove that bound, including its buffering fallback.
+Each limit setter accepts only a non-zero value. The matching
+[`unbounded_ratio`], [`unbounded_output_len`], or [`unbounded_streams`] method
+removes that bound, including its buffering fallback.
 [`DecompressorLimits::UNLIMITED`] removes every bound -- removing a bound is a
 decision too, not a request to restore its default.
 
@@ -177,6 +178,9 @@ rather than by input bytes, so it is covered by the deterministic suite instead.
 [`max_output_len`]: https://docs.rs/compressors/latest/compressors/struct.DecompressorLimits.html#method.max_output_len
 [`max_ratio`]: https://docs.rs/compressors/latest/compressors/struct.DecompressorLimits.html#method.max_ratio
 [`max_streams`]: https://docs.rs/compressors/latest/compressors/struct.DecompressorLimits.html#method.max_streams
+[`unbounded_output_len`]: https://docs.rs/compressors/latest/compressors/struct.DecompressorLimits.html#method.unbounded_output_len
+[`unbounded_ratio`]: https://docs.rs/compressors/latest/compressors/struct.DecompressorLimits.html#method.unbounded_ratio
+[`unbounded_streams`]: https://docs.rs/compressors/latest/compressors/struct.DecompressorLimits.html#method.unbounded_streams
 [`DecompressorLimits::UNLIMITED`]: https://docs.rs/compressors/latest/compressors/struct.DecompressorLimits.html#associatedconstant.UNLIMITED
 [`CompressionStream`]: https://docs.rs/compressors/latest/compressors/struct.CompressionStream.html
 [`Resources`]: https://docs.rs/compressors/latest/compressors/struct.Resources.html
