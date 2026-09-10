@@ -8,8 +8,12 @@
 //! a caller-supplied memory provider, and [`Resources`] recycles engine state. Timings alone would
 //! not show a regression in any of those.
 //!
-//! Allocation figures come from [`alloc_tracker`], which installs a global allocator for this
-//! binary and prints a per-iteration table when the session is dropped.
+//! [`metabench`] runs the same workloads with Criterion, allocation tracking, and, on Linux,
+//! Gungraun. Payload preparation and resource warm-up are outside the measured functions; output
+//! disposal remains inside them. Resources are retained across Criterion iterations.
+//!
+//! Parameter names use Rust identifiers so Criterion and Gungraun report the same cases.
+//! Pass `--show-engine-output` to also display the compression-ratio and zstd working-set tables.
 //!
 //! Read the zstd rows with care. `zstd` allocates its compression and decompression contexts
 //! through its own allocator rather than Rust's, so those allocations are invisible here and the
@@ -18,18 +22,13 @@
 
 use std::hint::black_box;
 use std::num::NonZeroUsize;
-use std::time::Instant;
 
-use alloc_tracker::{Allocator, Operation, Session};
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
 use compressors::brotli::{self, WindowSize};
 use compressors::format::Format;
 use compressors::{CompressorBuilder, DecompressorBuilder, Level, Resources};
-use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-
-#[global_allocator]
-static ALLOCATOR: Allocator<std::alloc::System> = Allocator::system();
+use criterion::{BenchmarkId, Criterion, Throughput};
 
 /// Sizes chosen to bracket real traffic: a small API response, a page, and a large document.
 const SIZES: [usize; 3] = [1024, 64 * 1024, 1024 * 1024];
@@ -146,38 +145,95 @@ fn compress_brotli(window: WindowSize, input: &BytesView, resources: &Resources)
     compressors::compress(input.clone(), compressor).expect("compression succeeds")
 }
 
-/// Runs `body` under Criterion while attributing its allocations to `operation`.
-fn measured(bencher: &mut criterion::Bencher<'_>, operation: &Operation, mut body: impl FnMut()) {
-    bencher.iter_custom(|iterations| {
-        let start = Instant::now();
-        let _span = operation.measure_process().iterations(iterations);
-
-        for _ in 0..iterations {
-            body();
-        }
-
-        start.elapsed()
-    });
+struct Input {
+    format: Format,
+    bytes: BytesView,
+    resources: Resources,
 }
 
-fn compression(criterion: &mut Criterion, session: &Session) {
-    let mut group = criterion.benchmark_group("compressors_codec/compress");
+impl Input {
+    fn new(format: Format, size: usize) -> Self {
+        let memory = GlobalPool::new();
+        Self {
+            format,
+            bytes: view(&payload(size), &memory),
+            resources: Resources::new(memory),
+        }
+    }
+
+    fn warm_compression(&self, level: Option<Level>, chunk_size: Option<NonZeroUsize>) {
+        drop(compress(self.format, level, chunk_size, &self.bytes, &self.resources));
+    }
+
+    fn into_compressed(mut self) -> Self {
+        self.bytes = compress(self.format, None, None, &self.bytes, &self.resources);
+        drop(decompress(self.format, &self.bytes, &self.resources));
+        self
+    }
+}
+
+fn compression_input(format: Format, size: usize) -> Input {
+    let input = Input::new(format, size);
+    input.warm_compression(None, None);
+    input
+}
+
+fn decompression_input(format: Format, size: usize) -> Input {
+    Input::new(format, size).into_compressed()
+}
+
+#[metabench::benchmark(COMPRESS, "compressors_codec", "compress")]
+#[bench::brotli_1024(&compression_input(Format::Brotli, 1024))]
+#[bench::brotli_65536(&compression_input(Format::Brotli, 64 * 1024))]
+#[bench::brotli_1048576(&compression_input(Format::Brotli, 1024 * 1024))]
+#[bench::deflate_1024(&compression_input(Format::Deflate, 1024))]
+#[bench::deflate_65536(&compression_input(Format::Deflate, 64 * 1024))]
+#[bench::deflate_1048576(&compression_input(Format::Deflate, 1024 * 1024))]
+#[bench::gzip_1024(&compression_input(Format::Gzip, 1024))]
+#[bench::gzip_65536(&compression_input(Format::Gzip, 64 * 1024))]
+#[bench::gzip_1048576(&compression_input(Format::Gzip, 1024 * 1024))]
+#[bench::zlib_1024(&compression_input(Format::Zlib, 1024))]
+#[bench::zlib_65536(&compression_input(Format::Zlib, 64 * 1024))]
+#[bench::zlib_1048576(&compression_input(Format::Zlib, 1024 * 1024))]
+#[bench::zstd_1024(&compression_input(Format::Zstd, 1024))]
+#[bench::zstd_65536(&compression_input(Format::Zstd, 64 * 1024))]
+#[bench::zstd_1048576(&compression_input(Format::Zstd, 1024 * 1024))]
+fn compress_payload(input: &Input) {
+    black_box(compress(input.format, None, None, &input.bytes, &input.resources));
+}
+
+#[metabench::benchmark(DECOMPRESS, "compressors_codec", "decompress")]
+#[bench::brotli_1024(&decompression_input(Format::Brotli, 1024))]
+#[bench::brotli_65536(&decompression_input(Format::Brotli, 64 * 1024))]
+#[bench::brotli_1048576(&decompression_input(Format::Brotli, 1024 * 1024))]
+#[bench::deflate_1024(&decompression_input(Format::Deflate, 1024))]
+#[bench::deflate_65536(&decompression_input(Format::Deflate, 64 * 1024))]
+#[bench::deflate_1048576(&decompression_input(Format::Deflate, 1024 * 1024))]
+#[bench::gzip_1024(&decompression_input(Format::Gzip, 1024))]
+#[bench::gzip_65536(&decompression_input(Format::Gzip, 64 * 1024))]
+#[bench::gzip_1048576(&decompression_input(Format::Gzip, 1024 * 1024))]
+#[bench::zlib_1024(&decompression_input(Format::Zlib, 1024))]
+#[bench::zlib_65536(&decompression_input(Format::Zlib, 64 * 1024))]
+#[bench::zlib_1048576(&decompression_input(Format::Zlib, 1024 * 1024))]
+#[bench::zstd_1024(&decompression_input(Format::Zstd, 1024))]
+#[bench::zstd_65536(&decompression_input(Format::Zstd, 64 * 1024))]
+#[bench::zstd_1048576(&decompression_input(Format::Zstd, 1024 * 1024))]
+fn decompress_payload(input: &Input) {
+    black_box(decompress(input.format, &input.bytes, &input.resources));
+}
+
+fn compression(criterion: &mut Criterion) {
+    let mut group = criterion.benchmark_group(COMPRESS.to_string());
 
     for size in SIZES {
-        let bytes = payload(size);
         group.throughput(Throughput::Bytes(size as u64));
 
         for &format in Format::ALL {
-            let memory = GlobalPool::new();
-            let resources = Resources::new(memory.clone());
-            let input = view(&bytes, &memory);
-            let name = format!("{format:?}/{size}");
-            let operation = session.operation(format!("compress {name}"));
+            let input = compression_input(format, size);
+            let name = format!("{format:?}_{size}").to_lowercase();
 
-            group.bench_function(BenchmarkId::from_parameter(&name), |bencher| {
-                measured(bencher, &operation, || {
-                    black_box(compress(format, None, None, &input, &resources));
-                });
+            group.bench_function(name, |bencher| {
+                bencher.iter(|| compress_payload(&input));
             });
         }
     }
@@ -185,29 +241,62 @@ fn compression(criterion: &mut Criterion, session: &Session) {
     group.finish();
 }
 
-fn decompression(criterion: &mut Criterion, session: &Session) {
-    let mut group = criterion.benchmark_group("compressors_codec/decompress");
+fn decompression(criterion: &mut Criterion) {
+    let mut group = criterion.benchmark_group(DECOMPRESS.to_string());
 
     for size in SIZES {
-        let bytes = payload(size);
         group.throughput(Throughput::Bytes(size as u64));
 
         for &format in Format::ALL {
-            let memory = GlobalPool::new();
-            let resources = Resources::new(memory.clone());
-            let compressed = compress(format, None, None, &view(&bytes, &memory), &resources);
-            let name = format!("{format:?}/{size}");
-            let operation = session.operation(format!("decompress {name}"));
+            let input = decompression_input(format, size);
+            let name = format!("{format:?}_{size}").to_lowercase();
 
-            group.bench_function(BenchmarkId::from_parameter(&name), |bencher| {
-                measured(bencher, &operation, || {
-                    black_box(decompress(format, &compressed, &resources));
-                });
+            group.bench_function(name, |bencher| {
+                bencher.iter(|| decompress_payload(&input));
             });
         }
     }
 
     group.finish();
+}
+
+fn pooling_input(format: Format, pooled: bool) -> Input {
+    let mut input = Input::new(format, 4096);
+    if !pooled {
+        input.resources = input.resources.with_pool_capacity(0);
+    }
+    input.warm_compression(None, None);
+    input
+}
+
+#[metabench::benchmark(POOL_COMPRESS, "compressors_codec/pooling", "compress")]
+#[bench::brotli_fresh(&pooling_input(Format::Brotli, false))]
+#[bench::brotli_pooled(&pooling_input(Format::Brotli, true))]
+#[bench::deflate_fresh(&pooling_input(Format::Deflate, false))]
+#[bench::deflate_pooled(&pooling_input(Format::Deflate, true))]
+#[bench::gzip_fresh(&pooling_input(Format::Gzip, false))]
+#[bench::gzip_pooled(&pooling_input(Format::Gzip, true))]
+#[bench::zlib_fresh(&pooling_input(Format::Zlib, false))]
+#[bench::zlib_pooled(&pooling_input(Format::Zlib, true))]
+#[bench::zstd_fresh(&pooling_input(Format::Zstd, false))]
+#[bench::zstd_pooled(&pooling_input(Format::Zstd, true))]
+fn compress_pooled(input: &Input) {
+    black_box(compress(input.format, None, None, &input.bytes, &input.resources));
+}
+
+#[metabench::benchmark(POOL_DECOMPRESS, "compressors_codec/pooling", "decompress")]
+#[bench::brotli_fresh(&pooling_input(Format::Brotli, false).into_compressed())]
+#[bench::brotli_pooled(&pooling_input(Format::Brotli, true).into_compressed())]
+#[bench::deflate_fresh(&pooling_input(Format::Deflate, false).into_compressed())]
+#[bench::deflate_pooled(&pooling_input(Format::Deflate, true).into_compressed())]
+#[bench::gzip_fresh(&pooling_input(Format::Gzip, false).into_compressed())]
+#[bench::gzip_pooled(&pooling_input(Format::Gzip, true).into_compressed())]
+#[bench::zlib_fresh(&pooling_input(Format::Zlib, false).into_compressed())]
+#[bench::zlib_pooled(&pooling_input(Format::Zlib, true).into_compressed())]
+#[bench::zstd_fresh(&pooling_input(Format::Zstd, false).into_compressed())]
+#[bench::zstd_pooled(&pooling_input(Format::Zstd, true).into_compressed())]
+fn decompress_pooled(input: &Input) {
+    black_box(decompress(input.format, &input.bytes, &input.resources));
 }
 
 /// The headline claim for [`Resources`]: recycling engine state removes per-message setup.
@@ -218,39 +307,23 @@ fn decompression(criterion: &mut Criterion, session: &Session) {
 /// controls -- they should show no material penalty from holding `Resources`, not a speed-up.
 /// If a pooled row stops beating its unpooled counterpart, or stops allocating less, something has
 /// broken.
-fn pooling(criterion: &mut Criterion, session: &Session) {
-    let mut group = criterion.benchmark_group("compressors_codec/pooling");
-    let bytes = payload(4096);
-    group.throughput(Throughput::Bytes(bytes.len() as u64));
+fn pooling(criterion: &mut Criterion) {
+    let mut group = criterion.benchmark_group(POOL_COMPRESS.group_name());
+    group.throughput(Throughput::Bytes(4096));
 
     for &format in Format::ALL {
-        let memory = GlobalPool::new();
-        let input = view(&bytes, &memory);
-        let fresh = Resources::new(memory.clone()).with_pool_capacity(0);
-        let pooled = Resources::new(memory.clone());
-        let compressed = compress(format, None, None, &input, &fresh);
+        for (label, pooled) in [("fresh", false), ("pooled", true)] {
+            let input = pooling_input(format, pooled);
+            let name = format!("{format:?}_{label}").to_lowercase();
 
-        // Warm the pool so the measured iterations all hit it.
-        drop(compress(format, None, None, &input, &pooled));
-        drop(decompress(format, &compressed, &pooled));
-
-        for (label, resources) in [("fresh", &fresh), ("pooled", &pooled)] {
-            let name = format!("{format:?}/compress/{label}");
-            let operation = session.operation(format!("pool {name}"));
-
-            group.bench_function(BenchmarkId::from_parameter(&name), |bencher| {
-                measured(bencher, &operation, || {
-                    black_box(compress(format, None, None, &input, resources));
-                });
+            group.bench_function(BenchmarkId::new(POOL_COMPRESS.benchmark_name(), &name), |bencher| {
+                bencher.iter(|| compress_pooled(&input));
             });
 
-            let name = format!("{format:?}/decompress/{label}");
-            let operation = session.operation(format!("pool {name}"));
+            let compressed = input.into_compressed();
 
-            group.bench_function(BenchmarkId::from_parameter(&name), |bencher| {
-                measured(bencher, &operation, || {
-                    black_box(decompress(format, &compressed, resources));
-                });
+            group.bench_function(BenchmarkId::new(POOL_DECOMPRESS.benchmark_name(), &name), |bencher| {
+                bencher.iter(|| decompress_pooled(&compressed));
             });
         }
     }
@@ -258,46 +331,70 @@ fn pooling(criterion: &mut Criterion, session: &Session) {
     group.finish();
 }
 
+fn segmentation_input(segment: Option<usize>) -> Input {
+    let memory = GlobalPool::new();
+    let bytes = payload(64 * 1024);
+    let input = Input {
+        format: REPRESENTATIVE_FORMAT,
+        bytes: match segment {
+            Some(segment) => fragmented(&bytes, segment, &memory),
+            None => view(&bytes, &memory),
+        },
+        resources: Resources::new(memory),
+    };
+    input.warm_compression(None, None);
+    input
+}
+
+#[metabench::benchmark(SEGMENTATION, "compressors_codec", "segmentation")]
+#[bench::segments_64(&segmentation_input(Some(64)))]
+#[bench::segments_1024(&segmentation_input(Some(1024)))]
+#[bench::segments_16384(&segmentation_input(Some(16 * 1024)))]
+#[bench::contiguous(&segmentation_input(None))]
+fn compress_segmented(input: &Input) {
+    black_box(compress(input.format, None, None, &input.bytes, &input.resources));
+}
+
 /// Input arrives as a chain of spans, so the cost of that chain is the crate's reason to exist.
 ///
 /// A regression here -- for instance flattening the view before handing it to the engine -- would
 /// show up as a jump in allocations for the fragmented cases.
-fn segmentation(criterion: &mut Criterion, session: &Session) {
-    let mut group = criterion.benchmark_group("compressors_codec/segmentation");
-    let bytes = payload(64 * 1024);
-    group.throughput(Throughput::Bytes(bytes.len() as u64));
+fn segmentation(criterion: &mut Criterion) {
+    let mut group = criterion.benchmark_group(SEGMENTATION.to_string());
+    group.throughput(Throughput::Bytes(64 * 1024));
 
     // Deflate is the representative backend for both this group and `chunk_size`: it is the most
     // widely deployed of the five and its engine takes the uninitialized output slice directly, so
     // what these groups measure is this crate's own segment handling rather than a backend quirk.
     // Sweeping every format here would multiply runtime without changing the conclusion.
-    let format = REPRESENTATIVE_FORMAT;
-    let memory = GlobalPool::new();
-    let resources = Resources::new(memory.clone());
-
+    //
     // 64 B is the pathological case -- a view shredded far below any real segment size -- while
     // 1 KiB and 16 KiB bracket what a real chained view looks like. Contiguous is the control.
-    for segment in [64_usize, 1024, 16 * 1024] {
-        let input = fragmented(&bytes, segment, &memory);
-        let name = format!("{segment}B segments");
-        let operation = session.operation(format!("segment {name}"));
+    for segment in [Some(64), Some(1024), Some(16 * 1024), None] {
+        let input = segmentation_input(segment);
+        let name = segment.map_or_else(|| "contiguous".to_owned(), |segment| format!("segments_{segment}"));
 
-        group.bench_function(BenchmarkId::from_parameter(&name), |bencher| {
-            measured(bencher, &operation, || {
-                black_box(compress(format, None, None, &input, &resources));
-            });
+        group.bench_function(name, |bencher| {
+            bencher.iter(|| compress_segmented(&input));
         });
     }
 
-    let contiguous = view(&bytes, &memory);
-    let operation = session.operation("segment contiguous");
-    group.bench_function(BenchmarkId::from_parameter("contiguous"), |bencher| {
-        measured(bencher, &operation, || {
-            black_box(compress(format, None, None, &contiguous, &resources));
-        });
-    });
-
     group.finish();
+}
+
+fn chunk_input(size: usize) -> Input {
+    let input = Input::new(REPRESENTATIVE_FORMAT, 256 * 1024);
+    input.warm_compression(None, Some(chunk(size)));
+    input
+}
+
+#[metabench::benchmark(CHUNK_SIZE, "compressors_codec", "chunk_size")]
+#[bench::chunks_1024(&chunk_input(1024), 1024)]
+#[bench::chunks_8192(&chunk_input(8 * 1024), 8 * 1024)]
+#[bench::chunks_65536(&chunk_input(64 * 1024), 64 * 1024)]
+#[bench::chunks_524288(&chunk_input(512 * 1024), 512 * 1024)]
+fn compress_chunked(input: &Input, size: usize) {
+    black_box(compress(input.format, None, Some(chunk(size)), &input.bytes, &input.resources));
 }
 
 /// The output chunk size trades per-call overhead against buffer churn.
@@ -306,56 +403,98 @@ fn segmentation(criterion: &mut Criterion, session: &Session) {
 /// than every engine. That is enough to settle a shared default -- the trade-off is a property of
 /// how often this crate hands the engine a slice, not of what the engine does with it -- but a
 /// claim about brotli or zstd specifically would need its own measurement.
-fn chunk_size(criterion: &mut Criterion, session: &Session) {
-    let mut group = criterion.benchmark_group("compressors_codec/chunk_size");
-    let bytes = payload(256 * 1024);
-    group.throughput(Throughput::Bytes(bytes.len() as u64));
-
-    let format = REPRESENTATIVE_FORMAT;
-    let memory = GlobalPool::new();
-    let resources = Resources::new(memory.clone());
-    let input = view(&bytes, &memory);
+fn chunk_size(criterion: &mut Criterion) {
+    let mut group = criterion.benchmark_group(CHUNK_SIZE.to_string());
+    group.throughput(Throughput::Bytes(256 * 1024));
 
     // 64 KiB is the implementation default; the others bracket the transition either side of it,
     // so the measurements show where the plateau starts rather than only that the default is on it.
     for size in [1024_usize, 8 * 1024, 64 * 1024, 512 * 1024] {
-        let name = format!("{size}B chunks");
-        let operation = session.operation(format!("chunk {name}"));
+        let input = chunk_input(size);
 
-        group.bench_function(BenchmarkId::from_parameter(&name), |bencher| {
-            measured(bencher, &operation, || {
-                black_box(compress(format, None, Some(chunk(size)), &input, &resources));
-            });
+        group.bench_function(format!("chunks_{size}"), |bencher| {
+            bencher.iter(|| compress_chunked(&input, size));
         });
     }
 
     group.finish();
 }
 
+fn level_input(format: Format, level: Level) -> Input {
+    let input = Input::new(format, 64 * 1024);
+    input.warm_compression(Some(level), None);
+    input
+}
+
+#[metabench::benchmark(LEVELS, "compressors_codec", "levels")]
+#[bench::brotli_1(&level_input(Format::Brotli, Level::FAST), Level::FAST)]
+#[bench::brotli_6(&level_input(Format::Brotli, Level::DEFAULT), Level::DEFAULT)]
+#[bench::brotli_9(&level_input(Format::Brotli, Level::HIGH), Level::HIGH)]
+#[bench::deflate_1(&level_input(Format::Deflate, Level::FAST), Level::FAST)]
+#[bench::deflate_6(&level_input(Format::Deflate, Level::DEFAULT), Level::DEFAULT)]
+#[bench::deflate_9(&level_input(Format::Deflate, Level::HIGH), Level::HIGH)]
+#[bench::gzip_1(&level_input(Format::Gzip, Level::FAST), Level::FAST)]
+#[bench::gzip_6(&level_input(Format::Gzip, Level::DEFAULT), Level::DEFAULT)]
+#[bench::gzip_9(&level_input(Format::Gzip, Level::HIGH), Level::HIGH)]
+#[bench::zlib_1(&level_input(Format::Zlib, Level::FAST), Level::FAST)]
+#[bench::zlib_6(&level_input(Format::Zlib, Level::DEFAULT), Level::DEFAULT)]
+#[bench::zlib_9(&level_input(Format::Zlib, Level::HIGH), Level::HIGH)]
+#[bench::zstd_1(&level_input(Format::Zstd, Level::FAST), Level::FAST)]
+#[bench::zstd_6(&level_input(Format::Zstd, Level::DEFAULT), Level::DEFAULT)]
+#[bench::zstd_9(&level_input(Format::Zstd, Level::HIGH), Level::HIGH)]
+fn compress_at_level(input: &Input, level: Level) {
+    black_box(compress(input.format, Some(level), None, &input.bytes, &input.resources));
+}
+
 /// Compression levels, so the portable scale's cost across formats is visible rather than assumed.
-fn levels(criterion: &mut Criterion, session: &Session) {
-    let mut group = criterion.benchmark_group("compressors_codec/levels");
-    let bytes = payload(64 * 1024);
-    group.throughput(Throughput::Bytes(bytes.len() as u64));
+fn levels(criterion: &mut Criterion) {
+    let mut group = criterion.benchmark_group(LEVELS.to_string());
+    group.throughput(Throughput::Bytes(64 * 1024));
 
     for &format in Format::ALL {
-        let memory = GlobalPool::new();
-        let resources = Resources::new(memory.clone());
-        let input = view(&bytes, &memory);
-
         for level in [Level::FAST, Level::DEFAULT, Level::HIGH] {
-            let name = format!("{format:?}/{}", level.get());
-            let operation = session.operation(format!("level {name}"));
+            let input = level_input(format, level);
+            let name = format!("{format:?}_{}", level.get()).to_lowercase();
 
-            group.bench_function(BenchmarkId::from_parameter(&name), |bencher| {
-                measured(bencher, &operation, || {
-                    black_box(compress(format, Some(level), None, &input, &resources));
-                });
+            group.bench_function(name, |bencher| {
+                bencher.iter(|| compress_at_level(&input, level));
             });
         }
     }
 
     group.finish();
+}
+
+fn window_input(exponent: u8) -> (Input, WindowSize) {
+    let input = Input::new(Format::Brotli, 1024);
+    let window = WindowSize::new(exponent).expect("benchmark window exponents are in the supported range");
+    drop(compress_brotli(window, &input.bytes, &input.resources));
+    (input, window)
+}
+
+fn window_compressed_input(exponent: u8) -> Input {
+    let (mut input, window) = window_input(exponent);
+    input.bytes = compress_brotli(window, &input.bytes, &input.resources);
+    drop(decompress(input.format, &input.bytes, &input.resources));
+    input
+}
+
+#[metabench::benchmark(WINDOW_COMPRESS, "compressors_codec/brotli_window", "compress")]
+#[bench::window_10(&window_input(10))]
+#[bench::window_16(&window_input(16))]
+#[bench::window_18(&window_input(18))]
+#[bench::window_22(&window_input(22))]
+fn compress_at_window((input, window): &(Input, WindowSize)) {
+    black_box(compress_brotli(*window, &input.bytes, &input.resources));
+}
+
+#[metabench::benchmark(WINDOW_DECOMPRESS, "compressors_codec/brotli_window", "decompress")]
+#[bench::window_10(&window_compressed_input(10))]
+#[bench::window_16(&window_compressed_input(16))]
+#[bench::window_18(&window_compressed_input(18))]
+#[bench::window_22(&window_compressed_input(22))]
+fn decompress_at_window(input: &Input) {
+    black_box(decompress(input.format, &input.bytes, &input.resources));
 }
 
 /// Guards the counter-intuitive shape of brotli's window setting.
@@ -366,36 +505,24 @@ fn levels(criterion: &mut Criterion, session: &Session) {
 /// small window costs memory and speed at once. The exponents below bracket that step so a change
 /// in it is visible rather than silent. The cause lies inside the brotli compressor, so treat these
 /// figures as the observed shape rather than as a rule about window sizes in general.
-fn brotli_window(criterion: &mut Criterion, session: &Session) {
-    let mut group = criterion.benchmark_group("compressors_codec/brotli_window");
-    let bytes = payload(1024);
-    group.throughput(Throughput::Bytes(bytes.len() as u64));
-
-    let memory = GlobalPool::new();
-
-    let resources = Resources::new(memory.clone());
-    let input = view(&bytes, &memory);
+fn brotli_window(criterion: &mut Criterion) {
+    let mut group = criterion.benchmark_group(WINDOW_COMPRESS.group_name());
+    group.throughput(Throughput::Bytes(1024));
 
     for exponent in [10_u8, 16, 18, 22] {
-        let window = WindowSize::new(exponent).expect("exponents are in range");
-        let name = format!("2^{exponent}");
-        let operation = session.operation(format!("brotli window {name}"));
+        let input = window_input(exponent);
+        let name = format!("window_{exponent}");
 
-        group.bench_function(BenchmarkId::from_parameter(&name), |bencher| {
-            measured(bencher, &operation, || {
-                black_box(compress_brotli(window, &input, &resources));
-            });
+        group.bench_function(BenchmarkId::new(WINDOW_COMPRESS.benchmark_name(), &name), |bencher| {
+            bencher.iter(|| compress_at_window(&input));
         });
 
         // The decompressor side matters independently: the window is recorded in the stream, so a
         // reader inherits whatever the writer chose.
-        let compressed = compress_brotli(window, &input, &resources);
-        let operation = session.operation(format!("brotli window {name} decompress"));
+        let compressed = window_compressed_input(exponent);
 
-        group.bench_function(BenchmarkId::from_parameter(format!("{name}/decompress")), |bencher| {
-            measured(bencher, &operation, || {
-                black_box(decompress(Format::Brotli, &compressed, &resources));
-            });
+        group.bench_function(BenchmarkId::new(WINDOW_DECOMPRESS.benchmark_name(), &name), |bencher| {
+            bencher.iter(|| decompress_at_window(&compressed));
         });
     }
 
@@ -477,20 +604,29 @@ fn zstd_footprint() {
 }
 
 fn benches(criterion: &mut Criterion) {
-    // Dropping the session prints the per-iteration allocation table.
-    let session = Session::new();
-
-    compression(criterion, &session);
-    decompression(criterion, &session);
-    pooling(criterion, &session);
-    segmentation(criterion, &session);
-    chunk_size(criterion, &session);
-    levels(criterion, &session);
-    brotli_window(criterion, &session);
+    compression(criterion);
+    decompression(criterion);
+    pooling(criterion);
+    segmentation(criterion);
+    chunk_size(criterion);
+    levels(criterion);
+    brotli_window(criterion);
 
     ratios();
     zstd_footprint();
 }
 
-criterion_group!(codec, benches);
-criterion_main!(codec);
+metabench::main!(
+    criterion = benches,
+    benchmarks = [
+        COMPRESS,
+        DECOMPRESS,
+        POOL_COMPRESS,
+        POOL_DECOMPRESS,
+        SEGMENTATION,
+        CHUNK_SIZE,
+        LEVELS,
+        WINDOW_COMPRESS,
+        WINDOW_DECOMPRESS,
+    ],
+);

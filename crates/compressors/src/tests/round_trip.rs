@@ -370,7 +370,9 @@ fn the_crate_level_decompress_applies_the_default_ceiling_unless_the_caller_deci
     assert_eq!(decompress_with(raised).unwrap().len(), over_the_cap.len());
 
     // Removed explicitly: also the caller's decision, so nothing is added on top.
-    assert_eq!(decompress_with(DecompressorLimits::UNLIMITED).unwrap().len(), over_the_cap.len());
+    for removed in [DecompressorLimits::UNLIMITED, DecompressorLimits::new().max_output_len(None)] {
+        assert_eq!(decompress_with(removed).unwrap().len(), over_the_cap.len());
+    }
 
     // Lowered explicitly: still the caller's decision, in the other direction.
     let lowered = DecompressorLimits::new().max_output_len(NonZeroU64::new(1024).unwrap());
@@ -402,7 +404,9 @@ fn the_crate_level_decompress_applies_the_default_stream_cap_unless_the_caller_d
     assert!(error.is_limit_exceeded(), "got {error}");
 
     // Removed explicitly: the caller's decision, so nothing is added on top.
-    assert!(decompress_with(DecompressorLimits::UNLIMITED).unwrap().is_empty());
+    for removed in [DecompressorLimits::UNLIMITED, DecompressorLimits::new().max_streams(None)] {
+        assert!(decompress_with(removed).unwrap().is_empty());
+    }
 
     // Raised explicitly: also the caller's decision.
     let raised = DecompressorLimits::new().max_streams(NonZeroU64::new(DEFAULT_MAX_STREAMS * 2).unwrap());
@@ -435,5 +439,7 @@ fn the_crate_level_decompress_applies_the_default_ceiling_to_runtime_formats_too
     let error = decompress_with(DecompressorLimits::new()).unwrap_err();
     assert!(error.is_limit_exceeded(), "got {error}");
 
-    assert_eq!(decompress_with(DecompressorLimits::UNLIMITED).unwrap().len(), over_the_cap.len());
+    for removed in [DecompressorLimits::UNLIMITED, DecompressorLimits::new().max_output_len(None)] {
+        assert_eq!(decompress_with(removed).unwrap().len(), over_the_cap.len());
+    }
 }

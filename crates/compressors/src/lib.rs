@@ -347,7 +347,8 @@ pub fn compress(input: BytesView, compressor: impl Compression<Mode = Compress>)
 /// |---|---|
 /// | nothing, or [`DecompressorLimits::new`] | 64 MiB output, 1024 streams |
 /// | [`max_output_len`][DecompressorLimits::max_output_len] or [`max_streams`][DecompressorLimits::max_streams] | the caller's value |
-/// | [`DecompressorLimits::UNLIMITED`] | none -- removing the bound is a decision too |
+/// | `max_output_len(None)` or `max_streams(None)` | none for that bound |
+/// | [`DecompressorLimits::UNLIMITED`] | none for either bound |
 pub fn decompress(input: BytesView, decompressor: impl Compression<Mode = Decompress>) -> Result<BytesView> {
     process(decompressor, input)
 }

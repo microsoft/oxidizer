@@ -1155,10 +1155,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "command-group"
+version = "5.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a68fa787550392a9d58f44c21a3022cfb3ea3e2458b7f85d3b399d0ceeccf409"
+dependencies = [
+ "nix 0.27.1",
+ "winapi",
+]
+
+[[package]]
 name = "compressors"
 version = "0.1.0"
 dependencies = [
- "alloc_tracker",
  "bolero",
  "brotli",
  "bytesbuf",
@@ -1167,6 +1176,7 @@ dependencies = [
  "flate2",
  "futures",
  "futures-core",
+ "metabench",
  "mutants",
  "pin-project-lite",
  "recoverable",
@@ -1175,16 +1185,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "zstd-safe",
-]
-
-[[package]]
-name = "command-group"
-version = "5.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a68fa787550392a9d58f44c21a3022cfb3ea3e2458b7f85d3b399d0ceeccf409"
-dependencies = [
- "nix 0.27.1",
- "winapi",
 ]
 
 [[package]]

@@ -71,7 +71,6 @@ zstd-safe = { workspace = true, features = ["std"], optional = true }
 cfg_aliases = { workspace = true }
 
 [dev-dependencies]
-alloc_tracker = { workspace = true }
 bolero = { workspace = true, features = ["std"] }
 brotli = { workspace = true, features = ["std"] }
 bytesbuf = { workspace = true, features = ["std", "test-util"] }
@@ -79,6 +78,7 @@ criterion = { workspace = true }
 flate2 = { workspace = true, features = ["zlib-rs"] }
 futures = { workspace = true, features = ["executor"] }
 futures-core = { workspace = true }
+metabench = { workspace = true }
 mutants = { workspace = true }
 pin-project-lite = { workspace = true }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["std", "test-utils"] }

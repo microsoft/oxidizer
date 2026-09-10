@@ -107,6 +107,9 @@ impl<T> Limit<T> {
 /// `decompress_with_limits`, and the same pair on [`Format`][crate::format::Format] -- add a 64 MiB output
 /// cap and a 1024 stream cap to whichever of those bounds the caller left unset.
 ///
+/// Each setter accepts a non-zero bound or `Some(bound)`. Passing `None` explicitly removes that
+/// bound, including any format default or buffering fallback; it does not leave the bound unset.
+///
 /// # Security
 ///
 /// A ratio bound is a coarse backstop, not real protection: in a format with no structural
@@ -131,7 +134,10 @@ impl<T> Limit<T> {
 ///     .max_ratio(NonZeroU32::new(50).unwrap())
 ///     .max_output_len(NonZeroU64::new(1024 * 1024).unwrap())
 ///     .max_streams(NonZeroU64::new(16).unwrap());
-/// # let _ = (untrusted, strict);
+///
+/// // Remove only the ratio guard, keeping the output and stream caps.
+/// let no_ratio = strict.max_ratio(None);
+/// # let _ = (untrusted, no_ratio);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct DecompressorLimits {
@@ -172,16 +178,11 @@ impl DecompressorLimits {
     ///
     /// The ratio is only enforced once cumulative output exceeds 32 KiB, so small streams are never
     /// rejected for the fixed overhead of their container.
+    ///
+    /// Pass `None` to remove the ratio bound, overriding the format's default.
     #[must_use]
-    pub const fn max_ratio(mut self, ratio: NonZeroU32) -> Self {
-        self.ratio = Limit::Value(ratio.get());
-        self
-    }
-
-    /// Removes the ratio bound, overriding the format's default.
-    #[must_use]
-    pub const fn unbounded_ratio(mut self) -> Self {
-        self.ratio = Limit::Unlimited;
+    pub fn max_ratio(mut self, ratio: impl Into<Option<NonZeroU32>>) -> Self {
+        self.ratio = ratio.into().map_or(Limit::Unlimited, |ratio| Limit::Value(ratio.get()));
         self
     }
 
@@ -190,16 +191,12 @@ impl DecompressorLimits {
     /// This is the bound that actually protects a caller which buffers the output. It takes a
     /// [`NonZeroU64`] for the same reason the ratio and stream bounds take non-zero types: a bound
     /// of zero rejects every stream, which is a way of not decompressing rather than a limit.
+    ///
+    /// Pass `None` to remove the total size bound, including the buffering conveniences' default cap.
+    /// Only remove this bound when the caller can safely retain the entire decompressed output.
     #[must_use]
-    pub const fn max_output_len(mut self, bytes: NonZeroU64) -> Self {
-        self.output_len = Limit::Value(bytes.get());
-        self
-    }
-
-    /// Removes the total size bound, overriding the format's default.
-    #[must_use]
-    pub const fn unbounded_output_len(mut self) -> Self {
-        self.output_len = Limit::Unlimited;
+    pub fn max_output_len(mut self, bytes: impl Into<Option<NonZeroU64>>) -> Self {
+        self.output_len = bytes.into().map_or(Limit::Unlimited, |bytes| Limit::Value(bytes.get()));
         self
     }
 
@@ -211,16 +208,11 @@ impl DecompressorLimits {
     ///
     /// This limits work that produces little or no output, such as a file containing millions of
     /// empty gzip members.
+    ///
+    /// Pass `None` to remove the stream-count bound, including the buffering conveniences' default cap.
     #[must_use]
-    pub const fn max_streams(mut self, streams: NonZeroU64) -> Self {
-        self.streams = Limit::Value(streams.get());
-        self
-    }
-
-    /// Removes the stream-count bound, overriding the format's default.
-    #[must_use]
-    pub const fn unbounded_streams(mut self) -> Self {
-        self.streams = Limit::Unlimited;
+    pub fn max_streams(mut self, streams: impl Into<Option<NonZeroU64>>) -> Self {
+        self.streams = streams.into().map_or(Limit::Unlimited, |streams| Limit::Value(streams.get()));
         self
     }
 
@@ -417,8 +409,8 @@ mod tests {
     #[test]
     fn buffering_respects_an_explicit_removal() {
         let removed = DecompressorLimits::new()
-            .unbounded_output_len()
-            .unbounded_streams()
+            .max_output_len(None)
+            .max_streams(None)
             .for_buffered_output();
 
         assert_eq!(removed.resolve(ALL_BOUNDS).output_len, None, "opting out is the caller's decision");
@@ -476,20 +468,38 @@ mod tests {
 
     #[test]
     fn each_bound_can_be_removed_independently() {
-        let no_ratio = DecompressorLimits::new().unbounded_ratio().resolve(ALL_BOUNDS);
+        let no_ratio = DecompressorLimits::new().max_ratio(None).resolve(ALL_BOUNDS);
         assert_eq!(no_ratio.ratio, None);
         assert_eq!(no_ratio.output_len, ALL_BOUNDS.output_len, "the others are untouched");
         assert_eq!(no_ratio.streams, ALL_BOUNDS.streams, "the others are untouched");
 
-        let no_len = DecompressorLimits::new().unbounded_output_len().resolve(ALL_BOUNDS);
+        let no_len = DecompressorLimits::new().max_output_len(None).resolve(ALL_BOUNDS);
         assert_eq!(no_len.ratio, ALL_BOUNDS.ratio, "the others are untouched");
         assert_eq!(no_len.output_len, None);
         assert_eq!(no_len.streams, ALL_BOUNDS.streams, "the others are untouched");
 
-        let no_streams = DecompressorLimits::new().unbounded_streams().resolve(ALL_BOUNDS);
+        let no_streams = DecompressorLimits::new().max_streams(None).resolve(ALL_BOUNDS);
         assert_eq!(no_streams.ratio, ALL_BOUNDS.ratio, "the others are untouched");
         assert_eq!(no_streams.output_len, ALL_BOUNDS.output_len, "the others are untouched");
         assert_eq!(no_streams.streams, None);
+    }
+
+    #[test]
+    fn a_later_call_replaces_an_earlier_override() {
+        let bounded = DecompressorLimits::new()
+            .max_ratio(ratio(7))
+            .max_output_len(NonZeroU64::new(99).unwrap())
+            .max_streams(NonZeroU64::new(3).unwrap());
+        let unlimited = bounded.max_ratio(None).max_output_len(None).max_streams(None);
+
+        assert_eq!(unlimited.resolve(ALL_BOUNDS), FormatLimits::new(None, None, None));
+
+        let restored = unlimited
+            .max_ratio(Some(ratio(11)))
+            .max_output_len(NonZeroU64::new(42))
+            .max_streams(NonZeroU64::new(5));
+
+        assert_eq!(restored.resolve(ALL_BOUNDS), FormatLimits::new(Some(11), Some(42), Some(5)));
     }
 
     #[test]

@@ -81,8 +81,10 @@ chunk however long the stream is; a consumer that accumulates retains everything
 | `<format>::decompress` and `decompress_with_limits`, and the same pair on `Format` | Yours, else 64 MiB output and 1024 streams | Buffers the whole result |
 
 The defaults are **fallbacks, not overrides**: they fill only bounds left unset.
-An explicit value wins, and so does an explicit
-[`DecompressorLimits::UNLIMITED`] -- removing a bound is a decision too.
+Each limit setter accepts a non-zero value or `Some(value)` to set a bound, and
+`None` to remove that bound, including its buffering fallback.
+[`DecompressorLimits::UNLIMITED`] removes every bound -- removing a bound is a
+decision too, not a request to restore its default.
 
 The engine, not the caller, applies them. Every `pull` states whether its output is
 being streamed or accumulated, and the pump narrows the slice it offers the engine
