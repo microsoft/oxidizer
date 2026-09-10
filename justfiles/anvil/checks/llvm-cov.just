@@ -11,8 +11,7 @@
 # `#[cfg_attr(coverage_nightly, coverage(off))]` exclusions when it
 # instruments on nightly. On stable those exclusions are inert and
 # untestable code (process-shelling error paths, script-only crates,
-# etc.) wrongly counts against coverage. This matches the repo's own
-# `coverage-measure` recipe, which also runs on nightly.
+# etc.) wrongly counts against coverage.
 
 # Measure test coverage and enforce the coverage gate.
 [script("pwsh", "-NoProfile")]
@@ -97,6 +96,71 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs anvil-impact
     # The *report* output directory (target/coverage/) is something we
     # choose and must exist before --output-path runs.
     [System.IO.Directory]::CreateDirectory('target/coverage') | Out-Null
+    function Invoke-AnvilLcovReport {
+        param([Parameter(Mandatory)][string] $OutputPath)
+
+        # Capture cargo-llvm-cov's diagnostic because it is the only place its
+        # private object discovery result is exposed. Keep displaying it so a
+        # non-retriable failure has the same evidence as a direct invocation.
+        $reportOutput = @()
+        $reportExitCode = 1
+        & cargo '+{{ rust_nightly }}' llvm-cov report --lcov --output-path $OutputPath 2>&1 |
+            Tee-Object -Variable reportOutput |
+            ForEach-Object { Write-Host $_.ToString() }
+        $reportExitCode = $LASTEXITCODE
+        if ($reportExitCode -eq 0) { return 0 }
+
+        $reportText = ($reportOutput | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+        if (-not $IsWindows -or $reportText -notmatch '\(os error 206\)') {
+            return $reportExitCode
+        }
+
+        # Best-effort bridge until cargo-llvm-cov uses response files itself.
+        # Its process diagnostic is shell-shaped text rather than a stable API,
+        # so fail closed if the expected llvm-cov export form changes.
+        $failedProcess = [regex]::Match(
+            $reportText,
+            '(?s)could not execute process `(?<command>.*?)` \(never executed\).*?\(os error 206\)'
+        )
+        if (-not $failedProcess.Success) {
+            Write-Warning 'anvil-llvm-cov: could not parse the Windows error 206 process diagnostic'
+            return $reportExitCode
+        }
+        $command = [regex]::Match(
+            $failedProcess.Groups['command'].Value,
+            '(?s)^(?:"(?<quoted>[^"]+)"|(?<bare>\S+))\s+export\s+(?<arguments>.*)$'
+        )
+        if (-not $command.Success) {
+            Write-Warning 'anvil-llvm-cov: the failed process was not an llvm-cov export command'
+            return $reportExitCode
+        }
+        $llvmCov = if ($command.Groups['quoted'].Success) {
+            $command.Groups['quoted'].Value
+        } else {
+            $command.Groups['bare'].Value
+        }
+        if ([System.IO.Path]::GetFileNameWithoutExtension($llvmCov) -ne 'llvm-cov') {
+            Write-Warning 'anvil-llvm-cov: the failed export executable was not named llvm-cov'
+            return $reportExitCode
+        }
+        $responsePath = [System.IO.Path]::GetFullPath("$OutputPath.llvm-cov.rsp")
+        try {
+            [System.IO.File]::WriteAllText(
+                $responsePath,
+                $command.Groups['arguments'].Value,
+                [System.Text.UTF8Encoding]::new($false)
+            )
+            Write-Host 'anvil-llvm-cov: retrying Windows error 206 with an LLVM response file'
+            & $llvmCov export "@$responsePath" > $OutputPath
+            $retryExitCode = $LASTEXITCODE
+            if ($retryExitCode -ne 0) {
+                Remove-Item -LiteralPath $OutputPath -Force -ErrorAction SilentlyContinue
+            }
+            return $retryExitCode
+        } finally {
+            Remove-Item -LiteralPath $responsePath -Force -ErrorAction SilentlyContinue
+        }
+    }
     # Instrument and run tests once per feature configuration, each as a
     # SELF-CONTAINED llvm-cov run that exports only its own config's
     # objects. Dual config (--all-features + --no-default-features) catches
@@ -105,15 +169,15 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs anvil-impact
     #
     # Crucially this does NOT merge both configs' objects into one report.
     # A single `llvm-cov report` over the union shells one `--object=` per
-    # test binary and, on a large workspace, overflows the Windows
-    # CreateProcess command-line limit (os error 206, "filename or extension
-    # is too long"). Each per-config report references only ~half the
-    # objects and stays under the limit. The two configs are reconciled
-    # *downstream* instead of via a merged report:
+    # test binary and reaches the Windows CreateProcess command-line limit
+    # sooner. A sufficiently large single config can still overflow, so the
+    # report helper retries that specific failure through a response file.
+    # The two configs are reconciled *downstream* instead of via a merged
+    # report:
     #   * cargo-coverage-gate merges the two lcov files at the line level
     #     (per-line counts summed) -- this is the gate;
     #   * Codecov ingests both lcov files (it coalesces uploads);
-    #   * ADO's PublishCodeCoverageResults coalesces both cobertura files.
+    #   * ADO's PublishCodeCoverageResults coalesces both lcov files.
     # This also avoids needing a platform-specific lcov merger (`lcov -a`
     # is Linux-only). HTML output is dropped -- it had no cloud-workflow
     # consumer and would reintroduce the overflowing union report; run
@@ -131,13 +195,11 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs anvil-impact
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         & cargo '+{{ rust_nightly }}' llvm-cov nextest @pkg $cfg.flag --locked --no-report
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        # lcov feeds the gate + Codecov; cobertura feeds ADO's
-        # PublishCodeCoverageResults@2. Both reports are scoped to THIS
-        # config's objects, so neither overflows the Windows cmdline limit.
-        cargo '+{{ rust_nightly }}' llvm-cov report --lcov      --output-path "target/coverage/lcov-$($cfg.name).info"
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        cargo '+{{ rust_nightly }}' llvm-cov report --cobertura --output-path "target/coverage/cobertura-$($cfg.name).xml"
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        # The same lcov report feeds the gate, Codecov, and ADO. On Windows,
+        # retry only CreateProcess error 206 through llvm-cov's response-file
+        # support; all other cargo-llvm-cov failures propagate unchanged.
+        $reportExitCode = Invoke-AnvilLcovReport "target/coverage/lcov-$($cfg.name).info"
+        if ($reportExitCode -ne 0) { exit $reportExitCode }
     }
     # Local coverage gate: cargo-coverage-gate compares per-package line
     # coverage against per-package thresholds carried in Cargo.toml

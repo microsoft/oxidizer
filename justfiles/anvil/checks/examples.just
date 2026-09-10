@@ -8,14 +8,121 @@
 
 # Affected tier.
 
-# Build all workspace examples.
+# Build examples, or run selected examples locally with `--run`.
+[arg("run", long, value="true")]
+[arg("package", long, pattern='(?:[A-Za-z0-9_.-]+)?')]
+[arg("example", long, pattern='(?:[A-Za-z0-9_.-]+)?')]
+[arg("timeout", long, pattern='[1-9][0-9]{0,3}')]
 [script("pwsh", "-NoProfile")]
-anvil-examples: anvil-examples-validate-prereqs anvil-impact
+anvil-examples run="false" package="" example="" timeout="30": anvil-examples-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
+    $run = [bool]::Parse('{{run}}')
+    $package = '{{package}}'
+    $example = '{{example}}'
+    $timeout = [int]'{{timeout}}'
+    if ($timeout -gt 3600) { Write-Error 'anvil-examples: --timeout must not exceed 3600 seconds'; exit 2 }
+    if ($example -and -not $package) {
+        Write-Error 'anvil-examples: --example requires --package to avoid workspace ambiguity'
+        exit 2
+    }
     $include = (& "{{ just_executable() }}" _anvil-impact-include affected)
-    if ($include -eq '--skip') { Write-Host 'anvil-examples: no affected packages; skipping'; exit 0 }
-    & cargo {{_anvil_stable_toolchain_args}} build @(if ($include) { -split $include } else { '--workspace' }) --examples --all-features --locked
+    if (-not $package -and $include -eq '--skip') { Write-Host 'anvil-examples: no affected packages; skipping'; exit 0 }
+    $pkgArgs = @(if ($package) { '--package'; $package } elseif ($include) { -split $include } else { '--workspace' })
+    $exampleArgs = @(if ($example) { '--example'; $example } else { '--examples' })
+    $stableArgs = {{_anvil_stable_toolchain_args}}
+    & cargo @stableArgs build @pkgArgs @exampleArgs --all-features --locked
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    if (-not $run) { exit 0 }
+
+    $metadataJson = & cargo @stableArgs metadata --no-deps --format-version 1
+    if ($LASTEXITCODE -ne 0) { Write-Error 'anvil-examples: cargo metadata failed'; exit $LASTEXITCODE }
+    try {
+        $meta = $metadataJson | ConvertFrom-Json
+    } catch {
+        Write-Error "anvil-examples: could not parse cargo metadata output: $_"
+        exit 1
+    }
+    $selectedPackages = if ($package) {
+        @($package)
+    } elseif ($include -and $include -ne '--workspace') {
+        $names = [System.Collections.Generic.List[string]]::new()
+        $parts = @(-split $include)
+        for ($i = 0; $i -lt $parts.Count; $i++) {
+            if ($parts[$i] -eq '--package' -and ++$i -lt $parts.Count) {
+                $names.Add(($parts[$i] -split '@', 2)[0])
+            }
+        }
+        @($names)
+    } else {
+        @($meta.packages | Where-Object { $meta.workspace_members -contains $_.id } | ForEach-Object { $_.name })
+    }
+    $targets = @(
+        foreach ($p in $meta.packages) {
+            if ($p.name -notin $selectedPackages) { continue }
+            $noRun = @($p.metadata.anvil.examples.'no-run')
+            foreach ($target in $p.targets) {
+                if ($target.kind -notcontains 'example') { continue }
+                if ($example -and $target.name -ne $example) { continue }
+                if (-not $example -and $target.name -in $noRun) {
+                    Write-Host "anvil-examples: $($p.name)::$($target.name) skipped by package metadata"
+                    continue
+                }
+                [pscustomobject]@{ package = $p.name; example = $target.name }
+            }
+        }
+    )
+    if ($example -and $targets.Count -eq 0) {
+        Write-Error "anvil-examples: package '$package' has no example named '$example'"
+        exit 2
+    }
+    if ($targets.Count -eq 0) {
+        Write-Host 'anvil-examples: no runnable examples selected'
+        exit 0
+    }
+
+    $cargo = (Get-Command cargo -ErrorAction Stop).Source
+    $failed = $false
+    foreach ($target in $targets) {
+        Write-Host "anvil-examples: running $($target.package)::$($target.example)"
+        $start = [System.Diagnostics.ProcessStartInfo]::new()
+        $start.FileName = $cargo
+        $start.UseShellExecute = $false
+        $start.RedirectStandardOutput = $true
+        $start.RedirectStandardError = $true
+        $start.Environment['ANVIL_EXAMPLE'] = '1'
+        foreach ($arg in @($stableArgs) + @(
+            'run', '--package', $target.package, '--example', $target.example,
+            '--all-features', '--locked'
+        )) {
+            $start.ArgumentList.Add($arg)
+        }
+        $process = [System.Diagnostics.Process]::new()
+        $process.StartInfo = $start
+        if (-not $process.Start()) {
+            Write-Error "anvil-examples: failed to start $($target.package)::$($target.example)"
+            exit 1
+        }
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        $timedOut = $false
+        if (-not $process.WaitForExit($timeout * 1000)) {
+            $process.Kill($true)
+            $process.WaitForExit()
+            [Console]::Error.WriteLine("anvil-examples: $($target.package)::$($target.example) timed out after $timeout seconds")
+            $failed = $true
+            $timedOut = $true
+        }
+        $out = $stdout.GetAwaiter().GetResult()
+        $err = $stderr.GetAwaiter().GetResult()
+        if ($out) { Write-Host $out.TrimEnd() }
+        if ($err) { [Console]::Error.WriteLine($err.TrimEnd()) }
+        if (-not $timedOut -and $process.ExitCode -ne 0) {
+            [Console]::Error.WriteLine("anvil-examples: $($target.package)::$($target.example) exited with code $($process.ExitCode)")
+            $failed = $true
+        }
+        $process.Dispose()
+    }
+    if ($failed) { exit 1 }
 
 # Install prerequisites for the `anvil-examples` recipe.
 [group("anvil-setup")]

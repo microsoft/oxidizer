@@ -37,6 +37,7 @@
 
 import 'helpers.just'
 import 'impact.just'
+import 'dev/build.just'
 import 'checks/aprz.just'
 import 'checks/audit.just'
 import 'checks/bench.just'
