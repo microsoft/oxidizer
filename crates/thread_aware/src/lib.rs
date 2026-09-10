@@ -161,22 +161,29 @@ mod thread;
 /// * `#[thread_aware(skip)]`: Prevents a field from being recursively transferred.
 ///
 /// # Generic Bounds
-/// Every field except a `#[thread_aware(skip)]` one is relocated by calling its own
-/// `ThreadAware::relocate`, and the bounds follow from that:
-/// * each relocated field whose type reaches a generic parameter contributes a
-///   `where <field type>: ::thread_aware::ThreadAware` predicate - the obligation the generated
-///   body actually has, discharged by that field type's own impl;
-/// * if any field carries `#[thread_aware(skip)]`, a `where Self: Send` predicate is added,
-///   since the `ThreadAware: Send` supertrait still has to hold.
+/// The derive adds one bound per relocated field: `where <field type>: ThreadAware`. A
+/// `#[thread_aware(skip)]` field isn't relocated, so it contributes `where Self: Send` instead,
+/// which is all the `ThreadAware: Send` supertrait needs.
 ///
-/// The predicate lands on the field type as written, not on the parameters inside it. A
-/// `PhantomData<U>` field yields `where PhantomData<U>: ThreadAware` (which reduces to `U: Send`
-/// through the no-op `impl<T: ?Sized> ThreadAware for PhantomData<T> where Self: Send`), and a
-/// wrapper `W<U>` yields `where W<U>: ThreadAware`, governed by `W`'s own impl rather than by a
-/// bound on `U` - so a wrapper that implements the trait unconditionally keeps deriving for
-/// arguments no bound on `U` would admit. The traversal does not enter a function pointer, so
-/// writing a marker payload as one carries the parameter for variance, stays `Send` for every
-/// argument, and emits no bound at all:
+/// Bounds are on the whole field type, not the parameters inside it. A `Wrapper<T>` field bounds
+/// `Wrapper<T>: ThreadAware` and defers to that wrapper's own impl, so a wrapper that is
+/// `ThreadAware` for every `T` keeps deriving even where `T` isn't.
+///
+/// The derive doesn't look inside function pointers, so a variance marker written as
+/// `PhantomData<fn(*const T)>` adds no bound at all:
+///
+/// ```rust
+/// # use core::marker::PhantomData;
+/// # use thread_aware::ThreadAware;
+/// #[derive(ThreadAware)]
+/// struct Marked<T> {
+///     // `PhantomData<*const T>` would make `Marked` `!Send`; this does not.
+///     marker: PhantomData<fn(*const T)>,
+/// }
+/// ```
+///
+/// If you already wrote a bare `ThreadAware` bound yourself, the derive assumes it's this trait
+/// and skips the duplicate; qualify the path to disambiguate.
 ///
 /// ```rust
 /// # use core::marker::PhantomData;
