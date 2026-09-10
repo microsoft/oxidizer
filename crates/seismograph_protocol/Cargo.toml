@@ -17,11 +17,11 @@ homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/seismograph_protocol"
 
-[dependencies]
-mutants.workspace = true
-
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
+
+[dependencies]
+mutants.workspace = true
 
 # >>> anvil-managed: anvil-lints
 [lints]

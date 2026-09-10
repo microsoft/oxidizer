@@ -30,13 +30,13 @@ allowed_external_types = [
 [features]
 monitor = ["dep:getrandom", "dep:seismograph_protocol"]
 
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_System_Diagnostics_Debug"] }
+
 [dependencies]
 getrandom = { workspace = true, optional = true }
 mutants.workspace = true
 seismograph_protocol = { workspace = true, optional = true }
-
-[target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_System_Diagnostics_Debug"] }
 
 [lints]
 workspace = true
