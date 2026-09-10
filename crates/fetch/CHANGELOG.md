@@ -20,10 +20,6 @@
 - Now requires `0.12.0` of `thread_aware`
 - Now requires `0.7.0` of `tick`
 
-### Features
-
-- add a WinHTTP-backed fetch transport for Windows ([#687](https://github.com/microsoft/oxidizer/pull/687))
-
 ## [0.16.1] - 2026-08-28
 
 - 🔧 Maintenance

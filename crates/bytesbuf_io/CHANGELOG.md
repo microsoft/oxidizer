@@ -7,9 +7,9 @@
 - Now requires `0.10.0` of `bytesbuf`
 - Now requires `0.5.1` of `ohno`
 
-### Features
+### Documentation
 
-- add a WinHTTP-backed fetch transport for Windows ([#687](https://github.com/microsoft/oxidizer/pull/687))
+- Correct the `bytesbuf` documentation link to use `docs.rs`.
 
 ## [0.9.0] - 2026-08-27
 
