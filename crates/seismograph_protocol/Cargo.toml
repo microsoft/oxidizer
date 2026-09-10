@@ -20,7 +20,7 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/seismograph
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 
-[dependencies]
+[dev-dependencies]
 mutants.workspace = true
 
 # >>> anvil-managed: anvil-lints
