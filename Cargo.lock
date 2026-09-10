@@ -4492,6 +4492,7 @@ dependencies = [
  "libc",
  "mimalloc",
  "multitude",
+ "mutants",
  "performables",
  "seismograph",
  "seismograph_rallocator",
@@ -5127,6 +5128,7 @@ version = "0.1.0"
 dependencies = [
  "getrandom 0.3.4",
  "libc",
+ "mutants",
  "seismograph_protocol",
  "windows-sys 0.61.2",
 ]
@@ -5159,6 +5161,7 @@ name = "seismograph_protocol"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "mutants",
 ]
 
 [[package]]

@@ -34,6 +34,7 @@ windows-sys = { workspace = true, features = [
 [dependencies]
 allocation_hints.workspace = true
 backtrace = { workspace = true, features = ["std"], optional = true }
+mutants.workspace = true
 seismograph.workspace = true
 seismograph_rallocator.workspace = true
 

@@ -32,6 +32,7 @@ monitor = ["dep:getrandom", "dep:seismograph_protocol"]
 
 [dependencies]
 getrandom = { workspace = true, optional = true }
+mutants.workspace = true
 seismograph_protocol = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
