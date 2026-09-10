@@ -154,6 +154,10 @@ fn run(args: &Args) -> Result<(), AppError> {
             println!("Running example '{example_name}' in package '{}'...", pkg.name);
             let mut cmd = cargo_example_command("run", &pkg.name, example_name, &args.cargo_profile);
             cmd.env("IS_TESTING", "1");
+            if pkg.name == "metabench" {
+                cmd.env("BENCH_ENGINE", "criterion")
+                    .args(["--", "--criterion-arg", "--quick"]);
+            }
 
             let result = run_with_timeout(cmd, TIMEOUT)?;
             match result.outcome {

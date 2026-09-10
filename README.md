@@ -29,6 +29,7 @@ These are the primary crates built out of this repo:
 - [`anyspawn`](./crates/anyspawn/README.md) - A generic task spawner compatible with any async runtime.
 - [`anyspawn_azure`](./crates/anyspawn_azure/README.md) - Azure SDK async runtime and process executor backed by an anyspawn spawner and a tick clock.
 - [`allocation_hints`](./crates/allocation_hints/README.md) - Allocator-independent heap ownership and scoped allocation hints.
+- [`arty`](./crates/arty/README.md) - Single-threaded, thread-aware application runtime.
 - [`bytesbuf`](./crates/bytesbuf/README.md) - Types for creating and manipulating byte sequences.
 - [`bytesbuf_io`](./crates/bytesbuf_io/README.md) - Asynchronous I/O abstractions expressed via `bytesbuf` types.
 - [`cachet`](./crates/cachet/README.md) - A composable, customizable multi-tier caching library with rich feature support.
@@ -46,6 +47,7 @@ These are the primary crates built out of this repo:
 - [`http_path_template`](./crates/http_path_template/README.md) - Parser for the google.api.http path-template grammar.
 - [`internity`](./crates/internity/README.md) - Blazingly fast string interning with compact handles, compact storage, and concurrent fill support.
 - [`layered`](./crates/layered/README.md) - A foundational service abstraction for building composable, middleware-driven systems.
+- [`metabench`](./crates/metabench/README.md) - Run Criterion, Gungraun, Linux perf, and allocation benchmarks together and combine their reports.
 - [`multitude`](./crates/multitude/README.md) - Fast and flexible arena allocator.
 - [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.
 - [`plurality`](./crates/plurality/README.md) - A highly efficient pooling memory allocator.
