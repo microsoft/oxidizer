@@ -12,6 +12,7 @@ use nm::{Event, Magnitude};
 use smallvec::SmallVec;
 
 use crate::mem::{BlockMeta, BlockSize, Memory};
+use crate::telemetry::BufferIdentity;
 use crate::{MAX_INLINE_SPANS, MemoryGuard, Span};
 
 /// A view over a sequence of immutable bytes.
@@ -61,14 +62,26 @@ use crate::{MAX_INLINE_SPANS, MemoryGuard, Span};
 /// [`from_views()`]: Self::from_views
 /// [`clone()`]: Self::clone
 /// [obtain access to a memory provider]: crate#producing-byte-sequences
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct BytesView {
+    identity: BufferIdentity,
+
     /// The spans of the byte sequence, stored in reverse order for efficient consumption
     /// by popping items off the end of the collection.
     pub(crate) spans_reversed: SmallVec<[Span; MAX_INLINE_SPANS]>,
 
     /// We cache the length so we do not have to recalculate it every time it is queried.
     len: usize,
+}
+
+impl Clone for BytesView {
+    fn clone(&self) -> Self {
+        Self {
+            identity: BufferIdentity::new(),
+            spans_reversed: self.spans_reversed.clone(),
+            len: self.len,
+        }
+    }
 }
 
 impl BytesView {
@@ -81,9 +94,18 @@ impl BytesView {
     #[must_use]
     pub const fn new() -> Self {
         Self {
+            identity: BufferIdentity::new(),
             spans_reversed: SmallVec::new_const(),
             len: 0,
         }
+    }
+
+    pub(crate) fn take_identity(&self) -> crate::telemetry::TransferredIdentity {
+        self.identity.take()
+    }
+
+    pub(crate) fn replace_identity(&self, id: crate::telemetry::TransferredIdentity) {
+        self.identity.replace(id);
     }
 
     pub(crate) fn from_spans_reversed(spans_reversed: SmallVec<[Span; MAX_INLINE_SPANS]>) -> Self {
@@ -99,7 +121,11 @@ impl BytesView {
                 .expect("attempted to create a BytesView larger than usize::MAX bytes")
         });
 
-        Self { spans_reversed, len }
+        Self {
+            identity: BufferIdentity::new(),
+            spans_reversed,
+            len,
+        }
     }
 
     /// (For testing) Concatenates a number of spans, yielding a view that combines the spans.
@@ -349,6 +375,7 @@ impl BytesView {
             spans_reversed.push(first.slice(start..end));
 
             return Some(Self {
+                identity: BufferIdentity::new(),
                 spans_reversed,
                 len: bytes_in_range,
             });
@@ -506,6 +533,7 @@ impl BytesView {
         }
 
         Some(Self {
+            identity: BufferIdentity::new(),
             spans_reversed: slice_spans,
             len: bytes_in_range,
         })
@@ -788,10 +816,19 @@ impl BytesView {
     ///
     /// Panics if the resulting view would be larger than `usize::MAX` bytes.
     pub fn append(&mut self, other: Self) {
-        self.len = self
+        let new_len = self
             .len
             .checked_add(other.len)
             .expect("attempted to create a BytesView larger than usize::MAX bytes");
+        if other.is_empty() {
+            return;
+        }
+        if self.is_empty() {
+            self.identity.replace(other.take_identity());
+        } else {
+            self.identity.clear();
+        }
+        self.len = new_len;
 
         self.spans_reversed.insert_many(0, other.spans_reversed);
     }
@@ -829,6 +866,13 @@ impl BytesView {
         let mut new_view = self.clone();
         new_view.append(other);
         new_view
+    }
+}
+
+#[cfg(feature = "seismograph")]
+impl seismograph_io::Buffer for BytesView {
+    fn recording_state(&self) -> seismograph_io::BufferState {
+        seismograph_io::BufferState::new(Some(self.identity.get_or_allocate()), self.len(), self.spans_reversed.len())
     }
 }
 
@@ -1857,6 +1901,25 @@ mod tests {
         assert_eq!(view3, b"world");
     }
 
+    #[cfg(feature = "seismograph")]
+    #[test]
+    fn append_preserves_identity_when_only_one_view_has_data() {
+        let memory = TransparentMemory::new();
+        let mut populated = BytesView::copied_from_slice(b"Hello", &memory);
+        let populated_id = populated.identity.get_or_allocate();
+        populated.append(BytesView::new());
+
+        let mut empty = BytesView::new();
+        let transferred = BytesView::copied_from_slice(b"world", &memory);
+        let transferred_id = transferred.identity.get_or_allocate();
+        empty.append(transferred);
+
+        assert_eq!(
+            (populated.identity.get_or_allocate(), empty.identity.get_or_allocate()),
+            (populated_id, transferred_id)
+        );
+    }
+
     #[test]
     fn concat_single_span() {
         let memory = TransparentMemory::new();
@@ -1930,7 +1993,7 @@ mod tests {
         // The point of this is not to say that we expect it to have a specific size but to allow
         // us to easily detect when the size changes and (if we choose to) bless the change.
         // We assume 64-bit pointers - any support for 32-bit is problem for the future.
-        assert_eq!(size_of::<BytesView>(), 272);
+        assert_eq!(size_of::<BytesView>(), 272 + size_of::<BufferIdentity>());
     }
 
     #[test]

@@ -82,6 +82,11 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs anvil-impact
         }
         exit 0
     }
+    if ($IsWindows) {
+        # llvm-cov passes every instrumented binary as a separate argument.
+        # Keep those paths short enough for Windows CreateProcess.
+        $env:CARGO_LLVM_COV_TARGET_DIR = 'target/.c'
+    }
     if ($testOnlyPkg.Count -gt 0) {
         Write-Host 'anvil-llvm-cov: running tests without coverage for opted-out packages'
         foreach ($cfg in $configs) {

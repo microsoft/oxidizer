@@ -476,7 +476,7 @@ including a custom DST with a trait-object tail.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/multitude">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbsPDWt438bisbkMh3Rx2B2aMbx5_CJ_u4DrMbgrz6oBHPzfdhZIaCaGJ5dGVtdWNrZjEuMjUuMIJlYnl0ZXNmMS4xMi4wgmhieXRlc2J1ZmUwLjkuMIJpbXVsdGl0dWRlZTAuOS4wgmVzZXJkZWcxLjAuMjI4gmh6ZXJvY29weWYwLjguNTI
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbsPDWt438bisbkMh3Rx2B2aMbx5_CJ_u4DrMbgrz6oBHPzfdhZIaCaGJ5dGVtdWNrZjEuMjUuMoJlYnl0ZXNmMS4xMi4xgmhieXRlc2J1ZmUwLjkuMIJpbXVsdGl0dWRlZTAuOS4wgmVzZXJkZWcxLjAuMjI5gmh6ZXJvY29weWYwLjguNTc
  [__link0]: https://docs.rs/multitude/0.9.0/multitude/?search=Alloc
  [__link1]: https://docs.rs/multitude/0.9.0/multitude/?search=Arc
  [__link10]: https://docs.rs/multitude/0.9.0/multitude/?search=vec::Vec
@@ -484,7 +484,7 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link101]: https://doc.rust-lang.org/stable/std/convert/trait.From.html
  [__link102]: https://docs.rs/multitude/0.9.0/multitude/?search=Arc
  [__link103]: https://docs.rs/multitude/0.9.0/multitude/?search=Arc
- [__link104]: https://docs.rs/bytes/1.12.0/bytes/?search=Bytes
+ [__link104]: https://docs.rs/bytes/1.12.1/bytes/?search=Bytes
  [__link105]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=mem::Memory
  [__link106]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena
  [__link107]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesBuf
@@ -562,7 +562,7 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link70]: https://docs.rs/multitude/0.9.0/multitude/?search=strings::Utf16String::into_boxed_utf16_str
  [__link71]: https://docs.rs/multitude/0.9.0/multitude/?search=de::DeserializeIn
  [__link72]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena
- [__link73]: https://docs.rs/serde/1.0.228/serde/?search=Deserialize
+ [__link73]: https://docs.rs/serde/1.0.229/serde/?search=Deserialize
  [__link74]: https://docs.rs/multitude/0.9.0/multitude/?search=de::DeserializeIn
  [__link75]: https://docs.rs/multitude/0.9.0/multitude/de/index.html
  [__link76]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena
@@ -587,7 +587,7 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link93]: https://docs.rs/multitude/0.9.0/multitude/?search=strings::format_utf16
  [__link94]: https://crates.io/crates/widestring
  [__link95]: https://docs.rs/multitude/0.9.0/multitude/?search=zerocopy::ZerocopyView
- [__link96]: https://docs.rs/zerocopy/0.8.52/zerocopy/?search=FromZeros
+ [__link96]: https://docs.rs/zerocopy/0.8.57/zerocopy/?search=FromZeros
  [__link97]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena::zerocopy
  [__link98]: https://docs.rs/multitude/0.9.0/multitude/?search=bytemuck::BytemuckView
- [__link99]: https://docs.rs/bytemuck/1.25.0/bytemuck/?search=Zeroable
+ [__link99]: https://docs.rs/bytemuck/1.25.2/bytemuck/?search=Zeroable

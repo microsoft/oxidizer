@@ -443,7 +443,7 @@ impl HttpClientBuilder {
         };
         let body_builder = aware.transport.create_body_builder(&aware.options);
         let pipeline = match aware.transport.isolation() {
-            Isolation::Isolated => HttpClientPipeline::Isolated(thread_aware::Arc::new_with(aware, Aware::into_pipeline)),
+            Isolation::Isolated => HttpClientPipeline::Isolated(performables::arc::Arc::new_with_data(aware, Aware::into_pipeline)),
             Isolation::Shared => HttpClientPipeline::Shared(std::sync::Arc::new(aware.into_pipeline())),
         };
 

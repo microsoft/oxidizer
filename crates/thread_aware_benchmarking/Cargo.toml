@@ -3,7 +3,7 @@
 
 [package]
 name = "thread_aware_benchmarking"
-description = "Benchmark suite and support model for thread_aware."
+description = "Benchmarks for Performables Arc relocation through thread_aware."
 version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
@@ -24,6 +24,7 @@ allowed_external_types = ["*"]
 min-lines-percent = 0
 
 [dependencies]
+performables = { workspace = true }
 thread_aware = { workspace = true, features = ["derive", "std"] }
 
 [dev-dependencies]

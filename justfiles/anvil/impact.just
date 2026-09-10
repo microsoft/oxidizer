@@ -465,11 +465,8 @@ anvil-impact: _anvil-impact-snapshot
 #
 # Output (stdout, exactly one line so the caller can capture it):
 #   * "--package name@version --package name2@version2 ..." when the
-#     tier has members. Each package is a version-qualified cargo spec:
-#     the version (read from `cargo metadata --no-deps`, i.e. workspace
-#     members only) disambiguates a workspace member from a like-named
-#     transitive dependency pulled in at a different version, which a
-#     bare `-p name` cannot do ("multiple packages named name").
+#     tier has members. Each package is a portable, version-qualified Cargo
+#     specification.
 #   * "--skip" when the tier is empty (recipes treat this as a no-op).
 # Metadata failures and unknown/ambiguous package names are written to
 # STDERR and fail the recipe, so callers never continue with an incomplete

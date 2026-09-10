@@ -32,24 +32,19 @@ all-features = true
 
 [features]
 default = ["std", "derive"]
-std = ["dep:dashmap", "dep:rustc-hash", "thread_aware_core/std"]
+std = ["thread_aware_core/std"]
 derive = ["dep:thread_aware_macros"]
 test-utils = ["std"]
 
 [dependencies]
-dashmap = { workspace = true, optional = true }
-rustc-hash = { workspace = true, optional = true }
-
 thread_aware_core = { workspace = true }
 thread_aware_macros = { workspace = true, optional = true }
 
 [dev-dependencies]
-# `dashmap`, `rustc-hash`, `thread_aware_core`, and `thread_aware_macros` mirror dependencies
-# activated by optional public surfaces that also compile through `cfg(test)`.
-dashmap = { workspace = true }
+# `thread_aware_core` and `thread_aware_macros` mirror dependencies activated by optional public
+# surfaces that also compile through `cfg(test)`.
 futures = { workspace = true, features = ["executor"] }
 mutants = { workspace = true }
-rustc-hash = { workspace = true }
 thread_aware_core = { path = "../thread_aware_core", features = ["std"] }
 thread_aware_macros = { path = "../thread_aware_macros" }
 
@@ -63,14 +58,6 @@ required-features = ["derive", "std"]
 [[test]]
 name = "transfer_pass"
 required-features = ["derive", "std"]
-
-[[test]]
-name = "core_adoption"
-required-features = ["std"]
-
-[[test]]
-name = "dyn_trait"
-required-features = ["std"]
 
 # >>> anvil-managed: anvil-lints
 [lints]

@@ -36,6 +36,8 @@ fast-instant = ["dep:libc", "dep:windows-sys"]
 test-util = []
 # Serialization support for serde
 serde = ["dep:serde_core"]
+# Seismograph recording for synchronization and ownership primitives
+seismograph = ["performables/seismograph"]
 # Integration with tokio runtime
 tokio = ["dep:tokio", "rt-shared"]
 # Enables primitives for runtimes that drive the clock from a single shared driver task,
@@ -47,6 +49,7 @@ fmt = ["dep:jiff"]
 [dependencies]
 futures-core = { workspace = true }
 jiff = { workspace = true, features = ["std"], optional = true }
+performables = { workspace = true }
 pin-project-lite = { workspace = true }
 serde_core = { workspace = true, features = ["std"], optional = true }
 thread_aware = { workspace = true, default-features = false, features = ["std"] }
@@ -60,8 +63,6 @@ windows-sys = { workspace = true, optional = true, features = ["Win32_System_Sys
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }
-ohno = { path = "../ohno", features = ["app-err"] }
-thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
 
 #external
 chrono = { workspace = true, features = ["clock"] }
@@ -71,10 +72,12 @@ futures = { workspace = true, features = ["default", "executor", "futures-execut
 insta = { workspace = true }
 jiff = { workspace = true, default-features = true }
 mutants = { workspace = true }
+ohno = { path = "../ohno", features = ["app-err"] }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_core = { workspace = true, features = ["std"] }
 serde_json = { workspace = true, features = ["std"] }
 static_assertions = { workspace = true }
+thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
 time = { workspace = true, features = ["formatting", "local-offset", "macros"] }
 tokio = { workspace = true, features = ["time", "rt", "macros", "rt-multi-thread"] }
 

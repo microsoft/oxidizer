@@ -3,7 +3,6 @@
 
 use std::ptr;
 
-use windows_sys::Win32::System::Diagnostics::Debug::RtlCaptureStackBackTrace;
 use windows_sys::Win32::System::Memory::{MEM_COMMIT, MEM_DECOMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE, VirtualAlloc, VirtualFree};
 use windows_sys::Win32::System::SystemInformation::GetTickCount64;
 
@@ -38,12 +37,4 @@ pub(crate) unsafe fn unmap(address: *mut u8, _size: usize) {
 
 pub(crate) fn monotonic_millis() -> u64 {
     unsafe { GetTickCount64() }
-}
-
-pub(crate) fn capture_stack(frames: &mut [usize], limit: usize) -> usize {
-    let limit = limit.min(frames.len()).min(u32::MAX as usize);
-    if limit == 0 {
-        return 0;
-    }
-    unsafe { RtlCaptureStackBackTrace(4, limit as u32, frames.as_mut_ptr().cast(), ptr::null_mut()) as usize }
 }
