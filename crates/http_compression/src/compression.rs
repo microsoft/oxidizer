@@ -872,7 +872,7 @@ impl Config {
                 }
 
                 match Format::from_content_encoding(token).filter(|format| enabled.contains(format)) {
-                    Some(format) if formats.len() == MAX_CONTENT_ENCODING_LAYERS => {
+                    Some(_) if formats.len() == MAX_CONTENT_ENCODING_LAYERS => {
                         return Err(too_many_content_codings(MAX_CONTENT_ENCODING_LAYERS));
                     }
                     Some(format) => formats.push(format),
