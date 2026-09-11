@@ -608,6 +608,8 @@ const CONTENT_TYPE_CASES: &[(&str, bool)] = &[
     ("application/json; charset=\"utf-8\"", true),
     ("application/ld+json", true),
     ("application/x-ndjson", true),
+    ("application/grpc+proto", false),
+    ("APPLICATION/GRPC+JSON", false),
     ("text/plain; charset=utf-8", true),
     ("text/event-streaming", true),
     ("application/grpc-web", true),
