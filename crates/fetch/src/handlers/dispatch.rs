@@ -2,12 +2,12 @@
 // Licensed under the MIT License.
 
 use std::future::ready;
-use std::sync::Arc;
 
 use futures::FutureExt as _;
 use futures::future::Either;
 use http::uri::Scheme;
 use layered::Service;
+use performables::arc::Arc;
 use seatbelt::retry::Attempt;
 
 use crate::handlers::TransportHandler;

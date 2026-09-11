@@ -199,6 +199,7 @@ engines it names:
 * `zstd` – the `zstd` module and `Format::Zstd`, via `zstd-safe`.
 * `futures-stream` – `CompressionStream`, presenting compression and decompression as a
   `futures_core::Stream` over any stream of byte sequences.
+* `seismograph` records ownership and engine-pool synchronization through `performables`.
 
 The deflate-family features share one dependency, so enabling more than one of them costs no
 more than enabling one. A build that needs only `brotli` or only `zstd` never compiles `flate2`
@@ -216,7 +217,7 @@ See [`documentation`][__link22] for the longer form guides.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/compressors">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbjojVXQIV2Ewb89V-5l67DvobDbwJEokPYgIb-ONYOqfWe4RhZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbJst_We-cIpEbgWOpQlSSKdUb3emM4OqvBxMbTM5RSh7MkwNhZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
  [__link0]: https://crates.io/crates/bytesbuf/0.9.0
  [__link1]: https://docs.rs/compressors/0.1.0/compressors/?search=Result
  [__link10]: https://docs.rs/compressors/0.1.0/compressors/fn.decompress.html

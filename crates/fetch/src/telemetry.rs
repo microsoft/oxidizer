@@ -12,7 +12,6 @@
 
 use std::borrow::Cow;
 use std::fmt;
-use std::sync::Arc;
 
 /// Diagnostic information about the connection that served an HTTP response.
 ///
@@ -24,6 +23,7 @@ use http::Version;
 use http::uri::Scheme;
 use opentelemetry::metrics::{Meter, MeterProvider};
 use opentelemetry::{InstrumentationScope, KeyValue, Value};
+use performables::arc::Arc;
 
 pub(crate) const METER_NAME: &str = "fetch";
 
@@ -117,8 +117,12 @@ impl Metering {
     /// The scope is only materialized when the meter is created, so a client
     /// name set either before or after this call is reflected in the eventual
     /// meter.
-    pub(crate) fn with_provider(mut self, provider: Arc<dyn MeterProvider + Send + Sync>) -> Self {
-        self.provider = Some(provider);
+    pub(crate) fn with_provider<P>(mut self, provider: P) -> Self
+    where
+        P: MeterProvider + Send + Sync + 'static,
+    {
+        let provider: Box<dyn MeterProvider + Send + Sync> = Box::new(provider);
+        self.provider = Some(provider.into());
         self
     }
 
@@ -228,8 +232,8 @@ mod tests {
         Metering::new(Cow::Borrowed("tokio"), Cow::Borrowed("hyper"), Cow::Borrowed(client_name))
     }
 
-    fn test_provider() -> Arc<dyn MeterProvider + Send + Sync> {
-        Arc::new(opentelemetry_sdk::metrics::SdkMeterProvider::builder().build())
+    fn test_provider() -> opentelemetry_sdk::metrics::SdkMeterProvider {
+        opentelemetry_sdk::metrics::SdkMeterProvider::builder().build()
     }
 
     #[test]

@@ -1234,6 +1234,7 @@ dependencies = [
  "futures-core",
  "metabench",
  "mutants",
+ "performables",
  "pin-project-lite",
  "recoverable",
  "thread_aware",

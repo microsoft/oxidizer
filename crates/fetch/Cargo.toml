@@ -65,6 +65,7 @@ json = ["http_extensions/json"]
 seismograph = [
     "anyspawn?/seismograph",
     "bytesbuf/seismograph",
+    "compressors?/seismograph",
     "performables/seismograph",
     "tick/seismograph",
 ]

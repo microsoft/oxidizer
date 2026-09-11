@@ -51,6 +51,7 @@ default = []
 deflate = ["dep:flate2"]
 futures-stream = ["dep:futures-core", "dep:pin-project-lite"]
 gzip = ["dep:flate2"]
+seismograph = ["bytesbuf/seismograph", "performables/seismograph"]
 zlib = ["dep:flate2"]
 zstd = ["dep:zstd-safe"]
 
@@ -62,6 +63,7 @@ bytesbuf = { workspace = true, features = ["std"] }
 # that parses untrusted input. The cost is recorded above -- it is what keeps this crate out of Miri.
 flate2 = { workspace = true, features = ["zlib-rs"], optional = true }
 futures-core = { workspace = true, optional = true }
+performables = { workspace = true }
 pin-project-lite = { workspace = true, optional = true }
 recoverable = { workspace = true }
 thread_aware = { workspace = true, features = ["std"] }

@@ -3,13 +3,13 @@
 
 use std::any::type_name;
 use std::fmt::Debug;
-use std::sync::Arc;
 
 use data_privacy::RedactionEngine;
 use http_extensions::HttpResponse;
 use http_extensions::routing::Router;
 use layered::{Intercept, InterceptLayer};
 use opentelemetry::metrics::Meter;
+use performables::arc::Arc;
 use thread_aware::ThreadAware;
 use tick::Clock;
 
@@ -257,10 +257,10 @@ impl StandardRequestPipeline {
     }
 }
 
+type ConfigurePipeline = dyn Fn(StandardRequestPipeline, PipelineContext) -> StandardRequestPipeline + Send + Sync;
+
 #[derive(Clone, ThreadAware)]
-pub(crate) struct ConfigureStandardPipeline(
-    #[thread_aware(skip)] Arc<dyn Fn(StandardRequestPipeline, PipelineContext) -> StandardRequestPipeline + Send + Sync>,
-);
+pub(crate) struct ConfigureStandardPipeline(#[thread_aware(skip)] Arc<ConfigurePipeline>);
 
 impl Default for ConfigureStandardPipeline {
     fn default() -> Self {
@@ -273,7 +273,8 @@ impl ConfigureStandardPipeline {
     where
         F: Fn(StandardRequestPipeline, PipelineContext) -> StandardRequestPipeline + Send + Sync + 'static,
     {
-        Self(Arc::new(func))
+        let func: Box<ConfigurePipeline> = Box::new(func);
+        Self(func.into())
     }
 
     pub(crate) fn combine<F>(self, func: F) -> Self

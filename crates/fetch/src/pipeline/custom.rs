@@ -3,9 +3,9 @@
 
 use std::any::type_name;
 use std::fmt::Debug;
-use std::sync::Arc;
 
 use layered::{DynamicService, DynamicServiceExt};
+use performables::arc::Arc;
 use thread_aware::ThreadAware;
 
 use crate::handlers::Dispatch;
@@ -13,14 +13,15 @@ use crate::pipeline::pipeline_context::PipelineContext;
 use crate::{HttpRequest, HttpResponse, RequestHandler};
 
 /// A convenience API for creating a custom request pipeline.
+type PipelineFactory = dyn Fn(Dispatch, PipelineContext) -> DynamicService<HttpRequest, crate::Result<HttpResponse>> + Send + Sync;
+
 #[derive(Clone, ThreadAware)]
-pub(crate) struct CustomPipelineFactory(
-    #[thread_aware(skip)] Arc<dyn Fn(Dispatch, PipelineContext) -> DynamicService<HttpRequest, crate::Result<HttpResponse>> + Send + Sync>,
-);
+pub(crate) struct CustomPipelineFactory(#[thread_aware(skip)] Arc<PipelineFactory>);
 
 impl CustomPipelineFactory {
     pub(crate) fn new<T: RequestHandler + 'static>(factory: impl Fn(Dispatch, PipelineContext) -> T + Send + Sync + 'static) -> Self {
-        Self(Arc::new(move |dispatch, context| factory(dispatch, context).into_dynamic()))
+        let factory: Box<PipelineFactory> = Box::new(move |dispatch, context| factory(dispatch, context).into_dynamic());
+        Self(factory.into())
     }
 
     pub(crate) fn create(&self, handler: Dispatch, context: PipelineContext) -> DynamicService<HttpRequest, crate::Result<HttpResponse>> {

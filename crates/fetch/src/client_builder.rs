@@ -3,7 +3,6 @@
 
 use std::borrow::Cow;
 use std::fmt::Debug;
-use std::sync::Arc;
 use std::time::Duration;
 
 use data_privacy::RedactionEngine;
@@ -313,7 +312,7 @@ impl HttpClientBuilder {
     pub fn meter_provider<P: MeterProvider + Send + Sync + 'static>(mut self, meter_provider: P) -> Self {
         // Update the metering at all relevant places.
         self.resilience_context = self.resilience_context.use_metrics(&meter_provider);
-        self.metering = self.metering.with_provider(Arc::new(meter_provider));
+        self.metering = self.metering.with_provider(meter_provider);
         self
     }
 
@@ -503,7 +502,7 @@ impl HttpClientBuilder {
         let body_builder = aware.transport.create_body_builder(&aware.options);
         let pipeline = match aware.transport.isolation() {
             Isolation::Isolated => HttpClientPipeline::Isolated(performables::arc::Arc::new_with_data(aware, Aware::into_pipeline)),
-            Isolation::Shared => HttpClientPipeline::Shared(std::sync::Arc::new(aware.into_pipeline())),
+            Isolation::Shared => HttpClientPipeline::Shared(performables::arc::Arc::new(aware.into_pipeline())),
         };
 
         crate::HttpClient::new(pipeline, body_builder, clock, router)

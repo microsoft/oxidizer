@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 use std::future::ready;
-use std::sync::Arc;
 use std::time::Duration;
 
 use bytesbuf::BytesBuf;
@@ -373,7 +372,7 @@ impl Service<HttpRequest> for HttpClient {
 
 #[derive(ThreadAware, Clone, Debug)]
 pub(super) enum HttpClientPipeline {
-    Shared(#[thread_aware(skip)] Arc<Pipeline>),
+    Shared(#[thread_aware(skip)] PerformableArc<Pipeline>),
     Isolated(PerformableArc<Pipeline, PerThread>),
 }
 

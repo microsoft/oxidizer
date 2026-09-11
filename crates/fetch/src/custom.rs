@@ -15,13 +15,12 @@
 
 use std::borrow::Cow;
 use std::fmt::Debug;
-use std::sync::Arc;
 
 use bytesbuf::mem::GlobalPool;
 use http_extensions::{HttpBodyBuilder, RequestHandler};
 use opentelemetry::metrics::Meter;
-use performables::arc::{Arc as PerformableArc, PerThread};
-use thread_aware::{ThreadAware, unaware};
+use performables::arc::{Arc, PerThread};
+use thread_aware::ThreadAware;
 use tick::Clock;
 
 use crate::handlers::TransportHandler;
@@ -205,7 +204,7 @@ impl HttpClient {
         F: Fn(CustomContext<Extras>) -> TransportHandler + Send + Sync + 'static,
         Extras: ThreadAware + Send + Sync + Clone + 'static,
     {
-        // The factory is shared across threads via `Arc`. The original `CustomDeps` is
+        // The factory is shared across threads via `performables::Arc`. The original `CustomDeps` is
         // carried alongside it so its `extras` are cloned into a fresh `CustomContext`
         // for every handler the per-thread transport builds.
         let factory = Arc::new(factory);
@@ -216,19 +215,21 @@ impl HttpClient {
             clock: deps.clock.clone(),
             global_pool: deps.global_pool.clone(),
             isolation,
-            inner: PerformableArc::new_with_data((deps, unaware(factory)), |(deps, factory)| {
-                Arc::new(move |options, meter, pool_index| {
-                    let context = CustomContext {
-                        body_builder: create_body_builder(&deps.global_pool, &deps.clock, &options),
-                        clock: deps.clock.clone(),
-                        pool_index,
-                        extras: deps.extras.clone(),
-                        options: options.transport.clone(),
-                        tls: options.tls.clone(),
-                        meter,
-                    };
-                    factory.0(context)
-                })
+            inner: Arc::new_with_data((deps, factory), |(deps, factory)| {
+                let transport: Box<dyn Fn(ClientOptions, Meter, PoolIndex) -> TransportHandler + Send + Sync> =
+                    Box::new(move |options, meter, pool_index| {
+                        let context = CustomContext {
+                            body_builder: create_body_builder(&deps.global_pool, &deps.clock, &options),
+                            clock: deps.clock.clone(),
+                            pool_index,
+                            extras: deps.extras.clone(),
+                            options: options.transport.clone(),
+                            tls: options.tls.clone(),
+                            meter,
+                        };
+                        factory(context)
+                    });
+                TransportFn::from(transport)
             }),
         };
 
@@ -244,7 +245,7 @@ pub(crate) struct Transport {
     runtime_name: Cow<'static, str>,
     #[thread_aware(skip)]
     name: Cow<'static, str>,
-    inner: PerformableArc<TransportFn, PerThread>,
+    inner: Arc<TransportFn, PerThread>,
     clock: Clock,
     global_pool: GlobalPool,
     isolation: Isolation,
