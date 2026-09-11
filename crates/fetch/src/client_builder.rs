@@ -153,8 +153,9 @@ impl HttpClientBuilder {
     /// `Accept-Encoding`, most preferred first, and a matching response is
     /// decompressed before the caller sees it, with `Content-Encoding` and
     /// `Content-Length` removed because neither describes the decompressed body.
-    /// What they said is kept in
-    /// [`OriginalBody`][http_compression::OriginalBody] on the response.
+    /// What they said is kept in [`OriginalBody`][crate::OriginalBody] on the
+    /// response; fetch re-exports that type whenever any `compression-*` feature
+    /// is enabled.
     ///
     /// A response compressed with a format that is not enabled is handed back
     /// untouched rather than failing. Decompression is lazy, so a malformed body

@@ -12,11 +12,10 @@ use compressors::Resources;
 use compressors::format::Format;
 use fetch::fake::{FakeDeps, FakeHandler};
 use fetch::options::{DecompressionMethod, ResponseDecompressionOptions};
-use fetch::{HttpClient, HttpClientBuilder, HttpResponseBuilder};
+use fetch::{HttpClient, HttpClientBuilder, HttpResponseBuilder, OriginalBody};
 use futures::StreamExt as _;
 use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH};
 use http::{HeaderMap, HeaderValue, StatusCode};
-use http_compression::OriginalBody;
 use http_extensions::HttpBodyOptions;
 use ohno::Labeled as _;
 

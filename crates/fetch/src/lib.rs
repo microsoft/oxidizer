@@ -798,7 +798,7 @@
 //! Requests then advertise the methods in `Accept-Encoding`, most preferred first, and a matching
 //! response is decompressed before the caller sees it. `Content-Encoding` and `Content-Length` are
 //! removed because neither describes the decompressed body; what they said is kept in
-//! `http_compression::OriginalBody` on the response. A response compressed with a format that was
+//! [`OriginalBody`] on the response. A response compressed with a format that was
 //! not asked for is handed back untouched rather than failing.
 //!
 //! [`DecompressionMethod::ALL`](options::DecompressionMethod::ALL) asks for everything the build can
@@ -925,6 +925,13 @@ pub mod handlers;
 /// Telemetry attributes and connection diagnostics.
 pub mod telemetry;
 
+#[cfg(any(
+    feature = "compression-gzip",
+    feature = "compression-deflate",
+    feature = "compression-brotli",
+    feature = "compression-zstd"
+))]
+pub use http_compression::OriginalBody;
 pub use http_extensions::{
     HeaderMapExt, HeaderValueExt, HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpRequestBuilder, HttpRequestExt, HttpResponse,
     HttpResponseBuilder, RequestExt, RequestHandler, ResponseExt, Result, StatusExt,
