@@ -158,14 +158,20 @@ mod thread;
 /// Unions are not supported and will produce a compile error.
 ///
 /// # Attributes
-/// * `#[thread_aware(skip)]`: Prevents a field from being recursively transferred.
+/// * `#[thread_aware(skip)]` (on a field): moves the field without calling `relocate` on it.
+/// * `#[thread_aware(bound = "...")]` (on the type): replaces the derive's inferred `where`
+///   predicates with your own. An escape hatch for a field whose bound the derive can't infer -
+///   most often a type alias that hides a recursive self-reference, where the inferred field-type
+///   bound would be circular. Write `#[thread_aware(bound = "T: ThreadAware")]` to bound the
+///   parameter instead.
 ///
 /// # Generic Bounds
 /// The derive bounds each relocated field by its own type - `where <field type>: ThreadAware` -
 /// not by the type parameters inside it. A field that refers back to the type being derived is the
-/// exception: it bounds the parameters it reaches instead, so recursive types still compile. A
-/// `#[thread_aware(skip)]` field isn't relocated, so it contributes `where Self: Send` instead,
-/// which is all the `ThreadAware: Send` supertrait needs.
+/// exception: it bounds the parameters it reaches instead, so recursive types still compile (a
+/// recursion hidden behind a type alias is invisible to the derive - use `#[thread_aware(bound =
+/// "...")]` there). A `#[thread_aware(skip)]` field isn't relocated, so it contributes
+/// `where Self: Send` instead, which is all the `ThreadAware: Send` supertrait needs.
 ///
 /// Bounding the field type means a `Wrapper<T>` field defers to that wrapper's own impl, so a
 /// wrapper that is `ThreadAware` for every `T` keeps deriving even where `T` isn't. The derive

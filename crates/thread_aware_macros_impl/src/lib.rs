@@ -34,7 +34,7 @@ mod field_attrs;
 mod struct_gen;
 
 use enum_gen::build_enum_body;
-use field_attrs::parse_field_attrs;
+use field_attrs::{parse_container_attrs, parse_field_attrs};
 use struct_gen::build_struct_body;
 
 /// Core implementation used by both `thread_aware_macros` and `oxidizer_macros`.
@@ -104,6 +104,21 @@ pub(crate) fn param_idents() -> (syn::Ident, syn::Ident) {
 
 fn add_bounds(input: &DeriveInput, root_path: &Path) -> syn::Result<syn::Generics> {
     let mut generics = input.generics.clone();
+
+    // Escape hatch: an explicit `#[thread_aware(bound = "...")]` on the type replaces the derive's
+    // inferred `where` predicates wholesale. Use it when the derive can't infer the right bound for
+    // a field - for example a type alias like `type Children<T> = Vec<Node<T>>` hides that the field
+    // is a recursive self-reference, so the inferred `Children<T>: ThreadAware` becomes circular.
+    // Writing `#[thread_aware(bound = "T: ThreadAware")]` restores the parameter bound instead.
+    if let Some(bounds) = parse_container_attrs(&input.attrs)?.bound {
+        if !bounds.is_empty() {
+            let where_clause = generics.make_where_clause();
+            for predicate in bounds {
+                where_clause.predicates.push(predicate);
+            }
+        }
+        return Ok(generics);
+    }
 
     // Type parameters in declaration order (for deterministic output) and as a set (for fast
     // membership tests).

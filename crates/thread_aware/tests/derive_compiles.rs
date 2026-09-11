@@ -717,6 +717,43 @@ fn recursive_and_slice_generics_compile_and_relocate() {
     assert_eq!(node.children[0].value.relocations, 1, "relocation reaches recursive children");
 }
 
+/// A recursive self-reference hidden behind a type alias.
+///
+/// The derive only sees the syntactic field type `AliasChildren<T>`, not that it expands to
+/// `Vec<AliasNode<T>>`, so it can't tell the field is a recursive self-reference. Left to infer, it
+/// would emit the circular `where AliasChildren<T>: ThreadAware`. The `#[thread_aware(bound = ...)]`
+/// escape hatch replaces the inferred bounds with the parameter bound the body actually needs.
+type AliasChildren<T> = Vec<AliasNode<T>>;
+
+#[derive(ThreadAware)]
+#[thread_aware(bound = "T: thread_aware::ThreadAware")]
+struct AliasNode<T> {
+    value: T,
+    children: AliasChildren<T>,
+}
+
+#[test]
+fn alias_hidden_recursion_compiles_with_bound_override() {
+    // `Rc<()>` is not `ThreadAware`, but the field is a `Vec` of the type itself, so the override
+    // bound `T: ThreadAware` is what the body needs - and it must relocate, not skip.
+    assert_thread_aware::<AliasNode<Tracker>>();
+
+    let (source, destination) = thread_pair();
+    let mut node = AliasNode {
+        value: Tracker::default(),
+        children: vec![AliasNode {
+            value: Tracker::default(),
+            children: Vec::new(),
+        }],
+    };
+    node.relocate(source.as_ref(), &destination);
+    assert_eq!(node.value.relocations, 1);
+    assert_eq!(
+        node.children[0].value.relocations, 1,
+        "relocation reaches aliased recursive children"
+    );
+}
+
 /// A trait of the user's own that happens to be called `ThreadAware`, named by a qualified
 /// path.
 ///

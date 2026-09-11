@@ -141,6 +141,22 @@ fn self_reference_through_the_self_keyword_falls_back_to_parameters() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
+fn container_bound_override_replaces_inferred_bounds() {
+    // `#[thread_aware(bound = "...")]` replaces the inferred field-type predicates - the escape
+    // hatch for a field whose bound the derive can't infer, such as a type alias hiding recursion.
+    let input = quote! {
+        #[derive(ThreadAware)]
+        #[thread_aware(bound = "T: ThreadAware")]
+        struct Node<T> {
+            value: T,
+            children: Children<T>,
+        }
+    };
+    assert_snapshot!(expand(input));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
 fn generics_prebound_bare_no_dup() {
     // Ensures no duplicate ThreadAware bound when already present.
     let input = quote! {

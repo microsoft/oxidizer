@@ -10,6 +10,39 @@ pub(crate) struct FieldAttrCfg {
     pub(crate) skip: bool,
 }
 
+/// Configuration parsed from `#[thread_aware(...)]` on the derive input itself (the struct or enum).
+#[derive(Default, Debug)]
+pub(crate) struct ContainerAttrCfg {
+    /// An explicit replacement for the derive's inferred `where` predicates, from
+    /// `#[thread_aware(bound = "...")]`. When set, the derive emits these predicates verbatim
+    /// instead of inferring bounds from the fields - the escape hatch for a field type whose
+    /// obligation the derive can't infer correctly (for example a type alias that hides a
+    /// recursive self-reference).
+    pub(crate) bound: Option<Vec<syn::WherePredicate>>,
+}
+
+/// Parses the `thread_aware` attributes on the derive input (the struct or enum).
+pub(crate) fn parse_container_attrs(attrs: &[Attribute]) -> syn::Result<ContainerAttrCfg> {
+    let mut cfg = ContainerAttrCfg::default();
+    for attr in attrs.iter().filter(|a| a.path().is_ident("thread_aware")) {
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("bound") {
+                if cfg.bound.is_some() {
+                    return Err(meta.error("duplicate 'bound'"));
+                }
+                let lit: syn::LitStr = meta.value()?.parse()?;
+                let parsed: syn::punctuated::Punctuated<syn::WherePredicate, syn::Token![,]> =
+                    lit.parse_with(syn::punctuated::Punctuated::parse_terminated)?;
+                cfg.bound = Some(parsed.into_iter().collect());
+                Ok(())
+            } else {
+                Err(meta.error("unknown thread_aware attribute (only 'bound' is supported on the type)"))
+            }
+        })?;
+    }
+    Ok(cfg)
+}
+
 /// Parses the `thread_aware` attributes on a field.
 pub(crate) fn parse_field_attrs(attrs: &[Attribute]) -> syn::Result<FieldAttrCfg> {
     let mut cfg = FieldAttrCfg::default();
@@ -134,5 +167,47 @@ mod tests {
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("duplicate"));
+    }
+
+    #[test]
+    fn test_parse_container_attrs_none() {
+        // No container attribute leaves the override unset.
+        let attrs: Vec<Attribute> = vec![];
+        let cfg = parse_container_attrs(&attrs).unwrap();
+        assert!(cfg.bound.is_none());
+    }
+
+    #[test]
+    fn test_parse_container_attrs_bound() {
+        // A `bound = "..."` parses into the listed where-predicates.
+        let attrs: Vec<Attribute> = vec![parse_quote! { #[thread_aware(bound = "T: ThreadAware, U: Send")] }];
+        let cfg = parse_container_attrs(&attrs).unwrap();
+        let bounds = cfg.bound.expect("bound should be set");
+        assert_eq!(bounds.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_container_attrs_duplicate_bound() {
+        // Two `bound` values are rejected.
+        let attrs: Vec<Attribute> = vec![parse_quote! { #[thread_aware(bound = "T: ThreadAware", bound = "U: Send")] }];
+        let result = parse_container_attrs(&attrs);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("duplicate 'bound'"));
+    }
+
+    #[test]
+    fn test_parse_container_attrs_unknown() {
+        // An unknown container key is rejected.
+        let attrs: Vec<Attribute> = vec![parse_quote! { #[thread_aware(nonsense = "x")] }];
+        let result = parse_container_attrs(&attrs);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("only 'bound' is supported"));
+    }
+
+    #[test]
+    fn test_parse_container_attrs_invalid_predicate() {
+        // A `bound` string that isn't a valid where-predicate list surfaces a parse error.
+        let attrs: Vec<Attribute> = vec![parse_quote! { #[thread_aware(bound = "!!!")] }];
+        parse_container_attrs(&attrs).unwrap_err();
     }
 }
