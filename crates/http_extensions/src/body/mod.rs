@@ -467,6 +467,21 @@ impl HttpBody {
         self.content_length() == Some(0)
     }
 
+    /// Returns `true` if the body wraps a streaming body implementation.
+    ///
+    /// This describes the body's representation, not whether more frames are available.
+    /// A streaming body remains streaming after reaching end-of-stream, even when its
+    /// content length is zero. Empty bodies and bodies backed by stored bytes return
+    /// `false`, including after their bytes have been consumed.
+    ///
+    /// This does not poll, consume, or clone the body. Use [`into_buffered`](Self::into_buffered)
+    /// to collect a streaming body into a non-streaming representation.
+    #[must_use]
+    #[inline]
+    pub const fn is_streaming(&self) -> bool {
+        matches!(&self.kind, Kind::Body(..))
+    }
+
     /// Attempts to clone the body if possible.
     ///
     /// This is only supported for bodies created from static data like text or byte slices.
@@ -630,7 +645,7 @@ mod tests {
     use bytes::Bytes;
     use bytesbuf::mem::GlobalPool;
     use futures::executor::block_on;
-    use http_body_util::StreamBody;
+    use http_body_util::{Empty, Full, StreamBody};
     use ohno::{ErrorExt, Labeled};
     use serde::{Deserialize, Serialize};
     use static_assertions::assert_impl_all;
@@ -648,6 +663,56 @@ mod tests {
     #[test]
     fn assert_send_and_sync() {
         assert_impl_all!(super::HttpBody: Send, Debug, ThreadAware);
+    }
+
+    #[test]
+    fn is_streaming_empty_and_stored_bytes() {
+        let builder = HttpBodyBuilder::new_fake();
+        assert!(!builder.empty().is_streaming());
+        assert!(!builder.bytes(BytesView::new()).is_streaming());
+        assert!(!builder.text("hello").is_streaming());
+    }
+
+    #[test]
+    fn is_streaming_after_stored_bytes_are_consumed() {
+        let mut body = HttpBodyBuilder::new_fake().text("hello");
+        let frame = block_on(body.frame()).unwrap().unwrap();
+        assert_eq!(frame.into_data().unwrap().to_bytes(), b"hello".as_slice());
+        assert!(body.is_end_stream());
+        assert!(!body.is_streaming());
+    }
+
+    #[test]
+    fn is_streaming_finished_custom_body() {
+        let builder = HttpBodyBuilder::new_fake();
+        let body = builder.body(Empty::<BytesView>::new(), &HttpBodyOptions::default());
+        assert!(body.is_end_stream());
+        assert_eq!(body.content_length(), Some(0));
+        assert!(body.is_streaming());
+    }
+
+    #[test]
+    fn is_streaming_does_not_consume_frames() {
+        let builder = HttpBodyBuilder::new_fake();
+        let bytes = BytesView::from(Bytes::from_static(b"hello"));
+        let mut body = builder.body(Full::new(bytes), &HttpBodyOptions::default());
+        assert!(body.is_streaming());
+        assert!(body.is_streaming());
+        let frame = block_on(body.frame()).unwrap().unwrap();
+        assert_eq!(frame.into_data().unwrap().to_bytes(), b"hello".as_slice());
+        assert!(body.is_end_stream());
+        assert!(body.is_streaming());
+    }
+
+    #[test]
+    fn is_streaming_changes_after_buffering() {
+        let builder = HttpBodyBuilder::new_fake();
+        let bytes = BytesView::from(Bytes::from_static(b"hello"));
+        let body = builder.body(Full::new(bytes), &HttpBodyOptions::default());
+        assert!(body.is_streaming());
+        let buffered = block_on(body.into_buffered()).unwrap();
+        assert!(!buffered.is_streaming());
+        assert_eq!(block_on(buffered.into_bytes()).unwrap().to_bytes(), b"hello".as_slice());
     }
 
     #[test]
