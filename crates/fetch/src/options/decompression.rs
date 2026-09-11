@@ -14,7 +14,7 @@ use compressors::format::Format;
 ///
 /// Each variant exists only when its Cargo feature is enabled, so the set of
 /// variants is exactly the set this build can handle - and a build with none of
-/// them has no variants at all, links no codec, and can only ask for an empty
+/// them has no variants at all, links no compression implementation, and can only ask for an empty
 /// set.
 ///
 /// Pass to [`ResponseDecompressionOptions::methods`].
@@ -92,7 +92,7 @@ impl DecompressionMethod {
 /// Configures automatic response decompression and its resource limits.
 ///
 /// Decompression is off until [`methods`][Self::methods] names a format. Limits
-/// inherit the selected codec's defaults unless explicitly configured here.
+/// inherit the selected compression format's defaults unless explicitly configured here.
 /// Configured bounds apply while reading the body, including when streaming
 /// without buffering it.
 ///
@@ -125,7 +125,7 @@ enum OutputLimit {
 }
 
 impl ResponseDecompressionOptions {
-    /// Creates options with no enabled methods and no overrides of codec limits.
+    /// Creates options with no enabled methods and no overrides of compression limits.
     ///
     /// This is what [`Default`] returns.
     #[must_use]
@@ -152,7 +152,7 @@ impl ResponseDecompressionOptions {
 
     /// Bounds the total decompressed output, in bytes.
     ///
-    /// Inherits the codec's limit when this setter is not called. Pass a byte count
+    /// Inherits the compression format's limit when this setter is not called. Pass a byte count
     /// or `Some(count)` to set a bound, or `None` to explicitly remove the output-size
     /// bound. An explicit bound applies even when the caller streams the body into
     /// a file or another service without buffering it in memory.
@@ -177,7 +177,7 @@ impl ResponseDecompressionOptions {
 
     /// Bounds the number of compressed streams decoded by each decompression stage.
     ///
-    /// Inherits the codec's limit by default. Each concatenated gzip member or zstd
+    /// Inherits the compression format's limit by default. Each concatenated gzip member or zstd
     /// frame counts as one stream, including empty ones that would never reach the
     /// output-size bound.
     ///

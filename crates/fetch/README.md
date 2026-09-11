@@ -681,8 +681,9 @@ instances to use different backends.
 ## Automatic Response Decompression
 
 The client can automatically decompress response bodies, which is off until it is asked for.
-Link the codecs you want through the `compression-*` features, or enable `compression-all` for
-every supported codec, then select them through [`ResponseDecompressionOptions`][__link82]:
+Link the compression formats you want through the `compression-*` features, or enable
+`compression-all` for every supported format, then select them through
+[`ResponseDecompressionOptions`][__link82]:
 
 ```rust
 let client = builder
@@ -700,7 +701,7 @@ not asked for is handed back untouched rather than failing.
 decompress.
 
 Decompression is lazy, so a malformed body fails when it is read rather than when the response
-arrives, and that failure therefore does not trigger a retry. Codec limits are
+arrives, and that failure therefore does not trigger a retry. Compression limits are
 preserved by default; the client adds no output-size or stream-count cap.
 
 [`ResponseDecompressionOptions`][__link84] can explicitly bound
@@ -744,30 +745,30 @@ fetch = { version = "*", features = ["json", "tokio", "tls", "compression-gzip"]
 * **`test-util`**: Provides APIs to fake responses and HTTP client behavior for testing purposes.
   This feature makes it easy to write fast, deterministic tests without making real network requests.
 
-The `compression-*` features below select codecs for
+The `compression-*` features below select formats for
 [automatic response decompression](#automatic-response-decompression). None is on by default,
-and a build with none of them links no codec at all. Enabling one makes a format *available*;
-the client decompresses nothing until
+and a build with none of them links no compression implementation. Enabling one makes a format
+*available*; the client decompresses nothing until
 [`ResponseDecompressionOptions::methods`][__link87]
 names it and those options are applied with
 [`response_decompression`][__link88].
 
-* **`compression-gzip`**: Links the `gzip` codec (RFC 1952) for
+* **`compression-gzip`**: Links `gzip` compression (RFC 1952) for
   [automatic response decompression](#automatic-response-decompression) and adds
   [`DecompressionMethod::Gzip`][__link89]. The legacy `x-gzip` token selects
   it too.
 
-* **`compression-deflate`**: Links the `deflate` codec and adds
+* **`compression-deflate`**: Links `deflate` compression and adds
   [`DecompressionMethod::Deflate`][__link90]. Despite the token, the HTTP
   `deflate` format is zlib-wrapped DEFLATE (RFC 1950), *not* raw DEFLATE (RFC 1951).
 
-* **`compression-brotli`**: Links the `br` codec (RFC 7932) and adds
+* **`compression-brotli`**: Links Brotli compression (`br`, RFC 7932) and adds
   [`DecompressionMethod::Brotli`][__link91].
 
-* **`compression-zstd`**: Links the `zstd` codec (RFC 8878) and adds
+* **`compression-zstd`**: Links Zstandard compression (`zstd`, RFC 8878) and adds
   [`DecompressionMethod::Zstd`][__link92].
 
-* **`compression-all`**: Enables all four codec features above. Use
+* **`compression-all`**: Enables all four compression features above. Use
   [`DecompressionMethod::ALL`][__link93] to request decompression with all of them.
 
  > 
@@ -780,7 +781,7 @@ names it and those options are applied with
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbgWKBUySW9pobUlL98Ktlh5cbfEo5nqxPmnkbHQxJe4fOhe1hZIeCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZlMC45LjCCZWZldGNoZjAuMTYuMYJvaHR0cF9leHRlbnNpb25zZjAuMTAuMIJnbGF5ZXJlZGUwLjMuNoJoc2VhdGJlbHRlMC44LjCCbXRlbXBsYXRlZF91cmllMC41LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbv1ecLQBsKykbXKC-jkLUZfAbHwbR4BYA5C8bNzuR_qhzafVhZIeCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZlMC45LjCCZWZldGNoZjAuMTYuMYJvaHR0cF9leHRlbnNpb25zZjAuMTAuMIJnbGF5ZXJlZGUwLjMuNoJoc2VhdGJlbHRlMC44LjCCbXRlbXBsYXRlZF91cmllMC41LjA
  [__link0]: https://docs.rs/fetch/0.16.1/fetch/?search=HttpClient
  [__link1]: https://docs.rs/http_extensions/0.10.0/http_extensions/?search=RequestHandler
  [__link10]: https://docs.rs/fetch/0.16.1/fetch/?search=HttpClient::post

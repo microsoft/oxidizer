@@ -69,7 +69,7 @@ fn receive_burst(mut body: Pin<&mut HttpBody>, expected: &[u8]) {
     let mut cx = Context::from_waker(&waker);
     let mut received = Vec::new();
     // Bound polling rather than waiting for EOF or a wall-clock timeout. Cooperative
-    // codec yields may return Pending before the source itself pauses.
+    // compression engine yields may return Pending before the source itself pauses.
     for _ in 0..1024 {
         match body.as_mut().poll_frame(&mut cx) {
             Poll::Ready(Some(frame)) => received.extend(frame.unwrap().into_data().unwrap().to_vec()),

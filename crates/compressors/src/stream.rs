@@ -51,9 +51,9 @@ where
         return Poll::Ready(None);
     }
 
-    // Latches when the source has run dry and `end_input` has been signalled. A conforming codec
+    // Latches when the source has run dry and `end_input` has been signalled. A conforming engine
     // answers the next `pull` with output or `Done`, never with another request for input, so a
-    // second `NeedInput` means the codec is not honouring the contract. Without this the loop would
+    // second `NeedInput` means the engine is not honouring the contract. Without this the loop would
     // poll the exhausted source again, re-signal end of input, and keep waking itself: bounded per
     // poll, but a livelock across them. `process` rejects the same sequence outright.
     let mut input_ended = false;

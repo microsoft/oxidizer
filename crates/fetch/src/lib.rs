@@ -777,8 +777,9 @@
 //! # Automatic Response Decompression
 //!
 //! The client can automatically decompress response bodies, which is off until it is asked for.
-//! Link the codecs you want through the `compression-*` features, or enable `compression-all` for
-//! every supported codec, then select them through [`ResponseDecompressionOptions`][options::ResponseDecompressionOptions]:
+//! Link the compression formats you want through the `compression-*` features, or enable
+//! `compression-all` for every supported format, then select them through
+//! [`ResponseDecompressionOptions`][options::ResponseDecompressionOptions]:
 //!
 //! ```
 //! # #[cfg(all(feature = "test-util", feature = "compression-gzip"))]
@@ -804,7 +805,7 @@
 //! decompress.
 //!
 //! Decompression is lazy, so a malformed body fails when it is read rather than when the response
-//! arrives, and that failure therefore does not trigger a retry. Codec limits are
+//! arrives, and that failure therefore does not trigger a retry. Compression limits are
 //! preserved by default; the client adds no output-size or stream-count cap.
 //!
 //! [`ResponseDecompressionOptions`][options::ResponseDecompressionOptions] can explicitly bound
@@ -848,30 +849,30 @@
 //! - **`test-util`**: Provides APIs to fake responses and HTTP client behavior for testing purposes.
 //!   This feature makes it easy to write fast, deterministic tests without making real network requests.
 //!
-//! The `compression-*` features below select codecs for
+//! The `compression-*` features below select formats for
 //! [automatic response decompression](#automatic-response-decompression). None is on by default,
-//! and a build with none of them links no codec at all. Enabling one makes a format *available*;
-//! the client decompresses nothing until
+//! and a build with none of them links no compression implementation. Enabling one makes a format
+//! *available*; the client decompresses nothing until
 //! [`ResponseDecompressionOptions::methods`](options::ResponseDecompressionOptions::methods)
 //! names it and those options are applied with
 //! [`response_decompression`](HttpClientBuilder::response_decompression).
 //!
-//! - **`compression-gzip`**: Links the `gzip` codec (RFC 1952) for
+//! - **`compression-gzip`**: Links `gzip` compression (RFC 1952) for
 //!   [automatic response decompression](#automatic-response-decompression) and adds
 //!   [`DecompressionMethod::Gzip`](options::DecompressionMethod). The legacy `x-gzip` token selects
 //!   it too.
 //!
-//! - **`compression-deflate`**: Links the `deflate` codec and adds
+//! - **`compression-deflate`**: Links `deflate` compression and adds
 //!   [`DecompressionMethod::Deflate`](options::DecompressionMethod). Despite the token, the HTTP
 //!   `deflate` format is zlib-wrapped DEFLATE (RFC 1950), *not* raw DEFLATE (RFC 1951).
 //!
-//! - **`compression-brotli`**: Links the `br` codec (RFC 7932) and adds
+//! - **`compression-brotli`**: Links Brotli compression (`br`, RFC 7932) and adds
 //!   [`DecompressionMethod::Brotli`](options::DecompressionMethod).
 //!
-//! - **`compression-zstd`**: Links the `zstd` codec (RFC 8878) and adds
+//! - **`compression-zstd`**: Links Zstandard compression (`zstd`, RFC 8878) and adds
 //!   [`DecompressionMethod::Zstd`](options::DecompressionMethod).
 //!
-//! - **`compression-all`**: Enables all four codec features above. Use
+//! - **`compression-all`**: Enables all four compression features above. Use
 //!   [`DecompressionMethod::ALL`](options::DecompressionMethod::ALL) to request decompression with all of them.
 //!
 //! > **Note**: Most users should enable the `tokio` feature along with the `tls` feature for HTTPS
