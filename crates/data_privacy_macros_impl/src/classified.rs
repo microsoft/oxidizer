@@ -120,6 +120,8 @@ pub fn classified(attr_args: TokenStream, item: TokenStream) -> SynResult<TokenS
                     }
                 };
                 if amount <= local_buf.len() {
+                    debug_assert!(::core::str::from_utf8(&local_buf[..amount]).is_ok(), "write_fmt output must be UTF-8");
+                    // SAFETY: `Ok` means complete UTF-8 segments were written; partial writes use the fallback.
                     let s = unsafe { ::core::str::from_utf8_unchecked(&local_buf[..amount]) };
                     redactor.redact(dc, s, output)
                 } else {
@@ -147,6 +149,8 @@ pub fn classified(attr_args: TokenStream, item: TokenStream) -> SynResult<TokenS
                     }
                 };
                 if amount <= local_buf.len() {
+                    debug_assert!(::core::str::from_utf8(&local_buf[..amount]).is_ok(), "write_fmt output must be UTF-8");
+                    // SAFETY: `Ok` means complete UTF-8 segments were written; partial writes use the fallback.
                     let s = unsafe { ::core::str::from_utf8_unchecked(&local_buf[..amount]) };
                     redactor.redact(dc, s, output)
                 } else {
@@ -155,6 +159,8 @@ pub fn classified(attr_args: TokenStream, item: TokenStream) -> SynResult<TokenS
             }
         }
 
+        // Retained for public compatibility: no `Infallible` reference can be returned, and
+        // either method always panics. Removing these impls requires a breaking release.
         impl #impl_generics core::ops::Deref for #struct_name #ty_generics #where_clause {
             type Target = ::core::convert::Infallible;
 

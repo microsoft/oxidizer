@@ -79,7 +79,10 @@ impl Drop for DiagnosticWaker {
         };
 
         let mut family_backtraces = self.registry.backtraces.lock().expect(ERR_POISONED_LOCK);
-        assert!(family_backtraces.remove(&key).is_some());
+        assert!(
+            family_backtraces.remove(&key).is_some(),
+            "backtrace for key {key} missing from registry on drop"
+        );
     }
 }
 

@@ -197,7 +197,10 @@ impl PinnedDrop for WakeSignal {
     #[cfg_attr(test, mutants::skip)] // Only used for assertions, effect-free.
     fn drop(self: Pin<&mut Self>) {
         // This is too common to do a release-mode assert.
-        debug_assert!(self.is_inert());
+        debug_assert!(
+            self.is_inert(),
+            "WakeSignal dropped while wakers are still outstanding (waker_count > 0)"
+        );
     }
 }
 

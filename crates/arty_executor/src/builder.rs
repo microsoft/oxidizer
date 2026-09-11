@@ -68,7 +68,9 @@ impl ExecutorBuilder {
     /// # Safety
     ///
     /// The returned object must not be dropped until a call to
-    /// [`execute_cycle()`][1] returns [`CycleOutcome::Shutdown`][2].
+    /// [`execute_cycle()`][1] returns [`CycleOutcome::Shutdown`][2]. Dropping it earlier
+    /// invalidates outstanding `TaskRef`/`WakeSignal` raw-pointer tickets into task storage;
+    /// later dereference may cause undefined behavior. `Drop` assertions are only a backstop.
     ///
     /// [1]: Executor::execute_cycle
     /// [2]: crate::CycleOutcome::Shutdown
