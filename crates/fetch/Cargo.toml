@@ -323,13 +323,7 @@ required-features = ["test-util"]
 
 [[test]]
 name = "decompression"
-required-features = [
-    "test-util",
-    "compression-brotli",
-    "compression-deflate",
-    "compression-gzip",
-    "compression-zstd",
-]
+required-features = ["test-util", "compression-all"]
 
 # >>> anvil-managed: anvil-lints
 [lints]
