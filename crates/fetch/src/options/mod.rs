@@ -8,8 +8,8 @@
 //! together with the response-body, routing, redaction, and TLS configuration
 //! owned by the `fetch` request pipeline.
 //!
-//! [`SocketOptions`] is re-exported for transport-specific builders. It is not part of
-//! [`TransportOptions`] because only socket-owning transports can honor it.
+//! [`fetch_options::SocketOptions`] is re-exported for transport-specific builders. It is not part
+//! of [`fetch_options::TransportOptions`] because only socket-owning transports can honor it.
 
 use data_privacy::RedactionEngine;
 

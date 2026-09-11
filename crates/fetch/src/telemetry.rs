@@ -3,9 +3,11 @@
 
 //! Telemetry types for enriching `fetch` metrics and inspecting connections.
 //!
-//! [`TelemetryAttributes`] lets you attach custom [`KeyValue`] attributes to a
+//! [`TelemetryAttributes`][crate::telemetry::TelemetryAttributes] lets you attach custom
+//! [`KeyValue`][opentelemetry::KeyValue] attributes to a
 //! request so they are merged into the metrics recorded for it.
-//! [`ConnectionInfo`] reports details about the connection that served a response.
+//! [`ConnectionInfo`][crate::telemetry::ConnectionInfo] reports details about the connection that
+//! served a response.
 //!
 //! For the full list of emitted metrics and their attributes, see the
 //! [telemetry reference](crate::_documentation::telemetry).

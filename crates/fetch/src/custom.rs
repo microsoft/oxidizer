@@ -9,7 +9,7 @@
 //! transports (the Tokio transport and the test fakes) reuse the same machinery
 //! internally.
 //!
-//! The free-standing [`create_builder`] function is the entry point: it returns
+//! The free-standing [`create_builder`][crate::custom::create_builder] function is the entry point: it returns
 //! an [`HttpClientBuilder`] so the pipeline (middleware, options, …) can be
 //! tailored before [`HttpClientBuilder::build`] is called.
 
