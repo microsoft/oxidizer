@@ -43,7 +43,7 @@ pub(crate) fn create_dispatch_handler(
     Dispatch::new(mode, options.transport.request_filter)
 }
 
-/// Decompressing response bodies when a codec is compiled in.
+/// Decompressing response bodies when a compression implementation is compiled in.
 ///
 /// The two halves keep the conditional compilation in one place, so the builder
 /// above reads the same either way.
@@ -90,7 +90,7 @@ mod decompression {
     }
 }
 
-/// The same two halves for a build that links no codec.
+/// The same two halves for a build that links no compression implementation.
 #[cfg(not(any(
     test,
     feature = "compression-gzip",

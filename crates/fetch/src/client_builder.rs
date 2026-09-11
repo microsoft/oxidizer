@@ -148,7 +148,7 @@ impl HttpClientBuilder {
     /// Configures automatic response decompression, including methods and resource limits.
     ///
     /// Off by default: a build with none of the `compression-*` features links no
-    /// codec at all, and even with them the client decompresses nothing until
+    /// compression implementation at all, and even with them the client decompresses nothing until
     /// [`methods`][ResponseDecompressionOptions::methods] names something. Requests then advertise the methods in
     /// `Accept-Encoding`, most preferred first, and a matching response is
     /// decompressed before the caller sees it, with `Content-Encoding` and
@@ -161,15 +161,15 @@ impl HttpClientBuilder {
     /// fails when it is read rather than when the response arrives.
     ///
     /// [`DecompressionMethod::ALL`][crate::options::DecompressionMethod::ALL] asks for everything this build can decompress.
-    /// The `compression-all` feature makes all supported codecs available.
+    /// The `compression-all` feature makes all supported compression formats available.
     ///
-    /// Passing a method slice or array reference preserves the codec's default limits.
+    /// Passing a method slice or array reference preserves the compression format's default limits.
     /// Pass [`ResponseDecompressionOptions`] to customize them.
     ///
     /// # Bounds
     ///
     /// No additional output-size or stream-count limits are imposed by default.
-    /// The selected codec retains its own limits. Explicit bounds configured through
+    /// The selected compression format retains its own limits. Explicit bounds configured through
     /// `options` apply while reading the body, even without buffering it. Exceeding
     /// a decompression bound fails the body with the `compression_limit_exceeded`
     /// error label.

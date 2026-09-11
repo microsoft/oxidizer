@@ -267,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn constructors_and_method_conversions_leave_codec_limits_untouched() {
+    fn constructors_and_method_conversions_leave_compression_limits_untouched() {
         for options in [
             ResponseDecompressionOptions::new(),
             ResponseDecompressionOptions::default(),

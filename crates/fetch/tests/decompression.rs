@@ -90,7 +90,7 @@ fn build(
     (configure(HttpClient::builder_fake(handler, FakeDeps::default())), seen)
 }
 
-/// A client that decompresses everything this build has a codec for.
+/// A client that decompresses every compression format available in this build.
 fn client_with(format_token: Option<&'static str>, body: BytesView) -> (HttpClient, SeenRequests) {
     build(format_token, body, |builder| {
         builder.response_decompression(DecompressionMethod::ALL).build()
@@ -296,7 +296,7 @@ async fn output_limits_apply_at_the_exact_boundary_for_every_method_and_pipeline
 }
 
 #[tokio::test]
-async fn codec_output_defaults_are_preserved_even_when_stream_count_is_limited() {
+async fn compression_output_defaults_are_preserved_even_when_stream_count_is_limited() {
     const LEN: usize = 64 * 1024 * 1024 + 1;
     let compressed = compress_zeroes(Format::Brotli, LEN);
     let options = ResponseDecompressionOptions::from(&[DecompressionMethod::Brotli]);
@@ -337,7 +337,7 @@ async fn none_removes_a_previously_configured_output_limit() {
 }
 
 #[tokio::test]
-async fn codec_stream_count_defaults_are_preserved_even_when_output_is_limited() {
+async fn compression_stream_count_defaults_are_preserved_even_when_output_is_limited() {
     for (token, format, method) in [
         ("gzip", Format::Gzip, DecompressionMethod::Gzip),
         ("zstd", Format::Zstd, DecompressionMethod::Zstd),

@@ -818,7 +818,7 @@ mod tests {
     }
 
     #[test]
-    fn progress_yields_after_one_codec_pull() {
+    fn progress_yields_after_one_engine_pull() {
         let pulls = Arc::new(AtomicUsize::new(0));
         let source = stream::pending::<std::result::Result<BytesView, std::io::Error>>();
         let mut stream = Box::pin(CompressionStream::compress(source, ProgressCompression::new(Arc::clone(&pulls))));
