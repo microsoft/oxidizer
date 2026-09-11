@@ -797,7 +797,7 @@
 //! decompress.
 //!
 //! Decompression is lazy, so a malformed body fails when it is read rather than when the response
-//! arrives, and that failure therefore does not trigger a retry. The codec's own limits are
+//! arrives, and that failure therefore does not trigger a retry. Codec limits are
 //! preserved by default; the client adds no output-size or stream-count cap.
 //!
 //! [`ResponseDecompressionOptions`][options::ResponseDecompressionOptions] can explicitly bound

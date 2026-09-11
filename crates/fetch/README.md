@@ -673,13 +673,48 @@ You can also select the TLS backend at runtime via [`TlsOptions::builder_rustls(
 `TlsOptions::builder_native_tls()` when both features are enabled, allowing different client
 instances to use different backends.
 
+## Automatic Response Decompression
+
+The client can automatically decompress response bodies, which is off until it is asked for.
+Link the codecs you want through the `compression-*` features, or enable `compression-all` for
+every supported codec, then select them through [`ResponseDecompressionOptions`][__link82]:
+
+```rust
+let client = builder
+    .response_decompression(&[DecompressionMethod::Gzip])
+    .build();
+```
+
+Requests then advertise the methods in `Accept-Encoding`, most preferred first, and a matching
+response is decompressed before the caller sees it. `Content-Encoding` and `Content-Length` are
+removed because neither describes the decompressed body; what they said is kept in
+`http_compression::OriginalBody` on the response. A response compressed with a format that was
+not asked for is handed back untouched rather than failing.
+
+[`DecompressionMethod::ALL`][__link83] asks for everything the build can
+decompress.
+
+Decompression is lazy, so a malformed body fails when it is read rather than when the response
+arrives, and that failure therefore does not trigger a retry. Codec limits are
+preserved by default; the client adds no output-size or stream-count cap.
+
+[`ResponseDecompressionOptions`][__link84] can explicitly bound
+decompressed output and the number of compressed streams. These bounds apply even when
+streaming without buffering the body; exceeding one fails the body with the
+`compression_limit_exceeded` error label.
+[`response_body_options`][__link85] separately controls how
+much a body-buffering operation may retain in memory.
+
+For server-side compression and decompression, use the
+[`http_compression`][__link86] crate directly.
+
 ## Features
 
 The `fetch` crate provides several optional features that you can enable in your `Cargo.toml`:
 
 ```toml
 [dependencies]
-fetch = { version = "*", features = ["json", "tokio"] }
+fetch = { version = "*", features = ["json", "tokio", "tls", "compression-gzip"] }
 ```
 
 * **`tokio`**: Enables integration with the Tokio runtime. This feature provides the `HttpClient::builder_tokio`
@@ -704,6 +739,32 @@ fetch = { version = "*", features = ["json", "tokio"] }
 * **`test-util`**: Provides APIs to fake responses and HTTP client behavior for testing purposes.
   This feature makes it easy to write fast, deterministic tests without making real network requests.
 
+The `compression-*` features below select codecs for
+[automatic response decompression](#automatic-response-decompression). None is on by default,
+and a build with none of them links no codec at all. Enabling one makes a format *available*;
+the client decompresses nothing until
+[`ResponseDecompressionOptions::methods`][__link87]
+names it and those options are applied with
+[`response_decompression`][__link88].
+
+* **`compression-gzip`**: Links the `gzip` codec (RFC 1952) for
+  [automatic response decompression](#automatic-response-decompression) and adds
+  [`DecompressionMethod::Gzip`][__link89]. The legacy `x-gzip` token selects
+  it too.
+
+* **`compression-deflate`**: Links the `deflate` codec and adds
+  [`DecompressionMethod::Deflate`][__link90]. Despite the token, the HTTP
+  `deflate` format is zlib-wrapped DEFLATE (RFC 1950), *not* raw DEFLATE (RFC 1951).
+
+* **`compression-brotli`**: Links the `br` codec (RFC 7932) and adds
+  [`DecompressionMethod::Brotli`][__link91].
+
+* **`compression-zstd`**: Links the `zstd` codec (RFC 8878) and adds
+  [`DecompressionMethod::Zstd`][__link92].
+
+* **`compression-all`**: Enables all four codec features above. Use
+  [`DecompressionMethod::ALL`][__link93] to request decompression with all of them.
+
  > 
  > **Note**: Most users should enable the `tokio` feature along with the `tls` feature for HTTPS
  > support. The `json` feature is recommended for most applications that need to work with JSON APIs.
@@ -714,7 +775,7 @@ fetch = { version = "*", features = ["json", "tokio"] }
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbECLnTOeX12YbX9iOeUkyZdIbmdfyJmK3r8wbqVSCmNHoD_5hZIeCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZlMC45LjCCZWZldGNoZjAuMTYuMYJvaHR0cF9leHRlbnNpb25zZjAuMTAuMIJnbGF5ZXJlZGUwLjMuNoJoc2VhdGJlbHRlMC44LjCCbXRlbXBsYXRlZF91cmllMC41LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb-nbWvsfqBvQbsVR4hfdnTHcbh2VMuOVXaXEbSLG_uRRtCylhZIeCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZlMC45LjCCZWZldGNoZjAuMTYuMYJvaHR0cF9leHRlbnNpb25zZjAuMTAuMIJnbGF5ZXJlZGUwLjMuNoJoc2VhdGJlbHRlMC44LjCCbXRlbXBsYXRlZF91cmllMC41LjA
  [__link0]: https://docs.rs/fetch/0.16.1/fetch/?search=HttpClient
  [__link1]: https://docs.rs/http_extensions/0.10.0/http_extensions/?search=RequestHandler
  [__link10]: https://docs.rs/fetch/0.16.1/fetch/?search=HttpClient::post
@@ -796,4 +857,16 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link8]: https://docs.rs/fetch/0.16.1/fetch/?search=HttpClient::builder_tokio
  [__link80]: https://docs.rs/rustls-platform-verifier
  [__link81]: https://docs.rs/fetch/0.16.1/fetch/?search=tls::TlsOptions::builder_rustls
+ [__link82]: https://docs.rs/fetch/0.16.1/fetch/?search=options::ResponseDecompressionOptions
+ [__link83]: https://docs.rs/fetch/0.16.1/fetch/?search=options::DecompressionMethod::ALL
+ [__link84]: https://docs.rs/fetch/0.16.1/fetch/?search=options::ResponseDecompressionOptions
+ [__link85]: https://docs.rs/fetch/0.16.1/fetch/?search=HttpClientBuilder::response_body_options
+ [__link86]: https://docs.rs/http_compression
+ [__link87]: https://docs.rs/fetch/0.16.1/fetch/?search=options::ResponseDecompressionOptions::methods
+ [__link88]: https://docs.rs/fetch/0.16.1/fetch/?search=HttpClientBuilder::response_decompression
+ [__link89]: https://docs.rs/fetch/0.16.1/fetch/?search=options::DecompressionMethod
  [__link9]: https://docs.rs/fetch/0.16.1/fetch/?search=HttpClient::get
+ [__link90]: https://docs.rs/fetch/0.16.1/fetch/?search=options::DecompressionMethod
+ [__link91]: https://docs.rs/fetch/0.16.1/fetch/?search=options::DecompressionMethod
+ [__link92]: https://docs.rs/fetch/0.16.1/fetch/?search=options::DecompressionMethod
+ [__link93]: https://docs.rs/fetch/0.16.1/fetch/?search=options::DecompressionMethod::ALL
