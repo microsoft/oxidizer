@@ -1,6 +1,20 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Compresses and decompresses HTTP message bodies.
+//!
+//! ```
+//! # #[cfg(feature = "gzip")] {
+//! use compressors::format::Format;
+//! use http_compression::Compression;
+//! use http_extensions::HttpBodyBuilder;
+//!
+//! let layer =
+//!     Compression::client(HttpBodyBuilder::new_fake()).decompress_responses(&[Format::Gzip]);
+//! # let _ = layer;
+//! # }
+//! ```
+
 #![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/http_compression/logo.png")]
@@ -8,8 +22,6 @@
     html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/http_compression/favicon.ico"
 )]
 
-//! Compresses and decompresses HTTP message bodies.
-//!
 //! [`compressors`] transforms a stream of bytes. This crate applies that to
 //! HTTP messages: reading `Content-Encoding`, negotiating `Accept-Encoding`,
 //! and replacing a body with one that compresses or decompresses as it is read.

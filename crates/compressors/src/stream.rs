@@ -230,8 +230,9 @@ where
     /// use compressors::{CompressionStream, DecompressorLimits, Resources, gzip};
     /// use futures::{StreamExt, stream};
     ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// # futures::executor::block_on(async {
-    /// let compressed = gzip::compress(b"payload", &Resources::default()).unwrap();
+    /// let compressed = gzip::compress(b"payload", &Resources::default())?;
     ///
     /// // Deliver the gzip stream one byte at a time, the worst case for a decompressor.
     /// let source = stream::iter(
@@ -242,17 +243,21 @@ where
     ///
     /// // This consumer collects every chunk, so it caps the total rather than relying on the
     /// // adapter's bounded working set.
+    /// let output_limit = NonZeroU64::new(1 << 20).ok_or("the limit is non-zero")?;
     /// let decompressor = gzip::Decompressor::builder()
-    ///     .limits(DecompressorLimits::new().max_output_len(NonZeroU64::new(1 << 20).unwrap()))
+    ///     .limits(DecompressorLimits::new().max_output_len(output_limit))
     ///     .build(&Resources::default());
     ///
     /// let chunks: Vec<_> = CompressionStream::decompress(source, decompressor)
     ///     .collect()
     ///     .await;
-    /// let plain = BytesView::from_views(chunks.into_iter().map(|c| c.unwrap()));
+    /// let plain = BytesView::from_views(chunks.into_iter().collect::<Result<Vec<_>, _>>()?);
     ///
     /// assert_eq!(plain.to_vec(), b"payload".to_vec());
-    /// # });
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// # })?;
+    /// # Ok(())
+    /// # }
     /// # }
     /// ```
     #[must_use]

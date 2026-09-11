@@ -74,7 +74,7 @@ impl HttpClient {
     ///
     /// ```
     /// # use http::header::USER_AGENT;
-    /// use fetch::HttpClient;
+    /// use fetch::{HttpClient, Uri};
     /// # async fn example(client: &HttpClient) -> Result<(), Box<dyn std::error::Error>> {
     /// // Using strings (convenient but with parsing overhead)
     /// let response = client
@@ -85,7 +85,7 @@ impl HttpClient {
     /// // Using pre-parsed values (more efficient) and additional customization
     /// // before fetching the response.
     /// let method = http::Method::GET;
-    /// let uri = "https://example.com/api".parse::<http::Uri>()?;
+    /// let uri = "https://example.com/api".parse::<Uri>()?;
     /// let response = client
     ///     .request(method, uri)
     ///     .header(USER_AGENT, "MyApp/1.0")

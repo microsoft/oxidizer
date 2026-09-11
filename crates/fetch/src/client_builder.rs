@@ -20,7 +20,7 @@ use crate::handlers::Dispatch;
 use crate::options::{
     ClientOptions, ConnectionKeepAlive, ConnectionPoolOptions, Http2Options, RequestFilter, ResponseDecompressionOptions,
 };
-use crate::pipeline::{CustomPipelineFactory, Pipeline, PipelineBuilder, PipelineContext, StandardRequestPipeline};
+use crate::pipeline::{CustomPipeline, Pipeline, PipelineBuilder, PipelineContext, StandardRequestPipeline};
 use crate::resilience::HttpResilienceContext;
 use crate::telemetry::Metering;
 use crate::tls::TlsOptions;
@@ -253,7 +253,7 @@ impl HttpClientBuilder {
         F: Fn(Dispatch, PipelineContext) -> R + Send + Sync + 'static,
         R: RequestHandler + 'static,
     {
-        self.pipeline_builder = PipelineBuilder::Custom(CustomPipelineFactory::new(factory));
+        self.pipeline_builder = PipelineBuilder::Custom(CustomPipeline::new(factory));
         self
     }
 
@@ -525,16 +525,16 @@ impl Aware {
         let meter: Meter = self.metering.into();
         let body_builder = self.transport.create_body_builder(&self.options);
         let dispatch = create_dispatch_handler(&meter, self.options.clone(), &self.transport, &body_builder);
-
-        self.pipeline.build(
-            dispatch,
+        let context = PipelineContext::new(
             self.resilience_context,
-            self.options.redaction_engine,
             &meter,
+            self.options.redaction_engine,
             body_builder,
             self.transport.clock().clone(),
             self.options.router,
-        )
+        );
+
+        self.pipeline.build(dispatch, context)
     }
 }
 
@@ -556,7 +556,7 @@ mod tests {
             .standard_pipeline(|pipeline, _context| pipeline.retry(|retry| retry.max_retry_attempts(5)))
             .build();
 
-        let dbg = client.pipeline().dbg_string_for_custom_pipeline();
+        let dbg = client.pipeline().debug_string();
         assert!(dbg.contains("max_attempts: 6"));
     }
 
@@ -618,7 +618,7 @@ mod tests {
             .standard_pipeline(|pipeline, _context| pipeline)
             .build();
 
-        let dbg = client.pipeline().dbg_string_for_custom_pipeline();
+        let dbg = client.pipeline().debug_string();
         assert!(dbg.contains("max_attempts: 4"));
     }
 

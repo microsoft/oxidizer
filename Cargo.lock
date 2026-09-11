@@ -1230,6 +1230,7 @@ dependencies = [
  "cfg_aliases",
  "criterion",
  "flate2",
+ "foldhash 0.2.0",
  "futures",
  "futures-core",
  "metabench",

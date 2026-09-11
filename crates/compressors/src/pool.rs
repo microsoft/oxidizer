@@ -15,6 +15,9 @@ use performables::sync::mutex::Mutex;
 #[cfg(any(test, feature = "deflate", feature = "gzip", feature = "zlib"))]
 use crate::flate::Wrapper;
 
+#[cfg(any(test, feature = "deflate", feature = "gzip", feature = "zlib"))]
+type EngineMap<K, V> = HashMap<K, V, foldhash::fast::RandomState>;
+
 /// How many idle engines the pool keeps per interchangeable group, unless told otherwise.
 ///
 /// Sized for a service handling a moderate number of concurrent messages: high enough that an
@@ -80,10 +83,10 @@ pub(crate) struct Pool {
 /// reuse" and builds a fresh engine instead.
 struct Inner {
     #[cfg(any(test, feature = "deflate", feature = "gzip", feature = "zlib"))]
-    compressors: Mutex<HashMap<EngineKey, Vec<flate2::Compress>>>,
+    compressors: Mutex<EngineMap<EngineKey, Vec<flate2::Compress>>>,
     /// Decompressors carry no level, so the container alone identifies them.
     #[cfg(any(test, feature = "deflate", feature = "zlib"))]
-    decompressors: Mutex<HashMap<Wrapper, Vec<flate2::Decompress>>>,
+    decompressors: Mutex<EngineMap<Wrapper, Vec<flate2::Decompress>>>,
     /// Zstd contexts allocate their working memory lazily, so recycling them saves far more than
     /// their construction cost suggests.
     ///
@@ -113,9 +116,9 @@ impl Pool {
         Self {
             inner: Arc::new(Inner {
                 #[cfg(any(test, feature = "deflate", feature = "gzip", feature = "zlib"))]
-                compressors: Mutex::new(HashMap::new()),
+                compressors: Mutex::new(EngineMap::with_hasher(foldhash::fast::RandomState::default())),
                 #[cfg(any(test, feature = "deflate", feature = "zlib"))]
-                decompressors: Mutex::new(HashMap::new()),
+                decompressors: Mutex::new(EngineMap::with_hasher(foldhash::fast::RandomState::default())),
                 #[cfg(any(test, feature = "zstd"))]
                 zstd_compressors: Mutex::new(Vec::new()),
                 #[cfg(any(test, feature = "zstd"))]

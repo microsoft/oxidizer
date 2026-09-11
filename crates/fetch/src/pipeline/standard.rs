@@ -4,27 +4,26 @@
 use std::any::type_name;
 use std::fmt::Debug;
 
-use data_privacy::RedactionEngine;
 use http_extensions::HttpResponse;
-use http_extensions::routing::Router;
 use layered::{Intercept, InterceptLayer};
-use opentelemetry::metrics::Meter;
 use performables::arc::Arc;
 use thread_aware::ThreadAware;
-use tick::Clock;
 
 use crate::handlers::{Logging, LoggingLayer, Metrics, MetricsLayer};
 use crate::pipeline::PipelineContext;
-use crate::resilience::HttpResilienceContext;
 use crate::resilience::breaker::{HttpBreaker, HttpBreakerLayer, HttpBreakerLayerExt};
 use crate::resilience::hedging::{HttpHedging, HttpHedgingLayer, HttpHedgingLayerExt};
 use crate::resilience::retry::{HttpRetry, HttpRetryLayer, HttpRetryLayerExt};
 use crate::resilience::timeout::{HttpTimeout, HttpTimeoutLayer, HttpTimeoutLayerExt};
 
 const ATTEMPT_TIMEOUT_NAME: &str = "standard.attempt_timeout";
+/// Ten seconds lets a single attempt survive ordinary network variance while leaving room for
+/// retries within the total request budget.
 const ATTEMPT_TIMEOUT_DURATION: std::time::Duration = std::time::Duration::from_secs(10);
 
 const TOTAL_TIMEOUT_NAME: &str = "standard.total_timeout";
+/// Thirty seconds permits the default initial attempt plus retries without letting one logical
+/// request occupy resources indefinitely.
 const TOTAL_TIMEOUT_DURATION: std::time::Duration = std::time::Duration::from_secs(30);
 
 const RETRY_NAME: &str = "standard.retry";
@@ -90,7 +89,12 @@ pub struct StandardRequestPipeline {
 }
 
 impl StandardRequestPipeline {
-    pub(crate) fn new(options: &HttpResilienceContext, redaction: &RedactionEngine, clock: &Clock, meter: &Meter, router: &Router) -> Self {
+    pub(crate) fn new(context: &PipelineContext) -> Self {
+        let options = context.resilience_context();
+        let clock = context.clock();
+        let meter = context.meter();
+        let router = context.router();
+
         Self {
             total_metrics: Metrics::layer().clock(clock).meter(meter.clone()).report_total_duration(true),
             total_timeout: HttpTimeout::layer(TOTAL_TIMEOUT_NAME, options)
@@ -107,7 +111,7 @@ impl StandardRequestPipeline {
                 .http_timeout_error()
                 .timeout(ATTEMPT_TIMEOUT_DURATION),
             attempt_intercept: Intercept::layer(),
-            attempt_logs: Logging::layer().redaction_engine(redaction).clock(clock),
+            attempt_logs: Logging::layer().redaction_engine(context.redaction_engine()).clock(clock),
             attempt_metrics: Metrics::layer().clock(clock).meter(meter.clone()),
             recovery_mode: RecoveryMode::default(),
         }
@@ -289,14 +293,8 @@ impl ConfigureStandardPipeline {
         })
     }
 
-    pub(crate) fn create(self, context: PipelineContext, redaction: &RedactionEngine) -> StandardRequestPipeline {
-        let pipeline = StandardRequestPipeline::new(
-            context.resilience_context(),
-            redaction,
-            context.clock(),
-            context.meter(),
-            context.router(),
-        );
+    pub(crate) fn create(self, context: PipelineContext) -> StandardRequestPipeline {
+        let pipeline = StandardRequestPipeline::new(&context);
         (self.0)(pipeline, context)
     }
 }
@@ -312,26 +310,36 @@ impl Debug for ConfigureStandardPipeline {
 mod tests {
     use std::time::Duration;
 
-    use opentelemetry::metrics::MeterProvider;
+    use data_privacy::RedactionEngine;
+    use http_extensions::HttpBodyBuilder;
+    use http_extensions::routing::Router;
+    use opentelemetry::metrics::{Meter, MeterProvider};
     use opentelemetry_sdk::metrics::SdkMeterProvider;
+    use tick::Clock;
 
     use super::*;
+    use crate::resilience::HttpResilienceContext;
 
     fn test_meter() -> Meter {
         SdkMeterProvider::default().meter("test")
     }
 
+    fn test_context() -> PipelineContext {
+        let clock = Clock::new_frozen();
+        PipelineContext::new(
+            HttpResilienceContext::new(&clock),
+            &test_meter(),
+            RedactionEngine::default(),
+            HttpBodyBuilder::new_fake(),
+            clock,
+            Router::default(),
+        )
+    }
+
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn test_new_with_clock_creates_pipeline() {
-        let clock = Clock::new_frozen();
-        let pipeline = StandardRequestPipeline::new(
-            &HttpResilienceContext::new(&clock),
-            &RedactionEngine::default(),
-            &clock,
-            &test_meter(),
-            &Router::default(),
-        );
+        let pipeline = StandardRequestPipeline::new(&test_context());
 
         assert!(format!("{:?}", pipeline.total_timeout).contains("timeout: Some(30s)"));
         assert!(format!("{:?}", pipeline.total_timeout).contains("standard.total_timeout"));
@@ -351,14 +359,7 @@ mod tests {
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn test_debug_implementation() {
-        let clock = Clock::new_frozen();
-        let pipeline = StandardRequestPipeline::new(
-            &HttpResilienceContext::new(&clock),
-            &RedactionEngine::default(),
-            &clock,
-            &test_meter(),
-            &Router::default(),
-        );
+        let pipeline = StandardRequestPipeline::new(&test_context());
 
         let debug_str = format!("{pipeline:?}");
         assert!(debug_str.contains("StandardRequestPipeline"));
@@ -381,21 +382,8 @@ mod tests {
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn test_multiple_pipelines_are_independent() {
-        let clock = Clock::new_frozen();
-        let pipeline1 = StandardRequestPipeline::new(
-            &HttpResilienceContext::new(&clock),
-            &RedactionEngine::default(),
-            &clock,
-            &test_meter(),
-            &Router::default(),
-        );
-        let pipeline2 = StandardRequestPipeline::new(
-            &HttpResilienceContext::new(&clock),
-            &RedactionEngine::default(),
-            &clock,
-            &test_meter(),
-            &Router::default(),
-        );
+        let pipeline1 = StandardRequestPipeline::new(&test_context());
+        let pipeline2 = StandardRequestPipeline::new(&test_context());
 
         // Different instances should have different memory addresses
         // We can't test this directly, but we can verify they are separate by formatting
@@ -410,14 +398,7 @@ mod tests {
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn test_default_recovery_mode_is_retry() {
-        let clock = Clock::new_frozen();
-        let pipeline = StandardRequestPipeline::new(
-            &HttpResilienceContext::new(&clock),
-            &RedactionEngine::default(),
-            &clock,
-            &test_meter(),
-            &Router::default(),
-        );
+        let pipeline = StandardRequestPipeline::new(&test_context());
 
         assert_eq!(pipeline.recovery_mode, RecoveryMode::Retry);
     }
@@ -425,15 +406,7 @@ mod tests {
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn test_recovery_mode_can_be_set_to_hedging() {
-        let clock = Clock::new_frozen();
-        let pipeline = StandardRequestPipeline::new(
-            &HttpResilienceContext::new(&clock),
-            &RedactionEngine::default(),
-            &clock,
-            &test_meter(),
-            &Router::default(),
-        )
-        .recovery_mode(RecoveryMode::Hedging);
+        let pipeline = StandardRequestPipeline::new(&test_context()).recovery_mode(RecoveryMode::Hedging);
 
         assert_eq!(pipeline.recovery_mode, RecoveryMode::Hedging);
     }
@@ -443,7 +416,6 @@ mod tests {
     fn test_attempt_layer_configure_closures_are_invoked() {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
-        let clock = Clock::new_frozen();
         let invocations = Arc::new(AtomicUsize::new(0));
 
         let intercept_flag = Arc::clone(&invocations);
@@ -451,29 +423,24 @@ mod tests {
         let metrics_flag = Arc::clone(&invocations);
         let total_metrics_flag = Arc::clone(&invocations);
 
-        let _pipeline = StandardRequestPipeline::new(
-            &HttpResilienceContext::new(&clock),
-            &RedactionEngine::default(),
-            &clock,
-            &test_meter(),
-            &Router::default(),
-        )
-        .attempt_intercept(move |intercept| {
-            intercept_flag.fetch_add(1, Ordering::Relaxed);
-            intercept
-        })
-        .attempt_logs(move |logs| {
-            logs_flag.fetch_add(1, Ordering::Relaxed);
-            logs
-        })
-        .attempt_metrics(move |metrics| {
-            metrics_flag.fetch_add(1, Ordering::Relaxed);
-            metrics
-        })
-        .total_metrics(move |metrics| {
-            total_metrics_flag.fetch_add(1, Ordering::Relaxed);
-            metrics
-        });
+        let context = test_context();
+        let _pipeline = StandardRequestPipeline::new(&context)
+            .attempt_intercept(move |intercept| {
+                intercept_flag.fetch_add(1, Ordering::Relaxed);
+                intercept
+            })
+            .attempt_logs(move |logs| {
+                logs_flag.fetch_add(1, Ordering::Relaxed);
+                logs
+            })
+            .attempt_metrics(move |metrics| {
+                metrics_flag.fetch_add(1, Ordering::Relaxed);
+                metrics
+            })
+            .total_metrics(move |metrics| {
+                total_metrics_flag.fetch_add(1, Ordering::Relaxed);
+                metrics
+            });
 
         assert_eq!(invocations.load(Ordering::Relaxed), 4);
     }

@@ -34,9 +34,16 @@ use crate::{HttpError, HttpRequest, HttpResponse, RequestExt, RequestHandler, Re
 /// per-attempt duration.
 const HTTP_CLIENT_REQUEST_TOTAL_DURATION: &str = "http.client.request.total_duration";
 
-type CallbackType = Arc<dyn Fn(Duration, &Result<HttpResponse>, &[KeyValue]) + Send + Sync>;
-type RequestEnricherFn = Arc<dyn Fn(&mut TelemetryAttributes, &HttpRequest) + Send + Sync>;
-type ResponseEnricherFn = Arc<dyn Fn(&mut TelemetryAttributes, &Result<HttpResponse>) + Send + Sync>;
+/// Boundaries cover common service response times from 5 ms to 10 s while keeping
+/// bucket continuity stable for dashboards when client implementations change.
+const HTTP_DURATION_BUCKETS_SECONDS: &[f64] = &[0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0];
+
+type CallbackFn = dyn Fn(Duration, &Result<HttpResponse>, &[KeyValue]) + Send + Sync;
+type CallbackType = Arc<CallbackFn>;
+type RequestEnricherCall = dyn Fn(&mut TelemetryAttributes, &HttpRequest) + Send + Sync;
+type RequestEnricherFn = Arc<RequestEnricherCall>;
+type ResponseEnricherCall = dyn Fn(&mut TelemetryAttributes, &Result<HttpResponse>) + Send + Sync;
+type ResponseEnricherFn = Arc<ResponseEnricherCall>;
 
 /// Callback invoked after metric attributes have been collected, allowing
 /// callers to observe the reported attributes alongside the request result.
@@ -45,7 +52,7 @@ struct OnRecordCallback(CallbackType);
 
 impl OnRecordCallback {
     fn new(callback: impl Fn(Duration, &Result<HttpResponse>, &[KeyValue]) + Send + Sync + 'static) -> Self {
-        let callback: Box<dyn Fn(Duration, &Result<HttpResponse>, &[KeyValue]) + Send + Sync> = Box::new(callback);
+        let callback: Box<CallbackFn> = Box::new(callback);
         Self(callback.into())
     }
 }
@@ -63,7 +70,7 @@ struct RequestEnricher(RequestEnricherFn);
 
 impl RequestEnricher {
     fn new(enricher: impl Fn(&mut TelemetryAttributes, &HttpRequest) + Send + Sync + 'static) -> Self {
-        let enricher: Box<dyn Fn(&mut TelemetryAttributes, &HttpRequest) + Send + Sync> = Box::new(enricher);
+        let enricher: Box<RequestEnricherCall> = Box::new(enricher);
         Self(enricher.into())
     }
 }
@@ -81,7 +88,7 @@ struct ResponseEnricher(ResponseEnricherFn);
 
 impl ResponseEnricher {
     fn new(enricher: impl Fn(&mut TelemetryAttributes, &Result<HttpResponse>) + Send + Sync + 'static) -> Self {
-        let enricher: Box<dyn Fn(&mut TelemetryAttributes, &Result<HttpResponse>) + Send + Sync> = Box::new(enricher);
+        let enricher: Box<ResponseEnricherCall> = Box::new(enricher);
         Self(enricher.into())
     }
 }
@@ -285,9 +292,7 @@ fn build_request_duration(meter: &Meter, report_total_duration: bool) -> Histogr
         .f64_histogram(name)
         .with_description(description)
         .with_unit("s")
-        .with_boundaries(vec![
-            0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0,
-        ])
+        .with_boundaries(HTTP_DURATION_BUCKETS_SECONDS.to_vec())
         .build()
 }
 

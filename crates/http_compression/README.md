@@ -15,6 +15,15 @@
 
 Compresses and decompresses HTTP message bodies.
 
+```rust
+use compressors::format::Format;
+use http_compression::Compression;
+use http_extensions::HttpBodyBuilder;
+
+let layer =
+    Compression::client(HttpBodyBuilder::new_fake()).decompress_responses(&[Format::Gzip]);
+```
+
 [`compressors`][__link0] transforms a stream of bytes. This crate applies that to
 HTTP messages: reading `Content-Encoding`, negotiating `Accept-Encoding`,
 and replacing a body with one that compresses or decompresses as it is read.
@@ -105,7 +114,7 @@ exactly as it arrived.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_compression">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbZfhbkfZ-Ct0bebBGfGMVHqEb0XL5Ze8Ej5obIxqtvozaLi1hZIKCa2NvbXByZXNzb3JzZTAuMS4wgnBodHRwX2NvbXByZXNzaW9uZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb8wIS6xG2z5YbweSeKJoDOZgbKp1v1CW-aokbUwyBzgNJ-DBhZIKCa2NvbXByZXNzb3JzZTAuMS4wgnBodHRwX2NvbXByZXNzaW9uZTAuMS4w
  [__link0]: https://crates.io/crates/compressors/0.1.0
  [__link1]: https://docs.rs/http_compression/0.1.0/http_compression/?search=Compression
  [__link10]: https://docs.rs/http_compression/0.1.0/http_compression/?search=CompressionLayer::on_unsupported

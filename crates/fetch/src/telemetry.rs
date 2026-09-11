@@ -36,12 +36,15 @@ pub(crate) const FETCH_TRANSPORT_ATTRIBUTE: &str = "fetch.transport";
 /// Instrumentation-scope attribute identifying the name of a client instance.
 pub(crate) const HTTP_CLIENT_NAME_ATTRIBUTE: &str = "http.client.name";
 
+/// Fits the built-in HTTP attributes in the common case; larger custom sets spill to the heap.
+const TELEMETRY_ATTRIBUTES_INLINE_CAPACITY: usize = 9;
+
 /// A set of key-value attributes that enrich `fetch` telemetry.
 ///
 /// Attach these to a request (via its extensions) to merge custom dimensions
 /// into the metrics recorded for that request.
 #[derive(Debug, Clone, Default)]
-pub struct TelemetryAttributes(smallvec::SmallVec<[KeyValue; 9]>);
+pub struct TelemetryAttributes(smallvec::SmallVec<[KeyValue; TELEMETRY_ATTRIBUTES_INLINE_CAPACITY]>);
 
 impl TelemetryAttributes {
     /// Creates an empty set of telemetry attributes.

@@ -11,9 +11,21 @@ use http::header::ACCEPT_ENCODING;
 ///
 /// RFC 9110 allows three decimal places and no more, so thousandths hold every
 /// legal value exactly and compare without floating point.
-type Quality = u16;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct Quality(u16);
 
-const MAX_QUALITY: Quality = 1000;
+impl Quality {
+    const ZERO: Self = Self(0);
+    const MAX: Self = Self(1000);
+
+    fn new(value: u16) -> Option<Self> {
+        (value <= Self::MAX.0).then_some(Self(value))
+    }
+
+    fn is_acceptable(self) -> bool {
+        self > Self::ZERO
+    }
+}
 
 /// Chooses the best of `offered` that the client will accept, if any.
 ///
@@ -51,7 +63,7 @@ pub(crate) fn select(headers: &HeaderMap, offered: &[Format]) -> Option<Format> 
     // sending the body as it is.
     // Only a named `identity` says so. A bare `*` means anything is acceptable,
     // not that the caller would rather have nothing applied.
-    let identity = quality_for(headers, "identity", Wildcard::Ignored).unwrap_or(0);
+    let identity = quality_for(headers, "identity", Wildcard::Ignored).unwrap_or(Quality::ZERO);
 
     best.filter(|(_, quality)| *quality > identity).map(|(format, _)| format)
 }
@@ -79,7 +91,7 @@ fn quality_for(headers: &HeaderMap, token: &str, wildcard_use: Wildcard) -> Opti
             let mut parts = entry.split(';');
             let name = parts.next()?.trim();
 
-            let quality = parts.next().map_or(Some(MAX_QUALITY), |weight| {
+            let quality = parts.next().map_or(Some(Quality::MAX), |weight| {
                 let weight = weight.trim();
                 weight
                     .strip_prefix("q=")
@@ -95,7 +107,7 @@ fn quality_for(headers: &HeaderMap, token: &str, wildcard_use: Wildcard) -> Opti
 
             if name.eq_ignore_ascii_case(token) {
                 // An explicit entry always beats the wildcard, even to reject.
-                return (quality > 0).then_some(quality);
+                return quality.is_acceptable().then_some(quality);
             }
 
             if name == "*" && wildcard_use == Wildcard::Allowed {
@@ -104,7 +116,7 @@ fn quality_for(headers: &HeaderMap, token: &str, wildcard_use: Wildcard) -> Opti
         }
     }
 
-    wildcard.filter(|quality| *quality > 0)
+    wildcard.filter(|quality| quality.is_acceptable())
 }
 
 /// Parses a `q=` value into thousandths, rejecting anything malformed.
@@ -113,7 +125,7 @@ fn parse_quality(value: &str) -> Option<Quality> {
 
     let whole = match whole {
         "0" => 0,
-        "1" => MAX_QUALITY,
+        "1" => Quality::MAX.0,
         _ => return None,
     };
     if fraction.len() > 3 || !fraction.bytes().all(|b| b.is_ascii_digit()) {
@@ -123,12 +135,12 @@ fn parse_quality(value: &str) -> Option<Quality> {
     // Pad so "5" and "500" both mean 0.5.
     let mut thousandths = 0;
     for index in 0..3 {
-        thousandths = thousandths * 10 + Quality::from(fraction.as_bytes().get(index).map_or(0, |b| b - b'0'));
+        thousandths = thousandths * 10 + u16::from(fraction.as_bytes().get(index).map_or(0, |b| b - b'0'));
     }
 
     let quality = whole + thousandths;
 
-    (quality <= MAX_QUALITY).then_some(quality)
+    Quality::new(quality)
 }
 
 #[cfg(test)]
@@ -211,14 +223,14 @@ mod tests {
 
     #[test]
     fn quality_is_parsed_to_three_decimal_places() {
-        assert_eq!(parse_quality("1"), Some(1000));
-        assert_eq!(parse_quality("1.0"), Some(1000));
-        assert_eq!(parse_quality("0.5"), Some(500));
-        assert_eq!(parse_quality("0.05"), Some(50));
-        assert_eq!(parse_quality("0.005"), Some(5));
-        assert_eq!(parse_quality("0"), Some(0));
-        assert_eq!(parse_quality("0."), Some(0));
-        assert_eq!(parse_quality("1."), Some(1000));
+        assert_eq!(parse_quality("1"), Some(Quality(1000)));
+        assert_eq!(parse_quality("1.0"), Some(Quality(1000)));
+        assert_eq!(parse_quality("0.5"), Some(Quality(500)));
+        assert_eq!(parse_quality("0.05"), Some(Quality(50)));
+        assert_eq!(parse_quality("0.005"), Some(Quality(5)));
+        assert_eq!(parse_quality("0"), Some(Quality(0)));
+        assert_eq!(parse_quality("0."), Some(Quality(0)));
+        assert_eq!(parse_quality("1."), Some(Quality(1000)));
     }
 
     #[test]

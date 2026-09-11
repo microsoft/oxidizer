@@ -12,24 +12,27 @@ use crate::handlers::Dispatch;
 use crate::pipeline::pipeline_context::PipelineContext;
 use crate::{HttpRequest, HttpResponse, RequestHandler};
 
-/// A convenience API for creating a custom request pipeline.
-type PipelineFactory = dyn Fn(Dispatch, PipelineContext) -> DynamicService<HttpRequest, crate::Result<HttpResponse>> + Send + Sync;
+/// Callable that constructs a custom request pipeline.
+type PipelineConstructor = dyn Fn(Dispatch, PipelineContext) -> DynamicService<HttpRequest, crate::Result<HttpResponse>> + Send + Sync;
 
+/// Type-erased callable that assembles a custom request pipeline.
 #[derive(Clone, ThreadAware)]
-pub(crate) struct CustomPipelineFactory(#[thread_aware(skip)] Arc<PipelineFactory>);
+pub(crate) struct CustomPipeline(#[thread_aware(skip)] Arc<PipelineConstructor>);
 
-impl CustomPipelineFactory {
-    pub(crate) fn new<T: RequestHandler + 'static>(factory: impl Fn(Dispatch, PipelineContext) -> T + Send + Sync + 'static) -> Self {
-        let factory: Box<PipelineFactory> = Box::new(move |dispatch, context| factory(dispatch, context).into_dynamic());
-        Self(factory.into())
+impl CustomPipeline {
+    /// Erases a concrete request-handler constructor into a reusable pipeline callable.
+    pub(crate) fn new<T: RequestHandler + 'static>(make_handler: impl Fn(Dispatch, PipelineContext) -> T + Send + Sync + 'static) -> Self {
+        let constructor: Box<PipelineConstructor> = Box::new(move |dispatch, context| make_handler(dispatch, context).into_dynamic());
+        Self(constructor.into())
     }
 
+    /// Creates the custom dynamic service for one dispatch handler and context.
     pub(crate) fn create(&self, handler: Dispatch, context: PipelineContext) -> DynamicService<HttpRequest, crate::Result<HttpResponse>> {
         self.0(handler, context)
     }
 }
 
-impl Debug for CustomPipelineFactory {
+impl Debug for CustomPipeline {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct(type_name::<Self>()).finish()
     }
@@ -41,9 +44,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn debug_custom_pipeline_factory() {
-        let factory = CustomPipelineFactory::new(|r, _| r);
-        let debug_str = format!("{factory:?}");
-        assert_eq!(debug_str, "fetch::pipeline::custom::CustomPipelineFactory");
+    fn debug_custom_pipeline() {
+        let pipeline = CustomPipeline::new(|r, _| r);
+        let debug_str = format!("{pipeline:?}");
+        assert_eq!(debug_str, "fetch::pipeline::custom::CustomPipeline");
     }
 }

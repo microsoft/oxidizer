@@ -22,6 +22,6 @@ mod standard;
 mod pipeline_context;
 
 pub(crate) use builder::{Pipeline, PipelineBuilder};
-pub(crate) use custom::CustomPipelineFactory;
+pub(crate) use custom::CustomPipeline;
 pub use pipeline_context::PipelineContext;
 pub use standard::{RecoveryMode, StandardRequestPipeline};

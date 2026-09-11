@@ -44,7 +44,7 @@ use crate::{HttpError, Result};
 /// With the `test-util` feature enabled, you can create a test instance using `HttpBodyBuilder::new_fake()`.
 #[derive(Debug, Clone, ThreadAware)]
 pub struct HttpBodyBuilder {
-    memory: MemoryWrapper,
+    memory: BodyMemory,
     clock: Clock,
     pub(super) options: HttpBodyOptions,
 }
@@ -80,7 +80,7 @@ impl HttpBodyBuilder {
     #[must_use]
     pub fn new(memory: GlobalPool, clock: &Clock) -> Self {
         Self {
-            memory: MemoryWrapper::Global(memory),
+            memory: BodyMemory::Global(memory),
             clock: clock.clone(),
             options: HttpBodyOptions::default(),
         }
@@ -95,7 +95,7 @@ impl HttpBodyBuilder {
     #[must_use]
     pub fn with_custom_memory(memory: impl MemoryShared, clock: &Clock) -> Self {
         Self {
-            memory: MemoryWrapper::Opaque(OpaqueMemory::new(memory)),
+            memory: BodyMemory::Opaque(OpaqueMemory::new(memory)),
             clock: clock.clone(),
             options: HttpBodyOptions::default(),
         }
@@ -403,12 +403,12 @@ impl HasMemory for HttpBodyBuilder {
 }
 
 #[derive(Debug, Clone, ThreadAware)]
-enum MemoryWrapper {
+enum BodyMemory {
     Global(GlobalPool),
     Opaque(OpaqueMemory),
 }
 
-impl Memory for MemoryWrapper {
+impl Memory for BodyMemory {
     fn reserve(&self, min_bytes: usize) -> BytesBuf {
         match self {
             Self::Global(pool) => pool.reserve(min_bytes),

@@ -1,18 +1,26 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! A fast, safe HTTP client that just works.
+//!
+//! ```
+//! # async fn example(client: &fetch::HttpClient) -> fetch::Result<()> {
+//! let response = client.get("https://example.com").fetch().await?;
+//! assert!(response.status().is_success());
+//! # Ok(())
+//! # }
+//! ```
+
 #![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(
     not(feature = "json"),
-    allow(
+    expect(
         rustdoc::broken_intra_doc_links,
         reason = "json feature disabled, intra-doc links to json types will be broken"
     )
 )]
 
-//! A fast, safe HTTP client that just works.
-//!
 //! This crate provides a powerful HTTP client that works with different async runtimes, handles
 //! security properly by default, and makes testing easy. The [`HttpClient`] provides a clean API
 //! for making HTTP requests without worrying about the complex details of modern HTTP.
@@ -659,8 +667,7 @@
 //! Follow these tips for the best performance:
 //!
 //! ```rust,no_run
-//! # use fetch::HttpClient;
-//! # use http::Uri;
+//! # use fetch::{HttpClient, Uri};
 //! # #[cfg(all(feature = "tokio", any(feature = "rustls", feature = "native-tls")))]
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! // 1. Create a client ONCE and reuse it
@@ -869,22 +876,18 @@
 //!
 //! > **Note**: Most users should enable the `tokio` feature along with the `tls` feature for HTTPS
 //! > support. The `json` feature is recommended for most applications that need to work with JSON APIs.
-#[doc(inline)]
 pub use ::http::{Extensions, HeaderMap, HeaderName, HeaderValue, Method, Request, Response, StatusCode, Version};
-#[doc(inline)]
 pub use http_extensions::routing;
-#[doc(inline)]
 pub use seatbelt::{Recovery, RecoveryInfo};
-#[doc(inline)]
 pub use templated_uri::{BasePath, BaseUri, Origin, PathAndQuery, Uri};
 
-/// Re-exports of the [`http`](https://docs.rs/http) crate's submodules.
-///
-/// These are grouped here to keep the `fetch` crate root uncluttered. The most
-/// commonly used `http` types (such as [`HeaderMap`], [`Method`], [`StatusCode`],
-/// and [`Version`]) are re-exported directly at the crate root.
 pub mod http {
-    #[doc(inline)]
+    //! Re-exports header, method, request, response, status, and version modules
+    //! from the underlying `http` ecosystem crate.
+    //!
+    //! The most commonly used HTTP types remain available directly at the
+    //! `fetch` crate root.
+
     pub use ::http::{header, method, request, response, status, version};
 }
 
@@ -892,12 +895,14 @@ pub(crate) mod constants;
 
 mod error_labels;
 
+/// TLS backend configuration and client identity types.
 pub mod tls;
 
 mod client_builder;
 mod dispatch_builder;
 pub use client_builder::HttpClientBuilder;
 
+/// Client transport, body, routing, and decompression options.
 pub mod options;
 
 mod client;
@@ -906,16 +911,19 @@ pub use client::HttpClient;
 #[cfg(any(feature = "test-util", test))]
 pub mod fake;
 
+/// Custom runtime and transport integration.
 pub mod custom;
 
 #[cfg(all(feature = "tokio", any(feature = "rustls", feature = "native-tls")))]
+/// Tokio transport integration.
 pub mod tokio;
 
+/// Built-in request pipeline handlers.
 pub mod handlers;
 
+/// Telemetry attributes and connection diagnostics.
 pub mod telemetry;
 
-#[doc(inline)]
 pub use http_extensions::{
     HeaderMapExt, HeaderValueExt, HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpRequestBuilder, HttpRequestExt, HttpResponse,
     HttpResponseBuilder, RequestExt, RequestHandler, ResponseExt, Result, StatusExt,
@@ -923,8 +931,10 @@ pub use http_extensions::{
 #[cfg(any(feature = "json", test))]
 pub use http_extensions::{Json, JsonError};
 
+/// HTTP-specific resilience layers and configuration.
 pub mod resilience;
 
+/// Standard, custom, and minimal request pipeline configuration.
 pub mod pipeline;
 
 /// Longer-form documentation for [`fetch`](crate).

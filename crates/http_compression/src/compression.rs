@@ -21,6 +21,9 @@ use crate::{body, negotiate};
 /// A short list of formats: a stacked `Content-Encoding` is rare.
 type Formats = SmallVec<[Format; 2]>;
 
+/// Average bytes reserved per advertised format, including separators and a quality suffix.
+const ACCEPT_ENCODING_ENTRY_CAPACITY: usize = 12;
+
 /// How to handle a compression format that is not enabled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
@@ -577,7 +580,7 @@ impl Client {
         // Bare tokens all rate the same, so the order would be a hint at best.
         // Descending quality values say the preference outright, which is what
         // a server needs to honour it.
-        let mut joined = String::new();
+        let mut joined = String::with_capacity(self.decompress_responses.len() * ACCEPT_ENCODING_ENTRY_CAPACITY);
 
         for (index, format) in self.decompress_responses.iter().filter_map(|f| f.content_encoding()).enumerate() {
             if !joined.is_empty() {
