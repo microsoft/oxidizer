@@ -15,7 +15,7 @@ use layered::{Layer, Service};
 use mime::Mime;
 use smallvec::SmallVec;
 
-use crate::error::{invalid, unsupported};
+use crate::error::{invalid, too_many_content_codings, unsupported};
 use crate::{body, negotiate};
 
 /// A short list of formats: a stacked `Content-Encoding` is rare.
@@ -23,6 +23,9 @@ type Formats = SmallVec<[Format; 2]>;
 
 /// Average bytes reserved per advertised format, including separators and a quality suffix.
 const ACCEPT_ENCODING_ENTRY_CAPACITY: usize = 12;
+
+/// Bounds decoder allocation and recursive stream depth for peer-controlled headers.
+const MAX_CONTENT_ENCODING_LAYERS: usize = 16;
 
 /// How to handle a compression format that is not enabled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -869,6 +872,9 @@ impl Config {
                 }
 
                 match Format::from_content_encoding(token).filter(|format| enabled.contains(format)) {
+                    Some(format) if formats.len() == MAX_CONTENT_ENCODING_LAYERS => {
+                        return Err(too_many_content_codings(MAX_CONTENT_ENCODING_LAYERS));
+                    }
                     Some(format) => formats.push(format),
                     // A recognisable compression format that is not enabled is a
                     // different matter: the caller may have asked to hear about it.

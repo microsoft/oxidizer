@@ -870,3 +870,32 @@ async fn an_empty_list_member_does_not_stop_decompression() {
     // meaning anything by them.
     assert_eq!(response.into_body().into_text().await.unwrap(), expected);
 }
+
+#[tokio::test]
+async fn content_encoding_layers_are_bounded_before_body_reading() {
+    let accepted = std::iter::repeat_n("gzip", 16).collect::<Vec<_>>().join(", ");
+    let rejected = std::iter::repeat_n("gzip", 17).collect::<Vec<_>>().join(", ");
+
+    for (encodings, expected_layers) in [(accepted, Some(16)), (rejected, None)] {
+        let value = HeaderValue::from_str(&encodings).unwrap();
+        let handler = client().decompress_responses(&[Format::Gzip]).layer(responds_with(move || {
+            HttpResponseBuilder::new_fake()
+                .status(StatusCode::OK)
+                .header(CONTENT_ENCODING, value.clone())
+                .text("body is intentionally never polled")
+                .build()
+        }));
+
+        let result = handler.execute(request(BytesView::default(), None)).await;
+        match expected_layers {
+            Some(expected_layers) => {
+                let response = result.unwrap();
+                assert_eq!(response.extensions().get::<OriginalBody>().unwrap().formats().len(), expected_layers);
+            }
+            None => {
+                let error = result.unwrap_err();
+                assert_eq!(error.label(), "compression_limit_exceeded");
+            }
+        }
+    }
+}

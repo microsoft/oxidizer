@@ -31,3 +31,12 @@ pub(crate) fn unsupported(token: &str) -> HttpError {
 pub(crate) fn invalid(cause: impl Display) -> HttpError {
     HttpError::other(cause.to_string(), RecoveryInfo::never(), LABEL_COMPRESSION_INVALID)
 }
+
+/// Builds a `compression_limit_exceeded` failure for an excessive coding stack.
+pub(crate) fn too_many_content_codings(max_layers: usize) -> HttpError {
+    HttpError::other(
+        format!("body uses more than {max_layers} content-coding layers"),
+        RecoveryInfo::never(),
+        LABEL_COMPRESSION_LIMIT_EXCEEDED,
+    )
+}
