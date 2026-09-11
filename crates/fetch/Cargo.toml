@@ -26,7 +26,7 @@ allowed_external_types = [
     "fetch_options::*",
     "fetch_tls::*",
     "http::*",
-    "http_compression::OriginalBody",
+    "http_compression::compression::OriginalBody",
     "http_extensions::*",
     "seatbelt_http::*",
     "templated_uri::*",
