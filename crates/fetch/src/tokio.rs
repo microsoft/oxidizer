@@ -3,8 +3,8 @@
 
 //! Tokio-runtime entry points for [`HttpClient`].
 //!
-//! This module groups the Tokio runtime dependencies ([`TokioDeps`]), the transport-specific
-//! tuning knobs ([`TokioTransportOptions`]), and the factory methods that produce HTTP clients
+//! This module groups the Tokio runtime dependencies ([`crate::tokio::TokioDeps`]), the
+//! transport-specific tuning knobs ([`crate::tokio::TokioTransportOptions`]), and the factory methods that produce HTTP clients
 //! backed by the Tokio runtime and the
 //! [`fetch_hyper`] transport. They are gated behind the `tokio` feature combined with a
 //! TLS backend (`rustls` and/or `native-tls`).

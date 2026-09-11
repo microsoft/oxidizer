@@ -1,0 +1,73 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "http_compression"
+description = "HTTP request and response body compression and decompression."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["http", "compression", "decompression", "gzip", "middleware"]
+categories = ["compression", "network-programming"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/http_compression"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "compressors::*",
+    "http::*",
+    "http_extensions::*",
+    "layered::service::Service",
+    "ohno::error_label::ErrorLabel",
+    "tower_layer::Layer",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = []
+gzip = ["compressors/gzip"]
+# HTTP `deflate` is zlib-wrapped DEFLATE (RFC 9110 section 8.4.1.2).
+deflate = ["compressors/zlib"]
+brotli = ["compressors/brotli"]
+zstd = ["compressors/zstd"]
+
+[dependencies]
+bytesbuf = { workspace = true, features = ["std"] }
+compressors = { workspace = true, features = ["futures-stream"] }
+futures = { workspace = true, features = ["std"] }
+http = { workspace = true }
+http-body = { workspace = true }
+http_extensions = { workspace = true }
+layered = { workspace = true }
+mime = { workspace = true }
+ohno = { workspace = true }
+seatbelt = { workspace = true }
+smallvec = { workspace = true }
+
+[dev-dependencies]
+compressors = { path = "../compressors", features = [
+    "brotli",
+    "deflate",
+    "futures-stream",
+    "gzip",
+    "zlib",
+    "zstd",
+] }
+ctor = { workspace = true }
+http_extensions = { path = "../http_extensions", features = ["test-util"] }
+mutants = { workspace = true }
+ohno = { path = "../ohno", features = ["test-util"] }
+testing_aids = { path = "../testing_aids" }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "rt"] }
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

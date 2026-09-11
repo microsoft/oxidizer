@@ -44,7 +44,7 @@ use crate::{HttpError, Result};
 /// With the `test-util` feature enabled, you can create a test instance using `HttpBodyBuilder::new_fake()`.
 #[derive(Debug, Clone, ThreadAware)]
 pub struct HttpBodyBuilder {
-    memory: MemoryWrapper,
+    memory: BodyMemory,
     clock: Clock,
     pub(super) options: HttpBodyOptions,
 }
@@ -80,7 +80,7 @@ impl HttpBodyBuilder {
     #[must_use]
     pub fn new(memory: GlobalPool, clock: &Clock) -> Self {
         Self {
-            memory: MemoryWrapper::Global(memory),
+            memory: BodyMemory::Global(memory),
             clock: clock.clone(),
             options: HttpBodyOptions::default(),
         }
@@ -95,7 +95,7 @@ impl HttpBodyBuilder {
     #[must_use]
     pub fn with_custom_memory(memory: impl MemoryShared, clock: &Clock) -> Self {
         Self {
-            memory: MemoryWrapper::Opaque(OpaqueMemory::new(memory)),
+            memory: BodyMemory::Opaque(OpaqueMemory::new(memory)),
             clock: clock.clone(),
             options: HttpBodyOptions::default(),
         }
@@ -164,6 +164,51 @@ impl HttpBodyBuilder {
         match merged.timeout {
             Some(timeout) => HttpBody::from_streaming(Box::pin(TimeoutBody::new(body, timeout, &self.clock)), merged),
             None => HttpBody::from_streaming(Box::pin(body), merged),
+        }
+    }
+
+    /// Interposes `wrap` on `body`'s frames, keeping the policies it already carries.
+    ///
+    /// Use this to transform a body in flight - decoding, counting, tracing -
+    /// rather than [`body`](Self::body), which builds a body from scratch and
+    /// would layer a second idle timeout over the one `body` already applies.
+    /// The existing options travel to the result, so a later
+    /// [`into_buffered`](HttpBody::into_buffered) still applies the buffer limit
+    /// the body was created with. A body carrying no policy of its own falls
+    /// back to this builder's defaults.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
+    /// # use http_extensions::{HttpBody, HttpBodyBuilder};
+    /// # use http_body_util::BodyExt;
+    /// # let builder = HttpBodyBuilder::new_fake();
+    /// let body = builder.text("hello");
+    ///
+    /// // Count the frames without disturbing the body's own policies.
+    /// let counted = builder.rewrap(body, |body| body.map_frame(|frame| frame));
+    /// # }
+    /// # }
+    /// ```
+    pub fn rewrap<B>(&self, body: HttpBody, wrap: impl FnOnce(HttpBody) -> B) -> HttpBody
+    where
+        B: Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
+    {
+        let own = body.options();
+        let options = own.merge(&self.options);
+        let wrapped = wrap(body).map_err(Into::into);
+
+        match (own.timeout, options.timeout) {
+            // The body carried no timeout of its own, so this builder's is not
+            // yet enforced anywhere: install it rather than record a policy
+            // nothing applies.
+            (None, Some(timeout)) => HttpBody::from_streaming(Box::pin(TimeoutBody::new(wrapped, timeout, &self.clock)), options),
+            // Already enforced underneath. Wrapping again would time the
+            // transformed frames instead, which a body turning many input
+            // frames into few output ones would trip.
+            _ => HttpBody::from_streaming(Box::pin(wrapped), options),
         }
     }
 
@@ -358,12 +403,12 @@ impl HasMemory for HttpBodyBuilder {
 }
 
 #[derive(Debug, Clone, ThreadAware)]
-enum MemoryWrapper {
+enum BodyMemory {
     Global(GlobalPool),
     Opaque(OpaqueMemory),
 }
 
-impl Memory for MemoryWrapper {
+impl Memory for BodyMemory {
     fn reserve(&self, min_bytes: usize) -> BytesBuf {
         match self {
             Self::Global(pool) => pool.reserve(min_bytes),
@@ -392,6 +437,61 @@ mod tests {
     use tick::ClockControl;
 
     use super::*;
+
+    #[test]
+    fn rewrapping_keeps_the_policies_the_body_already_had() {
+        let builder = HttpBodyBuilder::new_fake();
+        let strict = HttpBodyOptions::default().buffer_limit(7).timeout(Duration::from_secs(3));
+
+        // A streaming body carries its own policies, and they must survive being
+        // wrapped rather than be replaced by the builder's defaults.
+        let body = builder.stream(futures::stream::empty(), &strict);
+        let rewrapped = builder.rewrap(body, |body| body);
+
+        assert_eq!(rewrapped.options(), strict);
+    }
+
+    #[test]
+    fn rewrapping_falls_back_to_the_builder_for_a_buffered_body() {
+        let lenient = HttpBodyOptions::default().buffer_limit(99);
+        let builder = HttpBodyBuilder::new_fake().with_options(lenient);
+
+        // A buffered body has no policies of its own, so the builder supplies them.
+        let rewrapped = builder.rewrap(builder.text("hello"), |body| body);
+
+        assert_eq!(rewrapped.options(), lenient);
+    }
+
+    #[test]
+    fn rewrapping_installs_the_builder_timeout_when_the_body_has_none() {
+        #[derive(Debug)]
+        struct PendingBody;
+
+        impl Body for PendingBody {
+            type Data = BytesView;
+            type Error = HttpError;
+
+            fn poll_frame(
+                self: std::pin::Pin<&mut Self>,
+                _: &mut std::task::Context<'_>,
+            ) -> std::task::Poll<Option<Result<Frame<Self::Data>>>> {
+                std::task::Poll::Pending
+            }
+        }
+
+        let clock = ClockControl::new().auto_advance_timers(true).to_clock();
+        let options = HttpBodyOptions::default().timeout(Duration::from_millis(100));
+        let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock).with_options(options);
+        let mut body = Box::pin(builder.rewrap(builder.text("source"), |_| PendingBody));
+        let waker = futures::task::noop_waker();
+        let mut cx = std::task::Context::from_waker(&waker);
+
+        assert!(body.as_mut().poll_frame(&mut cx).is_pending());
+
+        let result = body.as_mut().poll_frame(&mut cx);
+        assert!(matches!(result, std::task::Poll::Ready(Some(Err(_)))));
+    }
+
     use crate::testing::{create_stream_body, create_stream_body_from_chunks};
 
     #[test]

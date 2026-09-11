@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 use std::fmt::{self, Debug};
-use std::sync::Arc;
 use std::time::Duration;
 
 use futures::FutureExt;
@@ -15,6 +14,7 @@ use opentelemetry_semantic_conventions::trace::{
     ERROR_TYPE, HTTP_REQUEST_METHOD, HTTP_RESPONSE_STATUS_CODE, NETWORK_PROTOCOL_NAME, NETWORK_PROTOCOL_VERSION, SERVER_ADDRESS,
     URL_SCHEME, URL_TEMPLATE,
 };
+use performables::arc::Arc;
 use seatbelt::RecoveryInfo;
 use tick::SimpleClock;
 
@@ -34,14 +34,28 @@ use crate::{HttpError, HttpRequest, HttpResponse, RequestExt, RequestHandler, Re
 /// per-attempt duration.
 const HTTP_CLIENT_REQUEST_TOTAL_DURATION: &str = "http.client.request.total_duration";
 
-type CallbackType = Arc<dyn Fn(Duration, &Result<HttpResponse>, &[KeyValue]) + Send + Sync>;
-type RequestEnricherFn = Arc<dyn Fn(&mut TelemetryAttributes, &HttpRequest) + Send + Sync>;
-type ResponseEnricherFn = Arc<dyn Fn(&mut TelemetryAttributes, &Result<HttpResponse>) + Send + Sync>;
+/// Boundaries cover common service response times from 5 ms to 10 s while keeping
+/// bucket continuity stable for dashboards when client implementations change.
+const HTTP_DURATION_BUCKETS_SECONDS: &[f64] = &[0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0];
+
+type CallbackFn = dyn Fn(Duration, &Result<HttpResponse>, &[KeyValue]) + Send + Sync;
+type CallbackType = Arc<CallbackFn>;
+type RequestEnricherCall = dyn Fn(&mut TelemetryAttributes, &HttpRequest) + Send + Sync;
+type RequestEnricherFn = Arc<RequestEnricherCall>;
+type ResponseEnricherCall = dyn Fn(&mut TelemetryAttributes, &Result<HttpResponse>) + Send + Sync;
+type ResponseEnricherFn = Arc<ResponseEnricherCall>;
 
 /// Callback invoked after metric attributes have been collected, allowing
 /// callers to observe the reported attributes alongside the request result.
 #[derive(Clone)]
 struct OnRecordCallback(CallbackType);
+
+impl OnRecordCallback {
+    fn new(callback: impl Fn(Duration, &Result<HttpResponse>, &[KeyValue]) + Send + Sync + 'static) -> Self {
+        let callback: Box<CallbackFn> = Box::new(callback);
+        Self(callback.into())
+    }
+}
 
 impl Debug for OnRecordCallback {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -54,6 +68,13 @@ impl Debug for OnRecordCallback {
 #[derive(Clone)]
 struct RequestEnricher(RequestEnricherFn);
 
+impl RequestEnricher {
+    fn new(enricher: impl Fn(&mut TelemetryAttributes, &HttpRequest) + Send + Sync + 'static) -> Self {
+        let enricher: Box<RequestEnricherCall> = Box::new(enricher);
+        Self(enricher.into())
+    }
+}
+
 impl Debug for RequestEnricher {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("RequestEnricher(..)")
@@ -64,6 +85,13 @@ impl Debug for RequestEnricher {
 /// outcome before metrics are recorded.
 #[derive(Clone)]
 struct ResponseEnricher(ResponseEnricherFn);
+
+impl ResponseEnricher {
+    fn new(enricher: impl Fn(&mut TelemetryAttributes, &Result<HttpResponse>) + Send + Sync + 'static) -> Self {
+        let enricher: Box<ResponseEnricherCall> = Box::new(enricher);
+        Self(enricher.into())
+    }
+}
 
 impl Debug for ResponseEnricher {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -150,7 +178,7 @@ impl MetricsLayer {
     /// collected [`KeyValue`] attributes.
     #[must_use]
     pub fn on_record(mut self, callback: impl Fn(Duration, &Result<HttpResponse>, &[KeyValue]) + Send + Sync + 'static) -> Self {
-        self.on_record = Some(OnRecordCallback(Arc::new(callback)));
+        self.on_record = Some(OnRecordCallback::new(callback));
         self
     }
 
@@ -163,7 +191,7 @@ impl MetricsLayer {
     /// into the final set of metric attributes for that request.
     #[must_use]
     pub fn enrich_from_request(mut self, enricher: impl Fn(&mut TelemetryAttributes, &HttpRequest) + Send + Sync + 'static) -> Self {
-        self.enrich_from_request = Some(RequestEnricher(Arc::new(enricher)));
+        self.enrich_from_request = Some(RequestEnricher::new(enricher));
         self
     }
 
@@ -179,7 +207,7 @@ impl MetricsLayer {
         mut self,
         enricher: impl Fn(&mut TelemetryAttributes, &Result<HttpResponse>) + Send + Sync + 'static,
     ) -> Self {
-        self.enrich_from_response = Some(ResponseEnricher(Arc::new(enricher)));
+        self.enrich_from_response = Some(ResponseEnricher::new(enricher));
         self
     }
 
@@ -264,9 +292,7 @@ fn build_request_duration(meter: &Meter, report_total_duration: bool) -> Histogr
         .f64_histogram(name)
         .with_description(description)
         .with_unit("s")
-        .with_boundaries(vec![
-            0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0,
-        ])
+        .with_boundaries(HTTP_DURATION_BUCKETS_SECONDS.to_vec())
         .build()
 }
 
@@ -394,6 +420,7 @@ mod tests {
     use http::{Request, StatusCode, Version};
     use http_extensions::{FakeHandler, HttpRequestBuilder};
     use opentelemetry_sdk::metrics::SdkMeterProvider;
+    use performables::sync::mutex::Mutex;
     use templated_uri::{EscapedString, templated};
 
     use super::*;
@@ -549,9 +576,9 @@ mod tests {
     #[cfg_attr(miri, ignore)] // insta snapshots are not supported under Miri.
     #[test]
     fn callbacks_have_compact_debug_representation() {
-        let on_record = OnRecordCallback(Arc::new(|_duration, _result, _attrs| {}));
-        let request_enricher = RequestEnricher(Arc::new(|_attrs, _request| {}));
-        let response_enricher = ResponseEnricher(Arc::new(|_attrs, _result| {}));
+        let on_record = OnRecordCallback::new(|_duration, _result, _attrs| {});
+        let request_enricher = RequestEnricher::new(|_attrs, _request| {});
+        let response_enricher = ResponseEnricher::new(|_attrs, _result| {});
 
         insta::assert_debug_snapshot!("on_record", on_record);
         insta::assert_debug_snapshot!("request_enricher", request_enricher);
@@ -587,7 +614,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[test]
     fn enrich_from_request_and_response_add_attributes() {
-        let recorded_attrs = Arc::new(std::sync::Mutex::new(Vec::<KeyValue>::new()));
+        let recorded_attrs = Arc::new(Mutex::new(Vec::<KeyValue>::new()));
         let attrs_clone = Arc::clone(&recorded_attrs);
 
         let handler = test_layer()
@@ -601,25 +628,25 @@ mod tests {
                 attrs.push(KeyValue::new("response.is_err", result.is_err()));
             })
             .on_record(move |_duration, _result, attrs| {
-                attrs_clone.lock().unwrap().extend(attrs.iter().cloned());
+                attrs_clone.lock_sync().extend(attrs.iter().cloned());
             })
             .layer(FakeHandler::from(StatusCode::OK));
 
         block_on(Service::execute(&handler, test_request())).unwrap();
 
-        let attrs = recorded_attrs.lock().unwrap();
+        let attrs = recorded_attrs.lock_sync();
         insta::assert_debug_snapshot!(sorted_attrs(&attrs));
     }
 
     #[cfg_attr(miri, ignore)]
     #[test]
     fn abandoned_future_records_abandoned_error_type() {
-        let recorded_attrs = Arc::new(std::sync::Mutex::new(Vec::<KeyValue>::new()));
+        let recorded_attrs = Arc::new(Mutex::new(Vec::<KeyValue>::new()));
         let attrs_clone = Arc::clone(&recorded_attrs);
 
         let handler = test_layer()
             .on_record(move |_duration, _result, attrs| {
-                attrs_clone.lock().unwrap().extend(attrs.iter().cloned());
+                attrs_clone.lock_sync().extend(attrs.iter().cloned());
             })
             .layer(FakeHandler::from_async_fn(|_req| async {
                 // This future will never complete because it pends forever.
@@ -637,25 +664,25 @@ mod tests {
         // Drop the future, triggering the MetricsDropGuard.
         drop(future);
 
-        let attrs = recorded_attrs.lock().unwrap();
+        let attrs = recorded_attrs.lock_sync();
         insta::assert_debug_snapshot!(sorted_attrs(&attrs));
     }
 
     #[cfg_attr(miri, ignore)]
     #[test]
     fn completed_future_does_not_record_abandoned() {
-        let recorded_attrs = Arc::new(std::sync::Mutex::new(Vec::<KeyValue>::new()));
+        let recorded_attrs = Arc::new(Mutex::new(Vec::<KeyValue>::new()));
         let attrs_clone = Arc::clone(&recorded_attrs);
 
         let handler = test_layer()
             .on_record(move |_duration, _result, attrs| {
-                attrs_clone.lock().unwrap().extend(attrs.iter().cloned());
+                attrs_clone.lock_sync().extend(attrs.iter().cloned());
             })
             .layer(FakeHandler::from(StatusCode::OK));
 
         block_on(Service::execute(&handler, test_request())).unwrap();
 
-        let attrs = recorded_attrs.lock().unwrap();
+        let attrs = recorded_attrs.lock_sync();
         insta::assert_debug_snapshot!(sorted_attrs(&attrs));
     }
 
