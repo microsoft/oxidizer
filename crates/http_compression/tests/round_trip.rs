@@ -969,7 +969,10 @@ async fn content_encoding_layers_are_bounded_before_body_reading() {
         let result = handler.execute(request(BytesView::default(), None)).await;
         if let Some(expected_layers) = expected_layers {
             let response = result.unwrap();
-            assert_eq!(response.extensions().get::<OriginalBody>().unwrap().formats().len(), expected_layers);
+            assert_eq!(
+                response.extensions().get::<OriginalBody>().unwrap().formats().len(),
+                expected_layers
+            );
         } else {
             let error = result.unwrap_err();
             assert_eq!(error.label(), "compression_limit_exceeded");

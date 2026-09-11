@@ -28,8 +28,8 @@ use http_body::{Body, Frame, SizeHint};
 use http_extensions::{HttpBody, HttpError, Result};
 use seatbelt::{Recovery as _, RecoveryInfo};
 
-use crate::error::{LABEL_COMPRESSION_INVALID, LABEL_COMPRESSION_LIMIT_EXCEEDED};
 use crate::CONTENT_DIGEST_HEADER;
+use crate::error::{LABEL_COMPRESSION_INVALID, LABEL_COMPRESSION_LIMIT_EXCEEDED};
 
 /// A body being read as a stream of transformed bytes.
 ///
