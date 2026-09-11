@@ -339,6 +339,24 @@ fn test_long_strings() {
     assert_eq!(result_string, expected_to_string_output);
 }
 
+#[test]
+#[ignore = "stub: verify UTF-8 handling at the formatting stack-buffer boundary"]
+fn redacted_formatting_multibyte_boundary_matches_fallback() {
+    let engine = RedactionEngine::builder()
+        .add_class_redactor(
+            TestTaxonomy::Sensitive,
+            SimpleRedactor::with_mode(SimpleRedactorMode::PassthroughAndTag),
+        )
+        .build();
+    let value = format!("{}\u{00e9}", "a".repeat(126));
+    let classified_value = Sensitive::new(value.clone());
+
+    // Act: format the value through redacted Debug, Display, and to-string paths.
+    // Assert: every path returns the complete tagged value without truncating
+    // the multibyte character that crosses the 128-byte stack-buffer boundary.
+    let _stub_inputs = (engine, value, classified_value);
+}
+
 fn test_redaction(engine: &RedactionEngine, data_class: &DataClass, input: &str, expected: &str) {
     let mut output = String::new();
     engine
