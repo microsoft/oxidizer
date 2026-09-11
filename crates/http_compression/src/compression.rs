@@ -553,17 +553,23 @@ fn wants_decompression(enabled: &[Format], headers: &HeaderMap) -> bool {
 /// treat them as byte-identical and could recombine ranges across them. Marking
 /// the tag weak keeps it usable for equivalence without claiming that.
 fn weaken_etag(headers: &mut HeaderMap) {
-    let Some(etag) = headers.get(ETAG).and_then(|value| value.to_str().ok()) else {
+    let Some(etag) = headers.get(ETAG) else {
         return;
     };
 
-    if etag.starts_with("W/") {
+    if etag.as_bytes().starts_with(b"W/") {
         return;
     }
 
-    let Ok(weakened) = HeaderValue::from_str(&format!("W/{etag}")) else {
+    let mut bytes = Vec::with_capacity(etag.as_bytes().len() + 2);
+    bytes.extend_from_slice(b"W/");
+    bytes.extend_from_slice(etag.as_bytes());
+    let sensitive = etag.is_sensitive();
+
+    let Ok(mut weakened) = HeaderValue::from_bytes(&bytes) else {
         return;
     };
+    weakened.set_sensitive(sensitive);
 
     headers.insert(ETAG, weakened);
 }

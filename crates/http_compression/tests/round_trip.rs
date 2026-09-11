@@ -817,6 +817,26 @@ async fn compression_weakens_a_strong_validator() {
 }
 
 #[tokio::test]
+async fn compression_weakens_a_non_ascii_strong_validator() {
+    let etag = HeaderValue::from_bytes(b"\"\x80\"").unwrap();
+    let handler = server().compress_responses(&[Format::Gzip]).layer(FakeHandler::from_fn(move |_| {
+        HttpResponseBuilder::new_fake()
+            .status(StatusCode::OK)
+            .header(ETAG, etag.clone())
+            .text("a body long enough to be worth compressing ".repeat(20))
+            .build()
+    }));
+
+    let mut input = request(BytesView::default(), None);
+    input.headers_mut().insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip"));
+
+    let response = handler.execute(input).await.unwrap();
+
+    assert_eq!(response.headers().get(CONTENT_ENCODING).unwrap(), "gzip");
+    assert_eq!(response.headers().get(ETAG).unwrap().as_bytes(), b"W/\"\x80\"");
+}
+
+#[tokio::test]
 async fn transformations_remove_content_digest_and_preserve_repr_digest() {
     let expected = payload();
     let compressed = compress(Format::Gzip, expected.as_bytes());
