@@ -78,8 +78,9 @@ impl<T> SyncHolder<T> {
     }
 }
 
-// SAFETY: SyncHolder<T> is Sync because at no point can the inner T be accessed.
-// The only way to get the inner T is to consume the SyncHolder<T> itself.
+// SAFETY: A shared reference never exposes `T`; `Debug` only reports its type name.
+// Extracting `T` consumes the holder and therefore requires exclusive ownership, so sharing
+// `&SyncHolder<T>` cannot create concurrent access to a non-Sync value.
 unsafe impl<T> Sync for SyncHolder<T> {}
 
 #[cfg(test)]

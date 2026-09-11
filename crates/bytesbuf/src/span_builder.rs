@@ -282,9 +282,9 @@ impl SpanBuilder {
 // SAFETY: The presence of pointers disables Send but we re-enable it here because all our internal
 // state is thread-mobile.
 unsafe impl Send for SpanBuilder {}
-// SAFETY: The presence of pointers disables Sync but we re-enable it here because all our internal
-// state is thread-safe (though only for reads - we still require outer mutability, which disables
-// multithreaded mutation).
+// SAFETY: Shared access exposes only immutable pointer metadata and `BlockRef`, whose unsafe
+// implementation contract requires clone/drop operations to be safe across threads. Mutation
+// still requires exclusive access through `&mut self`.
 unsafe impl Sync for SpanBuilder {}
 
 #[cfg_attr(coverage_nightly, coverage(off))]
