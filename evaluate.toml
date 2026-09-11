@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 [[config.allow]]
 rule = "m365_unsafe"
 file = "Cargo.toml"
