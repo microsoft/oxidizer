@@ -22,9 +22,9 @@ allowed_external_types = [
     "compressors::*",
     "http::*",
     "http_extensions::*",
-    "layered::layer::Layer",
     "layered::service::Service",
     "ohno::error_label::ErrorLabel",
+    "tower_layer::Layer",
 ]
 
 [package.metadata.docs.rs]
