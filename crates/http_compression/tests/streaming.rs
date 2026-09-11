@@ -97,11 +97,15 @@ async fn each_burst_is_decompressed_before_eof_and_trailers_survive() {
         sender.unbounded_send(Ok(data(b"2}\n"))).unwrap();
         receive_burst(body.as_mut(), b"{\"n\":2}\n");
 
-        let mut trailers = HeaderMap::new();
-        trailers.insert("x-complete", HeaderValue::from_static("true"));
-        trailers.insert("content-digest", HeaderValue::from_static("sha-256=:Y29udGVudA==:"));
-        trailers.insert("repr-digest", HeaderValue::from_static("sha-256=:cmVwcg==:"));
-        sender.unbounded_send(Ok(Frame::trailers(trailers))).unwrap();
+        let mut first_trailers = HeaderMap::new();
+        first_trailers.insert("x-first", HeaderValue::from_static("true"));
+        sender.unbounded_send(Ok(Frame::trailers(first_trailers))).unwrap();
+
+        let mut final_trailers = HeaderMap::new();
+        final_trailers.insert("x-complete", HeaderValue::from_static("true"));
+        final_trailers.insert("content-digest", HeaderValue::from_static("sha-256=:Y29udGVudA==:"));
+        final_trailers.insert("repr-digest", HeaderValue::from_static("sha-256=:cmVwcg==:"));
+        sender.unbounded_send(Ok(Frame::trailers(final_trailers))).unwrap();
         drop(sender);
 
         assert!(!body.is_end_stream(), "the trailer frame is still pending for {format:?}");
@@ -111,6 +115,7 @@ async fn each_burst_is_decompressed_before_eof_and_trailers_survive() {
             seen = Some(frame.unwrap().into_trailers().unwrap());
         }
         let seen = seen.unwrap();
+        assert_eq!(seen.get("x-first").unwrap(), "true", "{format:?}");
         assert_eq!(seen.get("x-complete").unwrap(), "true", "{format:?}");
         assert!(seen.get("content-digest").is_none(), "{format:?}");
         assert_eq!(seen.get("repr-digest").unwrap(), "sha-256=:cmVwcg==:", "{format:?}");

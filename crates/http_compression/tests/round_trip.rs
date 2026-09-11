@@ -172,6 +172,41 @@ async fn nothing_is_decompressed_or_advertised_until_it_is_configured() {
 }
 
 #[tokio::test]
+async fn identity_content_encoding_is_left_unchanged() {
+    let handler = client().decompress_responses(&[Format::Gzip]).layer(responds_with(|| {
+        HttpResponseBuilder::new_fake()
+            .status(StatusCode::OK)
+            .header(CONTENT_ENCODING, HeaderValue::from_static("identity"))
+            .text("plain body")
+            .build()
+    }));
+
+    let response = handler.execute(request(BytesView::default(), None)).await.unwrap();
+
+    assert_eq!(response.headers().get(CONTENT_ENCODING).unwrap(), "identity");
+    assert!(response.extensions().get::<OriginalBody>().is_none());
+    assert_eq!(response.into_body().into_text().await.unwrap(), "plain body");
+}
+
+#[tokio::test]
+async fn a_non_text_content_encoding_is_passed_through() {
+    let encoding = HeaderValue::from_bytes(b"\xff").unwrap();
+    let handler = client().decompress_responses(&[Format::Gzip]).layer(responds_with(move || {
+        HttpResponseBuilder::new_fake()
+            .status(StatusCode::OK)
+            .header(CONTENT_ENCODING, encoding.clone())
+            .text("opaque body")
+            .build()
+    }));
+
+    let response = handler.execute(request(BytesView::default(), None)).await.unwrap();
+
+    assert_eq!(response.headers().get(CONTENT_ENCODING).unwrap().as_bytes(), b"\xff");
+    assert!(response.extensions().get::<OriginalBody>().is_none());
+    assert_eq!(response.into_body().into_text().await.unwrap(), "opaque body");
+}
+
+#[tokio::test]
 async fn unsupported_policy_does_not_apply_when_decompression_is_disabled() {
     let compressed = compress(Format::Gzip, payload().as_bytes());
     let expected = compressed.clone();
@@ -931,6 +966,25 @@ async fn compression_weakens_a_strong_validator() {
 
     // The compressed body is a different representation, so it must not keep a
     // strong validator the identity body also claims.
+    assert_eq!(response.headers().get(CONTENT_ENCODING).unwrap(), "gzip");
+    assert_eq!(response.headers().get(ETAG).unwrap(), "W/\"v1\"");
+}
+
+#[tokio::test]
+async fn compression_preserves_an_already_weak_validator() {
+    let handler = server().compress_responses(&[Format::Gzip]).layer(FakeHandler::from_fn(|_| {
+        HttpResponseBuilder::new_fake()
+            .status(StatusCode::OK)
+            .header(ETAG, HeaderValue::from_static("W/\"v1\""))
+            .text("a body long enough to be worth compressing ".repeat(20))
+            .build()
+    }));
+
+    let mut input = request(BytesView::default(), None);
+    input.headers_mut().insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip"));
+
+    let response = handler.execute(input).await.unwrap();
+
     assert_eq!(response.headers().get(CONTENT_ENCODING).unwrap(), "gzip");
     assert_eq!(response.headers().get(ETAG).unwrap(), "W/\"v1\"");
 }

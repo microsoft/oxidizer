@@ -561,17 +561,23 @@ fn weaken_etag(headers: &mut HeaderMap) {
         return;
     }
 
-    let mut bytes = Vec::with_capacity(etag.as_bytes().len() + 2);
-    bytes.extend_from_slice(b"W/");
-    bytes.extend_from_slice(etag.as_bytes());
     let sensitive = etag.is_sensitive();
-
-    let Ok(mut weakened) = HeaderValue::from_bytes(&bytes) else {
-        return;
-    };
+    let mut weakened = weak_etag_value(etag);
     weakened.set_sensitive(sensitive);
 
     headers.insert(ETAG, weakened);
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn weak_etag_value(etag: &HeaderValue) -> HeaderValue {
+    let mut bytes = Vec::with_capacity(etag.as_bytes().len() + 2);
+    bytes.extend_from_slice(b"W/");
+    bytes.extend_from_slice(etag.as_bytes());
+
+    match HeaderValue::from_bytes(&bytes) {
+        Ok(value) => value,
+        Err(_) => unreachable!("prefixing a valid entity tag with 'W/' preserves header validity"),
+    }
 }
 
 /// Records that the body depends on `Accept-Encoding`, without losing what else it varies by.
@@ -901,5 +907,23 @@ impl Config {
         }
 
         Ok(Some(formats))
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raw_deflate_has_no_http_content_encoding() {
+        let layer = Compression::server(HttpBodyBuilder::new_fake());
+        let mut headers = HeaderMap::new();
+        let body = HttpBodyBuilder::new_fake().text("unchanged");
+
+        let body = layer.role.compress(&layer.config, &mut headers, body, Format::Deflate).unwrap();
+
+        assert!(headers.get(CONTENT_ENCODING).is_none());
+        assert_eq!(futures::executor::block_on(body.into_text()).unwrap(), "unchanged");
     }
 }

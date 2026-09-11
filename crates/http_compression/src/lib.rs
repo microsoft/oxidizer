@@ -15,7 +15,7 @@
 //! # }
 //! ```
 
-#![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/http_compression/logo.png")]
 #![doc(

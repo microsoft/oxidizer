@@ -54,6 +54,7 @@ smallvec = { workspace = true }
 [dev-dependencies]
 compressors = { path = "../compressors", features = [
     "brotli",
+    "deflate",
     "futures-stream",
     "gzip",
     "zlib",

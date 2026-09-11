@@ -337,6 +337,7 @@ mod tests {
     use futures::{StreamExt, stream};
 
     use super::*;
+    use crate::core::CompressionInternal;
     use crate::format::Format;
     use crate::testing::{ProgressCompression, view};
     use crate::{CompressorBuilder, DecompressorBuilder, DecompressorLimits, Level, Resources, gzip};
@@ -667,6 +668,54 @@ mod tests {
         let gzip = drain(CompressionStream::compress(source, gzip::Compressor::new(&Resources::default()))).unwrap();
 
         assert_eq!(gzip.range(0..2).to_vec(), vec![0x1f, 0x8b]);
+    }
+
+    #[test]
+    fn a_flush_failure_ends_the_stream() {
+        #[derive(Debug)]
+        struct RejectsFlush;
+
+        impl Compression for RejectsFlush {
+            type Mode = Compress;
+        }
+
+        impl CompressionInternal for RejectsFlush {
+            fn push(&mut self, _input: BytesView) -> Result<()> {
+                Ok(())
+            }
+
+            fn end_input(&mut self) {}
+
+            fn pull(&mut self, _into: Destination) -> Result<Output> {
+                Ok(Output::NeedInput)
+            }
+
+            fn total_in(&self) -> u64 {
+                0
+            }
+
+            fn total_out(&self) -> u64 {
+                0
+            }
+
+            fn flush(&mut self) -> Result<()> {
+                Err(Error::invalid_state("this fixture always rejects flushes"))
+            }
+        }
+
+        let (sender, source) = mpsc::unbounded::<std::result::Result<BytesView, std::io::Error>>();
+        let mut stream = Box::pin(CompressionStream::compress(source, RejectsFlush).flush_on_pending(true));
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        sender.unbounded_send(Ok(view(b"flush me"))).unwrap();
+
+        let error = match stream.as_mut().poll_next(&mut cx) {
+            Poll::Ready(Some(Err(error))) => error,
+            other => panic!("expected a flush failure, got {other:?}"),
+        };
+
+        assert!(error.is_invalid_state());
+        assert!(matches!(stream.as_mut().poll_next(&mut cx), Poll::Ready(None)));
     }
 
     #[test]

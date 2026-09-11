@@ -98,11 +98,10 @@ impl<C: Compression> Stream for CompressionChain<C> {
                     Ok(data) => return Poll::Ready(Some(Ok(data))),
                     // Not a data frame; keep any trailers and read on.
                     Err(frame) => {
-                        if let Ok(new) = frame.into_trailers() {
-                            match trailers.as_mut() {
-                                Some(existing) => existing.extend(new),
-                                None => *trailers = Some(new),
-                            }
+                        let new = frame.into_trailers().expect("a non-data HTTP frame must contain trailers");
+                        match trailers.as_mut() {
+                            Some(existing) => existing.extend(new),
+                            None => *trailers = Some(new),
                         }
                     }
                 }
@@ -196,4 +195,23 @@ fn to_http_error(err: compressors::Error) -> HttpError {
     let recovery = err.recovery();
 
     HttpError::other(err, recovery, label)
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use ohno::Labeled as _;
+
+    use super::*;
+
+    #[test]
+    fn a_foreign_source_error_uses_the_generic_compression_failure() {
+        let error = to_http_error(compressors::Error::other(
+            "source failed",
+            std::io::Error::other("not an HTTP error"),
+        ));
+
+        assert_eq!(error.label(), "compression_invalid");
+        assert!(error.to_string().contains("body compression or decompression failed"));
+    }
 }

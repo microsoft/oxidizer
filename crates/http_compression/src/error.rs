@@ -40,3 +40,19 @@ pub(crate) fn too_many_content_codings(max_layers: usize) -> HttpError {
         LABEL_COMPRESSION_LIMIT_EXCEEDED,
     )
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use ohno::Labeled as _;
+
+    use super::*;
+
+    #[test]
+    fn invalid_preserves_the_cause_text_and_label() {
+        let error = invalid("bad compressed bytes");
+
+        assert_eq!(error.label(), "compression_invalid");
+        assert!(error.to_string().contains("bad compressed bytes"));
+    }
+}

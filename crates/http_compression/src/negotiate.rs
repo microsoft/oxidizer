@@ -177,6 +177,11 @@ mod tests {
     }
 
     #[test]
+    fn a_format_without_an_http_token_is_not_selected() {
+        assert_eq!(select(&headers("*"), &[Format::Deflate]), None);
+    }
+
+    #[test]
     fn the_only_acceptable_format_is_selected() {
         assert_eq!(select(&headers("gzip"), OFFERED), Some(Format::Gzip));
     }

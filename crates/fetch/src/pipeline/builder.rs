@@ -190,6 +190,19 @@ mod tests {
 
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
+    fn service_trait_forwards_to_pipeline_execution() {
+        let pipeline = PipelineBuilder::Minimal.build(Dispatch::new_fake(StatusCode::OK), test_context());
+        let request = http::Request::get("https://example.com")
+            .body(HttpBodyBuilder::new_fake().empty())
+            .unwrap();
+
+        let response = futures::executor::block_on(Service::execute(&pipeline, request)).unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
+    #[test]
     #[should_panic(expected = "expected custom pipeline, found minimal pipeline")]
     fn dbg_string_for_minimal_pipeline_panics() {
         let dispatch = Dispatch::new_fake(StatusCode::OK);
