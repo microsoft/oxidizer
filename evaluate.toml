@@ -159,6 +159,11 @@ file = "crates/http_compression/src/compression.rs"
 reason = "The explicit impl Future uses Either to keep the middleware future materially smaller than an async state machine. The user explicitly requires preserving this size-sensitive pattern."
 
 [[config.allow]]
+rule = "m_services_clone"
+file = "crates/http_compression/src/compression.rs"
+reason = "CompressionLayer is Clone and is the supported way to construct additional services. Compression wraps an arbitrary RequestHandler, whose contract does not require Clone, so adding a public conditional Clone impl would create an unnecessary API commitment."
+
+[[config.allow]]
 rule = "m_avoid_indirection"
 file = "crates/http_extensions/src/body/builder.rs"
 reason = "OpaqueMemory is required only for caller-supplied MemoryShared implementations; the common GlobalPool path remains concrete. Removing type erasure would remove custom-memory support."

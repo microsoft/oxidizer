@@ -462,10 +462,12 @@ fn matches_type(allowed: &Mime, actual: &Mime) -> bool {
         return allowed.subtype() == actual.subtype() && Some(allowed_suffix) == actual.suffix();
     }
 
-    allowed.subtype() == actual.subtype()
+    match actual.suffix() {
         // `application/ld+json` is JSON underneath, so the base type covers it
         // without every structured-suffix variant having to be listed.
-        || actual.suffix().is_some_and(|suffix| suffix == allowed.subtype())
+        Some(actual_suffix) => actual_suffix == allowed.subtype(),
+        None => allowed.subtype() == actual.subtype(),
+    }
 }
 
 /// Whether the parsed content type passes the built-in exclusions.

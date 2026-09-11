@@ -747,6 +747,36 @@ async fn structured_suffix_allowlist_matches_only_the_requested_type() {
 }
 
 #[tokio::test]
+async fn base_subtype_allowlist_matches_suffix_not_structured_prefix() {
+    for (allowed, content_type, expected) in [
+        ("application/soap", "application/soap", true),
+        ("application/soap", "application/soap+xml", false),
+        ("application/xml", "application/soap+xml", true),
+    ] {
+        let handler = server()
+            .compress_responses(&[Format::Gzip])
+            .compressible_types([allowed])
+            .layer(FakeHandler::from_fn(move |_| {
+                HttpResponseBuilder::new_fake()
+                    .status(StatusCode::OK)
+                    .header(CONTENT_TYPE, HeaderValue::from_static(content_type))
+                    .text("a body long enough to be worth compressing ".repeat(20))
+                    .build()
+            }));
+
+        let mut input = request(BytesView::default(), None);
+        input.headers_mut().insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip"));
+
+        let response = handler.execute(input).await.unwrap();
+        assert_eq!(
+            response.headers().contains_key(CONTENT_ENCODING),
+            expected,
+            "allowlist {allowed}, content type {content_type}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn a_body_without_a_content_type_is_left_alone_once_filtering_is_on() {
     use http_compression::DEFAULT_COMPRESSIBLE_TYPES;
 
