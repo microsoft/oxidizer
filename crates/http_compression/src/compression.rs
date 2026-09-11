@@ -406,9 +406,7 @@ impl<S> Layer<S> for CompressionLayer<Server> {
     }
 }
 
-impl<T: RequestHandler> Service<HttpRequest> for Compression<T> {
-    type Out = Result<HttpResponse>;
-
+impl<T: RequestHandler> Compression<T> {
     fn execute(&self, mut input: HttpRequest) -> impl Future<Output = Result<HttpResponse>> + Send {
         let response = match &self.role {
             Role::Client(client) => {
@@ -442,19 +440,32 @@ impl<T: RequestHandler> Service<HttpRequest> for Compression<T> {
     }
 }
 
+impl<T: RequestHandler> Service<HttpRequest> for Compression<T> {
+    type Out = Result<HttpResponse>;
+
+    fn execute(&self, input: HttpRequest) -> impl Future<Output = Result<HttpResponse>> + Send {
+        Self::execute(self, input)
+    }
+}
+
 /// Whether `actual` is covered by the `allowed` pattern.
 fn matches_type(allowed: &Mime, actual: &Mime) -> bool {
     if allowed.type_() != mime::STAR && allowed.type_() != actual.type_() {
         return false;
     }
 
-    if allowed.subtype() == mime::STAR || allowed.subtype() == actual.subtype() {
+    if allowed.subtype() == mime::STAR {
         return true;
     }
 
-    // `application/ld+json` is JSON underneath, so the type it is built on
-    // covers it without every variant having to be listed.
-    actual.suffix().is_some_and(|suffix| suffix == allowed.subtype())
+    if let Some(allowed_suffix) = allowed.suffix() {
+        return allowed.subtype() == actual.subtype() && Some(allowed_suffix) == actual.suffix();
+    }
+
+    allowed.subtype() == actual.subtype()
+        // `application/ld+json` is JSON underneath, so the base type covers it
+        // without every structured-suffix variant having to be listed.
+        || actual.suffix().is_some_and(|suffix| suffix == allowed.subtype())
 }
 
 /// Whether the parsed content type passes the built-in exclusions.
@@ -521,6 +532,11 @@ fn carries_a_body(response: &HttpResponse) -> bool {
     }
 
     response.body().content_length() != Some(0)
+}
+
+/// The cheap test that keeps every uncompressed message off the slow path.
+fn wants_decompression(enabled: &[Format], headers: &HeaderMap) -> bool {
+    !enabled.is_empty() && headers.contains_key(CONTENT_ENCODING)
 }
 
 /// Weakens a strong entity tag, which a compressed body may no longer claim.
@@ -630,7 +646,7 @@ impl Client {
             return Ok(response);
         }
 
-        if !Config::wants_decompression(&self.decompress_responses, response.headers()) {
+        if !wants_decompression(&self.decompress_responses, response.headers()) {
             return Ok(response);
         }
 
@@ -681,7 +697,7 @@ impl Server {
     }
 
     fn decompress_request(&self, config: &Config, request: HttpRequest) -> Result<HttpRequest> {
-        if !Config::wants_decompression(&self.decompress_requests, request.headers()) {
+        if !wants_decompression(&self.decompress_requests, request.headers()) {
             return Ok(request);
         }
 
@@ -754,11 +770,6 @@ impl Config {
             body_builder,
             on_unsupported: UnsupportedCompression::default(),
         }
-    }
-
-    /// The cheap test that keeps every uncompressed message off the slow path.
-    fn wants_decompression(enabled: &[Format], headers: &HeaderMap) -> bool {
-        !enabled.is_empty() && headers.contains_key(CONTENT_ENCODING)
     }
 
     /// Replaces `body` with one that decompresses as it is read.

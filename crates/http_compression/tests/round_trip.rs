@@ -717,6 +717,36 @@ async fn only_the_chosen_content_types_are_compressed() {
 }
 
 #[tokio::test]
+async fn structured_suffix_allowlist_matches_only_the_requested_type() {
+    for (content_type, expected) in [
+        ("application/ld+json", true),
+        ("application/ld+xml", false),
+        ("application/foo+ld", false),
+    ] {
+        let handler = server()
+            .compress_responses(&[Format::Gzip])
+            .compressible_types(["application/ld+json"])
+            .layer(FakeHandler::from_fn(move |_| {
+                HttpResponseBuilder::new_fake()
+                    .status(StatusCode::OK)
+                    .header(CONTENT_TYPE, HeaderValue::from_static(content_type))
+                    .text("a body long enough to be worth compressing ".repeat(20))
+                    .build()
+            }));
+
+        let mut input = request(BytesView::default(), None);
+        input.headers_mut().insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip"));
+
+        let response = handler.execute(input).await.unwrap();
+        assert_eq!(
+            response.headers().contains_key(CONTENT_ENCODING),
+            expected,
+            "content type {content_type}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn a_body_without_a_content_type_is_left_alone_once_filtering_is_on() {
     use http_compression::DEFAULT_COMPRESSIBLE_TYPES;
 

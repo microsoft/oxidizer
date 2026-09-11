@@ -154,6 +154,11 @@ file = "crates/http_compression/src/compression.rs"
 reason = "http_compression is the HTTP adapter for the compressors sibling crate, so Format, Level, Limits, and Resources are intentionally its shared interoperability contract."
 
 [[config.allow]]
+rule = "m_async_fn"
+file = "crates/http_compression/src/compression.rs"
+reason = "The explicit impl Future uses Either to keep the middleware future materially smaller than an async state machine. The user explicitly requires preserving this size-sensitive pattern."
+
+[[config.allow]]
 rule = "m_avoid_indirection"
 file = "crates/http_extensions/src/body/builder.rs"
 reason = "OpaqueMemory is required only for caller-supplied MemoryShared implementations; the common GlobalPool path remains concrete. Removing type erasure would remove custom-memory support."
