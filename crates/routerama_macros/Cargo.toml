@@ -4,7 +4,7 @@
 [package]
 name = "routerama_macros"
 description = "Procedural macros for the routerama crate."
-version = "0.1.0"
+version = "0.1.1"
 readme = "README.md"
 keywords = ["http", "router", "routing", "macro", "codegen"]
 categories = ["web-programming", "development-tools::procedural-macro-helpers"]

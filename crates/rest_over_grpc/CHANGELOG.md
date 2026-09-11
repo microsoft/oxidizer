@@ -5,12 +5,28 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.1] - 2026-09-10
 
 ### Fixed
 
 - Query parameter field paths are now limited to 64 levels of nesting. A deeper
-  path is rejected with `Code::InvalidArgument` instead of being decoded.
+  path is rejected with `Code::InvalidArgument` instead of being decoded ([#729](https://github.com/microsoft/oxidizer/pull/729)).
+
+### Maintenance
+
+- The `build` feature now requires `0.2.1` of `http_path_template`
+- The `layered` feature now requires `0.3.7` of `layered`
+- Now requires `0.1.1` of `routerama`
+- The `build` feature now requires `0.1.1` of `routerama_build`
+
+### Bug Fixes
+
+- silence newly-firing clippy lints from Rust 1.98 ([#700](https://github.com/microsoft/oxidizer/pull/700))
+- declare optional dependencies as dev-dependencies ([#658](https://github.com/microsoft/oxidizer/pull/658))
+
+### Tasks
+
+- raise MSRV to Rust 1.95 ([#716](https://github.com/microsoft/oxidizer/pull/716))
 
 ## [0.2.0] - 2026-07-24
 

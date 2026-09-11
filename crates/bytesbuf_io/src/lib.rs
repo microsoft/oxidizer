@@ -23,7 +23,7 @@
 //! The `test-util` feature enables additional utilities for testing implementations of
 //! types that produce or consume streams of bytes. These are in the `testing` module.
 //!
-//! [`bytesbuf`]: https://docs.io/bytesbuf
+//! [`bytesbuf`]: https://docs.rs/bytesbuf
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf_io/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf_io/favicon.ico")]

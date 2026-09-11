@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.11.0] - 2026-09-10
+
+### Breaking
+
+- adopt thread_aware_core across workspace ([#721](https://github.com/microsoft/oxidizer/pull/721))
+- Now requires `0.10.0` of `bytesbuf`
+- Now requires `0.3.7` of `layered`
+- Now requires `0.5.2` of `ohno`
+- Now requires `0.6.0` of `templated_uri`
+- Now requires `0.12.0` of `thread_aware`
+- Now requires `0.7.0` of `tick`
+
 ## [0.10.0] - 2026-08-27
 
 - ⚠️ Breaking

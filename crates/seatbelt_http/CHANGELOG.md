@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.9.0] - 2026-09-10
+
+### Breaking
+
+- Now requires `0.11.0` of `http_extensions`
+- Now requires `0.9.0` of `seatbelt`
+- The `breaker` feature now requires `0.6.0` of `templated_uri`
+- The `timeout`, `retry`, `hedging`, and `breaker` features now require `0.7.0` of `tick`
+
 ## [0.8.0] - 2026-08-27
 
 - ⚠️ Breaking

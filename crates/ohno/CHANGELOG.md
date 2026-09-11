@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.5.2] - 2026-09-10
+
+### Compatibility
+
+- Corrected generated lint attributes can expose `dead_code` warnings for fields
+  read only by generated `Debug`. Consumers denying this lint may need a targeted
+  allowance. Error constructors, formatting, and trait signatures are unchanged.
+
+### Maintenance
+
+- Now requires `0.5.2` of `ohno_macros`
+
+### Bug Fixes
+
+- correct the syntax context of a rewritten unit struct and the `#[automatically_derived]` placements ([#723](https://github.com/microsoft/oxidizer/pull/723))
+
+### Documentation
+
+- reconcile the design with the two-crate split ([#698](https://github.com/microsoft/oxidizer/pull/698))
+
 ## [0.5.0] - 2026-08-27
 
 - 🔧 Maintenance

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.0] - 2026-09-10
+
+### Breaking
+
+- Now requires `0.10.0` of `bytesbuf`
+- Now requires `0.17.0` of `fetch`
+- Now requires `0.3.7` of `layered`
+
 ## [0.6.1] - 2026-08-28
 
 - 🔧 Maintenance

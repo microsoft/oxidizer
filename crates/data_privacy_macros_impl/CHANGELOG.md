@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.13.0] - 2026-09-10
+
+### Breaking
+
+- Public macro helper results now use Syn 3 rather than Syn 2 error types.
+
+### Code Refactoring
+
+- adopt shared macro test helpers from `testing_aids` ([#686](https://github.com/microsoft/oxidizer/pull/686))
+
 ## [0.10.3] - 2026-06-26
 
 - ✨ Features

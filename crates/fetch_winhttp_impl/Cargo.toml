@@ -4,7 +4,7 @@
 [package]
 name = "fetch_winhttp_impl"
 description = "Implementation of the fetch_winhttp WinHTTP transport (Windows only)."
-version = "0.1.1"
+version = "0.2.0"
 readme = "README.md"
 keywords = ["oxidizer", "http", "client", "winhttp", "windows"]
 categories = ["network-programming", "web-programming::http-client"]

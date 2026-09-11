@@ -4,7 +4,7 @@
 [package]
 name = "http_path_template"
 description = "Parser for the google.api.http path-template grammar"
-version = "0.2.0"
+version = "0.2.1"
 readme = "README.md"
 keywords = ["grpc", "rest", "path", "template", "http"]
 categories = ["parser-implementations", "web-programming"]

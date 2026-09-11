@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0] - 2026-09-10
+
+### Breaking
+
+- Now requires `0.9.0` of `anyspawn`
+- Now requires `0.7.0` of `tick`
+
 ## [0.3.0] - 2026-08-27
 
 - ⚠️ Breaking
