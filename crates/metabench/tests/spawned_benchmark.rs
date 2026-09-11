@@ -211,11 +211,9 @@ fn gungraun_listing_is_forwarded() {
 
     let stdout = successful_stdout(&["--gungraun", "--list"]);
 
-    assert!(
-        stdout
-            .lines()
-            .any(|line| line.contains("__metabench_group_434845434b53554d53::__metabench_benchmark_524f4c4c494e47"))
-    );
+    assert!(stdout.lines().any(|line| {
+        line.contains("__metabench_group_d23a5d29e30556e2f3f66fae89e4544b::__metabench_benchmark_ecb5d0c1194ff78d70d02d708fc2a852")
+    }));
     assert!(!stdout.contains("Running gungraun benchmarks"));
 }
 

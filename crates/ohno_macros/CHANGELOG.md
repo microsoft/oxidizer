@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.2] - 2026-09-10
+
+### Maintenance
+
+- Now requires `0.5.2` of `ohno_macros_impl`
+
+### Bug Fixes
+
+- correct the syntax context of a rewritten unit struct and the `#[automatically_derived]` placements ([#723](https://github.com/microsoft/oxidizer/pull/723))
+
+### Documentation
+
+- reconcile the design with the two-crate split ([#698](https://github.com/microsoft/oxidizer/pull/698))
+
 ## [0.5.0] - 2026-08-27
 
 - 🔧 Maintenance
@@ -113,4 +127,3 @@
 - ✨ Features
 
   - Introduce the ohno and ohno_macros crates ([#53](https://github.com/microsoft/oxidizer/pull/53))
-

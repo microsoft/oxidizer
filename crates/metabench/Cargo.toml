@@ -4,7 +4,7 @@
 [package]
 name = "metabench"
 description = "Run Criterion, Gungraun, Linux perf, and allocation benchmarks together and combine their reports."
-version = "0.1.0"
+version = "0.1.1"
 readme = "README.md"
 keywords = ["benchmark", "criterion", "callgrind", "gungraun", "oxidizer"]
 categories = ["development-tools::profiling"]
@@ -56,6 +56,7 @@ nix = { workspace = true, features = ["fs", "poll"] }
 
 [dev-dependencies]
 bolero = { workspace = true, features = ["std"] }
+mutants = { workspace = true }
 
 # >>> anvil-managed: anvil-lints
 [lints]

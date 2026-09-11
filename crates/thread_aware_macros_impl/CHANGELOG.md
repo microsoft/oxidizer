@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.12.0] - 2026-09-10
+
+### Breaking
+
+- adopt thread_aware_core across workspace ([#721](https://github.com/microsoft/oxidizer/pull/721))
+
 ## [0.11.0] - 2026-08-27
 
 - ⚠️ Breaking

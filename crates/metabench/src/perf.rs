@@ -63,6 +63,18 @@ pub fn begin() -> Option<Guard> {
     }
 }
 
+/// Resolves the environment probe behind [`begin`] ahead of any measurement.
+///
+/// [`begin`] runs inside the region a profiler collects, so leaving its
+/// `LazyLock` cold would charge the first workload for a `getenv` call and the
+/// surrounding one-time synchronization. Callgrind attributes that to the code
+/// under test, inflating every reported instruction count by a fixed amount.
+#[cfg_attr(coverage_nightly, coverage(off))] // not exercised by the instrumented test binary; see prime()'s doc comment
+#[cfg_attr(test, mutants::skip)] // warm-up only affects timing, not any observable behavior
+pub(crate) fn prime() {
+    let _active = *ACTIVE;
+}
+
 pub(crate) fn finish_worker() -> Result<(), Error> {
     let error = ERROR.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
     if let Some(error) = error {

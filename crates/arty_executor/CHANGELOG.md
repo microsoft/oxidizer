@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.2] - 2026-09-10
+
+### Maintenance
+
+- Now requires `0.7.0` of `tick`
+
 ## [0.1.1] - 2026-08-27
 
 - 🔧 Maintenance

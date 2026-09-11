@@ -220,13 +220,27 @@ fn thread_heap_hint_remains_usable_after_its_owner_exits() {
     );
 }
 
+/// Allocates one sample block from a call site the optimizer cannot duplicate.
+///
+/// Call stacks are recorded as raw return addresses, so grouping by stack only holds while every
+/// sample allocates through the same instruction. A loop with a compile-time trip count is fully
+/// unrolled in the release profile, which gives each sample its own call site and its own return
+/// address; keeping the allocation behind a non-inlined callee preserves one stack for all samples.
+#[inline(never)]
+fn allocate_stack_sample(value: u8) -> Box<[u8; 777]> {
+    std::hint::black_box(Box::new([value; 777]))
+}
+
 #[test]
 fn snapshot_encodes_allocations_by_stack() {
+    const SAMPLES: u8 = 4;
+
     let _test = test_lock();
     track_callers(false);
     track_callers(true);
-    for value in 0..4 {
-        drop(Box::new([value as u8; 777]));
+    // The opaque bound keeps the optimizer from unrolling the loop into one call site per sample.
+    for value in 0..std::hint::black_box(SAMPLES) {
+        drop(allocate_stack_sample(value));
     }
     track_callers(false);
 
@@ -243,7 +257,7 @@ fn snapshot_encodes_allocations_by_stack() {
         .iter()
         .filter(|event| event.kind == EventKind::Allocated && event.call_stack == *target_stack)
         .count();
-    assert_eq!(allocation_count, 4);
+    assert_eq!(allocation_count, usize::from(SAMPLES));
 }
 
 #[test]

@@ -4,7 +4,7 @@
 [package]
 name = "metabench_macros"
 description = "Procedural macros for the metabench crate. You should not add this as a direct dependency; use the re-exports from metabench."
-version = "0.1.0"
+version = "0.1.1"
 readme = "README.md"
 keywords = ["benchmark", "criterion", "gungraun", "procedural-macro"]
 categories = ["development-tools::profiling"]

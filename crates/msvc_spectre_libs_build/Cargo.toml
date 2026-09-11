@@ -4,7 +4,7 @@
 [package]
 name = "msvc_spectre_libs_build"
 description = "Build-time policy and MSVC toolchain resolution behind the msvc_spectre_libs build script."
-version = "0.1.0"
+version = "0.1.1"
 readme = "README.md"
 keywords = ["spectre", "msvc", "mitigated", "crt", "build"]
 categories = ["development-tools::build-utils"]

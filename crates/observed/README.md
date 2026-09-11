@@ -156,19 +156,19 @@ collects all visible entries and passes them to processors along with the event.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/observed">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbKjbIWh5Saasb3Q6nH8YFiegbx_otY0Te-H0b2d0E4ceQ9gVhZIKCbGRhdGFfcHJpdmFjeWYwLjEyLjSCaG9ic2VydmVkZjAuMjUuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbKjbIWh5Saasb3Q6nH8YFiegbx_otY0Te-H0b2d0E4ceQ9gVhZIKCbGRhdGFfcHJpdmFjeWYwLjEzLjCCaG9ic2VydmVkZjAuMjYuMA
  [__link0]: `emit!`
- [__link1]: https://docs.rs/data_privacy/0.12.4/data_privacy/?search=RedactionEngine
- [__link10]: https://docs.rs/observed/0.25.0/observed/?search=context::Transfer::with_enrichment_for
- [__link11]: https://docs.rs/observed/0.25.0/observed/?search=enrichment::EnrichFutureExt::enrich
- [__link12]: https://docs.rs/observed/0.25.0/observed/?search=context::Transferred::enrich
- [__link13]: https://docs.rs/observed/0.25.0/observed/?search=context::Transfer::apply_current_thread
- [__link14]: https://docs.rs/observed/0.25.0/observed/?search=enrichment::EnrichFutureExt::attach
- [__link2]: https://docs.rs/observed/0.25.0/observed/?search=EventSampler
- [__link3]: https://docs.rs/observed/0.25.0/observed/?search=processing::EventProcessor
- [__link4]: https://docs.rs/observed/0.25.0/observed/?search=enrichment::EnrichFutureExt::enrich
- [__link5]: https://docs.rs/observed/0.25.0/observed/?search=enrichment::EnrichFnExt::enrich
- [__link6]: https://docs.rs/observed/0.25.0/observed/?search=Sink::transfer_context
- [__link7]: https://docs.rs/observed/0.25.0/observed/?search=context::Transfer
- [__link8]: https://docs.rs/observed/0.25.0/observed/?search=enrichment::EnrichFutureExt::attach
- [__link9]: https://docs.rs/observed/0.25.0/observed/?search=context::Transfer::with_enrichment
+ [__link1]: https://docs.rs/data_privacy/0.13.0/data_privacy/?search=RedactionEngine
+ [__link10]: https://docs.rs/observed/0.26.0/observed/?search=context::Transfer::with_enrichment_for
+ [__link11]: https://docs.rs/observed/0.26.0/observed/?search=enrichment::EnrichFutureExt::enrich
+ [__link12]: https://docs.rs/observed/0.26.0/observed/?search=context::Transferred::enrich
+ [__link13]: https://docs.rs/observed/0.26.0/observed/?search=context::Transfer::apply_current_thread
+ [__link14]: https://docs.rs/observed/0.26.0/observed/?search=enrichment::EnrichFutureExt::attach
+ [__link2]: https://docs.rs/observed/0.26.0/observed/?search=EventSampler
+ [__link3]: https://docs.rs/observed/0.26.0/observed/?search=processing::EventProcessor
+ [__link4]: https://docs.rs/observed/0.26.0/observed/?search=enrichment::EnrichFutureExt::enrich
+ [__link5]: https://docs.rs/observed/0.26.0/observed/?search=enrichment::EnrichFnExt::enrich
+ [__link6]: https://docs.rs/observed/0.26.0/observed/?search=Sink::transfer_context
+ [__link7]: https://docs.rs/observed/0.26.0/observed/?search=context::Transfer
+ [__link8]: https://docs.rs/observed/0.26.0/observed/?search=enrichment::EnrichFutureExt::attach
+ [__link9]: https://docs.rs/observed/0.26.0/observed/?search=context::Transfer::with_enrichment

@@ -216,8 +216,8 @@ See [`documentation`][__link22] for the longer form guides.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/compressors">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbjojVXQIV2Ewb89V-5l67DvobDbwJEokPYgIb-ONYOqfWe4RhZIKCaGJ5dGVzYnVmZTAuOS4wgmtjb21wcmVzc29yc2UwLjEuMA
- [__link0]: https://crates.io/crates/bytesbuf/0.9.0
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbjojVXQIV2Ewb89V-5l67DvobDbwJEokPYgIb-ONYOqfWe4RhZIKCaGJ5dGVzYnVmZjAuMTAuMIJrY29tcHJlc3NvcnNlMC4xLjA
+ [__link0]: https://crates.io/crates/bytesbuf/0.10.0
  [__link1]: https://docs.rs/compressors/0.1.0/compressors/?search=Result
  [__link10]: https://docs.rs/compressors/0.1.0/compressors/fn.decompress.html
  [__link11]: https://docs.rs/compressors/0.1.0/compressors/?search=core::Compression
@@ -233,10 +233,10 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link20]: https://docs.rs/compressors/0.1.0/compressors/?search=core::Compression
  [__link21]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
  [__link22]: https://docs.rs/compressors/0.1.0/compressors/documentation/index.html
- [__link3]: https://crates.io/crates/bytesbuf/0.9.0
- [__link4]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesView
- [__link5]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesBuf
+ [__link3]: https://crates.io/crates/bytesbuf/0.10.0
+ [__link4]: https://docs.rs/bytesbuf/0.10.0/bytesbuf/?search=BytesView
+ [__link5]: https://docs.rs/bytesbuf/0.10.0/bytesbuf/?search=BytesBuf
  [__link6]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
- [__link7]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesView
- [__link8]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesBuf
+ [__link7]: https://docs.rs/bytesbuf/0.10.0/bytesbuf/?search=BytesView
+ [__link8]: https://docs.rs/bytesbuf/0.10.0/bytesbuf/?search=BytesBuf
  [__link9]: https://docs.rs/compressors/0.1.0/compressors/fn.compress.html
