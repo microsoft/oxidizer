@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::fmt::Write as _;
-
 use proc_macro_crate::FoundCrate;
 use proc_macro2::{Span, TokenStream, TokenTree};
 use quote::{format_ident, quote};
@@ -113,11 +111,15 @@ fn too_complex_error(token: &TokenTree) -> Error {
 }
 
 pub(super) fn support_ident(kind: &str, logical_name: &str) -> Ident {
-    let mut encoded_name = String::with_capacity(logical_name.len() * 2);
+    const OFFSET_BASIS: u128 = 0x6c62_272e_07bb_0142_62b8_2175_6295_c58d;
+    const PRIME: u128 = 0x0000_0000_0100_0000_0000_0000_0000_013b;
+
+    let mut hash = OFFSET_BASIS;
     for byte in logical_name.bytes() {
-        write!(encoded_name, "{byte:02x}").expect("writing to a String is infallible");
+        hash ^= u128::from(byte);
+        hash = hash.wrapping_mul(PRIME);
     }
-    format_ident!("__metabench_{kind}_{encoded_name}", span = Span::mixed_site())
+    format_ident!("__metabench_{kind}_{hash:032x}", span = Span::mixed_site())
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -148,6 +150,27 @@ mod tests {
         assert_eq!(support_ident("native", "IDENTITY"), support_ident("native", "IDENTITY"));
         assert_ne!(support_ident("native", "IDENTITY"), support_ident("adapter", "IDENTITY"));
         assert_ne!(support_ident("native", "IDENTITY"), support_ident("native", "OTHER"));
+    }
+
+    #[test]
+    fn support_identifier_hash_matches_reference_fnv1a_128() {
+        // Pins the exact hash so a mutation to the FNV-1a algorithm (e.g.
+        // swapping `^=` for `|=` in the mixing step) is caught even though
+        // it would still produce distinct, stable, fixed-length identifiers.
+        assert_eq!(
+            support_ident("target", "IDENTITY").to_string(),
+            "__metabench_target_0838fce072659a7de8f7c5a0f94235a3"
+        );
+    }
+
+    #[test]
+    fn support_identifier_length_does_not_depend_on_logical_name_length() {
+        let expected_length = "__metabench_target_".len() + 32;
+        assert_eq!(support_ident("target", "x").to_string().len(), expected_length);
+        assert_eq!(
+            support_ident("target", &"identity:".repeat(1_000)).to_string().len(),
+            expected_length
+        );
     }
 
     #[test]

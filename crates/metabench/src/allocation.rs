@@ -36,6 +36,19 @@ pub fn begin() -> Option<ProcessSpan> {
     })
 }
 
+/// Resolves the lazy state behind [`begin`] ahead of any measurement.
+///
+/// [`begin`] runs inside the region a profiler collects, so leaving these
+/// `LazyLock`s cold would charge the first workload for a `getenv` call, the
+/// surrounding one-time synchronization, and the tracking session setup.
+#[cfg_attr(coverage_nightly, coverage(off))] // not exercised by the instrumented test binary; see prime()'s doc comment
+#[cfg_attr(test, mutants::skip)] // warm-up only affects timing, not any observable behavior
+pub(crate) fn prime() {
+    if *ACTIVE {
+        LazyLock::force(&SESSION);
+    }
+}
+
 pub(crate) fn write_worker_artifact() -> Result<(), Error> {
     let Some(path) = env::var_os(ARTIFACT_ENV).map(PathBuf::from) else {
         return Ok(());

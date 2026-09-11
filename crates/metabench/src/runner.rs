@@ -98,6 +98,11 @@ pub fn run(engines: EngineSet, identities: &'static [BenchmarkIdentity], benchma
 }
 
 fn run_inner(engines: EngineSet, identities: &'static [BenchmarkIdentity], benchmark_target: &'static str) -> Result<(), Error> {
+    // Resolve the measurement gates before any engine starts collecting, so
+    // their one-time setup is not charged to the first workload invocation.
+    perf::prime();
+    allocation::prime();
+
     if env::args_os().nth(1).as_deref() == Some(OsStr::new("--gungraun-run")) {
         engines.run(Mode::Gungraun);
         return Ok(());

@@ -11,7 +11,7 @@ mod contract {
     mod __metabench_criterion {}
     mod __metabench_gungraun {}
     fn __metabench_benchmark_COLLISION() {}
-    fn __metabench_benchmark_434f4c4c4953494f4e() {}
+    fn __metabench_benchmark_5ba7e6e02b0556f2d58ca7998a1efd17() {}
     const __METABENCH_IDENTITIES: () = ();
     static METABENCH_ALLOCATOR: () = ();
 

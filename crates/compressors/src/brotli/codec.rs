@@ -1,0 +1,355 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+//! The brotli codec.
+//!
+//! Brotli is a genuinely different engine from the deflate family: a different state type, a
+//! different way of signaling completion, and an output slice that must already be initialized.
+//! It is the format that proves the [`Codec`] abstraction is not just shaped around flate2.
+
+use std::mem::MaybeUninit;
+
+use brotli::enc::StandardAlloc;
+use brotli::enc::encode::{BrotliEncoderOperation, BrotliEncoderStateStruct};
+use brotli::{BrotliDecompressStream, BrotliResult, BrotliState, HeapAlloc, HuffmanCode};
+
+use crate::brotli::{Brotli, Mode};
+use crate::engine::{Codec, Operation, Step, StreamEnd};
+use crate::error::{Error, Result};
+use crate::level::Level;
+use crate::limits::FormatLimits;
+use crate::trailing::TrailingData;
+
+/// Brotli's native quality range is `0..=11`, wider than the portable [`Level`] scale of `0..=9`.
+///
+/// A round-to-nearest linear map, so the endpoints line up (`0 -> 0`, `9 -> 11`) and the mapping
+/// stays monotonic.
+fn portable_quality(level: Level) -> u32 {
+    let scaled = (u32::from(level.get()) * 11 + 4) / 9;
+    scaled.min(11)
+}
+
+/// Initializes an uninitialized output slice so brotli, which writes into `&mut [u8]`, can use it.
+///
+/// Unlike the deflate backend, which takes the spare capacity uninitialized through
+/// `compress_uninit`/`decompress_uninit`, brotli's binding only accepts an initialized `&mut [u8]`.
+/// The zero-fill is therefore real work this format pays and the others do not, so it is done as a
+/// single bulk fill that lowers to `memset` rather than a per-element store loop.
+fn initialize(output: &mut [MaybeUninit<u8>]) -> &mut [u8] {
+    output.fill(MaybeUninit::new(0));
+
+    // SAFETY: every element of the slice was just initialized by the fill above, and `u8` has the
+    // same layout as `MaybeUninit<u8>`.
+    unsafe { &mut *(std::ptr::from_mut(output) as *mut [u8]) }
+}
+
+/// `compress_stream` reports failure only when it is driven inconsistently, for example by
+/// supplying new input after the encoder has already reached a terminal state. The engine's
+/// [`Pump`][crate::engine::Pump] never calls [`Codec::step`] again once a compressor reports
+/// [`Step::StreamEnd`].
+///
+/// Defensive against the encoder's contract rather than this crate's invariants: `compress_stream`
+/// does not document the complete set of conditions under which it reports failure, so this
+/// forwards whatever it reports rather than asserting a condition upstream has not promised.
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(test, mutants::skip)]
+#[cold]
+fn compress_stream_failed() -> Error {
+    Error::invalid_state("the brotli compression engine reported a failure")
+}
+
+/// Drives the `brotli` crate's encoder for one compressed stream.
+///
+/// The encoder is owned outright rather than borrowed from a pool: brotli exposes no reset, so
+/// there is nothing to hand back and no `Drop` work to do. `finished` latches once the encoder has
+/// emitted its terminal block, and the pump never calls `step` again after that -- which is what
+/// makes the "driven inconsistently" branch of `compress_stream` unreachable from here.
+pub(crate) struct BrotliCompress {
+    state: BrotliEncoderStateStruct<StandardAlloc>,
+    finished: bool,
+}
+
+impl BrotliCompress {
+    pub(crate) fn new(level: Level, options: &Brotli) -> Self {
+        use brotli::enc::encode::BrotliEncoderParameter;
+
+        let mut state = BrotliEncoderStateStruct::new(StandardAlloc::default());
+        let quality = options
+            .quality
+            .map_or_else(|| portable_quality(level), |quality| u32::from(quality.get()));
+
+        let accepted = state.set_parameter(BrotliEncoderParameter::BROTLI_PARAM_QUALITY, quality)
+            && state.set_parameter(BrotliEncoderParameter::BROTLI_PARAM_LGWIN, u32::from(options.window_size.get()))
+            && state.set_parameter(BrotliEncoderParameter::BROTLI_PARAM_MODE, mode(options.mode));
+
+        // `set_parameter` refuses only an already-initialized encoder or an unrecognized parameter.
+        // The state was created two statements ago and all three identifiers are recognized, so a
+        // refusal here means the encoder's contract changed under us rather than that the caller
+        // configured something invalid -- `Quality`, `WindowSize` and `Mode` validate on
+        // construction, and the portable `Level` is mapped into `0..=11`.
+        assert!(accepted, "the brotli encoder rejected a parameter it documents as recognized");
+
+        Self { state, finished: false }
+    }
+}
+
+/// Maps our [`Mode`] onto brotli's numeric parameter.
+fn mode(mode: Mode) -> u32 {
+    match mode {
+        Mode::Generic => 0,
+        Mode::Text => 1,
+        Mode::Font => 2,
+    }
+}
+
+impl std::fmt::Debug for BrotliCompress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BrotliCompress")
+            .field("finished", &self.finished)
+            .finish_non_exhaustive()
+    }
+}
+
+// SAFETY: `step` initializes the whole slice through `initialize` before handing it to brotli as a
+// `&mut [u8]`, so every byte the reported count covers is initialized.
+unsafe impl Codec for BrotliCompress {
+    fn step(&mut self, input: &[u8], output: &mut [MaybeUninit<u8>], operation: Operation) -> Result<(Step, usize, usize)> {
+        let brotli_operation = match operation {
+            Operation::Process => BrotliEncoderOperation::BROTLI_OPERATION_PROCESS,
+            Operation::Flush => BrotliEncoderOperation::BROTLI_OPERATION_FLUSH,
+            Operation::Finish => BrotliEncoderOperation::BROTLI_OPERATION_FINISH,
+        };
+
+        let out = initialize(output);
+        let mut available_in = input.len();
+        let mut input_offset = 0_usize;
+        let mut available_out = out.len();
+        let mut output_offset = 0_usize;
+        let mut total_out = None;
+
+        let ok = self.state.compress_stream(
+            brotli_operation,
+            &mut available_in,
+            input,
+            &mut input_offset,
+            &mut available_out,
+            out,
+            &mut output_offset,
+            &mut total_out,
+            &mut |_, _, _, _| (),
+        );
+
+        ok.then_some(()).ok_or_else(compress_stream_failed)?;
+
+        self.finished = self.state.is_finished();
+        let step = if self.finished {
+            Step::StreamEnd
+        } else if operation == Operation::Flush && available_in == 0 && !self.state.has_more_output() {
+            Step::FlushComplete
+        } else {
+            Step::Continue
+        };
+
+        Ok((step, input_offset, output_offset))
+    }
+
+    fn stream_ended(&mut self) -> Result<StreamEnd> {
+        Ok(StreamEnd::Complete)
+    }
+}
+
+/// Drives the `brotli` crate's decoder, across as many concatenated streams as the configuration
+/// allows.
+///
+/// Like the encoder, the state is owned rather than pooled. `limits`, `multi_stream` and
+/// `trailing_data` are fixed policy; `needs_reset` spans one stream and defers the reset until
+/// another stream actually arrives. `total_out` is counted here rather than read back from the
+/// decoder, because the decoder reports per-call progress and the limits are cumulative.
+pub(crate) struct BrotliDecompress {
+    state: BrotliState<HeapAlloc<u8>, HeapAlloc<u32>, HeapAlloc<HuffmanCode>>,
+    limits: FormatLimits,
+    multi_stream: bool,
+    trailing_data: TrailingData,
+    needs_reset: bool,
+    total_out: usize,
+}
+
+impl BrotliDecompress {
+    pub(crate) fn new(limits: FormatLimits, multi_stream: bool, trailing_data: TrailingData) -> Self {
+        Self {
+            state: Self::state(),
+            limits,
+            multi_stream,
+            trailing_data,
+            needs_reset: false,
+            total_out: 0,
+        }
+    }
+
+    /// A decoder restricted to RFC 7932.
+    ///
+    /// `new_strict` rather than `new`: the permissive constructor also accepts Large Window Brotli,
+    /// a non-standard extension whose declared window can reach 1 GiB, and the decoder sizes its
+    /// ring buffer from that declaration before producing any output. Nothing in this crate emits
+    /// such a stream -- [`WindowSize`][crate::brotli::WindowSize] tops out at the window the RFC
+    /// allows -- so accepting one would only widen what untrusted input can ask the allocator for.
+    fn state() -> BrotliState<HeapAlloc<u8>, HeapAlloc<u32>, HeapAlloc<HuffmanCode>> {
+        BrotliState::new_strict(HeapAlloc::new(0), HeapAlloc::new(0), HeapAlloc::new(HuffmanCode::default()))
+    }
+}
+
+impl std::fmt::Debug for BrotliDecompress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BrotliDecompress")
+            .field("limits", &self.limits)
+            .field("multi_stream", &self.multi_stream)
+            .field("trailing_data", &self.trailing_data)
+            .finish_non_exhaustive()
+    }
+}
+
+// SAFETY: `step` initializes the whole slice through `initialize` before handing it to brotli as a
+// `&mut [u8]`, so every byte the reported count covers is initialized.
+unsafe impl Codec for BrotliDecompress {
+    fn step(&mut self, input: &[u8], output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
+        if self.needs_reset {
+            self.state = Self::state();
+            self.total_out = 0;
+            self.needs_reset = false;
+        }
+
+        let out = initialize(output);
+        let mut available_in = input.len();
+        let mut input_offset = 0_usize;
+        let mut available_out = out.len();
+        let mut output_offset = 0_usize;
+
+        let result = BrotliDecompressStream(
+            &mut available_in,
+            &mut input_offset,
+            input,
+            &mut available_out,
+            &mut output_offset,
+            out,
+            &mut self.total_out,
+            &mut self.state,
+        );
+
+        let step = match result {
+            BrotliResult::ResultSuccess => Step::StreamEnd,
+            BrotliResult::NeedsMoreInput | BrotliResult::NeedsMoreOutput => Step::Continue,
+            BrotliResult::ResultFailure => {
+                return Err(Error::corrupt_data("the compressed data is not a valid brotli stream"));
+            }
+        };
+
+        Ok((step, input_offset, output_offset))
+    }
+
+    fn stream_ended(&mut self) -> Result<StreamEnd> {
+        if !self.multi_stream {
+            return Ok(match self.trailing_data {
+                TrailingData::Ignore => StreamEnd::Complete,
+                TrailingData::Reject => StreamEnd::AwaitEof,
+            });
+        }
+
+        self.needs_reset = true;
+        Ok(StreamEnd::NextStream)
+    }
+
+    fn check_limits(&self, total_in: u64, total_out: u64, streams: u64) -> Result<()> {
+        self.limits.check(total_in, total_out, streams)
+    }
+
+    fn remaining_output(&self, total_out: u64) -> Option<u64> {
+        self.limits.remaining_output(total_out)
+    }
+
+    fn max_streams(&self) -> Option<u64> {
+        self.limits.max_streams()
+    }
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quality_maps_the_portable_scale_onto_brotlis_range() {
+        assert_eq!(portable_quality(Level::MIN), 0, "the floor must line up");
+        assert_eq!(portable_quality(Level::HIGH), 11, "the ceiling must line up");
+
+        let mut previous = None;
+        for raw in 0..=Level::MAX.get() {
+            let level = Level::new(raw).unwrap();
+            let mapped = portable_quality(level);
+
+            assert!(Some(mapped) > previous, "mapping must be strictly monotonic at level {raw}");
+            assert!(mapped <= 11, "level {raw} mapped outside brotli's range");
+            previous = Some(mapped);
+        }
+    }
+
+    #[test]
+    fn every_mode_maps_to_its_own_brotli_parameter() {
+        assert_eq!(mode(Mode::Generic), 0);
+        assert_eq!(mode(Mode::Text), 1);
+        assert_eq!(mode(Mode::Font), 2);
+    }
+
+    #[test]
+    fn initialize_zeroes_the_whole_slice() {
+        let mut raw = [MaybeUninit::new(0xff_u8); 8];
+        let initialized = initialize(&mut raw);
+
+        assert_eq!(initialized, &[0_u8; 8]);
+    }
+
+    #[test]
+    fn every_expressible_configuration_is_accepted_by_the_engine() {
+        use crate::brotli::{Quality, WindowSize};
+
+        // Construction asserts that the encoder accepted every parameter, so this passing is what
+        // proves the assertion cannot fire for any configuration a caller can express.
+        for quality in Quality::MIN.get()..=Quality::MAX.get() {
+            for exponent in WindowSize::MIN.get()..=WindowSize::MAX.get() {
+                for chosen in [Mode::Generic, Mode::Text, Mode::Font] {
+                    let mut settings = Brotli::new();
+                    settings.quality = Quality::new(quality);
+                    settings.window_size = WindowSize::new(exponent).unwrap();
+                    settings.mode = chosen;
+
+                    drop(BrotliCompress::new(Level::DEFAULT, &settings));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn decompressor_debug_includes_its_policies() {
+        let codec = BrotliDecompress::new(FormatLimits::new(None, None, None), false, TrailingData::Reject);
+        let rendered = format!("{codec:?}");
+
+        assert!(rendered.contains("trailing_data"));
+        assert!(rendered.contains("Reject"));
+    }
+
+    #[test]
+    fn remaining_output_delegates_to_the_configured_limits() {
+        let codec = BrotliDecompress::new(FormatLimits::new(None, Some(100), None), false, TrailingData::Reject);
+
+        assert_eq!(Codec::remaining_output(&codec, 40), Some(60));
+        assert_eq!(Codec::remaining_output(&codec, 100), Some(0));
+    }
+
+    #[test]
+    fn compressor_debug_includes_its_finished_flag() {
+        let codec = BrotliCompress::new(Level::DEFAULT, &Brotli::new());
+        let rendered = format!("{codec:?}");
+
+        assert!(rendered.contains("BrotliCompress"));
+        assert!(rendered.contains("finished"));
+    }
+}
