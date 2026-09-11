@@ -3311,6 +3311,7 @@ dependencies = [
  "gungraun-summary",
  "jiff",
  "metabench_macros",
+ "mutants",
  "nix 0.31.3",
  "serde",
  "serde_json",
