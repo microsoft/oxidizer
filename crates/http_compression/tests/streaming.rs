@@ -104,6 +104,8 @@ async fn each_burst_is_decompressed_before_eof_and_trailers_survive() {
         sender.unbounded_send(Ok(Frame::trailers(trailers))).unwrap();
         drop(sender);
 
+        assert!(!body.is_end_stream(), "the trailer frame is still pending for {format:?}");
+
         let mut seen = None;
         while let Some(frame) = std::future::poll_fn(|cx| body.as_mut().poll_frame(cx)).await {
             seen = Some(frame.unwrap().into_trailers().unwrap());
