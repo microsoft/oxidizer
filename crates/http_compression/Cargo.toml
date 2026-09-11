@@ -1,0 +1,20 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "http_compression"
+description = "HTTP request and response body compression and decompression."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["http", "compression", "decompression", "gzip", "middleware"]
+categories = ["compression", "network-programming"]
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/http_compression"
+
+[lints]
+workspace = true
