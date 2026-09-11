@@ -889,6 +889,49 @@ async fn a_head_response_is_never_compressed() {
 }
 
 #[tokio::test]
+async fn a_successful_connect_response_is_never_decompressed() {
+    let compressed = compress(Format::Gzip, payload().as_bytes());
+    let expected = compressed.clone();
+    let handler = client().decompress_responses(&[Format::Gzip]).layer(responds_with(move || {
+        HttpResponseBuilder::new_fake()
+            .status(StatusCode::OK)
+            .header(CONTENT_ENCODING, HeaderValue::from_static("gzip"))
+            .bytes(compressed.clone())
+            .build()
+    }));
+    let input = http::Request::builder()
+        .method(http::Method::CONNECT)
+        .uri(URL)
+        .body(builder().empty())
+        .unwrap();
+
+    let response = handler.execute(input).await.unwrap();
+
+    assert_eq!(response.headers().get(CONTENT_ENCODING).unwrap(), "gzip");
+    assert!(response.extensions().get::<OriginalBody>().is_none());
+    assert_eq!(response.into_body().into_bytes().await.unwrap(), expected);
+}
+
+#[tokio::test]
+async fn a_successful_connect_response_is_never_compressed() {
+    let handler = server().compress_responses(&[Format::Gzip]).layer(responds_with(|| {
+        HttpResponseBuilder::new_fake().status(StatusCode::OK).text(payload()).build()
+    }));
+    let input = http::Request::builder()
+        .method(http::Method::CONNECT)
+        .uri(URL)
+        .header(ACCEPT_ENCODING, "gzip")
+        .body(builder().empty())
+        .unwrap();
+
+    let response = handler.execute(input).await.unwrap();
+
+    assert!(response.headers().get(CONTENT_ENCODING).is_none());
+    assert!(response.headers().get(VARY).is_none());
+    assert_eq!(response.into_body().into_text().await.unwrap(), payload());
+}
+
+#[tokio::test]
 async fn an_empty_list_member_does_not_stop_decompression() {
     let expected = payload();
     let compressed = compress(Format::Gzip, expected.as_bytes());

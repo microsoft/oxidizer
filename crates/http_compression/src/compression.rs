@@ -415,14 +415,16 @@ impl<T: RequestHandler> Compression<T> {
             Role::Client(client) => {
                 client.advertise(&mut input);
                 let head = input.method() == Method::HEAD;
+                let connect = input.method() == Method::CONNECT;
 
                 Either::Left(
                     self.inner
                         .execute(input)
-                        .map(move |response| client.decompress_response(&self.config, response?, head)),
+                        .map(move |response| client.decompress_response(&self.config, response?, head, connect)),
                 )
             }
             Role::Server(server) => {
+                let connect = input.method() == Method::CONNECT;
                 let input = match server.decompress_request(&self.config, input) {
                     Ok(input) => input,
                     Err(error) => return Either::Left(ready(Err(error))),
@@ -434,7 +436,7 @@ impl<T: RequestHandler> Compression<T> {
                 Either::Right(
                     self.inner
                         .execute(input)
-                        .map(move |response| server.compress_response(&self.config, response?, chosen)),
+                        .map(move |response| server.compress_response(&self.config, response?, chosen, connect)),
                 )
             }
         };
@@ -642,12 +644,12 @@ impl Client {
         request.headers_mut().insert(ACCEPT_ENCODING, value.clone());
     }
 
-    fn decompress_response(&self, config: &Config, response: HttpResponse, head: bool) -> Result<HttpResponse> {
+    fn decompress_response(&self, config: &Config, response: HttpResponse, head: bool, connect: bool) -> Result<HttpResponse> {
         // A `HEAD` response describes a body it does not carry, and a partial
         // one holds a byte range of the compressed representation rather than the
         // whole of it. Neither can be decompressed, and stripping the metadata would
         // leave the caller unable to decompress it either.
-        if head || !carries_a_body(&response) {
+        if head || (connect && response.status().is_success()) || !carries_a_body(&response) {
             return Ok(response);
         }
 
@@ -675,8 +677,14 @@ impl Server {
         negotiate::select(request.headers(), &self.compress_responses)
     }
 
-    fn compress_response(&self, config: &Config, mut response: HttpResponse, chosen: Option<Format>) -> Result<HttpResponse> {
-        if self.compress_responses.is_empty() {
+    fn compress_response(
+        &self,
+        config: &Config,
+        mut response: HttpResponse,
+        chosen: Option<Format>,
+        connect: bool,
+    ) -> Result<HttpResponse> {
+        if self.compress_responses.is_empty() || (connect && response.status().is_success()) {
             return Ok(response);
         }
 
