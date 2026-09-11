@@ -14,10 +14,10 @@ pub(crate) struct FieldAttrCfg {
 #[derive(Default, Debug)]
 pub(crate) struct ContainerAttrCfg {
     /// An explicit replacement for the derive's inferred `where` predicates, from
-    /// `#[thread_aware(bound = "...")]`. When set, the derive emits these predicates verbatim
-    /// instead of inferring bounds from the fields - the escape hatch for a field type whose
-    /// obligation the derive can't infer correctly (for example a type alias that hides a
-    /// recursive self-reference).
+    /// `#[thread_aware(bound = "...")]`. When set it is non-empty, and the derive emits these
+    /// predicates verbatim instead of inferring bounds from the fields - the escape hatch for a
+    /// field type whose obligation the derive can't infer correctly (for example a type alias that
+    /// hides a recursive self-reference).
     pub(crate) bound: Option<Vec<syn::WherePredicate>>,
 }
 
@@ -33,6 +33,9 @@ pub(crate) fn parse_container_attrs(attrs: &[Attribute]) -> syn::Result<Containe
                 let lit: syn::LitStr = meta.value()?.parse()?;
                 let parsed: syn::punctuated::Punctuated<syn::WherePredicate, syn::Token![,]> =
                     lit.parse_with(syn::punctuated::Punctuated::parse_terminated)?;
+                if parsed.is_empty() {
+                    return Err(meta.error("empty 'bound' - list at least one predicate, or omit the attribute to infer bounds"));
+                }
                 cfg.bound = Some(parsed.into_iter().collect());
                 Ok(())
             } else {
@@ -209,5 +212,20 @@ mod tests {
         // A `bound` string that isn't a valid where-predicate list surfaces a parse error.
         let attrs: Vec<Attribute> = vec![parse_quote! { #[thread_aware(bound = "!!!")] }];
         parse_container_attrs(&attrs).unwrap_err();
+    }
+
+    #[test]
+    fn test_parse_container_attrs_empty_bound() {
+        // An empty `bound = ""` is rejected rather than silently emitting no predicates.
+        let attrs: Vec<Attribute> = vec![parse_quote! { #[thread_aware(bound = "")] }];
+        let err = parse_container_attrs(&attrs).unwrap_err();
+        assert!(err.to_string().contains("empty 'bound'"));
+    }
+
+    #[test]
+    fn test_container_attr_cfg_debug() {
+        // Exercise the derived `Debug` (the error-path tests need the bound but never format it).
+        let cfg = ContainerAttrCfg::default();
+        assert!(format!("{cfg:?}").contains("ContainerAttrCfg"));
     }
 }

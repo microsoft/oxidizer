@@ -111,11 +111,10 @@ fn add_bounds(input: &DeriveInput, root_path: &Path) -> syn::Result<syn::Generic
     // is a recursive self-reference, so the inferred `Children<T>: ThreadAware` becomes circular.
     // Writing `#[thread_aware(bound = "T: ThreadAware")]` restores the parameter bound instead.
     if let Some(bounds) = parse_container_attrs(&input.attrs)?.bound {
-        if !bounds.is_empty() {
-            let where_clause = generics.make_where_clause();
-            for predicate in bounds {
-                where_clause.predicates.push(predicate);
-            }
+        // `parse_container_attrs` rejects an empty list, so there is at least one predicate here.
+        let where_clause = generics.make_where_clause();
+        for predicate in bounds {
+            where_clause.predicates.push(predicate);
         }
         return Ok(generics);
     }
