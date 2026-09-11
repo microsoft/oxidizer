@@ -717,6 +717,32 @@ fn recursive_and_slice_generics_compile_and_relocate() {
     assert_eq!(node.children[0].value.relocations, 1, "relocation reaches recursive children");
 }
 
+/// A field written as a qualified-self projection, `<T as ItemProvider>::Item`.
+///
+/// The field reaches `T` only through the `qself` type, not the path segments
+/// (`ItemProvider::Item`), so the derive has to look at the `qself` to know the field owes a bound
+/// - otherwise the body relocates a field the impl never bounded and fails to compile.
+trait ItemProvider {
+    type Item;
+}
+
+struct ConcreteProvider;
+
+impl ItemProvider for ConcreteProvider {
+    type Item = Tracker;
+}
+
+#[derive(ThreadAware)]
+struct ProjectedField<T: ItemProvider>(<T as ItemProvider>::Item);
+
+#[test]
+fn qualified_self_projection_field_is_bounded_and_relocates() {
+    let (source, destination) = thread_pair();
+    let mut value = ProjectedField::<ConcreteProvider>(Tracker::default());
+    value.relocate(source.as_ref(), &destination);
+    assert_eq!(value.0.relocations, 1);
+}
+
 /// A recursive self-reference hidden behind a type alias.
 ///
 /// The derive only sees the syntactic field type `AliasChildren<T>`, not that it expands to

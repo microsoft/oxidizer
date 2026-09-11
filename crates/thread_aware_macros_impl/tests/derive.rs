@@ -157,6 +157,17 @@ fn container_bound_override_replaces_inferred_bounds() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
+fn qualified_self_field_reaches_its_parameter() {
+    // `<T as Provider>::Item` reaches `T` through the qself type, so the field owes a bound.
+    let input = quote! {
+        #[derive(ThreadAware)]
+        struct Projected<T: Provider>(<T as Provider>::Item);
+    };
+    assert_snapshot!(expand(input));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
 fn generics_prebound_bare_no_dup() {
     // Ensures no duplicate ThreadAware bound when already present.
     let input = quote! {

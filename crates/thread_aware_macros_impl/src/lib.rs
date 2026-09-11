@@ -350,7 +350,14 @@ fn param_has_thread_aware_bound(generics: &syn::Generics, ident: &syn::Ident, th
 #[cfg_attr(coverage_nightly, coverage(off))] // can't figure out how to get to 100% coverage of this function
 fn type_reaches_ident(ty: &Type, targets: &HashSet<syn::Ident>) -> bool {
     match ty {
-        Type::Path(TypePath { path, .. }) => {
+        Type::Path(TypePath { qself, path, .. }) => {
+            // A qualified-self type like `<T as Provider>::Item` reaches whatever its self type
+            // (`T`) reaches; the path after `as` names the trait/assoc-item, not the parameter.
+            if let Some(qself) = qself
+                && type_reaches_ident(&qself.ty, targets)
+            {
+                return true;
+            }
             for segment in &path.segments {
                 if targets.contains(&segment.ident) {
                     return true;
