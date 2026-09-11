@@ -9,7 +9,7 @@ treated as a distinct row.
 > **Sources.** Design/handle/threading/limit facts are drawn from each crate's
 > public API and source (and, for `internity`, its own `src/`). Performance numbers
 > come from `internity`'s in-repo head-to-head harness ([`docs/PERF.md`](PERF.md),
-> `cargo bench --bench internity_compare`) over a corpus of ≈6000
+> `cargo bench --bench internity -- --criterion`) over a corpus of ≈6000
 > identifier-like strings on one dev box (`--release`, fat LTO). All timings are
 > wall-clock medians measured by Criterion; treat them as *relative signal on this
 > workload*, not universal constants — interner ranking shifts with string length,

@@ -48,7 +48,9 @@ alloc_tracker = { workspace = true }
 allocator-api2 = { workspace = true, features = ["alloc", "std"] }
 bolero = { workspace = true, features = ["std"] }
 criterion = { workspace = true }
+gungraun = { workspace = true, features = ["default"] }
 infinity_pool = { workspace = true }
+metabench = { workspace = true }
 mimalloc = { workspace = true }
 mutants = { workspace = true }
 static_assertions = { workspace = true }
@@ -58,7 +60,6 @@ loom = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 deadpool = { workspace = true, features = ["unmanaged"] }
-gungraun = { workspace = true, features = ["default"] }
 object-pool = { workspace = true }
 opool = { workspace = true }
 sharded-slab = { workspace = true }
@@ -78,26 +79,7 @@ name = "multi_pool_basic"
 name = "multi_pool_dyn_dispatch"
 
 [[bench]]
-name = "criterion"
-harness = false
-
-[[bench]]
-name = "graph_churn"
-harness = false
-
-[[bench]]
-name = "gungraun"
-harness = false
-
-[[bench]]
-name = "pool_comparison"
-harness = false
-
-# Callgrind benches require Linux (Valgrind). The bench file is gated to compile
-# to a no-op on non-Linux targets, but the [[bench]] entry itself cannot be
-# cfg-gated, so it is unconditional here.
-[[bench]]
-name = "pool_comparison_cg"
+name = "plurality"
 harness = false
 
 # Loom model-checking tests. `required-features = ["loom"]` lets `anvil-loom`

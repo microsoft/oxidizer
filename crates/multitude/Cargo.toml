@@ -90,7 +90,13 @@ bytemuck = { workspace = true, features = ["derive"] }
 bytes = { workspace = true }
 bytesbuf = { path = "../bytesbuf" }
 criterion = { workspace = true }
+# Workspace dep declares `default-features = false`; re-enable `default` here
+# because metabench emits the same Gungraun registration code on every
+# platform, while Valgrind/Callgrind execution remains a Linux-only runtime
+# concern inside gungraun/metabench.
+gungraun = { workspace = true, features = ["default"] }
 hashbrown = { workspace = true, features = ["allocator-api2", "default-hasher"] }
+metabench = { workspace = true }
 mimalloc = { workspace = true }
 multitude_macros = { path = "../multitude_macros" }
 mutants = { workspace = true }
@@ -102,78 +108,10 @@ zerocopy = { workspace = true, features = ["derive"] }
 [target.'cfg(loom)'.dev-dependencies]
 loom = { workspace = true }
 
-# Workspace dep declares `default-features = false`; we re-enable `default` here
-# (which pulls in the `benchmark` feature with `library_benchmark`,
-# `library_benchmark_group!`, and `gungraun::main!`) only on Linux.
-[target.'cfg(target_os = "linux")'.dev-dependencies]
-gungraun = { workspace = true, features = ["default"] }
-
 [[bench]]
-name = "criterion_alloc"
-harness = false
-
-[[bench]]
-name = "multitude_serde"
+name = "multitude"
 harness = false
 required-features = ["serde_json"]
-
-[[bench]]
-name = "multitude_serde_cg"
-harness = false
-required-features = ["serde_json"]
-
-[[bench]]
-name = "multitude_record_batch"
-harness = false
-required-features = ["serde_json"]
-
-[[bench]]
-name = "multitude_record_batch_cg"
-harness = false
-required-features = ["serde_json"]
-
-[[bench]]
-name = "multitude_teardown"
-harness = false
-
-[[bench]]
-name = "multitude_teardown_cg"
-harness = false
-
-[[bench]]
-name = "criterion_drop"
-harness = false
-
-[[bench]]
-name = "criterion_arc_array"
-harness = false
-
-[[bench]]
-name = "criterion_rc_array"
-harness = false
-
-[[bench]]
-name = "criterion_arena_vs_allocator"
-harness = false
-
-# Callgrind benches require Linux (Valgrind). The bench files are gated to compile
-# to a no-op on non-Linux targets, but the [[bench]] entry itself cannot be
-# cfg-gated, so it is unconditional here.
-[[bench]]
-name = "criterion_alloc_cg"
-harness = false
-
-[[bench]]
-name = "criterion_drop_cg"
-harness = false
-
-[[bench]]
-name = "criterion_arc_array_cg"
-harness = false
-
-[[bench]]
-name = "criterion_rc_array_cg"
-harness = false
 
 [[example]]
 name = "multitude_basic"
