@@ -289,6 +289,15 @@ impl Error {
     pub fn is_source(&self) -> bool {
         self.kind == Kind::Source
     }
+
+    /// Takes the wrapped foreign error by value.
+    ///
+    /// This supports adapters that need to preserve their own error type after it
+    /// has passed through a compression stream.
+    #[must_use]
+    pub fn into_source(self) -> Option<Box<dyn StdError + Send + Sync>> {
+        self.source
+    }
 }
 
 impl Recovery for Error {

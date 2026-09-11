@@ -69,6 +69,17 @@ seismograph = [
     "tick/seismograph",
 ]
 test-util = ["tick/test-util", "http_extensions/test-util"]
+compression-gzip = ["dep:compressors", "dep:http_compression", "http_compression/gzip"]
+# HTTP `deflate` is zlib-wrapped DEFLATE, which is `compressors/zlib`.
+compression-deflate = ["dep:compressors", "dep:http_compression", "http_compression/deflate"]
+compression-brotli = ["dep:compressors", "dep:http_compression", "http_compression/brotli"]
+compression-zstd = ["dep:compressors", "dep:http_compression", "http_compression/zstd"]
+compression-all = [
+    "compression-brotli",
+    "compression-deflate",
+    "compression-gzip",
+    "compression-zstd",
+]
 tokio = [
     "dep:tokio",
     "dep:anyspawn",
@@ -89,6 +100,8 @@ tokio = [
 [dependencies]
 # internal
 anyspawn = { workspace = true, optional = true }
+compressors = { workspace = true, optional = true }
+http_compression = { workspace = true, optional = true }
 
 # external
 bytes = { workspace = true }
@@ -141,6 +154,13 @@ alloc_tracker = { workspace = true }
 anyspawn = { path = "../anyspawn", features = ["tokio"] }
 argh = { workspace = true }
 benchmarking = { path = "../benchmarking" }
+compressors = { path = "../compressors", features = [
+    "brotli",
+    "futures-stream",
+    "gzip",
+    "zlib",
+    "zstd",
+] }
 criterion = { workspace = true }
 ctor = { workspace = true }
 data_privacy = { path = "../data_privacy" }
@@ -148,6 +168,7 @@ fastrand.workspace = true
 fetch_hyper = { path = "../fetch_hyper", features = ["rustls", "native-tls"] }
 fetch_tls = { path = "../fetch_tls", features = ["rustls", "native-tls"] }
 futures = { workspace = true, features = ["executor", "std"] }
+http_compression = { path = "../http_compression", features = ["brotli", "deflate", "gzip", "zstd"] }
 http_extensions = { path = "../http_extensions", features = ["test-util", "json"] }
 hyper-util = { workspace = true, features = ["tokio", "http1", "http2", "client-legacy"] }
 insta = { workspace = true }
@@ -299,6 +320,16 @@ required-features = ["test-util"]
 [[test]]
 name = "timeout"
 required-features = ["test-util"]
+
+[[test]]
+name = "decompression"
+required-features = [
+    "test-util",
+    "compression-brotli",
+    "compression-deflate",
+    "compression-gzip",
+    "compression-zstd",
+]
 
 # >>> anvil-managed: anvil-lints
 [lints]

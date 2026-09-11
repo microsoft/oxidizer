@@ -38,6 +38,8 @@ fn poll_compression<S, C, E>(
     mut source: Pin<&mut S>,
     compression: &mut C,
     finished: &mut bool,
+    flush_on_pending: bool,
+    needs_flush: &mut bool,
     cx: &mut Context<'_>,
 ) -> Poll<Option<Result<BytesView>>>
 where
@@ -76,12 +78,23 @@ where
                 return Poll::Ready(Some(Err(Error::invalid_state("the operation requested input after end of input"))));
             }
             Ok(Output::NeedInput) => match source.as_mut().poll_next(cx) {
+                Poll::Pending if flush_on_pending && *needs_flush => {
+                    if let Err(error) = compression.flush() {
+                        *finished = true;
+                        return Poll::Ready(Some(Err(error)));
+                    }
+
+                    // Drain this flush before polling the source again. Idle polls must not
+                    // produce empty compressed blocks when no new input arrived.
+                    *needs_flush = false;
+                }
                 Poll::Pending => return Poll::Pending,
                 Poll::Ready(None) => {
                     compression.end_input();
                     input_ended = true;
                 }
                 Poll::Ready(Some(Ok(chunk))) => {
+                    *needs_flush |= !chunk.is_empty();
                     if let Err(error) = compression.push(chunk) {
                         *finished = true;
                         return Poll::Ready(Some(Err(error)));
@@ -144,6 +157,8 @@ pin_project! {
         source: S,
         compression: C,
         finished: bool,
+        flush_on_pending: bool,
+        needs_flush: bool,
     }
 }
 
@@ -162,7 +177,20 @@ where
             source,
             compression,
             finished: false,
+            flush_on_pending: false,
+            needs_flush: false,
         }
+    }
+
+    /// Flushes buffered output when the source returns [`Poll::Pending`].
+    ///
+    /// Enable this for interactive streams whose consumers must process each
+    /// burst before more input arrives. Repeated idle polls do not flush again
+    /// until the source yields more non-empty input.
+    #[must_use]
+    pub const fn flush_on_pending(mut self, enabled: bool) -> Self {
+        self.flush_on_pending = enabled;
+        self
     }
 }
 
@@ -233,7 +261,38 @@ where
             source,
             compression,
             finished: false,
+            flush_on_pending: false,
+            needs_flush: false,
         }
+    }
+}
+
+impl<S, C> CompressionStream<S, C> {
+    /// Borrows the source stream.
+    #[must_use]
+    pub fn get_ref(&self) -> &S {
+        &self.source
+    }
+
+    /// Mutably borrows an unpinned source stream.
+    #[must_use]
+    pub fn get_mut(&mut self) -> &mut S
+    where
+        S: Unpin,
+    {
+        &mut self.source
+    }
+
+    /// Mutably borrows the pinned source stream.
+    #[must_use]
+    pub fn get_pin_mut(self: Pin<&mut Self>) -> Pin<&mut S> {
+        self.project().source
+    }
+
+    /// Consumes the adapter and returns its source stream.
+    #[must_use]
+    pub fn into_inner(self) -> S {
+        self.source
     }
 }
 
@@ -247,7 +306,14 @@ where
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.project();
-        poll_compression(this.source, this.compression, this.finished, cx)
+        poll_compression(
+            this.source,
+            this.compression,
+            this.finished,
+            *this.flush_on_pending,
+            this.needs_flush,
+            cx,
+        )
     }
 }
 

@@ -767,13 +767,56 @@
 //! `TlsOptions::builder_native_tls()` when both features are enabled, allowing different client
 //! instances to use different backends.
 //!
+//! # Automatic Response Decompression
+//!
+//! The client can automatically decompress response bodies, which is off until it is asked for.
+//! Link the codecs you want through the `compression-*` features, or enable `compression-all` for
+//! every supported codec, then select them through [`ResponseDecompressionOptions`][options::ResponseDecompressionOptions]:
+//!
+//! ```
+//! # #[cfg(all(feature = "test-util", feature = "compression-gzip"))]
+//! # {
+//! # use fetch::HttpClient;
+//! # use fetch::fake::FakeDeps;
+//! # use fetch::options::DecompressionMethod;
+//! # use http::StatusCode;
+//! # let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default());
+//! let client = builder
+//!     .response_decompression(&[DecompressionMethod::Gzip])
+//!     .build();
+//! # }
+//! ```
+//!
+//! Requests then advertise the methods in `Accept-Encoding`, most preferred first, and a matching
+//! response is decompressed before the caller sees it. `Content-Encoding` and `Content-Length` are
+//! removed because neither describes the decompressed body; what they said is kept in
+//! `http_compression::OriginalBody` on the response. A response compressed with a format that was
+//! not asked for is handed back untouched rather than failing.
+//!
+//! [`DecompressionMethod::ALL`](options::DecompressionMethod::ALL) asks for everything the build can
+//! decompress.
+//!
+//! Decompression is lazy, so a malformed body fails when it is read rather than when the response
+//! arrives, and that failure therefore does not trigger a retry. The codec's own limits are
+//! preserved by default; the client adds no output-size or stream-count cap.
+//!
+//! [`ResponseDecompressionOptions`][options::ResponseDecompressionOptions] can explicitly bound
+//! decompressed output and the number of compressed streams. These bounds apply even when
+//! streaming without buffering the body; exceeding one fails the body with the
+//! `compression_limit_exceeded` error label.
+//! [`response_body_options`](HttpClientBuilder::response_body_options) separately controls how
+//! much a body-buffering operation may retain in memory.
+//!
+//! For server-side compression and decompression, use the
+//! [`http_compression`](https://docs.rs/http_compression) crate directly.
+//!
 //! # Features
 //!
 //! The `fetch` crate provides several optional features that you can enable in your `Cargo.toml`:
 //!
 //! ```toml
 //! [dependencies]
-//! fetch = { version = "*", features = ["json", "tokio"] }
+//! fetch = { version = "*", features = ["json", "tokio", "tls", "compression-gzip"] }
 //! ```
 //!
 //! - **`tokio`**: Enables integration with the Tokio runtime. This feature provides the `HttpClient::builder_tokio`
@@ -797,6 +840,32 @@
 //!
 //! - **`test-util`**: Provides APIs to fake responses and HTTP client behavior for testing purposes.
 //!   This feature makes it easy to write fast, deterministic tests without making real network requests.
+//!
+//! The `compression-*` features below select codecs for
+//! [automatic response decompression](#automatic-response-decompression). None is on by default,
+//! and a build with none of them links no codec at all. Enabling one makes a format *available*;
+//! the client decompresses nothing until
+//! [`ResponseDecompressionOptions::methods`](options::ResponseDecompressionOptions::methods)
+//! names it and those options are applied with
+//! [`response_decompression`](HttpClientBuilder::response_decompression).
+//!
+//! - **`compression-gzip`**: Links the `gzip` codec (RFC 1952) for
+//!   [automatic response decompression](#automatic-response-decompression) and adds
+//!   [`DecompressionMethod::Gzip`](options::DecompressionMethod). The legacy `x-gzip` token selects
+//!   it too.
+//!
+//! - **`compression-deflate`**: Links the `deflate` codec and adds
+//!   [`DecompressionMethod::Deflate`](options::DecompressionMethod). Despite the token, the HTTP
+//!   `deflate` format is zlib-wrapped DEFLATE (RFC 1950), *not* raw DEFLATE (RFC 1951).
+//!
+//! - **`compression-brotli`**: Links the `br` codec (RFC 7932) and adds
+//!   [`DecompressionMethod::Brotli`](options::DecompressionMethod).
+//!
+//! - **`compression-zstd`**: Links the `zstd` codec (RFC 8878) and adds
+//!   [`DecompressionMethod::Zstd`](options::DecompressionMethod).
+//!
+//! - **`compression-all`**: Enables all four codec features above. Use
+//!   [`DecompressionMethod::ALL`](options::DecompressionMethod::ALL) to request decompression with all of them.
 //!
 //! > **Note**: Most users should enable the `tokio` feature along with the `tls` feature for HTTPS
 //! > support. The `json` feature is recommended for most applications that need to work with JSON APIs.
@@ -826,6 +895,7 @@ mod error_labels;
 pub mod tls;
 
 mod client_builder;
+mod dispatch_builder;
 pub use client_builder::HttpClientBuilder;
 
 pub mod options;

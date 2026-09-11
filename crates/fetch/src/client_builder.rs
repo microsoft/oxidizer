@@ -16,8 +16,11 @@ use thread_aware::ThreadAware;
 use crate::client::HttpClientPipeline;
 use crate::constants::DEFAULT_HTTP_CLIENT_NAME;
 use crate::custom::{Isolation, Transport};
-use crate::handlers::{Dispatch, DispatchMode};
-use crate::options::{ClientOptions, ConnectionKeepAlive, ConnectionPoolOptions, Http2Options, PoolIndex, RequestFilter};
+use crate::dispatch_builder::create_dispatch_handler;
+use crate::handlers::Dispatch;
+use crate::options::{
+    ClientOptions, ConnectionKeepAlive, ConnectionPoolOptions, Http2Options, RequestFilter, ResponseDecompressionOptions,
+};
 use crate::pipeline::{CustomPipelineFactory, Pipeline, PipelineBuilder, PipelineContext, StandardRequestPipeline};
 use crate::resilience::HttpResilienceContext;
 use crate::telemetry::Metering;
@@ -140,6 +143,62 @@ impl HttpClientBuilder {
     /// ```
     pub const fn response_body_options(mut self, options: HttpBodyOptions) -> Self {
         self.options.response_body_options = options;
+        self
+    }
+
+    /// Configures automatic response decompression, including methods and resource limits.
+    ///
+    /// Off by default: a build with none of the `compression-*` features links no
+    /// codec at all, and even with them the client decompresses nothing until
+    /// [`methods`][ResponseDecompressionOptions::methods] names something. Requests then advertise the methods in
+    /// `Accept-Encoding`, most preferred first, and a matching response is
+    /// decompressed before the caller sees it, with `Content-Encoding` and
+    /// `Content-Length` removed because neither describes the decompressed body.
+    /// What they said is kept in
+    /// [`OriginalBody`][http_compression::OriginalBody] on the response.
+    ///
+    /// A response compressed with a format that is not enabled is handed back
+    /// untouched rather than failing. Decompression is lazy, so a malformed body
+    /// fails when it is read rather than when the response arrives.
+    ///
+    /// [`DecompressionMethod::ALL`][crate::options::DecompressionMethod::ALL] asks for everything this build can decompress.
+    /// The `compression-all` feature makes all supported codecs available.
+    ///
+    /// Passing a method slice or array reference preserves the codec's default limits.
+    /// Pass [`ResponseDecompressionOptions`] to customize them.
+    ///
+    /// # Bounds
+    ///
+    /// No additional output-size or stream-count limits are imposed by default.
+    /// The selected codec retains its own limits. Explicit bounds configured through
+    /// `options` apply while reading the body, even without buffering it. Exceeding
+    /// a decompression bound fails the body with the `compression_limit_exceeded`
+    /// error label.
+    ///
+    /// The [`response_body_options`][Self::response_body_options] buffer limit remains
+    /// independent and applies when collecting the decompressed bytes into memory.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(all(feature = "test-util", feature = "compression-gzip"))]
+    /// # {
+    /// # use fetch::HttpClient;
+    /// # use fetch::options::{DecompressionMethod, ResponseDecompressionOptions};
+    /// # use fetch::fake::FakeDeps;
+    /// # use http::StatusCode;
+    /// # let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default());
+    /// let client = builder
+    ///     .response_decompression(
+    ///         ResponseDecompressionOptions::new()
+    ///             .methods(&[DecompressionMethod::Gzip])
+    ///             .max_output_len(8 * 1024 * 1024),
+    ///     )
+    ///     .build();
+    /// # }
+    /// ```
+    pub fn response_decompression(mut self, options: impl Into<ResponseDecompressionOptions>) -> Self {
+        self.options.decompression = options.into();
         self
     }
 
@@ -465,8 +524,8 @@ struct Aware {
 impl Aware {
     fn into_pipeline(self) -> Pipeline {
         let meter: Meter = self.metering.into();
-        let dispatch = create_dispatch_handler(&meter, self.options.clone(), &self.transport);
         let body_builder = self.transport.create_body_builder(&self.options);
+        let dispatch = create_dispatch_handler(&meter, self.options.clone(), &self.transport, &body_builder);
 
         self.pipeline.build(
             dispatch,
@@ -478,21 +537,6 @@ impl Aware {
             self.options.router,
         )
     }
-}
-
-fn create_dispatch_handler(meter: &Meter, options: ClientOptions, transport: &Transport) -> Dispatch {
-    let mode = match options.transport.connection_pool.multiple_pools.clone() {
-        Some((pool_count, selection)) if pool_count > 1 => {
-            let transports = (0..pool_count)
-                .map(|index| transport.create_transport_handler(options.clone(), meter.clone(), PoolIndex::new(index)))
-                .collect::<Vec<_>>();
-
-            DispatchMode::pooled(transports, selection)
-        }
-        _ => DispatchMode::single(transport.create_transport_handler(options.clone(), meter.clone(), PoolIndex::new(0))),
-    };
-
-    Dispatch::new(mode, options.transport.request_filter)
 }
 
 #[cfg(test)]

@@ -12,7 +12,10 @@
 //! [`TransportOptions`] because only socket-owning transports can honor it.
 
 use data_privacy::RedactionEngine;
-#[doc(inline)]
+
+mod decompression;
+
+pub use decompression::{DecompressionMethod, ResponseDecompressionOptions};
 pub use fetch_options::{
     ConnectionIdleTimeout, ConnectionKeepAlive, ConnectionLifetime, ConnectionPoolOptions, Http2Options, PoolIndex, PoolSelection,
     RequestFilter, SocketOptions, TransportOptions,
@@ -38,6 +41,8 @@ pub(crate) struct ClientOptions {
     pub redaction_engine: RedactionEngine,
     /// TLS configuration used by the bundled transports.
     pub tls: TlsOptions,
+    /// Formats and resource limits for automatic response decompression.
+    pub decompression: ResponseDecompressionOptions,
 }
 
 #[cfg(test)]

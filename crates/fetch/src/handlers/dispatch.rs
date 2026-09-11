@@ -4,7 +4,7 @@
 use std::future::ready;
 use std::sync::Arc;
 
-use futures::TryFutureExt;
+use futures::FutureExt as _;
 use futures::future::Either;
 use http::uri::Scheme;
 use layered::Service;
@@ -50,10 +50,16 @@ impl Dispatch {
 
     #[cfg(test)]
     pub(crate) fn new_fake(handler: impl Into<http_extensions::FakeHandler>) -> Self {
-        Self::new(
+        Self::new_test(
             DispatchMode::single(TransportHandler::new(handler.into())),
             RequestFilter::HttpAndHttps,
         )
+    }
+
+    /// Builds a dispatch handler that decompresses nothing.
+    #[cfg(test)]
+    pub(crate) fn new_test(mode: DispatchMode, request_filter: RequestFilter) -> Self {
+        Self::new(mode, request_filter)
     }
 }
 
@@ -130,7 +136,9 @@ impl Service<HttpRequest> for Dispatch {
             }
         };
 
-        Either::Left(transport.execute(input).map_ok(move |mut res| {
+        Either::Left(transport.execute(input).map(move |result| {
+            let mut res = result?;
+
             // Forward the attempt information to the response if present. This
             // allows inspecting the attempt used to get this response. In
             // healthy scenarios this is always the first attempt, but in
@@ -139,7 +147,7 @@ impl Service<HttpRequest> for Dispatch {
                 res.extensions_mut().insert(attempt);
             }
 
-            res
+            Ok(res)
         }))
     }
 }
@@ -190,7 +198,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn no_endpoint_error() {
-        let handler = Dispatch::new(
+        let handler = Dispatch::new_test(
             DispatchMode::single(TransportHandler::new(FakeHandler::never_completes())),
             RequestFilter::Https,
         );
@@ -208,7 +216,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn validate_scheme_ensure_http_rejected() {
-        let handler = Dispatch::new(
+        let handler = Dispatch::new_test(
             DispatchMode::single(TransportHandler::new(FakeHandler::from_status_codes([StatusCode::OK]))),
             RequestFilter::Https,
         );
@@ -230,7 +238,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn validate_scheme_ensure_https_accepted() {
-        let handler = Dispatch::new(
+        let handler = Dispatch::new_test(
             DispatchMode::single(TransportHandler::new(FakeHandler::default())),
             RequestFilter::Https,
         );
@@ -245,7 +253,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn validate_scheme_ensure_http_accepted() {
-        let handler = Dispatch::new(
+        let handler = Dispatch::new_test(
             DispatchMode::single(TransportHandler::new(FakeHandler::default())),
             RequestFilter::HttpAndHttps,
         );
@@ -260,7 +268,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn forward_attempt_number() {
-        let handler = Dispatch::new(
+        let handler = Dispatch::new_test(
             DispatchMode::single(TransportHandler::new(FakeHandler::from(StatusCode::OK))),
             RequestFilter::HttpAndHttps,
         );
@@ -285,7 +293,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn pool_index_selects_specific_pool() {
-        let handler = Dispatch::new(
+        let handler = Dispatch::new_test(
             DispatchMode::pooled(
                 vec![
                     TransportHandler::new(FakeHandler::from(StatusCode::OK)),
@@ -309,7 +317,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn pool_index_out_of_bounds_falls_back_to_strategy() {
-        let handler = Dispatch::new(
+        let handler = Dispatch::new_test(
             DispatchMode::pooled(
                 vec![
                     TransportHandler::new(FakeHandler::from(StatusCode::OK)),

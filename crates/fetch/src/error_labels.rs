@@ -18,8 +18,8 @@ pub(crate) const LABEL_REQUEST_HYPER: ErrorLabel = ErrorLabel::from_static("requ
 pub(crate) const LABEL_ABANDONED: ErrorLabel = ErrorLabel::from_static("abandoned");
 
 // Validation errors (granular replacements for generic "validation")
-pub(crate) const LABEL_CONTENT_ENCODING_INVALID: ErrorLabel = ErrorLabel::from_static("content_encoding_invalid");
-pub(crate) const LABEL_CONTENT_ENCODING_UNSUPPORTED: ErrorLabel = ErrorLabel::from_static("content_encoding_unsupported");
+pub(crate) const LABEL_COMPRESSION_INVALID: ErrorLabel = ErrorLabel::from_static("compression_invalid");
+pub(crate) const LABEL_COMPRESSION_UNSUPPORTED: ErrorLabel = ErrorLabel::from_static("compression_unsupported");
 pub(crate) const LABEL_URI_ORIGIN_MISSING: ErrorLabel = ErrorLabel::from_static("uri_origin_missing");
 pub(crate) const LABEL_SCHEME_NOT_ALLOWED: ErrorLabel = ErrorLabel::from_static("scheme_not_allowed");
 pub(crate) const LABEL_HTTP_VERSION_UNSUPPORTED: ErrorLabel = ErrorLabel::from_static("http_version_unsupported");

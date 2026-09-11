@@ -167,6 +167,17 @@ impl HttpBody {
         }
     }
 
+    /// The policies this body was created with.
+    ///
+    /// A buffered body has none of its own: it has nothing left to time out and
+    /// nothing left to buffer.
+    pub(crate) const fn options(&self) -> HttpBodyOptions {
+        match &self.kind {
+            Kind::Body(_, options) => *options,
+            Kind::Bytes(_) | Kind::Empty => HttpBodyOptions::new(),
+        }
+    }
+
     /// Creates a streaming body backed by a boxed [`Body`] implementation.
     pub(crate) fn from_streaming(body: Pin<Box<dyn Body<Data = BytesView, Error = HttpError> + Send>>, options: HttpBodyOptions) -> Self {
         Self {
