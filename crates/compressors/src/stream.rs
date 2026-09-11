@@ -681,17 +681,22 @@ mod tests {
                 let decompressor = DecompressorBuilder::new().build_format(format, &Resources::default()).unwrap();
                 let compressed = CompressionStream::compress(source, compressor).flush_on_pending(true);
                 let mut decoded = CompressionStream::decompress(compressed, decompressor);
-                let waker = noop_waker();
+                let scheduled = Arc::new(CountingWaker::default());
+                let waker = futures::task::waker(Arc::clone(&scheduled));
                 let mut cx = Context::from_waker(&waker);
 
                 for burst in [b"first burst".as_slice(), b"second burst".as_slice()] {
                     sender.unbounded_send(Ok(view(burst))).unwrap();
                     let mut received = Vec::new();
                     for _ in 0..1024 {
+                        let wakes_before = scheduled.0.load(Ordering::Relaxed);
                         match Pin::new(&mut decoded).poll_next(&mut cx) {
                             Poll::Ready(Some(chunk)) => received.extend(chunk.unwrap().to_vec()),
                             Poll::Ready(None) => panic!("the source is still open"),
-                            Poll::Pending => {}
+                            Poll::Pending => assert!(
+                                scheduled.0.load(Ordering::Relaxed) > wakes_before,
+                                "pending before a complete burst must arrange a repoll for {format:?}"
+                            ),
                         }
                         if received.len() >= burst.len() {
                             break;
