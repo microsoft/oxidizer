@@ -815,6 +815,43 @@ async fn compression_weakens_a_strong_validator() {
 }
 
 #[tokio::test]
+async fn transformations_remove_content_digest_and_preserve_repr_digest() {
+    let expected = payload();
+    let compressed = compress(Format::Gzip, expected.as_bytes());
+
+    let client_handler = client().decompress_responses(&[Format::Gzip]).layer(responds_with(move || {
+        HttpResponseBuilder::new_fake()
+            .status(StatusCode::OK)
+            .header(CONTENT_ENCODING, HeaderValue::from_static("gzip"))
+            .header("content-digest", HeaderValue::from_static("sha-256=:Y29udGVudA==:"))
+            .header("repr-digest", HeaderValue::from_static("sha-256=:cmVwcg==:"))
+            .bytes(compressed.clone())
+            .build()
+    }));
+
+    let response = client_handler.execute(request(BytesView::default(), None)).await.unwrap();
+    assert!(response.headers().get("content-digest").is_none());
+    assert_eq!(response.headers().get("repr-digest").unwrap(), "sha-256=:cmVwcg==:");
+
+    let server_handler = server().compress_responses(&[Format::Gzip]).layer(responds_with(|| {
+        HttpResponseBuilder::new_fake()
+            .status(StatusCode::OK)
+            .header("content-digest", HeaderValue::from_static("sha-256=:Y29udGVudA==:"))
+            .header("repr-digest", HeaderValue::from_static("sha-256=:cmVwcg==:"))
+            .text(payload())
+            .build()
+    }));
+    let input = http::Request::get(URL)
+        .header(ACCEPT_ENCODING, "gzip")
+        .body(builder().empty())
+        .unwrap();
+
+    let response = server_handler.execute(input).await.unwrap();
+    assert!(response.headers().get("content-digest").is_none());
+    assert_eq!(response.headers().get("repr-digest").unwrap(), "sha-256=:cmVwcg==:");
+}
+
+#[tokio::test]
 async fn a_head_response_is_never_decompressed() {
     let compressed = compress(Format::Gzip, payload().as_bytes());
 

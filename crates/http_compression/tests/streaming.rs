@@ -99,6 +99,8 @@ async fn each_burst_is_decompressed_before_eof_and_trailers_survive() {
 
         let mut trailers = HeaderMap::new();
         trailers.insert("x-complete", HeaderValue::from_static("true"));
+        trailers.insert("content-digest", HeaderValue::from_static("sha-256=:Y29udGVudA==:"));
+        trailers.insert("repr-digest", HeaderValue::from_static("sha-256=:cmVwcg==:"));
         sender.unbounded_send(Ok(Frame::trailers(trailers))).unwrap();
         drop(sender);
 
@@ -106,7 +108,10 @@ async fn each_burst_is_decompressed_before_eof_and_trailers_survive() {
         while let Some(frame) = std::future::poll_fn(|cx| body.as_mut().poll_frame(cx)).await {
             seen = Some(frame.unwrap().into_trailers().unwrap());
         }
-        assert_eq!(seen.unwrap().get("x-complete").unwrap(), "true", "{format:?}");
+        let seen = seen.unwrap();
+        assert_eq!(seen.get("x-complete").unwrap(), "true", "{format:?}");
+        assert!(seen.get("content-digest").is_none(), "{format:?}");
+        assert_eq!(seen.get("repr-digest").unwrap(), "sha-256=:cmVwcg==:", "{format:?}");
         assert!(body.is_end_stream());
     }
 }

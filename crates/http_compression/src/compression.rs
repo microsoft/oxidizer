@@ -16,7 +16,7 @@ use mime::Mime;
 use smallvec::SmallVec;
 
 use crate::error::{invalid, too_many_content_codings, unsupported};
-use crate::{body, negotiate};
+use crate::{CONTENT_DIGEST_HEADER, body, negotiate};
 
 /// A short list of formats: a stacked `Content-Encoding` is rare.
 type Formats = SmallVec<[Format; 2]>;
@@ -733,6 +733,7 @@ impl Server {
         headers.insert(CONTENT_ENCODING, HeaderValue::from_static(token));
         // The compressed length is not known until the body has been read.
         headers.remove(CONTENT_LENGTH);
+        headers.remove(CONTENT_DIGEST_HEADER);
         weaken_etag(headers);
 
         Ok(config.body_builder.rewrap(body, move |body| {
@@ -806,6 +807,7 @@ impl Config {
 
         headers.remove(CONTENT_ENCODING);
         headers.remove(CONTENT_LENGTH);
+        headers.remove(CONTENT_DIGEST_HEADER);
 
         // Built before the body is touched, so an engine that cannot be
         // configured fails the message rather than the body halfway through it.

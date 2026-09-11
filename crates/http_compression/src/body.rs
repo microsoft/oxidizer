@@ -29,6 +29,7 @@ use http_extensions::{HttpBody, HttpError, Result};
 use seatbelt::{Recovery as _, RecoveryInfo};
 
 use crate::error::{LABEL_COMPRESSION_INVALID, LABEL_COMPRESSION_LIMIT_EXCEEDED};
+use crate::CONTENT_DIGEST_HEADER;
 
 /// A body being read as a stream of transformed bytes.
 ///
@@ -150,7 +151,10 @@ impl<C: Compression> Body for CompressionBody<C> {
             }
 
             None => {
-                let trailers = this.chain.take().and_then(CompressionChain::into_trailers);
+                let trailers = this.chain.take().and_then(CompressionChain::into_trailers).map(|mut trailers| {
+                    trailers.remove(CONTENT_DIGEST_HEADER);
+                    trailers
+                });
 
                 Poll::Ready(trailers.map(|trailers| Ok(Frame::trailers(trailers))))
             }
