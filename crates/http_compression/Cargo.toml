@@ -61,6 +61,7 @@ compressors = { path = "../compressors", features = [
 ] }
 ctor = { workspace = true }
 http_extensions = { path = "../http_extensions", features = ["test-util"] }
+mutants = { workspace = true }
 ohno = { path = "../ohno", features = ["test-util"] }
 testing_aids = { path = "../testing_aids" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "rt"] }

@@ -166,6 +166,7 @@ impl<C: Compression> Body for CompressionBody<C> {
     }
 
     /// The transformed length is not known until the body has been read.
+    #[cfg_attr(test, mutants::skip)] // Replacing `SizeHint::default()` with `Default::default()` is equivalent.
     fn size_hint(&self) -> SizeHint {
         SizeHint::default()
     }

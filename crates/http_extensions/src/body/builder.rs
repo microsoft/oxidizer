@@ -461,6 +461,37 @@ mod tests {
 
         assert_eq!(rewrapped.options(), lenient);
     }
+
+    #[test]
+    fn rewrapping_installs_the_builder_timeout_when_the_body_has_none() {
+        #[derive(Debug)]
+        struct PendingBody;
+
+        impl Body for PendingBody {
+            type Data = BytesView;
+            type Error = HttpError;
+
+            fn poll_frame(
+                self: std::pin::Pin<&mut Self>,
+                _: &mut std::task::Context<'_>,
+            ) -> std::task::Poll<Option<Result<Frame<Self::Data>>>> {
+                std::task::Poll::Pending
+            }
+        }
+
+        let clock = ClockControl::new().auto_advance_timers(true).to_clock();
+        let options = HttpBodyOptions::default().timeout(Duration::from_millis(100));
+        let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock).with_options(options);
+        let mut body = Box::pin(builder.rewrap(builder.text("source"), |_| PendingBody));
+        let waker = futures::task::noop_waker();
+        let mut cx = std::task::Context::from_waker(&waker);
+
+        assert!(body.as_mut().poll_frame(&mut cx).is_pending());
+
+        let result = body.as_mut().poll_frame(&mut cx);
+        assert!(matches!(result, std::task::Poll::Ready(Some(Err(_)))));
+    }
+
     use crate::testing::{create_stream_body, create_stream_body_from_chunks};
 
     #[test]

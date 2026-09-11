@@ -198,8 +198,15 @@ mod tests {
         // Rating `identity` above the alternatives is how a caller says it
         // would rather have the body uncompressed.
         assert_eq!(select(&headers("identity, gzip;q=0.5"), OFFERED), None);
+        assert_eq!(select(&headers("identity;q=0.5, gzip;q=0.5"), OFFERED), None);
         assert_eq!(select(&headers("identity;q=0.5, gzip"), OFFERED), Some(Format::Gzip));
         assert_eq!(select(&headers("identity;q=0, gzip;q=0.1"), OFFERED), Some(Format::Gzip));
+    }
+
+    #[test]
+    fn zero_quality_is_not_acceptable() {
+        assert!(!Quality::ZERO.is_acceptable());
+        assert!(Quality::MAX.is_acceptable());
     }
 
     #[test]

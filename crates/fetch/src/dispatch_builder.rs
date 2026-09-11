@@ -105,10 +105,12 @@ mod decompression {
     /// There is nothing to configure, so there is nothing to carry.
     pub(super) type Layer = std::convert::Infallible;
 
+    #[cfg_attr(test, mutants::skip)] // Trivial adapter, inactive in the all-features mutation suite.
     pub(super) const fn layer(_: &ClientOptions, _: &HttpBodyBuilder) -> Option<Layer> {
         None
     }
 
+    #[cfg_attr(test, mutants::skip)] // Trivial identity adapter, inactive in the all-features mutation suite.
     pub(super) const fn wrap(handler: TransportHandler, _: Option<&Layer>) -> TransportHandler {
         handler
     }
