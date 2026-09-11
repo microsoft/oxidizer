@@ -4,6 +4,7 @@
 //! Integration tests covering each transformation.
 
 #![allow(clippy::unwrap_used, reason = "test code")]
+#![cfg(not(miri))] // The compression backends exercised here are excluded from Miri.
 
 use std::num::NonZeroU64;
 use std::sync::{Arc, Mutex, PoisonError};

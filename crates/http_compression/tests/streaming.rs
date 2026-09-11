@@ -4,6 +4,7 @@
 //! Incremental HTTP compression, including pauses, trailers and source failures.
 
 #![allow(clippy::unwrap_used, reason = "test code")]
+#![cfg(not(miri))] // The compression backends exercised here are excluded from Miri.
 
 use std::pin::Pin;
 use std::task::{Context, Poll};

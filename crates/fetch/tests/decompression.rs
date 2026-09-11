@@ -4,6 +4,7 @@
 //! Integration tests for automatic response decompression.
 
 #![allow(clippy::unwrap_used, reason = "test code")]
+#![cfg(not(miri))] // The compression backends exercised here are excluded from Miri.
 
 use std::sync::{Arc, Mutex, PoisonError};
 
