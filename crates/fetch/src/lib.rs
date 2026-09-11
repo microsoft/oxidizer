@@ -15,7 +15,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(
     not(feature = "json"),
-    expect(
+    allow(
         rustdoc::broken_intra_doc_links,
         reason = "json feature disabled, intra-doc links to json types will be broken"
     )
