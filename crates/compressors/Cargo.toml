@@ -51,7 +51,6 @@ default = []
 deflate = ["dep:flate2"]
 futures-stream = ["dep:futures-core", "dep:pin-project-lite"]
 gzip = ["dep:flate2"]
-seismograph = ["bytesbuf/seismograph", "performables/seismograph"]
 zlib = ["dep:flate2"]
 zstd = ["dep:zstd-safe"]
 

@@ -209,7 +209,6 @@
 //! * `zstd` -- the `zstd` module and `Format::Zstd`, via `zstd-safe`.
 //! * `futures-stream` -- `CompressionStream`, presenting compression and decompression as a
 //!   `futures_core::Stream` over any stream of byte sequences.
-//! * `seismograph` records ownership and engine-pool synchronization through `performables`.
 //!
 //! The deflate-family features share one dependency, so enabling more than one of them costs no
 //! more than enabling one. A build that needs only `brotli` or only `zstd` never compiles `flate2`
