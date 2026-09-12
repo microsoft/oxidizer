@@ -94,7 +94,7 @@ async fn custom_transport_scope_attribute() {
 
     let deps = CustomDeps {
         clock: Clock::new_frozen(),
-        global_pool: bytesbuf::mem::GlobalPool::new(),
+        memory: bytesbuf::mem::OpaqueMemory::new(bytesbuf::mem::GlobalPool::new()),
         extras: (),
     };
 
@@ -128,7 +128,7 @@ async fn custom_transport_instrument_inherits_scope() {
 
     let deps = CustomDeps {
         clock: Clock::new_frozen(),
-        global_pool: bytesbuf::mem::GlobalPool::new(),
+        memory: bytesbuf::mem::OpaqueMemory::new(bytesbuf::mem::GlobalPool::new()),
         extras: (),
     };
 

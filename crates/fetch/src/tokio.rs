@@ -39,7 +39,7 @@ pub struct TokioDeps {
     /// Clock for timing operations and timeouts.
     pub clock: Clock,
     /// Memory pool for usage-neutral memory allocations.
-    pub global_pool: bytesbuf::mem::GlobalPool,
+    pub global_pool: bytesbuf::mem::OpaqueMemory,
 }
 
 impl Default for TokioDeps {
@@ -53,7 +53,7 @@ impl TokioDeps {
     #[must_use]
     pub fn with_clock(clock: &Clock) -> Self {
         Self {
-            global_pool: bytesbuf::mem::GlobalPool::new(),
+            global_pool: bytesbuf::mem::OpaqueMemory::new(bytesbuf::mem::GlobalPool::new()),
             clock: clock.clone(),
         }
     }
@@ -145,7 +145,7 @@ impl HttpClient {
     pub fn builder_tokio_with_options(deps: impl Into<TokioDeps>, options: TokioTransportOptions) -> HttpClientBuilder {
         let deps = deps.into();
         let clock = deps.clock.clone();
-        let global_pool = deps.global_pool.clone();
+        let memory = deps.global_pool.clone();
 
         Self::builder_custom_internal(
             crate::constants::TOKIO_RUNTIME_NAME,
@@ -154,7 +154,7 @@ impl HttpClient {
             Isolation::Shared,
             CustomDeps {
                 clock,
-                global_pool,
+                memory,
                 extras: deps,
             },
         )
