@@ -4,7 +4,7 @@
 //! Memory-footprint measurement for each interner.
 //!
 //! Uses a tracking global allocator to report the **live heap bytes** each interner
-//! holds after two phases, over the **same corpus** as `internity_compare.rs` (both
+//! holds after two phases, over the **same corpus** as `internity.rs` (both
 //! honour the `INTERNITY_BENCH_CORPUS_SIZE` override; default ≈6000 identifiers):
 //!
 //! * **insert** — the filled interner (ready to intern more), including the dedup
@@ -102,14 +102,14 @@ fn footprint<T>(build: impl FnOnce() -> T) -> usize {
 }
 
 // ---------------------------------------------------------------------------
-// Corpus (identical to `internity_compare.rs`, including the size override).
+// Corpus (identical to `internity.rs`, including the size override).
 // ---------------------------------------------------------------------------
 
 const DEFAULT_CORPUS_SIZE: usize = 6000;
 const CORPUS_SIZE_ENV: &str = "INTERNITY_BENCH_CORPUS_SIZE";
 
 /// Resolves the corpus size, honouring the same `INTERNITY_BENCH_CORPUS_SIZE`
-/// override as `internity_compare.rs` so the memory and timing benchmarks measure
+/// override as `internity.rs` so the memory and timing benchmarks measure
 /// the identical corpus.
 fn corpus_size() -> usize {
     let Ok(value) = std::env::var(CORPUS_SIZE_ENV) else {

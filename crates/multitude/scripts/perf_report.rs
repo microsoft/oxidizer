@@ -9,14 +9,17 @@ edition = "2024"
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 ohno = { path = "../../ohno", features = ["app-err"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 ---
 
 //! Run the curated criterion benchmark scenarios and rebuild `docs/PERF.md`.
 //!
-//! The report is wall-clock only: it runs the criterion bench targets that back
-//! the customer-facing scenarios and emits differential tables for them. The
-//! crate's remaining micro-benchmarks and its Callgrind instruction-count
-//! suites are not part of this report; run them directly with `cargo bench`.
+//! The report is wall-clock only: it runs the criterion scenarios that back the
+//! customer-facing tables and emits differential tables for them. The crate's
+//! remaining micro-benchmarks and its Callgrind instruction-count suites are
+//! not part of this report; run them directly with
+//! `cargo bench --bench multitude --features serde_json`.
 //!
 //! Usage:
 //!   `scripts/perf_report.rs`                                       — full run (30 samples, 2s measurement)
@@ -28,15 +31,17 @@ ohno = { path = "../../ohno", features = ["app-err"] }
 //! The group tables below select which benchmark variants are measured and
 //! published. If a published scenario is added or removed, update them.
 
-use std::collections::HashSet;
+use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, HashSet};
+use std::ffi::OsString;
 use std::fmt::Write as _;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::{env, fs};
 
 use clap::Parser;
 use ohno::{AppError, app_err, bail};
+use serde::Deserialize;
 
 /// Run the curated criterion benchmark scenarios and rebuild `docs/PERF.md`.
 #[derive(Parser, Debug)]
@@ -152,14 +157,8 @@ const TEARDOWN_GROUPS: &[Group] = &[
 const SERDE_GROUPS: &[Group] = &[
     ("multitude_serde/typed", &["arena_owned", "serde_json_owned"]),
     ("multitude_serde/dynamic", &["arena_value", "serde_json_value"]),
-    (
-        "multitude_serde/typed_lifecycle",
-        &["serde_json", "multitude", "bumpalo"],
-    ),
-    (
-        "multitude_serde/batch_lifecycle",
-        &["serde_json", "multitude", "bumpalo"],
-    ),
+    ("multitude_serde/typed_lifecycle", &["serde_json", "multitude", "bumpalo"]),
+    ("multitude_serde/batch_lifecycle", &["serde_json", "multitude", "bumpalo"]),
 ];
 
 /// The curated record-batch scenarios.
@@ -181,10 +180,7 @@ const RECORD_BATCH_GROUPS: &[Group] = &[
         "multitude_record_batch/sparse_retention",
         &["standard_one_in_eight", "arena_one_in_eight"],
     ),
-    (
-        "multitude_record_batch/errors",
-        &["malformed_standard", "malformed_arena"],
-    ),
+    ("multitude_record_batch/errors", &["malformed_standard", "malformed_arena"]),
     (
         "multitude_record_batch/refresh_workload",
         &[
@@ -199,12 +195,7 @@ const RECORD_BATCH_GROUPS: &[Group] = &[
 
 /// `(workload_label, criterion_group, multitude_variant, bumpalo_variant)`.
 const BUMPALO_COMPARISONS: &[(&str, &str, &str, &str)] = &[
-    (
-        "Sized value (`alloc`)",
-        "criterion_alloc/alloc_u64",
-        "alloc",
-        "bumpalo_alloc",
-    ),
+    ("Sized value (`alloc`)", "criterion_alloc/alloc_u64", "alloc", "bumpalo_alloc"),
     (
         "String copy (`alloc_str`)",
         "criterion_alloc/alloc_str",
@@ -313,114 +304,94 @@ const REFRESH_COMPARISONS: &[(&str, &str)] = &[
     ("Standard collections", "standard_global_select"),
     ("Arena, `Vec` output, reset per refresh", "arena_vec_reset_global_select"),
     ("Arena, per-record output, reset per refresh", "arena_each_reset_global_select"),
-    (
-        "Arena, raw-value scan, per-record output",
-        "arena_raw_each_reset_global_select",
-    ),
-    (
-        "Arena, raw-value scan, indexed selection",
-        "arena_raw_index_reset_global_select",
-    ),
+    ("Arena, raw-value scan, per-record output", "arena_raw_each_reset_global_select"),
+    ("Arena, raw-value scan, indexed selection", "arena_raw_index_reset_global_select"),
 ];
 
-fn unit_to_ns(unit: &str) -> Option<f64> {
-    match unit {
-        "ps" => Some(1e-3),
-        "ns" => Some(1.0),
-        "µs" | "us" => Some(1e3),
-        "ms" => Some(1e6),
-        "s" => Some(1e9),
+#[derive(Deserialize)]
+struct JsonReport {
+    entries: Vec<JsonEntry>,
+}
+
+#[derive(Deserialize)]
+struct JsonEntry {
+    identity: String,
+    results: BTreeMap<String, JsonEngineResult>,
+}
+
+#[derive(Deserialize)]
+struct JsonEngineResult {
+    metrics: BTreeMap<String, JsonMetric>,
+}
+
+#[derive(Deserialize)]
+struct JsonMetric {
+    value: JsonMetricValue,
+    unit: Option<String>,
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(untagged)]
+enum JsonMetricValue {
+    Integer(u64),
+    Float(f64),
+}
+
+impl JsonMetricValue {
+    fn as_f64(self) -> f64 {
+        match self {
+            Self::Integer(value) => value as f64,
+            Self::Float(value) => value,
+        }
+    }
+}
+
+type ReportIndex = BTreeMap<String, JsonEntry>;
+
+fn index_report(report: JsonReport) -> Result<ReportIndex, AppError> {
+    let mut entries = BTreeMap::new();
+    for entry in report.entries {
+        match entries.entry(entry.identity.clone()) {
+            Entry::Vacant(slot) => {
+                slot.insert(entry);
+            }
+            Entry::Occupied(_) => bail!("report contains duplicate benchmark '{}'", entry.identity),
+        }
+    }
+    Ok(entries)
+}
+
+fn criterion_time_ns(report: &ReportIndex, identity: &str) -> Option<f64> {
+    let metric = report.get(identity)?.results.get("criterion")?.metrics.get("median")?;
+    let value = metric.value.as_f64();
+    match metric.unit.as_deref()? {
+        "ps" => Some(value * 1e-3),
+        "ns" => Some(value),
+        "µs" | "us" => Some(value * 1e3),
+        "ms" => Some(value * 1e6),
+        "s" => Some(value * 1e9),
         _ => None,
     }
 }
 
-/// Extract the median time from a criterion `time:` summary line.
-///
-/// Format: `time:   [<low> <unit> <median> <unit> <high> <unit>]`.
-fn parse_time_line(line: &str) -> Option<f64> {
-    let idx = line.find("time:")?;
-    let rest = &line[idx + "time:".len()..];
-    let open = rest.find('[')?;
-    let close = rest.find(']')?;
-    let inside = &rest[open + 1..close];
-    let toks: Vec<&str> = inside.split_whitespace().collect();
-    if toks.len() != 6 {
-        return None;
-    }
-    let median: f64 = toks[2].parse().ok()?;
-    let scale = unit_to_ns(toks[3])?;
-    Some(median * scale)
-}
+fn parse_report(path: &Path, expected: &[(&str, &str)]) -> Result<Vec<(String, f64)>, AppError> {
+    let json = fs::read_to_string(path).map_err(|e| app_err!("reading {}: {e}", path.display()))?;
+    let report: JsonReport = serde_json::from_str(&json).map_err(|e| app_err!("parsing {}: {e}", path.display()))?;
+    let report = index_report(report)?;
 
-/// True for a non-empty, non-indented `group/variant` identifier (the
-/// shape criterion emits on its own line or inline before `time:`).
-/// "Benchmarking foo/bar: ..." progress lines are filtered out by the
-/// no-colon and no-internal-whitespace checks.
-fn is_bench_name(s: &str) -> bool {
-    if s.is_empty() {
-        return false;
-    }
-    if s.contains(':') || s.contains(char::is_whitespace) {
-        return false;
-    }
-    let id_char = |c: char| c.is_ascii_alphanumeric() || c == '_';
-    let mut segments = s.split('/');
-    let Some(first) = segments.next() else {
-        return false;
-    };
-    if first.is_empty() || !first.chars().all(id_char) {
-        return false;
-    }
-    let mut descendants = 0;
-    for segment in segments {
-        if segment.is_empty() || !segment.chars().all(id_char) {
-            return false;
-        }
-        descendants += 1;
-    }
-    descendants > 0
-}
-
-/// Parse a criterion log and return `{group/variant: median_ns}`.
-///
-/// Criterion writes the bench identifier either on its own line just
-/// before the `time:` line (long names) or on the same line as `time:`
-/// separated by whitespace (short names). Both shapes are handled.
-///
-/// Fails if any expected row is absent, so a report is never emitted with
-/// blank cells where a measurement was meant to be.
-fn parse_criterion(text: &str, expected: &[(&str, &str)]) -> Result<Vec<(String, f64)>, AppError> {
-    let mut out: Vec<(String, f64)> = Vec::new();
-    let mut pending: Option<String> = None;
-    for line in text.lines() {
-        let trimmed = line.trim();
-        // Same-line form: `group/variant  time:   [...]`.
-        if let Some(t_idx) = line.find("time:") {
-            let head = line[..t_idx].trim();
-            let name_inline = if is_bench_name(head) { Some(head.to_string()) } else { None };
-            let name = name_inline.or_else(|| pending.take());
-            if let (Some(name), Some(t)) = (name, parse_time_line(line)) {
-                out.push((name, t));
-            }
-            continue;
-        }
-        // Bare-name line: stash for the next `time:` we see.
-        if is_bench_name(trimmed) {
-            pending = Some(trimmed.to_string());
-        }
+    let expected_keys: HashSet<String> = expected.iter().map(|(group, variant)| format!("{group}/{variant}")).collect();
+    let mut out = Vec::with_capacity(expected_keys.len());
+    for key in &expected_keys {
+        let Some(value) = criterion_time_ns(&report, key) else {
+            bail!("report {} is missing criterion median for {key}", path.display());
+        };
+        out.push((key.clone(), value));
     }
 
-    let expected_keys: HashSet<String> = expected.iter().map(|(g, v)| format!("{g}/{v}")).collect();
-    let got_keys: HashSet<String> = out.iter().map(|(k, _)| k.clone()).collect();
-    let mut missing: Vec<&String> = expected_keys.difference(&got_keys).collect();
-    if !missing.is_empty() {
-        missing.sort();
-        let names: Vec<&str> = missing.iter().map(|name| name.as_str()).collect();
-        bail!("criterion log is missing expected benches: {}", names.join(", "));
+    for extra in report.keys().filter(|key| !expected_keys.contains(*key)) {
+        eprintln!("warning: report {} has unexpected benchmark {extra}", path.display());
     }
-    for extra in got_keys.difference(&expected_keys) {
-        eprintln!("warning: criterion log has unexpected bench {extra}");
-    }
+
     Ok(out)
 }
 
@@ -493,8 +464,8 @@ fn build_report(
     out.push_str(
         "This report is a curated set of customer-facing scenarios. The crate also carries a\n\
          larger suite of internal micro-benchmarks, including Callgrind instruction-count\n\
-         suites (`benches/*_cg.rs`), which are used for optimization work and are not\n\
-         published here; run them with `cargo bench` in this crate.\n\n",
+         suites, which are used for optimization work and are not published here; run them\n\
+         with `cargo bench --bench multitude --features serde_json` in this crate.\n\n",
     );
 
     out.push_str("## How these numbers were produced\n\n");
@@ -595,12 +566,7 @@ fn build_report(
             ("Bumpalo", "bumpalo"),
         ] {
             let time = lookup_time(crit, &format!("{group}/{variant}"));
-            let _ = writeln!(
-                out,
-                "| {count} | {label} | {} | {} |",
-                fmt_ns(time),
-                fmt_delta(time, standard_time),
-            );
+            let _ = writeln!(out, "| {count} | {label} | {} | {} |", fmt_ns(time), fmt_delta(time, standard_time),);
         }
     }
     out.push('\n');
@@ -749,8 +715,46 @@ fn crate_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// Run a benchmark and capture stdout and stderr in one log.
-fn run_bench(cwd: &Path, bench: &str, features: &[&str], extra: &[&str], label: &str, cpu: Option<u32>) -> Result<String, AppError> {
+/// A criterion filter matching exactly the published variants of `group`.
+fn group_filter(group: &str, variants: &[&str]) -> String {
+    format!("^{group}/({})$", variants.join("|"))
+}
+
+fn bench_arguments(filter: &str, json_path: &Path, warmup_secs: u32, measurement_secs: u32, samples: u32) -> Vec<OsString> {
+    let warmup = warmup_secs.to_string();
+    let measurement = measurement_secs.to_string();
+    let sample_size = samples.to_string();
+    let mut args = vec![OsString::from("--")];
+    args.push(OsString::from("--criterion"));
+    args.push(OsString::from("--no-baseline"));
+    args.push(OsString::from("--export-json"));
+    args.push(json_path.as_os_str().to_owned());
+    for forwarded in [
+        filter,
+        "--warm-up-time",
+        warmup.as_str(),
+        "--measurement-time",
+        measurement.as_str(),
+        "--sample-size",
+        sample_size.as_str(),
+    ] {
+        args.push(OsString::from("--criterion-arg"));
+        args.push(OsString::from(forwarded));
+    }
+    args
+}
+
+/// Run a benchmark and write its metabench JSON report.
+fn run_bench(
+    cwd: &Path,
+    filter: &str,
+    json_path: &Path,
+    label: &str,
+    cpu: Option<u32>,
+    warmup_secs: u32,
+    measurement_secs: u32,
+    samples: u32,
+) -> Result<(), AppError> {
     println!("==> Running {label}");
     let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".into());
     let mut cmd = if let Some(cpu) = cpu {
@@ -760,72 +764,77 @@ fn run_bench(cwd: &Path, bench: &str, features: &[&str], extra: &[&str], label: 
     } else {
         Command::new(cargo)
     };
-    cmd.current_dir(cwd).arg("bench").arg("--bench").arg(bench);
-    if !features.is_empty() {
-        cmd.arg("--features").arg(features.join(","));
+    cmd.current_dir(cwd)
+        .arg("bench")
+        .arg("--bench")
+        .arg("multitude")
+        .arg("--features")
+        .arg("serde_json")
+        .args(bench_arguments(filter, json_path, warmup_secs, measurement_secs, samples));
+    let status = cmd
+        .status()
+        .map_err(|e| app_err!("failed to spawn cargo bench --bench multitude: {e}"))?;
+    if !status.success() {
+        bail!("cargo bench --bench multitude failed with status {status}");
     }
-    if !extra.is_empty() {
-        cmd.arg("--");
-        cmd.args(extra);
-    }
-    let out = cmd
-        .output()
-        .map_err(|e| app_err!("failed to spawn cargo bench --bench {bench}: {e}"))?;
-    let mut combined = String::from_utf8_lossy(&out.stdout).into_owned();
-    combined.push_str(&String::from_utf8_lossy(&out.stderr));
-    if !out.status.success() {
-        // Mirror the captured log to stderr so users can debug failures.
-        let _ = std::io::stderr().write_all(combined.as_bytes());
-        bail!("cargo bench --bench {bench} failed with status {}", out.status);
-    }
-    Ok(combined)
+    Ok(())
 }
 
-/// A criterion filter matching exactly the published variants of `group`.
-fn group_filter(group: &str, variants: &[&str]) -> String {
-    format!("^{group}/({})$", variants.join("|"))
+fn run_group(
+    cwd: &Path,
+    target_dir: &Path,
+    group: &str,
+    variants: &[&str],
+    label: &str,
+    cpu: Option<u32>,
+    warmup_secs: u32,
+    measurement_secs: u32,
+    samples: u32,
+) -> Result<Vec<(String, f64)>, AppError> {
+    let filter = group_filter(group, variants);
+    let json_path = target_dir.join("multitude-perf-report.json");
+    run_bench(cwd, &filter, &json_path, label, cpu, warmup_secs, measurement_secs, samples)?;
+    let expected: Vec<(&str, &str)> = variants.iter().copied().map(|variant| (group, variant)).collect();
+    parse_report(&json_path, &expected)
 }
 
-/// Run each benchmark group in an independent process.
-///
-/// Grouping the implementations being compared in one process keeps their
-/// measurements close enough to limit host-load and frequency drift. Every
-/// Criterion iteration still creates fresh inputs and freshly warmed state.
 fn run_groups(
     cwd: &Path,
-    bench: &str,
-    features: &[&str],
+    target_dir: &Path,
     groups: &[Group],
-    common_args: &[&str],
     cpu: Option<u32>,
-) -> Result<String, AppError> {
-    let mut combined = String::new();
+    warmup_secs: u32,
+    measurement_secs: u32,
+    samples: u32,
+) -> Result<Vec<(String, f64)>, AppError> {
+    let mut combined = Vec::new();
     for (group, variants) in groups {
-        let filter = group_filter(group, variants);
-        let mut args = Vec::with_capacity(common_args.len() + 1);
-        args.push(filter.as_str());
-        args.extend_from_slice(common_args);
-        combined.push_str(&run_bench(cwd, bench, features, &args, &format!("{bench} ({group})"), cpu)?);
+        combined.extend(run_group(
+            cwd,
+            target_dir,
+            group,
+            variants,
+            &format!("multitude ({group})"),
+            cpu,
+            warmup_secs,
+            measurement_secs,
+            samples,
+        )?);
     }
     Ok(combined)
 }
 
-/// Run every benchmark group in an independent process, alternating group order
-/// between rounds.
-///
-/// Keeping compared variants in one process makes their CPU state adjacent;
-/// alternating group order and reporting the median across rounds reduces
-/// longer-term host-load and frequency bias.
 fn run_repeated_variants(
     cwd: &Path,
-    bench: &str,
-    features: &[&str],
+    target_dir: &Path,
     groups: &[Group],
-    common_args: &[&str],
     repetitions: u32,
     cpu: Option<u32>,
-) -> Result<String, AppError> {
-    let mut combined = String::new();
+    warmup_secs: u32,
+    measurement_secs: u32,
+    samples: u32,
+) -> Result<Vec<(String, f64)>, AppError> {
+    let mut combined = Vec::new();
     for round in 0..repetitions {
         let indices: Vec<usize> = if round.is_multiple_of(2) {
             (0..groups.len()).collect()
@@ -834,28 +843,20 @@ fn run_repeated_variants(
         };
         for index in indices {
             let (group, variants) = groups[index];
-            let filter = group_filter(group, variants);
-            let mut args = Vec::with_capacity(common_args.len() + 1);
-            args.push(filter.as_str());
-            args.extend_from_slice(common_args);
-            combined.push_str(&run_bench(
+            combined.extend(run_group(
                 cwd,
-                bench,
-                features,
-                &args,
-                &format!("{bench} ({group}, round {}/{repetitions})", round + 1),
+                target_dir,
+                group,
+                variants,
+                &format!("multitude ({group}, round {}/{repetitions})", round + 1),
                 cpu,
+                warmup_secs,
+                measurement_secs,
+                samples,
             )?);
         }
     }
     Ok(combined)
-}
-
-fn keys(groups: &[Group]) -> Vec<(&str, &str)> {
-    groups
-        .iter()
-        .flat_map(|(group, variants)| variants.iter().map(move |variant| (*group, *variant)))
-        .collect()
 }
 
 fn run(args: &Args) -> Result<(), AppError> {
@@ -869,79 +870,61 @@ fn run(args: &Args) -> Result<(), AppError> {
     let samples = args.samples.unwrap_or(default_samples);
     let measurement_secs = args.measurement_time.unwrap_or(default_measurement_secs);
     let warmup_secs = args.warm_up_time.unwrap_or(1);
-    let samples_arg = samples.to_string();
-    let measurement_arg = measurement_secs.to_string();
-    let warmup_arg = warmup_secs.to_string();
 
-    let crit_args = vec![
-        "--warm-up-time",
-        warmup_arg.as_str(),
-        "--measurement-time",
-        measurement_arg.as_str(),
-        "--sample-size",
-        samples_arg.as_str(),
-    ];
+    let target_dir = crate_dir.join("target");
+    fs::create_dir_all(&target_dir).map_err(|e| app_err!("creating {}: {e}", target_dir.display()))?;
 
-    let arena_vs_allocator_log = run_groups(
+    let mut crit = run_groups(
         &crate_dir,
-        "criterion_arena_vs_allocator",
-        &[],
+        &target_dir,
         ARENA_VS_ALLOCATOR_GROUPS,
-        &crit_args,
         args.cpu,
-    )?;
-    let alloc_log = run_repeated_variants(
-        &crate_dir,
-        "criterion_alloc",
-        &[],
-        ALLOC_GROUPS,
-        &crit_args,
-        args.comparison_repetitions,
-        args.cpu,
-    )?;
-    let teardown_log = run_repeated_variants(
-        &crate_dir,
-        "multitude_teardown",
-        &[],
-        TEARDOWN_GROUPS,
-        &crit_args,
-        args.comparison_repetitions,
-        args.cpu,
-    )?;
-    let serde_log = run_repeated_variants(
-        &crate_dir,
-        "multitude_serde",
-        &["serde_json"],
-        SERDE_GROUPS,
-        &crit_args,
-        args.comparison_repetitions,
-        args.cpu,
-    )?;
-    let record_batch_log = run_groups(
-        &crate_dir,
-        "multitude_record_batch",
-        &["serde_json"],
-        RECORD_BATCH_GROUPS,
-        &crit_args,
-        args.cpu,
-    )?;
-
-    println!("==> Building docs/PERF.md");
-
-    let mut crit = parse_criterion(&arena_vs_allocator_log, &keys(ARENA_VS_ALLOCATOR_GROUPS))?;
-    crit.extend(parse_criterion(&alloc_log, &keys(ALLOC_GROUPS))?);
-    crit.extend(parse_criterion(&teardown_log, &keys(TEARDOWN_GROUPS))?);
-    crit.extend(parse_criterion(&serde_log, &keys(SERDE_GROUPS))?);
-    crit.extend(parse_criterion(&record_batch_log, &keys(RECORD_BATCH_GROUPS))?);
-
-    let report = build_report(
-        &crit,
-        args.comparison_repetitions,
-        samples,
         warmup_secs,
         measurement_secs,
+        samples,
+    )?;
+    crit.extend(run_repeated_variants(
+        &crate_dir,
+        &target_dir,
+        ALLOC_GROUPS,
+        args.comparison_repetitions,
         args.cpu,
-    );
+        warmup_secs,
+        measurement_secs,
+        samples,
+    )?);
+    crit.extend(run_repeated_variants(
+        &crate_dir,
+        &target_dir,
+        TEARDOWN_GROUPS,
+        args.comparison_repetitions,
+        args.cpu,
+        warmup_secs,
+        measurement_secs,
+        samples,
+    )?);
+    crit.extend(run_repeated_variants(
+        &crate_dir,
+        &target_dir,
+        SERDE_GROUPS,
+        args.comparison_repetitions,
+        args.cpu,
+        warmup_secs,
+        measurement_secs,
+        samples,
+    )?);
+    crit.extend(run_groups(
+        &crate_dir,
+        &target_dir,
+        RECORD_BATCH_GROUPS,
+        args.cpu,
+        warmup_secs,
+        measurement_secs,
+        samples,
+    )?);
+
+    println!("==> Building docs/PERF.md");
+    let report = build_report(&crit, args.comparison_repetitions, samples, warmup_secs, measurement_secs, args.cpu);
     let out_path = crate_dir.join("docs").join("PERF.md");
     fs::write(&out_path, &report).map_err(|e| app_err!("writing {}: {e}", out_path.display()))?;
 

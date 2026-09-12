@@ -48,8 +48,10 @@ serde = { workspace = true, features = ["alloc"], optional = true }
 bolero = { workspace = true, features = ["std"] }
 criterion = { workspace = true }
 foldhash = { workspace = true }
+gungraun = { workspace = true, features = ["default"] }
 internity_macros = { path = "../internity_macros" }
 lasso = { workspace = true, features = ["multi-threaded"] }
+metabench = { workspace = true }
 mutants = { workspace = true }
 parking_lot = { workspace = true }
 serde = { workspace = true, features = ["alloc"] }
@@ -63,16 +65,8 @@ ustr = { workspace = true }
 [target.'cfg(loom)'.dev-dependencies]
 loom = { workspace = true }
 
-[target.'cfg(target_os = "linux")'.dev-dependencies]
-gungraun = { workspace = true, features = ["default"] }
-
 [[bench]]
-name = "internity_compare"
-harness = false
-required-features = ["std"]
-
-[[bench]]
-name = "internity_compare_cg"
+name = "internity"
 harness = false
 required-features = ["std"]
 
