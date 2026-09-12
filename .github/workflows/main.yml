@@ -540,7 +540,7 @@ jobs:
         # release's tag can never be retargeted to a different commit, so pinning to a SHA adds no
         # extra protection here; this reference is intentionally left as a tag.
         # See https://github.com/codecov/codecov-action/releases/tag/v7.0.0
-        uses: codecov/codecov-action@v7.0.0
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: lcov-all.info,lcov-no-def.info
