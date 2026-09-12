@@ -750,6 +750,58 @@ mod tests {
     }
 
     #[test]
+    fn manual_advance_evaluates_auto_advance_timers() {
+        let mut state = State {
+            auto_advance_timers: true,
+            ..State::default()
+        };
+        let start = state.instant;
+        state.timers.register(start + Duration::from_secs(2), Waker::noop().clone());
+
+        state.advance(Duration::from_secs(1), TimeFlow::Forward);
+
+        assert_eq!(state.instant.saturating_duration_since(start), Duration::from_secs(2));
+        assert_eq!(state.timers.len(), 0);
+    }
+
+    #[test]
+    fn auto_advanced_timer_consumes_limit() {
+        let control = ClockControl::new()
+            .auto_advance_timers(true)
+            .auto_advance(Duration::from_secs(1))
+            .auto_advance_limit(Duration::from_secs(2));
+        let clock = control.to_clock();
+        let start = clock.instant();
+
+        control.register_timer(start + Duration::from_secs(2), Waker::noop().clone());
+        let after_timer = clock.instant();
+        let after_limit = clock.instant();
+
+        assert_eq!(after_timer.saturating_duration_since(start), Duration::from_secs(2));
+        assert_eq!(after_limit, after_timer);
+    }
+
+    #[test]
+    fn advance_time_fires_ready_timers() {
+        let mut state = State::default();
+        state.timers.register(state.instant + Duration::from_secs(1), Waker::noop().clone());
+
+        state.advance_time(Duration::from_secs(1), TimeFlow::Forward);
+
+        assert_eq!(state.timers.len(), 0);
+    }
+
+    #[test]
+    fn zero_advance_does_not_evaluate_timers() {
+        let mut state = State::default();
+        state.timers.register(state.instant, Waker::noop().clone());
+
+        state.advance_time(Duration::ZERO, TimeFlow::Forward);
+
+        assert_eq!(state.timers.len(), 1);
+    }
+
+    #[test]
     fn auto_advance_limit() {
         let control = ClockControl::new()
             .auto_advance(Duration::from_millis(550))

@@ -154,6 +154,30 @@ mod tests {
     }
 
     #[test]
+    fn timer_discriminators_are_sequential() {
+        let mut timers = Timers::default();
+        let when = Instant::now();
+
+        let first = timers.register(when, Waker::noop().clone());
+        let second = timers.register(when, Waker::noop().clone());
+
+        assert_eq!(first.discriminator, 1);
+        assert_eq!(second.discriminator, 2);
+    }
+
+    #[test]
+    fn timer_one_nanosecond_after_now_stays_pending() {
+        let mut timers = Timers::default();
+        let now = Instant::now();
+        let next = now + Duration::from_nanos(1);
+        let key = TimerKey::new(next, 0);
+        timers.wakers.insert(key, Waker::noop().clone());
+
+        assert_eq!(timers.advance_timers(now), Some(next));
+        assert!(timers.contains(key));
+    }
+
+    #[test]
     fn advance_timers_ensure_order() {
         let mut timers = Timers::default();
         let anchor = Instant::now();
