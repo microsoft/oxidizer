@@ -375,3 +375,103 @@ initial
         }
     }
 }
+
+Describe 'Write-Changelog commit filtering' {
+    # Regression: Write-Changelog must not attribute a commit to a package's
+    # changelog when the commit's ONLY change inside the package folder is an
+    # auto-maintained crate-root file (README.md / CHANGELOG.md). README.md is
+    # regenerated workspace-wide by `just readme`, so an unrelated commit can
+    # "touch" this package's folder solely through that regeneration.
+    #
+    # The single `git log --name-only` invocation is mocked. Its output encodes,
+    # per commit, a record separator (0x1e), the hash, a unit separator (0x1f),
+    # the subject, then the changed-file paths on following lines.
+
+    BeforeEach {
+        Mock -CommandName Get-Date -MockWith { [datetime]'2026-06-15T00:00:00Z' }
+
+        $script:ChangelogPath = Join-Path $TestDrive ("filter-" + [guid]::NewGuid().Guid.Substring(0, 8) + ".md")
+        Set-Content -LiteralPath $script:ChangelogPath -Value "# Changelog`n`n" -NoNewline -Encoding utf8
+    }
+
+    It 'excludes a commit whose only package-folder change is the crate-root README.md, but keeps a real source commit' {
+        $rs = [char]0x1e; $us = [char]0x1f
+        $script:LogText = "${rs}hReal${us}feat(pkg): genuine source change (#11)`n`ncrates/pkg/src/lib.rs`n${rs}hDoc${us}feat: introduce unrelated crate (#22)`n`ncrates/pkg/README.md"
+
+        Mock -CommandName Invoke-Git -MockWith {
+            if ($Arguments -contains 'tag') { return @() }
+            if ($Arguments[0] -eq 'log') { return $script:LogText }
+            return @()
+        }
+
+        Write-Changelog -packageName 'pkg' -newVersion '0.2.0' `
+            -packageFolder (Join-Path $TestDrive 'crates\pkg') `
+            -changelogFile $script:ChangelogPath -prBaseUrl 'http://x' `
+            -WarningAction SilentlyContinue
+
+        $content = Get-Content -LiteralPath $script:ChangelogPath -Raw
+        $content | Should -Match 'genuine source change'
+        $content | Should -Not -Match 'introduce unrelated crate'
+    }
+
+    It 'keeps a commit that touches a NESTED README.md (e.g. examples/README.md), which is hand-authored' {
+        $rs = [char]0x1e; $us = [char]0x1f
+        $script:LogText = "${rs}hNested${us}docs(pkg): expand examples readme (#33)`n`ncrates/pkg/examples/README.md"
+
+        Mock -CommandName Invoke-Git -MockWith {
+            if ($Arguments -contains 'tag') { return @() }
+            if ($Arguments[0] -eq 'log') { return $script:LogText }
+            return @()
+        }
+
+        Write-Changelog -packageName 'pkg' -newVersion '0.2.0' `
+            -packageFolder (Join-Path $TestDrive 'crates\pkg') `
+            -changelogFile $script:ChangelogPath -prBaseUrl 'http://x' `
+            -WarningAction SilentlyContinue
+
+        $content = Get-Content -LiteralPath $script:ChangelogPath -Raw
+        $content | Should -Match 'expand examples readme'
+    }
+
+    It 'keeps a commit touching a nested file that shares BOTH leaf and parent name (crates/<pkg>/<pkg>/README.md)' {
+        # Edge case: matching on the parent leaf alone would misclassify this as
+        # the crate root. The exact repo-relative path match keeps it.
+        $rs = [char]0x1e; $us = [char]0x1f
+        $script:LogText = "${rs}hNested${us}docs(pkg): nested same-named readme (#44)`n`ncrates/pkg/pkg/README.md"
+
+        Mock -CommandName Invoke-Git -MockWith {
+            if ($Arguments -contains 'tag') { return @() }
+            if ($Arguments[0] -eq 'log') { return $script:LogText }
+            return @()
+        }
+
+        Write-Changelog -packageName 'pkg' -newVersion '0.2.0' `
+            -packageFolder (Join-Path $TestDrive 'crates\pkg') `
+            -changelogFile $script:ChangelogPath -prBaseUrl 'http://x' `
+            -WarningAction SilentlyContinue
+
+        $content = Get-Content -LiteralPath $script:ChangelogPath -Raw
+        $content | Should -Match 'nested same-named readme'
+    }
+
+    It 'warns and writes nothing when every in-range commit is crate-root README-only' {
+        $rs = [char]0x1e; $us = [char]0x1f
+        $script:LogText = "${rs}hDoc${us}feat: introduce unrelated crate (#22)`n`ncrates/pkg/README.md"
+
+        Mock -CommandName Invoke-Git -MockWith {
+            if ($Arguments -contains 'tag') { return @() }
+            if ($Arguments[0] -eq 'log') { return $script:LogText }
+            return @()
+        }
+
+        $before = Get-Content -LiteralPath $script:ChangelogPath -Raw
+
+        Write-Changelog -packageName 'pkg' -newVersion '0.2.0' `
+            -packageFolder (Join-Path $TestDrive 'crates\pkg') `
+            -changelogFile $script:ChangelogPath -prBaseUrl 'http://x' `
+            -WarningAction SilentlyContinue
+
+        $after = Get-Content -LiteralPath $script:ChangelogPath -Raw
+        $after | Should -Be $before
+    }
+}
