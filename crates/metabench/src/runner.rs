@@ -17,7 +17,7 @@ use crate::error::Error;
 use crate::identity::BenchmarkIdentity;
 use crate::mode::Mode;
 use crate::report::BenchmarkReport;
-use crate::{allocation, perf};
+use crate::{allocation, perf, vtune};
 
 const HELP: &str = "\
 Usage: BENCHMARK [METABENCH OPTIONS] [ENGINE OPTIONS]
@@ -26,6 +26,7 @@ Engines:
   --criterion              Run Criterion benchmarks
   --gungraun               Run Gungraun benchmarks
   --perf                   Measure Linux hardware performance counters
+  --vtune                  Measure hardware events with Intel VTune
   --allocations            Measure allocations with alloc_tracker
   --all-engines            Run every engine compiled into this target
 
@@ -33,6 +34,7 @@ Native engine options (repeat once per argument):
   --criterion-arg ARG
   --gungraun-arg ARG
   --perf-arg ARG
+  --vtune-arg ARG
 
 Metabench options:
   --export-md PATH          Override the default Markdown report path
@@ -51,7 +53,7 @@ Metabench options:
   -h, --help
 
 Arguments after -- are forwarded when exactly one engine is selected.
-BENCH_ENGINE may select criterion, gungraun, perf, or allocations when no selector is present.
+BENCH_ENGINE may select criterion, gungraun, perf, vtune, or allocations when no selector is present.
 CRITERION_HOME and GUNGRAUN_HOME retain the 20 most recent metabench runs
 under each home's .metabench-runs directory.
 ";
@@ -79,7 +81,7 @@ impl EngineSet {
 
     fn run(self, mode: Mode) {
         let entry = match mode {
-            Mode::Criterion | Mode::Perf | Mode::Allocations => self.criterion,
+            Mode::Criterion | Mode::Perf | Mode::Vtune | Mode::Allocations => self.criterion,
             Mode::Gungraun => self.gungraun,
         };
         entry();
@@ -102,6 +104,7 @@ fn run_inner(engines: EngineSet, identities: &'static [BenchmarkIdentity], bench
     // their one-time setup is not charged to the first workload invocation.
     perf::prime();
     allocation::prime();
+    vtune::prime();
 
     if env::args_os().nth(1).as_deref() == Some(OsStr::new("--gungraun-run")) {
         engines.run(Mode::Gungraun);
@@ -115,6 +118,8 @@ fn run_inner(engines: EngineSet, identities: &'static [BenchmarkIdentity], bench
             allocation::write_worker_artifact()?;
         } else if mode == Mode::Perf {
             perf::finish_worker()?;
+        } else if mode == Mode::Vtune {
+            vtune::finish_worker()?;
         }
         return Ok(());
     }
@@ -125,6 +130,14 @@ fn run_inner(engines: EngineSet, identities: &'static [BenchmarkIdentity], bench
         return Ok(());
     }
     run_parent(&mut arguments, engines, identities, benchmark_target)
+}
+
+/// Determines whether a `--list` invocation must add [`Mode::Criterion`] to the native modes so
+/// that a non-native engine (allocations, perf, or vtune) has a Criterion instance to list
+/// benchmark identities from.
+fn needs_criterion_for_listing(list: bool, modes: &[Mode], native_modes: &[Mode]) -> bool {
+    list && (modes.contains(&Mode::Allocations) || modes.contains(&Mode::Perf) || modes.contains(&Mode::Vtune))
+        && !native_modes.contains(&Mode::Criterion)
 }
 
 fn run_parent(
@@ -143,9 +156,9 @@ fn run_parent(
     let mut native_modes = modes
         .iter()
         .copied()
-        .filter(|mode| !matches!(mode, Mode::Allocations | Mode::Perf))
+        .filter(|mode| !matches!(mode, Mode::Allocations | Mode::Perf | Mode::Vtune))
         .collect::<Vec<_>>();
-    if arguments.list && (modes.contains(&Mode::Allocations) || modes.contains(&Mode::Perf)) && !native_modes.contains(&Mode::Criterion) {
+    if needs_criterion_for_listing(arguments.list, &modes, &native_modes) {
         native_modes.push(Mode::Criterion);
     }
     let mut summary = orchestrate_modes(&native_modes, arguments.failure_mode, |mode| {
@@ -223,7 +236,7 @@ fn run_probe_modes(
 ) -> Result<Vec<crate::report::NativeResult>, Error> {
     let mut results = Vec::new();
     for &mode in modes {
-        if !matches!(mode, Mode::Allocations | Mode::Perf) {
+        if !matches!(mode, Mode::Allocations | Mode::Perf | Mode::Vtune) {
             continue;
         }
         print_progress(mode)?;
@@ -236,6 +249,13 @@ fn run_probe_modes(
                 summary.completed.contains(&Mode::Criterion),
             ),
             Mode::Perf => run_perf(
+                executable,
+                arguments,
+                artifacts,
+                identities,
+                summary.completed.contains(&Mode::Criterion),
+            ),
+            Mode::Vtune => run_vtune(
                 executable,
                 arguments,
                 artifacts,
@@ -729,6 +749,174 @@ fn validate_perf_arguments(arguments: &[OsString]) -> Result<(), Error> {
     Ok(())
 }
 
+fn run_vtune(
+    executable: &Path,
+    arguments: &Arguments,
+    artifacts: &ArtifactDirectory,
+    identities: &[BenchmarkIdentity],
+    criterion_completed: bool,
+) -> Result<Vec<crate::report::NativeResult>, Error> {
+    let targets = if criterion_completed {
+        artifact::parse_criterion(&artifacts.criterion_path(), artifacts.root(), identities, None)?
+            .into_iter()
+            .filter_map(|result| {
+                artifact::allocation_criterion_identity(&result.native_identity, identities).map(|identity| CriterionProbeTarget {
+                    identity,
+                    native_identity: result.native_identity,
+                })
+            })
+            .collect()
+    } else {
+        discover_criterion_probe_targets(executable, artifacts, identities, arguments.criterion_args(), arguments.timeout)?
+    };
+    if targets.is_empty() {
+        return Err(Error::ArtifactFormat {
+            path: artifacts.path().to_owned(),
+            message: "contains no registered Criterion benchmarks for vtune measurement".to_owned(),
+        });
+    }
+
+    let mut results = Vec::with_capacity(targets.len());
+    for (index, target) in targets.into_iter().enumerate() {
+        let artifact_path = artifacts.vtune_path(index);
+        let result_dir = artifacts.vtune_result_path(index);
+        let criterion_home = artifacts.path().join("vtune-probes").join(index.to_string());
+        let native_arguments = criterion_probe_arguments(arguments.criterion_args(), &target.native_identity);
+        let status = launch_vtune_worker(
+            executable,
+            &native_arguments,
+            arguments.args_for(Mode::Vtune),
+            &artifact_path,
+            &result_dir,
+            &criterion_home,
+            arguments.show_engine_output,
+            arguments.timeout,
+        )?;
+        ensure_success(Mode::Vtune, status)?;
+        results.push(artifact::parse_vtune(
+            &artifact_path,
+            artifacts.root(),
+            target.identity,
+            target.native_identity,
+        )?);
+    }
+    Ok(results)
+}
+
+/// Launches a benchmark worker under a paused `VTune` collection and, once it
+/// exits, extracts a CSV hardware-event report from the collection result.
+///
+/// This mirrors `launch_perf_worker`'s shape, but `VTune`'s own CLI takes the
+/// place of the FIFO-based `perf --control` protocol: the collection starts
+/// paused (`--start-paused`) and is resumed/paused around the annotated
+/// workload by [`crate::vtune::begin`]/[`crate::vtune::Guard::drop`] via
+/// `vtune -command resume|pause -r <result-dir>`, run from inside the worker
+/// process. The exact `vtune` invocation below (analysis type, knobs, and
+/// report format) is our best documented understanding of the `VTune`
+/// command-line interface and has not been verified against a live
+/// installation in this repository's environment; adjust it here if a real
+/// `VTune` version's CLI differs. See [`crate::vtune`] for the control-protocol
+/// references.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "worker process configuration is explicit at the process boundary"
+)]
+fn launch_vtune_worker(
+    executable: &Path,
+    native_arguments: &[OsString],
+    vtune_arguments: &[OsString],
+    artifact_path: &Path,
+    result_dir: &Path,
+    criterion_home: &Path,
+    show_output: bool,
+    timeout: Option<Duration>,
+) -> Result<ExitStatus, Error> {
+    validate_vtune_arguments(vtune_arguments)?;
+    if let Some(parent) = result_dir.parent() {
+        fs::create_dir_all(parent).map_err(|source| Error::ArtifactIo {
+            path: parent.to_owned(),
+            source,
+        })?;
+    }
+    if let Some(parent) = artifact_path.parent() {
+        fs::create_dir_all(parent).map_err(|source| Error::ArtifactIo {
+            path: parent.to_owned(),
+            source,
+        })?;
+    }
+
+    let mut command = Command::new("vtune");
+    command
+        .arg("-collect-with")
+        .arg("runsa")
+        .args(vtune_arguments)
+        .arg("--start-paused")
+        .arg("-result-dir")
+        .arg(result_dir)
+        .env(WORKER_MODE_ENV, Mode::Vtune.as_str())
+        .env("CRITERION_HOME", criterion_home)
+        .env_remove("CARGO_CRITERION_PORT")
+        .env(vtune::RESULT_DIR_ENV, result_dir)
+        .arg("--")
+        .arg(executable)
+        .args(native_arguments);
+    if !show_output {
+        command.stdout(Stdio::null()).stderr(Stdio::null());
+    }
+
+    let token = create_worker_token()?;
+    command.env(WORKER_TOKEN_ENV, token.path());
+    let status = wait_for_worker(Mode::Vtune, &mut command, timeout);
+    let cleanup = match token.path().try_exists() {
+        Ok(true) => fs::remove_dir(token.path()).map_err(Error::ConsumeWorkerToken),
+        Ok(false) => Ok(()),
+        Err(error) => Err(Error::ConsumeWorkerToken(error)),
+    };
+    let status = combine_results(status, cleanup)?;
+    if !status.success() {
+        return Ok(status);
+    }
+
+    let mut report_command = Command::new("vtune");
+    report_command
+        .args(["-report", "hw-events", "-r"])
+        .arg(result_dir)
+        .args(["-format", "csv", "-report-output"])
+        .arg(artifact_path);
+    if !show_output {
+        report_command.stdout(Stdio::null()).stderr(Stdio::null());
+    }
+    wait_for_worker(Mode::Vtune, &mut report_command, timeout)
+}
+
+fn validate_vtune_arguments(arguments: &[OsString]) -> Result<(), Error> {
+    for argument in arguments {
+        let value = argument.to_string_lossy();
+        if [
+            "--",
+            "-r",
+            "-collect",
+            "-c",
+            "-collect-with",
+            "-result-dir",
+            "-start-paused",
+            "--start-paused",
+            "-report",
+            "-R",
+            "-report-output",
+            "-format",
+            "-command",
+            "-C",
+        ]
+        .iter()
+        .any(|reserved| value == *reserved || value.starts_with(&format!("{reserved}=")))
+        {
+            return Err(Error::UnsupportedVtuneArgument(argument.clone()));
+        }
+    }
+    Ok(())
+}
+
 fn launch_worker(
     mode: Mode,
     executable: &Path,
@@ -792,6 +980,7 @@ fn launch_worker_with(
                     .env("GUNGRAUN_SAVE_SUMMARY", "json");
             }
             Mode::Perf => unreachable!("perf workers use launch_perf_worker"),
+            Mode::Vtune => unreachable!("vtune workers use launch_vtune_worker"),
         }
     }
     if let Some((identity, path)) = allocation_target {
@@ -1090,6 +1279,20 @@ mod tests {
         );
     }
 
+    #[test]
+    fn needs_criterion_for_listing_requires_list_a_native_only_engine_and_absence_of_criterion() {
+        // Not listing: never inject Criterion, regardless of the other modes.
+        assert!(!needs_criterion_for_listing(false, &[Mode::Vtune], &[]));
+        // Listing, but only native (non-Perf/Allocations/Vtune) modes selected: nothing to inject for.
+        assert!(!needs_criterion_for_listing(true, &[Mode::Criterion], &[Mode::Criterion]));
+        // Listing with Criterion already present among the native modes: no duplicate injection.
+        assert!(!needs_criterion_for_listing(true, &[Mode::Vtune], &[Mode::Criterion]));
+        // Listing with each non-native engine selected and no Criterion present yet: inject it.
+        assert!(needs_criterion_for_listing(true, &[Mode::Allocations], &[]));
+        assert!(needs_criterion_for_listing(true, &[Mode::Perf], &[]));
+        assert!(needs_criterion_for_listing(true, &[Mode::Vtune], &[]));
+    }
+
     #[cfg(unix)]
     fn exit_status(code: i32) -> ExitStatus {
         use std::os::unix::process::ExitStatusExt as _;
@@ -1234,6 +1437,37 @@ mod tests {
     }
 
     #[test]
+    fn vtune_arguments_cannot_override_measurement_protocol() {
+        for argument in [
+            "--",
+            "-r",
+            "-r=result",
+            "-collect",
+            "-c",
+            "-c=pause",
+            "-collect-with",
+            "-result-dir",
+            "-result-dir=result",
+            "-start-paused",
+            "--start-paused",
+            "-report",
+            "-R",
+            "-R=hw-events",
+            "-report-output",
+            "-format",
+            "-command",
+            "-C",
+            "-C=pause",
+        ] {
+            assert!(matches!(
+                validate_vtune_arguments(&[argument.into()]),
+                Err(Error::UnsupportedVtuneArgument(_))
+            ));
+        }
+        validate_vtune_arguments(&["-knob".into(), "event-config=INST_RETIRED.ANY".into()]).unwrap();
+    }
+
+    #[test]
     fn timeout_kills_reaps_and_reports_timeout() {
         let mut process = FakeProcess::new([Ok(None), Ok(None), Ok(Some(exit_status(9)))]);
         let clock = FakeClock::new();
@@ -1357,7 +1591,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(routed, Mode::ALL);
-        assert_eq!(summary.completed, [Mode::Gungraun, Mode::Perf, Mode::Allocations]);
+        assert_eq!(summary.completed, [Mode::Gungraun, Mode::Perf, Mode::Vtune, Mode::Allocations]);
         assert_eq!(summary.failures.len(), 2);
         assert!(summary.failures[0].contains("status 7"));
         assert!(summary.failures[1].contains("manifest failed"));
