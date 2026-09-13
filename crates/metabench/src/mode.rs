@@ -12,11 +12,12 @@ pub(crate) enum Mode {
     Criterion,
     Gungraun,
     Perf,
+    Vtune,
     Allocations,
 }
 
 impl Mode {
-    pub(crate) const ALL: [Self; 4] = [Self::Criterion, Self::Gungraun, Self::Perf, Self::Allocations];
+    pub(crate) const ALL: [Self; 5] = [Self::Criterion, Self::Gungraun, Self::Perf, Self::Vtune, Self::Allocations];
 
     /// The engine set used when no engine is explicitly selected.
     ///
@@ -46,6 +47,7 @@ impl Mode {
             Self::Criterion => "criterion",
             Self::Gungraun => "gungraun",
             Self::Perf => "perf",
+            Self::Vtune => "vtune",
             Self::Allocations => "allocations",
         }
     }
@@ -66,6 +68,7 @@ impl FromStr for Mode {
             "criterion" => Ok(Self::Criterion),
             "gungraun" => Ok(Self::Gungraun),
             "perf" => Ok(Self::Perf),
+            "vtune" => Ok(Self::Vtune),
             "allocations" => Ok(Self::Allocations),
             _ => Err(Error::InvalidMode(value.to_owned())),
         }

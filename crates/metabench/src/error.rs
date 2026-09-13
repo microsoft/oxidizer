@@ -15,6 +15,7 @@ pub(crate) enum Error {
     },
     #[cfg(any(target_os = "linux", test))]
     UnsupportedPerfArgument(OsString),
+    UnsupportedVtuneArgument(OsString),
     MissingOptionValue(&'static str),
     UnknownOption(OsString),
     AmbiguousArguments(Vec<OsString>),
@@ -48,6 +49,8 @@ pub(crate) enum Error {
     ConsumeWorkerToken(io::Error),
     PerfControl(io::Error),
     PerfWorkloadNotMeasured,
+    VtuneControl(io::Error),
+    VtuneWorkloadNotMeasured,
     MultipleModeFailures(Vec<String>),
     ReportIo {
         path: PathBuf,
@@ -91,7 +94,7 @@ impl fmt::Display for Error {
             Self::InvalidMode(mode) => {
                 write!(
                     formatter,
-                    "unknown mode '{mode}'; expected criterion, gungraun, perf, or allocations"
+                    "unknown mode '{mode}'; expected criterion, gungraun, perf, vtune, or allocations"
                 )
             }
             Self::UnsupportedMode { mode, reason } => write!(formatter, "{mode} is unavailable: {reason}"),
@@ -101,10 +104,15 @@ impl fmt::Display for Error {
                 "perf argument {} conflicts with metabench's measurement protocol",
                 argument.to_string_lossy()
             ),
+            Self::UnsupportedVtuneArgument(argument) => write!(
+                formatter,
+                "vtune argument {} conflicts with metabench's measurement protocol",
+                argument.to_string_lossy()
+            ),
             Self::MissingOptionValue(option) => write!(formatter, "{option} requires a value"),
             Self::UnknownOption(option) => write!(
                 formatter,
-                "unknown metabench option {}; use --criterion-arg, --gungraun-arg, or --perf-arg for native options",
+                "unknown metabench option {}; use --criterion-arg, --gungraun-arg, --perf-arg, or --vtune-arg for native options",
                 option.to_string_lossy()
             ),
             Self::AmbiguousArguments(arguments) => {
@@ -137,6 +145,8 @@ impl fmt::Display for Error {
             Self::ConsumeWorkerToken(error) => write!(formatter, "failed to consume an internal worker token: {error}"),
             Self::PerfControl(error) => write!(formatter, "failed to control Linux perf counters: {error}"),
             Self::PerfWorkloadNotMeasured => formatter.write_str("the perf worker did not execute an instrumented workload"),
+            Self::VtuneControl(error) => write!(formatter, "failed to control the VTune collection: {error}"),
+            Self::VtuneWorkloadNotMeasured => formatter.write_str("the vtune worker did not execute an instrumented workload"),
             Self::MultipleModeFailures(failures) => {
                 formatter.write_str("multiple benchmark failures occurred")?;
                 for failure in failures {
@@ -179,6 +189,7 @@ impl error::Error for Error {
             | Self::CreateWorkerToken(source)
             | Self::ConsumeWorkerToken(source)
             | Self::PerfControl(source)
+            | Self::VtuneControl(source)
             | Self::Spawn { source, .. }
             | Self::WorkerTermination { source, .. }
             | Self::ReportIo { source, .. }
@@ -186,5 +197,26 @@ impl error::Error for Error {
             Self::ReportJson { source, .. } | Self::ArtifactJson { source, .. } => Some(source),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_returns_the_wrapped_io_error_for_control_protocol_variants() {
+        let error = Error::VtuneControl(io::Error::other("control pipe closed"));
+        assert!(error::Error::source(&error).is_some());
+
+        let error = Error::PerfControl(io::Error::other("control pipe closed"));
+        assert!(error::Error::source(&error).is_some());
+    }
+
+    #[test]
+    fn source_returns_none_for_variants_without_an_underlying_cause() {
+        assert!(error::Error::source(&Error::VtuneWorkloadNotMeasured).is_none());
+        assert!(error::Error::source(&Error::ConflictingModes).is_none());
     }
 }

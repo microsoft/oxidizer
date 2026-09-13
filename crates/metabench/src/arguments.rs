@@ -18,6 +18,7 @@ struct EngineArguments {
     criterion: Vec<OsString>,
     gungraun: Vec<OsString>,
     perf: Vec<OsString>,
+    vtune: Vec<OsString>,
 }
 
 impl EngineArguments {
@@ -26,6 +27,7 @@ impl EngineArguments {
             Mode::Criterion | Mode::Allocations => &self.criterion,
             Mode::Gungraun => &self.gungraun,
             Mode::Perf => &self.perf,
+            Mode::Vtune => &self.vtune,
         }
     }
 
@@ -34,6 +36,7 @@ impl EngineArguments {
             Mode::Criterion | Mode::Allocations => &mut self.criterion,
             Mode::Gungraun => &mut self.gungraun,
             Mode::Perf => &mut self.perf,
+            Mode::Vtune => &mut self.vtune,
         }
     }
 }
@@ -89,6 +92,7 @@ impl Arguments {
             && !modes.contains(&Mode::Criterion)
             && !modes.contains(&Mode::Allocations)
             && !modes.contains(&Mode::Perf)
+            && !modes.contains(&Mode::Vtune)
         {
             return Err(Error::ArgumentsForUnselectedEngine(Mode::Criterion.as_str()));
         }
@@ -98,7 +102,14 @@ impl Arguments {
         if !self.native_args.perf.is_empty() && !modes.contains(&Mode::Perf) {
             return Err(Error::ArgumentsForUnselectedEngine(Mode::Perf.as_str()));
         }
-        if modes.contains(&Mode::Criterion) || modes.contains(&Mode::Allocations) || modes.contains(&Mode::Perf) {
+        if !self.native_args.vtune.is_empty() && !modes.contains(&Mode::Vtune) {
+            return Err(Error::ArgumentsForUnselectedEngine(Mode::Vtune.as_str()));
+        }
+        if modes.contains(&Mode::Criterion)
+            || modes.contains(&Mode::Allocations)
+            || modes.contains(&Mode::Perf)
+            || modes.contains(&Mode::Vtune)
+        {
             if self.cargo_bench || !self.cargo_test {
                 push_argument_unique(&mut self.native_args.criterion, "--bench");
             }
@@ -154,6 +165,7 @@ impl Arguments {
                 Some("--criterion") => push_unique(&mut selected, Mode::Criterion),
                 Some("--gungraun") => push_unique(&mut selected, Mode::Gungraun),
                 Some("--perf") => push_unique(&mut selected, Mode::Perf),
+                Some("--vtune") => push_unique(&mut selected, Mode::Vtune),
                 Some("--allocations") => push_unique(&mut selected, Mode::Allocations),
                 Some("--all-engines") => all_engines = true,
                 Some("--help" | "-h") => help = true,
@@ -179,6 +191,9 @@ impl Arguments {
                 Some("--perf-arg") => engine_arguments
                     .perf
                     .push(arguments.next().ok_or(Error::MissingOptionValue("--perf-arg"))?),
+                Some("--vtune-arg") => engine_arguments
+                    .vtune
+                    .push(arguments.next().ok_or(Error::MissingOptionValue("--vtune-arg"))?),
                 Some("--export-md") => export_markdown = Some(next_path(&mut arguments, "--export-md")?),
                 Some("--export-json") => export_json = Some(next_path(&mut arguments, "--export-json")?),
                 Some("--output") => output_base = Some(next_path(&mut arguments, "--output")?),
@@ -197,6 +212,9 @@ impl Arguments {
                 }
                 Some(value) if value.starts_with("--perf-arg=") => {
                     engine_arguments.perf.push(value["--perf-arg=".len()..].into());
+                }
+                Some(value) if value.starts_with("--vtune-arg=") => {
+                    engine_arguments.vtune.push(value["--vtune-arg=".len()..].into());
                 }
                 Some(value) if value.starts_with("--export-md=") => {
                     export_markdown = Some(value["--export-md=".len()..].into());
@@ -453,6 +471,33 @@ mod tests {
     }
 
     #[test]
+    fn parses_vtune_selection_and_arguments() {
+        let mut arguments = Arguments::parse_from(["--vtune".into(), "--vtune-arg".into(), "-knob".into()], None).unwrap();
+        arguments.finalize_native_args(&[Mode::Vtune]).unwrap();
+
+        assert_eq!(arguments.modes, [Mode::Vtune]);
+        assert_eq!(arguments.args_for(Mode::Vtune), ["-knob"]);
+        assert_eq!(arguments.criterion_args(), ["--bench"]);
+    }
+
+    #[test]
+    fn parses_vtune_arg_equals_form() {
+        let arguments = Arguments::parse_from(["--vtune".into(), "--vtune-arg=-knob".into()], None).unwrap();
+
+        assert_eq!(arguments.args_for(Mode::Vtune), ["-knob"]);
+    }
+
+    #[test]
+    fn vtune_only_selection_permits_criterion_arguments() {
+        // Vtune internally probes with Criterion, so criterion arguments must
+        // remain accepted even when only `Mode::Vtune` is selected.
+        let mut arguments = Arguments::parse_from(["--vtune".into(), "--criterion-arg=--quick".into()], None).unwrap();
+
+        arguments.finalize_native_args(&[Mode::Vtune]).unwrap();
+        assert!(arguments.criterion_args().contains(&"--quick".into()));
+    }
+
+    #[test]
     fn rejects_removed_valgrind_selector() {
         assert!(matches!(
             Arguments::parse_from(["--valgrind".into()], None),
@@ -482,6 +527,7 @@ mod tests {
     fn environment_selects_one_engine() {
         assert_eq!(parse(&[], Some("criterion")).unwrap().modes, [Mode::Criterion]);
         assert_eq!(parse(&[], Some("perf")).unwrap().modes, [Mode::Perf]);
+        assert_eq!(parse(&[], Some("vtune")).unwrap().modes, [Mode::Vtune]);
         assert_eq!(parse(&[], Some("allocations")).unwrap().modes, [Mode::Allocations]);
         assert!(matches!(parse(&[], Some("unknown")), Err(Error::InvalidMode(_))));
     }
@@ -598,7 +644,7 @@ mod tests {
         }
         assert_eq!(
             error(&["--native-option"]),
-            "unknown metabench option --native-option; use --criterion-arg, --gungraun-arg, or --perf-arg for native options"
+            "unknown metabench option --native-option; use --criterion-arg, --gungraun-arg, --perf-arg, or --vtune-arg for native options"
         );
     }
 
