@@ -7,7 +7,7 @@
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/metabench/favicon.ico")]
 
 //! Unified benchmark reports from [Criterion](https://crates.io/crates/criterion), [Gungraun](https://crates.io/crates/gungraun),
-//! Linux `perf`, and
+//! Linux `perf`, Intel `VTune`, and
 //! allocation tracking.
 //!
 //! With `metabench`, you:
@@ -78,8 +78,8 @@
 //!
 //! # Measurement engines
 //!
-//! As mentioned, metabench supports four distinct benchmark tools: Criterion, Gungraun, allocation
-//! tracking, and Linux `perf`:
+//! As mentioned, metabench supports five distinct benchmark tools: Criterion, Gungraun, allocation
+//! tracking, Linux `perf`, and Intel `VTune`:
 //!
 //! - **Criterion** reports wall-clock execution time and throughput. Use
 //!   ordinary Criterion registration, sampling, plotting, and profiling APIs.
@@ -96,10 +96,16 @@
 //!   annotated workload. Use repeated `--perf-arg` options for additional
 //!   `perf stat` arguments.
 //!
+//! - **Intel `VTune`** reports hardware event counts for one invocation of every
+//!   discovered Criterion case, using the same annotated-workload
+//!   measurement as Linux `perf`. Use repeated `--vtune-arg` options for
+//!   additional `vtune -collect-with runsa` arguments. Requires a `vtune`
+//!   installation reachable on `PATH`.
+//!
 //! Criterion and allocation tracking are always enabled by default; Gungraun is
 //! also enabled by default on Linux, where it is available. You can control the
 //! specific engines to run from the command-line by passing the
-//! `--criterion`, `--gungraun`, `--allocations`, `--perf`, or `--all-engines` options:
+//! `--criterion`, `--gungraun`, `--allocations`, `--perf`, `--vtune`, or `--all-engines` options:
 //!
 //! ```bash
 //! cargo bench --bench parser -- --criterion
@@ -108,9 +114,14 @@
 //! Some limitations around engines:
 //!
 //! - Benchmark functions declared with `const fn` can be measured by Criterion and Gungraun, but not
-//!   by allocation tracking or `perf`.
+//!   by allocation tracking, `perf`, or `VTune`.
 //!
-//! - Both Gungraun and Linux `perf` are only available on Linux platforms.
+//! - Gungraun and Linux `perf` are only available on Linux platforms. `VTune` is
+//!   available on Linux and Windows, provided a `vtune` installation is
+//!   reachable on `PATH`. `VTune`'s integration test exercises the control
+//!   protocol and CSV-report parsing on every platform against a fake
+//!   `vtune` fixture (see `tests/spawned_benchmark.rs`), rather than a real
+//!   `VTune` install.
 //!
 //! # Configure Criterion
 //!
@@ -202,11 +213,12 @@
 //!
 //! # Command-line options
 //!
-//! - `--criterion`, `--gungraun`, `--allocations`, `--perf`, and
+//! - `--criterion`, `--gungraun`, `--allocations`, `--perf`, `--vtune`, and
 //!   `--all-engines`: select measurement engines.
 //!
-//! - `--criterion-arg ARG`, `--gungraun-arg ARG`, `--perf-arg ARG`: forward
-//!   one argument to an engine; repeat the option for multiple arguments.
+//! - `--criterion-arg ARG`, `--gungraun-arg ARG`, `--perf-arg ARG`,
+//!   `--vtune-arg ARG`: forward one argument to an engine; repeat the option
+//!   for multiple arguments.
 //!
 //! - `--output PATH`: write `PATH.json` and `PATH.md`.
 //!
@@ -233,7 +245,7 @@
 //!
 //! Arguments after `--` are forwarded directly when exactly one engine is
 //! selected. The `BENCH_ENGINE` environment variable may select `criterion`,
-//! `gungraun`, `perf`, or `allocations` when no engine selector is present.
+//! `gungraun`, `perf`, `vtune`, or `allocations` when no engine selector is present.
 //! `CRITERION_HOME` and `GUNGRAUN_HOME` select the corresponding engine data
 //! directories.
 //!
@@ -257,6 +269,7 @@ mod mode;
 mod perf;
 mod report;
 mod runner;
+mod vtune;
 
 #[doc(inline)]
 pub use identity::BenchmarkIdentity;
