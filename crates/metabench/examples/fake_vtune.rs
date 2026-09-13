@@ -60,12 +60,37 @@ fn run_control_command(arguments: &[String]) -> ExitCode {
 }
 
 fn run_report(arguments: &[String]) -> ExitCode {
+    // Validate the full invocation shape (`-report hw-events -r <dir> -format
+    // csv -report-output <path>`), not just `-report-output`, so a
+    // regression in how `launch_vtune_worker` builds this command is caught
+    // by the tests that exercise this fixture rather than silently ignored.
+    if arguments.first().map(String::as_str) != Some("-report") || arguments.get(1).map(String::as_str) != Some("hw-events") {
+        return ExitCode::FAILURE;
+    }
     let mut values = arguments.iter();
+    let Some(_result_dir) = values.find(|value| *value == "-r").and_then(|_| values.next()) else {
+        return ExitCode::FAILURE;
+    };
+    if values
+        .find(|value| *value == "-format")
+        .and_then(|_| values.next())
+        .map(String::as_str)
+        != Some("csv")
+    {
+        return ExitCode::FAILURE;
+    }
     let Some(output) = values.find(|value| *value == "-report-output").and_then(|_| values.next()) else {
         return ExitCode::FAILURE;
     };
     eprintln!("vtune-report-invoked");
-    let report = "Hardware Event Type,Hardware Event Count:Self\nINST_RETIRED.ANY,1234\nCPU_CLK_UNHALTED.THREAD,567\n";
+    // Mirrors the full column set a real `vtune -report hw-events -format
+    // csv` report includes, not just the two columns this crate reads, so
+    // tests exercise the header-driven column lookup in `artifact::parse_vtune`.
+    let report = concat!(
+        "Hardware Event Sample Count:Self,Hardware Event Type,Events Per Sample,Hardware Event Count:Self,Precise:Self\n",
+        "1,INST_RETIRED.ANY,1234.0,1234,Yes\n",
+        "1,CPU_CLK_UNHALTED.THREAD,567.0,567,Yes\n",
+    );
     if std::fs::write(output, report).is_err() {
         return ExitCode::FAILURE;
     }

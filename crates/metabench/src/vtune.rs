@@ -49,10 +49,23 @@ impl Drop for Guard {
 #[inline]
 #[doc(hidden)]
 pub fn begin() -> Option<Guard> {
-    if !*ACTIVE || MEASURED.swap(true, Ordering::Relaxed) {
+    if !*ACTIVE {
         return None;
     }
-    let result_dir = env::var_os(RESULT_DIR_ENV)?;
+    // Fetch and validate the result directory before claiming the single
+    // `MEASURED` slot: if `ACTIVE` was cached `true` while the env var was
+    // set but it is now gone (only possible within the same process), this
+    // records a control error instead of silently marking the workload
+    // "measured" with no collection actually resumed.
+    let Some(result_dir) = env::var_os(RESULT_DIR_ENV) else {
+        record_error(Error::VtuneControl(std::io::Error::other(
+            "METABENCH_INTERNAL_VTUNE_RESULT_DIR was unset after vtune::begin's environment was primed",
+        )));
+        return None;
+    };
+    if MEASURED.swap(true, Ordering::Relaxed) {
+        return None;
+    }
     let result_dir = std::path::PathBuf::from(result_dir);
     match run_command(&result_dir, "resume") {
         Ok(()) => Some(Guard {

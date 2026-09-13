@@ -408,40 +408,76 @@ fn split_csv_fields(line: &str) -> Vec<String> {
     fields
 }
 
+/// The `hw-events` report column holding each event's name, and the column
+/// holding the count this crate measures. Real `VTune` reports may include
+/// further columns (sample count, events-per-sample, precision, and so on);
+/// those are read from the header and ignored rather than assumed absent.
+const VTUNE_EVENT_TYPE_COLUMN: &str = "Hardware Event Type";
+const VTUNE_EVENT_COUNT_COLUMN: &str = "Hardware Event Count:Self";
+
 /// Parses a `VTune` `-report hw-events -format csv` report into a
 /// [`NativeResult`].
 ///
-/// The report is a header row followed by one `<event name>,<count>` row per
+/// The report is a header row naming its columns, followed by one row per
 /// hardware event (see [`crate::vtune`] and `runner::launch_vtune_worker` for
 /// how it is produced). This is our best documented understanding of that
 /// report's shape and has not been verified against a live `VTune` install in
 /// this repository's environment; adjust it here if a real report's columns
-/// differ. Fields are split with [`split_csv_fields`] so a count that groups
+/// differ. Only [`VTUNE_EVENT_TYPE_COLUMN`] and [`VTUNE_EVENT_COUNT_COLUMN`]
+/// are read; any other columns a real report includes (sample count,
+/// events-per-sample, precision, and so on) are ignored rather than assumed
+/// absent. Fields are split with [`split_csv_fields`] so a count that groups
 /// digits with `,` thousands separators (this too remains unconfirmed
 /// against a live install) parses correctly as long as it is quoted per CSV
-/// convention, e.g. `INST_RETIRED.ANY,"1,234,567"`; an unquoted third field
-/// is treated as a genuine format error rather than silently merged in.
+/// convention, e.g. `INST_RETIRED.ANY,"1,234,567"`.
 pub(crate) fn parse_vtune(path: &Path, artifact_root: &Path, identity: String, native_identity: String) -> Result<NativeResult, Error> {
-    validate_json_size(path, MAX_ARTIFACT_JSON_BYTES)?;
+    validate_artifact_size(path, MAX_ARTIFACT_JSON_BYTES, "CSV")?;
     let contents = fs::read_to_string(path).map_err(|source| Error::ArtifactIo {
         path: path.to_owned(),
         source,
     })?;
+    let mut lines = contents.lines().enumerate();
+    let (name_column, count_column, expected_field_count) = match lines.next() {
+        Some((_, header)) => {
+            let header_fields = split_csv_fields(header.trim());
+            let name_column = header_fields.iter().position(|field| field.trim() == VTUNE_EVENT_TYPE_COLUMN);
+            let count_column = header_fields.iter().position(|field| field.trim() == VTUNE_EVENT_COUNT_COLUMN);
+            match (name_column, count_column) {
+                (Some(name_column), Some(count_column)) => (name_column, count_column, header_fields.len()),
+                _ => {
+                    return Err(Error::ArtifactFormat {
+                        path: path.to_owned(),
+                        message: format!("header is missing the {VTUNE_EVENT_TYPE_COLUMN:?} or {VTUNE_EVENT_COUNT_COLUMN:?} column"),
+                    });
+                }
+            }
+        }
+        None => {
+            return Err(Error::ArtifactFormat {
+                path: path.to_owned(),
+                message: "contains no vtune event records".to_owned(),
+            });
+        }
+    };
     let mut metrics = BTreeMap::new();
-    for (index, line) in contents.lines().enumerate().skip(1) {
+    for (index, line) in lines {
         let line = line.trim();
         if line.is_empty() {
             continue;
         }
         let fields = split_csv_fields(line);
-        let [name, value_text] = fields.as_slice() else {
+        if fields.len() != expected_field_count {
             return Err(Error::ArtifactFormat {
                 path: path.to_owned(),
-                message: format!("line {} does not have an event name and a count", index + 1),
+                message: format!(
+                    "line {} has {} field(s); expected {expected_field_count} matching the header",
+                    index + 1,
+                    fields.len()
+                ),
             });
-        };
-        let name = name.trim().to_owned();
-        let value_text = value_text.trim();
+        }
+        let name = fields[name_column].trim().to_owned();
+        let value_text = fields[count_column].trim();
         // A quoted count such as `"1,234,567"` protects its thousands
         // separators from being split as CSV field boundaries; strip them
         // here before parsing so the grouped count still parses as a number.
@@ -806,6 +842,13 @@ fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, Error> {
 }
 
 fn validate_json_size(path: &Path, limit: u64) -> Result<(), Error> {
+    validate_artifact_size(path, limit, "JSON")
+}
+
+/// Rejects an artifact larger than `limit`, naming its `format` (e.g.
+/// `"JSON"` or `"CSV"`) in the error so the diagnostic matches the actual
+/// file being validated rather than always describing it as JSON.
+fn validate_artifact_size(path: &Path, limit: u64, format: &str) -> Result<(), Error> {
     let length = fs::metadata(path)
         .map_err(|source| Error::ArtifactIo {
             path: path.to_owned(),
@@ -815,7 +858,7 @@ fn validate_json_size(path: &Path, limit: u64) -> Result<(), Error> {
     if length > limit {
         Err(Error::ArtifactFormat {
             path: path.to_owned(),
-            message: format!("JSON file is {length} bytes; limit is {limit} bytes"),
+            message: format!("{format} file is {length} bytes; limit is {limit} bytes"),
         })
     } else {
         Ok(())
@@ -1102,6 +1145,55 @@ mod tests {
             result.metrics["CPU_CLK_UNHALTED.THREAD"].value,
             crate::report::MetricValue::Float(567.5)
         );
+    }
+
+    #[test]
+    fn parses_vtune_csv_report_with_additional_columns_by_header_name() {
+        // Real `vtune -report hw-events -format csv` output includes further
+        // columns (sample count, events-per-sample, precision) beyond the
+        // two this crate measures; those must be located by header name and
+        // ignored, not assumed absent.
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("vtune.csv");
+        fs::write(
+            &path,
+            concat!(
+                "Hardware Event Sample Count:Self,Hardware Event Type,Events Per Sample,Hardware Event Count:Self,Precise:Self\n",
+                "10,INST_RETIRED.ANY,123.4,1234,Yes\n",
+            ),
+        )
+        .unwrap();
+
+        let result = parse_vtune(&path, directory.path(), "group/bench".to_owned(), "group/bench".to_owned()).unwrap();
+        assert_eq!(result.metrics["INST_RETIRED.ANY"].value, crate::report::MetricValue::Float(1234.0));
+    }
+
+    #[test]
+    fn vtune_rejects_a_header_missing_the_required_columns() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("vtune.csv");
+        fs::write(&path, "Hardware Event Type,Some Other Column\nINST_RETIRED.ANY,1234\n").unwrap();
+
+        assert!(matches!(
+            parse_vtune(&path, directory.path(), "group/bench".to_owned(), "group/bench".to_owned()),
+            Err(Error::ArtifactFormat { .. })
+        ));
+    }
+
+    #[test]
+    fn vtune_rejects_a_row_whose_field_count_does_not_match_the_header() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("vtune.csv");
+        fs::write(
+            &path,
+            "Hardware Event Type,Hardware Event Count:Self,Events Per Sample\nINST_RETIRED.ANY,1234\n",
+        )
+        .unwrap();
+
+        assert!(matches!(
+            parse_vtune(&path, directory.path(), "group/bench".to_owned(), "group/bench".to_owned()),
+            Err(Error::ArtifactFormat { .. })
+        ));
     }
 
     #[test]

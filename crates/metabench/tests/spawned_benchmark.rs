@@ -245,6 +245,19 @@ fn fake_vtune_directory() -> &'static Path {
 
 /// Prepends [`fake_vtune_directory`] to the current `PATH` so a spawned
 /// `metabench` worker resolves `vtune` to the fixture.
+/// The workspace's packaging allowlist deliberately keeps `/examples/**` out
+/// of the published `.crate` (examples are dev-only, per the top-level
+/// `Cargo.toml` policy), while `/tests/**` (this file) is packaged. A
+/// `cargo test` run from a published tarball therefore cannot build the
+/// `fake_vtune` fixture this file's vtune tests depend on. Skip them in that
+/// case instead of failing on a missing fixture that was never meant to ship.
+fn fake_vtune_fixture_available() -> bool {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("fake_vtune.rs")
+        .is_file()
+}
+
 fn path_with_fake_vtune() -> std::ffi::OsString {
     std::env::join_paths(
         std::iter::once(fake_vtune_directory().to_owned()).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())),
@@ -254,6 +267,10 @@ fn path_with_fake_vtune() -> std::ffi::OsString {
 
 #[test]
 fn vtune_measures_exact_workload_and_writes_metrics() {
+    if !fake_vtune_fixture_available() {
+        eprintln!("skipping: fake_vtune fixture source is not packaged (see fake_vtune_fixture_available)");
+        return;
+    }
     let path = path_with_fake_vtune();
     let _guard = CARGO_SUBPROCESS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let directory = tempfile::tempdir().unwrap();
@@ -324,6 +341,10 @@ fn vtune_measures_exact_workload_and_writes_metrics() {
 
 #[test]
 fn vtune_suppresses_report_output_without_show_engine_output() {
+    if !fake_vtune_fixture_available() {
+        eprintln!("skipping: fake_vtune fixture source is not packaged (see fake_vtune_fixture_available)");
+        return;
+    }
     let path = path_with_fake_vtune();
     let _guard = CARGO_SUBPROCESS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let directory = tempfile::tempdir().unwrap();
@@ -370,6 +391,10 @@ fn vtune_suppresses_report_output_without_show_engine_output() {
 
 #[test]
 fn vtune_command_failure_surfaces_vtune_control_error() {
+    if !fake_vtune_fixture_available() {
+        eprintln!("skipping: fake_vtune fixture source is not packaged (see fake_vtune_fixture_available)");
+        return;
+    }
     let path = path_with_fake_vtune();
     let _guard = CARGO_SUBPROCESS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     // Fails the `-command resume` call `vtune::begin` makes from inside the
@@ -395,6 +420,43 @@ fn vtune_command_failure_surfaces_vtune_control_error() {
         .output()
         .unwrap();
     assert!(!output.status.success(), "expected the failed vtune resume to fail the run");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("failed to control the VTune collection"), "stderr: {stderr}");
+}
+
+#[test]
+fn vtune_pause_failure_surfaces_vtune_control_error() {
+    if !fake_vtune_fixture_available() {
+        eprintln!("skipping: fake_vtune fixture source is not packaged (see fake_vtune_fixture_available)");
+        return;
+    }
+    let path = path_with_fake_vtune();
+    let _guard = CARGO_SUBPROCESS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    // Distinct from the resume-failure test above: `resume` succeeds so
+    // `vtune::begin` returns a `Guard`, and only the `-command pause` call
+    // `Guard::drop` makes at the end of the measured workload fails. This
+    // exercises `Guard::drop`'s own error-recording path rather than
+    // `begin`'s.
+    let output = cargo()
+        .env("PATH", path)
+        .env("FAKE_VTUNE_FAIL_COMMAND", "pause")
+        .args([
+            "run",
+            "--quiet",
+            "-p",
+            "metabench",
+            "--profile",
+            "bench",
+            "--example",
+            "basic",
+            "--",
+            "--vtune",
+            "--show-engine-output",
+            "--no-baseline",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "expected the failed vtune pause to fail the run");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("failed to control the VTune collection"), "stderr: {stderr}");
 }
