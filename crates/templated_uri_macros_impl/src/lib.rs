@@ -52,12 +52,8 @@ pub(crate) use bail;
 /// annotated item. The returned tokens contain the original item alongside the
 /// generated URI template implementations.
 ///
-/// # Errors
-///
-/// This function does not return a `Result`. Input that does not parse, a
-/// generic type, a union, or a template the parser rejects is returned as a
-/// `compile_error!` in the tokens, so the failure surfaces when the generated
-/// code is compiled.
+/// Input that does not parse, a generic type, a union, or a rejected template
+/// is represented by `compile_error!` in the returned tokens.
 #[must_use]
 #[cfg_attr(test, mutants::skip)] // not relevant for auto-generated proc macros
 pub fn templated_paq_impl(attr: &TokenStream, item: TokenStream) -> TokenStream {
@@ -194,12 +190,9 @@ fn filter_attributes(f: &Field) -> Vec<&Attribute> {
 
 /// Expands the `Escape` derive over a newtype struct.
 ///
-/// # Errors
-///
-/// This function does not return a `Result`. Input that does not parse, a
-/// generic type, an enum, a union, or a tuple struct without exactly one field
-/// is returned as a `compile_error!` in the tokens, so the failure surfaces
-/// when the generated code is compiled.
+/// `input` contains the derive target. Invalid syntax, unsupported item shapes,
+/// or tuple structs without exactly one field are represented by
+/// `compile_error!` in the returned tokens.
 #[must_use]
 #[cfg_attr(test, mutants::skip)] // just emits compile error otherwise
 pub fn uri_param_derive_impl(input: TokenStream) -> TokenStream {
@@ -213,12 +206,9 @@ pub fn uri_param_derive_impl(input: TokenStream) -> TokenStream {
 
 /// Expands the `Raw` derive over a newtype struct.
 ///
-/// # Errors
-///
-/// This function does not return a `Result`. Input that does not parse, a
-/// generic type, an enum, a union, or a tuple struct without exactly one field
-/// is returned as a `compile_error!` in the tokens, so the failure surfaces
-/// when the generated code is compiled.
+/// `input` contains the derive target. Invalid syntax, unsupported item shapes,
+/// or tuple structs without exactly one field are represented by
+/// `compile_error!` in the returned tokens.
 #[must_use]
 pub fn raw_derive_impl(input: TokenStream) -> TokenStream {
     let input: DeriveInput = match parse2(input) {

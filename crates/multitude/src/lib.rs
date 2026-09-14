@@ -460,6 +460,15 @@
 //! Any resulting vtable-metadata pointee carries an additional handle word,
 //! including a custom DST with a trait-object tail.
 //!
+//! # Error and safety contracts
+//!
+//! Fallible allocation and deserialization methods return [`AllocError`] or
+//! their documented format-specific error type. Methods that construct
+//! dynamically sized values from raw layouts are `unsafe` and document the
+//! layout, metadata, and initialization requirements in their own `# Safety`
+//! sections. The [`Alloc`], [`ArenaBuilder`], [`Box`], [`Rc`], [`Arc`], and
+//! conversion traits re-export their defining documentation at this crate root.
+//!
 //! # Crate Features
 //!
 //! | Feature | Description |

@@ -135,6 +135,9 @@ const LEGACY_RUNTIME_EVENT_FIXED_LEN: usize = 26;
 const STATS_PAYLOAD_LEN: usize = 13 * 8;
 
 /// An error reported while encoding or decoding a telemetry snapshot.
+///
+/// Use [`Error::kind`] to branch on the stable category without parsing the
+/// human-readable message.
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct Error {
     kind: ErrorKind,
@@ -273,6 +276,17 @@ impl std::error::Error for Error {
 /// Returns an [`Error`] with kind [`ErrorKind::LengthOverflow`] when a section
 /// or the container as a whole would exceed the length the wire format can
 /// represent.
+///
+/// # Examples
+///
+/// ```
+/// use seismograph_rallocator::encoded_len;
+/// use seismograph_rallocator::snapshot::{Snapshot, Version};
+///
+/// let snapshot = Snapshot::new(Version::new(1, 0, 0));
+/// assert!(encoded_len(&snapshot)? > 0);
+/// # Ok::<(), seismograph_rallocator::Error>(())
+/// ```
 pub fn encoded_len(snapshot: &Snapshot) -> Result<usize, Error> {
     count(snapshot.size_classes.len())?;
     count(snapshot.regions.len())?;
@@ -315,6 +329,18 @@ pub fn encoded_len(snapshot: &Snapshot) -> Result<usize, Error> {
 /// - [`ErrorKind::OutputLengthMismatch`] when `output` is longer than
 ///   [`encoded_len`].
 /// - [`ErrorKind::Wire`] when writing the container header or a section fails.
+///
+/// # Examples
+///
+/// ```
+/// use seismograph_rallocator::{encode, encoded_len};
+/// use seismograph_rallocator::snapshot::{Snapshot, Version};
+///
+/// let snapshot = Snapshot::new(Version::new(1, 0, 0));
+/// let mut bytes = vec![0; encoded_len(&snapshot)?];
+/// assert_eq!(encode(&snapshot, &mut bytes)?, bytes.len());
+/// # Ok::<(), seismograph_rallocator::Error>(())
+/// ```
 pub fn encode(snapshot: &Snapshot, output: &mut [u8]) -> Result<usize, Error> {
     let expected = encoded_len(snapshot)?;
     if output.len() < expected {
@@ -405,6 +431,19 @@ pub fn encode(snapshot: &Snapshot, output: &mut [u8]) -> Result<usize, Error> {
 /// Unknown sections and unsupported optional section versions are skipped
 /// rather than rejected, and are reported through
 /// [`snapshot::Snapshot::skipped_sections`].
+///
+/// # Examples
+///
+/// ```
+/// use seismograph_rallocator::{decode, encode, encoded_len};
+/// use seismograph_rallocator::snapshot::{Snapshot, Version};
+///
+/// let snapshot = Snapshot::new(Version::new(1, 0, 0));
+/// let mut bytes = vec![0; encoded_len(&snapshot)?];
+/// encode(&snapshot, &mut bytes)?;
+/// assert_eq!(decode(&bytes)?, snapshot);
+/// # Ok::<(), seismograph_rallocator::Error>(())
+/// ```
 pub fn decode(bytes: &[u8]) -> Result<Snapshot, Error> {
     let mut reader = Reader::new(bytes);
     let header = reader.read_header()?;

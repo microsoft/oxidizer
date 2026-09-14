@@ -51,6 +51,18 @@ use attrs::{ContainerAttrs, DefaultValue, FieldAttrs, RenameRule, parse_containe
 /// derive item, or that carries unsupported `#[multitude(...)]` configuration,
 /// is reported as a `compile_error!` in the returned tokens, so the failure
 /// surfaces when the generated code is compiled rather than at runtime.
+///
+/// # Examples
+///
+/// ```
+/// use multitude_macros_impl::derive_deserialize_in;
+/// use quote::quote;
+/// use syn::parse_quote;
+///
+/// let root_path: syn::Path = parse_quote!(::multitude::de);
+/// let expanded = derive_deserialize_in(quote!(struct Item { value: u32 }), &root_path);
+/// assert!(!expanded.is_empty());
+/// ```
 #[must_use]
 pub fn derive_deserialize_in(input: TokenStream2, root_path: &Path) -> TokenStream2 {
     syn::parse2::<DeriveInput>(input)
