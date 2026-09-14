@@ -1,0 +1,14 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[campaign]
+package = "http_headers_simd"
+default_engine = "libfuzzer"
+default_time = "60s"
+default_max_input_length = 1024
+corpus_root = "crates/http_headers_simd/tests/__fuzz__"
+
+[[target]]
+name = "public_scanners_match_scalar_oracles"
+test = "fuzz"
+description = "Compare the public scanner entry points with their scalar oracles over arbitrary bytes."
