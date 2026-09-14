@@ -23,5 +23,7 @@ allowed_external_types = ["seismograph::*"]
 [dependencies]
 seismograph.workspace = true
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

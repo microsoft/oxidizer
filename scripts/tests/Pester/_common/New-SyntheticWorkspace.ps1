@@ -331,7 +331,7 @@ function Initialize-GitRepo {
         & git config user.email 'test@example.com' 2>&1 | Out-Null
         & git config user.name  'Test User' 2>&1 | Out-Null
         & git config commit.gpgsign false 2>&1 | Out-Null
-        & git add -A 2>&1 | Out-Null
+        & git -c core.autocrlf=false add -A 2>&1 | Out-Null
         & git -c core.autocrlf=false commit --quiet -m 'baseline' --allow-empty 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) {
             throw "git init/commit failed in $Path"
@@ -456,7 +456,7 @@ function New-SyntheticWorkspace {
         param([string]$Message)
         Push-Location $this.Path
         try {
-            & git add -A 2>&1 | Out-Null
+            & git -c core.autocrlf=false add -A 2>&1 | Out-Null
             & git -c core.autocrlf=false commit --quiet -m $Message --allow-empty 2>&1 | Out-Null
             if ($LASTEXITCODE -ne 0) {
                 throw "AddCommit failed: $Message"

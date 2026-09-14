@@ -6,7 +6,7 @@
 [![crate.io](https://img.shields.io/crates/v/data_privacy.svg)](https://crates.io/crates/data_privacy)
 [![docs.rs](https://docs.rs/data_privacy/badge.svg)](https://docs.rs/data_privacy)
 [![MSRV](https://img.shields.io/crates/msrv/data_privacy)](https://crates.io/crates/data_privacy)
-[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml/badge.svg)](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/microsoft/oxidizer/blob/main/LICENSE)
 <a href="https://github.com/microsoft/oxidizer"><img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
@@ -192,7 +192,7 @@ assert_eq!(output_buffer, "********");
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/data_privacy">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbfPAU5OoNavUbRy0yQBG8se0b5QdS3UiPpR4bCQr6vjqou8phZIOCbGRhdGFfcHJpdmFjeWYwLjEzLjCCcWRhdGFfcHJpdmFjeV9jb3JlZTAuMS4ygnNkYXRhX3ByaXZhY3lfbWFjcm9zZjAuMTMuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbfPAU5OoNavUbRy0yQBG8se0b5QdS3UiPpR4bCQr6vjqou8phZIOCbGRhdGFfcHJpdmFjeWYwLjEzLjCCcWRhdGFfcHJpdmFjeV9jb3JlZTAuMS4ygnNkYXRhX3ByaXZhY3lfbWFjcm9zZjAuMTMuMA
  [__link0]: https://docs.rs/data_privacy_core/0.1.2/data_privacy_core/?search=Classified
  [__link1]: https://docs.rs/data_privacy_core/0.1.2/data_privacy_core/?search=Redactor
  [__link10]: https://docs.rs/data_privacy_macros/0.13.0/data_privacy_macros/?search=classified

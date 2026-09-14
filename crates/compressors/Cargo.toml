@@ -100,5 +100,7 @@ harness = false
 name = "compressors_codec"
 required-features = ["brotli", "deflate", "futures-stream", "gzip", "zlib", "zstd"]
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints
