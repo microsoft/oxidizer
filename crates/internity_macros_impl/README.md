@@ -16,6 +16,13 @@
 Implementation of the `internity` interner-aware serialization and
 deserialization derives.
 
+The `internity` facade is the supported interface; this crate exposes the
+token transformations it calls.
+
+```rust
+use internity_macros_impl::{derive_deserialize_in, derive_serialize_in};
+```
+
 
 <hr/>
 <sub>

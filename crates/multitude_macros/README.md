@@ -19,6 +19,14 @@ Derive macros for arena-aware deserialization in
 The `DeserializeIn` derive accepts arena-specific configuration through
 `#[multitude(...)]` and Serde configuration through `#[serde(...)]`.
 
+Macro invocation belongs in a crate that depends on the `multitude` facade,
+because expansion resolves that facade crate. See `multitude` for an
+example.
+
+```rust
+use multitude_macros::DeserializeIn;
+```
+
 
 <hr/>
 <sub>

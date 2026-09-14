@@ -13,6 +13,16 @@
 
 </div>
 
+Procedural macros that implement the event and enrichment derives of the
+[`observed`][__link0] facade.
+
+Macro invocation belongs in a crate that depends on the `observed` facade,
+because expansion resolves that facade crate. See `observed` for an example.
+
+```rust
+use observed_macros::Enrichment;
+```
+
 Procedural macros for the `observed` crate.
 
 This crate provides:
@@ -28,3 +38,4 @@ This crate provides:
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/observed_macros">source code</a>.
 </sub>
 
+ [__link0]: https://docs.rs/observed

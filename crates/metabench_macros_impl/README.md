@@ -13,6 +13,16 @@
 
 </div>
 
+Token transformations behind the benchmark macros of the
+[`metabench`][__link0] facade.
+
+The public `metabench` facade is the supported macro interface and provides
+invocation examples.
+
+```rust
+use metabench_macros_impl::benchmark;
+```
+
 Implementation of the procedural macros for the `metabench` crate.
 
 **Do not depend on this crate directly.** Use the re-exports from
@@ -24,3 +34,4 @@ Implementation of the procedural macros for the `metabench` crate.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/metabench_macros_impl">source code</a>.
 </sub>
 
+ [__link0]: https://docs.rs/metabench

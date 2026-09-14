@@ -15,6 +15,13 @@
 
 Macros for the [`thread_aware`][__link0] crate.
 
+This crate holds the token transformation behind the `ThreadAware` derive;
+the `thread_aware` facade is the supported interface.
+
+```rust
+use thread_aware_macros_impl::derive_thread_aware;
+```
+
 
 <hr/>
 <sub>

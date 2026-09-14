@@ -15,6 +15,26 @@
 
 Fast and flexible arena-based bump allocator.
 
+```rust
+use multitude::Arena;
+
+let arena = Arena::new();
+
+// Cheap atomic reference-counted allocation of any user type.
+struct Point { x: f64, y: f64 }
+let p = arena.alloc_arc(Point { x: 3.0, y: 4.0 });
+let p2 = p.clone();
+assert_eq!(p.x, p2.x);
+
+// Single-pointer immutable strings.
+let name = arena.alloc_str_arc("Alice");
+assert_eq!(&*name, "Alice");
+
+// format! macro returning a String.
+let greeting = multitude::strings::format!(in &arena, "Hello, {}!", "world");
+assert_eq!(&*greeting, "Hello, world!");
+```
+
 `multitude` allocates phase-oriented values from chunks and reclaims their
 storage in bulk. Escape-capable handles can retain and reclaim individual
 chunks independently.
@@ -71,28 +91,6 @@ See [`PERF.md`][__link14]
 for measured wall-clock timings of customer-facing scenarios, including
 head-to-head comparisons against the system allocator, `bumpalo`, and
 standard `serde_json` deserialization.
-
-## Example
-
-```rust
-use multitude::Arena;
-
-let arena = Arena::new();
-
-// Cheap atomic reference-counted allocation of any user type.
-struct Point { x: f64, y: f64 }
-let p = arena.alloc_arc(Point { x: 3.0, y: 4.0 });
-let p2 = p.clone();
-assert_eq!(p.x, p2.x);
-
-// Single-pointer immutable strings.
-let name = arena.alloc_str_arc("Alice");
-assert_eq!(&*name, "Alice");
-
-// format! macro returning a String.
-let greeting = multitude::strings::format!(in &arena, "Hello, {}!", "world");
-assert_eq!(&*greeting, "Hello, world!");
-```
 
 ## Flexibility
 
@@ -476,7 +474,7 @@ including a custom DST with a trait-object tail.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/multitude">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbsPDWt438bisbkMh3Rx2B2aMbx5_CJ_u4DrMbgrz6oBHPzfdhZIaCaGJ5dGVtdWNrZjEuMjUuMoJlYnl0ZXNmMS4xMi4xgmhieXRlc2J1ZmYwLjEwLjCCaW11bHRpdHVkZWYwLjEwLjCCZXNlcmRlZzEuMC4yMjmCaHplcm9jb3B5ZjAuOC41Nw
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb4L_aTXToDCYbWLFz7xON0O4b64FqrWq-gHIbM2eshOqzaqFhZIaCaGJ5dGVtdWNrZjEuMjUuMoJlYnl0ZXNmMS4xMi4xgmhieXRlc2J1ZmYwLjEwLjCCaW11bHRpdHVkZWYwLjEwLjCCZXNlcmRlZzEuMC4yMjmCaHplcm9jb3B5ZjAuOC41Nw
  [__link0]: https://docs.rs/multitude/0.10.0/multitude/?search=Alloc
  [__link1]: https://docs.rs/multitude/0.10.0/multitude/?search=Arc
  [__link10]: https://docs.rs/multitude/0.10.0/multitude/?search=vec::Vec

@@ -15,6 +15,15 @@
 
 HTTP-specific extensions for the [`seatbelt`][__link0] resilience middleware.
 
+```rust
+use seatbelt_http::HttpRecovery;
+use seatbelt_http::retry::{HttpRetryLayer, HttpRetryLayerExt};
+
+fn configure(layer: HttpRetryLayer) -> HttpRetryLayer {
+    layer.http_recovery(HttpRecovery::default())
+}
+```
+
 Each [`seatbelt`][__link1] middleware is generic over its input and output types.
 This crate specializes them for [`HttpRequest`][__link2] /
 [`Result<HttpResponse>`][__link3] and adds HTTP-aware
@@ -48,7 +57,7 @@ type aliases and an extension trait:
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt_http">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbTOk4e6Z0lGUbu-9zWu8YZcwbyVvoEicMTCUbJQkpemmNhqlhZIOCb2h0dHBfZXh0ZW5zaW9uc2YwLjExLjCCaHNlYXRiZWx0ZTAuOS4wgm1zZWF0YmVsdF9odHRwZTAuOS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb8oGDzKZVb7Qb2wZYekftZQgb6zKbFlSUp2obp-0ddeKUsWlhZIOCb2h0dHBfZXh0ZW5zaW9uc2YwLjExLjCCaHNlYXRiZWx0ZTAuOS4wgm1zZWF0YmVsdF9odHRwZTAuOS4w
  [__link0]: https://crates.io/crates/seatbelt/0.9.0
  [__link1]: https://crates.io/crates/seatbelt/0.9.0
  [__link2]: https://docs.rs/http_extensions/0.11.0/http_extensions/?search=HttpRequest

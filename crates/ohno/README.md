@@ -15,20 +15,6 @@
 
 High-quality error handling for Rust.
 
-Ohno combines error wrapping, enrichment messages stacking, backtrace capture, and procedural macros
-into one ergonomic crate for comprehensive error handling.
-
-## Key Features
-
-* [**`#[derive(Error)]`**](#derive-macro): Derive macro for automatic `std::error::Error`, [`Display`][__link0], [`Debug`][__link1] implementations
-* [**`#[error]`**](#ohnoerror): Attribute macro for creating error types
-* [**`#[enrich_err("...")]`**](#error-enrichment): Attribute macro for automatic error enrichment with file and line information.
-* [**`ErrorExt`**][__link2]: Trait that provides additional methods for ohno error types, it’s implemented automatically for all ohno error types
-* [**`OhnoCore`**][__link3]: Core error type that wraps source errors, captures backtraces, and holds enrichment entries
-* [**`AppError`**][__link4]: Application-level error type for general application errors
-
-## Quick Start
-
 ```rust
 use std::path::{Path, PathBuf};
 
@@ -41,6 +27,18 @@ fn open_file(path: impl AsRef<Path>) -> Result<String, ConfigError> {
         .map_err(|e| ConfigError::caused_by(path.as_ref().to_path_buf(), e))
 }
 ```
+
+Ohno combines error wrapping, enrichment messages stacking, backtrace capture, and procedural macros
+into one ergonomic crate for comprehensive error handling.
+
+## Key Features
+
+* [**`#[derive(Error)]`**](#derive-macro): Derive macro for automatic `std::error::Error`, [`Display`][__link0], [`Debug`][__link1] implementations
+* [**`#[error]`**](#ohnoerror): Attribute macro for creating error types
+* [**`#[enrich_err("...")]`**](#error-enrichment): Attribute macro for automatic error enrichment with file and line information.
+* [**`ErrorExt`**][__link2]: Trait that provides additional methods for ohno error types, it’s implemented automatically for all ohno error types
+* [**`OhnoCore`**][__link3]: Core error type that wraps source errors, captures backtraces, and holds enrichment entries
+* [**`AppError`**][__link4]: Application-level error type for general application errors
 
 ## Derive Macro
 
@@ -461,7 +459,7 @@ uniformly via [`Labeled::label`][__link26].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/ohno">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbPt0s3Sb8yJUbtV_MElvrqIMbHWX1B21g8MIbor0e9qvU6hVhZIKCZG9obm9lMC41LjKCa29obm9fbWFjcm9zZTAuNS4y
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb5782Lj6FYBEbGZtftOu6omkbN7d3ALnwjUIbR6HJcftwMyZhZIKCZG9obm9lMC41LjKCa29obm9fbWFjcm9zZTAuNS4y
  [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
  [__link10]: https://doc.rust-lang.org/stable/std/macro.unreachable.html

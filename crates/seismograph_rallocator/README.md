@@ -15,6 +15,12 @@
 
 Rallocator snapshot source for seismograph.
 
+```rust
+use seismograph_rallocator::source;
+
+println!("{} schema v{}", source::NAME, source::SCHEMA_VERSION);
+```
+
 Rallocator contributes this payload to the process-wide [`seismograph`][__link0]
 snapshot. Snapshot data is organized into [`snapshot`][__link1], [`topology`][__link2], and
 [`callers`][__link3].
@@ -45,7 +51,7 @@ existing version.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seismograph_rallocator">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbTzho6EHwOKQbGOYUASLk4KQbHGxNm6LolagbOrjK3XW4lNdhZIKCa3NlaXNtb2dyYXBoZTAuMS4wgnZzZWlzbW9ncmFwaF9yYWxsb2NhdG9yZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbsqdctdcdxjgbZe6BI18AD_YbbyoKHM02M3Yb10gY8JzXmkNhZIKCa3NlaXNtb2dyYXBoZTAuMS4wgnZzZWlzbW9ncmFwaF9yYWxsb2NhdG9yZTAuMS4w
  [__link0]: https://crates.io/crates/seismograph/0.1.0
  [__link1]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/snapshot/index.html
  [__link2]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/topology/index.html

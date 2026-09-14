@@ -15,6 +15,12 @@
 
 A fast, safe HTTP client that just works.
 
+```rust
+use fetch::HttpClient;
+
+let client = HttpClient::new_tokio();
+```
+
 This crate provides a powerful HTTP client that works with different async runtimes, handles
 security properly by default, and makes testing easy. The [`HttpClient`][__link0] provides a clean API
 for making HTTP requests without worrying about the complex details of modern HTTP.
@@ -714,7 +720,7 @@ fetch = { version = "*", features = ["json", "tokio"] }
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbECLnTOeX12YbX9iOeUkyZdIbmdfyJmK3r8wbqVSCmNHoD_5hZIeCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xMC4wgmVmZXRjaGYwLjE3LjCCb2h0dHBfZXh0ZW5zaW9uc2YwLjExLjCCZ2xheWVyZWRlMC4zLjeCaHNlYXRiZWx0ZTAuOS4wgm10ZW1wbGF0ZWRfdXJpZTAuNi4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbYjdDDoTINwwbM0UrRWTrjvgb1xagD803iB4bhRp66vcr3bphZIeCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xMC4wgmVmZXRjaGYwLjE3LjCCb2h0dHBfZXh0ZW5zaW9uc2YwLjExLjCCZ2xheWVyZWRlMC4zLjeCaHNlYXRiZWx0ZTAuOS4wgm10ZW1wbGF0ZWRfdXJpZTAuNi4w
  [__link0]: https://docs.rs/fetch/0.17.0/fetch/?search=HttpClient
  [__link1]: https://docs.rs/http_extensions/0.11.0/http_extensions/?search=RequestHandler
  [__link10]: https://docs.rs/fetch/0.17.0/fetch/?search=HttpClient::post

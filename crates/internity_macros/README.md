@@ -21,6 +21,14 @@ and [`SerializeIn`][__link2]
 derives thread a reader or lexicon through Serde so [`Sym`][__link3] fields are
 encoded and decoded through the interner.
 
+Macro invocation belongs in a crate that depends on the `internity` facade,
+because expansion resolves that facade crate. See `internity` for an
+example.
+
+```rust
+use internity_macros::{DeserializeIn, SerializeIn};
+```
+
 
 <hr/>
 <sub>

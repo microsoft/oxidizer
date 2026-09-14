@@ -17,6 +17,14 @@
 
 Build composable async services with layered middleware.
 
+```rust
+use layered::{Execute, Service};
+
+let greeter = Execute::new(|name: String| async move { format!("Hello, {name}!") });
+
+assert_eq!(greeter.execute("World".into()).await, "Hello, World!");
+```
+
 This crate provides the [`Service`][__link0] trait and a layer system for adding cross-cutting
 concerns like timeouts, retries, and logging.
 
@@ -45,29 +53,19 @@ impl Service<String> for Greeter {
 }
 ```
 
-Use [`Execute`][__link3] to turn any async function into a service:
-
-```rust
-use layered::{Execute, Service};
-
-let greeter = Execute::new(|name: String| async move { format!("Hello, {name}!") });
-
-assert_eq!(greeter.execute("World".into()).await, "Hello, World!");
-```
-
 ### Key Concepts
 
-* **Service**: A type implementing the [`Service`][__link4] trait that transforms inputs into outputs
+* **Service**: A type implementing the [`Service`][__link3] trait that transforms inputs into outputs
   asynchronously. Think of it as `async fn(&self, In) -> Out`.
 * **Middleware**: A service that wraps another service to add cross-cutting behavior such as
   logging, timeouts, or retries. Middleware receives inputs before the inner service and can
   process outputs after.
-* **Layer**: A type implementing the [`Layer`][__link5] trait that constructs middleware around a
+* **Layer**: A type implementing the [`Layer`][__link4] trait that constructs middleware around a
   service. Layers are composable and can be stacked using tuples like `(layer1, layer2, service)`.
 
 ### Layers and Middleware
 
-A [`Layer`][__link6] wraps a service with additional behavior. In this example, we create a logging
+A [`Layer`][__link5] wraps a service with additional behavior. In this example, we create a logging
 middleware that prints inputs before passing them to the inner service:
 
 ```rust
@@ -106,14 +104,14 @@ let result = service.execute(21).await;
 
 ### Thread Safety
 
-All services must implement [`Send`][__link7] and [`Sync`][__link8], and returned futures must be [`Send`][__link9].
+All services must implement [`Send`][__link6] and [`Sync`][__link7], and returned futures must be [`Send`][__link8].
 This ensures compatibility with multi-threaded async runtimes like Tokio.
 
 ### Features
 
-* **`intercept`**: Enables [`Intercept`][__link10] middleware
-* **`dynamic-service`**: Enables [`DynamicService`][__link11] for type erasure
-* **`tower-service`**: Enables Tower interoperability via the [`tower`][__link12] module
+* **`intercept`**: Enables [`Intercept`][__link9] middleware
+* **`dynamic-service`**: Enables [`DynamicService`][__link10] for type erasure
+* **`tower-service`**: Enables Tower interoperability via the [`tower`][__link11] module
 
 
 <hr/>
@@ -121,17 +119,16 @@ This ensures compatibility with multi-threaded async runtimes like Tokio.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/layered">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb1x3f-sqleXEbdw9CAf8hrTobKWN7nCN8vwwbwhSXly9kwANhZIGCZ2xheWVyZWRlMC4zLjc
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbNZXY4bwJXrYbbnxu3uO3jIAb5gOqgq3MAIkbQnMKknowvGFhZIGCZ2xheWVyZWRlMC4zLjc
  [__link0]: https://docs.rs/layered/0.3.7/layered/?search=Service
  [__link1]: https://docs.rs/tower
- [__link10]: https://docs.rs/layered/0.3.7/layered/?search=Intercept
- [__link11]: https://docs.rs/layered/0.3.7/layered/?search=DynamicService
- [__link12]: https://docs.rs/layered/0.3.7/layered/tower/index.html
+ [__link10]: https://docs.rs/layered/0.3.7/layered/?search=DynamicService
+ [__link11]: https://docs.rs/layered/0.3.7/layered/tower/index.html
  [__link2]: https://docs.rs/layered/0.3.7/layered/?search=Service
- [__link3]: https://docs.rs/layered/0.3.7/layered/?search=Execute
- [__link4]: https://docs.rs/layered/0.3.7/layered/?search=Service
+ [__link3]: https://docs.rs/layered/0.3.7/layered/?search=Service
+ [__link4]: https://docs.rs/layered/0.3.7/layered/?search=Layer
  [__link5]: https://docs.rs/layered/0.3.7/layered/?search=Layer
- [__link6]: https://docs.rs/layered/0.3.7/layered/?search=Layer
- [__link7]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
- [__link8]: https://doc.rust-lang.org/stable/std/marker/trait.Sync.html
- [__link9]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
+ [__link6]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
+ [__link7]: https://doc.rust-lang.org/stable/std/marker/trait.Sync.html
+ [__link8]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
+ [__link9]: https://docs.rs/layered/0.3.7/layered/?search=Intercept

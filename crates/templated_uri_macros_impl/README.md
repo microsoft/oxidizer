@@ -13,7 +13,16 @@
 
 </div>
 
-Macros for the [`templated_uri`][__link0] crate.
+Token transformations behind the URI template macros of the
+[`templated_uri`][__link0] crate.
+
+```rust
+use quote::quote;
+use templated_uri_macros_impl::raw_derive_impl;
+
+let expanded = raw_derive_impl(quote!(struct RawPath(String);));
+assert!(!expanded.is_empty());
+```
 
 
 <hr/>

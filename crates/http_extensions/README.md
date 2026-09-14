@@ -15,6 +15,14 @@
 
 Shared HTTP types and extension traits for clients and servers.
 
+```rust
+use http::StatusCode;
+use http_extensions::StatusExt;
+
+assert!(StatusCode::OK.ensure_success().is_ok());
+assert!(StatusCode::NOT_FOUND.ensure_success().is_err());
+```
+
 This crate provides common HTTP functionality built on the popular [`http`][__link0] crate,
 including flexible body handling, unified error types, and ergonomic extension traits
 for working with HTTP requests and responses.
@@ -170,7 +178,7 @@ for future requests. This makes the crate particularly efficient for high-throug
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_extensions">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb8ws5BCyJXrMbtKOqwMaB35YbTeUgtnVoxOMbl-5qQusDAothZIWCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xMC4wgmRodHRwZTEuNS4wg2lodHRwLWJvZHllMS4xLjBpaHR0cF9ib2R5gm9odHRwX2V4dGVuc2lvbnNmMC4xMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbXx8vJbxLC6gbQLTwqeuiZJQbAdixSCWFdc0buzjIAHnlAr5hZIWCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xMC4wgmRodHRwZTEuNS4wg2lodHRwLWJvZHllMS4xLjBpaHR0cF9ib2R5gm9odHRwX2V4dGVuc2lvbnNmMC4xMS4w
  [__link0]: https://crates.io/crates/http/1.5.0
  [__link1]: https://docs.rs/http_extensions/0.11.0/http_extensions/type.HttpRequest.html
  [__link10]: https://docs.rs/http_extensions/0.11.0/http_extensions/?search=StatusExt

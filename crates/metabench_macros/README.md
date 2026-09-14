@@ -13,6 +13,16 @@
 
 </div>
 
+Procedural macros that implement the benchmark attributes of the
+[`metabench`][__link0] facade.
+
+Macro invocation belongs in a crate that depends on the `metabench` facade,
+because expansion resolves that facade crate. See `metabench` for an example.
+
+```rust
+use metabench_macros::benchmark;
+```
+
 Procedural macros for the `metabench` crate.
 
 **Do not depend on this crate directly.** Use the re-exports from `metabench`
@@ -24,3 +34,4 @@ instead.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/metabench_macros">source code</a>.
 </sub>
 
+ [__link0]: https://docs.rs/metabench

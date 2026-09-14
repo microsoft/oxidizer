@@ -15,6 +15,13 @@
 
 Macros for the [`fundle`][__link0] crate.
 
+This crate holds the token transformations behind those macros; the
+`fundle` facade is the supported interface.
+
+```rust
+use fundle_macros_impl::bundle;
+```
+
 
 <hr/>
 <sub>

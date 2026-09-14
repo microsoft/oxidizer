@@ -20,6 +20,14 @@ Macros for the [`thread_aware`][__link0] crate.
 * `#[derive(ThreadAware)]`: Auto-implements the `thread_aware::ThreadAware` trait by recursively
   calling `transfer` on each field.
 
+Macro invocation belongs in a crate that depends on the `thread_aware`
+facade, because expansion resolves that facade crate. See `thread_aware`
+for an example.
+
+```rust
+use thread_aware_macros::ThreadAware;
+```
+
 
 <hr/>
 <sub>

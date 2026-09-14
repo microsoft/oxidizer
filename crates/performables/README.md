@@ -33,13 +33,26 @@ feature enables runtime ownership and synchronization telemetry.
 representation size as [`std::sync::Arc`][__link7]. Its thread-aware per-thread and
 per-NUMA strategies lazily materialize and reuse affinity-local values.
 
+## Example
+
+```rust
+use performables::arc::Arc;
+use performables::sync::mutex::Mutex;
+
+let shared = Arc::new(Mutex::new(0_u32));
+
+*shared.lock_sync() += 1;
+
+assert_eq!(*shared.lock_sync(), 1);
+```
+
 
 <hr/>
 <sub>
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/performables">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb1vPXB6EfLvQbwvNFy8_tgzIbzTAvOjuDuz4blkqInUMz1lNhZIGCbHBlcmZvcm1hYmxlc2UwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbJX_p3vOpvhkbAXy7wzmxKcQbDqEhHVWtj4QbvpzhJy8sHRlhZIGCbHBlcmZvcm1hYmxlc2UwLjEuMA
  [__link0]: https://docs.rs/performables/0.1.0/performables/?search=sync::PoisonError
  [__link1]: https://docs.rs/performables/0.1.0/performables/?search=sync::barrier::Barrier
  [__link2]: https://docs.rs/performables/0.1.0/performables/?search=sync::condition::Condvar

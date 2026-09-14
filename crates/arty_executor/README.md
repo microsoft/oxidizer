@@ -37,11 +37,26 @@ has started executing, the only thing that can terminate it is the task itself, 
 In a steady state, the executor is allocation-free, as all memory used by the executor is
 reused for new tasks when old ones complete.
 
+## Example
+
+```rust
+use arty_executor::{CycleOutcome, Executor};
+
+// SAFETY: the executor is dropped only after an execution cycle reports the `Shutdown`
+// outcome, which the loop below waits for.
+let executor = unsafe { Executor::builder().build() };
+
+executor.tasks().add(async { println!("Hello from the async task!") });
+executor.begin_shutdown();
+
+while executor.execute_cycle() != CycleOutcome::Shutdown {}
+```
+
 
 <hr/>
 <sub>
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_executor">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbVwz61IbZe5QbF4vbEa1LIsAbVDxflkNvtrIbD-TpXycN1glhZIGCakpvaW5IYW5kbGX2
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbSAndJDr5E7sbEU1b1gAs_3cbBDLLU1IRbP0bpjhmLdQajEFhZIGCakpvaW5IYW5kbGX2
  [__link0]: https://crates.io/crates/JoinHandle

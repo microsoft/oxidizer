@@ -15,6 +15,18 @@
 
 Support for values that adapt when a runtime moves them to another thread.
 
+```rust
+use thread_aware_core::{Thread, ThreadAware};
+
+struct Widget;
+
+impl ThreadAware for Widget {
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
+        // Adapt to the new thread here, e.g. by re-allocating NUMA-local buffers.
+    }
+}
+```
+
 This crate contains the small API shared by thread-aware libraries:
 
 * [`ThreadAware`][__link0] is the trait for values that adapt after a move; its
@@ -146,7 +158,7 @@ strategy-partitioned [`Arc`][__link31].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbaud81CVbfjgbWXnplkiWVocb2M0ryv2Vh08bO8ENADRtsdlhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4x
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb4wcIJ9vQYjQbFnH3tXeiWj8b6wCwUrLV5mYbXiG9e7oaqixhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4x
  [__link0]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware
  [__link1]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware::relocate
  [__link10]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=NumaNode
