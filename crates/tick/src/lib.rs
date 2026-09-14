@@ -23,7 +23,7 @@
 //!
 //! # Quick Start
 //!
-//! ```no_run
+//! ```rust,no_run
 //! use std::time::Duration;
 //!
 //! use tick::{Clock, Delay};

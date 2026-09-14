@@ -23,6 +23,23 @@
 //! The `test-util` feature enables additional utilities for testing implementations of
 //! types that produce or consume streams of bytes. These are in the `testing` module.
 //!
+//! # Example
+//!
+//! ```rust
+//! # fn main() {
+//! # #[cfg(feature = "test-util")] {
+//! # testing_aids::execute_or_terminate_process(|| futures::executor::block_on(async {
+//! # use bytesbuf_io::testing::Null;
+//! use bytesbuf_io::ReadExt;
+//!
+//! let mut source = Null::new();
+//! let data = source.read_at_most(123).await.unwrap();
+//! println!("read {} bytes of data", data.len());
+//! # }));
+//! # }
+//! # }
+//! ```
+//!
 //! [`bytesbuf`]: https://docs.rs/bytesbuf
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf_io/logo.png")]

@@ -15,6 +15,13 @@
 //!
 //! **Do not depend on this crate directly.** Use the re-exports from
 //! `metabench` instead.
+//!
+//! The public `metabench` facade is the supported macro interface and provides
+//! invocation examples.
+//!
+//! ```rust
+//! use metabench_macros_impl::benchmark;
+//! ```
 
 mod benchmark;
 mod shared;

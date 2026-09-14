@@ -63,7 +63,7 @@
 //! - `{book=**}` — a [`Segment::Variable`] binding field `book` to the remaining
 //!   segments (`**`, i.e. [`Segment::Rest`]).
 //!
-//! ```
+//! ```rust
 //! use http_path_template::{Grammar, PathTemplate, Segment};
 //!
 //! # fn main() -> Result<(), http_path_template::ParseError> {

@@ -13,6 +13,13 @@
 //!
 //! **Do not depend on this crate directly.** Use the re-exports from `metabench`
 //! instead.
+//!
+//! Macro invocation belongs in a crate that depends on the `metabench` facade,
+//! because expansion resolves that facade crate. See `metabench` for an example.
+//!
+//! ```rust
+//! use metabench_macros::benchmark;
+//! ```
 
 use proc_macro::TokenStream;
 

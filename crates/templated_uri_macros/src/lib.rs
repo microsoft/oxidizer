@@ -9,6 +9,14 @@
 )]
 
 //! Macros for the [`templated_uri`](https://docs.rs/templated_uri) crate.
+//!
+//! Macro invocation belongs in a crate that depends on the `templated_uri`
+//! facade, because expansion resolves that facade crate. See `templated_uri`
+//! for an example.
+//!
+//! ```rust
+//! use templated_uri_macros::Raw;
+//! ```
 
 use proc_macro::TokenStream;
 use templated_uri_macros_impl::{raw_derive_impl, templated_paq_impl, uri_param_derive_impl};

@@ -11,6 +11,16 @@
 )]
 
 //! Macros for the [`templated_uri`](https://docs.rs/templated_uri) crate.
+//!
+//! # Example
+//!
+//! ```rust
+//! use quote::quote;
+//! use templated_uri_macros_impl::raw_derive_impl;
+//!
+//! let expanded = raw_derive_impl(quote!(struct RawPath(String);));
+//! assert!(!expanded.is_empty());
+//! ```
 
 mod enum_template;
 pub(crate) mod error;

@@ -27,6 +27,20 @@
 //! [`std::thread::Thread`], which is a handle to a live OS thread. Naming both in one module
 //! requires aliasing one of them.
 //!
+//! # Example
+//!
+//! ```rust
+//! use thread_aware_core::{Thread, ThreadAware};
+//!
+//! struct Widget;
+//!
+//! impl ThreadAware for Widget {
+//!     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
+//!         // Adapt to the new thread here, e.g. by re-allocating NUMA-local buffers.
+//!     }
+//! }
+//! ```
+//!
 //! # The `thread_aware` family
 //!
 //! Downstream libraries need one small contract they can implement and expose in public APIs

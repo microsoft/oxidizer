@@ -51,6 +51,14 @@
 //! accepted by the decoder receive documented neutral defaults for fields that
 //! did not yet exist. Producers must not change the meaning or byte order of an
 //! existing version.
+//!
+//! # Example
+//!
+//! ```rust
+//! use seismograph_rallocator::source;
+//!
+//! println!("{} schema v{}", source::NAME, source::SCHEMA_VERSION);
+//! ```
 
 pub mod callers;
 pub mod snapshot;

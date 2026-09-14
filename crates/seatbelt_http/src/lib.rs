@@ -41,6 +41,21 @@
 //!   during retries and hedging (safe-only, idempotent, or all).
 //! - [`HttpResilienceContext`]: the HTTP specialization of
 //!   [`ResilienceContext`][seatbelt::ResilienceContext].
+//!
+//! # Example
+//!
+//! ```rust
+//! # fn main() {
+//! # #[cfg(feature = "retry")] {
+//! use seatbelt_http::HttpRecovery;
+//! use seatbelt_http::retry::{HttpRetryLayer, HttpRetryLayerExt};
+//!
+//! fn configure(layer: HttpRetryLayer) -> HttpRetryLayer {
+//!     layer.http_recovery(HttpRecovery::default())
+//! }
+//! # }
+//! # }
+//! ```
 
 use http_extensions::{HttpRequest, HttpResponse};
 

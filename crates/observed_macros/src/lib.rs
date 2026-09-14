@@ -14,6 +14,13 @@
 //! - `#[derive(Enrichment)]` - generate an `Enrichment` trait impl for a struct
 //!
 //! **Do not depend on this crate directly.** Use the re-exports from `observed` instead.
+//!
+//! Macro invocation belongs in a crate that depends on the `observed` facade,
+//! because expansion resolves that facade crate. See `observed` for an example.
+//!
+//! ```rust
+//! use observed_macros::Enrichment;
+//! ```
 
 use proc_macro::TokenStream;
 

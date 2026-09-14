@@ -72,7 +72,7 @@
 //!
 //! Install the standard configuration as the process-global allocator:
 //!
-//! ```
+//! ```rust
 //! rallocator::rallocator!();
 //! ```
 //!

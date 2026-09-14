@@ -70,7 +70,7 @@
 //!
 //! # Example
 //!
-//! ```
+//! ```rust
 //! use multitude::Arena;
 //!
 //! let arena = Arena::new();

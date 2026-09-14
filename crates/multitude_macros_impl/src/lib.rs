@@ -19,6 +19,18 @@
 //!
 //! Arena-specific derive configuration is parsed from `#[multitude(...)]`;
 //! Serde's own configuration remains under `#[serde(...)]`.
+//!
+//! # Example
+//!
+//! ```rust
+//! use multitude_macros_impl::derive_deserialize_in;
+//! use quote::quote;
+//! use syn::parse_quote;
+//!
+//! let root_path: syn::Path = parse_quote!(::multitude::de);
+//! let expanded = derive_deserialize_in(quote!(struct Item { value: u32 }), &root_path);
+//! assert!(!expanded.is_empty());
+//! ```
 
 use std::collections::HashSet;
 

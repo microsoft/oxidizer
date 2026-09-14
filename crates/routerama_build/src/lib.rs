@@ -24,7 +24,7 @@
 //!
 //! # Examples
 //!
-//! ```
+//! ```rust
 //! # #[cfg(feature = "codegen")]
 //! use http_path_template::{Grammar, PathTemplate};
 //! # #[cfg(feature = "codegen")]

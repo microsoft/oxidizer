@@ -28,7 +28,7 @@
 //!
 //! A [`Service`] transforms an input into an output asynchronously:
 //!
-//! ```
+//! ```rust
 //! use layered::Service;
 //!
 //! struct Greeter;

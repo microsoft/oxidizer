@@ -12,6 +12,25 @@
 //! The CLI renders common thread, stack, and runtime-event data directly.
 //! Rallocator payloads use the built-in schema-specific renderer; unknown
 //! sources remain visible in the source inventory.
+//!
+//! # Example
+//!
+//! The binary's entry point parses arguments with [`clap`], following the same
+//! shape as this crate's own (private) `Cli` type:
+//!
+//! ```rust
+//! use clap::Parser;
+//!
+//! #[derive(Parser)]
+//! #[command(name = "seismograph")]
+//! struct Cli {
+//!     /// Path to a snapshot file to render.
+//!     path: std::path::PathBuf,
+//! }
+//!
+//! let cli = Cli::parse_from(["seismograph", "snapshot.bin"]);
+//! assert_eq!(cli.path, std::path::PathBuf::from("snapshot.bin"));
+//! ```
 
 mod commands;
 mod report;
