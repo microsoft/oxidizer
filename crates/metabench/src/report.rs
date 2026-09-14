@@ -38,7 +38,7 @@ pub(crate) enum MetricValue {
 
 impl MetricValue {
     #[expect(clippy::cast_precision_loss, reason = "percentage comparisons are approximate")]
-    fn as_f64(self) -> f64 {
+    pub(crate) fn as_f64(self) -> f64 {
         match self {
             Self::Integer(value) => value as f64,
             Self::Float(value) => value,

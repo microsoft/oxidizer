@@ -148,6 +148,14 @@ impl ArtifactDirectory {
     pub(crate) fn perf_path(&self, index: usize) -> PathBuf {
         self.run.join("perf").join(format!("{index}.jsonl"))
     }
+
+    pub(crate) fn vtune_result_path(&self, index: usize) -> PathBuf {
+        self.run.join("vtune-results").join(index.to_string())
+    }
+
+    pub(crate) fn vtune_path(&self, index: usize) -> PathBuf {
+        self.run.join("vtune").join(format!("{index}.csv"))
+    }
 }
 
 pub(crate) fn write_run_manifest(
@@ -364,6 +372,167 @@ fn perf_counter_value(value: &serde_json::Value) -> Option<f64> {
         serde_json::Value::String(value) => value.parse().ok(),
         _ => None,
     }
+}
+
+/// Splits one CSV line into its comma-separated fields, honoring `"..."`
+/// quoting (including a doubled `""` as an escaped literal quote) so a
+/// quoted field such as `"1,234"` is treated as a single field rather than
+/// being split on its embedded comma. Unquoted commas always separate
+/// fields, matching ordinary CSV.
+fn split_csv_fields(line: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    let mut chars = line.chars().peekable();
+    while let Some(character) = chars.next() {
+        if in_quotes {
+            if character == '"' {
+                if chars.peek() == Some(&'"') {
+                    current.push('"');
+                    chars.next();
+                } else {
+                    in_quotes = false;
+                }
+            } else {
+                current.push(character);
+            }
+        } else if character == '"' {
+            in_quotes = true;
+        } else if character == ',' {
+            fields.push(std::mem::take(&mut current));
+        } else {
+            current.push(character);
+        }
+    }
+    fields.push(current);
+    fields
+}
+
+/// The `hw-events` report column holding each event's name, and the column
+/// holding the count this crate measures. Real `VTune` reports may include
+/// further columns (sample count, events-per-sample, precision, and so on);
+/// those are read from the header and ignored rather than assumed absent.
+const VTUNE_EVENT_TYPE_COLUMN: &str = "Hardware Event Type";
+const VTUNE_EVENT_COUNT_COLUMN: &str = "Hardware Event Count:Self";
+
+/// Parses a `VTune` `-report hw-events -format csv` report into a
+/// [`NativeResult`].
+///
+/// The report is a header row naming its columns, followed by one row per
+/// hardware event (see [`crate::vtune`] and `runner::launch_vtune_worker` for
+/// how it is produced). This is our best documented understanding of that
+/// report's shape and has not been verified against a live `VTune` install in
+/// this repository's environment; adjust it here if a real report's columns
+/// differ. Only [`VTUNE_EVENT_TYPE_COLUMN`] and [`VTUNE_EVENT_COUNT_COLUMN`]
+/// are read; any other columns a real report includes (sample count,
+/// events-per-sample, precision, and so on) are ignored rather than assumed
+/// absent. Fields are split with [`split_csv_fields`] so a count that groups
+/// digits with `,` thousands separators (this too remains unconfirmed
+/// against a live install) parses correctly as long as it is quoted per CSV
+/// convention, e.g. `INST_RETIRED.ANY,"1,234,567"`.
+pub(crate) fn parse_vtune(path: &Path, artifact_root: &Path, identity: String, native_identity: String) -> Result<NativeResult, Error> {
+    validate_artifact_size(path, MAX_ARTIFACT_JSON_BYTES, "CSV")?;
+    let contents = fs::read_to_string(path).map_err(|source| Error::ArtifactIo {
+        path: path.to_owned(),
+        source,
+    })?;
+    let mut lines = contents.lines().enumerate();
+    let (name_column, count_column, expected_field_count) = match lines.next() {
+        Some((_, header)) => {
+            let header_fields = split_csv_fields(header.trim());
+            let name_column = header_fields.iter().position(|field| field.trim() == VTUNE_EVENT_TYPE_COLUMN);
+            let count_column = header_fields.iter().position(|field| field.trim() == VTUNE_EVENT_COUNT_COLUMN);
+            match (name_column, count_column) {
+                (Some(name_column), Some(count_column)) => (name_column, count_column, header_fields.len()),
+                _ => {
+                    return Err(Error::ArtifactFormat {
+                        path: path.to_owned(),
+                        message: format!("header is missing the {VTUNE_EVENT_TYPE_COLUMN:?} or {VTUNE_EVENT_COUNT_COLUMN:?} column"),
+                    });
+                }
+            }
+        }
+        None => {
+            return Err(Error::ArtifactFormat {
+                path: path.to_owned(),
+                message: "contains no vtune event records".to_owned(),
+            });
+        }
+    };
+    let mut metrics = BTreeMap::new();
+    for (index, line) in lines {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let fields = split_csv_fields(line);
+        if fields.len() != expected_field_count {
+            return Err(Error::ArtifactFormat {
+                path: path.to_owned(),
+                message: format!(
+                    "line {} has {} field(s); expected {expected_field_count} matching the header",
+                    index + 1,
+                    fields.len()
+                ),
+            });
+        }
+        let name = fields[name_column].trim().to_owned();
+        let value_text = fields[count_column].trim();
+        // A quoted count such as `"1,234,567"` protects its thousands
+        // separators from being split as CSV field boundaries; strip them
+        // here before parsing so the grouped count still parses as a number.
+        let stripped_value_text = value_text.replace(',', "");
+        let value = stripped_value_text.parse::<f64>().map_err(|_error| Error::ArtifactFormat {
+            path: path.to_owned(),
+            message: format!("line {} event {name} has non-numeric count {value_text}", index + 1),
+        })?;
+        if !value.is_finite() || value < 0.0 {
+            return Err(Error::ArtifactFormat {
+                path: path.to_owned(),
+                message: format!("line {} event {name} has invalid count {value}", index + 1),
+            });
+        }
+        // Real `vtune -report hw-events` output can repeat the same event
+        // name across multiple rows (for example, one row per core type or
+        // per hardware thread group); the report command does not constrain
+        // the grouping to a single row per event. Sum repeated rows into one
+        // metric instead of treating a second occurrence as malformed input.
+        let mut aggregate_error = None;
+        metrics
+            .entry(name.clone())
+            .and_modify(|metric: &mut Metric| {
+                let existing = metric.value.as_f64();
+                let summed = existing + value;
+                if summed.is_finite() {
+                    *metric = Metric::float("vtune", &name, summed, MetricDirection::LowerIsBetter);
+                } else {
+                    // Two individually finite counts can still sum to
+                    // infinity; surface that as malformed input rather than
+                    // silently storing a non-finite aggregate metric.
+                    aggregate_error = Some(Error::ArtifactFormat {
+                        path: path.to_owned(),
+                        message: format!("line {} event {name} aggregate count {summed} is not finite", index + 1),
+                    });
+                }
+            })
+            .or_insert_with(|| Metric::float("vtune", &name, value, MetricDirection::LowerIsBetter));
+        if let Some(error) = aggregate_error {
+            return Err(error);
+        }
+    }
+    if metrics.is_empty() {
+        return Err(Error::ArtifactFormat {
+            path: path.to_owned(),
+            message: "contains no vtune event records".to_owned(),
+        });
+    }
+    Ok(NativeResult {
+        identity,
+        native_identity,
+        source: "vtune".to_owned(),
+        metrics,
+        raw_artifacts: vec![relative_artifact(artifact_root, path)],
+    })
 }
 
 fn criterion_identity(metadata: &CriterionMetadata) -> String {
@@ -691,6 +860,13 @@ fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, Error> {
 }
 
 fn validate_json_size(path: &Path, limit: u64) -> Result<(), Error> {
+    validate_artifact_size(path, limit, "JSON")
+}
+
+/// Rejects an artifact larger than `limit`, naming its `format` (e.g.
+/// `"JSON"` or `"CSV"`) in the error so the diagnostic matches the actual
+/// file being validated rather than always describing it as JSON.
+fn validate_artifact_size(path: &Path, limit: u64, format: &str) -> Result<(), Error> {
     let length = fs::metadata(path)
         .map_err(|source| Error::ArtifactIo {
             path: path.to_owned(),
@@ -700,7 +876,7 @@ fn validate_json_size(path: &Path, limit: u64) -> Result<(), Error> {
     if length > limit {
         Err(Error::ArtifactFormat {
             path: path.to_owned(),
-            message: format!("JSON file is {length} bytes; limit is {limit} bytes"),
+            message: format!("{format} file is {length} bytes; limit is {limit} bytes"),
         })
     } else {
         Ok(())
@@ -965,6 +1141,198 @@ mod tests {
     }
 
     #[test]
+    fn parses_vtune_csv_report_and_preserves_all_events() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("vtune.csv");
+        fs::write(
+            &path,
+            concat!(
+                "Hardware Event Type,Hardware Event Count:Self\n",
+                "INST_RETIRED.ANY,1234\n",
+                "CPU_CLK_UNHALTED.THREAD,567.5\n",
+            ),
+        )
+        .unwrap();
+
+        let result = parse_vtune(&path, directory.path(), "group/bench".to_owned(), "group/bench".to_owned()).unwrap();
+        assert_eq!(result.source, "vtune");
+        assert_eq!(result.identity, "group/bench");
+        assert_eq!(result.raw_artifacts, ["vtune.csv"]);
+        assert_eq!(result.metrics["INST_RETIRED.ANY"].value, crate::report::MetricValue::Float(1234.0));
+        assert_eq!(
+            result.metrics["CPU_CLK_UNHALTED.THREAD"].value,
+            crate::report::MetricValue::Float(567.5)
+        );
+    }
+
+    #[test]
+    fn parses_vtune_csv_report_with_additional_columns_by_header_name() {
+        // Real `vtune -report hw-events -format csv` output includes further
+        // columns (sample count, events-per-sample, precision) beyond the
+        // two this crate measures; those must be located by header name and
+        // ignored, not assumed absent.
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("vtune.csv");
+        fs::write(
+            &path,
+            concat!(
+                "Hardware Event Sample Count:Self,Hardware Event Type,Events Per Sample,Hardware Event Count:Self,Precise:Self\n",
+                "10,INST_RETIRED.ANY,123.4,1234,Yes\n",
+            ),
+        )
+        .unwrap();
+
+        let result = parse_vtune(&path, directory.path(), "group/bench".to_owned(), "group/bench".to_owned()).unwrap();
+        assert_eq!(result.metrics["INST_RETIRED.ANY"].value, crate::report::MetricValue::Float(1234.0));
+    }
+
+    #[test]
+    fn vtune_rejects_a_header_missing_the_required_columns() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("vtune.csv");
+        fs::write(&path, "Hardware Event Type,Some Other Column\nINST_RETIRED.ANY,1234\n").unwrap();
+
+        assert!(matches!(
+            parse_vtune(&path, directory.path(), "group/bench".to_owned(), "group/bench".to_owned()),
+            Err(Error::ArtifactFormat { .. })
+        ));
+    }
+
+    #[test]
+    fn vtune_rejects_a_row_whose_field_count_does_not_match_the_header() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("vtune.csv");
+        fs::write(
+            &path,
+            "Hardware Event Type,Hardware Event Count:Self,Events Per Sample\nINST_RETIRED.ANY,1234\n",
+        )
+        .unwrap();
+
+        assert!(matches!(
+            parse_vtune(&path, directory.path(), "group/bench".to_owned(), "group/bench".to_owned()),
+            Err(Error::ArtifactFormat { .. })
+        ));
+    }
+
+    #[test]
+    fn parses_vtune_csv_report_with_quoted_thousands_separated_counts() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("vtune.csv");
+        fs::write(
+            &path,
+            concat!(
+                "Hardware Event Type,Hardware Event Count:Self\n",
+                "INST_RETIRED.ANY,\"1,234,567\"\n",
+                "CPU_CLK_UNHALTED.THREAD,890\n",
+            ),
+        )
+        .unwrap();
+
+        let result = parse_vtune(&path, directory.path(), "group/bench".to_owned(), "group/bench".to_owned()).unwrap();
+        assert_eq!(
+            result.metrics["INST_RETIRED.ANY"].value,
+            crate::report::MetricValue::Float(1_234_567.0)
+        );
+        assert_eq!(
+            result.metrics["CPU_CLK_UNHALTED.THREAD"].value,
+            crate::report::MetricValue::Float(890.0)
+        );
+    }
+
+    #[test]
+    fn vtune_rejects_an_unquoted_grouped_count_as_too_many_fields() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("vtune.csv");
+        fs::write(
+            &path,
+            concat!("Hardware Event Type,Hardware Event Count:Self\n", "INST_RETIRED.ANY,1,234,567\n",),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            parse_vtune(&path, directory.path(), "group/bench".to_owned(), "group/bench".to_owned()),
+            Err(Error::ArtifactFormat { .. })
+        ));
+    }
+
+    #[test]
+    fn split_csv_fields_honors_quoting_and_escaped_quotes() {
+        assert_eq!(split_csv_fields("a,b,c"), ["a", "b", "c"]);
+        assert_eq!(split_csv_fields("a,\"1,234\",c"), ["a", "1,234", "c"]);
+        assert_eq!(split_csv_fields("a,\"say \"\"hi\"\"\",c"), ["a", "say \"hi\"", "c"]);
+    }
+
+    #[test]
+    fn vtune_rejects_malformed_and_missing_counters() {
+        for contents in [
+            "Hardware Event Type,Hardware Event Count:Self\nINST_RETIRED.ANY,not-a-number\n".to_owned(),
+            "Hardware Event Type,Hardware Event Count:Self\nINST_RETIRED.ANY\n".to_owned(),
+            "Hardware Event Type,Hardware Event Count:Self\n".to_owned(),
+            "Hardware Event Type,Hardware Event Count:Self\nINST_RETIRED.ANY,-1\n".to_owned(),
+            "Hardware Event Type,Hardware Event Count:Self\nINST_RETIRED.ANY,inf\n".to_owned(),
+            "Hardware Event Type,Hardware Event Count:Self\nINST_RETIRED.ANY,NaN\n".to_owned(),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("vtune.csv");
+            fs::write(&path, contents).unwrap();
+            assert!(matches!(
+                parse_vtune(&path, directory.path(), "group/bench".to_owned(), "group/bench".to_owned()),
+                Err(Error::ArtifactFormat { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn vtune_sums_repeated_event_rows_instead_of_rejecting_them() {
+        // Real `vtune -report hw-events` output can repeat the same event
+        // name across several rows (for example, one row per core type), so
+        // the parser aggregates repeats into a single metric rather than
+        // treating a second occurrence as malformed input.
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("vtune.csv");
+        fs::write(
+            &path,
+            "Hardware Event Type,Hardware Event Count:Self\nINST_RETIRED.ANY,1\nINST_RETIRED.ANY,2\n",
+        )
+        .unwrap();
+
+        let result = parse_vtune(&path, directory.path(), "group/bench".to_owned(), "group/bench".to_owned()).unwrap();
+        assert_eq!(result.metrics["INST_RETIRED.ANY"].value, crate::report::MetricValue::Float(3.0));
+    }
+
+    #[test]
+    fn vtune_rejects_repeated_rows_whose_sum_overflows_to_infinity() {
+        // Two individually finite counts can still sum to infinity; that
+        // must surface as malformed input rather than a silently stored
+        // non-finite aggregate metric.
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("vtune.csv");
+        fs::write(
+            &path,
+            format!(
+                "Hardware Event Type,Hardware Event Count:Self\nINST_RETIRED.ANY,{max}\nINST_RETIRED.ANY,{max}\n",
+                max = f64::MAX
+            ),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            parse_vtune(&path, directory.path(), "group/bench".to_owned(), "group/bench".to_owned()),
+            Err(Error::ArtifactFormat { .. })
+        ));
+    }
+
+    #[test]
+    fn vtune_accepts_a_zero_count_as_valid() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("vtune.csv");
+        fs::write(&path, "Hardware Event Type,Hardware Event Count:Self\nINST_RETIRED.ANY,0\n").unwrap();
+
+        let result = parse_vtune(&path, directory.path(), "group/bench".to_owned(), "group/bench".to_owned()).unwrap();
+        assert_eq!(result.metrics["INST_RETIRED.ANY"].value, crate::report::MetricValue::Float(0.0));
+    }
+
+    #[test]
     fn discovery_is_sorted_skips_symlinks_and_enforces_limits() {
         let directory = tempfile::tempdir().unwrap();
         fs::create_dir_all(directory.path().join("b")).unwrap();
@@ -1043,6 +1411,18 @@ mod tests {
         fs::write(&path, "previous").unwrap();
         assert!(matches!(write_json(&path, &Invalid), Err(Error::ArtifactJson { .. })));
         assert_eq!(fs::read_to_string(path).unwrap(), "previous");
+    }
+
+    #[test]
+    fn vtune_paths_are_scoped_under_the_run_directory_and_indexed() {
+        let directory = tempfile::tempdir().unwrap();
+        let run = ArtifactDirectory::create_with_homes(directory.path(), None, None).unwrap();
+        assert_eq!(run.vtune_result_path(0), run.path().join("vtune-results").join("0"));
+        assert_eq!(run.vtune_result_path(3), run.path().join("vtune-results").join("3"));
+        assert_ne!(run.vtune_result_path(0), run.vtune_result_path(3));
+        assert_eq!(run.vtune_path(0), run.path().join("vtune").join("0.csv"));
+        assert_eq!(run.vtune_path(3), run.path().join("vtune").join("3.csv"));
+        assert_ne!(run.vtune_path(0), run.vtune_path(3));
     }
 
     #[test]

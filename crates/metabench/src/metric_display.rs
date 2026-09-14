@@ -128,6 +128,14 @@ fn descriptor(key: &str) -> (Cow<'static, str>, u8, u8) {
 
         _ => {
             let name = key.rsplit_once('/').map_or(key, |(_, name)| name);
+            if key.starts_with("vtune/") {
+                // VTune hardware event names (for example `INST_RETIRED.ANY`) are
+                // already SCREAMING_SNAKE_CASE, so `humanize`'s "insert a space
+                // before every uppercase letter" heuristic (built for names like
+                // `TotalBytes`) would shred them into single letters. Only join
+                // the existing word separators.
+                return (Cow::Owned(name.replace(['_', '.'], " ")), 10, u8::MAX);
+            }
             return (Cow::Owned(title_case(&humanize(name))), 10, u8::MAX);
         }
     };
@@ -185,5 +193,12 @@ mod tests {
             TableMetric::new("criterion".to_owned(), "declared_throughput.elements_and_bytes".to_owned()).label,
             "Elements And Bytes"
         );
+    }
+
+    #[test]
+    fn vtune_metrics_preserve_screaming_snake_case_words() {
+        let metric = TableMetric::new("vtune".to_owned(), "INST_RETIRED.ANY".to_owned());
+        assert_eq!(metric.label, "INST RETIRED ANY");
+        assert_eq!(metric.priority, 10);
     }
 }
