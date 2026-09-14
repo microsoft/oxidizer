@@ -13,9 +13,10 @@
 //! [`GreeterService`] is the tonic-only handler shared by the runnable
 //! `examples/tonic_bridge/` and the end-to-end `tests/bridge.rs`.
 
-/// The generated greeter service: tonic messages + server trait, pbjson serde,
-/// and the `rest_over_grpc` REST trait + transcoder + tonic bridge.
 pub mod greeter {
+    //! The generated greeter service: tonic messages + server trait, pbjson
+    //! serde, and the `rest_over_grpc` REST trait + transcoder + tonic bridge.
+
     #![allow(
         clippy::all,
         clippy::pedantic,
@@ -52,12 +53,11 @@ use futures_util::stream::{self, Stream};
 use greeter::{HelloReply, HelloRequest, greeter_server};
 pub use transcoder::Transcoder;
 
-/// A greeter implemented purely against `tonic`'s generated `greeter_server::Greeter`
-/// trait — it never mentions `rest_over_grpc`.
+/// A greeter implemented purely against `tonic`'s generated `greeter_server::Greeter` trait.
 ///
-/// The generated blanket `impl` bridges it to the REST service trait, so a
-/// [`Transcoder::new(GreeterService)`](Transcoder) transcodes REST/JSON requests
-/// without any extra code.
+/// It never mentions `rest_over_grpc`. The generated blanket `impl` bridges it to the REST
+/// service trait, so a [`Transcoder::new(GreeterService)`](Transcoder) transcodes REST/JSON
+/// requests without any extra code.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct GreeterService;
 

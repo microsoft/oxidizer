@@ -800,21 +800,19 @@
 //!
 //! > **Note**: Most users should enable the `tokio` feature along with the `tls` feature for HTTPS
 //! > support. The `json` feature is recommended for most applications that need to work with JSON APIs.
-#[doc(inline)]
 pub use ::http::{Extensions, HeaderMap, HeaderName, HeaderValue, Method, Request, Response, StatusCode, Version};
-#[doc(inline)]
 pub use http_extensions::routing;
-#[doc(inline)]
 pub use seatbelt::{Recovery, RecoveryInfo};
-#[doc(inline)]
 pub use templated_uri::{BasePath, BaseUri, Origin, PathAndQuery, Uri};
 
-/// Re-exports of the [`http`](https://docs.rs/http) crate's submodules.
-///
-/// These are grouped here to keep the `fetch` crate root uncluttered. The most
-/// commonly used `http` types (such as [`HeaderMap`], [`Method`], [`StatusCode`],
-/// and [`Version`]) are re-exported directly at the crate root.
 pub mod http {
+    //! Re-exports of the [`http`](https://docs.rs/http) crate's submodules.
+    //!
+    //! These are grouped here to keep the `fetch` crate root uncluttered. The
+    //! most commonly used `http` types (such as [`HeaderMap`], [`Method`],
+    //! [`StatusCode`], and [`Version`]) are re-exported directly at the crate
+    //! root.
+
     #[doc(inline)]
     pub use ::http::{header, method, request, response, status, version};
 }

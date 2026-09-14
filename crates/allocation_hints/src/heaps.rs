@@ -20,8 +20,14 @@ thread_local! {
     };
 }
 
-/// General-purpose heap configuration.
 pub mod general {
+    //! General-purpose heap configuration.
+    //!
+    //! Contains [`Options`] for tuning a general-purpose heap before it is
+    //! created: the preferred locality segment size and the largest medium
+    //! allocation kept in the per-thread cache. Values are advisory; a heap
+    //! implementation may clamp them to its supported range.
+
     const MEDIUM_SLICE_BYTES: usize = 64 * 1024;
     const MAX_LOCALITY_SEGMENT_BYTES: usize = 1024 * 1024 * 1024;
     const MAX_MEDIUM_CACHE_BYTES: usize = 8 * 1024 * 1024;
@@ -93,8 +99,14 @@ pub mod general {
     }
 }
 
-/// Bump heap configuration.
 pub mod bump {
+    //! Bump heap configuration.
+    //!
+    //! Contains [`Options`] for tuning a bump heap before it is created: the
+    //! largest eligible allocation and alignment, and how many chunks a
+    //! supporting allocator's cache retains. Values are advisory; a heap
+    //! implementation may clamp them to its supported range.
+
     const BUMP_SEGMENT_SIZE: usize = 32 * 1024;
 
     /// Advisory options for a bump heap.

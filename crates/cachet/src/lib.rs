@@ -290,17 +290,12 @@ pub use builder::{CacheBuilder, CacheTierBuilder, FallbackBuilder, TransformBuil
 #[doc(inline)]
 pub use cache::{Cache, CacheName};
 #[cfg(any(feature = "memory", test))]
-#[doc(inline)]
 pub use cachet_memory::InMemoryCache;
 #[cfg(feature = "service")]
-#[doc(inline)]
 pub use cachet_service::{CacheOperation, CacheResponse, CacheServiceExt, GetRequest, InsertRequest, InvalidateRequest, ServiceAdapter};
-#[doc(inline)]
 pub use cachet_tier::DynamicCache;
-#[doc(inline)]
 pub use cachet_tier::{CacheEntry, CacheTier, Error, InsertOutcome, Result, SizeError};
 #[cfg(any(feature = "test-util", test))]
-#[doc(inline)]
 pub use cachet_tier::{CacheOp, MockCache};
 #[doc(inline)]
 pub use policy::InsertPolicy;

@@ -50,10 +50,10 @@ use crate::zstd::codec::{ZstdCompress, ZstdDecompress};
 /// the same order of magnitude would serve equally well.
 pub(crate) const DEFAULT_LIMITS: FormatLimits = FormatLimits::new(Some(250_000), None, None);
 
-/// Selects zstd as the format of a [`CompressorBuilder`][crate::CompressorBuilder] or [`DecompressorBuilder`][crate::DecompressorBuilder], and carries
-/// the settings only zstd has.
+/// Selects zstd as the compression format, carrying the settings only zstd has.
 ///
-/// Naming the format in the builder's type parameter is what gives that builder a `build` method
+/// Naming zstd in the type parameter of a [`CompressorBuilder`][crate::CompressorBuilder] or
+/// [`DecompressorBuilder`][crate::DecompressorBuilder] is what gives that builder a `build` method
 /// producing this module's [`Compressor`] and [`Decompressor`], along with the setters below.
 #[derive(Debug, Clone)]
 pub struct Zstd {

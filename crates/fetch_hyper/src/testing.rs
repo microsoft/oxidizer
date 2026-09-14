@@ -273,8 +273,9 @@ impl std::error::Error for TestError {
     }
 }
 
-/// Builds a basic GET request against `http://example.com/some-custom-path`,
-/// using a fake [`HttpBodyBuilder`] for the request body.
+/// Builds a basic GET request for tests, using a fake [`HttpBodyBuilder`] for the body.
+///
+/// The request targets `http://example.com/some-custom-path`.
 ///
 /// # Panics
 ///
@@ -294,8 +295,9 @@ pub fn fake_body_builder() -> HttpBodyBuilder {
     HttpBodyBuilder::new_fake()
 }
 
-/// Returns OpenTelemetry [`KeyValue`]s as `(key, value)` string pairs sorted
-/// by key, suitable for deterministic snapshot assertions.
+/// Returns OpenTelemetry [`KeyValue`]s as `(key, value)` string pairs sorted by key.
+///
+/// Suitable for deterministic snapshot assertions.
 #[must_use]
 pub fn sorted_attributes(attrs: &[opentelemetry::KeyValue]) -> Vec<(String, String)> {
     let mut pairs: Vec<(String, String)> = attrs.iter().map(|kv| (kv.key.to_string(), kv.value.to_string())).collect();

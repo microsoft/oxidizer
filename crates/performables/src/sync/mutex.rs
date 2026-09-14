@@ -1,6 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! An executor-independent asynchronous mutual-exclusion lock.
+//!
+//! [`Mutex`] serves the uncontended path through atomic operations without
+//! allocating. The lock becomes poisoned if an exclusive guard is dropped
+//! during a panic unwind that began after the guard was acquired.
+
 use std::cell::UnsafeCell;
 use std::fmt;
 use std::marker::PhantomData;

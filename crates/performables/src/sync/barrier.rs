@@ -1,6 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! An executor-independent, reusable participant barrier.
+//!
+//! [`Barrier`] blocks a fixed number of participants until all of them arrive,
+//! then releases every waiter and resets for the next round.
+
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};

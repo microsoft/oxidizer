@@ -1,6 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! A cell that initializes its value exactly once.
+//!
+//! [`OnceLock`] lets any number of callers race to initialize the value; only
+//! one initialization runs, and every caller observes the same result.
+
 use std::cell::UnsafeCell;
 use std::fmt;
 use std::ops::Deref;

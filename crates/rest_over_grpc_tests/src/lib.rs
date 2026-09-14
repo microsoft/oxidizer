@@ -19,8 +19,10 @@
 pub mod custom;
 pub mod tonic_bridge;
 
-/// The large GitHub-like router driving the `grs_router_vs_matchit` benchmark.
 pub mod bench_router {
+    //! The large GitHub-like router driving the `grs_router_vs_matchit`
+    //! benchmark.
+
     #![allow(
         clippy::all,
         clippy::pedantic,
@@ -32,8 +34,10 @@ pub mod bench_router {
     include!(concat!(env!("OUT_DIR"), "/bench_router.rs"));
 }
 
-/// A small router exercising tricky routing cases, used by the correctness tests.
 pub mod coverage {
+    //! A small router exercising tricky routing cases, used by the
+    //! correctness tests.
+
     #![allow(
         clippy::all,
         clippy::pedantic,

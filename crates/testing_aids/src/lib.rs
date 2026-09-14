@@ -46,8 +46,10 @@ pub fn is_mutation_testing() -> bool {
     env::var("MUTATION_TESTING").as_deref() == Ok("1")
 }
 
-/// Executes a thread-safe function on a background thread and abandons it if
-/// it does not complete before the provided timeout.
+/// Executes a thread-safe function on a background thread with a timeout.
+///
+/// Returns `None` if the function does not complete before the timeout,
+/// abandoning it on the background thread.
 ///
 /// # Panics
 ///
@@ -82,8 +84,10 @@ where
     receiver.recv_timeout(TEST_TIMEOUT).ok()
 }
 
-/// Executes a function on the current thread and sets up a watchdog timer that terminates the
-/// process if the target function does not complete before the provided timeout.
+/// Executes a function on the current thread with a watchdog timeout.
+///
+/// The watchdog terminates the process if the function does not complete
+/// before the timeout.
 ///
 /// This is a variant of `execute_or_abandon()` that can be used with single-threaded
 /// logic that does not support being moved to a background thread.
@@ -143,8 +147,9 @@ pub fn repeating_reverse_incrementing_bytes() -> impl Iterator<Item = u8> {
     (0..=u8::MAX).rev().cycle()
 }
 
-/// Executes an async function on the Miri-compatible `futures` async task runtime,
-/// blocking until it completes and enforcing a test timeout.
+/// Executes an async function on the Miri-compatible `futures` runtime.
+///
+/// Blocks until it completes and enforces a test timeout.
 pub fn async_test<F, FF>(f: F)
 where
     F: FnOnce() -> FF + 'static,

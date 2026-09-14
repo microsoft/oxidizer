@@ -62,8 +62,13 @@ pub use wire::Error as WireError;
 /// Stable category of a low-level snapshot framing error.
 pub use wire::ErrorKind as WireErrorKind;
 
-/// Stable identity and schema metadata for the rallocator snapshot source.
 pub mod source {
+    //! Stable identity and schema metadata for the rallocator snapshot
+    //! source.
+    //!
+    //! Consumers of [`seismograph`] snapshots use [`ID`] to recognize sections
+    //! contributed by this crate, and [`SCHEMA_VERSION`] to interpret them.
+
     /// Stable seismograph source identity for rallocator snapshots.
     pub const ID: seismograph::snapshot::SourceId = seismograph::snapshot::SourceId::new(0x5241_4c4c_4f43_4154);
     /// Human-readable source name.

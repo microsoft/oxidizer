@@ -1,6 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! An executor-independent condition variable.
+//!
+//! [`Condvar`] pairs with [`super::mutex::Mutex`] to let a task release its
+//! lock and wait for a notification, then reacquire the lock before
+//! continuing. Waits may complete spuriously, so callers must re-check their
+//! predicate after waking.
+
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};

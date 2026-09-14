@@ -21,8 +21,10 @@
 //! (generated from `proto/library.proto`). The top-level [`Transcoder`] that
 //! routes requests to that trait is generated separately and re-exported here.
 
-/// The `prost` + `pbjson` message types and the generated REST service trait.
 pub mod pb {
+    //! The `prost` + `pbjson` message types and the generated REST service
+    //! trait.
+
     #![allow(
         clippy::all,
         clippy::pedantic,

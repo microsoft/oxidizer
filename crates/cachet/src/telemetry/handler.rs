@@ -1,6 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Callback-based telemetry handlers for cache operations.
+//!
+//! Register a [`CacheEventHandler`] via
+//! [`CacheBuilder::event_handler`](crate::CacheBuilder::event_handler) to
+//! receive structured callbacks for per-tier and top-level cache operations,
+//! as an alternative to the `tracing`-based event recording.
+
 use std::time::Duration;
 
 /// Unique identifier for a cache operation, used to correlate tier events

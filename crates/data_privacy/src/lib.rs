@@ -183,7 +183,6 @@
 extern crate self as data_privacy;
 
 // Re-export types and traits from data_privacy_core.
-#[doc(inline)]
 pub use data_privacy_core::{Classified, DataClass, IntoDataClass, RedactedDebug, RedactedDisplay, RedactedToString, Redactor};
 /// Derives an implementation of the [`RedactedDebug`](trait@RedactedDebug) trait for a struct.
 ///
@@ -249,7 +248,6 @@ pub use data_privacy_core::{Classified, DataClass, IntoDataClass, RedactedDebug,
 ///     r#"User { email: <redacted>, department: "engineering" }"#
 /// );
 /// ```
-#[doc(inline)]
 pub use data_privacy_macros::RedactedDebug;
 /// Derives an implementation of the [`RedactedDisplay`](trait@RedactedDisplay) trait for a struct.
 ///
@@ -312,10 +310,8 @@ pub use data_privacy_macros::RedactedDebug;
 /// // standard `Display` representation (no surrounding quotes).
 /// assert_eq!(out, "User { email: <redacted>, department: engineering }");
 /// ```
-#[doc(inline)]
 pub use data_privacy_macros::RedactedDisplay;
 // Re-export attribute macros.
-#[doc(inline)]
 pub use data_privacy_macros::{classified, taxonomy};
 
 mod redaction_engine;

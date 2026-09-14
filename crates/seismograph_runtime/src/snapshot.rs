@@ -24,8 +24,13 @@ const TASK_V2_FIXED_LEN: usize = 32;
 const TASK_FIXED_LEN: usize = 120;
 const ADDRESS_LOOKUP_FIXED_LEN: usize = 24;
 
-/// Stable identity and schema metadata for the process-wide runtime source.
 pub mod source {
+    //! Stable identity and schema metadata for the process-wide runtime
+    //! source.
+    //!
+    //! Consumers of [`seismograph`] snapshots use [`ID`] to recognize sections
+    //! contributed by this crate.
+
     /// Stable source identity spelling `SEISRUNT` in ASCII.
     pub const ID: seismograph::snapshot::SourceId = seismograph::snapshot::SourceId::new(0x5345_4953_5255_4e54);
     /// Human-readable source name.

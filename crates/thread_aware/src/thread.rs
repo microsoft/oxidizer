@@ -26,8 +26,9 @@ pub struct ThreadBuilder {
 }
 
 impl ThreadBuilder {
-    /// Selects the NUMA node nearest to the thread being built, overriding the
-    /// topology-agnostic node-zero fallback.
+    /// Selects the NUMA node nearest to the thread being built.
+    ///
+    /// Overrides the topology-agnostic node-zero fallback.
     #[must_use]
     pub fn with_numa_node(mut self, numa_node: u32) -> Self {
         self.numa_node = new_numa_node(numa_node);
