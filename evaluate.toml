@@ -22,3 +22,13 @@ reason = "The primary fallible decode API has Errors and Examples sections; requ
 rule = "m_canonical_docs"
 file = "crates/testing_aids/src/lib.rs"
 reason = "All helpers document behavior and applicable panics, and representative data-generator examples already exist; requiring examples on every straightforward test helper exceeds the guideline's strongly-encouraged language."
+
+[[config.allow]]
+rule = "m_canonical_docs"
+file = "crates/fetch_hyper/src/testing.rs"
+reason = "The public test-fixture families have representative examples and applicable panic contracts; requiring a separate example on every fixture type exceeds the guideline's strongly-encouraged language."
+
+[[config.allow]]
+rule = "m_canonical_docs"
+file = "crates/seismograph_rallocator/src/lib.rs"
+reason = "Encoding and decoding APIs have complete Errors and Examples sections, and error types explain stable categories; separate examples for each error type and re-export are not required."
