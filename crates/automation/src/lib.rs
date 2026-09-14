@@ -12,5 +12,5 @@ mod cargo_metadata;
 mod process;
 
 pub use cargo::{INTERNAL_CRATES, run_cargo};
-pub use cargo_metadata::{PackageMetadata, Target, list_packages};
+pub use cargo_metadata::{PackageMetadata, Target, check_unique_example_names, list_packages};
 pub use process::{Outcome, RunResult, run_with_timeout};

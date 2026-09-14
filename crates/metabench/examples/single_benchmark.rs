@@ -2,6 +2,10 @@
 // Licensed under the MIT License.
 
 //! One shared workload and input registered with Criterion and Gungraun.
+//!
+//! Named for the single benchmark it registers, to contrast with the
+//! `parameterized` example and to keep example target names unique across the
+//! workspace -- Cargo writes every example to one shared output directory.
 
 use criterion::Criterion;
 

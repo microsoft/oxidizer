@@ -72,6 +72,11 @@ fn run(args: &Args) -> Result<(), AppError> {
     // Discover workspace packages and their example targets via cargo metadata.
     let packages = automation::list_packages(".")?;
 
+    // Checked over every package, not just the selected ones: a duplicate
+    // example name is a property of the workspace, and CI narrows this run with
+    // `--exclude`.
+    automation::check_unique_example_names(&packages)?;
+
     let excluded_packages: Vec<&str> = args.exclude.iter().map(String::as_str).collect();
 
     // Resolve which packages to iterate over.
