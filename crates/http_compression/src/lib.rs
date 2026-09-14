@@ -25,7 +25,8 @@
 //! [`compressors`] transforms a stream of bytes. This crate applies that to
 //! HTTP messages: reading `Content-Encoding`, negotiating `Accept-Encoding`,
 //! and replacing a body with one that compresses or decompresses as it is read.
-//! The trailers and the policies the body already carried travel through intact.
+//! The policies and trailer fields the body already carried travel through,
+//! except stale `Content-Digest` values removed after a transformation.
 //!
 //! Everything runs through one handler, [`Compression`], because a client and
 //! a server want different parts of the same job. The role is chosen up front
