@@ -42,7 +42,7 @@ observed = { workspace = true }
 opentelemetry = { workspace = true, features = ["logs"] }
 
 [dev-dependencies]
-tick = { workspace = true }
+tick = { path = "../tick" }
 
 # >>> anvil-managed: anvil-lints
 [lints]

@@ -45,7 +45,7 @@ loom = { workspace = true }
 [dev-dependencies]
 criterion.workspace = true
 serde = { workspace = true, features = ["std"] }
-thread_aware = { workspace = true, features = ["test-utils"] }
+thread_aware = { path = "../thread_aware", features = ["test-utils"] }
 
 [[bench]]
 name = "performables_uncontended"

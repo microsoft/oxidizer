@@ -44,10 +44,10 @@ seismograph_rallocator.workspace = true
 criterion.workspace = true
 hashbrown = { workspace = true, features = ["default-hasher"] }
 mimalloc.workspace = true
-multitude = { workspace = true, features = ["hashbrown"] }
-performables = { workspace = true, features = ["seismograph"] }
-seismograph = { workspace = true, features = ["monitor"] }
-seismograph_runtime.workspace = true
+multitude = { path = "../multitude", features = ["hashbrown"] }
+performables = { path = "../performables", features = ["seismograph"] }
+seismograph = { path = "../seismograph", features = ["monitor"] }
+seismograph_runtime = { path = "../seismograph_runtime" }
 
 [[bench]]
 name = "mimalloc"
