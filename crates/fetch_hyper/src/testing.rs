@@ -153,7 +153,8 @@ impl Connection for FakeStream {
 /// use tick::Clock;
 ///
 /// let response = &b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"[..];
-/// let connector = FakeConnector::new_success(response, Clock::new_frozen()).with_delay(Duration::from_millis(5));
+/// let connector = FakeConnector::new_success(response, Clock::new_frozen())
+///     .with_delay(Duration::from_millis(5));
 ///
 /// assert_eq!(connector.delay, Duration::from_millis(5));
 /// ```
@@ -343,7 +344,10 @@ pub fn fake_body_builder() -> HttpBodyBuilder {
 ///
 /// assert_eq!(
 ///     sorted_attributes(&attrs),
-///     vec![("a".to_string(), "1".to_string()), ("b".to_string(), "2".to_string())]
+///     vec![
+///         ("a".to_string(), "1".to_string()),
+///         ("b".to_string(), "2".to_string())
+///     ]
 /// );
 /// ```
 #[must_use]

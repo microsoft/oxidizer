@@ -18,8 +18,11 @@ A parser for the [`google.api.http`][__link0] path-template grammar.
 ```rust
 use http_path_template::{Grammar, PathTemplate};
 
-let template = PathTemplate::parse("/shelves/{shelf}/books/{book=**}:archive", Grammar::default())
-    .expect("the template follows the strict grammar");
+let template = PathTemplate::parse(
+    "/shelves/{shelf}/books/{book=**}:archive",
+    Grammar::default(),
+)
+.expect("the template follows the strict grammar");
 
 assert_eq!(template.verb(), Some("archive"));
 ```
@@ -115,7 +118,7 @@ assert!(book.segments().eq([Segment::Rest]));
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_path_template">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbkAlMYyQ1VIMbPvYtX6sorXQbt4ixZNWDMxsbiJP7o0y9DHNhZIGCcmh0dHBfcGF0aF90ZW1wbGF0ZWUwLjIuMQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbvIelRlpsh6gbfzhffoZn_SQbedMRZOQm7kobF31_bfC5OwthZIGCcmh0dHBfcGF0aF90ZW1wbGF0ZWUwLjIuMQ
  [__link0]: https://github.com/googleapis/googleapis/blob/master/google/api/http.proto
  [__link1]: https://docs.rs/http_path_template/0.2.1/http_path_template/?search=PathTemplate
  [__link10]: https://docs.rs/http_path_template/0.2.1/http_path_template/?search=Grammar

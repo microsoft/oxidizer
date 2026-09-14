@@ -38,7 +38,9 @@
 //! // outcome, which the loop below waits for.
 //! let executor = unsafe { Executor::builder().build() };
 //!
-//! executor.tasks().add(async { println!("Hello from the async task!") });
+//! executor
+//!     .tasks()
+//!     .add(async { println!("Hello from the async task!") });
 //! executor.begin_shutdown();
 //!
 //! while executor.execute_cycle() != CycleOutcome::Shutdown {}

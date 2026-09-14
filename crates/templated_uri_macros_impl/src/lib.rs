@@ -8,7 +8,9 @@
 //! use quote::quote;
 //! use templated_uri_macros_impl::raw_derive_impl;
 //!
-//! let expanded = raw_derive_impl(quote!(struct RawPath(String);));
+//! let expanded = raw_derive_impl(quote!(
+//!     struct RawPath(String);
+//! ));
 //! assert!(!expanded.is_empty());
 //! ```
 
@@ -63,7 +65,11 @@ pub(crate) use bail;
 /// use templated_uri_macros_impl::templated_paq_impl;
 ///
 /// let attr = TokenStream::new();
-/// let item = quote!(struct Item { value: u32 });
+/// let item = quote!(
+///     struct Item {
+///         value: u32,
+///     }
+/// );
 /// let expanded = templated_paq_impl(&attr, item);
 /// assert!(!expanded.is_empty());
 /// ```
@@ -213,7 +219,9 @@ fn filter_attributes(f: &Field) -> Vec<&Attribute> {
 /// use quote::quote;
 /// use templated_uri_macros_impl::uri_param_derive_impl;
 ///
-/// let expanded = uri_param_derive_impl(quote!(struct SafeFragment(String);));
+/// let expanded = uri_param_derive_impl(quote!(
+///     struct SafeFragment(String);
+/// ));
 /// assert!(!expanded.is_empty());
 /// ```
 #[must_use]
@@ -239,7 +247,9 @@ pub fn uri_param_derive_impl(input: TokenStream) -> TokenStream {
 /// use quote::quote;
 /// use templated_uri_macros_impl::raw_derive_impl;
 ///
-/// let expanded = raw_derive_impl(quote!(struct RawPath(String);));
+/// let expanded = raw_derive_impl(quote!(
+///     struct RawPath(String);
+/// ));
 /// assert!(!expanded.is_empty());
 /// ```
 #[must_use]

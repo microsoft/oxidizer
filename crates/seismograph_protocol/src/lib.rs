@@ -10,7 +10,8 @@
 //! use seismograph_protocol::write_request;
 //!
 //! let mut frame = Vec::new();
-//! write_request(&mut frame, 1, &Request::ReadRecorderStatistics).expect("the request fits the protocol limit");
+//! write_request(&mut frame, 1, &Request::ReadRecorderStatistics)
+//!     .expect("the request fits the protocol limit");
 //!
 //! assert!(!frame.is_empty());
 //! ```

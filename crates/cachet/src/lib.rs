@@ -293,8 +293,7 @@ pub use cache::{Cache, CacheName};
 pub use cachet_memory::InMemoryCache;
 #[cfg(feature = "service")]
 pub use cachet_service::{CacheOperation, CacheResponse, CacheServiceExt, GetRequest, InsertRequest, InvalidateRequest, ServiceAdapter};
-pub use cachet_tier::DynamicCache;
-pub use cachet_tier::{CacheEntry, CacheTier, Error, InsertOutcome, Result, SizeError};
+pub use cachet_tier::{CacheEntry, CacheTier, DynamicCache, Error, InsertOutcome, Result, SizeError};
 #[cfg(any(feature = "test-util", test))]
 pub use cachet_tier::{CacheOp, MockCache};
 #[doc(inline)]

@@ -288,7 +288,8 @@ impl std::error::Error for Error {}
 ///
 /// let _runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("primary", 1));
 ///
-/// let snapshot = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+/// let snapshot =
+///     seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
 /// let decoded = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap();
 /// let source = decoded
 ///     .sources

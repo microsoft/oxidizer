@@ -89,7 +89,9 @@ impl Barrier {
     /// let participant = thread::spawn(move || other.wait_sync().is_leader());
     ///
     /// let this_thread_led = barrier.wait_sync().is_leader();
-    /// let other_thread_led = participant.join().expect("the participant thread does not panic");
+    /// let other_thread_led = participant
+    ///     .join()
+    ///     .expect("the participant thread does not panic");
     ///
     /// // Exactly one participant releases a given barrier generation.
     /// assert!(this_thread_led ^ other_thread_led);

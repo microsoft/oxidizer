@@ -333,8 +333,8 @@ pub fn encoded_len(snapshot: &Snapshot) -> Result<usize, Error> {
 /// # Examples
 ///
 /// ```
-/// use seismograph_rallocator::{encode, encoded_len};
 /// use seismograph_rallocator::snapshot::{Snapshot, Version};
+/// use seismograph_rallocator::{encode, encoded_len};
 ///
 /// let snapshot = Snapshot::new(Version::new(1, 0, 0));
 /// let mut bytes = vec![0; encoded_len(&snapshot)?];
@@ -435,8 +435,8 @@ pub fn encode(snapshot: &Snapshot, output: &mut [u8]) -> Result<usize, Error> {
 /// # Examples
 ///
 /// ```
-/// use seismograph_rallocator::{decode, encode, encoded_len};
 /// use seismograph_rallocator::snapshot::{Snapshot, Version};
+/// use seismograph_rallocator::{decode, encode, encoded_len};
 ///
 /// let snapshot = Snapshot::new(Version::new(1, 0, 0));
 /// let mut bytes = vec![0; encoded_len(&snapshot)?];

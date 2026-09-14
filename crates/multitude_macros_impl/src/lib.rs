@@ -15,7 +15,14 @@
 //! use syn::parse_quote;
 //!
 //! let root_path: syn::Path = parse_quote!(::multitude::de);
-//! let expanded = derive_deserialize_in(quote!(struct Item { value: u32 }), &root_path);
+//! let expanded = derive_deserialize_in(
+//!     quote!(
+//!         struct Item {
+//!             value: u32,
+//!         }
+//!     ),
+//!     &root_path,
+//! );
 //! assert!(!expanded.is_empty());
 //! ```
 
@@ -60,7 +67,14 @@ use attrs::{ContainerAttrs, DefaultValue, FieldAttrs, RenameRule, parse_containe
 /// use syn::parse_quote;
 ///
 /// let root_path: syn::Path = parse_quote!(::multitude::de);
-/// let expanded = derive_deserialize_in(quote!(struct Item { value: u32 }), &root_path);
+/// let expanded = derive_deserialize_in(
+///     quote!(
+///         struct Item {
+///             value: u32,
+///         }
+///     ),
+///     &root_path,
+/// );
 /// assert!(!expanded.is_empty());
 /// ```
 #[must_use]

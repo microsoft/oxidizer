@@ -46,7 +46,9 @@ use arty_executor::{CycleOutcome, Executor};
 // outcome, which the loop below waits for.
 let executor = unsafe { Executor::builder().build() };
 
-executor.tasks().add(async { println!("Hello from the async task!") });
+executor
+    .tasks()
+    .add(async { println!("Hello from the async task!") });
 executor.begin_shutdown();
 
 while executor.execute_cycle() != CycleOutcome::Shutdown {}
@@ -58,5 +60,5 @@ while executor.execute_cycle() != CycleOutcome::Shutdown {}
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_executor">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbSAndJDr5E7sbEU1b1gAs_3cbBDLLU1IRbP0bpjhmLdQajEFhZIGCakpvaW5IYW5kbGX2
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbvrR_OvfAzakbjb-LW-lr_FYbSdYKRtopaqMbBCAoT8Xgv8hhZIGCakpvaW5IYW5kbGX2
  [__link0]: https://crates.io/crates/JoinHandle

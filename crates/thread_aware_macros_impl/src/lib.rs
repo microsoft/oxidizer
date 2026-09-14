@@ -57,7 +57,12 @@ use struct_gen::build_struct_body;
 /// use thread_aware_macros_impl::derive_thread_aware;
 ///
 /// let root_path: syn::Path = parse_quote!(::thread_aware);
-/// let expanded = derive_thread_aware(quote!(struct Buffer(Vec<u8>);), &root_path);
+/// let expanded = derive_thread_aware(
+///     quote!(
+///         struct Buffer(Vec<u8>);
+///     ),
+///     &root_path,
+/// );
 /// assert!(!expanded.is_empty());
 /// ```
 #[must_use]

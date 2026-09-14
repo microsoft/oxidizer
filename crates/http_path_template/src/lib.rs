@@ -6,8 +6,11 @@
 //! ```
 //! use http_path_template::{Grammar, PathTemplate};
 //!
-//! let template = PathTemplate::parse("/shelves/{shelf}/books/{book=**}:archive", Grammar::default())
-//!     .expect("the template follows the strict grammar");
+//! let template = PathTemplate::parse(
+//!     "/shelves/{shelf}/books/{book=**}:archive",
+//!     Grammar::default(),
+//! )
+//! .expect("the template follows the strict grammar");
 //!
 //! assert_eq!(template.verb(), Some("archive"));
 //! ```
