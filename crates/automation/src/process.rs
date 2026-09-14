@@ -53,14 +53,12 @@ pub struct RunResult {
 ///
 /// use automation::{Outcome, run_with_timeout};
 ///
-/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let mut command = Command::new("cargo");
 /// command.arg("--version");
 ///
-/// let result = run_with_timeout(command, Duration::from_secs(5))?;
+/// let result = run_with_timeout(command, Duration::from_secs(5))
+///     .expect("cargo --version completes before the timeout");
 /// assert!(matches!(result.outcome, Outcome::Success));
-/// # Ok(())
-/// # }
 /// ```
 pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<RunResult, AppError> {
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());

@@ -50,13 +50,10 @@ pub struct Target {
 /// ```no_run
 /// use automation::list_packages;
 ///
-/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let packages = list_packages(".")?;
+/// let packages = list_packages(".").expect("cargo metadata succeeds");
 /// for package in packages {
 ///     println!("{}", package.name);
 /// }
-/// # Ok(())
-/// # }
 /// ```
 pub fn list_packages(workspace_root: impl AsRef<Path>) -> Result<Vec<PackageMetadata>, AppError> {
     let output = Command::new("cargo")
