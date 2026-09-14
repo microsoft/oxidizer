@@ -54,13 +54,13 @@ tick = { workspace = true }
 all_the_time = { workspace = true }
 alloc_tracker = { workspace = true }
 criterion = { workspace = true }
-ohno = { workspace = true, features = ["test-util"] }
+ohno = { path = "../ohno", features = ["test-util"] }
 opentelemetry = { workspace = true, features = ["logs"] }
 opentelemetry-stdout = { workspace = true, features = ["logs", "metrics"] }
 opentelemetry_sdk = { workspace = true, features = ["logs", "metrics", "testing"] }
 static_assertions = { workspace = true }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
-tick = { workspace = true, features = ["test-util", "tokio"] }
+tick = { path = "../tick", features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
 
 [[bench]]

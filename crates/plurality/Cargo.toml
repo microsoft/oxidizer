@@ -50,7 +50,7 @@ bolero = { workspace = true, features = ["std"] }
 criterion = { workspace = true }
 gungraun = { workspace = true, features = ["default"] }
 infinity_pool = { workspace = true }
-metabench = { workspace = true }
+metabench = { path = "../metabench" }
 mimalloc = { workspace = true }
 mutants = { workspace = true }
 static_assertions = { workspace = true }

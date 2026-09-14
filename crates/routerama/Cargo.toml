@@ -50,7 +50,7 @@ criterion = { workspace = true }
 gungraun = { workspace = true, features = ["default"] }
 itoa = { workspace = true }
 matchit = { workspace = true }
-metabench = { workspace = true }
+metabench = { path = "../metabench" }
 mutants = { workspace = true }
 path-tree = { workspace = true }
 regex = { workspace = true, features = ["std", "perf"] }

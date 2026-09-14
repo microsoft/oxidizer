@@ -96,7 +96,7 @@ criterion = { workspace = true }
 # concern inside gungraun/metabench.
 gungraun = { workspace = true, features = ["default"] }
 hashbrown = { workspace = true, features = ["allocator-api2", "default-hasher"] }
-metabench = { workspace = true }
+metabench = { path = "../metabench" }
 mimalloc = { workspace = true }
 multitude_macros = { path = "../multitude_macros" }
 mutants = { workspace = true }

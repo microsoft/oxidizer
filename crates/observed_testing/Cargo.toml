@@ -33,7 +33,7 @@ observed_utils = { workspace = true }
 tick = { workspace = true, features = ["test-util"] }
 
 [dev-dependencies]
-testing_aids = { workspace = true }
+testing_aids = { path = "../testing_aids" }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
 
 # >>> anvil-managed: anvil-lints

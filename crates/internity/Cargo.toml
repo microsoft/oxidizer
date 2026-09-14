@@ -51,7 +51,7 @@ foldhash = { workspace = true }
 gungraun = { workspace = true, features = ["default"] }
 internity_macros = { path = "../internity_macros" }
 lasso = { workspace = true, features = ["multi-threaded"] }
-metabench = { workspace = true }
+metabench = { path = "../metabench" }
 mutants = { workspace = true }
 parking_lot = { workspace = true }
 serde = { workspace = true, features = ["alloc"] }
