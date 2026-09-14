@@ -1,0 +1,41 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "http_headers_simd"
+description = "SIMD implementation details for http_headers. Do not depend on this crate directly; use http_headers."
+version = "0.1.0"
+readme = "README.md"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/http_headers_simd"
+keywords = ["http", "headers", "simd", "parsing"]
+categories = ["web-programming"]
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = []
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = ["std"]
+std = []
+benchmarking = []
+test-util = []
+
+[dev-dependencies]
+bolero = { workspace = true, features = ["std"] }
+criterion = { workspace = true }
+metabench = { workspace = true }
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "http_headers_simd_no_std_dispatch"
+harness = false
