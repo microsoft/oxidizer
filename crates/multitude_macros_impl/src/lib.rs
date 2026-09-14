@@ -44,6 +44,13 @@ mod attrs;
 use attrs::{ContainerAttrs, DefaultValue, FieldAttrs, RenameRule, parse_container, parse_field, parse_variant};
 
 /// Generates an implementation of `DeserializeIn` using `root_path`.
+///
+/// # Errors
+///
+/// This function does not return a `Result`. Input that cannot be parsed as a
+/// derive item, or that carries unsupported `#[multitude(...)]` configuration,
+/// is reported as a `compile_error!` in the returned tokens, so the failure
+/// surfaces when the generated code is compiled rather than at runtime.
 #[must_use]
 pub fn derive_deserialize_in(input: TokenStream2, root_path: &Path) -> TokenStream2 {
     syn::parse2::<DeriveInput>(input)

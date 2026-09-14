@@ -46,6 +46,18 @@ macro_rules! bail {
 
 pub(crate) use bail;
 
+/// Expands the `#[templated]` attribute over a struct or enum.
+///
+/// `attr` holds the attribute arguments, if any, and `item` holds the
+/// annotated item. The returned tokens contain the original item alongside the
+/// generated URI template implementations.
+///
+/// # Errors
+///
+/// This function does not return a `Result`. Input that does not parse, a
+/// generic type, a union, or a template the parser rejects is returned as a
+/// `compile_error!` in the tokens, so the failure surfaces when the generated
+/// code is compiled.
 #[must_use]
 #[cfg_attr(test, mutants::skip)] // not relevant for auto-generated proc macros
 pub fn templated_paq_impl(attr: &TokenStream, item: TokenStream) -> TokenStream {
@@ -180,6 +192,14 @@ fn filter_attributes(f: &Field) -> Vec<&Attribute> {
     attrs
 }
 
+/// Expands the `Escape` derive over a newtype struct.
+///
+/// # Errors
+///
+/// This function does not return a `Result`. Input that does not parse, a
+/// generic type, an enum, a union, or a tuple struct without exactly one field
+/// is returned as a `compile_error!` in the tokens, so the failure surfaces
+/// when the generated code is compiled.
 #[must_use]
 #[cfg_attr(test, mutants::skip)] // just emits compile error otherwise
 pub fn uri_param_derive_impl(input: TokenStream) -> TokenStream {
@@ -191,6 +211,14 @@ pub fn uri_param_derive_impl(input: TokenStream) -> TokenStream {
     uri_param_impl(input)
 }
 
+/// Expands the `Raw` derive over a newtype struct.
+///
+/// # Errors
+///
+/// This function does not return a `Result`. Input that does not parse, a
+/// generic type, an enum, a union, or a tuple struct without exactly one field
+/// is returned as a `compile_error!` in the tokens, so the failure surfaces
+/// when the generated code is compiled.
 #[must_use]
 pub fn raw_derive_impl(input: TokenStream) -> TokenStream {
     let input: DeriveInput = match parse2(input) {

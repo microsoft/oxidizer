@@ -14,10 +14,6 @@
     reason = "Wire and integer conversion errors intentionally collapse into stable telemetry error categories"
 )]
 #![expect(
-    clippy::missing_errors_doc,
-    reason = "Public encoding and decoding functions return the crate's documented Error type"
-)]
-#![expect(
     clippy::module_name_repetitions,
     reason = "Schema field names remain explicit and stable when viewed independently"
 )]
@@ -271,6 +267,12 @@ impl std::error::Error for Error {
 }
 
 /// Returns the exact byte length required to encode `snapshot`.
+///
+/// # Errors
+///
+/// Returns an [`Error`] with kind [`ErrorKind::LengthOverflow`] when a section
+/// or the container as a whole would exceed the length the wire format can
+/// represent.
 pub fn encoded_len(snapshot: &Snapshot) -> Result<usize, Error> {
     count(snapshot.size_classes.len())?;
     count(snapshot.regions.len())?;
@@ -301,6 +303,18 @@ pub fn encoded_len(snapshot: &Snapshot) -> Result<usize, Error> {
 }
 
 /// Encodes `snapshot` into an exactly sized output buffer.
+///
+/// # Errors
+///
+/// Returns an [`Error`] with kind:
+///
+/// - [`ErrorKind::LengthOverflow`] when the snapshot cannot be represented in
+///   the wire format's lengths.
+/// - [`ErrorKind::OutputTooSmall`] when `output` is shorter than
+///   [`encoded_len`].
+/// - [`ErrorKind::OutputLengthMismatch`] when `output` is longer than
+///   [`encoded_len`].
+/// - [`ErrorKind::Wire`] when writing the container header or a section fails.
 pub fn encode(snapshot: &Snapshot, output: &mut [u8]) -> Result<usize, Error> {
     let expected = encoded_len(snapshot)?;
     if output.len() < expected {
@@ -368,6 +382,29 @@ pub fn encode(snapshot: &Snapshot, output: &mut [u8]) -> Result<usize, Error> {
 }
 
 /// Decodes a snapshot from wire bytes.
+///
+/// # Errors
+///
+/// Returns an [`Error`] with kind:
+///
+/// - [`ErrorKind::Wire`] when the container header or section framing is
+///   invalid or truncated.
+/// - [`ErrorKind::UnsupportedSchema`] when the header names a telemetry schema
+///   version this crate cannot read.
+/// - [`ErrorKind::DuplicateSection`] when a section appears more than once.
+/// - [`ErrorKind::MissingSection`] when a required section is absent.
+/// - [`ErrorKind::MalformedSection`] when a section payload does not match the
+///   shape its version declares.
+/// - [`ErrorKind::InvalidUtf8`] when a section carries text that is not UTF-8.
+/// - [`ErrorKind::IntegerOverflow`] when a decoded integer does not fit in the
+///   target type.
+/// - [`ErrorKind::UnknownEventKind`], [`ErrorKind::UnknownSliceKind`], or
+///   [`ErrorKind::UnknownRuntimeEventKind`] when a section carries a
+///   discriminant this crate does not recognize.
+///
+/// Unknown sections and unsupported optional section versions are skipped
+/// rather than rejected, and are reported through
+/// [`snapshot::Snapshot::skipped_sections`].
 pub fn decode(bytes: &[u8]) -> Result<Snapshot, Error> {
     let mut reader = Reader::new(bytes);
     let header = reader.read_header()?;

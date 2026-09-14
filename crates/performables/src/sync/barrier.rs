@@ -40,6 +40,25 @@ impl Barrier {
     }
 
     /// Returns a future that waits for all participants to reach the barrier.
+    ///
+    /// Dropping the returned future before it completes withdraws this
+    /// participant's arrival from the current generation.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use performables::sync::barrier::{Barrier, BarrierWaitResult};
+    ///
+    /// // Awaiting the future completes once every participant has arrived.
+    /// async fn arrive(barrier: &Barrier) -> BarrierWaitResult {
+    ///     barrier.wait().await
+    /// }
+    ///
+    /// let barrier = Barrier::new(2);
+    ///
+    /// // A future that is never polled never arrives at the barrier.
+    /// let _pending = arrive(&barrier);
+    /// ```
     pub fn wait(&self) -> BarrierWait<'_> {
         BarrierWait {
             barrier: self,
@@ -50,6 +69,25 @@ impl Barrier {
     }
 
     /// Blocks the current thread until all participants reach the barrier.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use std::thread;
+    ///
+    /// use performables::sync::barrier::Barrier;
+    ///
+    /// let barrier = Arc::new(Barrier::new(2));
+    /// let other = Arc::clone(&barrier);
+    /// let participant = thread::spawn(move || other.wait_sync().is_leader());
+    ///
+    /// let this_thread_led = barrier.wait_sync().is_leader();
+    /// let other_thread_led = participant.join().expect("the participant thread does not panic");
+    ///
+    /// // Exactly one participant releases a given barrier generation.
+    /// assert!(this_thread_led ^ other_thread_led);
+    /// ```
     pub fn wait_sync(&self) -> BarrierWaitResult {
         block_on(self.wait())
     }
@@ -113,6 +151,10 @@ enum Arrival {
 }
 
 /// A future returned by [`Barrier::wait`].
+///
+/// Polling registers this participant with the current barrier generation and
+/// completes once every participant has arrived. Dropping the future before it
+/// completes withdraws the arrival, so the remaining participants keep waiting.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless polled or awaited"]
 pub struct BarrierWait<'a> {

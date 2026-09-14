@@ -49,6 +49,12 @@ pub use yielding::*;
 /// immediately at the start of a test run.
 pub const TEST_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Returns whether the current process runs under mutation testing.
+///
+/// Mutation testing runs set the `MUTATION_TESTING` environment variable to
+/// `1`. Test timeouts are disabled in that mode so that a mutation which makes
+/// code hang is reported as a timeout rather than being hidden by a helper's
+/// own timeout.
 #[must_use]
 pub fn is_mutation_testing() -> bool {
     env::var("MUTATION_TESTING").as_deref() == Ok("1")
@@ -146,11 +152,31 @@ where
 }
 
 /// Standard test data generator - a repeating sequence of bytes from 0 to 255.
+///
+/// # Examples
+///
+/// ```
+/// use testing_aids::repeating_incrementing_bytes;
+///
+/// let bytes: Vec<u8> = repeating_incrementing_bytes().take(3).collect();
+///
+/// assert_eq!(bytes, [0, 1, 2]);
+/// ```
 pub fn repeating_incrementing_bytes() -> impl Iterator<Item = u8> {
     (0..=u8::MAX).cycle()
 }
 
 /// Standard test data generator - a repeating sequence of bytes from 255 to 0.
+///
+/// # Examples
+///
+/// ```
+/// use testing_aids::repeating_reverse_incrementing_bytes;
+///
+/// let bytes: Vec<u8> = repeating_reverse_incrementing_bytes().take(3).collect();
+///
+/// assert_eq!(bytes, [255, 254, 253]);
+/// ```
 pub fn repeating_reverse_incrementing_bytes() -> impl Iterator<Item = u8> {
     (0..=u8::MAX).rev().cycle()
 }
@@ -158,6 +184,12 @@ pub fn repeating_reverse_incrementing_bytes() -> impl Iterator<Item = u8> {
 /// Executes an async function on the Miri-compatible `futures` runtime.
 ///
 /// Blocks until it completes and enforces a test timeout.
+///
+/// # Panics
+///
+/// Panics if the future panics. The test timeout is enforced by
+/// [`execute_or_terminate_process`], which terminates the whole process when
+/// the future does not complete in time.
 pub fn async_test<F, FF>(f: F)
 where
     F: FnOnce() -> FF + 'static,

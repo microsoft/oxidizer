@@ -66,4 +66,5 @@ pub use route::Route;
 #[doc(hidden)]
 pub use route::is_http_token;
 #[doc(hidden)]
+#[doc(inline)]
 pub use trie::route_field_name;

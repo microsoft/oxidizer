@@ -823,7 +823,6 @@ pub mod http {
     //! [`StatusCode`], and [`Version`]) are re-exported directly at the crate
     //! root.
 
-    #[doc(inline)]
     pub use ::http::{header, method, request, response, status, version};
 }
 
@@ -853,7 +852,6 @@ pub mod handlers;
 
 pub mod telemetry;
 
-#[doc(inline)]
 pub use http_extensions::{
     HeaderMapExt, HeaderValueExt, HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpRequestBuilder, HttpRequestExt, HttpResponse,
     HttpResponseBuilder, RequestExt, RequestHandler, ResponseExt, Result, StatusExt,

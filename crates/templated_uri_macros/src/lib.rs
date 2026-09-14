@@ -22,6 +22,16 @@
 use proc_macro::TokenStream;
 use templated_uri_macros_impl::{raw_derive_impl, templated_paq_impl, uri_param_derive_impl};
 
+/// Implements the URI template traits for a struct or enum.
+///
+/// The attribute is re-exported as `templated_uri::templated`, whose
+/// documentation describes the template syntax and the supported attributes.
+///
+/// # Errors
+///
+/// The macro emits a `compile_error!` instead of returning an error: generic
+/// types, unions, malformed attribute arguments, and templates the parser
+/// rejects all fail when the expansion is compiled.
 #[cfg_attr(test, mutants::skip)] // The macro is tested indirectly through the `templated_uri` crate's tests, so we can skip it in mutation testing here.
 #[proc_macro_attribute]
 pub fn templated(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -29,6 +39,16 @@ pub fn templated(attr: TokenStream, item: TokenStream) -> TokenStream {
     output.into()
 }
 
+/// Derives the `Escape` trait for a newtype wrapping a URI-escaped value.
+///
+/// The derive is re-exported as `templated_uri::Escape`, whose documentation
+/// describes the requirements it places on the annotated type.
+///
+/// # Errors
+///
+/// The macro emits a `compile_error!` instead of returning an error: input
+/// that does not parse, generic types, enums, unions, and tuple structs
+/// without exactly one field all fail when the expansion is compiled.
 #[cfg_attr(test, mutants::skip)] // The macro is tested indirectly through the `templated_uri` crate's tests, so we can skip it in mutation testing here.
 #[proc_macro_derive(Escape)]
 pub fn uri_param(input: TokenStream) -> TokenStream {
@@ -36,6 +56,16 @@ pub fn uri_param(input: TokenStream) -> TokenStream {
     output.into()
 }
 
+/// Derives the `Raw` trait for a newtype wrapping an unescaped value.
+///
+/// The derive is re-exported as `templated_uri::Raw`, whose documentation
+/// describes the requirements it places on the annotated type.
+///
+/// # Errors
+///
+/// The macro emits a `compile_error!` instead of returning an error: input
+/// that does not parse, generic types, enums, unions, and tuple structs
+/// without exactly one field all fail when the expansion is compiled.
 #[cfg_attr(test, mutants::skip)] // The macro is tested indirectly through the `templated_uri` crate's tests, so we can skip it in mutation testing here.
 #[proc_macro_derive(Raw)]
 pub fn raw(input: TokenStream) -> TokenStream {

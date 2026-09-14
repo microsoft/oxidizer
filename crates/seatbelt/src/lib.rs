@@ -233,7 +233,6 @@
 //! - **`tower-service`** - Enables [`tower_service::Service`] trait implementations for all
 //!   resilience middleware.
 
-#[doc(inline)]
 pub use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
 
 mod context;

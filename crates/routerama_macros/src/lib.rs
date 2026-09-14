@@ -188,6 +188,39 @@ pub fn derive_to_query(input: TokenStream) -> TokenStream {
 /// represented by `routerama::ResolveError`. See the
 /// [`routerama`](https://docs.rs/routerama) crate documentation for the full
 /// model.
+///
+/// # Example
+///
+/// Import the attribute through this implementation crate:
+///
+/// ```
+/// use routerama_macros::resolver;
+/// ```
+///
+/// Expansion resolves the `routerama` facade, so the complete invocation is
+/// shown as syntax here; the same code compiles in a crate that depends on
+/// `routerama`:
+///
+/// ```text
+/// use routerama::resolver;
+///
+/// #[resolver]
+/// enum BookRoute<'p> {
+///     #[route(GET, "/books/{book}")]
+///     GetBook { book: &'p str },
+///
+///     #[route(GET, "/health")]
+///     Health,
+/// }
+///
+/// let resolver = BookRoute::resolver();
+///
+/// match resolver.resolve("GET", "/books/rust") {
+///     Ok(BookRoute::GetBook { book }) => println!("book {book}"),
+///     Ok(BookRoute::Health) => println!("healthy"),
+///     Err(error) => println!("unresolved: {error:?}"),
+/// }
+/// ```
 #[cfg_attr(test, mutants::skip)]
 #[proc_macro_attribute]
 pub fn resolver(attr: TokenStream, item: TokenStream) -> TokenStream {

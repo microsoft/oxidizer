@@ -299,6 +299,14 @@ pub use allocator::Rallocator;
 ///
 /// All options are optional and inherit the standard configuration.
 ///
+/// # Safety
+///
+/// The expansion contains the unsafe call to [`Rallocator::new`], whose
+/// invariant it establishes by construction: invoke this macro exactly once in
+/// a process, as that process's `#[global_allocator]`, and never mix
+/// configurations. A second installation, or an installation with a different
+/// configuration, breaks that invariant.
+///
 /// # Options
 ///
 /// | Option | Default |

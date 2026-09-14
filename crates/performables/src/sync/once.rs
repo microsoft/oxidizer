@@ -58,6 +58,11 @@ impl<T> OnceLock<T> {
     }
 
     /// Returns the stored value, initializing it with `initialize` if needed.
+    ///
+    /// # Panics
+    ///
+    /// A panic in `initialize` propagates to the caller and leaves the cell
+    /// uninitialized, so a later call runs the initializer again.
     pub fn get_or_init<F>(&self, initialize: F) -> &T
     where
         F: FnOnce() -> T,
