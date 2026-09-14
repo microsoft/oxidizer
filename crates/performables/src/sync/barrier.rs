@@ -44,6 +44,12 @@ impl Barrier {
     /// Dropping the returned future before it completes withdraws this
     /// participant's arrival from the current generation.
     ///
+    /// # Panics
+    ///
+    /// Polling panics only if the barrier's internal arrival state is
+    /// inconsistent. Ordinary waiting, cancellation, and future drops do not
+    /// panic.
+    ///
     /// # Example
     ///
     /// ```
