@@ -60,7 +60,7 @@ criterion = { workspace = true }
 
 [target.'cfg(windows)'.dev-dependencies]
 bytes = { workspace = true }
-bytesbuf = { path = "../bytesbuf" }
+bytesbuf = { path = "../bytesbuf", default-features = false }
 ctor = { workspace = true }
 fetch = { path = "../fetch" }
 # The localhost fixtures the tests, benchmarks and examples below are written
