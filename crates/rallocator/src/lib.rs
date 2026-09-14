@@ -299,6 +299,11 @@ pub use allocator::Rallocator;
 ///
 /// All options are optional and inherit the standard configuration.
 ///
+/// # Panics
+///
+/// Allocator construction panics if the size-class layout is malformed or
+/// `partial_slab_scan_limit` is zero.
+///
 /// # Safety
 ///
 /// The expansion contains the unsafe call to [`Rallocator::new`], whose
