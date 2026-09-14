@@ -20,10 +20,12 @@
 //!   writes a small, fixed hardware-event CSV report to `<path>` and prints a
 //!   marker line to stderr so tests can check whether the worker suppressed
 //!   this command's own output.
-//! - anything else: the initial `--start-paused` collection launch; execs
-//!   everything after the first `--` (the wrapped benchmark executable and
-//!   its arguments) and forwards its exit code, standing in for `vtune`
-//!   actually running the workload.
+//! - anything else: the initial `--start-paused` collection launch. Validates
+//!   the `-collect-with runsa [<forwarded --vtune-arg values>] --start-paused
+//!   -result-dir <dir>` shape before `--`, then execs everything after the
+//!   first `--` (the wrapped benchmark executable and its arguments) and
+//!   forwards its exit code, standing in for `vtune` actually running the
+//!   workload.
 
 use std::env;
 use std::io::Write as _;
@@ -101,6 +103,24 @@ fn run_wrapped_workload(arguments: &[String]) -> ExitCode {
     let Some(separator) = arguments.iter().position(|argument| argument == "--") else {
         return ExitCode::FAILURE;
     };
+    // Validate the collection-launch shape `launch_vtune_worker` builds
+    // (`-collect-with runsa [<forwarded --vtune-arg values>] --start-paused
+    // -result-dir <dir>`), not just that a `--` separator exists, so a
+    // regression in how that command is assembled is caught by the tests
+    // that exercise this fixture rather than silently ignored.
+    let launch_arguments = &arguments[..separator];
+    if launch_arguments.first().map(String::as_str) != Some("-collect-with") || launch_arguments.get(1).map(String::as_str) != Some("runsa")
+    {
+        return ExitCode::FAILURE;
+    }
+    let Some(start_paused_index) = launch_arguments.iter().position(|argument| argument == "--start-paused") else {
+        return ExitCode::FAILURE;
+    };
+    if launch_arguments.get(start_paused_index + 1).map(String::as_str) != Some("-result-dir")
+        || launch_arguments.get(start_paused_index + 2).is_none()
+    {
+        return ExitCode::FAILURE;
+    }
     let Some((program, workload_arguments)) = arguments[separator + 1..].split_first() else {
         return ExitCode::FAILURE;
     };

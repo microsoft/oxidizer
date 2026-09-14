@@ -243,14 +243,11 @@ fn fake_vtune_directory() -> &'static Path {
     })
 }
 
-/// Prepends [`fake_vtune_directory`] to the current `PATH` so a spawned
-/// `metabench` worker resolves `vtune` to the fixture.
 /// The workspace's packaging allowlist deliberately keeps `/examples/**` out
 /// of the published `.crate` (examples are dev-only, per the top-level
 /// `Cargo.toml` policy), while `/tests/**` (this file) is packaged. A
 /// `cargo test` run from a published tarball therefore cannot build the
-/// `fake_vtune` fixture this file's vtune tests depend on. Skip them in that
-/// case instead of failing on a missing fixture that was never meant to ship.
+/// `fake_vtune` fixture this file's vtune tests depend on.
 fn fake_vtune_fixture_available() -> bool {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("examples")
@@ -258,6 +255,37 @@ fn fake_vtune_fixture_available() -> bool {
         .is_file()
 }
 
+/// Published crate tarballs contain only the files this crate's packaging
+/// allowlist (`Cargo.toml`'s workspace-inherited `include`) selects, which
+/// never covers the workspace root manifest one level above `crates/`. Its
+/// presence therefore distinguishes a full repository checkout (where
+/// `examples/fake_vtune.rs` is expected to exist and its absence would be an
+/// accidental move/rename bug) from a published-tarball build (where the
+/// fixture's absence is an intentional packaging choice).
+fn is_full_repository_checkout() -> bool {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.toml").is_file()
+}
+
+/// Returns `true` if the calling test should proceed. If the `fake_vtune`
+/// fixture is unavailable, this either skips the test (published-tarball
+/// case, expected) or panics (full repository checkout, where the fixture's
+/// absence means it was accidentally moved or renamed rather than
+/// intentionally excluded from packaging).
+fn require_fake_vtune_fixture_or_skip() -> bool {
+    if fake_vtune_fixture_available() {
+        return true;
+    }
+    assert!(
+        !is_full_repository_checkout(),
+        "examples/fake_vtune.rs is missing from a full repository checkout; the vtune integration \
+         tests depend on it and it should not have been moved or renamed without updating this file"
+    );
+    eprintln!("skipping: fake_vtune fixture source is not packaged (see fake_vtune_fixture_available)");
+    false
+}
+
+/// Prepends [`fake_vtune_directory`] to the current `PATH` so a spawned
+/// `metabench` worker resolves `vtune` to the fixture.
 fn path_with_fake_vtune() -> std::ffi::OsString {
     std::env::join_paths(
         std::iter::once(fake_vtune_directory().to_owned()).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())),
@@ -267,8 +295,7 @@ fn path_with_fake_vtune() -> std::ffi::OsString {
 
 #[test]
 fn vtune_measures_exact_workload_and_writes_metrics() {
-    if !fake_vtune_fixture_available() {
-        eprintln!("skipping: fake_vtune fixture source is not packaged (see fake_vtune_fixture_available)");
+    if !require_fake_vtune_fixture_or_skip() {
         return;
     }
     let path = path_with_fake_vtune();
@@ -277,6 +304,10 @@ fn vtune_measures_exact_workload_and_writes_metrics() {
     let command_log = directory.path().join("vtune-commands.log");
     let json = directory.path().join("report.json");
     let markdown = directory.path().join("report.md");
+    // Also forwards `--vtune-arg -knob`, exercising `fake_vtune`'s validation
+    // of the full `-collect-with runsa [<forwarded args>] --start-paused
+    // -result-dir <dir>` collection-launch shape (not just the trailing `--`)
+    // with a non-empty forwarded-argument list in the middle of it.
     let output = cargo()
         .env("PATH", path)
         .env("VTUNE_TEST_COMMAND_LOG", &command_log)
@@ -293,6 +324,8 @@ fn vtune_measures_exact_workload_and_writes_metrics() {
             "--vtune",
             "--show-engine-output",
             "--no-baseline",
+            "--vtune-arg",
+            "-knob",
             "--export-json",
         ])
         .arg(&json)
@@ -341,8 +374,7 @@ fn vtune_measures_exact_workload_and_writes_metrics() {
 
 #[test]
 fn vtune_suppresses_report_output_without_show_engine_output() {
-    if !fake_vtune_fixture_available() {
-        eprintln!("skipping: fake_vtune fixture source is not packaged (see fake_vtune_fixture_available)");
+    if !require_fake_vtune_fixture_or_skip() {
         return;
     }
     let path = path_with_fake_vtune();
@@ -391,8 +423,7 @@ fn vtune_suppresses_report_output_without_show_engine_output() {
 
 #[test]
 fn vtune_command_failure_surfaces_vtune_control_error() {
-    if !fake_vtune_fixture_available() {
-        eprintln!("skipping: fake_vtune fixture source is not packaged (see fake_vtune_fixture_available)");
+    if !require_fake_vtune_fixture_or_skip() {
         return;
     }
     let path = path_with_fake_vtune();
@@ -426,8 +457,7 @@ fn vtune_command_failure_surfaces_vtune_control_error() {
 
 #[test]
 fn vtune_pause_failure_surfaces_vtune_control_error() {
-    if !fake_vtune_fixture_available() {
-        eprintln!("skipping: fake_vtune fixture source is not packaged (see fake_vtune_fixture_available)");
+    if !require_fake_vtune_fixture_or_skip() {
         return;
     }
     let path = path_with_fake_vtune();

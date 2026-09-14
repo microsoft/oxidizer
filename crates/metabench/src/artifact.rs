@@ -492,15 +492,18 @@ pub(crate) fn parse_vtune(path: &Path, artifact_root: &Path, identity: String, n
                 message: format!("line {} event {name} has invalid count {value}", index + 1),
             });
         }
-        if metrics
-            .insert(name.clone(), Metric::float("vtune", &name, value, MetricDirection::LowerIsBetter))
-            .is_some()
-        {
-            return Err(Error::ArtifactFormat {
-                path: path.to_owned(),
-                message: format!("vtune event {name} occurs more than once"),
-            });
-        }
+        // Real `vtune -report hw-events` output can repeat the same event
+        // name across multiple rows (for example, one row per core type or
+        // per hardware thread group); the report command does not constrain
+        // the grouping to a single row per event. Sum repeated rows into one
+        // metric instead of treating a second occurrence as malformed input.
+        metrics
+            .entry(name.clone())
+            .and_modify(|metric: &mut Metric| {
+                let existing = metric.value.as_f64();
+                *metric = Metric::float("vtune", &name, existing + value, MetricDirection::LowerIsBetter);
+            })
+            .or_insert_with(|| Metric::float("vtune", &name, value, MetricDirection::LowerIsBetter));
     }
     if metrics.is_empty() {
         return Err(Error::ArtifactFormat {
@@ -1245,10 +1248,9 @@ mod tests {
     }
 
     #[test]
-    fn vtune_rejects_malformed_missing_and_duplicate_counters() {
+    fn vtune_rejects_malformed_and_missing_counters() {
         for contents in [
             "Hardware Event Type,Hardware Event Count:Self\nINST_RETIRED.ANY,not-a-number\n".to_owned(),
-            "Hardware Event Type,Hardware Event Count:Self\nINST_RETIRED.ANY,1\nINST_RETIRED.ANY,2\n".to_owned(),
             "Hardware Event Type,Hardware Event Count:Self\nINST_RETIRED.ANY\n".to_owned(),
             "Hardware Event Type,Hardware Event Count:Self\n".to_owned(),
             "Hardware Event Type,Hardware Event Count:Self\nINST_RETIRED.ANY,-1\n".to_owned(),
@@ -1263,6 +1265,24 @@ mod tests {
                 Err(Error::ArtifactFormat { .. })
             ));
         }
+    }
+
+    #[test]
+    fn vtune_sums_repeated_event_rows_instead_of_rejecting_them() {
+        // Real `vtune -report hw-events` output can repeat the same event
+        // name across several rows (for example, one row per core type), so
+        // the parser aggregates repeats into a single metric rather than
+        // treating a second occurrence as malformed input.
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("vtune.csv");
+        fs::write(
+            &path,
+            "Hardware Event Type,Hardware Event Count:Self\nINST_RETIRED.ANY,1\nINST_RETIRED.ANY,2\n",
+        )
+        .unwrap();
+
+        let result = parse_vtune(&path, directory.path(), "group/bench".to_owned(), "group/bench".to_owned()).unwrap();
+        assert_eq!(result.metrics["INST_RETIRED.ANY"].value, crate::report::MetricValue::Float(3.0));
     }
 
     #[test]

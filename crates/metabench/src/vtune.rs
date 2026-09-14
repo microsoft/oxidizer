@@ -17,6 +17,21 @@
 //! so nothing is measured until this module's [`begin`] resumes it, and this
 //! module's [`Guard::drop`] pauses it again the instant the annotated
 //! workload returns.
+//!
+//! # Sampling limitations
+//!
+//! `VTune`'s hardware-event collection is a statistical sampler, not an exact
+//! event counter: only the single Criterion invocation that first calls
+//! [`begin`] is measured (the `MEASURED` flag admits exactly one resume per
+//! process), and unlike the exact per-invocation counts `perf` produces,
+//! `VTune`'s reported counts are sampling estimates whose accuracy improves
+//! with a longer-running workload. A workload short enough to complete
+//! between sampler ticks can therefore report zero events for a metric it
+//! genuinely exercises. Additionally, [`Guard::drop`]'s synchronous
+//! `vtune -command pause` call is issued after the workload returns, so the
+//! measured window extends slightly beyond the workload itself to include
+//! that pause round-trip. Callers who need exact, per-invocation counts
+//! should prefer the Linux `perf` engine (see [`crate::perf`]).
 
 use std::env;
 use std::process::Command;
@@ -64,6 +79,10 @@ pub fn begin() -> Option<Guard> {
         return None;
     };
     if MEASURED.swap(true, Ordering::Relaxed) {
+        // Only the first Criterion invocation in this process is ever
+        // measured; see this module's "Sampling limitations" doc for why
+        // that single-invocation, sampling-based measurement is `VTune`'s
+        // documented trade-off rather than a bug to fix here.
         return None;
     }
     let result_dir = std::path::PathBuf::from(result_dir);
