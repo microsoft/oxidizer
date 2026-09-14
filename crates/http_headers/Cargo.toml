@@ -1,0 +1,128 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "http_headers"
+description = "Fast, ergonomic typed HTTP headers with borrowed views."
+version = "0.1.0"
+readme = "README.md"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/http_headers"
+documentation = "https://docs.rs/http_headers"
+keywords = ["http", "headers", "zero-copy", "simd"]
+categories = ["web-programming"]
+autobenches = false
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["bytes::bytes::Bytes", "http::*", "serde_core::de::*", "serde_core::ser::*"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = ["headers-all"]
+benchmarking = ["http_headers_simd/benchmarking"]
+headers-all = [
+    "headers-authorization",
+    "headers-cache-control",
+    "headers-conditional",
+    "headers-content-length",
+    "headers-content-type",
+    "headers-cors",
+    "headers-etag",
+    "headers-location",
+    "headers-negotiation",
+    "headers-range",
+    "headers-security",
+    "headers-set-cookie",
+    "headers-user-agent",
+    "headers-websocket",
+]
+headers-authorization = ["dep:base64", "dep:zeroize"]
+headers-cache-control = ["dep:compact_str"]
+headers-conditional = ["dep:httpdate", "headers-etag"]
+headers-content-length = []
+headers-content-type = []
+headers-cors = []
+headers-etag = []
+headers-location = ["dep:fluent-uri"]
+headers-negotiation = ["dep:idna"]
+headers-range = []
+headers-security = ["dep:compact_str"]
+headers-set-cookie = []
+headers-user-agent = []
+headers-websocket = ["dep:base64", "dep:sha1"]
+# Optional adapter for the external `http` crate. The adapter may retain
+# `HeaderValue` storage internally without changing typed-header semantics.
+http = ["dep:http"]
+serde = ["dep:serde"]
+
+[dependencies]
+base64 = { workspace = true, optional = true, features = ["std"] }
+bytes = { workspace = true, features = ["std"] }
+compact_str = { workspace = true, optional = true, features = ["std"] }
+fluent-uri = { workspace = true, optional = true, features = ["ipv_future"] }
+http = { workspace = true, optional = true }
+http_headers_simd = { workspace = true, features = ["std"] }
+httpdate = { workspace = true, optional = true }
+idna = { workspace = true, optional = true, features = ["compiled_data", "std"] }
+itoa.workspace = true
+serde = { workspace = true, optional = true, features = ["derive", "std"] }
+sha1 = { workspace = true, optional = true, features = ["std"] }
+smallvec = { workspace = true, features = ["const_new"] }
+zeroize = { workspace = true, optional = true, features = ["alloc"] }
+
+[dev-dependencies]
+axum = { workspace = true, features = ["http1", "json", "tokio"] }
+base64 = { workspace = true, features = ["std"] }
+bolero = { workspace = true, features = ["std"] }
+compact_str = { workspace = true, features = ["std"] }
+criterion = { workspace = true }
+fluent-uri = { workspace = true, features = ["ipv_future"] }
+headers = { workspace = true }
+http = { workspace = true }
+httpdate = { workspace = true }
+idna = { workspace = true, features = ["compiled_data", "std"] }
+metabench = { workspace = true }
+mutants = { workspace = true }
+paste = { workspace = true }
+serde = { workspace = true, features = ["derive", "std"] }
+serde_json = { workspace = true, features = ["std"] }
+sha1 = { workspace = true, features = ["std"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
+tower = { workspace = true, features = ["util"] }
+zeroize = { workspace = true, features = ["alloc"] }
+
+[[example]]
+name = "axum"
+required-features = ["headers-cache-control", "headers-user-agent", "http"]
+
+[[bench]]
+name = "http_headers_micro"
+harness = false
+required-features = ["benchmarking", "http"]
+
+[[bench]]
+name = "http_headers_storage"
+harness = false
+required-features = ["benchmarking", "http"]
+
+[[bench]]
+name = "http_headers_per_header"
+harness = false
+required-features = ["benchmarking", "http"]
+
+[[bench]]
+name = "http_headers_name_recognition"
+harness = false
+required-features = ["benchmarking", "http"]
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints
