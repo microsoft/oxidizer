@@ -802,15 +802,16 @@
 //! decompress.
 //!
 //! Decompression is lazy, so a malformed body fails when it is read rather than when the response
-//! arrives, and that failure therefore does not trigger a retry. Compression limits are
-//! preserved by default; the client adds no output-size or stream-count cap.
+//! arrives, and that failure therefore does not trigger a retry. The output-size
+//! limit inherits the format's streaming default, while each decompression stage
+//! accepts at most 1,024 concatenated streams by default.
 //!
 //! [`DecompressionOptions`][options::DecompressionOptions] can explicitly bound
 //! decompressed output and the number of compressed streams. These bounds apply even when
 //! streaming without buffering the body; exceeding one fails the body with the
 //! `compression_limit_exceeded` error label.
 //! [`response_body_options`](HttpClientBuilder::response_body_options) separately controls how
-//! much a body-buffering operation may retain in memory.
+//! much a body-buffering operation may retain in memory, with a 2 GiB default.
 //!
 //! For server-side compression and decompression, use the
 //! [`http_compression`](https://docs.rs/http_compression) crate directly.

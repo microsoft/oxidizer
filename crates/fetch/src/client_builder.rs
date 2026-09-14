@@ -163,14 +163,16 @@ impl HttpClientBuilder {
     ///
     /// # Bounds
     ///
-    /// No additional output-size or stream-count limits are imposed by default.
-    /// The selected compression format retains its own limits. Explicit bounds configured through
-    /// `options` apply while reading the body, even without buffering it. Exceeding
-    /// a decompression bound fails the body with the `compression_limit_exceeded`
-    /// error label.
+    /// The output-size limit inherits the selected compression format's
+    /// streaming default, while the number of concatenated streams is capped at
+    /// 1,024 per decompression stage. Explicit bounds configured through
+    /// `options` apply while reading the body, even without buffering it.
+    /// Exceeding a decompression bound fails the body with the
+    /// `compression_limit_exceeded` error label.
     ///
     /// The [`response_body_options`][Self::response_body_options] buffer limit remains
-    /// independent and applies when collecting the decompressed bytes into memory.
+    /// independent and applies when collecting the decompressed bytes into
+    /// memory; its default is 2 GiB.
     ///
     /// # Example
     ///

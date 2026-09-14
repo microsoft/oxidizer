@@ -698,15 +698,16 @@ that was not asked for is handed back untouched rather than failing.
 decompress.
 
 Decompression is lazy, so a malformed body fails when it is read rather than when the response
-arrives, and that failure therefore does not trigger a retry. Compression limits are
-preserved by default; the client adds no output-size or stream-count cap.
+arrives, and that failure therefore does not trigger a retry. The output-size
+limit inherits the format’s streaming default, while each decompression stage
+accepts at most 1,024 concatenated streams by default.
 
 [`DecompressionOptions`][__link84] can explicitly bound
 decompressed output and the number of compressed streams. These bounds apply even when
 streaming without buffering the body; exceeding one fails the body with the
 `compression_limit_exceeded` error label.
 [`response_body_options`][__link85] separately controls how
-much a body-buffering operation may retain in memory.
+much a body-buffering operation may retain in memory, with a 2 GiB default.
 
 For server-side compression and decompression, use the
 [`http_compression`][__link86] crate directly.
@@ -778,7 +779,7 @@ names it and those options are applied with
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbiBKs2oOhBugbpz16ko6K1Cwbr_G93ukzYhIb5f83lR1XbJJhZIeCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xMC4wgmVmZXRjaGYwLjE3LjCCb2h0dHBfZXh0ZW5zaW9uc2YwLjExLjCCZ2xheWVyZWRlMC4zLjeCaHNlYXRiZWx0ZTAuOS4wgm10ZW1wbGF0ZWRfdXJpZTAuNi4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbT9AX4uMwSfAbF-a-uUQ3DLQbLBjZMbPH4p8bZymvA9Ubc7ZhZIeCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xMC4wgmVmZXRjaGYwLjE3LjCCb2h0dHBfZXh0ZW5zaW9uc2YwLjExLjCCZ2xheWVyZWRlMC4zLjeCaHNlYXRiZWx0ZTAuOS4wgm10ZW1wbGF0ZWRfdXJpZTAuNi4w
  [__link0]: https://docs.rs/fetch/0.17.0/fetch/?search=HttpClient
  [__link1]: https://docs.rs/http_extensions/0.11.0/http_extensions/?search=RequestHandler
  [__link10]: https://docs.rs/fetch/0.17.0/fetch/?search=HttpClient::post
