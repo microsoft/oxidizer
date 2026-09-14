@@ -56,7 +56,7 @@ impl Dispatch {
         )
     }
 
-    /// Test-only constructor for a preassembled dispatch mode.
+    /// Test-only constructor for a dispatch mode assembled by the caller.
     #[cfg(test)]
     pub(crate) fn new_test(mode: DispatchMode, request_filter: RequestFilter) -> Self {
         Self::new(mode, request_filter)
