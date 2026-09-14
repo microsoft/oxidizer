@@ -41,7 +41,9 @@ seismograph.workspace = true
 seismograph_rallocator.workspace = true
 
 [dev-dependencies]
+bolero = { workspace = true, features = ["std"] }
 criterion.workspace = true
+fastrand.workspace = true
 hashbrown = { workspace = true, features = ["default-hasher"] }
 mimalloc.workspace = true
 multitude = { workspace = true, features = ["hashbrown"] }
