@@ -15,7 +15,7 @@ use data_privacy::RedactionEngine;
 
 mod decompression;
 
-pub use decompression::{DecompressionMethod, ResponseDecompressionOptions};
+pub use decompression::{DecompressionMethod, DecompressionOptions};
 pub use fetch_options::{
     ConnectionIdleTimeout, ConnectionKeepAlive, ConnectionLifetime, ConnectionPoolOptions, Http2Options, PoolIndex, PoolSelection,
     RequestFilter, SocketOptions, TransportOptions,
@@ -42,7 +42,7 @@ pub(crate) struct ClientOptions {
     /// TLS configuration used by the bundled transports.
     pub tls: TlsOptions,
     /// Formats and resource limits for automatic response decompression.
-    pub decompression: ResponseDecompressionOptions,
+    pub decompression: DecompressionOptions,
 }
 
 #[cfg(test)]

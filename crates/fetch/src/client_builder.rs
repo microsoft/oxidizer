@@ -17,9 +17,7 @@ use crate::constants::DEFAULT_HTTP_CLIENT_NAME;
 use crate::custom::{Isolation, Transport};
 use crate::dispatch_builder::create_dispatch_handler;
 use crate::handlers::Dispatch;
-use crate::options::{
-    ClientOptions, ConnectionKeepAlive, ConnectionPoolOptions, Http2Options, RequestFilter, ResponseDecompressionOptions,
-};
+use crate::options::{ClientOptions, ConnectionKeepAlive, ConnectionPoolOptions, DecompressionOptions, Http2Options, RequestFilter};
 use crate::pipeline::{CustomPipeline, Pipeline, PipelineBuilder, PipelineContext, StandardRequestPipeline};
 use crate::resilience::HttpResilienceContext;
 use crate::telemetry::Metering;
@@ -149,14 +147,10 @@ impl HttpClientBuilder {
     ///
     /// Off by default: a build with none of the `compression-*` features links no
     /// compression implementation at all, and even with them the client decompresses nothing until
-    /// [`methods`][ResponseDecompressionOptions::methods] names something. Requests then advertise the methods in
+    /// [`methods`][DecompressionOptions::methods] names something. Requests then advertise the methods in
     /// `Accept-Encoding`, most preferred first, and a matching response is
     /// decompressed before the caller sees it, with `Content-Encoding` and
     /// `Content-Length` removed because neither describes the decompressed body.
-    /// What they said is kept in [`OriginalBody`][crate::OriginalBody] on the
-    /// response; fetch re-exports that type whenever any `compression-*` feature
-    /// is enabled.
-    ///
     /// A response compressed with a format that is not enabled is handed back
     /// untouched rather than failing. Decompression is lazy, so a malformed body
     /// fails when it is read rather than when the response arrives.
@@ -165,7 +159,7 @@ impl HttpClientBuilder {
     /// The `compression-all` feature makes all supported compression formats available.
     ///
     /// Passing a method slice or array reference preserves the compression format's default limits.
-    /// Pass [`ResponseDecompressionOptions`] to customize them.
+    /// Pass [`DecompressionOptions`] to customize them.
     ///
     /// # Bounds
     ///
@@ -184,20 +178,19 @@ impl HttpClientBuilder {
     /// # #[cfg(all(feature = "test-util", feature = "compression-gzip"))]
     /// # {
     /// # use fetch::HttpClient;
-    /// # use fetch::options::{DecompressionMethod, ResponseDecompressionOptions};
+    /// # use fetch::options::{DecompressionMethod, DecompressionOptions};
     /// # use fetch::fake::FakeDeps;
     /// # use http::StatusCode;
     /// # let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default());
     /// let client = builder
-    ///     .response_decompression(
-    ///         ResponseDecompressionOptions::new()
-    ///             .methods(&[DecompressionMethod::Gzip])
+    ///     .decompression(
+    ///         DecompressionOptions::with_methods(&[DecompressionMethod::Gzip])
     ///             .max_output_len(8 * 1024 * 1024),
     ///     )
     ///     .build();
     /// # }
     /// ```
-    pub fn response_decompression(mut self, options: impl Into<ResponseDecompressionOptions>) -> Self {
+    pub fn decompression(mut self, options: impl Into<DecompressionOptions>) -> Self {
         self.options.decompression = options.into();
         self
     }

@@ -17,7 +17,7 @@ use compressors::format::Format;
 /// them has no variants at all, links no compression implementation, and can only ask for an empty
 /// set.
 ///
-/// Pass to [`ResponseDecompressionOptions::methods`].
+/// Pass to [`DecompressionOptions::methods`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum DecompressionMethod {
@@ -96,22 +96,21 @@ impl DecompressionMethod {
 /// Configured bounds apply while reading the body, including when streaming
 /// without buffering it.
 ///
-/// Pass to [`HttpClientBuilder::response_decompression`][crate::HttpClientBuilder::response_decompression].
+/// Pass to [`HttpClientBuilder::decompression`][crate::HttpClientBuilder::decompression].
 ///
 /// # Examples
 ///
 /// ```
 /// # #[cfg(feature = "compression-gzip")] {
-/// use fetch::options::{DecompressionMethod, ResponseDecompressionOptions};
+/// use fetch::options::{DecompressionMethod, DecompressionOptions};
 ///
-/// let options = ResponseDecompressionOptions::new()
-///     .methods(&[DecompressionMethod::Gzip])
+/// let options = DecompressionOptions::with_methods(&[DecompressionMethod::Gzip])
 ///     .max_output_len(8 * 1024 * 1024)
 ///     .max_streams(32);
 /// # }
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResponseDecompressionOptions {
+pub struct DecompressionOptions {
     pub(crate) methods: Vec<DecompressionMethod>,
     output_limit: OutputLimit,
     max_streams: Option<u64>,
@@ -124,7 +123,7 @@ enum OutputLimit {
     Unbounded,
 }
 
-impl ResponseDecompressionOptions {
+impl DecompressionOptions {
     /// Creates options with no enabled methods and no overrides of compression limits.
     ///
     /// This is what [`Default`] returns.
@@ -135,6 +134,12 @@ impl ResponseDecompressionOptions {
             output_limit: OutputLimit::Inherit,
             max_streams: None,
         }
+    }
+
+    /// Creates options that enable `methods` and inherit the compression formats' limits.
+    #[must_use]
+    pub fn with_methods(methods: &[DecompressionMethod]) -> Self {
+        Self::new().methods(methods)
     }
 
     /// Decompresses responses using any of `methods`, most preferred first.
@@ -211,31 +216,31 @@ impl ResponseDecompressionOptions {
         let limits = match self.output_limit {
             OutputLimit::Inherit => limits,
             OutputLimit::Bounded(bytes) => {
-                limits.max_output_len(NonZeroU64::new(bytes).expect("ResponseDecompressionOptions::max_output_len rejects zero"))
+                limits.max_output_len(NonZeroU64::new(bytes).expect("DecompressionOptions::max_output_len rejects zero"))
             }
             OutputLimit::Unbounded => limits.unbounded_output_len(),
         };
 
         Some(match self.max_streams {
-            Some(streams) => limits.max_streams(NonZeroU64::new(streams).expect("ResponseDecompressionOptions::max_streams rejects zero")),
+            Some(streams) => limits.max_streams(NonZeroU64::new(streams).expect("DecompressionOptions::max_streams rejects zero")),
             None => limits,
         })
     }
 }
 
-impl Default for ResponseDecompressionOptions {
+impl Default for DecompressionOptions {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl From<&[DecompressionMethod]> for ResponseDecompressionOptions {
+impl From<&[DecompressionMethod]> for DecompressionOptions {
     fn from(methods: &[DecompressionMethod]) -> Self {
-        Self::new().methods(methods)
+        Self::with_methods(methods)
     }
 }
 
-impl<const N: usize> From<&[DecompressionMethod; N]> for ResponseDecompressionOptions {
+impl<const N: usize> From<&[DecompressionMethod; N]> for DecompressionOptions {
     fn from(methods: &[DecompressionMethod; N]) -> Self {
         Self::from(methods.as_slice())
     }
@@ -269,11 +274,11 @@ mod tests {
     #[test]
     fn constructors_and_method_conversions_leave_compression_limits_untouched() {
         for options in [
-            ResponseDecompressionOptions::new(),
-            ResponseDecompressionOptions::default(),
-            ResponseDecompressionOptions::new().methods(DecompressionMethod::ALL),
-            ResponseDecompressionOptions::from(DecompressionMethod::ALL),
-            ResponseDecompressionOptions::from(&[DecompressionMethod::Gzip]),
+            DecompressionOptions::new(),
+            DecompressionOptions::default(),
+            DecompressionOptions::with_methods(DecompressionMethod::ALL),
+            DecompressionOptions::from(DecompressionMethod::ALL),
+            DecompressionOptions::from(&[DecompressionMethod::Gzip]),
         ] {
             assert!(options.limits().is_none());
         }
@@ -281,7 +286,7 @@ mod tests {
 
     #[test]
     fn explicit_unbounded_output_is_distinct_from_inheritance() {
-        let options = ResponseDecompressionOptions::new().max_output_len(None);
+        let options = DecompressionOptions::new().max_output_len(None);
         assert_eq!(
             options.limits(),
             Some(compressors::DecompressorLimits::new().unbounded_output_len())
@@ -291,18 +296,18 @@ mod tests {
     #[test]
     #[should_panic(expected = "max_output_len must be greater than zero")]
     fn zero_output_limit_is_a_configuration_error() {
-        let _ = ResponseDecompressionOptions::new().max_output_len(0);
+        let _ = DecompressionOptions::new().max_output_len(0);
     }
 
     #[test]
     #[should_panic(expected = "max_output_len must be greater than zero")]
     fn an_optional_zero_output_limit_is_a_configuration_error() {
-        let _ = ResponseDecompressionOptions::new().max_output_len(Some(0));
+        let _ = DecompressionOptions::new().max_output_len(Some(0));
     }
 
     #[test]
     #[should_panic(expected = "max_streams must be greater than zero")]
     fn zero_stream_limit_is_a_configuration_error() {
-        let _ = ResponseDecompressionOptions::new().max_streams(0);
+        let _ = DecompressionOptions::new().max_streams(0);
     }
 }

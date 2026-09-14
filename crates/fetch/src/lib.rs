@@ -779,7 +779,7 @@
 //! The client can automatically decompress response bodies, which is off until it is asked for.
 //! Link the compression formats you want through the `compression-*` features, or enable
 //! `compression-all` for every supported format, then select them through
-//! [`ResponseDecompressionOptions`][options::ResponseDecompressionOptions]:
+//! [`DecompressionOptions`][options::DecompressionOptions]:
 //!
 //! ```
 //! # #[cfg(all(feature = "test-util", feature = "compression-gzip"))]
@@ -789,17 +789,14 @@
 //! # use fetch::options::DecompressionMethod;
 //! # use http::StatusCode;
 //! # let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default());
-//! let client = builder
-//!     .response_decompression(&[DecompressionMethod::Gzip])
-//!     .build();
+//! let client = builder.decompression(&[DecompressionMethod::Gzip]).build();
 //! # }
 //! ```
 //!
 //! Requests then advertise the methods in `Accept-Encoding`, most preferred first, and a matching
 //! response is decompressed before the caller sees it. `Content-Encoding` and `Content-Length` are
-//! removed because neither describes the decompressed body; what they said is kept in
-//! [`OriginalBody`] on the response. A response compressed with a format that was
-//! not asked for is handed back untouched rather than failing.
+//! removed because neither describes the decompressed body. A response compressed with a format
+//! that was not asked for is handed back untouched rather than failing.
 //!
 //! [`DecompressionMethod::ALL`](options::DecompressionMethod::ALL) asks for everything the build can
 //! decompress.
@@ -808,7 +805,7 @@
 //! arrives, and that failure therefore does not trigger a retry. Compression limits are
 //! preserved by default; the client adds no output-size or stream-count cap.
 //!
-//! [`ResponseDecompressionOptions`][options::ResponseDecompressionOptions] can explicitly bound
+//! [`DecompressionOptions`][options::DecompressionOptions] can explicitly bound
 //! decompressed output and the number of compressed streams. These bounds apply even when
 //! streaming without buffering the body; exceeding one fails the body with the
 //! `compression_limit_exceeded` error label.
@@ -853,9 +850,9 @@
 //! [automatic response decompression](#automatic-response-decompression). None is on by default,
 //! and a build with none of them links no compression implementation. Enabling one makes a format
 //! *available*; the client decompresses nothing until
-//! [`ResponseDecompressionOptions::methods`](options::ResponseDecompressionOptions::methods)
+//! [`DecompressionOptions::methods`](options::DecompressionOptions::methods)
 //! names it and those options are applied with
-//! [`response_decompression`](HttpClientBuilder::response_decompression).
+//! [`decompression`](HttpClientBuilder::decompression).
 //!
 //! - **`compression-gzip`**: Links `gzip` compression (RFC 1952) for
 //!   [automatic response decompression](#automatic-response-decompression) and adds
@@ -925,13 +922,6 @@ pub mod handlers;
 /// Telemetry attributes and connection diagnostics.
 pub mod telemetry;
 
-#[cfg(any(
-    feature = "compression-gzip",
-    feature = "compression-deflate",
-    feature = "compression-brotli",
-    feature = "compression-zstd"
-))]
-pub use http_compression::OriginalBody;
 pub use http_extensions::{
     HeaderMapExt, HeaderValueExt, HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpRequestBuilder, HttpRequestExt, HttpResponse,
     HttpResponseBuilder, RequestExt, RequestHandler, ResponseExt, Result, StatusExt,

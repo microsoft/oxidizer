@@ -12,11 +12,12 @@ use bytesbuf::BytesView;
 use compressors::Resources;
 use compressors::format::Format;
 use fetch::fake::{FakeDeps, FakeHandler};
-use fetch::options::{DecompressionMethod, ResponseDecompressionOptions};
-use fetch::{HttpClient, HttpClientBuilder, HttpResponseBuilder, OriginalBody};
+use fetch::options::{DecompressionMethod, DecompressionOptions};
+use fetch::{HttpClient, HttpClientBuilder, HttpResponseBuilder};
 use futures::StreamExt as _;
 use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH};
 use http::{HeaderMap, HeaderValue, StatusCode};
+use http_compression::OriginalBody;
 use http_extensions::HttpBodyOptions;
 use ohno::Labeled as _;
 
@@ -93,7 +94,7 @@ fn build(
 /// A client that decompresses every compression format available in this build.
 fn client_with(format_token: Option<&'static str>, body: BytesView) -> (HttpClient, SeenRequests) {
     build(format_token, body, |builder| {
-        builder.response_decompression(DecompressionMethod::ALL).build()
+        builder.decompression(DecompressionMethod::ALL).build()
     })
 }
 
@@ -101,7 +102,7 @@ fn client_with(format_token: Option<&'static str>, body: BytesView) -> (HttpClie
 async fn a_default_client_decompresses_nothing() {
     let expected = payload();
     let compressed = compress(Format::Gzip, expected.as_bytes());
-    // No call to `response_decompression`: compiling the features in
+    // No call to `decompression`: compiling the features in
     // must not change what this client sends or what it hands back.
     let (client, seen) = build(Some("gzip"), compressed.clone(), HttpClientBuilder::build);
 
@@ -116,9 +117,7 @@ async fn a_default_client_decompresses_nothing() {
 #[tokio::test]
 async fn an_empty_method_array_keeps_decompression_disabled() {
     let compressed = compress(Format::Gzip, payload().as_bytes());
-    let (client, seen) = build(Some("gzip"), compressed.clone(), |builder| {
-        builder.response_decompression(&[]).build()
-    });
+    let (client, seen) = build(Some("gzip"), compressed.clone(), |builder| builder.decompression(&[]).build());
     let response = client.get(URL).fetch().await.unwrap();
 
     assert!(!seen.last().contains_key(ACCEPT_ENCODING));
@@ -204,7 +203,7 @@ async fn a_caller_supplied_accept_encoding_is_left_alone() {
 async fn narrowing_the_method_set_passes_the_rest_through() {
     let compressed = compress(Format::Brotli, payload().as_bytes());
     let (client, seen) = build(Some("br"), compressed, |builder| {
-        builder.response_decompression(&[DecompressionMethod::Gzip]).build()
+        builder.decompression(&[DecompressionMethod::Gzip]).build()
     });
 
     let response = client.get(URL).fetch().await.unwrap();
@@ -218,9 +217,8 @@ async fn clearing_methods_disables_decompression_and_advertisement() {
     let compressed = compress(Format::Gzip, payload().as_bytes());
     let (client, seen) = build(Some("gzip"), compressed.clone(), |builder| {
         builder
-            .response_decompression(
-                ResponseDecompressionOptions::new()
-                    .methods(&[DecompressionMethod::Gzip])
+            .decompression(
+                DecompressionOptions::with_methods(&[DecompressionMethod::Gzip])
                     .max_output_len(1)
                     .methods(&[]),
             )
@@ -238,12 +236,8 @@ async fn replacing_options_replaces_both_methods_and_limits() {
     let expected = payload();
     let (client, seen) = build(Some("br"), compress(Format::Brotli, expected.as_bytes()), |builder| {
         builder
-            .response_decompression(
-                ResponseDecompressionOptions::new()
-                    .methods(&[DecompressionMethod::Gzip])
-                    .max_output_len(1),
-            )
-            .response_decompression(&[DecompressionMethod::Brotli])
+            .decompression(DecompressionOptions::with_methods(&[DecompressionMethod::Gzip]).max_output_len(1))
+            .decompression(&[DecompressionMethod::Brotli])
             .build()
     });
     let response = client.get(URL).fetch().await.unwrap();
@@ -267,7 +261,7 @@ async fn output_limits_apply_at_the_exact_boundary_for_every_method_and_pipeline
             for limit in [len, len - 1] {
                 let (client, _) = build(Some(token), compressed.clone(), |builder| {
                     let builder = if minimal { builder.minimal_pipeline() } else { builder };
-                    let options = ResponseDecompressionOptions::new().methods(&[method]).max_output_len(None);
+                    let options = DecompressionOptions::with_methods(&[method]).max_output_len(None);
                     let options = if minimal {
                         options.max_output_len(Some(limit))
                     } else {
@@ -275,7 +269,7 @@ async fn output_limits_apply_at_the_exact_boundary_for_every_method_and_pipeline
                     };
                     builder
                         .response_body_options(HttpBodyOptions::new().buffer_limit(1))
-                        .response_decompression(options)
+                        .decompression(options)
                         .build()
                 });
                 let response = client.get(URL).fetch().await.unwrap();
@@ -299,12 +293,12 @@ async fn output_limits_apply_at_the_exact_boundary_for_every_method_and_pipeline
 async fn compression_output_defaults_are_preserved_even_when_stream_count_is_limited() {
     const LEN: usize = 64 * 1024 * 1024 + 1;
     let compressed = compress_zeroes(Format::Brotli, LEN);
-    let options = ResponseDecompressionOptions::from(&[DecompressionMethod::Brotli]);
+    let options = DecompressionOptions::from(&[DecompressionMethod::Brotli]);
     for options in [options.clone(), options.max_streams(1)] {
         let (client, _) = build(Some("br"), compressed.clone(), |builder| {
             builder
                 .response_body_options(HttpBodyOptions::new().buffer_limit(1))
-                .response_decompression(options)
+                .decompression(options)
                 .build()
         });
 
@@ -321,9 +315,8 @@ async fn none_removes_a_previously_configured_output_limit() {
     let (client, _) = build(Some("gzip"), compress(Format::Gzip, expected.as_bytes()), |builder| {
         builder
             .response_body_options(HttpBodyOptions::new().buffer_limit(1))
-            .response_decompression(
-                ResponseDecompressionOptions::new()
-                    .methods(&[DecompressionMethod::Gzip])
+            .decompression(
+                DecompressionOptions::with_methods(&[DecompressionMethod::Gzip])
                     .max_output_len(1)
                     .max_output_len(None),
             )
@@ -344,11 +337,9 @@ async fn compression_stream_count_defaults_are_preserved_even_when_output_is_lim
     ] {
         let member = compress(format, b"");
         let members = BytesView::from_views(std::iter::repeat_n(member, 1025));
-        let options = ResponseDecompressionOptions::from(&[method]);
+        let options = DecompressionOptions::from(&[method]);
         for options in [options.clone(), options.max_output_len(1)] {
-            let (client, _) = build(Some(token), members.clone(), |builder| {
-                builder.response_decompression(options).build()
-            });
+            let (client, _) = build(Some(token), members.clone(), |builder| builder.decompression(options).build());
             assert_eq!(streamed_len(client.get(URL).fetch().await.unwrap()).await.unwrap(), 0, "{token}");
         }
     }
@@ -364,11 +355,8 @@ async fn stream_limits_count_empty_members_even_with_unbounded_output() {
         for count in [2, 3] {
             let members = BytesView::from_views(std::iter::repeat_n(member.clone(), count));
             let (client, _) = build(Some(token), members, |builder| {
-                let options = ResponseDecompressionOptions::new()
-                    .methods(&[method])
-                    .max_streams(2)
-                    .max_output_len(None);
-                builder.response_decompression(options).build()
+                let options = DecompressionOptions::with_methods(&[method]).max_streams(2).max_output_len(None);
+                builder.decompression(options).build()
             });
             let result = streamed_len(client.get(URL).fetch().await.unwrap()).await;
 
@@ -402,12 +390,12 @@ async fn a_corrupt_body_fails_when_it_is_read() {
 #[tokio::test]
 async fn the_buffer_limit_applies_to_the_decompressed_body() {
     let expected = payload();
-    let options = ResponseDecompressionOptions::new().methods(&[DecompressionMethod::Gzip]);
+    let options = DecompressionOptions::with_methods(&[DecompressionMethod::Gzip]);
     for options in [options.clone(), options.max_output_len(None)] {
         let (client, _) = build(Some("gzip"), compress(Format::Gzip, expected.as_bytes()), |builder| {
             builder
                 .response_body_options(HttpBodyOptions::default().buffer_limit(16))
-                .response_decompression(options)
+                .decompression(options)
                 .build()
         });
 
@@ -425,7 +413,7 @@ async fn decompression_also_applies_to_the_minimal_pipeline() {
     let (client, _) = build(Some("gzip"), compress(Format::Gzip, expected.as_bytes()), |builder| {
         builder
             .minimal_pipeline()
-            .response_decompression(ResponseDecompressionOptions::new().methods(&[DecompressionMethod::Gzip]))
+            .decompression(DecompressionOptions::with_methods(&[DecompressionMethod::Gzip]))
             .build()
     });
 
