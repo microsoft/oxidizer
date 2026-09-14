@@ -16,7 +16,7 @@ use mime::Mime;
 use smallvec::SmallVec;
 
 use crate::error::{CompressibleTypeError, invalid, too_many_content_codings, unsupported};
-use crate::{CONTENT_DIGEST_HEADER, body, negotiate};
+use crate::{CONTENT_DIGEST_HEADER, REPR_DIGEST_HEADER, body, negotiate};
 
 /// A short list of formats: a stacked `Content-Encoding` is rare.
 type Formats = SmallVec<[Format; 2]>;
@@ -294,6 +294,10 @@ impl CompressionLayer<Server> {
     /// A request whose body reports a known length of zero is passed through
     /// unchanged, including its `Content-Encoding` metadata. This exception
     /// avoids installing a decoder that cannot produce a compressed member.
+    ///
+    /// Decompression streams bytes without imposing an absolute output-size
+    /// bound by default. Set [`limits`][Self::limits] to an application-specific
+    /// bound before enabling this for untrusted request bodies.
     #[must_use]
     pub fn decompress_requests(mut self, formats: &[Format]) -> Self {
         self.role.decompress_requests = http_formats(formats);
@@ -451,7 +455,7 @@ impl<T: RequestHandler> Compression<T> {
                 Either::Right(
                     self.inner
                         .execute(input)
-                        .map(move |response| server.compress_response(&self.config, response?, chosen, connect)),
+                        .map(move |response| server.compress_response(&self.config, response?, &chosen, connect)),
                 )
             }
         };
@@ -691,27 +695,49 @@ impl Client {
     }
 }
 
+#[derive(Debug)]
+struct ResponseNegotiation {
+    selection: negotiate::Selection,
+    accept_encoding: HeaderMap,
+}
+
 impl Server {
     /// Picks the response's compression format before the inner handler runs.
     ///
     /// A `HEAD` response carries no body to compress however its headers describe
     /// one, so it is ruled out here rather than after the fact.
-    fn choose_response_format(&self, request: &HttpRequest) -> negotiate::Selection {
-        if self.compress_responses.is_empty() || request.method() == Method::HEAD {
-            return negotiate::Selection::Identity;
+    fn choose_response_format(&self, request: &HttpRequest) -> ResponseNegotiation {
+        let mut accept_encoding = HeaderMap::new();
+        for value in request.headers().get_all(ACCEPT_ENCODING) {
+            accept_encoding.append(ACCEPT_ENCODING, value.clone());
         }
 
-        negotiate::select(request.headers(), &self.compress_responses)
+        if self.compress_responses.is_empty() || request.method() == Method::HEAD {
+            return ResponseNegotiation {
+                selection: negotiate::Selection::Identity,
+                accept_encoding,
+            };
+        }
+
+        ResponseNegotiation {
+            selection: negotiate::select(&accept_encoding, &self.compress_responses),
+            accept_encoding,
+        }
     }
 
     fn compress_response(
         &self,
         config: &Config,
         mut response: HttpResponse,
-        chosen: negotiate::Selection,
+        negotiation: &ResponseNegotiation,
         connect: bool,
     ) -> Result<HttpResponse> {
         if self.compress_responses.is_empty() || (connect && response.status().is_success()) {
+            return Ok(response);
+        }
+
+        // Do not hide an origin failure behind a negotiation response.
+        if !response.status().is_success() {
             return Ok(response);
         }
 
@@ -726,20 +752,21 @@ impl Server {
             return Ok(response);
         }
 
-        let format = match chosen {
-            negotiate::Selection::Format(format) => format,
-            negotiate::Selection::Identity => return Ok(response),
-            negotiate::Selection::NotAcceptable => {
-                let (mut parts, _) = response.into_parts();
-                parts.status = StatusCode::NOT_ACCEPTABLE;
-                parts.headers.remove(CONTENT_ENCODING);
-                parts.headers.remove(CONTENT_LENGTH);
-                parts.headers.remove(CONTENT_RANGE);
-                parts.headers.remove(CONTENT_TYPE);
-                parts.headers.remove(ETAG);
-                parts.headers.remove(CONTENT_DIGEST_HEADER);
-                return Ok(HttpResponse::from_parts(parts, config.body_builder.empty()));
+        if response.headers().contains_key(CONTENT_ENCODING) {
+            return if negotiate::content_encoding_acceptable(&negotiation.accept_encoding, response.headers()) {
+                Ok(response)
+            } else {
+                Ok(not_acceptable(config, response))
+            };
+        }
+
+        let format = match negotiation.selection {
+            negotiate::Selection::Format(format) if self.is_compressible(response.headers()) => format,
+            _ if negotiate::identity_acceptable(&negotiation.accept_encoding) => return Ok(response),
+            negotiate::Selection::Format(_) | negotiate::Selection::NotAcceptable => {
+                return Ok(not_acceptable(config, response));
             }
+            negotiate::Selection::Identity => return Ok(response),
         };
 
         let (mut parts, body) = response.into_parts();
@@ -781,6 +808,7 @@ impl Server {
         // The compressed length is not known until the body has been read.
         headers.remove(CONTENT_LENGTH);
         headers.remove(CONTENT_DIGEST_HEADER);
+        headers.remove(REPR_DIGEST_HEADER);
         weaken_etag(headers);
 
         Ok(config.body_builder.rewrap(body, move |body| {
@@ -804,6 +832,20 @@ impl Server {
                 .as_ref()
                 .is_none_or(|allowed| allowed.iter().any(|allowed| matches_type(allowed, &actual)))
     }
+}
+
+fn not_acceptable(config: &Config, response: HttpResponse) -> HttpResponse {
+    let (mut parts, _) = response.into_parts();
+    parts.status = StatusCode::NOT_ACCEPTABLE;
+    parts.headers.remove(CONTENT_ENCODING);
+    parts.headers.remove(CONTENT_LENGTH);
+    parts.headers.remove(CONTENT_RANGE);
+    parts.headers.remove(CONTENT_TYPE);
+    parts.headers.remove(ETAG);
+    parts.headers.remove(CONTENT_DIGEST_HEADER);
+    parts.headers.remove(REPR_DIGEST_HEADER);
+
+    HttpResponse::from_parts(parts, config.body_builder.empty())
 }
 
 /// Settings shared by both roles.
@@ -855,6 +897,7 @@ impl Config {
         headers.remove(CONTENT_ENCODING);
         headers.remove(CONTENT_LENGTH);
         headers.remove(CONTENT_DIGEST_HEADER);
+        headers.remove(REPR_DIGEST_HEADER);
 
         // Built before the body is touched, so an engine that cannot be
         // configured fails the message rather than the body halfway through it.

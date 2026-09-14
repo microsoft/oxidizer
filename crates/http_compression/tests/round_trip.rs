@@ -644,8 +644,17 @@ async fn an_uncompressed_response_still_says_it_varies() {
 #[tokio::test]
 async fn a_body_is_not_returned_when_no_representation_is_acceptable() {
     for accept_encoding in ["gzip;q=0, identity;q=0", "*;q=0"] {
-        let handler = server().compress_responses(&[Format::Gzip]).layer(echo());
-        let mut input = request(bytes(&payload()), None);
+        let handler = server().compress_responses(&[Format::Gzip]).layer(responds_with(|| {
+            HttpResponseBuilder::new_fake()
+                .status(StatusCode::OK)
+                .header(CONTENT_TYPE, HeaderValue::from_static("text/plain"))
+                .header(ETAG, HeaderValue::from_static("\"original\""))
+                .header("content-digest", HeaderValue::from_static("sha-256=:Y29udGVudA==:"))
+                .header("repr-digest", HeaderValue::from_static("sha-256=:cmVwcg==:"))
+                .text(payload())
+                .build()
+        }));
+        let mut input = request(BytesView::default(), None);
         input
             .headers_mut()
             .insert(ACCEPT_ENCODING, HeaderValue::from_static(accept_encoding));
@@ -655,8 +664,92 @@ async fn a_body_is_not_returned_when_no_representation_is_acceptable() {
         assert_eq!(response.status(), StatusCode::NOT_ACCEPTABLE, "{accept_encoding}");
         assert_eq!(response.headers().get(VARY).unwrap(), "accept-encoding");
         assert!(response.headers().get(CONTENT_ENCODING).is_none(), "{accept_encoding}");
+        assert!(response.headers().get(CONTENT_TYPE).is_none(), "{accept_encoding}");
+        assert!(response.headers().get(ETAG).is_none(), "{accept_encoding}");
+        assert!(response.headers().get("content-digest").is_none(), "{accept_encoding}");
+        assert!(response.headers().get("repr-digest").is_none(), "{accept_encoding}");
         assert!(response.into_body().into_bytes().await.unwrap().is_empty(), "{accept_encoding}");
     }
+}
+
+#[tokio::test]
+async fn an_acceptable_pre_encoded_response_is_not_replaced_with_406() {
+    let handler = server().compress_responses(&[Format::Gzip]).layer(responds_with(|| {
+        HttpResponseBuilder::new_fake()
+            .status(StatusCode::OK)
+            .header(CONTENT_ENCODING, HeaderValue::from_static("br"))
+            .text("pre-encoded")
+            .build()
+    }));
+    let mut input = request(BytesView::default(), None);
+    input
+        .headers_mut()
+        .insert(ACCEPT_ENCODING, HeaderValue::from_static("br, identity;q=0"));
+
+    let response = handler.execute(input).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get(CONTENT_ENCODING).unwrap(), "br");
+    assert_eq!(response.into_body().into_text().await.unwrap(), "pre-encoded");
+}
+
+#[tokio::test]
+async fn an_unacceptable_pre_encoded_response_is_replaced_with_406() {
+    let handler = server().compress_responses(&[Format::Gzip]).layer(responds_with(|| {
+        HttpResponseBuilder::new_fake()
+            .status(StatusCode::OK)
+            .header(CONTENT_ENCODING, HeaderValue::from_static("br"))
+            .text("pre-encoded")
+            .build()
+    }));
+    let mut input = request(BytesView::default(), None);
+    input
+        .headers_mut()
+        .insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, identity;q=0"));
+
+    let response = handler.execute(input).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_ACCEPTABLE);
+    assert!(response.into_body().into_bytes().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn an_error_response_is_not_hidden_by_406() {
+    let handler = server().compress_responses(&[Format::Gzip]).layer(responds_with(|| {
+        HttpResponseBuilder::new_fake()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .text("origin failure")
+            .build()
+    }));
+    let mut input = request(BytesView::default(), None);
+    input
+        .headers_mut()
+        .insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip;q=0, identity;q=0"));
+
+    let response = handler.execute(input).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(response.into_body().into_text().await.unwrap(), "origin failure");
+}
+
+#[tokio::test]
+async fn rejected_identity_is_not_used_for_a_non_compressible_response() {
+    let handler = server().compress_responses(&[Format::Gzip]).layer(responds_with(|| {
+        HttpResponseBuilder::new_fake()
+            .status(StatusCode::OK)
+            .header(CONTENT_TYPE, HeaderValue::from_static("image/png"))
+            .text("not compressed")
+            .build()
+    }));
+    let mut input = request(BytesView::default(), None);
+    input
+        .headers_mut()
+        .insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, identity;q=0"));
+
+    let response = handler.execute(input).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_ACCEPTABLE);
+    assert!(response.into_body().into_bytes().await.unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -1053,7 +1146,7 @@ async fn compression_weakens_a_non_ascii_strong_validator() {
 }
 
 #[tokio::test]
-async fn transformations_remove_content_digest_and_preserve_repr_digest() {
+async fn transformations_remove_stale_digest_fields() {
     let expected = payload();
     let compressed = compress(Format::Gzip, expected.as_bytes());
 
@@ -1069,7 +1162,7 @@ async fn transformations_remove_content_digest_and_preserve_repr_digest() {
 
     let response = client_handler.execute(request(BytesView::default(), None)).await.unwrap();
     assert!(response.headers().get("content-digest").is_none());
-    assert_eq!(response.headers().get("repr-digest").unwrap(), "sha-256=:cmVwcg==:");
+    assert!(response.headers().get("repr-digest").is_none());
 
     let server_handler = server().compress_responses(&[Format::Gzip]).layer(responds_with(|| {
         HttpResponseBuilder::new_fake()
@@ -1086,7 +1179,7 @@ async fn transformations_remove_content_digest_and_preserve_repr_digest() {
 
     let response = server_handler.execute(input).await.unwrap();
     assert!(response.headers().get("content-digest").is_none());
-    assert_eq!(response.headers().get("repr-digest").unwrap(), "sha-256=:cmVwcg==:");
+    assert!(response.headers().get("repr-digest").is_none());
 }
 
 #[tokio::test]

@@ -119,7 +119,7 @@ async fn each_burst_is_decompressed_before_eof_and_trailers_survive() {
         assert_eq!(seen.get("x-first").unwrap(), "true", "{format:?}");
         assert_eq!(seen.get("x-complete").unwrap(), "true", "{format:?}");
         assert!(seen.get("content-digest").is_none(), "{format:?}");
-        assert_eq!(seen.get("repr-digest").unwrap(), "sha-256=:cmVwcg==:", "{format:?}");
+        assert!(seen.get("repr-digest").is_none(), "{format:?}");
         assert!(body.is_end_stream());
     }
 }

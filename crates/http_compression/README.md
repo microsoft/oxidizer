@@ -28,7 +28,8 @@ let layer =
 HTTP messages: reading `Content-Encoding`, negotiating `Accept-Encoding`,
 and replacing a body with one that compresses or decompresses as it is read.
 The policies and trailer fields the body already carried travel through,
-except stale `Content-Digest` values removed after a transformation.
+except stale `Content-Digest` and `Repr-Digest` values removed after a
+transformation.
 
 Everything runs through one handler, [`Compression`][__link1], because a client and
 a server want different parts of the same job. The role is chosen up front
@@ -115,7 +116,7 @@ exactly as it arrived.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_compression">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbRs5bh8jNQ4gbInwUWP6_KjcbYGws38JaPIgblhi_05J8YG5hZIKCa2NvbXByZXNzb3JzZTAuMS4wgnBodHRwX2NvbXByZXNzaW9uZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbsrQukaa-Pq4bQJia_7E-jFgbVxcIBwLdr7sbli02E8Zb_r1hZIKCa2NvbXByZXNzb3JzZTAuMS4wgnBodHRwX2NvbXByZXNzaW9uZTAuMS4w
  [__link0]: https://crates.io/crates/compressors/0.1.0
  [__link1]: https://docs.rs/http_compression/0.1.0/http_compression/?search=Compression
  [__link10]: https://docs.rs/http_compression/0.1.0/http_compression/?search=CompressionLayer::on_unsupported

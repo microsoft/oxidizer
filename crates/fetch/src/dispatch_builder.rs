@@ -71,8 +71,7 @@ mod decompression {
         }
 
         let formats = options.formats.iter().map(|format| format.format()).collect::<Vec<_>>();
-        let layer = Compression::client(body_builder.clone())
-            .decompress_responses(&formats);
+        let layer = Compression::client(body_builder.clone()).decompress_responses(&formats);
         let layer = layer.limits(options.limits());
         Some(layer)
     }

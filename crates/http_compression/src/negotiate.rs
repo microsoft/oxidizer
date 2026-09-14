@@ -5,7 +5,7 @@
 
 use compressors::format::Format;
 use http::HeaderMap;
-use http::header::ACCEPT_ENCODING;
+use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING};
 
 /// The quality value of one `Accept-Encoding` entry, scaled to thousandths.
 ///
@@ -77,8 +77,7 @@ pub(crate) fn select(headers: &HeaderMap, offered: &[Format]) -> Selection {
     // Only a named `identity` says so. A bare `*` means anything is acceptable,
     // not that the caller would rather have nothing applied.
     let explicit_identity = quality_for(headers, "identity", Wildcard::Ignored);
-    let identity_rejected_by_wildcard = explicit_identity.is_none() && quality_for(headers, "\0", Wildcard::Allowed) == Some(Quality::ZERO);
-    let identity_acceptable = explicit_identity.is_none_or(Quality::is_acceptable) && !identity_rejected_by_wildcard;
+    let identity_acceptable = identity_acceptable(headers);
     let identity_preference = explicit_identity.unwrap_or(Quality::ZERO);
 
     if let Some((format, _)) = best.filter(|(_, quality)| *quality > identity_preference) {
@@ -92,6 +91,50 @@ pub(crate) fn select(headers: &HeaderMap, offered: &[Format]) -> Selection {
     }
 }
 
+/// Returns whether the client permits a response without a content coding.
+pub(crate) fn identity_acceptable(headers: &HeaderMap) -> bool {
+    if !headers.contains_key(ACCEPT_ENCODING) {
+        return true;
+    }
+
+    let explicit_identity = quality_for(headers, "identity", Wildcard::Ignored);
+    let rejected_by_wildcard = explicit_identity.is_none() && quality_for(headers, "\0", Wildcard::Allowed) == Some(Quality::ZERO);
+
+    explicit_identity.is_none_or(Quality::is_acceptable) && !rejected_by_wildcard
+}
+
+/// Returns whether the client permits the response's existing content coding.
+pub(crate) fn content_encoding_acceptable(request_headers: &HeaderMap, response_headers: &HeaderMap) -> bool {
+    if !request_headers.contains_key(ACCEPT_ENCODING) {
+        return true;
+    }
+
+    let mut found = false;
+    for value in response_headers.get_all(CONTENT_ENCODING) {
+        let Ok(value) = value.to_str() else {
+            return false;
+        };
+
+        for token in value.split(',').map(str::trim) {
+            if token.is_empty() {
+                return false;
+            }
+            found = true;
+
+            let acceptable = if token.eq_ignore_ascii_case("identity") {
+                identity_acceptable(request_headers)
+            } else {
+                quality_for(request_headers, token, Wildcard::Allowed).is_some_and(Quality::is_acceptable)
+            };
+            if !acceptable {
+                return false;
+            }
+        }
+    }
+
+    found
+}
+
 /// Whether `*` may stand in for a format the header does not name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Wildcard {
@@ -99,7 +142,7 @@ enum Wildcard {
     Ignored,
 }
 
-/// The quality the header assigns to `token`, or `None` if it is not acceptable.
+/// The quality the header assigns to `token`, including zero, or `None` if it is absent.
 ///
 /// A list header may be split across several lines, so every one is read in
 /// order, as though they had been joined with commas.
