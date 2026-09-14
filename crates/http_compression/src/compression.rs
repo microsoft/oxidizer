@@ -290,6 +290,10 @@ impl CompressionLayer<Client> {
 /// What only a server can ask for: it reads requests and sends responses.
 impl CompressionLayer<Server> {
     /// Decompresses request bodies compressed with any of `formats`.
+    ///
+    /// A request whose body reports a known length of zero is passed through
+    /// unchanged, including its `Content-Encoding` metadata. This exception
+    /// avoids installing a decoder that cannot produce a compressed member.
     #[must_use]
     pub fn decompress_requests(mut self, formats: &[Format]) -> Self {
         self.role.decompress_requests = http_formats(formats);
