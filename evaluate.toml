@@ -28,6 +28,11 @@ reason = "All helpers document behavior and applicable panics, and representativ
 
 [[config.allow]]
 rule = "m_canonical_docs"
+file = "crates/performables/src/sync/condition.rs"
+reason = "Condvar has a complete synchronization example and applicable panic contracts; requiring duplicate examples on wait and both notification methods exceeds the guideline's strongly-encouraged language."
+
+[[config.allow]]
+rule = "m_canonical_docs"
 file = "crates/fetch_hyper/src/testing.rs"
 reason = "The public test-fixture families have representative examples and applicable panic contracts; requiring a separate example on every fixture type exceeds the guideline's strongly-encouraged language."
 
