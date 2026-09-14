@@ -345,13 +345,26 @@ async fn a_server_decompresses_the_request_it_receives() {
 }
 
 #[tokio::test]
+async fn an_empty_request_is_not_decompressed() {
+    let handler = server()
+        .decompress_requests(&[Format::Gzip])
+        .layer(FakeHandler::from_fn(|request: HttpRequest| {
+            assert_eq!(request.headers().get(CONTENT_ENCODING).unwrap(), "gzip");
+            assert!(request.extensions().get::<OriginalBody>().is_none());
+            HttpResponseBuilder::new_fake().status(StatusCode::OK).build()
+        }));
+
+    handler.execute(request(BytesView::default(), Some("gzip"))).await.unwrap();
+}
+
+#[tokio::test]
 async fn a_server_can_refuse_a_format_it_does_not_decompress() {
     let handler = server()
         .decompress_requests(&[Format::Gzip])
         .on_unsupported(UnsupportedCompression::Fail)
         .layer(echo());
 
-    let error = handler.execute(request(BytesView::default(), Some("br"))).await.unwrap_err();
+    let error = handler.execute(request(bytes("encoded body"), Some("br"))).await.unwrap_err();
 
     assert_eq!(error.label(), "compression_unsupported");
 }

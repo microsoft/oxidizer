@@ -722,7 +722,7 @@ impl Server {
     }
 
     fn decompress_request(&self, config: &Config, request: HttpRequest) -> Result<HttpRequest> {
-        if !wants_decompression(&self.decompress_requests, request.headers()) {
+        if request.body().content_length() == Some(0) || !wants_decompression(&self.decompress_requests, request.headers()) {
             return Ok(request);
         }
 
