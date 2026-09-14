@@ -125,6 +125,12 @@ impl Quality {
 impl TryFrom<u8> for Quality {
     type Error = crate::Error;
 
+    /// Converts a native brotli quality value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `quality` is outside [`Quality::MIN`] through
+    /// [`Quality::MAX`].
     fn try_from(quality: u8) -> core::result::Result<Self, Self::Error> {
         Self::new(quality).ok_or_else(|| {
             crate::Error::invalid_configuration(format!(
@@ -201,6 +207,12 @@ impl Default for WindowSize {
 impl TryFrom<u8> for WindowSize {
     type Error = crate::Error;
 
+    /// Converts a base-2 brotli window exponent.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `exponent` is outside [`WindowSize::MIN`] through
+    /// [`WindowSize::MAX`].
     fn try_from(exponent: u8) -> core::result::Result<Self, Self::Error> {
         Self::new(exponent).ok_or_else(|| {
             crate::Error::invalid_configuration(format!(

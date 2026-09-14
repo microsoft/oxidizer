@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Child-process execution with bounded runtime and captured output.
+
 use std::io::Read;
 use std::process::{Command, Stdio};
 use std::thread;
@@ -8,7 +10,10 @@ use std::time::{Duration, Instant};
 
 use ohno::{AppError, IntoAppError};
 
-/// Outcome of running a child process with a timeout
+/// Outcome of running a child process with a timeout.
+///
+/// Distinguishes success, process failure, and forced termination at the
+/// configured deadline.
 #[derive(Debug)]
 pub enum Outcome {
     /// Process exited with a zero exit code
@@ -19,7 +24,10 @@ pub enum Outcome {
     TimedOut,
 }
 
-/// Output captured from a child process run via [`run_with_timeout`]
+/// Output captured from a child process run via [`run_with_timeout`].
+///
+/// Standard output and error are retained as bytes so callers can choose the
+/// appropriate text or binary interpretation.
 #[derive(Debug)]
 pub struct RunResult {
     /// How the process ended
@@ -30,7 +38,30 @@ pub struct RunResult {
     pub stderr: Vec<u8>,
 }
 
-/// Spawns `cmd` with stdout/stderr captured, blocks until the child exits or the timeout elapses.
+/// Spawns `cmd` and captures its output until it exits or the timeout elapses.
+///
+/// # Errors
+///
+/// Returns an error when the child cannot be started, observed, terminated, or
+/// reaped, or when either output-reader thread fails.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::process::Command;
+/// use std::time::Duration;
+///
+/// use automation::{Outcome, run_with_timeout};
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let mut command = Command::new("cargo");
+/// command.arg("--version");
+///
+/// let result = run_with_timeout(command, Duration::from_secs(5))?;
+/// assert!(matches!(result.outcome, Outcome::Success));
+/// # Ok(())
+/// # }
+/// ```
 pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<RunResult, AppError> {
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = cmd.spawn().into_app_err("failed to spawn child process")?;

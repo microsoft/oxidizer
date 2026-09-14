@@ -60,6 +60,7 @@ mod transcoder {
 use http::{HeaderName, HeaderValue};
 use pb::{CreateShelfRequest, Genre, GetShelfRequest, ListShelvesByGenreRequest, ListShelvesRequest, ListShelvesResponse, Shelf};
 use rest_over_grpc::handling::{Context, ResponseStream, Status};
+/// Routes HTTP requests to the generated custom library methods.
 pub use transcoder::Transcoder;
 
 /// A tiny in-memory implementation of the generated [`pb::Library`] trait,
