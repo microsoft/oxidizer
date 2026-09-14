@@ -54,6 +54,19 @@ pub(crate) use bail;
 ///
 /// Input that does not parse, a generic type, a union, or a rejected template
 /// is represented by `compile_error!` in the returned tokens.
+///
+/// # Examples
+///
+/// ```
+/// use proc_macro2::TokenStream;
+/// use quote::quote;
+/// use templated_uri_macros_impl::templated_paq_impl;
+///
+/// let attr = TokenStream::new();
+/// let item = quote!(struct Item { value: u32 });
+/// let expanded = templated_paq_impl(&attr, item);
+/// assert!(!expanded.is_empty());
+/// ```
 #[must_use]
 #[cfg_attr(test, mutants::skip)] // not relevant for auto-generated proc macros
 pub fn templated_paq_impl(attr: &TokenStream, item: TokenStream) -> TokenStream {
@@ -193,6 +206,16 @@ fn filter_attributes(f: &Field) -> Vec<&Attribute> {
 /// `input` contains the derive target. Invalid syntax, unsupported item shapes,
 /// or tuple structs without exactly one field are represented by
 /// `compile_error!` in the returned tokens.
+///
+/// # Examples
+///
+/// ```
+/// use quote::quote;
+/// use templated_uri_macros_impl::uri_param_derive_impl;
+///
+/// let expanded = uri_param_derive_impl(quote!(struct SafeFragment(String);));
+/// assert!(!expanded.is_empty());
+/// ```
 #[must_use]
 #[cfg_attr(test, mutants::skip)] // just emits compile error otherwise
 pub fn uri_param_derive_impl(input: TokenStream) -> TokenStream {
@@ -209,6 +232,16 @@ pub fn uri_param_derive_impl(input: TokenStream) -> TokenStream {
 /// `input` contains the derive target. Invalid syntax, unsupported item shapes,
 /// or tuple structs without exactly one field are represented by
 /// `compile_error!` in the returned tokens.
+///
+/// # Examples
+///
+/// ```
+/// use quote::quote;
+/// use templated_uri_macros_impl::raw_derive_impl;
+///
+/// let expanded = raw_derive_impl(quote!(struct RawPath(String);));
+/// assert!(!expanded.is_empty());
+/// ```
 #[must_use]
 pub fn raw_derive_impl(input: TokenStream) -> TokenStream {
     let input: DeriveInput = match parse2(input) {

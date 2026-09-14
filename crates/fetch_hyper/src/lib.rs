@@ -29,6 +29,8 @@
 //! Applications do not construct the transport themselves; `fetch` does that for
 //! them. The entry points this crate exposes are:
 //!
+//! # Examples
+//!
 //! ```
 //! use fetch_hyper::{Connect, HyperTransport, HyperTransportBuilder};
 //! ```

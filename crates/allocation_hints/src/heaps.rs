@@ -266,6 +266,25 @@ pub(crate) struct Descriptor {
 /// Creating or dropping this handle does not call an allocator. A supporting
 /// allocator realizes its descriptor only while observing it as the active
 /// hint during an allocation.
+///
+/// # Examples
+///
+/// [`Heap::new`], [`Heap::general`], and [`Heap::bump`] construct distinct
+/// prospective heaps; [`Heap::id`] and [`Heap::kind`] read back their
+/// descriptor:
+///
+/// ```
+/// use allocation_hints::heaps::{Heap, Kind, bump, general};
+///
+/// let default_heap = Heap::new();
+/// let general_heap = Heap::general(general::Options::new());
+/// let bump_heap = Heap::bump(bump::Options::new());
+///
+/// assert!(matches!(default_heap.kind(), Kind::General(_)));
+/// assert!(matches!(general_heap.kind(), Kind::General(_)));
+/// assert!(matches!(bump_heap.kind(), Kind::Bump(_)));
+/// assert_ne!(default_heap.id(), bump_heap.id());
+/// ```
 #[derive(Clone)]
 pub struct Heap {
     pub(crate) descriptor: Arc<Descriptor>,
@@ -357,6 +376,15 @@ impl ActiveHint {
 /// Supporting allocators resolve this identity to the heap they use for
 /// ordinary allocations on this thread. The handle can then be sent to another
 /// thread and installed with [`crate::with_hint`]. Other allocators may ignore it.
+///
+/// # Examples
+///
+/// ```
+/// use allocation_hints::heaps::thread_heap;
+///
+/// let owner = thread_heap();
+/// assert_ne!(owner.id().get(), 0);
+/// ```
 #[must_use]
 pub fn thread_heap() -> Heap {
     let thread_id = current_thread_id();

@@ -4,6 +4,11 @@
 //! Token transformations behind the `multitude` arena-aware deserialization
 //! derive.
 //!
+//! Arena-specific derive configuration is parsed from `#[multitude(...)]`;
+//! Serde's own configuration remains under `#[serde(...)]`.
+//!
+//! # Examples
+//!
 //! ```
 //! use multitude_macros_impl::derive_deserialize_in;
 //! use quote::quote;
@@ -27,11 +32,6 @@
     clippy::too_many_lines,
     reason = "the enum generator handles all externally tagged variant shapes together"
 )]
-
-//! Implementation of the `multitude` arena-aware deserialization derive.
-//!
-//! Arena-specific derive configuration is parsed from `#[multitude(...)]`;
-//! Serde's own configuration remains under `#[serde(...)]`.
 
 use std::collections::HashSet;
 

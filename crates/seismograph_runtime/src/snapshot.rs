@@ -280,6 +280,25 @@ impl std::error::Error for Error {}
 ///
 /// Returns an error for malformed bytes or an unsupported wire or schema
 /// version. Future versions are rejected rather than silently misinterpreted.
+///
+/// # Examples
+///
+/// ```
+/// use seismograph_runtime::RuntimeMetadata;
+///
+/// let _runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("primary", 1));
+///
+/// let snapshot = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+/// let decoded = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap();
+/// let source = decoded
+///     .sources
+///     .iter()
+///     .find(|source| source.id == seismograph_runtime::snapshot::source::ID)
+///     .unwrap();
+///
+/// let runtime_snapshot = seismograph_runtime::snapshot::decode(&source.data).unwrap();
+/// assert!(!runtime_snapshot.runtimes.is_empty());
+/// ```
 pub fn decode(bytes: &[u8]) -> Result<Snapshot, Error> {
     let mut reader = Reader::new(bytes);
     if reader.read(MAGIC.len())? != MAGIC {

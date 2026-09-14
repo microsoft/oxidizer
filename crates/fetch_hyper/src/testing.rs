@@ -143,6 +143,20 @@ impl Connection for FakeStream {
 /// Implements [`layered::Service<BaseUri>`] (and therefore
 /// [`Connect<FakeStream>`](crate::Connect)) so it can be plugged directly
 /// into [`HyperTransportBuilder`](crate::HyperTransportBuilder).
+///
+/// # Examples
+///
+/// ```
+/// use std::time::Duration;
+///
+/// use fetch_hyper::testing::FakeConnector;
+/// use tick::Clock;
+///
+/// let response = &b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"[..];
+/// let connector = FakeConnector::new_success(response, Clock::new_frozen()).with_delay(Duration::from_millis(5));
+///
+/// assert_eq!(connector.delay, Duration::from_millis(5));
+/// ```
 #[derive(Debug, Clone)]
 pub struct FakeConnector {
     response: Option<std::result::Result<Bytes, TestError>>,
@@ -225,6 +239,16 @@ impl layered::Service<BaseUri> for FakeConnector {
 ///
 /// Optionally carries an inner cause so error-chain traversal logic can be
 /// exercised.
+///
+/// # Examples
+///
+/// ```
+/// use fetch_hyper::testing::TestError;
+///
+/// let error = TestError::new("forced failure");
+///
+/// assert_eq!(error.to_string(), "forced failure");
+/// ```
 #[derive(Debug, Clone)]
 pub struct TestError {
     message: String,
@@ -281,6 +305,16 @@ impl std::error::Error for TestError {
 ///
 /// Panics if the test request cannot be built. The static URI is valid, so
 /// this only fails on programming errors in the request builder itself.
+///
+/// # Examples
+///
+/// ```
+/// use fetch_hyper::testing::create_test_request;
+///
+/// let request = create_test_request();
+///
+/// assert_eq!(request.uri().path(), "/some-custom-path");
+/// ```
 #[must_use]
 pub fn create_test_request() -> HttpRequest {
     HttpRequestBuilder::new(&HttpBodyBuilder::new_fake())
@@ -298,6 +332,20 @@ pub fn fake_body_builder() -> HttpBodyBuilder {
 /// Returns OpenTelemetry [`KeyValue`]s as `(key, value)` string pairs sorted by key.
 ///
 /// Suitable for deterministic snapshot assertions.
+///
+/// # Examples
+///
+/// ```
+/// use fetch_hyper::testing::sorted_attributes;
+/// use opentelemetry::KeyValue;
+///
+/// let attrs = [KeyValue::new("b", "2"), KeyValue::new("a", "1")];
+///
+/// assert_eq!(
+///     sorted_attributes(&attrs),
+///     vec![("a".to_string(), "1".to_string()), ("b".to_string(), "2".to_string())]
+/// );
+/// ```
 #[must_use]
 pub fn sorted_attributes(attrs: &[opentelemetry::KeyValue]) -> Vec<(String, String)> {
     let mut pairs: Vec<(String, String)> = attrs.iter().map(|kv| (kv.key.to_string(), kv.value.to_string())).collect();
