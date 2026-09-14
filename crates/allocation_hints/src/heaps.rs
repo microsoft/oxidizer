@@ -267,6 +267,11 @@ pub(crate) struct Descriptor {
 /// allocator realizes its descriptor only while observing it as the active
 /// hint during an allocation.
 ///
+/// # Panics
+///
+/// Heap construction panics if the process-wide logical heap identity space
+/// is exhausted.
+///
 /// # Examples
 ///
 /// [`Heap::new`], [`Heap::general`], and [`Heap::bump`] construct distinct
@@ -385,6 +390,11 @@ impl ActiveHint {
 /// let owner = thread_heap();
 /// assert_ne!(owner.id().get(), 0);
 /// ```
+///
+/// # Panics
+///
+/// Panics if this thread initializes its heap after the process-wide logical
+/// heap identity space is exhausted.
 #[must_use]
 pub fn thread_heap() -> Heap {
     let thread_id = current_thread_id();

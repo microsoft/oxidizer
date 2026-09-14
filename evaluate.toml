@@ -17,3 +17,8 @@ reason = "The re-exported public items originate in private modules, so they hav
 rule = "m_canonical_docs"
 file = "crates/seismograph_runtime/src/snapshot.rs"
 reason = "The primary fallible decode API has Errors and Examples sections; requiring separate examples on every passive snapshot model exceeds the guideline's strongly-encouraged language."
+
+[[config.allow]]
+rule = "m_canonical_docs"
+file = "crates/testing_aids/src/lib.rs"
+reason = "All helpers document behavior and applicable panics, and representative data-generator examples already exist; requiring examples on every straightforward test helper exceeds the guideline's strongly-encouraged language."
