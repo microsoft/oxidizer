@@ -830,11 +830,13 @@ pub(crate) mod constants;
 
 mod error_labels;
 
+/// TLS backend selection and connector construction.
 pub mod tls;
 
 mod client_builder;
 pub use client_builder::HttpClientBuilder;
 
+/// Transport, pooling, HTTP version, and socket configuration.
 pub mod options;
 
 mod client;
@@ -843,13 +845,17 @@ pub use client::HttpClient;
 #[cfg(any(feature = "test-util", test))]
 pub mod fake;
 
+/// Extension points for custom runtimes and HTTP transports.
 pub mod custom;
 
 #[cfg(all(feature = "tokio", any(feature = "rustls", feature = "native-tls")))]
+/// Tokio-based client construction using the enabled TLS backend.
 pub mod tokio;
 
+/// Request-handler implementations for transport and pipeline behavior.
 pub mod handlers;
 
+/// HTTP client telemetry events, attributes, and metric helpers.
 pub mod telemetry;
 
 pub use http_extensions::{
@@ -859,8 +865,10 @@ pub use http_extensions::{
 #[cfg(any(feature = "json", test))]
 pub use http_extensions::{Json, JsonError};
 
+/// Retry, timeout, hedging, and circuit-breaker middleware.
 pub mod resilience;
 
+/// Standard and custom request-pipeline construction.
 pub mod pipeline;
 
 /// Longer-form documentation for [`fetch`](crate).

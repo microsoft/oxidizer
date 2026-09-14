@@ -20,9 +20,12 @@
 use proc_macro::TokenStream;
 use syn::{Path, parse_quote};
 
+/// Derives arena-aware deserialization through the `multitude` facade.
+///
+/// Invalid derive input or unsupported helper attributes are emitted as
+/// `compile_error!` tokens.
 #[proc_macro_derive(DeserializeIn, attributes(serde, multitude))]
 #[cfg_attr(test, mutants::skip)]
-#[expect(missing_docs, reason = "Documented in the multitude crate's reexport")]
 pub fn derive_deserialize_in(input: TokenStream) -> TokenStream {
     let root_path: Path = parse_quote!(::multitude::de);
     multitude_macros_impl::derive_deserialize_in(input.into(), &root_path).into()

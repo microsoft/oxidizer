@@ -19,6 +19,29 @@ use super::wait_queue::{WaitQueue, Waiter, block_on, block_on_timeout};
 use crate::telemetry::{self, EventKind};
 
 /// An executor-independent condition variable used with [`super::mutex::Mutex`].
+///
+/// # Examples
+///
+/// ```
+/// use std::sync::Arc;
+/// use std::thread;
+///
+/// use performables::sync::condition::Condvar;
+/// use performables::sync::mutex::Mutex;
+///
+/// let shared = Arc::new((Mutex::new(false), Condvar::new()));
+/// let worker_shared = Arc::clone(&shared);
+/// let worker = thread::spawn(move || {
+///     let (ready, changed) = &*worker_shared;
+///     *ready.lock_sync() = true;
+///     changed.notify_one();
+/// });
+///
+/// let (ready, changed) = &*shared;
+/// let guard = changed.wait_while_sync(ready.lock_sync(), |ready| !*ready);
+/// assert!(*guard);
+/// worker.join().unwrap();
+/// ```
 #[derive(Debug)]
 pub struct Condvar {
     generation: AtomicU64,
@@ -39,6 +62,11 @@ impl Condvar {
     ///
     /// Callers must re-check their predicate after this returns because condition-variable
     /// waits may complete spuriously.
+    ///
+    /// # Panics
+    ///
+    /// Polling the returned future panics if the mutex becomes poisoned while
+    /// it is being reacquired.
     pub fn wait<'condition, 'mutex, T: ?Sized>(&'condition self, guard: MutexGuard<'mutex, T>) -> CondvarWait<'condition, 'mutex, T> {
         let mutex = guard.mutex();
         CondvarWait {
@@ -53,6 +81,10 @@ impl Condvar {
     }
 
     /// Releases `guard`, blocks for a notification, and reacquires its mutex.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the mutex becomes poisoned while it is being reacquired.
     pub fn wait_sync<'mutex, T: ?Sized>(&self, guard: MutexGuard<'mutex, T>) -> MutexGuard<'mutex, T> {
         block_on(self.wait(guard))
     }
@@ -80,6 +112,10 @@ impl Condvar {
     }
 
     /// Releases `guard`, waits up to `timeout`, and reacquires its mutex.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the mutex becomes poisoned while it is being reacquired.
     pub fn wait_timeout_sync<'mutex, T: ?Sized>(
         &self,
         guard: MutexGuard<'mutex, T>,
