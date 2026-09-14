@@ -55,8 +55,6 @@ pub(crate) fn create_dispatch_handler(
     feature = "compression-zstd"
 ))]
 mod decompression {
-    use bytesbuf::mem::HasMemory;
-    use compressors::Resources;
     use http_compression::{Client, Compression, CompressionLayer};
     use layered::Layer as _;
 
@@ -74,7 +72,6 @@ mod decompression {
 
         let formats = options.formats.iter().map(|format| format.format()).collect::<Vec<_>>();
         let layer = Compression::client(body_builder.clone())
-            .resources(Resources::new(body_builder.memory()))
             .decompress_responses(&formats);
         let layer = layer.limits(options.limits());
         Some(layer)
