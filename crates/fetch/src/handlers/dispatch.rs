@@ -56,7 +56,7 @@ impl Dispatch {
         )
     }
 
-    /// Builds a dispatch handler that decompresses nothing.
+    /// Test-only constructor for a preassembled dispatch mode.
     #[cfg(test)]
     pub(crate) fn new_test(mode: DispatchMode, request_filter: RequestFilter) -> Self {
         Self::new(mode, request_filter)

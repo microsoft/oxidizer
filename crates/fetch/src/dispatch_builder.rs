@@ -5,9 +5,9 @@
 //!
 //! [`Dispatch`] owns the transports and whatever is wrapped around them.
 //! Wrapping there rather than at the pipeline is what keeps a wrapper out of
-//! the way: it runs inside retries, so each attempt gets a fresh one, and below
-//! the attempt logs and metrics, so those keep measuring the response as it
-//! arrived on the wire.
+//! the way: it runs inside retries, so each attempt gets a fresh one, and inside
+//! the attempt logs and metrics, so those record timing and status without lazy
+//! decompression work. They observe the response after its encoding metadata is removed.
 
 use http_extensions::HttpBodyBuilder;
 use opentelemetry::metrics::Meter;
