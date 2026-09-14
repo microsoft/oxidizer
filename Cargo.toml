@@ -133,7 +133,7 @@ futures = { version = "0.3.31", default-features = false }
 futures-channel = { version = "0.3.31", default-features = false }
 futures-core = { version = "0.3.31", default-features = false }
 futures-util = { version = "0.3.31", default-features = false }
-getrandom = { version = "0.3.4", default-features = false }
+getrandom = { version = "0.4.3", default-features = false }
 # Keep the library and summary parser aligned with gungraun-runner's schema.
 gungraun = { version = "=0.19.4", default-features = false }
 gungraun-summary = { version = "=6.0.0", default-features = false }
