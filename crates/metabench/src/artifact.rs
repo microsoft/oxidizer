@@ -497,13 +497,28 @@ pub(crate) fn parse_vtune(path: &Path, artifact_root: &Path, identity: String, n
         // per hardware thread group); the report command does not constrain
         // the grouping to a single row per event. Sum repeated rows into one
         // metric instead of treating a second occurrence as malformed input.
+        let mut aggregate_error = None;
         metrics
             .entry(name.clone())
             .and_modify(|metric: &mut Metric| {
                 let existing = metric.value.as_f64();
-                *metric = Metric::float("vtune", &name, existing + value, MetricDirection::LowerIsBetter);
+                let summed = existing + value;
+                if summed.is_finite() {
+                    *metric = Metric::float("vtune", &name, summed, MetricDirection::LowerIsBetter);
+                } else {
+                    // Two individually finite counts can still sum to
+                    // infinity; surface that as malformed input rather than
+                    // silently storing a non-finite aggregate metric.
+                    aggregate_error = Some(Error::ArtifactFormat {
+                        path: path.to_owned(),
+                        message: format!("line {} event {name} aggregate count {summed} is not finite", index + 1),
+                    });
+                }
             })
             .or_insert_with(|| Metric::float("vtune", &name, value, MetricDirection::LowerIsBetter));
+        if let Some(error) = aggregate_error {
+            return Err(error);
+        }
     }
     if metrics.is_empty() {
         return Err(Error::ArtifactFormat {
@@ -1283,6 +1298,28 @@ mod tests {
 
         let result = parse_vtune(&path, directory.path(), "group/bench".to_owned(), "group/bench".to_owned()).unwrap();
         assert_eq!(result.metrics["INST_RETIRED.ANY"].value, crate::report::MetricValue::Float(3.0));
+    }
+
+    #[test]
+    fn vtune_rejects_repeated_rows_whose_sum_overflows_to_infinity() {
+        // Two individually finite counts can still sum to infinity; that
+        // must surface as malformed input rather than a silently stored
+        // non-finite aggregate metric.
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("vtune.csv");
+        fs::write(
+            &path,
+            format!(
+                "Hardware Event Type,Hardware Event Count:Self\nINST_RETIRED.ANY,{max}\nINST_RETIRED.ANY,{max}\n",
+                max = f64::MAX
+            ),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            parse_vtune(&path, directory.path(), "group/bench".to_owned(), "group/bench".to_owned()),
+            Err(Error::ArtifactFormat { .. })
+        ));
     }
 
     #[test]

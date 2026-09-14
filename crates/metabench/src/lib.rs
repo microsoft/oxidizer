@@ -98,9 +98,14 @@
 //!
 //! - **Intel `VTune`** reports hardware event counts for one invocation of every
 //!   discovered Criterion case, using the same annotated-workload
-//!   measurement as Linux `perf`. Use repeated `--vtune-arg` options for
-//!   additional `vtune -collect-with runsa` arguments. Requires a `vtune`
-//!   installation reachable on `PATH`.
+//!   measurement as Linux `perf`. Because `VTune`'s hardware-event collection
+//!   is a statistical sampler rather than an exact counter, reported counts
+//!   are sampling estimates that can read zero for a short workload, and the
+//!   measured window extends slightly beyond the workload to include the
+//!   pause round-trip that stops collection; callers who need exact
+//!   per-invocation counts should prefer `perf` instead. Use repeated
+//!   `--vtune-arg` options for additional `vtune -collect-with runsa`
+//!   arguments. Requires a `vtune` installation reachable on `PATH`.
 //!
 //! Criterion and allocation tracking are always enabled by default; Gungraun is
 //! also enabled by default on Linux, where it is available. You can control the

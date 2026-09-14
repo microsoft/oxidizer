@@ -118,7 +118,12 @@ fn run_wrapped_workload(arguments: &[String]) -> ExitCode {
     };
     if launch_arguments.get(start_paused_index + 1).map(String::as_str) != Some("-result-dir")
         || launch_arguments.get(start_paused_index + 2).is_none()
+        || start_paused_index + 2 != launch_arguments.len() - 1
     {
+        // `-result-dir <dir>` must be the last two arguments before `--`: a
+        // trailing argument after the result directory would mean
+        // `launch_vtune_worker` assembled something other than the expected
+        // shape, and this fixture is meant to catch that regression.
         return ExitCode::FAILURE;
     }
     let Some((program, workload_arguments)) = arguments[separator + 1..].split_first() else {
