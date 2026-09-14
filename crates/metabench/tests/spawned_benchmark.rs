@@ -248,6 +248,14 @@ fn fake_vtune_directory() -> &'static Path {
 /// `Cargo.toml` policy), while `/tests/**` (this file) is packaged. A
 /// `cargo test` run from a published tarball therefore cannot build the
 /// `fake_vtune` fixture this file's vtune tests depend on.
+///
+/// This guard only covers the vtune tests added alongside it; it is not a
+/// claim that the rest of this file (`run`/`run_target`'s unconditional
+/// `--example basic`/`--example parameterized` invocations) can run from a
+/// published tarball. Those tests have depended on unpackaged examples since
+/// before this fixture existed, and fixing that pre-existing, file-wide gap
+/// is a separate concern from hardening the new vtune coverage this guard
+/// protects.
 fn fake_vtune_fixture_available() -> bool {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("examples")
