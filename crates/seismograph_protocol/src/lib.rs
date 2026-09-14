@@ -81,6 +81,18 @@ impl std::error::Error for Error {
 /// # Errors
 ///
 /// Returns an error when the request is too large or writing fails.
+///
+/// # Examples
+///
+/// ```
+/// use seismograph_protocol::message::Request;
+/// use seismograph_protocol::write_request;
+///
+/// let mut frame = Vec::new();
+/// write_request(&mut frame, 7, &Request::ReadRecorderStatistics)?;
+/// assert!(!frame.is_empty());
+/// # Ok::<(), seismograph_protocol::Error>(())
+/// ```
 pub fn write_request(writer: &mut impl Write, request_id: u64, request: &Request) -> Result<(), Error> {
     let (kind, payload) = message::encode_request(request)?;
     write_frame(writer, kind, request_id, &payload)
