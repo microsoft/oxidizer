@@ -12,6 +12,13 @@
 //! Arty is being developed as a small runtime. Stable contracts for integrating external I/O
 //! drivers live in [`arty_io_core`].
 //!
+//! The runtime surface is still taking shape, so the crate currently re-exports the
+//! thread-awareness types that integrators build on:
+//!
+//! ```
+//! use arty::core::{NumaNode, Owner, Thread, ThreadAware};
+//! ```
+//!
 //! # Features
 //!
 //! - **`time`** - Exposes time primitives through `arty::time`.

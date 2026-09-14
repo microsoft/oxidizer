@@ -1,6 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Procedural macros that implement the event and enrichment derives of the
+//! [`observed`](https://docs.rs/observed) facade.
+//!
+//! Macro invocation belongs in a crate that depends on the `observed` facade,
+//! because expansion resolves that facade crate. See `observed` for an example.
+//!
+//! ```
+//! use observed_macros::Enrichment;
+//! ```
+
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/observed_macros/logo.png")]
 #![doc(
@@ -14,13 +24,6 @@
 //! - `#[derive(Enrichment)]` - generate an `Enrichment` trait impl for a struct
 //!
 //! **Do not depend on this crate directly.** Use the re-exports from `observed` instead.
-//!
-//! Macro invocation belongs in a crate that depends on the `observed` facade,
-//! because expansion resolves that facade crate. See `observed` for an example.
-//!
-//! ```rust
-//! use observed_macros::Enrichment;
-//! ```
 
 use proc_macro::TokenStream;
 

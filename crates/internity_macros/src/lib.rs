@@ -13,6 +13,14 @@
 //! encoded and decoded through the interner.
 //!
 //! [`Sym`]: https://docs.rs/internity/latest/internity/struct.Sym.html
+//!
+//! Macro invocation belongs in a crate that depends on the `internity` facade,
+//! because expansion resolves that facade crate. See `internity` for an
+//! example.
+//!
+//! ```
+//! use internity_macros::{DeserializeIn, SerializeIn};
+//! ```
 
 use proc_macro::TokenStream;
 use syn::{Path, parse_quote};

@@ -28,6 +28,21 @@
 //!
 //! In a steady state, the executor is allocation-free, as all memory used by the executor is
 //! reused for new tasks when old ones complete.
+//!
+//! # Example
+//!
+//! ```
+//! use arty_executor::{CycleOutcome, Executor};
+//!
+//! // SAFETY: the executor is dropped only after an execution cycle reports the `Shutdown`
+//! // outcome, which the loop below waits for.
+//! let executor = unsafe { Executor::builder().build() };
+//!
+//! executor.tasks().add(async { println!("Hello from the async task!") });
+//! executor.begin_shutdown();
+//!
+//! while executor.execute_cycle() != CycleOutcome::Shutdown {}
+//! ```
 
 mod builder;
 mod constants;

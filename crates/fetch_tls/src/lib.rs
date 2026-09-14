@@ -38,6 +38,17 @@
 //! With neither feature enabled, the API surface is limited to wrapping a
 //! pre-built backend; attempting to build any other configuration returns
 //! a [`BackendError`].
+//!
+//! # Example
+//!
+//! ```
+//! use fetch_tls::TlsOptions;
+//!
+//! // Describe the desired TLS behavior; the consuming library picks the backend.
+//! let options = TlsOptions::builder().build();
+//!
+//! println!("{options:?}");
+//! ```
 
 #[cfg(any(feature = "native-tls", feature = "rustls", test))]
 mod alpn;

@@ -11,6 +11,10 @@
 //! - `#[ohno::error]` - Turn a plain struct into an error type
 //!
 //! **Do not depend on this crate directly.** Use the re-exports from `ohno` instead.
+//!
+//! ```
+//! use ohno_macros_impl::{derive_error, enrich_err, error};
+//! ```
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/ohno_macros_impl/logo.png")]
 #![doc(

@@ -1,6 +1,19 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Resilience and recovery mechanisms for fallible operations.
+//!
+//! Middleware is composed on top of a service; the recovery classification it
+//! acts on is described with [`RecoveryInfo`]:
+//!
+//! ```
+//! use seatbelt::{RecoveryInfo, RecoveryKind};
+//!
+//! let transient = RecoveryInfo::retry();
+//!
+//! assert_eq!(transient.kind(), RecoveryKind::Retry);
+//! ```
+
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/seatbelt/logo.png")]
@@ -23,8 +36,6 @@
     )
 )]
 
-//! Resilience and recovery mechanisms for fallible operations.
-//!
 //! # Quick Start
 //!
 //! Add resilience to fallible operations, such as RPC calls over the network, with just a few lines of code.

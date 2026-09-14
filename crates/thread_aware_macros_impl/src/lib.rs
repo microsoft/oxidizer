@@ -5,6 +5,13 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! Macros for the [`thread_aware`](https://docs.rs/thread_aware) crate.
+//!
+//! This crate holds the token transformation behind the `ThreadAware` derive;
+//! the `thread_aware` facade is the supported interface.
+//!
+//! ```
+//! use thread_aware_macros_impl::derive_thread_aware;
+//! ```
 
 #![doc(
     html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware_macros_impl/logo.png"

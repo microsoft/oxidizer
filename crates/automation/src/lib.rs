@@ -2,6 +2,10 @@
 // Licensed under the MIT License.
 
 //! An unpublished crate for shared code used for writing Rust scripts
+//!
+//! ```
+//! use automation::{list_packages, run_cargo, run_with_timeout};
+//! ```
 
 #![allow(clippy::missing_errors_doc, reason = "this is an internal crate for scripts")]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]

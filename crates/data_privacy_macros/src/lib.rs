@@ -4,6 +4,14 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! Macros for the [`data_privacy`](https://docs.rs/data_privacy) crate.
+//!
+//! Macro invocation belongs in a crate that depends on the `data_privacy`
+//! facade, because expansion resolves that facade crate. See `data_privacy`
+//! for an example.
+//!
+//! ```
+//! use data_privacy_macros::RedactedDebug;
+//! ```
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/data_privacy_macros/logo.png")]
 #![doc(

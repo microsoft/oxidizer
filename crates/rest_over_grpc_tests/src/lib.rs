@@ -13,6 +13,14 @@
 //!   generated end to end so the integration tests can drive a real compiled
 //!   `Transcoder`. These mirror the `rest_over_grpc_examples` crate's modules but
 //!   are copied here so this crate stays independent of it.
+//!
+//! # Example
+//!
+//! The fixtures are consumed from this crate's own benchmarks and tests:
+//!
+//! ```
+//! use rest_over_grpc_tests::{bench_router, coverage, custom, tonic_bridge};
+//! ```
 
 #![allow(clippy::allow_attributes, reason = "generated code carries #[allow] attributes to suppress lints")]
 

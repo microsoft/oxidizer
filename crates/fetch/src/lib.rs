@@ -1,6 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! A fast, safe HTTP client that just works.
+//!
+//! ```no_run
+//! # fn main() {
+//! # #[cfg(all(feature = "tokio", any(feature = "rustls", feature = "native-tls")))] {
+//! use fetch::HttpClient;
+//!
+//! let client = HttpClient::new_tokio();
+//! # }
+//! # }
+//! ```
+
 #![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(
@@ -11,8 +23,6 @@
     )
 )]
 
-//! A fast, safe HTTP client that just works.
-//!
 //! This crate provides a powerful HTTP client that works with different async runtimes, handles
 //! security properly by default, and makes testing easy. The [`HttpClient`] provides a clean API
 //! for making HTTP requests without worrying about the complex details of modern HTTP.

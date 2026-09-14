@@ -8,6 +8,16 @@
 //! [`Resource`] lazily acquires its identity when an enabled I/O event is first
 //! recorded. [`Operation`] pairs start and finish events without reading a
 //! clock or allocating any identity outside [`seismograph::record`].
+//!
+//! # Example
+//!
+//! ```
+//! use seismograph_io::{IoResourceKind, Resource};
+//!
+//! let resource = Resource::new(IoResourceKind::TcpStream);
+//!
+//! assert_eq!(resource.kind(), IoResourceKind::TcpStream);
+//! ```
 
 use std::sync::atomic::{AtomicU64, Ordering};
 

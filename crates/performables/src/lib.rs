@@ -23,6 +23,19 @@
 //! [`arc::Arc`] defaults to a process-wide allocation with the same
 //! representation size as [`std::sync::Arc`]. Its thread-aware per-thread and
 //! per-NUMA strategies lazily materialize and reuse affinity-local values.
+//!
+//! # Example
+//!
+//! ```
+//! use performables::arc::Arc;
+//! use performables::sync::mutex::Mutex;
+//!
+//! let shared = Arc::new(Mutex::new(0_u32));
+//!
+//! *shared.lock_sync() += 1;
+//!
+//! assert_eq!(*shared.lock_sync(), 1);
+//! ```
 
 pub mod arc;
 pub mod sync;

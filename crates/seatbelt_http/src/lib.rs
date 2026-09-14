@@ -1,6 +1,21 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! HTTP-specific extensions for the [`seatbelt`] resilience middleware.
+//!
+//! ```
+//! # fn main() {
+//! # #[cfg(feature = "retry")] {
+//! use seatbelt_http::HttpRecovery;
+//! use seatbelt_http::retry::{HttpRetryLayer, HttpRetryLayerExt};
+//!
+//! fn configure(layer: HttpRetryLayer) -> HttpRetryLayer {
+//!     layer.http_recovery(HttpRecovery::default())
+//! }
+//! # }
+//! # }
+//! ```
+
 #![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/seatbelt_http/logo.png")]
@@ -13,8 +28,6 @@
     )
 )]
 
-//! HTTP-specific extensions for the [`seatbelt`] resilience middleware.
-//!
 //! Each [`seatbelt`] middleware is generic over its input and output types.
 //! This crate specializes them for [`HttpRequest`] /
 //! [`Result<HttpResponse>`][http_extensions::Result] and adds HTTP-aware
@@ -41,21 +54,6 @@
 //!   during retries and hedging (safe-only, idempotent, or all).
 //! - [`HttpResilienceContext`]: the HTTP specialization of
 //!   [`ResilienceContext`][seatbelt::ResilienceContext].
-//!
-//! # Example
-//!
-//! ```rust
-//! # fn main() {
-//! # #[cfg(feature = "retry")] {
-//! use seatbelt_http::HttpRecovery;
-//! use seatbelt_http::retry::{HttpRetryLayer, HttpRetryLayerExt};
-//!
-//! fn configure(layer: HttpRetryLayer) -> HttpRetryLayer {
-//!     layer.http_recovery(HttpRecovery::default())
-//! }
-//! # }
-//! # }
-//! ```
 
 use http_extensions::{HttpRequest, HttpResponse};
 

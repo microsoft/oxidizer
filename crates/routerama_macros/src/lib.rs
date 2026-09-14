@@ -4,6 +4,14 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! Procedural macros for [`routerama`](https://docs.rs/routerama).
+//!
+//! Macro invocation belongs in a crate that depends on the `routerama` facade,
+//! because expansion resolves that facade crate. See `routerama` for an
+//! example.
+//!
+//! ```
+//! use routerama_macros::{FromQuery, ToQuery};
+//! ```
 
 use proc_macro::TokenStream;
 

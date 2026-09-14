@@ -24,6 +24,17 @@
 //! - [`Classified`] - trait for types that hold classified data
 //! - [`Redactor`] - trait for types that can apply redaction
 //! - [`RedactedDebug`] / [`RedactedDisplay`] / [`RedactedToString`] - redaction-aware formatting traits
+//!
+//! # Example
+//!
+//! ```
+//! use data_privacy_core::DataClass;
+//!
+//! let class = DataClass::new("contoso", "customer_content");
+//!
+//! assert_eq!(class.taxonomy(), "contoso");
+//! assert_eq!(class.name(), "customer_content");
+//! ```
 
 mod classified;
 mod data_class;

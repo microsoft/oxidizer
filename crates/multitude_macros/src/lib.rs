@@ -8,6 +8,14 @@
 //!
 //! The `DeserializeIn` derive accepts arena-specific configuration through
 //! `#[multitude(...)]` and Serde configuration through `#[serde(...)]`.
+//!
+//! Macro invocation belongs in a crate that depends on the `multitude` facade,
+//! because expansion resolves that facade crate. See `multitude` for an
+//! example.
+//!
+//! ```
+//! use multitude_macros::DeserializeIn;
+//! ```
 
 use proc_macro::TokenStream;
 use syn::{Path, parse_quote};

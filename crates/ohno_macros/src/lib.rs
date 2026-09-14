@@ -11,6 +11,13 @@
 //! - `#[derive(Error)]` - Automatically implement error traits
 //! - `#[enrich_err("message")]` - Add error enrichment with file/line information to function errors
 //! - `#[ohno::error]` - Turn a plain struct into an error type
+//!
+//! Macro invocation belongs in a crate that depends on the `ohno` facade,
+//! because expansion resolves that facade crate. See `ohno` for an example.
+//!
+//! ```
+//! use ohno_macros::Error;
+//! ```
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/ohno_macros/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/ohno_macros/favicon.ico")]

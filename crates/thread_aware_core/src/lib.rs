@@ -1,33 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![no_std]
-#![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
-#![cfg_attr(docsrs, feature(doc_cfg))]
-#![cfg_attr(
-    not(feature = "std"),
-    expect(rustdoc::broken_intra_doc_links, reason = "all-features documentation validates std links")
-)]
-#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware_core/logo.png")]
-#![doc(
-    html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware_core/favicon.ico"
-)]
-
 //! Support for values that adapt when a runtime moves them to another thread.
-//!
-//! This crate contains the small API shared by thread-aware libraries:
-//!
-//! - [`ThreadAware`] is the trait for values that adapt after a move; its
-//!   [`relocate`](ThreadAware::relocate) callback reports the destination.
-//! - [`Thread`] is the coordinate where a value now runs, composed of runtime, OS-thread, and
-//!   nearest-memory identifiers.
-//!
-//! [`Thread`] is a coordinate, not a handle: a runtime builds one to describe where a value
-//! is running, and it owns no operating-system resource. It is unrelated to
-//! [`std::thread::Thread`], which is a handle to a live OS thread. Naming both in one module
-//! requires aliasing one of them.
-//!
-//! # Example
 //!
 //! ```rust
 //! use thread_aware_core::{Thread, ThreadAware};
@@ -40,6 +14,30 @@
 //!     }
 //! }
 //! ```
+
+#![no_std]
+#![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(
+    not(feature = "std"),
+    expect(rustdoc::broken_intra_doc_links, reason = "all-features documentation validates std links")
+)]
+#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware_core/logo.png")]
+#![doc(
+    html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware_core/favicon.ico"
+)]
+
+//! This crate contains the small API shared by thread-aware libraries:
+//!
+//! - [`ThreadAware`] is the trait for values that adapt after a move; its
+//!   [`relocate`](ThreadAware::relocate) callback reports the destination.
+//! - [`Thread`] is the coordinate where a value now runs, composed of runtime, OS-thread, and
+//!   nearest-memory identifiers.
+//!
+//! [`Thread`] is a coordinate, not a handle: a runtime builds one to describe where a value
+//! is running, and it owns no operating-system resource. It is unrelated to
+//! [`std::thread::Thread`], which is a handle to a live OS thread. Naming both in one module
+//! requires aliasing one of them.
 //!
 //! # The `thread_aware` family
 //!

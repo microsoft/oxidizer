@@ -1,6 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Shared HTTP types and extension traits for clients and servers.
+//!
+//! ```
+//! use http::StatusCode;
+//! use http_extensions::StatusExt;
+//!
+//! assert!(StatusCode::OK.ensure_success().is_ok());
+//! assert!(StatusCode::NOT_FOUND.ensure_success().is_err());
+//! ```
+
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/http_extensions/logo.png")]
@@ -8,8 +18,6 @@
     html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/http_extensions/favicon.ico"
 )]
 
-//! Shared HTTP types and extension traits for clients and servers.
-//!
 //! This crate provides common HTTP functionality built on the popular [`http`] crate,
 //! including flexible body handling, unified error types, and ergonomic extension traits
 //! for working with HTTP requests and responses.

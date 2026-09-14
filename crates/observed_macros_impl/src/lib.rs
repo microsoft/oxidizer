@@ -11,6 +11,10 @@
 //! - `#[derive(Enrichment)]` - generate an `Enrichment` trait impl for a struct
 //!
 //! **Do not depend on this crate directly.** Use the re-exports from `observed` instead.
+//!
+//! ```
+//! use observed_macros_impl::{derive_enrichment, event};
+//! ```
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/observed_macros_impl/logo.png")]
 #![doc(

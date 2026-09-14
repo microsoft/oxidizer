@@ -1,6 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Token transformations behind the benchmark macros of the
+//! [`metabench`](https://docs.rs/metabench) facade.
+//!
+//! The public `metabench` facade is the supported macro interface and provides
+//! invocation examples.
+//!
+//! ```
+//! use metabench_macros_impl::benchmark;
+//! ```
+
 #![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc(hidden)]
@@ -15,13 +25,6 @@
 //!
 //! **Do not depend on this crate directly.** Use the re-exports from
 //! `metabench` instead.
-//!
-//! The public `metabench` facade is the supported macro interface and provides
-//! invocation examples.
-//!
-//! ```rust
-//! use metabench_macros_impl::benchmark;
-//! ```
 
 mod benchmark;
 mod shared;

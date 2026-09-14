@@ -1,6 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! A pure-Rust, high-performance allocator with scoped heaps and telemetry.
+//!
+//! ```
+//! rallocator::rallocator!();
+//!
+//! let values = vec![1, 2, 3];
+//!
+//! assert_eq!(values.len(), 3);
+//! ```
+
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![expect(
     missing_debug_implementations,
@@ -57,8 +67,6 @@
     expect(clippy::iter_with_drain, reason = "The test explicitly drains before reverse-order deallocation")
 )]
 
-//! A pure-Rust, high-performance allocator with scoped heaps and telemetry.
-//!
 //! # Supported platforms
 //!
 //! `rallocator` currently supports Windows and Linux. Other operating systems

@@ -54,6 +54,19 @@
 //! [WinHTTP](https://learn.microsoft.com/en-us/windows/win32/winhttp/using-winhttp)
 //! API.
 //!
+//! # Example
+//!
+//! The transport constructor is an extension trait on `fetch`'s `HttpClient`,
+//! and exists only on Windows:
+//!
+//! ```
+//! # fn main() {
+//! # #[cfg(windows)] {
+//! use fetch_winhttp::{HttpClientWinHttpExt, WinHttpDeps, WinHttpTlsConfig};
+//! # }
+//! # }
+//! ```
+//!
 //! [`fetch`]: https://docs.rs/fetch
 //! [`HttpClient`]: https://docs.rs/fetch
 //! [`WinHttpDeps`]: https://docs.rs/fetch_winhttp/latest/fetch_winhttp/struct.WinHttpDeps.html

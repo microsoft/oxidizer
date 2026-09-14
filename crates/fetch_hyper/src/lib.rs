@@ -26,6 +26,13 @@
 //!
 //! The runtime is supplied by the caller via an [`anyspawn::Spawner`].
 //!
+//! Applications do not construct the transport themselves; `fetch` does that for
+//! them. The entry points this crate exposes are:
+//!
+//! ```
+//! use fetch_hyper::{Connect, HyperTransport, HyperTransportBuilder};
+//! ```
+//!
 //! [`RequestHandler`]: http_extensions::RequestHandler
 
 mod builder;

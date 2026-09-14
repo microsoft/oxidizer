@@ -9,6 +9,14 @@
 //!
 //! * `#[derive(ThreadAware)]`: Auto-implements the `thread_aware::ThreadAware` trait by recursively
 //!   calling `transfer` on each field.
+//!
+//! Macro invocation belongs in a crate that depends on the `thread_aware`
+//! facade, because expansion resolves that facade crate. See `thread_aware`
+//! for an example.
+//!
+//! ```
+//! use thread_aware_macros::ThreadAware;
+//! ```
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware_macros/logo.png")]
 #![doc(

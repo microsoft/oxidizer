@@ -9,6 +9,14 @@
 #![cfg_attr(coverage_nightly, coverage(off))]
 
 //! An unpublished crate containing testing utilities for use within this repo.
+//!
+//! ```
+//! use std::time::Duration;
+//!
+//! use testing_aids::TEST_TIMEOUT;
+//!
+//! assert!(TEST_TIMEOUT > Duration::from_secs(1));
+//! ```
 
 #![allow(clippy::panic, clippy::unwrap_used, missing_docs, reason = "Test code")]
 
