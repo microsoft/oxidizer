@@ -119,3 +119,4 @@ mod negotiate;
 pub(crate) const CONTENT_DIGEST_HEADER: &str = "content-digest";
 
 pub use compression::{Client, Compression, CompressionLayer, DEFAULT_COMPRESSIBLE_TYPES, OriginalBody, Server, UnsupportedCompression};
+pub use error::CompressibleTypeError;

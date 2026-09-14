@@ -7,7 +7,7 @@ use bytesbuf::BytesView;
 use compressors::Resources;
 use compressors::format::Format;
 use fetch::fake::{FakeDeps, FakeHandler};
-use fetch::options::{DecompressionMethod, DecompressionOptions};
+use fetch::options::{DecompressionFormat, DecompressionOptions};
 use fetch::{HttpClient, HttpResponseBuilder};
 use http::HeaderValue;
 use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING};
@@ -30,7 +30,7 @@ fn main() -> Result<(), ohno::AppError> {
                 .build()
         });
         let client = HttpClient::builder_fake(handler, FakeDeps::default())
-            .decompression(DecompressionOptions::with_methods(&[DecompressionMethod::Gzip]))
+            .decompression(DecompressionOptions::with_formats(&[DecompressionFormat::Gzip]))
             .build();
 
         let response = client.get("https://example.com").fetch().await?;

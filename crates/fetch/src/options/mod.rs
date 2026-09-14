@@ -15,7 +15,7 @@ use data_privacy::RedactionEngine;
 
 mod decompression;
 
-pub use decompression::{DecompressionMethod, DecompressionOptions};
+pub use decompression::{DecompressionFormat, DecompressionOptions};
 pub use fetch_options::{
     ConnectionIdleTimeout, ConnectionKeepAlive, ConnectionLifetime, ConnectionPoolOptions, Http2Options, PoolIndex, PoolSelection,
     RequestFilter, SocketOptions, TransportOptions,

@@ -642,6 +642,24 @@ async fn an_uncompressed_response_still_says_it_varies() {
 }
 
 #[tokio::test]
+async fn a_body_is_not_returned_when_no_representation_is_acceptable() {
+    for accept_encoding in ["gzip;q=0, identity;q=0", "*;q=0"] {
+        let handler = server().compress_responses(&[Format::Gzip]).layer(echo());
+        let mut input = request(bytes(&payload()), None);
+        input
+            .headers_mut()
+            .insert(ACCEPT_ENCODING, HeaderValue::from_static(accept_encoding));
+
+        let response = handler.execute(input).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_ACCEPTABLE, "{accept_encoding}");
+        assert_eq!(response.headers().get(VARY).unwrap(), "accept-encoding");
+        assert!(response.headers().get(CONTENT_ENCODING).is_none(), "{accept_encoding}");
+        assert!(response.into_body().into_bytes().await.unwrap().is_empty(), "{accept_encoding}");
+    }
+}
+
+#[tokio::test]
 async fn an_existing_vary_is_kept() {
     let handler = server().compress_responses(&[Format::Gzip]).layer(FakeHandler::from_fn(|_| {
         HttpResponseBuilder::new_fake()
@@ -825,7 +843,7 @@ async fn safe_content_type_exclusions_apply_without_a_custom_filter() {
 
 #[tokio::test]
 async fn a_wildcard_allowlist_cannot_override_the_builtin_exclusions() {
-    assert_content_type_policy(&server().compress_responses(&[Format::Gzip]).compressible_types(["*/*"])).await;
+    assert_content_type_policy(&server().compress_responses(&[Format::Gzip]).compressible_types(["*/*"]).unwrap()).await;
 }
 
 #[tokio::test]
@@ -868,6 +886,7 @@ async fn only_the_chosen_content_types_are_compressed() {
         let handler = server()
             .compress_responses(&[Format::Gzip])
             .compressible_types(DEFAULT_COMPRESSIBLE_TYPES.iter().copied())
+            .unwrap()
             .layer(FakeHandler::from_fn(move |_| {
                 HttpResponseBuilder::new_fake()
                     .status(StatusCode::OK)
@@ -896,6 +915,7 @@ async fn structured_suffix_allowlist_matches_only_the_requested_type() {
         let handler = server()
             .compress_responses(&[Format::Gzip])
             .compressible_types(["application/ld+json"])
+            .unwrap()
             .layer(FakeHandler::from_fn(move |_| {
                 HttpResponseBuilder::new_fake()
                     .status(StatusCode::OK)
@@ -926,6 +946,7 @@ async fn base_subtype_allowlist_matches_suffix_not_structured_prefix() {
         let handler = server()
             .compress_responses(&[Format::Gzip])
             .compressible_types([allowed])
+            .unwrap()
             .layer(FakeHandler::from_fn(move |_| {
                 HttpResponseBuilder::new_fake()
                     .status(StatusCode::OK)
@@ -953,6 +974,7 @@ async fn a_body_without_a_content_type_is_left_alone_once_filtering_is_on() {
     let handler = server()
         .compress_responses(&[Format::Gzip])
         .compressible_types(DEFAULT_COMPRESSIBLE_TYPES.iter().copied())
+        .unwrap()
         .layer(echo());
 
     let mut input = request(bytes(&payload()), None);
@@ -961,6 +983,13 @@ async fn a_body_without_a_content_type_is_left_alone_once_filtering_is_on() {
     let response = handler.execute(input).await.unwrap();
 
     assert!(response.headers().get(CONTENT_ENCODING).is_none());
+}
+
+#[test]
+fn an_invalid_compressible_type_is_rejected() {
+    let error = server().compressible_types(["application/json", "not a media type"]).unwrap_err();
+
+    assert_eq!(error.to_string(), "'not a media type' is not a valid media type");
 }
 
 #[tokio::test]

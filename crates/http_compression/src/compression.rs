@@ -15,7 +15,7 @@ use layered::{Layer, Service};
 use mime::Mime;
 use smallvec::SmallVec;
 
-use crate::error::{invalid, too_many_content_codings, unsupported};
+use crate::error::{CompressibleTypeError, invalid, too_many_content_codings, unsupported};
 use crate::{CONTENT_DIGEST_HEADER, body, negotiate};
 
 /// A short list of formats: a stacked `Content-Encoding` is rare.
@@ -348,8 +348,7 @@ impl CompressionLayer<Server> {
     ///
     /// An entry such as `text/*` covers every kind of text, and an entry whose
     /// second half carries a structured suffix covers the type it is built on, so `application/ld+json` is covered by `application/json`.
-    /// Parameters such as `; charset=utf-8` are ignored, and an entry that is
-    /// not a media type at all is dropped.
+    /// Parameters such as `; charset=utf-8` are ignored.
     ///
     /// Once a list is set, a body with a missing or unreadable `Content-Type` is
     /// left alone, since there is nothing to check it against.
@@ -369,19 +368,31 @@ impl CompressionLayer<Server> {
     /// # let body_builder = HttpBodyBuilder::new_fake();
     /// let layer = Compression::server(body_builder)
     ///     .compress_responses(&[Format::Gzip])
-    ///     .compressible_types(DEFAULT_COMPRESSIBLE_TYPES.iter().copied());
+    ///     .compressible_types(DEFAULT_COMPRESSIBLE_TYPES.iter().copied())
+    ///     .unwrap();
     /// # }
     /// ```
-    #[must_use]
-    pub fn compressible_types<T: AsRef<str>>(mut self, types: impl IntoIterator<Item = T>) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any entry is not a valid media type.
+    pub fn compressible_types<T: AsRef<str>>(
+        mut self,
+        types: impl IntoIterator<Item = T>,
+    ) -> std::result::Result<Self, CompressibleTypeError> {
         self.role.compressible = Some(
             types
                 .into_iter()
-                .filter_map(|pattern| pattern.as_ref().parse::<Mime>().ok())
-                .collect(),
+                .map(|pattern| {
+                    let pattern = pattern.as_ref();
+                    pattern
+                        .parse::<Mime>()
+                        .map_err(|source| CompressibleTypeError::new(pattern.to_owned(), source))
+                })
+                .collect::<std::result::Result<_, _>>()?,
         );
 
-        self
+        Ok(self)
     }
 }
 
@@ -681,9 +692,9 @@ impl Server {
     ///
     /// A `HEAD` response carries no body to compress however its headers describe
     /// one, so it is ruled out here rather than after the fact.
-    fn choose_response_format(&self, request: &HttpRequest) -> Option<Format> {
+    fn choose_response_format(&self, request: &HttpRequest) -> negotiate::Selection {
         if self.compress_responses.is_empty() || request.method() == Method::HEAD {
-            return None;
+            return negotiate::Selection::Identity;
         }
 
         negotiate::select(request.headers(), &self.compress_responses)
@@ -693,7 +704,7 @@ impl Server {
         &self,
         config: &Config,
         mut response: HttpResponse,
-        chosen: Option<Format>,
+        chosen: negotiate::Selection,
         connect: bool,
     ) -> Result<HttpResponse> {
         if self.compress_responses.is_empty() || (connect && response.status().is_success()) {
@@ -707,13 +718,25 @@ impl Server {
         // to a caller that never asked for one.
         mark_varies_on_accept_encoding(response.headers_mut());
 
-        let Some(format) = chosen else {
-            return Ok(response);
-        };
-
         if !carries_a_body(&response) {
             return Ok(response);
         }
+
+        let format = match chosen {
+            negotiate::Selection::Format(format) => format,
+            negotiate::Selection::Identity => return Ok(response),
+            negotiate::Selection::NotAcceptable => {
+                let (mut parts, _) = response.into_parts();
+                parts.status = StatusCode::NOT_ACCEPTABLE;
+                parts.headers.remove(CONTENT_ENCODING);
+                parts.headers.remove(CONTENT_LENGTH);
+                parts.headers.remove(CONTENT_RANGE);
+                parts.headers.remove(CONTENT_TYPE);
+                parts.headers.remove(ETAG);
+                parts.headers.remove(CONTENT_DIGEST_HEADER);
+                return Ok(HttpResponse::from_parts(parts, config.body_builder.empty()));
+            }
+        };
 
         let (mut parts, body) = response.into_parts();
         let body = self.compress(config, &mut parts.headers, body, format)?;

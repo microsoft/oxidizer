@@ -143,11 +143,11 @@ impl HttpClientBuilder {
         self
     }
 
-    /// Configures automatic response decompression, including methods and resource limits.
+    /// Configures automatic response decompression, including formats and resource limits.
     ///
     /// Off by default: a build with none of the `compression-*` features links no
     /// compression implementation at all, and even with them the client decompresses nothing until
-    /// [`methods`][DecompressionOptions::methods] names something. Requests then advertise the methods in
+    /// [`formats`][DecompressionOptions::formats] names something. Requests then advertise the formats in
     /// `Accept-Encoding`, most preferred first, and a matching response is
     /// decompressed before the caller sees it, with `Content-Encoding` and
     /// `Content-Length` removed because neither describes the decompressed body.
@@ -155,10 +155,10 @@ impl HttpClientBuilder {
     /// untouched rather than failing. Decompression is lazy, so a malformed body
     /// fails when it is read rather than when the response arrives.
     ///
-    /// [`DecompressionMethod::ALL`][crate::options::DecompressionMethod::ALL] asks for everything this build can decompress.
+    /// [`DecompressionFormat::ALL`][crate::options::DecompressionFormat::ALL] asks for everything this build can decompress.
     /// The `compression-all` feature makes all supported compression formats available.
     ///
-    /// Passing a method slice or array reference preserves the compression format's default limits.
+    /// Passing a format slice or array reference uses the default decompression limits.
     /// Pass [`DecompressionOptions`] to customize them.
     ///
     /// # Bounds
@@ -178,13 +178,13 @@ impl HttpClientBuilder {
     /// # #[cfg(all(feature = "test-util", feature = "compression-gzip"))]
     /// # {
     /// # use fetch::HttpClient;
-    /// # use fetch::options::{DecompressionMethod, DecompressionOptions};
+    /// # use fetch::options::{DecompressionFormat, DecompressionOptions};
     /// # use fetch::fake::FakeDeps;
     /// # use http::StatusCode;
     /// # let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default());
     /// let client = builder
     ///     .decompression(
-    ///         DecompressionOptions::with_methods(&[DecompressionMethod::Gzip])
+    ///         DecompressionOptions::with_formats(&[DecompressionFormat::Gzip])
     ///             .max_output_len(8 * 1024 * 1024),
     ///     )
     ///     .build();

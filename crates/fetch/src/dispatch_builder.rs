@@ -68,17 +68,15 @@ mod decompression {
     /// Builds the layer, or `None` when the client asked for no decompression.
     pub(super) fn layer(options: &ClientOptions, body_builder: &HttpBodyBuilder) -> Option<Layer> {
         let options = &options.decompression;
-        if options.methods.is_empty() {
+        if options.formats.is_empty() {
             return None;
         }
 
-        let formats = options.methods.iter().map(|method| method.format()).collect::<Vec<_>>();
-        let mut layer = Compression::client(body_builder.clone())
+        let formats = options.formats.iter().map(|format| format.format()).collect::<Vec<_>>();
+        let layer = Compression::client(body_builder.clone())
             .resources(Resources::new(body_builder.memory()))
             .decompress_responses(&formats);
-        if let Some(limits) = options.limits() {
-            layer = layer.limits(limits);
-        }
+        let layer = layer.limits(options.limits());
         Some(layer)
     }
 

@@ -786,19 +786,19 @@
 //! # {
 //! # use fetch::HttpClient;
 //! # use fetch::fake::FakeDeps;
-//! # use fetch::options::DecompressionMethod;
+//! # use fetch::options::DecompressionFormat;
 //! # use http::StatusCode;
 //! # let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default());
-//! let client = builder.decompression(&[DecompressionMethod::Gzip]).build();
+//! let client = builder.decompression(&[DecompressionFormat::Gzip]).build();
 //! # }
 //! ```
 //!
-//! Requests then advertise the methods in `Accept-Encoding`, most preferred first, and a matching
+//! Requests then advertise the formats in `Accept-Encoding`, most preferred first, and a matching
 //! response is decompressed before the caller sees it. `Content-Encoding` and `Content-Length` are
 //! removed because neither describes the decompressed body. A response compressed with a format
 //! that was not asked for is handed back untouched rather than failing.
 //!
-//! [`DecompressionMethod::ALL`](options::DecompressionMethod::ALL) asks for everything the build can
+//! [`DecompressionFormat::ALL`](options::DecompressionFormat::ALL) asks for everything the build can
 //! decompress.
 //!
 //! Decompression is lazy, so a malformed body fails when it is read rather than when the response
@@ -850,27 +850,27 @@
 //! [automatic response decompression](#automatic-response-decompression). None is on by default,
 //! and a build with none of them links no compression implementation. Enabling one makes a format
 //! *available*; the client decompresses nothing until
-//! [`DecompressionOptions::methods`](options::DecompressionOptions::methods)
+//! [`DecompressionOptions::formats`](options::DecompressionOptions::formats)
 //! names it and those options are applied with
 //! [`decompression`](HttpClientBuilder::decompression).
 //!
 //! - **`compression-gzip`**: Links `gzip` compression (RFC 1952) for
 //!   [automatic response decompression](#automatic-response-decompression) and adds
-//!   [`DecompressionMethod::Gzip`](options::DecompressionMethod). The legacy `x-gzip` token selects
+//!   [`DecompressionFormat::Gzip`](options::DecompressionFormat). The legacy `x-gzip` token selects
 //!   it too.
 //!
 //! - **`compression-deflate`**: Links `deflate` compression and adds
-//!   [`DecompressionMethod::Deflate`](options::DecompressionMethod). Despite the token, the HTTP
+//!   [`DecompressionFormat::Deflate`](options::DecompressionFormat). Despite the token, the HTTP
 //!   `deflate` format is zlib-wrapped DEFLATE (RFC 1950), *not* raw DEFLATE (RFC 1951).
 //!
 //! - **`compression-brotli`**: Links Brotli compression (`br`, RFC 7932) and adds
-//!   [`DecompressionMethod::Brotli`](options::DecompressionMethod).
+//!   [`DecompressionFormat::Brotli`](options::DecompressionFormat).
 //!
 //! - **`compression-zstd`**: Links Zstandard compression (`zstd`, RFC 8878) and adds
-//!   [`DecompressionMethod::Zstd`](options::DecompressionMethod).
+//!   [`DecompressionFormat::Zstd`](options::DecompressionFormat).
 //!
 //! - **`compression-all`**: Enables all four compression features above. Use
-//!   [`DecompressionMethod::ALL`](options::DecompressionMethod::ALL) to request decompression with all of them.
+//!   [`DecompressionFormat::ALL`](options::DecompressionFormat::ALL) to request decompression with all of them.
 //!
 //! > **Note**: Most users should enable the `tokio` feature along with the `tls` feature for HTTPS
 //! > support. The `json` feature is recommended for most applications that need to work with JSON APIs.

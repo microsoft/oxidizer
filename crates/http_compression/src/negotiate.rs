@@ -27,18 +27,31 @@ impl Quality {
     }
 }
 
-/// Chooses the best of `offered` that the client will accept, if any.
+/// The result of negotiating an encoding for one response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Selection {
+    /// Apply this compression format.
+    Format(Format),
+    /// Send the representation without a content coding.
+    Identity,
+    /// Neither identity nor an offered format is acceptable.
+    NotAcceptable,
+}
+
+/// Chooses the best representation the client will accept.
 ///
 /// `offered` is in server preference order, which breaks ties between compression formats
 /// the client rates equally. An entry the client rejects outright with `q=0` is
 /// never chosen, and a format absent from the header is only chosen when the
 /// header allows a wildcard.
-pub(crate) fn select(headers: &HeaderMap, offered: &[Format]) -> Option<Format> {
+pub(crate) fn select(headers: &HeaderMap, offered: &[Format]) -> Selection {
     if offered.is_empty() {
-        return None;
+        return Selection::Identity;
     }
 
-    headers.get(ACCEPT_ENCODING)?;
+    if !headers.contains_key(ACCEPT_ENCODING) {
+        return Selection::Identity;
+    }
 
     let mut best: Option<(Format, Quality)> = None;
 
@@ -47,7 +60,7 @@ pub(crate) fn select(headers: &HeaderMap, offered: &[Format]) -> Option<Format> 
             continue;
         };
 
-        let Some(quality) = quality_for(headers, token, Wildcard::Allowed) else {
+        let Some(quality) = quality_for(headers, token, Wildcard::Allowed).filter(|quality| quality.is_acceptable()) else {
             continue;
         };
 
@@ -63,9 +76,20 @@ pub(crate) fn select(headers: &HeaderMap, offered: &[Format]) -> Option<Format> 
     // sending the body as it is.
     // Only a named `identity` says so. A bare `*` means anything is acceptable,
     // not that the caller would rather have nothing applied.
-    let identity = quality_for(headers, "identity", Wildcard::Ignored).unwrap_or(Quality::ZERO);
+    let explicit_identity = quality_for(headers, "identity", Wildcard::Ignored);
+    let identity_rejected_by_wildcard = explicit_identity.is_none() && quality_for(headers, "\0", Wildcard::Allowed) == Some(Quality::ZERO);
+    let identity_acceptable = explicit_identity.is_none_or(Quality::is_acceptable) && !identity_rejected_by_wildcard;
+    let identity_preference = explicit_identity.unwrap_or(Quality::ZERO);
 
-    best.filter(|(_, quality)| *quality > identity).map(|(format, _)| format)
+    if let Some((format, _)) = best.filter(|(_, quality)| *quality > identity_preference) {
+        Selection::Format(format)
+    } else if identity_acceptable {
+        Selection::Identity
+    } else if let Some((format, _)) = best {
+        Selection::Format(format)
+    } else {
+        Selection::NotAcceptable
+    }
 }
 
 /// Whether `*` may stand in for a format the header does not name.
@@ -107,7 +131,7 @@ fn quality_for(headers: &HeaderMap, token: &str, wildcard_use: Wildcard) -> Opti
 
             if name.eq_ignore_ascii_case(token) {
                 // An explicit entry always beats the wildcard, even to reject.
-                return quality.is_acceptable().then_some(quality);
+                return Some(quality);
             }
 
             if name == "*" && wildcard_use == Wildcard::Allowed {
@@ -116,7 +140,7 @@ fn quality_for(headers: &HeaderMap, token: &str, wildcard_use: Wildcard) -> Opti
         }
     }
 
-    wildcard.filter(|quality| quality.is_acceptable())
+    wildcard
 }
 
 /// Parses a `q=` value into thousandths, rejecting anything malformed.
@@ -168,44 +192,47 @@ mod tests {
 
     #[test]
     fn nothing_is_selected_without_a_header() {
-        assert_eq!(select(&HeaderMap::new(), OFFERED), None);
+        assert_eq!(select(&HeaderMap::new(), OFFERED), Selection::Identity);
     }
 
     #[test]
     fn nothing_is_selected_when_nothing_is_offered() {
-        assert_eq!(select(&headers("gzip"), &[]), None);
+        assert_eq!(select(&headers("gzip"), &[]), Selection::Identity);
     }
 
     #[test]
     fn a_format_without_an_http_token_is_not_selected() {
-        assert_eq!(select(&headers("*"), &[Format::Deflate]), None);
+        assert_eq!(select(&headers("*"), &[Format::Deflate]), Selection::Identity);
     }
 
     #[test]
     fn the_only_acceptable_format_is_selected() {
-        assert_eq!(select(&headers("gzip"), OFFERED), Some(Format::Gzip));
+        assert_eq!(select(&headers("gzip"), OFFERED), Selection::Format(Format::Gzip));
     }
 
     #[test]
     fn the_highest_quality_wins() {
-        assert_eq!(select(&headers("gzip;q=0.9, br;q=0.2"), OFFERED), Some(Format::Gzip));
-        assert_eq!(select(&headers("gzip;q=0.2, br;q=0.9"), OFFERED), Some(Format::Brotli));
+        assert_eq!(select(&headers("gzip;q=0.9, br;q=0.2"), OFFERED), Selection::Format(Format::Gzip));
+        assert_eq!(select(&headers("gzip;q=0.2, br;q=0.9"), OFFERED), Selection::Format(Format::Brotli));
     }
 
     #[test]
     fn a_tie_is_broken_by_the_offered_order() {
         // Zstd is offered first, so it wins an equal rating.
-        assert_eq!(select(&headers("gzip, br, zstd"), OFFERED), Some(Format::Zstd));
+        assert_eq!(select(&headers("gzip, br, zstd"), OFFERED), Selection::Format(Format::Zstd));
     }
 
     #[test]
     fn a_preference_for_no_compression_is_respected() {
         // Rating `identity` above the alternatives is how a caller says it
         // would rather have the body uncompressed.
-        assert_eq!(select(&headers("identity, gzip;q=0.5"), OFFERED), None);
-        assert_eq!(select(&headers("identity;q=0.5, gzip;q=0.5"), OFFERED), None);
-        assert_eq!(select(&headers("identity;q=0.5, gzip"), OFFERED), Some(Format::Gzip));
-        assert_eq!(select(&headers("identity;q=0, gzip;q=0.1"), OFFERED), Some(Format::Gzip));
+        assert_eq!(select(&headers("identity, gzip;q=0.5"), OFFERED), Selection::Identity);
+        assert_eq!(select(&headers("identity;q=0.5, gzip;q=0.5"), OFFERED), Selection::Identity);
+        assert_eq!(select(&headers("identity;q=0.5, gzip"), OFFERED), Selection::Format(Format::Gzip));
+        assert_eq!(
+            select(&headers("identity;q=0, gzip;q=0.1"), OFFERED),
+            Selection::Format(Format::Gzip)
+        );
     }
 
     #[test]
@@ -216,21 +243,21 @@ mod tests {
 
     #[test]
     fn an_explicitly_rejected_format_is_never_selected() {
-        assert_eq!(select(&headers("gzip;q=0"), OFFERED), None);
-        assert_eq!(select(&headers("gzip;q=0, br"), OFFERED), Some(Format::Brotli));
+        assert_eq!(select(&headers("gzip;q=0"), OFFERED), Selection::Identity);
+        assert_eq!(select(&headers("gzip;q=0, br"), OFFERED), Selection::Format(Format::Brotli));
     }
 
     #[test]
     fn a_wildcard_covers_formats_the_header_does_not_name() {
-        assert_eq!(select(&headers("*"), OFFERED), Some(Format::Zstd));
+        assert_eq!(select(&headers("*"), OFFERED), Selection::Format(Format::Zstd));
         // An explicit entry overrides the wildcard, even to reject.
-        assert_eq!(select(&headers("*, zstd;q=0"), OFFERED), Some(Format::Brotli));
+        assert_eq!(select(&headers("*, zstd;q=0"), OFFERED), Selection::Format(Format::Brotli));
     }
 
     #[test]
     fn a_rejecting_wildcard_leaves_only_named_formats() {
-        assert_eq!(select(&headers("*;q=0"), OFFERED), None);
-        assert_eq!(select(&headers("*;q=0, gzip"), OFFERED), Some(Format::Gzip));
+        assert_eq!(select(&headers("*;q=0"), OFFERED), Selection::NotAcceptable);
+        assert_eq!(select(&headers("*;q=0, gzip"), OFFERED), Selection::Format(Format::Gzip));
     }
 
     #[test]
@@ -259,7 +286,7 @@ mod tests {
 
     #[test]
     fn malformed_members_do_not_discard_valid_alternatives() {
-        assert_eq!(select(&headers("gzip;q=nonsense"), OFFERED), None);
+        assert_eq!(select(&headers("gzip;q=nonsense"), OFFERED), Selection::Identity);
         for invalid in [
             "gzip;q=nonsense",
             "gzip;q=2",
@@ -273,48 +300,71 @@ mod tests {
             "gzip;q=1;extra",
         ] {
             for value in [format!("{invalid}, br"), format!("br, {invalid}")] {
-                assert_eq!(select(&headers(&value), OFFERED), Some(Format::Brotli), "{value}");
+                assert_eq!(select(&headers(&value), OFFERED), Selection::Format(Format::Brotli), "{value}");
             }
         }
-        assert_eq!(select(&split_headers(&["gzip;q=nonsense", "br"]), OFFERED), Some(Format::Brotli));
-        assert_eq!(select(&headers("gzip;q=nonsense, gzip"), OFFERED), Some(Format::Gzip));
+        assert_eq!(
+            select(&split_headers(&["gzip;q=nonsense", "br"]), OFFERED),
+            Selection::Format(Format::Brotli)
+        );
+        assert_eq!(select(&headers("gzip;q=nonsense, gzip"), OFFERED), Selection::Format(Format::Gzip));
     }
 
     #[test]
     fn ignoring_malformed_members_preserves_rejections_and_identity_preferences() {
-        for value in ["br;q=nonsense, gzip;q=0", "br;q=nonsense, *;q=0", "gzip;q=0, br;q=nonsense, *"] {
-            assert_eq!(select(&headers(value), &[Format::Gzip]), None, "{value}");
-        }
-        assert_eq!(select(&headers("gzip;q=nonsense, br;q=0.5, identity"), OFFERED), None);
+        assert_eq!(select(&headers("br;q=nonsense, gzip;q=0"), &[Format::Gzip]), Selection::Identity);
+        assert_eq!(select(&headers("br;q=nonsense, *;q=0"), &[Format::Gzip]), Selection::NotAcceptable);
+        assert_eq!(select(&headers("gzip;q=0, br;q=nonsense, *"), &[Format::Gzip]), Selection::Identity);
+        assert_eq!(
+            select(&headers("gzip;q=nonsense, br;q=0.5, identity"), OFFERED),
+            Selection::Identity
+        );
         assert_eq!(
             select(&headers("gzip;q=nonsense, br;q=0.5, identity;q=0"), OFFERED),
-            Some(Format::Brotli)
+            Selection::Format(Format::Brotli)
         );
-        assert_eq!(select(&headers("gzip;q=nonsense, *;q=0.5"), OFFERED), Some(Format::Zstd));
-        assert_eq!(select(&headers("*;q=nonsense, gzip"), OFFERED), Some(Format::Gzip));
+        assert_eq!(
+            select(&headers("gzip;q=nonsense, *;q=0.5"), OFFERED),
+            Selection::Format(Format::Zstd)
+        );
+        assert_eq!(select(&headers("*;q=nonsense, gzip"), OFFERED), Selection::Format(Format::Gzip));
     }
 
     #[test]
     fn an_unreadable_header_line_does_not_discard_readable_lines() {
         let mut headers = headers("br");
         headers.append(ACCEPT_ENCODING, HeaderValue::from_bytes(b"\xff").unwrap());
-        assert_eq!(select(&headers, OFFERED), Some(Format::Brotli));
+        assert_eq!(select(&headers, OFFERED), Selection::Format(Format::Brotli));
 
         headers.insert(ACCEPT_ENCODING, HeaderValue::from_bytes(b"\xff").unwrap());
         headers.append(ACCEPT_ENCODING, HeaderValue::from_static("gzip"));
-        assert_eq!(select(&headers, OFFERED), Some(Format::Gzip));
+        assert_eq!(select(&headers, OFFERED), Selection::Format(Format::Gzip));
     }
 
     #[test]
     fn a_header_split_over_several_lines_is_read_as_one_list() {
         // RFC 9110 lets a list header be sent as repeated lines.
-        assert_eq!(select(&split_headers(&["gzip;q=0.2", "br;q=0.9"]), OFFERED), Some(Format::Brotli));
-        assert_eq!(select(&split_headers(&["gzip", "zstd;q=0"]), OFFERED), Some(Format::Gzip));
-        assert_eq!(select(&split_headers(&["identity", "*;q=0"]), OFFERED), None);
+        assert_eq!(
+            select(&split_headers(&["gzip;q=0.2", "br;q=0.9"]), OFFERED),
+            Selection::Format(Format::Brotli)
+        );
+        assert_eq!(
+            select(&split_headers(&["gzip", "zstd;q=0"]), OFFERED),
+            Selection::Format(Format::Gzip)
+        );
+        assert_eq!(select(&split_headers(&["identity", "*;q=0"]), OFFERED), Selection::Identity);
     }
 
     #[test]
     fn casing_and_whitespace_do_not_matter() {
-        assert_eq!(select(&headers("  GZIP ;  q=0.9  "), OFFERED), Some(Format::Gzip));
+        assert_eq!(select(&headers("  GZIP ;  q=0.9  "), OFFERED), Selection::Format(Format::Gzip));
+    }
+
+    #[test]
+    fn rejecting_identity_and_every_offered_format_is_not_acceptable() {
+        assert_eq!(
+            select(&headers("gzip;q=0, identity;q=0"), &[Format::Gzip]),
+            Selection::NotAcceptable
+        );
     }
 }
