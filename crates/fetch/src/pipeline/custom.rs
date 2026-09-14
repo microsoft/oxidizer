@@ -26,7 +26,6 @@ impl CustomPipeline {
         Self(constructor.into())
     }
 
-    /// Creates the custom dynamic service for one dispatch handler and context.
     pub(crate) fn create(&self, handler: Dispatch, context: PipelineContext) -> DynamicService<HttpRequest, crate::Result<HttpResponse>> {
         self.0(handler, context)
     }
