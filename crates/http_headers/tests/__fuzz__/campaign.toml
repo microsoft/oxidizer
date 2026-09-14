@@ -1,0 +1,39 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[campaign]
+package = "http_headers"
+default_engine = "libfuzzer"
+default_time = "300s"
+default_max_input_length = 4096
+corpus_root = "crates/http_headers/tests/__fuzz__"
+
+[[target]]
+name = "arbitrary_header_values_do_not_panic"
+test = "fuzz"
+description = "Exercise every representative parser over arbitrary HeaderValue-compatible bytes."
+
+[[target]]
+name = "expanded_header_values_do_not_panic"
+test = "fuzz"
+description = "Exercise negotiation, conditional, range, CORS, WebSocket, and security parsers."
+
+[[target]]
+name = "comma_and_quoted_delimiters_match_reference"
+test = "fuzz"
+description = "Compare comma and semicolon parsing, including quoted delimiters, with an independent reference."
+
+[[target]]
+name = "content_type_cached_and_uncached_agree"
+test = "fuzz"
+description = "Compare borrowed Content-Type decoding with first and repeated owned metadata outcomes."
+
+[[target]]
+name = "scalar_and_simd_agree"
+test = "fuzz"
+description = "Compare scalar and runtime-selected byte scanners over arbitrary bytes."
+
+[[target]]
+name = "typed_round_trips"
+test = "fuzz"
+description = "Construct, encode, decode, and compare representative typed header values."
