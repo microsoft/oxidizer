@@ -1,0 +1,89 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "http_headers"
+description = "Fast, ergonomic typed HTTP headers with borrowed views."
+version = "0.1.0"
+readme = "README.md"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/http_headers"
+documentation = "https://docs.rs/http_headers"
+keywords = ["http", "headers", "zero-copy", "simd"]
+categories = ["web-programming"]
+autobenches = false
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["bytes::bytes::Bytes", "http::*", "serde_core::de::*", "serde_core::ser::*"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = []
+benchmarking = ["http_headers_simd/benchmarking"]
+# Optional adapter for the external `http` crate. The adapter may retain
+# `HeaderValue` storage internally without changing typed-header semantics.
+http = ["dep:http"]
+serde = ["dep:serde"]
+
+[dependencies]
+base64 = { workspace = true, features = ["std"] }
+bytes = { workspace = true, features = ["std"] }
+compact_str = { workspace = true, features = ["std"] }
+fluent-uri = { workspace = true, features = ["ipv_future"] }
+http = { workspace = true, optional = true }
+http_headers_simd = { workspace = true, features = ["std"] }
+httpdate = { workspace = true }
+idna = { workspace = true, features = ["compiled_data", "std"] }
+itoa.workspace = true
+serde = { workspace = true, optional = true, features = ["derive", "std"] }
+sha1 = { workspace = true, features = ["std"] }
+smallvec = { workspace = true, features = ["const_new"] }
+zeroize = { workspace = true, features = ["alloc"] }
+
+[dev-dependencies]
+axum = { workspace = true, features = ["http1", "json", "tokio"] }
+bolero = { workspace = true, features = ["std"] }
+criterion = { workspace = true }
+headers = { workspace = true }
+http = { workspace = true }
+metabench = { workspace = true }
+mutants = { workspace = true }
+paste = { workspace = true }
+serde = { workspace = true, features = ["derive", "std"] }
+serde_json = { workspace = true, features = ["std"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
+tower = { workspace = true, features = ["util"] }
+
+[lints]
+workspace = true
+
+[[example]]
+name = "axum"
+required-features = ["http"]
+
+[[bench]]
+name = "http_headers_micro"
+harness = false
+required-features = ["benchmarking", "http"]
+
+[[bench]]
+name = "http_headers_storage"
+harness = false
+required-features = ["benchmarking", "http"]
+
+[[bench]]
+name = "http_headers_per_header"
+harness = false
+required-features = ["benchmarking", "http"]
+
+[[bench]]
+name = "http_headers_name_recognition"
+harness = false
+required-features = ["benchmarking", "http"]

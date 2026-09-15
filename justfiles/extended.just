@@ -162,7 +162,7 @@ bolero TIME="60s":
 
     foreach ($e in $entries) {
         Write-Host "`n=== bolero list: $($e.Package)::$($e.Harness) ===" -ForegroundColor Cyan
-        $listing = cargo +$env:RUST_NIGHTLY bolero list -p $e.Package
+        $listing = cargo +$env:RUST_NIGHTLY bolero list -p $e.Package --all-features
         if (-not $listing) {
             Write-Host "  (no targets)"
             continue
@@ -180,6 +180,6 @@ bolero TIME="60s":
             # Raise the RSS limit from the 2 GiB default. Adaptive chunk sizing
             # allocates more (smaller, 64 KiB-aligned) chunks per arena, which
             # inflates ASan shadow memory and quarantine overhead under libfuzzer.
-            cargo +$env:RUST_NIGHTLY bolero test $target -p $e.Package --engine libfuzzer -T {{ TIME }} --engine-args=-rss_limit_mb=4096
+            cargo +$env:RUST_NIGHTLY bolero test $target -p $e.Package --all-features --engine libfuzzer -T {{ TIME }} --engine-args=-rss_limit_mb=4096
         }
     }
