@@ -33,13 +33,22 @@ The entry points are:
 
 The runtime is supplied by the caller via an [`anyspawn::Spawner`][__link6].
 
+Applications do not construct the transport themselves; `fetch` does that for
+them. The entry points this crate exposes are:
+
+## Examples
+
+```rust
+use fetch_hyper::{Connect, HyperTransport, HyperTransportBuilder};
+```
+
 
 <hr/>
 <sub>
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_hyper">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb1PafKPRqQnMbycEo89Tdc1Ibs7VR1QL49eUbNVExL_GkLMNhZISCaGFueXNwYXduZTAuOS4wgmtmZXRjaF9oeXBlcmUwLjguMIJtZmV0Y2hfb3B0aW9uc2UwLjIuNIJvaHR0cF9leHRlbnNpb25zZjAuMTEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbUqqqf8DFc7cbbqjsMMlcCgAb8aYEL5KSCfsbBEWevMU_lP9hZISCaGFueXNwYXduZTAuOS4wgmtmZXRjaF9oeXBlcmUwLjguMIJtZmV0Y2hfb3B0aW9uc2UwLjIuNIJvaHR0cF9leHRlbnNpb25zZjAuMTEuMA
  [__link0]: https://docs.rs/fetch_hyper/0.8.0/fetch_hyper/?search=HyperTransportBuilder
  [__link1]: https://docs.rs/fetch_hyper/0.8.0/fetch_hyper/?search=Connect
  [__link2]: https://docs.rs/fetch_options/0.2.4/fetch_options/?search=TransportOptions

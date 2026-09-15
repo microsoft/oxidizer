@@ -4,6 +4,13 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! Macros for the [`data_privacy`](https://docs.rs/data_privacy) crate.
+//!
+//! This crate holds the token transformations behind those macros; the
+//! `data_privacy` facade is the supported interface.
+//!
+//! ```
+//! use data_privacy_macros_impl::derive::redacted_debug;
+//! ```
 
 #![expect(
     clippy::missing_panics_doc,

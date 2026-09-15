@@ -3,8 +3,13 @@
 
 //! Private construction APIs for thread-aware runtimes, grouped by version.
 
-/// Version 1 of the private construction API.
 pub mod v1 {
+    //! Version 1 of the private construction API.
+    //!
+    //! Constructs [`Owner`], [`NumaNode`], and [`Thread`] identifiers for
+    //! runtimes that build their own thread-awareness values. Used only by
+    //! runtime implementations, not by application code.
+
     #[cfg(any(test, feature = "std"))]
     use std::thread::ThreadId;
 

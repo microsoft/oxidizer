@@ -16,8 +16,6 @@
 Primitives for obtaining, working with, and mocking system
 time and timers, enabling faster and more robust testing.
 
-## Quick Start
-
 ```rust
 use std::time::Duration;
 
@@ -292,7 +290,7 @@ contain additional examples of how to use the time primitives.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQboHuu5M6pCuEb3VZo280w0XAbKK68kBCH6YMb59kPPAtIPCVhZIKCbHRocmVhZF9hd2FyZWYwLjEyLjCCZHRpY2tlMC43LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbhyBAngPlCKsbEBompuY6vBkbUjmsek6C-ZcbhKQfeU2g0-dhZIKCbHRocmVhZF9hd2FyZWYwLjEyLjCCZHRpY2tlMC43LjA
  [__link0]: https://docs.rs/tick/0.7.0/tick/?search=ClockControl
  [__link1]: https://docs.rs/tick/0.7.0/tick/?search=Clock
  [__link10]: https://docs.rs/tick/0.7.0/tick/?search=Error

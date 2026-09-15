@@ -15,6 +15,23 @@
 
 Live monitoring and snapshot-to-HTML reporting for the `seismograph` command.
 
+The binary’s entry point parses arguments with [`clap`][__link0], following the same
+shape as this crate’s own (private) `Cli` type:
+
+```rust
+use clap::Parser;
+
+#[derive(Parser)]
+#[command(name = "seismograph")]
+struct Cli {
+    /// Path to a snapshot file to render.
+    path: std::path::PathBuf,
+}
+
+let cli = Cli::parse_from(["seismograph", "snapshot.bin"]);
+assert_eq!(cli.path, std::path::PathBuf::from("snapshot.bin"));
+```
+
 The CLI renders common thread, stack, and runtime-event data directly.
 Rallocator payloads use the built-in schema-specific renderer; unknown
 sources remain visible in the source inventory.
@@ -25,3 +42,5 @@ sources remain visible in the source inventory.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seismograph_cli">source code</a>.
 </sub>
 
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbAcUP8elXFk0bF_C0i6BnyRIbN5eqLuarxUIbr20fkg-Cc05hZIGCZGNsYXBlNC42LjY
+ [__link0]: https://crates.io/crates/clap/4.6.6

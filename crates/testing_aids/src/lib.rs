@@ -9,6 +9,14 @@
 #![cfg_attr(coverage_nightly, coverage(off))]
 
 //! An unpublished crate containing testing utilities for use within this repo.
+//!
+//! ```
+//! use std::time::Duration;
+//!
+//! use testing_aids::TEST_TIMEOUT;
+//!
+//! assert!(TEST_TIMEOUT > Duration::from_secs(1));
+//! ```
 
 #![allow(clippy::panic, clippy::unwrap_used, missing_docs, reason = "Test code")]
 
@@ -41,13 +49,21 @@ pub use yielding::*;
 /// immediately at the start of a test run.
 pub const TEST_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Returns whether the current process runs under mutation testing.
+///
+/// Mutation testing runs set the `MUTATION_TESTING` environment variable to
+/// `1`. Test timeouts are disabled in that mode so that a mutation which makes
+/// code hang is reported as a timeout rather than being hidden by a helper's
+/// own timeout.
 #[must_use]
 pub fn is_mutation_testing() -> bool {
     env::var("MUTATION_TESTING").as_deref() == Ok("1")
 }
 
-/// Executes a thread-safe function on a background thread and abandons it if
-/// it does not complete before the provided timeout.
+/// Executes a thread-safe function on a background thread with a timeout.
+///
+/// Returns `None` if the function does not complete before the timeout,
+/// abandoning it on the background thread.
 ///
 /// # Panics
 ///
@@ -82,8 +98,10 @@ where
     receiver.recv_timeout(TEST_TIMEOUT).ok()
 }
 
-/// Executes a function on the current thread and sets up a watchdog timer that terminates the
-/// process if the target function does not complete before the provided timeout.
+/// Executes a function on the current thread with a watchdog timeout.
+///
+/// The watchdog terminates the process if the function does not complete
+/// before the timeout.
 ///
 /// This is a variant of `execute_or_abandon()` that can be used with single-threaded
 /// logic that does not support being moved to a background thread.
@@ -134,17 +152,44 @@ where
 }
 
 /// Standard test data generator - a repeating sequence of bytes from 0 to 255.
+///
+/// # Examples
+///
+/// ```
+/// use testing_aids::repeating_incrementing_bytes;
+///
+/// let bytes: Vec<u8> = repeating_incrementing_bytes().take(3).collect();
+///
+/// assert_eq!(bytes, [0, 1, 2]);
+/// ```
 pub fn repeating_incrementing_bytes() -> impl Iterator<Item = u8> {
     (0..=u8::MAX).cycle()
 }
 
 /// Standard test data generator - a repeating sequence of bytes from 255 to 0.
+///
+/// # Examples
+///
+/// ```
+/// use testing_aids::repeating_reverse_incrementing_bytes;
+///
+/// let bytes: Vec<u8> = repeating_reverse_incrementing_bytes().take(3).collect();
+///
+/// assert_eq!(bytes, [255, 254, 253]);
+/// ```
 pub fn repeating_reverse_incrementing_bytes() -> impl Iterator<Item = u8> {
     (0..=u8::MAX).rev().cycle()
 }
 
-/// Executes an async function on the Miri-compatible `futures` async task runtime,
-/// blocking until it completes and enforcing a test timeout.
+/// Executes an async function on the Miri-compatible `futures` runtime.
+///
+/// Blocks until it completes and enforces a test timeout.
+///
+/// # Panics
+///
+/// Panics if the future panics. The test timeout is enforced by
+/// [`execute_or_terminate_process`], which terminates the whole process when
+/// the future does not complete in time.
 pub fn async_test<F, FF>(f: F)
 where
     F: FnOnce() -> FF + 'static,

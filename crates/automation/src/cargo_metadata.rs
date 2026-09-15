@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Cargo workspace metadata discovery.
+
 use std::path::Path;
 use std::process::Command;
 
@@ -12,7 +14,9 @@ struct CargoMetadata {
     packages: Vec<PackageMetadata>,
 }
 
-/// Metadata for a Cargo package
+/// Metadata for one package decoded from `cargo metadata` output.
+///
+/// This intentionally keeps only the fields used by repository automation.
 #[derive(Debug, Deserialize)]
 pub struct PackageMetadata {
     /// Package name
@@ -25,7 +29,7 @@ pub struct PackageMetadata {
     pub targets: Vec<Target>,
 }
 
-/// A Cargo build target
+/// One build target belonging to a [`PackageMetadata`] record.
 #[derive(Debug, Deserialize)]
 pub struct Target {
     /// Target kinds (e.g., "lib", "bin")
@@ -34,7 +38,23 @@ pub struct Target {
     pub name: String,
 }
 
-/// List all workspace packages using `cargo metadata`
+/// Lists all workspace packages using `cargo metadata`.
+///
+/// # Errors
+///
+/// Returns an error when Cargo cannot be launched, `cargo metadata` exits
+/// unsuccessfully, or its JSON output cannot be decoded.
+///
+/// # Examples
+///
+/// ```no_run
+/// use automation::list_packages;
+///
+/// let packages = list_packages(".").expect("cargo metadata succeeds");
+/// for package in packages {
+///     println!("{}", package.name);
+/// }
+/// ```
 pub fn list_packages(workspace_root: impl AsRef<Path>) -> Result<Vec<PackageMetadata>, AppError> {
     let output = Command::new("cargo")
         .arg("metadata")

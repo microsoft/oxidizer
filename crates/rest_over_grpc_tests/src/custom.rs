@@ -21,8 +21,10 @@
 //! (generated from `proto/library.proto`). The top-level [`Transcoder`] that
 //! routes requests to that trait is generated separately and re-exported here.
 
-/// The `prost` + `pbjson` message types and the generated REST service trait.
 pub mod pb {
+    //! The `prost` + `pbjson` message types and the generated REST service
+    //! trait.
+
     #![allow(
         clippy::all,
         clippy::pedantic,
@@ -70,6 +72,22 @@ pub use transcoder::Transcoder;
 /// status details: `get_shelf` echoes an `x-trace-id` request header, sets an
 /// `ETag`, and attaches a `google.rpc.ResourceInfo`-style detail on a miss;
 /// `create_shelf` sets a `Location` header for the created resource.
+///
+/// # Errors
+///
+/// The implemented trait methods return a [`Status`] error when:
+///
+/// - `get_shelf` receives the sentinel shelf name `missing`.
+/// - `create_shelf` or `update_shelf` receives no shelf value.
+/// - `list_shelves_by_genre` receives an unspecified genre.
+///
+/// # Examples
+///
+/// ```
+/// use rest_over_grpc_tests::custom::{InMemoryLibrary, Transcoder};
+///
+/// let _transcoder = Transcoder::new(InMemoryLibrary);
+/// ```
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryLibrary;
 

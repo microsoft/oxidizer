@@ -15,6 +15,13 @@
 
 Macros for the [`data_privacy`][__link0] crate.
 
+This crate holds the token transformations behind those macros; the
+`data_privacy` facade is the supported interface.
+
+```rust
+use data_privacy_macros_impl::derive::redacted_debug;
+```
+
 
 <hr/>
 <sub>

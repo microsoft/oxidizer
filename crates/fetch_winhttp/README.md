@@ -66,6 +66,15 @@ Requests are serviced through the operating system’s
 [WinHTTP][__link5]
 API.
 
+## Example
+
+The transport constructor is an extension trait on `fetch`’s `HttpClient`,
+and exists only on Windows:
+
+```rust
+use fetch_winhttp::{HttpClientWinHttpExt, WinHttpDeps, WinHttpTlsConfig};
+```
+
 
 <hr/>
 <sub>

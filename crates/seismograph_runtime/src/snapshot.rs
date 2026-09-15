@@ -24,8 +24,13 @@ const TASK_V2_FIXED_LEN: usize = 32;
 const TASK_FIXED_LEN: usize = 120;
 const ADDRESS_LOOKUP_FIXED_LEN: usize = 24;
 
-/// Stable identity and schema metadata for the process-wide runtime source.
 pub mod source {
+    //! Stable identity and schema metadata for the process-wide runtime
+    //! source.
+    //!
+    //! Consumers of [`seismograph`] snapshots use [`ID`] to recognize sections
+    //! contributed by this crate.
+
     /// Stable source identity spelling `SEISRUNT` in ASCII.
     pub const ID: seismograph::snapshot::SourceId = seismograph::snapshot::SourceId::new(0x5345_4953_5255_4e54);
     /// Human-readable source name.
@@ -275,6 +280,26 @@ impl std::error::Error for Error {}
 ///
 /// Returns an error for malformed bytes or an unsupported wire or schema
 /// version. Future versions are rejected rather than silently misinterpreted.
+///
+/// # Examples
+///
+/// ```
+/// use seismograph_runtime::RuntimeMetadata;
+///
+/// let _runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("primary", 1));
+///
+/// let snapshot =
+///     seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+/// let decoded = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap();
+/// let source = decoded
+///     .sources
+///     .iter()
+///     .find(|source| source.id == seismograph_runtime::snapshot::source::ID)
+///     .unwrap();
+///
+/// let runtime_snapshot = seismograph_runtime::snapshot::decode(&source.data).unwrap();
+/// assert!(!runtime_snapshot.runtimes.is_empty());
+/// ```
 pub fn decode(bytes: &[u8]) -> Result<Snapshot, Error> {
     let mut reader = Reader::new(bytes);
     if reader.read(MAGIC.len())? != MAGIC {

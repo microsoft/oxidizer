@@ -15,6 +15,14 @@
 
 Procedural macros for [`routerama`][__link0].
 
+Macro invocation belongs in a crate that depends on the `routerama` facade,
+because expansion resolves that facade crate. See `routerama` for an
+example.
+
+```rust
+use routerama_macros::{FromQuery, ToQuery};
+```
+
 
 <hr/>
 <sub>

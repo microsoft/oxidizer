@@ -34,6 +34,15 @@
 //!   `custom_fallback`).
 //! - `examples/handling/` — supplying the service logic (`direct_service`,
 //!   `volo_bridge`, `client_streaming_upload`).
+//!
+//! # Example
+//!
+//! Each fixture exposes the generated transcoder that the runnable examples
+//! drive:
+//!
+//! ```
+//! use rest_over_grpc_examples::{custom, tonic_bridge};
+//! ```
 
 #![allow(clippy::allow_attributes, reason = "generated code carries #[allow] attributes to suppress lints")]
 

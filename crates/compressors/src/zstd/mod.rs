@@ -50,10 +50,10 @@ use crate::zstd::codec::{ZstdCompress, ZstdDecompress};
 /// the same order of magnitude would serve equally well.
 pub(crate) const DEFAULT_LIMITS: FormatLimits = FormatLimits::new(Some(250_000), None, None);
 
-/// Selects zstd as the format of a [`CompressorBuilder`][crate::CompressorBuilder] or [`DecompressorBuilder`][crate::DecompressorBuilder], and carries
-/// the settings only zstd has.
+/// Selects zstd as the compression format, carrying the settings only zstd has.
 ///
-/// Naming the format in the builder's type parameter is what gives that builder a `build` method
+/// Naming zstd in the type parameter of a [`CompressorBuilder`][crate::CompressorBuilder] or
+/// [`DecompressorBuilder`][crate::DecompressorBuilder] is what gives that builder a `build` method
 /// producing this module's [`Compressor`] and [`Decompressor`], along with the setters below.
 #[derive(Debug, Clone)]
 pub struct Zstd {
@@ -104,6 +104,9 @@ impl CompressionLevel {
     pub const DEFAULT: Self = Self(3);
 
     /// Creates a level in the range supported by the bundled zstd library.
+    ///
+    /// Returns `None` when `level` falls outside the range reported by the bundled library, which
+    /// spans [`min`][Self::min] to [`max`][Self::max] inclusive.
     #[must_use]
     pub fn new(level: i32) -> Option<Self> {
         if level < zstd_safe::min_c_level() || level > zstd_safe::max_c_level() {
@@ -143,6 +146,13 @@ impl Default for CompressionLevel {
 impl TryFrom<i32> for CompressionLevel {
     type Error = crate::Error;
 
+    /// Converts a level on zstd's own scale.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`Error`][crate::Error] describing an invalid configuration when `level` falls
+    /// outside the range the bundled zstd library supports, which spans [`min`][Self::min] to
+    /// [`max`][Self::max] inclusive.
     fn try_from(level: i32) -> core::result::Result<Self, Self::Error> {
         Self::new(level).ok_or_else(|| {
             crate::Error::invalid_configuration(format!(
@@ -179,6 +189,8 @@ impl WindowLog {
     pub const MAX: Self = Self(if usize::BITS == 32 { 30 } else { 31 });
 
     /// Creates a window logarithm accepted by zstd on this target.
+    ///
+    /// Returns `None` when `log` falls outside [`MIN`][Self::MIN] to [`MAX`][Self::MAX] inclusive.
     #[must_use]
     pub const fn new(log: u32) -> Option<Self> {
         if log < Self::MIN.0 || log > Self::MAX.0 {
@@ -204,6 +216,12 @@ impl Default for WindowLog {
 impl TryFrom<u32> for WindowLog {
     type Error = crate::Error;
 
+    /// Converts a base-2 window logarithm.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`Error`][crate::Error] describing an invalid configuration when `log` falls
+    /// outside [`MIN`][Self::MIN] to [`MAX`][Self::MAX] inclusive.
     fn try_from(log: u32) -> core::result::Result<Self, Self::Error> {
         Self::new(log).ok_or_else(|| {
             crate::Error::invalid_configuration(format!(

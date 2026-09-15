@@ -1,13 +1,17 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Rallocator snapshot source for seismograph.
+//!
+//! ```rust
+//! use seismograph_rallocator::source;
+//!
+//! println!("{} schema v{}", source::NAME, source::SCHEMA_VERSION);
+//! ```
+
 #![expect(
     clippy::map_err_ignore,
     reason = "Wire and integer conversion errors intentionally collapse into stable telemetry error categories"
-)]
-#![expect(
-    clippy::missing_errors_doc,
-    reason = "Public encoding and decoding functions return the crate's documented Error type"
 )]
 #![expect(
     clippy::module_name_repetitions,
@@ -26,8 +30,6 @@
     reason = "Wire decoders remain linear so field order and validation are auditable against the schema"
 )]
 
-//! Rallocator snapshot source for seismograph.
-//!
 //! Rallocator contributes this payload to the process-wide [`seismograph`]
 //! snapshot. Snapshot data is organized into [`snapshot`], [`topology`], and
 //! [`callers`].
@@ -62,8 +64,13 @@ pub use wire::Error as WireError;
 /// Stable category of a low-level snapshot framing error.
 pub use wire::ErrorKind as WireErrorKind;
 
-/// Stable identity and schema metadata for the rallocator snapshot source.
 pub mod source {
+    //! Stable identity and schema metadata for the rallocator snapshot
+    //! source.
+    //!
+    //! Consumers of [`seismograph`] snapshots use [`ID`] to recognize sections
+    //! contributed by this crate, and [`SCHEMA_VERSION`] to interpret them.
+
     /// Stable seismograph source identity for rallocator snapshots.
     pub const ID: seismograph::snapshot::SourceId = seismograph::snapshot::SourceId::new(0x5241_4c4c_4f43_4154);
     /// Human-readable source name.
@@ -128,6 +135,9 @@ const LEGACY_RUNTIME_EVENT_FIXED_LEN: usize = 26;
 const STATS_PAYLOAD_LEN: usize = 13 * 8;
 
 /// An error reported while encoding or decoding a telemetry snapshot.
+///
+/// Use [`Error::kind`] to branch on the stable category without parsing the
+/// human-readable message.
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct Error {
     kind: ErrorKind,
@@ -260,6 +270,23 @@ impl std::error::Error for Error {
 }
 
 /// Returns the exact byte length required to encode `snapshot`.
+///
+/// # Errors
+///
+/// Returns an [`Error`] with kind [`ErrorKind::LengthOverflow`] when a section
+/// or the container as a whole would exceed the length the wire format can
+/// represent.
+///
+/// # Examples
+///
+/// ```
+/// use seismograph_rallocator::encoded_len;
+/// use seismograph_rallocator::snapshot::{Snapshot, Version};
+///
+/// let snapshot = Snapshot::new(Version::new(1, 0, 0));
+/// assert!(encoded_len(&snapshot)? > 0);
+/// # Ok::<(), seismograph_rallocator::Error>(())
+/// ```
 pub fn encoded_len(snapshot: &Snapshot) -> Result<usize, Error> {
     count(snapshot.size_classes.len())?;
     count(snapshot.regions.len())?;
@@ -290,6 +317,30 @@ pub fn encoded_len(snapshot: &Snapshot) -> Result<usize, Error> {
 }
 
 /// Encodes `snapshot` into an exactly sized output buffer.
+///
+/// # Errors
+///
+/// Returns an [`Error`] with kind:
+///
+/// - [`ErrorKind::LengthOverflow`] when the snapshot cannot be represented in
+///   the wire format's lengths.
+/// - [`ErrorKind::OutputTooSmall`] when `output` is shorter than
+///   [`encoded_len`].
+/// - [`ErrorKind::OutputLengthMismatch`] when `output` is longer than
+///   [`encoded_len`].
+/// - [`ErrorKind::Wire`] when writing the container header or a section fails.
+///
+/// # Examples
+///
+/// ```
+/// use seismograph_rallocator::snapshot::{Snapshot, Version};
+/// use seismograph_rallocator::{encode, encoded_len};
+///
+/// let snapshot = Snapshot::new(Version::new(1, 0, 0));
+/// let mut bytes = vec![0; encoded_len(&snapshot)?];
+/// assert_eq!(encode(&snapshot, &mut bytes)?, bytes.len());
+/// # Ok::<(), seismograph_rallocator::Error>(())
+/// ```
 pub fn encode(snapshot: &Snapshot, output: &mut [u8]) -> Result<usize, Error> {
     let expected = encoded_len(snapshot)?;
     if output.len() < expected {
@@ -357,6 +408,42 @@ pub fn encode(snapshot: &Snapshot, output: &mut [u8]) -> Result<usize, Error> {
 }
 
 /// Decodes a snapshot from wire bytes.
+///
+/// # Errors
+///
+/// Returns an [`Error`] with kind:
+///
+/// - [`ErrorKind::Wire`] when the container header or section framing is
+///   invalid or truncated.
+/// - [`ErrorKind::UnsupportedSchema`] when the header names a telemetry schema
+///   version this crate cannot read.
+/// - [`ErrorKind::DuplicateSection`] when a section appears more than once.
+/// - [`ErrorKind::MissingSection`] when a required section is absent.
+/// - [`ErrorKind::MalformedSection`] when a section payload does not match the
+///   shape its version declares.
+/// - [`ErrorKind::InvalidUtf8`] when a section carries text that is not UTF-8.
+/// - [`ErrorKind::IntegerOverflow`] when a decoded integer does not fit in the
+///   target type.
+/// - [`ErrorKind::UnknownEventKind`], [`ErrorKind::UnknownSliceKind`], or
+///   [`ErrorKind::UnknownRuntimeEventKind`] when a section carries a
+///   discriminant this crate does not recognize.
+///
+/// Unknown sections and unsupported optional section versions are skipped
+/// rather than rejected, and are reported through
+/// [`snapshot::Snapshot::skipped_sections`].
+///
+/// # Examples
+///
+/// ```
+/// use seismograph_rallocator::snapshot::{Snapshot, Version};
+/// use seismograph_rallocator::{decode, encode, encoded_len};
+///
+/// let snapshot = Snapshot::new(Version::new(1, 0, 0));
+/// let mut bytes = vec![0; encoded_len(&snapshot)?];
+/// encode(&snapshot, &mut bytes)?;
+/// assert_eq!(decode(&bytes)?, snapshot);
+/// # Ok::<(), seismograph_rallocator::Error>(())
+/// ```
 pub fn decode(bytes: &[u8]) -> Result<Snapshot, Error> {
     let mut reader = Reader::new(bytes);
     let header = reader.read_header()?;

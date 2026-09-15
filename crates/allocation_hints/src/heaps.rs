@@ -20,8 +20,14 @@ thread_local! {
     };
 }
 
-/// General-purpose heap configuration.
 pub mod general {
+    //! General-purpose heap configuration.
+    //!
+    //! Contains [`Options`] for tuning a general-purpose heap before it is
+    //! created: the preferred locality segment size and the largest medium
+    //! allocation kept in the per-thread cache. Values are advisory; a heap
+    //! implementation may clamp them to its supported range.
+
     const MEDIUM_SLICE_BYTES: usize = 64 * 1024;
     const MAX_LOCALITY_SEGMENT_BYTES: usize = 1024 * 1024 * 1024;
     const MAX_MEDIUM_CACHE_BYTES: usize = 8 * 1024 * 1024;
@@ -93,8 +99,14 @@ pub mod general {
     }
 }
 
-/// Bump heap configuration.
 pub mod bump {
+    //! Bump heap configuration.
+    //!
+    //! Contains [`Options`] for tuning a bump heap before it is created: the
+    //! largest eligible allocation and alignment, and how many chunks a
+    //! supporting allocator's cache retains. Values are advisory; a heap
+    //! implementation may clamp them to its supported range.
+
     const BUMP_SEGMENT_SIZE: usize = 32 * 1024;
 
     /// Advisory options for a bump heap.
@@ -254,6 +266,30 @@ pub(crate) struct Descriptor {
 /// Creating or dropping this handle does not call an allocator. A supporting
 /// allocator realizes its descriptor only while observing it as the active
 /// hint during an allocation.
+///
+/// # Panics
+///
+/// Heap construction panics if the process-wide logical heap identity space
+/// is exhausted.
+///
+/// # Examples
+///
+/// [`Heap::new`], [`Heap::general`], and [`Heap::bump`] construct distinct
+/// prospective heaps; [`Heap::id`] and [`Heap::kind`] read back their
+/// descriptor:
+///
+/// ```
+/// use allocation_hints::heaps::{Heap, Kind, bump, general};
+///
+/// let default_heap = Heap::new();
+/// let general_heap = Heap::general(general::Options::new());
+/// let bump_heap = Heap::bump(bump::Options::new());
+///
+/// assert!(matches!(default_heap.kind(), Kind::General(_)));
+/// assert!(matches!(general_heap.kind(), Kind::General(_)));
+/// assert!(matches!(bump_heap.kind(), Kind::Bump(_)));
+/// assert_ne!(default_heap.id(), bump_heap.id());
+/// ```
 #[derive(Clone)]
 pub struct Heap {
     pub(crate) descriptor: Arc<Descriptor>,
@@ -345,6 +381,20 @@ impl ActiveHint {
 /// Supporting allocators resolve this identity to the heap they use for
 /// ordinary allocations on this thread. The handle can then be sent to another
 /// thread and installed with [`crate::with_hint`]. Other allocators may ignore it.
+///
+/// # Examples
+///
+/// ```
+/// use allocation_hints::heaps::thread_heap;
+///
+/// let owner = thread_heap();
+/// assert_ne!(owner.id().get(), 0);
+/// ```
+///
+/// # Panics
+///
+/// Panics if this thread initializes its heap after the process-wide logical
+/// heap identity space is exhausted.
 #[must_use]
 pub fn thread_heap() -> Heap {
     let thread_id = current_thread_id();

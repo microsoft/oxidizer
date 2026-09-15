@@ -13,14 +13,24 @@
 //!   generated end to end so the integration tests can drive a real compiled
 //!   `Transcoder`. These mirror the `rest_over_grpc_examples` crate's modules but
 //!   are copied here so this crate stays independent of it.
+//!
+//! # Example
+//!
+//! The fixtures are consumed from this crate's own benchmarks and tests:
+//!
+//! ```
+//! use rest_over_grpc_tests::{bench_router, coverage, custom, tonic_bridge};
+//! ```
 
 #![allow(clippy::allow_attributes, reason = "generated code carries #[allow] attributes to suppress lints")]
 
 pub mod custom;
 pub mod tonic_bridge;
 
-/// The large GitHub-like router driving the `grs_router_vs_matchit` benchmark.
 pub mod bench_router {
+    //! The large GitHub-like router driving the `grs_router_vs_matchit`
+    //! benchmark.
+
     #![allow(
         clippy::all,
         clippy::pedantic,
@@ -32,8 +42,10 @@ pub mod bench_router {
     include!(concat!(env!("OUT_DIR"), "/bench_router.rs"));
 }
 
-/// A small router exercising tricky routing cases, used by the correctness tests.
 pub mod coverage {
+    //! A small router exercising tricky routing cases, used by the
+    //! correctness tests.
+
     #![allow(
         clippy::all,
         clippy::pedantic,

@@ -1,6 +1,20 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! A parser for the [`google.api.http`] path-template grammar.
+//!
+//! ```
+//! use http_path_template::{Grammar, PathTemplate};
+//!
+//! let template = PathTemplate::parse(
+//!     "/shelves/{shelf}/books/{book=**}:archive",
+//!     Grammar::default(),
+//! )
+//! .expect("the template follows the strict grammar");
+//!
+//! assert_eq!(template.verb(), Some("archive"));
+//! ```
+
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![no_std]
@@ -10,8 +24,6 @@
     html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/http_path_template/favicon.ico"
 )]
 
-//! A parser for the [`google.api.http`] path-template grammar.
-//!
 //! A path template is the pattern that appears in a `google.api.http`
 //! annotation, for example `/shelves/{shelf}/books/{book=**}:archive`. This crate
 //! turns such a string into a validated, structured [`PathTemplate`] — an
@@ -63,7 +75,7 @@
 //! - `{book=**}` — a [`Segment::Variable`] binding field `book` to the remaining
 //!   segments (`**`, i.e. [`Segment::Rest`]).
 //!
-//! ```
+//! ```rust
 //! use http_path_template::{Grammar, PathTemplate, Segment};
 //!
 //! # fn main() -> Result<(), http_path_template::ParseError> {

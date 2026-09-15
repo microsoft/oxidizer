@@ -22,6 +22,10 @@ re-export them, and they may be changed or removed at any time.
 
 The crate is empty on targets other than Windows.
 
+```rust
+use fetch_winhttp_impl::{HttpClientWinHttpExt, WinHttpDeps, WinHttpTlsConfig};
+```
+
 
 <hr/>
 <sub>

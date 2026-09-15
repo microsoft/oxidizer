@@ -1,6 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! An executor-independent, reusable participant barrier.
+//!
+//! [`Barrier`] blocks a fixed number of participants until all of them arrive,
+//! then releases every waiter and resets for the next round.
+
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -35,6 +40,31 @@ impl Barrier {
     }
 
     /// Returns a future that waits for all participants to reach the barrier.
+    ///
+    /// Dropping the returned future before it completes withdraws this
+    /// participant's arrival from the current generation.
+    ///
+    /// # Panics
+    ///
+    /// Polling panics only if the barrier's internal arrival state is
+    /// inconsistent. Ordinary waiting, cancellation, and future drops do not
+    /// panic.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use performables::sync::barrier::{Barrier, BarrierWaitResult};
+    ///
+    /// // Awaiting the future completes once every participant has arrived.
+    /// async fn arrive(barrier: &Barrier) -> BarrierWaitResult {
+    ///     barrier.wait().await
+    /// }
+    ///
+    /// let barrier = Barrier::new(2);
+    ///
+    /// // A future that is never polled never arrives at the barrier.
+    /// let _pending = arrive(&barrier);
+    /// ```
     pub fn wait(&self) -> BarrierWait<'_> {
         BarrierWait {
             barrier: self,
@@ -45,6 +75,27 @@ impl Barrier {
     }
 
     /// Blocks the current thread until all participants reach the barrier.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use std::thread;
+    ///
+    /// use performables::sync::barrier::Barrier;
+    ///
+    /// let barrier = Arc::new(Barrier::new(2));
+    /// let other = Arc::clone(&barrier);
+    /// let participant = thread::spawn(move || other.wait_sync().is_leader());
+    ///
+    /// let this_thread_led = barrier.wait_sync().is_leader();
+    /// let other_thread_led = participant
+    ///     .join()
+    ///     .expect("the participant thread does not panic");
+    ///
+    /// // Exactly one participant releases a given barrier generation.
+    /// assert!(this_thread_led ^ other_thread_led);
+    /// ```
     pub fn wait_sync(&self) -> BarrierWaitResult {
         block_on(self.wait())
     }
@@ -108,6 +159,10 @@ enum Arrival {
 }
 
 /// A future returned by [`Barrier::wait`].
+///
+/// Polling registers this participant with the current barrier generation and
+/// completes once every participant has arrived. Dropping the future before it
+/// completes withdraws the arrival, so the remaining participants keep waiting.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless polled or awaited"]
 pub struct BarrierWait<'a> {

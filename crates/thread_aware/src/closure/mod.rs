@@ -55,7 +55,9 @@ pub trait ThreadAwareAsyncFn<T>: ThreadAware {
     fn call(&self) -> BoxFuture<'_, T>;
 }
 
-/// Async equivalent of [`ThreadAwareFnMut`] - calls the closure by mutable reference, returning a [`BoxFuture`].
+/// Async equivalent of [`ThreadAwareFnMut`]: calls the closure by mutable reference.
+///
+/// Returns a [`BoxFuture`].
 ///
 /// Use [`async_closure_mut`] to construct an implementation.
 pub trait ThreadAwareAsyncFnMut<T>: ThreadAware {

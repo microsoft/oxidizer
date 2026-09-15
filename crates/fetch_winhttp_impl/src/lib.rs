@@ -10,6 +10,14 @@
 //!
 //! The crate is empty on targets other than Windows.
 //!
+//! ```
+//! # fn main() {
+//! # #[cfg(windows)] {
+//! use fetch_winhttp_impl::{HttpClientWinHttpExt, WinHttpDeps, WinHttpTlsConfig};
+//! # }
+//! # }
+//! ```
+//!
 //! [`fetch_winhttp`]: https://docs.rs/fetch_winhttp
 
 #![cfg_attr(docsrs, feature(doc_cfg))]

@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Cargo command execution helpers.
+
 use ohno::AppError;
 
 /// Internal crates that should be skipped in CI checks.
@@ -18,7 +20,11 @@ pub const INTERNAL_CRATES: &[&str] = &[
     "thread_aware_benchmarking",
 ];
 
-/// Run a cargo command and pipe the output to stdout/stderr
+/// Runs a Cargo command and pipes its output to stdout and stderr.
+///
+/// # Errors
+///
+/// Returns an error when Cargo cannot be launched or exits unsuccessfully.
 pub fn run_cargo(args: impl Iterator<Item = impl AsRef<str>>) -> Result<(), AppError> {
     let args: Vec<_> = args.map(|s| s.as_ref().to_string()).collect();
     let args_str = args.join(" ");

@@ -1,29 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
-#![cfg_attr(docsrs, feature(doc_cfg))]
-#![cfg_attr(
-    not(feature = "app-err"),
-    expect(rustdoc::broken_intra_doc_links, reason = "AppError is only available with the 'app-err' feature")
-)]
-#![expect(clippy::doc_markdown, reason = "AppError in header doesn't look good with backticks")]
-
 //! High-quality error handling for Rust.
-//!
-//! Ohno combines error wrapping, enrichment messages stacking, backtrace capture, and procedural macros
-//! into one ergonomic crate for comprehensive error handling.
-//!
-//! # Key Features
-//!
-//! - [**`#[derive(Error)]`**](#derive-macro): Derive macro for automatic `std::error::Error`, [`Display`](std::fmt::Display), [`Debug`](std::fmt::Debug) implementations
-//! - [**`#[error]`**](#ohnoerror): Attribute macro for creating error types
-//! - [**`#[enrich_err("...")]`**](#error-enrichment): Attribute macro for automatic error enrichment with file and line information.
-//! - [**`ErrorExt`**](ohno::ErrorExt): Trait that provides additional methods for ohno error types, it's implemented automatically for all ohno error types
-//! - [**`OhnoCore`**](OhnoCore): Core error type that wraps source errors, captures backtraces, and holds enrichment entries
-//! - [**`AppError`**](AppError): Application-level error type for general application errors
-//!
-//! # Quick Start
 //!
 //! ```rust
 //! use std::path::{Path, PathBuf};
@@ -37,6 +15,26 @@
 //!         .map_err(|e| ConfigError::caused_by(path.as_ref().to_path_buf(), e))
 //! }
 //! ```
+
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(
+    not(feature = "app-err"),
+    expect(rustdoc::broken_intra_doc_links, reason = "AppError is only available with the 'app-err' feature")
+)]
+#![expect(clippy::doc_markdown, reason = "AppError in header doesn't look good with backticks")]
+
+//! Ohno combines error wrapping, enrichment messages stacking, backtrace capture, and procedural macros
+//! into one ergonomic crate for comprehensive error handling.
+//!
+//! # Key Features
+//!
+//! - [**`#[derive(Error)]`**](#derive-macro): Derive macro for automatic `std::error::Error`, [`Display`](std::fmt::Display), [`Debug`](std::fmt::Debug) implementations
+//! - [**`#[error]`**](#ohnoerror): Attribute macro for creating error types
+//! - [**`#[enrich_err("...")]`**](#error-enrichment): Attribute macro for automatic error enrichment with file and line information.
+//! - [**`ErrorExt`**](ohno::ErrorExt): Trait that provides additional methods for ohno error types, it's implemented automatically for all ohno error types
+//! - [**`OhnoCore`**](OhnoCore): Core error type that wraps source errors, captures backtraces, and holds enrichment entries
+//! - [**`AppError`**](AppError): Application-level error type for general application errors
 //!
 //! # Derive Macro
 //!

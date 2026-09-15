@@ -1,6 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! A fast, safe HTTP client that just works.
+//!
+//! ```no_run
+//! # fn main() {
+//! # #[cfg(all(feature = "tokio", any(feature = "rustls", feature = "native-tls")))] {
+//! use fetch::HttpClient;
+//!
+//! let client = HttpClient::new_tokio();
+//! # }
+//! # }
+//! ```
+
 #![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(
@@ -11,8 +23,6 @@
     )
 )]
 
-//! A fast, safe HTTP client that just works.
-//!
 //! This crate provides a powerful HTTP client that works with different async runtimes, handles
 //! security properly by default, and makes testing easy. The [`HttpClient`] provides a clean API
 //! for making HTTP requests without worrying about the complex details of modern HTTP.
@@ -800,22 +810,19 @@
 //!
 //! > **Note**: Most users should enable the `tokio` feature along with the `tls` feature for HTTPS
 //! > support. The `json` feature is recommended for most applications that need to work with JSON APIs.
-#[doc(inline)]
 pub use ::http::{Extensions, HeaderMap, HeaderName, HeaderValue, Method, Request, Response, StatusCode, Version};
-#[doc(inline)]
 pub use http_extensions::routing;
-#[doc(inline)]
 pub use seatbelt::{Recovery, RecoveryInfo};
-#[doc(inline)]
 pub use templated_uri::{BasePath, BaseUri, Origin, PathAndQuery, Uri};
 
-/// Re-exports of the [`http`](https://docs.rs/http) crate's submodules.
-///
-/// These are grouped here to keep the `fetch` crate root uncluttered. The most
-/// commonly used `http` types (such as [`HeaderMap`], [`Method`], [`StatusCode`],
-/// and [`Version`]) are re-exported directly at the crate root.
 pub mod http {
-    #[doc(inline)]
+    //! Re-exports of the [`http`](https://docs.rs/http) crate's submodules.
+    //!
+    //! These are grouped here to keep the `fetch` crate root uncluttered. The
+    //! most commonly used `http` types (such as [`HeaderMap`], [`Method`],
+    //! [`StatusCode`], and [`Version`]) are re-exported directly at the crate
+    //! root.
+
     pub use ::http::{header, method, request, response, status, version};
 }
 
@@ -823,11 +830,13 @@ pub(crate) mod constants;
 
 mod error_labels;
 
+/// TLS backend selection and connector construction.
 pub mod tls;
 
 mod client_builder;
 pub use client_builder::HttpClientBuilder;
 
+/// Transport, pooling, HTTP version, and socket configuration.
 pub mod options;
 
 mod client;
@@ -836,16 +845,19 @@ pub use client::HttpClient;
 #[cfg(any(feature = "test-util", test))]
 pub mod fake;
 
+/// Extension points for custom runtimes and HTTP transports.
 pub mod custom;
 
 #[cfg(all(feature = "tokio", any(feature = "rustls", feature = "native-tls")))]
+/// Tokio-based client construction using the enabled TLS backend.
 pub mod tokio;
 
+/// Request-handler implementations for transport and pipeline behavior.
 pub mod handlers;
 
+/// HTTP client telemetry events, attributes, and metric helpers.
 pub mod telemetry;
 
-#[doc(inline)]
 pub use http_extensions::{
     HeaderMapExt, HeaderValueExt, HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpRequestBuilder, HttpRequestExt, HttpResponse,
     HttpResponseBuilder, RequestExt, RequestHandler, ResponseExt, Result, StatusExt,
@@ -853,8 +865,10 @@ pub use http_extensions::{
 #[cfg(any(feature = "json", test))]
 pub use http_extensions::{Json, JsonError};
 
+/// Retry, timeout, hedging, and circuit-breaker middleware.
 pub mod resilience;
 
+/// Standard and custom request-pipeline construction.
 pub mod pipeline;
 
 /// Longer-form documentation for [`fetch`](crate).

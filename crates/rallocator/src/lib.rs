@@ -1,6 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! A pure-Rust, high-performance allocator with scoped heaps and telemetry.
+//!
+//! ```
+//! rallocator::rallocator!();
+//!
+//! let values = vec![1, 2, 3];
+//!
+//! assert_eq!(values.len(), 3);
+//! ```
+
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![expect(
     missing_debug_implementations,
@@ -57,8 +67,6 @@
     expect(clippy::iter_with_drain, reason = "The test explicitly drains before reverse-order deallocation")
 )]
 
-//! A pure-Rust, high-performance allocator with scoped heaps and telemetry.
-//!
 //! # Supported platforms
 //!
 //! `rallocator` currently supports Windows and Linux. Other operating systems
@@ -72,7 +80,7 @@
 //!
 //! Install the standard configuration as the process-global allocator:
 //!
-//! ```
+//! ```rust
 //! rallocator::rallocator!();
 //! ```
 //!
@@ -290,6 +298,19 @@ pub use allocator::Rallocator;
 /// Installs and configures the process-global allocator.
 ///
 /// All options are optional and inherit the standard configuration.
+///
+/// # Panics
+///
+/// Allocator construction panics if the size-class layout is malformed or
+/// `partial_slab_scan_limit` is zero.
+///
+/// # Safety
+///
+/// The expansion contains the unsafe call to [`Rallocator::new`], whose
+/// invariant it establishes by construction: invoke this macro exactly once in
+/// a process, as that process's `#[global_allocator]`, and never mix
+/// configurations. A second installation, or an installation with a different
+/// configuration, breaks that invariant.
 ///
 /// # Options
 ///

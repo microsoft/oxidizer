@@ -1,8 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-/// `(rpc, method, path template)` triples describing the benchmarked service's
-/// routes, shared by the build script and the `grs_router_vs_matchit` benchmark.
+/// Route triples `(rpc, method, path template)` for the benchmarked service.
+///
+/// Shared by the build script and the `grs_router_vs_matchit` benchmark.
 pub static ROUTES: &[(&str, &str, &str)] = &[
     ("ListUsers", "GET", "/v1/users"),
     ("CreateUser", "POST", "/v1/users"),

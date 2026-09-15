@@ -365,9 +365,10 @@ where
     S: Strategy<MergerState<K, T>> + Send + Sync,
     S::State: Send + Sync,
 {
-    /// Execute and return the value for a given function, making sure that only one
-    /// operation is in-flight at a given moment. If a duplicate call comes in,
-    /// that caller will wait until the leader completes and return the same value.
+    /// Executes `func`, ensuring only one operation is in-flight for a given key.
+    ///
+    /// If a duplicate call comes in for the same key while the leader is running,
+    /// that caller waits for the leader to complete and receives the same value.
     ///
     /// # Errors
     ///

@@ -21,6 +21,13 @@ Macros for the [`ohno`][__link0] crate.
 * `#[enrich_err("message")]` - Add error enrichment with file/line information to function errors
 * `#[ohno::error]` - Turn a plain struct into an error type
 
+Macro invocation belongs in a crate that depends on the `ohno` facade,
+because expansion resolves that facade crate. See `ohno` for an example.
+
+```rust
+use ohno_macros::Error;
+```
+
 
 <hr/>
 <sub>

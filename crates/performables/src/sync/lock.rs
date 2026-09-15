@@ -1,6 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! An executor-independent asynchronous reader-writer lock.
+//!
+//! [`RwLock`] serves uncontended reads and writes through atomic operations
+//! without allocating. The lock becomes poisoned if an exclusive write guard
+//! is dropped during a panic unwind that began after the guard was acquired;
+//! read guards never poison it.
+
 use std::cell::UnsafeCell;
 use std::fmt;
 use std::marker::PhantomData;

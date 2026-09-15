@@ -15,6 +15,14 @@
 
 Macros for the [`data_privacy`][__link0] crate.
 
+Macro invocation belongs in a crate that depends on the `data_privacy`
+facade, because expansion resolves that facade crate. See `data_privacy`
+for an example.
+
+```rust
+use data_privacy_macros::RedactedDebug;
+```
+
 
 <hr/>
 <sub>

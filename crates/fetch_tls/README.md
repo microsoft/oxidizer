@@ -46,13 +46,24 @@ With neither feature enabled, the API surface is limited to wrapping a
 pre-built backend; attempting to build any other configuration returns
 a [`BackendError`][__link7].
 
+## Example
+
+```rust
+use fetch_tls::TlsOptions;
+
+// Describe the desired TLS behavior; the consuming library picks the backend.
+let options = TlsOptions::builder().build();
+
+println!("{options:?}");
+```
+
 
 <hr/>
 <sub>
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_tls">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbQA960tEbzWQbaOpko_VXWgAbMI3Hi90EGwIb3WsswbPp-xVhZIGCaWZldGNoX3Rsc2UwLjQuMQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbPNWsnlOyS8Eb3kxywYLpScEbVREY5UcBlysbTQR6RbpG3uNhZIGCaWZldGNoX3Rsc2UwLjQuMQ
  [__link0]: https://docs.rs/fetch_tls/0.4.1/fetch_tls/?search=TlsOptions
  [__link1]: https://docs.rs/fetch_tls/0.4.1/fetch_tls/?search=TlsOptionsBuilder
  [__link2]: https://docs.rs/fetch_tls/0.4.1/fetch_tls/?search=TlsOptions::builder

@@ -1,6 +1,19 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Token transformations behind the URI template macros of the
+//! [`templated_uri`](https://docs.rs/templated_uri) crate.
+//!
+//! ```
+//! use quote::quote;
+//! use templated_uri_macros_impl::raw_derive_impl;
+//!
+//! let expanded = raw_derive_impl(quote!(
+//!     struct RawPath(String);
+//! ));
+//! assert!(!expanded.is_empty());
+//! ```
+
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc(hidden)]
 #![doc(
@@ -9,8 +22,6 @@
 #![doc(
     html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/templated_uri_macros_impl/favicon.ico"
 )]
-
-//! Macros for the [`templated_uri`](https://docs.rs/templated_uri) crate.
 
 mod enum_template;
 pub(crate) mod error;
@@ -37,6 +48,31 @@ macro_rules! bail {
 
 pub(crate) use bail;
 
+/// Expands the `#[templated]` attribute over a struct or enum.
+///
+/// `attr` holds the attribute arguments, if any, and `item` holds the
+/// annotated item. The returned tokens contain the original item alongside the
+/// generated URI template implementations.
+///
+/// Input that does not parse, a generic type, a union, or a rejected template
+/// is represented by `compile_error!` in the returned tokens.
+///
+/// # Examples
+///
+/// ```
+/// use proc_macro2::TokenStream;
+/// use quote::quote;
+/// use templated_uri_macros_impl::templated_paq_impl;
+///
+/// let attr = TokenStream::new();
+/// let item = quote!(
+///     struct Item {
+///         value: u32,
+///     }
+/// );
+/// let expanded = templated_paq_impl(&attr, item);
+/// assert!(!expanded.is_empty());
+/// ```
 #[must_use]
 #[cfg_attr(test, mutants::skip)] // not relevant for auto-generated proc macros
 pub fn templated_paq_impl(attr: &TokenStream, item: TokenStream) -> TokenStream {
@@ -171,6 +207,23 @@ fn filter_attributes(f: &Field) -> Vec<&Attribute> {
     attrs
 }
 
+/// Expands the `Escape` derive over a newtype struct.
+///
+/// `input` contains the derive target. Invalid syntax, unsupported item shapes,
+/// or tuple structs without exactly one field are represented by
+/// `compile_error!` in the returned tokens.
+///
+/// # Examples
+///
+/// ```
+/// use quote::quote;
+/// use templated_uri_macros_impl::uri_param_derive_impl;
+///
+/// let expanded = uri_param_derive_impl(quote!(
+///     struct SafeFragment(String);
+/// ));
+/// assert!(!expanded.is_empty());
+/// ```
 #[must_use]
 #[cfg_attr(test, mutants::skip)] // just emits compile error otherwise
 pub fn uri_param_derive_impl(input: TokenStream) -> TokenStream {
@@ -182,6 +235,23 @@ pub fn uri_param_derive_impl(input: TokenStream) -> TokenStream {
     uri_param_impl(input)
 }
 
+/// Expands the `Raw` derive over a newtype struct.
+///
+/// `input` contains the derive target. Invalid syntax, unsupported item shapes,
+/// or tuple structs without exactly one field are represented by
+/// `compile_error!` in the returned tokens.
+///
+/// # Examples
+///
+/// ```
+/// use quote::quote;
+/// use templated_uri_macros_impl::raw_derive_impl;
+///
+/// let expanded = raw_derive_impl(quote!(
+///     struct RawPath(String);
+/// ));
+/// assert!(!expanded.is_empty());
+/// ```
 #[must_use]
 pub fn raw_derive_impl(input: TokenStream) -> TokenStream {
     let input: DeriveInput = match parse2(input) {

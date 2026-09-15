@@ -15,6 +15,14 @@
 
 Asynchronous I/O abstractions expressed via [`bytesbuf`][__link0] types.
 
+```rust
+use bytesbuf_io::ReadExt;
+
+let mut source = Null::new();
+let data = source.read_at_most(123).await.unwrap();
+println!("read {} bytes of data", data.len());
+```
+
 These types model byte sources that can be read from ([`Read`][__link1] trait) and byte sinks that can be
 written to ([`Write`][__link2] trait). All operations use byte sequences represented by types from
 [`bytesbuf`][__link3] instead of raw byte slices, enabling the level of flexibility required for
@@ -35,7 +43,7 @@ types that produce or consume streams of bytes. These are in the `testing` modul
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/bytesbuf_io">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbznBFI8C0GD8by5hkazCnR-8b_vEBoag4nrUbmwlWuOx7ojphZIGCa2J5dGVzYnVmX2lvZjAuMTAuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbwp2180aJQHQbDpEM4fEHNAwbkXshQeagR4Yb9z4hztwwUOlhZIGCa2J5dGVzYnVmX2lvZjAuMTAuMA
  [__link0]: https://docs.rs/bytesbuf
  [__link1]: https://docs.rs/bytesbuf_io/0.10.0/bytesbuf_io/?search=Read
  [__link2]: https://docs.rs/bytesbuf_io/0.10.0/bytesbuf_io/?search=Write

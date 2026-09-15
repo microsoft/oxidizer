@@ -13,7 +13,16 @@
 
 </div>
 
-Macros for the [`templated_uri`][__link0] crate.
+Procedural macros that implement the URI template attributes and derives of
+the [`templated_uri`][__link0] crate.
+
+Macro invocation belongs in a crate that depends on the `templated_uri`
+facade, because expansion resolves that facade crate. See `templated_uri`
+for an example.
+
+```rust
+use templated_uri_macros::Raw;
+```
 
 
 <hr/>

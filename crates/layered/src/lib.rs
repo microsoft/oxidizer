@@ -1,6 +1,20 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! # Layered Services
+//!
+//! Build composable async services with layered middleware.
+//!
+//! ```
+//! use layered::{Execute, Service};
+//!
+//! # async fn example() {
+//! let greeter = Execute::new(|name: String| async move { format!("Hello, {name}!") });
+//!
+//! assert_eq!(greeter.execute("World".into()).await, "Hello, World!");
+//! # }
+//! ```
+
 #![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(
@@ -10,10 +24,6 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/layered/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/layered/favicon.ico")]
 
-//! # Layered Services
-//!
-//! Build composable async services with layered middleware.
-//!
 //! This crate provides the [`Service`] trait and a layer system for adding cross-cutting
 //! concerns like timeouts, retries, and logging.
 //!
@@ -28,7 +38,7 @@
 //!
 //! A [`Service`] transforms an input into an output asynchronously:
 //!
-//! ```
+//! ```rust
 //! use layered::Service;
 //!
 //! struct Greeter;
@@ -40,18 +50,6 @@
 //!         format!("Hello, {name}!")
 //!     }
 //! }
-//! ```
-//!
-//! Use [`Execute`] to turn any async function into a service:
-//!
-//! ```
-//! use layered::{Execute, Service};
-//!
-//! # async fn example() {
-//! let greeter = Execute::new(|name: String| async move { format!("Hello, {name}!") });
-//!
-//! assert_eq!(greeter.execute("World".into()).await, "Hello, World!");
-//! # }
 //! ```
 //!
 //! ## Key Concepts
@@ -135,7 +133,6 @@ pub mod prelude;
 
 #[cfg(any(test, feature = "intercept"))]
 mod intercept;
-#[doc(inline)]
 #[cfg(any(test, feature = "intercept"))]
 pub use intercept::{Intercept, InterceptLayer};
 

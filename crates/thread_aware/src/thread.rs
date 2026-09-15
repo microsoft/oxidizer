@@ -19,6 +19,19 @@ use crate::{NumaNode, Owner, Thread};
 /// single-node fallback. It does not assert that every worker is physically on
 /// hardware node zero. A runtime that knows its topology should call
 /// [`with_numa_node`](Self::with_numa_node) for each worker before building its coordinate.
+///
+/// # Examples
+///
+/// ```
+/// use thread_aware::ThreadBuilder;
+///
+/// let coordinate = ThreadBuilder::default()
+///     .with_numa_node(1)
+///     .build(std::thread::current().id());
+/// let default_coordinate = ThreadBuilder::default().build(std::thread::current().id());
+///
+/// assert_ne!(coordinate.numa_node(), default_coordinate.numa_node());
+/// ```
 #[derive(Clone, Debug)]
 pub struct ThreadBuilder {
     owner: Owner,
@@ -26,8 +39,9 @@ pub struct ThreadBuilder {
 }
 
 impl ThreadBuilder {
-    /// Selects the NUMA node nearest to the thread being built, overriding the
-    /// topology-agnostic node-zero fallback.
+    /// Selects the NUMA node nearest to the thread being built.
+    ///
+    /// Overrides the topology-agnostic node-zero fallback.
     #[must_use]
     pub fn with_numa_node(mut self, numa_node: u32) -> Self {
         self.numa_node = new_numa_node(numa_node);

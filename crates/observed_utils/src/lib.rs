@@ -27,6 +27,17 @@
 //!   through the caller's redactor.
 //!
 //! This crate is less stable than `observed` itself and may have breaking changes.
+//!
+//! # Example
+//!
+//! ```
+//! use observed::Value;
+//! use observed_utils::otel_value_of;
+//!
+//! let converted = otel_value_of(Value::from(42_i64));
+//!
+//! assert!(matches!(converted, opentelemetry::Value::I64(42)));
+//! ```
 
 mod format_any_value;
 mod metric_number;

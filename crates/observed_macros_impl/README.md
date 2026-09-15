@@ -22,6 +22,10 @@ This crate holds the logic behind:
 
 **Do not depend on this crate directly.** Use the re-exports from `observed` instead.
 
+```rust
+use observed_macros_impl::{derive_enrichment, event};
+```
+
 
 <hr/>
 <sub>

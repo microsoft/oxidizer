@@ -1,6 +1,31 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Token transformations behind the `multitude` arena-aware deserialization
+//! derive.
+//!
+//! Arena-specific derive configuration is parsed from `#[multitude(...)]`;
+//! Serde's own configuration remains under `#[serde(...)]`.
+//!
+//! # Examples
+//!
+//! ```
+//! use multitude_macros_impl::derive_deserialize_in;
+//! use quote::quote;
+//! use syn::parse_quote;
+//!
+//! let root_path: syn::Path = parse_quote!(::multitude::de);
+//! let expanded = derive_deserialize_in(
+//!     quote!(
+//!         struct Item {
+//!             value: u32,
+//!         }
+//!     ),
+//!     &root_path,
+//! );
+//! assert!(!expanded.is_empty());
+//! ```
+
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![expect(
     clippy::needless_pass_by_value,
@@ -15,11 +40,6 @@
     reason = "the enum generator handles all externally tagged variant shapes together"
 )]
 
-//! Implementation of the `multitude` arena-aware deserialization derive.
-//!
-//! Arena-specific derive configuration is parsed from `#[multitude(...)]`;
-//! Serde's own configuration remains under `#[serde(...)]`.
-
 use std::collections::HashSet;
 
 use proc_macro2::{Span, TokenStream as TokenStream2};
@@ -31,6 +51,32 @@ mod attrs;
 use attrs::{ContainerAttrs, DefaultValue, FieldAttrs, RenameRule, parse_container, parse_field, parse_variant};
 
 /// Generates an implementation of `DeserializeIn` using `root_path`.
+///
+/// # Errors
+///
+/// This function does not return a `Result`. Input that cannot be parsed as a
+/// derive item, or that carries unsupported `#[multitude(...)]` configuration,
+/// is reported as a `compile_error!` in the returned tokens, so the failure
+/// surfaces when the generated code is compiled rather than at runtime.
+///
+/// # Examples
+///
+/// ```
+/// use multitude_macros_impl::derive_deserialize_in;
+/// use quote::quote;
+/// use syn::parse_quote;
+///
+/// let root_path: syn::Path = parse_quote!(::multitude::de);
+/// let expanded = derive_deserialize_in(
+///     quote!(
+///         struct Item {
+///             value: u32,
+///         }
+///     ),
+///     &root_path,
+/// );
+/// assert!(!expanded.is_empty());
+/// ```
 #[must_use]
 pub fn derive_deserialize_in(input: TokenStream2, root_path: &Path) -> TokenStream2 {
     syn::parse2::<DeriveInput>(input)

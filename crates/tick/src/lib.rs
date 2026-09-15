@@ -1,29 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
-#![cfg_attr(docsrs, feature(doc_cfg))]
-#![cfg_attr(
-    not(all(feature = "test-util", feature = "tokio", feature = "fmt")),
-    expect(rustdoc::broken_intra_doc_links, reason = "simpler docs")
-)]
-#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/tick/logo.png")]
-#![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/tick/favicon.ico")]
-#![cfg_attr(
-    test,
-    allow(
-        clippy::arithmetic_side_effects,
-        clippy::unchecked_time_subtraction,
-        reason = "allow these lints in tests to improve the readability of the tests"
-    )
-)]
-
 //! Primitives for obtaining, working with, and mocking system
 //! time and timers, enabling faster and more robust testing.
 //!
-//! # Quick Start
-//!
-//! ```no_run
+//! ```rust,no_run
 //! use std::time::Duration;
 //!
 //! use tick::{Clock, Delay};
@@ -56,7 +37,24 @@
 //!     }
 //! }
 //! ```
-//!
+
+#![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(
+    not(all(feature = "test-util", feature = "tokio", feature = "fmt")),
+    expect(rustdoc::broken_intra_doc_links, reason = "simpler docs")
+)]
+#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/tick/logo.png")]
+#![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/tick/favicon.ico")]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::arithmetic_side_effects,
+        clippy::unchecked_time_subtraction,
+        reason = "allow these lints in tests to improve the readability of the tests"
+    )
+)]
+
 //! # Why?
 //!
 //! This crate provides a unified API for working with time that:

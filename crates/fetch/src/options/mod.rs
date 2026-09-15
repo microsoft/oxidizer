@@ -12,7 +12,6 @@
 //! [`TransportOptions`] because only socket-owning transports can honor it.
 
 use data_privacy::RedactionEngine;
-#[doc(inline)]
 pub use fetch_options::{
     ConnectionIdleTimeout, ConnectionKeepAlive, ConnectionLifetime, ConnectionPoolOptions, Http2Options, PoolIndex, PoolSelection,
     RequestFilter, SocketOptions, TransportOptions,

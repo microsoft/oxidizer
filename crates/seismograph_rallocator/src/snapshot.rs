@@ -352,8 +352,10 @@ pub struct Metadata {
     pub capture_duration_nanos: u64,
 }
 
-/// A snapshot section skipped because its identifier is unknown or its version is older or newer
-/// than the versions supported by this decoder.
+/// A snapshot section skipped by this decoder.
+///
+/// Skipped because its identifier is unknown, or its version is outside the
+/// range this decoder supports.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SkippedSection {

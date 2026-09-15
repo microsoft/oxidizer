@@ -1,6 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! An executor-independent asynchronous mutual-exclusion lock.
+//!
+//! [`Mutex`] serves the uncontended path through atomic operations without
+//! allocating. The lock becomes poisoned if an exclusive guard is dropped
+//! during a panic unwind that began after the guard was acquired.
+
 use std::cell::UnsafeCell;
 use std::fmt;
 use std::marker::PhantomData;
@@ -31,6 +37,16 @@ enum Acquisition {
 /// The uncontended path uses atomic operations and does not allocate.
 /// The lock is poisoned when an exclusive guard is dropped during an unwind
 /// that began after the guard was acquired.
+///
+/// # Examples
+///
+/// ```
+/// use performables::sync::mutex::Mutex;
+///
+/// let value = Mutex::new(1);
+/// *value.lock_sync() += 1;
+/// assert_eq!(*value.lock_sync(), 2);
+/// ```
 pub struct Mutex<T: ?Sized> {
     state: AtomicU8,
     poisoned: AtomicBool,

@@ -1,6 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Procedural macros that implement the benchmark attributes of the
+//! [`metabench`](https://docs.rs/metabench) facade.
+//!
+//! Macro invocation belongs in a crate that depends on the `metabench` facade,
+//! because expansion resolves that facade crate. See `metabench` for an example.
+//!
+//! ```
+//! use metabench_macros::benchmark;
+//! ```
+
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc(hidden)]

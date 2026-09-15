@@ -17,6 +17,13 @@ Stable contracts for integrating external I/O drivers with the Arty runtime.
 
 This crate is intentionally empty while the I/O integration contracts are designed.
 
+There is nothing to call yet, so an integrator only takes the dependency to pin the
+contract surface:
+
+```rust
+use arty_io_core as _;
+```
+
 
 <hr/>
 <sub>

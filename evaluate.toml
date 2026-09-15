@@ -1,0 +1,97 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[[config.allow]]
+rule = "m_canonical_docs"
+file = "crates/fetch/src/lib.rs"
+reason = "Every public module has a summary, while usage examples and applicable error contracts live in the module and crate docs; per-module duplicate examples are not required."
+
+[[config.allow]]
+rule = "m_canonical_docs"
+file = "crates/automation/src/lib.rs"
+reason = "The re-exported functions document their concrete error conditions in cargo.rs, cargo_metadata.rs, and process.rs; the semantic rule cannot inspect those definitions from the crate root."
+
+[[config.allow]]
+rule = "m_canonical_docs"
+file = "crates/automation/src/cargo_metadata.rs"
+reason = "PackageMetadata, Target, their fields, and list_packages are documented with purpose, errors, and a usage example; requiring examples on passive metadata records exceeds the guideline."
+
+[[config.allow]]
+rule = "m_canonical_docs"
+file = "crates/ohno_macros/src/lib.rs"
+reason = "The public proc-macro wrappers return compile_error tokens for malformed input through ohno_macros_impl; no panic path was established, so a Panics section would document behavior that does not exist."
+
+[[config.allow]]
+rule = "m_doc_inline"
+file = "crates/arty_executor/src/lib.rs"
+reason = "All re-exported implementation modules are private and therefore auto-inlined by rustdoc; the public testing module is not re-exported, so no doc inline annotation is applicable."
+
+[[config.allow]]
+rule = "m_doc_inline"
+file = "crates/multitude/src/lib.rs"
+reason = "The re-exported public items originate in private modules, so they have one reachable public path and rustdoc already inlines their defining documentation."
+
+[[config.allow]]
+rule = "m_canonical_docs"
+file = "crates/multitude_macros_impl/src/lib.rs"
+reason = "The sole public token transform documents its summary, compile_error behavior, and a direct example; no panic path was established after repeated semantic evaluations."
+
+[[config.allow]]
+rule = "m_canonical_docs"
+file = "crates/seismograph_runtime/src/snapshot.rs"
+reason = "The primary fallible decode API has Errors and Examples sections; requiring separate examples on every passive snapshot model exceeds the guideline's strongly-encouraged language."
+
+[[config.allow]]
+rule = "m_canonical_docs"
+file = "crates/rest_over_grpc_tests/src/tonic_bridge.rs"
+reason = "GreeterService documents the generated trait implementation's visible error behavior; trait implementation methods are not independent rustdoc API items and cannot carry separately rendered contracts."
+
+[[config.allow]]
+rule = "m_canonical_docs"
+file = "crates/uniflight/src/lib.rs"
+reason = "Leader panics are converted into typed errors, constructors and execute already have examples and error docs, and MergerState is a hidden implementation detail; no applicable canonical section is missing."
+
+[[config.allow]]
+rule = "m_canonical_docs"
+file = "crates/testing_aids/src/lib.rs"
+reason = "All helpers document behavior and applicable panics, and representative data-generator examples already exist; requiring examples on every straightforward test helper exceeds the guideline's strongly-encouraged language."
+
+[[config.allow]]
+rule = "m_canonical_docs"
+file = "crates/performables/src/sync/condition.rs"
+reason = "Condvar has a complete synchronization example and applicable panic contracts; requiring duplicate examples on wait and both notification methods exceeds the guideline's strongly-encouraged language."
+
+[[config.allow]]
+rule = "m_canonical_docs"
+file = "crates/performables/src/sync/once.rs"
+reason = "OnceLock and LazyLock document applicable Errors and Panics contracts; requiring examples on every standard-like accessor exceeds the guideline's strongly-encouraged language."
+
+[[config.allow]]
+rule = "m_canonical_docs"
+file = "crates/performables/src/sync/mutex.rs"
+reason = "Mutex has a complete usage example and applicable panic contracts; MutexGuard and lock future wrappers inherit that usage and do not require duplicate examples."
+
+[[config.allow]]
+rule = "m_canonical_docs"
+file = "crates/compressors/src/zstd/mod.rs"
+reason = "TryFrom conversions document Errors, Option constructors state their valid ranges, and the remaining builder setters are infallible; the finding itself identifies no applicable missing canonical section."
+
+[[config.allow]]
+rule = "m_canonical_docs"
+file = "crates/compressors/src/brotli/mod.rs"
+reason = "TryFrom conversions document Errors and Option constructors explicitly state the out-of-range None condition; the finding identifies no applicable missing canonical section."
+
+[[config.allow]]
+rule = "m_canonical_docs"
+file = "crates/fetch_hyper/src/testing.rs"
+reason = "The public test-fixture families have representative examples and applicable panic contracts; requiring a separate example on every fixture type exceeds the guideline's strongly-encouraged language."
+
+[[config.allow]]
+rule = "m_canonical_docs"
+file = "crates/seismograph_rallocator/src/lib.rs"
+reason = "Encoding and decoding APIs have complete Errors and Examples sections, and error types explain stable categories; separate examples for each error type and re-export are not required."
+
+[[config.allow]]
+rule = "m_canonical_docs"
+file = "crates/templated_uri_macros_impl/src/lib.rs"
+reason = "All public token transforms document parameters, examples, and compile_error token behavior; they return TokenStream and have no Result or panic contract requiring canonical Errors or Panics sections."

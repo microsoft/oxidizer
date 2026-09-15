@@ -38,10 +38,10 @@ use crate::limits::FormatLimits;
 pub(crate) const DEFAULT_LIMITS: FormatLimits = FormatLimits::new(None, None, None);
 use crate::macros::define_format;
 
-/// Selects brotli as the format of a [`CompressorBuilder`][crate::CompressorBuilder] or [`DecompressorBuilder`][crate::DecompressorBuilder], and carries
-/// the settings only brotli has.
+/// Selects brotli as the compression format, carrying the settings only brotli has.
 ///
-/// Naming the format in the builder's type parameter is what gives that builder a `build` method
+/// Naming brotli in the type parameter of a [`CompressorBuilder`][crate::CompressorBuilder] or
+/// [`DecompressorBuilder`][crate::DecompressorBuilder] is what gives that builder a `build` method
 /// producing this module's [`Compressor`] and [`Decompressor`], along with the setters below.
 #[derive(Debug, Clone)]
 pub struct Brotli {
@@ -125,6 +125,12 @@ impl Quality {
 impl TryFrom<u8> for Quality {
     type Error = crate::Error;
 
+    /// Converts a native brotli quality value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `quality` is outside [`Quality::MIN`] through
+    /// [`Quality::MAX`].
     fn try_from(quality: u8) -> core::result::Result<Self, Self::Error> {
         Self::new(quality).ok_or_else(|| {
             crate::Error::invalid_configuration(format!(
@@ -201,6 +207,12 @@ impl Default for WindowSize {
 impl TryFrom<u8> for WindowSize {
     type Error = crate::Error;
 
+    /// Converts a base-2 brotli window exponent.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `exponent` is outside [`WindowSize::MIN`] through
+    /// [`WindowSize::MAX`].
     fn try_from(exponent: u8) -> core::result::Result<Self, Self::Error> {
         Self::new(exponent).ok_or_else(|| {
             crate::Error::invalid_configuration(format!(

@@ -2,6 +2,19 @@
 // Licensed under the MIT License.
 
 //! Local monitor protocol and discovery model for Seismograph.
+//!
+//! # Example
+//!
+//! ```
+//! use seismograph_protocol::message::Request;
+//! use seismograph_protocol::write_request;
+//!
+//! let mut frame = Vec::new();
+//! write_request(&mut frame, 1, &Request::ReadRecorderStatistics)
+//!     .expect("the request fits the protocol limit");
+//!
+//! assert!(!frame.is_empty());
+//! ```
 
 mod codec;
 pub mod message;
@@ -22,6 +35,9 @@ const MAX_SNAPSHOT_BYTES: usize = u32::MAX as usize;
 const VERSION: u16 = 7;
 
 /// Protocol or discovery failure.
+///
+/// Variants distinguish transport failures, malformed peer data, incompatible
+/// versions, size limits, and unavailable runtime discovery directories.
 #[derive(Debug)]
 pub enum Error {
     /// Underlying I/O failure.
@@ -65,6 +81,18 @@ impl std::error::Error for Error {
 /// # Errors
 ///
 /// Returns an error when the request is too large or writing fails.
+///
+/// # Examples
+///
+/// ```
+/// use seismograph_protocol::message::Request;
+/// use seismograph_protocol::write_request;
+///
+/// let mut frame = Vec::new();
+/// write_request(&mut frame, 7, &Request::ReadRecorderStatistics)?;
+/// assert!(!frame.is_empty());
+/// # Ok::<(), seismograph_protocol::Error>(())
+/// ```
 pub fn write_request(writer: &mut impl Write, request_id: u64, request: &Request) -> Result<(), Error> {
     let (kind, payload) = message::encode_request(request)?;
     write_frame(writer, kind, request_id, &payload)
@@ -75,6 +103,21 @@ pub fn write_request(writer: &mut impl Write, request_id: u64, request: &Request
 /// # Errors
 ///
 /// Returns an error when reading fails or the request is malformed.
+///
+/// # Examples
+///
+/// ```
+/// use seismograph_protocol::message::Request;
+/// use seismograph_protocol::{read_request, write_request};
+///
+/// let mut frame = Vec::new();
+/// write_request(&mut frame, 7, &Request::ReadRecorderStatistics)?;
+/// let (request_id, request) = read_request(&mut frame.as_slice())?;
+///
+/// assert_eq!(request_id, 7);
+/// assert_eq!(request, Request::ReadRecorderStatistics);
+/// # Ok::<(), seismograph_protocol::Error>(())
+/// ```
 pub fn read_request(reader: &mut impl Read) -> Result<(u64, Request), Error> {
     let frame = read_frame(reader, MAX_CONTROL_BYTES)?;
     message::decode_request(frame.kind, &frame.payload).map(|request| (frame.request_id, request))
@@ -85,6 +128,18 @@ pub fn read_request(reader: &mut impl Read) -> Result<(u64, Request), Error> {
 /// # Errors
 ///
 /// Returns an error when the response is too large or writing fails.
+///
+/// # Examples
+///
+/// ```
+/// use seismograph_protocol::message::Response;
+/// use seismograph_protocol::write_response;
+///
+/// let mut frame = Vec::new();
+/// write_response(&mut frame, 7, &Response::Acknowledged)?;
+/// assert!(!frame.is_empty());
+/// # Ok::<(), seismograph_protocol::Error>(())
+/// ```
 pub fn write_response(writer: &mut impl Write, request_id: u64, response: &Response) -> Result<(), Error> {
     let (kind, payload) = message::encode_response(response)?;
     write_frame(writer, kind, request_id, &payload)
@@ -95,6 +150,21 @@ pub fn write_response(writer: &mut impl Write, request_id: u64, response: &Respo
 /// # Errors
 ///
 /// Returns an error when reading fails or the response is malformed.
+///
+/// # Examples
+///
+/// ```
+/// use seismograph_protocol::message::Response;
+/// use seismograph_protocol::{read_response, write_response};
+///
+/// let mut frame = Vec::new();
+/// write_response(&mut frame, 7, &Response::Acknowledged)?;
+/// let (request_id, response) = read_response(&mut frame.as_slice())?;
+///
+/// assert_eq!(request_id, 7);
+/// assert_eq!(response, Response::Acknowledged);
+/// # Ok::<(), seismograph_protocol::Error>(())
+/// ```
 pub fn read_response(reader: &mut impl Read) -> Result<(u64, Response), Error> {
     let frame = read_frame(reader, MAX_SNAPSHOT_BYTES)?;
     message::decode_response(frame.kind, &frame.payload).map(|response| (frame.request_id, response))
@@ -105,6 +175,13 @@ pub fn read_response(reader: &mut impl Read) -> Result<(u64, Response), Error> {
 /// # Errors
 ///
 /// Returns an error when the platform does not expose a per-user directory.
+///
+/// # Platform behavior
+///
+/// - Windows uses `%LOCALAPPDATA%\seismograph\monitor`.
+/// - Unix uses `$XDG_RUNTIME_DIR/seismograph` when available, otherwise a
+///   user-specific directory under the system temporary directory.
+/// - Other targets use `seismograph` under the system temporary directory.
 pub fn monitor_directory() -> Result<PathBuf, Error> {
     #[cfg(target_os = "windows")]
     let directory = std::env::var_os("LOCALAPPDATA")

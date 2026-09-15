@@ -1,6 +1,20 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Support for values that adapt when a runtime moves them to another thread.
+//!
+//! ```rust
+//! use thread_aware_core::{Thread, ThreadAware};
+//!
+//! struct Widget;
+//!
+//! impl ThreadAware for Widget {
+//!     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
+//!         // Adapt to the new thread here, e.g. by re-allocating NUMA-local buffers.
+//!     }
+//! }
+//! ```
+
 #![no_std]
 #![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
@@ -13,8 +27,6 @@
     html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware_core/favicon.ico"
 )]
 
-//! Support for values that adapt when a runtime moves them to another thread.
-//!
 //! This crate contains the small API shared by thread-aware libraries:
 //!
 //! - [`ThreadAware`] is the trait for values that adapt after a move; its

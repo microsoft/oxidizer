@@ -14,9 +14,10 @@
 //! [`LibraryService`] is the tonic-only handler shared by the runnable examples
 //! that exercise this modality.
 
-/// The generated library service: tonic messages + server trait, pbjson serde,
-/// and the `rest_over_grpc` REST trait + transcoder + tonic bridge.
 pub mod library {
+    //! The generated library service: tonic messages + server trait, pbjson
+    //! serde, and the `rest_over_grpc` REST trait + transcoder + tonic bridge.
+
     #![allow(
         clippy::all,
         clippy::pedantic,
@@ -53,14 +54,22 @@ use futures_util::stream::{self, Stream};
 use library::{
     CreateShelfRequest, Genre, GetShelfRequest, ListShelvesByGenreRequest, ListShelvesRequest, ListShelvesResponse, Shelf, library_server,
 };
+/// Routes REST requests through the generated tonic-to-REST bridge.
 pub use transcoder::Transcoder;
 
-/// A library implemented purely against `tonic`'s generated `library_server::Library`
-/// trait — it never mentions `rest_over_grpc`.
+/// A library implemented purely against `tonic`'s generated `library_server::Library` trait.
 ///
-/// The generated blanket `impl` bridges it to the REST service trait, so a
-/// [`Transcoder::new(LibraryService)`](Transcoder) transcodes REST/JSON requests
-/// without any extra code.
+/// It never mentions `rest_over_grpc`. The generated blanket `impl` bridges it to the REST
+/// service trait, so a [`Transcoder::new(LibraryService)`](Transcoder) transcodes REST/JSON
+/// requests without any extra code.
+///
+/// # Errors
+///
+/// The implemented tonic methods return a [`tonic::Status`] error when:
+///
+/// - `get_shelf` receives the sentinel shelf name `missing`.
+/// - `create_shelf` receives no shelf value.
+/// - `list_shelves_by_genre` receives an unspecified genre.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct LibraryService;
 

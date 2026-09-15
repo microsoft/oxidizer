@@ -5,6 +5,13 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! Macros for the [`thread_aware`](https://docs.rs/thread_aware) crate.
+//!
+//! This crate holds the token transformation behind the `ThreadAware` derive;
+//! the `thread_aware` facade is the supported interface.
+//!
+//! ```
+//! use thread_aware_macros_impl::derive_thread_aware;
+//! ```
 
 #![doc(
     html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware_macros_impl/logo.png"
@@ -41,6 +48,25 @@ use struct_gen::build_struct_body;
 ///
 /// This crate is a normal library crate (not `proc-macro`), so we operate purely
 /// on `proc_macro2::TokenStream` and let the wrappers perform the conversion.
+/// Parse and generation failures are embedded as `compile_error!` tokens in
+/// the returned stream rather than returned as a `Result`.
+///
+/// # Examples
+///
+/// ```
+/// use quote::quote;
+/// use syn::parse_quote;
+/// use thread_aware_macros_impl::derive_thread_aware;
+///
+/// let root_path: syn::Path = parse_quote!(::thread_aware);
+/// let expanded = derive_thread_aware(
+///     quote!(
+///         struct Buffer(Vec<u8>);
+///     ),
+///     &root_path,
+/// );
+/// assert!(!expanded.is_empty());
+/// ```
 #[must_use]
 pub fn derive_thread_aware(input: TokenStream2, root_path: &Path) -> TokenStream2 {
     let parsed: syn::Result<DeriveInput> = syn::parse2(input);

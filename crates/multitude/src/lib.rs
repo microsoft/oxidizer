@@ -1,6 +1,28 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Fast and flexible arena-based bump allocator.
+//!
+//! ```rust
+//! use multitude::Arena;
+//!
+//! let arena = Arena::new();
+//!
+//! // Cheap atomic reference-counted allocation of any user type.
+//! struct Point { x: f64, y: f64 }
+//! let p = arena.alloc_arc(Point { x: 3.0, y: 4.0 });
+//! let p2 = p.clone();
+//! assert_eq!(p.x, p2.x);
+//!
+//! // Single-pointer immutable strings.
+//! let name = arena.alloc_str_arc("Alice");
+//! assert_eq!(&*name, "Alice");
+//!
+//! // format! macro returning a String.
+//! let greeting = multitude::strings::format!(in &arena, "Hello, {}!", "world");
+//! assert_eq!(&*greeting, "Hello, world!");
+//! ```
+
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![allow(
@@ -9,8 +31,6 @@
     reason = "throughout this crate, related unsafe operations are intentionally grouped under a single safety invariant; `#[allow]` is preferred over `#[expect]` for attributes that expand inside macro bodies (the lint may or may not fire in any given instantiation)"
 )]
 
-//! Fast and flexible arena-based bump allocator.
-//!
 //! `multitude` allocates phase-oriented values from chunks and reclaims their
 //! storage in bulk. Escape-capable handles can retain and reclaim individual
 //! chunks independently.
@@ -67,28 +87,6 @@
 //! for measured wall-clock timings of customer-facing scenarios, including
 //! head-to-head comparisons against the system allocator, `bumpalo`, and
 //! standard `serde_json` deserialization.
-//!
-//! # Example
-//!
-//! ```
-//! use multitude::Arena;
-//!
-//! let arena = Arena::new();
-//!
-//! // Cheap atomic reference-counted allocation of any user type.
-//! struct Point { x: f64, y: f64 }
-//! let p = arena.alloc_arc(Point { x: 3.0, y: 4.0 });
-//! let p2 = p.clone();
-//! assert_eq!(p.x, p2.x);
-//!
-//! // Single-pointer immutable strings.
-//! let name = arena.alloc_str_arc("Alice");
-//! assert_eq!(&*name, "Alice");
-//!
-//! // format! macro returning a String.
-//! let greeting = multitude::strings::format!(in &arena, "Hello, {}!", "world");
-//! assert_eq!(&*greeting, "Hello, world!");
-//! ```
 //!
 //! # Flexibility
 //!
@@ -461,6 +459,15 @@
 //! `#[multitude::dst::pointee]`; see [`coerce!`] for the exact boundary.
 //! Any resulting vtable-metadata pointee carries an additional handle word,
 //! including a custom DST with a trait-object tail.
+//!
+//! # Error and safety contracts
+//!
+//! Fallible allocation and deserialization methods return [`AllocError`] or
+//! their documented format-specific error type. Methods that construct
+//! dynamically sized values from raw layouts are `unsafe` and document the
+//! layout, metadata, and initialization requirements in their own `# Safety`
+//! sections. The [`Alloc`], [`ArenaBuilder`], [`Box`], [`Rc`], [`Arc`], and
+//! conversion traits re-export their defining documentation at this crate root.
 //!
 //! # Crate Features
 //!

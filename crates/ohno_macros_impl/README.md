@@ -23,6 +23,10 @@ This crate holds the logic behind:
 
 **Do not depend on this crate directly.** Use the re-exports from `ohno` instead.
 
+```rust
+use ohno_macros_impl::{derive_error, enrich_err, error};
+```
+
 
 <hr/>
 <sub>

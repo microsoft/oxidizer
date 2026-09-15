@@ -15,6 +15,17 @@
 
 Resilience and recovery mechanisms for fallible operations.
 
+Middleware is composed on top of a service; the recovery classification it
+acts on is described with [`RecoveryInfo`][__link0]:
+
+```rust
+use seatbelt::{RecoveryInfo, RecoveryKind};
+
+let transient = RecoveryInfo::retry();
+
+assert_eq!(transient.kind(), RecoveryKind::Retry);
+```
+
 ## Quick Start
 
 Add resilience to fallible operations, such as RPC calls over the network, with just a few lines of code.
@@ -69,38 +80,38 @@ scenarios.
 
 ## Overview
 
-This crate uses the [`layered`][__link0] crate for composing middleware. The middleware layers
-can be stacked together using tuples and built into a service using the [`Stack`][__link1] trait.
+This crate uses the [`layered`][__link1] crate for composing middleware. The middleware layers
+can be stacked together using tuples and built into a service using the [`Stack`][__link2] trait.
 
-Resilience middleware also requires [`Clock`][__link2] from the [`tick`][__link3] crate for timing
+Resilience middleware also requires [`Clock`][__link3] from the [`tick`][__link4] crate for timing
 operations like delays, timeouts, and backoff calculations. The clock is passed through
-[`ResilienceContext`][__link4] when creating middleware layers.
+[`ResilienceContext`][__link5] when creating middleware layers.
 
 ### Core Types
 
-* [`ResilienceContext`][__link5] - Holds shared state for resilience middleware, including the clock.
-* [`RecoveryInfo`][__link6] - Classifies errors as recoverable (transient) or non-recoverable (permanent).
-* [`Recovery`][__link7] - A trait for types that can determine their recoverability.
+* [`ResilienceContext`][__link6] - Holds shared state for resilience middleware, including the clock.
+* [`RecoveryInfo`][__link7] - Classifies errors as recoverable (transient) or non-recoverable (permanent).
+* [`Recovery`][__link8] - A trait for types that can determine their recoverability.
 
 ### Built-in Middleware
 
 This crate provides built-in resilience middleware that you can use out of the box. See the documentation
 for each module for details on how to use them.
 
-* [`timeout`][__link8] - Middleware that cancels long-running operations.
-* [`retry`][__link9] - Middleware that automatically retries failed operations.
-* [`hedging`][__link10] - Middleware that reduces tail latency via additional concurrent execution.
-* [`breaker`][__link11] - Middleware that prevents cascading failures.
-* [`fallback`][__link12] - Middleware that replaces invalid output with a user-defined alternative.
+* [`timeout`][__link9] - Middleware that cancels long-running operations.
+* [`retry`][__link10] - Middleware that automatically retries failed operations.
+* [`hedging`][__link11] - Middleware that reduces tail latency via additional concurrent execution.
+* [`breaker`][__link12] - Middleware that prevents cascading failures.
+* [`fallback`][__link13] - Middleware that replaces invalid output with a user-defined alternative.
 
 ### Chaos Testing
 
-The [`chaos`][__link13] module provides middleware for deliberately injecting faults into a service
+The [`chaos`][__link14] module provides middleware for deliberately injecting faults into a service
 pipeline, enabling teams to verify that their systems handle failures gracefully.
 
-* [`chaos::injection`][__link14] - Middleware that replaces service output with a user-provided value
+* [`chaos::injection`][__link15] - Middleware that replaces service output with a user-provided value
   at a configurable probability.
-* [`chaos::latency`][__link15] - Middleware that injects artificial delay before the inner service
+* [`chaos::latency`][__link16] - Middleware that injects artificial delay before the inner service
   call at a configurable probability.
 
 ## Middleware Ordering
@@ -155,42 +166,42 @@ let service = ServiceBuilder::new()
 
 Examples covering each middleware and common composition patterns:
 
-* [`timeout`][__link16]: Basic timeout that cancels long-running operations.
-* [`timeout_advanced`][__link17]: Dynamic timeout duration and timeout callbacks.
-* [`retry`][__link18]: Automatic retry with input cloning and recovery classification.
-* [`retry_advanced`][__link19]: Custom input cloning with attempt metadata injection.
-* [`retry_outage`][__link20]: Input restoration from errors when cloning is not possible.
-* [`breaker`][__link21]: Circuit breaker that monitors failure rates.
-* [`hedging`][__link22]: Hedging slow requests with parallel attempts to reduce tail latency.
-* [`fallback`][__link23]: Substitutes default values for invalid outputs.
-* [`resilience_pipeline`][__link24]: Composing retry and timeout with metrics.
-* [`tower`][__link25]: Tower `ServiceBuilder` integration.
-* [`config`][__link26]: Loading settings from a [JSON file][__link27].
-* [`chaos_injection`][__link28]: Fault injection with configurable probability.
-* [`chaos_injection_advanced`][__link29]: Simulating an extended outage with dynamic injection rates.
-* [`chaos_latency`][__link30]: Injecting artificial delay with configurable probability.
+* [`timeout`][__link17]: Basic timeout that cancels long-running operations.
+* [`timeout_advanced`][__link18]: Dynamic timeout duration and timeout callbacks.
+* [`retry`][__link19]: Automatic retry with input cloning and recovery classification.
+* [`retry_advanced`][__link20]: Custom input cloning with attempt metadata injection.
+* [`retry_outage`][__link21]: Input restoration from errors when cloning is not possible.
+* [`breaker`][__link22]: Circuit breaker that monitors failure rates.
+* [`hedging`][__link23]: Hedging slow requests with parallel attempts to reduce tail latency.
+* [`fallback`][__link24]: Substitutes default values for invalid outputs.
+* [`resilience_pipeline`][__link25]: Composing retry and timeout with metrics.
+* [`tower`][__link26]: Tower `ServiceBuilder` integration.
+* [`config`][__link27]: Loading settings from a [JSON file][__link28].
+* [`chaos_injection`][__link29]: Fault injection with configurable probability.
+* [`chaos_injection_advanced`][__link30]: Simulating an extended outage with dynamic injection rates.
+* [`chaos_latency`][__link31]: Injecting artificial delay with configurable probability.
 
 ## Features
 
 This crate provides several optional features that can be enabled in your `Cargo.toml`:
 
-* **`timeout`** - Enables the [`timeout`][__link31] middleware for canceling long-running operations.
-* **`retry`** - Enables the [`retry`][__link32] middleware for automatically retrying failed operations with
+* **`timeout`** - Enables the [`timeout`][__link32] middleware for canceling long-running operations.
+* **`retry`** - Enables the [`retry`][__link33] middleware for automatically retrying failed operations with
   configurable backoff strategies, jitter, and recovery classification.
-* **`hedging`** - Enables the [`hedging`][__link33] middleware for reducing tail latency via additional
+* **`hedging`** - Enables the [`hedging`][__link34] middleware for reducing tail latency via additional
   concurrent requests with configurable delay modes.
-* **`breaker`** - Enables the [`breaker`][__link34] middleware for preventing cascading failures.
-* **`fallback`** - Enables the [`fallback`][__link35] middleware for replacing invalid output with a
+* **`breaker`** - Enables the [`breaker`][__link35] middleware for preventing cascading failures.
+* **`fallback`** - Enables the [`fallback`][__link36] middleware for replacing invalid output with a
   user-defined alternative.
-* **`chaos-injection`** - Enables the [`chaos::injection`][__link36] middleware for injecting faults
+* **`chaos-injection`** - Enables the [`chaos::injection`][__link37] middleware for injecting faults
   with a configurable probability.
-* **`chaos-latency`** - Enables the [`chaos::latency`][__link37] middleware for injecting artificial
+* **`chaos-latency`** - Enables the [`chaos::latency`][__link38] middleware for injecting artificial
   delay with a configurable probability.
 * **`metrics`** - Exposes the OpenTelemetry metrics API for collecting and reporting metrics.
 * **`logs`** - Enables structured logging for resilience middleware using the `tracing` crate.
 * **`serde`** - Enables `serde::Serialize` and `serde::Deserialize` implementations for
   configuration types.
-* **`tower-service`** - Enables [`tower_service::Service`][__link38] trait implementations for all
+* **`tower-service`** - Enables [`tower_service::Service`][__link39] trait implementations for all
   resilience middleware.
 
 
@@ -199,43 +210,44 @@ This crate provides several optional features that can be enabled in your `Cargo
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbYvFWrvv8310bVH74l03n0WQbkisnDrQ6OyIbDoEzq0lVXmRhZIWCZ2xheWVyZWRlMC4zLjeCa3JlY292ZXJhYmxlZTAuMi4wgmhzZWF0YmVsdGUwLjkuMIJkdGlja2UwLjcuMINtdG93ZXItc2VydmljZWUwLjMuM210b3dlcl9zZXJ2aWNl
- [__link0]: https://crates.io/crates/layered/0.3.7
- [__link1]: https://docs.rs/layered/0.3.7/layered/?search=Stack
- [__link10]: https://docs.rs/seatbelt/0.9.0/seatbelt/hedging/index.html
- [__link11]: https://docs.rs/seatbelt/0.9.0/seatbelt/breaker/index.html
- [__link12]: https://docs.rs/seatbelt/0.9.0/seatbelt/fallback/index.html
- [__link13]: https://docs.rs/seatbelt/0.9.0/seatbelt/chaos/index.html
- [__link14]: https://docs.rs/seatbelt/0.9.0/seatbelt/?search=chaos::injection
- [__link15]: https://docs.rs/seatbelt/0.9.0/seatbelt/?search=chaos::latency
- [__link16]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/timeout.rs
- [__link17]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/timeout_advanced.rs
- [__link18]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry.rs
- [__link19]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry_advanced.rs
- [__link2]: https://docs.rs/tick/0.7.0/tick/?search=Clock
- [__link20]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry_outage.rs
- [__link21]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/breaker.rs
- [__link22]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/hedging.rs
- [__link23]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/fallback.rs
- [__link24]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/resilience_pipeline.rs
- [__link25]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/tower.rs
- [__link26]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/config.rs
- [__link27]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/config.json
- [__link28]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/chaos_injection.rs
- [__link29]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/chaos_injection_advanced.rs
- [__link3]: https://crates.io/crates/tick/0.7.0
- [__link30]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/chaos_latency.rs
- [__link31]: https://docs.rs/seatbelt/0.9.0/seatbelt/timeout/index.html
- [__link32]: https://docs.rs/seatbelt/0.9.0/seatbelt/retry/index.html
- [__link33]: https://docs.rs/seatbelt/0.9.0/seatbelt/hedging/index.html
- [__link34]: https://docs.rs/seatbelt/0.9.0/seatbelt/breaker/index.html
- [__link35]: https://docs.rs/seatbelt/0.9.0/seatbelt/fallback/index.html
- [__link36]: https://docs.rs/seatbelt/0.9.0/seatbelt/?search=chaos::injection
- [__link37]: https://docs.rs/seatbelt/0.9.0/seatbelt/?search=chaos::latency
- [__link38]: https://docs.rs/tower-service/0.3.3/tower_service/?search=Service
- [__link4]: https://docs.rs/seatbelt/0.9.0/seatbelt/?search=ResilienceContext
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb9GCJ4S823AobaE0kUgaNdm4bKUtWXFItdAYb4uP4goUpwwdhZIWCZ2xheWVyZWRlMC4zLjeCa3JlY292ZXJhYmxlZTAuMi4wgmhzZWF0YmVsdGUwLjkuMIJkdGlja2UwLjcuMINtdG93ZXItc2VydmljZWUwLjMuM210b3dlcl9zZXJ2aWNl
+ [__link0]: https://docs.rs/recoverable/0.2.0/recoverable/?search=RecoveryInfo
+ [__link1]: https://crates.io/crates/layered/0.3.7
+ [__link10]: https://docs.rs/seatbelt/0.9.0/seatbelt/retry/index.html
+ [__link11]: https://docs.rs/seatbelt/0.9.0/seatbelt/hedging/index.html
+ [__link12]: https://docs.rs/seatbelt/0.9.0/seatbelt/breaker/index.html
+ [__link13]: https://docs.rs/seatbelt/0.9.0/seatbelt/fallback/index.html
+ [__link14]: https://docs.rs/seatbelt/0.9.0/seatbelt/chaos/index.html
+ [__link15]: https://docs.rs/seatbelt/0.9.0/seatbelt/?search=chaos::injection
+ [__link16]: https://docs.rs/seatbelt/0.9.0/seatbelt/?search=chaos::latency
+ [__link17]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/timeout.rs
+ [__link18]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/timeout_advanced.rs
+ [__link19]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry.rs
+ [__link2]: https://docs.rs/layered/0.3.7/layered/?search=Stack
+ [__link20]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry_advanced.rs
+ [__link21]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry_outage.rs
+ [__link22]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/breaker.rs
+ [__link23]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/hedging.rs
+ [__link24]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/fallback.rs
+ [__link25]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/resilience_pipeline.rs
+ [__link26]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/tower.rs
+ [__link27]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/config.rs
+ [__link28]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/config.json
+ [__link29]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/chaos_injection.rs
+ [__link3]: https://docs.rs/tick/0.7.0/tick/?search=Clock
+ [__link30]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/chaos_injection_advanced.rs
+ [__link31]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/chaos_latency.rs
+ [__link32]: https://docs.rs/seatbelt/0.9.0/seatbelt/timeout/index.html
+ [__link33]: https://docs.rs/seatbelt/0.9.0/seatbelt/retry/index.html
+ [__link34]: https://docs.rs/seatbelt/0.9.0/seatbelt/hedging/index.html
+ [__link35]: https://docs.rs/seatbelt/0.9.0/seatbelt/breaker/index.html
+ [__link36]: https://docs.rs/seatbelt/0.9.0/seatbelt/fallback/index.html
+ [__link37]: https://docs.rs/seatbelt/0.9.0/seatbelt/?search=chaos::injection
+ [__link38]: https://docs.rs/seatbelt/0.9.0/seatbelt/?search=chaos::latency
+ [__link39]: https://docs.rs/tower-service/0.3.3/tower_service/?search=Service
+ [__link4]: https://crates.io/crates/tick/0.7.0
  [__link5]: https://docs.rs/seatbelt/0.9.0/seatbelt/?search=ResilienceContext
- [__link6]: https://docs.rs/recoverable/0.2.0/recoverable/?search=RecoveryInfo
- [__link7]: https://docs.rs/recoverable/0.2.0/recoverable/?search=Recovery
- [__link8]: https://docs.rs/seatbelt/0.9.0/seatbelt/timeout/index.html
- [__link9]: https://docs.rs/seatbelt/0.9.0/seatbelt/retry/index.html
+ [__link6]: https://docs.rs/seatbelt/0.9.0/seatbelt/?search=ResilienceContext
+ [__link7]: https://docs.rs/recoverable/0.2.0/recoverable/?search=RecoveryInfo
+ [__link8]: https://docs.rs/recoverable/0.2.0/recoverable/?search=Recovery
+ [__link9]: https://docs.rs/seatbelt/0.9.0/seatbelt/timeout/index.html

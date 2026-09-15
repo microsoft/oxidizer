@@ -1,6 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! A cell that initializes its value exactly once.
+//!
+//! [`OnceLock`] lets any number of callers race to initialize the value; only
+//! one initialization runs, and every caller observes the same result.
+
 use std::cell::UnsafeCell;
 use std::fmt;
 use std::ops::Deref;
@@ -53,6 +58,11 @@ impl<T> OnceLock<T> {
     }
 
     /// Returns the stored value, initializing it with `initialize` if needed.
+    ///
+    /// # Panics
+    ///
+    /// A panic in `initialize` propagates to the caller and leaves the cell
+    /// uninitialized, so a later call runs the initializer again.
     pub fn get_or_init<F>(&self, initialize: F) -> &T
     where
         F: FnOnce() -> T,

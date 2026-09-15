@@ -1,14 +1,31 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Asynchronous I/O abstractions expressed via [`bytesbuf`] types.
+//!
+//! ```rust
+//! # fn main() {
+//! # #[cfg(feature = "test-util")] {
+//! # testing_aids::execute_or_terminate_process(|| futures::executor::block_on(async {
+//! # use bytesbuf_io::testing::Null;
+//! use bytesbuf_io::ReadExt;
+//!
+//! let mut source = Null::new();
+//! let data = source.read_at_most(123).await.unwrap();
+//! println!("read {} bytes of data", data.len());
+//! # }));
+//! # }
+//! # }
+//! ```
+
 #![cfg_attr(
     all(coverage_nightly, any(test, feature = "futures-stream", feature = "test-util")),
     feature(coverage_attribute)
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf_io/logo.png")]
+#![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf_io/favicon.ico")]
 
-//! Asynchronous I/O abstractions expressed via [`bytesbuf`] types.
-//!
 //! These types model byte sources that can be read from ([`Read`] trait) and byte sinks that can be
 //! written to ([`Write`] trait). All operations use byte sequences represented by types from
 //! [`bytesbuf`] instead of raw byte slices, enabling the level of flexibility required for
@@ -24,9 +41,6 @@
 //! types that produce or consume streams of bytes. These are in the `testing` module.
 //!
 //! [`bytesbuf`]: https://docs.rs/bytesbuf
-
-#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf_io/logo.png")]
-#![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf_io/favicon.ico")]
 
 mod error;
 mod read;
@@ -44,5 +58,6 @@ pub use read_futures::ReadAsFuturesStream;
 pub use write::Write;
 pub use write_ext::WriteExt;
 
+/// Test fixtures for byte sources and sinks.
 #[cfg(any(test, feature = "test-util"))]
 pub mod testing;

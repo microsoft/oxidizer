@@ -105,8 +105,9 @@ impl Body for RestBody {
     }
 }
 
-/// Reads the body of `request` and transcodes it through a closure, returning
-/// an [`http::Response`] with a [`RestBody`].
+/// Reads the body of `request` and transcodes it through a closure.
+///
+/// Returns an [`http::Response`] with a [`RestBody`].
 ///
 /// The closure-taking sibling of [`serve_http`], for a hand-written transcoder
 /// rather than a generated one. `transcoder` receives the request method, URI,
@@ -274,8 +275,9 @@ fn transcode_response_into_http(response: TranscodeResponse) -> Response<RestBod
     }
 }
 
-/// Reads the body of `request` and transcodes it through `transcoder`,
-/// returning an [`http::Response`] with a [`RestBody`].
+/// Reads the body of `request` and transcodes it through `transcoder`.
+///
+/// Returns an [`http::Response`] with a [`RestBody`].
 ///
 /// Serves any generated [`Transcode`] directly: it
 /// does the [`Uri`]→`target` / [`Method`]→`&str` / `body`→`&[u8]` conversion for
@@ -412,9 +414,11 @@ impl<T> RestService<T> {
         }
     }
 
-    /// Caps the request body at `max` bytes: a longer body is rejected with
-    /// `413 Payload Too Large` before it is fully buffered (the length is checked
-    /// as the body streams in, so an over-cap upload cannot exhaust memory).
+    /// Caps the request body at `max` bytes.
+    ///
+    /// A longer body is rejected with `413 Payload Too Large` before it is fully
+    /// buffered; the length is checked as the body streams in, so an over-cap
+    /// upload cannot exhaust memory.
     ///
     /// Uncapped by default, matching the neutral, policy-free contract of the
     /// free [`serve_http`] helper. For finer control (an HTTP-level `415`, a

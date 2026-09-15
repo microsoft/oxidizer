@@ -4,6 +4,13 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! Macros for the [`fundle`](https://docs.rs/fundle) crate.
+//!
+//! This crate holds the token transformations behind those macros; the
+//! `fundle` facade is the supported interface.
+//!
+//! ```
+//! use fundle_macros_impl::bundle;
+//! ```
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fundle_macros_impl/logo.png")]
 #![doc(

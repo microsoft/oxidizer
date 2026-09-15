@@ -21,8 +21,10 @@
 //! (generated from `proto/library.proto`). The top-level [`Transcoder`] that
 //! routes requests to that trait is generated separately and re-exported here.
 
-/// The `prost` + `pbjson` message types and the generated REST service trait.
 pub mod pb {
+    //! The `prost` + `pbjson` message types and the generated REST service
+    //! trait.
+
     #![allow(
         clippy::all,
         clippy::pedantic,
@@ -58,6 +60,7 @@ mod transcoder {
 use http::{HeaderName, HeaderValue};
 use pb::{CreateShelfRequest, Genre, GetShelfRequest, ListShelvesByGenreRequest, ListShelvesRequest, ListShelvesResponse, Shelf};
 use rest_over_grpc::handling::{Context, ResponseStream, Status};
+/// Routes HTTP requests to the generated custom library methods.
 pub use transcoder::Transcoder;
 
 /// A tiny in-memory implementation of the generated [`pb::Library`] trait,
@@ -67,6 +70,17 @@ pub use transcoder::Transcoder;
 /// status details: `get_shelf` echoes an `x-trace-id` request header, sets an
 /// `ETag`, and attaches a `google.rpc.ResourceInfo`-style detail on a miss;
 /// `create_shelf` sets a `Location` header for the created resource.
+///
+/// # Errors
+///
+/// The implemented trait methods return a [`Status`] error in these cases:
+///
+/// - `get_shelf` returns `not_found` ("no such shelf") when the requested
+///   shelf is named `missing`.
+/// - `create_shelf` returns `invalid_argument` ("shelf is required") when the
+///   request carries no shelf.
+/// - `list_shelves_by_genre` returns `invalid_argument` ("genre is required")
+///   when the request genre is unspecified.
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryLibrary;
 

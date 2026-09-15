@@ -15,6 +15,14 @@
 
 A pure-Rust, high-performance allocator with scoped heaps and telemetry.
 
+```rust
+rallocator::rallocator!();
+
+let values = vec![1, 2, 3];
+
+assert_eq!(values.len(), 3);
+```
+
 ## Supported platforms
 
 `rallocator` currently supports Windows and Linux. Other operating systems
@@ -235,7 +243,7 @@ allocations.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/rallocator">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbypoMx1WbAVobE3PgdRcrEt8bP9EGMsbHO_QbJf2ng-VTcMRhZIKCcGFsbG9jYXRpb25faGludHNlMC4xLjCCanJhbGxvY2F0b3JlMC4xLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbq9roGNbzL5QbuKcnfWVmNvUbw6zGlxlb1Ygb1CoTMVI2JK5hZIKCcGFsbG9jYXRpb25faGludHNlMC4xLjCCanJhbGxvY2F0b3JlMC4xLjA
  [__link0]: https://docs.rs/rallocator/0.1.0/rallocator/?search=Rallocator::new
  [__link1]: https://crates.io/crates/allocation_hints/0.1.0
  [__link2]: https://docs.rs/rallocator/0.1.0/rallocator/macro.rallocator.html

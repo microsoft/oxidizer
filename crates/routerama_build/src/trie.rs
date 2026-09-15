@@ -170,8 +170,10 @@ pub(crate) fn build_trie_with_templates(routes: &[Route], templates: &[PathTempl
     }
 }
 
-/// Reports route sets that terminate at the same trie node with the same HTTP
-/// method and custom verb, making all but the first route unreachable.
+/// Reports route sets that collide at the same trie node and become unreachable.
+///
+/// A conflicting set shares the same trie node, HTTP method, and custom verb;
+/// all but the first route in the set are unreachable.
 #[must_use]
 pub fn conflicts(root: &Node) -> Vec<String> {
     let mut conflicts = Vec::new();
@@ -297,9 +299,10 @@ fn insert_route(root: &mut Node, route: &Route, template: &PathTemplate<'_>, rou
     atom_count
 }
 
-/// The affix edges of `node` in the order both backends must try them: longer
-/// literal prefix+suffix first (more specific wins), ties broken by key so the
-/// ordering is deterministic.
+/// The affix edges of `node`, ordered as both backends must try them.
+///
+/// Longer literal prefix+suffix wins (more specific first); ties are broken by
+/// key so the ordering is deterministic.
 #[must_use]
 pub fn affix_edges_in_match_order(node: &Node) -> Vec<(&(String, String), &Node)> {
     let mut affixes: Vec<_> = node.affix.iter().collect();
@@ -333,12 +336,12 @@ pub fn capture_field_names(segments: &[Segment]) -> Vec<Vec<String>> {
     flatten(segments).1.into_iter().map(|var| var.name).collect()
 }
 
-/// Maps a route template variable's name to the sanitized Rust *field*
-/// identifier the generated `Route` enum uses for it.
+/// Maps a route template variable's name to its sanitized Rust field identifier.
 ///
-/// This is only the codegen field identifier; it is **not** the runtime
-/// `capture` key. Both backends key `capture` on the variable's original
-/// (unmangled) name (see [`VarPlan::key`]).
+/// This is the field identifier the generated `Route` enum uses for the
+/// variable. It is only the codegen field identifier; it is **not** the
+/// runtime `capture` key. Both backends key `capture` on the variable's
+/// original (unmangled) name (see [`VarPlan::key`]).
 ///
 /// The name is the variable's (possibly dotted) source name, e.g. `"shelf"` or
 /// `"shelf.id"`; dotted path separators become `_` (so `"shelf.id"` yields

@@ -37,11 +37,37 @@ has started executing, the only thing that can terminate it is the task itself, 
 In a steady state, the executor is allocation-free, as all memory used by the executor is
 reused for new tasks when old ones complete.
 
+## Safety
+
+An [`Executor`][__link1] returned by the unsafe builder must remain alive until
+[`Executor::execute_cycle`][__link2] returns [`CycleOutcome::Shutdown`][__link3]. Dropping it
+earlier can invalidate task references still held by outstanding wakers.
+
+## Example
+
+```rust
+use arty_executor::{CycleOutcome, Executor};
+
+// SAFETY: the executor is dropped only after an execution cycle reports the `Shutdown`
+// outcome, which the loop below waits for.
+let executor = unsafe { Executor::builder().build() };
+
+executor
+    .tasks()
+    .add(async { println!("Hello from the async task!") });
+executor.begin_shutdown();
+
+while executor.execute_cycle() != CycleOutcome::Shutdown {}
+```
+
 
 <hr/>
 <sub>
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_executor">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbVwz61IbZe5QbF4vbEa1LIsAbVDxflkNvtrIbD-TpXycN1glhZIGCakpvaW5IYW5kbGX2
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb4SSC7MCgVoAbKGl3Ps4Tk2Ibclkw6HpQB7Ibc3FyXDHl2blhZIOCbEN5Y2xlT3V0Y29tZfaCaEV4ZWN1dG9y9oJqSm9pbkhhbmRsZfY
  [__link0]: https://crates.io/crates/JoinHandle
+ [__link1]: https://crates.io/crates/Executor
+ [__link2]: https://docs.rs/Executor/latest/Executor/?search=execute_cycle
+ [__link3]: https://docs.rs/CycleOutcome/latest/CycleOutcome/?search=Shutdown
