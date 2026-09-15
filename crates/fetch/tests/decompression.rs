@@ -7,6 +7,7 @@
 #![cfg(not(miri))] // The compression backends exercised here are excluded from Miri.
 
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 
 use bytesbuf::BytesView;
 use compressors::Resources;
@@ -62,6 +63,10 @@ struct SeenRequests(Arc<Mutex<Vec<HeaderMap>>>);
 impl SeenRequests {
     fn last(&self) -> HeaderMap {
         self.0.lock().unwrap_or_else(PoisonError::into_inner).last().cloned().unwrap()
+    }
+
+    fn count(&self) -> usize {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner).len()
     }
 }
 
@@ -392,14 +397,20 @@ async fn stream_limit_can_be_explicitly_removed() {
 }
 
 #[tokio::test]
-async fn a_corrupt_body_fails_when_it_is_read() {
+async fn a_corrupt_body_fails_when_it_is_read_without_retrying() {
     let mut corrupt = compress(Format::Gzip, payload().as_bytes()).to_vec();
     let tail = corrupt.len() - 8;
     corrupt[tail..].fill(0);
 
-    let (client, _) = client_with(
+    let (client, seen) = build(
         Some("gzip"),
         BytesView::copied_from_slice(&corrupt, &fetch::HttpBodyBuilder::new_fake()),
+        |builder| {
+            builder
+                .standard_pipeline(|pipeline, _| pipeline.retry(|retry| retry.max_retry_attempts(3).base_delay(Duration::ZERO)))
+                .decompression(DecompressionFormat::ALL)
+                .build()
+        },
     );
 
     // Decompression is lazy, so the response itself is fine and the body is not.
@@ -407,6 +418,7 @@ async fn a_corrupt_body_fails_when_it_is_read() {
     let error = response.into_body().into_text().await.unwrap_err();
 
     assert_eq!(error.label(), "compression_invalid");
+    assert_eq!(seen.count(), 1);
 }
 
 #[tokio::test]
