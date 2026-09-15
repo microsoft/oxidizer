@@ -426,12 +426,16 @@ impl AsRef<Clock> for HttpBodyBuilder {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::pin::pin;
+    use std::task::{Context, Poll};
     use std::time::Duration;
 
     use bytes::Bytes;
     use bytesbuf::mem::testing::TransparentMemory;
+    use futures::channel::mpsc;
     use futures::executor::block_on;
     use futures::stream;
+    use ohno::Labeled as _;
     use serde::Serialize;
     use static_assertions::assert_impl_all;
     use tick::ClockControl;
@@ -449,6 +453,58 @@ mod tests {
         let rewrapped = builder.rewrap(body, |body| body);
 
         assert_eq!(rewrapped.options(), strict);
+    }
+
+    #[test]
+    fn rewrapping_preserves_the_source_idle_timeout() {
+        let control = ClockControl::new();
+        let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock())
+            .with_options(HttpBodyOptions::default().timeout(Duration::from_secs(1)));
+        let options = HttpBodyOptions::default().timeout(Duration::from_millis(100));
+        let source = builder.stream(stream::pending(), &options);
+        let mut body = pin!(builder.rewrap(source, |body| body));
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        assert!(body.as_mut().poll_frame(&mut cx).is_pending());
+        control.advance(Duration::from_millis(101));
+
+        let Poll::Ready(Some(Err(error))) = body.as_mut().poll_frame(&mut cx) else {
+            panic!("the source idle timeout must still fire after rewrapping");
+        };
+        assert_eq!(error.label(), "body_timeout");
+    }
+
+    #[test]
+    fn rewrapping_does_not_time_transformed_frames_while_the_source_makes_progress() {
+        let control = ClockControl::new();
+        let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock());
+        let options = HttpBodyOptions::default().timeout(Duration::from_millis(100));
+        let (sender, receiver) = mpsc::unbounded();
+        let source = builder.stream(receiver, &options);
+        let mut body = pin!(builder.rewrap(source, |body| {
+            http_body_util::StreamBody::new(stream::once(async move { body.into_bytes().await.map(Frame::data) }))
+        }));
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        assert!(body.as_mut().poll_frame(&mut cx).is_pending());
+        control.advance(Duration::from_millis(75));
+        sender.unbounded_send(Ok(BytesView::copied_from_slice(b"first", &builder))).unwrap();
+        assert!(body.as_mut().poll_frame(&mut cx).is_pending());
+
+        // Output is buffered for longer than the timeout, but source frames keep arriving.
+        control.advance(Duration::from_millis(75));
+        sender
+            .unbounded_send(Ok(BytesView::copied_from_slice(b"second", &builder)))
+            .unwrap();
+        assert!(body.as_mut().poll_frame(&mut cx).is_pending());
+        drop(sender);
+
+        let Poll::Ready(Some(Ok(frame))) = body.as_mut().poll_frame(&mut cx) else {
+            panic!("the transformed frame must not acquire a second idle timeout");
+        };
+        assert_eq!(frame.into_data().unwrap(), b"firstsecond");
     }
 
     #[test]
