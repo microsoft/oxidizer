@@ -1345,6 +1345,28 @@ async fn an_empty_list_member_does_not_stop_decompression() {
 }
 
 #[tokio::test]
+async fn stacked_content_encodings_are_decoded_in_reverse_order() {
+    let expected = payload();
+    let gzip = compress(Format::Gzip, expected.as_bytes());
+    let compressed = compress(Format::Brotli, &gzip.to_vec());
+    let handler = client()
+        .decompress_responses(&[Format::Gzip, Format::Brotli])
+        .layer(responds_with(move || {
+            HttpResponseBuilder::new_fake()
+                .status(StatusCode::OK)
+                .header(CONTENT_ENCODING, HeaderValue::from_static("gzip, br"))
+                .bytes(compressed.clone())
+                .build()
+        }));
+
+    let response = handler.execute(request(BytesView::default(), None)).await.unwrap();
+    let original = response.extensions().get::<OriginalBody>().unwrap().clone();
+
+    assert_eq!(original.formats(), [Format::Gzip, Format::Brotli]);
+    assert_eq!(response.into_body().into_text().await.unwrap(), expected);
+}
+
+#[tokio::test]
 async fn content_encoding_layers_are_bounded_before_body_reading() {
     let accepted = std::iter::repeat_n("gzip", 16).collect::<Vec<_>>().join(", ");
     let rejected = std::iter::repeat_n("gzip", 17).collect::<Vec<_>>().join(", ");
