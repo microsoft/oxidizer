@@ -632,6 +632,8 @@ mod tests {
         let precise_clock = Clock::new_system_frozen();
         let fast_clock = precise_clock.clone().with_fast_instant(true);
 
+        assert!(!precise_clock.simple_clock().uses_fast_instant());
+        assert!(fast_clock.simple_clock().uses_fast_instant());
         _ = precise_clock.instant();
         _ = fast_clock.instant();
     }
