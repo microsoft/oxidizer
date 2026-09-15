@@ -175,6 +175,13 @@ pub fn read_response(reader: &mut impl Read) -> Result<(u64, Response), Error> {
 /// # Errors
 ///
 /// Returns an error when the platform does not expose a per-user directory.
+///
+/// # Platform behavior
+///
+/// - Windows uses `%LOCALAPPDATA%\seismograph\monitor`.
+/// - Unix uses `$XDG_RUNTIME_DIR/seismograph` when available, otherwise a
+///   user-specific directory under the system temporary directory.
+/// - Other targets use `seismograph` under the system temporary directory.
 pub fn monitor_directory() -> Result<PathBuf, Error> {
     #[cfg(target_os = "windows")]
     let directory = std::env::var_os("LOCALAPPDATA")
