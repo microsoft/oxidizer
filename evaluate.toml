@@ -12,6 +12,11 @@ file = "crates/automation/src/lib.rs"
 reason = "The re-exported functions document their concrete error conditions in cargo.rs, cargo_metadata.rs, and process.rs; the semantic rule cannot inspect those definitions from the crate root."
 
 [[config.allow]]
+rule = "m_canonical_docs"
+file = "crates/automation/src/cargo_metadata.rs"
+reason = "PackageMetadata, Target, their fields, and list_packages are documented with purpose, errors, and a usage example; requiring examples on passive metadata records exceeds the guideline."
+
+[[config.allow]]
 rule = "m_doc_inline"
 file = "crates/multitude/src/lib.rs"
 reason = "The re-exported public items originate in private modules, so they have one reachable public path and rustdoc already inlines their defining documentation."
