@@ -133,7 +133,6 @@ pub mod prelude;
 
 #[cfg(any(test, feature = "intercept"))]
 mod intercept;
-#[doc(inline)]
 #[cfg(any(test, feature = "intercept"))]
 pub use intercept::{Intercept, InterceptLayer};
 
