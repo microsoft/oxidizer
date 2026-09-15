@@ -47,7 +47,14 @@ use crate::shared::{field_seed, missing_value_expr, validate_transparent_contain
 /// use syn::parse_quote;
 ///
 /// let root: syn::Path = parse_quote!(::internity);
-/// let expanded = derive_deserialize_in(quote!(struct Item { value: u32 }), &root);
+/// let expanded = derive_deserialize_in(
+///     quote!(
+///         struct Item {
+///             value: u32,
+///         }
+///     ),
+///     &root,
+/// );
 /// assert!(!expanded.is_empty());
 /// ```
 #[must_use]
@@ -68,7 +75,14 @@ pub fn derive_deserialize_in(input: TokenStream2, root_path: &Path) -> TokenStre
 /// use syn::parse_quote;
 ///
 /// let root: syn::Path = parse_quote!(::internity);
-/// let expanded = derive_serialize_in(quote!(struct Item { value: u32 }), &root);
+/// let expanded = derive_serialize_in(
+///     quote!(
+///         struct Item {
+///             value: u32,
+///         }
+///     ),
+///     &root,
+/// );
 /// assert!(!expanded.is_empty());
 /// ```
 #[must_use]

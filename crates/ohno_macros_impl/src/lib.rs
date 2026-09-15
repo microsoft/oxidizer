@@ -42,7 +42,9 @@ use quote::ToTokens;
 /// use ohno_macros_impl::derive_error;
 /// use quote::quote;
 ///
-/// let expanded = derive_error(quote!(struct ExampleError;));
+/// let expanded = derive_error(quote!(
+///     struct ExampleError;
+/// ));
 /// assert!(!expanded.is_empty());
 /// ```
 #[must_use]
@@ -63,7 +65,12 @@ pub fn derive_error(input: TokenStream) -> TokenStream {
 /// use ohno_macros_impl::enrich_err;
 /// use quote::quote;
 ///
-/// let expanded = enrich_err(quote!("context"), quote!(fn run() {}));
+/// let expanded = enrich_err(
+///     quote!("context"),
+///     quote!(
+///         fn run() {}
+///     ),
+/// );
 /// assert!(!expanded.is_empty());
 /// ```
 #[must_use]
@@ -85,7 +92,12 @@ pub fn enrich_err(args: TokenStream, input: TokenStream) -> TokenStream {
 /// use proc_macro2::TokenStream;
 /// use quote::quote;
 ///
-/// let expanded = error(TokenStream::new(), quote!(struct ExampleError;));
+/// let expanded = error(
+///     TokenStream::new(),
+///     quote!(
+///         struct ExampleError;
+///     ),
+/// );
 /// assert!(!expanded.is_empty());
 /// ```
 #[must_use]
