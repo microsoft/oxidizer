@@ -24,6 +24,15 @@ use syn::{Path, parse_quote};
 ///
 /// Invalid derive input or unsupported helper attributes are emitted as
 /// `compile_error!` tokens.
+///
+/// # Examples
+///
+/// Import the derive from this implementation crate; invoke it through the
+/// `multitude` facade so the generated paths resolve:
+///
+/// ```
+/// use multitude_macros::DeserializeIn;
+/// ```
 #[proc_macro_derive(DeserializeIn, attributes(serde, multitude))]
 #[cfg_attr(test, mutants::skip)]
 pub fn derive_deserialize_in(input: TokenStream) -> TokenStream {

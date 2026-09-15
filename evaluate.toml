@@ -18,6 +18,11 @@ reason = "PackageMetadata, Target, their fields, and list_packages are documente
 
 [[config.allow]]
 rule = "m_doc_inline"
+file = "crates/arty_executor/src/lib.rs"
+reason = "All re-exported implementation modules are private and therefore auto-inlined by rustdoc; the public testing module is not re-exported, so no doc inline annotation is applicable."
+
+[[config.allow]]
+rule = "m_doc_inline"
 file = "crates/multitude/src/lib.rs"
 reason = "The re-exported public items originate in private modules, so they have one reachable public path and rustdoc already inlines their defining documentation."
 
@@ -25,6 +30,11 @@ reason = "The re-exported public items originate in private modules, so they hav
 rule = "m_canonical_docs"
 file = "crates/seismograph_runtime/src/snapshot.rs"
 reason = "The primary fallible decode API has Errors and Examples sections; requiring separate examples on every passive snapshot model exceeds the guideline's strongly-encouraged language."
+
+[[config.allow]]
+rule = "m_canonical_docs"
+file = "crates/uniflight/src/lib.rs"
+reason = "Leader panics are converted into typed errors, constructors and execute already have examples and error docs, and MergerState is a hidden implementation detail; no applicable canonical section is missing."
 
 [[config.allow]]
 rule = "m_canonical_docs"
