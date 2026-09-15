@@ -1,7 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use bytesbuf::mem::{GlobalPool, HasMemory, Memory, MemoryShared, OpaqueMemory};
+#[cfg(any(feature = "test-util", test))]
+use bytesbuf::mem::GlobalPool;
+use bytesbuf::mem::{HasMemory, Memory, MemoryShared, OpaqueMemory};
 use bytesbuf::{BytesBuf, BytesView};
 use futures::{Stream, TryStreamExt};
 use http_body::{Body, Frame};
@@ -44,7 +46,7 @@ use crate::{HttpError, Result};
 /// With the `test-util` feature enabled, you can create a test instance using `HttpBodyBuilder::new_fake()`.
 #[derive(Debug, Clone, ThreadAware)]
 pub struct HttpBodyBuilder {
-    memory: MemoryWrapper,
+    memory: OpaqueMemory,
     clock: Clock,
     pub(super) options: HttpBodyOptions,
 }
@@ -76,26 +78,11 @@ impl HttpBodyBuilder {
 
     /// Creates a new instance of [`HttpBodyBuilder`].
     ///
-    /// This method uses a per-thread memory pool from [`GlobalPool`].
+    /// The provided memory is type-erased unless it is already an [`OpaqueMemory`].
     #[must_use]
-    pub fn new(memory: GlobalPool, clock: &Clock) -> Self {
+    pub fn new(memory: impl MemoryShared, clock: &Clock) -> Self {
         Self {
-            memory: MemoryWrapper::Global(memory),
-            clock: clock.clone(),
-            options: HttpBodyOptions::default(),
-        }
-    }
-
-    /// Creates a new instance of [`HttpBodyBuilder`] with custom memory.
-    ///
-    /// The provided memory provider is type-erased and used in place of the global per-thread
-    /// memory used by [`HttpBodyBuilder::new`]. It remains thread-aware: when the builder is moved
-    /// between threads via a thread-aware runtime mechanism, the provider's thread-affine state is
-    /// relocated along with it.
-    #[must_use]
-    pub fn with_custom_memory(memory: impl MemoryShared, clock: &Clock) -> Self {
-        Self {
-            memory: MemoryWrapper::Opaque(OpaqueMemory::new(memory)),
+            memory: OpaqueMemory::new(memory),
             clock: clock.clone(),
             options: HttpBodyOptions::default(),
         }
@@ -357,21 +344,6 @@ impl HasMemory for HttpBodyBuilder {
     }
 }
 
-#[derive(Debug, Clone, ThreadAware)]
-enum MemoryWrapper {
-    Global(GlobalPool),
-    Opaque(OpaqueMemory),
-}
-
-impl Memory for MemoryWrapper {
-    fn reserve(&self, min_bytes: usize) -> BytesBuf {
-        match self {
-            Self::Global(pool) => pool.reserve(min_bytes),
-            Self::Opaque(memory) => memory.reserve(min_bytes),
-        }
-    }
-}
-
 impl AsRef<Clock> for HttpBodyBuilder {
     fn as_ref(&self) -> &Clock {
         &self.clock
@@ -400,24 +372,25 @@ mod tests {
     }
 
     #[test]
+    fn new_accepts_opaque_memory_with_custom_provider() {
+        let clock = Clock::new_frozen();
+        let memory = OpaqueMemory::new(TransparentMemory::new());
+
+        let builder = HttpBodyBuilder::new(memory, &clock);
+        let body = builder.text("custom pool");
+
+        assert_eq!(body.content_length(), Some(11));
+    }
+
+    #[test]
     fn new_with_global_memory() {
         let clock = Clock::new_frozen();
-        let memory = GlobalPool::new();
-        let builder = HttpBodyBuilder::new(memory, &clock);
+        let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
         let body = builder.text("test");
         assert_eq!(body.content_length(), Some(4));
 
         // access the clock
         let _clock: &Clock = builder.as_ref();
-    }
-
-    #[test]
-    fn with_custom_memory() {
-        let clock = Clock::new_frozen();
-        let builder = HttpBodyBuilder::with_custom_memory(TransparentMemory::new(), &clock);
-        let body = builder.text("hello");
-        let data = BytesView::try_from(body).unwrap();
-        assert_eq!(data.len(), 5);
     }
 
     #[test]
@@ -602,7 +575,7 @@ mod tests {
         );
 
         let clock = Clock::new_frozen();
-        let builder = HttpBodyBuilder::with_custom_memory(TransparentMemory::new(), &clock);
+        let builder = HttpBodyBuilder::new(TransparentMemory::new(), &clock);
         let body = builder.json(&payload).unwrap();
         let bytes_view = body.into_bytes_no_buffering().unwrap();
 

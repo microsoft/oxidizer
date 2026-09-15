@@ -19,9 +19,9 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch"
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
-    "bytesbuf::mem::global::GlobalPool",
     "bytesbuf::mem::has_memory::HasMemory",
     "bytesbuf::mem::memory::Memory",
+    "bytesbuf::mem::opaque_memory::OpaqueMemory",
     "data_privacy::redaction_engine::RedactionEngine",
     "fetch_options::*",
     "fetch_tls::*",

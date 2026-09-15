@@ -25,10 +25,10 @@ ignored = ["uuid"]
 allowed_external_types = [
     "futures_core::stream::Stream",
     "bytes::bytes::Bytes",
-    "bytesbuf::mem::global::GlobalPool",
     "bytesbuf::mem::has_memory::HasMemory",
     "bytesbuf::mem::memory::Memory",
     "bytesbuf::mem::memory_shared::MemoryShared",
+    "bytesbuf::mem::opaque_memory::OpaqueMemory",
     "bytesbuf::view::BytesView",
     "http::*",
     "http_body::Body",
