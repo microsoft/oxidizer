@@ -915,3 +915,10 @@ BBV
 DRD
 Helgrind
 Memcheck
+VTune
+vtune
+ITT
+JIT
+CSV
+subcommands
+POSIX

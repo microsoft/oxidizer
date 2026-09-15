@@ -181,10 +181,10 @@ use proc_macro::TokenStream;
 ///
 /// Metabench applies `#[inline(never)]` to the benchmark function so every
 /// engine measures a stable function boundary. Non-const functions are
-/// measured by allocation tracking and Linux `perf` in addition to Criterion
-/// and Gungraun. Benchmark functions declared with `const fn` cannot contain
-/// that runtime instrumentation and therefore produce only Criterion and
-/// Gungraun measurements.
+/// measured by allocation tracking, Linux `perf`, and Intel `VTune` in
+/// addition to Criterion and Gungraun. Benchmark functions declared with
+/// `const fn` cannot contain that runtime instrumentation and therefore
+/// produce only Criterion and Gungraun measurements.
 #[proc_macro_attribute]
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg_attr(test, mutants::skip)]

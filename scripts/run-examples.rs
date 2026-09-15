@@ -33,6 +33,10 @@ const TIMEOUT: Duration = Duration::from_secs(30);
 const EXCLUDED_EXAMPLES: &[&str] = &[
     // Interactive - requires user input from stdin.
     "employees",
+    // A fake-`vtune` CLI test fixture, not a runnable example: it requires
+    // `-command`/`-report`/`-- <workload>` arguments from
+    // `tests/spawned_benchmark.rs` and fails without them.
+    "fake_vtune",
 ];
 
 /// Run all stand-alone example binaries in the workspace.

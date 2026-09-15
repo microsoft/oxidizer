@@ -316,9 +316,11 @@ fn expand_benchmark(arguments: BenchmarkArguments, mut function: ItemFn, metaben
         let body = function.block;
         let allocation_measurement = format_ident!("_metabench_allocation_measurement", span = Span::mixed_site());
         let perf_measurement = format_ident!("_metabench_perf_measurement", span = Span::mixed_site());
+        let vtune_measurement = format_ident!("_metabench_vtune_measurement", span = Span::mixed_site());
         function.block = parse_quote!({
             let #allocation_measurement = #metabench::__private::begin_allocation_measurement();
             let #perf_measurement = #metabench::__private::begin_perf_measurement();
+            let #vtune_measurement = #metabench::__private::begin_vtune_measurement();
             #body
         });
     }
@@ -397,8 +399,8 @@ fn expand_benchmark(arguments: BenchmarkArguments, mut function: ItemFn, metaben
 /// generated adapter cannot correctly invoke those adapter shapes or uphold
 /// an unsafe function's safety contract. Ordinary generic, const, and
 /// explicitly ABI-qualified functions are supported. Const functions run
-/// under Criterion and Gungraun but do not participate in runtime allocation
-/// or Linux perf tracking.
+/// under Criterion and Gungraun but do not participate in runtime allocation,
+/// Linux perf, or `VTune` tracking.
 pub fn benchmark(arguments: TokenStream2, item: TokenStream2) -> Result<TokenStream2> {
     reject_if_too_complex(&arguments)?;
     let arguments = parse2(arguments)?;

@@ -8,30 +8,23 @@ edition = "2024"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 ---
 
-//! Run the criterion wall-clock and memory-footprint benchmark suites and
-//! rebuild `docs/PERF.md`.
-//!
-//! The published report is a curated set of customer-facing scenarios: the three
-//! interning operations (`insert`, `reuse`, `lookup`) single-threaded and
-//! concurrently at 1/2/4/8 threads, plus the live-heap footprint of each
-//! interner. The crate's Callgrind instruction-count benches
-//! (`benches/internity_compare_cg.rs`) are kept for internal optimization work
-//! and are not part of this report, so no valgrind installation is required.
+//! Run the consolidated internity metabench suite and rebuild `docs/PERF.md`.
 //!
 //! Usage:
 //!   `scripts/perf_report.rs`                                    — full run (30 samples, 2s measurement)
 //!   `scripts/perf_report.rs --fast`                             — quick run (10 samples, 1s)
 //!   `scripts/perf_report.rs --samples 50 --measurement-time 3`  — custom criterion settings
 //!
-//! internity has a single criterion bench binary (`internity_compare`, with
-//! groups `internity_compare/insert` / `internity_compare/reuse` /
-//! `internity_compare/lookup` and their `*-concurrent` counterparts) and a
-//! memory-footprint binary (`internity_mem`). Every benchmark measures only
-//! insert/dedupe or lookup; benchmark setup and result destruction are kept
-//! outside the timed region.
+//! `internity` now measures the Criterion wall-clock scenarios through one
+//! metabench binary and writes `target/metabench/internity/report.json`. The
+//! live-heap measurement remains the dedicated `internity_mem` target because it
+//! reports steady-state retained bytes, not a metabench engine metric.
 
+use std::collections::{BTreeMap, btree_map::Entry};
 use std::env;
 use std::error::Error;
 use std::fmt::Write as _;
@@ -41,6 +34,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 use clap::Parser;
+use serde::Deserialize;
 
 type BoxErr = Box<dyn Error>;
 
@@ -68,8 +62,7 @@ struct Args {
 /// `(operation, criterion_group, interner_rows_in_table_order)`.
 type Group = (&'static str, &'static str, &'static [&'static str]);
 
-/// Single-threaded tables. The row name is the string passed to
-/// `g.bench_function(...)` in `benches/internity_compare.rs`.
+/// Single-threaded tables.
 const SINGLE_GROUPS: &[Group] = &[
     (
         "insert",
@@ -113,7 +106,7 @@ const SINGLE_GROUPS: &[Group] = &[
 ];
 
 /// Concurrent tables. Each row is measured at every entry of `THREAD_COUNTS`,
-/// under the criterion id `<group>/<interner>/<threads>`.
+/// under the metabench identity `<group>/<interner>/<threads>`.
 const CONCURRENT_GROUPS: &[Group] = &[
     (
         "insert",
@@ -141,91 +134,84 @@ const CRITERION_OMITTED: &[&str] = &[
     "internity_compare/insert/string_cache",
 ];
 
-fn unit_to_ns(unit: &str) -> Option<f64> {
-    match unit {
-        "ps" => Some(1e-3),
-        "ns" => Some(1.0),
-        "µs" | "us" => Some(1e3),
-        "ms" => Some(1e6),
-        "s" => Some(1e9),
+#[derive(Deserialize)]
+struct JsonReport {
+    entries: Vec<JsonEntry>,
+}
+
+#[derive(Deserialize)]
+struct JsonEntry {
+    identity: String,
+    results: BTreeMap<String, JsonEngineResult>,
+}
+
+#[derive(Deserialize)]
+struct JsonEngineResult {
+    metrics: BTreeMap<String, JsonMetric>,
+}
+
+#[derive(Deserialize)]
+struct JsonMetric {
+    value: JsonMetricValue,
+    unit: Option<String>,
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(untagged)]
+enum JsonMetricValue {
+    Integer(u64),
+    Float(f64),
+}
+
+impl JsonMetricValue {
+    fn as_f64(self) -> f64 {
+        match self {
+            Self::Integer(value) => value as f64,
+            Self::Float(value) => value,
+        }
+    }
+}
+
+type ReportIndex = BTreeMap<String, JsonEntry>;
+
+fn index_report(report: JsonReport) -> Result<ReportIndex, BoxErr> {
+    let mut entries = BTreeMap::new();
+    for entry in report.entries {
+        match entries.entry(entry.identity.clone()) {
+            Entry::Vacant(slot) => {
+                slot.insert(entry);
+            }
+            Entry::Occupied(_) => {
+                return Err(format!("report contains duplicate benchmark '{}'", entry.identity).into());
+            }
+        }
+    }
+    Ok(entries)
+}
+
+fn criterion_time_ns(report: &ReportIndex, identity: &str) -> Option<f64> {
+    let metric = report.get(identity)?.results.get("criterion")?.metrics.get("median")?;
+    let value = metric.value.as_f64();
+    match metric.unit.as_deref()? {
+        "ps" => Some(value * 1e-3),
+        "ns" => Some(value),
+        "µs" | "us" => Some(value * 1e3),
+        "ms" => Some(value * 1e6),
+        "s" => Some(value * 1e9),
         _ => None,
     }
 }
 
-/// Extract the median time from a criterion `time:` summary line.
-///
-/// Format: `time:   [<low> <unit> <median> <unit> <high> <unit>]`. Change-detection
-/// lines (`time: [-3% ...]`, three tokens, no units) are ignored.
-fn parse_time_line(line: &str) -> Option<f64> {
-    let idx = line.find("time:")?;
-    let rest = &line[idx + "time:".len()..];
-    let open = rest.find('[')?;
-    let close = rest.find(']')?;
-    let inside = &rest[open + 1..close];
-    let toks: Vec<&str> = inside.split_whitespace().collect();
-    if toks.len() != 6 {
-        return None;
-    }
-    let median: f64 = toks[2].parse().ok()?;
-    let scale = unit_to_ns(toks[3])?;
-    Some(median * scale)
+fn lookup_time(report: &ReportIndex, key: &str) -> Option<f64> {
+    criterion_time_ns(report, key)
 }
 
-/// True for a `group/variant` identifier. The variant may contain `-`
-/// (e.g. `string-interner`) and further `/` segments (e.g. `internity/8`).
-/// "Benchmarking foo/bar" progress lines are rejected by the whitespace check.
-fn is_bench_name(s: &str) -> bool {
-    if s.is_empty() || s.contains(':') || s.contains(char::is_whitespace) {
-        return false;
-    }
-    let Some((g, v)) = s.split_once('/') else {
-        return false;
-    };
-    if g.is_empty() || v.is_empty() {
-        return false;
-    }
-    let id = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
-    g.chars().all(id) && v.chars().all(|c| id(c) || c == '/')
-}
-
-/// Parse a criterion log and return `{group/variant: median_ns}`.
-///
-/// The identifier appears either on its own line just before the `time:` line
-/// (long names) or inline before `time:` (short names). Both are handled.
-fn parse_criterion(text: &str) -> Vec<(String, f64)> {
-    let mut out: Vec<(String, f64)> = Vec::new();
-    let mut pending: Option<String> = None;
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if let Some(t_idx) = line.find("time:") {
-            let head = line[..t_idx].trim();
-            let name = if is_bench_name(head) {
-                Some(head.to_string())
-            } else {
-                pending.take()
-            };
-            if let (Some(name), Some(t)) = (name, parse_time_line(line)) {
-                out.push((name, t));
-            }
-            continue;
-        }
-        if is_bench_name(trimmed) {
-            pending = Some(trimmed.to_string());
-        }
-    }
-    out
-}
-
-fn lookup_time(crit: &[(String, f64)], key: &str) -> Option<f64> {
-    crit.iter().find(|(k, _)| k == key).map(|(_, v)| *v)
-}
-
-fn validate_criterion(crit: &[(String, f64)]) -> Result<(), BoxErr> {
+fn validate_criterion(report: &ReportIndex) -> Result<(), BoxErr> {
     let mut missing = Vec::new();
     for (_, group, rows) in SINGLE_GROUPS {
         for row in *rows {
             let key = format!("{group}/{row}");
-            if !CRITERION_OMITTED.contains(&key.as_str()) && lookup_time(crit, &key).is_none() {
+            if !CRITERION_OMITTED.contains(&key.as_str()) && lookup_time(report, &key).is_none() {
                 missing.push(key);
             }
         }
@@ -234,7 +220,7 @@ fn validate_criterion(crit: &[(String, f64)]) -> Result<(), BoxErr> {
         for row in *rows {
             for threads in THREAD_COUNTS {
                 let key = format!("{group}/{row}/{threads}");
-                if lookup_time(crit, &key).is_none() {
+                if lookup_time(report, &key).is_none() {
                     missing.push(key);
                 }
             }
@@ -282,9 +268,9 @@ fn header() -> String {
     );
     out.push_str(
         "This report is a curated set of customer-facing scenarios. The crate also carries\n\
-         internal Callgrind instruction-count benches (`benches/internity_compare_cg.rs`)\n\
-         used for optimization work, which are not published here; run them with\n\
-         `cargo bench --bench internity_compare_cg`.\n\n",
+         internal Callgrind instruction-count benches in the consolidated metabench target\n\
+         (`benches/internity.rs`) used for optimization work, which are not published here;\n\
+         run them with `cargo bench --bench internity -- --gungraun`.\n\n",
     );
     out.push_str(
         "**Workload:** a corpus of ≈6000 identifier-like strings, exercised through three \
@@ -313,7 +299,7 @@ fn header() -> String {
     out
 }
 
-fn render_single(out: &mut String, crit: &[(String, f64)]) {
+fn render_single(out: &mut String, report: &ReportIndex) {
     out.push_str("## Single-threaded interning\n\n");
     out.push_str(
         "One table per operation, comparing internity against every other interner measured \
@@ -324,10 +310,10 @@ fn render_single(out: &mut String, crit: &[(String, f64)]) {
         let _ = writeln!(out, "### `{op}` — single-threaded\n");
         out.push_str("| Interner | Time | Δ vs internity |\n");
         out.push_str("|---|---:|---:|\n");
-        let reference = lookup_time(crit, &format!("{group}/internity"));
+        let reference = lookup_time(report, &format!("{group}/internity"));
         for row in *rows {
             let key = format!("{group}/{row}");
-            let time = lookup_time(crit, &key);
+            let time = lookup_time(report, &key);
             if time.is_none() {
                 continue;
             }
@@ -344,7 +330,7 @@ fn render_single(out: &mut String, crit: &[(String, f64)]) {
 
 /// Render each concurrent operation as a single table: one row per interner, one
 /// column per thread count, and a trailing delta at the highest thread count.
-fn render_concurrent(out: &mut String, crit: &[(String, f64)]) {
+fn render_concurrent(out: &mut String, report: &ReportIndex) {
     let top = THREAD_COUNTS
         .last()
         .expect("THREAD_COUNTS is a non-empty compile-time constant");
@@ -372,14 +358,14 @@ fn render_concurrent(out: &mut String, crit: &[(String, f64)]) {
         }
         out.push_str("---:|\n");
 
-        let reference = lookup_time(crit, &format!("{group}/internity/{top}"));
+        let reference = lookup_time(report, &format!("{group}/internity/{top}"));
         for row in *rows {
             let _ = write!(out, "| `{row}` |");
             for threads in THREAD_COUNTS {
-                let time = lookup_time(crit, &format!("{group}/{row}/{threads}"));
+                let time = lookup_time(report, &format!("{group}/{row}/{threads}"));
                 let _ = write!(out, " {} |", fmt_ns(time));
             }
-            let top_time = lookup_time(crit, &format!("{group}/{row}/{top}"));
+            let top_time = lookup_time(report, &format!("{group}/{row}/{top}"));
             let _ = writeln!(
                 out,
                 " {} |",
@@ -398,11 +384,11 @@ fn memory_section(mem_log: &str) -> Result<String, BoxErr> {
     let start = mem_log
         .find("Corpus:")
         .ok_or("memory footprint output did not contain a `Corpus:` section")?;
-    let is_cargo_status = |l: &str| {
-        let t = l.trim_start();
+    let is_cargo_status = |line: &str| {
+        let trimmed = line.trim_start();
         ["Compiling", "Finished", "Running", "Blocking", "warning", "error", "note:"]
             .iter()
-            .any(|p| t.starts_with(p))
+            .any(|prefix| trimmed.starts_with(prefix))
     };
     let mut table = String::new();
     for line in mem_log[start..].lines() {
@@ -426,10 +412,10 @@ fn memory_section(mem_log: &str) -> Result<String, BoxErr> {
     ))
 }
 
-fn build_report(crit: &[(String, f64)]) -> String {
+fn build_report(report: &ReportIndex) -> String {
     let mut out = header();
-    render_single(&mut out, crit);
-    render_concurrent(&mut out, crit);
+    render_single(&mut out, report);
+    render_concurrent(&mut out, report);
     out
 }
 
@@ -443,7 +429,7 @@ fn crate_root() -> PathBuf {
 }
 
 /// Run `cargo bench --bench <name> -- <extra>` from `cwd`, capturing combined
-/// stdout+stderr (criterion writes its summaries to stdout).
+/// stdout+stderr.
 fn run_bench(cwd: &Path, bench: &str, extra: &[&str], label: &str) -> Result<String, BoxErr> {
     println!("==> Running {label}");
     let mut cmd = Command::new(env::var("CARGO").unwrap_or_else(|_| "cargo".into()));
@@ -464,13 +450,47 @@ fn run_bench(cwd: &Path, bench: &str, extra: &[&str], label: &str) -> Result<Str
     Ok(combined)
 }
 
+fn run_metabench(
+    cwd: &Path,
+    json_path: &Path,
+    markdown_path: &Path,
+    samples: &str,
+    measurement: &str,
+    warmup: &str,
+) -> Result<(), BoxErr> {
+    println!("==> Running criterion metabench suite");
+    let mut cmd = Command::new(env::var("CARGO").unwrap_or_else(|_| "cargo".into()));
+    cmd.current_dir(cwd).arg("bench").arg("--bench").arg("internity").arg("--");
+    cmd.arg("--criterion");
+    for forwarded in [
+        "--warm-up-time",
+        warmup,
+        "--measurement-time",
+        measurement,
+        "--sample-size",
+        samples,
+    ] {
+        cmd.arg("--criterion-arg").arg(forwarded);
+    }
+    cmd.arg("--no-baseline");
+    cmd.arg("--export-json").arg(json_path);
+    cmd.arg("--export-md").arg(markdown_path);
+
+    let out = cmd
+        .output()
+        .map_err(|e| format!("failed to spawn cargo bench --bench internity: {e}"))?;
+    let mut combined = String::from_utf8_lossy(&out.stdout).into_owned();
+    combined.push_str(&String::from_utf8_lossy(&out.stderr));
+    if !out.status.success() {
+        let _ = std::io::stderr().write_all(combined.as_bytes());
+        return Err(format!("cargo bench --bench internity failed with status {}", out.status).into());
+    }
+    Ok(())
+}
+
 fn run(args: &Args) -> Result<(), BoxErr> {
     let crate_dir = crate_root();
 
-    // The published report's prose is written against the default corpus, and the
-    // memory and timing benches must measure the *same* corpus. A non-default
-    // `INTERNITY_BENCH_CORPUS_SIZE` would silently desynchronise the prose from the
-    // numbers, so reject it here and fail before writing anything.
     if let Ok(value) = std::env::var("INTERNITY_BENCH_CORPUS_SIZE") {
         return Err(format!(
             "INTERNITY_BENCH_CORPUS_SIZE is set to {value:?}; report generation requires the \
@@ -485,37 +505,36 @@ fn run(args: &Args) -> Result<(), BoxErr> {
     let meas = args.measurement_time.unwrap_or(def_meas).to_string();
     let warmup = args.warm_up_time.unwrap_or(1).to_string();
 
-    let crit_args = vec![
-        "--warm-up-time",
-        warmup.as_str(),
-        "--measurement-time",
-        meas.as_str(),
-        "--sample-size",
-        samples.as_str(),
-    ];
+    let metabench_dir = crate_dir.join("target").join("metabench").join("internity");
+    fs::create_dir_all(&metabench_dir)
+        .map_err(|e| format!("creating {}: {e}", metabench_dir.display()))?;
+    let json_path = metabench_dir.join("report.json");
+    let markdown_path = metabench_dir.join("report.md");
 
-    let crit_log = run_bench(
-        &crate_dir,
-        "internity_compare",
-        &crit_args,
-        &format!("criterion internity_compare: {samples} samples, {meas}s measurement"),
-    )?;
+    run_metabench(&crate_dir, &json_path, &markdown_path, &samples, &meas, &warmup)?;
     let mem_log = run_bench(&crate_dir, "internity_mem", &[], "memory footprint")?;
 
     println!("==> Building docs/PERF.md");
-    let crit = parse_criterion(&crit_log);
+    let json = fs::read_to_string(&json_path).map_err(|e| format!("reading {}: {e}", json_path.display()))?;
+    let report: JsonReport = serde_json::from_str(&json).map_err(|e| format!("parsing {}: {e}", json_path.display()))?;
+    let report = index_report(report)?;
+    let entry_count = report.len();
     let mem = memory_section(&mem_log)?;
 
-    validate_criterion(&crit)?;
+    validate_criterion(&report)?;
 
-    let report = build_report(&crit);
+    let report = build_report(&report);
     let report = format!("{report}{mem}");
     let docs_dir = crate_dir.join("docs");
     fs::create_dir_all(&docs_dir).map_err(|e| format!("creating {}: {e}", docs_dir.display()))?;
     let out_path = docs_dir.join("PERF.md");
     fs::write(&out_path, &report).map_err(|e| format!("writing {}: {e}", out_path.display()))?;
 
-    println!("Wrote {} ({} criterion benches)", out_path.display(), crit.len());
+    println!(
+        "Wrote {} ({} metabench identities)",
+        out_path.display(),
+        entry_count,
+    );
     println!("==> Done. Report written to docs/PERF.md");
     Ok(())
 }
