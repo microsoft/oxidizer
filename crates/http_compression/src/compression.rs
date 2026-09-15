@@ -338,12 +338,14 @@ impl CompressionLayer<Server> {
     /// use compressors::Level;
     /// use compressors::format::Format;
     /// use http_compression::Compression;
-    /// # use http_extensions::HttpBodyBuilder;
-    /// # let body_builder = HttpBodyBuilder::new_fake();
+    /// use http_extensions::HttpBodyBuilder;
     ///
+    /// # fn configure(body_builder: HttpBodyBuilder) {
     /// let layer = Compression::server(body_builder)
     ///     .compress_responses(&[Format::Gzip])
     ///     .level(Level::DEFAULT);
+    /// # let _ = layer;
+    /// # }
     /// # }
     /// ```
     #[must_use]
@@ -373,11 +375,13 @@ impl CompressionLayer<Server> {
     /// # use compressors::format::Format;
     /// # use http_compression::{Compression, DEFAULT_COMPRESSIBLE_TYPES};
     /// # use http_extensions::HttpBodyBuilder;
-    /// # let body_builder = HttpBodyBuilder::new_fake();
+    /// # fn configure(body_builder: HttpBodyBuilder) {
     /// let layer = Compression::server(body_builder)
     ///     .compress_responses(&[Format::Gzip])
     ///     .compressible_types(DEFAULT_COMPRESSIBLE_TYPES.iter().copied())
     ///     .unwrap();
+    /// # let _ = layer;
+    /// # }
     /// # }
     /// ```
     ///
@@ -960,16 +964,24 @@ impl Config {
                     continue;
                 }
 
-                match Format::from_content_encoding(token).filter(|format| enabled.contains(format)) {
-                    Some(_) if formats.len() == MAX_CONTENT_ENCODING_LAYERS => {
-                        return Err(too_many_content_codings(MAX_CONTENT_ENCODING_LAYERS));
-                    }
-                    Some(format) => formats.push(format),
+                let Some(format) = Format::from_content_encoding(token) else {
+                    return Ok(None);
+                };
+
+                if !enabled.contains(&format) {
                     // A recognisable compression format that is not enabled is a
                     // different matter: the caller may have asked to hear about it.
-                    None if self.on_unsupported == UnsupportedCompression::Fail => return Err(unsupported(token)),
-                    None => return Ok(None),
+                    return if self.on_unsupported == UnsupportedCompression::Fail {
+                        Err(unsupported(token))
+                    } else {
+                        Ok(None)
+                    };
                 }
+
+                if formats.len() == MAX_CONTENT_ENCODING_LAYERS {
+                    return Err(too_many_content_codings(MAX_CONTENT_ENCODING_LAYERS));
+                }
+                formats.push(format);
             }
         }
 

@@ -208,6 +208,25 @@ async fn a_non_text_content_encoding_is_passed_through() {
 }
 
 #[tokio::test]
+async fn an_unknown_content_encoding_is_passed_through_under_fail_policy() {
+    let handler = client()
+        .decompress_responses(&[Format::Gzip])
+        .on_unsupported(UnsupportedCompression::Fail)
+        .layer(responds_with(|| {
+            HttpResponseBuilder::new_fake()
+                .status(StatusCode::OK)
+                .header(CONTENT_ENCODING, HeaderValue::from_static("nonsense"))
+                .text("opaque body")
+                .build()
+        }));
+
+    let response = handler.execute(request(BytesView::default(), None)).await.unwrap();
+
+    assert_eq!(response.headers().get(CONTENT_ENCODING).unwrap(), "nonsense");
+    assert_eq!(response.into_body().into_text().await.unwrap(), "opaque body");
+}
+
+#[tokio::test]
 async fn unsupported_policy_does_not_apply_when_decompression_is_disabled() {
     let compressed = compress(Format::Gzip, payload().as_bytes());
     let expected = compressed.clone();
@@ -693,6 +712,25 @@ async fn an_acceptable_pre_encoded_response_is_not_replaced_with_406() {
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers().get(CONTENT_ENCODING).unwrap(), "br");
+    assert_eq!(response.into_body().into_text().await.unwrap(), "pre-encoded");
+}
+
+#[tokio::test]
+async fn empty_content_encoding_members_do_not_make_an_acceptable_response_fail() {
+    let handler = server().compress_responses(&[Format::Gzip]).layer(responds_with(|| {
+        HttpResponseBuilder::new_fake()
+            .status(StatusCode::OK)
+            .header(CONTENT_ENCODING, HeaderValue::from_static("gzip,,"))
+            .text("pre-encoded")
+            .build()
+    }));
+    let mut input = request(BytesView::default(), None);
+    input.headers_mut().insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip"));
+
+    let response = handler.execute(input).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get(CONTENT_ENCODING).unwrap(), "gzip,,");
     assert_eq!(response.into_body().into_text().await.unwrap(), "pre-encoded");
 }
 

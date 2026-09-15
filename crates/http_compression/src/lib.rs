@@ -9,9 +9,10 @@
 //! use http_compression::Compression;
 //! use http_extensions::HttpBodyBuilder;
 //!
-//! let layer =
-//!     Compression::client(HttpBodyBuilder::new_fake()).decompress_responses(&[Format::Gzip]);
+//! # fn configure(body_builder: HttpBodyBuilder) {
+//! let layer = Compression::client(body_builder).decompress_responses(&[Format::Gzip]);
 //! # let _ = layer;
+//! # }
 //! # }
 //! ```
 
@@ -64,9 +65,9 @@
 //! use compressors::DecompressorLimits;
 //! use compressors::format::Format;
 //! use http_compression::Compression;
-//! # use http_extensions::HttpBodyBuilder;
-//! # let body_builder = HttpBodyBuilder::new_fake();
+//! use http_extensions::HttpBodyBuilder;
 //!
+//! # fn configure(body_builder: HttpBodyBuilder) {
 //! let client = Compression::client(body_builder.clone())
 //!     .decompress_responses(&[Format::Gzip])
 //!     .limits(DecompressorLimits::new());
@@ -74,6 +75,8 @@
 //! let server = Compression::server(body_builder)
 //!     .decompress_requests(&[Format::Gzip])
 //!     .compress_responses(&[Format::Gzip]);
+//! # let _ = (client, server);
+//! # }
 //! # }
 //! ```
 //!

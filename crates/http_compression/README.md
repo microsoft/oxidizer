@@ -20,8 +20,7 @@ use compressors::format::Format;
 use http_compression::Compression;
 use http_extensions::HttpBodyBuilder;
 
-let layer =
-    Compression::client(HttpBodyBuilder::new_fake()).decompress_responses(&[Format::Gzip]);
+let layer = Compression::client(body_builder).decompress_responses(&[Format::Gzip]);
 ```
 
 [`compressors`][__link0] transforms a stream of bytes. This crate applies that to
@@ -65,6 +64,7 @@ already sent without waiting for the body to end.
 use compressors::DecompressorLimits;
 use compressors::format::Format;
 use http_compression::Compression;
+use http_extensions::HttpBodyBuilder;
 
 let client = Compression::client(body_builder.clone())
     .decompress_responses(&[Format::Gzip])
@@ -116,7 +116,7 @@ exactly as it arrived.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_compression">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbsrQukaa-Pq4bQJia_7E-jFgbVxcIBwLdr7sbli02E8Zb_r1hZIKCa2NvbXByZXNzb3JzZTAuMS4wgnBodHRwX2NvbXByZXNzaW9uZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbyyYxZ6w8CoobCWNTppQxSqQbnCRaUZHu2fIbyUoBKEj83VthZIKCa2NvbXByZXNzb3JzZTAuMS4wgnBodHRwX2NvbXByZXNzaW9uZTAuMS4w
  [__link0]: https://crates.io/crates/compressors/0.1.0
  [__link1]: https://docs.rs/http_compression/0.1.0/http_compression/?search=Compression
  [__link10]: https://docs.rs/http_compression/0.1.0/http_compression/?search=CompressionLayer::on_unsupported

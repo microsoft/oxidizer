@@ -115,7 +115,7 @@ pub(crate) fn content_encoding_acceptable(request_headers: &HeaderMap, response_
 
         for token in value.split(',').map(str::trim) {
             if token.is_empty() {
-                return false;
+                continue;
             }
             found = true;
 
@@ -431,6 +431,10 @@ mod tests {
             &response(HeaderValue::from_bytes(b"\xff").unwrap())
         ));
         assert!(!content_encoding_acceptable(
+            &headers("gzip"),
+            &response(HeaderValue::from_static(",,"))
+        ));
+        assert!(content_encoding_acceptable(
             &headers("gzip"),
             &response(HeaderValue::from_static("gzip, "))
         ));
