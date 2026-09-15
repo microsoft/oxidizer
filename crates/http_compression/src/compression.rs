@@ -1005,4 +1005,18 @@ mod tests {
         assert!(headers.get(CONTENT_ENCODING).is_none());
         assert_eq!(futures::executor::block_on(body.into_text()).unwrap(), "unchanged");
     }
+
+    #[test]
+    fn head_response_format_is_identity_before_the_handler_runs() {
+        let body_builder = HttpBodyBuilder::new_fake();
+        let layer = Compression::server(body_builder.clone()).compress_responses(&[Format::Gzip]);
+        let request = http::Request::head("https://example.com")
+            .header(ACCEPT_ENCODING, "gzip, identity;q=0")
+            .body(body_builder.empty())
+            .unwrap();
+
+        let negotiation = layer.role.choose_response_format(&request);
+
+        assert_eq!(negotiation.selection, negotiate::Selection::Identity);
+    }
 }
