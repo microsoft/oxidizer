@@ -10,11 +10,12 @@ edition = "2024"
 clap = { version = "4", features = ["derive"] }
 ohno = { path = "../../ohno", features = ["app-err"] }
 prettyplease = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 syn = { version = "2", features = ["full", "parsing"] }
 ---
 
-//! Run the criterion + gungraun router and query-codec suites and rebuild
-//! `docs/PERF.md`.
+//! Run the consolidated routerama metabench suite and rebuild `docs/PERF.md`.
 //!
 //! Runs Criterion and, where Valgrind is available, Gungraun.
 //!
@@ -24,8 +25,10 @@ syn = { version = "2", features = ["full", "parsing"] }
 //!   `scripts/perf_report.rs --samples 50 --measurement-time 3`  — custom criterion settings
 //!   `scripts/perf_report.rs --no-gungraun`                      — criterion only
 //!
-//! Criterion and Gungraun variants are paired through `VARIANTS`.
+//! Criterion and Gungraun variants are paired through shared metabench identities.
 
+use std::collections::{BTreeMap, btree_map::Entry};
+use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -34,6 +37,7 @@ use std::{env, fs};
 
 use clap::Parser;
 use ohno::{AppError, app_err, bail};
+use serde::Deserialize;
 
 /// Run the routerama benchmark suites and rebuild `docs/PERF.md`.
 #[derive(Parser, Debug)]
@@ -69,29 +73,22 @@ struct Args {
 // The benchmark route table (`ROUTES`, `LOOKUPS`), shared with the benches.
 include!("../benches/common/routes_data.rs");
 
-/// The benchmark group name shared by both suites.
+/// The benchmark group name shared by the router comparison rows.
 const GROUP: &str = "compare_routers";
 
-/// The routers compared, in report order. Each name is both the criterion
-/// variant (`compare_routers/<name>`) and the gungraun function
-/// (`compare_routers::<name>`). `routerama_static` is the compile-time
-/// `#[resolver]` router and `routerama_dynamic` the run-time one built from the
-/// same table; both coerce captures to typed fields. The rest are third-party
-/// runtime routers driven to the same typed end state in a (non-measured) setup
-/// step.
+/// The routers compared, in report order.
 const VARIANTS: &[&str] = &[
-    "routerama_static",
-    "routerama_dynamic",
-    "matchit",
-    "path_tree",
-    "regex",
-    "route_recognizer",
+    "compare_routers/routerama_static",
+    "compare_routers/routerama_dynamic",
+    "compare_routers/matchit",
+    "compare_routers/path_tree",
+    "compare_routers/regex",
+    "compare_routers/route_recognizer",
 ];
 
 struct QueryVariant {
     label: &'static str,
-    criterion: &'static str,
-    gungraun: &'static str,
+    identity: &'static str,
 }
 
 struct QueryGroup {
@@ -105,18 +102,15 @@ const QUERY_GROUPS: &[QueryGroup] = &[
         variants: &[
             QueryVariant {
                 label: "routerama",
-                criterion: "routerama_query/parse_common/routerama",
-                gungraun: "parse_common_routerama",
+                identity: "routerama_query/parse_common/routerama",
             },
             QueryVariant {
                 label: "serde_urlencoded",
-                criterion: "routerama_query/parse_common/serde_urlencoded",
-                gungraun: "parse_common_serde_urlencoded",
+                identity: "routerama_query/parse_common/serde_urlencoded",
             },
             QueryVariant {
                 label: "serde_html_form",
-                criterion: "routerama_query/parse_common/serde_html_form",
-                gungraun: "parse_common_serde_html_form",
+                identity: "routerama_query/parse_common/serde_html_form",
             },
         ],
     },
@@ -125,18 +119,15 @@ const QUERY_GROUPS: &[QueryGroup] = &[
         variants: &[
             QueryVariant {
                 label: "routerama",
-                criterion: "routerama_query/parse_escaped/routerama",
-                gungraun: "parse_escaped_routerama",
+                identity: "routerama_query/parse_escaped/routerama",
             },
             QueryVariant {
                 label: "serde_urlencoded",
-                criterion: "routerama_query/parse_escaped/serde_urlencoded",
-                gungraun: "parse_escaped_serde_urlencoded",
+                identity: "routerama_query/parse_escaped/serde_urlencoded",
             },
             QueryVariant {
                 label: "serde_html_form",
-                criterion: "routerama_query/parse_escaped/serde_html_form",
-                gungraun: "parse_escaped_serde_html_form",
+                identity: "routerama_query/parse_escaped/serde_html_form",
             },
         ],
     },
@@ -145,13 +136,11 @@ const QUERY_GROUPS: &[QueryGroup] = &[
         variants: &[
             QueryVariant {
                 label: "routerama",
-                criterion: "routerama_query/parse_repeated/routerama",
-                gungraun: "parse_repeated_routerama",
+                identity: "routerama_query/parse_repeated/routerama",
             },
             QueryVariant {
                 label: "serde_html_form",
-                criterion: "routerama_query/parse_repeated/serde_html_form",
-                gungraun: "parse_repeated_serde_html_form",
+                identity: "routerama_query/parse_repeated/serde_html_form",
             },
         ],
     },
@@ -160,18 +149,15 @@ const QUERY_GROUPS: &[QueryGroup] = &[
         variants: &[
             QueryVariant {
                 label: "routerama",
-                criterion: "routerama_query/parse_long_ascii/routerama",
-                gungraun: "parse_long_routerama",
+                identity: "routerama_query/parse_long_ascii/routerama",
             },
             QueryVariant {
                 label: "serde_urlencoded",
-                criterion: "routerama_query/parse_long_ascii/serde_urlencoded",
-                gungraun: "parse_long_serde_urlencoded",
+                identity: "routerama_query/parse_long_ascii/serde_urlencoded",
             },
             QueryVariant {
                 label: "serde_html_form",
-                criterion: "routerama_query/parse_long_ascii/serde_html_form",
-                gungraun: "parse_long_serde_html_form",
+                identity: "routerama_query/parse_long_ascii/serde_html_form",
             },
         ],
     },
@@ -180,13 +166,11 @@ const QUERY_GROUPS: &[QueryGroup] = &[
         variants: &[
             QueryVariant {
                 label: "routerama",
-                criterion: "routerama_query/produce_common/routerama_reserved",
-                gungraun: "produce_common_routerama_reserved",
+                identity: "routerama_query/produce_common/routerama_reserved",
             },
             QueryVariant {
                 label: "serde_html_form",
-                criterion: "routerama_query/produce_common/serde_html_form_reserved",
-                gungraun: "produce_common_serde_html_form_reserved",
+                identity: "routerama_query/produce_common/serde_html_form_reserved",
             },
         ],
     },
@@ -195,156 +179,104 @@ const QUERY_GROUPS: &[QueryGroup] = &[
         variants: &[
             QueryVariant {
                 label: "routerama",
-                criterion: "routerama_query/produce_common_allocating/routerama",
-                gungraun: "produce_common_routerama_allocating",
+                identity: "routerama_query/produce_common_allocating/routerama",
             },
             QueryVariant {
                 label: "serde_urlencoded",
-                criterion: "routerama_query/produce_common_allocating/serde_urlencoded",
-                gungraun: "produce_common_serde_urlencoded_allocating",
+                identity: "routerama_query/produce_common_allocating/serde_urlencoded",
             },
             QueryVariant {
                 label: "serde_html_form",
-                criterion: "routerama_query/produce_common_allocating/serde_html_form",
-                gungraun: "produce_common_serde_html_form_allocating",
+                identity: "routerama_query/produce_common_allocating/serde_html_form",
             },
         ],
     },
 ];
 
-fn unit_to_ns(unit: &str) -> Option<f64> {
-    match unit {
-        "ps" => Some(1e-3),
-        "ns" => Some(1.0),
-        "µs" | "us" => Some(1e3),
-        "ms" => Some(1e6),
-        "s" => Some(1e9),
+#[derive(Deserialize)]
+struct JsonReport {
+    entries: Vec<JsonEntry>,
+}
+
+#[derive(Deserialize)]
+struct JsonEntry {
+    identity: String,
+    results: BTreeMap<String, JsonEngineResult>,
+}
+
+#[derive(Deserialize)]
+struct JsonEngineResult {
+    metrics: BTreeMap<String, JsonMetric>,
+}
+
+#[derive(Deserialize)]
+struct JsonMetric {
+    value: JsonMetricValue,
+    unit: Option<String>,
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(untagged)]
+enum JsonMetricValue {
+    Integer(u64),
+    Float(f64),
+}
+
+impl JsonMetricValue {
+    fn as_f64(self) -> f64 {
+        match self {
+            Self::Integer(value) => value as f64,
+            Self::Float(value) => value,
+        }
+    }
+
+    fn as_u64(self) -> Option<u64> {
+        match self {
+            Self::Integer(value) => Some(value),
+            Self::Float(_) => None,
+        }
+    }
+}
+
+type ReportIndex = BTreeMap<String, JsonEntry>;
+
+fn index_report(report: JsonReport) -> Result<ReportIndex, AppError> {
+    let mut entries = BTreeMap::new();
+    for entry in report.entries {
+        match entries.entry(entry.identity.clone()) {
+            Entry::Vacant(slot) => {
+                slot.insert(entry);
+            }
+            Entry::Occupied(_) => bail!("report contains duplicate benchmark '{}'", entry.identity),
+        }
+    }
+    Ok(entries)
+}
+
+fn criterion_time_ns(report: &ReportIndex, identity: &str) -> Option<f64> {
+    let metric = report.get(identity)?.results.get("criterion")?.metrics.get("median")?;
+    let value = metric.value.as_f64();
+    match metric.unit.as_deref()? {
+        "ps" => Some(value * 1e-3),
+        "ns" => Some(value),
+        "µs" | "us" => Some(value * 1e3),
+        "ms" => Some(value * 1e6),
+        "s" => Some(value * 1e9),
         _ => None,
     }
 }
 
-/// Extract the median time from a criterion `time:` summary line.
-///
-/// Format: `time:   [<low> <unit> <median> <unit> <high> <unit>]`.
-fn parse_time_line(line: &str) -> Option<f64> {
-    let idx = line.find("time:")?;
-    let rest = &line[idx + "time:".len()..];
-    let open = rest.find('[')?;
-    let close = rest.find(']')?;
-    let inside = &rest[open + 1..close];
-    let toks: Vec<&str> = inside.split_whitespace().collect();
-    if toks.len() != 6 {
-        return None;
-    }
-    let median: f64 = toks[2].parse().ok()?;
-    let scale = unit_to_ns(toks[3])?;
-    Some(median * scale)
-}
-
-/// True for a non-empty, non-indented `group/variant` identifier (the shape
-/// criterion emits before `time:`). Progress lines with colons or internal
-/// whitespace are rejected.
-fn is_bench_name(s: &str) -> bool {
-    if s.is_empty() || !s.contains('/') || s.contains(':') || s.contains(char::is_whitespace) {
-        return false;
-    }
-    let id_char = |c: char| c.is_ascii_alphanumeric() || c == '_';
-    s.split('/').all(|part| !part.is_empty() && part.chars().all(id_char))
-}
-
-/// Parse a criterion log into `{group/variant: median_ns}` pairs. Criterion
-/// writes the bench identifier either on its own line just before the `time:`
-/// line (long names) or inline before `time:` (short names); both are handled.
-fn parse_criterion(text: &str) -> Vec<(String, f64)> {
-    let mut out: Vec<(String, f64)> = Vec::new();
-    let mut pending: Option<String> = None;
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if let Some(t_idx) = line.find("time:") {
-            let head = line[..t_idx].trim();
-            let name_inline = if is_bench_name(head) { Some(head.to_owned()) } else { None };
-            let name = name_inline.or_else(|| pending.take());
-            if let (Some(name), Some(t)) = (name, parse_time_line(line)) {
-                out.push((name, t));
-            }
-            continue;
-        }
-        if is_bench_name(trimmed) {
-            pending = Some(trimmed.to_owned());
-        }
-    }
-    out
-}
-
-fn lookup_time(crit: &[(String, f64)], variant: &str) -> Option<f64> {
-    let key = format!("{GROUP}/{variant}");
-    lookup_time_by_key(crit, &key)
-}
-
-fn lookup_time_by_key(crit: &[(String, f64)], key: &str) -> Option<f64> {
-    crit.iter().find(|(k, _)| k == key).map(|(_, v)| *v)
-}
-
-/// One gungraun benchmark's parsed metrics.
-struct GungEntry {
-    name: String,
-    metrics: Vec<(String, u64)>,
-}
-
-/// Parse the gungraun (iai-callgrind) text output. Per-bench headers look like
-/// `gungraun_routers::compare_routers::<fn>` (plain benches) or
-/// `…::<fn> run:(<args>)` (`#[bench::run(...)]` benches); metric lines follow as
-/// `  <Metric>: <value>|…`.
-fn parse_gungraun(text: &str) -> Vec<GungEntry> {
-    let mut out: Vec<GungEntry> = Vec::new();
-    let mut cur: Option<GungEntry> = None;
-    for line in text.lines() {
-        let rest = line
-            .strip_prefix("gungraun_routers::")
-            .or_else(|| line.strip_prefix("routerama_query_cg::"));
-        if let Some(rest) = rest
-            && let Some(after_mod) = rest.find("::")
-        {
-            let after = &rest[after_mod + 2..];
-            let fn_name = match after.find(char::is_whitespace) {
-                Some(sp) => &after[..sp],
-                None => after,
-            };
-            let valid = !fn_name.is_empty() && fn_name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
-            if valid {
-                if let Some(prev) = cur.take() {
-                    out.push(prev);
-                }
-                cur = Some(GungEntry {
-                    name: fn_name.to_owned(),
-                    metrics: Vec::new(),
-                });
-                continue;
-            }
-        }
-        if let Some(entry) = cur.as_mut() {
-            let trimmed = line.trim_start();
-            if let Some(colon) = trimmed.find(':') {
-                let key = &trimmed[..colon];
-                if matches!(key, "Instructions" | "L1 Hits" | "LL Hits" | "RAM Hits" | "Bcm") {
-                    let after = trimmed[colon + 1..].trim_start();
-                    let num: String = after.chars().take_while(char::is_ascii_digit).collect();
-                    if let Ok(v) = num.parse::<u64>() {
-                        entry.metrics.push((key.to_owned(), v));
-                    }
-                }
-            }
-        }
-    }
-    if let Some(entry) = cur.take() {
-        out.push(entry);
-    }
-    out
-}
-
-fn gung_metric(g: &[GungEntry], name: &str, key: &str) -> Option<u64> {
-    let entry = g.iter().find(|e| e.name == name)?;
-    entry.metrics.iter().find(|(k, _)| k == key).map(|(_, v)| *v)
+fn callgrind_metric(report: &ReportIndex, identity: &str, key: &str) -> Option<u64> {
+    [identity, &format!("{identity}/run")]
+        .into_iter()
+        .filter_map(|candidate| report.get(candidate))
+        .find_map(|entry| {
+            let engine = entry
+                .results
+                .iter()
+                .find(|(name, result)| name.starts_with("gungraun.") && result.metrics.contains_key(key))?;
+            engine.1.metrics.get(key)?.value.as_u64()
+        })
 }
 
 fn fmt_ns(ns: Option<f64>) -> String {
@@ -367,8 +299,8 @@ fn fmt_int(n: Option<u64>) -> String {
             if first > 0 {
                 out.push_str(&s[..first]);
             }
-            for (i, chunk) in bytes[first..].chunks(3).enumerate() {
-                if !(i == 0 && first == 0) {
+            for (index, chunk) in bytes[first..].chunks(3).enumerate() {
+                if !(index == 0 && first == 0) {
                     out.push(',');
                 }
                 out.push_str(std::str::from_utf8(chunk).expect("ASCII digits from u64::to_string"));
@@ -385,7 +317,7 @@ fn fmt_ratio(value: Option<f64>, baseline: Option<f64>) -> String {
     }
 }
 
-fn write_query_report(out: &mut String, crit: &[(String, f64)], gung: &[GungEntry]) {
+fn write_query_report(out: &mut String, report: &ReportIndex) {
     out.push_str("\n## Query codecs\n\n");
     out.push_str(
         "Each table compares complete typed parsing or canonical production of \
@@ -395,15 +327,15 @@ fn write_query_report(out: &mut String, crit: &[(String, f64)], gung: &[GungEntr
     );
     for (group_index, group) in QUERY_GROUPS.iter().enumerate() {
         let baseline = group.variants.first().expect("every query group has a Routerama baseline");
-        let baseline_time = lookup_time_by_key(crit, baseline.criterion);
-        let baseline_instructions = gung_metric(gung, baseline.gungraun, "Instructions");
+        let baseline_time = criterion_time_ns(report, baseline.identity);
+        let baseline_instructions = callgrind_metric(report, baseline.identity, "Ir");
 
         let _ = writeln!(out, "### {}\n", group.title);
         out.push_str("| Implementation | Time | Time vs Routerama | Instructions | Instructions vs Routerama |\n");
         out.push_str("|---|---:|---:|---:|---:|\n");
         for variant in group.variants {
-            let time = lookup_time_by_key(crit, variant.criterion);
-            let instructions = gung_metric(gung, variant.gungraun, "Instructions");
+            let time = criterion_time_ns(report, variant.identity);
+            let instructions = callgrind_metric(report, variant.identity, "Ir");
             let _ = writeln!(
                 out,
                 "| `{}` | {} | {} | {} | {} |",
@@ -423,14 +355,15 @@ fn write_query_report(out: &mut String, crit: &[(String, f64)], gung: &[GungEntr
     }
 }
 
-fn build_report(crit: &[(String, f64)], gung: &[GungEntry]) -> String {
+fn build_report(report: &ReportIndex) -> String {
     let mut out = String::new();
     out.push_str("# Routerama Performance Report\n\n");
     out.push_str("Generated by `scripts/perf_report.rs`:\n");
-    out.push_str("- `cargo bench --bench criterion_routers` — criterion wall-clock timings.\n");
-    out.push_str("- `cargo bench --bench gungraun_routers` — Callgrind instruction-precise counts.\n");
-    out.push_str("- `cargo bench --bench routerama_query` — differential query-codec timings.\n");
-    out.push_str("- `cargo bench --bench routerama_query_cg` — differential query-codec instruction counts.\n\n");
+    out.push_str(
+        "- `cargo bench --bench routerama` — consolidated Criterion and Gungraun \
+         router/query suite; this script forwards `--criterion` and, when \
+         available, `--gungraun` to the same benchmark binary.\n\n",
+    );
     out.push_str(
         "**Workload:** one full sweep of the shared request-path lookups (see \
          `benches/common/routes_data.rs`) against each router. Every router is \
@@ -467,29 +400,29 @@ fn build_report(crit: &[(String, f64)], gung: &[GungEntry]) -> String {
     let _ = writeln!(out, "## `{GROUP}`\n");
     out.push_str("| Resolver | Time (criterion) | Instructions | Branch misses | Mem accesses |\n");
     out.push_str("|---|---:|---:|---:|---:|\n");
-    for variant in VARIANTS {
-        let t = lookup_time(crit, variant);
-        let instr = gung_metric(gung, variant, "Instructions");
-        let bcm = gung_metric(gung, variant, "Bcm");
-        let mem = {
-            let l1 = gung_metric(gung, variant, "L1 Hits");
-            let ll = gung_metric(gung, variant, "LL Hits");
-            let ram = gung_metric(gung, variant, "RAM Hits");
-            match (l1, ll, ram) {
-                (Some(l1), Some(ll), Some(ram)) => Some(l1 + ll + ram),
-                _ => None,
-            }
+    for identity in VARIANTS {
+        let variant = identity.strip_prefix("compare_routers/").expect("variant identity stays within compare_routers");
+        let time = criterion_time_ns(report, identity);
+        let instructions = callgrind_metric(report, identity, "Ir");
+        let branch_misses = callgrind_metric(report, identity, "Bcm");
+        let memory_accesses = match (
+            callgrind_metric(report, identity, "L1hits"),
+            callgrind_metric(report, identity, "LLhits"),
+            callgrind_metric(report, identity, "RamHits"),
+        ) {
+            (Some(l1), Some(ll), Some(ram)) => Some(l1 + ll + ram),
+            _ => None,
         };
         let _ = writeln!(
             out,
             "| `{variant}` | {} | {} | {} | {} |",
-            fmt_ns(t),
-            fmt_int(instr),
-            fmt_int(bcm),
-            fmt_int(mem),
+            fmt_ns(time),
+            fmt_int(instructions),
+            fmt_int(branch_misses),
+            fmt_int(memory_accesses),
         );
     }
-    write_query_report(&mut out, crit, gung);
+    write_query_report(&mut out, report);
     out
 }
 
@@ -594,8 +527,8 @@ fn regenerate_router(crate_dir: &Path) -> Result<(), AppError> {
     code.push_str("/// Dynamic typed router: the same routes registered at run time through the\n");
     code.push_str("/// generated builder. Dynamic captures are always owned.\n");
     code.push_str("#[::routerama::resolver]\n#[derive(Debug)]\nenum BenchDynRoute {\n");
-    for (name, template, tys) in ROUTES {
-        emit_variant(&mut code, name, template, tys, dynamic_field_ty);
+    for (name, _template, tys) in ROUTES {
+        emit_variant(&mut code, name, _template, tys, dynamic_field_ty);
     }
     code.push_str("}\n\n");
 
@@ -616,7 +549,8 @@ fn regenerate_router(crate_dir: &Path) -> Result<(), AppError> {
     let body = prettyplease::unparse(&file);
 
     let out_path = crate_dir.join("benches").join("common").join("bench_router.rs");
-    fs::write(&out_path, format!("{ROUTER_HEADER}{body}")).map_err(|e| app_err!("writing {}: {e}", out_path.display()))?;
+    fs::write(&out_path, format!("{ROUTER_HEADER}{body}"))
+        .map_err(|e| app_err!("writing {}: {e}", out_path.display()))?;
     println!("Regenerated {}", out_path.display());
     Ok(())
 }
@@ -628,29 +562,24 @@ fn have_valgrind() -> bool {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
-        .is_ok_and(|s| s.success())
+        .is_ok_and(|status| status.success())
 }
 
-/// Run `cargo bench --bench <name> -- <args>` from `cwd`, capturing combined
-/// stdout+stderr (criterion writes summaries to stdout; gungraun to stderr).
-fn run_bench(cwd: &Path, bench: &str, extra: &[&str], label: &str) -> Result<String, AppError> {
-    println!("==> Running {label}");
-    let mut cmd = Command::new(env::var("CARGO").unwrap_or_else(|_| "cargo".into()));
-    cmd.current_dir(cwd).arg("bench").arg("--bench").arg(bench);
-    if !extra.is_empty() {
-        cmd.arg("--");
-        cmd.args(extra);
-    }
-    let out = cmd
+fn run_benchmark(crate_dir: &Path, arguments: &[OsString]) -> Result<(), AppError> {
+    println!("==> Running cargo bench --bench routerama");
+    let mut command = Command::new(env::var("CARGO").unwrap_or_else(|_| "cargo".into()));
+    command.current_dir(crate_dir).arg("bench").arg("--bench").arg("routerama");
+    command.args(arguments);
+    let output = command
         .output()
-        .map_err(|e| app_err!("failed to spawn cargo bench --bench {bench}: {e}"))?;
-    let mut combined = String::from_utf8_lossy(&out.stdout).into_owned();
-    combined.push_str(&String::from_utf8_lossy(&out.stderr));
-    if !out.status.success() {
+        .map_err(|e| app_err!("failed to spawn cargo bench --bench routerama: {e}"))?;
+    let mut combined = String::from_utf8_lossy(&output.stdout).into_owned();
+    combined.push_str(&String::from_utf8_lossy(&output.stderr));
+    if !output.status.success() {
         let _ = std::io::stderr().write_all(combined.as_bytes());
-        bail!("cargo bench --bench {bench} failed with status {}", out.status);
+        bail!("cargo bench --bench routerama failed with status {}", output.status);
     }
-    Ok(combined)
+    Ok(())
 }
 
 fn run(args: &Args) -> Result<(), AppError> {
@@ -660,10 +589,10 @@ fn run(args: &Args) -> Result<(), AppError> {
         return regenerate_router(&crate_dir);
     }
 
-    let run_gungraun = if cfg!(windows) {
+    let run_gungraun = if !cfg!(target_os = "linux") {
         if !args.no_gungraun {
             eprintln!(
-                "note: skipping gungraun benches; valgrind is unavailable on Windows. \
+                "note: skipping gungraun benches; metabench only supports Gungraun on Linux. \
                  Gungraun columns in docs/PERF.md will show \"—\"."
             );
         }
@@ -680,53 +609,66 @@ fn run(args: &Args) -> Result<(), AppError> {
         );
     };
 
-    let (def_samples, def_meas) = if args.fast { (10, 1) } else { (30, 2) };
-    let samples = args.samples.unwrap_or(def_samples).to_string();
-    let meas = args.measurement_time.unwrap_or(def_meas).to_string();
+    let (default_samples, default_measurement) = if args.fast { (10, 1) } else { (30, 2) };
+    let samples = args.samples.unwrap_or(default_samples).to_string();
+    let measurement = args.measurement_time.unwrap_or(default_measurement).to_string();
     let warmup = args.warm_up_time.unwrap_or(1).to_string();
-    let crit_args = vec![
+
+    let target_dir = crate_dir.join("target");
+    fs::create_dir_all(&target_dir).map_err(|e| app_err!("creating {}: {e}", target_dir.display()))?;
+    let json_path = target_dir.join("routerama-perf-report.json");
+    let markdown_path = target_dir.join("routerama-perf-report.md");
+
+    let mut bench_args = vec![OsString::from("--")];
+    bench_args.push(OsString::from("--criterion"));
+    if run_gungraun {
+        bench_args.push(OsString::from("--gungraun"));
+    }
+    for forwarded in [
         "--warm-up-time",
         warmup.as_str(),
         "--measurement-time",
-        meas.as_str(),
+        measurement.as_str(),
         "--sample-size",
         samples.as_str(),
-    ];
-
-    let crit_log = run_bench(
-        &crate_dir,
-        "criterion_routers",
-        &crit_args,
-        &format!("criterion_routers: {samples} samples, {meas}s measurement"),
-    )?;
-    let query_crit_log = run_bench(
-        &crate_dir,
-        "routerama_query",
-        &crit_args,
-        &format!("routerama_query: {samples} samples, {meas}s measurement"),
-    )?;
-    let mut gung_log = if run_gungraun {
-        run_bench(&crate_dir, "gungraun_routers", &[], "gungraun_routers")?
-    } else {
-        String::new()
-    };
-    if run_gungraun {
-        gung_log.push_str(&run_bench(&crate_dir, "routerama_query_cg", &[], "routerama_query_cg")?);
+    ] {
+        bench_args.push(OsString::from("--criterion-arg"));
+        bench_args.push(OsString::from(forwarded));
     }
+    bench_args.push(OsString::from("--no-baseline"));
+    bench_args.push(OsString::from("--export-json"));
+    bench_args.push(json_path.as_os_str().to_owned());
+    bench_args.push(OsString::from("--export-md"));
+    bench_args.push(markdown_path.as_os_str().to_owned());
+
+    run_benchmark(&crate_dir, &bench_args)?;
 
     println!("==> Building docs/PERF.md");
-    let crit = parse_criterion(&(crit_log + &query_crit_log));
-    let gung = parse_gungraun(&gung_log);
+    let json = fs::read_to_string(&json_path).map_err(|e| app_err!("reading {}: {e}", json_path.display()))?;
+    let report: JsonReport = serde_json::from_str(&json).map_err(|e| app_err!("parsing {}: {e}", json_path.display()))?;
+    let report = index_report(report)?;
 
-    let report = build_report(&crit, &gung);
+    let expected = VARIANTS
+        .iter()
+        .copied()
+        .chain(QUERY_GROUPS.iter().flat_map(|group| group.variants.iter().map(|variant| variant.identity)));
+    let missing: Vec<&str> = expected.filter(|key| criterion_time_ns(&report, key).is_none()).collect();
+    if !missing.is_empty() {
+        bail!(
+            "report is missing {} expected criterion benchmark(s): {}",
+            missing.len(),
+            missing.join(", ")
+        );
+    }
+
+    let markdown = build_report(&report);
     let out_path = crate_dir.join("docs").join("PERF.md");
-    fs::write(&out_path, &report).map_err(|e| app_err!("writing {}: {e}", out_path.display()))?;
+    fs::write(&out_path, &markdown).map_err(|e| app_err!("writing {}: {e}", out_path.display()))?;
 
     println!(
-        "Wrote {} ({} criterion, {} gungraun benches)",
+        "Wrote {} ({} metabench identities)",
         out_path.display(),
-        crit.len(),
-        gung.len(),
+        report.len(),
     );
     println!("==> Done. Report written to docs/PERF.md");
     Ok(())

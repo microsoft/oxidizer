@@ -82,7 +82,7 @@ azure_storage_blob = { version = "1.0.0", default-features = false }
 backtrace = { version = "0.3.76", default-features = false }
 base64 = { version = "0.23.0", default-features = false, features = ["alloc"] }
 bolero = { version = "0.13.4", default-features = false }
-brotli = { version = "8.0.4", default-features = false }
+brotli = { version = "9.0.0", default-features = false }
 bumpalo = { version = "3.20.2", default-features = false }
 bytemuck = { version = "1.25.0", default-features = false }
 bytes = { version = "1.11.1", default-features = false }
@@ -133,7 +133,7 @@ futures = { version = "0.3.31", default-features = false }
 futures-channel = { version = "0.3.31", default-features = false }
 futures-core = { version = "0.3.31", default-features = false }
 futures-util = { version = "0.3.31", default-features = false }
-getrandom = { version = "0.3.4", default-features = false }
+getrandom = { version = "0.4.3", default-features = false }
 # Keep the library and summary parser aligned with gungraun-runner's schema.
 gungraun = { version = "=0.19.4", default-features = false }
 gungraun-summary = { version = "=6.0.0", default-features = false }
@@ -301,7 +301,7 @@ windows-sys = { version = "0.61.2", default-features = false }
 wiremock = { version = "0.6.5", default-features = false }
 xxhash-rust = { version = "0.8.15", default-features = false }
 zerocopy = { version = "0.8.26", default-features = false }
-zstd-safe = { version = "7.2.4", default-features = false }
+zstd-safe = { version = "8.0.0", default-features = false }
 
 # >>> anvil-managed: anvil-workspace-lints
 [workspace.lints]

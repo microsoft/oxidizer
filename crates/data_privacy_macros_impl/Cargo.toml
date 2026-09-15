@@ -39,7 +39,7 @@ syn = { workspace = true, features = [
 
 [dev-dependencies]
 insta = { workspace = true, features = ["yaml"] }
-testing_aids = { workspace = true }
+testing_aids = { path = "../testing_aids" }
 
 # >>> anvil-managed: anvil-lints
 [lints]
