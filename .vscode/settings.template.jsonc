@@ -61,13 +61,13 @@
     // The nightly toolchain has additional code formatting capabilities that are disabled
     // with the regular toolchain. This enables those capabilities.
     //
-    // The pinned nightly must match `RUST_NIGHTLY` in `constants.env`, which is what CI's
-    // format check runs; a different nightly can format the same file differently.
-    // `scripts/update_rust_toolchain.ps1` rewrites both, so a routine bump keeps them in step.
+    // The pinned nightly must match `rust_nightly` in
+    // `justfiles/anvil/versions.just`, which is what Anvil's format check runs;
+    // a different nightly can format the same file differently.
     //
-    // Your own copy of this file does not move with a bump: after `RUST_NIGHTLY` changes,
+    // Your own copy of this file does not move with an Anvil catalog update:
     // re-copy this line into `.vscode/settings.json` and install the new toolchain with
-    // `rustup toolchain install <RUST_NIGHTLY> --component rustfmt` (or re-run `just install-tools`),
+    // re-run `just anvil-fmt-setup`, then copy the updated argument below,
     // otherwise format-on-save fails on a toolchain you no longer have.
     "rust-analyzer.rustfmt.extraArgs": ["+nightly-2026-05-30", "--config-path", "${workspaceFolder}/unstable-rustfmt.toml"],
 

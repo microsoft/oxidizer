@@ -1,11 +1,22 @@
-# Testing_Aids
+<div align="center">
+ <img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="Testing Aids Logo" width="96">
 
-[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
+# Testing Aids
+
+[![crate.io](https://img.shields.io/crates/v/testing_aids.svg)](https://crates.io/crates/testing_aids)
+[![docs.rs](https://docs.rs/testing_aids/badge.svg)](https://docs.rs/testing_aids)
+[![MSRV](https://img.shields.io/crates/msrv/testing_aids)](https://crates.io/crates/testing_aids)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml/badge.svg)](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml)
+[![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/microsoft/oxidizer/blob/main/LICENSE)
+<a href="https://github.com/microsoft/oxidizer"><img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
+
+</div>
 
 An unpublished crate containing testing utilities for use within this repo.
 
+
 <hr/>
 <sub>
-This crate was developed as part of <a href="../..">The Oxidizer Project</a>.
+This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/testing_aids">source code</a>.
 </sub>

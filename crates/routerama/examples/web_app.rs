@@ -121,7 +121,7 @@ async fn main() {
     let app = Router::new().fallback(dispatch).with_state(state);
     let server = axum::serve(listener, app);
 
-    if std::env::var_os("IS_TESTING").is_some() {
+    if std::env::var_os("ANVIL_EXAMPLE").is_some() {
         server.with_graceful_shutdown(async {}).await.expect("server error");
     } else {
         server.await.expect("server error");

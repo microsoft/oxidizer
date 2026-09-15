@@ -461,7 +461,7 @@ direct test of the rollback guard described under
 engines. Another spawns a writer against a concurrent `freeze` and asserts the
 snapshot is a consistent prefix.
 
-**Property tests (`bolero`, run by `just bolero`).** Two properties matter most
+**Property tests (`bolero`, run by `just anvil-bolero`).** Two properties matter most
 and neither is easy to reach with hand-written cases. The first feeds arbitrary
 byte-derived words through both engines and checks dedup, resolution, `len`, and
 `iter` against a `HashMap` oracle across the freeze boundary. The second is the
@@ -470,7 +470,7 @@ and asserts every one is either rejected or resolves to exactly the string the
 oracle predicts. That is the fuzzed statement of "the unchecked storage path can
 never be reached with an out-of-range index".
 
-**Model checks (`loom`, `just loom`) — and their precise scope.** The loom
+**Model checks (`loom`, `just anvil-loom`) — and their precise scope.** The loom
 target is a `[[test]]` gated on the `loom` feature and compiled under
 `--cfg loom`. It deliberately models an *algorithm sketch*, not the production
 types: loom cannot instrument `parking_lot`, and `loom::sync::RwLock` has no
