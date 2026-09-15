@@ -84,8 +84,6 @@ pub(crate) fn select(headers: &HeaderMap, offered: &[Format]) -> Selection {
         Selection::Format(format)
     } else if identity_acceptable {
         Selection::Identity
-    } else if let Some((format, _)) = best {
-        Selection::Format(format)
     } else {
         Selection::NotAcceptable
     }
@@ -409,5 +407,40 @@ mod tests {
             select(&headers("gzip;q=0, identity;q=0"), &[Format::Gzip]),
             Selection::NotAcceptable
         );
+    }
+
+    #[test]
+    fn identity_is_acceptable_without_an_accept_encoding_header() {
+        assert!(identity_acceptable(&HeaderMap::new()));
+    }
+
+    #[test]
+    fn existing_content_encoding_acceptance_handles_header_edge_cases() {
+        let response = |value: HeaderValue| {
+            let mut headers = HeaderMap::new();
+            headers.insert(CONTENT_ENCODING, value);
+            headers
+        };
+
+        assert!(content_encoding_acceptable(
+            &HeaderMap::new(),
+            &response(HeaderValue::from_static("br"))
+        ));
+        assert!(!content_encoding_acceptable(
+            &headers("gzip"),
+            &response(HeaderValue::from_bytes(b"\xff").unwrap())
+        ));
+        assert!(!content_encoding_acceptable(
+            &headers("gzip"),
+            &response(HeaderValue::from_static("gzip, "))
+        ));
+        assert!(!content_encoding_acceptable(
+            &headers("identity;q=0"),
+            &response(HeaderValue::from_static("identity"))
+        ));
+        assert!(content_encoding_acceptable(
+            &headers("gzip, br"),
+            &response(HeaderValue::from_static("gzip, br"))
+        ));
     }
 }

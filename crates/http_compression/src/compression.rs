@@ -764,8 +764,10 @@ impl Server {
 
         let format = match negotiation.selection {
             negotiate::Selection::Format(format) if self.is_compressible(response.headers()) => format,
-            _ if negotiate::identity_acceptable(&negotiation.accept_encoding) => return Ok(response),
             negotiate::Selection::Format(_) | negotiate::Selection::NotAcceptable => {
+                if negotiate::identity_acceptable(&negotiation.accept_encoding) {
+                    return Ok(response);
+                }
                 return Ok(not_acceptable(config, response));
             }
             negotiate::Selection::Identity => return Ok(response),
@@ -789,17 +791,10 @@ impl Server {
     }
 
     /// Replaces `body` with one that compresses as it is read.
-    ///
-    /// A message that already declares a `Content-Encoding` is left alone: it is
-    /// already compressed, and stacking another format on top would be a surprise.
     fn compress(&self, config: &Config, headers: &mut HeaderMap, body: HttpBody, format: Format) -> Result<HttpBody> {
         let Some(token) = format.content_encoding() else {
             return Ok(body);
         };
-
-        if headers.contains_key(CONTENT_ENCODING) || !self.is_compressible(headers) {
-            return Ok(body);
-        }
 
         let compressor = CompressorBuilder::new()
             .level(self.level)

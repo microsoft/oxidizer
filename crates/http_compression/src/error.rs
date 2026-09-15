@@ -81,4 +81,12 @@ mod tests {
         assert!(error.to_string().contains("bad compressed bytes"));
         assert!(error.source().is_some());
     }
+
+    #[test]
+    fn compressible_type_error_preserves_the_parse_error() {
+        let source = "not a media type".parse::<mime::Mime>().unwrap_err();
+        let error = CompressibleTypeError::new("not a media type".to_owned(), source);
+
+        assert!(error.source().is_some());
+    }
 }

@@ -404,7 +404,10 @@ async fn a_server_never_advertises_or_decompresses_its_responses() {
 #[tokio::test]
 async fn a_server_compresses_the_response_the_caller_accepts() {
     let expected = payload();
-    let handler = server().compress_responses(&[Format::Zstd, Format::Gzip]).layer(echo());
+    let handler = server()
+        .resources(Resources::global().clone())
+        .compress_responses(&[Format::Zstd, Format::Gzip])
+        .layer(echo());
 
     let mut input = request(bytes(&expected), None);
     input.headers_mut().insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip"));
