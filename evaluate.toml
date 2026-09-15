@@ -75,3 +75,8 @@ reason = "The public test-fixture families have representative examples and appl
 rule = "m_canonical_docs"
 file = "crates/seismograph_rallocator/src/lib.rs"
 reason = "Encoding and decoding APIs have complete Errors and Examples sections, and error types explain stable categories; separate examples for each error type and re-export are not required."
+
+[[config.allow]]
+rule = "m_canonical_docs"
+file = "crates/templated_uri_macros_impl/src/lib.rs"
+reason = "All public token transforms document parameters, examples, and compile_error token behavior; they return TokenStream and have no Result or panic contract requiring canonical Errors or Panics sections."

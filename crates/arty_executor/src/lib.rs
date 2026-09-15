@@ -29,6 +29,12 @@
 //! In a steady state, the executor is allocation-free, as all memory used by the executor is
 //! reused for new tasks when old ones complete.
 //!
+//! # Safety
+//!
+//! An [`Executor`] returned by the unsafe builder must remain alive until
+//! [`Executor::execute_cycle`] returns [`CycleOutcome::Shutdown`]. Dropping it
+//! earlier can invalidate task references still held by outstanding wakers.
+//!
 //! # Example
 //!
 //! ```
