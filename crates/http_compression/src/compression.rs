@@ -443,6 +443,7 @@ impl<T: RequestHandler> Compression<T> {
                 )
             }
             Role::Server(server) => {
+                let head = input.method() == Method::HEAD;
                 let connect = input.method() == Method::CONNECT;
                 let input = match server.decompress_request(&self.config, input) {
                     Ok(input) => input,
@@ -455,7 +456,7 @@ impl<T: RequestHandler> Compression<T> {
                 Either::Right(
                     self.inner
                         .execute(input)
-                        .map(move |response| server.compress_response(&self.config, response?, &chosen, connect)),
+                        .map(move |response| server.compress_response(&self.config, response?, &chosen, head, connect)),
                 )
             }
         };
@@ -730,9 +731,10 @@ impl Server {
         config: &Config,
         mut response: HttpResponse,
         negotiation: &ResponseNegotiation,
+        head: bool,
         connect: bool,
     ) -> Result<HttpResponse> {
-        if self.compress_responses.is_empty() || (connect && response.status().is_success()) {
+        if self.compress_responses.is_empty() || head || (connect && response.status().is_success()) {
             return Ok(response);
         }
 

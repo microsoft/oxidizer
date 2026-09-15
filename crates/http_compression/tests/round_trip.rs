@@ -1220,6 +1220,27 @@ async fn a_head_response_is_never_compressed() {
 }
 
 #[tokio::test]
+async fn a_head_response_is_not_replaced_when_its_existing_coding_is_unacceptable() {
+    let handler = server().compress_responses(&[Format::Gzip]).layer(responds_with(|| {
+        HttpResponseBuilder::new_fake()
+            .status(StatusCode::OK)
+            .header(CONTENT_ENCODING, HeaderValue::from_static("br"))
+            .text(payload())
+            .build()
+    }));
+    let input = http::Request::head(URL)
+        .header(ACCEPT_ENCODING, "gzip, identity;q=0")
+        .body(builder().empty())
+        .unwrap();
+
+    let response = handler.execute(input).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get(CONTENT_ENCODING).unwrap(), "br");
+    assert_eq!(response.into_body().into_text().await.unwrap(), payload());
+}
+
+#[tokio::test]
 async fn a_successful_connect_response_is_never_decompressed() {
     let compressed = compress(Format::Gzip, payload().as_bytes());
     let expected = compressed.clone();
