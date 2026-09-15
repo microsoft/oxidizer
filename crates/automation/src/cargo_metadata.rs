@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::process::Command;
 
@@ -70,20 +70,44 @@ pub fn list_packages(workspace_root: impl AsRef<Path>) -> Result<Vec<PackageMeta
 /// selection. A collision is a property of the workspace, not of the selection,
 /// so checking a subset hides it on exactly the pull requests that did not touch
 /// either colliding crate.
+///
+/// Names are compared case-insensitively. Windows and the default
+/// case-insensitive `macOS` volumes resolve `basic` and `Basic` to the same
+/// path, so a case-only difference collides on exactly the platforms where the
+/// consequence is worst. Cargo target names are ASCII, so ASCII folding is exact
+/// rather than an approximation of how the filesystem folds case.
 pub fn check_unique_example_names(packages: &[PackageMetadata]) -> Result<(), AppError> {
-    let mut owners: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    let mut owners: BTreeMap<String, Vec<(&str, &str)>> = BTreeMap::new();
     for package in packages {
         for target in &package.targets {
             if target.kind.iter().any(|kind| kind == "example") {
-                owners.entry(target.name.as_str()).or_default().push(package.name.as_str());
+                owners
+                    .entry(target.name.to_ascii_lowercase())
+                    .or_default()
+                    .push((package.name.as_str(), target.name.as_str()));
             }
         }
     }
 
     let collisions: Vec<String> = owners
         .into_iter()
-        .filter(|(_, packages)| packages.len() > 1)
-        .map(|(example, packages)| format!("  - '{example}' is declared by: {}", packages.join(", ")))
+        .filter(|(_, declarations)| declarations.len() > 1)
+        .map(|(folded, declarations)| {
+            // Spell out each package's own casing only when the names actually
+            // differ, so the common exact-duplicate message stays terse and a
+            // case-only collision is not mistaken for a reporting bug.
+            let spellings: BTreeSet<&str> = declarations.iter().map(|(_, example)| *example).collect();
+            let detail = if spellings.len() == 1 {
+                declarations.iter().map(|(package, _)| *package).collect::<Vec<_>>().join(", ")
+            } else {
+                declarations
+                    .iter()
+                    .map(|(package, example)| format!("{package} ('{example}')"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            format!("  - '{folded}' is declared by: {detail}")
+        })
         .collect();
 
     if collisions.is_empty() {
@@ -167,6 +191,50 @@ mod tests {
             .to_string();
 
         assert!(message.contains("alpha, beta, gamma"), "{message}");
+    }
+
+    #[test]
+    fn a_case_only_difference_is_still_a_collision() {
+        // Windows and default macOS volumes are case-insensitive, so these two
+        // resolve to one `examples/basic.exe`. Byte-comparing the names would
+        // pass them and leave the race this guard exists to prevent.
+        let packages = vec![package("alpha", &["Basic"]), package("beta", &["basic"])];
+
+        let message = check_unique_example_names(&packages)
+            .expect_err("a case-only difference must be rejected")
+            .to_string();
+
+        // Each side's own spelling has to appear, or the author cannot tell
+        // which file to rename.
+        assert!(message.contains("alpha ('Basic')"), "{message}");
+        assert!(message.contains("beta ('basic')"), "{message}");
+    }
+
+    #[test]
+    fn a_case_only_difference_within_one_package_is_a_collision() {
+        // Cargo permits `examples/basic.rs` and `examples/Basic.rs` in one
+        // package -- the names differ -- but the output paths do not.
+        let packages = vec![package("alpha", &["basic", "Basic"])];
+
+        let message = check_unique_example_names(&packages)
+            .expect_err("a case-only difference within one package must be rejected")
+            .to_string();
+
+        assert!(message.contains("alpha ('basic')"), "{message}");
+        assert!(message.contains("alpha ('Basic')"), "{message}");
+    }
+
+    #[test]
+    fn an_exact_duplicate_message_does_not_repeat_the_name_per_package() {
+        // The per-package spelling is only useful when the spellings differ;
+        // adding it unconditionally would make the common case harder to read.
+        let packages = vec![package("alpha", &["basic"]), package("beta", &["basic"])];
+
+        let message = check_unique_example_names(&packages)
+            .expect_err("a reused example name must be rejected")
+            .to_string();
+
+        assert!(message.contains("is declared by: alpha, beta"), "{message}");
     }
 
     #[test]
