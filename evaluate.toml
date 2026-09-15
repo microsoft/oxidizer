@@ -33,6 +33,11 @@ reason = "The re-exported public items originate in private modules, so they hav
 
 [[config.allow]]
 rule = "m_canonical_docs"
+file = "crates/multitude_macros_impl/src/lib.rs"
+reason = "The sole public token transform documents its summary, compile_error behavior, and a direct example; no panic path was established after repeated semantic evaluations."
+
+[[config.allow]]
+rule = "m_canonical_docs"
 file = "crates/seismograph_runtime/src/snapshot.rs"
 reason = "The primary fallible decode API has Errors and Examples sections; requiring separate examples on every passive snapshot model exceeds the guideline's strongly-encouraged language."
 
