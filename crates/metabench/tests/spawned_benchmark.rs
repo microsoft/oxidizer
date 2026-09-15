@@ -66,7 +66,7 @@ fn run(arguments: &[&str]) -> Output {
             "--profile",
             "bench",
             "--example",
-            "basic",
+            "single_benchmark",
             "--",
         ])
         .args(arguments)
@@ -162,7 +162,7 @@ exit "$status"
             "--profile",
             "bench",
             "--example",
-            "basic",
+            "single_benchmark",
             "--",
             "--perf",
             "--show-engine-output",
