@@ -53,6 +53,11 @@ reason = "OnceLock and LazyLock document applicable Errors and Panics contracts;
 
 [[config.allow]]
 rule = "m_canonical_docs"
+file = "crates/performables/src/sync/mutex.rs"
+reason = "Mutex has a complete usage example and applicable panic contracts; MutexGuard and lock future wrappers inherit that usage and do not require duplicate examples."
+
+[[config.allow]]
+rule = "m_canonical_docs"
 file = "crates/compressors/src/zstd/mod.rs"
 reason = "TryFrom conversions document Errors, Option constructors state their valid ranges, and the remaining builder setters are infallible; the finding itself identifies no applicable missing canonical section."
 
