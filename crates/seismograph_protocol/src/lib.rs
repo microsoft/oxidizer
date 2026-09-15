@@ -132,7 +132,7 @@ fn write_frame(writer: &mut impl Write, kind: u16, request_id: u64, payload: &[u
     writer.flush().map_err(Error::Io)
 }
 
-fn read_frame(reader: &mut dyn Read, maximum: usize) -> Result<Frame, Error> {
+fn read_frame(reader: &mut impl Read, maximum: usize) -> Result<Frame, Error> {
     let mut header = [0; FRAME_HEADER_BYTES];
     reader.read_exact(&mut header).map_err(Error::Io)?;
     if header[..4] != FRAME_MAGIC {
