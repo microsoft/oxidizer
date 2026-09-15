@@ -33,6 +33,11 @@ reason = "The primary fallible decode API has Errors and Examples sections; requ
 
 [[config.allow]]
 rule = "m_canonical_docs"
+file = "crates/rest_over_grpc_tests/src/tonic_bridge.rs"
+reason = "GreeterService documents the generated trait implementation's visible error behavior; trait implementation methods are not independent rustdoc API items and cannot carry separately rendered contracts."
+
+[[config.allow]]
+rule = "m_canonical_docs"
 file = "crates/uniflight/src/lib.rs"
 reason = "Leader panics are converted into typed errors, constructors and execute already have examples and error docs, and MergerState is a hidden implementation detail; no applicable canonical section is missing."
 
