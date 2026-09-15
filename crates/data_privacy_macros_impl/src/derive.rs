@@ -27,7 +27,7 @@ pub fn redacted_debug(input: TokenStream) -> Result<TokenStream> {
         syn::Fields::Named(fields) => {
             let calls = fields.named.iter().enumerate().map(|(i, field)| {
                 let field_name = &field.ident;
-                let field_name_str = field_name.as_ref().unwrap().to_string();
+                let field_name_str = field_name.as_ref().expect("named fields always have identifiers").to_string();
                 let field_type = &field.ty;
                 let unredacted = is_unredacted(field);
 
@@ -118,7 +118,7 @@ pub fn redacted_display(input: TokenStream) -> Result<TokenStream> {
         syn::Fields::Named(fields) => {
             let calls = fields.named.iter().enumerate().map(|(i, field)| {
                 let field_name = &field.ident;
-                let field_name_str = field_name.as_ref().unwrap().to_string();
+                let field_name_str = field_name.as_ref().expect("named fields always have identifiers").to_string();
                 let field_type = &field.ty;
                 let unredacted = is_unredacted(field);
 

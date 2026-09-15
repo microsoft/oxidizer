@@ -14,10 +14,12 @@ use performables::sync::channel::OneshotReceiver;
 /// This is returned by [`Spawner::spawn`](crate::Spawner::spawn) and implements
 /// [`Future`] to allow awaiting the task's completion.
 ///
+/// A child panic, runtime cancellation, or early result-channel close is a hard failure.
+///
 /// # Panics
 ///
-/// Awaiting a `JoinHandle` will panic if the spawned task panicked or its
-/// runtime stopped before delivering the result.
+/// Panics if the spawned task panics, its runtime cancels it, or its result channel closes
+/// before sending a result.
 pub struct JoinHandle<T>(pub(crate) JoinHandleInner<T>);
 
 pub(crate) enum JoinHandleInner<T> {
@@ -35,7 +37,7 @@ impl<T> Future for JoinHandle<T> {
             JoinHandleInner::Tokio(jh) => Pin::new(jh).poll(cx).map(unwrap_tokio_result),
             JoinHandleInner::Custom(rx) => Pin::new(rx)
                 .poll(cx)
-                .map(|res| res.expect("spawned task did not produce a result because its channel closed")),
+                .map(|res| res.expect("spawned task result channel closed early")),
         }
     }
 }
@@ -45,7 +47,7 @@ impl<T> Future for JoinHandle<T> {
 fn unwrap_tokio_result<T>(result: Result<T, tokio::task::JoinError>) -> T {
     match result {
         Ok(value) => value,
-        Err(error) => panic!("spawned task did not complete: {error}"),
+        Err(error) => panic!("spawned task did not complete: {error} (panic or cancellation)"),
     }
 }
 

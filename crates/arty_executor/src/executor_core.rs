@@ -168,7 +168,9 @@ impl ExecutorCore {
     /// # Safety
     ///
     /// The returned object must not be dropped until a call to
-    /// [`execute_cycle()`][Self::execute_cycle] returns [`CycleOutcome::Shutdown`].
+    /// [`execute_cycle()`][Self::execute_cycle] returns [`CycleOutcome::Shutdown`]. Dropping
+    /// it earlier invalidates outstanding `TaskRef`/`WakeSignal` raw-pointer tickets into task
+    /// storage; later dereference may cause undefined behavior. `Drop` assertions are only a backstop.
     #[must_use]
     pub(crate) unsafe fn new(
         owner_waker: task::Waker,
@@ -563,9 +565,18 @@ impl ExecutorCore {
         };
 
         // During shutdown, tasks can only exist in the "completed" state.
-        debug_assert!(state_exclusive.active.is_empty());
-        debug_assert!(state_reentrant.new_tasks.is_empty());
-        debug_assert!(state_exclusive.inactive.is_empty());
+        debug_assert!(
+            state_exclusive.active.is_empty(),
+            "active tasks should have been aborted before entering shutdown completion"
+        );
+        debug_assert!(
+            state_reentrant.new_tasks.is_empty(),
+            "new tasks should not be accepted once shutdown has begun"
+        );
+        debug_assert!(
+            state_exclusive.inactive.is_empty(),
+            "inactive tasks should have been aborted before entering shutdown completion"
+        );
 
         // Shutdown is finished if all of the following are true:
         // 1. All completed tasks (== all tasks because there can be

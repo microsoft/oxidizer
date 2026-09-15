@@ -48,6 +48,10 @@ where
             }
         };
         if amount <= local_buf.len() {
+            debug_assert!(
+                ::core::str::from_utf8(& local_buf[..amount]).is_ok(),
+                "write_fmt output must be UTF-8"
+            );
             let s = unsafe { ::core::str::from_utf8_unchecked(&local_buf[..amount]) };
             redactor.redact(dc, s, output)
         } else {
@@ -81,6 +85,10 @@ where
             }
         };
         if amount <= local_buf.len() {
+            debug_assert!(
+                ::core::str::from_utf8(& local_buf[..amount]).is_ok(),
+                "write_fmt output must be UTF-8"
+            );
             let s = unsafe { ::core::str::from_utf8_unchecked(&local_buf[..amount]) };
             redactor.redact(dc, s, output)
         } else {

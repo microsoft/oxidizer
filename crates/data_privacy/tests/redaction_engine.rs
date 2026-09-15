@@ -339,6 +339,48 @@ fn test_long_strings() {
     assert_eq!(result_string, expected_to_string_output);
 }
 
+#[test]
+fn redacted_formatting_multibyte_boundary_matches_fallback() {
+    let engine = RedactionEngine::builder()
+        .add_class_redactor(
+            TestTaxonomy::Sensitive,
+            SimpleRedactor::with_mode(SimpleRedactorMode::PassthroughAndTag),
+        )
+        .build();
+    let values = [
+        format!("{}\u{00e9}", "a".repeat(126)),
+        format!("{}\u{00e9}", "a".repeat(127)),
+        format!("{}\u{1f600}", "a".repeat(124)),
+        format!("{}\u{1f600}", "a".repeat(126)),
+    ];
+
+    let actual = values
+        .iter()
+        .map(|value| {
+            let classified_value = Sensitive::new(value.clone());
+            let mut debug = String::new();
+            engine.redacted_debug(&classified_value, &mut debug).unwrap();
+            let mut display = String::new();
+            engine.redacted_display(&classified_value, &mut display).unwrap();
+            let to_string = engine.redacted_to_string(&classified_value);
+
+            (debug, display, to_string)
+        })
+        .collect::<Vec<_>>();
+    let expected = values
+        .iter()
+        .map(|value| {
+            (
+                format!("<test/sensitive:{value:?}>"),
+                format!("<test/sensitive:{value}>"),
+                format!("<test/sensitive:{value}>"),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(actual, expected);
+}
+
 fn test_redaction(engine: &RedactionEngine, data_class: &DataClass, input: &str, expected: &str) {
     let mut output = String::new();
     engine

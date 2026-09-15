@@ -200,9 +200,10 @@ impl HttpBody {
     /// # }
     /// ```
     pub fn into_bytes(self) -> impl Future<Output = Result<BytesView>> + Send {
-        self.into_buffered().map_ok(|body| {
+        self.into_buffered().map(|result| {
+            let body = result?;
             body.into_bytes_no_buffering()
-                .unwrap_or_else(|| unreachable!("once body is buffered, it must be a view over a byte sequence"))
+                .ok_or_else(|| HttpError::validation("buffered body did not contain an in-memory byte sequence"))
         })
     }
 

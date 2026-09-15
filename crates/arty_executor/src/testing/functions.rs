@@ -39,8 +39,8 @@ pub fn new_guarded_executor(owner_waker: Waker) -> ScopeGuard<Executor, fn(Execu
                 builder = builder.shutdown_timeout(TEST_TIMEOUT);
             }
 
-            // SAFETY: We are not allowed to drop it without the proper shutdown process.
-            // That is the whole point of this guard, so we are all good on that front.
+            // SAFETY: The scope guard drives the executor to `Shutdown` before dropping it,
+            // keeping task storage alive until all raw-pointer task tickets are released.
             unsafe { builder.build() }
         },
         |executor: Executor| {

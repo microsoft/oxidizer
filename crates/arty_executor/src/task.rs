@@ -203,7 +203,7 @@ where
         // the caller's safety guarantees that this is not called more than once.
         let maybe_wake_signal = unsafe { self.wake_signal.get().as_mut().expect("UnsafeCell pointer cannot be null") };
 
-        debug_assert!(maybe_wake_signal.is_none());
+        debug_assert!(maybe_wake_signal.is_none(), "task already initialized with a wake signal");
 
         *maybe_wake_signal = Some(wake_signal);
     }

@@ -47,7 +47,7 @@ pub(crate) enum Pipeline {
 impl Pipeline {
     pub(crate) fn dbg_string_for_custom_pipeline(&self) -> &str {
         match self {
-            Self::Minimal(_) => panic!("must be custom pipeline"),
+            Self::Minimal(_) => panic!("must be custom pipeline, not Minimal"),
             Self::Custom { debug, .. } => debug,
         }
     }
