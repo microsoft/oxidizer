@@ -48,8 +48,18 @@ reason = "Condvar has a complete synchronization example and applicable panic co
 
 [[config.allow]]
 rule = "m_canonical_docs"
+file = "crates/performables/src/sync/once.rs"
+reason = "OnceLock and LazyLock document applicable Errors and Panics contracts; requiring examples on every standard-like accessor exceeds the guideline's strongly-encouraged language."
+
+[[config.allow]]
+rule = "m_canonical_docs"
 file = "crates/compressors/src/zstd/mod.rs"
 reason = "TryFrom conversions document Errors, Option constructors state their valid ranges, and the remaining builder setters are infallible; the finding itself identifies no applicable missing canonical section."
+
+[[config.allow]]
+rule = "m_canonical_docs"
+file = "crates/compressors/src/brotli/mod.rs"
+reason = "TryFrom conversions document Errors and Option constructors explicitly state the out-of-range None condition; the finding identifies no applicable missing canonical section."
 
 [[config.allow]]
 rule = "m_canonical_docs"
