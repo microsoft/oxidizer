@@ -17,6 +17,11 @@ file = "crates/automation/src/cargo_metadata.rs"
 reason = "PackageMetadata, Target, their fields, and list_packages are documented with purpose, errors, and a usage example; requiring examples on passive metadata records exceeds the guideline."
 
 [[config.allow]]
+rule = "m_canonical_docs"
+file = "crates/ohno_macros/src/lib.rs"
+reason = "The public proc-macro wrappers return compile_error tokens for malformed input through ohno_macros_impl; no panic path was established, so a Panics section would document behavior that does not exist."
+
+[[config.allow]]
 rule = "m_doc_inline"
 file = "crates/arty_executor/src/lib.rs"
 reason = "All re-exported implementation modules are private and therefore auto-inlined by rustdoc; the public testing module is not re-exported, so no doc inline annotation is applicable."
