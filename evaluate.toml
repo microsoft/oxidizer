@@ -33,6 +33,11 @@ reason = "Condvar has a complete synchronization example and applicable panic co
 
 [[config.allow]]
 rule = "m_canonical_docs"
+file = "crates/compressors/src/zstd/mod.rs"
+reason = "TryFrom conversions document Errors, Option constructors state their valid ranges, and the remaining builder setters are infallible; the finding itself identifies no applicable missing canonical section."
+
+[[config.allow]]
+rule = "m_canonical_docs"
 file = "crates/fetch_hyper/src/testing.rs"
 reason = "The public test-fixture families have representative examples and applicable panic contracts; requiring a separate example on every fixture type exceeds the guideline's strongly-encouraged language."
 

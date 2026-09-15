@@ -58,5 +58,6 @@ pub use read_futures::ReadAsFuturesStream;
 pub use write::Write;
 pub use write_ext::WriteExt;
 
+/// Test fixtures for byte sources and sinks.
 #[cfg(any(test, feature = "test-util"))]
 pub mod testing;

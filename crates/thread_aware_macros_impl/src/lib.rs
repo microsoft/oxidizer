@@ -48,6 +48,8 @@ use struct_gen::build_struct_body;
 ///
 /// This crate is a normal library crate (not `proc-macro`), so we operate purely
 /// on `proc_macro2::TokenStream` and let the wrappers perform the conversion.
+/// Parse and generation failures are embedded as `compile_error!` tokens in
+/// the returned stream rather than returned as a `Result`.
 ///
 /// # Examples
 ///
