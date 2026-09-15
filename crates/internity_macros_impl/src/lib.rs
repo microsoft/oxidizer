@@ -38,6 +38,18 @@ use crate::shared::{field_seed, missing_value_expr, validate_transparent_contain
 
 /// Generates an implementation of `DeserializeIn` using `root_path` as the
 /// `internity` crate root.
+///
+/// # Examples
+///
+/// ```
+/// use internity_macros_impl::derive_deserialize_in;
+/// use quote::quote;
+/// use syn::parse_quote;
+///
+/// let root: syn::Path = parse_quote!(::internity);
+/// let expanded = derive_deserialize_in(quote!(struct Item { value: u32 }), &root);
+/// assert!(!expanded.is_empty());
+/// ```
 #[must_use]
 pub fn derive_deserialize_in(input: TokenStream2, root_path: &Path) -> TokenStream2 {
     syn::parse2::<DeriveInput>(input)
@@ -47,6 +59,18 @@ pub fn derive_deserialize_in(input: TokenStream2, root_path: &Path) -> TokenStre
 
 /// Generates an implementation of `SerializeIn` using `root_path` as the
 /// `internity` crate root.
+///
+/// # Examples
+///
+/// ```
+/// use internity_macros_impl::derive_serialize_in;
+/// use quote::quote;
+/// use syn::parse_quote;
+///
+/// let root: syn::Path = parse_quote!(::internity);
+/// let expanded = derive_serialize_in(quote!(struct Item { value: u32 }), &root);
+/// assert!(!expanded.is_empty());
+/// ```
 #[must_use]
 pub fn derive_serialize_in(input: TokenStream2, root_path: &Path) -> TokenStream2 {
     syn::parse2::<DeriveInput>(input)

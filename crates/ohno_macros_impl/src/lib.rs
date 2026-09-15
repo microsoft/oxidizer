@@ -33,6 +33,18 @@ use proc_macro2::TokenStream;
 use quote::ToTokens;
 
 /// Expands the `#[derive(Error)]` derive macro.
+///
+/// Parse or validation failures are embedded as `compile_error!` tokens.
+///
+/// # Examples
+///
+/// ```
+/// use ohno_macros_impl::derive_error;
+/// use quote::quote;
+///
+/// let expanded = derive_error(quote!(struct ExampleError;));
+/// assert!(!expanded.is_empty());
+/// ```
 #[must_use]
 pub fn derive_error(input: TokenStream) -> TokenStream {
     match syn::parse2::<syn::DeriveInput>(input) {
@@ -42,6 +54,18 @@ pub fn derive_error(input: TokenStream) -> TokenStream {
 }
 
 /// Expands the `#[enrich_err(...)]` attribute macro.
+///
+/// Parse or validation failures are embedded as `compile_error!` tokens.
+///
+/// # Examples
+///
+/// ```
+/// use ohno_macros_impl::enrich_err;
+/// use quote::quote;
+///
+/// let expanded = enrich_err(quote!("context"), quote!(fn run() {}));
+/// assert!(!expanded.is_empty());
+/// ```
 #[must_use]
 pub fn enrich_err(args: TokenStream, input: TokenStream) -> TokenStream {
     match syn::parse2::<syn::Item>(input) {
@@ -51,6 +75,19 @@ pub fn enrich_err(args: TokenStream, input: TokenStream) -> TokenStream {
 }
 
 /// Expands the `#[ohno::error]` attribute macro.
+///
+/// Parse or validation failures are embedded as `compile_error!` tokens.
+///
+/// # Examples
+///
+/// ```
+/// use ohno_macros_impl::error;
+/// use proc_macro2::TokenStream;
+/// use quote::quote;
+///
+/// let expanded = error(TokenStream::new(), quote!(struct ExampleError;));
+/// assert!(!expanded.is_empty());
+/// ```
 #[must_use]
 pub fn error(args: TokenStream, input: TokenStream) -> TokenStream {
     if !args.is_empty() {

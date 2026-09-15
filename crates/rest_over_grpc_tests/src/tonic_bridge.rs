@@ -51,6 +51,7 @@ use std::pin::Pin;
 
 use futures_util::stream::{self, Stream};
 use greeter::{HelloReply, HelloRequest, greeter_server};
+/// Routes REST requests through the generated tonic-to-REST bridge.
 pub use transcoder::Transcoder;
 
 /// A greeter implemented purely against `tonic`'s generated `greeter_server::Greeter` trait.
@@ -58,6 +59,10 @@ pub use transcoder::Transcoder;
 /// It never mentions `rest_over_grpc`. The generated blanket `impl` bridges it to the REST
 /// service trait, so a [`Transcoder::new(GreeterService)`](Transcoder) transcodes REST/JSON
 /// requests without any extra code.
+///
+/// # Errors
+///
+/// `say_hello` returns `not_found` when the request name is `missing`.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct GreeterService;
 
