@@ -105,6 +105,7 @@ mod tests {
     use super::{Cli, Command, run};
 
     #[test]
+    #[cfg_attr(coverage_nightly, coverage(off))] // Wrong-command panic callbacks are test-only failure paths.
     fn monitor_command_dispatches_and_propagates_failures() {
         run(
             Cli {
@@ -127,6 +128,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(coverage_nightly, coverage(off))] // Wrong-command panic callbacks are test-only failure paths.
     fn view_parses_and_dispatches_a_required_path_with_spaces() {
         use clap::Parser;
         let path = r"C:\capture files\blob.seismograph";

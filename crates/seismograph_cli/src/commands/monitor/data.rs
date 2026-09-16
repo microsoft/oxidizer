@@ -1521,9 +1521,8 @@ fn accumulate_thread_objects<'a>(
         {
             let first = &selected[0];
             let thread_id = first.event.thread_id.get();
-            let Some(operation) = operations_by_kind[usize::from(first.event.kind.wire_value())] else {
-                unreachable!("the index contains only supported operation kinds");
-            };
+            let operation =
+                operations_by_kind[usize::from(first.event.kind.wire_value())].expect("the index contains only supported operation kinds");
             let kind = ThreadOperationKind::ALL[operation];
             threads
                 .get_mut(&thread_id)
@@ -3078,6 +3077,65 @@ mod tests {
                 }),
             })
         );
+    }
+
+    #[test]
+    fn empty_thread_events_have_no_representative_stack() {
+        let stacks = thread_stacks(std::iter::empty(), ThreadOperationKind::ArcClone, &mut ThreadStacks::new(&[]));
+        assert_eq!((stacks.first(), &stacks), (None, &ThreadStackSet::Empty));
+    }
+
+    #[test]
+    fn compact_stack_sets_preserve_the_first_stack_and_order() {
+        let stack = |count| ThreadStack {
+            count,
+            frames: Arc::new(ThreadFrames {
+                application: vec!["application::run".into()],
+                complete: vec!["application::run".into()],
+            }),
+        };
+        let first = stack(3);
+        let second = stack(1);
+        let empty = ThreadStackSet::from(Vec::new());
+        let one = ThreadStackSet::from(vec![first.clone()]);
+        let many = ThreadStackSet::from(vec![first.clone(), second.clone()]);
+        assert_eq!(
+            (empty, one, many.first(), &many),
+            (
+                ThreadStackSet::Empty,
+                ThreadStackSet::One(first.clone()),
+                Some(&first),
+                &ThreadStackSet::Many(vec![first.clone(), second]),
+            ),
+        );
+    }
+
+    #[test]
+    fn unrelated_operations_on_the_same_object_do_not_link_threads() {
+        let events = Events {
+            events: [RuntimeEventKind::ArcClone, RuntimeEventKind::MutexAccess]
+                .into_iter()
+                .enumerate()
+                .map(|(index, kind)| RuntimeEvent {
+                    thread_id: ThreadId::new(u64::try_from(index).unwrap() + 1),
+                    sequence: EventSequence::new(1),
+                    timestamp: EventTimestamp::from_ticks(1),
+                    kind,
+                    payload: EventPayload::Object(ObjectId::new(7)),
+                    call_stack: Vec::new(),
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let snapshot = ThreadSnapshot::from_events(&events, &[]);
+        let operations = snapshot
+            .threads
+            .iter()
+            .flat_map(|thread| &thread.operations)
+            .filter(|operation| operation.events > 0)
+            .map(|operation| (operation.events, operation.objects, operation.participants.len()))
+            .collect::<Vec<_>>();
+        assert_eq!(operations, [(1, 1, 0), (1, 1, 0)]);
     }
 
     #[test]

@@ -3,6 +3,8 @@
 
 //! Allocation and CPU measurements for the opt-in large-file regression test.
 
+#![cfg_attr(coverage_nightly, coverage(off))] // Manual profiling support, not product behavior.
+
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
