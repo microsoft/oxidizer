@@ -1803,6 +1803,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn stats_writer_rejects_missing_peak_scope_storage() {
+        let mut bytes = [0; 13 * size_of::<u64>()];
+        let error = write_stats(&mut Writer::new(&mut bytes), Stats::default()).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Wire(WireError::UNEXPECTED_END));
+    }
+
+    #[test]
     fn errors_have_descriptive_output_and_sources() {
         let wire_source = Reader::new(&[]).read_u8().unwrap_err();
         let cases = [
