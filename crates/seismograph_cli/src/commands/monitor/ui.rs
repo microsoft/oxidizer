@@ -37,17 +37,15 @@ impl App {
         let [body, footer] = Layout::vertical([Constraint::Min(4), Constraint::Length(1)]).areas(frame.area());
         match &self.screen {
             Screen::Browse => self.draw_browser(frame, body),
-            Screen::Connected {
-                descriptor,
-                recording,
-                tab,
-                snapshot,
-            } => draw_connected(
+            Screen::Connected { tab, snapshot, .. } | Screen::Offline { tab, snapshot, .. } => draw_connected(
                 frame,
                 body,
                 &ConnectedView {
-                    descriptor,
-                    recording: *recording,
+                    origin: match &self.screen {
+                        Screen::Connected { descriptor, recording, .. } => ViewOrigin::Live(descriptor, *recording),
+                        Screen::Offline { path, .. } => ViewOrigin::Offline(path),
+                        Screen::Browse => unreachable!("the outer match selected a snapshot screen"),
+                    },
                     tab: *tab,
                     snapshot: snapshot.as_deref(),
                     snapshot_error: self.snapshot_error.as_deref(),
@@ -65,6 +63,7 @@ impl App {
         }
         let line = match &self.screen {
             Screen::Browse => browse_footer(&self.status),
+            Screen::Offline { .. } => Line::from(format!(" Offline · read-only · Tab/1–8 tabs · q/Esc quit · {}", self.status)),
             Screen::Connected { recording, snapshot, .. } => {
                 let snapshot_time = snapshot.as_deref().map(format_snapshot_time);
                 connected_footer(
@@ -171,8 +170,7 @@ impl App {
 
 #[derive(Clone, Copy)]
 struct ConnectedView<'a> {
-    descriptor: &'a MonitorDescriptor,
-    recording: RecordingConfiguration,
+    origin: ViewOrigin<'a>,
     tab: MonitorTab,
     snapshot: Option<&'a CapturedSnapshot>,
     snapshot_error: Option<&'a str>,
@@ -185,6 +183,12 @@ struct ConnectedView<'a> {
     cache_view: CacheViewState,
     activity_samples: &'a VecDeque<ActivitySample>,
     recorder_statistics: Option<&'a RecorderStatistics>,
+}
+
+#[derive(Clone, Copy)]
+enum ViewOrigin<'a> {
+    Live(&'a MonitorDescriptor, RecordingConfiguration),
+    Offline(&'a std::path::Path),
 }
 
 fn centered_rect(area: Rect, maximum_width: u16, maximum_height: u16) -> Rect {
@@ -204,6 +208,11 @@ fn row_is_selected(first: usize, index: usize, selected: usize) -> bool {
 
 fn draw_connected(frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect, view: &ConnectedView<'_>) {
     let [tabs, content] = Layout::vertical([Constraint::Length(3), Constraint::Min(1)]).areas(area);
+    let tabs_block = Block::default().borders(Borders::ALL);
+    let tabs_block = match view.origin {
+        ViewOrigin::Live(..) => tabs_block,
+        ViewOrigin::Offline(path) => tabs_block.title(format!(" {} · offline · read-only ", path.display())),
+    };
     frame.render_widget(
         Tabs::new([
             " Info ",
@@ -216,21 +225,27 @@ fn draw_connected(frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect, v
             " Cache ",
         ])
         .select(view.tab.index())
-        .block(Block::default().borders(Borders::ALL))
+        .block(tabs_block)
         .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD))
         .divider("│"),
         tabs,
     );
-    match view.tab {
-        MonitorTab::Info => draw_info(
-            frame,
+    if let ViewOrigin::Offline(path) = view.origin
+        && view.snapshot.is_none()
+    {
+        frame.render_widget(
+            Paragraph::new(format!(
+                "{}\n\n{}\n\nq / Esc to quit",
+                path.display(),
+                view.snapshot_error.unwrap_or("Loading and decoding snapshot…")
+            ))
+            .block(Block::default().title(" Offline snapshot · read-only ").borders(Borders::ALL)),
             content,
-            view.descriptor,
-            view.recording,
-            view.snapshot.and_then(|capture| capture.allocations.as_ref()),
-            view.activity_samples,
-            view.recorder_statistics,
-        ),
+        );
+        return;
+    }
+    match view.tab {
+        MonitorTab::Info => draw_snapshot_info(frame, content, view),
         MonitorTab::Heaps => draw_memory(
             frame,
             content,
@@ -286,6 +301,55 @@ fn draw_connected(frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect, v
             view.snapshot_error,
             view.cache_view,
         ),
+    }
+}
+
+const SNAPSHOT_SCOPE_NOTES: [&str; 7] = [
+    "Accepted/overwritten counts exclude suppressed, sampled-out, disabled and non-producing activity.",
+    "Source accepted/overwritten counters span event classes; they are not allocation populations.",
+    "Unmatched retained allocations are not proven live allocations or leaks, even with zero overwrites.",
+    "General-counter availability/start epoch are unencoded; cumulative totals are not session/workload deltas.",
+    "Region assignment is virtual; mapped/backing bytes are not portable committed memory or RSS.",
+    "Published-class totals cover small classes only; class estimates are not per-segment occupancy.",
+    "Sampled live maxima use independent counter reads and are not guaranteed lifetime bounds.",
+];
+
+fn draw_snapshot_info(frame: &mut ratatui::Frame<'_>, area: Rect, view: &ConnectedView<'_>) {
+    match view.origin {
+        ViewOrigin::Live(descriptor, recording) => draw_info(
+            frame,
+            area,
+            descriptor,
+            recording,
+            view.snapshot.and_then(|capture| capture.allocations.as_ref()),
+            view.activity_samples,
+            view.recorder_statistics,
+        ),
+        ViewOrigin::Offline(path) => {
+            let mut lines = vec![
+                Line::from(path.display().to_string()),
+                Line::from("Offline snapshot · read-only"),
+                Line::from("Capture time: not recorded in the snapshot"),
+                Line::from("No process connection; recording and capture controls are disabled."),
+            ];
+            if let Some(snapshot) = view.snapshot {
+                lines.push(Line::from(format!(
+                    "Source events: {} accepted · {} overwritten · {} threads",
+                    format_count(snapshot.primitives.total_events),
+                    format_count(snapshot.primitives.lost_events),
+                    snapshot.threads.threads.len(),
+                )));
+                if let Some(error) = &snapshot.heap_error {
+                    lines.push(Line::from(error.as_str()));
+                }
+                lines.push(Line::from(""));
+                lines.extend(SNAPSHOT_SCOPE_NOTES.map(Line::from));
+            }
+            frame.render_widget(
+                Paragraph::new(lines).block(Block::default().title(" Snapshot file ").borders(Borders::ALL)),
+                area,
+            );
+        }
     }
 }
 
@@ -346,7 +410,7 @@ fn draw_io(
             Block::default()
                 .title(Line::from(vec![
                     Span::raw(format!(
-                        " I/O Resources · retained {} / {} events · {} lost ({}) · ",
+                        " I/O Resources · source retained {} / {} accepted · {} overwritten ({}) · ",
                         format_count(io.retained_events),
                         format_count(io.total_events),
                         format_count(io.lost_events),
@@ -481,7 +545,7 @@ fn draw_cache(
             Block::default()
                 .title(Line::from(vec![
                     Span::raw(format!(
-                        " Cache Tiers · retained {} / {} events · {} lost ({}) · ",
+                        " Cache Tiers · source retained {} / {} accepted · {} overwritten ({}) · ",
                         format_count(cache.retained_events),
                         format_count(cache.total_events),
                         format_count(cache.lost_events),
@@ -651,7 +715,7 @@ fn draw_runtime(
             Block::default()
                 .title(Line::from(vec![
                     Span::raw(format!(
-                        " Runtime Threads · retained {} / {} events · {} lost ({}) · Poll busy = retained-window task polls · ",
+                        " Runtime Threads · source retained {} / {} accepted · {} overwritten ({}) · Poll busy = retained-window task polls · ",
                         format_count(runtime.retained_events),
                         format_count(runtime.total_events),
                         format_count(runtime.lost_events),
@@ -892,9 +956,9 @@ fn draw_allocations(
         Span::raw(" "),
         heading("Average", BYTES_WIDTH, AllocationSort::AverageBytes),
         Span::raw(" "),
-        heading("Live", COUNT_WIDTH, AllocationSort::LiveAllocations),
+        heading("Unmatched", COUNT_WIDTH, AllocationSort::LiveAllocations),
         Span::raw(" "),
-        heading("Live bytes", BYTES_WIDTH, AllocationSort::LiveBytes),
+        heading("Unmatched B", BYTES_WIDTH, AllocationSort::LiveBytes),
         Span::styled("  Location", Style::default().add_modifier(Modifier::BOLD)),
     ])];
     lines.extend(
@@ -940,11 +1004,12 @@ fn draw_allocations(
                     Span::raw(" reverse • select "),
                     key_span("↑/↓"),
                     Span::raw(format!(
-                        " • {} events • {} lost ",
+                        " • all-class source: {} accepted • {} overwritten ",
                         format_count(allocations.total_events),
                         format_count(allocations.lost_events)
                     )),
                 ]))
+                .title_bottom(" Unmatched retained allocations are not proven live allocations or leaks, even with zero overwrites ")
                 .borders(Borders::ALL),
         ),
         hotspots_area,
@@ -1008,7 +1073,7 @@ fn draw_info(
     activity_samples: &VecDeque<ActivitySample>,
     recorder_statistics: Option<&RecorderStatistics>,
 ) {
-    let [activity_area, details_area] = Layout::vertical([Constraint::Percentage(55), Constraint::Percentage(45)]).areas(area);
+    let [activity_area, details_area] = Layout::vertical([Constraint::Percentage(45), Constraint::Percentage(55)]).areas(area);
     draw_activity(frame, activity_area, activity_samples);
     let event_capacity = u64::from(recording.event_capacity_per_thread);
     let capacity = usize::try_from(recording.event_capacity_per_thread)
@@ -1037,7 +1102,7 @@ fn draw_info(
         lines.extend([
             metric_line("Telemetry threads", format_count(statistics.thread_count)),
             metric_line("Telemetry memory total", format_bytes(statistics.allocated_bytes)),
-            metric_line("Total telemetry events", format_count(statistics.total_events)),
+            metric_line("Accepted telemetry events", format_count(statistics.total_events)),
             metric_line("Retained telemetry events", format_count(statistics.retained_events)),
             metric_line("Overwritten telemetry events", format_count(statistics.lost_events)),
         ]);
@@ -1048,11 +1113,13 @@ fn draw_info(
                 "Telemetry memory total",
                 format_bytes(memory_per_thread.saturating_mul(allocations.thread_count)),
             ),
-            metric_line("Total telemetry events", format_count(allocations.total_events)),
+            metric_line("All-class source accepted", format_count(allocations.total_events)),
             metric_line("Retained allocator events", format_count(allocations.retained_events)),
-            metric_line("Overwritten telemetry events", format_count(allocations.lost_events)),
+            metric_line("All-class source overwritten", format_count(allocations.lost_events)),
         ]);
     }
+    lines.push(Line::from(""));
+    lines.extend(SNAPSHOT_SCOPE_NOTES.map(Line::from));
     frame.render_widget(
         Paragraph::new(Text::from(lines)).block(Block::default().title(" Info ").borders(Borders::ALL)),
         details_area,
@@ -1184,9 +1251,9 @@ fn draw_primitive_types(frame: &mut ratatui::Frame<'_>, area: Rect, primitives: 
                     Span::raw(" select · "),
                     key_span("Enter"),
                     Span::raw(format!(
-                        " details · {} primitive / {} total retained · {} lost ",
+                        " details · {} retained primitive · {} source accepted · {} overwritten ",
                         format_count(primitives.groups.iter().map(|group| group.events).sum()),
-                        format_count(primitives.total_events.saturating_sub(primitives.lost_events)),
+                        format_count(primitives.total_events),
                         format_count(primitives.lost_events)
                     )),
                 ]))
@@ -1410,13 +1477,13 @@ fn draw_thread_list(frame: &mut ratatui::Frame<'_>, area: Rect, threads: &Thread
     let visible = usize::from(area.height.saturating_sub(3));
     let first = selected.saturating_sub(visible.saturating_sub(1));
     let mut lines = vec![Line::from(Span::styled(
-        format!("{:<18} {:>9} {:>9}", "Thread", "Retained", "Lost"),
+        format!("{:<18} {:>9} {:>11}", "Thread", "Retained", "Overwritten"),
         Style::default().add_modifier(Modifier::BOLD),
     ))];
     lines.extend(threads.threads.iter().skip(first).take(visible).enumerate().map(|(index, thread)| {
         primitive_selection_line(
             Line::from(format!(
-                "{:<18} {:>9} {:>9}",
+                "{:<18} {:>9} {:>11}",
                 thread_label(thread.thread_id, &thread.name, 18),
                 format_count(thread.retained_events),
                 format_count(thread.lost_events),
@@ -1754,12 +1821,29 @@ fn draw_memory_summary(frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Re
     let [live, peak, mapped] =
         Layout::horizontal([Constraint::Percentage(34), Constraint::Percentage(33), Constraint::Percentage(33)]).areas(gauges);
     frame.render_widget(memory_gauge(" Live ", memory.live_bytes, memory.mapped_bytes, Color::Green), live);
+    match memory.peak_live_bytes_scope {
+        seismograph_rallocator::snapshot::PeakLiveBytesScope::Lifetime => frame.render_widget(
+            memory_gauge(" Lifetime peak ", memory.peak_live_bytes, memory.mapped_bytes, Color::Yellow),
+            peak,
+        ),
+        seismograph_rallocator::snapshot::PeakLiveBytesScope::SnapshotSamples => frame.render_widget(
+            Paragraph::new(format!("Max sampled live: {}", format_bytes(memory.peak_live_bytes)))
+                .block(Block::default().title(" Lifetime peak unavailable ").borders(Borders::ALL)),
+            peak,
+        ),
+        _ => frame.render_widget(
+            Paragraph::new("Unavailable: capture did not record peak scope")
+                .block(Block::default().title(" Peak scope unavailable ").borders(Borders::ALL)),
+            peak,
+        ),
+    }
     frame.render_widget(
-        memory_gauge(" Peak ", memory.peak_live_bytes, memory.mapped_bytes, Color::Yellow),
-        peak,
-    );
-    frame.render_widget(
-        memory_gauge(" Mapped ", memory.mapped_bytes, memory.reserved_bytes, Color::Cyan),
+        memory_gauge(
+            " Reported mapped (not RSS/committed) ",
+            memory.mapped_bytes,
+            memory.reserved_bytes,
+            Color::Cyan,
+        ),
         mapped,
     );
     let region_details = if memory.regions.is_empty() {
@@ -1782,7 +1866,7 @@ fn draw_memory_summary(frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Re
     };
     frame.render_widget(
         Paragraph::new(format!(
-            "{} lifetime allocations · {} assigned / {} free slices · {region_details}",
+            "{} cumulative allocations (epoch/coverage unknown) · {} assigned / {} free virtual slices · {region_details}",
             format_count(memory.allocations),
             format_count(memory.used_slices),
             format_count(memory.free_slices)
@@ -1790,7 +1874,7 @@ fn draw_memory_summary(frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Re
         .block(
             Block::default()
                 .title(format!(
-                    " Regions: {} • reserved {} • {} slices • small {} • medium {} • bump {} • other {} ",
+                    " Virtual regions: {} • reserved {} • {} slices • small {} • medium {} • bump {} • other {} ",
                     memory.regions.len(),
                     format_bytes(memory.reserved_bytes),
                     format_bytes(memory.slice_bytes),
@@ -1866,6 +1950,11 @@ fn draw_memory_buckets(
             Cell::from(Line::from(utilization_bar(bar_value, bar_total, 10))),
         ])
     });
+    let (count_label, bar_label) = if tier.kind == MemoryTier::Small {
+        ("Est. live", "Est. class")
+    } else {
+        ("Unmatched", "Event share")
+    };
     let table = Table::new(
         rows,
         [
@@ -1878,7 +1967,7 @@ fn draw_memory_buckets(
         ],
     )
     .header(
-        Row::new(["Size", "Retained", "Bytes", "Live", "Hotspots", "Distribution"]).style(Style::default().add_modifier(Modifier::BOLD)),
+        Row::new(["Size", "Retained", "Bytes", count_label, "Hotspots", bar_label]).style(Style::default().add_modifier(Modifier::BOLD)),
     )
     .column_spacing(1)
     .block(block)
@@ -1896,14 +1985,14 @@ fn memory_tier_title(tier: Option<&super::data::MemoryTierData>, memory: &Memory
         return " Size Distribution ".to_owned();
     };
     let live_label = if tier.kind == MemoryTier::Direct {
-        "window live"
+        "unmatched retained"
     } else {
-        "current"
+        "reported current"
     };
     let detail = match tier.kind {
-        MemoryTier::Small => format!("{} size classes", memory.size_classes.len()),
+        MemoryTier::Small => format!("{} published small classes", memory.size_classes.len()),
         MemoryTier::Medium => format!(
-            "{} backing slices · overhead {} · largest {}",
+            "{} virtual slice spans · overhead {} · largest {}",
             format_count(memory.medium_allocations.span_slices),
             format_bytes(
                 memory
@@ -1930,7 +2019,7 @@ fn draw_memory_hotspots(frame: &mut ratatui::Frame<'_>, area: Rect, bucket: Opti
     let visible = usize::from(area.height.saturating_sub(3));
     let first = selected.saturating_sub(visible.saturating_sub(1));
     let mut lines = vec![Line::from(Span::styled(
-        format!("{:>9} {:>11} {:>9}  Location", "Events", "Bytes", "Live"),
+        format!("{:>9} {:>11} {:>9}  Location", "Events", "Bytes", "Unmatched"),
         Style::default().add_modifier(Modifier::BOLD),
     ))];
     if let Some(bucket) = bucket {
@@ -1970,12 +2059,12 @@ fn draw_memory_hotspots(frame: &mut ratatui::Frame<'_>, area: Rect, bucket: Opti
                     ),
                     _ => String::new(),
                 };
-                format!(" · current class {}/{}{bytes}", format_count(live), format_count(capacity))
+                format!(" · class estimate {}/{}{bytes}", format_count(live), format_count(capacity))
             }
             _ => String::new(),
         };
         format!(
-            " · {} · retained live {} / {}{topology}",
+            " · {} · unmatched retained {} / {}{topology}",
             memory_bucket_label(bucket),
             format_count(bucket.live_allocations),
             format_bytes(bucket.live_bytes)
@@ -2203,11 +2292,14 @@ fn snapshot_time(snapshot: &CapturedSnapshot) -> String {
 }
 
 fn snapshot_time_at(snapshot: &CapturedSnapshot, now: Instant) -> String {
-    let local: DateTime<Local> = snapshot.captured_at.into();
+    let (Some(captured_at), Some(captured_instant)) = (snapshot.captured_at, snapshot.captured_instant) else {
+        return "capture time not recorded".into();
+    };
+    let local: DateTime<Local> = captured_at.into();
     format!(
         "{} ({})",
         local.format("%H:%M:%S"),
-        format_age(now.saturating_duration_since(snapshot.captured_instant))
+        format_age(now.saturating_duration_since(captured_instant))
     )
 }
 
@@ -2321,6 +2413,7 @@ mod tests {
         let mut allocator = Snapshot::new(Version::new(1, 0, 0));
         allocator.stats.live_bytes = 100_000;
         allocator.stats.peak_live_bytes = 200_000;
+        allocator.stats.peak_live_bytes_scope = seismograph_rallocator::snapshot::PeakLiveBytesScope::Lifetime;
         allocator.stats.mapped_bytes = 400_000;
         allocator.stats.allocations = 3;
         let mut region = Region::default();
@@ -2582,8 +2675,8 @@ mod tests {
             io: runtime.io,
             cache: runtime.cache,
             threads: runtime.threads,
-            captured_at: SystemTime::UNIX_EPOCH,
-            captured_instant: Instant::now(),
+            captured_at: Some(SystemTime::UNIX_EPOCH),
+            captured_instant: Some(Instant::now()),
         })
     }
 
@@ -2598,6 +2691,119 @@ mod tests {
             .iter()
             .map(ratatui::buffer::Cell::symbol)
             .collect()
+    }
+
+    #[test]
+    fn offline_tabs_reuse_the_live_snapshot_renderers() {
+        for tab in [
+            MonitorTab::Heaps,
+            MonitorTab::Allocations,
+            MonitorTab::Primitives,
+            MonitorTab::Threads,
+            MonitorTab::Runtime,
+            MonitorTab::Io,
+            MonitorTab::Cache,
+        ] {
+            let mut app = App::new();
+            app.screen = Screen::Connected {
+                descriptor: descriptor(),
+                recording: RecordingConfiguration::default(),
+                tab,
+                snapshot: Some(representative_capture()),
+            };
+            let live = render(&app);
+            let Screen::Connected { snapshot, .. } = app.screen else {
+                unreachable!()
+            };
+            app.screen = Screen::Offline {
+                path: "blob capture.seismograph".into(),
+                tab,
+                snapshot,
+            };
+            let offline = render(&app);
+            // Only the tab border (filename) and footer differ; compare every content cell.
+            let content = |text: &str| text.chars().skip(180 * 3).take(180 * 56).collect::<String>();
+            assert_eq!(content(&offline), content(&live), "{tab:?}");
+        }
+    }
+
+    #[test]
+    fn offline_loading_errors_and_info_are_not_live_process_data() {
+        let mut app = App::offline("blob capture.seismograph".into());
+        assert!(render(&app).contains("Loading and decoding snapshot"));
+        app.snapshot_error = Some("invalid snapshot test error".into());
+        assert!(render(&app).contains("invalid snapshot test error"));
+        app.snapshot_error = None;
+        app.finish_offline_load(representative_capture());
+        let output = render(&app);
+        assert!(output.contains("blob capture.seismograph"));
+        assert!(output.contains("Capture time: not recorded"));
+        assert!(!output.contains("Waiting for the first"));
+        assert!(!output.contains("Recording configuration"));
+    }
+
+    #[test]
+    fn memory_peak_labels_follow_the_recorded_scope() {
+        use seismograph_rallocator::snapshot::PeakLiveBytesScope;
+        for (scope, label, show_value) in [
+            (
+                PeakLiveBytesScope::Unavailable,
+                "Unavailable: capture did not record peak scope",
+                false,
+            ),
+            (PeakLiveBytesScope::SnapshotSamples, "Max sampled live:", true),
+            (PeakLiveBytesScope::Lifetime, "Lifetime peak", true),
+        ] {
+            let mut capture = representative_capture();
+            let memory = capture.memory.as_mut().unwrap();
+            memory.peak_live_bytes_scope = scope;
+            let output = render_frame(|frame| draw_memory_summary(frame, frame.area(), memory));
+            assert_eq!(
+                (output.contains(label), output.contains(&format_bytes(memory.peak_live_bytes))),
+                (true, show_value)
+            );
+            assert_eq!(
+                output.contains("Lifetime peak unavailable"),
+                scope == PeakLiveBytesScope::SnapshotSamples
+            );
+        }
+    }
+
+    #[test]
+    fn info_explains_counter_and_memory_scope_in_both_modes() {
+        let mut app = App::offline("scope.seismograph".into());
+        app.finish_offline_load(representative_capture());
+        let offline = render(&app);
+        app.screen = Screen::Connected {
+            descriptor: descriptor(),
+            recording: RecordingConfiguration::default(),
+            tab: MonitorTab::Info,
+            snapshot: Some(representative_capture()),
+        };
+        let live = render(&app);
+        for note in SNAPSHOT_SCOPE_NOTES {
+            assert!(offline.contains(note), "offline: {note}");
+            assert!(live.contains(note), "live: {note}");
+        }
+        assert!(live.contains("All-class source accepted"));
+        assert!(live.contains("All-class source overwritten"));
+    }
+
+    #[test]
+    fn allocation_labels_do_not_claim_unmatched_records_are_live() {
+        let capture = representative_capture();
+        let output = render_frame(|frame| {
+            draw_allocations(frame, frame.area(), capture.allocations.as_ref(), None, App::new().allocation_view);
+        });
+        assert!(output.contains("Unmatched B"));
+        assert!(output.contains("all-class source:"));
+        assert!(output.contains("not proven live allocations or leaks, even with zero overwrites"));
+        assert!(!output.contains("Live bytes"));
+        let memory = capture.memory.as_ref().unwrap();
+        let direct = memory.tiers.iter().find(|tier| tier.kind == MemoryTier::Direct);
+        assert!(memory_tier_title(direct, memory).contains("unmatched retained"));
+        let small = memory.tiers.iter().find(|tier| tier.kind == MemoryTier::Small);
+        assert!(memory_tier_title(small, memory).contains("published small classes"));
     }
 
     fn render_debug(draw: impl FnOnce(&mut ratatui::Frame<'_>)) -> String {
@@ -2666,12 +2872,12 @@ mod tests {
         assert_eq!(format_age(Duration::from_secs(125)), "2m ago");
 
         let snapshot = representative_capture();
-        let local: DateTime<Local> = snapshot.captured_at.into();
+        let local: DateTime<Local> = snapshot.captured_at.unwrap().into();
         let current = snapshot_time(&snapshot);
         assert!(current.starts_with(&local.format("%H:%M:%S").to_string()));
         assert!(current.ends_with(" ago)"));
         assert_eq!(
-            snapshot_time_at(&snapshot, snapshot.captured_instant + Duration::from_secs(125)),
+            snapshot_time_at(&snapshot, snapshot.captured_instant.unwrap() + Duration::from_secs(125)),
             format!("{} (2m ago)", local.format("%H:%M:%S"))
         );
     }
@@ -3376,6 +3582,6 @@ mod tests {
             }));
         }
 
-        assert_eq!(stable_digest(&output), (430_412, 3_899_769_936_188_636_598));
+        assert_eq!(stable_digest(&output), (429_498, 3_695_959_029_943_845_295));
     }
 }

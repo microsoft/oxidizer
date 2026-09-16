@@ -3,6 +3,8 @@
 
 //! Message models exchanged through the monitor protocol.
 
+use std::borrow::Cow;
+
 use crate::Error;
 use crate::codec::{SliceReader, push_string, push_u32, push_u64};
 use crate::monitor::{AuthenticationToken, InstanceId};
@@ -193,17 +195,17 @@ pub(crate) fn decode_request(kind: u16, payload: &[u8]) -> Result<Request, Error
     }
 }
 
-pub(crate) fn encode_response(response: &Response) -> Result<(u16, Vec<u8>), Error> {
+pub(crate) fn encode_response(response: &Response) -> Result<(u16, Cow<'_, [u8]>), Error> {
     match response {
         Response::Hello { instance_id, recording } => {
             validate_legacy_recording(*recording)?;
             let mut payload = Vec::with_capacity(50);
             payload.extend_from_slice(&instance_id.as_bytes());
             payload.extend_from_slice(&encode_recording(*recording));
-            Ok((101, payload))
+            Ok((101, Cow::Owned(payload)))
         }
-        Response::Acknowledged => Ok((102, Vec::new())),
-        Response::Snapshot(bytes) => Ok((103, bytes.clone())),
+        Response::Acknowledged => Ok((102, Cow::Borrowed(&[]))),
+        Response::Snapshot(bytes) => Ok((103, Cow::Borrowed(bytes))),
         Response::RecorderStatistics(statistics) => {
             validate_legacy_recording(statistics.recording)?;
             let mut payload = Vec::with_capacity(82);
@@ -214,17 +216,17 @@ pub(crate) fn encode_response(response: &Response) -> Result<(u16, Vec<u8>), Err
             push_u64(&mut payload, statistics.event_capacity_per_thread);
             push_u64(&mut payload, statistics.allocated_bytes);
             payload.extend_from_slice(&encode_recording(statistics.recording));
-            Ok((104, payload))
+            Ok((104, Cow::Owned(payload)))
         }
         Response::CacheRecording(policy) => {
             let mut payload = Vec::with_capacity(6);
             encode_recording_policy(&mut payload, *policy);
-            Ok((105, payload))
+            Ok((105, Cow::Owned(payload)))
         }
         Response::Error(message) => {
             let mut payload = Vec::new();
             push_string(&mut payload, message)?;
-            Ok((255, payload))
+            Ok((255, Cow::Owned(payload)))
         }
     }
 }
@@ -411,6 +413,17 @@ mod tests {
     }
 
     #[test]
+    fn empty_and_chunked_snapshot_responses_round_trip() {
+        for len in [0, 1, 8_191, 8_192, 8_193] {
+            let response = Response::Snapshot(vec![0xA5; len]);
+            let mut bytes = Vec::new();
+            write_response(&mut bytes, 23, &response).unwrap();
+
+            assert_eq!(read_response(&mut bytes.as_slice()).unwrap(), (23, response));
+        }
+    }
+
+    #[test]
     fn recording_configuration_rejects_invalid_sampling_denominators() {
         for offset in [6, 12, 18, 24, 30] {
             for sampling in [0_u32, MAX_EVENT_SAMPLING_ONE_IN + 1] {
@@ -456,16 +469,16 @@ mod tests {
     #[test]
     fn legacy_recording_message_sizes_remain_stable() {
         let configuration = RecordingConfiguration::default();
-        let (_, hello) = encode_response(&Response::Hello {
+        let hello_response = Response::Hello {
             instance_id: InstanceId::from_bytes([1; 16]),
             recording: configuration,
-        })
-        .unwrap();
-        let (_, statistics) = encode_response(&Response::RecorderStatistics(RecorderStatistics {
+        };
+        let statistics_response = Response::RecorderStatistics(RecorderStatistics {
             recording: configuration,
             ..RecorderStatistics::default()
-        }))
-        .unwrap();
+        });
+        let (_, hello) = encode_response(&hello_response).unwrap();
+        let (_, statistics) = encode_response(&statistics_response).unwrap();
 
         assert_eq!(
             (

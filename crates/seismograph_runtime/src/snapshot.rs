@@ -788,6 +788,24 @@ mod tests {
     }
 
     #[test]
+    fn unresolved_addresses_round_trip_without_symbol_metadata() {
+        let snapshot = Snapshot {
+            addresses: vec![AddressLookup {
+                address: 0x1234,
+                symbol: None,
+                filename: None,
+                line: None,
+                column: None,
+            }],
+            ..fixture()
+        };
+        let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
+        encode(&snapshot, &mut bytes).unwrap();
+
+        assert_eq!(decode(&bytes).unwrap(), snapshot);
+    }
+
+    #[test]
     fn every_truncated_source_payload_is_rejected() {
         let snapshot = fixture();
         let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
@@ -993,6 +1011,30 @@ mod tests {
         let mut excessive_frames = encoded_fixture();
         excessive_frames[211..215].copy_from_slice(&u32::MAX.to_le_bytes());
         assert_eq!(decode(&excessive_frames).unwrap_err().kind(), ErrorKind::Malformed);
+    }
+
+    #[test]
+    fn malformed_variable_lengths_and_text_are_rejected() {
+        fn encoded_fixture() -> Vec<u8> {
+            let snapshot = fixture();
+            let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
+            encode(&snapshot, &mut bytes).unwrap();
+            bytes
+        }
+
+        for offset in [52, 331, 335] {
+            let mut bytes = encoded_fixture();
+            bytes[offset..offset + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+            assert_eq!(decode(&bytes).unwrap_err().kind(), ErrorKind::Malformed);
+        }
+
+        let mut invalid_runtime_name = encoded_fixture();
+        invalid_runtime_name[148] = 0xff;
+        assert_eq!(decode(&invalid_runtime_name).unwrap_err().kind(), ErrorKind::Malformed);
+
+        let mut invalid_symbol = encoded_fixture();
+        invalid_symbol[347] = 0xff;
+        assert_eq!(decode(&invalid_symbol).unwrap_err().kind(), ErrorKind::Malformed);
     }
 
     #[test]

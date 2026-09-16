@@ -87,7 +87,7 @@ pub fn read_request(reader: &mut impl Read) -> Result<(u64, Request), Error> {
 /// Returns an error when the response is too large or writing fails.
 pub fn write_response(writer: &mut impl Write, request_id: u64, response: &Response) -> Result<(), Error> {
     let (kind, payload) = message::encode_response(response)?;
-    write_frame(writer, kind, request_id, &payload)
+    write_frame(writer, kind, request_id, payload.as_ref())
 }
 
 /// Reads one response frame.
@@ -302,6 +302,55 @@ mod tests {
             [
                 b'S', b'G', b'M', b'P', 7, 0, 105, 0, 9, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 1, 0, 1, 0, 0,
             ]
+        );
+    }
+
+    #[test]
+    fn snapshot_response_writes_the_original_payload_with_stable_framing() {
+        struct SnapshotWriter {
+            payload_address: *const u8,
+            header: [u8; FRAME_HEADER_BYTES],
+            written: usize,
+            flushed: bool,
+        }
+
+        impl Write for SnapshotWriter {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                let len = buf.len().min(3);
+                if self.written < FRAME_HEADER_BYTES {
+                    self.header[self.written..self.written + len].copy_from_slice(&buf[..len]);
+                } else {
+                    let offset = self.written - FRAME_HEADER_BYTES;
+                    assert_eq!(buf.as_ptr(), self.payload_address.wrapping_add(offset));
+                }
+                self.written += len;
+                Ok(len)
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                self.flushed = true;
+                Ok(())
+            }
+        }
+
+        let payload = vec![0xA5; 17];
+        let payload_len = payload.len();
+        let mut writer = SnapshotWriter {
+            payload_address: payload.as_ptr(),
+            header: [0; FRAME_HEADER_BYTES],
+            written: 0,
+            flushed: false,
+        };
+        let response = Response::Snapshot(payload);
+        write_response(&mut writer, 0x0102_0304_0506_0708, &response).unwrap();
+
+        assert_eq!(
+            (writer.header, writer.written, writer.flushed),
+            (
+                [b'S', b'G', b'M', b'P', 7, 0, 103, 0, 8, 7, 6, 5, 4, 3, 2, 1, 17, 0, 0, 0],
+                FRAME_HEADER_BYTES + payload_len,
+                true,
+            )
         );
     }
 

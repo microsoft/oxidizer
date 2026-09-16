@@ -9,13 +9,16 @@
 pub struct ThreadLog {
     /// Thread-log identifier.
     pub thread_log_id: u64,
-    /// Events observed by this log.
+    /// Accepted events reported by the shared recorder log, potentially across multiple event classes.
     pub total_events: u64,
-    /// Events overwritten before capture.
+    /// Accepted records overwritten before capture, not operations omitted by sampling or suppression.
     pub lost_events: u64,
     /// Allocated-size counts by bucket.
     pub allocated_histogram: Vec<u64>,
-    /// Live-size counts by bucket.
+    /// Size counts for retained allocations without a retained matching free.
+    ///
+    /// This is not proof of live allocations: recording boundaries, sampling and
+    /// overwrites can omit counterpart events.
     pub live_histogram: Vec<u64>,
 }
 
@@ -188,9 +191,15 @@ impl ThreadName {
 pub struct Callers {
     /// Capture-session identifier.
     pub session_id: u64,
-    /// Events observed during the session.
+    /// Accepted events reported by the shared recording session.
+    ///
+    /// This can include non-allocation event classes even though [`Self::events`]
+    /// contains only allocation records. It is not an allocation population count.
     pub total_events: u64,
-    /// Events lost before capture.
+    /// Accepted shared-recorder records overwritten before capture.
+    ///
+    /// This is not allocation-specific loss and excludes operations never recorded
+    /// because of sampling, suppression, disabled policies or missing instrumentation.
     pub lost_events: u64,
     /// Per-thread log summaries.
     pub threads: Vec<ThreadLog>,

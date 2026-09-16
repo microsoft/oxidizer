@@ -27,9 +27,31 @@ pub(crate) use native::{
     release_free_metadata, release_storage, write_free_next, write_free_requested,
 };
 #[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
-pub(crate) use platform::monotonic_millis;
+pub(crate) use platform::{current_processor_location, monotonic_millis};
 #[cfg(all(not(miri), target_os = "windows"))]
 use win64 as platform;
+
+#[derive(Clone, Copy)]
+pub(crate) struct MemoryStatus {
+    pub(crate) total: usize,
+    pub(crate) available: usize,
+}
+
+#[cfg(not(miri))]
+pub(crate) use platform::memory_status;
+
+#[cfg(miri)]
+pub(crate) const fn memory_status() -> Option<MemoryStatus> {
+    Some(MemoryStatus {
+        total: 256 * 1024 * 1024 * 1024,
+        available: 128 * 1024 * 1024 * 1024,
+    })
+}
+
+#[cfg(miri)]
+pub(crate) const fn current_processor_location() -> (usize, usize) {
+    (0, 0)
+}
 
 #[cfg(all(test, not(miri)))]
 mod faults {
@@ -82,6 +104,8 @@ pub(crate) fn reserve(size: usize) -> *mut u8 {
 #[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
 pub(crate) unsafe fn commit(address: *mut u8, size: usize) -> bool {
     #[cfg(test)]
+    COMMIT_COUNT.set(COMMIT_COUNT.get() + 1);
+    #[cfg(test)]
     if faults::take(faults::COMMIT) {
         return false;
     }
@@ -116,6 +140,8 @@ pub(crate) unsafe fn commit_locality_slab(address: *mut u8, slab_size: usize) ->
 
 #[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
 pub(crate) unsafe fn decommit(address: *mut u8, size: usize) -> bool {
+    #[cfg(test)]
+    DECOMMIT_COUNT.set(DECOMMIT_COUNT.get() + 1);
     #[cfg(test)]
     if faults::take(faults::DECOMMIT) {
         return false;
@@ -197,6 +223,13 @@ pub(crate) fn fail_next_align_offset() {
 #[cfg(all(test, not(miri)))]
 thread_local! {
     static UNMAP_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static COMMIT_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static DECOMMIT_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(all(test, not(miri)))]
+pub(crate) fn medium_os_counts() -> (usize, usize) {
+    (COMMIT_COUNT.get(), DECOMMIT_COUNT.get())
 }
 
 #[cfg(all(test, not(miri)))]

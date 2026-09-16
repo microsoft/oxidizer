@@ -242,4 +242,32 @@ mod tests {
         invalid_instance_tag[instance_tag] = 2;
         assert!(matches!(decode_descriptor(&invalid_instance_tag), Err(Error::InvalidDescriptor)));
     }
+
+    #[test]
+    fn every_truncated_descriptor_is_rejected() {
+        let bytes = encode_descriptor(&descriptor()).unwrap();
+
+        for len in 0..bytes.len() {
+            assert!(matches!(decode_descriptor(&bytes[..len]), Err(Error::InvalidDescriptor)));
+        }
+    }
+
+    #[test]
+    fn malformed_descriptor_lengths_text_and_trailing_data_are_rejected() {
+        const NAME_LENGTH_OFFSET: usize = 4 + 2 + 4 + 2 + 16 + 32;
+
+        let bytes = encode_descriptor(&descriptor()).unwrap();
+
+        let mut oversized_name = bytes.clone();
+        oversized_name[NAME_LENGTH_OFFSET..NAME_LENGTH_OFFSET + 2].copy_from_slice(&u16::MAX.to_le_bytes());
+        assert!(matches!(decode_descriptor(&oversized_name), Err(Error::InvalidDescriptor)));
+
+        let mut invalid_name = bytes.clone();
+        invalid_name[NAME_LENGTH_OFFSET + 2] = 0xff;
+        assert!(matches!(decode_descriptor(&invalid_name), Err(Error::InvalidDescriptor)));
+
+        let mut trailing = bytes;
+        trailing.push(0);
+        assert!(matches!(decode_descriptor(&trailing), Err(Error::InvalidDescriptor)));
+    }
 }

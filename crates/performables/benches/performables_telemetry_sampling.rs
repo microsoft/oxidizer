@@ -35,7 +35,7 @@ fn main() {
 
 fn recording_configuration(sampling_one_in: usize, capture_backtraces: bool) -> Configuration {
     Configuration {
-        general_events: seismograph::recorder::RecordingPolicy {
+        arc_dereferences: seismograph::recorder::RecordingPolicy {
             enabled: true,
             capture_backtraces,
             event_sampling: EventSampling::one_in(sampling_one_in)

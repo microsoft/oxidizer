@@ -14,8 +14,8 @@ use seismograph_rallocator::callers::{
     ThreadName, ThreadNameFields,
 };
 use seismograph_rallocator::snapshot::{
-    Domain, DomainFields, Estimate, EstimateFields, Region, RegionFields, SizeClass, SizeClassFields, SkippedSection, SkippedSectionFields,
-    Snapshot, Stats, StatsFields, Version,
+    Domain, DomainFields, Estimate, EstimateFields, PeakLiveBytesScope, Region, RegionFields, SizeClass, SizeClassFields, SkippedSection,
+    SkippedSectionFields, Snapshot, Stats, StatsFields, Version,
 };
 use seismograph_rallocator::topology::{Segment, SegmentFields, Slice, SliceFields, SliceKind, TopologyRegion, TopologyRegionFields};
 use seismograph_rallocator::{decode, encode, encoded_len};
@@ -241,6 +241,58 @@ fn snapshot_round_trips() {
 }
 
 #[test]
+fn reporting_peak_scope_round_trips_without_reinterpreting_samples_as_lifetime() {
+    for scope in [
+        PeakLiveBytesScope::Unavailable,
+        PeakLiveBytesScope::SnapshotSamples,
+        PeakLiveBytesScope::Lifetime,
+    ] {
+        let mut expected = fixture();
+        expected.stats.peak_live_bytes = 73_322;
+        expected.stats.peak_live_bytes_scope = scope;
+        let actual = decode(&encoded(&expected)).unwrap();
+        assert_eq!(actual, expected);
+        assert_eq!(
+            actual.stats.lifetime_peak_live_bytes(),
+            (scope == PeakLiveBytesScope::Lifetime).then_some(73_322),
+        );
+    }
+}
+
+#[test]
+fn reporting_legacy_stats_keep_raw_value_but_make_historical_peak_unavailable() {
+    let mut expected = fixture();
+    expected.stats.peak_live_bytes = 73_322;
+    expected.stats.peak_live_bytes_scope = PeakLiveBytesScope::Lifetime;
+    let mut bytes = encoded(&expected);
+    let (header, payload) = section(&bytes, SECTION_STATS);
+    bytes[header + 2..header + 4].copy_from_slice(&1_u16.to_le_bytes());
+    write_u32(&mut bytes, header + 4, 13 * 8);
+    bytes.remove(payload + 13 * 8);
+    expected.stats.peak_live_bytes_scope = PeakLiveBytesScope::Unavailable;
+
+    let actual = decode(&bytes).unwrap();
+
+    assert_eq!(actual, expected);
+    assert_eq!(
+        (actual.stats.lifetime_peak_live_bytes(), actual.stats.sampled_peak_live_bytes()),
+        (None, None)
+    );
+}
+
+#[test]
+fn reporting_unknown_peak_scope_is_rejected() {
+    let mut bytes = encoded(&fixture());
+    let (_, payload) = section(&bytes, SECTION_STATS);
+    bytes[payload + 13 * 8] = 3;
+
+    assert!(matches!(
+        decode(&bytes).unwrap_err().kind(),
+        seismograph_rallocator::ErrorKind::MalformedSection(SECTION_STATS)
+    ));
+}
+
+#[test]
 fn duplicate_known_sections_are_rejected() {
     let mut bytes = encoded(&fixture());
     let (header, payload) = section(&bytes, SECTION_METADATA);
@@ -297,6 +349,50 @@ fn truncated_payload_is_rejected() {
     encode(&expected, &mut bytes).unwrap();
     bytes.pop();
     decode(&bytes).unwrap_err();
+}
+
+#[test]
+fn every_partially_truncated_section_is_rejected() {
+    let bytes = encoded(&fixture());
+    let mut complete_section_boundaries = Vec::new();
+    let mut offset = HEADER_LEN;
+    while offset < bytes.len() {
+        let payload_len = u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().unwrap()) as usize;
+        offset += SECTION_HEADER_LEN + payload_len;
+        complete_section_boundaries.push(offset);
+    }
+
+    for len in 0..bytes.len() {
+        if !complete_section_boundaries.contains(&len) {
+            assert!(decode(&bytes[..len]).is_err(), "truncated snapshot length {len}");
+        }
+    }
+}
+
+#[test]
+fn malformed_section_lengths_are_rejected() {
+    for length in [7_u32, 9, u32::MAX] {
+        let mut bytes = encoded(&fixture());
+        let (metadata, _) = section(&bytes, SECTION_METADATA);
+        write_u32(&mut bytes, metadata + 4, length);
+
+        assert!(decode(&bytes).is_err(), "metadata section length {length}");
+    }
+}
+
+#[test]
+fn corrupt_header_and_unsupported_wire_version_are_rejected() {
+    let mut invalid_magic = encoded(&fixture());
+    invalid_magic[0] ^= 1;
+    decode(&invalid_magic).unwrap_err();
+
+    let mut invalid_reserved = encoded(&fixture());
+    invalid_reserved[18..20].copy_from_slice(&1_u16.to_le_bytes());
+    decode(&invalid_reserved).unwrap_err();
+
+    let mut unsupported_wire = encoded(&fixture());
+    unsupported_wire[8..10].copy_from_slice(&2_u16.to_le_bytes());
+    decode(&unsupported_wire).unwrap_err();
 }
 
 #[test]

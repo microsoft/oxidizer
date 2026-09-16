@@ -23,6 +23,9 @@ libc.workspace = true
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 mutants.workspace = true
 
+[target.'cfg(loom)'.dev-dependencies]
+loom.workspace = true
+
 [features]
 default = ["caller-symbolization"]
 caller-symbolization = ["dep:backtrace"]
@@ -32,11 +35,15 @@ tuning-telemetry = []
 windows-sys = { workspace = true, features = [
     "Win32_System_Memory",
     "Win32_System_SystemInformation",
+    "Win32_System_Kernel",
+    "Win32_System_Threading",
 ] }
 
 [dependencies]
 allocation_hints.workspace = true
+allocator-api2-02.workspace = true
 backtrace = { workspace = true, features = ["std"], optional = true }
+hashbrown = { workspace = true, features = ["allocator-api2"] }
 seismograph.workspace = true
 seismograph_rallocator.workspace = true
 
@@ -48,6 +55,10 @@ multitude = { path = "../multitude", default-features = false, features = ["hash
 performables = { path = "../performables", features = ["seismograph"] }
 seismograph = { path = "../seismograph", features = ["monitor"] }
 seismograph_runtime = { path = "../seismograph_runtime" }
+
+[[test]]
+name = "snapshot_mappings"
+harness = false
 
 [[bench]]
 name = "mimalloc"
