@@ -3,7 +3,7 @@
 
 [package]
 name = "compressors"
-version = "0.1.0"
+version = "0.1.1"
 description = "Streaming compression and decompression over bytesbuf byte sequences"
 readme = "README.md"
 keywords = ["compression", "gzip", "streaming", "zero-copy"]

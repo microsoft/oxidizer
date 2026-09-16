@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.17.1] - 2026-09-16
+
+- 🔧 Maintenance
+
+  - Now requires `0.1.1` of `compressors`
+  - Now requires `0.8.1` of `fetch_hyper`
+  - Now requires `0.1.1` of `http_compression`
+  - Now requires `0.11.1` of `http_extensions`
+  - Now requires `0.9.1` of `seatbelt_http`
+
+- ✨ Features
+
+  - add HTTP response decompression ([#746](https://github.com/microsoft/oxidizer/pull/746))
+
 ## [0.17.0] - 2026-09-10
 
 ### Breaking

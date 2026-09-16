@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1] - 2026-09-16
+
+- 🔧 Maintenance
+
+  - Now requires `0.17.1` of `fetch`
+  - Now requires `0.11.1` of `http_extensions`
+
 ## [0.2.0] - 2026-09-10
 
 ### Breaking
