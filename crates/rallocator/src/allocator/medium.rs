@@ -62,6 +62,8 @@
 //! timer or allocation-reentrant topology/memory library is introduced.
 
 use super::*;
+#[cfg(all(test, not(miri)))]
+mod policy_tests;
 mod retention;
 use retention::{CreditLease, Demand, MemoryBudget};
 
@@ -1080,7 +1082,7 @@ mod tests {
     fn publication_stripes_preserve_budgets_and_spread_power_of_two_strides() {
         assert_eq!(REMOTE_STRIPES * REMOTE_CAPACITY, BATCH_CAPACITY);
         assert_eq!(REMOTE_STRIPES * REMOTE_BYTES, LOCAL_CACHE_BYTES);
-        for stride in [1, 2, 4, 8, 16, 32, 64, 128] {
+        for stride in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384] {
             let mut counts = [0; REMOTE_STRIPES];
             for index in 0..256 {
                 let address = ptr::without_provenance_mut(index * stride * MEDIUM_SLICE_SIZE);

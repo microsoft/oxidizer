@@ -4011,6 +4011,44 @@ mod tests {
         assert!(direct_mapping_size(usize::MAX, 16, 0).is_none());
     }
 
+    #[cfg(not(miri))]
+    #[test]
+    fn free_slice_search_does_not_count_bits_past_a_bitmap_word() {
+        let mut used = [u64::MAX; MEDIUM_REGION_BITMAP_WORDS];
+        used[0] = 1;
+        assert_eq!(find_free_slices_in(&used, 1, 128, 64), None);
+        used[1] &= !1;
+        assert_eq!(find_free_slices_in(&used, 1, 128, 64), Some(1));
+        used[1] = 0;
+        assert_eq!(find_free_slices_in(&used, 1, 65, 65), None);
+        assert_eq!(find_free_slices_in(&used, 1, 66, 65), Some(1));
+    }
+
+    #[cfg(not(miri))]
+    #[test]
+    fn region_lookup_excludes_the_mapping_end_address() {
+        const CHILD: &str = "RALLOCATOR_REGION_BOUNDARY_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "allocator::tests::region_lookup_excludes_the_mapping_end_address"])
+                .env(CHILD, "1")
+                .status()
+                .unwrap();
+            assert!(status.success());
+            return;
+        }
+        // Isolate the registry so another test cannot map a region adjacent to
+        // this one and legitimately own the address immediately after its end.
+        let domain = crate::domain::state(crate::domain::Domain::new().unwrap());
+        // SAFETY: the domain and its published regions remain process-retained.
+        let backing = unsafe { domain_regions(domain) };
+        let (base, region) = backing.reserve_slices(domain, 1).unwrap();
+        assert_eq!(region_containing_uncached(base), Some(region));
+        assert_eq!(region_containing_uncached(base.wrapping_add(MEDIUM_REGION_SIZE)), None);
+        // SAFETY: this uncommitted span never escaped the fixture.
+        unsafe { backing.release_slices(base, 1) };
+    }
+
     #[test]
     fn allocation_size_arithmetic_has_exact_boundaries() {
         let context_overhead = HEADER_OFFSET + EXTRA_SIZE;
@@ -6029,7 +6067,7 @@ mod tests {
         assert!(slices_are_free(segment, 1));
     }
 
-    fn slices_are_free(address: *mut u8, count: usize) -> bool {
+    pub(super) fn slices_are_free(address: *mut u8, count: usize) -> bool {
         let Some(containing) = region_containing(address) else {
             return false;
         };

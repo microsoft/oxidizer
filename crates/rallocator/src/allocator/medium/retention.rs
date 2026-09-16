@@ -221,6 +221,161 @@ impl Demand {
 mod tests {
     use super::*;
 
+    #[cfg(not(miri))]
+    #[test]
+    fn unused_credit_and_dropped_shards_return_only_their_own_grants() {
+        const CHILD: &str = "RALLOCATOR_CREDIT_RELEASE_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "allocator::medium::retention::tests::unused_credit_and_dropped_shards_return_only_their_own_grants",
+                ])
+                .env(CHILD, "1")
+                .status()
+                .unwrap();
+            assert!(status.success());
+            return;
+        }
+        // The child runs only this test, so unrelated allocators cannot change
+        // the process-wide pool while these grant returns are observed.
+        assert_eq!((CACHE_LIMIT.load(Ordering::Relaxed), CREDIT_QUANTUM), (256 << 20, 8 << 20));
+        MemoryBudget::sample(1);
+        assert_eq!(NEXT_SAMPLE.load(Ordering::Relaxed), 1 + SAMPLE_INTERVAL_MS);
+        assert_eq!(CREDITS.allocated.load(Ordering::Relaxed), 0);
+        CREDITS.allocated.fetch_add(3 * CREDIT_QUANTUM, Ordering::Relaxed);
+        let mut lease = CreditLease {
+            bytes: 2 * CREDIT_QUANTUM,
+            retry_after: 500,
+        };
+        lease.release_unused(CREDIT_QUANTUM);
+        assert_eq!(
+            (lease.bytes, lease.retry_after, CREDITS.allocated.load(Ordering::Relaxed)),
+            (CREDIT_QUANTUM, 0, 2 * CREDIT_QUANTUM)
+        );
+        lease.retry_after = 600;
+        lease.release_unused(CREDIT_QUANTUM);
+        assert_eq!((lease.bytes, lease.retry_after), (CREDIT_QUANTUM, 600));
+        lease.release_unused(0);
+        assert_eq!(CREDITS.allocated.load(Ordering::Relaxed), CREDIT_QUANTUM);
+        let mut state = MediumState::new();
+        state.credit.bytes = CREDIT_QUANTUM;
+        drop(state);
+        assert_eq!(CREDITS.allocated.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn zero_budget_does_not_require_proportional_credit_division() {
+        let pool = CreditPool::new();
+        let mut lease = CreditLease::new();
+        let budget = lease.adjust(&pool, 0, 0, 1, MemoryBudget { limit: 0, pressured: true });
+        assert_eq!((budget.limit, budget.pressured), (0, true));
+    }
+
+    #[test]
+    fn exact_pressure_boundary_keeps_the_budget_unpressured() {
+        let memory = hal::MemoryStatus {
+            total: 1600,
+            available: 100,
+        };
+        let budget = MemoryBudget::from_memory(memory, 0);
+        assert_eq!((budget.limit, budget.pressured), (50, false));
+    }
+
+    #[test]
+    fn growing_an_existing_credit_lease_rounds_only_the_additional_grant() {
+        let pool = CreditPool::new();
+        pool.allocated.store(CREDIT_QUANTUM, Ordering::Relaxed);
+        let mut lease = CreditLease {
+            bytes: CREDIT_QUANTUM,
+            retry_after: 0,
+        };
+        let budget = MemoryBudget {
+            limit: 3 * CREDIT_QUANTUM,
+            pressured: false,
+        };
+        let now = (1..=32)
+            .find(|attempt| {
+                let granted = lease
+                    .adjust(&pool, 2 * CREDIT_QUANTUM, 1, attempt * SAMPLE_INTERVAL_MS, budget)
+                    .limit;
+                assert!(granted <= 2 * CREDIT_QUANTUM, "admission must never exceed the rounded requirement");
+                granted == 2 * CREDIT_QUANTUM
+            })
+            .unwrap()
+            * SAMPLE_INTERVAL_MS;
+        assert_eq!(
+            (lease.bytes, lease.retry_after, pool.allocated.load(Ordering::Relaxed)),
+            (2 * CREDIT_QUANTUM, 0, 2 * CREDIT_QUANTUM)
+        );
+        lease.adjust(&pool, 2 * CREDIT_QUANTUM, 1, now, budget);
+        assert_eq!((lease.bytes, lease.retry_after), (2 * CREDIT_QUANTUM, 0));
+    }
+
+    #[test]
+    fn unchanged_credit_requirement_preserves_the_admission_retry_deadline() {
+        let pool = CreditPool::new();
+        pool.allocated.store(CREDIT_QUANTUM, Ordering::Relaxed);
+        let mut lease = CreditLease {
+            bytes: CREDIT_QUANTUM,
+            retry_after: 500,
+        };
+        let budget = MemoryBudget {
+            limit: 2 * CREDIT_QUANTUM,
+            pressured: false,
+        };
+        lease.adjust(&pool, CREDIT_QUANTUM, 1, 1, budget);
+        assert_eq!(
+            (lease.bytes, lease.retry_after, pool.allocated.load(Ordering::Relaxed)),
+            (CREDIT_QUANTUM, 500, CREDIT_QUANTUM)
+        );
+    }
+
+    #[test]
+    fn partial_credit_admission_waits_before_requesting_the_remainder() {
+        let pool = CreditPool::new();
+        pool.allocated.store(CREDIT_QUANTUM / 2, Ordering::Relaxed);
+        let mut lease = CreditLease::new();
+        let partial = CREDIT_QUANTUM + CREDIT_QUANTUM / 2;
+        let budget = MemoryBudget {
+            limit: 2 * CREDIT_QUANTUM,
+            pressured: false,
+        };
+        let mut now = 1;
+        adjust_after_transient_failures(&mut lease, &pool, 2 * CREDIT_QUANTUM, 1, &mut now, budget, partial);
+        assert_eq!(lease.retry_after, now + SAMPLE_INTERVAL_MS);
+        let larger = MemoryBudget {
+            limit: 3 * CREDIT_QUANTUM,
+            pressured: false,
+        };
+        assert_eq!(
+            lease
+                .adjust(&pool, 2 * CREDIT_QUANTUM, 1, now + SAMPLE_INTERVAL_MS - 1, larger)
+                .limit,
+            partial
+        );
+        now += SAMPLE_INTERVAL_MS;
+        assert_eq!(lease.adjust(&pool, partial, 1, now, larger).limit, partial);
+        adjust_after_transient_failures(&mut lease, &pool, 2 * CREDIT_QUANTUM, 1, &mut now, larger, 2 * CREDIT_QUANTUM);
+        assert_eq!(pool.allocated.load(Ordering::Relaxed), 2 * CREDIT_QUANTUM + CREDIT_QUANTUM / 2);
+    }
+
+    #[test]
+    fn retired_demand_is_subtracted_and_old_peaks_decay_each_window() {
+        let mut demand = Demand::new();
+        let peak = 8 * SHARED_CACHE_BYTES;
+        demand.acquire(peak, 1);
+        demand.retire(peak / 4);
+        assert_eq!(demand.leased, peak * 3 / 4);
+        demand.retire(usize::MAX);
+        assert_eq!(demand.leased, 0);
+        demand.observe(1001);
+        demand.observe(2001);
+        assert_eq!((demand.peak, demand.window_peak, demand.window_end), (peak / 2, 0, 3001));
+        demand.observe(3001);
+        assert_eq!(demand.peak, peak / 4);
+    }
+
     #[test]
     fn fresh_medium_refill_leases_every_committed_span() {
         let domain = crate::domain::state(crate::domain::Domain::new().unwrap());

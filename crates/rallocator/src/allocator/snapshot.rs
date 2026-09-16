@@ -277,6 +277,57 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_registry_spreads_aligned_and_overaligned_address_sequences() {
+        for stride in [16, 65536] {
+            let mut shards: Vec<_> = (0..ADDRESSES.len())
+                .map(|index| ptr::from_ref(addresses(0x001f_0000 + index * stride)))
+                .collect();
+            shards.sort_unstable();
+            shards.dedup();
+            assert_eq!(shards.len(), ADDRESSES.len(), "address stride {stride}");
+        }
+    }
+
+    #[test]
+    fn shrink_policy_observes_the_eighth_full_boundary_and_retains_warm_capacity() {
+        let mut entries = reserve_addresses(512).unwrap();
+        let capacity = entries.capacity();
+        assert_eq!(shrink_capacity(&entries, capacity), None);
+        for address in 0..capacity / 8 {
+            entries.insert(address);
+        }
+        assert_eq!(
+            shrink_capacity(&entries, capacity),
+            Some((2 * entries.len()).max(RETAINED_CAPACITY / 2))
+        );
+        entries.insert(capacity / 8);
+        assert_eq!(shrink_capacity(&entries, capacity), None);
+        entries.clear();
+        entries.insert(1);
+        assert_eq!(shrink_capacity(&entries, capacity), Some(RETAINED_CAPACITY / 2));
+        let mut warm = reserve_addresses(RETAINED_CAPACITY / 2).unwrap();
+        warm.insert(1);
+        assert_eq!(shrink_capacity(&warm, warm.capacity()), None);
+    }
+
+    #[test]
+    fn shrinking_a_large_table_keeps_exact_members_and_a_warm_minimum() {
+        let shard = Shard::new();
+        for address in 0..1024 {
+            assert!(shard.insert(address, reserve_addresses));
+        }
+        for address in 1..1024 {
+            assert!(shard.remove(address, reserve_addresses));
+        }
+        let capacity = shard.allocation_capacity.load(Ordering::Relaxed);
+        let warm_capacity = reserve_addresses(RETAINED_CAPACITY / 2).unwrap().capacity();
+        assert_eq!(capacity, warm_capacity);
+        assert!(shard.with_entries(|entries| entries.len() == 1 && entries.contains(&0)));
+        assert!(shard.remove(0, reserve_addresses));
+        assert_eq!(shard.allocation_capacity.load(Ordering::Relaxed), warm_capacity);
+    }
+
+    #[test]
     fn bounds_reject_nonmembers_without_locking_and_reset_after_removal() {
         let shard = Shard::new();
         assert!(shard.insert(10, reserve_addresses));
@@ -392,6 +443,36 @@ mod tests {
             assert!(shard.remove(address, |_| None));
         }
         assert_eq!(shard.with_entries(|entries| entries.capacity()), 0);
+        assert_eq!(MEMORY_WHILE_LOCKED.get(), 0);
+    }
+
+    #[test]
+    fn pending_shrink_is_cancelled_when_the_population_grows() {
+        MEMORY_WHILE_LOCKED.set(0);
+        let shard = Shard::new();
+        for address in 1..=1024 {
+            assert!(shard.insert(address, reserve_addresses));
+        }
+        let original_capacity = shard.allocation_capacity.load(Ordering::Relaxed);
+        for address in 1..=800 {
+            assert!(shard.remove(address, |_| None));
+        }
+        let mut reservations = 0;
+        assert!(shard.remove(801, |capacity| {
+            reservations += 1;
+            let candidate = reserve_addresses(capacity);
+            // Model another owner growing the table while the reservation is
+            // made outside the lock, without relying on scheduler timing.
+            for address in 10_000..10_080 {
+                assert!(shard.insert(address, reserve_addresses));
+            }
+            candidate
+        }));
+        assert_eq!(
+            (reservations, shard.allocation_capacity.load(Ordering::Relaxed)),
+            (1, original_capacity)
+        );
+        assert_eq!(shard.with_entries(|entries| entries.len()), 303);
         assert_eq!(MEMORY_WHILE_LOCKED.get(), 0);
     }
 

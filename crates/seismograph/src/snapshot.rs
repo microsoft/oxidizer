@@ -1630,7 +1630,7 @@ mod tests {
             assert!(!arena.deallocate(ptr::without_provenance_mut(1)));
         }
         let maximum_probes = count * 16 * (usize::try_from(count.ilog2()).unwrap() + 2);
-        assert!(arena.lookup_steps.get() <= maximum_probes);
+        assert!((1..=maximum_probes).contains(&arena.lookup_steps.get()));
     }
 
     #[cfg(not(miri))]
