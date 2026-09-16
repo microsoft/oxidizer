@@ -1353,9 +1353,11 @@ where
         owner: *mut ReusableHeapState,
     ) -> *mut u8 {
         let requested_size = cmp::max(layout.size(), 1);
+        // The prefix stores a pointer, so even byte-aligned payloads need pointer alignment.
+        let alignment = cmp::max(layout.align(), align_of::<*mut ExtraHeader>());
         let default_class = if has_context { default_class::<C::Tunables>(layout) } else { None };
-        let discriminator_space = if default_class.is_some() { layout.align() } else { 0 };
-        let mapping_size = direct_mapping_size(requested_size, layout.align(), discriminator_space)
+        let discriminator_space = if default_class.is_some() { alignment } else { 0 };
+        let mapping_size = direct_mapping_size(requested_size, alignment, discriminator_space)
             .expect("valid allocation layouts must have a representable mapping size");
 
         let mapping_address = hal::map(mapping_size);
@@ -1370,7 +1372,7 @@ where
         self.record_mapping(mapping_size);
 
         let first_user_address = unsafe { mapping_address.add(EXTRA_SIZE + HEADER_OFFSET) };
-        let offset = hal::align_offset(first_user_address, layout.align());
+        let offset = hal::align_offset(first_user_address, alignment);
         if offset == usize::MAX {
             unsafe { hal::unmap(mapping_address, mapping_size) };
             self.record_unmapping(mapping_size);
@@ -1381,7 +1383,7 @@ where
         if let Some(class_index) = default_class {
             let block_size = ConfigSizeClasses::<C>::SIZES[class_index];
             if user_address.addr() & (block_size - 1) == 0 {
-                user_address = unsafe { user_address.add(layout.align()) };
+                user_address = unsafe { user_address.add(alignment) };
             }
         }
         let extra = mapping_address.cast::<ExtraHeader>();
@@ -2640,6 +2642,12 @@ fn context_required_size(size: usize, alignment: usize) -> Option<usize> {
 }
 
 fn direct_mapping_size(requested_size: usize, alignment: usize, discriminator_space: usize) -> Option<usize> {
+    let alignment = cmp::max(alignment, align_of::<*mut ExtraHeader>());
+    let discriminator_space = if discriminator_space == 0 {
+        0
+    } else {
+        cmp::max(discriminator_space, align_of::<*mut ExtraHeader>())
+    };
     requested_size
         .checked_add(alignment - 1)
         .and_then(|size| size.checked_add(discriminator_space))
@@ -4015,6 +4023,11 @@ mod tests {
         assert_eq!(direct_mapping_size(1, 64, 32), Some(1 + direct_overhead));
         assert_eq!(direct_mapping_size(usize::MAX - direct_overhead, 64, 32), Some(usize::MAX));
         assert_eq!(direct_mapping_size(usize::MAX - direct_overhead + 1, 64, 32), None);
+        let pointer_alignment = align_of::<*mut ExtraHeader>();
+        assert_eq!(
+            direct_mapping_size(1, 1, 1),
+            Some(2 * pointer_alignment + HEADER_OFFSET + EXTRA_SIZE)
+        );
     }
 
     #[test]
