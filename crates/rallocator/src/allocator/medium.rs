@@ -1332,6 +1332,33 @@ mod tests {
 
     #[cfg(not(miri))]
     #[test]
+    fn unexpired_large_extent_survives_opportunistic_purge() {
+        let domain = domain();
+        // SAFETY: the isolated domain owns its primary shard for this test.
+        let backing = unsafe { domain_shard(domain, 0) };
+        let slices = SHARED_CACHE_BYTES / MEDIUM_SLICE_SIZE + 1;
+        let bytes = slices * MEDIUM_SLICE_SIZE;
+        let (address, _) = backing.reserve_slices(domain, slices).unwrap();
+        // SAFETY: the test exclusively owns this reserved span.
+        assert!(unsafe { hal::commit(address, bytes) });
+        // SAFETY: the committed span transfers into the shard's locked free list.
+        unsafe { insert_cached_span(&mut backing.state.lock(), address, slices, 20) };
+        backing.purge_with_budget(
+            false,
+            10,
+            MemoryBudget {
+                limit: usize::MAX,
+                pressured: false,
+            },
+        );
+        let retained = backing.state.lock().retained_bytes;
+        let used = used_slices(backing);
+        backing.purge(true, u64::MAX);
+        assert_eq!((retained, used, used_slices(backing)), (bytes, slices, 0));
+    }
+
+    #[cfg(not(miri))]
+    #[test]
     fn continuous_returns_honor_a_memory_budget_equal_to_the_idle_floor() {
         let domain = domain();
         let backing = unsafe { domain_shard(domain, 0) };
