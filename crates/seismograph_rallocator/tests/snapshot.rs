@@ -241,6 +241,31 @@ fn snapshot_round_trips() {
 }
 
 #[test]
+fn stats_fields_preserve_wire_order_and_default_peak_scope() {
+    let mut snapshot = Snapshot::new(Version::new(0, 1, 0));
+    snapshot.stats = Stats::from_fields(StatsFields {
+        allocated_bytes: 1,
+        deallocated_bytes: 2,
+        live_bytes: 3,
+        peak_live_bytes: 4,
+        mapped_bytes: 5,
+        os_mappings: 6,
+        os_unmappings: 7,
+        allocations: 8,
+        deallocations: 9,
+        remote_frees: 10,
+        pending_remote_blocks: 11,
+        remote_pushes_in_progress: 12,
+        drained_remote_blocks: 13,
+    });
+    let bytes = encoded(&snapshot);
+    let (header, payload) = section(&bytes, SECTION_STATS);
+    let length = u32::from_le_bytes(bytes[header + 4..header + 8].try_into().unwrap()) as usize;
+    let expected = (1_u64..=13).flat_map(u64::to_le_bytes).chain([0]).collect::<Vec<_>>();
+    assert_eq!(&bytes[payload..payload + length], expected);
+}
+
+#[test]
 fn reporting_peak_scope_round_trips_without_reinterpreting_samples_as_lifetime() {
     for scope in [
         PeakLiveBytesScope::Unavailable,

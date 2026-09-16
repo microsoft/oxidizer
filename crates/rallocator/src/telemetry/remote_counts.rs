@@ -126,6 +126,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn ticket_slots_cycle_through_every_shard_without_losing_wraparound() {
+        let actual: Vec<_> = (0..SHARD_COUNT * 3).map(slot_index).collect();
+        let expected: Vec<_> = (0..SHARD_COUNT).cycle().take(SHARD_COUNT * 3).collect();
+        assert_eq!(actual, expected);
+        assert_eq!(slot_index(usize::MAX), SHARD_COUNT - 1);
+    }
+
+    #[test]
+    fn first_use_assigns_a_bounded_slot_and_reuses_it() {
+        for _ in 0..=SHARD_COUNT {
+            std::thread::spawn(|| {
+                assert_eq!(SLOT.get(), UNASSIGNED);
+                let first = current_shard();
+                let assigned = SLOT.get();
+                assert!(assigned < SHARD_COUNT);
+                let second = current_shard();
+                assert_eq!(SLOT.get(), assigned);
+                assert!(std::ptr::eq(first, second));
+                assert!(std::ptr::eq(first, &raw const COUNTS[assigned]));
+            })
+            .join()
+            .unwrap();
+        }
+    }
+
+    #[test]
     fn slot_bounds_and_counter_layout_are_fixed() {
         assert!(SHARD_COUNT.is_power_of_two());
         assert_eq!((size_of::<CounterShard>(), align_of::<CounterShard>()), (64, 64));

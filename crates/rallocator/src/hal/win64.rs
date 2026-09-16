@@ -90,6 +90,56 @@ mod tests {
     use super::*;
 
     #[test]
+    fn processor_query_follows_the_calling_threads_affinity() {
+        use windows_sys::Win32::System::SystemInformation::GROUP_AFFINITY;
+        use windows_sys::Win32::System::Threading::{GetCurrentThread, GetThreadGroupAffinity, SetThreadGroupAffinity};
+
+        std::thread::spawn(|| {
+            let mut allowed = GROUP_AFFINITY::default();
+            // SAFETY: the pseudo handle identifies this live worker, and the
+            // writable affinity output is correctly sized.
+            assert_ne!(unsafe { GetThreadGroupAffinity(GetCurrentThread(), &raw mut allowed) }, 0);
+            for number in 0..usize::BITS {
+                let mask = 1_usize << number;
+                if allowed.Mask & mask == 0 {
+                    continue;
+                }
+                let affinity = GROUP_AFFINITY { Mask: mask, ..allowed };
+                let mut previous = GROUP_AFFINITY::default();
+                // SAFETY: each mask is a nonempty subset of this worker's
+                // allowed group. Only this dedicated worker changes affinity;
+                // thread exit releases it without affecting the test harness.
+                assert_ne!(
+                    unsafe { SetThreadGroupAffinity(GetCurrentThread(), &raw const affinity, &raw mut previous) },
+                    0
+                );
+                let processor = PROCESSOR_NUMBER {
+                    Group: allowed.Group,
+                    Number: number as u8,
+                    Reserved: 0,
+                };
+                let mut node = 0;
+                // SAFETY: this is an allowed processor and a live output cell.
+                let found = unsafe { GetNumaProcessorNodeEx(&raw const processor, &raw mut node) } != 0;
+                let expected_node = if found && node != u16::MAX { usize::from(node) } else { 0 };
+                assert_eq!(
+                    current_processor_location(),
+                    (usize::from(allowed.Group) * 64 + number as usize, expected_node)
+                );
+            }
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn host_memory_query_reports_nonzero_consistent_bounds() {
+        let memory = memory_status().unwrap();
+        assert!(memory.total > 0);
+        assert!(memory.available <= memory.total);
+    }
+
+    #[test]
     fn unavailable_memory_status_does_not_invent_a_budget() {
         assert!(
             memory_status_with(|status| {

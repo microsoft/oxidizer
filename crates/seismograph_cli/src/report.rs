@@ -2224,6 +2224,27 @@ mod tests {
     }
 
     #[test]
+    fn reporting_partially_freed_stack_counts_only_matched_frees() {
+        let mut allocation = seismograph_rallocator::callers::Event::default();
+        allocation.allocation_id = 1;
+        allocation.thread_log_id = 7;
+        allocation.size = 1024;
+        let mut unmatched = allocation.clone();
+        unmatched.allocation_id = 2;
+        let mut free = allocation.clone();
+        free.kind = EventKind::Deallocated;
+        let mut callers = Callers::default();
+        callers.events = vec![free.clone(), allocation, unmatched, free];
+        let mut html = String::new();
+
+        render_callers(&mut html, &callers, &[]);
+
+        assert!(html.contains(
+            "<li><strong>1.00 KiB unmatched in 1 allocations</strong> <span class=\"muted\">(2.00 KiB allocated in 2, 1 freed)</span>"
+        ));
+    }
+
+    #[test]
     fn reporting_size_class_totals_are_explicitly_partial() {
         let mut snapshot = Snapshot::new(Version::new(0, 1, 0));
         snapshot.stats.live_bytes = 128;
@@ -2285,6 +2306,35 @@ mod tests {
         assert!(html.contains("<tr><td>7</td><td>5</td><td>3</td><td>2</td></tr>"));
         assert!(html.contains("start-to-finish recording does not imply start-to-finish retained history"));
         assert!(html.contains("not all operations that were never recorded"));
+    }
+
+    #[test]
+    fn reporting_zero_overwrites_does_not_claim_retained_history_is_truncated() {
+        let mut snapshot = Snapshot::new(Version::new(0, 1, 0));
+        snapshot.runtime_events = Some(Events::default());
+        let mut html = String::new();
+
+        render_recording_coverage(&mut html, &snapshot);
+
+        assert!(!html.contains("The retained history is truncated"));
+    }
+
+    #[test]
+    fn reporting_missing_stacks_counts_events_across_threads() {
+        let mut snapshot = Snapshot::new(Version::new(0, 1, 0));
+        snapshot.runtime_events = Some(Events {
+            events: vec![
+                runtime_event(7, 1, RuntimeEventKind::MutexAccess, 1, &[]),
+                runtime_event(7, 2, RuntimeEventKind::MutexRelease, 1, &[10]),
+                runtime_event(8, 1, RuntimeEventKind::MutexAccess, 1, &[]),
+            ],
+            ..Events::default()
+        });
+        let mut html = String::new();
+
+        render_recording_coverage(&mut html, &snapshot);
+
+        assert!(html.contains("<p>2 events have no retained stack."));
     }
 
     #[test]

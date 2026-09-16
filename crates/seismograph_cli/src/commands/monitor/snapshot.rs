@@ -264,6 +264,13 @@ mod tests {
     }
 
     #[test]
+    fn event_sets_at_the_parallel_release_threshold_are_released() {
+        let mut events = vec![1_u8; 1_000_000];
+        release_stacks(&mut events, |event| *event = 0);
+        assert_eq!(events, vec![0; 1_000_000]);
+    }
+
+    #[test]
     fn large_event_sets_release_every_stack_before_returning() {
         let mut events = vec![1_u8; 1_000_003];
         release_stacks(&mut events, |event| *event = 0);

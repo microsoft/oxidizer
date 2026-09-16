@@ -2910,6 +2910,13 @@ mod tests {
     }
 
     #[test]
+    fn offline_initial_status_reports_loading_before_a_snapshot_arrives() {
+        let app = App::offline(PathBuf::from("capture.seismograph"));
+
+        assert_eq!(app.status, "Loading snapshot…");
+    }
+
+    #[test]
     fn offline_navigation_never_starts_remote_actions() {
         let mut app = App::offline(PathBuf::from("capture.seismograph"));
         app.finish_offline_load(empty_capture());
