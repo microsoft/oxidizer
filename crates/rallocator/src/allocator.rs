@@ -5075,21 +5075,23 @@ mod tests {
         unsafe { regions.decommit_span(fixed, 1, 0) };
         assert!(slices_are_free(fixed, 1));
 
-        let large_layout = Layout::from_size_align((MEDIUM_MAX_SLICES + 1) * MEDIUM_SLICE_SIZE, 16).unwrap();
-        let large = allocator.allocate_medium(large_layout, &mut heap, None);
-        unsafe { allocator.deallocate_medium(large, large_layout, ptr::from_mut(&mut heap)) };
-        let slices = medium_slice_count(large_layout).unwrap();
-        // Extents larger than the shared byte budget decommit on free, so this
-        // test injects failure into that same detached operation explicitly.
-        if !slices_are_free(large, slices) {
-            let mut recovered = [ptr::null_mut()];
-            assert_eq!(regions.take_batch(slices, &mut recovered), 1);
-            hal::fail_next_decommit();
-            unsafe { regions.decommit_span(large, slices, 0) };
-            assert!(!slices_are_free(large, slices));
-            assert_eq!(regions.take_batch(slices, &mut recovered), 1);
-            unsafe { regions.decommit_span(large, slices, 0) };
-        }
+        // Own a detached large span directly so OS memory pressure cannot
+        // decommit it during an earlier allocator free and skip this check.
+        let slices = MEDIUM_MAX_SLICES + 1;
+        let bytes = slices * MEDIUM_SLICE_SIZE;
+        let large = regions.allocate_slices(crate::domain::state(domain), slices).unwrap();
+        // SAFETY: the test exclusively owns this reserved span until reclamation.
+        assert!(unsafe { hal::commit(large, bytes) });
+        tracking::record_mapping(bytes);
+        regions.record_fresh(bytes);
+        hal::fail_next_decommit();
+        assert!(!unsafe { regions.decommit_span(large, slices, 0) });
+        assert!(!slices_are_free(large, slices));
+        let mut recovered = [ptr::null_mut()];
+        assert_eq!(regions.take_batch(slices, &mut recovered), 1);
+        assert_eq!(recovered[0], large);
+        assert!(unsafe { regions.decommit_span(large, slices, 0) });
+        assert!(slices_are_free(large, slices));
     }
 
     #[test]
@@ -5882,6 +5884,9 @@ mod tests {
 
     #[test]
     fn bitmap_and_extent_helpers_cover_wrapping_and_coalescing() {
+        let empty = [0; MEDIUM_REGION_BITMAP_WORDS];
+        assert_eq!(find_free_slices(&empty, 0, 0), None);
+        assert_eq!(find_free_slices(&empty, 0, MEDIUM_REGION_SLICE_COUNT + 1), None);
         let mut used = [0; MEDIUM_REGION_BITMAP_WORDS];
         mark_slices(&mut used, 0, 2, true);
         mark_slices(&mut used, 4, 2, true);

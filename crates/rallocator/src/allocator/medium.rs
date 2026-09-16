@@ -989,7 +989,7 @@ mod tests {
             per_lane.iter().map(|count| count / REMOTE_CAPACITY).sum::<usize>()
         );
         let mut recycled = Vec::new();
-        while recycled.len() < expected.len() {
+        loop {
             let mut batch = [ptr::null_mut(); BATCH_CAPACITY];
             let count = backing.take_batch(1, &mut batch);
             if count == 0 {
@@ -1166,6 +1166,69 @@ mod tests {
         assert!(backing.state.lock().available.is_null());
         unsafe { backing.release_slices(address, MEDIUM_REGION_SLICE_COUNT) };
         assert_eq!(used_slices(backing), 0);
+    }
+
+    #[test]
+    fn unexpired_bins_remain_available_for_reuse() {
+        let mut block = MediumFreeBlock { next: ptr::null_mut() };
+        let mut state = MediumState::new();
+        let mut bin = MediumBin::new();
+        bin.free_list = ptr::from_mut(&mut block);
+        bin.purge_after = 20;
+        state.bins[0] = bin;
+        state.nonempty_bins[0] = 1;
+        let mut pending = [(ptr::null_mut(), 0); PURGE_WORK];
+        assert_eq!(state.detach_bins(&mut pending, false, false, 10), (0, 0));
+        assert_eq!(state.bins[0].free_list, ptr::from_mut(&mut block));
+        assert_eq!(state.next_bin(0), Some(0));
+    }
+
+    #[cfg(not(miri))]
+    #[test]
+    fn availability_unlinks_middle_regions_and_large_search_visits_all_regions() {
+        let domain = domain();
+        let backing = unsafe { domain_shard(domain, 0) };
+        let mut result = [ptr::null_mut()];
+        assert_eq!(backing.take_batch(MEDIUM_MAX_SLICES + 1, &mut result), 0);
+        let mut state = backing.state.lock();
+        // SAFETY: the private shard lock protects all three newly published regions.
+        let regions = unsafe { std::array::from_fn::<_, 3, _>(|_| append_region(&mut state, &backing.regions, domain).unwrap()) };
+        // SAFETY: all regions are linked and the test holds their shard lock.
+        unsafe {
+            remove_available(&mut state, regions[1]);
+            assert_eq!(
+                ((*regions[2]).available_next, (*regions[0]).available_previous),
+                (regions[0], regions[2])
+            );
+            add_available(&mut state, regions[1]);
+        }
+        drop(state);
+        assert_eq!(backing.take_batch(MEDIUM_MAX_SLICES + 1, &mut result), 0);
+    }
+
+    #[test]
+    fn remote_flush_tolerates_an_already_detached_packet() {
+        let backing = MediumRegion::new();
+        // A competing consumer can detach the packet after this consumer has
+        // observed readiness but before it obtains the packet lock.
+        backing.remote.lanes[0].ready.store(true, Ordering::Relaxed);
+        backing.flush_remote();
+        assert_eq!(backing.remote.pending(), (0, 0));
+        assert_eq!(backing.state.lock().retained_bytes, 0);
+    }
+
+    #[cfg(not(miri))]
+    #[test]
+    fn failed_batch_and_single_reservations_leave_no_cached_spans() {
+        let domain = domain();
+        let allocator = allocator();
+        let mut heap = ReusableHeapState::new(GeneralOptions::new(), domain);
+        heap.medium_batch.targets[0] = BATCH_CAPACITY;
+        hal::fail_next_reserve();
+        hal::fail_next_map();
+        let layout = Layout::from_size_align(MEDIUM_SLICE_SIZE, 16).unwrap();
+        assert!(allocator.allocate_medium(layout, &mut heap, None).is_null());
+        assert_eq!((used_slices(heap_regions(&mut heap)), heap.medium_batch.bytes), (0, 0));
     }
 
     #[test]

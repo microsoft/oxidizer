@@ -1600,6 +1600,15 @@ mod tests {
     }
 
     #[test]
+    fn inactive_snapshot_guard_does_not_release_an_outer_scope() {
+        with_snapshot_arena(|| {
+            drop(SnapshotArenaActivation { depth_entered: false });
+            assert_eq!(SNAPSHOT_ALLOCATION_DEPTH.get(), 1);
+        });
+        assert_eq!(SNAPSHOT_ALLOCATION_DEPTH.get(), 0);
+    }
+
+    #[test]
     fn snapshot_allocation_scope_restores_nested_depth() {
         assert!(!snapshot_collection_active());
         with_snapshot_arena(|| {
@@ -1945,6 +1954,7 @@ mod tests {
             assert!(telemetry_suppressed());
             record_allocation(1);
             record_deallocation_stats(1);
+            record_resize(Some((0, 8)), 1, 2);
             record_small_allocation(0, 8, 1);
             record_small_deallocation(0, 1);
             record_remote_retired_free();
