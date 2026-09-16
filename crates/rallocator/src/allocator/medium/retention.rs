@@ -63,6 +63,13 @@ impl CreditPool {
     }
 
     fn acquire(&self, wanted: usize, limit: usize) -> usize {
+        self.acquire_with(wanted, limit, |current, next| {
+            self.allocated
+                .compare_exchange_weak(current, next, Ordering::Relaxed, Ordering::Relaxed)
+        })
+    }
+
+    fn acquire_with(&self, wanted: usize, limit: usize, mut exchange: impl FnMut(usize, usize) -> Result<usize, usize>) -> usize {
         let mut allocated = self.allocated.load(Ordering::Relaxed);
         // This is a rare quota-growth transaction, not a per-span operation.
         // Bound retries; a contended/empty pool simply grants less retention.
@@ -71,10 +78,7 @@ impl CreditPool {
             if granted == 0 {
                 return 0;
             }
-            match self
-                .allocated
-                .compare_exchange_weak(allocated, allocated + granted, Ordering::Relaxed, Ordering::Relaxed)
-            {
+            match exchange(allocated, allocated + granted) {
                 Ok(_) => return granted,
                 Err(current) => allocated = current,
             }
@@ -357,13 +361,53 @@ mod tests {
         // uncontended weak CAS can fail spuriously (Miri exercises this), so
         // policy tests must allow the documented later retry rather than assume
         // every first admission attempt succeeds.
-        for _ in 0..32 {
-            if lease.adjust(pool, desired, retained, *now, budget).limit == expected {
-                return;
-            }
-            *now += SAMPLE_INTERVAL_MS;
-        }
-        panic!("isolated credit admission did not converge after transient retries");
+        (0..32)
+            .find(|_| {
+                if lease.adjust(pool, desired, retained, *now, budget).limit == expected {
+                    true
+                } else {
+                    *now += SAMPLE_INTERVAL_MS;
+                    false
+                }
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn credit_admission_stops_after_bounded_contention() {
+        let pool = CreditPool::new();
+        let mut attempts = 0;
+        let granted = pool.acquire_with(CREDIT_QUANTUM, 2 * CREDIT_QUANTUM, |current, _| {
+            attempts += 1;
+            Err(current)
+        });
+        assert_eq!((granted, attempts, pool.allocated.load(Ordering::Relaxed)), (0, 8, 0));
+    }
+
+    #[test]
+    fn credit_admission_resumes_after_the_retry_deadline() {
+        let pool = CreditPool::new();
+        let mut lease = CreditLease::new();
+        lease.retry_after = SAMPLE_INTERVAL_MS;
+        let mut now = 0;
+        let budget = MemoryBudget {
+            limit: CREDIT_QUANTUM,
+            pressured: false,
+        };
+        adjust_after_transient_failures(
+            &mut lease,
+            &pool,
+            CREDIT_QUANTUM,
+            MEDIUM_SLICE_SIZE,
+            &mut now,
+            budget,
+            CREDIT_QUANTUM,
+        );
+        assert!(now >= SAMPLE_INTERVAL_MS);
+        assert_eq!(
+            (lease.bytes, pool.allocated.load(Ordering::Relaxed)),
+            (CREDIT_QUANTUM, CREDIT_QUANTUM)
+        );
     }
 
     #[test]

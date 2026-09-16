@@ -192,9 +192,14 @@ fn shrink_capacity(entries: &Addresses, allocation_capacity: usize) -> Option<us
 ///
 /// `layout` must have nonzero size, as required by `GlobalAlloc::alloc`.
 pub(super) unsafe fn allocate(layout: Layout) -> *mut u8 {
+    // SAFETY: the caller supplies a nonzero, valid layout.
+    unsafe { allocate_with_registration(layout, |address| addresses(address).insert(address, reserve_addresses)) }
+}
+
+unsafe fn allocate_with_registration(layout: Layout, register: impl FnOnce(usize) -> bool) -> *mut u8 {
     // SAFETY: GlobalAlloc's caller supplies a nonzero, valid layout.
     let address = unsafe { System.alloc(layout) };
-    if !address.is_null() && !addresses(address.addr()).insert(address.addr(), reserve_addresses) {
+    if !address.is_null() && !register(address.addr()) {
         // SAFETY: the allocation has not escaped and has its original layout.
         unsafe { System.dealloc(address, layout) };
         return ptr::null_mut();
@@ -290,6 +295,22 @@ mod tests {
         );
         assert!(shard.insert(100, reserve_addresses));
         assert!(shard.remove(100, reserve_addresses));
+    }
+
+    #[test]
+    fn failed_registration_releases_payload_without_publishing_it() {
+        let mut attempted = false;
+        // SAFETY: the layout is nonzero; rejecting registration leaves ownership
+        // with allocate_with_registration, which frees the System allocation.
+        let address = unsafe {
+            allocate_with_registration(Layout::new::<u64>(), |address| {
+                assert_ne!(address, 0);
+                attempted = true;
+                false
+            })
+        };
+        assert!(attempted);
+        assert!(address.is_null());
     }
 
     #[test]

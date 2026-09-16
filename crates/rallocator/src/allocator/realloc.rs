@@ -31,11 +31,10 @@ pub(super) unsafe fn reallocate<A: GlobalAlloc, T: Tunables>(allocator: &A, addr
     }
     // The mapping fallback adds headers, alignment slack and slab rounding.
     // Reject unrepresentable backing before entering its infallible arithmetic.
-    let Some(mapping_size) = direct_mapping_size(new_size, layout.align(), layout.align()).and_then(|size| size.checked_add(SLAB_SIZE - 1))
-    else {
-        return ptr::null_mut();
-    };
-    if mapping_size > isize::MAX as usize {
+    if direct_mapping_size(new_size, layout.align(), layout.align())
+        .and_then(|size| size.checked_add(SLAB_SIZE - 1))
+        .is_none_or(|size| size > isize::MAX as usize)
+    {
         return ptr::null_mut();
     }
     // SAFETY: the old allocation remains live and exclusively owned for resizing.
@@ -74,14 +73,15 @@ unsafe fn try_in_place<T: Tunables>(address: *mut u8, layout: Layout, new_layout
     let class = match kind & PHYSICAL_KIND_MASK {
         PHYSICAL_SLICE_SMALL => {
             let segment = allocation_segment(address);
-            if address == segment {
-                return false;
-            }
             let slab = segment.cast::<SlabHeader>();
-            // SAFETY: a live small allocation pins its slab. Marker and owner
-            // are immutable, including while retirement repurposes other fields.
-            let marker = unsafe { (*slab).marker.load(Ordering::Acquire) };
-            let Some(class) = slab_class_from_marker::<T>(marker) else {
+            let class = (address != segment)
+                .then(|| {
+                    // SAFETY: a live small allocation pins its slab. Its marker
+                    // is immutable, including while retirement repurposes other fields.
+                    unsafe { (*slab).marker.load(Ordering::Acquire) }
+                })
+                .and_then(slab_class_from_marker::<T>);
+            let Some(class) = class else {
                 return false;
             };
             if default_class::<T>(layout) != Some(class) || default_class::<T>(new_layout) != Some(class) {
@@ -90,10 +90,7 @@ unsafe fn try_in_place<T: Tunables>(address: *mut u8, layout: Layout, new_layout
             // SAFETY: only inspect mutable slab fields after identifying the
             // current owning heap, which cannot retire concurrently on this thread.
             let heap = unsafe { current_initialized_reusable_heap(state) };
-            if heap.is_null() || unsafe { (*slab).owner != (*heap).owner } {
-                return false;
-            }
-            if unsafe { is_remote_slab(slab) } {
+            if heap.is_null() || unsafe { (*slab).owner != (*heap).owner } || unsafe { is_remote_slab(slab) } {
                 return false;
             }
             let bytes = T::SizeClasses::SIZES[class];

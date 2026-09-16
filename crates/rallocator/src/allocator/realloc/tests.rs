@@ -108,6 +108,24 @@ fn failed_replacement_mapping_preserves_original() {
 }
 
 #[test]
+fn medium_growth_beyond_a_region_preserves_original_on_mapping_failure() {
+    let _test = tracking::TEST_LOCK.lock().unwrap();
+    // SAFETY: the live medium allocation keeps its original layout on failure.
+    // The injected mapping failure avoids reserving the oversized replacement.
+    unsafe {
+        let allocator = Rallocator::<Standard>::new();
+        let layout = Layout::from_size_align(MEDIUM_SLICE_SIZE, 16).unwrap();
+        let address = allocator.alloc(layout);
+        assert!(!address.is_null());
+        address.write(0x7b);
+        hal::fail_next_map();
+        assert!(allocator.realloc(address, layout, MEDIUM_REGION_SIZE + 1).is_null());
+        assert_eq!(address.read(), 0x7b);
+        allocator.dealloc(address, layout);
+    }
+}
+
+#[test]
 fn context_origin_survives_without_active_recording() {
     let _test = tracking::TEST_LOCK.lock().unwrap();
     // SAFETY: explicit context allocation uses the normal thread's heap and is
