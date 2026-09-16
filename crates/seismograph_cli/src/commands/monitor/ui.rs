@@ -35,17 +35,25 @@ impl App {
 
     fn draw_with_snapshot_time(&self, frame: &mut ratatui::Frame<'_>, format_snapshot_time: impl Fn(&CapturedSnapshot) -> String) {
         let [body, footer] = Layout::vertical([Constraint::Min(4), Constraint::Length(1)]).areas(frame.area());
-        match &self.screen {
-            Screen::Browse => self.draw_browser(frame, body),
-            Screen::Connected { tab, snapshot, .. } | Screen::Offline { tab, snapshot, .. } => draw_connected(
+        let snapshot_view = match &self.screen {
+            Screen::Browse => {
+                self.draw_browser(frame, body);
+                None
+            }
+            Screen::Connected {
+                descriptor,
+                recording,
+                tab,
+                snapshot,
+            } => Some((ViewOrigin::Live(descriptor, *recording), tab, snapshot)),
+            Screen::Offline { path, tab, snapshot } => Some((ViewOrigin::Offline(path), tab, snapshot)),
+        };
+        if let Some((origin, tab, snapshot)) = snapshot_view {
+            draw_connected(
                 frame,
                 body,
                 &ConnectedView {
-                    origin: match &self.screen {
-                        Screen::Connected { descriptor, recording, .. } => ViewOrigin::Live(descriptor, *recording),
-                        Screen::Offline { path, .. } => ViewOrigin::Offline(path),
-                        Screen::Browse => unreachable!("the outer match selected a snapshot screen"),
-                    },
+                    origin,
                     tab: *tab,
                     snapshot: snapshot.as_deref(),
                     snapshot_error: self.snapshot_error.as_deref(),
@@ -59,7 +67,7 @@ impl App {
                     activity_samples: &self.activity_samples,
                     recorder_statistics: self.recorder_statistics.as_ref(),
                 },
-            ),
+            );
         }
         let line = match &self.screen {
             Screen::Browse => browse_footer(&self.status),
@@ -2694,6 +2702,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(coverage_nightly, coverage(off))] // The fixture's impossible screen mismatch is not product behavior.
     fn offline_tabs_reuse_the_live_snapshot_renderers() {
         for tab in [
             MonitorTab::Heaps,
@@ -2740,6 +2749,62 @@ mod tests {
         assert!(output.contains("Capture time: not recorded"));
         assert!(!output.contains("Waiting for the first"));
         assert!(!output.contains("Recording configuration"));
+    }
+
+    #[test]
+    fn offline_info_reports_event_loss_and_missing_heap_data() {
+        let mut capture = representative_capture();
+        capture.primitives.total_events = 12;
+        capture.primitives.lost_events = 3;
+        capture.heap_error = Some("allocator source was not recorded".into());
+        let threads = capture.threads.threads.len();
+        let mut app = App::offline("runtime-only.seismograph".into());
+        app.finish_offline_load(capture);
+        let output = render(&app);
+        assert_eq!(
+            (
+                output.contains(&format!("Source events: 12 accepted · 3 overwritten · {threads} threads")),
+                output.contains("allocator source was not recorded"),
+            ),
+            (true, true),
+        );
+    }
+
+    #[test]
+    fn offline_info_without_a_snapshot_omits_source_statistics() {
+        let app = App::offline("pending.seismograph".into());
+        let view = ConnectedView {
+            origin: ViewOrigin::Offline(std::path::Path::new("pending.seismograph")),
+            tab: MonitorTab::Info,
+            snapshot: None,
+            snapshot_error: None,
+            heap_view: app.heap_view,
+            allocation_view: app.allocation_view,
+            primitive_view: app.primitive_view,
+            thread_view: app.thread_view,
+            runtime_view: app.runtime_view,
+            io_view: app.io_view,
+            cache_view: app.cache_view,
+            activity_samples: &app.activity_samples,
+            recorder_statistics: None,
+        };
+        let output = render_frame(|frame| draw_snapshot_info(frame, frame.area(), &view));
+        assert_eq!(
+            (
+                output.contains("pending.seismograph"),
+                output.contains("Offline snapshot · read-only"),
+                output.contains("Source events:"),
+            ),
+            (true, true, false),
+        );
+    }
+
+    #[test]
+    fn snapshot_time_does_not_invent_missing_capture_metadata() {
+        let mut capture = representative_capture();
+        capture.captured_at = None;
+        capture.captured_instant = None;
+        assert_eq!(snapshot_time(&capture), "capture time not recorded");
     }
 
     #[test]

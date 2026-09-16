@@ -169,6 +169,72 @@ mod tests {
     }
 
     #[test]
+    fn loader_returns_the_worker_result_before_reporting_disconnection() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let path = path("completed-worker");
+        let loader = Loader {
+            path: path.clone(),
+            receiver,
+        };
+        sender.send(Err(Error::snapshot_file(&path, "invalid source"))).unwrap();
+        drop(sender);
+
+        assert_eq!(
+            loader.poll().unwrap().err().unwrap().to_string(),
+            Error::snapshot_file(&path, "invalid source").to_string(),
+        );
+    }
+
+    #[test]
+    fn file_loading_reports_ordered_progress_through_ready() {
+        let bytes = native_bytes(seismograph::snapshot::SourceId::new(1), b"unknown source");
+        let path = write("progress", &bytes);
+        let mut phases = Vec::new();
+        let snapshot = load_with_progress(&path, File::open(&path).unwrap(), &mut |phase| {
+            phases.push(format!("{phase:?}"));
+        })
+        .unwrap();
+        std::fs::remove_file(path).unwrap();
+
+        assert_eq!(
+            (
+                phases,
+                snapshot.memory.is_none(),
+                snapshot.allocations.is_none(),
+                snapshot.heap_error.is_some(),
+                snapshot.captured_at,
+                snapshot.captured_instant,
+            ),
+            (
+                [
+                    "Read",
+                    "DecodeContainer",
+                    "ReleaseInput",
+                    "AllocationIndex",
+                    "Heaps",
+                    "Allocations",
+                    "Symbols",
+                    "Primitives",
+                    "Runtime",
+                    "Io",
+                    "Cache",
+                    "Threads",
+                    "ReleaseEvents",
+                    "Ready",
+                ]
+                .map(String::from)
+                .to_vec(),
+                true,
+                true,
+                true,
+                None,
+                None,
+            ),
+        );
+    }
+
+    #[test]
+    #[cfg_attr(coverage_nightly, coverage(off))] // Manual profiling, not an automated test.
     #[ignore = "requires SEISMOGRAPH_TEST_SNAPSHOT to name a large local capture"]
     fn large_file_load() {
         let path = PathBuf::from(std::env::var_os("SEISMOGRAPH_TEST_SNAPSHOT").unwrap());
