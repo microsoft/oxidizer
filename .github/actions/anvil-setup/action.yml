@@ -109,7 +109,7 @@ runs:
 
     # cargo-binstall keeps the cold bootstrap path fast.
     - name: Install cargo-binstall
-      uses: cargo-bins/cargo-binstall@v1.21.0 # pinned by tag: this release is an immutable release (GitHub locks the tag to a commit)
+      uses: cargo-bins/cargo-binstall@ead08b90bd7b2e6d81963fb9cf0b7239f66d5db4 # v1.21.0
 
     - name: Install just
       shell: pwsh -NoProfile -Command ". '{0}'"
