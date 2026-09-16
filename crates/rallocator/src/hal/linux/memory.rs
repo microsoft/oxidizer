@@ -139,6 +139,40 @@ mod tests {
     }
 
     #[test]
+    fn unavailable_cgroup_membership_preserves_host_memory() {
+        let memory = memory_status_with(|path, output| {
+            if path.to_bytes() != b"/proc/meminfo" {
+                return None;
+            }
+            let contents = b"MemTotal: 8 kB\nMemAvailable: 4 kB\n";
+            output[..contents.len()].copy_from_slice(contents);
+            Some(contents.len())
+        })
+        .unwrap();
+        assert_eq!((memory.total, memory.available), (8192, 4096));
+    }
+
+    #[test]
+    fn deeply_nested_cgroups_bound_ancestor_queries() {
+        let membership = format!("0::{}\n", "/a".repeat(40));
+        let mut limit_queries = 0;
+        let memory = memory_status_with(|path, output| {
+            let contents = match path.to_bytes() {
+                b"/proc/meminfo" => b"MemTotal: 8 kB\nMemAvailable: 4 kB\n".as_slice(),
+                b"/proc/self/cgroup" => membership.as_bytes(),
+                _ => {
+                    limit_queries += 1;
+                    return None;
+                }
+            };
+            output[..contents.len()].copy_from_slice(contents);
+            Some(contents.len())
+        })
+        .unwrap();
+        assert_eq!((memory.total, memory.available, limit_queries), (8192, 4096, 2 + 32 * 2));
+    }
+
+    #[test]
     fn oversized_cgroup_paths_preserve_host_memory_without_io() {
         let mut memory = MemoryStatus { total: 100, available: 40 };
         apply_cgroup(&[b'a'; 800], &mut memory, &mut read_file);
