@@ -44,6 +44,7 @@ These are the primary crates built out of this repo:
 - [`fetch_options`](./crates/fetch_options/README.md) - Options types for 'fetch' crate.
 - [`fetch_winhttp`](./crates/fetch_winhttp/README.md) - WinHTTP-based HTTP transport for the fetch client (Windows only).
 - [`fundle`](./crates/fundle/README.md) - Compile-time safe dependency injection for Rust.
+- [`http_compression`](./crates/http_compression/README.md) - HTTP request and response body compression and decompression.
 - [`http_extensions`](./crates/http_extensions/README.md) - Shared HTTP types and extension traits for clients and servers.
 - [`http_path_template`](./crates/http_path_template/README.md) - Parser for the google.api.http path-template grammar.
 - [`internity`](./crates/internity/README.md) - Blazingly fast string interning with compact handles, compact storage, and concurrent fill support.
@@ -145,8 +146,8 @@ To generate documentation locally with all features enabled (including feature-g
 just anvil-doc-build --open
 ```
 
-This requires the Rust nightly toolchain to be installed. The script will generate documentation
-and open it in your default browser.
+Anvil uses the repository's selected stable toolchain for this command. The
+script generates documentation and opens it in your default browser.
 
 ### CI Workflows
 

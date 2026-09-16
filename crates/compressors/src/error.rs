@@ -289,6 +289,15 @@ impl Error {
     pub fn is_source(&self) -> bool {
         self.kind == Kind::Source
     }
+
+    /// Takes the wrapped foreign error by value.
+    ///
+    /// This supports adapters that need to preserve their own error type after it
+    /// has passed through a compression stream.
+    #[must_use]
+    pub fn into_source(self) -> Option<Box<dyn StdError + Send + Sync>> {
+        self.source
+    }
 }
 
 impl Recovery for Error {
@@ -431,6 +440,24 @@ mod tests {
         assert!(error.is_source(), "got {error}");
         assert!(!error.is_corrupt_data(), "got {error}");
         assert!(!error.is_invalid_configuration(), "got {error}");
+    }
+
+    #[test]
+    fn a_wrapped_cause_can_be_taken_back_by_value() {
+        let error = Error::other("the source stopped", std::io::Error::other("the cause"));
+
+        assert!(error.source().is_some(), "the cause must also be visible by reference");
+
+        let taken = error.into_source().unwrap();
+        let taken = taken.downcast::<std::io::Error>().unwrap();
+        assert_eq!(taken.to_string(), "the cause");
+    }
+
+    #[test]
+    fn an_error_this_crate_raises_itself_wraps_nothing() {
+        let error = Error::corrupt_data("the trailer checksum did not match");
+
+        assert!(error.into_source().is_none());
     }
 
     #[test]

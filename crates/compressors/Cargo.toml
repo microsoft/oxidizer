@@ -61,7 +61,9 @@ bytesbuf = { workspace = true, features = ["std"] }
 # unlike the `zlib`/`zlib-ng` bindings, is pure Rust, so the deflate family stays free of C on a path
 # that parses untrusted input. The cost is recorded above -- it is what keeps this crate out of Miri.
 flate2 = { workspace = true, features = ["zlib-rs"], optional = true }
+foldhash = { workspace = true }
 futures-core = { workspace = true, optional = true }
+performables = { workspace = true }
 pin-project-lite = { workspace = true, optional = true }
 recoverable = { workspace = true }
 thread_aware = { workspace = true, features = ["std"] }

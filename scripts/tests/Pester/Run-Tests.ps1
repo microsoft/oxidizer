@@ -36,6 +36,9 @@ $PSNativeCommandUseErrorActionPreference = $true
 # --- PESTER PRE-FLIGHT ---
 
 $requiredPesterVersion = [version]'5.7.1'
+$availablePester = Get-Module Pester -ListAvailable |
+    Sort-Object Version -Descending |
+    Select-Object -First 1
 $pester = Get-Module Pester -ListAvailable |
     Where-Object Version -EQ $requiredPesterVersion |
     Select-Object -First 1
@@ -47,9 +50,9 @@ if ($null -eq $pester) {
     Write-Host ""
     Write-Host "Then rerun:" -ForegroundColor Yellow
     Write-Host "  just test-scripts"
-    if ($null -ne $pester) {
+    if ($null -ne $availablePester) {
         Write-Host ""
-        Write-Host "(Detected Pester $($pester.Version); upgrade required.)"
+        Write-Host "(Detected Pester $($availablePester.Version); version $requiredPesterVersion is required.)"
     }
     exit 2
 }

@@ -65,10 +65,9 @@
     // `justfiles/anvil/versions.just`, which is what Anvil's format check runs;
     // a different nightly can format the same file differently.
     //
-    // Your own copy of this file does not move with an Anvil catalog update:
-    // re-copy this line into `.vscode/settings.json` and install the new toolchain with
-    // re-run `just anvil-fmt-setup`, then copy the updated argument below,
-    // otherwise format-on-save fails on a toolchain you no longer have.
+    // Your own copy of this file does not move with an Anvil catalog update.
+    // After an update, run `just anvil-fmt-setup`, then copy the updated
+    // `rust-analyzer.rustfmt.extraArgs` value into `.vscode/settings.json`.
     "rust-analyzer.rustfmt.extraArgs": ["+nightly-2026-05-30", "--config-path", "${workspaceFolder}/unstable-rustfmt.toml"],
 
     // Clippy is extremely slow when used on our large workspace, so you may want to use

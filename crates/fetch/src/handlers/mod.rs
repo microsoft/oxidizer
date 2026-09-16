@@ -8,15 +8,15 @@
 //! builds the request-processing pipeline used by an
 //! [`HttpClient`](crate::HttpClient).
 //!
-//! See [`RequestHandler`][super::RequestHandler] for how handlers work and how to
+//! See [`RequestHandler`][crate::RequestHandler] for how handlers work and how to
 //! write your own.
 //!
 //! # Available Handlers
 //!
-//! - [`Buffering`]: buffers the entire response body into memory.
-//! - [`Metrics`]: collects performance data for monitoring.
-//! - [`Logging`]: adds structured request/response logging.
-//! - [`Dispatch`]: sends requests to the network (managed by the `HttpClient`).
+//! - [`Buffering`][crate::handlers::Buffering]: buffers the entire response body into memory.
+//! - [`Metrics`][crate::handlers::Metrics]: collects performance data for monitoring.
+//! - [`Logging`][crate::handlers::Logging]: adds structured request/response logging.
+//! - [`Dispatch`][crate::handlers::Dispatch]: sends requests to the network (managed by the `HttpClient`).
 
 mod dispatch;
 pub use dispatch::Dispatch;
