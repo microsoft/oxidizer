@@ -34,7 +34,7 @@ default = ["std"]
 std = ["dep:parking_lot"]
 serde = ["dep:serde", "dep:internity_macros"]
 # Marker feature selecting the Loom model-checking test target. The model itself
-# is compiled under `--cfg loom` by the workspace's `just loom` recipe.
+# is compiled under `--cfg loom` by `just anvil-loom`.
 loom = []
 
 [dependencies]

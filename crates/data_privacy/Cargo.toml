@@ -20,6 +20,9 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/data_privac
 [package.metadata.docs.rs]
 all-features = true
 
+[package.metadata.anvil.examples]
+no-run = ["employees"]
+
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
     "serde_core::de::*",

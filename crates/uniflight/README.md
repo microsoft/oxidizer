@@ -6,7 +6,7 @@
 [![crate.io](https://img.shields.io/crates/v/uniflight.svg)](https://crates.io/crates/uniflight)
 [![docs.rs](https://docs.rs/uniflight/badge.svg)](https://docs.rs/uniflight)
 [![MSRV](https://img.shields.io/crates/msrv/uniflight)](https://crates.io/crates/uniflight)
-[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml/badge.svg)](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/microsoft/oxidizer/blob/main/LICENSE)
 <a href="https://github.com/microsoft/oxidizer"><img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
@@ -136,7 +136,7 @@ Use `--save-baseline` and `--baseline` flags to track regressions over time.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/uniflight">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbU6WjHK_pePUb9nAUk6LDFxYbshcxUBqnlqkbwdYKqA0YNsRhZIKCbHBlcmZvcm1hYmxlc2UwLjEuMIJpdW5pZmxpZ2h0ZTAuNi4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbU6WjHK_pePUb9nAUk6LDFxYbshcxUBqnlqkbwdYKqA0YNsRhZIKCbHBlcmZvcm1hYmxlc2UwLjEuMIJpdW5pZmxpZ2h0ZTAuNi4w
  [__link0]: https://docs.rs/uniflight/0.6.0/uniflight/struct.Merger.html
  [__link1]: https://docs.rs/uniflight/0.6.0/uniflight/?search=Merger::execute
  [__link10]: https://doc.rust-lang.org/stable/std/?search=hash::Hash

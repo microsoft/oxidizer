@@ -6,7 +6,7 @@
 [![crate.io](https://img.shields.io/crates/v/rest_over_grpc.svg)](https://crates.io/crates/rest_over_grpc)
 [![docs.rs](https://docs.rs/rest_over_grpc/badge.svg)](https://docs.rs/rest_over_grpc)
 [![MSRV](https://img.shields.io/crates/msrv/rest_over_grpc)](https://crates.io/crates/rest_over_grpc)
-[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml/badge.svg)](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/microsoft/oxidizer/blob/main/LICENSE)
 <a href="https://github.com/microsoft/oxidizer"><img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
@@ -226,7 +226,7 @@ as an Axum fallback service.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/rest_over_grpc">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbvTkfRkZSF74bFkiR2XTYsVUbNpV_rR9ivr4bQqiJonBozh9hZIOCZ2xheWVyZWRlMC4zLjeCbnJlc3Rfb3Zlcl9ncnBjZTAuMi4xg210b3dlci1zZXJ2aWNlZTAuMy4zbXRvd2VyX3NlcnZpY2U
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbvTkfRkZSF74bFkiR2XTYsVUbNpV_rR9ivr4bQqiJonBozh9hZIOCZ2xheWVyZWRlMC4zLjeCbnJlc3Rfb3Zlcl9ncnBjZTAuMi4xg210b3dlci1zZXJ2aWNlZTAuMy4zbXRvd2VyX3NlcnZpY2U
  [__link0]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=handling::Status
  [__link1]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=serving::RestService::new
  [__link10]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=transcoding::Transcode::try_transcode

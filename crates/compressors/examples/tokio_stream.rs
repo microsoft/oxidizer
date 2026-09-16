@@ -52,10 +52,10 @@ async fn main() -> Result<(), compressors::Error> {
     // all draw on this provider and share its pool of recycled engines.
     let resources = Resources::new(GlobalPool::new());
 
-    // Under `scripts/run-examples.rs` this runs as an automated check, where waiting out 200 real
+    // Under Anvil this runs as an automated check, where waiting out 200 real
     // arrivals would be two seconds of wall clock and a dependency on runtime scheduling. A clock
     // that advances itself on every query settles the same 200 arrivals immediately.
-    let clock = if env::var_os("IS_TESTING").is_some() {
+    let clock = if env::var_os("ANVIL_EXAMPLE").is_some() {
         ClockControl::new().auto_advance(ARRIVAL_PERIOD).to_clock()
     } else {
         Clock::new_tokio()

@@ -17,7 +17,7 @@
 //!
 //! insta cannot run under miri: `insta::_macro_support::get_cargo_workspace` reads from disk
 //! and miri's isolation rejects that, so this whole file is compiled out under miri. The
-//! crate is on the miri exclusion list in `main.yml`, so that costs no CI coverage.
+//! crate opts out through package-level Anvil Miri metadata, so that costs no CI coverage.
 
 #![cfg(not(miri))]
 

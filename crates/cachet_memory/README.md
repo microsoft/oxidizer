@@ -6,7 +6,7 @@
 [![crate.io](https://img.shields.io/crates/v/cachet_memory.svg)](https://crates.io/crates/cachet_memory)
 [![docs.rs](https://docs.rs/cachet_memory/badge.svg)](https://docs.rs/cachet_memory)
 [![MSRV](https://img.shields.io/crates/msrv/cachet_memory)](https://crates.io/crates/cachet_memory)
-[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml/badge.svg)](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/microsoft/oxidizer/blob/main/LICENSE)
 <a href="https://github.com/microsoft/oxidizer"><img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
@@ -91,7 +91,7 @@ TTL/TTI unset or set them to a sufficiently high ceiling.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet_memory">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbejeJIJ3wjSIbQ4FD8_ZrIe0bdNSA5y85nYcbNmCiuslgqq1hZIKCbWNhY2hldF9tZW1vcnllMC44LjCCa2NhY2hldF90aWVyZTAuNS4x
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbejeJIJ3wjSIbQ4FD8_ZrIe0bdNSA5y85nYcbNmCiuslgqq1hZIKCbWNhY2hldF9tZW1vcnllMC44LjCCa2NhY2hldF90aWVyZTAuNS4x
  [__link0]: https://docs.rs/cachet_memory/0.8.0/cachet_memory/?search=InMemoryCache
  [__link1]: https://docs.rs/cachet_memory/0.8.0/cachet_memory/?search=InMemoryCacheBuilder
  [__link10]: https://docs.rs/cachet_tier/0.5.1/cachet_tier/?search=CacheEntry::expires_after

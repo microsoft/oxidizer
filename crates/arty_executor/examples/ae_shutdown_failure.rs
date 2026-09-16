@@ -30,7 +30,7 @@ use tracing::info;
 const EXPECTED_FAILURE_CHILD_ENV: &str = "ARTY_EXECUTOR_EXPECTED_FAILURE_CHILD";
 
 fn main() {
-    if env::var_os("IS_TESTING").is_some() && env::var_os(EXPECTED_FAILURE_CHILD_ENV).is_none() {
+    if env::var_os("ANVIL_EXAMPLE").is_some() && env::var_os(EXPECTED_FAILURE_CHILD_ENV).is_none() {
         assert_failure_in_child();
     } else {
         run_example();
@@ -51,7 +51,7 @@ fn run_example() {
     tracing_subscriber::fmt::init();
 
     let mut executor_builder = Executor::builder();
-    if env::var_os("IS_TESTING").is_some() {
+    if env::var_os("ANVIL_EXAMPLE").is_some() {
         executor_builder = executor_builder.shutdown_timeout(Duration::ZERO);
     }
     // SAFETY: We are required to complete safe shutdown of the executor by only dropping it once

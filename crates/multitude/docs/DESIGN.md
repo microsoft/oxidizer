@@ -802,12 +802,9 @@ maximize coverage percentages.
 
 **Miri** runs over the library and integration tests with all features in
 CI, and the tree-borrows, strict-provenance, and many-seeds profiles run on
-a nightly schedule. A repo-root suppression file, `.miri-tree-borrows-skip`,
-excludes individual tests from the tree-borrows profile only. Entries there
-are memory-budget exclusions, not soundness exclusions: tree borrows tracks
-provenance per byte, and a test that takes repeated nested borrows into a
-64 KiB chunk can exceed the CI runner's memory limit while remaining
-correct. Two test binaries opt out of Miri entirely for structural
+a nightly schedule. Profile-specific test exclusions use `cfg_attr` on the
+affected test so the reason stays next to the behavior it excludes. Two test
+binaries opt out of Miri entirely for structural
 reasons — the Bolero driver needs filesystem access for corpus replay, and
 the allocation-tracking tests measure real system-allocator traffic that
 Miri's allocator model does not represent. Both have Miri-visible
@@ -815,7 +812,7 @@ counterparts covering the same unsafe paths.
 
 **Loom** model-checks the concurrent protocols. The test target is gated
 behind a marker feature, built under `--cfg loom`, and driven by
-`just loom`. It covers five protocol families:
+`just anvil-loom`. It covers five protocol families:
 
 | Interleaving explored | Invariant defended |
 |---|---|

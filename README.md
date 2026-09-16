@@ -3,7 +3,7 @@
 
 # The Oxidizer Project
 
-[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml/badge.svg)](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
@@ -19,7 +19,7 @@ This repository contains a set of crates that help you build robust highly scala
     - [Documenting Crates](#documenting-crates)
     - [CI Workflows](#ci-workflows)
     - [Pull Request Gates](#pull-request-gates)
-    - [Tool Versions](#tool-versions)
+    - [Local Verification](#local-verification)
   - [Trademarks](#trademarks)
 
 ## Crates
@@ -143,117 +143,51 @@ automation processes:
 To generate documentation locally with all features enabled (including feature-gated items), run:
 
 ```shell
-just docs
+just anvil-doc-build --open
 ```
 
-This requires the Rust nightly toolchain to be installed. The script will generate documentation
-and open it in your default browser.
+Anvil uses the repository's selected stable toolchain for this command. The
+script generates documentation and opens it in your default browser.
 
 ### CI Workflows
 
-We have two primary workflows:
+Cargo Anvil owns Rust verification:
 
-- `main`. Runs on all pull requests and commits to the main branch. This
-  performs quite a bit of validation to ensure high-quality outcomes. Any issues
-  found by this workflow blocks the pull request from being merged.
+- `anvil-pr.yml` runs impact-scoped pull request and merge-group checks across
+  the supported operating-system and architecture matrix.
+- `anvil-scheduled.yml` runs full-workspace backstops and longer checks.
 
-- `nightly`. Runs nightly on the main branch. This executes repo-wide mutation testing
-  (as opposed to the main workflow which does incremental testing). Any issues
-  found by this workflow result in an issue being opened reporting the problem.
+Both workflows invoke the same generated `just anvil-*` recipes developers use
+locally. Codecov reports remain available for detailed inspection, while the
+Anvil coverage gate is authoritative.
 
 ### Pull Request Gates
 
-We strive to deliver high-quality code and as such, we've put in place a number of PR gates, described here:
+The Anvil pull request tier covers formatting, linting, manifest policy,
+documentation, dependency policy, SemVer analysis, external-type exposure,
+tests, coverage, examples, MSRV compatibility, Miri, cargo-careful, Loom,
+Bolero, and mutation testing. Run the complete tier locally with:
 
-- **Build**. We build all the crates in the repo for Windows and Linux.
-  We use [`cargo-hack`](https://crates.io/crates/cargo-hack) to iterate through
-  different crate feature combinations to make sure everything builds properly.
+```shell
+just anvil-pr
+```
 
-- **Testing**. We run `cargo nextest --all-features` to run every normal test and documentation test in the repo.
+### Local Verification
 
-- **Code Coverage**. We calculate code coverage for the whole repo using [
-  `cargo-llvm-cov`](https://crates.io/crates/cargo-llvm-cov).
-  We capture coverage for Windows and Linux, with `--all-features` and `--no-features`. Coverage is collected using
-  the nightly Rust compiler which makes it possible to use `coverage(off)` annotations in the source code to suppress
-  coverage collection for a chunk of code. We require 100% coverage for any checked in code.
+Run `just anvil-setup` once to install the toolchains and tools selected by the
+Anvil catalog. Useful focused commands include:
 
-- **Mutation Testing**. We use [`cargo-mutants`](https://crates.io/crates/cargo-mutants) to help maintain
-  high test quality.
+```shell
+just anvil-build
+just anvil-clippy
+just anvil-fmt --fix
+just anvil-readme --fix
+just anvil-spellcheck
+just anvil-pr-fast
+```
 
-- **Source Linting**. We run Clippy with most warnings enabled and all treated as errors.
-
-- **Doc Linting**. We lint documentation to help find bad links and other anti-patterns.
-
-- **Source Formatting**. We ensure the source code complies with the Rust standard format.
-
-- **Cargo.toml Formatting**. We use [`cargo-sort`](https://crates.io/crates/cargo-sort) to keep Cargo.toml
-  files in a consistent format and layout.
-
-- **Unsafe Verification**. We use Miri and [`cargo-careful`](https://crates.io/crates/cargo-careful) to verify that our
-  unsafe code doesn't induce undefined behaviors. Miri is run with multiple aliasing models — Stacked Borrows,
-  [Tree Borrows](https://perso.crans.org/vanille/treebor/), strict provenance, and a many-seeds sweep — because each
-  variant rejects a different class of UB.
-
-- **Concurrency Verification**. Crates with concurrent unsafe code can opt in to model-checking with
-  [`loom`](https://crates.io/crates/loom). Loom exhaustively explores legal interleavings of atomic operations
-  to surface memory-ordering bugs that hardware-stressing won't reproduce reliably. Run locally via `just loom`;
-  any crate with a `[target.'cfg(loom)'.dependencies]` section in its `Cargo.toml` is auto-discovered.
-
-- **Property-Based Fuzzing**. Crates can opt in to coverage-guided property tests with
-  [`bolero`](https://crates.io/crates/bolero) by adding `tests/bolero_*.rs` files. The CI fuzzing job runs each
-  target under libfuzzer for a bounded duration on every PR. Run locally via `just bolero` (override the time
-  budget with `just bolero 10m`).
-
-- **External Type Exposure**. We use [`cargo-check-external-types`](https://crates.io/crates/cargo-check-external-types) to track
-  which external types our crates depend on. Exposing a 3P type from a crate creates a coupling between the crate and
-  the exporter
-  of the type which can be problematic over time. This check is there to prevent unintentional exposure. If the exposure
-  is intentional,
-  it's a simple matter of adding an exclusion for it to the crate's `Cargo.toml` file.
-
-- **Default Features**. We use [
-  `cargo-ensure-no-default-features`](https://crates.io/crates/cargo-ensure-no-default-features) to make
-  sure the dependencies pulled in by the top-level Cargo.toml are all annotated with `default-features = false`.
-  Individual crates that use
-  these dependencies are then responsible for stating exactly which features they need. This is designed to minimize
-  build times for
-  our customers.
-
-- **Cyclic Dependencies**. We use [`cargo-ensure-no-cyclic-deps`](https://crates.io/crates/cargo-ensure-no-cyclic-deps)
-  to ensure the
-  crates in the repo don't create funny referential cycles using `dev-dependencies`. Things break or get difficult when
-  these cycles exist.
-
-- **Unneeded Dependencies**. We use [`cargo-udeps`](https://crates.io/crates/cargo-udeps) to ensure our crates don't
-  have superfluous
-  dependencies.
-
-- **Dependency Validation**. We use [`cargo-deny`](https://crates.io/crates/cargo-deny) to ensure our dependencies
-  have acceptable licenses and don't contain known vulnerabilities.
-
-- **Semantic Version Compatibility**. We use [`cargo-semver-checks`](https://crates.io/crates/cargo-semver-checks) to ensure
-  our API surface maintains the compatibility guarantees implies by semantic versioning.
-
-- **PR Title**. Every PR submitted to this repo must follow
-  the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
-  specification. We use these PR titles as part of our automatic change log generation logic.
-
-- **License Headers**. We ensure all source files have the requisite license header using
-  [cargo-heather](https://crates.io/crates/cargo-heather). Run `just license-check` to check or `just license` to auto-apply.
-
-- **Spell Checking**. We use [cargo-spellcheck](https://crates.io/crates/cargo-spellcheck) to help our docs have fewer typos.
-
-- **README Content**. We use [`cargo-doc2readme`](https://crates.io/crates/cargo-doc2readme) to ensure each crate's `README.md`
-  file matches the crate's current crate-level documentation.
-
-### Tool Versions
-
-We pin the version of the tools we use in CI to ensure hermetic builds as much as possible. We routinely update
-the versions of everything to stay up to date using three scripts:
-
-- `scripts/update_rust_toolchain.ps1` which updates the version of the Rust toolchain in the `constants.env` file.
-- `scripts/update_tool_versions.ps1` which updates the version of tools in the `constants.env` file.
-- `scripts/update_action_versions.ps1` which updates the version of GitHub actions in the various files in `.github/workflows`.
+Tool versions are generated in `justfiles/anvil/versions.just` and updated with
+Cargo Anvil. Do not maintain a second tool-version list.
 
 ## Trademarks
 

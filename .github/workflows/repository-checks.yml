@@ -1,0 +1,56 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+name: Repository checks
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+  merge_group: {}
+
+permissions:
+  contents: read
+
+jobs:
+  release-script-tests:
+    name: "Release script tests (${{ matrix.os }})"
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/anvil-setup
+        with:
+          group: none
+      - name: Install Rust
+        run: just anvil-toolchain-stable-install
+      - name: Install Pester
+        shell: pwsh
+        run: |
+          $existing = Get-Module Pester -ListAvailable |
+              Where-Object Version -EQ ([version]'5.7.1') |
+              Select-Object -First 1
+          if ($null -eq $existing) {
+              Install-Module -Name Pester -RequiredVersion 5.7.1 -Force -Scope CurrentUser -SkipPublisherCheck
+          }
+      - name: Run Pester suite
+        shell: pwsh
+        run: just test-scripts
+
+  required-repository-checks:
+    name: Required repository checks
+    if: always()
+    needs: [release-script-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify repository checks
+        env:
+          RELEASE_SCRIPT_TESTS: ${{ needs.release-script-tests.result }}
+        run: |
+          if [[ "$RELEASE_SCRIPT_TESTS" != "success" ]]; then
+            echo "::error::release-script-tests concluded $RELEASE_SCRIPT_TESTS"
+            exit 1
+          fi

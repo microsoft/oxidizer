@@ -8,7 +8,7 @@
     Runs the Pester test suite for the release-related PowerShell scripts.
 
 .DESCRIPTION
-    Validates that Pester 5.7+ is available, then runs every *.Tests.ps1 file
+    Validates that Pester 5.7.1 is available, then runs every *.Tests.ps1 file
     under scripts/tests/Pester/. Optionally limits to a single subtree
     (unit|integration|scenarios). Emits NUnit XML if -OutputPath is provided
     (CI consumes this).
@@ -35,23 +35,29 @@ $PSNativeCommandUseErrorActionPreference = $true
 
 # --- PESTER PRE-FLIGHT ---
 
-$pester = Get-Module Pester -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1
-if ($null -eq $pester -or $pester.Version -lt [version]'5.7.0') {
-    Write-Host "ERROR: Pester 5.7+ is required to run the release-script test suite." -ForegroundColor Red
+$requiredPesterVersion = [version]'5.7.1'
+$availablePester = Get-Module Pester -ListAvailable |
+    Sort-Object Version -Descending |
+    Select-Object -First 1
+$pester = Get-Module Pester -ListAvailable |
+    Where-Object Version -EQ $requiredPesterVersion |
+    Select-Object -First 1
+if ($null -eq $pester) {
+    Write-Host "ERROR: Pester $requiredPesterVersion is required to run the release-script test suite." -ForegroundColor Red
     Write-Host ""
     Write-Host "Install with:"   -ForegroundColor Yellow
-    Write-Host "  Install-Module -Name Pester -MinimumVersion 5.7.1 -Force -Scope CurrentUser -SkipPublisherCheck"
+    Write-Host "  Install-Module -Name Pester -RequiredVersion 5.7.1 -Force -Scope CurrentUser -SkipPublisherCheck"
     Write-Host ""
-    Write-Host "Or run:" -ForegroundColor Yellow
-    Write-Host "  just install-tools"
-    if ($null -ne $pester) {
+    Write-Host "Then rerun:" -ForegroundColor Yellow
+    Write-Host "  just test-scripts"
+    if ($null -ne $availablePester) {
         Write-Host ""
-        Write-Host "(Detected Pester $($pester.Version); upgrade required.)"
+        Write-Host "(Detected Pester $($availablePester.Version); version $requiredPesterVersion is required.)"
     }
     exit 2
 }
 
-Import-Module Pester -MinimumVersion 5.7.0 -Force
+Import-Module Pester -RequiredVersion $requiredPesterVersion -Force
 
 # --- TEST DISCOVERY ---
 
@@ -83,7 +89,7 @@ if ($PassThru) {
     return $result
 }
 
-if ($result.FailedCount -gt 0) {
+if ($result.Result -ne 'Passed' -or $result.FailedCount -gt 0 -or $result.FailedContainersCount -gt 0) {
     exit 1
 }
 exit 0
