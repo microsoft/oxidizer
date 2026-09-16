@@ -217,6 +217,36 @@ impl Demand {
 mod tests {
     use super::*;
 
+    #[test]
+    fn fresh_medium_refill_leases_every_committed_span() {
+        let domain = crate::domain::state(crate::domain::Domain::new().unwrap());
+        // SAFETY: this test uses the standard allocator configuration.
+        let allocator: Rallocator = unsafe { Rallocator::new() };
+        let mut heap = ReusableHeapState::new(GeneralOptions::new(), domain);
+        let layout = Layout::from_size_align(2 * MEDIUM_SLICE_SIZE, 16).unwrap();
+        let backing = heap_regions(&mut heap);
+        let mut observations = [(0, 0); 3];
+        let addresses: [_; 3] = std::array::from_fn(|index| {
+            let address = allocator.allocate_medium(layout, &mut heap, None);
+            assert!(!address.is_null());
+            observations[index] = (backing.state.lock().demand.leased, heap.medium_batch.bytes);
+            address
+        });
+        for address in addresses {
+            // SAFETY: each allocation is live and owned exclusively by this heap.
+            unsafe { allocator.deallocate_medium(address, layout, ptr::from_mut(&mut heap)) };
+        }
+        while let Some(cached) = heap.medium_batch.pop(1) {
+            // SAFETY: the cache transfers exclusive ownership of this two-slice span.
+            unsafe { backing.decommit_span(cached, 2, 0) };
+        }
+
+        assert_eq!(
+            observations,
+            [(layout.size(), 0), (3 * layout.size(), layout.size()), (3 * layout.size(), 0)]
+        );
+    }
+
     #[cfg(not(miri))]
     fn assert_cache_misses_release_idle_credits(size: usize, cache_limit: usize) {
         let domain = crate::domain::state(crate::domain::Domain::new().unwrap());
