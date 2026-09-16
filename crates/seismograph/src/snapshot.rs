@@ -1157,7 +1157,7 @@ pub fn snapshot_arena_allocation_suspended() -> bool {
 /// restricting ordinary Rust allocation lifetimes to the capture scope.
 #[doc(hidden)]
 #[must_use]
-pub fn snapshot_arena_active() -> bool {
+pub fn snapshot_collection_active() -> bool {
     ACTIVE_SNAPSHOT_ARENA.try_with(|active| !active.get().is_null()).unwrap_or(false)
 }
 
@@ -1165,7 +1165,7 @@ pub fn snapshot_arena_active() -> bool {
 ///
 /// Storage is scoped to this capture. Global allocators must not use this for
 /// arbitrary Rust allocations: source caches, errors and panic payloads can
-/// outlive capture. Use [`snapshot_arena_active`] to select independently owned
+/// outlive capture. Use [`snapshot_collection_active`] to select independently owned
 /// storage instead.
 #[doc(hidden)]
 #[must_use]

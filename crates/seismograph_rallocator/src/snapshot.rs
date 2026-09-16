@@ -4,10 +4,8 @@
 //! Rallocator snapshot model types.
 //!
 //! Statistics section version 2 identifies the raw peak value's scope through
-//! [`PeakLiveBytesScope`]. Version 1 remains readable, but its peak is reported as
-//! unavailable rather than retroactively treated as a lifetime peak. Readers
-//! predating statistics version 2 must be upgraded to read newly encoded snapshots
-//! because the statistics section is required.
+//! [`PeakLiveBytesScope`]. Only version 2 is supported; version 1 snapshots are
+//! rejected because the statistics section is required.
 
 /// Version of the snapshot producer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -68,8 +66,7 @@ impl Estimate {
 /// Collection scope of the raw [`Stats::peak_live_bytes`] value.
 ///
 /// A maximum over occasional counter reads cannot recover a lifetime peak:
-/// allocations may be created and freed between those reads. Historical statistics
-/// sections did not identify the scope and decode as [`Self::Unavailable`].
+/// allocations may be created and freed between those reads.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum PeakLiveBytesScope {
@@ -114,8 +111,6 @@ pub struct Stats {
     /// Raw high-water-mark value; interpret only through [`Self::peak_live_bytes_scope`].
     ///
     /// Use [`Self::lifetime_peak_live_bytes`] when a true lifetime peak is required.
-    /// Old snapshots retain their numeric value here but do not acquire historical
-    /// peak information merely by being decoded by a newer reader.
     pub peak_live_bytes: u64,
     /// Whether the raw peak is unavailable, an aggregate-query sample maximum, or a lifetime peak.
     pub peak_live_bytes_scope: PeakLiveBytesScope,

@@ -78,7 +78,7 @@ pub(crate) fn with_snapshot_arena<R>(operation: impl FnOnce() -> R) -> R {
     operation()
 }
 
-pub(crate) fn snapshot_arena_active() -> bool {
+pub(crate) fn snapshot_collection_active() -> bool {
     SNAPSHOT_ALLOCATION_DEPTH.try_with(|depth| depth.get() != 0).unwrap_or(false)
 }
 
@@ -1601,20 +1601,20 @@ mod tests {
 
     #[test]
     fn snapshot_allocation_scope_restores_nested_depth() {
-        assert!(!snapshot_arena_active());
+        assert!(!snapshot_collection_active());
         with_snapshot_arena(|| {
-            assert!(snapshot_arena_active());
-            with_snapshot_arena(|| assert!(snapshot_arena_active()));
-            assert!(snapshot_arena_active());
+            assert!(snapshot_collection_active());
+            with_snapshot_arena(|| assert!(snapshot_collection_active()));
+            assert!(snapshot_collection_active());
         });
-        assert!(!snapshot_arena_active());
+        assert!(!snapshot_collection_active());
     }
 
     #[test]
     fn snapshot_allocation_scope_restores_after_unwind() {
         let result = std::panic::catch_unwind(|| with_snapshot_arena(|| panic!("injected capture failure")));
         assert!(result.is_err());
-        assert!(!snapshot_arena_active());
+        assert!(!snapshot_collection_active());
     }
 
     #[test]

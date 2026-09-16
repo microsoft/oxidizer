@@ -1838,7 +1838,7 @@ where
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         GLOBAL_ALLOCATOR_ACTIVE.store(true, Ordering::Release);
         if !seismograph::snapshot::snapshot_arena_allocation_suspended()
-            && (seismograph::snapshot::snapshot_arena_active() || tracking::snapshot_arena_active())
+            && (seismograph::snapshot::snapshot_collection_active() || tracking::snapshot_collection_active())
         {
             // SAFETY: the GlobalAlloc caller provides a valid nonzero layout.
             return unsafe { snapshot::allocate(layout) };
