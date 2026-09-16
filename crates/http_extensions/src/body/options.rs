@@ -28,6 +28,15 @@ pub struct HttpBodyOptions {
 }
 
 impl HttpBodyOptions {
+    /// Options that set no policy at all.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            timeout: None,
+            buffer_limit: None,
+        }
+    }
+
     /// Sets the body idle timeout.
     ///
     /// The timeout limits how long the consumer will wait between frames while

@@ -1,28 +1,22 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use data_privacy::RedactionEngine;
 use futures::future::Either;
-use http_extensions::HttpBodyBuilder;
-use http_extensions::routing::Router;
 use layered::{DynamicService, DynamicServiceExt, Service, Stack};
-use opentelemetry::metrics::Meter;
 use thread_aware::ThreadAware;
-use tick::Clock;
 
 use crate::handlers::Dispatch;
 use crate::pipeline::StandardRequestPipeline;
-use crate::pipeline::custom::CustomPipelineFactory;
+use crate::pipeline::custom::CustomPipeline;
 use crate::pipeline::pipeline_context::PipelineContext;
 use crate::pipeline::standard::{ConfigureStandardPipeline, RecoveryMode};
-use crate::resilience::HttpResilienceContext;
 use crate::{HttpRequest, HttpResponse};
 
 #[derive(Debug, Clone, ThreadAware)]
 pub(crate) enum PipelineBuilder {
     StandardPipeline(ConfigureStandardPipeline),
     Minimal,
-    Custom(CustomPipelineFactory),
+    Custom(CustomPipeline),
 }
 
 impl Default for PipelineBuilder {
@@ -45,9 +39,9 @@ pub(crate) enum Pipeline {
 
 #[cfg(test)]
 impl Pipeline {
-    pub(crate) fn dbg_string_for_custom_pipeline(&self) -> &str {
+    pub(crate) fn debug_string(&self) -> &str {
         match self {
-            Self::Minimal(_) => panic!("must be custom pipeline"),
+            Self::Minimal(_) => panic!("expected custom pipeline, found minimal pipeline"),
             Self::Custom { debug, .. } => debug,
         }
     }
@@ -60,14 +54,20 @@ impl Pipeline {
     }
 }
 
-impl Service<HttpRequest> for Pipeline {
-    type Out = crate::Result<HttpResponse>;
-
-    fn execute(&self, input: HttpRequest) -> impl Future<Output = crate::Result<HttpResponse>> + Send {
+impl Pipeline {
+    pub(crate) fn execute(&self, input: HttpRequest) -> impl Future<Output = crate::Result<HttpResponse>> + Send {
         match &self {
             Self::Minimal(handler) => Either::Left(handler.execute(input)),
             Self::Custom { pipeline, .. } => Either::Right(pipeline.execute(input)),
         }
+    }
+}
+
+impl Service<HttpRequest> for Pipeline {
+    type Out = crate::Result<HttpResponse>;
+
+    fn execute(&self, input: HttpRequest) -> impl Future<Output = crate::Result<HttpResponse>> + Send {
+        Self::execute(self, input)
     }
 }
 
@@ -82,24 +82,10 @@ impl PipelineBuilder {
         }
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "all parameters are required dependencies for assembling the pipeline"
-    )]
-    pub(crate) fn build(
-        self,
-        dispatch_handler: Dispatch,
-        resilience_context: HttpResilienceContext,
-        redaction_engine: RedactionEngine,
-        meter: &Meter,
-        body_builder: HttpBodyBuilder,
-        clock: Clock,
-        router: Router,
-    ) -> Pipeline {
+    pub(crate) fn build(self, dispatch_handler: Dispatch, context: PipelineContext) -> Pipeline {
         match self {
             Self::StandardPipeline(configure) => {
-                let context = PipelineContext::new(resilience_context, meter, redaction_engine.clone(), body_builder, clock, router);
-                let standard = configure.create(context, &redaction_engine);
+                let standard = configure.create(context);
 
                 match standard.recovery_mode {
                     RecoveryMode::Retry => {
@@ -150,10 +136,7 @@ impl PipelineBuilder {
             }
             Self::Minimal => Pipeline::Minimal(Box::new(dispatch_handler)),
             Self::Custom(factory) => {
-                let pipeline = factory.create(
-                    dispatch_handler,
-                    PipelineContext::new(resilience_context, meter, redaction_engine, body_builder, clock, router),
-                );
+                let pipeline = factory.create(dispatch_handler, context);
 
                 Pipeline::Custom {
                     #[cfg(test)]
@@ -172,26 +155,34 @@ impl PipelineBuilder {
 mod tests {
     use std::time::Duration;
 
+    use data_privacy::RedactionEngine;
     use http::StatusCode;
-    use opentelemetry::metrics::MeterProvider;
+    use http_extensions::HttpBodyBuilder;
+    use http_extensions::routing::Router;
+    use opentelemetry::metrics::{Meter, MeterProvider};
     use opentelemetry_sdk::metrics::SdkMeterProvider;
+    use tick::Clock;
 
     use super::*;
+    use crate::resilience::HttpResilienceContext;
+
+    fn test_context() -> PipelineContext {
+        let clock = Clock::new_frozen();
+        PipelineContext::new(
+            HttpResilienceContext::new(&clock),
+            &test_meter(),
+            RedactionEngine::default(),
+            HttpBodyBuilder::new_fake(),
+            clock,
+            Router::default(),
+        )
+    }
 
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn build_minimal_ok() {
-        let clock = Clock::new_frozen();
         let dispatch = Dispatch::new_fake(StatusCode::OK);
-        let pipeline = PipelineBuilder::Minimal.build(
-            dispatch,
-            HttpResilienceContext::new(&clock),
-            RedactionEngine::default(),
-            &test_meter(),
-            HttpBodyBuilder::new_fake(),
-            clock,
-            Router::default(),
-        );
+        let pipeline = PipelineBuilder::Minimal.build(dispatch, test_context());
 
         assert!(matches!(pipeline, Pipeline::Minimal(_)));
         assert!(!pipeline.is_standard());
@@ -199,39 +190,34 @@ mod tests {
 
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
-    #[should_panic(expected = "must be custom pipeline")]
+    fn service_trait_forwards_to_pipeline_execution() {
+        let pipeline = PipelineBuilder::Minimal.build(Dispatch::new_fake(StatusCode::OK), test_context());
+        let request = http::Request::get("https://example.com")
+            .body(HttpBodyBuilder::new_fake().empty())
+            .unwrap();
+
+        let response = futures::executor::block_on(Service::execute(&pipeline, request)).unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
+    #[test]
+    #[should_panic(expected = "expected custom pipeline, found minimal pipeline")]
     fn dbg_string_for_minimal_pipeline_panics() {
-        let clock = Clock::new_frozen();
         let dispatch = Dispatch::new_fake(StatusCode::OK);
-        let pipeline = PipelineBuilder::Minimal.build(
-            dispatch,
-            HttpResilienceContext::new(&clock),
-            RedactionEngine::default(),
-            &test_meter(),
-            HttpBodyBuilder::new_fake(),
-            clock,
-            Router::default(),
-        );
+        let pipeline = PipelineBuilder::Minimal.build(dispatch, test_context());
 
         // The debug accessor is only valid for custom pipelines; a minimal pipeline must panic.
-        let _ = pipeline.dbg_string_for_custom_pipeline();
+        let _ = pipeline.debug_string();
     }
 
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn build_custom_ok() {
-        let clock = Clock::new_frozen();
         let dispatch = Dispatch::new_fake(StatusCode::OK);
-        let factory = CustomPipelineFactory::new(|dispatch, _| dispatch);
-        let pipeline = PipelineBuilder::Custom(factory).build(
-            dispatch,
-            HttpResilienceContext::new(&clock),
-            RedactionEngine::default(),
-            &test_meter(),
-            HttpBodyBuilder::new_fake(),
-            clock,
-            Router::default(),
-        );
+        let factory = CustomPipeline::new(|dispatch, _| dispatch);
+        let pipeline = PipelineBuilder::Custom(factory).build(dispatch, test_context());
 
         assert!(!pipeline.is_standard());
     }
@@ -239,35 +225,17 @@ mod tests {
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn build_standard_ok() {
-        let clock = Clock::new_frozen();
         let dispatch = Dispatch::new_fake(StatusCode::OK);
-        let pipeline = PipelineBuilder::StandardPipeline(ConfigureStandardPipeline::default()).build(
-            dispatch,
-            HttpResilienceContext::new(&clock),
-            RedactionEngine::default(),
-            &test_meter(),
-            HttpBodyBuilder::new_fake(),
-            clock,
-            Router::default(),
-        );
+        let pipeline = PipelineBuilder::StandardPipeline(ConfigureStandardPipeline::default()).build(dispatch, test_context());
 
-        let _dbg = pipeline.dbg_string_for_custom_pipeline();
+        let _dbg = pipeline.debug_string();
     }
 
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn pipeline_builder_default_ok() {
-        let clock = Clock::new_frozen();
         let dispatch = Dispatch::new_fake(StatusCode::OK);
-        let pipeline = PipelineBuilder::default().build(
-            dispatch,
-            HttpResilienceContext::new(&clock),
-            RedactionEngine::default(),
-            &test_meter(),
-            HttpBodyBuilder::new_fake(),
-            clock,
-            Router::default(),
-        );
+        let pipeline = PipelineBuilder::default().build(dispatch, test_context());
 
         assert!(pipeline.is_standard());
     }
@@ -275,19 +243,10 @@ mod tests {
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn configure_standard() {
-        let clock = Clock::new_frozen();
         let dispatch = Dispatch::new_fake(StatusCode::OK);
         let pipeline = PipelineBuilder::Minimal
             .configure_standard(|p, _context| p.retry(|retry| retry.max_retry_attempts(10)))
-            .build(
-                dispatch,
-                HttpResilienceContext::new(&clock),
-                RedactionEngine::default(),
-                &test_meter(),
-                HttpBodyBuilder::new_fake(),
-                clock,
-                Router::default(),
-            );
+            .build(dispatch, test_context());
 
         assert!(format!("{pipeline:?}").contains("max_attempts: 11"));
     }
@@ -295,20 +254,11 @@ mod tests {
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn configure_standard_twice() {
-        let clock = Clock::new_frozen();
         let dispatch = Dispatch::new_fake(StatusCode::OK);
         let pipeline = PipelineBuilder::Minimal
             .configure_standard(|p, _context| p.retry(|retry| retry.max_retry_attempts(10)))
             .configure_standard(|p, _context| p.attempt_timeout(|timeout| timeout.timeout(Duration::from_secs(123))))
-            .build(
-                dispatch,
-                HttpResilienceContext::new(&clock),
-                RedactionEngine::default(),
-                &test_meter(),
-                HttpBodyBuilder::new_fake(),
-                clock,
-                Router::default(),
-            );
+            .build(dispatch, test_context());
 
         let debug = format!("{pipeline:?}");
         assert!(debug.contains("max_attempts: 11"));
