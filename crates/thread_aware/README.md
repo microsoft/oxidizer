@@ -6,7 +6,7 @@
 [![crate.io](https://img.shields.io/crates/v/thread_aware.svg)](https://crates.io/crates/thread_aware)
 [![docs.rs](https://docs.rs/thread_aware/badge.svg)](https://docs.rs/thread_aware)
 [![MSRV](https://img.shields.io/crates/msrv/thread_aware)](https://crates.io/crates/thread_aware)
-[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml/badge.svg)](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/microsoft/oxidizer/blob/main/LICENSE)
 <a href="https://github.com/microsoft/oxidizer"><img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
@@ -131,7 +131,7 @@ struct Point {
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb79BCY6qjdQEb0qTcjTGYKc4b2LBpnswH_rIbMXORN5wIL-phZIOCbHRocmVhZF9hd2FyZWYwLjEyLjCCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4xgnN0aHJlYWRfYXdhcmVfbWFjcm9zZjAuMTIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb79BCY6qjdQEb0qTcjTGYKc4b2LBpnswH_rIbMXORN5wIL-phZIOCbHRocmVhZF9hd2FyZWYwLjEyLjCCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4xgnN0aHJlYWRfYXdhcmVfbWFjcm9zZjAuMTIuMA
  [__link0]: https://docs.rs/thread_aware_core
  [__link1]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware
  [__link10]: https://docs.rs/thread_aware/0.12.0/thread_aware/?search=Unaware

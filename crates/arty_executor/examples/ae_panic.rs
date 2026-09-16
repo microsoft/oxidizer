@@ -18,7 +18,7 @@ use arty_executor::Executor;
 const EXPECTED_FAILURE_CHILD_ENV: &str = "ARTY_EXECUTOR_EXPECTED_FAILURE_CHILD";
 
 fn main() {
-    if env::var_os("IS_TESTING").is_some() && env::var_os(EXPECTED_FAILURE_CHILD_ENV).is_none() {
+    if env::var_os("ANVIL_EXAMPLE").is_some() && env::var_os(EXPECTED_FAILURE_CHILD_ENV).is_none() {
         assert_failure_in_child();
     } else {
         run_example();

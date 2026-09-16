@@ -2665,7 +2665,7 @@ function Invoke-ReleasePackagesMain {
     # crate's previous version-bump commit). It is a hard dependency — there is no
     # heuristic fallback — so fail fast with an actionable message if missing.
     if (-not (Test-CommandExists -command 'cargo-semver-checks')) {
-        throw "cargo-semver-checks is not installed or not found in your PATH. Install the version pinned in constants.env (CARGO_SEMVER_CHECKS_VERSION) with 'cargo install cargo-semver-checks --version <pinned> --locked'. It is required to classify releases against their previous version-bump commit."
+        throw "cargo-semver-checks is not installed or not found in your PATH. Run 'just anvil-semver-check-setup' to install the repository-pinned version. It is required to classify releases against their previous version-bump commit."
     }
 
     $repoRoot = Get-Location

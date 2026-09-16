@@ -24,5 +24,7 @@ allowed_external_types = ["seismograph::*"]
 backtrace = { workspace = true, features = ["std"] }
 seismograph.workspace = true
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints
