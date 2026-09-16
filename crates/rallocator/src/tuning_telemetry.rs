@@ -703,6 +703,36 @@ mod tests {
         }
     }
 
+    fn observation() -> TuningTelemetryObservation {
+        TuningTelemetryObservation {
+            session_id: 7,
+            classes: std::array::from_fn(|index| indexed_class(index, 64)),
+            medium: medium(),
+        }
+    }
+
+    #[test]
+    fn observation_debug_includes_session_and_visible_counters() {
+        let observation = observation();
+        let classes = &observation.classes[..StandardSizeClasses::SIZES.len()];
+        let medium = observation.medium;
+        assert_eq!(
+            format!("{observation:?}"),
+            format!("TuningTelemetryObservation {{ session_id: 7, classes: {classes:?}, medium: {medium:?} }}")
+        );
+    }
+
+    #[test]
+    fn observation_display_propagates_each_write_failure() {
+        let observation = observation();
+        let rendered = observation.to_string();
+        let boundaries = [0, rendered.find("medium ").unwrap(), rendered.find("class index=").unwrap()];
+        assert_eq!(
+            boundaries.map(|remaining| fmt::write(&mut FailAfter { remaining }, format_args!("{observation}"))),
+            [Err(fmt::Error); 3]
+        );
+    }
+
     #[test]
     fn allocator_paths_produce_tuning_recommendations() {
         let _test = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);

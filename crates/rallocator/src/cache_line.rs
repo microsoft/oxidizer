@@ -30,12 +30,13 @@ impl<T> Deref for CacheLine<T> {
 #[cfg(test)]
 mod tests {
     use std::mem::offset_of;
-    use std::sync::atomic::{AtomicBool, AtomicPtr};
+    use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
     use super::CacheLine;
 
     #[test]
     fn read_mostly_cells_fill_one_line_with_the_atomic_at_its_start() {
+        let cell = CacheLine::new(AtomicBool::new(true));
         assert_eq!(
             (
                 size_of::<CacheLine<AtomicBool>>(),
@@ -44,8 +45,10 @@ mod tests {
                 size_of::<CacheLine<AtomicPtr<()>>>(),
                 align_of::<CacheLine<AtomicPtr<()>>>(),
                 offset_of!(CacheLine<AtomicPtr<()>>, 0),
+                cell.load(Ordering::Relaxed),
+                std::ptr::from_ref(&cell).addr() % align_of::<CacheLine<AtomicBool>>(),
             ),
-            (64, 64, 0, 64, 64, 0)
+            (64, 64, 0, 64, 64, 0, true, 0)
         );
     }
 }
