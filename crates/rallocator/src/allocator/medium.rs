@@ -1438,6 +1438,7 @@ mod tests {
         std::thread::spawn(move || {
             let allocator = allocator();
             let heap = create_bump_fallback_heap(crate::domain::state(domain));
+            assert!(!heap.is_null());
             let backing = unsafe { domain_shard(crate::domain::state(domain), 11) };
             unsafe { (*heap).medium_shard = backing };
             let layout = Layout::from_size_align(MEDIUM_SLICE_SIZE, 16).unwrap();
