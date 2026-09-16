@@ -47,10 +47,9 @@
 //!   section versions are skipped and reported through
 //!   [`snapshot::Snapshot::skipped_sections`].
 //!
-//! Metadata and statistics sections are required. Historical section versions
-//! accepted by the decoder receive documented neutral defaults for fields that
-//! did not yet exist. Producers must not change the meaning or byte order of an
-//! existing version.
+//! Metadata and statistics sections are required. Statistics must use the current
+//! section version; legacy statistics payloads are not supported. Producers must
+//! not change the meaning or byte order of an existing version.
 
 pub mod callers;
 pub mod snapshot;
@@ -381,7 +380,7 @@ pub fn decode(bytes: &[u8]) -> Result<Snapshot, Error> {
             seen_sections |= bit;
         }
         if section.id() == SECTION_STATS {
-            if !(SECTION_VERSION..=STATS_SECTION_VERSION).contains(&section.version()) {
+            if section.version() != STATS_SECTION_VERSION {
                 snapshot
                     .skipped_sections
                     .push(snapshot::SkippedSection::from_fields(SkippedSectionFields {
@@ -436,7 +435,7 @@ pub fn decode(bytes: &[u8]) -> Result<Snapshot, Error> {
                 has_metadata = true;
             }
             SECTION_STATS => {
-                snapshot.stats = read_stats(&mut payload, section.version())?;
+                snapshot.stats = read_stats(&mut payload)?;
                 has_stats = true;
             }
             SECTION_SIZE_CLASSES => snapshot.size_classes = read_size_classes(&mut payload)?,
@@ -496,13 +495,12 @@ fn write_stats(writer: &mut Writer<'_>, stats: Stats) -> Result<(), Error> {
     Ok(())
 }
 
-fn read_stats(reader: &mut Reader<'_>, version: u16) -> Result<Stats, Error> {
-    let mut stats = Stats {
+fn read_stats(reader: &mut Reader<'_>) -> Result<Stats, Error> {
+    Ok(Stats {
         allocated_bytes: reader.read_u64()?,
         deallocated_bytes: reader.read_u64()?,
         live_bytes: reader.read_u64()?,
         peak_live_bytes: reader.read_u64()?,
-        peak_live_bytes_scope: PeakLiveBytesScope::Unavailable,
         mapped_bytes: reader.read_u64()?,
         os_mappings: reader.read_u64()?,
         os_unmappings: reader.read_u64()?,
@@ -512,16 +510,13 @@ fn read_stats(reader: &mut Reader<'_>, version: u16) -> Result<Stats, Error> {
         pending_remote_blocks: reader.read_u64()?,
         remote_pushes_in_progress: reader.read_u64()?,
         drained_remote_blocks: reader.read_u64()?,
-    };
-    if version >= STATS_SECTION_VERSION {
-        stats.peak_live_bytes_scope = match reader.read_u8()? {
+        peak_live_bytes_scope: match reader.read_u8()? {
             0 => PeakLiveBytesScope::Unavailable,
             1 => PeakLiveBytesScope::SnapshotSamples,
             2 => PeakLiveBytesScope::Lifetime,
             _ => return Err(Error::malformed_section(SECTION_STATS)),
-        };
-    }
-    Ok(stats)
+        },
+    })
 }
 
 fn write_estimate(writer: &mut Writer<'_>, estimate: Estimate) -> Result<(), Error> {

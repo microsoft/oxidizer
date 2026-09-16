@@ -31,9 +31,9 @@ mod tests {
     fn source_errors_panics_and_retained_data_outlive_capture() {
         // Keep source registration in this test, after the successful capture.
         let snapshot = seismograph::snapshot(SnapshotOptions::default()).unwrap();
-        assert!(!seismograph::snapshot::snapshot_arena_active());
+        assert!(!seismograph::snapshot::snapshot_collection_active());
         std::thread::spawn(move || {
-            assert!(!seismograph::snapshot::snapshot_arena_active());
+            assert!(!seismograph::snapshot::snapshot_collection_active());
             let decoded = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap();
             assert!(decoded.sources.iter().any(|source| source.id == seismograph_rallocator::source::ID));
             drop(snapshot);

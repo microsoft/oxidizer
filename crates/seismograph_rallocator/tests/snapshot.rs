@@ -260,23 +260,15 @@ fn reporting_peak_scope_round_trips_without_reinterpreting_samples_as_lifetime()
 }
 
 #[test]
-fn reporting_legacy_stats_keep_raw_value_but_make_historical_peak_unavailable() {
-    let mut expected = fixture();
-    expected.stats.peak_live_bytes = 73_322;
-    expected.stats.peak_live_bytes_scope = PeakLiveBytesScope::Lifetime;
-    let mut bytes = encoded(&expected);
+fn reporting_legacy_stats_are_rejected() {
+    let mut bytes = encoded(&fixture());
     let (header, payload) = section(&bytes, SECTION_STATS);
     bytes[header + 2..header + 4].copy_from_slice(&1_u16.to_le_bytes());
     write_u32(&mut bytes, header + 4, 13 * 8);
     bytes.remove(payload + 13 * 8);
-    expected.stats.peak_live_bytes_scope = PeakLiveBytesScope::Unavailable;
-
-    let actual = decode(&bytes).unwrap();
-
-    assert_eq!(actual, expected);
     assert_eq!(
-        (actual.stats.lifetime_peak_live_bytes(), actual.stats.sampled_peak_live_bytes()),
-        (None, None)
+        decode(&bytes).unwrap_err().kind(),
+        seismograph_rallocator::ErrorKind::MissingSection(SECTION_STATS)
     );
 }
 
