@@ -4,4 +4,5 @@
 //! Internal allocator snapshot-source support.
 
 mod core;
+mod remote_counts;
 pub(crate) use core::*;

@@ -13,11 +13,20 @@
 
 </div>
 
-Live monitoring and snapshot-to-HTML reporting for the `seismograph` command.
+Live monitoring, interactive snapshot viewing, and HTML reporting for `seismograph`.
 
 The CLI renders common thread, stack, and runtime-event data directly.
 Rallocator payloads use the built-in schema-specific renderer; unknown
 sources remain visible in the source inventory.
+
+Run `seismograph monitor` to capture a running application, or
+`seismograph view "C:\captures\capture.seismograph"` to inspect a native
+snapshot in the same interactive tabs without connecting to a process.
+The offline viewer is read-only: use `Tab` or `1` through `8` to select tabs,
+the usual arrow/Enter/Backspace navigation within tabs, and `q` or `Esc` to quit.
+Large files load on a worker thread while the terminal remains responsive.
+Loading still requires memory for the decoded events and their summaries.
+Snapshot files do not record a wall-clock capture time.
 
 
 <hr/>

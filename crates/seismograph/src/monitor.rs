@@ -456,7 +456,7 @@ fn recorder_policy(policy: seismograph_protocol::message::RecordingPolicy) -> cr
 
 fn snapshot_response(snapshot: Result<crate::snapshot::Snapshot, crate::Error>) -> Response {
     match snapshot {
-        Ok(snapshot) => Response::Snapshot(snapshot.as_bytes().to_vec()),
+        Ok(snapshot) => Response::Snapshot(snapshot.into_bytes()),
         Err(error) => Response::Error(error.to_string()),
     }
 }
@@ -879,6 +879,13 @@ mod tests {
                 Response::Snapshot(_)
             ));
         }
+
+        let snapshot = crate::snapshot(crate::snapshot::SnapshotOptions::default()).unwrap();
+        let address = snapshot.as_bytes().as_ptr();
+        assert!(matches!(
+            snapshot_response(Ok(snapshot)),
+            Response::Snapshot(bytes) if std::ptr::eq(bytes.as_ptr(), address)
+        ));
     }
 
     #[cfg_attr(miri, ignore)]

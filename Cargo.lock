@@ -921,6 +921,7 @@ dependencies = [
  "nm",
  "performables",
  "plurality",
+ "seismograph",
  "seismograph_io",
  "smallvec",
  "static_assertions",
@@ -4592,10 +4593,12 @@ name = "rallocator"
 version = "0.1.0"
 dependencies = [
  "allocation_hints",
+ "allocator-api2 0.2.21",
  "backtrace",
  "criterion",
  "hashbrown 0.17.1",
  "libc",
+ "loom",
  "mimalloc",
  "multitude",
  "mutants",

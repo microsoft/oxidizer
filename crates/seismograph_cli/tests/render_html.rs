@@ -235,7 +235,7 @@ fn html_report_contains_required_sections() {
     assert!(!html.contains("width:1600px"));
     assert!(html.contains("Allocated and freed on different threads"));
     assert!(html.contains("Freed after a bump heap handle was released"));
-    assert!(html.contains("<details><summary>General live-allocation hotspots (showing"));
+    assert!(html.contains("<details><summary>Retained unmatched allocation candidates (showing"));
     assert!(html.contains("<details class=\"stack-details\"><summary>Stack trace"));
     let cross_thread = html.find("Cross-thread and escaped-lifetime hotspots").unwrap();
     let thread_sizes = html.find("<details><summary>Allocation sizes by thread</summary>").unwrap();
@@ -258,7 +258,7 @@ fn html_report_contains_required_sections() {
     assert!(!html.contains("Size-class occupancy"));
     assert!(!html.contains("http://"));
     assert!(!html.contains("https://"));
-    assert_eq!(stable_digest(&html), (51_516, 2_830_809_008_930_878_494));
+    assert_eq!(stable_digest(&html), (54_085, 2_038_034_598_192_960_993));
 }
 
 #[test]

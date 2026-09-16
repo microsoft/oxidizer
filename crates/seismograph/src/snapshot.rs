@@ -232,7 +232,13 @@ pub struct SourceSnapshot {
 /// A decoded seismograph snapshot.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct DecodedSnapshot {
-    /// Time spent collecting and encoding the snapshot.
+    /// Time spent collecting recorder data and preparing source payloads.
+    ///
+    /// This partial duration ends before final container sizing, encoding and
+    /// destruction of intermediate data. It excludes file I/O and any caller-side
+    /// prewarming before collection starts; work inside source callbacks is included.
+    /// It is not an end-to-end capture duration. Older format versions carry the
+    /// same partial measurement.
     pub capture_duration_nanos: u64,
     /// Retained general-purpose runtime events.
     pub events: Events,
@@ -242,14 +248,26 @@ pub struct DecodedSnapshot {
 
 /// An opaque encoded seismograph snapshot.
 pub struct Snapshot {
-    bytes: SystemBytes,
+    bytes: Vec<u8>,
 }
 
 impl Snapshot {
+    fn zeroed(len: usize) -> Result<Self, Error> {
+        let mut bytes = Vec::new();
+        bytes.try_reserve_exact(len).map_err(|_error| Error::allocation_failed())?;
+        bytes.resize(len, 0);
+        Ok(Self { bytes })
+    }
+
     /// Returns the complete encoded snapshot.
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
-        self.bytes.as_slice()
+        &self.bytes
+    }
+
+    #[cfg(any(test, feature = "monitor"))]
+    pub(crate) fn into_bytes(self) -> Vec<u8> {
+        self.bytes
     }
 
     /// Writes the complete encoded snapshot to a file.
@@ -266,18 +284,21 @@ impl Snapshot {
 
 impl fmt::Debug for Snapshot {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Snapshot")
-            .field("bytes", &self.bytes.as_slice().len())
-            .finish_non_exhaustive()
+        f.debug_struct("Snapshot").field("bytes", &self.bytes.len()).finish_non_exhaustive()
     }
 }
 
 /// Captures general-purpose events and all registered snapshot sources.
 ///
+/// The encoded duration measures collection and source preparation only, not final
+/// container sizing/encoding, intermediate-data destruction, or subsequent file I/O.
+/// Caller-side prewarming before collection starts is also excluded; source
+/// callbacks executed during collection are included.
+///
 /// # Errors
 ///
 /// Returns an error when a source fails, source identities conflict, or the
-/// system-backed output buffer cannot be allocated.
+/// output buffer cannot be allocated.
 pub(crate) fn snapshot(options: SnapshotOptions) -> Result<Snapshot, Error> {
     with_snapshot_arena(|| {
         let _suppression = SuppressionGuard::enter();
@@ -701,8 +722,8 @@ fn encode_snapshot(snapshot: &DecodedSnapshot) -> Result<Snapshot, Error> {
         .and_then(|len| len.checked_add(events_len?))
         .and_then(|len| len.checked_add(sources_len?))
         .ok_or_else(Error::allocation_failed)?;
-    let mut bytes = SystemBytes::zeroed(len).ok_or_else(Error::allocation_failed)?;
-    let mut writer = Writer::new(bytes.as_mut_slice());
+    let mut encoded = Snapshot::zeroed(len)?;
+    let mut writer = Writer::new(&mut encoded.bytes);
     writer.write(&MAGIC)?;
     writer.u16(FORMAT_VERSION)?;
     writer.u16(0)?;
@@ -755,7 +776,7 @@ fn encode_snapshot(snapshot: &DecodedSnapshot) -> Result<Snapshot, Error> {
         writer.write(&source.data)?;
     }
     debug_assert!(writer.remaining().is_empty(), "encoded length accounts for every written field");
-    Ok(Snapshot { bytes })
+    Ok(encoded)
 }
 
 fn encode_recording_policy(writer: &mut Writer<'_>, policy: RecordingPolicy) -> Result<(), Error> {
@@ -865,14 +886,29 @@ impl SystemBytes {
 
 struct SnapshotArenaChunk {
     previous: *mut Self,
+    next: *mut Self,
     layout: Layout,
     cursor: usize,
     dedicated: bool,
 }
 
+#[derive(Clone, Copy)]
+struct SnapshotArenaRange {
+    start: usize,
+    end: usize,
+    chunk: *mut SnapshotArenaChunk,
+}
+
 struct SnapshotArena {
     head: *mut SnapshotArenaChunk,
     parent: *mut Self,
+    // Shared chunks live until arena drop. Cache only those ranges, never
+    // independently freed dedicated chunks, to amortize sequential stack frees.
+    last_shared_range: std::ops::Range<usize>,
+    ranges: Option<SystemSlice<SnapshotArenaRange>>,
+    range_count: usize,
+    #[cfg(test)]
+    lookup_steps: Cell<usize>,
 }
 
 impl SnapshotArena {
@@ -880,6 +916,11 @@ impl SnapshotArena {
         Self {
             head: ptr::null_mut(),
             parent: ptr::null_mut(),
+            last_shared_range: 0..0,
+            ranges: None,
+            range_count: 0,
+            #[cfg(test)]
+            lookup_steps: Cell::new(0),
         }
     }
 
@@ -926,46 +967,65 @@ impl SnapshotArena {
         unsafe {
             chunk.write(SnapshotArenaChunk {
                 previous: self.head,
+                next: ptr::null_mut(),
                 layout: mapping_layout,
                 cursor: size_of::<SnapshotArenaChunk>(),
                 dedicated,
             });
         }
+        if !self.head.is_null() {
+            // SAFETY: the old head is a live, exclusively owned mapping.
+            unsafe { (*self.head).next = chunk };
+        }
         self.head = chunk;
+        self.insert_range(SnapshotArenaRange {
+            start: chunk.addr(),
+            end: chunk.addr().saturating_add(mapping_layout.size()),
+            chunk,
+        });
         // SAFETY: chunk was initialized above and is exclusively owned.
         unsafe { allocate_from_snapshot_chunk(chunk, size, layout.align()) }
     }
 
     fn deallocate(&mut self, address: *mut u8) -> bool {
-        let mut link = &raw mut self.head;
-        loop {
-            // SAFETY: link points to the arena head or a live chunk's next field.
-            let chunk = unsafe { *link };
-            if chunk.is_null() {
-                break;
-            }
-            let start = chunk.addr();
+        if self.last_shared_range.contains(&address.addr()) {
+            return true;
+        }
+        if let Some((index, range)) = self.find_range(address.addr()) {
+            let chunk = range.chunk;
             // SAFETY: chunk is a live node owned by this arena.
             let chunk_layout = unsafe { (*chunk).layout };
-            let end = start.saturating_add(chunk_layout.size());
-            if address.addr() >= start && address.addr() < end {
-                // SAFETY: chunk is a live node owned by this arena.
-                let dedicated = unsafe { (*chunk).dedicated };
-                if dedicated {
-                    // SAFETY: chunk is live, so its previous link is readable.
-                    let previous = unsafe { (*chunk).previous };
-                    // SAFETY: link identifies the pointer that currently owns chunk.
-                    unsafe { *link = previous };
-                    // SAFETY: dedicated chunks can be released independently and
-                    // were allocated by System with chunk_layout.
-                    unsafe { System.dealloc(chunk.cast(), chunk_layout) };
-                    #[cfg(test)]
-                    LIVE_SNAPSHOT_ARENA_CHUNKS.with(|count| count.set(count.get() - 1));
+            // SAFETY: chunk is a live node owned by this arena.
+            let dedicated = unsafe { (*chunk).dedicated };
+            if dedicated {
+                // SAFETY: both links belong to this live, exclusively owned chunk.
+                let previous = unsafe { (*chunk).previous };
+                // SAFETY: chunk remains live while its links are read.
+                let next = unsafe { (*chunk).next };
+                if next.is_null() {
+                    self.head = previous;
+                } else {
+                    // SAFETY: next is the live newer node that links to chunk.
+                    unsafe { (*next).previous = previous };
                 }
-                return true;
+                if !previous.is_null() {
+                    // SAFETY: previous is the live older node that links to chunk.
+                    unsafe { (*previous).next = next };
+                }
+                let Some(ranges) = &mut self.ranges else {
+                    unreachable!("find_range found a live indexed mapping");
+                };
+                ranges.copy_within(index + 1..self.range_count, index);
+                self.range_count -= 1;
+                // SAFETY: this dedicated mapping was unlinked above and was allocated
+                // by System with chunk_layout. No cached range refers to dedicated chunks.
+                unsafe { System.dealloc(chunk.cast(), chunk_layout) };
+                #[cfg(test)]
+                LIVE_SNAPSHOT_ARENA_CHUNKS.with(|count| count.set(count.get() - 1));
+            } else {
+                self.last_shared_range = range.start..range.end;
             }
-            // SAFETY: link points into a live arena-owned chunk.
-            link = unsafe { &raw mut (*chunk).previous };
+            return true;
         }
         if self.parent.is_null() {
             false
@@ -974,6 +1034,48 @@ impl SnapshotArena {
             // this child activation.
             unsafe { (*self.parent).deallocate(address) }
         }
+    }
+
+    fn insert_range(&mut self, range: SnapshotArenaRange) {
+        let capacity = self.ranges.as_ref().map_or(0, |ranges| ranges.len());
+        if self.range_count == capacity {
+            // SystemSlice bypasses the global allocator: growing an index inside
+            // GlobalAlloc must not recursively re-enter this active snapshot arena.
+            let capacity = capacity.saturating_mul(2).max(32);
+            self.ranges = Some(SystemSlice::from_fn(capacity, |index| {
+                if index < self.range_count {
+                    self.ranges.as_ref().unwrap_or_else(|| unreachable!("nonempty ranges have storage"))[index]
+                } else {
+                    SnapshotArenaRange {
+                        start: 0,
+                        end: 0,
+                        chunk: ptr::null_mut(),
+                    }
+                }
+            }));
+        }
+        let Some(ranges) = &mut self.ranges else {
+            unreachable!("range storage was allocated above");
+        };
+        let index = ranges[..self.range_count].partition_point(|existing| existing.start < range.start);
+        ranges.copy_within(index..self.range_count, index + 1);
+        ranges[index] = range;
+        self.range_count += 1;
+    }
+
+    fn find_range(&self, address: usize) -> Option<(usize, SnapshotArenaRange)> {
+        let ranges = self.ranges.as_ref()?;
+        let index = ranges[..self.range_count]
+            .partition_point(|range| {
+                #[cfg(test)]
+                {
+                    self.lookup_steps.set(self.lookup_steps.get() + 1);
+                }
+                range.start <= address
+            })
+            .checked_sub(1)?;
+        let range = ranges[index];
+        (address < range.end).then_some((index, range))
     }
 }
 
@@ -1049,7 +1151,22 @@ pub fn snapshot_arena_allocation_suspended() -> bool {
     SNAPSHOT_ARENA_SUSPENSION_DEPTH.try_with(|depth| depth.get() != 0).unwrap_or(true)
 }
 
+/// Returns whether this thread is collecting a snapshot.
+///
+/// Allocator integrations can exclude this storage from telemetry without
+/// restricting ordinary Rust allocation lifetimes to the capture scope.
+#[doc(hidden)]
+#[must_use]
+pub fn snapshot_arena_active() -> bool {
+    ACTIVE_SNAPSHOT_ARENA.try_with(|active| !active.get().is_null()).unwrap_or(false)
+}
+
 /// Allocates from the active snapshot arena, when snapshotting this thread.
+///
+/// Storage is scoped to this capture. Global allocators must not use this for
+/// arbitrary Rust allocations: source caches, errors and panic payloads can
+/// outlive capture. Use [`snapshot_arena_active`] to select independently owned
+/// storage instead.
 #[doc(hidden)]
 #[must_use]
 pub fn snapshot_arena_allocate(layout: Layout) -> Option<*mut u8> {
@@ -1200,6 +1317,21 @@ mod tests {
     )]
 
     use super::*;
+
+    #[test]
+    fn snapshot_storage_is_zeroed_and_moves_without_copying() {
+        let snapshot = Snapshot::zeroed(32).unwrap();
+        let address = snapshot.as_bytes().as_ptr();
+        let bytes = snapshot.into_bytes();
+
+        assert_eq!((bytes.as_ptr(), bytes.as_slice()), (address, [0; 32].as_slice()));
+        assert_eq!(Snapshot::zeroed(0).unwrap().as_bytes(), &[]);
+    }
+
+    #[test]
+    fn snapshot_storage_reports_unrepresentable_capacity() {
+        Snapshot::zeroed(usize::MAX).unwrap_err();
+    }
 
     static TEST_SOURCE: Source = Source::new(SourceId::new(7), "test", 3, capture_test_source);
 
@@ -1433,6 +1565,134 @@ mod tests {
             assert_eq!(address.addr() % 64, 0);
             assert!(snapshot_arena_deallocate(address));
         });
+    }
+
+    fn sequential_arena_frees(chunks: usize, per_chunk: usize) -> usize {
+        let mut arena = SnapshotArena::new();
+        let layout = Layout::from_size_align(24 * size_of::<usize>(), align_of::<usize>()).unwrap();
+        let mut addresses = Vec::with_capacity(chunks * per_chunk);
+        for _ in 0..chunks {
+            if !arena.head.is_null() {
+                // SAFETY: this test exclusively owns the live head. Skipping its
+                // unused tail forces a chunk boundary without touching gigabytes.
+                let head = unsafe { &mut *arena.head };
+                head.cursor = head.layout.size();
+            }
+            for _ in 0..per_chunk {
+                let address = arena.allocate(layout);
+                assert!(!address.is_null());
+                addresses.push(address);
+            }
+        }
+        let start = Instant::now();
+        for address in addresses {
+            assert!(arena.deallocate(address));
+        }
+        let elapsed = start.elapsed();
+        eprintln!(
+            "chunks={chunks} frees={} visits={} elapsed={elapsed:?}",
+            chunks * per_chunk,
+            arena.lookup_steps.get()
+        );
+        arena.lookup_steps.get()
+    }
+
+    #[test]
+    fn snapshot_arena_sequential_frees_do_not_rescan_each_allocation() {
+        let chunks = if cfg!(miri) { 3 } else { 12 };
+        assert!(sequential_arena_frees(chunks, 128) <= chunks * (usize::try_from(chunks.ilog2()).unwrap() + 2));
+    }
+
+    #[test]
+    fn snapshot_arena_shuffled_frees_and_misses_have_bounded_lookup_cost() {
+        let count = if cfg!(miri) { 4_usize } else { 64 };
+        let mut arena = SnapshotArena::new();
+        let mut addresses = Vec::new();
+        for _ in 0..count {
+            if !arena.head.is_null() {
+                // SAFETY: the test owns this live header; filling its cursor forces
+                // another range without touching the unused multi-megabyte payload.
+                let head = unsafe { &mut *arena.head };
+                head.cursor = head.layout.size();
+            }
+            addresses.push(arena.allocate(Layout::new::<u64>()));
+        }
+        for index in 0..count * 8 {
+            assert!(arena.deallocate(addresses[(index * 17) % count]));
+            assert!(!arena.deallocate(ptr::without_provenance_mut(1)));
+        }
+        let maximum_probes = count * 16 * (usize::try_from(count.ilog2()).unwrap() + 2);
+        assert!(arena.lookup_steps.get() <= maximum_probes);
+    }
+
+    #[cfg(not(miri))]
+    #[test]
+    #[ignore = "manual CPU scaling probe; reserves 512 MiB without populating chunk tails"]
+    fn snapshot_arena_sequential_free_scaling_probe() {
+        sequential_arena_frees(128, 8192);
+    }
+
+    #[test]
+    fn snapshot_arena_cached_range_excludes_dedicated_and_unknown_storage() {
+        let mut arena = SnapshotArena::new();
+        let small = Layout::new::<u64>();
+        let first = arena.allocate(small);
+        assert!(!first.is_null());
+        assert!(arena.deallocate(first));
+        let first_range = arena.last_shared_range.clone();
+        assert!(!arena.deallocate(ptr::without_provenance_mut(first_range.end)));
+        assert!(!arena.deallocate(ptr::null_mut()));
+
+        let large = Layout::from_size_align(SNAPSHOT_ARENA_CHUNK_BYTES, 16).unwrap();
+        let dedicated = arena.allocate(large);
+        assert!(!dedicated.is_null());
+        let second = arena.allocate(small);
+        assert!(!second.is_null());
+        let reusable = arena.head;
+        // The dedicated chunk is now inside the list, not at its head.
+        assert!(arena.deallocate(dedicated));
+        assert!(!arena.deallocate(dedicated));
+        assert_eq!(arena.last_shared_range, first_range);
+        assert!(arena.deallocate(second));
+        assert!(arena.deallocate(first));
+
+        let dedicated = arena.allocate(large);
+        assert!(!dedicated.is_null());
+        assert!(arena.deallocate(dedicated));
+        assert!(!arena.deallocate(dedicated));
+        assert_eq!(arena.last_shared_range, first_range);
+        let reused = arena.allocate(small);
+        assert!(!reused.is_null());
+        assert_eq!(arena.head, reusable);
+        assert!(arena.deallocate(reused));
+        let mut foreign = 0_u8;
+        assert!(!arena.deallocate(ptr::from_mut(&mut foreign)));
+        assert!(arena.deallocate(second));
+    }
+
+    #[test]
+    fn snapshot_arena_cached_ranges_preserve_parent_fallback() {
+        let mut parent = SnapshotArena::new();
+        let small = Layout::new::<u64>();
+        let outer = parent.allocate(small);
+        assert!(!outer.is_null());
+        assert!(parent.deallocate(outer));
+        let dedicated = parent.allocate(Layout::from_size_align(SNAPSHOT_ARENA_CHUNK_BYTES, 16).unwrap());
+        assert!(!dedicated.is_null());
+        {
+            let mut child = SnapshotArena::new();
+            child.parent = ptr::from_mut(&mut parent);
+            let inner = child.allocate(small);
+            assert!(!inner.is_null());
+            assert!(child.deallocate(inner));
+            assert!(child.deallocate(outer));
+            assert!(child.deallocate(dedicated));
+            assert!(!child.deallocate(dedicated));
+            assert!(child.deallocate(inner));
+            let mut foreign = 0_u8;
+            assert!(!child.deallocate(ptr::from_mut(&mut foreign)));
+        }
+        assert!(parent.deallocate(outer));
     }
 
     #[test]
@@ -2186,5 +2446,23 @@ mod tests {
         // SAFETY: adding the allocation's exact size produces its one-past-the-end pointer.
         let end = unsafe { arena.head.byte_add(chunk_size) }.cast::<u8>();
         assert!(!arena.deallocate(end));
+    }
+
+    #[test]
+    #[ignore = "snapshot-arena shuffled-release profiling probe"]
+    fn arena_shuffled_lookup_profile() {
+        let mut arena = SnapshotArena::new();
+        let layout = Layout::from_size_align(1_048_576, 8).unwrap();
+        let addresses = (0..1_024).map(|_| arena.allocate(layout)).collect::<Vec<_>>();
+        assert!(addresses.iter().all(|address| !address.is_null()));
+        let started = Instant::now();
+        for index in 0..2_000_000_usize {
+            assert!(arena.deallocate(addresses[(index * 257) % addresses.len()]));
+        }
+        println!(
+            "shuffled arena lookups: {:.3}s, {} search probes",
+            started.elapsed().as_secs_f64(),
+            arena.lookup_steps.get()
+        );
     }
 }

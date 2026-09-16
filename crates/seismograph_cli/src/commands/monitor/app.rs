@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -11,10 +12,7 @@ use seismograph_protocol::message::{EventBufferDisposition, RecorderStatistics, 
 use seismograph_protocol::monitor::MonitorDescriptor;
 
 use super::client::{capture_snapshot, discover, recorder_statistics, save_snapshot, set_recording};
-use super::data::{
-    AllocationSnapshot, AllocationSort, AllocationStackFilter, CapturedSnapshot, MemorySnapshot, MemoryTier, MemoryTierData, PrimitiveSort,
-    RuntimeSnapshot, RuntimeTaskSort,
-};
+use super::data::{AllocationSort, AllocationStackFilter, CapturedSnapshot, MemoryTier, MemoryTierData, PrimitiveSort, RuntimeTaskSort};
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_ACTIVITY_SAMPLES: usize = 120;
@@ -563,6 +561,11 @@ impl MonitorTab {
 
 pub(super) enum Screen {
     Browse,
+    Offline {
+        path: PathBuf,
+        tab: MonitorTab,
+        snapshot: Option<Box<CapturedSnapshot>>,
+    },
     Connected {
         descriptor: MonitorDescriptor,
         recording: RecordingConfiguration,
@@ -649,6 +652,25 @@ struct RecordingUpdate {
 }
 
 impl App {
+    pub(super) fn offline(path: PathBuf) -> Self {
+        Self {
+            screen: Screen::Offline {
+                path,
+                tab: MonitorTab::Info,
+                snapshot: None,
+            },
+            status: "Loading snapshot…".into(),
+            ..Self::new()
+        }
+    }
+
+    pub(super) fn finish_offline_load(&mut self, loaded: Box<CapturedSnapshot>) {
+        if let Screen::Offline { snapshot, .. } = &mut self.screen {
+            self.status = loaded.heap_error.clone().unwrap_or_default();
+            *snapshot = Some(loaded);
+        }
+    }
+
     pub(super) fn new() -> Self {
         Self {
             instances: Vec::new(),
@@ -693,6 +715,9 @@ impl App {
         S: FnOnce(&MonitorDescriptor) -> Result<RecorderStatistics, super::Error> + Send + 'static,
     {
         self.next_refresh = Instant::now().checked_add(REFRESH_INTERVAL).unwrap_or_else(Instant::now);
+        if matches!(self.screen, Screen::Offline { .. }) {
+            return;
+        }
         if let Screen::Connected { descriptor, .. } = &self.screen {
             if workers_are_idle(
                 self.capture_receiver.is_some(),
@@ -712,6 +737,13 @@ impl App {
         if matches!(code, KeyCode::Char('q' | 'Q')) {
             return true;
         }
+        let offline = matches!(self.screen, Screen::Offline { .. });
+        if offline && code == KeyCode::Esc {
+            return true;
+        }
+        if offline && matches!(code, KeyCode::Char('s' | 'c' | 'd')) {
+            return false;
+        }
         let capture_in_progress = self.capture_receiver.is_some();
         if self.recording_configuration_popup.is_some() {
             self.handle_recording_configuration_key(code);
@@ -723,7 +755,7 @@ impl App {
             }
             let capture = match &self.screen {
                 Screen::Connected { descriptor, .. } => Some(descriptor.clone()),
-                Screen::Browse => None,
+                Screen::Browse | Screen::Offline { .. } => None,
             };
             if let Some(descriptor) = capture {
                 self.start_snapshot_capture(descriptor, self.snapshot_options);
@@ -754,9 +786,7 @@ impl App {
                 KeyCode::Char('r') => self.refresh(),
                 _ => {}
             },
-            Screen::Connected {
-                recording, tab, snapshot, ..
-            } => {
+            Screen::Connected { tab, snapshot, .. } | Screen::Offline { tab, snapshot, .. } => {
                 let handled_by_tab = match *tab {
                     MonitorTab::Heaps => handle_heap_key(code, &mut self.heap_view, snapshot.as_deref()),
                     MonitorTab::Allocations => handle_allocation_key(code, &mut self.allocation_view, snapshot.as_deref()),
@@ -790,10 +820,12 @@ impl App {
                         self.status = format!("Snapshot buffers: {:?}", self.snapshot_options.event_buffers);
                     }
                     KeyCode::Char('c') if !capture_in_progress && self.recording_receiver.is_none() => {
-                        self.recording_configuration_popup = Some(RecordingConfigurationPopup {
-                            draft: *recording,
-                            selected: 0,
-                        });
+                        if let Screen::Connected { recording, .. } = &self.screen {
+                            self.recording_configuration_popup = Some(RecordingConfigurationPopup {
+                                draft: *recording,
+                                selected: 0,
+                            });
+                        }
                     }
                     _ => {}
                 }
@@ -1464,80 +1496,15 @@ fn capture_connected_snapshot(
     let bytes = capture_snapshot(descriptor, options).map_err(|error| error.to_string())?;
     report_capture_step(progress, CaptureStep::Decode)?;
     let decoded = seismograph::snapshot::decode(&bytes).map_err(|error| format!("invalid Seismograph snapshot: {error}"))?;
-    let allocator = source_with_id(&decoded.sources, seismograph_rallocator::source::ID)
-        .ok_or(super::Error::MissingMemorySource)
-        .and_then(|source| seismograph_rallocator::decode(&source.data).map_err(super::Error::MemorySnapshot));
-    let runtime_source = source_with_id(&decoded.sources, seismograph_runtime::snapshot::source::ID)
-        .and_then(|source| seismograph_runtime::snapshot::decode(&source.data).ok());
-    let runtime_addresses = runtime_source
-        .iter()
-        .flat_map(|source| &source.addresses)
-        .map(|lookup| {
-            seismograph_rallocator::callers::AddressLookup::from_fields(seismograph_rallocator::callers::AddressLookupFields {
-                address: lookup.address,
-                symbol: lookup.symbol.clone(),
-                filename: lookup.filename.clone(),
-                line: lookup.line,
-                column: lookup.column,
-            })
-        })
-        .collect::<Vec<_>>();
-    let (memory, allocations, runtime, heap_error, mut status) = match allocator {
-        Ok(allocator) => {
-            let mut addresses = allocator
-                .addresses
-                .iter()
-                .cloned()
-                .map(|lookup| (lookup.address, lookup))
-                .collect::<std::collections::BTreeMap<_, _>>();
-            for lookup in runtime_addresses {
-                addresses.insert(lookup.address, lookup);
-            }
-            let addresses = addresses.into_values().collect::<Vec<_>>();
-            let runtime = RuntimeSnapshot::from_events(&decoded, &addresses, runtime_source.as_ref());
-            (
-                Some(MemorySnapshot::from_snapshot(&allocator)),
-                Some(AllocationSnapshot::from_snapshot(&allocator)),
-                runtime,
-                None,
-                String::new(),
-            )
-        }
-        Err(error) => {
-            let error = format!("heap data unavailable: {error}");
-            (
-                None,
-                None,
-                RuntimeSnapshot::from_events(&decoded, &runtime_addresses, runtime_source.as_ref()),
-                Some(error.clone()),
-                error,
-            )
-        }
-    };
-    let snapshot = Box::new(CapturedSnapshot {
-        memory,
-        allocations,
-        heap_error,
-        primitives: runtime.primitives,
-        runtime: runtime.runtime,
-        io: runtime.io,
-        cache: runtime.cache,
-        threads: runtime.threads,
-        captured_at: SystemTime::now(),
-        captured_instant: Instant::now(),
-    });
+    let mut snapshot = super::snapshot::prepare(decoded)?;
+    snapshot.captured_at = Some(SystemTime::now());
+    snapshot.captured_instant = Some(Instant::now());
+    let mut status = snapshot.heap_error.clone().unwrap_or_default();
     report_capture_step(progress, CaptureStep::Save)?;
     if let Err(error) = save_snapshot(descriptor, &bytes) {
         status = error.to_string();
     }
     Ok(CaptureOutcome { snapshot, status })
-}
-
-fn source_with_id(
-    sources: &[seismograph::snapshot::SourceSnapshot],
-    id: seismograph::snapshot::SourceId,
-) -> Option<&seismograph::snapshot::SourceSnapshot> {
-    sources.iter().find(|source| source.id == id)
 }
 
 fn report_capture_step(progress: &Sender<CaptureMessage>, step: CaptureStep) -> Result<(), String> {
@@ -1601,8 +1568,8 @@ mod tests {
             io: IoMonitorSnapshot::default(),
             cache: CacheMonitorSnapshot::default(),
             threads: ThreadSnapshot { threads: Vec::new() },
-            captured_at: SystemTime::UNIX_EPOCH,
-            captured_instant: Instant::now(),
+            captured_at: Some(SystemTime::UNIX_EPOCH),
+            captured_instant: Some(Instant::now()),
         })
     }
 
@@ -1619,7 +1586,7 @@ mod tests {
 
     fn connected_fields(screen: &Screen) -> Option<(seismograph_protocol::monitor::InstanceId, RecordingConfiguration, MonitorTab, bool)> {
         match screen {
-            Screen::Browse => None,
+            Screen::Browse | Screen::Offline { .. } => None,
             Screen::Connected {
                 descriptor,
                 recording,
@@ -2920,27 +2887,106 @@ mod tests {
 
     #[test]
     fn snapshot_sources_are_selected_by_exact_identifier() {
-        let allocator = seismograph::snapshot::SourceSnapshot {
-            id: seismograph_rallocator::source::ID,
-            name: "allocator".into(),
-            schema_version: 1,
-            data: Vec::new(),
-        };
-        let runtime = seismograph::snapshot::SourceSnapshot {
-            id: seismograph_runtime::snapshot::source::ID,
-            name: "runtime".into(),
-            schema_version: 1,
-            data: Vec::new(),
-        };
-        let sources = [allocator, runtime];
+        for (id, expected) in [
+            (seismograph_rallocator::source::ID, Some("invalid rallocator snapshot")),
+            (seismograph_runtime::snapshot::source::ID, Some("invalid runtime snapshot")),
+            (seismograph::snapshot::SourceId::new(999), None),
+        ] {
+            let decoded = seismograph::snapshot::DecodedSnapshot {
+                sources: vec![seismograph::snapshot::SourceSnapshot {
+                    id,
+                    name: "not-used-for-identification".into(),
+                    schema_version: 1,
+                    data: Vec::new(),
+                }],
+                ..Default::default()
+            };
+            let result = super::super::snapshot::prepare(decoded);
+            assert_eq!(
+                result.err().map(|error| error.split(':').next().unwrap().to_owned()),
+                expected.map(str::to_owned),
+            );
+        }
+    }
 
+    #[test]
+    fn offline_navigation_never_starts_remote_actions() {
+        let mut app = App::offline(PathBuf::from("capture.seismograph"));
+        app.finish_offline_load(empty_capture());
+        for tab in ['1', '2', '3', '4', '5', '6', '7', '8'] {
+            app.handle_key(KeyCode::Char(tab));
+            for key in ['s', 'r', 'c', 'd'] {
+                assert!(!app.handle_key(KeyCode::Char(key)));
+            }
+            app.refresh_with(|| panic!("offline discovery"), |_| panic!("offline statistics"));
+            app.apply_recording_configuration_with(RecordingConfiguration::default(), |_, _| panic!("offline recording"));
+        }
+        assert!(matches!(
+            app.screen,
+            Screen::Offline {
+                tab: MonitorTab::Cache,
+                ..
+            }
+        ));
         assert_eq!(
             (
-                source_with_id(&sources, seismograph_rallocator::source::ID).map(|source| source.name.as_str()),
-                source_with_id(&sources, seismograph_runtime::snapshot::source::ID).map(|source| source.name.as_str()),
-                source_with_id(&sources, seismograph::snapshot::SourceId::new(999)).map(|source| source.name.as_str()),
+                app.capture_receiver.is_none(),
+                app.discovery_receiver.is_none(),
+                app.statistics_receiver.is_none(),
+                app.recording_receiver.is_none(),
+                app.recording_configuration_popup.is_none(),
+                app.snapshot_options,
             ),
-            (Some("allocator"), Some("runtime"), None)
+            (true, true, true, true, true, SnapshotOptions::default()),
         );
+        assert!(app.handle_key(KeyCode::Esc));
+        assert!(app.handle_key(KeyCode::Char('q')));
+    }
+
+    #[test]
+    fn offline_navigation_sorting_and_stack_filters_match_monitor() {
+        for tab in [
+            MonitorTab::Info,
+            MonitorTab::Heaps,
+            MonitorTab::Allocations,
+            MonitorTab::Primitives,
+            MonitorTab::Threads,
+            MonitorTab::Runtime,
+            MonitorTab::Io,
+            MonitorTab::Cache,
+        ] {
+            let mut live = connected_app(tab);
+            let mut offline = App::offline(PathBuf::from("capture.seismograph"));
+            offline.screen = Screen::Offline {
+                path: PathBuf::from("capture.seismograph"),
+                tab,
+                snapshot: Some(empty_capture()),
+            };
+            for key in [
+                KeyCode::Char(']'),
+                KeyCode::Char('r'),
+                KeyCode::Char('f'),
+                KeyCode::Down,
+                KeyCode::Enter,
+                KeyCode::PageDown,
+                KeyCode::Backspace,
+                KeyCode::Tab,
+                KeyCode::BackTab,
+            ] {
+                assert_eq!(live.handle_key(key), offline.handle_key(key));
+                let state = |app: &App| {
+                    (
+                        app.heap_view,
+                        app.allocation_view,
+                        app.primitive_view,
+                        app.thread_view,
+                        app.runtime_view,
+                        app.io_view,
+                        app.cache_view,
+                    )
+                };
+                assert_eq!(state(&live), state(&offline), "{tab:?} {key:?}");
+            }
+        }
     }
 }
