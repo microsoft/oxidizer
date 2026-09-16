@@ -1012,9 +1012,7 @@ impl SnapshotArena {
                     // SAFETY: previous is the live older node that links to chunk.
                     unsafe { (*previous).next = next };
                 }
-                let Some(ranges) = &mut self.ranges else {
-                    unreachable!("find_range found a live indexed mapping");
-                };
+                let ranges = self.ranges.as_mut().expect("find_range found a live indexed mapping");
                 ranges.copy_within(index + 1..self.range_count, index);
                 self.range_count -= 1;
                 // SAFETY: this dedicated mapping was unlinked above and was allocated
@@ -1054,9 +1052,7 @@ impl SnapshotArena {
                 }
             }));
         }
-        let Some(ranges) = &mut self.ranges else {
-            unreachable!("range storage was allocated above");
-        };
+        let ranges = self.ranges.as_mut().expect("range storage was allocated above");
         let index = ranges[..self.range_count].partition_point(|existing| existing.start < range.start);
         ranges.copy_within(index..self.range_count, index + 1);
         ranges[index] = range;
@@ -1558,6 +1554,18 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_collection_stays_active_while_arena_allocation_is_suspended() {
+        let before = snapshot_collection_active();
+        let during = with_snapshot_arena(|| {
+            (
+                snapshot_collection_active(),
+                with_snapshot_arena_suspended(snapshot_collection_active),
+            )
+        });
+        assert_eq!((before, during, snapshot_collection_active()), (false, (true, true), false));
+    }
+
+    #[test]
     fn snapshot_arena_recognizes_its_allocations() {
         with_snapshot_arena(|| {
             let layout = Layout::from_size_align(128, 64).unwrap();
@@ -1628,6 +1636,7 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     #[ignore = "manual CPU scaling probe; reserves 512 MiB without populating chunk tails"]
+    #[cfg_attr(coverage_nightly, coverage(off))] // Manual profiling, not an automated test.
     fn snapshot_arena_sequential_free_scaling_probe() {
         sequential_arena_frees(128, 8192);
     }
@@ -2450,6 +2459,7 @@ mod tests {
 
     #[test]
     #[ignore = "snapshot-arena shuffled-release profiling probe"]
+    #[cfg_attr(coverage_nightly, coverage(off))] // Manual profiling, not an automated test.
     fn arena_shuffled_lookup_profile() {
         let mut arena = SnapshotArena::new();
         let layout = Layout::from_size_align(1_048_576, 8).unwrap();

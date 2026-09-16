@@ -253,10 +253,25 @@ fn reporting_peak_scope_round_trips_without_reinterpreting_samples_as_lifetime()
         let actual = decode(&encoded(&expected)).unwrap();
         assert_eq!(actual, expected);
         assert_eq!(
-            actual.stats.lifetime_peak_live_bytes(),
-            (scope == PeakLiveBytesScope::Lifetime).then_some(73_322),
+            (actual.stats.lifetime_peak_live_bytes(), actual.stats.sampled_peak_live_bytes()),
+            (
+                (scope == PeakLiveBytesScope::Lifetime).then_some(73_322),
+                (scope == PeakLiveBytesScope::SnapshotSamples).then_some(73_322),
+            ),
         );
     }
+}
+
+#[test]
+fn reporting_peak_scope_labels_distinguish_samples_from_lifetime() {
+    assert_eq!(
+        [
+            PeakLiveBytesScope::Unavailable.to_string(),
+            PeakLiveBytesScope::SnapshotSamples.to_string(),
+            PeakLiveBytesScope::Lifetime.to_string(),
+        ],
+        ["unavailable", "aggregate-query samples", "lifetime"]
+    );
 }
 
 #[test]
