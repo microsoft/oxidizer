@@ -32,6 +32,9 @@ backend, scheduler, driver registry, or placement policy.
   and caching. Failed attempts are not cached as successful registrations.
 - Abandoning an acquisition result does not justify abandoning cleanup of an
   installation already in progress.
+- A retry does not create another instance while the previous instance or drain
+  still occupies that worker's registration. Lost installation replies trigger
+  bounded retirement, and undelivered cleanup outcomes remain observable.
 
 ## `R3`: Negotiation and owner-thread initialization
 
@@ -60,7 +63,7 @@ backend, scheduler, driver registry, or placement policy.
   instance state. Providers construct both from the same private owner, and
   instance-association scenarios verify the resulting behavior.
 - A heterogeneous runtime may erase these local values privately. Public driver
-  and   drain contracts remain generic and support static dispatch.
+  and drain contracts remain generic and support static dispatch.
 - Creation is prompt and does not wait for runtime workers to make progress.
   Routing and notification are established before a context becomes usable.
 

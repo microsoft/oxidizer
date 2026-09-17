@@ -200,10 +200,7 @@ impl<W: CompletionWaiter> Coordinator<W> {
     }
 
     pub(super) fn insert(&mut self, id: TypeId, source: Arc<Source>, driver: Box<dyn ErasedDriver>) {
-        assert!(
-            !self.entries.iter().any(|entry| entry.id == id),
-            "registration must be unique until its previous drain retires"
-        );
+        assert!(!self.contains(id), "registration must be unique until its previous drain retires");
         self.entries.push(Entry {
             id,
             source,
@@ -211,6 +208,10 @@ impl<W: CompletionWaiter> Coordinator<W> {
             status: ServiceStatus::Runnable,
             errors: Vec::new(),
         });
+    }
+
+    pub(super) fn contains(&self, id: TypeId) -> bool {
+        self.entries.iter().any(|entry| entry.id == id)
     }
 
     pub(super) fn service(&mut self, now: Instant) {

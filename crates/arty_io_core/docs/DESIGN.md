@@ -228,5 +228,11 @@ The two-thread reference runtime exercises that protocol through in-memory
 record delivery and readiness sources. Its own registries, queue implementation,
 source identity, fairness, and timeout policy are examples of runtime/native
 responsibilities, not additional public core APIs.
+An unpublished registration retires individually under a deadline before that
+type can be installed again; other healthy registrations remain serviceable.
+The reference uses serialized, FIFO control commands and one response owner per
+rollback. Undelivered outcomes remain available for late acknowledgement.
+Repeated requests do not overwrite an existing deadline or response owner and
+are rejected explicitly when another request already owns the outcome.
 The control thread uses blocking result handles. The example is not an
 application-future executor or a production native backend.

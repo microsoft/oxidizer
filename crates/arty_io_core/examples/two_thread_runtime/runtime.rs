@@ -337,7 +337,7 @@ fn install_on<C: IoContext>(worker: &Worker, mut provider: C::Provider, timeout:
     let (reply, receiver) = mpsc::channel();
     let install = Box::new(move |context: DriverContext| {
         provider.relocate(None, context.thread());
-        // One box per installed driver: the returned object is already erased and local.
+        // This runtime privately erases the inline owner only after creation succeeds.
         let (consumer_context, driver) = provider.create(context)?;
         Ok(Installed {
             context: Box::new(consumer_context),
@@ -357,7 +357,12 @@ fn install_on<C: IoContext>(worker: &Worker, mut provider: C::Provider, timeout:
 
 struct Rollback {
     deadline: Instant,
-    reply: Reply,
+    reply: Option<Reply>,
+}
+
+enum RollbackOutcome {
+    PendingDelivery(Result<(), RuntimeError>),
+    Delivered,
 }
 
 struct WorkerLoop {
@@ -367,6 +372,7 @@ struct WorkerLoop {
     commands: mpsc::Receiver<Command>,
     pending_command: Option<Command>,
     rollbacks: HashMap<TypeId, Rollback>,
+    completed_rollbacks: HashMap<TypeId, RollbackOutcome>,
     stopping: Option<Instant>,
     errors: Vec<DriverError>,
     options: Options,
@@ -381,6 +387,7 @@ impl WorkerLoop {
             commands,
             pending_command: None,
             rollbacks: HashMap::new(),
+            completed_rollbacks: HashMap::new(),
             stopping: None,
             errors: Vec::new(),
             options,
@@ -482,6 +489,18 @@ impl WorkerLoop {
                     send_install_reply(&reply, Err(DriverError::from_message("the owner worker is shutting down")));
                     return;
                 }
+                if self.coordinator.contains(id) || self.rollbacks.contains_key(&id) {
+                    send_install_reply(
+                        &reply,
+                        Err(DriverError::from_message("the driver type is still installed or retiring")),
+                    );
+                    return;
+                }
+                // Reuse is allowed only after owner-thread retirement. Preserve an unclaimed
+                // failure before discarding the previous attempt's completed record.
+                if let Some(RollbackOutcome::PendingDelivery(Err(error))) = self.completed_rollbacks.remove(&id) {
+                    self.errors.extend(error.errors);
+                }
                 let source = Source::new(self.coordinator.waiter.waker());
                 let context = DriverContext::new(self.worker.clone(), self.tasks.clone(), Waker::from(std::sync::Arc::clone(&source)));
                 let context = self.coordinator.waiter.attach_clients(context);
@@ -491,18 +510,56 @@ impl WorkerLoop {
                         if reply.send(Ok(installed.context)).is_err() {
                             self.errors
                                 .push(DriverError::from_message("registration caller disappeared before publication"));
-                            self.begin_stop(deadline_after(self.options.shutdown_timeout));
+                            assert!(
+                                self.coordinator.begin_shutdown(id),
+                                "the newly installed driver still owns its slot"
+                            );
+                            self.rollbacks.insert(
+                                id,
+                                Rollback {
+                                    deadline: deadline_after(self.options.shutdown_timeout),
+                                    reply: None,
+                                },
+                            );
                         }
                     }
                     Err(error) => send_install_reply(&reply, Err(error)),
                 }
             }
             Command::Rollback { id, deadline, reply } => {
-                if self.coordinator.begin_shutdown(id) {
-                    self.rollbacks.insert(id, Rollback { deadline, reply });
+                if let Some(rollback) = self.rollbacks.get_mut(&id) {
+                    if rollback.reply.is_none() {
+                        // The first controller joins orphan cleanup without extending its bound.
+                        rollback.deadline = rollback.deadline.min(deadline);
+                        rollback.reply = Some(reply);
+                    } else {
+                        self.send_untracked_reply(
+                            &reply,
+                            Err(DriverError::from_message("registration rollback is already in progress").into()),
+                        );
+                    }
+                } else if let Some(completed) = self.completed_rollbacks.remove(&id) {
+                    match completed {
+                        RollbackOutcome::PendingDelivery(result) => self.complete_rollback(id, Some(reply), result),
+                        RollbackOutcome::Delivered => {
+                            self.completed_rollbacks.insert(id, RollbackOutcome::Delivered);
+                            self.send_untracked_reply(
+                                &reply,
+                                Err(DriverError::from_message("registration rollback outcome was already delivered").into()),
+                            );
+                        }
+                    }
+                } else if self.coordinator.begin_shutdown(id) {
+                    self.rollbacks.insert(
+                        id,
+                        Rollback {
+                            deadline,
+                            reply: Some(reply),
+                        },
+                    );
                 } else {
                     // Valid when this attempted worker's create returned an error.
-                    send_reply(&reply, Ok(()));
+                    self.send_untracked_reply(&reply, Ok(()));
                 }
             }
             Command::Stop { deadline } => self.begin_stop(deadline),
@@ -516,6 +573,28 @@ impl WorkerLoop {
 
     fn next_deadline(&self) -> Option<Instant> {
         self.rollbacks.values().map(|rollback| rollback.deadline).chain(self.stopping).min()
+    }
+
+    fn send_untracked_reply(&mut self, reply: &Reply, result: Result<(), RuntimeError>) {
+        if let Some(Err(error)) = send_reply(reply, result) {
+            self.errors.extend(error.errors);
+        }
+    }
+
+    fn complete_rollback(&mut self, id: TypeId, reply: Option<Reply>, result: Result<(), RuntimeError>) {
+        let undelivered = if let Some(reply) = reply {
+            send_reply(&reply, result)
+        } else {
+            if let Err(error) = &result {
+                report(&format!("unclaimed registration retirement failure: {error}"));
+            }
+            Some(result)
+        };
+        let completed = undelivered.map_or(RollbackOutcome::Delivered, RollbackOutcome::PendingDelivery);
+        assert!(
+            self.completed_rollbacks.insert(id, completed).is_none(),
+            "a retirement outcome is recorded once or removed before redelivery"
+        );
     }
 
     fn finish_drains(&mut self) {
@@ -532,17 +611,30 @@ impl WorkerLoop {
         self.errors.extend(self.coordinator.take_domain_errors());
         for retired in self.coordinator.take_retired() {
             if let Some(rollback) = self.rollbacks.remove(&retired.id) {
-                send_reply(&rollback.reply, outcome(retired.errors));
+                self.complete_rollback(retired.id, rollback.reply, outcome(retired.errors));
             } else {
                 self.errors.extend(retired.errors);
+            }
+        }
+        if self.stopping.is_some() && self.coordinator.is_empty() {
+            for completed in std::mem::take(&mut self.completed_rollbacks).into_values() {
+                if let RollbackOutcome::PendingDelivery(Err(error)) = completed {
+                    self.errors.extend(error.errors);
+                }
             }
         }
     }
 }
 
-fn send_reply(reply: &Reply, result: Result<(), RuntimeError>) {
-    if let Err(mpsc::SendError(Err(error))) = reply.send(result) {
-        report(&format!("unobserved registration rollback failure: {error}"));
+fn send_reply(reply: &Reply, result: Result<(), RuntimeError>) -> Option<Result<(), RuntimeError>> {
+    match reply.send(result) {
+        Ok(()) => None,
+        Err(mpsc::SendError(result)) => {
+            if let Err(error) = &result {
+                report(&format!("unobserved registration rollback failure: {error}"));
+            }
+            Some(result)
+        }
     }
 }
 
