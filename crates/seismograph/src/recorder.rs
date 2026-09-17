@@ -1139,7 +1139,21 @@ fn destructive_snapshot(disposition: crate::snapshot::EventBufferDisposition) ->
         );
         return Err(crate::Error::new("seismograph snapshot timed out waiting for active event writers"));
     }
-    let snapshot = snapshot_session_until(LAST_SESSION.load(Ordering::Acquire), deadline)?;
+    let snapshot = match snapshot_session_until(LAST_SESSION.load(Ordering::Acquire), deadline) {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            restore_recording_policies(
+                allocation_policy,
+                general_policy,
+                arc_dereference_policy,
+                runtime_task_policy,
+                io_policy,
+                cache_policy,
+                was_enabled.then(|| LAST_SESSION.load(Ordering::Acquire)),
+            );
+            return Err(error);
+        }
+    };
     let release = disposition == crate::snapshot::EventBufferDisposition::Release;
     let mut recorder = RECORDERS.load(Ordering::Acquire);
     while !recorder.is_null() {
@@ -1349,6 +1363,316 @@ fn capture_platform_stack(frames: &mut [u64]) -> usize {
 mod tests {
     use super::*;
     use crate::recorder::event::EventTimestamp;
+
+    #[test]
+    fn contended_ring_rejects_a_new_session_without_changing_the_old_one() {
+        let recorder = ThreadRecorder::new();
+        let capacity = EventBufferCapacity::new(64).unwrap();
+        let event = Record::object(EventKind::MutexAccess, ObjectId::new(1));
+        assert!(recorder.record(1, capacity, event, [0; MAX_STACK_FRAMES], 0));
+        let ring = recorder.ring_lock();
+        let accepted = recorder.record(2, capacity, event, [0; MAX_STACK_FRAMES], 0);
+        drop(ring);
+        let captured = recorder.snapshot();
+        assert_eq!(
+            (
+                accepted,
+                recorder.session.load(Ordering::Acquire),
+                captured.log.total_events,
+                captured.events.len()
+            ),
+            (false, 1, 1, 1)
+        );
+    }
+
+    #[test]
+    fn contended_slot_drops_an_event_and_releases_the_writer() {
+        let _test = TEST_LOCK.lock().unwrap();
+        configure(Configuration {
+            general_events: RecordingPolicy::all(false),
+            event_capacity_per_thread: EventBufferCapacity::new(64).unwrap(),
+            ..Default::default()
+        });
+        let event = Record::object(EventKind::MutexAccess, ObjectId::new(1));
+        let session = record_session(EventClass::General, || event).unwrap();
+        // SAFETY: this thread owns the process-lifetime recorder and its writer context.
+        let recorder = unsafe { &*local_recorder() };
+        let slot = recorder.ring().unwrap().slots[1].lock_until(wait_deadline()).unwrap();
+        let accepted = record_in_session(session, || event);
+        drop(slot);
+        let writer_active = recorder.writer_active.load(Ordering::Acquire);
+        let resumed = record_in_session(session, || event);
+        let captured = snapshot(crate::snapshot::EventBufferDisposition::Release).unwrap();
+        configure(Configuration::default());
+        assert_eq!(
+            (
+                accepted,
+                writer_active,
+                resumed,
+                captured.events.iter().map(|event| event.sequence.get()).collect::<Vec<_>>()
+            ),
+            (false, false, true, vec![1, 3])
+        );
+    }
+
+    #[test]
+    fn expired_snapshot_releases_ring_lock_when_a_slot_is_busy() {
+        let recorder = ThreadRecorder::new();
+        let capacity = EventBufferCapacity::new(64).unwrap();
+        assert!(recorder.record(
+            1,
+            capacity,
+            Record::object(EventKind::MutexAccess, ObjectId::new(1)),
+            [0; MAX_STACK_FRAMES],
+            0
+        ));
+        let slot = recorder.ring().unwrap().slots[0].lock_until(wait_deadline()).unwrap();
+        let timed_out = recorder.snapshot_until(Instant::now()).is_none();
+        let ring_released = !recorder.ring_locked.load(Ordering::Acquire);
+        drop(slot);
+        assert_eq!((timed_out, ring_released, recorder.snapshot().events.len()), (true, true, 1));
+    }
+
+    #[test]
+    fn contended_statistics_returns_error_and_legacy_fallback() {
+        let _test = TEST_LOCK.lock().unwrap();
+        configure(Configuration {
+            general_events: RecordingPolicy::all(false),
+            event_capacity_per_thread: EventBufferCapacity::new(64).unwrap(),
+            ..Default::default()
+        });
+        // SAFETY: this thread owns the process-lifetime recorder.
+        let recorder = unsafe { &*local_recorder() };
+        let ring = recorder.ring_lock();
+        let error = try_statistics().unwrap_err().to_string();
+        let fallback = statistics();
+        drop(ring);
+        let expected = Statistics {
+            event_capacity_per_thread: 64,
+            recording: last_recording_policies(),
+            ..Statistics::default()
+        };
+        configure(Configuration::default());
+        assert_eq!(
+            (error.as_str(), fallback),
+            ("seismograph recorder statistics timed out waiting for an event ring", expected)
+        );
+    }
+
+    fn timeout_configuration() -> Configuration {
+        Configuration {
+            allocations: RecordingPolicy::all(false),
+            general_events: RecordingPolicy::all(false),
+            arc_dereferences: RecordingPolicy::all(false),
+            runtime_tasks: RecordingPolicy::all(false),
+            io: RecordingPolicy::all(false),
+            cache: RecordingPolicy::all(false),
+            event_capacity_per_thread: EventBufferCapacity::new(64).unwrap(),
+        }
+    }
+
+    #[test]
+    fn destructive_snapshot_restores_recording_after_writer_timeout() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let expected = timeout_configuration();
+        configure(expected);
+        let session = ACTIVE_SESSION.load(Ordering::Acquire);
+        // SAFETY: this thread owns the process-lifetime recorder.
+        let recorder = unsafe { &*local_recorder() };
+        recorder.writer_active.store(true, Ordering::SeqCst);
+        let writer = WriterActiveGuard { recorder };
+        let error = destructive_snapshot(crate::snapshot::EventBufferDisposition::Release).unwrap_err();
+        drop(writer);
+        let restored = (configuration(), ACTIVE_SESSION.load(Ordering::Acquire));
+        let resumed = record_session(EventClass::General, || Record::object(EventKind::MutexAccess, ObjectId::new(1)));
+        configure(Configuration::default());
+        assert_eq!(
+            (error.to_string(), restored, resumed.map(RecordingSession::get)),
+            (
+                "seismograph snapshot timed out waiting for active event writers".into(),
+                (expected, session),
+                Some(session)
+            )
+        );
+    }
+
+    #[test]
+    fn destructive_snapshot_restores_recording_after_snapshot_timeout() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let expected = timeout_configuration();
+        configure(expected);
+        let event = Record::object(EventKind::MutexAccess, ObjectId::new(1));
+        let session = record_session(EventClass::General, || event).unwrap();
+        // SAFETY: this thread owns the process-lifetime recorder.
+        let recorder = unsafe { &*local_recorder() };
+        let ring = recorder.ring_lock();
+        let error = destructive_snapshot(crate::snapshot::EventBufferDisposition::Release).unwrap_err();
+        drop(ring);
+        let restored = (configuration(), ACTIVE_SESSION.load(Ordering::Acquire));
+        let resumed = record_in_session(session, || event);
+        let captured = snapshot(crate::snapshot::EventBufferDisposition::Release).unwrap();
+        configure(Configuration::default());
+        assert_eq!(
+            (error.to_string(), restored, resumed, captured.events.len()),
+            (
+                "seismograph snapshot timed out waiting for an event recorder".into(),
+                (expected, session.get()),
+                true,
+                2
+            )
+        );
+    }
+
+    #[test]
+    fn destructive_snapshot_restores_recording_when_clearing_an_older_ring_times_out() {
+        let _test = TEST_LOCK.lock().unwrap();
+        configure(Configuration::default());
+        // A recorder with no events in the new session is skipped during capture,
+        // but its retained ring still needs clearing.
+        let recorder = local_recorder();
+        let expected = timeout_configuration();
+        configure(expected);
+        let session = ACTIVE_SESSION.load(Ordering::Acquire);
+        // SAFETY: this thread owns the process-lifetime recorder.
+        let recorder = unsafe { &*recorder };
+        let ring = recorder.ring_lock();
+        let error = destructive_snapshot(crate::snapshot::EventBufferDisposition::Clear).unwrap_err();
+        drop(ring);
+        let restored = (configuration(), ACTIVE_SESSION.load(Ordering::Acquire));
+        let resumed = record_session(EventClass::General, || Record::object(EventKind::MutexAccess, ObjectId::new(1)));
+        configure(Configuration::default());
+        assert_eq!(
+            (error.to_string(), restored, resumed.map(RecordingSession::get)),
+            (
+                "seismograph snapshot timed out clearing an event recorder".into(),
+                (expected, session),
+                Some(session)
+            )
+        );
+    }
+
+    #[test]
+    fn expired_configuration_lock_can_be_acquired_after_release() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let lock = ConfigurationLock::acquire();
+        let blocked = ConfigurationLock::acquire_until(Instant::now()).is_none();
+        drop(lock);
+        let acquired = ConfigurationLock::acquire_until(Instant::now()).is_some();
+        assert_eq!((blocked, acquired), (true, true));
+    }
+
+    #[test]
+    fn blocking_configuration_acquisition_retries_after_its_bounded_wait() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let lock = ConfigurationLock::acquire();
+        let (started_sender, started_receiver) = std::sync::mpsc::channel();
+        let (finished_sender, finished_receiver) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            started_sender.send(()).unwrap();
+            let _lock = ConfigurationLock::acquire();
+            finished_sender.send(()).unwrap();
+        });
+        started_receiver.recv().unwrap();
+        let blocked = finished_receiver.recv_timeout(RECORDER_WAIT_TIMEOUT + Duration::from_millis(100));
+        drop(lock);
+        let completed = finished_receiver.recv_timeout(Duration::from_secs(5));
+        worker.join().unwrap();
+        assert_eq!((blocked, completed), (Err(std::sync::mpsc::RecvTimeoutError::Timeout), Ok(())));
+    }
+
+    #[cfg(feature = "monitor")]
+    fn monitor_connection() -> (crate::monitor::Monitor, std::net::TcpStream) {
+        use seismograph_protocol::message::{Request, Response};
+
+        let monitor = crate::monitor::Monitor::builder().name("recorder-timeout").start().unwrap();
+        let mut stream = std::net::TcpStream::connect(monitor.descriptor().socket_address()).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        stream.set_write_timeout(Some(Duration::from_secs(10))).unwrap();
+        seismograph_protocol::write_request(
+            &mut stream,
+            1,
+            &Request::Hello {
+                authentication: monitor.descriptor().authentication,
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            seismograph_protocol::read_response(&mut stream).unwrap(),
+            (1, Response::Hello { .. })
+        ));
+        (monitor, stream)
+    }
+
+    #[cfg(feature = "monitor")]
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn monitor_reports_busy_statistics_and_recovers_on_the_same_connection() {
+        use seismograph_protocol::message::{Request, Response};
+
+        let _test = TEST_LOCK.lock().unwrap();
+        let (_monitor, mut stream) = monitor_connection();
+        // SAFETY: this thread owns the process-lifetime recorder.
+        let recorder = unsafe { &*local_recorder() };
+        let ring = recorder.ring_lock();
+        seismograph_protocol::write_request(&mut stream, 2, &Request::ReadRecorderStatistics).unwrap();
+        let response = seismograph_protocol::read_response(&mut stream).unwrap();
+        drop(ring);
+        seismograph_protocol::write_request(&mut stream, 3, &Request::ReadRecorderStatistics).unwrap();
+        let resumed = seismograph_protocol::read_response(&mut stream).unwrap();
+        assert_eq!(
+            (response, matches!(resumed, (3, Response::RecorderStatistics(_)))),
+            (
+                (
+                    2,
+                    Response::Error("seismograph recorder statistics timed out waiting for an event ring".into())
+                ),
+                true
+            )
+        );
+    }
+
+    #[cfg(feature = "monitor")]
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn monitor_rejects_configuration_changes_while_locked_without_changing_policies() {
+        use seismograph_protocol::message::{RecordingConfiguration, Request, Response};
+
+        let _test = TEST_LOCK.lock().unwrap();
+        configure(Configuration::default());
+        let (_monitor, mut stream) = monitor_connection();
+        let lock = ConfigurationLock::acquire();
+        let requested = seismograph_protocol::message::RecordingPolicy {
+            enabled: true,
+            ..Default::default()
+        };
+        seismograph_protocol::write_request(&mut stream, 2, &Request::SetCacheRecording(requested)).unwrap();
+        let cache_response = seismograph_protocol::read_response(&mut stream).unwrap();
+        seismograph_protocol::write_request(
+            &mut stream,
+            3,
+            &Request::SetRecording(RecordingConfiguration {
+                general_events: requested,
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+        let general_response = seismograph_protocol::read_response(&mut stream).unwrap();
+        let unchanged = configuration();
+        drop(lock);
+        seismograph_protocol::write_request(&mut stream, 4, &Request::SetCacheRecording(requested)).unwrap();
+        let resumed = seismograph_protocol::read_response(&mut stream).unwrap();
+        configure(Configuration::default());
+        let expected_error = Response::Error("seismograph recording configuration timed out waiting for another operation".into());
+        assert_eq!(
+            (cache_response, general_response, unchanged, resumed),
+            (
+                (2, expected_error.clone()),
+                (3, expected_error),
+                Configuration::default(),
+                (4, Response::Acknowledged)
+            )
+        );
+    }
 
     #[test]
     fn zero_initialized_policy_uses_default_sampling() {
