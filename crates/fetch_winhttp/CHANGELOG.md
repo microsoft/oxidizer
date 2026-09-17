@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.1] - 2026-09-16
+
+- 🔧 Maintenance
+
+  - Now requires `0.2.1` of `fetch_winhttp_impl`
+
 ## [0.2.0] - 2026-09-10
 
 ### Breaking
