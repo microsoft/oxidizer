@@ -15,7 +15,7 @@ use super::client::{capture_snapshot, discover, recorder_statistics, save_snapsh
 use super::data::{AllocationSort, AllocationStackFilter, CapturedSnapshot, MemoryTier, MemoryTierData, PrimitiveSort, RuntimeTaskSort};
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(1);
-const CAPTURE_TIMEOUT: Duration = Duration::from_secs(60);
+const CAPTURE_TIMEOUT: Duration = Duration::from_mins(1);
 const MAX_ACTIVITY_SAMPLES: usize = 120;
 pub(super) const EVENT_BUFFER_CAPACITIES: [u32; 15] = [
     64, 128, 256, 512, 1_024, 2_048, 4_096, 8_192, 16_384, 32_768, 65_536, 131_072, 262_144, 524_288, 1_048_576,
