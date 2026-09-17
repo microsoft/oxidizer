@@ -51,9 +51,16 @@ mod tests {
         drop(error);
 
         MODE.store(1, Ordering::Relaxed);
-        let payload = std::panic::catch_unwind(|| seismograph::snapshot(SnapshotOptions::default())).unwrap_err();
-        assert_eq!(payload.downcast_ref::<String>().map(String::as_str), Some("injected source panic"));
-        drop(payload);
+        let error = seismograph::snapshot(SnapshotOptions::default()).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "seismograph source {} failed: seismograph source panicked during snapshot capture",
+                u64::MAX
+            )
+        );
+        assert!(!seismograph::snapshot::snapshot_collection_active());
+        drop(error);
 
         MODE.store(2, Ordering::Relaxed);
         let snapshot = seismograph::snapshot(SnapshotOptions::default()).unwrap();
