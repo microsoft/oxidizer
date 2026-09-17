@@ -3,7 +3,7 @@
 
 use thread_aware_core::ThreadAware;
 
-use crate::{DriverError, DriverProvider, ProviderContext};
+use crate::{DriverError, DriverProvider};
 
 /// A consumer-facing I/O handle that identifies the provider used to create it.
 ///
@@ -23,15 +23,19 @@ pub trait IoContext: Clone + ThreadAware + 'static {
 
     /// Returns the provider used when this context type is first requested.
     ///
-    /// `context` advertises the client capabilities of the proposed completion configuration.
-    /// Select one compatible strategy without registering per-worker native resources here.
+    /// This call establishes shared provider state that every worker instance may use. It carries
+    /// no native client capabilities: the completion strategy is selected from the clients that
+    /// each owning thread's [`DriverContext`](crate::DriverContext) actually supplies, so
+    /// strategy-specific shared native initialization is deferred to the first
+    /// [`DriverProvider::create`] that needs it.
     ///
     /// The runtime gives this function once-semantics per context type. Implementations should
     /// therefore return an equivalent provider on every call and should not rely on calls after
     /// successful registration.
+    ///
     /// # Errors
     ///
-    /// Returns unsupported configuration or provider initialization failures. A failed attempt
-    /// does not constitute successful registration and may be retried under an explicit policy.
-    fn provider(context: ProviderContext) -> Result<Self::Provider, DriverError>;
+    /// Returns unsupported-environment or provider initialization failures. A failed attempt does
+    /// not constitute successful registration and may be retried under an explicit policy.
+    fn provider() -> Result<Self::Provider, DriverError>;
 }

@@ -14,7 +14,7 @@ use std::task::{Wake, Waker};
 use std::thread::{self, ThreadId};
 use std::time::Duration;
 
-use arty_io_core::{CompletionBudget, CompletionDomain, CompletionWaiter, DriverError, ServiceStatus};
+use arty_io_core::{CompletionBudget, CompletionWaiter, DriverContext, DriverError, ServiceStatus};
 
 const BATCH_SIZE: usize = 64;
 
@@ -189,6 +189,11 @@ impl RecordClient {
     }
 }
 
+/// A unique, non-cloneable owner of one native record route.
+///
+/// Dropping this handle retires the route, so a registration acquired before a later
+/// construction failure cannot survive as an open mailbox. Retirement stays idempotent:
+/// an explicit [`retire`](Self::retire) followed by this drop counts exactly once.
 #[derive(Debug)]
 pub(super) struct RecordRegistration {
     queue: Arc<EventQueue>,
@@ -236,6 +241,14 @@ impl RecordRegistration {
     }
 }
 
+impl Drop for RecordRegistration {
+    fn drop(&mut self) {
+        // Retirement closes the route without invalidating it: in-flight packets keep their own
+        // reference and are discarded by the closed mailbox instead of landing in an orphan.
+        self.retire();
+    }
+}
+
 #[derive(Debug)]
 struct ReadyRoute {
     pending: AtomicBool,
@@ -278,6 +291,11 @@ impl ReadinessClient {
     }
 }
 
+/// A unique, non-cloneable owner of one native readiness route.
+///
+/// Dropping this handle retires the route, so a registration acquired before a later
+/// construction failure cannot survive as a live notification target. Retirement stays
+/// idempotent: an explicit [`retire`](Self::retire) followed by this drop counts exactly once.
 #[derive(Debug)]
 pub(super) struct ReadinessRegistration {
     queue: Arc<EventQueue>,
@@ -308,21 +326,31 @@ impl ReadinessRegistration {
     }
 }
 
+impl Drop for ReadinessRegistration {
+    fn drop(&mut self) {
+        // A late packet retains this closed route and is discarded, never redirected to a
+        // replacement registration.
+        self.retire();
+    }
+}
+
 pub(super) struct NativeWaiter {
-    domain: CompletionDomain,
     queue: Arc<EventQueue>,
     batch: Vec<Event>,
     metrics: Arc<NativeMetrics>,
     #[cfg(test)]
     fail_record_registration: Arc<AtomicBool>,
     #[cfg(test)]
+    record_client_enabled: AtomicBool,
+    #[cfg(test)]
     before_wait: Option<Box<dyn FnOnce()>>,
+    #[cfg(test)]
+    wait_entries: usize,
 }
 
 impl NativeWaiter {
     pub(super) fn new() -> Self {
         Self {
-            domain: CompletionDomain::new(),
             queue: Arc::new(EventQueue {
                 state: Mutex::new(QueueState {
                     open: true,
@@ -341,7 +369,11 @@ impl NativeWaiter {
             #[cfg(test)]
             fail_record_registration: Arc::default(),
             #[cfg(test)]
+            record_client_enabled: AtomicBool::new(true),
+            #[cfg(test)]
             before_wait: None,
+            #[cfg(test)]
+            wait_entries: 0,
         }
     }
 
@@ -372,18 +404,29 @@ impl NativeWaiter {
         self.fail_record_registration.store(true, Ordering::Relaxed);
     }
 
+    #[cfg(test)]
+    pub(super) fn disable_record_client(&self) {
+        self.record_client_enabled.store(false, Ordering::Relaxed);
+    }
+
     fn status(&self) -> ServiceStatus {
         if self.queue.has_events() {
-            ServiceStatus::runnable()
+            ServiceStatus::Runnable
         } else {
-            ServiceStatus::idle()
+            ServiceStatus::Idle
         }
     }
 }
 
 impl CompletionWaiter for NativeWaiter {
-    fn domain(&self) -> &CompletionDomain {
-        &self.domain
+    fn attach_clients(&self, context: DriverContext) -> Result<DriverContext, DriverError> {
+        #[cfg(test)]
+        if !self.record_client_enabled.load(Ordering::Relaxed) {
+            return context.with_completion_service(self.readiness_client());
+        }
+        context
+            .with_completion_service(self.record_client())?
+            .with_completion_service(self.readiness_client())
     }
 
     fn waker(&self) -> Waker {
@@ -399,6 +442,10 @@ impl CompletionWaiter for NativeWaiter {
             if self.queue.has_events() {
                 self.queue.latch.consume();
             } else {
+                #[cfg(test)]
+                {
+                    self.wait_entries += 1;
+                }
                 #[cfg(test)]
                 if let Some(hook) = self.before_wait.take() {
                     hook();
@@ -444,6 +491,5 @@ impl Drop for NativeWaiter {
 }
 
 #[cfg(test)]
-#[expect(clippy::unwrap_used, reason = "test setup and assertions use the test backtrace")]
 #[path = "native_tests.rs"]
 mod tests;

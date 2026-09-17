@@ -4,10 +4,10 @@
 use std::error::Error;
 use std::fmt;
 
-/// A failure of driver negotiation, initialization, completion service, or graceful shutdown.
+/// A failure of driver initialization, completion service, or graceful shutdown.
 ///
-/// Inspect the classification methods when deciding whether to select another configured
-/// completion domain or report a shutdown timeout. Messages provide context, not classification.
+/// Inspect the classification methods when deciding whether to select another configured native
+/// arrangement or report a shutdown timeout. Messages provide context, not classification.
 /// Native failures retain their underlying error through [`Error::source`].
 #[derive(Debug)]
 pub struct DriverError {
@@ -21,7 +21,6 @@ enum ErrorKind {
     Failure,
     Unsupported,
     DuplicateService,
-    WrongDomain,
     ShutdownTimeout,
 }
 
@@ -48,9 +47,9 @@ impl DriverError {
         self
     }
 
-    /// Reports that the proposed completion configuration cannot support this driver.
+    /// Reports that this worker's native configuration cannot support the driver.
     ///
-    /// This permits an explicit policy decision to try another configured domain. It does not
+    /// This permits an explicit policy decision to try another configured arrangement. It does not
     /// authorize silently starting helper threads or changing native ownership.
     #[must_use]
     pub fn unsupported(message: impl Into<String>) -> Self {
@@ -65,7 +64,7 @@ impl DriverError {
         Self::message(ErrorKind::ShutdownTimeout, "i/o driver shutdown deadline expired")
     }
 
-    /// Returns whether the selected completion configuration is unsupported.
+    /// Returns whether the worker's native configuration is unsupported.
     #[must_use]
     pub fn is_unsupported(&self) -> bool {
         self.kind == ErrorKind::Unsupported
@@ -75,12 +74,6 @@ impl DriverError {
     #[must_use]
     pub fn is_duplicate_completion_service(&self) -> bool {
         self.kind == ErrorKind::DuplicateService
-    }
-
-    /// Returns whether a supplied client was tagged with another collection domain.
-    #[must_use]
-    pub fn is_wrong_completion_domain(&self) -> bool {
-        self.kind == ErrorKind::WrongDomain
     }
 
     /// Returns whether the overall graceful-shutdown deadline expired.
@@ -97,13 +90,6 @@ impl DriverError {
         Self::message(
             ErrorKind::DuplicateService,
             format!("completion service {name} was supplied more than once"),
-        )
-    }
-
-    pub(crate) fn wrong_domain(name: &str) -> Self {
-        Self::message(
-            ErrorKind::WrongDomain,
-            format!("completion service {name} belongs to another domain"),
         )
     }
 

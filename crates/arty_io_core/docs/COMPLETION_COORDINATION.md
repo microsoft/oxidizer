@@ -39,24 +39,24 @@ The native adapter must connect its source to the collection domain.
 | Runtime coordinator | Negotiation, publication, fair turns, readiness, deadlines, and failure policy. |
 | Owned drain | Budgeted cleanup using the same source identity and notification path. |
 
-`ProviderContext` advertises one proposed configuration's client types. The
-provider chooses a strategy and reports its `CompletionRequirements`. The
-runtime validates those requirements against each actual `DriverContext` before
-creation.
+The runtime chooses the final owner thread and configured waiter, then calls that
+waiter's object-safe `attach_clients` operation with a new `DriverContext`.
+Providers select a strategy from those actual clients early in `create`, before
+native binding. Typed insertion rejects duplicates; lookup reports unsupported
+clients explicitly.
 
-Native adapters tag client handles through `CompletionDomain::service`.
-`DriverContext::with_completion_service` rejects wrong-domain and duplicate
-clients, while typed lookup reports unsupported clients explicitly. The map
-exists only during construction; it is not a type-erased completion transport.
+Native clients originate from the collector that services them and retain their
+necessary backing resources. The typed lookup is an interface-delivery mechanism,
+not proof of native provenance or automatic discovery of equivalent APIs.
+Drivers and runtimes must agree on the native adapter's client interfaces;
+different compiled client types may need an explicit bridge.
 
-The domain tag identifies a collection arrangement. It does not own OS resources,
-replace source-registration identities, or prove that an adapter paired an opaque
-client with the correct native object. Those remain native adapter obligations.
-
-`LocalDriver` prevents sending or sharing an installed driver across threads,
-even if its concrete fields implement those traits. A provider may still share
-an engine across instances, and mobile contexts can submit remotely without
-moving the underlying native binding.
+Providers return boxed driver trait objects without `Send` or `Sync`, even if
+their concrete fields implement those traits. A provider may still share an
+engine across instances, and mobile contexts can submit remotely without moving
+the underlying native binding. Strategy-specific shared initialization happens
+when actual clients are known; incompatible worker configurations fail and roll
+back rather than becoming partial success.
 
 ## Windows mapping: aggregate producers before waiting
 
@@ -71,7 +71,7 @@ driver C: RIO CQ notifications ----+
 runtime wake packets -------------+
 ```
 
-A Windows native adapter can expose scoped client handles for association and
+A Windows native adapter can expose client handles for association and
 registration through `DriverContext`. Its waiter owns collection and identifies
 the destination source before a driver interprets an operation pointer.
 
@@ -146,14 +146,25 @@ must prevent old signals from targeting replacement registrations.
 Each collection, driver, and drain turn receives a finite `CompletionBudget`.
 Charge before processing a completion or performing another bounded progress
 step. A participant that runs out of allowance with work remaining returns
-`ServiceStatus::runnable`, even when no new notification will arrive.
+`ServiceStatus::Runnable`, even when no new notification will arrive.
 New drivers and drains start runnable and receive an initial service turn before
 the coordinator may park.
+
+The helper supplies shared remaining-allowance accounting; it does not preempt
+arbitrary code. Implementations must not replace the allowance or disguise
+variable-length work as one bounded step.
 
 Service owns any necessary submission flushing and native task work. Examining
 a completion queue is not assumed to perform either. Scheduling continuation
 does not mean starting an unbounded inner loop; the runtime returns to other
 participants and control work between turns.
+
+Collection also needs fairness among native sources. A continuously actionable
+source must eventually be delivered or signaled despite another source staying
+busy. Preserve scan position, queued order, or equivalent continuation across
+turns. Fair scheduling of already-notified drivers cannot repair unfair native
+discovery. This does not promise to reorder operating-system completion queues
+or impose a hard real-time latency bound.
 
 Before a positive wait, the runtime establishes all of these conditions:
 
@@ -175,14 +186,16 @@ timeout is not an error.
 
 ## Draining through the same coordinator
 
-Consuming `LocalDriver::shutdown` closes admission before returning `Shutdown`.
+Consuming `Driver::shutdown(self: Box<Self>)` closes admission before returning
+`Box<dyn Drain>`.
 The drain keeps the same registrations and readiness identity and receives the
 same bounded service and preparation opportunities. Every turn receives a budget;
 shutdown is not a blocking call or a future.
 
 The runtime begins all relevant shutdowns, keeps native collection and required
 system work available, and interleaves drains under an overall deadline.
-Completion or an error is terminal; it does not permit restarting shutdown.
+Completion or an error is terminal. The coordinator removes and drops that drain
+and never services or prepares it again; it does not restart shutdown.
 
 Retained contexts remain closed handles, not outstanding operations. Admission
 closure must synchronize with accepting active work. Operations and callbacks
@@ -190,8 +203,7 @@ retain independent ownership, including backing storage when native code holds
 raw pointers.
 
 Cancellation, timeout, or abandoning a drain never authorizes invalidating native
-storage. A domain identity is not a retirement lease. Native adapters separately
-retain routes and resources for queued and executing dispatches, late control
+storage. Native adapters retain routes and resources for queued and executing dispatches, late control
 packets, and saved wakers. Generations prevent stale routing but do not replace
 buffer ownership. [Windows cancellation guidance][windows-cancel]
 
@@ -201,6 +213,15 @@ wait through a destructor.
 
 The same ownership rules apply during failed creation or partial installation.
 Failures remain visible, and unrelated participants continue cleanup.
+Execution resources need ownership too: a timed-out controller cannot stop the
+shared offload facility while retained owner threads or pending cleanup still
+need to submit work. Accepted work must not disappear behind a stop marker.
+Retained consumer contexts or inert task handles are not themselves drain
+participants.
+`SystemTasks::spawn` separately reports whether submission was accepted. A
+retired or failed facility returns an error, not apparent success with a task
+that will never run. Draining reports cleanup rejection promptly while retaining
+the independent ownership of any active native operation.
 
 ## Configuration and alternatives
 
@@ -213,14 +234,15 @@ Failures remain visible, and unrelated participants continue cleanup.
 | Repeated finite waits on opaque drivers | Introduces polling and latency; it is not the coordinated core contract. |
 
 Core does not automatically choose or start extra threads. Unsupported
-configurations return classified errors. Domain configuration and provider
-strategy selection must agree before construction, especially for thread-local
-native state.
+configurations return classified errors. The runtime supplies clients from the
+waiter it drives, and providers select a compatible strategy before creating
+native state. Shared strategies require coherent worker configurations; core
+does not perform automatic global capability intersection.
 
 A universal operation format would couple independent drivers to shared buffers,
 queue configuration, and decoding. A raw wait-handle interface alone would miss
 both IOCP routing ownership and native service requirements. The implemented
-control boundary instead exposes scoped clients, bounded progress, readiness,
+control boundary instead exposes actual clients, bounded progress, readiness,
 and safe owned draining.
 
 ## Reference scope and public prior art

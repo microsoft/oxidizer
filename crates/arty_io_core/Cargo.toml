@@ -36,6 +36,10 @@ thread_aware_core = { workspace = true, features = ["std"] }
 [dev-dependencies]
 static_assertions = { workspace = true }
 
+[[example]]
+name = "two_thread_runtime"
+test = true
+
 # >>> anvil-managed: anvil-lints
 [lints]
 workspace = true

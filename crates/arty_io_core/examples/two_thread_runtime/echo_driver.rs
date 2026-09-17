@@ -11,8 +11,8 @@ use std::task::Waker;
 use std::thread::{self, ThreadId};
 
 use arty_io_core::{
-    CompletionBudget, CompletionRequirements, Drain, DrainStatus, Driver, DriverContext, DriverError, DriverProvider, IoContext,
-    LocalDriver, ProviderContext, ServiceStatus, Shutdown, SystemTasks, WaitStatus,
+    CompletionBudget, Drain, DrainStatus, Driver, DriverContext, DriverError, DriverProvider, IoContext, ServiceStatus, SystemTasks,
+    WaitStatus,
 };
 use thread_aware_core::{Thread, ThreadAware};
 
@@ -121,10 +121,7 @@ impl ThreadAware for EchoContext {
 impl IoContext for EchoContext {
     type Provider = EchoProvider;
 
-    fn provider(context: ProviderContext) -> Result<Self::Provider, DriverError> {
-        if !context.offers::<ReadinessClient>() {
-            return Err(DriverError::unsupported("echo I/O requires the private-queue readiness client"));
-        }
+    fn provider() -> Result<Self::Provider, DriverError> {
         Ok(EchoProvider)
     }
 }
@@ -138,17 +135,11 @@ impl ThreadAware for EchoProvider {
 
 impl DriverProvider for EchoProvider {
     type Context = EchoContext;
-    type Driver = EchoDriver;
-
-    fn completion_requirements(&self) -> CompletionRequirements {
-        CompletionRequirements::new().require::<ReadinessClient>()
-    }
-
-    fn create(self, context: DriverContext) -> Result<LocalDriver<Self::Driver>, DriverError> {
+    fn create(self, context: DriverContext) -> Result<Box<dyn Driver<Context = Self::Context>>, DriverError> {
         let registration = context
             .completion_service::<ReadinessClient>()?
             .register(context.readiness_waker().clone())?;
-        Ok(LocalDriver::new(EchoDriver {
+        Ok(Box::new(EchoDriver {
             state: Arc::new(EchoState {
                 owner: thread::current().id(),
                 queue: Mutex::new(PrivateQueue {
@@ -200,7 +191,7 @@ impl Driver for EchoDriver {
         debug_assert_eq!(thread::current().id(), self.state.owner);
         self.queue_ready |= self.state.registration.take_ready();
         if !self.queue_ready {
-            return Ok(ServiceStatus::idle());
+            return Ok(ServiceStatus::Idle);
         }
         let mut queue = self
             .state
@@ -211,7 +202,7 @@ impl Driver for EchoDriver {
             if !budget.try_consume() {
                 // A single collected edge can cover many private entries. Retain continuation
                 // locally; do not depend on the collector delivering a second edge.
-                return Ok(ServiceStatus::runnable());
+                return Ok(ServiceStatus::Runnable);
             }
             let token = queue
                 .completions
@@ -230,7 +221,7 @@ impl Driver for EchoDriver {
             self.state.completed.notify_all();
         }
         self.queue_ready = false;
-        Ok(ServiceStatus::idle())
+        Ok(ServiceStatus::Idle)
     }
 
     fn prepare_wait(&mut self) -> Result<WaitStatus, DriverError> {
@@ -243,14 +234,14 @@ impl Driver for EchoDriver {
         })
     }
 
-    fn shutdown(self: Box<Self>) -> Shutdown {
+    fn shutdown(self: Box<Self>) -> Box<dyn Drain> {
         self.state
             .queue
             .lock()
             .expect("a panicking echo operation poisoned its admission lock")
             .open = false;
         let cleanup = Cleanup::start(&self.tasks, self.ready.clone());
-        Shutdown::new(EchoDrain { driver: self, cleanup })
+        Box::new(EchoDrain { driver: self, cleanup })
     }
 }
 
@@ -277,19 +268,21 @@ struct EchoDrain {
 
 impl Drain for EchoDrain {
     fn service(&mut self, budget: &mut CompletionBudget) -> Result<DrainStatus, DriverError> {
+        let cleanup_complete = self.cleanup.check_complete()?;
         let status = self.driver.service(budget)?;
-        if self.driver.active() == 0 && self.cleanup.is_complete() {
+        if self.driver.active() == 0 && cleanup_complete {
             return Ok(if budget.try_consume() {
                 DrainStatus::Complete
             } else {
-                DrainStatus::Pending(ServiceStatus::runnable())
+                DrainStatus::Pending(ServiceStatus::Runnable)
             });
         }
         Ok(DrainStatus::Pending(status))
     }
 
     fn prepare_wait(&mut self) -> Result<WaitStatus, DriverError> {
-        if self.driver.active() == 0 && self.cleanup.is_complete() {
+        let cleanup_complete = self.cleanup.check_complete()?;
+        if self.driver.active() == 0 && cleanup_complete {
             return Ok(WaitStatus::WorkReady);
         }
         self.driver.prepare_wait()

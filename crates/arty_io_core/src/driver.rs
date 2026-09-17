@@ -1,17 +1,20 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::{CompletionBudget, DriverError, IoContext, ServiceStatus, Shutdown, WaitStatus};
+use crate::{CompletionBudget, Drain, DriverError, IoContext, ServiceStatus, WaitStatus};
 
-/// One worker's non-blocking participant in an I/O completion domain.
+/// One worker's non-blocking participant in an I/O completion arrangement.
 ///
-/// The runtime owns the driver through [`LocalDriver`](crate::LocalDriver) on its final
-/// owning thread. Consumers use the independent context; native collection and blocking wait
-/// belong to a separate [`CompletionWaiter`](crate::CompletionWaiter).
+/// The runtime owns the driver as a boxed local trait object on its final owning thread. That
+/// object is neither [`Send`] nor [`Sync`] even when the concrete implementation happens to be
+/// thread-safe, so an installed driver cannot be relocated after creation. Consumers use the
+/// independent context; native collection and the blocking wait belong to a separate
+/// [`CompletionWaiter`](crate::CompletionWaiter).
 ///
-/// Driver implementations need neither `Send` nor `Sync`. Contexts may move between workers
-/// and outlive the driver, and relocation is an optimization rather than a correctness condition.
-/// Native client services and the readiness waker arrive through [`DriverContext`](crate::DriverContext).
+/// Driver implementations need neither `Send` nor `Sync`. Contexts may move between workers and
+/// outlive the driver, and relocation is an optimization rather than a correctness condition.
+/// Native client capabilities and the readiness waker arrive through
+/// [`DriverContext`](crate::DriverContext).
 ///
 /// # Ownership
 ///
@@ -42,29 +45,30 @@ pub trait Driver: 'static {
     /// makes every backend progress. Keep operation completion and task wakes on their supported
     /// execution paths.
     ///
-    /// Return runnable if work remains after the budget is exhausted, even if no new notification
-    /// will arrive. Otherwise report a required service deadline or idle. New activity after an
-    /// idle result must signal the supplied readiness waker.
-    /// The runtime schedules an initial service turn after creation even without a notification.
+    /// Return [`ServiceStatus::Runnable`] if work remains after the budget is exhausted, even if
+    /// no new notification will arrive. Otherwise report a required service deadline or
+    /// [`ServiceStatus::Idle`]. New activity after an idle result must signal the supplied
+    /// readiness waker. The runtime schedules an initial service turn after creation even without
+    /// a notification.
     ///
     /// # Errors
     ///
     /// Returns submission-progress, completion-processing, or driver failures. A failure is not
-    /// an idle result; the runtime reports it and applies its source/domain failure policy.
-    /// Individual I/O results, including operation errors, stay on the context's result path
-    /// and do not by themselves fail this service participant.
+    /// an idle result; the runtime reports it and applies its source failure policy. Individual
+    /// I/O results, including operation errors, stay on the context's result path and do not by
+    /// themselves fail this service participant.
     fn service(&mut self, budget: &mut CompletionBudget) -> Result<ServiceStatus, DriverError>;
 
     /// Arms notifications and rechecks private work immediately before a possible wait.
     ///
-    /// `Armed` means notifications are enabled and the driver rechecked that no immediate work
-    /// remains. Activity appearing afterward signals the supplied readiness waker. Return
-    /// `WorkReady` if work is already present or preparation needs another budgeted service turn.
+    /// [`WaitStatus::Armed`] means notifications are enabled and the driver rechecked that no
+    /// immediate work remains. Activity appearing afterward signals the supplied readiness waker.
+    /// Return [`WaitStatus::WorkReady`] if work is already present or preparation needs another
+    /// budgeted service turn.
     ///
-    /// This method only performs bounded notification preparation. Draining and cancellation
-    /// use budgeted service.
-    /// The runtime separately latches source readiness, arms its own wait, and rechecks task and
-    /// control activity before blocking.
+    /// This method only performs bounded notification preparation. Draining and cancellation use
+    /// budgeted service. The runtime separately latches source readiness, arms its own wait, and
+    /// rechecks task and control activity before blocking.
     ///
     /// # Errors
     ///
@@ -73,9 +77,9 @@ pub trait Driver: 'static {
 
     /// Closes admission synchronously and transfers ownership into cooperative draining.
     ///
-    /// Admission is already closed when this method returns, before the first drain-service
-    /// turn. Racing operations are either admitted and included in the drain or rejected.
-    /// Do not block or perform an unbounded cancellation loop here.
+    /// Admission is already closed when this method returns, before the first drain-service turn.
+    /// Racing operations are either admitted and included in the drain or rejected. Do not block
+    /// or perform an unbounded cancellation loop here.
     ///
     /// The returned drain retains the same registrations and readiness waker. The runtime keeps
     /// collecting activity and drives all drains fairly with completion budgets until they
@@ -85,5 +89,6 @@ pub trait Driver: 'static {
     /// Consuming the boxed driver makes initiation exactly once, including for trait objects.
     /// Dropping the returned drain early must remain memory-safe; graceful cleanup is never a
     /// precondition for safe destruction.
-    fn shutdown(self: Box<Self>) -> Shutdown;
+    #[must_use = "the drain must be serviced to completion or reported as abandoned"]
+    fn shutdown(self: Box<Self>) -> Box<dyn Drain>;
 }

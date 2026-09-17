@@ -7,11 +7,13 @@ use std::num::NonZeroUsize;
 ///
 /// Charge a unit before processing a completion or performing another bounded progress step.
 /// A driver that uses its allowance while work remains returns
-/// [`ServiceStatus::runnable`](crate::ServiceStatus::runnable). The runtime gives each
+/// [`ServiceStatus::Runnable`](crate::ServiceStatus::Runnable). The runtime gives each
 /// participant a new allowance on its next turn.
 ///
-/// A budget is deliberately neither `Clone` nor `Copy`: forwarding the same mutable budget
-/// through helpers must not duplicate its remaining allowance.
+/// This is cooperative residual accounting shared with the participant, not automatic
+/// enforcement: a participant that never charges the budget is a fairness defect the runtime
+/// cannot detect. A budget is deliberately neither `Clone` nor `Copy`, so forwarding the same
+/// mutable budget through helpers cannot duplicate its remaining allowance.
 ///
 /// ```
 /// use std::num::NonZeroUsize;

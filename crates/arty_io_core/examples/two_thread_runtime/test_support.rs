@@ -8,11 +8,11 @@ use std::sync::{Arc, Mutex};
 use std::task::Waker;
 use std::thread;
 
-use arty_io_core::{CompletionWaiter, DriverContext, DriverProvider, IoContext, LocalDriver, ProviderContext, SystemTask, SystemTasks};
+use arty_io_core::{CompletionWaiter, Driver, DriverContext, DriverProvider, IoContext, SystemTask, SystemTasks};
 use thread_aware_core::{Thread, ThreadAware};
 
 use super::coordinator::{Coordinator, Source};
-use super::native::{NativeWaiter, ReadinessClient, RecordClient};
+use super::native::NativeWaiter;
 
 #[derive(Default)]
 pub(super) struct ManualTasks {
@@ -22,7 +22,10 @@ pub(super) struct ManualTasks {
 impl ManualTasks {
     pub(super) fn handle(&self) -> SystemTasks {
         let queue = Arc::clone(&self.queue);
-        SystemTasks::new(move |task| queue.lock().unwrap().push_back(task))
+        SystemTasks::new(move |task| {
+            queue.lock().unwrap().push_back(task);
+            Ok(())
+        })
     }
 
     pub(super) fn len(&self) -> usize {
@@ -40,7 +43,7 @@ impl ManualTasks {
     }
 }
 
-type Created<C> = (LocalDriver<<<C as IoContext>::Provider as DriverProvider>::Driver>, Arc<Source>);
+type Created<C> = (Box<dyn Driver<Context = C>>, Arc<Source>);
 
 pub(super) struct Harness {
     pub(super) coordinator: Coordinator<NativeWaiter>,
@@ -63,25 +66,10 @@ impl Harness {
 
     pub(super) fn create<C: IoContext>(&self) -> Created<C> {
         let source = Source::new(self.coordinator.waiter.waker());
-        let domain = self.coordinator.waiter.domain();
-        let context = DriverContext::new(
-            self.thread.clone(),
-            self.tasks.handle(),
-            domain.clone(),
-            Waker::from(Arc::clone(&source)),
-        )
-        .with_completion_service(domain.service(self.coordinator.waiter.record_client()))
-        .unwrap()
-        .with_completion_service(domain.service(self.coordinator.waiter.readiness_client()))
-        .unwrap();
-        let mut provider = C::provider(
-            ProviderContext::new()
-                .with_completion_service::<RecordClient>()
-                .with_completion_service::<ReadinessClient>(),
-        )
-        .unwrap();
+        let context = DriverContext::new(self.thread.clone(), self.tasks.handle(), Waker::from(Arc::clone(&source)));
+        let context = self.coordinator.waiter.attach_clients(context).unwrap();
+        let mut provider = C::provider().unwrap();
         provider.relocate(None, &self.thread);
-        provider.completion_requirements().validate(&context).unwrap();
         (provider.create(context).unwrap(), source)
     }
 

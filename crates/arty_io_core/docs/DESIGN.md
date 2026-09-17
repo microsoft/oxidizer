@@ -20,11 +20,14 @@ The design follows four rules:
 consumer context type
         |
         v
-provider selects a supported strategy
+provider creates shared configuration
         |
-        | requirements validated; clone and relocate per owner thread
+        | clone and relocate per owner thread
         v
-local driver <----- scoped native clients + readiness waker
+create selects actual clients <----- waiter supplies clients + readiness waker
+        |
+        v
+boxed local driver
         |
         | non-blocking service under a budget
         v
@@ -40,10 +43,10 @@ Consumer contexts are mobile, independently retained handles. Their relocation
 can improve locality, but correctness does not depend on relocation being called.
 An existing native binding continues to obey its own owner and lifetime rules.
 
-Drivers stay on their final owning thread. `LocalDriver` enforces that property
-even for a concrete implementation whose fields happen to be thread-safe.
-Runtime-only adapters may erase unrelated context types without exposing mutable
-driver ownership or changing where service and destruction run.
+Drivers stay on their final owning thread. Providers return
+`Box<dyn Driver<Context = Self::Context>>` without `Send` or `Sync`, rather than a
+movable concrete driver. Runtime-only adapters may erase unrelated context types
+without adding those auto traits or changing where service and destruction run.
 
 A provider can share an engine or resources across its instances. The per-worker
 driver adapter does not imply a per-worker physical queue. Context type identity
@@ -52,21 +55,27 @@ callback routes, and collection domains.
 
 ## Negotiation before publication
 
-The runtime proposes a completion configuration through capability metadata.
-The provider chooses one strategy and declares all client types that strategy
-requires. A strategy that can use either of two native mechanisms selects one;
-its requirements do not demand both.
-
 The runtime configures native waiters and chooses final owner threads before
-creating drivers. Scoped clients arrive in `DriverContext`, alongside thread
-coordinates, system work, and the readiness waker for the new participant.
-Each client carries the identity of the waiter domain backing it. The context
-rejects duplicate client types and clients tagged with another domain.
+creating drivers. It builds the basic `DriverContext`, then asks the waiter it
+actually drives to attach that collector's client capabilities. This operation
+is object-safe, so the runtime need not name platform-specific client types.
 
-Domain tags are deliberately narrower than native-resource ownership. A native
-adapter must pair its client handles with the collector that actually services
-them and retain its own registration leases. Core cannot inspect an opaque client
-and prove which operating-system object it contains.
+During `create`, a provider selects a strategy from the clients actually present,
+before creating native bindings. Missing clients and duplicate insertion are
+errors. There is no separate advertised capability list to repeat or keep in sync.
+
+The provider factory creates shared configuration. Strategy-specific shared
+resources can be initialized once actual clients are known, with compatible
+subsequent worker instances reusing them. Creation stays prompt and cannot
+wait for async work or a cross-worker initialization handshake. The runtime
+supplies a coherent configuration for shared strategies; core does not solve
+automatic capability intersections across heterogeneous workers.
+
+Native adapter factories pair clients with their real backing resources and
+retain registration ownership. The assembly seam is not a proof that an arbitrary
+adapter implementation supplied the correct native object. Typed client lookup
+also requires agreement on the adapter interface/version, beyond agreement on
+the core contract itself.
 
 Registration is transactional runtime work. The first context request succeeds
 only after every active worker has created its instance. Routing and notification
@@ -95,11 +104,18 @@ retirement protocol.
 
 Collection, running-driver service, and draining each receive finite budgets.
 Charge before a bounded progress step and report continuation when work remains.
+The budget is cooperative accounting: implementations must not reset it or hide
+an unbounded amount of work inside one charged operation.
 New drivers and drains start runnable and receive an initial turn without a
 native notification.
 The core does not assume that a consumed batch produces another notification.
 It also does not assume that inspecting a queue performs required submission
 flushing or kernel task work.
+
+Native collection must itself preserve fair discovery or delivery across active
+sources. Repeatedly scanning from one busy source can starve another before the
+runtime has any chance to schedule its driver. Source continuation and ordering
+belong to the native adapter; participant rotation belongs to the coordinator.
 
 An idle service result is only a scheduling observation. Before sleeping, each
 participant arms its notification mechanism and rechecks private state. It either
@@ -118,8 +134,8 @@ already reached requires service rather than sleep.
 
 ## Cooperative shutdown
 
-Consuming a local driver closes admission synchronously and transfers ownership
-into `Shutdown`. There is no repeatable borrowed initiation operation. Admission
+Consuming the boxed driver closes admission synchronously and returns a boxed
+`Drain`. There is no repeatable borrowed initiation operation. Admission
 closure is synchronized with accepting operations, so work racing shutdown is
 either tracked in the drain or rejected.
 
@@ -130,10 +146,10 @@ The runtime initiates all relevant drains, keeps native collection and system
 work available, and gives each participant progress while enforcing an overall
 deadline.
 
-Completing or failing a drain releases its owned state. The runtime reports
-failure and continues cleanup of independent participants. A failed preparation
-is terminal as well; errors cannot turn into an idle or successful result on a
-subsequent turn.
+The coordinator removes and drops a drain after completion or an error from
+service or preparation. It never calls a terminal drain again. The runtime reports
+failure and continues cleanup of independent participants; errors cannot turn
+into an idle or successful result on a subsequent turn.
 
 Contexts remain closed handles and are not drain participants. Operations,
 callbacks, and native registrations retain the storage they can still access.
@@ -150,7 +166,7 @@ cleanup retains its own resource ownership when needed.
 
 `DriverError` is the common failure boundary for negotiation, creation, progress,
 and shutdown. Native error causes remain accessible. Classified unsupported
-configuration, duplicate capability, wrong domain, and shutdown timeout do not
+configuration, duplicate capability, and shutdown timeout do not
 require parsing messages.
 Attaching a cause preserves the classification and descriptive context rather
 than forcing a choice between fallback information and native diagnostics.
@@ -166,12 +182,19 @@ System work uses the runtime-owned synchronous offload facility. It remains
 available while running drivers and pending drains require it, including
 registration rollback. It is not an async task scheduler or a thread-per-driver
 implementation.
+Submission returns an acceptance result: success does not imply completion,
+and rejection promises no task execution or callback. A cleanup submission
+failure is reported by draining rather than hidden behind an eventual timeout.
+Retained owner threads and transferred cleanup also retain execution authority
+when a controller times out. Accepted work cannot be discarded behind a pool stop
+marker. Execution obligations, not inert handles or retained context clones,
+determine when the existing facility can retire.
 
 ## Native scope and reference runtime
 
 The native mechanisms and their constraints are described in
 [Completion coordination](COMPLETION_COORDINATION.md). The core defines the
-shared control protocol and scoped client boundary; production native adapters
+shared control protocol and typed client boundary; production native adapters
 are separate components.
 
 The two-thread reference runtime exercises that protocol through in-memory

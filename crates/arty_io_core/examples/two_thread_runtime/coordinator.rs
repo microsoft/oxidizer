@@ -13,27 +13,25 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Wake, Waker};
 use std::time::{Duration, Instant};
 
-use arty_io_core::{
-    CompletionBudget, CompletionWaiter, DrainStatus, Driver, DriverError, LocalDriver, ServiceStatus, Shutdown, WaitStatus,
-};
+use arty_io_core::{CompletionBudget, CompletionWaiter, Drain, DrainStatus, Driver, DriverError, IoContext, ServiceStatus, WaitStatus};
 
 pub(super) trait ErasedDriver {
     fn service(&mut self, budget: &mut CompletionBudget) -> Result<ServiceStatus, DriverError>;
     fn prepare_wait(&mut self) -> Result<WaitStatus, DriverError>;
-    fn shutdown(self: Box<Self>) -> Shutdown;
+    fn shutdown(self: Box<Self>) -> Box<dyn Drain>;
 }
 
-// Erase the LOCAL HANDLE, not its inner driver. No path extracts a movable concrete driver.
-impl<D: Driver> ErasedDriver for LocalDriver<D> {
+// The inner trait object is already local, even when its concrete implementation is Send.
+impl<C: IoContext> ErasedDriver for Box<dyn Driver<Context = C>> {
     fn service(&mut self, budget: &mut CompletionBudget) -> Result<ServiceStatus, DriverError> {
-        self.service(budget)
+        self.as_mut().service(budget)
     }
 
     fn prepare_wait(&mut self) -> Result<WaitStatus, DriverError> {
-        self.prepare_wait()
+        self.as_mut().prepare_wait()
     }
 
-    fn shutdown(self: Box<Self>) -> Shutdown {
+    fn shutdown(self: Box<Self>) -> Box<dyn Drain> {
         (*self).shutdown()
     }
 }
@@ -78,7 +76,7 @@ impl Wake for Source {
 
 enum Participant {
     Driver(Box<dyn ErasedDriver>),
-    Drain(Shutdown),
+    Drain(Box<dyn Drain>),
 }
 
 struct Entry {
@@ -100,7 +98,7 @@ impl Entry {
                 Participant::Driver(driver) => Participant::Drain(driver.shutdown()),
                 Participant::Drain(drain) => Participant::Drain(drain),
             });
-            self.status = ServiceStatus::runnable();
+            self.status = ServiceStatus::Runnable;
         }
     }
 
@@ -109,7 +107,7 @@ impl Entry {
         if matches!(self.participant, Some(Participant::Driver(_))) {
             self.begin_shutdown();
         } else {
-            // Shutdown released its drain on either service or prepare_wait Err. Call neither again.
+            // Either drain error is terminal: release it and never call either method again.
             self.participant = None;
         }
     }
@@ -141,7 +139,7 @@ impl Entry {
         };
         match result {
             Ok(WaitStatus::Armed) => {}
-            Ok(WaitStatus::WorkReady) => self.status = ServiceStatus::runnable(),
+            Ok(WaitStatus::WorkReady) => self.status = ServiceStatus::Runnable,
             Err(error) => {
                 self.fail(error);
                 return true;
@@ -175,7 +173,7 @@ impl<W: CompletionWaiter> Coordinator<W> {
             entries: Vec::new(),
             first: 0,
             quantum,
-            collection: ServiceStatus::idle(),
+            collection: ServiceStatus::Idle,
             collector_failed: false,
             failed: false,
             domain_errors: Vec::new(),
@@ -192,7 +190,7 @@ impl<W: CompletionWaiter> Coordinator<W> {
             id,
             source,
             participant: Some(Participant::Driver(driver)),
-            status: ServiceStatus::runnable(),
+            status: ServiceStatus::Runnable,
             errors: Vec::new(),
         });
     }
@@ -242,8 +240,8 @@ impl<W: CompletionWaiter> Coordinator<W> {
         let nearest = self
             .entries
             .iter()
-            .filter_map(|entry| entry.status.deadline())
-            .chain(self.collection.deadline())
+            .filter_map(|entry| deadline(entry.status))
+            .chain(deadline(self.collection))
             .chain(overall_deadline)
             .min();
         nearest.map_or(Duration::MAX, |deadline| deadline.saturating_duration_since(now))
@@ -312,10 +310,20 @@ impl<W: CompletionWaiter> Coordinator<W> {
 }
 
 fn due(status: ServiceStatus, now: Instant) -> bool {
-    status.is_runnable() || status.deadline().is_some_and(|deadline| deadline <= now)
+    match status {
+        ServiceStatus::Idle => false,
+        ServiceStatus::Runnable => true,
+        ServiceStatus::Deadline(deadline) => deadline <= now,
+    }
+}
+
+fn deadline(status: ServiceStatus) -> Option<Instant> {
+    match status {
+        ServiceStatus::Deadline(deadline) => Some(deadline),
+        ServiceStatus::Idle | ServiceStatus::Runnable => None,
+    }
 }
 
 #[cfg(test)]
-#[expect(clippy::unwrap_used, reason = "test setup and assertions use the test backtrace")]
 #[path = "coordinator_tests.rs"]
 mod tests;

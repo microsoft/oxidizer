@@ -8,17 +8,23 @@ use std::task::Waker;
 
 use thread_aware_core::Thread;
 
-use crate::{CompletionDomain, CompletionService, DriverError, SystemTasks};
+use crate::{DriverError, SystemTasks};
 
 /// Placement and runtime facilities supplied when one driver instance is created.
 ///
-/// The runtime assembles this on the final owning thread. Native client services are scoped to
-/// the selected waiter's domain and may themselves be thread-local. This context is therefore
-/// neither `Send` nor `Sync`; mobile consumers receive a separate [`IoContext`](crate::IoContext).
+/// The runtime assembles this on the final owning thread, then asks that worker's collector to
+/// attach its own client capabilities through
+/// [`CompletionWaiter::attach_clients`](crate::CompletionWaiter::attach_clients). Native clients
+/// may themselves be thread-local, so this context is neither [`Send`] nor [`Sync`]; mobile
+/// consumers receive a separate [`IoContext`](crate::IoContext).
+///
+/// A client type is matched by its exact type identity. Sharing this core crate is not enough for
+/// a driver and a native adapter to interoperate: they must agree on the same adapter crate, the
+/// same client interface, and the same compiled version of it. Two builds of one adapter whose
+/// types are distinct simply do not match, and the lookup reports an unsupported configuration.
 pub struct DriverContext {
     thread: Thread,
     system_tasks: SystemTasks,
-    domain: CompletionDomain,
     readiness_waker: Waker,
     completion_services: HashMap<TypeId, Box<dyn Any>>,
 }
@@ -28,11 +34,10 @@ impl DriverContext {
     ///
     /// This constructor is intended for runtime implementations and driver tests.
     #[must_use]
-    pub fn new(thread: Thread, system_tasks: SystemTasks, domain: CompletionDomain, readiness_waker: Waker) -> Self {
+    pub fn new(thread: Thread, system_tasks: SystemTasks, readiness_waker: Waker) -> Self {
         Self {
             thread,
             system_tasks,
-            domain,
             readiness_waker,
             completion_services: HashMap::new(),
         }
@@ -50,52 +55,49 @@ impl DriverContext {
         &self.system_tasks
     }
 
-    /// Returns the collection domain whose waiter the runtime will drive.
-    #[must_use]
-    pub const fn completion_domain(&self) -> &CompletionDomain {
-        &self.domain
-    }
-
     /// Returns the runtime-provided notification handle for this driver's service.
     ///
     /// Native adapters signal this after publishing records or readiness that require driver
-    /// service. The runtime latches the source's readiness before interrupting its domain waiter.
-    /// This handle is not a transport for operation records and must not run driver service inline.
-    /// It remains memory-safe after registration rollback, driver shutdown, or driver destruction;
-    /// late notifications must not be redirected to a reused source identity.
+    /// service. The runtime latches the source's readiness before interrupting its collector.
+    /// This handle is not a transport for operation records and must not run driver service
+    /// inline. It remains memory-safe after registration rollback, driver shutdown, or driver
+    /// destruction; late notifications must not be redirected to a reused source identity.
     #[must_use]
     pub const fn readiness_waker(&self) -> &Waker {
         &self.readiness_waker
     }
 
-    /// Supplies one typed client capability from the selected completion domain.
+    /// Supplies one typed native client capability to the driver being created.
+    ///
+    /// Collectors normally attach their own clients through
+    /// [`CompletionWaiter::attach_clients`](crate::CompletionWaiter::attach_clients); a runtime
+    /// with no native collector can also use this directly. The core cannot establish that a
+    /// supplied client is backed by the collector that will service this worker, so a runtime
+    /// must assemble each context from one coherent native arrangement.
     ///
     /// This is a construction-time operation; completion records do not use this map.
     ///
     /// # Errors
     ///
-    /// Returns a wrong-domain error for a foreign service, or a duplicate-service error if
-    /// another value with the same client type has already been supplied.
-    pub fn with_completion_service<T: 'static>(mut self, service: CompletionService<T>) -> Result<Self, DriverError> {
-        if !self.domain.is_same(service.domain()) {
-            return Err(DriverError::wrong_domain(type_name::<T>()));
-        }
+    /// Returns a duplicate-client error if another value with the same client type has already
+    /// been supplied. A client is never silently replaced.
+    pub fn with_completion_service<T: 'static>(mut self, value: T) -> Result<Self, DriverError> {
         if self.completion_services.contains_key(&TypeId::of::<T>()) {
             return Err(DriverError::duplicate_service(type_name::<T>()));
         }
-        self.completion_services.insert(TypeId::of::<T>(), Box::new(service.value));
+        drop(self.completion_services.insert(TypeId::of::<T>(), Box::new(value)));
         Ok(self)
     }
 
     /// Borrows a native client capability of type `T`.
     ///
     /// Clone an appropriate client handle if the driver needs to retain it after creation.
-    /// Native adapter packages define the client interfaces and their registration/retirement
+    /// Native adapter packages define the client interfaces and their registration and retirement
     /// rules; the core does not interpret their operation or buffer types.
     ///
     /// # Errors
     ///
-    /// Returns an unsupported-configuration error when this domain does not supply `T`.
+    /// Returns an unsupported-configuration error when this worker does not supply `T`.
     #[expect(
         clippy::missing_panics_doc,
         reason = "the typed insertion API establishes the internal type-id invariant"
@@ -109,17 +111,12 @@ impl DriverContext {
             .downcast_ref::<T>()
             .expect("completion service type ids are recorded together with their values"))
     }
-
-    pub(crate) fn has_completion_service(&self, id: TypeId) -> bool {
-        self.completion_services.contains_key(&id)
-    }
 }
 
 impl fmt::Debug for DriverContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct(type_name::<Self>())
             .field("thread", &self.thread)
-            .field("domain", &self.domain)
             .field("completion_service_count", &self.completion_services.len())
             .finish_non_exhaustive()
     }

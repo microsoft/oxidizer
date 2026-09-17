@@ -11,8 +11,8 @@ use std::task::Waker;
 use std::thread::{self, ThreadId};
 
 use arty_io_core::{
-    CompletionBudget, CompletionRequirements, Drain, DrainStatus, Driver, DriverContext, DriverError, DriverProvider, IoContext,
-    LocalDriver, ProviderContext, ServiceStatus, Shutdown, SystemTasks, WaitStatus,
+    CompletionBudget, Drain, DrainStatus, Driver, DriverContext, DriverError, DriverProvider, IoContext, ServiceStatus, SystemTasks,
+    WaitStatus,
 };
 use thread_aware_core::{Thread, ThreadAware};
 
@@ -121,10 +121,7 @@ impl ThreadAware for SampleContext {
 impl IoContext for SampleContext {
     type Provider = SampleProvider;
 
-    fn provider(context: ProviderContext) -> Result<Self::Provider, DriverError> {
-        if !context.offers::<RecordClient>() {
-            return Err(DriverError::unsupported("sample I/O requires the record-delivery client"));
-        }
+    fn provider() -> Result<Self::Provider, DriverError> {
         Ok(SampleProvider)
     }
 }
@@ -138,17 +135,11 @@ impl ThreadAware for SampleProvider {
 
 impl DriverProvider for SampleProvider {
     type Context = SampleContext;
-    type Driver = SampleDriver;
-
-    fn completion_requirements(&self) -> CompletionRequirements {
-        CompletionRequirements::new().require::<RecordClient>()
-    }
-
-    fn create(self, context: DriverContext) -> Result<LocalDriver<Self::Driver>, DriverError> {
+    fn create(self, context: DriverContext) -> Result<Box<dyn Driver<Context = Self::Context>>, DriverError> {
         let registration = context
             .completion_service::<RecordClient>()?
             .register(context.readiness_waker().clone())?;
-        Ok(LocalDriver::new(SampleDriver {
+        Ok(Box::new(SampleDriver {
             state: Arc::new(SampleState {
                 owner: thread::current().id(),
                 requests: Mutex::new(Admission {
@@ -206,7 +197,7 @@ impl Driver for SampleDriver {
         debug_assert_eq!(thread::current().id(), self.state.owner);
         while self.state.registration.has_records() {
             if !budget.try_consume() {
-                return Ok(ServiceStatus::runnable());
+                return Ok(ServiceStatus::Runnable);
             }
             let record = self
                 .state
@@ -235,7 +226,7 @@ impl Driver for SampleDriver {
             drop(requests);
             self.state.completed.notify_all();
         }
-        Ok(ServiceStatus::idle())
+        Ok(ServiceStatus::Idle)
     }
 
     fn prepare_wait(&mut self) -> Result<WaitStatus, DriverError> {
@@ -247,10 +238,10 @@ impl Driver for SampleDriver {
         })
     }
 
-    fn shutdown(self: Box<Self>) -> Shutdown {
+    fn shutdown(self: Box<Self>) -> Box<dyn Drain> {
         self.close();
         let cleanup = Cleanup::start(&self.tasks, self.ready.clone());
-        Shutdown::new(SampleDrain { driver: self, cleanup })
+        Box::new(SampleDrain { driver: self, cleanup })
     }
 }
 
@@ -279,19 +270,21 @@ struct SampleDrain {
 
 impl Drain for SampleDrain {
     fn service(&mut self, budget: &mut CompletionBudget) -> Result<DrainStatus, DriverError> {
+        let cleanup_complete = self.cleanup.check_complete()?;
         let status = self.driver.service(budget)?;
-        if self.driver.active() == 0 && self.cleanup.is_complete() {
+        if self.driver.active() == 0 && cleanup_complete {
             return Ok(if budget.try_consume() {
                 DrainStatus::Complete
             } else {
-                DrainStatus::Pending(ServiceStatus::runnable())
+                DrainStatus::Pending(ServiceStatus::Runnable)
             });
         }
         Ok(DrainStatus::Pending(status))
     }
 
     fn prepare_wait(&mut self) -> Result<WaitStatus, DriverError> {
-        if self.driver.active() == 0 && self.cleanup.is_complete() {
+        let cleanup_complete = self.cleanup.check_complete()?;
+        if self.driver.active() == 0 && cleanup_complete {
             return Ok(WaitStatus::WorkReady);
         }
         self.driver.prepare_wait()

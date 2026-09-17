@@ -11,11 +11,11 @@ use std::task::Waker;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use arty_io_core::{CompletionWaiter, DriverContext, DriverError, DriverProvider, IoContext, ProviderContext, SystemTasks};
+use arty_io_core::{CompletionWaiter, DriverContext, DriverError, DriverProvider, IoContext, SystemTasks};
 use thread_aware_core::{Thread, ThreadAware};
 
 use super::coordinator::{Coordinator, ErasedDriver, Source};
-use super::native::{NativeWaiter, ReadinessClient, RecordClient};
+use super::native::NativeWaiter;
 use super::system_tasks::{SystemPool, report};
 
 type ContextBox = Box<dyn Any + Send>;
@@ -34,6 +34,13 @@ struct Registration<C: IoContext> {
 }
 
 enum Command {
+    #[cfg(test)]
+    Pause {
+        entered: mpsc::Sender<()>,
+        resume: mpsc::Receiver<()>,
+        cleanup: arty_io_core::SystemTask,
+        accepted: mpsc::Sender<Result<(), DriverError>>,
+    },
     Install {
         id: TypeId,
         install: Install,
@@ -106,6 +113,8 @@ pub(super) struct Options {
     pub(super) shutdown_timeout: Duration,
     #[cfg(test)]
     pub(super) fail_record_worker: Option<usize>,
+    #[cfg(test)]
+    pub(super) missing_record_worker: Option<usize>,
 }
 
 impl Default for Options {
@@ -115,6 +124,8 @@ impl Default for Options {
             shutdown_timeout: Duration::from_secs(5),
             #[cfg(test)]
             fail_record_worker: None,
+            #[cfg(test)]
+            missing_record_worker: None,
         }
     }
 }
@@ -149,15 +160,22 @@ impl Runtime {
             let (finished_tx, finished) = mpsc::channel();
             let worker_owner = owner.clone();
             let tasks = runtime.system.handle();
+            let execution = runtime.system.execution_lease();
             let thread = thread::Builder::new()
                 .name(format!("in-memory-io-owner-{index}"))
                 .spawn(move || {
+                    // A controller timeout cannot revoke this owner's cleanup execution facility.
+                    let _execution = execution;
                     let node = thread_aware_core::__private::v1::new_numa_node(node);
                     let worker = thread_aware_core::__private::v1::new_thread(worker_owner, thread::current().id(), node);
                     let waiter = NativeWaiter::new();
                     #[cfg(test)]
                     if options.fail_record_worker == Some(index) {
                         waiter.fail_next_record_registration();
+                    }
+                    #[cfg(test)]
+                    if options.missing_record_worker == Some(index) {
+                        waiter.disable_record_client();
                     }
                     let ready = Ready {
                         waker: waiter.waker(),
@@ -216,12 +234,7 @@ impl Runtime {
             return Ok(registration.contexts[index].clone());
         }
 
-        // Only type metadata is used for selection; native handles are created on owner threads.
-        let provider = C::provider(
-            ProviderContext::new()
-                .with_completion_service::<RecordClient>()
-                .with_completion_service::<ReadinessClient>(),
-        )?;
+        let provider = C::provider()?;
         let mut contexts = Vec::with_capacity(self.workers.len());
         for (attempt, worker) in self.workers.iter().enumerate() {
             match install_on::<C>(worker, provider.clone(), self.options.shutdown_timeout) {
@@ -324,7 +337,6 @@ fn install_on<C: IoContext>(worker: &Worker, mut provider: C::Provider, timeout:
     let (reply, receiver) = mpsc::channel();
     let install = Box::new(move |context: DriverContext| {
         provider.relocate(None, context.thread());
-        provider.completion_requirements().validate(&context)?;
         let driver = provider.create(context)?;
         Ok(Installed {
             context: Box::new(driver.context()),
@@ -449,21 +461,29 @@ impl WorkerLoop {
 
     fn command(&mut self, command: Command) {
         match command {
+            #[cfg(test)]
+            Command::Pause {
+                entered,
+                resume,
+                cleanup,
+                accepted,
+            } => {
+                entered.send(()).expect("the test retains its owner-pause acknowledgement receiver");
+                resume
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("the test must resume its paused owner before its safety timeout");
+                accepted
+                    .send(self.tasks.spawn(cleanup))
+                    .expect("the test retains its cleanup-admission result receiver");
+            }
             Command::Install { id, install, reply } => {
                 if self.stopping.is_some() {
                     send_install_reply(&reply, Err(DriverError::from_message("the owner worker is shutting down")));
                     return;
                 }
                 let source = Source::new(self.coordinator.waiter.waker());
-                let domain = self.coordinator.waiter.domain().clone();
-                let context = DriverContext::new(
-                    self.worker.clone(),
-                    self.tasks.clone(),
-                    domain.clone(),
-                    Waker::from(std::sync::Arc::clone(&source)),
-                )
-                .with_completion_service(domain.service(self.coordinator.waiter.record_client()))
-                .and_then(|context| context.with_completion_service(domain.service(self.coordinator.waiter.readiness_client())));
+                let context = DriverContext::new(self.worker.clone(), self.tasks.clone(), Waker::from(std::sync::Arc::clone(&source)));
+                let context = self.coordinator.waiter.attach_clients(context);
                 match context.and_then(install) {
                     Ok(installed) => {
                         self.coordinator.insert(id, source, installed.driver);
@@ -571,6 +591,5 @@ fn outcome(errors: Vec<DriverError>) -> Result<(), RuntimeError> {
 }
 
 #[cfg(test)]
-#[expect(clippy::unwrap_used, reason = "test setup and assertions use the test backtrace")]
 #[path = "runtime_tests.rs"]
 mod tests;

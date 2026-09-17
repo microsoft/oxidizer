@@ -2,14 +2,18 @@
 // Licensed under the MIT License.
 
 use std::any::TypeId;
+use std::error::Error;
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use std::thread;
+use std::task::Waker;
 use std::time::{Duration, Instant};
+use std::{io, thread};
 
-use arty_io_core::{CompletionBudget, CompletionWaiter};
+use arty_io_core::{CompletionBudget, CompletionWaiter, DriverContext, DriverError, DriverProvider, IoContext, SystemTasks};
 use thread_aware_core::ThreadAware;
 
+use super::coordinator::Source;
 use super::echo_driver::{EchoContext, EchoIoError};
 use super::sample_driver::{SampleContext, SampleIoError};
 use super::test_support::Harness;
@@ -170,4 +174,101 @@ fn losing_interest_and_operation_errors_do_not_fail_the_driver() {
     harness.tasks.run_all();
     harness.coordinator.service(Instant::now());
     assert!(harness.coordinator.is_empty());
+}
+
+#[test]
+fn missing_actual_clients_fail_before_native_registration_or_system_work() {
+    let harness = Harness::new(1);
+    let context = || DriverContext::new(harness.thread.clone(), harness.tasks.handle(), Waker::noop().clone());
+    let sample = SampleContext::provider().unwrap().create(context());
+    let echo = EchoContext::provider().unwrap().create(context());
+    assert!(sample.err().unwrap().is_unsupported());
+    assert!(echo.err().unwrap().is_unsupported());
+    let metrics = harness.coordinator.waiter.metrics();
+    assert_eq!(metrics.records_created.load(Ordering::Relaxed), 0);
+    assert_eq!(metrics.readiness_created.load(Ordering::Relaxed), 0);
+    assert_eq!(harness.tasks.len(), 0);
+}
+
+#[test]
+fn rejected_cleanup_is_reported_on_the_first_drain_turn_with_active_operations() {
+    let harness = Harness::new(2);
+    let tasks = SystemTasks::new(|task| {
+        drop(task);
+        Err(DriverError::unsupported("cleanup submission rejected")
+            .with_cause(io::Error::new(io::ErrorKind::PermissionDenied, "executor admission denied")))
+    });
+    let context = || {
+        harness
+            .coordinator
+            .waiter
+            .attach_clients(DriverContext::new(harness.thread.clone(), tasks.clone(), Waker::noop().clone()))
+            .unwrap()
+    };
+    let sample_driver = SampleContext::provider().unwrap().create(context()).unwrap();
+    let echo_driver = EchoContext::provider().unwrap().create(context()).unwrap();
+    let sample = sample_driver.context();
+    let echo = echo_driver.context();
+    let number = sample.submit(9).unwrap();
+    let text = echo.submit("pending").unwrap();
+    let drains = [sample_driver.shutdown(), echo_driver.shutdown()];
+    assert!(matches!(sample.submit(0), Err(SampleIoError::Closed)));
+    assert!(matches!(echo.submit("closed"), Err(EchoIoError::Closed)));
+    assert!(number.is_pending());
+    assert!(text.is_pending());
+
+    // No native collection has occurred: both drivers still have admitted, incomplete work.
+    for mut drain in drains {
+        let error = drain.service(&mut budget(1)).unwrap_err();
+        assert!(error.is_unsupported());
+        assert_eq!(error.to_string(), "cleanup submission rejected");
+        assert_eq!(
+            error.source().unwrap().downcast_ref::<io::Error>().unwrap().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        drop(drain);
+    }
+    assert!(matches!(number.wait(), Err(SampleIoError::Abandoned)));
+    assert!(matches!(text.wait(), Err(EchoIoError::Abandoned)));
+}
+
+#[test]
+fn cleanup_rejection_does_not_stop_an_independent_drain() {
+    let mut harness = Harness::new(2);
+    let source = Source::new(harness.coordinator.waiter.waker());
+    let tasks = SystemTasks::new(|task| {
+        drop(task);
+        Err(DriverError::from_message("cleanup submission rejected"))
+    });
+    let context = harness
+        .coordinator
+        .waiter
+        .attach_clients(DriverContext::new(harness.thread.clone(), tasks, Waker::from(Arc::clone(&source))))
+        .unwrap();
+    let driver = SampleContext::provider().unwrap().create(context).unwrap();
+    let sample = driver.context();
+    harness.coordinator.insert(TypeId::of::<SampleContext>(), source, Box::new(driver));
+    let echo = harness.install::<EchoContext>();
+    let number = sample.submit(1).unwrap();
+    let text = echo.submit("independent").unwrap();
+    harness.coordinator.begin_shutdown_all();
+    assert_eq!(harness.tasks.len(), 1);
+    harness.coordinator.service(Instant::now());
+    assert!(harness.coordinator.has_failed());
+    assert!(!harness.coordinator.is_empty());
+    let retired = harness.coordinator.take_retired();
+    assert_eq!(retired.len(), 1);
+    assert_eq!(retired[0].id, TypeId::of::<SampleContext>());
+    assert_eq!(retired[0].errors.len(), 1);
+    assert_eq!(retired[0].errors[0].to_string(), "cleanup submission rejected");
+    assert!(matches!(number.wait(), Err(SampleIoError::Abandoned)));
+
+    harness.tasks.run_all();
+    harness.coordinator.service(Instant::now());
+    assert!(harness.coordinator.is_empty());
+    let retired = harness.coordinator.take_retired();
+    assert_eq!(retired.len(), 1);
+    assert_eq!(retired[0].id, TypeId::of::<EchoContext>());
+    assert!(retired[0].errors.is_empty());
+    assert_eq!(text.wait().unwrap(), "INDEPENDENT");
 }

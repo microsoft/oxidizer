@@ -1,37 +1,35 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! One shared offload thread, kept alive until every worker finishes draining.
+//! One shared offload thread, kept alive by owner leases and accepted work, not inert handles.
 
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, mpsc};
 use std::task::Waker;
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
 use arty_io_core::{DriverError, SystemTask, SystemTasks};
 
-enum Command {
-    Run(SystemTask),
-    Stop,
+pub(super) struct ExecutionLease {
+    sender: mpsc::Sender<SystemTask>,
 }
 
 pub(super) struct SystemPool {
-    sender: mpsc::Sender<Command>,
+    execution: Option<Arc<ExecutionLease>>,
     finished: mpsc::Receiver<()>,
     thread: Option<JoinHandle<()>>,
-    failure: Arc<Mutex<Option<String>>>,
 }
 
 impl SystemPool {
     pub(super) fn start() -> Result<Self, DriverError> {
-        let (sender, receiver) = mpsc::channel();
+        let (sender, receiver) = mpsc::channel::<SystemTask>();
         let (finished_tx, finished) = mpsc::channel();
         let thread = thread::Builder::new()
             .name("in-memory-io-system".into())
             .spawn(move || {
-                while let Ok(Command::Run(task)) = receiver.recv() {
+                while let Ok(task) = receiver.recv() {
                     task();
                 }
                 // The owner can time out and abandon the join without invalidating this thread.
@@ -39,24 +37,40 @@ impl SystemPool {
             })
             .map_err(DriverError::from_cause)?;
         Ok(Self {
-            sender,
+            execution: Some(Arc::new(ExecutionLease { sender })),
             finished,
             thread: Some(thread),
-            failure: Arc::default(),
         })
     }
 
+    pub(super) fn execution_lease(&self) -> Arc<ExecutionLease> {
+        Arc::clone(
+            self.execution
+                .as_ref()
+                .expect("execution leases are acquired before controller shutdown"),
+        )
+    }
+
     pub(super) fn handle(&self) -> SystemTasks {
-        let sender = self.sender.clone();
-        let failure = Arc::clone(&self.failure);
+        let execution = Arc::downgrade(
+            self.execution
+                .as_ref()
+                .expect("system-task handles are created before controller shutdown"),
+        );
         SystemTasks::new(move |task| {
-            if let Err(error) = sender.send(Command::Run(task)) {
-                let message = format!("system work was not accepted: {error}");
-                report(&message);
-                *failure
-                    .lock()
-                    .expect("only a panicking system-task submitter can poison this mutex") = Some(message);
-            }
+            let execution = execution
+                .upgrade()
+                .ok_or_else(|| DriverError::from_message("system work has no remaining execution owner"))?;
+            // Acceptance transfers execution authority to the job, including any work it submits.
+            // The sender disappears only after owners AND accepted jobs retire.
+            let job_execution = Arc::clone(&execution);
+            execution
+                .sender
+                .send(Box::new(move || {
+                    task();
+                    drop(job_execution);
+                }))
+                .map_err(|error| DriverError::from_message(format!("system work was not accepted: {error}")))
         })
     }
 
@@ -64,8 +78,9 @@ impl SystemPool {
         let Some(thread) = self.thread.take() else {
             return Ok(());
         };
-        // A disconnected receiver is diagnosed by the exit notification or join below.
-        drop(self.sender.send(Command::Stop));
+        // There is no Stop marker that can overtake a retained owner's later cleanup. Inert
+        // SystemTasks handles are weak; they cannot keep graceful shutdown pending by themselves.
+        drop(self.execution.take());
         match self.finished.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
             Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => {
                 thread.join().map_err(|payload| {
@@ -79,38 +94,44 @@ impl SystemPool {
                 return Err(DriverError::shutdown_timeout());
             }
         }
-        let failure = self
-            .failure
-            .lock()
-            .expect("only a panicking system-task submitter can poison this mutex")
-            .take();
-        if let Some(message) = failure {
-            return Err(DriverError::from_message(message));
-        }
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(super) fn wait_stopped(&self, timeout: std::time::Duration) -> Result<(), mpsc::RecvTimeoutError> {
+        self.finished.recv_timeout(timeout)
     }
 }
 
 /// A callback owns this completion flag independently of the driver or drain.
 pub(super) struct Cleanup {
     complete: Arc<AtomicBool>,
+    submission_error: Option<DriverError>,
 }
 
 impl Cleanup {
     pub(super) fn start(tasks: &SystemTasks, ready: Waker) -> Self {
         let complete = Arc::new(AtomicBool::new(false));
         let callback_complete = Arc::clone(&complete);
-        tasks.spawn(move || {
-            // Release publishes cleanup before the source's publish-then-wake notification.
-            callback_complete.store(true, Ordering::Release);
-            ready.wake();
-        });
-        Self { complete }
+        let submission_error = tasks
+            .spawn(move || {
+                // Release publishes cleanup before the source's publish-then-wake notification.
+                callback_complete.store(true, Ordering::Release);
+                ready.wake();
+            })
+            .err();
+        Self {
+            complete,
+            submission_error,
+        }
     }
 
-    pub(super) fn is_complete(&self) -> bool {
+    pub(super) fn check_complete(&mut self) -> Result<bool, DriverError> {
+        if let Some(error) = self.submission_error.take() {
+            return Err(error);
+        }
         // Acquire observes everything preceding the callback's completion publication.
-        self.complete.load(Ordering::Acquire)
+        Ok(self.complete.load(Ordering::Acquire))
     }
 }
 
@@ -120,8 +141,8 @@ pub(super) fn report(message: &str) {
 }
 
 #[cfg(test)]
-#[expect(clippy::unwrap_used, reason = "test setup and assertions use the test backtrace")]
 mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, mpsc};
     use std::thread;
     use std::time::{Duration, Instant};
@@ -135,7 +156,7 @@ mod tests {
         let (sender, receiver) = mpsc::channel();
         for _ in 0..4 {
             let sender = sender.clone();
-            tasks.spawn(move || sender.send(thread::current().id()).unwrap());
+            tasks.spawn(move || sender.send(thread::current().id()).unwrap()).unwrap();
         }
         let owner = receiver.recv_timeout(Duration::from_secs(5)).unwrap();
         assert_ne!(owner, thread::current().id());
@@ -153,11 +174,13 @@ mod tests {
         let (completed_tx, completed_rx) = mpsc::channel();
         let resource = Arc::new(String::from("callback-owned"));
         let weak = Arc::downgrade(&resource);
-        pool.handle().spawn(move || {
-            entered_tx.send(()).unwrap();
-            release_rx.recv().unwrap();
-            completed_tx.send(resource.to_string()).unwrap();
-        });
+        pool.handle()
+            .spawn(move || {
+                entered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                completed_tx.send(resource.to_string()).unwrap();
+            })
+            .unwrap();
         entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
         assert!(pool.stop(Instant::now()).unwrap_err().is_shutdown_timeout());
         assert!(weak.upgrade().is_some());
@@ -165,5 +188,41 @@ mod tests {
         assert_eq!(completed_rx.recv_timeout(Duration::from_secs(5)).unwrap(), "callback-owned");
         pool.finished.recv_timeout(Duration::from_secs(5)).unwrap();
         assert!(weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn accepted_work_retains_authority_for_followup_work_after_controller_timeout() {
+        let mut pool = SystemPool::start().unwrap();
+        let tasks = pool.handle();
+        let retained_handle = tasks.clone();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (resume_tx, resume_rx) = mpsc::channel();
+        let (finished_tx, finished_rx) = mpsc::channel();
+        pool.handle()
+            .spawn(move || {
+                let owner = thread::current().id();
+                entered_tx.send(owner).unwrap();
+                resume_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                tasks.spawn(move || finished_tx.send(thread::current().id()).unwrap()).unwrap();
+            })
+            .unwrap();
+        let owner = entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(pool.stop(Instant::now()).unwrap_err().is_shutdown_timeout());
+        resume_tx.send(()).unwrap();
+        assert_eq!(finished_rx.recv_timeout(Duration::from_secs(5)).unwrap(), owner);
+        pool.wait_stopped(Duration::from_secs(5)).unwrap();
+        drop(retained_handle);
+    }
+
+    #[test]
+    fn an_inert_handle_reports_rejection_after_execution_retires() {
+        let mut pool = SystemPool::start().unwrap();
+        let tasks = pool.handle();
+        pool.stop(Instant::now() + Duration::from_secs(5)).unwrap();
+        let ran = Arc::new(AtomicBool::new(false));
+        let task_ran = Arc::clone(&ran);
+        let error = tasks.spawn(move || task_ran.store(true, Ordering::Relaxed)).unwrap_err();
+        assert!(error.to_string().contains("no remaining execution owner"));
+        assert!(!ran.load(Ordering::Relaxed));
     }
 }

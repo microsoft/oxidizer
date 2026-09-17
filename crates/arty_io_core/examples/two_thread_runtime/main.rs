@@ -18,6 +18,8 @@
 //! rechecks sources and control work before entering the one latched domain wait. Shutdown starts
 //! all drains before driving any, keeps the collector and shared offload facility alive, and
 //! reports failure or an overall timeout without invalidating callback-owned storage.
+//! Retained owner threads and accepted cleanup keep that same offload thread available after a
+//! controller timeout. Inert task handles and retained consumer contexts do not prolong draining.
 
 #![forbid(unsafe_code)]
 
@@ -29,11 +31,9 @@ mod sample_driver;
 mod system_tasks;
 
 #[cfg(test)]
-#[expect(clippy::unwrap_used, reason = "test setup and assertions use the test backtrace")]
 mod test_support;
 
 #[cfg(test)]
-#[expect(clippy::unwrap_used, reason = "test setup and assertions use the test backtrace")]
 mod contract_tests;
 
 use std::error::Error;

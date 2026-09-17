@@ -2,7 +2,7 @@
 
 `arty_io_core` defines the agreement between drivers with independent versions,
 native completion adapters, and a runtime that coordinates their progress.
-The core implements the shared vocabulary and ownership handles, not a native
+The core implements the shared service and lifecycle vocabulary, not a native
 backend, scheduler, driver registry, or placement policy.
 
 ## `R1`: Shared vocabulary
@@ -10,6 +10,9 @@ backend, scheduler, driver registry, or placement policy.
 - Runtimes and their drivers use the same core contract. Distinct versions of a
   driver can coexist through different context types; incompatible copies of the
   core itself do not become interoperable.
+- Native composition also requires matching adapter client interfaces. Sharing
+  the core does not discover compatible native APIs or bridge different client
+  types from independently compiled adapter versions.
 - Standard-library types are preferred. `thread_aware_core` is the only external
   type dependency in public signatures and is not re-exported.
 - Operations, buffers, native completion records, registration tables, and
@@ -32,19 +35,25 @@ backend, scheduler, driver registry, or placement policy.
 
 ## `R3`: Negotiation and owner-thread initialization
 
-- `ProviderContext` advertises the client capability types of one proposed
-  completion configuration, without carrying native handles.
-- The provider selects one supported strategy and declares its
-  `CompletionRequirements`. Every capability in that set is required; unrelated
-  alternative strategies are not combined into the set.
-- The runtime chooses final driver-owning threads and native domains before
-  creation. It validates requirements against each actual `DriverContext`.
+- `IoContext::provider` creates provider state without a separate capability
+  advertisement. The runtime chooses final owner threads and configured native
+  waiters before per-worker creation.
+- The runtime asks the waiter it actually drives to `attach_clients` to the
+  new `DriverContext`. Native clients retain their actual backing resources;
+  this construction rule is not a generic proof of native provenance.
+- `DriverProvider::create` selects a supported strategy from the clients actually
+  supplied, before creating native bindings. Missing clients produce classified
+  unsupported errors instead of partially usable drivers.
 - A provider clone is relocated and consumed once per worker creation attempt.
   The provider decides whether instances share an engine, resources, or nothing.
-- `DriverContext` carries thread coordinates, system work, a domain identity, a
-  readiness waker, and typed domain-scoped clients. It stays on its owning thread.
-- Providers return `LocalDriver`. This handle cannot be sent or shared across
-  threads even when the concrete implementation happens to be thread-safe.
+- Strategy-specific shared state may be initialized when actual clients are
+  known. The runtime supplies compatible worker configurations; core does not
+  discover intersections across heterogeneous capability sets.
+- `DriverContext` carries thread coordinates, system work, a readiness waker,
+  and typed clients. It stays on its owning thread.
+- Providers return `Box<dyn Driver<Context = Self::Context>>` without `Send` or
+  `Sync`. The installed boundary cannot cross threads even when the concrete
+  implementation happens to be thread-safe.
 - Creation is prompt and does not wait for runtime workers to make progress.
   Routing and notification are established before a context becomes usable.
 
@@ -53,17 +62,23 @@ backend, scheduler, driver registry, or placement policy.
 - `Driver::service` never waits for new activity. It processes completions and
   performs any submission or kernel progress its implementation requires.
 - Service charges `CompletionBudget` before each bounded progress step. Budgets
-  cannot be copied or cloned to duplicate an allowance.
+  cannot be copied or cloned through the helper API. This is cooperative
+  accounting, not preemption or enforcement against a faulty implementation:
+  do not reset the allowance or hide variable-length work inside one charged step.
 - Each newly installed driver and newly initiated drain starts runnable and
   receives an initial service turn without requiring a native notification.
-- `ServiceStatus` distinguishes immediate continuation from idle and timed
-  service. Work left after budget exhaustion remains runnable without requiring
-  another native notification.
+- `ServiceStatus::Idle`, `Runnable`, and `Deadline(Instant)` distinguish idle,
+  immediate continuation, and timed service. Work left after budget exhaustion
+  remains runnable without requiring another native notification.
 - Native collection and the worker's blocking wait belong to a separate
   `CompletionWaiter`. Collection is budgeted too and does not run driver service
   or application futures recursively.
 - A waiter routes native records to their owning registrations before private
   decoding, or reports readiness for drivers that retain their own queues.
+- Native collection itself must eventually deliver or signal each continuously
+  actionable source despite another source remaining busy. Preserve source
+  continuation or ordering across collection turns; fair scheduling of already
+  notified drivers is not sufficient.
 - A zero-duration collection never blocks. An exhausted collection budget never
   enters a wait. A normal timeout is idle, not a failure.
 - Finite native waits may round up but never become infinite. Only
@@ -98,20 +113,21 @@ backend, scheduler, driver registry, or placement policy.
 
 ## `R6`: Owned cooperative shutdown and safe destruction
 
-- `LocalDriver::shutdown` consumes the running driver. The underlying boxed
-  `Driver::shutdown` closes admission synchronously before returning `Shutdown`.
+- `Driver::shutdown(self: Box<Self>)` consumes the running driver and closes
+  admission synchronously before returning `Box<dyn Drain>`.
 - Admission closure synchronizes with acquiring active-operation ownership:
   racing operations are either admitted and included in draining or rejected.
 - The drain keeps the same native registrations and readiness identity.
   Shutdown initiation is not repeated on each service turn.
-- `Shutdown` drives a local `Drain` with the same budget and arming protocol as
+- The boxed `Drain` is local and uses the same budget and arming protocol as
   running drivers. Every turn receives a budget; it is not a blocking call or a future.
 - The runtime initiates relevant shutdowns, continues native collection and
   required system work, and services all drains fairly.
 - Pending drains retain a notification, immediate-continuation, or timed-service
   obligation. The runtime applies an overall graceful-shutdown deadline.
-- Completion or an error releases the drain. Calling it after a terminal result
-  is a programming error, not a new shutdown attempt.
+- The coordinator removes and drops a drain after `Complete`, a service error,
+  or a preparation error. It never calls the drain again after that terminal
+  result. Terminal retirement is runtime state, not another public owner wrapper.
 - Context clones remain valid but closed and do not themselves prevent graceful
   completion. Active operations and callbacks retain their own resources.
 - Dropping a running driver or abandoning a drain always remains memory-safe.
@@ -128,13 +144,13 @@ backend, scheduler, driver registry, or placement policy.
 
 - Both `IoContext::provider` and `DriverProvider::create` return `DriverError`.
   Environmental initialization failure is not required to panic.
-- Missing capabilities, duplicate clients, wrong-domain clients, and shutdown
-  timeout have classifications; callers do not parse diagnostic text to recover.
+- Missing capabilities, duplicate clients, and shutdown timeout have
+  classifications; callers do not parse diagnostic text to recover.
 - Native causes remain available through the standard error source chain.
 - Attaching a native cause preserves the selected classification, so an
   unsupported strategy can retain both fallback information and its native error.
-- A preliminary capability advertisement does not eliminate resource,
-  permission, or native registration failures.
+- Successful client lookup does not eliminate resource, permission, or native
+  registration failures.
 - Partial installation is rolled back or safely retired before reporting a
   coherent registration result. Callback-visible state must remain owned during
   that process, and cleanup failures remain visible alongside the original error.
@@ -146,22 +162,36 @@ backend, scheduler, driver registry, or placement policy.
 
 ## `R8`: Runtime system work
 
-- `SystemTasks` accepts synchronous work that may block and returns after
-  acceptance rather than completion.
+- `SystemTasks::spawn` returns `Result<(), DriverError>` for synchronous work
+  that may block. `Ok(())` means execution ownership was accepted, not that the
+  task completed. `Err` means the task was not accepted and will not start.
+- Rejection may drop the task and its captures; no completion callback is
+  promised. Classification and native causes remain observable to the caller.
 - Submitted work does not run on an async worker.
 - The facility stays available during normal service, registration rollback, and
   cooperative draining while participants still require it.
+- A controller reaching its shutdown deadline does not revoke execution access
+  from retained owner threads or pending cleanup. Those obligations retain
+  execution authority on the existing facility.
+- Accepted work is not discarded behind a stop marker. Pool retirement waits
+  for execution obligations, not merely for the controller to request shutdown.
+- Worker or queue failures can still prevent admission and must be returned
+  explicitly. Cleanup reports rejection instead of waiting for a completion
+  that cannot arrive.
+- Retained consumer contexts or inert facility handles are not, by themselves,
+  active operations or graceful-drain participants.
 - The core provides the cloneable handle, not an implicit thread per operation
   or driver. The runtime implements and owns the execution facility.
 
 ## `R9`: Native service boundaries and scope
 
-- Each waiter identifies its `CompletionDomain`; client capabilities are tagged
-  with the same identity before being supplied to drivers.
+- `CompletionWaiter::attach_clients` supplies the client capabilities backed by
+  the collector the runtime will drive. The default attaches no native clients.
 - Typed lookup is a construction-time operation. Native completion records do
   not pass through a type-erased per-operation envelope.
-- Domain tags reject accidental mixing of client sets. They are identities, not
-  native-resource owners or verification of an adapter's underlying OS handles.
+- Typed lookup selects an agreed client interface; it does not verify native
+  handles or ownership. Adapter factories and registrations establish and retain
+  the connection to the correct collector.
 - Native adapter packages own client interfaces, source registration, routing,
   and safe retirement. A domain, a registered driver type, and a physical queue
   are not interchangeable identities.

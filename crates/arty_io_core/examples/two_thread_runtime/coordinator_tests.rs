@@ -10,9 +10,7 @@ use std::task::Waker;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use arty_io_core::{
-    CompletionBudget, CompletionDomain, CompletionWaiter, Drain, DrainStatus, DriverError, ServiceStatus, Shutdown, WaitStatus,
-};
+use arty_io_core::{CompletionBudget, CompletionWaiter, Drain, DrainStatus, DriverError, ServiceStatus, WaitStatus};
 
 use super::{Coordinator, ErasedDriver, Source};
 use crate::test_support::ManualTasks;
@@ -21,23 +19,18 @@ struct A;
 struct B;
 
 struct ObservedWaiter {
-    domain: CompletionDomain,
     waits: Rc<RefCell<Vec<Duration>>>,
     status: ServiceStatus,
 }
 
 impl CompletionWaiter for ObservedWaiter {
-    fn domain(&self) -> &CompletionDomain {
-        &self.domain
-    }
-
     fn waker(&self) -> Waker {
         Waker::noop().clone()
     }
 
-    fn collect(&mut self, wait: Duration, budget: &mut CompletionBudget) -> Result<ServiceStatus, DriverError> {
+    fn collect(&mut self, max_wait: Duration, budget: &mut CompletionBudget) -> Result<ServiceStatus, DriverError> {
         assert!(budget.try_consume());
-        self.waits.borrow_mut().push(wait);
+        self.waits.borrow_mut().push(max_wait);
         Ok(self.status)
     }
 }
@@ -49,7 +42,7 @@ type Arm = Box<dyn FnMut() -> Result<WaitStatus, DriverError>>;
 struct Scripted {
     service: Service,
     arm: Arm,
-    shutdown: Box<dyn FnOnce() -> Shutdown>,
+    shutdown: Box<dyn FnOnce() -> Box<dyn Drain>>,
 }
 
 impl Scripted {
@@ -58,7 +51,7 @@ impl Scripted {
             service,
             arm: Box::new(|| Ok(WaitStatus::Armed)),
             shutdown: Box::new(|| {
-                Shutdown::new(ScriptedDrain {
+                Box::new(ScriptedDrain {
                     service: Box::new(|budget| {
                         assert!(budget.try_consume());
                         Ok(DrainStatus::Complete)
@@ -79,7 +72,7 @@ impl ErasedDriver for Scripted {
         (self.arm)()
     }
 
-    fn shutdown(self: Box<Self>) -> Shutdown {
+    fn shutdown(self: Box<Self>) -> Box<dyn Drain> {
         (self.shutdown)()
     }
 }
@@ -87,6 +80,43 @@ impl ErasedDriver for Scripted {
 struct ScriptedDrain {
     service: DrainService,
     arm: Arm,
+}
+
+#[derive(Clone, Copy)]
+enum Terminal {
+    Complete,
+    ServiceError,
+    PreparationError,
+}
+
+struct CountedDrain {
+    terminal: Terminal,
+    services: Rc<Cell<usize>>,
+    preparations: Rc<Cell<usize>>,
+    drops: Rc<Cell<usize>>,
+}
+
+impl Drain for CountedDrain {
+    fn service(&mut self, budget: &mut CompletionBudget) -> Result<DrainStatus, DriverError> {
+        assert!(budget.try_consume());
+        self.services.set(self.services.get() + 1);
+        match self.terminal {
+            Terminal::Complete => Ok(DrainStatus::Complete),
+            Terminal::ServiceError => Err(DriverError::from_message("terminal drain service failure")),
+            Terminal::PreparationError => Ok(DrainStatus::Pending(ServiceStatus::Idle)),
+        }
+    }
+
+    fn prepare_wait(&mut self) -> Result<WaitStatus, DriverError> {
+        self.preparations.set(self.preparations.get() + 1);
+        Err(DriverError::from_message("terminal drain preparation failure"))
+    }
+}
+
+impl Drop for CountedDrain {
+    fn drop(&mut self) {
+        self.drops.set(self.drops.get() + 1);
+    }
 }
 
 impl Drain for ScriptedDrain {
@@ -102,9 +132,8 @@ impl Drain for ScriptedDrain {
 fn coordinator(quantum: usize) -> Coordinator<ObservedWaiter> {
     Coordinator::new(
         ObservedWaiter {
-            domain: CompletionDomain::new(),
             waits: Rc::default(),
-            status: ServiceStatus::idle(),
+            status: ServiceStatus::Idle,
         },
         NonZeroUsize::new(quantum).unwrap(),
     )
@@ -120,7 +149,7 @@ fn installation_schedules_an_initial_turn_without_a_notification() {
     let mut driver = Scripted::new(Box::new(move |budget| {
         assert!(budget.try_consume());
         service_calls.set(service_calls.get() + 1);
-        Ok(ServiceStatus::idle())
+        Ok(ServiceStatus::Idle)
     }));
     driver.arm = Box::new(move || {
         assert_eq!(arm_calls.get(), 1);
@@ -145,13 +174,13 @@ fn shutdown_of_an_idle_driver_schedules_its_own_initial_turn() {
     let calls = Rc::new(Cell::new(0));
     let service_calls = Rc::clone(&calls);
     let arm_calls = Rc::clone(&calls);
-    let mut driver = Scripted::new(Box::new(|_| Ok(ServiceStatus::idle())));
+    let mut driver = Scripted::new(Box::new(|_| Ok(ServiceStatus::Idle)));
     driver.shutdown = Box::new(move || {
-        Shutdown::new(ScriptedDrain {
+        Box::new(ScriptedDrain {
             service: Box::new(move |budget| {
                 assert!(budget.try_consume());
                 service_calls.set(service_calls.get() + 1);
-                Ok(DrainStatus::Pending(ServiceStatus::idle()))
+                Ok(DrainStatus::Pending(ServiceStatus::Idle))
             }),
             arm: Box::new(move || {
                 assert_eq!(arm_calls.get(), 1);
@@ -182,7 +211,7 @@ fn shutdown_created_by_driver_failure_also_gets_an_initial_turn() {
         let mut driver = Scripted::new(Box::new(move |budget| {
             assert!(budget.try_consume());
             if fail_during_arm {
-                Ok(ServiceStatus::idle())
+                Ok(ServiceStatus::Idle)
             } else {
                 Err(DriverError::from_message("injected driver service failure"))
             }
@@ -220,7 +249,7 @@ fn a_wake_during_service_is_not_cleared_by_its_idle_result() {
             if service_calls.get() == 1 {
                 wake.wake_by_ref();
             }
-            Ok(ServiceStatus::idle())
+            Ok(ServiceStatus::Idle)
         }))),
     );
     coordinator.service(Instant::now());
@@ -244,7 +273,7 @@ fn a_notification_during_arm_is_rechecked_before_waiting() {
         wake.wake();
         notified_tx.send(()).unwrap();
     });
-    let mut driver = Scripted::new(Box::new(|_| Ok(ServiceStatus::idle())));
+    let mut driver = Scripted::new(Box::new(|_| Ok(ServiceStatus::Idle)));
     driver.arm = Box::new(move || {
         armed_tx.send(()).unwrap();
         notified_rx.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -267,10 +296,12 @@ fn collection_and_every_busy_source_get_a_bounded_turn() {
             id,
             Source::new(coordinator.waiter.waker()),
             Box::new(Scripted::new(Box::new(move |budget| {
-                while budget.try_consume() {
+                for _ in 0..2 {
+                    assert!(budget.try_consume());
                     work.borrow_mut().push(name);
                 }
-                Ok(ServiceStatus::runnable())
+                assert!(!budget.try_consume());
+                Ok(ServiceStatus::Runnable)
             }))),
         );
     }
@@ -299,9 +330,9 @@ fn service_deadlines_survive_idle_rounds_and_bound_the_domain_wait() {
             assert!(budget.try_consume());
             service_calls.set(service_calls.get() + 1);
             Ok(if service_calls.get() == 1 {
-                ServiceStatus::at(deadline)
+                ServiceStatus::Deadline(deadline)
             } else {
-                ServiceStatus::idle()
+                ServiceStatus::Idle
             })
         }))),
     );
@@ -324,7 +355,7 @@ fn service_deadlines_survive_idle_rounds_and_bound_the_domain_wait() {
 fn an_expired_collector_deadline_prevents_sleeping() {
     let mut coordinator = coordinator(1);
     let now = Instant::now();
-    coordinator.waiter.status = ServiceStatus::at(now + Duration::from_secs(4));
+    coordinator.waiter.status = ServiceStatus::Deadline(now + Duration::from_secs(4));
     coordinator.service(now);
     assert_eq!(coordinator.wait_duration(now, None), Duration::from_secs(4));
     assert_eq!(coordinator.wait_duration(now + Duration::from_secs(4), None), Duration::ZERO);
@@ -337,7 +368,7 @@ fn a_retained_old_source_never_notifies_its_replacement() {
     coordinator.insert(
         TypeId::of::<A>(),
         Arc::clone(&old),
-        Box::new(Scripted::new(Box::new(|_| Ok(ServiceStatus::idle())))),
+        Box::new(Scripted::new(Box::new(|_| Ok(ServiceStatus::Idle)))),
     );
     assert!(coordinator.begin_shutdown(TypeId::of::<A>()));
     coordinator.service(Instant::now());
@@ -350,7 +381,7 @@ fn a_retained_old_source_never_notifies_its_replacement() {
         Arc::clone(&replacement),
         Box::new(Scripted::new(Box::new(move |_| {
             service_calls.set(service_calls.get() + 1);
-            Ok(ServiceStatus::idle())
+            Ok(ServiceStatus::Idle)
         }))),
     );
     coordinator.service(Instant::now());
@@ -369,15 +400,18 @@ fn drain_failure_does_not_serialize_or_abandon_the_other_drain() {
     let weak = Arc::downgrade(&resource);
     let (callback_tx, callback_rx) = mpsc::channel();
     let task_resource = Arc::clone(&resource);
-    tasks.handle().spawn(move || callback_tx.send(task_resource.to_string()).unwrap());
+    tasks
+        .handle()
+        .spawn(move || callback_tx.send(task_resource.to_string()).unwrap())
+        .unwrap();
     for (id, name) in [(TypeId::of::<A>(), 'a'), (TypeId::of::<B>(), 'b')] {
         let starts = Rc::clone(&starts);
         let retained = Arc::clone(&resource);
-        let mut driver = Scripted::new(Box::new(|_| Ok(ServiceStatus::idle())));
+        let mut driver = Scripted::new(Box::new(|_| Ok(ServiceStatus::Idle)));
         driver.shutdown = Box::new(move || {
             starts.borrow_mut().push(name);
             let mut turns = 0;
-            Shutdown::new(ScriptedDrain {
+            Box::new(ScriptedDrain {
                 service: Box::new(move |budget| {
                     assert!(budget.try_consume());
                     assert!(!retained.is_empty());
@@ -388,7 +422,7 @@ fn drain_failure_does_not_serialize_or_abandon_the_other_drain() {
                     Ok(if turns == 2 {
                         DrainStatus::Complete
                     } else {
-                        DrainStatus::Pending(ServiceStatus::runnable())
+                        DrainStatus::Pending(ServiceStatus::Runnable)
                     })
                 }),
                 arm: Box::new(|| Ok(WaitStatus::Armed)),
@@ -422,14 +456,14 @@ fn a_terminal_arm_failure_releases_and_retires_the_drain() {
     let arm_calls = Rc::clone(&arms);
     let resource = Rc::new(Cell::new(false));
     let weak_resource = Rc::downgrade(&resource);
-    let mut driver = Scripted::new(Box::new(|_| Ok(ServiceStatus::idle())));
+    let mut driver = Scripted::new(Box::new(|_| Ok(ServiceStatus::Idle)));
     driver.shutdown = Box::new(move || {
-        Shutdown::new(ScriptedDrain {
+        Box::new(ScriptedDrain {
             service: Box::new(move |budget| {
                 assert!(budget.try_consume());
                 resource.set(true);
                 service_calls.set(service_calls.get() + 1);
-                Ok(DrainStatus::Pending(ServiceStatus::idle()))
+                Ok(DrainStatus::Pending(ServiceStatus::Idle))
             }),
             arm: Box::new(move || {
                 arm_calls.set(arm_calls.get() + 1);
@@ -453,4 +487,46 @@ fn a_terminal_arm_failure_releases_and_retires_the_drain() {
     assert_eq!(retired.len(), 1);
     assert_eq!(retired[0].errors.len(), 1);
     assert_eq!(retired[0].errors[0].to_string(), "injected drain arming failure");
+}
+
+#[test]
+fn every_terminal_drain_result_drops_once_without_further_calls_or_restart() {
+    for terminal in [Terminal::Complete, Terminal::ServiceError, Terminal::PreparationError] {
+        let mut coordinator = coordinator(1);
+        let services = Rc::new(Cell::new(0));
+        let preparations = Rc::new(Cell::new(0));
+        let drops = Rc::new(Cell::new(0));
+        let starts = Rc::new(Cell::new(0));
+        let drain = CountedDrain {
+            terminal,
+            services: Rc::clone(&services),
+            preparations: Rc::clone(&preparations),
+            drops: Rc::clone(&drops),
+        };
+        let shutdown_starts = Rc::clone(&starts);
+        let mut driver = Scripted::new(Box::new(|_| Ok(ServiceStatus::Idle)));
+        driver.shutdown = Box::new(move || {
+            shutdown_starts.set(shutdown_starts.get() + 1);
+            Box::new(drain)
+        });
+        coordinator.insert(TypeId::of::<A>(), Source::new(coordinator.waiter.waker()), Box::new(driver));
+        coordinator.begin_shutdown_all();
+        coordinator.begin_shutdown_all();
+        coordinator.service(Instant::now());
+        coordinator.arm();
+        assert_eq!(drops.get(), 1);
+        assert!(coordinator.is_empty());
+        for _ in 0..3 {
+            coordinator.begin_shutdown_all();
+            coordinator.service(Instant::now());
+            coordinator.arm();
+        }
+        assert_eq!(starts.get(), 1);
+        assert_eq!(services.get(), 1);
+        assert_eq!(preparations.get(), usize::from(matches!(terminal, Terminal::PreparationError)));
+        assert_eq!(drops.get(), 1);
+        let retired = coordinator.take_retired();
+        assert_eq!(retired.len(), 1);
+        assert_eq!(retired[0].errors.len(), usize::from(!matches!(terminal, Terminal::Complete)));
+    }
 }
