@@ -156,11 +156,7 @@ impl App {
         let popup_area = centered_rect(area, width, height);
         let items = fields.into_iter().map(|field| {
             let value = field.value(popup);
-            if value.is_empty() {
-                ListItem::new(format!("  {}", field.label()))
-            } else {
-                ListItem::new(format!("{:<32} {value:>32}", field.label()))
-            }
+            ListItem::new(format!("{:<32} {value:>32}", field.label()))
         });
         let list = List::new(items)
             .block(
@@ -3114,6 +3110,58 @@ mod tests {
 
         assert!(rendered.contains("worker (west)"));
         assert!(rendered.contains("Recording configuration"));
+    }
+
+    #[test]
+    fn recording_popup_hides_custom_settings_and_restores_them_when_reselected() {
+        use crossterm::event::KeyCode;
+
+        let recording = RecordingConfiguration {
+            allocations: RecordingPolicy {
+                enabled: true,
+                capture_backtraces: true,
+                sampling_one_in: 8,
+            },
+            ..Default::default()
+        };
+        let mut app = App::new();
+        app.screen = Screen::Connected {
+            descriptor: descriptor(),
+            recording,
+            tab: MonitorTab::Info,
+            snapshot: None,
+        };
+        app.handle_key(KeyCode::Char('c'));
+        let render_popup = |app: &App| {
+            render_frame(|frame| App::draw_recording_configuration_popup(frame, app.recording_configuration_popup.unwrap()))
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let custom = render_popup(&app);
+        app.handle_key(KeyCode::Left);
+        let on = render_popup(&app);
+        app.handle_key(KeyCode::Left);
+        let off = render_popup(&app);
+        app.handle_key(KeyCode::Right);
+        app.handle_key(KeyCode::Right);
+        let restored = render_popup(&app);
+
+        assert_eq!(
+            (
+                custom.contains("Allocations custom"),
+                custom.contains("Backtraces on"),
+                custom.contains("Sampling 1/8 (12.5%)"),
+                on.contains("Allocations on"),
+                on.contains("Backtraces"),
+                on.contains("Sampling"),
+                off.contains("Allocations off"),
+                off.contains("Backtraces"),
+                off.contains("Sampling"),
+                restored,
+            ),
+            (true, true, true, true, false, false, true, false, false, custom)
+        );
     }
 
     #[cfg_attr(miri, ignore)]

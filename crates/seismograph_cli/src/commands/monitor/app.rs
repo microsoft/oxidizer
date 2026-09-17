@@ -157,25 +157,7 @@ impl RecordingConfigurationField {
         }
     }
 
-    const fn is_mode(self) -> bool {
-        matches!(
-            self,
-            Self::AllocationRecording
-                | Self::GeneralRecording
-                | Self::ArcDereferenceRecording
-                | Self::RuntimeTaskRecording
-                | Self::IoRecording
-                | Self::CacheRecording
-        )
-    }
-
     pub(super) fn value(self, popup: RecordingConfigurationPopup) -> String {
-        if self.is_mode() {
-            return popup
-                .mode(self.recorder().expect("recording mode fields always identify a recorder"))
-                .label()
-                .to_owned();
-        }
         let configuration = popup.draft;
         match self {
             Self::AllocationBacktraces => toggle_label(configuration.allocations.capture_backtraces),
@@ -195,16 +177,14 @@ impl RecordingConfigurationField {
             | Self::ArcDereferenceRecording
             | Self::RuntimeTaskRecording
             | Self::IoRecording
-            | Self::CacheRecording => unreachable!("recording modes return above"),
+            | Self::CacheRecording => popup
+                .mode(self.recorder().expect("recording mode fields always identify a recorder"))
+                .label()
+                .to_owned(),
         }
     }
 
     fn adjust(self, popup: &mut RecordingConfigurationPopup, direction: isize) {
-        if self.is_mode() {
-            let recorder = self.recorder().expect("recording mode fields always identify a recorder");
-            popup.modes[recorder.index()] = popup.mode(recorder).adjusted(direction);
-            return;
-        }
         let configuration = &mut popup.draft;
         match self {
             Self::AllocationBacktraces => {
@@ -252,7 +232,10 @@ impl RecordingConfigurationField {
             | Self::ArcDereferenceRecording
             | Self::RuntimeTaskRecording
             | Self::IoRecording
-            | Self::CacheRecording => unreachable!("recording modes return above"),
+            | Self::CacheRecording => {
+                let recorder = self.recorder().expect("recording mode fields always identify a recorder");
+                popup.modes[recorder.index()] = popup.mode(recorder).adjusted(direction);
+            }
         }
     }
 }
@@ -1955,6 +1938,215 @@ mod tests {
                 RuntimeViewState::new(),
                 IoViewState::new(),
                 CacheViewState::new(),
+            )
+        );
+    }
+
+    #[test]
+    fn event_buffer_capacity_is_not_associated_with_a_recorder() {
+        assert_eq!(RecordingConfigurationField::EventBufferCapacity.recorder(), None);
+    }
+
+    macro_rules! recording_configuration_regressions {
+        ($cycle:ident, $backtraces:ident, $policy:ident, $mode:ident, $trace_field:ident, $sampling:expr) => {
+            #[test]
+            fn $cycle() {
+                let mut configuration = RecordingConfiguration::default();
+                configuration.$policy.enabled = true;
+                configuration.$policy.capture_backtraces = true;
+                configuration.$policy.sampling_one_in = $sampling;
+                let mut app = connected_app(MonitorTab::Info);
+                let mut popup = RecordingConfigurationPopup::new(configuration);
+                popup.selected = popup
+                    .fields()
+                    .iter()
+                    .position(|field| *field == RecordingConfigurationField::$mode)
+                    .unwrap();
+                app.recording_configuration_popup = Some(popup);
+
+                app.handle_key(KeyCode::Left);
+                let on = app.recording_configuration_popup.unwrap();
+                app.handle_key(KeyCode::Left);
+                let off = app.recording_configuration_popup.unwrap();
+                app.handle_key(KeyCode::Left);
+                let lower_bound = app.recording_configuration_popup.unwrap();
+                app.handle_key(KeyCode::Char(' '));
+                app.handle_key(KeyCode::Right);
+                let restored = app.recording_configuration_popup.unwrap();
+                app.handle_key(KeyCode::Right);
+                let upper_bound = app.recording_configuration_popup.unwrap();
+
+                let mut enabled = configuration;
+                enabled.$policy.capture_backtraces = false;
+                enabled.$policy.sampling_one_in = 1;
+                let mut disabled = configuration;
+                disabled.$policy.enabled = false;
+                assert_eq!(
+                    (
+                        on.configuration(),
+                        off.configuration(),
+                        lower_bound,
+                        restored,
+                        upper_bound,
+                        on.field(),
+                        off.field(),
+                    ),
+                    (
+                        enabled,
+                        disabled,
+                        off,
+                        popup,
+                        popup,
+                        RecordingConfigurationField::$mode,
+                        RecordingConfigurationField::$mode,
+                    )
+                );
+            }
+
+            #[test]
+            fn $backtraces() {
+                let mut configuration = RecordingConfiguration::default();
+                configuration.$policy.enabled = true;
+                configuration.$policy.capture_backtraces = true;
+                let mut app = connected_app(MonitorTab::Info);
+                let mut popup = RecordingConfigurationPopup::new(configuration);
+                popup.selected = popup
+                    .fields()
+                    .iter()
+                    .position(|field| *field == RecordingConfigurationField::$trace_field)
+                    .unwrap();
+                app.recording_configuration_popup = Some(popup);
+
+                app.handle_key(KeyCode::Right);
+                let toggled = app.recording_configuration_popup.unwrap();
+                app.handle_key(KeyCode::Left);
+                let restored = app.recording_configuration_popup.unwrap();
+
+                let mut expected = configuration;
+                expected.$policy.capture_backtraces = false;
+                assert_eq!(
+                    (toggled.configuration(), toggled.fields(), restored),
+                    (expected, popup.fields(), popup)
+                );
+            }
+        };
+    }
+
+    recording_configuration_regressions!(
+        allocation_modes_preserve_custom_draft,
+        allocation_backtraces_toggle_without_collapsing_custom_fields,
+        allocations,
+        AllocationRecording,
+        AllocationBacktraces,
+        8
+    );
+    recording_configuration_regressions!(
+        general_modes_preserve_custom_draft,
+        general_backtraces_toggle_without_collapsing_custom_fields,
+        general_events,
+        GeneralRecording,
+        GeneralBacktraces,
+        8
+    );
+    recording_configuration_regressions!(
+        arc_modes_preserve_custom_draft,
+        arc_backtraces_toggle_without_collapsing_custom_fields,
+        arc_dereferences,
+        ArcDereferenceRecording,
+        ArcDereferenceBacktraces,
+        8
+    );
+    recording_configuration_regressions!(
+        runtime_modes_preserve_custom_draft,
+        runtime_backtraces_toggle_without_collapsing_custom_fields,
+        runtime_tasks,
+        RuntimeTaskRecording,
+        RuntimeTaskBacktraces,
+        1
+    );
+    recording_configuration_regressions!(
+        io_modes_preserve_custom_draft,
+        io_backtraces_toggle_without_collapsing_custom_fields,
+        io,
+        IoRecording,
+        IoBacktraces,
+        8
+    );
+    recording_configuration_regressions!(
+        cache_modes_preserve_custom_draft,
+        cache_backtraces_toggle_without_collapsing_custom_fields,
+        cache,
+        CacheRecording,
+        CacheBacktraces,
+        8
+    );
+
+    macro_rules! recording_sampling_regression {
+        ($name:ident, $policy:ident, $field:ident) => {
+            #[test]
+            fn $name() {
+                let mut configuration = RecordingConfiguration::default();
+                configuration.$policy.enabled = true;
+                configuration.$policy.sampling_one_in = 8;
+                let mut app = connected_app(MonitorTab::Info);
+                let mut popup = RecordingConfigurationPopup::new(configuration);
+                popup.selected = popup
+                    .fields()
+                    .iter()
+                    .position(|field| *field == RecordingConfigurationField::$field)
+                    .unwrap();
+                app.recording_configuration_popup = Some(popup);
+
+                app.handle_key(KeyCode::Right);
+                let increased = app.recording_configuration_popup.unwrap().configuration();
+                app.handle_key(KeyCode::Left);
+                let restored = app.recording_configuration_popup.unwrap();
+                let mut expected = configuration;
+                expected.$policy.sampling_one_in = 16;
+                assert_eq!((increased, restored), (expected, popup));
+            }
+        };
+    }
+
+    recording_sampling_regression!(allocation_sampling_edits_only_allocations, allocations, AllocationSampling);
+    recording_sampling_regression!(general_sampling_edits_only_events, general_events, GeneralSampling);
+    recording_sampling_regression!(arc_sampling_edits_only_arc, arc_dereferences, ArcDereferenceSampling);
+    recording_sampling_regression!(io_sampling_edits_only_io, io, IoSampling);
+    recording_sampling_regression!(cache_sampling_edits_only_cache, cache, CacheSampling);
+
+    #[test]
+    fn configuration_keyboard_navigation_clamps_and_edits_capacity() {
+        let mut app = connected_app(MonitorTab::Info);
+        app.handle_key(KeyCode::Char('c'));
+        let original = app.recording_configuration_popup.unwrap();
+        app.handle_key(KeyCode::Up);
+        let at_start = app.recording_configuration_popup.unwrap();
+        for _ in 0..original.fields().len() {
+            app.handle_key(KeyCode::Down);
+        }
+        app.handle_key(KeyCode::Right);
+        let increased = app.recording_configuration_popup.unwrap();
+        app.handle_key(KeyCode::Left);
+        let restored = app.recording_configuration_popup.unwrap();
+        app.handle_key(KeyCode::Up);
+        let previous = app.recording_configuration_popup.unwrap().field();
+
+        let mut expected = original.draft;
+        expected.event_capacity_per_thread = 131_072;
+        assert_eq!(
+            (
+                at_start,
+                increased.configuration(),
+                restored.configuration(),
+                restored.field(),
+                previous
+            ),
+            (
+                original,
+                expected,
+                original.draft,
+                RecordingConfigurationField::EventBufferCapacity,
+                RecordingConfigurationField::CacheRecording,
             )
         );
     }
