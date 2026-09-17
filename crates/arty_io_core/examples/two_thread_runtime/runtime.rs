@@ -563,6 +563,12 @@ pub(super) struct RuntimeError {
     errors: Vec<DriverError>,
 }
 
+impl RuntimeError {
+    pub(super) fn errors(&self) -> &[DriverError] {
+        &self.errors
+    }
+}
+
 impl From<DriverError> for RuntimeError {
     fn from(error: DriverError) -> Self {
         Self { errors: vec![error] }
@@ -571,7 +577,7 @@ impl From<DriverError> for RuntimeError {
 
 impl fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (index, error) in self.errors.iter().enumerate() {
+        for (index, error) in self.errors().iter().enumerate() {
             if index != 0 {
                 f.write_str("; ")?;
             }
@@ -583,7 +589,7 @@ impl fmt::Display for RuntimeError {
 
 impl Error for RuntimeError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
-        self.errors.first().map(|error| error as &(dyn Error + 'static))
+        self.errors().first().map(|error| error as &(dyn Error + 'static))
     }
 }
 

@@ -9,6 +9,8 @@ use std::fmt;
 /// Inspect the classification methods when deciding whether to select another configured native
 /// arrangement or report a shutdown timeout. Messages provide context, not classification.
 /// Native failures retain their underlying error through [`Error::source`].
+/// A classification does not establish whether retrying after native side effects is safe;
+/// the caller still applies the relevant rollback and recovery policy.
 #[derive(Debug)]
 pub struct DriverError {
     kind: ErrorKind,
@@ -70,7 +72,7 @@ impl DriverError {
         self.kind == ErrorKind::Unsupported
     }
 
-    /// Returns whether a client type was supplied more than once to one driver context.
+    /// Returns whether insertion conflicted with an already supplied client type.
     #[must_use]
     pub fn is_duplicate_completion_service(&self) -> bool {
         self.kind == ErrorKind::DuplicateService

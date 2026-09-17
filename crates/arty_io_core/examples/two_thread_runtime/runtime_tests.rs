@@ -1,16 +1,42 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::error::Error;
 use std::num::NonZeroUsize;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
-use std::thread;
 use std::time::{Duration, Instant};
+use std::{io, thread};
+
+use arty_io_core::DriverError;
 
 use super::{Command, Options, Runtime, WorkerLoop};
 use crate::echo_driver::{EchoContext, EchoIoError};
 use crate::sample_driver::{SampleContext, SampleIoError};
 use crate::test_support::Harness;
+
+#[test]
+fn aggregate_failures_preserve_every_typed_cause_in_order() {
+    let error = super::outcome(vec![
+        DriverError::unsupported("native strategy unavailable")
+            .with_cause(io::Error::new(io::ErrorKind::PermissionDenied, "native binding denied")),
+        DriverError::shutdown_timeout().with_cause(io::Error::new(io::ErrorKind::TimedOut, "native cleanup timed out")),
+    ])
+    .unwrap_err();
+    let failures = error.errors();
+    assert_eq!(failures.len(), 2);
+    assert!(failures[0].is_unsupported());
+    assert!(!failures[0].is_shutdown_timeout());
+    assert!(failures[1].is_shutdown_timeout());
+    assert!(!failures[1].is_unsupported());
+    let native_causes: Vec<_> = failures
+        .iter()
+        .map(|failure| failure.source().unwrap().downcast_ref::<io::Error>().unwrap().kind())
+        .collect();
+    assert_eq!(native_causes, [io::ErrorKind::PermissionDenied, io::ErrorKind::TimedOut]);
+    let primary = error.source().unwrap().downcast_ref::<DriverError>().unwrap();
+    assert!(std::ptr::eq(primary, &raw const failures[0]));
+}
 
 #[test]
 fn two_workers_lazily_cache_and_host_both_models_on_their_collectors() {

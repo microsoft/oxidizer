@@ -187,6 +187,9 @@ configuration, duplicate capability, and shutdown timeout do not
 require parsing messages.
 Attaching a cause preserves the classification and descriptive context rather
 than forcing a choice between fallback information and native diagnostics.
+Aggregated failures retain each classified error and its native cause, not just
+a formatted summary. Classification alone does not make retry after native
+side effects safe.
 
 Runtime policy chooses the response: reject a configuration, try another
 explicitly configured domain, retire a failed source, or stop a failed domain.
