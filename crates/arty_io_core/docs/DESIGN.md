@@ -2,201 +2,237 @@
 
 ## Purpose
 
-Arty does not own an I/O implementation. Libraries and applications inject
-drivers, and the runtime hosts them. `arty_io_core` is the small agreement that
-lets both sides evolve independently.
+Arty hosts independently supplied I/O drivers without selecting one universal
+operation format or native queue implementation. `arty_io_core` defines how those
+drivers negotiate facilities, make bounded progress, and retire safely while a
+runtime coordinates their waiting point.
 
-The contract follows four design rules:
+The design follows four rules:
 
-1. Keep the semver chokepoint small.
-2. Let providers own topology and threading.
-3. Make graceful shutdown observable without making it a safety protocol.
-4. Keep runtime policy out of driver signatures.
+1. Keep consumer operations and native representations private.
+2. Separate driver service from native collection and waiting.
+3. Make progress, notification, and failure obligations explicit.
+4. Make graceful shutdown observable without making it a safety protocol.
 
-## Public model
+## Ownership and data flow
 
 ```text
-one registered driver type
+consumer context type
         |
         v
-IoContext::provider(ProviderContext)
+provider creates shared configuration
         |
-        | clone, relocate, consume once per worker
+        | clone and relocate per owner thread
         v
-DriverProvider::create(DriverContext)
+create selects actual clients <----- waiter supplies clients + readiness waker
         |
-        +-- Driver + IoContext
-        +-- completion processing and wake-up
-        +-- optional SystemTasks use
-        +-- optional provider-owned threads
+        v
+inline local driver
+        |
+        | non-blocking service under a budget
+        v
+owned cooperative drain
+
+native activity --> separate waiter --> private records or source readiness
+                           ^
+                           |
+                 runtime interruption
 ```
 
-`DriverProvider` is the cross-worker object. It can hold shared state used to
-connect the instances it creates. The runtime only knows that each relocated
-clone creates one `Driver`.
+Consumer contexts are mobile, independently retained handles. Their relocation
+can improve locality, but correctness does not depend on relocation being called.
+An existing native binding continues to obey its own owner and lifetime rules.
 
-`Driver` is thread-local. Its `Context` is the mobile handle that consumers
-hold. `ThreadAware` relocation lets the context optimize for the destination
-worker, but correctness cannot depend on relocation being called.
+Providers return a typed consumer context paired with an inline `LocalDriver`
+owner. The wrapper prevents sending or sharing the installed value even when its
+concrete fields are thread-safe, without requiring a driver allocation or virtual
+dispatch. The consuming transition returns the concrete associated drain inside
+an equally local `LocalDrain` owner.
 
-The runtime owns each driver exclusively, so completion processing receives
-`&mut self`. This lets a driver mutate thread-local state directly without
-adding synchronization or dynamic borrow checks solely to satisfy the contract.
+These phase-specific owners expose no mutable inner access or extraction. They
+remain unambiguous even when one concrete type implements both service protocols.
+A heterogeneous runtime may erase them privately; homogeneous callers retain
+static dispatch. Pair creation still requires the provider to construct matching
+context/driver state and does not itself prove that instance association.
 
-`Driver` is dyn-compatible once its `Context` associated type is specified.
-Runtimes that erase unrelated context types use a private owning shim, which is
-also where they adapt the by-value `shutdown` method to boxed storage.
+Local ownership is not pinning. Values can move within the owner thread; native
+callbacks must use independently stable storage rather than rely on an inline
+driver or drain retaining its address.
 
-Every consumer context implements `IoContext`, whose associated `Provider` and
-`provider(ProviderContext)` function are the complete registration recipe. A
-runtime method such as `get_context::<MyContext>()` therefore needs only the
-context type. The first request creates the provider, initializes its driver on
-every active worker, and returns only after all workers acknowledge completion.
-Later requests reuse the registered driver and return the cached context for the
-calling worker.
+A provider can share an engine or resources across its instances. The per-worker
+driver adapter does not imply a per-worker physical queue. Context type identity
+selects registration; native adapters separately identify physical sources,
+callback routes, and collection domains.
 
-`ProviderContext` is the runtime-to-provider extension point. It is empty in the
-initial contract. `DriverContext` is the separate per-worker extension point
-passed to `DriverProvider::create`; it identifies the owning worker and exposes
-runtime facilities needed by the driver.
+## Negotiation before publication
 
-## Registration stays in the runtime
+The runtime configures native waiters and chooses final owner threads before
+creating drivers. It builds the basic `DriverContext`, then asks the waiter it
+actually drives to attach that collector's client capabilities. This operation
+is object-safe, so the runtime need not name platform-specific client types.
 
-Lazy registration requires a type-keyed registry, synchronization between
-workers, caching, and rollback after failed creation. None of these mechanisms
-need to be shared with a driver, so none belong in this crate.
+During `create`, a provider selects a strategy from the clients actually present,
+before creating native bindings. Missing clients and duplicate insertion are
+errors. There is no separate advertised capability list to repeat or keep in sync.
+Client access transfers ownership through `take_completion_service`, so a unique
+local client need not be made cloneable or kept inside the construction context.
+Providers can repeatedly borrow their extracted local value. Missing takes leave
+other clients intact, and all required clients are obtained before native effects.
 
-The contract enables lazy registration by making the context select a
-self-contained provider. The runtime can store that provider when the context
-type is first requested and use it to create all current or future worker
-instances.
+The provider factory creates shared configuration. Strategy-specific shared
+resources can be initialized once actual clients are known, with compatible
+subsequent worker instances reusing them. Creation stays prompt and cannot
+wait for async work or a cross-worker initialization handshake. The runtime
+supplies a coherent configuration for shared strategies; core does not solve
+automatic capability intersections across heterogeneous workers.
 
-Different major versions of one driver crate naturally have different Rust
-context types and `TypeId` values. They coexist as long as both versions use
-the same `arty_io_core` contract.
+Native adapter factories pair clients with their real backing resources and
+retain registration ownership. The assembly seam is not a proof that an arbitrary
+adapter implementation supplied the correct native object. Typed client lookup
+also requires agreement on the adapter interface/version, beyond agreement on
+the core contract itself.
 
-## Execution and waiting
+Registration is transactional runtime work. The first context request succeeds
+only after every active worker has created its instance. Routing and notification
+must be ready before publication. Errors require cleanup or safe retirement of
+partial instances rather than success for whichever workers happened to finish.
+Later requests reuse cached contexts.
 
-An I/O subsystem chooses its own execution strategy. Before calling
-`DriverProvider::create`, the runtime chooses the thread that will own the
-driver. Completion processing and blocking shutdown run only on that thread.
-Internally, the driver may process completions there, delegate system work, or
-coordinate with threads managed by its provider.
+## Separate wake directions
 
-This avoids exposing primary or satellite roles as public API. Those are
-placement choices the runtime may change later.
+Native completion activity makes a driver service participant ready. The runtime
+latches that readiness and interrupts the domain waiter. A native collector may
+first place records in a private mailbox, or simply report that a private queue
+needs attention. A readiness waker carries neither operation data nor permission
+to invoke thread-local driver code on the notifying thread.
 
-The driver's interruptor follows a strict latched contract. Without latching,
-an interrupt between the runtime's final work check and the actual wait can be
-lost and the worker can sleep forever. A non-blocking completion pass does not
-consume the latch; the next call that is willing to block observes it. An
-interrupt changes only the wait behavior, so already-pending completions are
-still processed.
+The waiter's waker has another purpose: interrupt the current or next blocking
+collection for task, command, or source activity. Its latch closes the race
+between the last work check and entering the native wait.
 
-## Shutdown
+Both paths remain safe for late callers. Native registrations use retained
+identity or generations so old packets and wakers cannot target newly installed
+drivers. Removing an entry from a routing table is not, by itself, a resource
+retirement protocol.
 
-The reference design used an unsafe driver trait and an `is_inert` query to
-prevent the runtime from dropping a driver while external code still referenced
-its memory. This contract moves soundness back to the owning type:
+## Bounded turns and safe parking
 
-- `Driver::Drop` is always safe.
-- `Driver::shutdown` consumes the driver.
-- Shutdown closes admission and blocks until cleanup completes or fails.
-- Failure is reported through `ShutdownError`.
+Collection, running-driver service, and draining each receive finite budgets.
+Charge before a bounded progress step and report continuation when work remains.
+The budget is cooperative accounting: implementations must not reset it or hide
+an unbounded amount of work inside one charged operation.
+New drivers and drains start runnable and receive an initial turn without a
+native notification.
+The core does not assume that a consumed batch produces another notification.
+It also does not assume that inspecting a queue performs required submission
+flushing or kernel task work.
 
-Contexts remain usable as closed handles after shutdown and therefore do not
-participate in the drain count. In-flight operations and operating-system
-callbacks own the state they can access through reference-counted handles, pool
-leases, or equivalent safe ownership tokens. Shutdown closes admission and
-waits for those active owners to drain.
+Native collection must itself preserve fair discovery or delivery across active
+sources. Repeatedly scanning from one busy source can starve another before the
+runtime has any chance to schedule its driver. Source continuation and ordering
+belong to the native adapter; participant rotation belongs to the coordinator.
 
-An operating system may retain only a raw pointer rather than an ownership
-token. A pooled implementation therefore keeps the pool's owner alive
-independently of `Driver::Drop`, releasing it after a clean drain and retaining
-it on premature drop. Dropping a driver closes admission before releasing or
-retaining this owner.
+An idle service result is only a scheduling observation. Before sleeping, each
+participant arms its notification mechanism and rechecks private state. It either
+reports work ready or confirms that notification is armed. The runtime separately
+rechecks commands, tasks, source signals, and deadlines.
+Those checks can cancel the wait. An armed participant must remain usable for
+normal service or repeated preparation even if no blocking collection occurs.
 
-This model supports high-performance implementations without putting unsafe
-lifecycle obligations in the stable API. Drivers can build it from standard
-reference counting or ecosystem storage such as `multitude`, `plurality`,
-`infinity_pool`, and `rallocator`. The contract does not depend on those crates,
-so implementations can evolve independently. Platform-specific unsafe code, if
-needed, remains isolated behind the driver's private ownership types.
+While other work is runnable, the runtime continues non-blocking native collection.
+A positive wait is permitted only after the full preparation protocol. Finite
+waits do not become infinite during native unit conversion, and collection never
+blocks with an exhausted budget or waits again merely to fill a partially
+available batch.
 
-The runtime removes a driver from its normal completion loop and transfers
-ownership into `shutdown`. The call performs whatever completion processing,
-waiting, cancellation, and cleanup the implementation requires. `SystemTasks`
-remains available until the call returns. The driver owns the liveness policy
-for this blocking phase and returns an error instead of waiting indefinitely.
-It does not depend on work that can run only after its own shutdown returns,
-including another driver serialized on the same runtime thread. A returned
-error reports incomplete graceful cleanup but never changes whether dropping
-the consumed driver is memory-safe.
+Deadlines use the standard monotonic `Instant` domain. The runtime accounts for
+every relevant participant and its own task and shutdown deadlines. A deadline
+already reached requires service rather than sleep.
 
-`ShutdownError` accepts either a message or an underlying error. This keeps the
-stable contract independent of driver-specific error taxonomies while preserving
-an ordinary error source chain.
+## Cooperative shutdown
 
-## Creation failure
+Consuming the inline driver owner closes admission synchronously and returns the
+concrete associated `Drain` in a local owner. There is no repeatable borrowed initiation operation. Admission
+closure is synchronized with accepting operations, so work racing shutdown is
+either tracked in the drain or rejected.
 
-Creation is infallible at the type level. A provider that cannot initialize its
-driver panics because the runtime cannot continue coherently with a driver
-registered on only part of its worker set.
+A drain follows the same budget and notification preparation protocol as a
+running driver. It retains explicit service budgets rather than a future poll
+without this protocol's budget.
+The runtime initiates all relevant drains, keeps native collection and system
+work available, and gives each participant progress while enforcing an overall
+deadline.
 
-A driver with conditional platform or permission requirements exposes a
-capability check. The consumer calls that check before
-`get_context::<MyContext>()`, while it can still choose another context type.
+The coordinator removes and drops a drain after completion or an error from
+service or preparation. It never calls a terminal drain again. The runtime reports
+failure and continues cleanup of independent participants; errors cannot turn
+into an idle or successful result on a subsequent turn.
 
-## System tasks
+Contexts remain closed handles and are not drain participants. Operations,
+callbacks, and native registrations retain the storage they can still access.
+When native code holds raw pointers, the driver keeps a backing owner alive
+independently of its public handle. Cancellation, timeout, and early drop never
+authorize invalidating that storage.
 
-Some I/O mechanisms need synchronous calls that cannot run on an async worker.
-`SystemTasks` is intentionally narrower than an async scheduler:
+This makes destruction safe during failed initialization, unwinding, or abandoned
+shutdown without requiring an unsafe driver trait or an inertness query.
+Destruction does not wait for I/O, other participants, or callbacks; independent
+cleanup retains its own resource ownership when needed.
 
-- it accepts only synchronous `FnOnce` work;
-- work is explicitly allowed to block;
-- it returns after acceptance, not completion;
-- it stays alive through driver shutdown.
+## Error and policy boundaries
 
-The cloneable handle hides the runtime's shared-ownership mechanism instead of
-exposing `Arc<dyn ...>` in `DriverContext`. Its generic `spawn` method boxes only
-at the internal callback boundary.
+`DriverError` is the common failure boundary for negotiation, creation, progress,
+and shutdown. Native error causes remain accessible. Classified unsupported
+configuration, duplicate capability, and shutdown timeout do not
+require parsing messages.
+Attaching a cause preserves the classification and descriptive context rather
+than forcing a choice between fallback information and native diagnostics.
+Aggregated failures retain each classified error and its native cause, not just
+a formatted summary. Classification alone does not make retry after native
+side effects safe.
 
-## Compatibility
+Runtime policy chooses the response: reject a configuration, try another
+explicitly configured domain, retire a failed source, or stop a failed domain.
+Individual I/O errors are operation results and do not themselves fail a driver
+or its collection domain.
+Core does not silently add threads, busy-poll a supposedly idle source, or mask
+partial registration.
 
-Every public non-standard type increases the chance that two otherwise
-compatible drivers resolve to different copies of the contract. The initial API
-therefore depends only on `thread_aware_core`, whose `Thread` and `ThreadAware`
-types are essential for per-worker placement.
+System work uses the runtime-owned synchronous offload facility. It remains
+available while running drivers and pending drains require it, including
+registration rollback. It is not an async task scheduler or a thread-per-driver
+implementation.
+Submission returns an acceptance result: success does not imply completion,
+and rejection promises no task execution or callback. A cleanup submission
+failure is reported by draining rather than hidden behind an eventual timeout.
+Retained owner threads and transferred cleanup also retain execution authority
+when a controller times out. Accepted work cannot be discarded behind a pool stop
+marker. Execution obligations, not inert handles or retained context clones,
+determine when the existing facility can retire.
+An accepted task retains execution authority through its synchronous invocation,
+including submission of follow-up work. External callbacks that run later need
+independent execution ownership, not merely a clone of an inert task handle.
+Orderly retirement does not imply recovery from a failed system-work thread.
+Queued `SystemTask` values are opaque and consumed when run. Heterogeneous task
+erasure remains private to that facility; driver and drain ownership do not
+inherit its allocation or dispatch policy.
 
-`arty_io_core` references those types directly but does not re-export them.
-Driver authors depend on `thread_aware_core` when implementing relocation.
-`arty_io_core` must not stabilize before `thread_aware_core`.
+## Native scope and reference runtime
 
-Future additions follow these rules:
+The native mechanisms and their constraints are described in
+[Completion coordination](COMPLETION_COORDINATION.md). The core defines the
+shared control protocol and typed client boundary; production native adapters
+are separate components.
 
-- Add optional provider facilities through private `ProviderContext` fields and
-  new accessors.
-- Add optional per-driver facilities through private `DriverContext` fields and
-  new accessors.
-- Adding a new mandatory constructor input is a breaking change and requires
-  explicit stabilization review.
-- Add trait methods only with compatible defaults when possible.
-- Prefer standard-library types over ecosystem dependencies.
-- Keep erasure, registration, and placement helpers private to the runtime.
-
-## Deferred decisions
-
-The initial API does not decide:
-
-- how a runtime selects the driver that provides its waiting point;
-- whether workers or drivers are pinned to processors;
-- whether registrations cover existing workers atomically;
-- how runtimes order independent driver shutdown calls;
-- whether a reusable latched-interruptor implementation belongs in a later
-  utility crate;
-- which memory pool, clock, or telemetry facilities drivers may eventually
-  receive.
-
-[Completion coordination across I/O drivers](COMPLETION_COORDINATION.md)
-explores a separate proposal for shared waiting, native source routing, and
-cooperative draining. It does not change the contract described in this document.
+The two-thread reference runtime exercises that protocol through in-memory
+record delivery and readiness sources. Its own registries, queue implementation,
+source identity, fairness, and timeout policy are examples of runtime/native
+responsibilities, not additional public core APIs.
+An unpublished registration retires individually under a deadline before that
+type can be installed again; other healthy registrations remain serviceable.
+The reference uses serialized, FIFO control commands and one response owner per
+rollback. Undelivered outcomes remain available for late acknowledgement.
+Repeated requests do not overwrite an existing deadline or response owner and
+are rejected explicitly when another request already owns the outcome.
+The control thread uses blocking result handles. The example is not an
+application-future executor or a production native backend.

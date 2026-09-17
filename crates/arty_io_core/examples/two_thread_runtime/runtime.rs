@@ -5,145 +5,284 @@ use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
-use std::sync::{Mutex, PoisonError, mpsc};
+use std::num::NonZeroUsize;
+use std::sync::{Mutex, mpsc};
+use std::task::Waker;
 use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
-use arty_io_core::{Driver, DriverContext, DriverProvider, IoContext, ProviderContext, ShutdownError, SystemTasks};
+use arty_io_core::{CompletionWaiter, DriverContext, DriverError, DriverProvider, IoContext, SystemTasks};
 use thread_aware_core::{Thread, ThreadAware};
 
-use super::system_tasks::runtime_system_tasks;
+use super::coordinator::{Coordinator, ErasedDriver, Source};
+use super::native::NativeWaiter;
+use super::system_tasks::{SystemPool, report};
 
 type ContextBox = Box<dyn Any + Send>;
 type ContextCache = HashMap<TypeId, ContextBox>;
-type DriverStore = Vec<Box<dyn ErasedDriver>>;
-type Install = Box<dyn FnOnce(DriverContext, &mut DriverStore) -> ContextBox + Send>;
-type ShutdownResult = Result<(), ShutdownError>;
+type Install = Box<dyn FnOnce(DriverContext) -> Result<Installed, DriverError> + Send>;
+type Reply = mpsc::Sender<Result<(), RuntimeError>>;
+
+struct Installed {
+    context: ContextBox,
+    driver: Box<dyn ErasedDriver>,
+}
+
+struct Registration<C: IoContext> {
+    _provider: C::Provider,
+    contexts: Vec<C>,
+}
 
 enum Command {
-    Install { install: Install, reply: mpsc::Sender<ContextBox> },
-    Stop { reply: mpsc::Sender<ShutdownResult> },
+    #[cfg(test)]
+    Pause {
+        entered: mpsc::Sender<()>,
+        resume: mpsc::Receiver<()>,
+        cleanup: arty_io_core::SystemTask,
+        accepted: mpsc::Sender<Result<(), DriverError>>,
+    },
+    Install {
+        id: TypeId,
+        install: Install,
+        reply: mpsc::Sender<Result<ContextBox, DriverError>>,
+    },
+    Rollback {
+        id: TypeId,
+        deadline: Instant,
+        reply: Reply,
+    },
+    Stop {
+        deadline: Instant,
+    },
 }
 
-impl fmt::Debug for Command {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Install { .. } => f.write_str("Install"),
-            Self::Stop { .. } => f.write_str("Stop"),
-        }
-    }
-}
-
-trait ErasedDriver {
-    fn shutdown(self: Box<Self>) -> Result<(), ShutdownError>;
-}
-
-impl<D: Driver> ErasedDriver for D {
-    fn shutdown(self: Box<Self>) -> Result<(), ShutdownError> {
-        Driver::shutdown(*self)
-    }
+struct Ready {
+    waker: Waker,
+    #[cfg(test)]
+    metrics: std::sync::Arc<super::native::NativeMetrics>,
 }
 
 struct Worker {
     commands: mpsc::Sender<Command>,
+    waker: Waker,
+    finished: mpsc::Receiver<Result<(), RuntimeError>>,
     thread: Option<JoinHandle<()>>,
+    #[cfg(test)]
+    metrics: std::sync::Arc<super::native::NativeMetrics>,
+}
+
+impl Worker {
+    fn send(&self, command: Command) -> Result<(), DriverError> {
+        self.commands
+            .send(command)
+            .map_err(|error| DriverError::from_message(format!("worker control channel closed: {error}")))?;
+        // Queue publication precedes the latched interruption. No submitter lock spans a wait.
+        self.waker.wake_by_ref();
+        Ok(())
+    }
+
+    fn finish(&mut self, deadline: Instant) -> Result<(), RuntimeError> {
+        let Some(thread) = self.thread.take() else {
+            return Ok(());
+        };
+        let mut errors = Vec::new();
+        match self.finished.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => errors.extend(error.errors),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                errors.push(DriverError::from_message("worker exited without reporting its outcome"));
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                // The owner thread retains its waiter, drivers, drains, and callbacks. A timeout
+                // is NOT permission to transfer or free that thread's local driver state.
+                drop(thread);
+                return Err(DriverError::shutdown_timeout().into());
+            }
+        }
+        if let Err(payload) = thread.join() {
+            drop(payload);
+            errors.push(DriverError::from_message("an I/O owner worker panicked"));
+        }
+        outcome(errors)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct Options {
+    pub(super) quantum: NonZeroUsize,
+    pub(super) shutdown_timeout: Duration,
+    #[cfg(test)]
+    pub(super) fail_record_worker: Option<usize>,
+    #[cfg(test)]
+    pub(super) missing_record_worker: Option<usize>,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            quantum: NonZeroUsize::new(8).expect("the fixed service quantum is nonzero"),
+            shutdown_timeout: Duration::from_secs(5),
+            #[cfg(test)]
+            fail_record_worker: None,
+            #[cfg(test)]
+            missing_record_worker: None,
+        }
+    }
 }
 
 pub(super) struct Runtime {
     workers: Vec<Worker>,
     contexts: Mutex<ContextCache>,
+    system: SystemPool,
+    options: Options,
     stopped: bool,
 }
 
 impl Runtime {
     pub(super) const WORKER_COUNT: usize = 2;
-    const NUMA_NODES: [u32; Self::WORKER_COUNT] = [0, 1];
 
     pub(super) fn start() -> Result<Self, RuntimeError> {
-        let owner = thread_aware_core::__private::v1::new_owner();
-        let system_tasks = runtime_system_tasks();
-        let mut workers = Vec::with_capacity(Self::WORKER_COUNT);
-
-        for numa_node_id in Self::NUMA_NODES {
-            let (commands_tx, commands_rx) = mpsc::channel();
-            let (ready_tx, ready_rx) = mpsc::channel();
-            let worker_owner = owner.clone();
-            let worker_system_tasks = system_tasks.clone();
-
-            let thread = thread::spawn(move || {
-                let numa_node = thread_aware_core::__private::v1::new_numa_node(numa_node_id);
-                let worker = thread_aware_core::__private::v1::new_thread(worker_owner, thread::current().id(), numa_node);
-
-                if ready_tx.send(()).is_err() {
-                    return;
-                }
-
-                run_worker(&worker, &worker_system_tasks, &commands_rx);
-            });
-
-            ready_rx
-                .recv()
-                .map_err(|error| RuntimeError::message(format!("worker stopped during startup: {error}")))?;
-            workers.push(Worker {
-                commands: commands_tx,
-                thread: Some(thread),
-            });
-        }
-
-        Ok(Self {
-            workers,
-            contexts: Mutex::default(),
-            stopped: false,
-        })
+        Self::start_with(Options::default())
     }
 
-    pub(super) fn get_context<C>(&self) -> C
-    where
-        C: IoContext,
-    {
-        // Keep the guard for the entire registration. If any worker fails to initialize, the
-        // resulting panic poisons this mutex and permanently prevents another registration attempt.
+    pub(super) fn start_with(options: Options) -> Result<Self, RuntimeError> {
+        let mut runtime = Self {
+            workers: Vec::with_capacity(Self::WORKER_COUNT),
+            contexts: Mutex::default(),
+            system: SystemPool::start()?,
+            options,
+            stopped: false,
+        };
+        let owner = thread_aware_core::__private::v1::new_owner();
+        for (index, node) in [0, 1].into_iter().enumerate() {
+            let (commands_tx, commands_rx) = mpsc::channel();
+            let (ready_tx, ready_rx) = mpsc::channel();
+            let (finished_tx, finished) = mpsc::channel();
+            let worker_owner = owner.clone();
+            let tasks = runtime.system.handle();
+            let execution = runtime.system.execution_lease();
+            let thread = thread::Builder::new()
+                .name(format!("in-memory-io-owner-{index}"))
+                .spawn(move || {
+                    // A controller timeout cannot revoke this owner's cleanup execution facility.
+                    let _execution = execution;
+                    let node = thread_aware_core::__private::v1::new_numa_node(node);
+                    let worker = thread_aware_core::__private::v1::new_thread(worker_owner, thread::current().id(), node);
+                    let waiter = NativeWaiter::new();
+                    #[cfg(test)]
+                    if options.fail_record_worker == Some(index) {
+                        waiter.fail_next_record_registration();
+                    }
+                    #[cfg(test)]
+                    if options.missing_record_worker == Some(index) {
+                        waiter.disable_record_client();
+                    }
+                    let ready = Ready {
+                        waker: waiter.waker(),
+                        #[cfg(test)]
+                        metrics: waiter.metrics(),
+                    };
+                    let result = if ready_tx.send(ready).is_ok() {
+                        WorkerLoop::new(worker, tasks, waiter, commands_rx, options).run()
+                    } else {
+                        Err(DriverError::from_message("runtime disappeared during worker initialization").into())
+                    };
+                    if let Err(mpsc::SendError(Err(error))) = finished_tx.send(result) {
+                        report(&format!("abandoned worker shutdown failed: {error}"));
+                    }
+                })
+                .map_err(DriverError::from_cause)?;
+            let ready = match ready_rx.recv() {
+                Ok(ready) => ready,
+                Err(error) => {
+                    if let Err(payload) = thread.join() {
+                        drop(payload);
+                        report("I/O owner worker panicked during initialization");
+                    }
+                    return Err(DriverError::from_cause(error).into());
+                }
+            };
+            runtime.workers.push(Worker {
+                commands: commands_tx,
+                waker: ready.waker,
+                finished,
+                thread: Some(thread),
+                #[cfg(test)]
+                metrics: ready.metrics,
+            });
+        }
+        Ok(runtime)
+    }
+
+    pub(super) fn get_context<C: IoContext>(&self) -> Result<C, RuntimeError> {
+        self.get_context_on::<C>(0)
+    }
+
+    pub(super) fn get_context_on<C: IoContext>(&self, index: usize) -> Result<C, RuntimeError> {
+        if index >= self.workers.len() {
+            return Err(DriverError::from_message("requested worker is outside this fixed runtime").into());
+        }
         let mut cache = self
             .contexts
             .lock()
-            .expect("a failed driver registration makes the runtime unusable");
-
-        if let Some(context) = cache.get(&TypeId::of::<C>()).and_then(|context| context.downcast_ref::<C>()) {
-            return context.clone();
+            .expect("a panicking registration caller poisoned the context cache");
+        let id = TypeId::of::<C>();
+        if let Some(registration) = cache.get(&id) {
+            let registration = registration
+                .downcast_ref::<Registration<C>>()
+                .expect("context type ids are inserted together with their typed registration");
+            return Ok(registration.contexts[index].clone());
         }
 
-        let provider = C::provider(ProviderContext::new());
-        let mut caller_context = None;
-
-        for worker in &self.workers {
-            let mut worker_provider = provider.clone();
-            let (reply_tx, reply_rx) = mpsc::channel();
-            let install = Box::new(move |context: DriverContext, drivers: &mut DriverStore| {
-                worker_provider.relocate(None, context.thread());
-                let driver = worker_provider.create(context);
-                let context = driver.context();
-                drivers.push(Box::new(driver));
-                Box::new(context) as ContextBox
-            });
-
-            worker
-                .commands
-                .send(Command::Install { install, reply: reply_tx })
-                .expect("a Runtime-owned worker must remain alive during context registration");
-
-            let context = reply_rx
-                .recv()
-                .expect("driver initialization failure must terminate context registration");
-            let context = *context
-                .downcast::<C>()
-                .expect("the install closure always boxes the requested context type");
-            caller_context.get_or_insert(context);
+        let provider = C::provider()?;
+        let mut contexts = Vec::with_capacity(self.workers.len());
+        for (attempt, worker) in self.workers.iter().enumerate() {
+            match install_on::<C>(worker, provider.clone(), self.options.shutdown_timeout) {
+                Ok(context) => contexts.push(context),
+                Err(mut failure) => {
+                    // Roll back every attempted worker, including an installation whose reply
+                    // timed out. FIFO commands put rollback after any such delayed creation.
+                    if let Err(rollback) = self.rollback(id, attempt + 1) {
+                        failure.errors.extend(rollback.errors);
+                    }
+                    return Err(failure);
+                }
+            }
         }
+        let context = contexts[index].clone();
+        // No caller sees a context, and no cache entry exists, until EVERY worker succeeded.
+        cache.insert(
+            id,
+            Box::new(Registration::<C> {
+                _provider: provider,
+                contexts,
+            }),
+        );
+        Ok(context)
+    }
 
-        // This small control-thread example represents calls as belonging to worker 0. A real
-        // runtime selects the context of the worker on which get_context is called.
-        let context = caller_context.expect("the fixed runtime always has at least one worker");
-        cache.insert(TypeId::of::<C>(), Box::new(context.clone()));
-        context
+    fn rollback(&self, id: TypeId, attempted: usize) -> Result<(), RuntimeError> {
+        let deadline = deadline_after(self.options.shutdown_timeout);
+        let mut replies = Vec::with_capacity(attempted);
+        let mut errors = Vec::new();
+        for worker in self.workers.iter().take(attempted) {
+            let (reply, receiver) = mpsc::channel();
+            match worker.send(Command::Rollback { id, deadline, reply }) {
+                Ok(()) => replies.push(receiver),
+                Err(error) => errors.push(error),
+            }
+        }
+        for reply in replies {
+            match reply.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => errors.extend(error.errors),
+                Err(mpsc::RecvTimeoutError::Timeout) => errors.push(DriverError::shutdown_timeout()),
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    errors.push(DriverError::from_message("worker stopped before confirming registration rollback"));
+                }
+            }
+        }
+        outcome(errors)
     }
 
     pub(super) fn shutdown(mut self) -> Result<(), RuntimeError> {
@@ -155,119 +294,401 @@ impl Runtime {
             return Ok(());
         }
         self.stopped = true;
-
-        self.contexts.get_mut().unwrap_or_else(PoisonError::into_inner).clear();
-
-        let mut failure = None;
-        let mut shutdowns = Vec::with_capacity(self.workers.len());
+        let deadline = deadline_after(self.options.shutdown_timeout);
+        let mut errors = Vec::new();
+        match self.contexts.get_mut() {
+            Ok(cache) => cache.clear(),
+            Err(poisoned) => {
+                errors.push(DriverError::from_message(
+                    "a registration caller panicked; discarding its poisoned cache",
+                ));
+                // Explicitly report the poison, but still request worker cleanup during unwinding.
+                poisoned.into_inner().clear();
+            }
+        }
+        // Initiate every worker before waiting on any worker. Each owner in turn starts all
+        // of its drivers' drains before servicing any of them.
         for worker in &self.workers {
-            let (reply_tx, reply_rx) = mpsc::channel();
-            match worker.commands.send(Command::Stop { reply: reply_tx }) {
-                Ok(()) => shutdowns.push(reply_rx),
-                Err(error) => {
-                    failure.get_or_insert_with(|| RuntimeError::message(format!("worker stopped before shutdown: {error}")));
-                }
+            if let Err(error) = worker.send(Command::Stop { deadline }) {
+                errors.push(error);
             }
         }
-
-        for shutdown in shutdowns {
-            match shutdown.recv() {
-                Ok(Ok(())) => {}
-                Ok(Err(error)) => {
-                    failure.get_or_insert_with(|| RuntimeError::DriverShutdown(error));
-                }
-                Err(error) => {
-                    failure.get_or_insert_with(|| RuntimeError::message(format!("worker stopped during driver shutdown: {error}")));
-                }
-            }
-        }
-
         for worker in &mut self.workers {
-            match worker.thread.take() {
-                Some(thread) => {
-                    if thread.join().is_err() {
-                        failure.get_or_insert_with(|| RuntimeError::message("worker thread panicked"));
-                    }
-                }
-                None => {
-                    failure.get_or_insert_with(|| RuntimeError::message("worker thread was already joined"));
-                }
+            if let Err(error) = worker.finish(deadline) {
+                errors.extend(error.errors);
             }
         }
-
-        match failure {
-            Some(error) => Err(error),
-            None => Ok(()),
+        if let Err(error) = self.system.stop(deadline) {
+            errors.push(error);
         }
+        outcome(errors)
     }
 }
 
 impl Drop for Runtime {
     fn drop(&mut self) {
-        let _ = self.stop();
+        if let Err(error) = self.stop() {
+            report(&format!("best-effort runtime shutdown failed: {error}"));
+        }
     }
 }
 
-fn run_worker(worker: &Thread, system_tasks: &SystemTasks, commands: &mpsc::Receiver<Command>) {
-    let mut drivers = DriverStore::new();
+fn install_on<C: IoContext>(worker: &Worker, mut provider: C::Provider, timeout: Duration) -> Result<C, RuntimeError> {
+    let (reply, receiver) = mpsc::channel();
+    let install = Box::new(move |context: DriverContext| {
+        provider.relocate(None, context.thread());
+        // This runtime privately erases the inline owner only after creation succeeds.
+        let (consumer_context, driver) = provider.create(context)?;
+        Ok(Installed {
+            context: Box::new(consumer_context),
+            driver: Box::new(driver),
+        })
+    });
+    worker.send(Command::Install {
+        id: TypeId::of::<C>(),
+        install,
+        reply,
+    })?;
+    let context = receiver.recv_timeout(timeout).map_err(DriverError::from_cause)??;
+    Ok(*context
+        .downcast::<C>()
+        .expect("the install closure boxes exactly the requested context type"))
+}
 
-    while let Ok(command) = commands.recv() {
+struct Rollback {
+    deadline: Instant,
+    reply: Option<Reply>,
+}
+
+enum RollbackOutcome {
+    PendingDelivery(Result<(), RuntimeError>),
+    Delivered,
+}
+
+struct WorkerLoop {
+    worker: Thread,
+    tasks: SystemTasks,
+    coordinator: Coordinator<NativeWaiter>,
+    commands: mpsc::Receiver<Command>,
+    pending_command: Option<Command>,
+    rollbacks: HashMap<TypeId, Rollback>,
+    completed_rollbacks: HashMap<TypeId, RollbackOutcome>,
+    stopping: Option<Instant>,
+    errors: Vec<DriverError>,
+    options: Options,
+}
+
+impl WorkerLoop {
+    fn new(worker: Thread, tasks: SystemTasks, waiter: NativeWaiter, commands: mpsc::Receiver<Command>, options: Options) -> Self {
+        Self {
+            worker,
+            tasks,
+            coordinator: Coordinator::new(waiter, options.quantum),
+            commands,
+            pending_command: None,
+            rollbacks: HashMap::new(),
+            completed_rollbacks: HashMap::new(),
+            stopping: None,
+            errors: Vec::new(),
+            options,
+        }
+    }
+
+    fn run(mut self) -> Result<(), RuntimeError> {
+        loop {
+            self.process_commands();
+            self.finish_drains();
+            if self.stopping.is_some() && self.coordinator.is_empty() {
+                return outcome(self.errors);
+            }
+            self.coordinator.service(Instant::now());
+            if self.coordinator.has_failed() && self.stopping.is_none() {
+                self.begin_stop(deadline_after(self.options.shutdown_timeout));
+            }
+            self.finish_drains();
+            if self.stopping.is_some() && self.coordinator.is_empty() {
+                return outcome(self.errors);
+            }
+            if self.pending_command.is_some() {
+                continue;
+            }
+            if self.coordinator.wait_duration(Instant::now(), self.next_deadline()).is_zero() {
+                continue;
+            }
+            self.coordinator.arm();
+            // Arming may fail, or may publish new readiness. Neither permits a blocking wait.
+            if self.coordinator.has_failed() && self.stopping.is_none() {
+                continue;
+            }
+            if self.stopping.is_some() && self.coordinator.is_empty() {
+                continue;
+            }
+            // System-task callbacks publish through the same per-source readiness protocol.
+            // Recheck control activity AFTER arming; a later command sets the domain latch.
+            match self.commands.try_recv() {
+                Ok(command) => {
+                    self.pending_command = Some(command);
+                    continue;
+                }
+                Err(mpsc::TryRecvError::Disconnected) if self.stopping.is_none() => {
+                    self.errors
+                        .push(DriverError::from_message("runtime control channel disconnected without shutdown"));
+                    self.begin_stop(deadline_after(self.options.shutdown_timeout));
+                    continue;
+                }
+                Err(mpsc::TryRecvError::Empty | mpsc::TryRecvError::Disconnected) => {}
+            }
+            let wait = self.coordinator.wait_duration(Instant::now(), self.next_deadline());
+            if !wait.is_zero() {
+                self.coordinator.collect(wait);
+            }
+        }
+    }
+
+    fn process_commands(&mut self) {
+        for _ in 0..self.options.quantum.get() {
+            let command = if let Some(command) = self.pending_command.take() {
+                command
+            } else {
+                match self.commands.try_recv() {
+                    Ok(command) => command,
+                    Err(mpsc::TryRecvError::Empty) => break,
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        if self.stopping.is_none() {
+                            self.errors
+                                .push(DriverError::from_message("runtime control channel disconnected without shutdown"));
+                            self.begin_stop(deadline_after(self.options.shutdown_timeout));
+                        }
+                        break;
+                    }
+                }
+            };
+            self.command(command);
+        }
+    }
+
+    fn command(&mut self, command: Command) {
         match command {
-            Command::Install { install, reply } => {
-                let context = DriverContext::new(worker.clone(), system_tasks.clone());
-                let context = install(context, &mut drivers);
-                let _ = reply.send(context);
+            #[cfg(test)]
+            Command::Pause {
+                entered,
+                resume,
+                cleanup,
+                accepted,
+            } => {
+                entered.send(()).expect("the test retains its owner-pause acknowledgement receiver");
+                resume
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("the test must resume its paused owner before its safety timeout");
+                accepted
+                    .send(self.tasks.spawn(move || cleanup.run()))
+                    .expect("the test retains its cleanup-admission result receiver");
             }
-            Command::Stop { reply } => {
-                let result = shutdown_drivers(drivers);
-                let _ = reply.send(result);
-                return;
+            Command::Install { id, install, reply } => {
+                if self.stopping.is_some() {
+                    send_install_reply(&reply, Err(DriverError::from_message("the owner worker is shutting down")));
+                    return;
+                }
+                if self.coordinator.contains(id) || self.rollbacks.contains_key(&id) {
+                    send_install_reply(
+                        &reply,
+                        Err(DriverError::from_message("the driver type is still installed or retiring")),
+                    );
+                    return;
+                }
+                // Reuse is allowed only after owner-thread retirement. Preserve an unclaimed
+                // failure before discarding the previous attempt's completed record.
+                if let Some(RollbackOutcome::PendingDelivery(Err(error))) = self.completed_rollbacks.remove(&id) {
+                    self.errors.extend(error.errors);
+                }
+                let source = Source::new(self.coordinator.waiter.waker());
+                let context = DriverContext::new(self.worker.clone(), self.tasks.clone(), Waker::from(std::sync::Arc::clone(&source)));
+                let context = self.coordinator.waiter.attach_clients(context);
+                match context.and_then(install) {
+                    Ok(installed) => {
+                        self.coordinator.insert(id, source, installed.driver);
+                        if reply.send(Ok(installed.context)).is_err() {
+                            self.errors
+                                .push(DriverError::from_message("registration caller disappeared before publication"));
+                            assert!(
+                                self.coordinator.begin_shutdown(id),
+                                "the newly installed driver still owns its slot"
+                            );
+                            self.rollbacks.insert(
+                                id,
+                                Rollback {
+                                    deadline: deadline_after(self.options.shutdown_timeout),
+                                    reply: None,
+                                },
+                            );
+                        }
+                    }
+                    Err(error) => send_install_reply(&reply, Err(error)),
+                }
+            }
+            Command::Rollback { id, deadline, reply } => {
+                if let Some(rollback) = self.rollbacks.get_mut(&id) {
+                    if rollback.reply.is_none() {
+                        // The first controller joins orphan cleanup without extending its bound.
+                        rollback.deadline = rollback.deadline.min(deadline);
+                        rollback.reply = Some(reply);
+                    } else {
+                        self.send_untracked_reply(
+                            &reply,
+                            Err(DriverError::from_message("registration rollback is already in progress").into()),
+                        );
+                    }
+                } else if let Some(completed) = self.completed_rollbacks.remove(&id) {
+                    match completed {
+                        RollbackOutcome::PendingDelivery(result) => self.complete_rollback(id, Some(reply), result),
+                        RollbackOutcome::Delivered => {
+                            self.completed_rollbacks.insert(id, RollbackOutcome::Delivered);
+                            self.send_untracked_reply(
+                                &reply,
+                                Err(DriverError::from_message("registration rollback outcome was already delivered").into()),
+                            );
+                        }
+                    }
+                } else if self.coordinator.begin_shutdown(id) {
+                    self.rollbacks.insert(
+                        id,
+                        Rollback {
+                            deadline,
+                            reply: Some(reply),
+                        },
+                    );
+                } else {
+                    // Valid when this attempted worker's create returned an error.
+                    self.send_untracked_reply(&reply, Ok(()));
+                }
+            }
+            Command::Stop { deadline } => self.begin_stop(deadline),
+        }
+    }
+
+    fn begin_stop(&mut self, deadline: Instant) {
+        self.stopping = Some(self.stopping.map_or(deadline, |old| old.min(deadline)));
+        self.coordinator.begin_shutdown_all();
+    }
+
+    fn next_deadline(&self) -> Option<Instant> {
+        self.rollbacks.values().map(|rollback| rollback.deadline).chain(self.stopping).min()
+    }
+
+    fn send_untracked_reply(&mut self, reply: &Reply, result: Result<(), RuntimeError>) {
+        if let Some(Err(error)) = send_reply(reply, result) {
+            self.errors.extend(error.errors);
+        }
+    }
+
+    fn complete_rollback(&mut self, id: TypeId, reply: Option<Reply>, result: Result<(), RuntimeError>) {
+        let undelivered = if let Some(reply) = reply {
+            send_reply(&reply, result)
+        } else {
+            if let Err(error) = &result {
+                report(&format!("unclaimed registration retirement failure: {error}"));
+            }
+            Some(result)
+        };
+        let completed = undelivered.map_or(RollbackOutcome::Delivered, RollbackOutcome::PendingDelivery);
+        assert!(
+            self.completed_rollbacks.insert(id, completed).is_none(),
+            "a retirement outcome is recorded once or removed before redelivery"
+        );
+    }
+
+    fn finish_drains(&mut self) {
+        let now = Instant::now();
+        if self.stopping.is_some_and(|deadline| now >= deadline) {
+            self.coordinator.expire_all();
+        } else {
+            for (&id, rollback) in &self.rollbacks {
+                if now >= rollback.deadline {
+                    self.coordinator.expire(id);
+                }
+            }
+        }
+        self.errors.extend(self.coordinator.take_domain_errors());
+        for retired in self.coordinator.take_retired() {
+            if let Some(rollback) = self.rollbacks.remove(&retired.id) {
+                self.complete_rollback(retired.id, rollback.reply, outcome(retired.errors));
+            } else {
+                self.errors.extend(retired.errors);
+            }
+        }
+        if self.stopping.is_some() && self.coordinator.is_empty() {
+            for completed in std::mem::take(&mut self.completed_rollbacks).into_values() {
+                if let RollbackOutcome::PendingDelivery(Err(error)) = completed {
+                    self.errors.extend(error.errors);
+                }
             }
         }
     }
 }
 
-fn shutdown_drivers(drivers: DriverStore) -> ShutdownResult {
-    let mut failure = None;
-
-    for driver in drivers {
-        if let Err(error) = driver.shutdown() {
-            failure.get_or_insert(error);
+fn send_reply(reply: &Reply, result: Result<(), RuntimeError>) -> Option<Result<(), RuntimeError>> {
+    match reply.send(result) {
+        Ok(()) => None,
+        Err(mpsc::SendError(result)) => {
+            if let Err(error) = &result {
+                report(&format!("unobserved registration rollback failure: {error}"));
+            }
+            Some(result)
         }
     }
+}
 
-    match failure {
-        Some(error) => Err(error),
-        None => Ok(()),
+fn send_install_reply(reply: &mpsc::Sender<Result<ContextBox, DriverError>>, result: Result<ContextBox, DriverError>) {
+    if let Err(mpsc::SendError(Err(error))) = reply.send(result) {
+        report(&format!("unobserved driver creation failure: {error}"));
     }
+}
+
+fn deadline_after(timeout: Duration) -> Instant {
+    let now = Instant::now();
+    // This example bounds its shutdown policy even if a caller supplies an enormous duration.
+    now + timeout.min(Duration::from_mins(1))
 }
 
 #[derive(Debug)]
-pub(super) enum RuntimeError {
-    Message(Box<str>),
-    DriverShutdown(ShutdownError),
+pub(super) struct RuntimeError {
+    errors: Vec<DriverError>,
 }
 
 impl RuntimeError {
-    fn message(message: impl Into<String>) -> Self {
-        Self::Message(message.into().into_boxed_str())
+    pub(super) fn errors(&self) -> &[DriverError] {
+        &self.errors
+    }
+}
+
+impl From<DriverError> for RuntimeError {
+    fn from(error: DriverError) -> Self {
+        Self { errors: vec![error] }
     }
 }
 
 impl fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Message(message) => f.write_str(message),
-            Self::DriverShutdown(_) => f.write_str("runtime shutdown failed"),
+        for (index, error) in self.errors().iter().enumerate() {
+            if index != 0 {
+                f.write_str("; ")?;
+            }
+            error.fmt(f)?;
         }
+        Ok(())
     }
 }
 
 impl Error for RuntimeError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::Message(_) => None,
-            Self::DriverShutdown(error) => Some(error),
-        }
+        self.errors().first().map(|error| error as &(dyn Error + 'static))
     }
 }
+
+fn outcome(errors: Vec<DriverError>) -> Result<(), RuntimeError> {
+    if errors.is_empty() { Ok(()) } else { Err(RuntimeError { errors }) }
+}
+
+#[cfg(test)]
+#[path = "runtime_tests.rs"]
+mod tests;
