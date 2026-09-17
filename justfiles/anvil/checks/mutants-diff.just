@@ -68,6 +68,7 @@ anvil-mutants-diff: anvil-mutants-diff-validate-prereqs anvil-impact
         $monitor = Start-Process -FilePath '/bin/bash' -ArgumentList $monitor_path -NoNewWindow -PassThru
     }
     try {
+        $env:CARGO_BUILD_JOBS = '1'
         & cargo {{_anvil_stable_toolchain_args}} mutants --in-diff $diff_path --no-shuffle --jobs 1 --jobserver-tasks 1
         $status = $LASTEXITCODE
     } finally {
