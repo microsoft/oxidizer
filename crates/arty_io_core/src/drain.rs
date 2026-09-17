@@ -29,6 +29,8 @@ pub trait Drain: 'static {
     /// Performs bounded shutdown progress without waiting for new activity.
     ///
     /// Charge the budget before each bounded completion, cancellation, or cleanup step.
+    /// Forward the same budget into nested driver service; if it spends the last unit, defer
+    /// any remaining cleanup step to another turn even when all operations have completed.
     /// Return [`DrainStatus::Pending`] with [`ServiceStatus::Runnable`] if the allowance expires
     /// while work remains. Pending without a deadline requires an armed notification when
     /// progress becomes possible.

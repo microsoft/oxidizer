@@ -10,7 +10,9 @@ use std::task::Waker;
 use std::time::{Duration, Instant};
 use std::{io, thread};
 
-use arty_io_core::{CompletionBudget, CompletionWaiter, DriverContext, DriverError, DriverProvider, IoContext, SystemTasks};
+use arty_io_core::{
+    CompletionBudget, CompletionWaiter, DrainStatus, DriverContext, DriverError, DriverProvider, IoContext, ServiceStatus, SystemTasks,
+};
 use thread_aware_core::ThreadAware;
 
 use super::coordinator::Source;
@@ -78,6 +80,47 @@ fn budget_exhaustion_retains_each_models_continuation() {
     for operation in texts {
         assert_eq!(operation.wait().unwrap(), "Q");
     }
+}
+
+#[test]
+fn nested_completion_work_defers_retirement_until_a_fresh_budget() {
+    let mut harness = Harness::new(1);
+    let (sample, sample_driver, _) = harness.create::<SampleContext>();
+    let (echo, echo_driver, _) = harness.create::<EchoContext>();
+    let number = sample.submit(8).unwrap();
+    let text = echo.submit("last").unwrap();
+    let mut sample_drain = sample_driver.shutdown();
+    let mut echo_drain = echo_driver.shutdown();
+    harness.tasks.run_all();
+    harness.coordinator.waiter.collect(Duration::ZERO, &mut budget(2)).unwrap();
+
+    let mut sample_budget = budget(1);
+    let mut echo_budget = budget(1);
+    assert_eq!(
+        sample_drain.service(&mut sample_budget).unwrap(),
+        DrainStatus::Pending(ServiceStatus::Runnable)
+    );
+    assert_eq!(
+        echo_drain.service(&mut echo_budget).unwrap(),
+        DrainStatus::Pending(ServiceStatus::Runnable)
+    );
+    assert_eq!(sample_budget.remaining(), 0);
+    assert_eq!(echo_budget.remaining(), 0);
+    assert!(!number.is_pending());
+    assert!(!text.is_pending());
+    assert_eq!(number.wait().unwrap(), 9);
+    assert_eq!(text.wait().unwrap(), "LAST");
+    let metrics = harness.coordinator.waiter.metrics();
+    assert_eq!(metrics.records_retired.load(Ordering::Relaxed), 0);
+    assert_eq!(metrics.readiness_retired.load(Ordering::Relaxed), 0);
+
+    // Inner completion service spent the unit. Retirement needs a fresh turn, not a new event.
+    assert_eq!(sample_drain.service(&mut budget(1)).unwrap(), DrainStatus::Complete);
+    assert_eq!(echo_drain.service(&mut budget(1)).unwrap(), DrainStatus::Complete);
+    drop(sample_drain);
+    drop(echo_drain);
+    assert_eq!(metrics.records_retired.load(Ordering::Relaxed), 1);
+    assert_eq!(metrics.readiness_retired.load(Ordering::Relaxed), 1);
 }
 
 #[test]
