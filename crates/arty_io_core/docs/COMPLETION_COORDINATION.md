@@ -189,6 +189,9 @@ Before a positive wait, the runtime establishes all of these conditions:
 participant's notification mechanism and final private-work check are ready
 for the shared wait. Preparation does bounded bookkeeping rather than hiding a
 completion or cancellation loop outside the budget.
+Another source or control activity can cancel the wait after successful
+preparation. Drivers and drains preserve native notification-arm state so
+subsequent service or repeated preparation remains valid without an intervening wait.
 
 The waiter's latch covers notifications racing the final check and native wait.
 Do not hold a resource needed by a submitter or notifier across that wait.

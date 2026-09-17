@@ -289,6 +289,61 @@ fn a_notification_during_arm_is_rechecked_before_waiting() {
 }
 
 #[test]
+fn armed_sources_can_resume_service_or_prepare_again_without_a_wait() {
+    let mut coordinator = coordinator(1);
+    let source = Source::new(coordinator.waiter.waker());
+    let wake = Waker::from(Arc::clone(&source));
+    let armed = Rc::new(Cell::new(false));
+    let services_after_arm = Rc::new(Cell::new(0));
+    let preparations = Rc::new(Cell::new(0));
+    let service_armed = Rc::clone(&armed);
+    let service_count = Rc::clone(&services_after_arm);
+    let arm_count = Rc::clone(&preparations);
+    let mut driver = Scripted::new(Box::new(move |budget| {
+        assert!(budget.try_consume());
+        if service_armed.replace(false) {
+            service_count.set(service_count.get() + 1);
+        }
+        Ok(ServiceStatus::Idle)
+    }));
+    driver.arm = Box::new(move || {
+        armed.set(true);
+        arm_count.set(arm_count.get() + 1);
+        Ok(WaitStatus::Armed)
+    });
+    coordinator.insert(TypeId::of::<A>(), source, erase(driver));
+
+    let peer_wake = wake.clone();
+    let mut first_arm = true;
+    let mut peer = Scripted::new(Box::new(|_| Ok(ServiceStatus::Idle)));
+    peer.arm = Box::new(move || {
+        if std::mem::take(&mut first_arm) {
+            peer_wake.wake_by_ref();
+            Ok(WaitStatus::WorkReady)
+        } else {
+            Ok(WaitStatus::Armed)
+        }
+    });
+    coordinator.insert(TypeId::of::<B>(), Source::new(coordinator.waiter.waker()), erase(peer));
+
+    coordinator.service(Instant::now());
+    coordinator.arm();
+    assert_eq!(coordinator.wait_duration(Instant::now(), None), Duration::ZERO);
+    coordinator.service(Instant::now());
+    assert_eq!(services_after_arm.get(), 1);
+
+    coordinator.arm();
+    assert_eq!(coordinator.wait_duration(Instant::now(), None), Duration::MAX);
+    coordinator.arm();
+    assert_eq!(preparations.get(), 3);
+    wake.wake();
+    coordinator.service(Instant::now());
+    assert_eq!(services_after_arm.get(), 2);
+    assert!(!coordinator.has_failed());
+    assert!(coordinator.waiter.waits.borrow().iter().all(Duration::is_zero));
+}
+
+#[test]
 fn collection_and_every_busy_source_get_a_bounded_turn() {
     let mut coordinator = coordinator(2);
     let work = Rc::new(RefCell::new(Vec::new()));

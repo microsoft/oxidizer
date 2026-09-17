@@ -136,6 +136,8 @@ An idle service result is only a scheduling observation. Before sleeping, each
 participant arms its notification mechanism and rechecks private state. It either
 reports work ready or confirms that notification is armed. The runtime separately
 rechecks commands, tasks, source signals, and deadlines.
+Those checks can cancel the wait. An armed participant must remain usable for
+normal service or repeated preparation even if no blocking collection occurs.
 
 While other work is runnable, the runtime continues non-blocking native collection.
 A positive wait is permitted only after the full preparation protocol. Finite

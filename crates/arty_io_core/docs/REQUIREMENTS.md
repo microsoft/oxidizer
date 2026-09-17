@@ -111,6 +111,8 @@ backend, scheduler, driver registry, or placement policy.
   no immediate work was found; later activity signals readiness. `WorkReady`
   requires another service turn before sleeping.
 - Preparation is bounded bookkeeping, not a hidden drain or cancellation loop.
+- Successful preparation need not be followed by a wait. Normal service and
+  repeated preparation remain valid while native notification-arm state is retained.
 - The runtime arms participants, publishes sleeping intent, and rechecks task,
   command, and source state before a positive wait. The native interruption
   latch covers the final check-to-sleep race.

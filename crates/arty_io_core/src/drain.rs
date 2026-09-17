@@ -44,6 +44,7 @@ pub trait Drain: 'static {
     /// Arms notification and rechecks progress before a possible shared wait.
     ///
     /// This is bounded preparation, not a hidden completion or cancellation loop.
+    /// The runtime may resume service or repeat preparation without waiting in between.
     ///
     /// # Errors
     ///

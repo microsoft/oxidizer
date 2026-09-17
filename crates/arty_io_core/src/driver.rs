@@ -70,6 +70,8 @@ pub trait Driver: Sized + 'static {
     /// This method only performs bounded notification preparation. Draining and cancellation use
     /// budgeted service. The runtime separately latches source readiness, arms its own wait, and
     /// rechecks task and control activity before blocking.
+    /// Preparation does not guarantee a subsequent wait: normal service or another preparation
+    /// may follow instead. Preserve any native notification-arm state across those transitions.
     ///
     /// # Errors
     ///
