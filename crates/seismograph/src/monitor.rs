@@ -371,14 +371,27 @@ fn spawn_client_thread(
     registration: ActiveClient,
     last_error: &Arc<Mutex<Option<String>>>,
 ) {
+    spawn_client_thread_with(stream, descriptor, stop, registration, last_error, |operation| {
+        thread::Builder::new().name("seismograph-monitor-client".into()).spawn(operation)
+    });
+}
+
+fn spawn_client_thread_with(
+    stream: TcpStream,
+    descriptor: MonitorDescriptor,
+    stop: Arc<AtomicBool>,
+    registration: ActiveClient,
+    last_error: &Arc<Mutex<Option<String>>>,
+    spawn: impl FnOnce(Box<dyn FnOnce() + Send>) -> io::Result<JoinHandle<()>>,
+) {
     let worker_last_error = Arc::clone(last_error);
-    let spawn_result = thread::Builder::new().name("seismograph-monitor-client".into()).spawn(move || {
+    let spawn_result = spawn(Box::new(move || {
         let _registration = registration;
         let _suppression = SuppressionGuard::enter();
         if let Err(error) = handle_client(stream, &descriptor, &stop) {
             set_last_error(&worker_last_error, &error);
         }
-    });
+    }));
     if let Err(error) = spawn_result {
         set_last_error(last_error, &error);
     }
@@ -779,6 +792,77 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn concurrent_snapshot_is_rejected_until_the_current_request_finishes() {
+        let _test = crate::recorder::TEST_LOCK.lock().unwrap();
+        let guard = SnapshotRequestGuard::acquire().unwrap();
+        let request = Request::CaptureSnapshot(SnapshotOptions::default());
+        let rejected = authenticated_response(&request);
+        drop(guard);
+        let resumed = authenticated_response(&request);
+        assert_eq!(
+            (rejected, matches!(resumed, Response::Snapshot(_))),
+            (Response::Error("a seismograph snapshot is already in progress".into()), true)
+        );
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn expired_frame_deadline_does_not_consume_a_buffered_request() {
+        let (mut client, mut server) = connected_pair();
+        seismograph_protocol::write_request(&mut client, 1, &Request::ReadRecorderStatistics).unwrap();
+        let error = DeadlineReader {
+            stream: &mut server,
+            deadline: Instant::now(),
+        }
+        .read(&mut [0; 1])
+        .unwrap_err();
+        let request = read_request_with_timeout(&mut server, &AtomicBool::new(false), Duration::from_secs(1), ReadTimeout::Idle).unwrap();
+        assert_eq!(
+            (error.kind(), request),
+            (io::ErrorKind::TimedOut, (1, Request::ReadRecorderStatistics))
+        );
+    }
+
+    #[test]
+    fn unclassified_io_failure_preserves_the_protocol_error() {
+        let error = classify_read_error(
+            seismograph_protocol::Error::Io(io::Error::new(io::ErrorKind::PermissionDenied, "socket denied")),
+            false,
+            ReadTimeout::Idle,
+        );
+        assert!(matches!(
+            error,
+            ClientError::Protocol(seismograph_protocol::Error::Io(error))
+                if error.kind() == io::ErrorKind::PermissionDenied && error.to_string() == "socket denied"
+        ));
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn client_spawn_failure_releases_registration_and_reports_error() {
+        let clients = Arc::new(ActiveClients::new());
+        let (mut peer, stream) = connected_pair();
+        let registration = clients.register(&stream).unwrap().unwrap();
+        let last_error = Arc::new(Mutex::new(None));
+        spawn_client_thread_with(
+            stream,
+            test_descriptor(),
+            Arc::new(AtomicBool::new(false)),
+            registration,
+            &last_error,
+            |_operation| Err(io::Error::other("worker unavailable")),
+        );
+        assert_eq!(
+            (
+                last_error.lock().unwrap().clone(),
+                clients.state.lock().unwrap().streams.len(),
+                connection_is_closed(&mut peer)
+            ),
+            (Some("worker unavailable".into()), 0, true)
+        );
+    }
+
     fn connected_pair() -> (TcpStream, TcpStream) {
         let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).unwrap();
         let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
@@ -801,20 +885,24 @@ mod tests {
         stream.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
         let mut byte = [0];
         match stream.read(&mut byte) {
-            Ok(0) => true,
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    io::ErrorKind::ConnectionReset
-                        | io::ErrorKind::ConnectionAborted
-                        | io::ErrorKind::BrokenPipe
-                        | io::ErrorKind::NotConnected
-                ) =>
-            {
-                true
-            }
-            Ok(_) | Err(_) => false,
+            Ok(count) => count == 0,
+            Err(error) => matches!(
+                classify_read_error(seismograph_protocol::Error::Io(error), false, ReadTimeout::Idle),
+                ClientError::Disconnected
+            ),
         }
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn connection_check_does_not_mistake_pending_data_or_would_block_for_disconnect() {
+        let (mut client, mut server) = connected_pair();
+        server.set_nonblocking(true).unwrap();
+        let idle_is_closed = connection_is_closed(&mut server);
+        client.write_all(&[1]).unwrap();
+        server.set_nonblocking(false).unwrap();
+        let readable_is_closed = connection_is_closed(&mut server);
+        assert_eq!((idle_is_closed, readable_is_closed), (false, false));
     }
 
     #[cfg_attr(miri, ignore)]
