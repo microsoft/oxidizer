@@ -77,7 +77,7 @@ anvil-mutants-diff: anvil-mutants-diff-validate-prereqs anvil-impact
     }
     try {
         & cargo {{_anvil_stable_toolchain_args}} mutants --in-diff $diff_path --no-shuffle --jobs 1 `
-            --re '^crates/rallocator/src/allocator\.rs:1259:57: replace \* with / in Rallocator<C>::allocate_medium$' `
+            --re '^crates/rallocator/src/allocator\.rs:(1260:70|1267:53|1269:43|1270:44):' `
             --exclude 'crates/rallocator/src/hal/win64.rs' `
             --exclude 'crates/seismograph_cli/**'
         $status = $LASTEXITCODE
