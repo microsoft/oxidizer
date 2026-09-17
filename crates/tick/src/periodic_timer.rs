@@ -226,6 +226,18 @@ mod tests {
     }
 
     #[test]
+    fn timer_fires_at_exact_deadline() {
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+        let mut timer = PeriodicTimer::new(&clock, Duration::from_millis(1));
+
+        assert_eq!(poll_timer(&mut timer), Poll::Pending);
+        control.advance(Duration::from_millis(1));
+
+        assert_eq!(poll_timer(&mut timer), Poll::Ready(Some(())));
+    }
+
+    #[test]
     fn first_poll_next_should_be_pending() {
         let clock = Clock::new_frozen();
 
