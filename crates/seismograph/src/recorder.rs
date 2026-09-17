@@ -166,7 +166,10 @@ static ARC_DEREFERENCE_POLICY: AtomicU64 = AtomicU64::new(0);
 static RUNTIME_TASK_POLICY: AtomicU64 = AtomicU64::new(0);
 static IO_POLICY: AtomicU64 = AtomicU64::new(0);
 static CACHE_POLICY: AtomicU64 = AtomicU64::new(0);
-static RETIRED_RINGS: Mutex<RetiredRings> = Mutex::new(RetiredRings::new());
+static RETIRED_RINGS: Mutex<RetiredRings> = Mutex::new(RetiredRings {
+    rings: VecDeque::new(),
+    allocated_bytes: 0,
+});
 static CONFIGURATION_LOCKED: AtomicBool = AtomicBool::new(false);
 static ACTIVE_SESSION: AtomicU64 = AtomicU64::new(0);
 static LAST_SESSION: AtomicU64 = AtomicU64::new(0);
@@ -928,15 +931,6 @@ impl ThreadRecorder {
 struct RetiredRings {
     rings: VecDeque<(usize, usize)>,
     allocated_bytes: usize,
-}
-
-impl RetiredRings {
-    const fn new() -> Self {
-        Self {
-            rings: VecDeque::new(),
-            allocated_bytes: 0,
-        }
-    }
 }
 
 fn retired_rings() -> std::sync::MutexGuard<'static, RetiredRings> {
