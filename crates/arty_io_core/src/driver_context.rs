@@ -44,6 +44,8 @@ impl DriverContext {
     }
 
     /// Returns the async worker this driver instance serves.
+    ///
+    /// These coordinates include [`Thread::numa_node`] for locality-aware resource allocation.
     #[must_use]
     pub const fn thread(&self) -> &Thread {
         &self.thread
@@ -96,9 +98,9 @@ impl DriverContext {
     ///
     /// This removes the value from the context: a repeated take of the same type reports the
     /// missing-client error, and the type may be supplied again through
-    /// [`with_completion_service`](Self::with_completion_service). Extraction alone has no native
-    /// side effect; take every required client before registering any of them, so a missing
-    /// later requirement leaves previously extracted clients unregistered and safe to drop.
+    /// [`with_completion_service`](Self::with_completion_service). Extraction itself performs no
+    /// native operation. Take every required client before starting native registration, so a
+    /// missing requirement can abort without a partial driver registration.
     /// Native adapter packages define the client interfaces and their registration and retirement
     /// rules; the core does not interpret their operation or buffer types.
     ///

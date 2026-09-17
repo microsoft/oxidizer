@@ -29,9 +29,10 @@
 //! for that worker together with its concrete driver in an allocation-free [`LocalDriver`].
 //! The provider must pair each context with the instance it actually belongs to.
 //!
-//! The provider selects its native strategy from the clients the context actually supplies,
-//! before performing native side effects, and reports an unsupported configuration when no
-//! supported strategy is available. Strategy-specific shared native initialization may be
+//! The provider selects its native strategy and takes the required clients through
+//! [`DriverContext::take_completion_service`] before native side effects. Clients may be local
+//! and move-only. When no supported strategy is available, creation reports an unsupported
+//! configuration. Strategy-specific shared native initialization may be
 //! deferred into provider state, but creation must return promptly without awaiting async work
 //! or a cross-worker initialization handshake. It establishes routing and notification before
 //! publishing a usable context.
