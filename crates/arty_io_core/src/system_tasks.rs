@@ -13,8 +13,8 @@ pub type SystemTask = Box<dyn FnOnce() + Send + 'static>;
 /// not an async application task and never runs on an async worker. The runtime callback must
 /// permit the work to block.
 ///
-/// The facility remains available until every driver that received it has completed shutdown, so
-/// cleanup work submitted during shutdown can still run.
+/// The facility remains available while drivers and pending shutdown operations need it, including
+/// during registration rollback, so cleanup work submitted during draining can still run.
 #[derive(Clone)]
 pub struct SystemTasks {
     spawn: Arc<dyn Fn(SystemTask) + Send + Sync + 'static>,

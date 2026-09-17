@@ -13,126 +13,105 @@
 
 </div>
 
-Stable contracts for integrating external I/O drivers with the Arty runtime.
+Contracts for coordinating independent I/O drivers with the Arty runtime.
 
-The runtime hosts drivers supplied by libraries and applications rather than depending on one
-I/O implementation. This crate contains the small vocabulary both sides share:
+Drivers retain their operations, buffers, and completion decoding. The runtime owns their
+scheduling and a separate [`CompletionWaiter`][__link0] that collects native activity and provides
+the blocking wait. This crate supplies the shared contracts, not a production native backend,
+a driver registry, or a thread-placement policy.
 
-* [`Driver`][__link0] is the adapter between one worker and an I/O subsystem.
-* [`IoContext`][__link1] is the consumer handle that selects its provider.
-* [`ProviderContext`][__link2] supplies runtime facilities when that provider is created.
-* [`DriverProvider`][__link3] creates and connects the per-worker adapters for a driver.
-* [`DriverContext`][__link4] describes the worker and runtime facilities available during driver
-  creation.
-* [`ShutdownError`][__link5] reports unsuccessful graceful shutdown.
-* [`SystemTasks`][__link6] lets a driver delegate blocking system work to the runtime.
+## Negotiation and registration
 
-Registration and driver placement are runtime behavior, not part of this crate. Keeping those
-policies outside the contract allows the runtime and drivers to evolve independently.
+A requested [`IoContext`][__link1] type selects its [`DriverProvider`][__link2]. The runtime supplies a
+[`ProviderContext`][__link3] advertising the native client capability types of a proposed completion
+configuration. The provider chooses one strategy and declares its [`CompletionRequirements`][__link4].
+Alternative strategies are selected explicitly, not combined into one set of required clients.
 
-## Runtime and driver lifecycle
+Before creation, the runtime chooses the final owning threads and configures their waiters.
+Each waiter and the client services backed by it share a [`CompletionDomain`][__link5] identity.
+[`CompletionService`][__link6] tags prevent accidentally combining clients from different domains.
+Native adapters remain responsible for associating those clients with the correct native
+resources and for their registration/retirement rules.
 
-The contract separates one provider per registered driver type, one driver per runtime worker,
-and contexts that consumers may move and retain independently:
+On each owning thread, the runtime assembles [`DriverContext`][__link7] with thread coordinates,
+[`SystemTasks`][__link8], a source readiness waker, and typed client capabilities. It validates the
+selected requirements, relocates the provider clone, and consumes it to create a
+[`LocalDriver`][__link9]. Creation must return promptly and establish routing and notification before
+publishing a usable context.
+
+Provider and driver creation return [`DriverError`][__link10]. The first context request succeeds only
+after every active worker has initialized the driver. Failure requires explicit rollback or
+retirement of partial registrations; it is not success for the surviving workers. Later
+requests reuse the successfully registered provider/context family. Drivers with independent
+versions coexist through distinct context type identities while using the same core contract.
+
+## One wait, multiple service participants
 
 ```text
-context request
-      |
-      v
-IoContext::provider(ProviderContext)
-      |
-      | clone and relocate once per worker
-      v
-DriverProvider::create(DriverContext)
-      |
-      +-- Driver: owned and driven by that worker
-      +-- Context: obtained from the driver, then cached for consumers
+native activity -> CompletionWaiter -> records or readiness -> driver service
+                          ^
+                          |
+            runtime task/control/source interruption
 ```
 
-### Registration and initialization
+A native adapter may route already-collected records into private driver mailboxes or report
+that a driver must drain its own queue. Records never travel through the construction-time
+service lookup or through a `Waker`.
 
-A consumer asks the runtime for a concrete [`IoContext`][__link7] type. On the first request for that
-type, the runtime creates a [`ProviderContext`][__link8], calls [`IoContext::provider`][__link9], and registers
-the resulting [`DriverProvider`][__link10]. Registration, synchronization, rollback, and caching remain
-runtime concerns.
+The [`DriverContext::readiness_waker`][__link11] identifies a driver service participant. The runtime
+latches readiness for that participant before waking the collection domain. The separate
+[`CompletionWaiter::waker`][__link12] interrupts the current or next blocking collection. Both handles
+remain memory-safe after their original participant disappears; a late signal must not
+target a replacement registration.
 
-The runtime clones the provider for each active worker, relocates each clone to that worker,
-and invokes [`DriverProvider::create`][__link11] on the worker thread. [`DriverContext`][__link12] identifies the
-worker and supplies runtime facilities such as [`SystemTasks`][__link13]. The returned [`Driver`][__link14] stays
-on that thread for its entire lifetime; it is deliberately not required to be [`Send`][__link15] or
-[`Sync`][__link16]. Creation runs inline and must return promptly; waiting there for another worker to
-make progress can deadlock registration.
+The coordinator alternates bounded collection, task/control work, and driver service. A
+[`CompletionBudget`][__link13] limits one participant during each turn. [`ServiceStatus`][__link14] reports remaining work
+or a service deadline. A runnable result schedules another turn without requiring a new
+notification. Every newly installed driver and newly initiated drain starts runnable,
+before the runtime can park, even if no native notification has arrived.
 
-After creation, the runtime obtains the worker’s context through [`Driver::context`][__link17] and may
-cache both that context and the driver’s [interruptor][__link18]. The interruptor
-honors interrupts raised by the driver’s own thread and remains safe to invoke after the driver
-is gone. The first context request completes only after every active worker has created its
-driver instance. Later requests reuse the registration and return the context cached for the
-calling worker. A runtime may retain the provider to initialize workers created later.
+Before a positive wait, the runtime services due work, asks every participating driver or
+drain to prepare notifications, and rechecks task, control, and source readiness. Only
+[`WaitStatus::Armed`][__link15] permits that participant to sleep. The waiter must preserve an
+interruption racing the final check and actual wait. Deadlines and remaining runnable work
+also constrain whether and how long the runtime waits.
 
-Driver creation is infallible at the type level. If [`DriverProvider::create`][__link19] panics, the
-runtime does not continue with a driver registered on only part of its worker set. A driver
-with conditional platform or permission requirements therefore exposes its own capability
-check for consumers to call before requesting its context.
+Drivers and [`Shutdown`][__link16] handles stay on their owning thread, enforced by local ownership
+wrappers even when the concrete implementation has thread-safe fields. Native
+clients may be thread-local; consumer contexts remain mobile through [`IoContext`][__link17].
+A runtime with no native drivers can use an ordinary latched parking waiter. Unsupported
+native configurations fail explicitly or use another explicitly configured domain; core
+does not silently create helper threads.
 
-### Driving I/O
+## Cooperative shutdown and safe ownership
 
-Consumers start operations through contexts. Contexts may be cloned, relocated between
-workers, and retained after their original driver is gone. Relocation may improve locality, but
-correctness must not depend on it.
+[`LocalDriver::shutdown`][__link18] consumes the running driver and closes admission before returning
+a [`Shutdown`][__link19] handle. Its [`Drain`][__link20] continues service and notification preparation under the
+same budget protocol. Every turn receives a budget; shutdown is not a blocking call or a future.
 
-The runtime exclusively owns each driver and calls every [`Driver`][__link20] method only on its owning
-thread. A zero wait to [`Driver::process_completions`][__link21] performs a non-blocking completion pass
-without consuming a pending interrupt; a bounded or unbounded wait lets the same call provide
-the worker’s idle point. The driver’s interruptor is latched, so it ends either the current
-blocking wait or the next one without preventing pending completions from being processed.
-Runtime policy decides which driver supplies a worker’s waiting point and how additional
-drivers are scheduled.
+The runtime initiates all relevant shutdowns, keeps collecting native activity and executing
+required system work, and services drains fairly. [`DrainStatus::Complete`][__link21] marks graceful
+retirement; pending status retains its notification or deadline obligation. Failures remain
+visible through [`DriverError`][__link22], and the runtime applies an overall shutdown deadline.
 
-Operations may be submitted from other threads while the driver waits. A driver therefore
-separates its state into two parts:
+Context clones remain valid but closed and do not themselves delay drain completion.
+Admitted operations, callbacks, and native registrations independently retain their storage.
+Neither cancellation nor an expired deadline permits invalidating memory still reachable
+by native code. Dropping a driver or abandoning a drain is always memory-safe, even when
+graceful cleanup cannot complete. Destruction does not wait for I/O or other participants;
+any necessary independent cleanup retains its own resource ownership.
 
-* State reached by contexts, interruptors, background threads, or operating-system callbacks
-  is shared independently of the driver and uses appropriate reference counting and
-  synchronization. Each in-flight operation owns every resource it uses through a reference
-  count, pool lease, or equivalent handle; contexts themselves hold no per-operation state and
-  therefore do not delay shutdown.
-* Completion buffers, queue-reader state, batching state, and lifecycle state used only on the
-  owning thread remain ordinary driver fields accessed through `&mut self`.
+## Example and design
 
-In particular, [`Driver::process_completions`][__link22] must not hold anything across a blocking wait
-that a submitter needs to make a completion possible, such as a lock, queue slot, or pool
-capacity.
+The [two-thread reference runtime][__link23]
+demonstrates coordinated in-memory completion sources, not production IOCP or `io_uring`
+implementations. Registries, native routing, placement, and timeout policy belong to that
+runtime/native layer rather than this crate.
+Its control thread uses blocking result handles; it is not an application-future executor.
 
-### Shutdown
-
-Shutdown is cooperative, but it is not a memory-safety protocol:
-
-1. The runtime removes the driver from its normal completion loop and calls
-   [`Driver::shutdown`][__link23], transferring ownership of the driver.
-1. `shutdown` closes admission, blocks while active operations and operating-system callbacks
-   drain, and performs graceful cleanup. It owns the liveness policy for that wait and returns
-   an error rather than blocking indefinitely. Contexts remain valid but reject new operations.
-1. [`SystemTasks`][__link24] remains available until `shutdown` returns.
-1. `shutdown` returns [`ShutdownError`][__link25] when graceful cleanup cannot be completed. The runtime
-   records or reports the error and continues shutting down its remaining drivers.
-
-A driver must nevertheless be safe to drop at any point, including during unwinding or after a
-shutdown error. Dropping closes admission if necessary. Storage that an operating system can
-reach only by raw pointer must have an independent owner that is retained rather than
-invalidated on a premature drop. A successful shutdown determines whether cleanup was
-graceful, never whether destruction is sound.
-
-## Example
-
-The [fixed two-thread runtime example][__link26]
-starts both worker threads before `get_context::<SampleContext>()` uses the context type to
-inject its associated driver.
-
-## Project documents
-
-* [Requirements][__link27]
-* [Design][__link28]
+* [Requirements][__link24]
+* [Design][__link25]
+* [Completion coordination][__link26]
 
 
 <hr/>
@@ -140,33 +119,31 @@ inject its associated driver.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbXHvW0KP2pNsbpAluTL3rKBwb7CkYGkSYEf0byc-sL65ysCdhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
- [__link0]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbTdTRM3Ter5obfHbFD5kvsw8bol88Neh2pwkblZk1sRA_Fp1hZIGCbGFydHlfaW9fY29yZWUwLjIuMA
+ [__link0]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=CompletionWaiter
  [__link1]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=IoContext
- [__link10]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverProvider
- [__link11]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverProvider::create
- [__link12]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverContext
- [__link13]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=SystemTasks
- [__link14]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver
- [__link15]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
- [__link16]: https://doc.rust-lang.org/stable/std/marker/trait.Sync.html
- [__link17]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::context
- [__link18]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::interruptor
- [__link19]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverProvider::create
- [__link2]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=ProviderContext
- [__link20]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver
- [__link21]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::process_completions
- [__link22]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::process_completions
- [__link23]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::shutdown
- [__link24]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=SystemTasks
- [__link25]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=ShutdownError
- [__link26]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/examples/two_thread_runtime/main.rs
- [__link27]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/REQUIREMENTS.md
- [__link28]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/DESIGN.md
- [__link3]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverProvider
- [__link4]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverContext
- [__link5]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=ShutdownError
- [__link6]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=SystemTasks
- [__link7]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=IoContext
- [__link8]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=ProviderContext
- [__link9]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=IoContext::provider
+ [__link10]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverError
+ [__link11]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverContext::readiness_waker
+ [__link12]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=CompletionWaiter::waker
+ [__link13]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=CompletionBudget
+ [__link14]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=ServiceStatus
+ [__link15]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=WaitStatus::Armed
+ [__link16]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Shutdown
+ [__link17]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=IoContext
+ [__link18]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=LocalDriver::shutdown
+ [__link19]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Shutdown
+ [__link2]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverProvider
+ [__link20]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Drain
+ [__link21]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DrainStatus::Complete
+ [__link22]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverError
+ [__link23]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/examples/two_thread_runtime/main.rs
+ [__link24]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/REQUIREMENTS.md
+ [__link25]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/DESIGN.md
+ [__link26]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/COMPLETION_COORDINATION.md
+ [__link3]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=ProviderContext
+ [__link4]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=CompletionRequirements
+ [__link5]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=CompletionDomain
+ [__link6]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=CompletionService
+ [__link7]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverContext
+ [__link8]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=SystemTasks
+ [__link9]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=LocalDriver
