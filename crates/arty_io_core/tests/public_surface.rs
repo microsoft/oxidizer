@@ -11,6 +11,7 @@
 
 use std::cell::Cell;
 use std::error::Error;
+use std::marker::PhantomData;
 use std::num::NonZeroUsize;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -212,10 +213,92 @@ fn duplicate_client_type_is_rejected_instead_of_replaced() {
 
 #[test]
 fn missing_client_is_classified_unsupported() {
-    let error = driver_context().completion_service::<PreferredClient>().unwrap_err();
+    let error = driver_context().take_completion_service::<PreferredClient>().unwrap_err();
     assert!(error.is_unsupported());
     assert!(!error.is_duplicate_completion_service());
     assert!(error.source().is_none());
+}
+
+#[test]
+fn a_non_clone_client_transfers_ownership_and_drops_exactly_once() {
+    assert_not_impl_any!(RecordLease: Send, Sync, Clone);
+    let retired = Arc::new(AtomicUsize::new(0));
+    let mut context = driver_context()
+        .with_completion_service(RecordLease::new(Arc::clone(&retired)))
+        .unwrap();
+
+    let taken = context.take_completion_service::<RecordLease>().unwrap();
+    assert_eq!(retired.load(Ordering::Relaxed), 0, "extraction alone has no side effect");
+    let error = context.take_completion_service::<RecordLease>().unwrap_err();
+    assert!(error.is_unsupported());
+    drop(context);
+    assert_eq!(retired.load(Ordering::Relaxed), 0, "the extracted lease outlives its context");
+    drop(taken);
+    assert_eq!(retired.load(Ordering::Relaxed), 1, "the moved-out lease drops exactly once");
+}
+
+#[test]
+fn take_once_reports_missing_on_repeat_while_a_sibling_client_stays_available() {
+    let mut context = driver_context()
+        .with_completion_service(PreferredClient::new())
+        .unwrap()
+        .with_completion_service(FallbackClient::new())
+        .unwrap();
+
+    let first_take = context.take_completion_service::<PreferredClient>().unwrap();
+    let repeat = context.take_completion_service::<PreferredClient>().unwrap_err();
+    assert!(repeat.is_unsupported());
+    assert!(!repeat.is_duplicate_completion_service());
+    drop(first_take);
+
+    // The unrelated type was never touched by the repeated take of the first type.
+    let sibling = context.take_completion_service::<FallbackClient>().unwrap();
+    assert_eq!(sibling.registrations(), 0);
+}
+
+#[test]
+fn reinsertion_succeeds_once_the_prior_occupant_is_taken() {
+    let first = PreferredClient::new();
+    let second = PreferredClient::new();
+    let mut context = driver_context().with_completion_service(first.clone()).unwrap();
+
+    // Duplicate rejection reflects current occupancy (see
+    // `duplicate_client_type_is_rejected_instead_of_replaced`); taking the occupant clears it.
+    let taken = context.take_completion_service::<PreferredClient>().unwrap();
+    assert_eq!(taken.registrations(), 0);
+    drop(taken);
+
+    let mut context = context.with_completion_service(second.clone()).unwrap();
+    context
+        .take_completion_service::<PreferredClient>()
+        .unwrap()
+        .register(&Waker::noop().clone())
+        .unwrap();
+    assert_eq!(second.registrations(), 1);
+    assert_eq!(first.registrations(), 0);
+}
+
+#[test]
+fn missing_second_required_client_performs_no_native_effects_and_releases_the_first() {
+    let retired = Arc::new(AtomicUsize::new(0));
+    let registrations = Cell::new(0);
+    let mut context = driver_context()
+        .with_completion_service(RecordLease::new(Arc::clone(&retired)))
+        .unwrap();
+
+    let create = (|| {
+        let first = context.take_completion_service::<RecordLease>()?;
+        let second = context.take_completion_service::<FallbackClient>()?;
+        registrations.set(registrations.get() + 1);
+        second.register(context.readiness_waker())?;
+        Ok::<_, DriverError>(first)
+    })();
+
+    assert!(create.unwrap_err().is_unsupported());
+    assert_eq!(registrations.get(), 0);
+    assert_eq!(retired.load(Ordering::Relaxed), 1);
+    drop(context);
+    assert_eq!(retired.load(Ordering::Relaxed), 1);
 }
 
 #[test]
@@ -263,8 +346,13 @@ fn unsupported_worker_configuration_fails_before_native_side_effects() {
 #[test]
 fn native_registration_failure_during_creation_is_reported_with_its_cause() {
     let preferred = PreferredClient::new();
+    let fallback = FallbackClient::new();
     preferred.deny_next_registration();
-    let context = driver_context().with_completion_service(preferred.clone()).unwrap();
+    let context = driver_context()
+        .with_completion_service(preferred.clone())
+        .unwrap()
+        .with_completion_service(fallback.clone())
+        .unwrap();
 
     let error = TestContext::provider().unwrap().create(context).err().unwrap();
 
@@ -272,6 +360,7 @@ fn native_registration_failure_during_creation_is_reported_with_its_cause() {
     assert!(!error.is_unsupported());
     assert!(error.source().unwrap().downcast_ref::<io::Error>().is_some());
     assert_eq!(preferred.registrations(), 0);
+    assert_eq!(fallback.registrations(), 0);
 
     let fallback = FallbackClient::new();
     fallback.deny_next_registration();
@@ -671,9 +760,9 @@ fn a_boxed_collector_attaches_its_own_clients_without_naming_native_types() {
 #[test]
 fn a_collector_without_native_clients_uses_the_default_seam() {
     let waiter = ParkingWaiter;
-    let context = waiter.attach_clients(driver_context()).unwrap();
+    let mut context = waiter.attach_clients(driver_context()).unwrap();
 
-    assert!(context.completion_service::<PreferredClient>().unwrap_err().is_unsupported());
+    assert!(context.take_completion_service::<PreferredClient>().unwrap_err().is_unsupported());
     let (context, _driver) = SoftwareContext::provider().unwrap().create(context).unwrap();
     assert_eq!(context.0.completed_events(), 0);
 }
@@ -835,6 +924,32 @@ impl FallbackClient {
 #[derive(Clone, Debug)]
 struct UnrelatedClient;
 
+/// A move-only, thread-affine native lease: no `Clone`, no `Send`/`Sync`. Ownership-capable
+/// extraction must work for this shape without an artificial `Clone` or `RefCell` workaround.
+#[derive(Debug)]
+struct RecordLease {
+    retired: Arc<AtomicUsize>,
+    owner: thread::ThreadId,
+    _not_send: PhantomData<*const ()>,
+}
+
+impl RecordLease {
+    fn new(retired: Arc<AtomicUsize>) -> Self {
+        Self {
+            retired,
+            owner: thread::current().id(),
+            _not_send: PhantomData,
+        }
+    }
+}
+
+impl Drop for RecordLease {
+    fn drop(&mut self) {
+        assert_eq!(thread::current().id(), self.owner);
+        self.retired.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
 #[derive(Debug, Default)]
 struct State {
     closed: bool,
@@ -949,22 +1064,22 @@ impl DriverProvider for TestProvider {
     type Context = TestContext;
     type Driver = TestDriver;
 
-    fn create(self, context: DriverContext) -> Result<(Self::Context, LocalDriver<Self::Driver>), DriverError> {
-        // Select from the clients this worker actually supplies, before any native side effect.
-        let strategy = if context.completion_service::<PreferredClient>().is_ok() {
+    fn create(self, mut context: DriverContext) -> Result<(Self::Context, LocalDriver<Self::Driver>), DriverError> {
+        let readiness = context.readiness_waker().clone();
+        // Select from the client this worker actually supplies, before any native side effect.
+        // Fallback follows only a missing extraction, never a native registration failure: once
+        // a client is taken, its `?` below reports that failure directly.
+        let strategy = if let Ok(client) = context.take_completion_service::<PreferredClient>() {
+            client.register(&readiness)?;
             Strategy::Preferred
-        } else if context.completion_service::<FallbackClient>().is_ok() {
+        } else if let Ok(client) = context.take_completion_service::<FallbackClient>() {
+            client.register(&readiness)?;
             Strategy::Fallback
         } else {
             return Err(DriverError::unsupported(
                 "this worker supplies no completion client this driver supports",
             ));
         };
-        let readiness = context.readiness_waker().clone();
-        match strategy {
-            Strategy::Preferred => context.completion_service::<PreferredClient>()?.register(&readiness)?,
-            Strategy::Fallback => context.completion_service::<FallbackClient>()?.register(&readiness)?,
-        }
         // The published handle and the installed driver share one newly created state.
         let handle = TestContext::fresh(strategy, readiness);
         let driver = TestDriver { context: handle.clone() };

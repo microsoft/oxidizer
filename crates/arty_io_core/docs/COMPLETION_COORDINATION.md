@@ -44,6 +44,11 @@ waiter's object-safe `attach_clients` operation with a new `DriverContext`.
 Providers select a strategy from those actual clients early in `create`, before
 native binding. Typed insertion rejects duplicates; lookup reports unsupported
 clients explicitly.
+`take_completion_service` supports unique local clients without retaining the
+whole construction context. Missing or repeated takes
+leave sibling clients intact. Providers obtain a strategy's required clients
+before native effects and do not reinterpret registration failure as permission
+to fall back.
 
 Native clients originate from the collector that services them and retain their
 necessary backing resources. The typed lookup is an interface-delivery mechanism,

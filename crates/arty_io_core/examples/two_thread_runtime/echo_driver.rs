@@ -137,10 +137,9 @@ impl DriverProvider for EchoProvider {
     type Context = EchoContext;
     type Driver = EchoDriver;
 
-    fn create(self, context: DriverContext) -> Result<(Self::Context, LocalDriver<Self::Driver>), DriverError> {
-        let registration = context
-            .completion_service::<ReadinessClient>()?
-            .register(context.readiness_waker().clone())?;
+    fn create(self, mut context: DriverContext) -> Result<(Self::Context, LocalDriver<Self::Driver>), DriverError> {
+        let client = context.take_completion_service::<ReadinessClient>()?;
+        let registration = client.register(context.readiness_waker().clone())?;
         // One creation builds the shared state, so the published context and the installed
         // driver are the same instance's two handles.
         let state = Arc::new(EchoState {

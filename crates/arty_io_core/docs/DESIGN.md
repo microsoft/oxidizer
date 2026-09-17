@@ -74,6 +74,10 @@ is object-safe, so the runtime need not name platform-specific client types.
 During `create`, a provider selects a strategy from the clients actually present,
 before creating native bindings. Missing clients and duplicate insertion are
 errors. There is no separate advertised capability list to repeat or keep in sync.
+Client access transfers ownership through `take_completion_service`, so a unique
+local client need not be made cloneable or kept inside the construction context.
+Providers can repeatedly borrow their extracted local value. Missing takes leave
+other clients intact, and all required clients are obtained before native effects.
 
 The provider factory creates shared configuration. Strategy-specific shared
 resources can be initialized once actual clients are known, with compatible

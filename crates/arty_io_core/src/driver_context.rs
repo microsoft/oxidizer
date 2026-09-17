@@ -75,12 +75,15 @@ impl DriverContext {
     /// supplied client is backed by the collector that will service this worker, so a runtime
     /// must assemble each context from one coherent native arrangement.
     ///
-    /// This is a construction-time operation; completion records do not use this map.
+    /// This is a construction-time operation; completion records do not use this map. Rejection
+    /// reflects only the type's current occupancy: once a value of type `T` is taken through
+    /// [`take_completion_service`](Self::take_completion_service), a later value of that same
+    /// type may be supplied again.
     ///
     /// # Errors
     ///
-    /// Returns a duplicate-client error if another value with the same client type has already
-    /// been supplied. A client is never silently replaced.
+    /// Returns a duplicate-client error if a value of this client type is currently supplied.
+    /// A client is never silently replaced.
     pub fn with_completion_service<T: 'static>(mut self, value: T) -> Result<Self, DriverError> {
         if self.completion_services.contains_key(&TypeId::of::<T>()) {
             return Err(DriverError::duplicate_service(type_name::<T>()));
@@ -89,26 +92,30 @@ impl DriverContext {
         Ok(self)
     }
 
-    /// Borrows a native client capability of type `T`.
+    /// Takes ownership of a native client capability of type `T`.
     ///
-    /// Clone an appropriate client handle if the driver needs to retain it after creation.
+    /// This removes the value from the context: a repeated take of the same type reports the
+    /// missing-client error, and the type may be supplied again through
+    /// [`with_completion_service`](Self::with_completion_service). Extraction alone has no native
+    /// side effect; take every required client before registering any of them, so a missing
+    /// later requirement leaves previously extracted clients unregistered and safe to drop.
     /// Native adapter packages define the client interfaces and their registration and retirement
     /// rules; the core does not interpret their operation or buffer types.
     ///
     /// # Errors
     ///
-    /// Returns an unsupported-configuration error when this worker does not supply `T`.
+    /// Returns an unsupported-configuration error when this worker does not currently supply `T`.
     #[expect(
         clippy::missing_panics_doc,
         reason = "the typed insertion API establishes the internal type-id invariant"
     )]
-    pub fn completion_service<T: 'static>(&self) -> Result<&T, DriverError> {
+    pub fn take_completion_service<T: 'static>(&mut self) -> Result<T, DriverError> {
         let service = self
             .completion_services
-            .get(&TypeId::of::<T>())
+            .remove(&TypeId::of::<T>())
             .ok_or_else(|| DriverError::missing_service(type_name::<T>()))?;
-        Ok(service
-            .downcast_ref::<T>()
+        Ok(*service
+            .downcast::<T>()
             .expect("completion service type ids are recorded together with their values"))
     }
 }

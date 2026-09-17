@@ -203,6 +203,13 @@ backend, scheduler, driver registry, or placement policy.
   the collector the runtime will drive. The default attaches no native clients.
 - Typed lookup is a construction-time operation. Native completion records do
   not pass through a type-erased per-operation envelope.
+- `take_completion_service` transfers one client's ownership out of the context,
+  including move-only local clients. A missing or repeated take reports
+  unsupported and leaves unrelated clients intact.
+- Duplicate insertion rejects an occupied type slot. After a successful take,
+  that type may be inserted again; no historical reservation remains.
+- Providers obtain all clients needed for a strategy before native side effects.
+  A native registration failure is not treated as a missing-client fallback.
 - Typed lookup selects an agreed client interface; it does not verify native
   handles or ownership. Adapter factories and registrations establish and retain
   the connection to the correct collector.

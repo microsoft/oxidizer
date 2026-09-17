@@ -254,25 +254,25 @@ fn each_attached_client_is_driven_by_its_actual_collector() {
             ))
             .unwrap()
     };
-    let first_context = context(&first);
-    let second_context = context(&second);
+    let mut first_context = context(&first);
+    let mut second_context = context(&second);
     let first_record = first_context
-        .completion_service::<RecordClient>()
+        .take_completion_service::<RecordClient>()
         .unwrap()
         .register(Waker::noop().clone())
         .unwrap();
     let second_record = second_context
-        .completion_service::<RecordClient>()
+        .take_completion_service::<RecordClient>()
         .unwrap()
         .register(Waker::noop().clone())
         .unwrap();
     let first_ready = first_context
-        .completion_service::<ReadinessClient>()
+        .take_completion_service::<ReadinessClient>()
         .unwrap()
         .register(Waker::noop().clone())
         .unwrap();
     let second_ready = second_context
-        .completion_service::<ReadinessClient>()
+        .take_completion_service::<ReadinessClient>()
         .unwrap()
         .register(Waker::noop().clone())
         .unwrap();
