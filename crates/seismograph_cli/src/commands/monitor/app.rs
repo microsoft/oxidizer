@@ -40,6 +40,63 @@ pub(super) struct ActivitySample {
 pub(super) struct RecordingConfigurationPopup {
     pub(super) draft: RecordingConfiguration,
     pub(super) selected: usize,
+    modes: [RecordingMode; 6],
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RecordingMode {
+    Off,
+    On,
+    Custom,
+}
+
+impl RecordingMode {
+    const ALL: [Self; 3] = [Self::Off, Self::On, Self::Custom];
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::On => "on",
+            Self::Custom => "custom",
+        }
+    }
+
+    fn adjusted(self, direction: isize) -> Self {
+        let index = Self::ALL.iter().position(|mode| *mode == self).unwrap_or(0);
+        Self::ALL[index.saturating_add_signed(direction).min(Self::ALL.len() - 1)]
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RecorderKind {
+    Allocations,
+    General,
+    ArcDereferences,
+    RuntimeTasks,
+    Io,
+    Cache,
+}
+
+impl RecorderKind {
+    const ALL: [Self; 6] = [
+        Self::Allocations,
+        Self::General,
+        Self::ArcDereferences,
+        Self::RuntimeTasks,
+        Self::Io,
+        Self::Cache,
+    ];
+
+    const fn index(self) -> usize {
+        match self {
+            Self::Allocations => 0,
+            Self::General => 1,
+            Self::ArcDereferences => 2,
+            Self::RuntimeTasks => 3,
+            Self::Io => 4,
+            Self::Cache => 5,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -62,86 +119,94 @@ pub(super) enum RecordingConfigurationField {
     CacheBacktraces,
     CacheSampling,
     EventBufferCapacity,
-    Apply,
-    Cancel,
 }
 
 impl RecordingConfigurationField {
-    pub(super) const ALL: [Self; 20] = [
-        Self::AllocationRecording,
-        Self::AllocationBacktraces,
-        Self::AllocationSampling,
-        Self::GeneralRecording,
-        Self::GeneralBacktraces,
-        Self::GeneralSampling,
-        Self::ArcDereferenceRecording,
-        Self::ArcDereferenceBacktraces,
-        Self::ArcDereferenceSampling,
-        Self::RuntimeTaskRecording,
-        Self::RuntimeTaskBacktraces,
-        Self::IoRecording,
-        Self::IoBacktraces,
-        Self::IoSampling,
-        Self::CacheRecording,
-        Self::CacheBacktraces,
-        Self::CacheSampling,
-        Self::EventBufferCapacity,
-        Self::Apply,
-        Self::Cancel,
-    ];
-
     pub(super) const fn label(self) -> &'static str {
         match self {
-            Self::AllocationRecording => "Allocations recording",
-            Self::AllocationBacktraces => "Allocations backtraces",
-            Self::AllocationSampling => "Allocations sampling",
-            Self::GeneralRecording => "General events recording",
-            Self::GeneralBacktraces => "General events backtraces",
-            Self::GeneralSampling => "General events sampling",
-            Self::ArcDereferenceRecording => "Arc dereference recording",
-            Self::ArcDereferenceBacktraces => "Arc dereference backtraces",
-            Self::ArcDereferenceSampling => "Arc dereference sampling",
-            Self::RuntimeTaskRecording => "Runtime task recording",
-            Self::RuntimeTaskBacktraces => "Runtime task backtraces",
-            Self::IoRecording => "I/O recording",
-            Self::IoBacktraces => "I/O backtraces",
-            Self::IoSampling => "I/O resource sampling",
-            Self::CacheRecording => "Cache recording",
-            Self::CacheBacktraces => "Cache backtraces",
-            Self::CacheSampling => "Cache tier sampling",
+            Self::AllocationRecording => "Allocations",
+            Self::GeneralRecording => "Events",
+            Self::ArcDereferenceRecording => "Arc",
+            Self::RuntimeTaskRecording => "Runtime tasks",
+            Self::IoRecording => "I/O",
+            Self::CacheRecording => "Cache",
+            Self::AllocationBacktraces
+            | Self::GeneralBacktraces
+            | Self::ArcDereferenceBacktraces
+            | Self::RuntimeTaskBacktraces
+            | Self::IoBacktraces
+            | Self::CacheBacktraces => "  Backtraces",
+            Self::AllocationSampling | Self::GeneralSampling | Self::ArcDereferenceSampling | Self::IoSampling | Self::CacheSampling => {
+                "  Sampling"
+            }
             Self::EventBufferCapacity => "Event buffer capacity",
-            Self::Apply => "OK",
-            Self::Cancel => "Cancel",
         }
     }
 
-    pub(super) fn value(self, configuration: RecordingConfiguration) -> String {
+    const fn recorder(self) -> Option<RecorderKind> {
         match self {
-            Self::AllocationRecording => toggle_label(configuration.allocations.enabled),
+            Self::AllocationRecording | Self::AllocationBacktraces | Self::AllocationSampling => Some(RecorderKind::Allocations),
+            Self::GeneralRecording | Self::GeneralBacktraces | Self::GeneralSampling => Some(RecorderKind::General),
+            Self::ArcDereferenceRecording | Self::ArcDereferenceBacktraces | Self::ArcDereferenceSampling => {
+                Some(RecorderKind::ArcDereferences)
+            }
+            Self::RuntimeTaskRecording | Self::RuntimeTaskBacktraces => Some(RecorderKind::RuntimeTasks),
+            Self::IoRecording | Self::IoBacktraces | Self::IoSampling => Some(RecorderKind::Io),
+            Self::CacheRecording | Self::CacheBacktraces | Self::CacheSampling => Some(RecorderKind::Cache),
+            Self::EventBufferCapacity => None,
+        }
+    }
+
+    const fn is_mode(self) -> bool {
+        matches!(
+            self,
+            Self::AllocationRecording
+                | Self::GeneralRecording
+                | Self::ArcDereferenceRecording
+                | Self::RuntimeTaskRecording
+                | Self::IoRecording
+                | Self::CacheRecording
+        )
+    }
+
+    pub(super) fn value(self, popup: RecordingConfigurationPopup) -> String {
+        if self.is_mode() {
+            return popup
+                .mode(self.recorder().expect("recording mode fields always identify a recorder"))
+                .label()
+                .to_owned();
+        }
+        let configuration = popup.draft;
+        match self {
             Self::AllocationBacktraces => toggle_label(configuration.allocations.capture_backtraces),
             Self::AllocationSampling => sampling_label(configuration.allocations.sampling_one_in),
-            Self::GeneralRecording => toggle_label(configuration.general_events.enabled),
             Self::GeneralBacktraces => toggle_label(configuration.general_events.capture_backtraces),
             Self::GeneralSampling => sampling_label(configuration.general_events.sampling_one_in),
-            Self::ArcDereferenceRecording => toggle_label(configuration.arc_dereferences.enabled),
             Self::ArcDereferenceBacktraces => toggle_label(configuration.arc_dereferences.capture_backtraces),
             Self::ArcDereferenceSampling => sampling_label(configuration.arc_dereferences.sampling_one_in),
-            Self::RuntimeTaskRecording => toggle_label(configuration.runtime_tasks.enabled),
             Self::RuntimeTaskBacktraces => toggle_label(configuration.runtime_tasks.capture_backtraces),
-            Self::IoRecording => toggle_label(configuration.io.enabled),
             Self::IoBacktraces => toggle_label(configuration.io.capture_backtraces),
             Self::IoSampling => sampling_label(configuration.io.sampling_one_in),
-            Self::CacheRecording => toggle_label(configuration.cache.enabled),
             Self::CacheBacktraces => toggle_label(configuration.cache.capture_backtraces),
             Self::CacheSampling => sampling_label(configuration.cache.sampling_one_in),
             Self::EventBufferCapacity => format!("{} events / thread", configuration.event_capacity_per_thread),
-            Self::Apply | Self::Cancel => String::new(),
+            Self::AllocationRecording
+            | Self::GeneralRecording
+            | Self::ArcDereferenceRecording
+            | Self::RuntimeTaskRecording
+            | Self::IoRecording
+            | Self::CacheRecording => unreachable!("recording modes return above"),
         }
     }
 
-    fn adjust(self, configuration: &mut RecordingConfiguration, direction: isize) {
+    fn adjust(self, popup: &mut RecordingConfigurationPopup, direction: isize) {
+        if self.is_mode() {
+            let recorder = self.recorder().expect("recording mode fields always identify a recorder");
+            popup.modes[recorder.index()] = popup.mode(recorder).adjusted(direction);
+            return;
+        }
+        let configuration = &mut popup.draft;
         match self {
-            Self::AllocationRecording => configuration.allocations.enabled = !configuration.allocations.enabled,
             Self::AllocationBacktraces => {
                 configuration.allocations.capture_backtraces = !configuration.allocations.capture_backtraces;
             }
@@ -149,16 +214,12 @@ impl RecordingConfigurationField {
                 configuration.allocations.sampling_one_in =
                     adjusted_value(configuration.allocations.sampling_one_in, &EVENT_SAMPLING_RATES, direction);
             }
-            Self::GeneralRecording => configuration.general_events.enabled = !configuration.general_events.enabled,
             Self::GeneralBacktraces => {
                 configuration.general_events.capture_backtraces = !configuration.general_events.capture_backtraces;
             }
             Self::GeneralSampling => {
                 configuration.general_events.sampling_one_in =
                     adjusted_value(configuration.general_events.sampling_one_in, &EVENT_SAMPLING_RATES, direction);
-            }
-            Self::ArcDereferenceRecording => {
-                configuration.arc_dereferences.enabled = !configuration.arc_dereferences.enabled;
             }
             Self::ArcDereferenceBacktraces => {
                 configuration.arc_dereferences.capture_backtraces = !configuration.arc_dereferences.capture_backtraces;
@@ -167,18 +228,15 @@ impl RecordingConfigurationField {
                 configuration.arc_dereferences.sampling_one_in =
                     adjusted_value(configuration.arc_dereferences.sampling_one_in, &EVENT_SAMPLING_RATES, direction);
             }
-            Self::RuntimeTaskRecording => configuration.runtime_tasks.enabled = !configuration.runtime_tasks.enabled,
             Self::RuntimeTaskBacktraces => {
                 configuration.runtime_tasks.capture_backtraces = !configuration.runtime_tasks.capture_backtraces;
             }
-            Self::IoRecording => configuration.io.enabled = !configuration.io.enabled,
             Self::IoBacktraces => {
                 configuration.io.capture_backtraces = !configuration.io.capture_backtraces;
             }
             Self::IoSampling => {
                 configuration.io.sampling_one_in = adjusted_value(configuration.io.sampling_one_in, &EVENT_SAMPLING_RATES, direction);
             }
-            Self::CacheRecording => configuration.cache.enabled = !configuration.cache.enabled,
             Self::CacheBacktraces => {
                 configuration.cache.capture_backtraces = !configuration.cache.capture_backtraces;
             }
@@ -189,14 +247,156 @@ impl RecordingConfigurationField {
                 configuration.event_capacity_per_thread =
                     adjusted_value(configuration.event_capacity_per_thread, &EVENT_BUFFER_CAPACITIES, direction);
             }
-            Self::Apply | Self::Cancel => {}
+            Self::AllocationRecording
+            | Self::GeneralRecording
+            | Self::ArcDereferenceRecording
+            | Self::RuntimeTaskRecording
+            | Self::IoRecording
+            | Self::CacheRecording => unreachable!("recording modes return above"),
         }
     }
 }
 
 impl RecordingConfigurationPopup {
+    pub(super) fn new(draft: RecordingConfiguration) -> Self {
+        let modes = RecorderKind::ALL.map(|recorder| recording_mode(recorder_policy(draft, recorder)));
+        Self { draft, selected: 0, modes }
+    }
+
     pub(super) fn field(self) -> RecordingConfigurationField {
-        RecordingConfigurationField::ALL[self.selected]
+        self.fields()[self.selected]
+    }
+
+    pub(super) fn fields(self) -> Vec<RecordingConfigurationField> {
+        let mut fields = Vec::with_capacity(19);
+        for (recorder, mode, group) in [
+            (
+                RecorderKind::Allocations,
+                self.mode(RecorderKind::Allocations),
+                [
+                    RecordingConfigurationField::AllocationRecording,
+                    RecordingConfigurationField::AllocationBacktraces,
+                    RecordingConfigurationField::AllocationSampling,
+                ]
+                .as_slice(),
+            ),
+            (
+                RecorderKind::General,
+                self.mode(RecorderKind::General),
+                [
+                    RecordingConfigurationField::GeneralRecording,
+                    RecordingConfigurationField::GeneralBacktraces,
+                    RecordingConfigurationField::GeneralSampling,
+                ]
+                .as_slice(),
+            ),
+            (
+                RecorderKind::ArcDereferences,
+                self.mode(RecorderKind::ArcDereferences),
+                [
+                    RecordingConfigurationField::ArcDereferenceRecording,
+                    RecordingConfigurationField::ArcDereferenceBacktraces,
+                    RecordingConfigurationField::ArcDereferenceSampling,
+                ]
+                .as_slice(),
+            ),
+            (
+                RecorderKind::RuntimeTasks,
+                self.mode(RecorderKind::RuntimeTasks),
+                [
+                    RecordingConfigurationField::RuntimeTaskRecording,
+                    RecordingConfigurationField::RuntimeTaskBacktraces,
+                    RecordingConfigurationField::RuntimeTaskBacktraces,
+                ]
+                .as_slice(),
+            ),
+            (
+                RecorderKind::Io,
+                self.mode(RecorderKind::Io),
+                [
+                    RecordingConfigurationField::IoRecording,
+                    RecordingConfigurationField::IoBacktraces,
+                    RecordingConfigurationField::IoSampling,
+                ]
+                .as_slice(),
+            ),
+            (
+                RecorderKind::Cache,
+                self.mode(RecorderKind::Cache),
+                [
+                    RecordingConfigurationField::CacheRecording,
+                    RecordingConfigurationField::CacheBacktraces,
+                    RecordingConfigurationField::CacheSampling,
+                ]
+                .as_slice(),
+            ),
+        ] {
+            fields.push(group[0]);
+            if mode == RecordingMode::Custom {
+                fields.push(group[1]);
+                if recorder != RecorderKind::RuntimeTasks {
+                    fields.push(group[2]);
+                }
+            }
+        }
+        fields.push(RecordingConfigurationField::EventBufferCapacity);
+        fields
+    }
+
+    fn mode(self, recorder: RecorderKind) -> RecordingMode {
+        self.modes[recorder.index()]
+    }
+
+    fn configuration(self) -> RecordingConfiguration {
+        let mut configuration = self.draft;
+        for recorder in RecorderKind::ALL {
+            let policy = recorder_policy_mut(&mut configuration, recorder);
+            match self.mode(recorder) {
+                RecordingMode::Off => policy.enabled = false,
+                RecordingMode::On => {
+                    policy.enabled = true;
+                    policy.capture_backtraces = false;
+                    policy.sampling_one_in = 1;
+                }
+                RecordingMode::Custom => policy.enabled = true,
+            }
+        }
+        configuration
+    }
+}
+
+fn recorder_policy(configuration: RecordingConfiguration, recorder: RecorderKind) -> seismograph_protocol::message::RecordingPolicy {
+    match recorder {
+        RecorderKind::Allocations => configuration.allocations,
+        RecorderKind::General => configuration.general_events,
+        RecorderKind::ArcDereferences => configuration.arc_dereferences,
+        RecorderKind::RuntimeTasks => configuration.runtime_tasks,
+        RecorderKind::Io => configuration.io,
+        RecorderKind::Cache => configuration.cache,
+    }
+}
+
+fn recorder_policy_mut(
+    configuration: &mut RecordingConfiguration,
+    recorder: RecorderKind,
+) -> &mut seismograph_protocol::message::RecordingPolicy {
+    match recorder {
+        RecorderKind::Allocations => &mut configuration.allocations,
+        RecorderKind::General => &mut configuration.general_events,
+        RecorderKind::ArcDereferences => &mut configuration.arc_dereferences,
+        RecorderKind::RuntimeTasks => &mut configuration.runtime_tasks,
+        RecorderKind::Io => &mut configuration.io,
+        RecorderKind::Cache => &mut configuration.cache,
+    }
+}
+
+const fn recording_mode(policy: seismograph_protocol::message::RecordingPolicy) -> RecordingMode {
+    if !policy.enabled {
+        RecordingMode::Off
+    } else if policy.capture_backtraces || policy.sampling_one_in != 1 {
+        RecordingMode::Custom
+    } else {
+        RecordingMode::On
     }
 }
 
@@ -820,10 +1020,7 @@ impl App {
                     }
                     KeyCode::Char('c') if self.recording_receiver.is_none() => {
                         if let Screen::Connected { recording, .. } = &self.screen {
-                            self.recording_configuration_popup = Some(RecordingConfigurationPopup {
-                                draft: *recording,
-                                selected: 0,
-                            });
+                            self.recording_configuration_popup = Some(RecordingConfigurationPopup::new(*recording));
                         }
                     }
                     _ => {}
@@ -834,28 +1031,29 @@ impl App {
     }
 
     fn handle_recording_configuration_key(&mut self, code: KeyCode) {
+        if code == KeyCode::Enter {
+            if let Some(popup) = self.recording_configuration_popup {
+                self.apply_recording_configuration(popup.configuration());
+            }
+            return;
+        }
         let Some(popup) = &mut self.recording_configuration_popup else {
             return;
         };
         match code {
             KeyCode::Up => popup.selected = popup.selected.saturating_sub(1),
             KeyCode::Down => {
-                popup.selected = advance_selection(popup.selected, RecordingConfigurationField::ALL.len());
+                popup.selected = advance_selection(popup.selected, popup.fields().len());
             }
-            KeyCode::Left => popup.field().adjust(&mut popup.draft, -1),
-            KeyCode::Right | KeyCode::Char(' ') => popup.field().adjust(&mut popup.draft, 1),
+            KeyCode::Left => {
+                popup.field().adjust(popup, -1);
+                popup.selected = popup.selected.min(popup.fields().len().saturating_sub(1));
+            }
+            KeyCode::Right | KeyCode::Char(' ') => {
+                popup.field().adjust(popup, 1);
+                popup.selected = popup.selected.min(popup.fields().len().saturating_sub(1));
+            }
             KeyCode::Esc => self.recording_configuration_popup = None,
-            KeyCode::Enter => match popup.field() {
-                RecordingConfigurationField::Apply => {
-                    let configuration = popup.draft;
-                    self.apply_recording_configuration(configuration);
-                }
-                RecordingConfigurationField::Cancel => {
-                    self.recording_configuration_popup = None;
-                    self.status = "Recording configuration unchanged".into();
-                }
-                field => field.adjust(&mut popup.draft, 1),
-            },
             _ => {}
         }
     }
@@ -1630,82 +1828,74 @@ mod tests {
         configuration.cache.sampling_one_in = 10;
         configuration.event_capacity_per_thread = 1_024;
 
+        let popup = RecordingConfigurationPopup::new(configuration);
         assert_eq!(
-            RecordingConfigurationField::ALL.map(|field| (field.label(), field.value(configuration))),
-            [
-                ("Allocations recording", "on".into()),
-                ("Allocations backtraces", "on".into()),
-                ("Allocations sampling", "1/8 (12.5%)".into()),
-                ("General events recording", "on".into()),
-                ("General events backtraces", "on".into()),
-                ("General events sampling", "1/20 (5%)".into()),
-                ("Arc dereference recording", "on".into()),
-                ("Arc dereference backtraces", "on".into()),
-                ("Arc dereference sampling", "1/100 (1%)".into()),
-                ("Runtime task recording", "on".into()),
-                ("Runtime task backtraces", "on".into()),
-                ("I/O recording", "on".into()),
-                ("I/O backtraces", "on".into()),
-                ("I/O resource sampling", "1/4 (25%)".into()),
-                ("Cache recording", "on".into()),
-                ("Cache backtraces", "on".into()),
-                ("Cache tier sampling", "1/10 (10%)".into()),
+            popup
+                .fields()
+                .into_iter()
+                .map(|field| (field.label(), field.value(popup)))
+                .collect::<Vec<_>>(),
+            vec![
+                ("Allocations", "custom".into()),
+                ("  Backtraces", "on".into()),
+                ("  Sampling", "1/8 (12.5%)".into()),
+                ("Events", "custom".into()),
+                ("  Backtraces", "on".into()),
+                ("  Sampling", "1/20 (5%)".into()),
+                ("Arc", "custom".into()),
+                ("  Backtraces", "on".into()),
+                ("  Sampling", "1/100 (1%)".into()),
+                ("Runtime tasks", "custom".into()),
+                ("  Backtraces", "on".into()),
+                ("I/O", "custom".into()),
+                ("  Backtraces", "on".into()),
+                ("  Sampling", "1/4 (25%)".into()),
+                ("Cache", "custom".into()),
+                ("  Backtraces", "on".into()),
+                ("  Sampling", "1/10 (10%)".into()),
                 ("Event buffer capacity", "1024 events / thread".into()),
-                ("OK", String::new()),
-                ("Cancel", String::new()),
             ]
         );
     }
 
     #[test]
-    fn every_recording_field_adjusts_only_its_value() {
-        let mut configuration = RecordingConfiguration::default();
-        for field in RecordingConfigurationField::ALL {
-            field.adjust(&mut configuration, 1);
-        }
-
+    fn recording_modes_expand_custom_fields_and_normalize_on_apply() {
+        let mut popup = RecordingConfigurationPopup::new(RecordingConfiguration::default());
+        RecordingConfigurationField::AllocationRecording.adjust(&mut popup, 1);
+        let on_fields = popup.fields();
+        RecordingConfigurationField::AllocationRecording.adjust(&mut popup, 1);
+        let custom_fields = popup.fields();
+        RecordingConfigurationField::AllocationBacktraces.adjust(&mut popup, 1);
+        RecordingConfigurationField::AllocationSampling.adjust(&mut popup, 1);
+        let configuration = popup.configuration();
         assert_eq!(
+            (on_fields, custom_fields, configuration.allocations,),
             (
-                configuration.allocations,
-                configuration.general_events,
-                configuration.arc_dereferences,
-                configuration.runtime_tasks,
-                configuration.io,
-                configuration.cache,
-                configuration.event_capacity_per_thread,
-            ),
-            (
+                vec![
+                    RecordingConfigurationField::AllocationRecording,
+                    RecordingConfigurationField::GeneralRecording,
+                    RecordingConfigurationField::ArcDereferenceRecording,
+                    RecordingConfigurationField::RuntimeTaskRecording,
+                    RecordingConfigurationField::IoRecording,
+                    RecordingConfigurationField::CacheRecording,
+                    RecordingConfigurationField::EventBufferCapacity,
+                ],
+                vec![
+                    RecordingConfigurationField::AllocationRecording,
+                    RecordingConfigurationField::AllocationBacktraces,
+                    RecordingConfigurationField::AllocationSampling,
+                    RecordingConfigurationField::GeneralRecording,
+                    RecordingConfigurationField::ArcDereferenceRecording,
+                    RecordingConfigurationField::RuntimeTaskRecording,
+                    RecordingConfigurationField::IoRecording,
+                    RecordingConfigurationField::CacheRecording,
+                    RecordingConfigurationField::EventBufferCapacity,
+                ],
                 seismograph_protocol::message::RecordingPolicy {
                     enabled: true,
                     capture_backtraces: true,
                     sampling_one_in: 2,
                 },
-                seismograph_protocol::message::RecordingPolicy {
-                    enabled: true,
-                    capture_backtraces: true,
-                    sampling_one_in: 2,
-                },
-                seismograph_protocol::message::RecordingPolicy {
-                    enabled: true,
-                    capture_backtraces: true,
-                    sampling_one_in: 2,
-                },
-                seismograph_protocol::message::RecordingPolicy {
-                    enabled: true,
-                    capture_backtraces: true,
-                    sampling_one_in: 1,
-                },
-                seismograph_protocol::message::RecordingPolicy {
-                    enabled: true,
-                    capture_backtraces: true,
-                    sampling_one_in: 2,
-                },
-                seismograph_protocol::message::RecordingPolicy {
-                    enabled: true,
-                    capture_backtraces: true,
-                    sampling_one_in: 2,
-                },
-                131_072,
             )
         );
     }
@@ -1817,29 +2007,44 @@ mod tests {
     }
 
     #[test]
-    fn recording_toggle_preserves_backtraces() {
+    fn recording_mode_changes_preserve_custom_values_until_apply() {
         let mut configuration = RecordingConfiguration::default();
         configuration.allocations.enabled = true;
         configuration.allocations.capture_backtraces = true;
-        RecordingConfigurationField::AllocationRecording.adjust(&mut configuration, 1);
+        let mut popup = RecordingConfigurationPopup::new(configuration);
+        RecordingConfigurationField::AllocationRecording.adjust(&mut popup, -1);
 
         assert_eq!(
-            (configuration.allocations.enabled, configuration.allocations.capture_backtraces),
-            (false, true)
+            (
+                popup.mode(RecorderKind::Allocations),
+                popup.draft.allocations.capture_backtraces,
+                popup.configuration().allocations,
+            ),
+            (
+                RecordingMode::On,
+                true,
+                seismograph_protocol::message::RecordingPolicy {
+                    enabled: true,
+                    capture_backtraces: false,
+                    sampling_one_in: 1,
+                }
+            )
         );
     }
 
     #[test]
     fn backtrace_toggle_preserves_recording() {
-        let mut configuration = RecordingConfiguration::default();
-        RecordingConfigurationField::GeneralBacktraces.adjust(&mut configuration, 1);
+        let mut popup = RecordingConfigurationPopup::new(RecordingConfiguration::default());
+        RecordingConfigurationField::GeneralRecording.adjust(&mut popup, 1);
+        RecordingConfigurationField::GeneralRecording.adjust(&mut popup, 1);
+        RecordingConfigurationField::GeneralBacktraces.adjust(&mut popup, 1);
 
         assert_eq!(
             (
-                configuration.general_events.enabled,
-                configuration.general_events.capture_backtraces
+                popup.configuration().general_events.enabled,
+                popup.configuration().general_events.capture_backtraces
             ),
-            (false, true)
+            (true, true)
         );
     }
 
@@ -1880,24 +2085,13 @@ mod tests {
     #[test]
     fn configuration_popup_uses_arrow_keys_and_escape() {
         let mut app = App::new();
-        app.recording_configuration_popup = Some(RecordingConfigurationPopup {
-            draft: RecordingConfiguration::default(),
-            selected: 0,
-        });
+        app.recording_configuration_popup = Some(RecordingConfigurationPopup::new(RecordingConfiguration::default()));
         app.handle_key(KeyCode::Down);
         let moved = app.recording_configuration_popup;
         app.handle_key(KeyCode::Esc);
 
-        assert_eq!(
-            (moved, app.recording_configuration_popup),
-            (
-                Some(RecordingConfigurationPopup {
-                    draft: RecordingConfiguration::default(),
-                    selected: 1,
-                }),
-                None
-            )
-        );
+        assert_eq!(moved.map(|popup| popup.selected), Some(1));
+        assert_eq!(app.recording_configuration_popup, None);
     }
 
     #[test]
@@ -1909,64 +2103,34 @@ mod tests {
         app.poll_snapshot_capture();
         app.poll_discovery();
         app.poll_recorder_statistics();
-        app.recording_configuration_popup = Some(RecordingConfigurationPopup {
-            draft: RecordingConfiguration::default(),
-            selected: 0,
-        });
+        app.recording_configuration_popup = Some(RecordingConfigurationPopup::new(RecordingConfiguration::default()));
         app.handle_recording_configuration_key(KeyCode::Char('x'));
 
         assert_eq!((app.next_refresh(), app.status), (refresh, String::new()));
     }
 
     #[test]
-    fn configuration_popup_handles_adjust_cancel_and_disconnected_apply() {
+    fn configuration_popup_handles_modes_custom_settings_and_disconnected_apply() {
         let mut app = App::new();
-        app.recording_configuration_popup = Some(RecordingConfigurationPopup {
-            draft: RecordingConfiguration::default(),
-            selected: 1,
-        });
+        app.recording_configuration_popup = Some(RecordingConfigurationPopup::new(RecordingConfiguration::default()));
         app.handle_key(KeyCode::Right);
         let after_right = app.recording_configuration_popup.unwrap();
-        app.handle_key(KeyCode::Left);
-        let after_left = app.recording_configuration_popup.unwrap();
-        app.handle_key(KeyCode::Char(' '));
-        let after_space = app.recording_configuration_popup.unwrap();
-        app.handle_key(KeyCode::Up);
-        let after_up = app.recording_configuration_popup.unwrap();
-        app.handle_key(KeyCode::Down);
-        let after_down = app.recording_configuration_popup.unwrap();
-        app.recording_configuration_popup.as_mut().unwrap().selected = 2;
         app.handle_key(KeyCode::Right);
-        let sampling_after_right = app.recording_configuration_popup.unwrap().draft.allocations.sampling_one_in;
-        app.handle_key(KeyCode::Left);
-        let sampling_after_left = app.recording_configuration_popup.unwrap().draft.allocations.sampling_one_in;
-        app.recording_configuration_popup.as_mut().unwrap().selected = RecordingConfigurationField::ALL.len() - 1;
+        let after_custom = app.recording_configuration_popup.unwrap();
+        app.handle_key(KeyCode::Down);
+        app.handle_key(KeyCode::Right);
+        let backtraces = app.recording_configuration_popup.unwrap().draft.allocations.capture_backtraces;
         app.handle_key(KeyCode::Enter);
 
         assert_eq!(
             (
-                after_right.selected,
-                after_right.draft.allocations.capture_backtraces,
-                after_left.selected,
-                after_left.draft.allocations.capture_backtraces,
-                after_space.selected,
-                after_space.draft.allocations.capture_backtraces,
-                after_up.selected,
-                after_down.selected,
-                sampling_after_right,
-                sampling_after_left,
+                after_right.mode(RecorderKind::Allocations),
+                after_custom.mode(RecorderKind::Allocations),
+                backtraces,
                 app.recording_configuration_popup,
-                app.status.as_str(),
             ),
-            (1, true, 1, false, 1, true, 0, 1, 2, 1, None, "Recording configuration unchanged")
+            (RecordingMode::On, RecordingMode::Custom, true, None)
         );
-
-        app.recording_configuration_popup = Some(RecordingConfigurationPopup {
-            draft: RecordingConfiguration::default(),
-            selected: RecordingConfigurationField::ALL.len() - 2,
-        });
-        app.handle_key(KeyCode::Enter);
-        assert_eq!(app.recording_configuration_popup, None);
     }
 
     #[test]
@@ -1990,13 +2154,7 @@ mod tests {
 
         app.handle_key(KeyCode::Char('c'));
 
-        assert_eq!(
-            app.recording_configuration_popup,
-            Some(RecordingConfigurationPopup {
-                draft: recording,
-                selected: 0,
-            })
-        );
+        assert_eq!(app.recording_configuration_popup, Some(RecordingConfigurationPopup::new(recording)));
     }
 
     #[test]
@@ -2037,12 +2195,7 @@ mod tests {
             tab: MonitorTab::Info,
             snapshot: None,
         };
-        app.recording_configuration_popup = Some(RecordingConfigurationPopup {
-            draft: RecordingConfiguration::default(),
-            selected: 0,
-        });
-
-        app.handle_key(KeyCode::Enter);
+        app.recording_configuration_popup = Some(RecordingConfigurationPopup::new(RecordingConfiguration::default()));
         app.handle_key(KeyCode::Esc);
 
         assert_eq!(
