@@ -87,6 +87,29 @@ fn homogeneous_same_type_drivers_and_drains_have_unambiguous_static_phases() {
 }
 
 #[test]
+fn a_generic_runtime_can_store_both_phases_without_erasure() {
+    enum Participant<D: Driver> {
+        Driver(LocalDriver<D>),
+        Drain(LocalDrain<D::Drain>),
+    }
+
+    fn begin_drain<D: Driver>(participant: Participant<D>) -> Participant<D> {
+        match participant {
+            Participant::Driver(driver) => Participant::Drain(driver.shutdown()),
+            Participant::Drain(drain) => Participant::Drain(drain),
+        }
+    }
+
+    let participant = Participant::Driver(LocalDriver::new(DualPhase { closed: false }));
+    let participant = begin_drain(participant);
+    let participant = begin_drain(participant);
+    let Participant::Drain(mut drain) = participant else {
+        panic!("the runtime must retain the draining phase");
+    };
+    assert_eq!(drain.service(&mut budget(1)).unwrap(), DrainStatus::Complete);
+}
+
+#[test]
 fn budget_is_finite_and_exhaustion_does_not_underflow() {
     let mut budget = budget(2);
     assert_eq!(budget.remaining(), 2);
