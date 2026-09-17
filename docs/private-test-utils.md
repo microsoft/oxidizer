@@ -91,10 +91,6 @@ and `cargo run --example` in this workspace get it with.
   `#[cfg_attr(coverage_nightly, coverage(off))]` and add its path to
   `exclude_globs` in `.cargo/mutants.toml`.
 
-- **Group the two packages in `TEST_GROUPS`** in `scripts/mutants.rs`. The
-  implementation crate's integration tests live in the facade, so mutating it
-  in isolation would report mutants that its own package cannot catch.
-
 - **Allow the implementation crate's types through the facade's
   external-type check.** The facade re-exports them, so
   `allowed_external_types` needs a `fetch_winhttp_impl::*`-style entry; the

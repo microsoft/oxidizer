@@ -6,7 +6,7 @@
 [![crate.io](https://img.shields.io/crates/v/bytesbuf_io.svg)](https://crates.io/crates/bytesbuf_io)
 [![docs.rs](https://docs.rs/bytesbuf_io/badge.svg)](https://docs.rs/bytesbuf_io)
 [![MSRV](https://img.shields.io/crates/msrv/bytesbuf_io)](https://crates.io/crates/bytesbuf_io)
-[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml/badge.svg)](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/microsoft/oxidizer/blob/main/LICENSE)
 <a href="https://github.com/microsoft/oxidizer"><img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
@@ -35,7 +35,7 @@ types that produce or consume streams of bytes. These are in the `testing` modul
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/bytesbuf_io">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbznBFI8C0GD8by5hkazCnR-8b_vEBoag4nrUbmwlWuOx7ojphZIGCa2J5dGVzYnVmX2lvZjAuMTAuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbznBFI8C0GD8by5hkazCnR-8b_vEBoag4nrUbmwlWuOx7ojphZIGCa2J5dGVzYnVmX2lvZjAuMTAuMA
  [__link0]: https://docs.rs/bytesbuf
  [__link1]: https://docs.rs/bytesbuf_io/0.10.0/bytesbuf_io/?search=Read
  [__link2]: https://docs.rs/bytesbuf_io/0.10.0/bytesbuf_io/?search=Write

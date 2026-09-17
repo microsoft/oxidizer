@@ -85,7 +85,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "3S workload running as PID {}; telemetry starts disabled and is controlled through `seismograph monitor`",
         std::process::id()
     );
-    if std::env::var_os("IS_TESTING").is_some() {
+    if std::env::var_os("ANVIL_EXAMPLE").is_some() {
         run_test_workload(&service);
         return Ok(());
     }

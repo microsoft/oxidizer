@@ -306,14 +306,14 @@ Install once:
 
 ```bash
 sudo apt install -y valgrind
-cargo install gungraun-runner --version 0.19.2 --locked
+just setup-callgrind
 ```
 
 The `gungraun-runner` version must match the `gungraun` library version
 pinned in the workspace `Cargo.toml` exactly — `gungraun-runner` enforces
 strict string equality on the version and any drift surfaces as a
-`VersionMismatch` runtime error. `just install-tools` performs the
-equivalent install for you.
+`VersionMismatch` runtime error. The setup recipe derives the required version
+from that workspace dependency.
 
 Then:
 

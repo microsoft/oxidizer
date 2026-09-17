@@ -6,7 +6,7 @@
 [![crate.io](https://img.shields.io/crates/v/seatbelt_http.svg)](https://crates.io/crates/seatbelt_http)
 [![docs.rs](https://docs.rs/seatbelt_http/badge.svg)](https://docs.rs/seatbelt_http)
 [![MSRV](https://img.shields.io/crates/msrv/seatbelt_http)](https://crates.io/crates/seatbelt_http)
-[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml/badge.svg)](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/microsoft/oxidizer/blob/main/LICENSE)
 <a href="https://github.com/microsoft/oxidizer"><img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
@@ -48,7 +48,7 @@ type aliases and an extension trait:
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt_http">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbTOk4e6Z0lGUbu-9zWu8YZcwbyVvoEicMTCUbJQkpemmNhqlhZIOCb2h0dHBfZXh0ZW5zaW9uc2YwLjExLjGCaHNlYXRiZWx0ZTAuOS4wgm1zZWF0YmVsdF9odHRwZTAuOS4x
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbTOk4e6Z0lGUbu-9zWu8YZcwbyVvoEicMTCUbJQkpemmNhqlhZIOCb2h0dHBfZXh0ZW5zaW9uc2YwLjExLjGCaHNlYXRiZWx0ZTAuOS4wgm1zZWF0YmVsdF9odHRwZTAuOS4x
  [__link0]: https://crates.io/crates/seatbelt/0.9.0
  [__link1]: https://crates.io/crates/seatbelt/0.9.0
  [__link2]: https://docs.rs/http_extensions/0.11.1/http_extensions/?search=HttpRequest

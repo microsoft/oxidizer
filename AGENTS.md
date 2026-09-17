@@ -4,18 +4,20 @@ Code in this repository should follow the guidelines specified in the [Microsoft
 
 ## README Files
 
-Crate README files are auto-generated via `just readme`. Do not manually update them. Because they are generated, do not edit them by hand and do not raise their formatting, wording, or casing (for example the title-cased crate name) as issues in code review - such content is not authored here and is regenerated from the crate's doc comments.
+Crate README files are auto-generated via `just anvil-readme --fix`. Do not manually update them. Because they are generated, do not edit them by hand and do not raise their formatting, wording, or casing (for example the title-cased crate name) as issues in code review - such content is not authored here and is regenerated from the crate's doc comments.
 
 ## Executing `just` commands
 
-If you only touch one package, you may use `just package=PACKAGE_NAME command` to narrow command scope to that package, where PACKAGE_NAME is the Cargo.toml `[package].name`, which may differ from the directory name.
+Use each Anvil recipe's `--package PACKAGE_NAME` option when it supports package
+scoping. The package name is the Cargo.toml `[package].name`, which may differ
+from the directory name.
 
 ## Pre-commit Checklist
 
-- Run `just clippy` to verify the code compiles without linter errors.
-- Run `just format` to format code.
-- Run `just readme` to regenerate crate-level readme files.
-- Run `just spellcheck` to check spelling in code comments and docs.
+- Run `just anvil-clippy` to verify the code compiles without linter errors.
+- Run `just anvil-fmt --fix` to format code.
+- Run `just anvil-readme --fix` to regenerate crate-level README files.
+- Run `just anvil-spellcheck` to check spelling in code comments and docs.
 
 ## Spelling
 
@@ -90,22 +92,9 @@ Attach the exclusions to the `no_std` arm alone, splitting the item into per-con
 
 ## Required CI Checks
 
-The `required-checks` job in `.github/workflows/main.yml` is a "fan-in"
-aggregator: branch protection requires only this single context for jobs
-defined in that workflow, and it succeeds when every dependency either
-succeeded or was skipped.
-
-When you add a new job to `main.yml`, you MUST also add it to the `needs:`
-list of `required-checks` if it has BOTH a `strategy.matrix` AND a
-job-level `if:` that can evaluate to false (typically gated on
-`needs.delta.outputs.skip` or `github.event_name`). GitHub Actions does
-not expand the matrix when such a gate skips the job, so per-OS contexts
-like `testing (ubuntu-latest)` are never posted and would stay stuck on
-`Expected — Waiting for status to be reported` if required directly.
-
-Other required jobs should also be funnelled through `required-checks`
-so branch protection only references one workflow context. See the
-inline comment on the `required-checks` job for the full policy.
+The generated Anvil workflow publishes the `Required Anvil checks` fan-in.
+Repository-specific checks outside Anvil publish `Required repository checks`.
+Treat both display names as ruleset interfaces and keep them stable.
 
 ## Maintainability
 
