@@ -5,6 +5,8 @@
 //!
 //! Newly installed drivers and newly created drains receive an initial runnable turn without
 //! needing a notification. Errors from either drain service or arming retire the slot permanently.
+//! This runtime chooses private boxed erasure for heterogeneous owners. The adapters forward
+//! statically into concrete drivers and drains; no public driver trait object is involved.
 
 use std::any::TypeId;
 use std::num::NonZeroUsize;
@@ -13,26 +15,42 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Wake, Waker};
 use std::time::{Duration, Instant};
 
-use arty_io_core::{CompletionBudget, CompletionWaiter, Drain, DrainStatus, Driver, DriverError, IoContext, ServiceStatus, WaitStatus};
+use arty_io_core::{
+    CompletionBudget, CompletionWaiter, Drain, DrainStatus, Driver, DriverError, LocalDrain, LocalDriver, ServiceStatus, WaitStatus,
+};
 
 pub(super) trait ErasedDriver {
     fn service(&mut self, budget: &mut CompletionBudget) -> Result<ServiceStatus, DriverError>;
     fn prepare_wait(&mut self) -> Result<WaitStatus, DriverError>;
-    fn shutdown(self: Box<Self>) -> Box<dyn Drain>;
+    fn shutdown(self: Box<Self>) -> Box<dyn ErasedDrain>;
 }
 
-// The inner trait object is already local, even when its concrete implementation is Send.
-impl<C: IoContext> ErasedDriver for Box<dyn Driver<Context = C>> {
+pub(super) trait ErasedDrain {
+    fn service(&mut self, budget: &mut CompletionBudget) -> Result<DrainStatus, DriverError>;
+    fn prepare_wait(&mut self) -> Result<WaitStatus, DriverError>;
+}
+
+impl<D: Driver> ErasedDriver for LocalDriver<D> {
     fn service(&mut self, budget: &mut CompletionBudget) -> Result<ServiceStatus, DriverError> {
-        self.as_mut().service(budget)
+        self.service(budget)
     }
 
     fn prepare_wait(&mut self) -> Result<WaitStatus, DriverError> {
-        self.as_mut().prepare_wait()
+        self.prepare_wait()
     }
 
-    fn shutdown(self: Box<Self>) -> Box<dyn Drain> {
-        (*self).shutdown()
+    fn shutdown(self: Box<Self>) -> Box<dyn ErasedDrain> {
+        Box::new((*self).shutdown())
+    }
+}
+
+impl<S: Drain> ErasedDrain for LocalDrain<S> {
+    fn service(&mut self, budget: &mut CompletionBudget) -> Result<DrainStatus, DriverError> {
+        self.service(budget)
+    }
+
+    fn prepare_wait(&mut self) -> Result<WaitStatus, DriverError> {
+        self.prepare_wait()
     }
 }
 
@@ -76,7 +94,7 @@ impl Wake for Source {
 
 enum Participant {
     Driver(Box<dyn ErasedDriver>),
-    Drain(Box<dyn Drain>),
+    Drain(Box<dyn ErasedDrain>),
 }
 
 struct Entry {

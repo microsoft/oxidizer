@@ -162,7 +162,7 @@ fn a_timed_out_owner_can_submit_cleanup_before_the_existing_pool_retires() {
         .send(Command::Pause {
             entered: entered_tx,
             resume: resume_rx,
-            cleanup: Box::new(move || cleanup_tx.send(thread::current().id()).unwrap()),
+            cleanup: arty_io_core::SystemTask::new(move || cleanup_tx.send(thread::current().id()).unwrap()),
             accepted: accepted_tx,
         })
         .unwrap();

@@ -6,7 +6,9 @@ use crate::{CompletionBudget, DriverError, ServiceStatus, WaitStatus};
 /// Driver-owned state retained while graceful shutdown makes cooperative progress.
 ///
 /// [`Driver::shutdown`](crate::Driver::shutdown) consumes the running driver and returns this
-/// state as a boxed local trait object. Admission is already closed when the runtime receives it.
+/// concrete state. [`LocalDriver`](crate::LocalDriver) wraps it in an inline
+/// [`LocalDrain`](crate::LocalDrain), preserving its owning thread without allocation or erasure.
+/// Admission is already closed when the runtime receives it.
 /// A drain keeps the running driver's source identities, readiness waker, native registrations,
 /// and active-operation ownership, and does not require another initiation call.
 ///
@@ -21,6 +23,8 @@ use crate::{CompletionBudget, DriverError, ServiceStatus, WaitStatus};
 /// service fails or the overall shutdown deadline expires. Context clones are not drain
 /// participants; operations and callbacks retain ownership of the resources they may still
 /// access. Destruction does not wait for I/O, another participant, or an external callback.
+/// Thread confinement does not pin this value: native callbacks must reference independently
+/// stable or pinned backing storage, not assume the inline drain's address never changes.
 pub trait Drain: 'static {
     /// Performs bounded shutdown progress without waiting for new activity.
     ///

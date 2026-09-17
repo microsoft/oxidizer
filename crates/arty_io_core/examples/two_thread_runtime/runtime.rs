@@ -337,9 +337,10 @@ fn install_on<C: IoContext>(worker: &Worker, mut provider: C::Provider, timeout:
     let (reply, receiver) = mpsc::channel();
     let install = Box::new(move |context: DriverContext| {
         provider.relocate(None, context.thread());
-        let driver = provider.create(context)?;
+        // One box per installed driver: the returned object is already erased and local.
+        let (consumer_context, driver) = provider.create(context)?;
         Ok(Installed {
-            context: Box::new(driver.context()),
+            context: Box::new(consumer_context),
             driver: Box::new(driver),
         })
     });
@@ -473,7 +474,7 @@ impl WorkerLoop {
                     .recv_timeout(Duration::from_secs(5))
                     .expect("the test must resume its paused owner before its safety timeout");
                 accepted
-                    .send(self.tasks.spawn(cleanup))
+                    .send(self.tasks.spawn(move || cleanup.run()))
                     .expect("the test retains its cleanup-admission result receiver");
             }
             Command::Install { id, install, reply } => {

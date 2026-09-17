@@ -6,8 +6,34 @@ use std::sync::Arc;
 
 use crate::DriverError;
 
-/// A synchronous unit of work that an I/O driver delegates to the runtime.
-pub type SystemTask = Box<dyn FnOnce() + Send + 'static>;
+/// An opaque synchronous work item that an I/O driver delegates to the runtime.
+///
+/// Task erasure is private: construction boxes the closure, and [`run`](Self::run) invokes it
+/// indirectly once. This offload cost is separate from the allocation-free local driver owners.
+pub struct SystemTask {
+    action: Box<dyn FnOnce() + Send + 'static>,
+}
+
+impl SystemTask {
+    /// Boxes a synchronous work item without executing it.
+    #[must_use]
+    pub fn new(task: impl FnOnce() + Send + 'static) -> Self {
+        Self { action: Box::new(task) }
+    }
+
+    /// Consumes and executes the work item on a runtime-owned system-work thread.
+    ///
+    /// The runtime must permit blocking here rather than running this on an async worker.
+    pub fn run(self) {
+        (self.action)();
+    }
+}
+
+impl fmt::Debug for SystemTask {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SystemTask").finish_non_exhaustive()
+    }
+}
 
 /// A cloneable handle for running I/O system work on runtime-owned threads.
 ///
@@ -19,6 +45,10 @@ pub type SystemTask = Box<dyn FnOnce() + Send + 'static>;
 /// during registration rollback, so cleanup work submitted during draining can still run.
 /// A retained handle is not itself an execution-lifetime lease. The runtime must preserve execution
 /// access for live owners and transferred cleanup even after a controller's shutdown deadline.
+///
+/// This facility keeps an `Arc`-backed erased callback, and submission constructs one boxed
+/// [`SystemTask`]. Wakers, client storage, and driver-owned resources have their own costs;
+/// static driver contracts are not a promise of globally allocation-free execution.
 #[derive(Clone)]
 pub struct SystemTasks {
     spawn: Arc<dyn Fn(SystemTask) -> Result<(), DriverError> + Send + Sync + 'static>,
@@ -46,7 +76,7 @@ impl SystemTasks {
     /// Returns the submission error from the runtime when work is not accepted, preserving its
     /// classification and underlying source.
     pub fn spawn(&self, task: impl FnOnce() + Send + 'static) -> Result<(), DriverError> {
-        (self.spawn)(Box::new(task))
+        (self.spawn)(SystemTask::new(task))
     }
 }
 

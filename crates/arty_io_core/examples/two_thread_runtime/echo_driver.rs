@@ -11,8 +11,8 @@ use std::task::Waker;
 use std::thread::{self, ThreadId};
 
 use arty_io_core::{
-    CompletionBudget, Drain, DrainStatus, Driver, DriverContext, DriverError, DriverProvider, IoContext, ServiceStatus, SystemTasks,
-    WaitStatus,
+    CompletionBudget, Drain, DrainStatus, Driver, DriverContext, DriverError, DriverProvider, IoContext, LocalDriver, ServiceStatus,
+    SystemTasks, WaitStatus,
 };
 use thread_aware_core::{Thread, ThreadAware};
 
@@ -135,29 +135,35 @@ impl ThreadAware for EchoProvider {
 
 impl DriverProvider for EchoProvider {
     type Context = EchoContext;
-    fn create(self, context: DriverContext) -> Result<Box<dyn Driver<Context = Self::Context>>, DriverError> {
+    type Driver = EchoDriver;
+
+    fn create(self, context: DriverContext) -> Result<(Self::Context, LocalDriver<Self::Driver>), DriverError> {
         let registration = context
             .completion_service::<ReadinessClient>()?
             .register(context.readiness_waker().clone())?;
-        Ok(Box::new(EchoDriver {
-            state: Arc::new(EchoState {
-                owner: thread::current().id(),
-                queue: Mutex::new(PrivateQueue {
-                    open: true,
-                    alive: true,
-                    next_token: 0,
-                    active: 0,
-                    completed_on: None,
-                    requests: HashMap::new(),
-                    completions: VecDeque::with_capacity(64),
-                }),
-                completed: Condvar::new(),
-                registration,
+        // One creation builds the shared state, so the published context and the installed
+        // driver are the same instance's two handles.
+        let state = Arc::new(EchoState {
+            owner: thread::current().id(),
+            queue: Mutex::new(PrivateQueue {
+                open: true,
+                alive: true,
+                next_token: 0,
+                active: 0,
+                completed_on: None,
+                requests: HashMap::new(),
+                completions: VecDeque::with_capacity(64),
             }),
+            completed: Condvar::new(),
+            registration,
+        });
+        let driver = EchoDriver {
+            state: Arc::clone(&state),
             queue_ready: false,
             tasks: context.system_tasks().clone(),
             ready: context.readiness_waker().clone(),
-        }))
+        };
+        Ok((EchoContext { state }, LocalDriver::new(driver)))
     }
 }
 
@@ -179,13 +185,7 @@ impl EchoDriver {
 }
 
 impl Driver for EchoDriver {
-    type Context = EchoContext;
-
-    fn context(&self) -> Self::Context {
-        EchoContext {
-            state: Arc::clone(&self.state),
-        }
-    }
+    type Drain = EchoDrain;
 
     fn service(&mut self, budget: &mut CompletionBudget) -> Result<ServiceStatus, DriverError> {
         debug_assert_eq!(thread::current().id(), self.state.owner);
@@ -234,14 +234,14 @@ impl Driver for EchoDriver {
         })
     }
 
-    fn shutdown(self: Box<Self>) -> Box<dyn Drain> {
+    fn shutdown(self) -> Self::Drain {
         self.state
             .queue
             .lock()
             .expect("a panicking echo operation poisoned its admission lock")
             .open = false;
         let cleanup = Cleanup::start(&self.tasks, self.ready.clone());
-        Box::new(EchoDrain { driver: self, cleanup })
+        EchoDrain { driver: self, cleanup }
     }
 }
 
@@ -261,8 +261,8 @@ impl Drop for EchoDriver {
     }
 }
 
-struct EchoDrain {
-    driver: Box<EchoDriver>,
+pub(super) struct EchoDrain {
+    driver: EchoDriver,
     cleanup: Cleanup,
 }
 

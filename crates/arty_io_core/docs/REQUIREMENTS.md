@@ -51,9 +51,16 @@ backend, scheduler, driver registry, or placement policy.
   discover intersections across heterogeneous capability sets.
 - `DriverContext` carries thread coordinates, system work, a readiness waker,
   and typed clients. It stays on its owning thread.
-- Providers return `Box<dyn Driver<Context = Self::Context>>` without `Send` or
-  `Sync`. The installed boundary cannot cross threads even when the concrete
-  implementation happens to be thread-safe.
+- Providers return the typed consumer context paired with
+  `LocalDriver<Self::Driver>`. The driver value is stored inline, without a
+  mandatory heap allocation or virtual dispatch at this boundary.
+- `LocalDriver` and `LocalDrain` enforce `!Send` and `!Sync` even for thread-safe
+  concrete values. They expose no mutable inner access or extraction.
+- Pair construction does not prove that the context and driver share the correct
+  instance state. Providers construct both from the same private owner, and
+  instance-association scenarios verify the resulting behavior.
+- A heterogeneous runtime may erase these local values privately. Public driver
+  and   drain contracts remain generic and support static dispatch.
 - Creation is prompt and does not wait for runtime workers to make progress.
   Routing and notification are established before a context becomes usable.
 
@@ -113,13 +120,14 @@ backend, scheduler, driver registry, or placement policy.
 
 ## `R6`: Owned cooperative shutdown and safe destruction
 
-- `Driver::shutdown(self: Box<Self>)` consumes the running driver and closes
-  admission synchronously before returning `Box<dyn Drain>`.
+- Consuming `LocalDriver<D>::shutdown` calls `Driver::shutdown(self)`, closes
+  admission synchronously, and returns `LocalDrain<D::Drain>` containing
+  the concrete associated drain value inline.
 - Admission closure synchronizes with acquiring active-operation ownership:
   racing operations are either admitted and included in draining or rejected.
 - The drain keeps the same native registrations and readiness identity.
   Shutdown initiation is not repeated on each service turn.
-- The boxed `Drain` is local and uses the same budget and arming protocol as
+- The owned `Drain` is local and uses the same budget and arming protocol as
   running drivers. Every turn receives a budget; it is not a blocking call or a future.
 - The runtime initiates relevant shutdowns, continues native collection and
   required system work, and services all drains fairly.
@@ -135,6 +143,9 @@ backend, scheduler, driver registry, or placement policy.
   than invalidated on incomplete cleanup.
 - Destruction does not wait for I/O, other participants, or callbacks.
   Independent cleanup retains or receives ownership when it is still needed.
+- Thread locality does not pin an address. Inline owners may move within their
+  owning thread; callback-visible native storage must remain independently
+  stable and owned.
 - Cancellation or timeout is not permission to free native storage. Late control
   packets, callbacks, and wakers participate in registration retirement.
 - Failure remains observable and does not stop cleanup of independent
@@ -182,6 +193,9 @@ backend, scheduler, driver registry, or placement policy.
   active operations or graceful-drain participants.
 - The core provides the cloneable handle, not an implicit thread per operation
   or driver. The runtime implements and owns the execution facility.
+- `SystemTask` is an opaque, consuming work unit. The offload facility may erase
+  heterogeneous closures privately; this does not impose boxing on driver or
+  drain ownership, nor promise a globally allocation-free runtime.
 
 ## `R9`: Native service boundaries and scope
 

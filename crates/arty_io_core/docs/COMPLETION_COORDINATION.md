@@ -51,12 +51,18 @@ not proof of native provenance or automatic discovery of equivalent APIs.
 Drivers and runtimes must agree on the native adapter's client interfaces;
 different compiled client types may need an explicit bridge.
 
-Providers return boxed driver trait objects without `Send` or `Sync`, even if
-their concrete fields implement those traits. A provider may still share an
-engine across instances, and mobile contexts can submit remotely without moving
-the underlying native binding. Strategy-specific shared initialization happens
-when actual clients are known; incompatible worker configurations fail and roll
-back rather than becoming partial success.
+Providers return the typed context paired with `LocalDriver<Self::Driver>`.
+The owner stores its concrete driver inline and prevents cross-thread transfer
+without mandatory driver boxing or dynamic dispatch. The associated drain is
+likewise returned by value inside `LocalDrain`. Private runtime erasure remains
+available for heterogeneous storage.
+
+A provider may still share an engine across instances, and mobile contexts can
+submit remotely without moving the underlying native binding. Pair construction
+requires matching private state; it does not prove the association automatically.
+Strategy-specific shared initialization happens when actual clients are known;
+incompatible worker configurations fail and roll back rather than becoming
+partial success.
 
 ## Windows mapping: aggregate producers before waiting
 
@@ -186,8 +192,8 @@ timeout is not an error.
 
 ## Draining through the same coordinator
 
-Consuming `Driver::shutdown(self: Box<Self>)` closes admission before returning
-`Box<dyn Drain>`.
+Consuming the local driver owner calls `Driver::shutdown(self)` and closes
+admission before returning the associated concrete drain inside a local owner.
 The drain keeps the same registrations and readiness identity and receives the
 same bounded service and preparation opportunities. Every turn receives a budget;
 shutdown is not a blocking call or a future.
@@ -210,6 +216,9 @@ buffer ownership. [Windows cancellation guidance][windows-cancel]
 Destruction cannot wait for I/O or another participant. Transfer or retain
 resource ownership for independent cleanup rather than introducing a blocking
 wait through a destructor.
+Inline owners may move within their own thread. Their thread-local marker is not
+an address-pinning guarantee; callback-visible storage keeps its independent
+stable owner.
 
 The same ownership rules apply during failed creation or partial installation.
 Failures remain visible, and unrelated participants continue cleanup.
@@ -222,6 +231,10 @@ participants.
 retired or failed facility returns an error, not apparent success with a task
 that will never run. Draining reports cleanup rejection promptly while retaining
 the independent ownership of any active native operation.
+The queued `SystemTask` is an opaque work unit, not a public boxed-closure alias.
+Private offload-task erasure and native client storage may still allocate; the
+static driver/drain contract is not a claim that the entire runtime is
+allocation-free.
 
 ## Configuration and alternatives
 

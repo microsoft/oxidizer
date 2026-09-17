@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::task::Waker;
 use std::thread;
 
-use arty_io_core::{CompletionWaiter, Driver, DriverContext, DriverProvider, IoContext, SystemTask, SystemTasks};
+use arty_io_core::{CompletionWaiter, DriverContext, DriverProvider, IoContext, LocalDriver, SystemTask, SystemTasks};
 use thread_aware_core::{Thread, ThreadAware};
 
 use super::coordinator::{Coordinator, Source};
@@ -38,12 +38,12 @@ impl ManualTasks {
             let Some(task) = task else {
                 break;
             };
-            task();
+            task.run();
         }
     }
 }
 
-type Created<C> = (Box<dyn Driver<Context = C>>, Arc<Source>);
+type Created<C> = (C, LocalDriver<<<C as IoContext>::Provider as DriverProvider>::Driver>, Arc<Source>);
 
 pub(super) struct Harness {
     pub(super) coordinator: Coordinator<NativeWaiter>,
@@ -70,12 +70,12 @@ impl Harness {
         let context = self.coordinator.waiter.attach_clients(context).unwrap();
         let mut provider = C::provider().unwrap();
         provider.relocate(None, &self.thread);
-        (provider.create(context).unwrap(), source)
+        let (consumer_context, driver) = provider.create(context).unwrap();
+        (consumer_context, driver, source)
     }
 
     pub(super) fn install<C: IoContext>(&mut self) -> C {
-        let (driver, source) = self.create::<C>();
-        let context = driver.context();
+        let (context, driver, source) = self.create::<C>();
         self.coordinator.insert(TypeId::of::<C>(), source, Box::new(driver));
         context
     }

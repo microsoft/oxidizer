@@ -7,6 +7,9 @@
 //! runs a single collector alongside independent record-delivery and private-queue drivers.
 //! Submitting publishes native-shaped activity; only collection followed by driver service
 //! completes operations. There are no per-driver threads or per-operation producer threads.
+//! Providers return concrete inline local owners. This heterogeneous example deliberately boxes
+//! and erases those owners only in its private coordinator; the public driver contracts do not.
+//! Offload tasks, wakers, client storage, and native backing state have separate allocation costs.
 //!
 //! The external caller uses blocking result handles for a compact demonstration; owner workers
 //! never use those handles. This is a completion coordinator, not an application-future executor.

@@ -25,7 +25,9 @@
 //! On each owning thread it assembles a [`DriverContext`] with thread coordinates,
 //! [`SystemTasks`], and a source readiness waker, and asks the collector on that worker to attach its
 //! own typed clients through [`CompletionWaiter::attach_clients`]. It then relocates the provider
-//! clone and consumes it through [`DriverProvider::create`].
+//! clone and consumes it through [`DriverProvider::create`], which returns a consumer context
+//! for that worker together with its concrete driver in an allocation-free [`LocalDriver`].
+//! The provider must pair each context with the instance it actually belongs to.
 //!
 //! The provider selects its native strategy from the clients the context actually supplies,
 //! before performing native side effects, and reports an unsupported configuration when no
@@ -81,8 +83,11 @@
 //! interruption racing the final check and actual wait. Deadlines and remaining runnable work
 //! also constrain whether and how long the runtime waits.
 //!
-//! Installed drivers and drains are boxed local trait objects: they stay on their owning thread
-//! even when the concrete implementation has thread-safe fields. Native clients may be
+//! [`LocalDriver`] and [`LocalDrain`] hold concrete state inline and dispatch statically. They
+//! stay on their owning thread even when the implementation has thread-safe fields. A runtime
+//! may choose private erasure for heterogeneous storage; the public contracts require no driver
+//! boxing. Thread confinement is not pinning: callback-visible storage must remain independently
+//! stable, pinned, or otherwise safely owned. Native clients may be
 //! thread-local; consumer contexts remain mobile through [`IoContext`]. A runtime with no native
 //! drivers can use an ordinary latched parking collector. Unsupported native configurations fail
 //! explicitly or use another explicitly configured arrangement; core does not silently create
@@ -90,8 +95,9 @@
 //!
 //! # Cooperative shutdown and safe ownership
 //!
-//! [`Driver::shutdown`] consumes the boxed running driver and closes admission before returning
-//! its [`Drain`]. The drain continues service and notification preparation under the same budget
+//! [`LocalDriver::shutdown`] consumes the running owner and invokes [`Driver::shutdown`], which
+//! closes admission and returns its concrete [`Drain`]. A [`LocalDrain`] keeps that value local.
+//! The drain continues service and notification preparation under the same budget
 //! protocol. Every turn receives a budget; shutdown is not a blocking call or a future.
 //!
 //! The runtime initiates all relevant shutdowns, keeps collecting native activity and executing
@@ -112,6 +118,10 @@
 //! was accepted; rejection returns [`DriverError`] and promises no task execution or callback.
 //! Retained owners and pending cleanup keep execution authority on the existing facility even
 //! when the controller reaches its shutdown deadline. Inert handles alone do not extend it.
+//! Offload tasks still use private closure boxing and dispatch through [`SystemTask::run`];
+//! [`SystemTasks`] uses an `Arc`-backed callback. Wakers, clients, and driver-owned resources may
+//! also allocate. Only the inline ownership wrappers themselves introduce no allocation or
+//! dynamic dispatch.
 //!
 //! # Example and design
 //!
@@ -132,6 +142,7 @@ mod driver;
 mod driver_context;
 mod driver_error;
 mod io_context;
+mod local_owner;
 mod provider;
 mod service_status;
 mod system_tasks;
@@ -143,6 +154,7 @@ pub use driver::Driver;
 pub use driver_context::DriverContext;
 pub use driver_error::DriverError;
 pub use io_context::IoContext;
+pub use local_owner::{LocalDrain, LocalDriver};
 pub use provider::DriverProvider;
 pub use service_status::{ServiceStatus, WaitStatus};
 pub use system_tasks::{SystemTask, SystemTasks};

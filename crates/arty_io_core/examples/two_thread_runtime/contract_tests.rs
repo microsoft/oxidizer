@@ -25,10 +25,8 @@ fn budget(units: usize) -> CompletionBudget {
 #[test]
 fn both_models_require_collection_then_owner_service() {
     let mut harness = Harness::new(2);
-    let (mut sample_driver, _) = harness.create::<SampleContext>();
-    let (mut echo_driver, _) = harness.create::<EchoContext>();
-    let sample = sample_driver.context();
-    let echo = echo_driver.context();
+    let (sample, mut sample_driver, _) = harness.create::<SampleContext>();
+    let (echo, mut echo_driver, _) = harness.create::<EchoContext>();
     let number = sample.submit(41).unwrap();
     let text = echo.submit("arty").unwrap();
     sample_driver.service(&mut budget(2)).unwrap();
@@ -51,10 +49,8 @@ fn both_models_require_collection_then_owner_service() {
 #[test]
 fn budget_exhaustion_retains_each_models_continuation() {
     let mut harness = Harness::new(1);
-    let (sample_driver, sample_source) = harness.create::<SampleContext>();
-    let (echo_driver, echo_source) = harness.create::<EchoContext>();
-    let sample = sample_driver.context();
-    let echo = echo_driver.context();
+    let (sample, sample_driver, sample_source) = harness.create::<SampleContext>();
+    let (echo, echo_driver, echo_source) = harness.create::<EchoContext>();
     let mut numbers = Vec::new();
     let mut texts = Vec::new();
     for input in 0..4 {
@@ -205,29 +201,31 @@ fn rejected_cleanup_is_reported_on_the_first_drain_turn_with_active_operations()
             .attach_clients(DriverContext::new(harness.thread.clone(), tasks.clone(), Waker::noop().clone()))
             .unwrap()
     };
-    let sample_driver = SampleContext::provider().unwrap().create(context()).unwrap();
-    let echo_driver = EchoContext::provider().unwrap().create(context()).unwrap();
-    let sample = sample_driver.context();
-    let echo = echo_driver.context();
+    let (sample, sample_driver) = SampleContext::provider().unwrap().create(context()).unwrap();
+    let (echo, echo_driver) = EchoContext::provider().unwrap().create(context()).unwrap();
     let number = sample.submit(9).unwrap();
     let text = echo.submit("pending").unwrap();
-    let drains = [sample_driver.shutdown(), echo_driver.shutdown()];
+    let mut sample_drain = sample_driver.shutdown();
+    let mut echo_drain = echo_driver.shutdown();
     assert!(matches!(sample.submit(0), Err(SampleIoError::Closed)));
     assert!(matches!(echo.submit("closed"), Err(EchoIoError::Closed)));
     assert!(number.is_pending());
     assert!(text.is_pending());
 
     // No native collection has occurred: both drivers still have admitted, incomplete work.
-    for mut drain in drains {
-        let error = drain.service(&mut budget(1)).unwrap_err();
+    for error in [
+        sample_drain.service(&mut budget(1)).unwrap_err(),
+        echo_drain.service(&mut budget(1)).unwrap_err(),
+    ] {
         assert!(error.is_unsupported());
         assert_eq!(error.to_string(), "cleanup submission rejected");
         assert_eq!(
             error.source().unwrap().downcast_ref::<io::Error>().unwrap().kind(),
             io::ErrorKind::PermissionDenied
         );
-        drop(drain);
     }
+    drop(sample_drain);
+    drop(echo_drain);
     assert!(matches!(number.wait(), Err(SampleIoError::Abandoned)));
     assert!(matches!(text.wait(), Err(EchoIoError::Abandoned)));
 }
@@ -245,8 +243,7 @@ fn cleanup_rejection_does_not_stop_an_independent_drain() {
         .waiter
         .attach_clients(DriverContext::new(harness.thread.clone(), tasks, Waker::from(Arc::clone(&source))))
         .unwrap();
-    let driver = SampleContext::provider().unwrap().create(context).unwrap();
-    let sample = driver.context();
+    let (sample, driver) = SampleContext::provider().unwrap().create(context).unwrap();
     harness.coordinator.insert(TypeId::of::<SampleContext>(), source, Box::new(driver));
     let echo = harness.install::<EchoContext>();
     let number = sample.submit(1).unwrap();

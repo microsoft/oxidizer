@@ -13,7 +13,12 @@ use std::time::Instant;
 use arty_io_core::{DriverError, SystemTask, SystemTasks};
 
 pub(super) struct ExecutionLease {
-    sender: mpsc::Sender<SystemTask>,
+    sender: mpsc::Sender<AcceptedTask>,
+}
+
+struct AcceptedTask {
+    task: SystemTask,
+    execution: Arc<ExecutionLease>,
 }
 
 pub(super) struct SystemPool {
@@ -24,13 +29,14 @@ pub(super) struct SystemPool {
 
 impl SystemPool {
     pub(super) fn start() -> Result<Self, DriverError> {
-        let (sender, receiver) = mpsc::channel::<SystemTask>();
+        let (sender, receiver) = mpsc::channel::<AcceptedTask>();
         let (finished_tx, finished) = mpsc::channel();
         let thread = thread::Builder::new()
             .name("in-memory-io-system".into())
             .spawn(move || {
-                while let Ok(task) = receiver.recv() {
-                    task();
+                while let Ok(work) = receiver.recv() {
+                    work.task.run();
+                    drop(work.execution);
                 }
                 // The owner can time out and abandon the join without invalidating this thread.
                 let _ = finished_tx.send(());
@@ -66,10 +72,10 @@ impl SystemPool {
             let job_execution = Arc::clone(&execution);
             execution
                 .sender
-                .send(Box::new(move || {
-                    task();
-                    drop(job_execution);
-                }))
+                .send(AcceptedTask {
+                    task,
+                    execution: job_execution,
+                })
                 .map_err(|error| DriverError::from_message(format!("system work was not accepted: {error}")))
         })
     }

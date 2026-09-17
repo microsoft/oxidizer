@@ -20,15 +20,14 @@ use std::time::{Duration, Instant};
 use std::{fmt, io, thread};
 
 use arty_io_core::{
-    CompletionBudget, CompletionWaiter, Drain, DrainStatus, Driver, DriverContext, DriverError, DriverProvider, IoContext, ServiceStatus,
-    SystemTasks, WaitStatus,
+    CompletionBudget, CompletionWaiter, Drain, DrainStatus, Driver, DriverContext, DriverError, DriverProvider, IoContext, LocalDrain,
+    LocalDriver, ServiceStatus, SystemTask, SystemTasks, WaitStatus,
 };
 use static_assertions::{assert_impl_all, assert_not_impl_any};
 use thread_aware_core::{Thread, ThreadAware};
 
-/// The currency in which a runtime installs a driver: a local boxed trait object.
-type BoxedDriver = Box<dyn Driver<Context = TestContext>>;
-type BoxedDrain = Box<dyn Drain>;
+type InstalledDriver = LocalDriver<TestDriver>;
+type InstalledDrain = LocalDrain<TestDrain>;
 
 /// Every cooperative loop in this file is bounded so a mutated quota cannot spin forever.
 const MAX_TURNS: usize = 32;
@@ -37,14 +36,54 @@ const WAIT_CAP: Duration = Duration::from_millis(50);
 
 assert_not_impl_any!(DriverContext: Send, Sync);
 assert_not_impl_any!(CompletionBudget: Clone, Copy);
-assert_not_impl_any!(BoxedDriver: Send, Sync, Clone);
-assert_not_impl_any!(BoxedDrain: Send, Sync, Clone);
+assert_not_impl_any!(InstalledDriver: Send, Sync, Clone);
+assert_not_impl_any!(InstalledDrain: Send, Sync, Clone);
 assert_impl_all!(TestDriver: Send, Sync);
+assert_impl_all!(TestDrain: Send, Sync);
+assert_impl_all!(SystemTask: Send, fmt::Debug);
 assert_impl_all!(DriverError: Send, Sync, fmt::Debug, fmt::Display, Error);
 assert_impl_all!(SystemTasks: Clone, Send, Sync, fmt::Debug);
 assert_impl_all!(ServiceStatus: Copy, Clone, Eq, fmt::Debug);
 assert_impl_all!(DrainStatus: Copy, Clone, Eq, fmt::Debug);
 assert_impl_all!(WaitStatus: Copy, Clone, Eq, fmt::Debug);
+assert_impl_all!(DualPhase: Send, Sync);
+assert_impl_all!(LocalDriver<DualPhase>: Unpin);
+assert_impl_all!(LocalDrain<DualPhase>: Unpin);
+assert_not_impl_any!(LocalDriver<DualPhase>: Send, Sync, Drain);
+assert_not_impl_any!(LocalDrain<DualPhase>: Send, Sync, Driver);
+
+#[test]
+fn local_owners_preserve_inline_layout_without_driver_boxing() {
+    assert_eq!(size_of::<LocalDriver<DualPhase>>(), size_of::<DualPhase>());
+    assert_eq!(align_of::<LocalDriver<DualPhase>>(), align_of::<DualPhase>());
+    assert_eq!(size_of::<LocalDrain<DualPhase>>(), size_of::<DualPhase>());
+    assert_eq!(align_of::<LocalDrain<DualPhase>>(), align_of::<DualPhase>());
+    assert_eq!(size_of::<InstalledDriver>(), size_of::<TestDriver>());
+    assert_eq!(size_of::<InstalledDrain>(), size_of::<TestDrain>());
+}
+
+#[test]
+fn homogeneous_same_type_drivers_and_drains_have_unambiguous_static_phases() {
+    let mut drivers = [
+        LocalDriver::new(DualPhase { closed: false }),
+        LocalDriver::new(DualPhase { closed: false }),
+    ];
+    for driver in &mut drivers {
+        assert_eq!(driver.service(&mut budget(1)).unwrap(), ServiceStatus::Idle);
+        assert_eq!(driver.prepare_wait().unwrap(), WaitStatus::Armed);
+    }
+    for mut drain in drivers.map(LocalDriver::shutdown) {
+        let mut exhausted = budget(1);
+        assert!(exhausted.try_consume());
+        assert_eq!(
+            drain.service(&mut exhausted).unwrap(),
+            DrainStatus::Pending(ServiceStatus::Runnable)
+        );
+        assert_eq!(drain.prepare_wait().unwrap(), WaitStatus::WorkReady);
+        assert_eq!(drain.service(&mut budget(1)).unwrap(), DrainStatus::Complete);
+        drop(drain);
+    }
+}
 
 #[test]
 fn budget_is_finite_and_exhaustion_does_not_underflow() {
@@ -84,7 +123,7 @@ fn driver_context_exposes_worker_system_work_and_readiness() {
         worker_thread(),
         SystemTasks::new(move |task| {
             tasks_tx.send(()).unwrap();
-            task();
+            task.run();
             Ok(())
         }),
         Waker::from(Arc::clone(&wake)),
@@ -100,6 +139,7 @@ fn driver_context_exposes_worker_system_work_and_readiness() {
     context.readiness_waker().wake_by_ref();
     assert_eq!(wake.count(), 1);
     assert!(format!("{context:?}").contains("DriverContext"));
+    assert!(format!("{:?}", context.system_tasks()).contains("SystemTasks"));
 }
 
 #[test]
@@ -113,7 +153,18 @@ fn system_task_acceptance_does_not_imply_completion() {
     let task_ran = Arc::clone(&ran);
     tasks.spawn(move || task_ran.store(true, Ordering::Relaxed)).unwrap();
     assert!(!ran.load(Ordering::Relaxed));
-    receiver.recv_timeout(WAIT_CAP).unwrap()();
+    receiver.recv_timeout(WAIT_CAP).unwrap().run();
+    assert!(ran.load(Ordering::Relaxed));
+}
+
+#[test]
+fn an_opaque_system_task_runs_only_when_consumed() {
+    let ran = Arc::new(AtomicBool::new(false));
+    let task_ran = Arc::clone(&ran);
+    let task = SystemTask::new(move || task_ran.store(true, Ordering::Relaxed));
+    assert!(format!("{task:?}").contains("SystemTask"));
+    assert!(!ran.load(Ordering::Relaxed));
+    task.run();
     assert!(ran.load(Ordering::Relaxed));
 }
 
@@ -177,9 +228,9 @@ fn provider_selects_preferred_strategy_from_the_clients_actually_supplied() {
         .with_completion_service(fallback.clone())
         .unwrap();
 
-    let driver = TestContext::provider().unwrap().create(context).unwrap();
+    let (context, _driver) = TestContext::provider().unwrap().create(context).unwrap();
 
-    assert_eq!(driver.context().strategy(), Strategy::Preferred);
+    assert_eq!(context.strategy(), Strategy::Preferred);
     assert_eq!(preferred.registrations(), 1);
     assert_eq!(fallback.registrations(), 0);
 }
@@ -189,9 +240,9 @@ fn provider_falls_back_when_the_preferred_client_is_absent() {
     let fallback = FallbackClient::new();
     let context = driver_context().with_completion_service(fallback.clone()).unwrap();
 
-    let driver = TestContext::provider().unwrap().create(context).unwrap();
+    let (context, _driver) = TestContext::provider().unwrap().create(context).unwrap();
 
-    assert_eq!(driver.context().strategy(), Strategy::Fallback);
+    assert_eq!(context.strategy(), Strategy::Fallback);
     assert_eq!(fallback.registrations(), 1);
 }
 
@@ -237,29 +288,83 @@ fn one_provider_creates_an_independent_instance_per_worker() {
 
     let mut first_clone = provider.clone();
     first_clone.relocate(None, &worker_thread());
-    let first = first_clone
+    let (first, _first_driver) = first_clone
         .create(driver_context().with_completion_service(preferred.clone()).unwrap())
         .unwrap();
 
     let mut second_clone = provider;
     second_clone.relocate(None, &worker_thread());
-    let second = second_clone
+    let (second, _second_driver) = second_clone
         .create(driver_context().with_completion_service(preferred.clone()).unwrap())
         .unwrap();
 
     // Creation never waits for another worker, and the instances share no driver state.
     assert_eq!(preferred.registrations(), 2);
-    first.context().queue_events(1);
-    assert_eq!(first.context().queued_events(), 1);
-    assert_eq!(second.context().queued_events(), 0);
+    first.queue_events(1);
+    assert_eq!(first.queued_events(), 1);
+    assert_eq!(second.queued_events(), 0);
+}
+
+#[test]
+fn each_returned_context_belongs_to_its_own_driver_instance() {
+    let preferred = PreferredClient::new();
+    let provider = TestContext::provider().unwrap();
+    let (first, mut first_driver) = provider
+        .clone()
+        .create(driver_context().with_completion_service(preferred.clone()).unwrap())
+        .unwrap();
+    let (second, second_driver) = provider
+        .create(driver_context().with_completion_service(preferred).unwrap())
+        .unwrap();
+
+    // Two instances of the SAME context type: the pairing is a value-level obligation that the
+    // tuple does not prove, so it is verified through observable effects.
+    let first_operation = first.begin_operation().unwrap();
+    let second_operation = second.begin_operation().unwrap();
+    first.queue_events(2);
+    second.queue_events(3);
+
+    assert_eq!(first_driver.service(&mut budget(MAX_TURNS)).unwrap(), ServiceStatus::Idle);
+    assert_eq!(first.completed_events(), 2);
+    assert_eq!(
+        second.completed_events(),
+        0,
+        "servicing one driver must not complete the other's work"
+    );
+
+    let mut first_drain = first_driver.shutdown();
+    assert!(first.is_closed());
+    assert!(!second.is_closed(), "shutting down one driver must not close the other's admission");
+    let still_admitted = second.begin_operation().unwrap();
+
+    assert_eq!(
+        first_drain.service(&mut budget(MAX_TURNS)).unwrap(),
+        DrainStatus::Pending(ServiceStatus::Idle),
+        "the first drain waits for its own operation, not the other instance's"
+    );
+    drop(first_operation);
+    assert_eq!(first_drain.service(&mut budget(MAX_TURNS)).unwrap(), DrainStatus::Complete);
+    assert_eq!(
+        second.active_operations(),
+        2,
+        "the retired instance released none of its peer's state"
+    );
+
+    drop(second_driver);
+    drop(second_operation);
+    drop(still_admitted);
+    assert_eq!(second.active_operations(), 0);
+    // The runtime owns terminal removal; releasing the completed drain drops only its own driver.
+    drop(first_drain);
+    assert_eq!(first.drop_calls(), 1);
+    assert_eq!(second.drop_calls(), 1);
 }
 
 #[test]
 fn driver_without_native_clients_installs_on_a_client_free_context() {
     let provider = SoftwareContext::provider().unwrap();
-    let mut driver = provider.create(driver_context()).unwrap();
+    let (context, mut driver) = provider.create(driver_context()).unwrap();
 
-    let context = driver.context();
     context.0.queue_events(1);
     let mut budget = budget(4);
     assert_eq!(driver.service(&mut budget).unwrap(), ServiceStatus::Idle);
@@ -267,16 +372,17 @@ fn driver_without_native_clients_installs_on_a_client_free_context() {
 }
 
 #[test]
-fn installed_driver_and_drain_stay_local_trait_objects() {
+fn installed_driver_and_drain_stay_local_inline_owners() {
     let preferred = PreferredClient::new();
-    let driver: BoxedDriver = TestContext::provider()
+    let (context, driver): (TestContext, InstalledDriver) = TestContext::provider()
         .unwrap()
         .create(driver_context().with_completion_service(preferred).unwrap())
         .unwrap();
-    let context = driver.context();
 
-    // The concrete driver is Send and Sync; the installed object deliberately is not.
-    let drain: BoxedDrain = driver.shutdown();
+    // Both concrete values are Send and Sync; their installed owners deliberately are not.
+    assert!(format!("{driver:?}").contains("LocalDriver"));
+    let drain: InstalledDrain = driver.shutdown();
+    assert!(format!("{drain:?}").contains("LocalDrain"));
     assert_eq!(context.shutdown_calls(), 1);
     drop(drain);
 }
@@ -413,10 +519,11 @@ fn abandoning_a_drain_keeps_admitted_state_owned() {
 #[test]
 fn drain_service_failure_preserves_its_native_cause_and_releases_state() {
     let drops = Rc::new(Cell::new(0));
-    let mut drain: BoxedDrain = Box::new(FailingDrain {
+    let mut drain = LocalDriver::new(FailingDrain {
         fail_prepare: false,
         drops: Rc::clone(&drops),
-    });
+    })
+    .shutdown();
 
     let error = drain.service(&mut budget(4)).unwrap_err();
     assert!(error.source().unwrap().downcast_ref::<io::Error>().is_some());
@@ -429,10 +536,11 @@ fn drain_service_failure_preserves_its_native_cause_and_releases_state() {
 #[test]
 fn drain_preparation_failure_is_reported_to_the_runtime() {
     let drops = Rc::new(Cell::new(0));
-    let mut drain: BoxedDrain = Box::new(FailingDrain {
+    let mut drain = LocalDriver::new(FailingDrain {
         fail_prepare: true,
         drops: Rc::clone(&drops),
-    });
+    })
+    .shutdown();
 
     let error = drain.prepare_wait().unwrap_err();
     assert!(error.to_string().contains("arming"));
@@ -552,8 +660,8 @@ fn a_boxed_collector_attaches_its_own_clients_without_naming_native_types() {
     let waiter: Box<dyn CompletionWaiter> = Box::new(TestWaiter::new());
 
     let context = waiter.attach_clients(driver_context()).unwrap();
-    let driver = TestContext::provider().unwrap().create(context).unwrap();
-    assert_eq!(driver.context().strategy(), Strategy::Preferred);
+    let (context, _driver) = TestContext::provider().unwrap().create(context).unwrap();
+    assert_eq!(context.strategy(), Strategy::Preferred);
 
     // Attaching the same clients twice is the duplicate-client failure, not a silent replacement.
     let error = waiter.attach_clients(waiter.attach_clients(driver_context()).unwrap()).unwrap_err();
@@ -566,8 +674,8 @@ fn a_collector_without_native_clients_uses_the_default_seam() {
     let context = waiter.attach_clients(driver_context()).unwrap();
 
     assert!(context.completion_service::<PreferredClient>().unwrap_err().is_unsupported());
-    let driver = SoftwareContext::provider().unwrap().create(context).unwrap();
-    assert_eq!(driver.context().0.completed_events(), 0);
+    let (context, _driver) = SoftwareContext::provider().unwrap().create(context).unwrap();
+    assert_eq!(context.0.completed_events(), 0);
 }
 
 #[test]
@@ -577,8 +685,8 @@ fn a_late_readiness_signal_after_destruction_is_safe() {
     let context = DriverContext::new(worker_thread(), system_tasks(), Waker::from(Arc::clone(&wake)))
         .with_completion_service(preferred)
         .unwrap();
-    let driver = TestContext::provider().unwrap().create(context).unwrap();
-    let readiness = driver.context().readiness_waker();
+    let (context, driver) = TestContext::provider().unwrap().create(context).unwrap();
+    let readiness = context.readiness_waker();
 
     let drain = driver.shutdown();
     drop(drain);
@@ -591,6 +699,50 @@ fn a_late_readiness_signal_after_destruction_is_safe() {
 // ---------------------------------------------------------------------------------------------
 // Test doubles
 // ---------------------------------------------------------------------------------------------
+
+struct DualPhase {
+    closed: bool,
+}
+
+impl Driver for DualPhase {
+    type Drain = Self;
+
+    fn service(&mut self, budget: &mut CompletionBudget) -> Result<ServiceStatus, DriverError> {
+        assert!(!self.closed);
+        Ok(if budget.try_consume() {
+            ServiceStatus::Idle
+        } else {
+            ServiceStatus::Runnable
+        })
+    }
+
+    fn prepare_wait(&mut self) -> Result<WaitStatus, DriverError> {
+        assert!(!self.closed);
+        Ok(WaitStatus::Armed)
+    }
+
+    fn shutdown(mut self) -> Self::Drain {
+        assert!(!self.closed);
+        self.closed = true;
+        self
+    }
+}
+
+impl Drain for DualPhase {
+    fn service(&mut self, budget: &mut CompletionBudget) -> Result<DrainStatus, DriverError> {
+        assert!(self.closed);
+        Ok(if budget.try_consume() {
+            DrainStatus::Complete
+        } else {
+            DrainStatus::Pending(ServiceStatus::Runnable)
+        })
+    }
+
+    fn prepare_wait(&mut self) -> Result<WaitStatus, DriverError> {
+        assert!(self.closed);
+        Ok(WaitStatus::WorkReady)
+    }
+}
 
 #[derive(Debug, Default)]
 struct WakeCount {
@@ -702,6 +854,14 @@ struct TestContext {
 }
 
 impl TestContext {
+    fn fresh(strategy: Strategy, readiness: Waker) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(State::default())),
+            strategy,
+            readiness,
+        }
+    }
+
     fn strategy(&self) -> Strategy {
         self.strategy
     }
@@ -787,8 +947,9 @@ impl ThreadAware for TestProvider {
 
 impl DriverProvider for TestProvider {
     type Context = TestContext;
+    type Driver = TestDriver;
 
-    fn create(self, context: DriverContext) -> Result<Box<dyn Driver<Context = Self::Context>>, DriverError> {
+    fn create(self, context: DriverContext) -> Result<(Self::Context, LocalDriver<Self::Driver>), DriverError> {
         // Select from the clients this worker actually supplies, before any native side effect.
         let strategy = if context.completion_service::<PreferredClient>().is_ok() {
             Strategy::Preferred
@@ -804,7 +965,10 @@ impl DriverProvider for TestProvider {
             Strategy::Preferred => context.completion_service::<PreferredClient>()?.register(&readiness)?,
             Strategy::Fallback => context.completion_service::<FallbackClient>()?.register(&readiness)?,
         }
-        Ok(Box::new(TestDriver::new(strategy, readiness)))
+        // The published handle and the installed driver share one newly created state.
+        let handle = TestContext::fresh(strategy, readiness);
+        let driver = TestDriver { context: handle.clone() };
+        Ok((handle, LocalDriver::new(driver)))
     }
 }
 
@@ -814,16 +978,6 @@ struct TestDriver {
 }
 
 impl TestDriver {
-    fn new(strategy: Strategy, readiness: Waker) -> Self {
-        Self {
-            context: TestContext {
-                state: Arc::new(Mutex::new(State::default())),
-                strategy,
-                readiness,
-            },
-        }
-    }
-
     fn close(&self) {
         self.context.state.lock().unwrap().closed = true;
     }
@@ -838,11 +992,7 @@ impl Drop for TestDriver {
 }
 
 impl Driver for TestDriver {
-    type Context = TestContext;
-
-    fn context(&self) -> Self::Context {
-        self.context.clone()
-    }
+    type Drain = TestDrain;
 
     fn service(&mut self, budget: &mut CompletionBudget) -> Result<ServiceStatus, DriverError> {
         let mut state = self.context.state.lock().unwrap();
@@ -864,16 +1014,16 @@ impl Driver for TestDriver {
         })
     }
 
-    fn shutdown(self: Box<Self>) -> Box<dyn Drain> {
+    fn shutdown(self) -> Self::Drain {
         // Admission closes synchronously, before the runtime can service the returned drain.
         self.close();
         self.context.state.lock().unwrap().shutdown_calls += 1;
-        Box::new(TestDrain { driver: self })
+        TestDrain { driver: self }
     }
 }
 
 struct TestDrain {
-    driver: Box<TestDriver>,
+    driver: TestDriver,
 }
 
 impl Drain for TestDrain {
@@ -918,41 +1068,36 @@ impl ThreadAware for SoftwareProvider {
 
 impl DriverProvider for SoftwareProvider {
     type Context = SoftwareContext;
+    type Driver = TestDriver;
 
-    fn create(self, context: DriverContext) -> Result<Box<dyn Driver<Context = Self::Context>>, DriverError> {
-        Ok(Box::new(SoftwareDriver(TestDriver::new(
-            Strategy::Fallback,
-            context.readiness_waker().clone(),
-        ))))
-    }
-}
-
-#[derive(Debug)]
-struct SoftwareDriver(TestDriver);
-
-impl Driver for SoftwareDriver {
-    type Context = SoftwareContext;
-
-    fn context(&self) -> Self::Context {
-        SoftwareContext(self.0.context())
-    }
-
-    fn service(&mut self, budget: &mut CompletionBudget) -> Result<ServiceStatus, DriverError> {
-        self.0.service(budget)
-    }
-
-    fn prepare_wait(&mut self) -> Result<WaitStatus, DriverError> {
-        self.0.prepare_wait()
-    }
-
-    fn shutdown(self: Box<Self>) -> Box<dyn Drain> {
-        Box::new(self.0).shutdown()
+    fn create(self, context: DriverContext) -> Result<(Self::Context, LocalDriver<Self::Driver>), DriverError> {
+        // A driver names no context family, so one implementation serves a distinct context type
+        // without a delegating wrapper.
+        let handle = TestContext::fresh(Strategy::Fallback, context.readiness_waker().clone());
+        let driver = TestDriver { context: handle.clone() };
+        Ok((SoftwareContext(handle), LocalDriver::new(driver)))
     }
 }
 
 struct FailingDrain {
     fail_prepare: bool,
     drops: Rc<Cell<usize>>,
+}
+
+impl Driver for FailingDrain {
+    type Drain = Self;
+
+    fn service(&mut self, _budget: &mut CompletionBudget) -> Result<ServiceStatus, DriverError> {
+        Ok(ServiceStatus::Idle)
+    }
+
+    fn prepare_wait(&mut self) -> Result<WaitStatus, DriverError> {
+        Ok(WaitStatus::Armed)
+    }
+
+    fn shutdown(self) -> Self::Drain {
+        self
+    }
 }
 
 impl Drain for FailingDrain {
@@ -1112,7 +1257,7 @@ fn budget(units: usize) -> CompletionBudget {
 
 fn system_tasks() -> SystemTasks {
     SystemTasks::new(|task| {
-        task();
+        task.run();
         Ok(())
     })
 }
@@ -1121,16 +1266,15 @@ fn driver_context() -> DriverContext {
     DriverContext::new(worker_thread(), system_tasks(), Waker::noop().clone())
 }
 
-fn installed_driver() -> (BoxedDriver, TestContext) {
+fn installed_driver() -> (InstalledDriver, TestContext) {
     installed_driver_with(&Arc::new(WakeCount::default()))
 }
 
-fn installed_driver_with(wake: &Arc<WakeCount>) -> (BoxedDriver, TestContext) {
+fn installed_driver_with(wake: &Arc<WakeCount>) -> (InstalledDriver, TestContext) {
     let context = DriverContext::new(worker_thread(), system_tasks(), Waker::from(Arc::clone(wake)))
         .with_completion_service(PreferredClient::new())
         .unwrap();
-    let driver = TestContext::provider().unwrap().create(context).unwrap();
-    let handle = driver.context();
+    let (handle, driver) = TestContext::provider().unwrap().create(context).unwrap();
     (driver, handle)
 }
 

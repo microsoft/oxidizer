@@ -10,7 +10,7 @@ use std::task::Waker;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use arty_io_core::{CompletionBudget, CompletionWaiter, Drain, DrainStatus, DriverError, ServiceStatus, WaitStatus};
+use arty_io_core::{CompletionBudget, CompletionWaiter, Drain, DrainStatus, Driver, DriverError, LocalDriver, ServiceStatus, WaitStatus};
 
 use super::{Coordinator, ErasedDriver, Source};
 use crate::test_support::ManualTasks;
@@ -39,31 +39,31 @@ type Service = Box<dyn FnMut(&mut CompletionBudget) -> Result<ServiceStatus, Dri
 type DrainService = Box<dyn FnMut(&mut CompletionBudget) -> Result<DrainStatus, DriverError>>;
 type Arm = Box<dyn FnMut() -> Result<WaitStatus, DriverError>>;
 
-struct Scripted {
+struct Scripted<S: Drain = ScriptedDrain> {
     service: Service,
     arm: Arm,
-    shutdown: Box<dyn FnOnce() -> Box<dyn Drain>>,
+    shutdown: Box<dyn FnOnce() -> S>,
 }
 
-impl Scripted {
+impl Scripted<ScriptedDrain> {
     fn new(service: Service) -> Self {
         Self {
             service,
             arm: Box::new(|| Ok(WaitStatus::Armed)),
-            shutdown: Box::new(|| {
-                Box::new(ScriptedDrain {
-                    service: Box::new(|budget| {
-                        assert!(budget.try_consume());
-                        Ok(DrainStatus::Complete)
-                    }),
-                    arm: Box::new(|| Ok(WaitStatus::WorkReady)),
-                })
+            shutdown: Box::new(|| ScriptedDrain {
+                service: Box::new(|budget| {
+                    assert!(budget.try_consume());
+                    Ok(DrainStatus::Complete)
+                }),
+                arm: Box::new(|| Ok(WaitStatus::WorkReady)),
             }),
         }
     }
 }
 
-impl ErasedDriver for Scripted {
+impl<S: Drain> Driver for Scripted<S> {
+    type Drain = S;
+
     fn service(&mut self, budget: &mut CompletionBudget) -> Result<ServiceStatus, DriverError> {
         (self.service)(budget)
     }
@@ -72,9 +72,13 @@ impl ErasedDriver for Scripted {
         (self.arm)()
     }
 
-    fn shutdown(self: Box<Self>) -> Box<dyn Drain> {
+    fn shutdown(self) -> Self::Drain {
         (self.shutdown)()
     }
+}
+
+fn erase(driver: impl Driver) -> Box<dyn ErasedDriver> {
+    Box::new(LocalDriver::new(driver))
 }
 
 struct ScriptedDrain {
@@ -155,7 +159,7 @@ fn installation_schedules_an_initial_turn_without_a_notification() {
         assert_eq!(arm_calls.get(), 1);
         Ok(WaitStatus::Armed)
     });
-    coordinator.insert(TypeId::of::<A>(), Arc::clone(&source), Box::new(driver));
+    coordinator.insert(TypeId::of::<A>(), Arc::clone(&source), erase(driver));
     assert!(!source.is_ready());
     assert_eq!(coordinator.wait_duration(Instant::now(), None), Duration::ZERO);
     coordinator.service(Instant::now());
@@ -175,20 +179,18 @@ fn shutdown_of_an_idle_driver_schedules_its_own_initial_turn() {
     let service_calls = Rc::clone(&calls);
     let arm_calls = Rc::clone(&calls);
     let mut driver = Scripted::new(Box::new(|_| Ok(ServiceStatus::Idle)));
-    driver.shutdown = Box::new(move || {
-        Box::new(ScriptedDrain {
-            service: Box::new(move |budget| {
-                assert!(budget.try_consume());
-                service_calls.set(service_calls.get() + 1);
-                Ok(DrainStatus::Pending(ServiceStatus::Idle))
-            }),
-            arm: Box::new(move || {
-                assert_eq!(arm_calls.get(), 1);
-                Ok(WaitStatus::Armed)
-            }),
-        })
+    driver.shutdown = Box::new(move || ScriptedDrain {
+        service: Box::new(move |budget| {
+            assert!(budget.try_consume());
+            service_calls.set(service_calls.get() + 1);
+            Ok(DrainStatus::Pending(ServiceStatus::Idle))
+        }),
+        arm: Box::new(move || {
+            assert_eq!(arm_calls.get(), 1);
+            Ok(WaitStatus::Armed)
+        }),
     });
-    coordinator.insert(TypeId::of::<A>(), Arc::clone(&source), Box::new(driver));
+    coordinator.insert(TypeId::of::<A>(), Arc::clone(&source), erase(driver));
     coordinator.service(Instant::now());
     coordinator.arm();
     assert_eq!(coordinator.wait_duration(Instant::now(), None), Duration::MAX);
@@ -217,7 +219,7 @@ fn shutdown_created_by_driver_failure_also_gets_an_initial_turn() {
             }
         }));
         driver.arm = Box::new(|| Err(DriverError::from_message("injected driver arming failure")));
-        coordinator.insert(TypeId::of::<A>(), Arc::clone(&source), Box::new(driver));
+        coordinator.insert(TypeId::of::<A>(), Arc::clone(&source), erase(driver));
         coordinator.service(Instant::now());
         if fail_during_arm {
             coordinator.arm();
@@ -243,7 +245,7 @@ fn a_wake_during_service_is_not_cleared_by_its_idle_result() {
     coordinator.insert(
         TypeId::of::<A>(),
         Arc::clone(&source),
-        Box::new(Scripted::new(Box::new(move |budget| {
+        erase(Scripted::new(Box::new(move |budget| {
             assert!(budget.try_consume());
             service_calls.set(service_calls.get() + 1);
             if service_calls.get() == 1 {
@@ -279,7 +281,7 @@ fn a_notification_during_arm_is_rechecked_before_waiting() {
         notified_rx.recv_timeout(Duration::from_secs(5)).unwrap();
         Ok(WaitStatus::Armed)
     });
-    coordinator.insert(TypeId::of::<A>(), source, Box::new(driver));
+    coordinator.insert(TypeId::of::<A>(), source, erase(driver));
     coordinator.service(Instant::now());
     coordinator.arm();
     assert_eq!(coordinator.wait_duration(Instant::now(), None), Duration::ZERO);
@@ -295,7 +297,7 @@ fn collection_and_every_busy_source_get_a_bounded_turn() {
         coordinator.insert(
             id,
             Source::new(coordinator.waiter.waker()),
-            Box::new(Scripted::new(Box::new(move |budget| {
+            erase(Scripted::new(Box::new(move |budget| {
                 for _ in 0..2 {
                     assert!(budget.try_consume());
                     work.borrow_mut().push(name);
@@ -326,7 +328,7 @@ fn service_deadlines_survive_idle_rounds_and_bound_the_domain_wait() {
     coordinator.insert(
         TypeId::of::<A>(),
         Source::new(coordinator.waiter.waker()),
-        Box::new(Scripted::new(Box::new(move |budget| {
+        erase(Scripted::new(Box::new(move |budget| {
             assert!(budget.try_consume());
             service_calls.set(service_calls.get() + 1);
             Ok(if service_calls.get() == 1 {
@@ -368,7 +370,7 @@ fn a_retained_old_source_never_notifies_its_replacement() {
     coordinator.insert(
         TypeId::of::<A>(),
         Arc::clone(&old),
-        Box::new(Scripted::new(Box::new(|_| Ok(ServiceStatus::Idle)))),
+        erase(Scripted::new(Box::new(|_| Ok(ServiceStatus::Idle)))),
     );
     assert!(coordinator.begin_shutdown(TypeId::of::<A>()));
     coordinator.service(Instant::now());
@@ -379,7 +381,7 @@ fn a_retained_old_source_never_notifies_its_replacement() {
     coordinator.insert(
         TypeId::of::<A>(),
         Arc::clone(&replacement),
-        Box::new(Scripted::new(Box::new(move |_| {
+        erase(Scripted::new(Box::new(move |_| {
             service_calls.set(service_calls.get() + 1);
             Ok(ServiceStatus::Idle)
         }))),
@@ -411,7 +413,7 @@ fn drain_failure_does_not_serialize_or_abandon_the_other_drain() {
         driver.shutdown = Box::new(move || {
             starts.borrow_mut().push(name);
             let mut turns = 0;
-            Box::new(ScriptedDrain {
+            ScriptedDrain {
                 service: Box::new(move |budget| {
                     assert!(budget.try_consume());
                     assert!(!retained.is_empty());
@@ -426,9 +428,9 @@ fn drain_failure_does_not_serialize_or_abandon_the_other_drain() {
                     })
                 }),
                 arm: Box::new(|| Ok(WaitStatus::Armed)),
-            })
+            }
         });
-        coordinator.insert(id, Source::new(coordinator.waiter.waker()), Box::new(driver));
+        coordinator.insert(id, Source::new(coordinator.waiter.waker()), erase(driver));
     }
     drop(resource);
     coordinator.begin_shutdown_all();
@@ -457,21 +459,19 @@ fn a_terminal_arm_failure_releases_and_retires_the_drain() {
     let resource = Rc::new(Cell::new(false));
     let weak_resource = Rc::downgrade(&resource);
     let mut driver = Scripted::new(Box::new(|_| Ok(ServiceStatus::Idle)));
-    driver.shutdown = Box::new(move || {
-        Box::new(ScriptedDrain {
-            service: Box::new(move |budget| {
-                assert!(budget.try_consume());
-                resource.set(true);
-                service_calls.set(service_calls.get() + 1);
-                Ok(DrainStatus::Pending(ServiceStatus::Idle))
-            }),
-            arm: Box::new(move || {
-                arm_calls.set(arm_calls.get() + 1);
-                Err(DriverError::from_message("injected drain arming failure"))
-            }),
-        })
+    driver.shutdown = Box::new(move || ScriptedDrain {
+        service: Box::new(move |budget| {
+            assert!(budget.try_consume());
+            resource.set(true);
+            service_calls.set(service_calls.get() + 1);
+            Ok(DrainStatus::Pending(ServiceStatus::Idle))
+        }),
+        arm: Box::new(move || {
+            arm_calls.set(arm_calls.get() + 1);
+            Err(DriverError::from_message("injected drain arming failure"))
+        }),
     });
-    coordinator.insert(TypeId::of::<A>(), Source::new(coordinator.waiter.waker()), Box::new(driver));
+    coordinator.insert(TypeId::of::<A>(), Source::new(coordinator.waiter.waker()), erase(driver));
     coordinator.begin_shutdown_all();
     coordinator.service(Instant::now());
     assert!(weak_resource.upgrade().is_some());
@@ -504,12 +504,15 @@ fn every_terminal_drain_result_drops_once_without_further_calls_or_restart() {
             drops: Rc::clone(&drops),
         };
         let shutdown_starts = Rc::clone(&starts);
-        let mut driver = Scripted::new(Box::new(|_| Ok(ServiceStatus::Idle)));
-        driver.shutdown = Box::new(move || {
-            shutdown_starts.set(shutdown_starts.get() + 1);
-            Box::new(drain)
-        });
-        coordinator.insert(TypeId::of::<A>(), Source::new(coordinator.waiter.waker()), Box::new(driver));
+        let driver = Scripted {
+            service: Box::new(|_| Ok(ServiceStatus::Idle)),
+            arm: Box::new(|| Ok(WaitStatus::Armed)),
+            shutdown: Box::new(move || {
+                shutdown_starts.set(shutdown_starts.get() + 1);
+                drain
+            }),
+        };
+        coordinator.insert(TypeId::of::<A>(), Source::new(coordinator.waiter.waker()), erase(driver));
         coordinator.begin_shutdown_all();
         coordinator.begin_shutdown_all();
         coordinator.service(Instant::now());

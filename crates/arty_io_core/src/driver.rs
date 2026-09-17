@@ -1,20 +1,22 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::{CompletionBudget, Drain, DriverError, IoContext, ServiceStatus, WaitStatus};
+use crate::{CompletionBudget, Drain, DriverError, ServiceStatus, WaitStatus};
 
 /// One worker's non-blocking participant in an I/O completion arrangement.
 ///
-/// The runtime owns the driver as a boxed local trait object on its final owning thread. That
-/// object is neither [`Send`] nor [`Sync`] even when the concrete implementation happens to be
-/// thread-safe, so an installed driver cannot be relocated after creation. Consumers use the
-/// independent context; native collection and the blocking wait belong to a separate
-/// [`CompletionWaiter`](crate::CompletionWaiter).
+/// The runtime owns the concrete driver through [`LocalDriver`](crate::LocalDriver) on its final
+/// owning thread. That inline owner is neither [`Send`] nor [`Sync`] even when the implementation
+/// is thread-safe. Service is statically dispatched; a heterogeneous runtime may choose its own
+/// private erasure boundary without imposing allocation or virtual dispatch on other runtimes.
 ///
-/// Driver implementations need neither `Send` nor `Sync`. Contexts may move between workers and
-/// outlive the driver, and relocation is an optimization rather than a correctness condition.
-/// Native client capabilities and the readiness waker arrive through
-/// [`DriverContext`](crate::DriverContext).
+/// The consumer handle is not obtained from the driver:
+/// [`DriverProvider::create`](crate::DriverProvider::create) returns it together with the local
+/// owner. Contexts may move between workers and outlive the driver, and
+/// relocation is an optimization rather than a correctness condition. Native client capabilities
+/// and the readiness waker arrive through [`DriverContext`](crate::DriverContext).
+///
+/// Driver implementations need neither `Send` nor `Sync`.
 ///
 /// # Ownership
 ///
@@ -22,6 +24,9 @@ use crate::{CompletionBudget, Drain, DriverError, IoContext, ServiceStatus, Wait
 /// record to its owning registration before private decoding, or notify a driver that must drain
 /// its own queue. In-flight operations, callbacks, and native registrations independently own
 /// every resource they may still access.
+/// Thread confinement is not pinning: inline owners may move within their owning thread.
+/// Callback-visible addresses must belong to independently stable, pinned, or otherwise safely
+/// owned storage rather than relying on the address of this driver.
 ///
 /// Dropping a driver is always memory-safe and closes admission if needed. If native code still
 /// holds raw pointers, retain their backing owners rather than invalidate them on early drop.
@@ -30,13 +35,9 @@ use crate::{CompletionBudget, Drain, DriverError, IoContext, ServiceStatus, Wait
 /// Retained contexts remain closed handles; their existence does not itself delay shutdown.
 /// Private platform code may use unsafe mechanisms, but callers of this contract have no unsafe
 /// implementation or inertness-checking obligation.
-pub trait Driver: 'static {
-    /// The mobile consumer handle that selects this driver's provider.
-    type Context: IoContext;
-
-    /// Returns a context bound to this driver instance.
-    #[must_use]
-    fn context(&self) -> Self::Context;
+pub trait Driver: Sized + 'static {
+    /// The concrete state that makes cooperative progress after admission closes.
+    type Drain: Drain;
 
     /// Performs one bounded service turn without waiting for new I/O.
     ///
@@ -86,9 +87,10 @@ pub trait Driver: 'static {
     /// complete, fail, or reach its overall shutdown deadline. System work remains available
     /// throughout this phase.
     ///
-    /// Consuming the boxed driver makes initiation exactly once, including for trait objects.
+    /// Consuming the driver makes initiation exactly once. Its local owner wraps the returned
+    /// concrete state in [`LocalDrain`](crate::LocalDrain) before returning it to the runtime.
     /// Dropping the returned drain early must remain memory-safe; graceful cleanup is never a
     /// precondition for safe destruction.
     #[must_use = "the drain must be serviced to completion or reported as abandoned"]
-    fn shutdown(self: Box<Self>) -> Box<dyn Drain>;
+    fn shutdown(self) -> Self::Drain;
 }

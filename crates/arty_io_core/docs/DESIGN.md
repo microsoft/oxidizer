@@ -27,7 +27,7 @@ provider creates shared configuration
 create selects actual clients <----- waiter supplies clients + readiness waker
         |
         v
-boxed local driver
+inline local driver
         |
         | non-blocking service under a budget
         v
@@ -43,10 +43,21 @@ Consumer contexts are mobile, independently retained handles. Their relocation
 can improve locality, but correctness does not depend on relocation being called.
 An existing native binding continues to obey its own owner and lifetime rules.
 
-Drivers stay on their final owning thread. Providers return
-`Box<dyn Driver<Context = Self::Context>>` without `Send` or `Sync`, rather than a
-movable concrete driver. Runtime-only adapters may erase unrelated context types
-without adding those auto traits or changing where service and destruction run.
+Providers return a typed consumer context paired with an inline `LocalDriver`
+owner. The wrapper prevents sending or sharing the installed value even when its
+concrete fields are thread-safe, without requiring a driver allocation or virtual
+dispatch. The consuming transition returns the concrete associated drain inside
+an equally local `LocalDrain` owner.
+
+These phase-specific owners expose no mutable inner access or extraction. They
+remain unambiguous even when one concrete type implements both service protocols.
+A heterogeneous runtime may erase them privately; homogeneous callers retain
+static dispatch. Pair creation still requires the provider to construct matching
+context/driver state and does not itself prove that instance association.
+
+Local ownership is not pinning. Values can move within the owner thread; native
+callbacks must use independently stable storage rather than rely on an inline
+driver or drain retaining its address.
 
 A provider can share an engine or resources across its instances. The per-worker
 driver adapter does not imply a per-worker physical queue. Context type identity
@@ -134,8 +145,8 @@ already reached requires service rather than sleep.
 
 ## Cooperative shutdown
 
-Consuming the boxed driver closes admission synchronously and returns a boxed
-`Drain`. There is no repeatable borrowed initiation operation. Admission
+Consuming the inline driver owner closes admission synchronously and returns the
+concrete associated `Drain` in a local owner. There is no repeatable borrowed initiation operation. Admission
 closure is synchronized with accepting operations, so work racing shutdown is
 either tracked in the drain or rejected.
 
@@ -189,6 +200,9 @@ Retained owner threads and transferred cleanup also retain execution authority
 when a controller times out. Accepted work cannot be discarded behind a pool stop
 marker. Execution obligations, not inert handles or retained context clones,
 determine when the existing facility can retire.
+Queued `SystemTask` values are opaque and consumed when run. Heterogeneous task
+erasure remains private to that facility; driver and drain ownership do not
+inherit its allocation or dispatch policy.
 
 ## Native scope and reference runtime
 
