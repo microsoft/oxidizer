@@ -1212,7 +1212,7 @@ dependencies = [
 
 [[package]]
 name = "compressors"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bolero",
  "brotli",
@@ -1787,7 +1787,7 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "fetch"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
@@ -1841,7 +1841,7 @@ dependencies = [
 
 [[package]]
 name = "fetch_azure"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyspawn",
  "anyspawn_azure",
@@ -1861,7 +1861,7 @@ dependencies = [
 
 [[package]]
 name = "fetch_hyper"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "anyspawn",
  "bytes",
@@ -1926,7 +1926,7 @@ dependencies = [
 
 [[package]]
 name = "fetch_winhttp"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "all_the_time",
  "alloc_tracker",
@@ -1951,7 +1951,7 @@ dependencies = [
 
 [[package]]
 name = "fetch_winhttp_impl"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "bytes",
  "bytesbuf",
@@ -2498,7 +2498,7 @@ dependencies = [
 
 [[package]]
 name = "http_compression"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bytesbuf",
  "compressors",
@@ -2519,7 +2519,7 @@ dependencies = [
 
 [[package]]
 name = "http_extensions"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "alloc_tracker",
  "benchmarking",
@@ -5161,7 +5161,7 @@ dependencies = [
 
 [[package]]
 name = "seatbelt_http"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "futures",
  "http",
