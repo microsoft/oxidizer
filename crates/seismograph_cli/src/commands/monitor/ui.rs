@@ -17,8 +17,8 @@ use seismograph_protocol::monitor::MonitorDescriptor;
 
 use super::app::{
     ActivitySample, AllocationViewState, App, CacheFocus, CacheViewState, CaptureStep, HeapFocus, HeapViewState, IoFocus, IoViewState,
-    MonitorTab, PrimitiveFocus, PrimitiveViewState, RecordingConfigurationField, RecordingConfigurationPopup, RuntimeDetailView,
-    RuntimeFocus, RuntimeViewState, Screen, ThreadFocus, ThreadViewState, format_sampling_percentage,
+    MonitorTab, PrimitiveFocus, PrimitiveViewState, RecordingConfigurationPopup, RuntimeDetailView, RuntimeFocus, RuntimeViewState, Screen,
+    ThreadFocus, ThreadViewState, format_sampling_percentage,
 };
 use super::data::{
     AllocationHotspot, AllocationSnapshot, AllocationSort, AllocationStackFilter, CapturedSnapshot, MemorySnapshot, MemoryTier,
@@ -150,11 +150,12 @@ impl App {
     fn draw_recording_configuration_popup(frame: &mut ratatui::Frame<'_>, popup: RecordingConfigurationPopup) {
         let area = frame.area();
         let width = area.width.min(72);
-        let desired_height = u16::try_from(RecordingConfigurationField::ALL.len().saturating_add(2)).unwrap_or(u16::MAX);
+        let fields = popup.fields();
+        let desired_height = u16::try_from(fields.len().saturating_add(2)).unwrap_or(u16::MAX);
         let height = area.height.saturating_sub(2).min(desired_height).max(3);
         let popup_area = centered_rect(area, width, height);
-        let items = RecordingConfigurationField::ALL.into_iter().map(|field| {
-            let value = field.value(popup.draft);
+        let items = fields.into_iter().map(|field| {
+            let value = field.value(popup);
             if value.is_empty() {
                 ListItem::new(format!("  {}", field.label()))
             } else {
@@ -165,7 +166,7 @@ impl App {
             .block(
                 Block::default()
                     .title(" Recording configuration ")
-                    .title_bottom(" ↑/↓ field · ←/→ change · Space toggle · Enter select · Esc cancel ")
+                    .title_bottom(" ↑/↓ field · ←/→ change · Enter apply · Esc cancel ")
                     .borders(Borders::ALL),
             )
             .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD))
@@ -3107,10 +3108,7 @@ mod tests {
         app.capture_started_at = Some(Instant::now().checked_sub(Duration::from_millis(500)).unwrap());
         app.capture_step = Some(CaptureStep::Decode);
         assert!(render(&app).contains("Snapshot"));
-        app.recording_configuration_popup = Some(RecordingConfigurationPopup {
-            draft: RecordingConfiguration::default(),
-            selected: 0,
-        });
+        app.recording_configuration_popup = Some(RecordingConfigurationPopup::new(RecordingConfiguration::default()));
 
         let rendered = render(&app);
 
@@ -3544,20 +3542,18 @@ mod tests {
             App::draw_capture_popup(frame, Duration::from_millis(450), CaptureStep::Decode);
         }));
         output.push_str(&render_debug(|frame| {
-            App::draw_recording_configuration_popup(
-                frame,
-                RecordingConfigurationPopup {
-                    draft: RecordingConfiguration {
-                        allocations: RecordingPolicy {
-                            enabled: true,
-                            capture_backtraces: true,
-                            sampling_one_in: 8,
-                        },
-                        ..Default::default()
+            App::draw_recording_configuration_popup(frame, {
+                let mut popup = RecordingConfigurationPopup::new(RecordingConfiguration {
+                    allocations: RecordingPolicy {
+                        enabled: true,
+                        capture_backtraces: true,
+                        sampling_one_in: 8,
                     },
-                    selected: 2,
-                },
-            );
+                    ..Default::default()
+                });
+                popup.selected = 2;
+                popup
+            });
         }));
 
         for tab in [
@@ -3647,6 +3643,6 @@ mod tests {
             }));
         }
 
-        assert_eq!(stable_digest(&output), (429_498, 3_695_959_029_943_845_295));
+        assert_eq!(stable_digest(&output), (429_485, 10_135_719_325_180_800_782));
     }
 }
