@@ -451,7 +451,15 @@ fn handle_client_with_timeouts(
             Err(error) => return Err(error),
         };
         let response = authenticated_response(&request);
-        seismograph_protocol::write_response(&mut stream, request_id, &response).map_err(ClientError::Protocol)?;
+        let snapshot_response = matches!(response, Response::Snapshot(_));
+        if snapshot_response {
+            stream.set_write_timeout(None).map_err(ClientError::Io)?;
+        }
+        let write_result = seismograph_protocol::write_response(&mut stream, request_id, &response);
+        if snapshot_response {
+            stream.set_write_timeout(Some(CLIENT_WRITE_TIMEOUT)).map_err(ClientError::Io)?;
+        }
+        write_result.map_err(ClientError::Protocol)?;
     }
     Ok(())
 }

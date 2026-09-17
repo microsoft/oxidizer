@@ -15,7 +15,6 @@ use super::client::{capture_snapshot, discover, recorder_statistics, save_snapsh
 use super::data::{AllocationSort, AllocationStackFilter, CapturedSnapshot, MemoryTier, MemoryTierData, PrimitiveSort, RuntimeTaskSort};
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(1);
-const CAPTURE_TIMEOUT: Duration = Duration::from_mins(1);
 const MAX_ACTIVITY_SAMPLES: usize = 120;
 pub(super) const EVENT_BUFFER_CAPACITIES: [u32; 15] = [
     64, 128, 256, 512, 1_024, 2_048, 4_096, 8_192, 16_384, 32_768, 65_536, 131_072, 262_144, 524_288, 1_048_576,
@@ -1078,13 +1077,6 @@ impl App {
     }
 
     pub(super) fn poll_snapshot_capture(&mut self) {
-        if self
-            .capture_started_at
-            .is_some_and(|started_at| started_at.elapsed() >= CAPTURE_TIMEOUT)
-        {
-            self.finish_snapshot_capture(Err(format!("snapshot capture exceeded the {CAPTURE_TIMEOUT:?} deadline")));
-            return;
-        }
         loop {
             let message = match receive_capture_message(self.capture_receiver.as_ref()) {
                 Ok(Some(message)) => message,
@@ -2859,42 +2851,6 @@ mod tests {
                 IoViewState::new(),
                 CacheViewState::new(),
                 "saved",
-            )
-        );
-    }
-
-    #[test]
-    fn expired_snapshot_capture_discards_worker_messages_and_clears_progress() {
-        let mut app = connected_app(MonitorTab::Info);
-        let (sender, receiver) = unbounded();
-        app.capture_receiver = Some(receiver);
-        app.capture_started_at = Some(Instant::now().checked_sub(Duration::from_secs(61)).unwrap());
-        app.capture_step = Some(CaptureStep::Decode);
-        app.capture_instance_id = connected_fields(&app.screen).map(|fields| fields.0);
-        sender
-            .send_sync(CaptureMessage::Complete(Err("late worker result".into())))
-            .unwrap();
-
-        app.poll_snapshot_capture();
-
-        assert_eq!(
-            (
-                app.snapshot_error.as_deref(),
-                app.status.as_str(),
-                app.capture_started_at,
-                app.capture_step,
-                app.capture_instance_id,
-                app.capture_receiver.is_none(),
-                sender.send_sync(CaptureMessage::Progress(CaptureStep::Save)).is_err(),
-            ),
-            (
-                Some("snapshot capture exceeded the 60s deadline"),
-                "snapshot capture exceeded the 60s deadline",
-                None,
-                None,
-                None,
-                true,
-                true,
             )
         );
     }
