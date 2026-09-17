@@ -2519,6 +2519,42 @@ mod tests {
     }
 
     #[test]
+    fn expired_snapshot_capture_discards_worker_messages_and_clears_progress() {
+        let mut app = connected_app(MonitorTab::Info);
+        let (sender, receiver) = unbounded();
+        app.capture_receiver = Some(receiver);
+        app.capture_started_at = Some(Instant::now().checked_sub(Duration::from_secs(61)).unwrap());
+        app.capture_step = Some(CaptureStep::Decode);
+        app.capture_instance_id = connected_fields(&app.screen).map(|fields| fields.0);
+        sender
+            .send_sync(CaptureMessage::Complete(Err("late worker result".into())))
+            .unwrap();
+
+        app.poll_snapshot_capture();
+
+        assert_eq!(
+            (
+                app.snapshot_error.as_deref(),
+                app.status.as_str(),
+                app.capture_started_at,
+                app.capture_step,
+                app.capture_instance_id,
+                app.capture_receiver.is_none(),
+                sender.send_sync(CaptureMessage::Progress(CaptureStep::Save)).is_err(),
+            ),
+            (
+                Some("snapshot capture exceeded the 60s deadline"),
+                "snapshot capture exceeded the 60s deadline",
+                None,
+                None,
+                None,
+                true,
+                true,
+            )
+        );
+    }
+
+    #[test]
     fn snapshot_capture_messages_cover_progress_completion_and_closed_worker() {
         let mut app = App::new();
         let (sender, receiver) = unbounded();
