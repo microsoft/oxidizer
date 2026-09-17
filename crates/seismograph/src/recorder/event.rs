@@ -693,7 +693,10 @@ impl EventKind {
     }
 }
 
-/// Retained runtime events from all initialized recording threads.
+/// Retained runtime events from active and recently exited recording threads.
+///
+/// Exited-thread buffers are retained within a bounded process-wide memory
+/// budget until a snapshot consumes them.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Events {
     /// Clock shared by all timestamps in this collection.
