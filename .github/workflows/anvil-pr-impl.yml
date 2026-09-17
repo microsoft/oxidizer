@@ -317,8 +317,8 @@ jobs:
           impact_mode: consume
         env:
           # Diagnostic PR #765 targets PR #764's head. Diff mutation testing
-          # against #764's original base so this run exercises the same 1,025
-          # mutants as the cancelled jobs, now with --jobs 1.
+          # against #764's original base so this run can isolate the suspected
+          # Linux allocator mutant with streamed resource telemetry.
           BASE_REF: ec1f6bc2d289f73202665952aa8a1492d13c40c4
 
   required-checks:
