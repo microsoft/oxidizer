@@ -316,7 +316,10 @@ jobs:
           publish_commit_statuses: ${{ inputs.publish_commit_statuses }}
           impact_mode: consume
         env:
-          BASE_REF: ${{ inputs.base_ref }}
+          # Diagnostic PR targets PR #760's head. Diff mutation testing against
+          # its original base so this run exercises the same mutant set with
+          # sequential execution and streamed Linux memory telemetry.
+          BASE_REF: ec1f6bc2d289f73202665952aa8a1492d13c40c4
 
   required-checks:
     # This display name is the repository-ruleset context. Keep it stable
