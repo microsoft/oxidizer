@@ -231,4 +231,53 @@ mod tests {
         assert!(error.to_string().contains("no remaining execution owner"));
         assert!(!ran.load(Ordering::Relaxed));
     }
+
+    #[test]
+    fn a_panicked_worker_rejects_later_work_and_reports_failure() {
+        let mut pool = SystemPool::start().unwrap();
+        let owner = pool.execution_lease();
+        let tasks = pool.handle();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (resume_tx, resume_rx) = mpsc::channel();
+        tasks
+            .spawn(move || {
+                entered_tx.send(()).unwrap();
+                resume_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                panic!("injected system-task failure");
+            })
+            .unwrap();
+        entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+
+        let queued_ran = Arc::new(AtomicBool::new(false));
+        let task_ran = Arc::clone(&queued_ran);
+        let queued_resource = Arc::new(String::from("queued callback storage"));
+        let queued_weak = Arc::downgrade(&queued_resource);
+        tasks
+            .spawn(move || {
+                task_ran.store(true, Ordering::Relaxed);
+                drop(queued_resource);
+            })
+            .unwrap();
+        resume_tx.send(()).unwrap();
+        let failure = pool.stop(Instant::now() + Duration::from_secs(5)).unwrap_err();
+        assert!(failure.to_string().contains("panicked"));
+        assert!(!queued_ran.load(Ordering::Relaxed));
+        assert!(queued_weak.upgrade().is_none());
+
+        // The live owner permits submission attempts, but cannot revive a failed worker.
+        let later_ran = Arc::new(AtomicBool::new(false));
+        let task_ran = Arc::clone(&later_ran);
+        let rejected_resource = Arc::new(String::from("rejected callback storage"));
+        let rejected_weak = Arc::downgrade(&rejected_resource);
+        let rejected = tasks
+            .spawn(move || {
+                task_ran.store(true, Ordering::Relaxed);
+                drop(rejected_resource);
+            })
+            .unwrap_err();
+        assert!(rejected.to_string().contains("not accepted"));
+        assert!(!later_ran.load(Ordering::Relaxed));
+        assert!(rejected_weak.upgrade().is_none());
+        drop(owner);
+    }
 }

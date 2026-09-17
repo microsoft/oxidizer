@@ -45,6 +45,9 @@ impl fmt::Debug for SystemTask {
 /// during registration rollback, so cleanup work submitted during draining can still run.
 /// A retained handle is not itself an execution-lifetime lease. The runtime must preserve execution
 /// access for live owners and transferred cleanup even after a controller's shutdown deadline.
+/// Accepted synchronous work retains execution authority through [`SystemTask::run`], including
+/// submission of follow-up work. A later external callback needs independently retained execution
+/// authority; passing it only a clone of this handle does not extend the synchronous task's lifetime.
 ///
 /// This facility keeps an `Arc`-backed erased callback, and submission constructs one boxed
 /// [`SystemTask`]. Wakers, client storage, and driver-owned resources have their own costs;

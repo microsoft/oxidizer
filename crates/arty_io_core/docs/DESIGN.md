@@ -206,6 +206,10 @@ Retained owner threads and transferred cleanup also retain execution authority
 when a controller times out. Accepted work cannot be discarded behind a pool stop
 marker. Execution obligations, not inert handles or retained context clones,
 determine when the existing facility can retire.
+An accepted task retains execution authority through its synchronous invocation,
+including submission of follow-up work. External callbacks that run later need
+independent execution ownership, not merely a clone of an inert task handle.
+Orderly retirement does not imply recovery from a failed system-work thread.
 Queued `SystemTask` values are opaque and consumed when run. Heterogeneous task
 erasure remains private to that facility; driver and drain ownership do not
 inherit its allocation or dispatch policy.

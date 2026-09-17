@@ -188,6 +188,9 @@ backend, scheduler, driver registry, or placement policy.
   execution authority on the existing facility.
 - Accepted work is not discarded behind a stop marker. Pool retirement waits
   for execution obligations, not merely for the controller to request shutdown.
+- An accepted synchronous task retains execution authority through its invocation,
+  including follow-up submissions. A later external callback needs independent
+  execution ownership; retaining only the task handle does not extend that interval.
 - Worker or queue failures can still prevent admission and must be returned
   explicitly. Cleanup reports rejection instead of waiting for a completion
   that cannot arrive.
