@@ -196,3 +196,7 @@ The initial API does not decide:
   utility crate;
 - which memory pool, clock, or telemetry facilities drivers may eventually
   receive.
+
+[Completion coordination across I/O drivers](COMPLETION_COORDINATION.md)
+explores a separate proposal for shared waiting, native source routing, and
+cooperative draining. It does not change the contract described in this document.
