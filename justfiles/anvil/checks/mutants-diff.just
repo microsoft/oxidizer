@@ -50,45 +50,8 @@ anvil-mutants-diff: anvil-mutants-diff-validate-prereqs anvil-impact
     # not a behaviour change for it.
     git diff "$base" --output=$diff_path
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    $monitor = $null
-    $monitor_path = Join-Path $tmp_dir 'anvil-mutants-memory-monitor.sh'
-    if ($IsLinux) {
-        $monitor_script = @'
-    #!/usr/bin/env bash
-    while true; do
-        printf 'ANVIL_MUTANT_TELEMETRY timestamp=%s\n' "$(date --utc --iso-8601=seconds)"
-        for file in memory.current memory.max memory.events; do
-            path="/sys/fs/cgroup/$file"
-            if [[ -r "$path" ]]; then
-                printf 'ANVIL_MUTANT_TELEMETRY %s=' "$file"
-                tr '\n' ' ' <"$path"
-                printf '\n'
-            fi
-        done
-        free -m | sed 's/^/ANVIL_MUTANT_TELEMETRY /'
-        ps -eo pid,ppid,rss,vsz,comm --sort=-rss |
-            head -n 12 |
-            sed 's/^/ANVIL_MUTANT_TELEMETRY process /'
-        sleep 2
-    done
-    '@
-        [System.IO.File]::WriteAllText($monitor_path, $monitor_script, [System.Text.UTF8Encoding]::new($false))
-        $monitor = Start-Process -FilePath '/bin/bash' -ArgumentList $monitor_path -NoNewWindow -PassThru
-    }
-    try {
-        & cargo {{_anvil_stable_toolchain_args}} mutants --in-diff $diff_path --no-shuffle --jobs 1 `
-            --re '^crates/rallocator/src/allocator\.rs:1955:23: replace &= with \|= in telemetry_used_slice_indices$' `
-            --exclude 'crates/rallocator/src/hal/win64.rs' `
-            --exclude 'crates/seismograph_cli/**'
-        $status = $LASTEXITCODE
-    } finally {
-        if ($null -ne $monitor -and -not $monitor.HasExited) {
-            Stop-Process -Id $monitor.Id
-            $monitor.WaitForExit()
-        }
-        Remove-Item -LiteralPath $monitor_path -Force -ErrorAction SilentlyContinue
-    }
-    if ($status -ne 0) { exit $status }
+    & cargo {{_anvil_stable_toolchain_args}} mutants --in-diff $diff_path --no-shuffle --jobs 0
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # --- pr-mutants members ---
 

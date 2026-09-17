@@ -1944,6 +1944,7 @@ pub(crate) fn flush_thread_aggregate_batch() {
     unsafe { flush_aggregate_batch(state) };
 }
 
+#[cfg_attr(test, mutants::skip)] // Bit-clearing mutants create an unbounded iterator and OOM Linux runners.
 fn telemetry_used_slice_indices(bitmap: &[u64]) -> impl Iterator<Item = usize> + '_ {
     bitmap.iter().enumerate().flat_map(|(word_index, &word)| {
         let mut remaining = word;
