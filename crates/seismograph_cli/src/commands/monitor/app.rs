@@ -9,12 +9,13 @@ use std::time::{Duration, Instant, SystemTime};
 use crossterm::event::KeyCode;
 use performables::sync::channel::{Receiver, Sender, unbounded};
 use seismograph_protocol::message::{EventBufferDisposition, RecorderStatistics, RecordingConfiguration, SnapshotOptions};
-use seismograph_protocol::monitor::MonitorDescriptor;
+use seismograph_protocol::monitor::{InstanceId, MonitorDescriptor};
 
 use super::client::{capture_snapshot, discover, recorder_statistics, save_snapshot, set_recording};
 use super::data::{AllocationSort, AllocationStackFilter, CapturedSnapshot, MemoryTier, MemoryTierData, PrimitiveSort, RuntimeTaskSort};
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+const CAPTURE_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_ACTIVITY_SAMPLES: usize = 120;
 pub(super) const EVENT_BUFFER_CAPACITIES: [u32; 15] = [
     64, 128, 256, 512, 1_024, 2_048, 4_096, 8_192, 16_384, 32_768, 65_536, 131_072, 262_144, 524_288, 1_048_576,
@@ -594,6 +595,7 @@ pub(super) struct App {
     activity_observed_at: Option<Instant>,
     pub(super) capture_started_at: Option<Instant>,
     pub(super) capture_step: Option<CaptureStep>,
+    capture_instance_id: Option<InstanceId>,
     capture_receiver: Option<Receiver<CaptureMessage>>,
     discovery_receiver: Option<Receiver<Result<Vec<Instance>, String>>>,
     statistics_receiver: Option<Receiver<Result<RecorderStatistics, String>>>,
@@ -692,6 +694,7 @@ impl App {
             activity_observed_at: None,
             capture_started_at: None,
             capture_step: None,
+            capture_instance_id: None,
             capture_receiver: None,
             discovery_receiver: None,
             statistics_receiver: None,
@@ -719,11 +722,7 @@ impl App {
             return;
         }
         if let Screen::Connected { descriptor, .. } = &self.screen {
-            if workers_are_idle(
-                self.capture_receiver.is_some(),
-                self.statistics_receiver.is_some(),
-                self.recording_receiver.is_some(),
-            ) {
+            if self.statistics_receiver.is_none() {
                 self.start_recorder_statistics_with(descriptor.clone(), recorder_statistics);
             }
             return;
@@ -819,7 +818,7 @@ impl App {
                         self.snapshot_options.event_buffers = next_buffer_disposition(self.snapshot_options.event_buffers);
                         self.status = format!("Snapshot buffers: {:?}", self.snapshot_options.event_buffers);
                     }
-                    KeyCode::Char('c') if !capture_in_progress && self.recording_receiver.is_none() => {
+                    KeyCode::Char('c') if self.recording_receiver.is_none() => {
                         if let Screen::Connected { recording, .. } = &self.screen {
                             self.recording_configuration_popup = Some(RecordingConfigurationPopup {
                                 draft: *recording,
@@ -898,6 +897,13 @@ impl App {
     }
 
     pub(super) fn poll_snapshot_capture(&mut self) {
+        if self
+            .capture_started_at
+            .is_some_and(|started_at| started_at.elapsed() >= CAPTURE_TIMEOUT)
+        {
+            self.finish_snapshot_capture(Err(format!("snapshot capture exceeded the {CAPTURE_TIMEOUT:?} deadline")));
+            return;
+        }
         loop {
             let message = match receive_capture_message(self.capture_receiver.as_ref()) {
                 Ok(Some(message)) => message,
@@ -958,10 +964,13 @@ impl App {
         self.capture_receiver = None;
         self.capture_started_at = None;
         self.capture_step = None;
+        let capture_instance_id = self.capture_instance_id.take();
         match result {
             Ok(outcome) => {
                 self.snapshot_error = None;
-                if let Screen::Connected { snapshot, .. } = &mut self.screen {
+                if let Screen::Connected { descriptor, snapshot, .. } = &mut self.screen
+                    && capture_instance_id == Some(descriptor.instance_id)
+                {
                     *snapshot = Some(outcome.snapshot);
                     self.heap_view.reset();
                     self.allocation_view.reset_position();
@@ -982,6 +991,7 @@ impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn start_snapshot_capture(&mut self, descriptor: MonitorDescriptor, options: SnapshotOptions) {
         let (sender, receiver) = unbounded();
+        let instance_id = descriptor.instance_id;
         match thread::Builder::new().name("seismograph-snapshot".into()).spawn(move || {
             let result = capture_connected_snapshot(&descriptor, options, &sender);
             let _receiver_closed = sender.send_sync(CaptureMessage::Complete(result));
@@ -990,6 +1000,7 @@ impl App {
                 self.snapshot_error = None;
                 self.capture_started_at = Some(Instant::now());
                 self.capture_step = Some(CaptureStep::Capture);
+                self.capture_instance_id = Some(instance_id);
                 self.capture_receiver = Some(receiver);
                 self.status.clear();
             }
@@ -1095,6 +1106,7 @@ fn receive_worker_result<T>(receiver: Option<&Receiver<Result<T, String>>>, work
     }
 }
 
+#[cfg(test)]
 const fn workers_are_idle(capturing: bool, fetching_statistics: bool, updating_recording: bool) -> bool {
     !capturing && !fetching_statistics && !updating_recording
 }
@@ -2216,12 +2228,13 @@ mod tests {
     }
 
     #[test]
-    fn recording_popup_is_blocked_by_capture_and_recording_updates() {
+    fn recording_popup_remains_available_during_capture_but_not_recording_updates() {
         let mut app = connected_app(MonitorTab::Info);
         let (_capture_sender, capture_receiver) = unbounded();
         app.capture_receiver = Some(capture_receiver);
         app.handle_key(KeyCode::Char('c'));
         let while_capturing = app.recording_configuration_popup;
+        app.recording_configuration_popup = None;
         app.capture_receiver = None;
         let (_recording_sender, recording_receiver) = unbounded();
         app.recording_receiver = Some(recording_receiver);
@@ -2231,8 +2244,12 @@ mod tests {
         app.handle_key(KeyCode::Char('c'));
 
         assert_eq!(
-            (while_capturing, while_recording, app.recording_configuration_popup.is_some()),
-            (None, None, true)
+            (
+                while_capturing.is_some(),
+                while_recording,
+                app.recording_configuration_popup.is_some()
+            ),
+            (true, None, true)
         );
     }
 
@@ -2465,6 +2482,7 @@ mod tests {
     #[test]
     fn successful_snapshot_capture_resets_views_and_installs_snapshot() {
         let mut app = connected_app(MonitorTab::Info);
+        app.capture_instance_id = connected_fields(&app.screen).map(|fields| fields.0);
         app.heap_view.focus = HeapFocus::Hotspots;
         app.allocation_view.selected = 3;
         app.thread_view.focus = ThreadFocus::Objects;

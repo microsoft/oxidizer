@@ -303,7 +303,7 @@ pub(crate) fn snapshot(options: SnapshotOptions) -> Result<Snapshot, Error> {
     with_snapshot_arena(|| {
         let _suppression = SuppressionGuard::enter();
         let started_at = Instant::now();
-        let mut events = recorder::snapshot(options.event_buffers).unwrap_or_default();
+        let mut events = recorder::try_snapshot(options.event_buffers)?.unwrap_or_default();
         events.clock = EventClock::CURRENT;
         let sources = capture_sources(SnapshotContext { events: &events })?;
         encode_snapshot(&DecodedSnapshot {
@@ -690,7 +690,9 @@ fn capture_sources_from(mut source: *mut Source, context: SnapshotContext<'_>) -
         if snapshots.iter().any(|snapshot: &SourceSnapshot| snapshot.id == descriptor.id) {
             return Err(Error::duplicate_source(descriptor.id));
         }
-        let data = (descriptor.capture)(context).map_err(|error| Error::source_failed(descriptor.id, error))?;
+        let data = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (descriptor.capture)(context)))
+            .map_err(|_panic| Error::source_failed(descriptor.id, Error::new("seismograph source panicked during snapshot capture")))?
+            .map_err(|error| Error::source_failed(descriptor.id, error))?;
         snapshots.push(SourceSnapshot {
             id: descriptor.id,
             name: descriptor.name.to_owned(),
@@ -2368,6 +2370,9 @@ mod tests {
         fn fail(_context: SnapshotContext<'_>) -> Result<SourceData, Error> {
             Err(Error::new("injected source failure"))
         }
+        fn panic_during_capture(_context: SnapshotContext<'_>) -> Result<SourceData, Error> {
+            panic!("injected source panic")
+        }
 
         let first = Source::new(SourceId::new(101), "first", 1, capture);
         let second = Source::new(SourceId::new(101), "second", 1, capture);
@@ -2375,6 +2380,17 @@ mod tests {
         assert!(
             capture_sources_from(
                 ptr::from_ref(&first).cast_mut(),
+                SnapshotContext {
+                    events: &Events::default()
+                }
+            )
+            .is_err()
+        );
+
+        let panicked = Source::new(SourceId::new(105), "panicked", 1, panic_during_capture);
+        assert!(
+            capture_sources_from(
+                ptr::from_ref(&panicked).cast_mut(),
                 SnapshotContext {
                     events: &Events::default()
                 }
