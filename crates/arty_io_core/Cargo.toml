@@ -19,13 +19,22 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_cor
 [package.metadata.docs.rs]
 all-features = true
 
-# Empty contract crate: it has no executable source lines until I/O integration
-# contracts are introduced.
-[package.metadata.coverage-gate]
-min-lines-percent = 0
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "thread_aware_core::thread::NumaNode",
+    "thread_aware_core::thread::Owner",
+    "thread_aware_core::thread::Thread",
+    "thread_aware_core::thread_aware::ThreadAware",
+]
 
 [features]
 default = []
+
+[dependencies]
+thread_aware_core = { workspace = true, features = ["std"] }
+
+[dev-dependencies]
+static_assertions = { workspace = true }
 
 # >>> anvil-managed: anvil-lints
 [lints]
