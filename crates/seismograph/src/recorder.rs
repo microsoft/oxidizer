@@ -10,8 +10,10 @@
 
 use std::alloc::{GlobalAlloc, Layout, System, handle_alloc_error};
 use std::cell::{Cell, UnsafeCell};
+use std::collections::VecDeque;
 use std::num::NonZeroU64;
 use std::ptr;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
@@ -36,6 +38,10 @@ const MIN_EVENT_CAPACITY_PER_THREAD: usize = 64;
 const MAX_EVENT_CAPACITY_PER_THREAD: usize = 1_048_576;
 const MAX_EVENT_SAMPLING_ONE_IN: usize = 1_048_576;
 const RECORDER_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
+#[cfg(not(test))]
+const RETIRED_RING_BUDGET_BYTES: usize = 256 * 1024 * 1024;
+#[cfg(test)]
+const RETIRED_RING_BUDGET_BYTES: usize = 32 * 1024;
 
 /// Validated power-of-two capacity for one thread's event buffer.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -160,6 +166,7 @@ static ARC_DEREFERENCE_POLICY: AtomicU64 = AtomicU64::new(0);
 static RUNTIME_TASK_POLICY: AtomicU64 = AtomicU64::new(0);
 static IO_POLICY: AtomicU64 = AtomicU64::new(0);
 static CACHE_POLICY: AtomicU64 = AtomicU64::new(0);
+static RETIRED_RINGS: Mutex<RetiredRings> = Mutex::new(RetiredRings::new());
 static CONFIGURATION_LOCKED: AtomicBool = AtomicBool::new(false);
 static ACTIVE_SESSION: AtomicU64 = AtomicU64::new(0);
 static LAST_SESSION: AtomicU64 = AtomicU64::new(0);
@@ -683,8 +690,10 @@ struct ThreadRecorder {
     thread_name_len: usize,
     ring_locked: AtomicBool,
     ring: UnsafeCell<Option<Ring>>,
+    ring_capacity: AtomicUsize,
     writer_active: AtomicBool,
     retired: AtomicBool,
+    release_on_unlock: AtomicBool,
     write_index: AtomicUsize,
 }
 
@@ -720,8 +729,10 @@ impl ThreadRecorder {
             thread_name_len,
             ring_locked: AtomicBool::new(false),
             ring: UnsafeCell::new(None),
+            ring_capacity: AtomicUsize::new(0),
             writer_active: AtomicBool::new(false),
             retired: AtomicBool::new(false),
+            release_on_unlock: AtomicBool::new(false),
             write_index: AtomicUsize::new(0),
         }
     }
@@ -802,7 +813,7 @@ impl ThreadRecorder {
                 });
             }
         }
-        Some(ThreadSnapshot {
+        let snapshot = ThreadSnapshot {
             log: ThreadLog {
                 thread_id: self.thread_id,
                 total_events: total_events as u64,
@@ -810,7 +821,12 @@ impl ThreadRecorder {
                 name: String::from_utf8_lossy(&self.thread_name[..self.thread_name_len]).into_owned(),
             },
             events,
-        })
+        };
+        if self.retired.load(Ordering::Acquire) {
+            self.release_on_unlock.store(true, Ordering::Release);
+            forget_retired_ring(self);
+        }
+        Some(snapshot)
     }
 
     #[cfg(test)]
@@ -828,6 +844,7 @@ impl ThreadRecorder {
         if self.ring().is_some_and(|ring| ring.capacity() == capacity.get()) {
             self.write_index.store(0, Ordering::Relaxed);
             self.session.store(session, Ordering::Release);
+            self.ring_capacity.store(capacity.get(), Ordering::Release);
             return true;
         }
         let replacement = Ring::new(capacity);
@@ -836,6 +853,7 @@ impl ThreadRecorder {
         let previous = unsafe { (&mut *self.ring.get()).replace(replacement) };
         self.write_index.store(0, Ordering::Relaxed);
         self.session.store(session, Ordering::Release);
+        self.ring_capacity.store(capacity.get(), Ordering::Release);
         drop(previous);
         true
     }
@@ -847,16 +865,20 @@ impl ThreadRecorder {
         self.write_index.store(0, Ordering::Relaxed);
         self.session.store(0, Ordering::Release);
         if release {
-            // SAFETY: destructive snapshots first quiesce every writer, and
-            // ring_lock excludes concurrent snapshots and retirement.
-            let ring = unsafe { (&mut *self.ring.get()).take() };
-            drop(ring);
+            self.release_ring_locked();
         }
         true
     }
 
     fn retire(&self) {
         self.retired.store(true, Ordering::Release);
+        let ring_bytes = self
+            .ring_capacity
+            .load(Ordering::Acquire)
+            .saturating_mul(std::mem::size_of::<Slot>());
+        if ring_bytes != 0 {
+            register_retired_ring(self, ring_bytes);
+        }
     }
 
     #[cfg(test)]
@@ -884,6 +906,80 @@ impl ThreadRecorder {
         // ring_lock. Ring replacement only occurs under those conditions.
         unsafe { (&*self.ring.get()).as_ref() }
     }
+
+    fn release_ring_locked(&self) {
+        forget_retired_ring(self);
+        self.write_index.store(0, Ordering::Relaxed);
+        self.session.store(0, Ordering::Release);
+        self.ring_capacity.store(0, Ordering::Release);
+        // SAFETY: the caller holds ring_lock, excluding snapshots, resizing,
+        // and retirement from accessing the ring concurrently.
+        let ring = unsafe { (&mut *self.ring.get()).take() };
+        drop(ring);
+    }
+
+    fn release_retired_ring(&self) {
+        self.release_on_unlock.store(true, Ordering::Release);
+        forget_retired_ring(self);
+        let _ring = self.ring_lock_until(wait_deadline());
+    }
+}
+
+struct RetiredRings {
+    rings: VecDeque<(usize, usize)>,
+    allocated_bytes: usize,
+}
+
+impl RetiredRings {
+    const fn new() -> Self {
+        Self {
+            rings: VecDeque::new(),
+            allocated_bytes: 0,
+        }
+    }
+}
+
+fn retired_rings() -> std::sync::MutexGuard<'static, RetiredRings> {
+    RETIRED_RINGS.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn register_retired_ring(recorder: &ThreadRecorder, ring_bytes: usize) {
+    let address = ptr::from_ref(recorder) as usize;
+    let limit = RETIRED_RING_BUDGET_BYTES.max(ring_bytes);
+    {
+        let mut retired = retired_rings();
+        retired.rings.push_back((address, ring_bytes));
+        retired.allocated_bytes = retired.allocated_bytes.saturating_add(ring_bytes);
+    }
+
+    loop {
+        let evicted = {
+            let mut retired = retired_rings();
+            if retired.allocated_bytes <= limit {
+                None
+            } else {
+                retired.rings.pop_front().map(|(address, bytes)| {
+                    retired.allocated_bytes = retired.allocated_bytes.saturating_sub(bytes);
+                    address
+                })
+            }
+        };
+        let Some(evicted) = evicted else {
+            break;
+        };
+        // SAFETY: published recorders are retained for process lifetime.
+        unsafe { &*(evicted as *const ThreadRecorder) }.release_retired_ring();
+    }
+}
+
+fn forget_retired_ring(recorder: &ThreadRecorder) {
+    let address = ptr::from_ref(recorder) as usize;
+    let mut retired = retired_rings();
+    if let Some(index) = retired.rings.iter().position(|(candidate, _)| *candidate == address)
+        && let Some((_, bytes)) = retired.rings.remove(index)
+    {
+        retired.allocated_bytes = retired.allocated_bytes.saturating_sub(bytes);
+    }
 }
 
 struct Ring {
@@ -910,6 +1006,9 @@ struct RingLock<'a> {
 
 impl Drop for RingLock<'_> {
     fn drop(&mut self) {
+        if self.recorder.release_on_unlock.load(Ordering::Acquire) {
+            self.recorder.release_ring_locked();
+        }
         self.recorder.ring_locked.store(false, Ordering::Release);
     }
 }
@@ -2533,7 +2632,7 @@ mod tests {
     }
 
     #[test]
-    fn destructive_snapshot_releases_retired_thread_ring() {
+    fn snapshot_releases_a_retired_thread_ring_after_capturing_it() {
         let _test = TEST_LOCK.lock().unwrap();
         let capacity = EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD).unwrap();
         configure(Configuration {
@@ -2557,13 +2656,71 @@ mod tests {
         thread.join().unwrap();
         let retained_bytes = statistics().allocated_bytes;
         let captured = snapshot(crate::snapshot::EventBufferDisposition::Clear).unwrap();
-        let retired_bytes = statistics().allocated_bytes;
+        let released_bytes = statistics().allocated_bytes;
 
-        assert_eq!(
-            (retained_bytes, captured.events.len(), retired_bytes < active_bytes),
-            (active_bytes, 1, true)
-        );
+        assert_eq!(retained_bytes, active_bytes);
+        assert_eq!(captured.events.len(), 1);
+        assert!(released_bytes < retained_bytes);
         configure(Configuration::default());
+    }
+
+    #[test]
+    fn retired_thread_rings_are_bounded_and_evict_the_oldest_history() {
+        let _test = TEST_LOCK.lock().unwrap();
+        configure(Configuration {
+            arc_dereferences: RecordingPolicy {
+                enabled: true,
+                ..Default::default()
+            },
+            event_capacity_per_thread: EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD).unwrap(),
+            ..Default::default()
+        });
+        let _initial = snapshot(crate::snapshot::EventBufferDisposition::Release);
+
+        for object_id in [1, 2] {
+            std::thread::spawn(move || {
+                record(EventClass::ArcDereference, || {
+                    Record::object(EventKind::ArcDeref, ObjectId::new(object_id))
+                });
+            })
+            .join()
+            .unwrap();
+        }
+
+        assert!(retired_rings().allocated_bytes <= RETIRED_RING_BUDGET_BYTES);
+        let captured = snapshot(crate::snapshot::EventBufferDisposition::Retain).unwrap();
+        assert_eq!(
+            captured
+                .events
+                .iter()
+                .filter_map(Event::object_id)
+                .map(ObjectId::get)
+                .collect::<Vec<_>>(),
+            vec![2]
+        );
+        assert_eq!(retired_rings().allocated_bytes, 0);
+        configure(Configuration::default());
+    }
+
+    #[test]
+    fn evicted_retired_ring_is_released_after_an_existing_reader() {
+        let recorder = ThreadRecorder::new();
+        recorder.begin_session(1, EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD).unwrap());
+        let ring = recorder.ring_lock();
+
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                recorder.retire();
+                recorder.release_retired_ring();
+            });
+            while !recorder.release_on_unlock.load(Ordering::Acquire) {
+                std::hint::spin_loop();
+            }
+            assert!(recorder.ring().is_some());
+            drop(ring);
+        });
+
+        assert!(recorder.ring().is_none());
     }
 
     #[test]

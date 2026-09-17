@@ -160,15 +160,14 @@ fn read_frame(reader: &mut impl Read, maximum: usize) -> Result<Frame, Error> {
         return Err(Error::MessageTooLarge);
     }
     let mut payload = Vec::new();
+    payload.try_reserve_exact(len).map_err(|_error| Error::MessageTooLarge)?;
     let mut chunk = [0_u8; FRAME_READ_CHUNK_BYTES];
     for _ in 0..len / chunk.len() {
-        payload.try_reserve_exact(chunk.len()).map_err(|_error| Error::MessageTooLarge)?;
         reader.read_exact(&mut chunk).map_err(Error::Io)?;
         payload.extend_from_slice(&chunk);
     }
     let tail_len = len % chunk.len();
     if tail_len != 0 {
-        payload.try_reserve_exact(tail_len).map_err(|_error| Error::MessageTooLarge)?;
         reader.read_exact(&mut chunk[..tail_len]).map_err(Error::Io)?;
         payload.extend_from_slice(&chunk[..tail_len]);
     }

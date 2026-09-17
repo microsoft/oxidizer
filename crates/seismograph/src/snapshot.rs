@@ -51,12 +51,14 @@ thread_local! {
 /// Treatment of recorder event buffers after a snapshot captures them.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum EventBufferDisposition {
-    /// Keeps retained events and their backing buffers.
+    /// Keeps retained events and active-thread backing buffers.
+    ///
+    /// Buffers belonging to exited threads are released after capture.
     #[default]
     Retain,
-    /// Discards retained events after capture while keeping allocated buffers for reuse.
+    /// Discards retained events after capture while keeping active-thread buffers for reuse.
     Clear,
-    /// Discards retained events after capture and releases their backing buffers.
+    /// Discards retained events after capture and releases active-thread buffers.
     Release,
 }
 
