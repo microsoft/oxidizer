@@ -66,7 +66,7 @@ fn run(arguments: &[&str]) -> Output {
             "--profile",
             "bench",
             "--example",
-            "basic",
+            "single_benchmark",
             "--",
         ])
         .args(arguments)
@@ -162,7 +162,7 @@ exit "$status"
             "--profile",
             "bench",
             "--example",
-            "basic",
+            "single_benchmark",
             "--",
             "--perf",
             "--show-engine-output",
@@ -251,7 +251,7 @@ fn fake_vtune_directory() -> &'static Path {
 ///
 /// This guard only covers the vtune tests added alongside it; it is not a
 /// claim that the rest of this file (`run`/`run_target`'s unconditional
-/// `--example basic`/`--example parameterized` invocations) can run from a
+/// `--example single_benchmark`/`--example parameterized` invocations) can run from a
 /// published tarball. Those tests have depended on unpackaged examples since
 /// before this fixture existed, and fixing that pre-existing, file-wide gap
 /// is a separate concern from hardening the new vtune coverage this guard
@@ -327,7 +327,7 @@ fn vtune_measures_exact_workload_and_writes_metrics() {
             "--profile",
             "bench",
             "--example",
-            "basic",
+            "single_benchmark",
             "--",
             "--vtune",
             "--show-engine-output",
@@ -402,7 +402,7 @@ fn vtune_suppresses_report_output_without_show_engine_output() {
             "--profile",
             "bench",
             "--example",
-            "basic",
+            "single_benchmark",
             "--",
             "--vtune",
             "--no-baseline",
@@ -450,7 +450,7 @@ fn vtune_command_failure_surfaces_vtune_control_error() {
             "--profile",
             "bench",
             "--example",
-            "basic",
+            "single_benchmark",
             "--",
             "--vtune",
             "--show-engine-output",
@@ -486,7 +486,7 @@ fn vtune_pause_failure_surfaces_vtune_control_error() {
             "--profile",
             "bench",
             "--example",
-            "basic",
+            "single_benchmark",
             "--",
             "--vtune",
             "--show-engine-output",
