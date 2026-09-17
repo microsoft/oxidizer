@@ -26,7 +26,7 @@
 //! [`SystemTasks`], and a source readiness waker, and asks the collector on that worker to attach its
 //! own typed clients through [`CompletionWaiter::attach_clients`]. It then relocates the provider
 //! clone and consumes it through [`DriverProvider::create`], which returns a consumer context
-//! for that worker together with its concrete driver in an allocation-free [`LocalDriver`].
+//! for that worker together with its concrete driver in an inline [`LocalDriver`] owner.
 //! The provider must pair each context with the instance it actually belongs to.
 //!
 //! The provider selects its native strategy and takes the required clients through

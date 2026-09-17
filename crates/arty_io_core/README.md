@@ -31,7 +31,7 @@ On each owning thread it assembles a [`DriverContext`][__link4] with thread coor
 [`SystemTasks`][__link5], and a source readiness waker, and asks the collector on that worker to attach its
 own typed clients through [`CompletionWaiter::attach_clients`][__link6]. It then relocates the provider
 clone and consumes it through [`DriverProvider::create`][__link7], which returns a consumer context
-for that worker together with its concrete driver in an allocation-free [`LocalDriver`][__link8].
+for that worker together with its concrete driver in an inline [`LocalDriver`][__link8] owner.
 The provider must pair each context with the instance it actually belongs to.
 
 The provider selects its native strategy and takes the required clients through
@@ -147,7 +147,7 @@ Its control thread uses blocking result handles; it is not an application-future
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbI2Trnv6XVd8brpPqoIIEhnIbhhuU9vDFFtAbFg0NgcmHRxxhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb8Et7vxhFuJwbM9y7fYb5Q88bgo0yJs5YjgMb7Enu7LjzoihhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
  [__link0]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=CompletionWaiter
  [__link1]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=IoContext
  [__link10]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverError
