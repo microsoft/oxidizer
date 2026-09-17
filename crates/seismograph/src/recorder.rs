@@ -13,6 +13,7 @@ use std::cell::{Cell, UnsafeCell};
 use std::num::NonZeroU64;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 use crate::system::SystemSlice;
 
@@ -34,6 +35,7 @@ const DEFAULT_EVENT_CAPACITY_PER_THREAD: usize = 65_536;
 const MIN_EVENT_CAPACITY_PER_THREAD: usize = 64;
 const MAX_EVENT_CAPACITY_PER_THREAD: usize = 1_048_576;
 const MAX_EVENT_SAMPLING_ONE_IN: usize = 1_048_576;
+const RECORDER_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Validated power-of-two capacity for one thread's event buffer.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -271,6 +273,18 @@ impl RecordingSession {
 /// Configures runtime event recording for the process.
 pub(crate) fn configure(configuration: Configuration) {
     let _lock = ConfigurationLock::acquire();
+    configure_locked(configuration);
+}
+
+#[cfg(feature = "monitor")]
+pub(crate) fn try_configure(configuration: Configuration) -> Result<(), crate::Error> {
+    let _lock = ConfigurationLock::acquire_until(wait_deadline())
+        .ok_or_else(|| crate::Error::new("seismograph recording configuration timed out waiting for another operation"))?;
+    configure_locked(configuration);
+    Ok(())
+}
+
+fn configure_locked(configuration: Configuration) {
     let allocation_policy = encode_policy(configuration.allocations);
     let general_policy = encode_policy(configuration.general_events);
     let arc_dereference_policy = encode_policy(configuration.arc_dereferences);
@@ -388,9 +402,19 @@ fn selection_still_current(class: EventClass, policy: u64, session: u64) -> bool
 }
 
 /// Reads recorder counters without copying retained events.
-#[cfg(any(test, feature = "monitor"))]
+#[cfg(test)]
 #[must_use]
 pub(crate) fn statistics() -> Statistics {
+    try_statistics().unwrap_or_else(|_error| Statistics {
+        event_capacity_per_thread: u64::try_from(configuration().event_capacity_per_thread.get()).unwrap_or(u64::MAX),
+        recording: last_recording_policies(),
+        ..Statistics::default()
+    })
+}
+
+#[cfg(any(test, feature = "monitor"))]
+pub(crate) fn try_statistics() -> Result<Statistics, crate::Error> {
+    let deadline = wait_deadline();
     let session = LAST_SESSION.load(Ordering::Acquire);
     let capacity = configuration().event_capacity_per_thread;
     let mut statistics = Statistics {
@@ -402,7 +426,9 @@ pub(crate) fn statistics() -> Statistics {
     while !recorder.is_null() {
         // SAFETY: published recorders are retained for process lifetime.
         let current = unsafe { &*recorder };
-        let _ring = current.ring_lock();
+        let _ring = current
+            .ring_lock_until(deadline)
+            .ok_or_else(|| crate::Error::new("seismograph recorder statistics timed out waiting for an event ring"))?;
         let ring_capacity = current.ring().map_or(0, Ring::capacity);
         statistics.allocated_bytes = statistics.allocated_bytes.saturating_add(
             u64::try_from(std::mem::size_of::<ThreadRecorder>() + ring_capacity * std::mem::size_of::<Slot>()).unwrap_or(u64::MAX),
@@ -417,7 +443,7 @@ pub(crate) fn statistics() -> Statistics {
         }
         recorder = current.next.load(Ordering::Acquire);
     }
-    statistics
+    Ok(statistics)
 }
 
 /// Lazily constructs and records an event in a known class.
@@ -493,11 +519,11 @@ fn record_enabled_with_recorder(
     // intentionally retained for process lifetime.
     let recorder = unsafe { &*recorder };
     recorder.writer_active.store(true, Ordering::SeqCst);
+    let _writer = WriterActiveGuard { recorder };
     if policy_atomic(class).load(Ordering::SeqCst) != policy
         || EVENT_CAPACITY.load(Ordering::SeqCst) != capacity
         || ACTIVE_SESSION.load(Ordering::SeqCst) != session
     {
-        recorder.writer_active.store(false, Ordering::Release);
         return false;
     }
     let capture_backtrace = match record.backtrace {
@@ -511,28 +537,40 @@ fn record_enabled_with_recorder(
     } else {
         ([0; MAX_STACK_FRAMES], 0)
     };
-    recorder.record(session, decode_capacity(capacity), record, frames, frame_count);
-    recorder.writer_active.store(false, Ordering::Release);
-    true
+    recorder.record(session, decode_capacity(capacity), record, frames, frame_count)
 }
 
 /// Captures all currently retained runtime events.
+#[cfg(test)]
 #[must_use]
 pub(crate) fn snapshot(disposition: crate::snapshot::EventBufferDisposition) -> Option<Events> {
+    try_snapshot(disposition).ok().flatten()
+}
+
+pub(crate) fn try_snapshot(disposition: crate::snapshot::EventBufferDisposition) -> Result<Option<Events>, crate::Error> {
     let _suppression = SuppressionGuard::enter();
     if disposition != crate::snapshot::EventBufferDisposition::Retain {
         return destructive_snapshot(disposition);
     }
     let session = LAST_SESSION.load(Ordering::Acquire);
     if session == 0 {
-        return None;
+        return Ok(None);
     }
-    snapshot_from_recorders(session, RECORDERS.load(Ordering::Acquire))
+    snapshot_from_recorders_until(session, RECORDERS.load(Ordering::Acquire), wait_deadline())
 }
 
-fn snapshot_from_recorders(session: u64, mut recorder: *mut ThreadRecorder) -> Option<Events> {
+#[cfg(test)]
+fn snapshot_from_recorders(session: u64, recorder: *mut ThreadRecorder) -> Option<Events> {
+    snapshot_from_recorders_until(session, recorder, wait_deadline()).ok().flatten()
+}
+
+fn snapshot_from_recorders_until(
+    session: u64,
+    mut recorder: *mut ThreadRecorder,
+    deadline: Instant,
+) -> Result<Option<Events>, crate::Error> {
     if recorder.is_null() {
-        return None;
+        return Ok(None);
     }
     let mut snapshot = Events {
         clock: EventClock::CURRENT,
@@ -543,7 +581,9 @@ fn snapshot_from_recorders(session: u64, mut recorder: *mut ThreadRecorder) -> O
         // SAFETY: published recorders are retained for process lifetime.
         let current = unsafe { &*recorder };
         if current.session.load(Ordering::Acquire) == session {
-            let thread = current.snapshot();
+            let thread = current
+                .snapshot_until(deadline)
+                .ok_or_else(|| crate::Error::new("seismograph snapshot timed out waiting for an event recorder"))?;
             snapshot.total_events = snapshot.total_events.saturating_add(thread.log.total_events);
             snapshot.lost_events = snapshot.lost_events.saturating_add(thread.log.lost_events);
             snapshot.threads.push(thread.log);
@@ -551,7 +591,7 @@ fn snapshot_from_recorders(session: u64, mut recorder: *mut ThreadRecorder) -> O
         }
         recorder = current.next.load(Ordering::Acquire);
     }
-    Some(snapshot)
+    Ok(Some(snapshot))
 }
 
 /// Returns whether telemetry-internal work is suppressed on this thread.
@@ -648,6 +688,16 @@ struct ThreadRecorder {
     write_index: AtomicUsize,
 }
 
+struct WriterActiveGuard<'a> {
+    recorder: &'a ThreadRecorder,
+}
+
+impl Drop for WriterActiveGuard<'_> {
+    fn drop(&mut self) {
+        self.recorder.writer_active.store(false, Ordering::Release);
+    }
+}
+
 // SAFETY: the owning thread is the only event writer. Snapshots, resizing, and
 // retirement serialize changes to `ring` with `ring_locked`, while individual
 // slot payloads provide their own synchronization.
@@ -676,15 +726,25 @@ impl ThreadRecorder {
         }
     }
 
-    fn record(&self, session: u64, capacity: EventBufferCapacity, record: Record, frames: [u64; MAX_STACK_FRAMES], frame_count: u8) {
+    fn record(
+        &self,
+        session: u64,
+        capacity: EventBufferCapacity,
+        record: Record,
+        frames: [u64; MAX_STACK_FRAMES],
+        frame_count: u8,
+    ) -> bool {
+        let deadline = wait_deadline();
         let new_session = self.session.load(Ordering::Relaxed) != session;
-        if new_session {
-            self.begin_session(session, capacity);
+        if new_session && !self.begin_session_until(session, capacity, deadline) {
+            return false;
         }
         let index = self.write_index.fetch_add(1, Ordering::Relaxed);
         let ring = self.ring().expect("begin_session installs an event ring");
         let slot = &ring.slots[index & ring.mask];
-        slot.lock();
+        let Some(_slot) = slot.lock_until(deadline) else {
+            return false;
+        };
         // SAFETY: the slot lock provides exclusive access to its payload.
         unsafe {
             slot.data.get().write(EventData {
@@ -696,14 +756,20 @@ impl ThreadRecorder {
                 frames,
             });
         }
-        slot.unlock();
+        true
     }
 
+    #[cfg(test)]
     fn snapshot(&self) -> ThreadSnapshot {
-        let _ring = self.ring_lock();
+        self.snapshot_until(wait_deadline())
+            .unwrap_or_else(|| panic!("event recorder snapshot did not complete within {RECORDER_WAIT_TIMEOUT:?}"))
+    }
+
+    fn snapshot_until(&self, deadline: Instant) -> Option<ThreadSnapshot> {
+        let _ring = self.ring_lock_until(deadline)?;
         let total_events = self.write_index.load(Ordering::Acquire);
         let Some(ring) = self.ring() else {
-            return ThreadSnapshot {
+            return Some(ThreadSnapshot {
                 log: ThreadLog {
                     thread_id: self.thread_id,
                     total_events: 0,
@@ -711,17 +777,16 @@ impl ThreadRecorder {
                     name: String::from_utf8_lossy(&self.thread_name[..self.thread_name_len]).into_owned(),
                 },
                 events: Vec::new(),
-            };
+            });
         };
         let first = total_events.saturating_sub(ring.capacity());
         let mut events = Vec::with_capacity(total_events - first);
         for index in first..total_events {
             let slot = &ring.slots[index & ring.mask];
-            slot.lock();
+            let _slot = slot.lock_until(deadline)?;
             // SAFETY: the slot lock prevents the writer from modifying the
             // payload while it is copied.
             let data = unsafe { *slot.data.get() };
-            slot.unlock();
             if data.sequence == index as u64 + 1 {
                 events.push(Event {
                     thread_id: self.thread_id,
@@ -737,7 +802,7 @@ impl ThreadRecorder {
                 });
             }
         }
-        ThreadSnapshot {
+        Some(ThreadSnapshot {
             log: ThreadLog {
                 thread_id: self.thread_id,
                 total_events: total_events as u64,
@@ -745,15 +810,25 @@ impl ThreadRecorder {
                 name: String::from_utf8_lossy(&self.thread_name[..self.thread_name_len]).into_owned(),
             },
             events,
-        }
+        })
     }
 
+    #[cfg(test)]
     fn begin_session(&self, session: u64, capacity: EventBufferCapacity) {
-        let _ring = self.ring_lock();
+        assert!(
+            self.begin_session_until(session, capacity, wait_deadline()),
+            "event recorder session did not begin within {RECORDER_WAIT_TIMEOUT:?}"
+        );
+    }
+
+    fn begin_session_until(&self, session: u64, capacity: EventBufferCapacity, deadline: Instant) -> bool {
+        let Some(_ring) = self.ring_lock_until(deadline) else {
+            return false;
+        };
         if self.ring().is_some_and(|ring| ring.capacity() == capacity.get()) {
             self.write_index.store(0, Ordering::Relaxed);
             self.session.store(session, Ordering::Release);
-            return;
+            return true;
         }
         let replacement = Ring::new(capacity);
         // SAFETY: the owning writer is the only caller that replaces a live
@@ -762,10 +837,13 @@ impl ThreadRecorder {
         self.write_index.store(0, Ordering::Relaxed);
         self.session.store(session, Ordering::Release);
         drop(previous);
+        true
     }
 
-    fn clear(&self, release: bool) {
-        let _ring = self.ring_lock();
+    fn clear(&self, release: bool, deadline: Instant) -> bool {
+        let Some(_ring) = self.ring_lock_until(deadline) else {
+            return false;
+        };
         self.write_index.store(0, Ordering::Relaxed);
         self.session.store(0, Ordering::Release);
         if release {
@@ -774,25 +852,31 @@ impl ThreadRecorder {
             let ring = unsafe { (&mut *self.ring.get()).take() };
             drop(ring);
         }
+        true
     }
 
     fn retire(&self) {
         self.retired.store(true, Ordering::Release);
     }
 
+    #[cfg(test)]
     fn ring_lock(&self) -> RingLock<'_> {
-        #[cfg(test)]
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        self.ring_lock_until(wait_deadline())
+            .unwrap_or_else(|| panic!("event ring lock was not released within {RECORDER_WAIT_TIMEOUT:?}"))
+    }
+
+    fn ring_lock_until(&self, deadline: Instant) -> Option<RingLock<'_>> {
         while self
             .ring_locked
             .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_err()
         {
-            #[cfg(test)]
-            assert_test_lock_progress(deadline, "ring lock was not released within one second");
+            if wait_expired(deadline) {
+                return None;
+            }
             std::hint::spin_loop();
         }
-        RingLock { recorder: self }
+        Some(RingLock { recorder: self })
     }
 
     fn ring(&self) -> Option<&Ring> {
@@ -851,22 +935,40 @@ impl Slot {
         }
     }
 
+    #[cfg(test)]
     fn lock(&self) {
-        #[cfg(test)]
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        let guard = self
+            .lock_until(wait_deadline())
+            .unwrap_or_else(|| panic!("event slot lock was not released within {RECORDER_WAIT_TIMEOUT:?}"));
+        std::mem::forget(guard);
+    }
+
+    fn lock_until(&self, deadline: Instant) -> Option<SlotLock<'_>> {
         while self
             .locked
             .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_err()
         {
-            #[cfg(test)]
-            assert_test_lock_progress(deadline, "slot lock was not released within one second");
+            if wait_expired(deadline) {
+                return None;
+            }
             std::hint::spin_loop();
         }
+        Some(SlotLock { slot: self })
     }
 
     fn unlock(&self) {
         self.locked.store(false, Ordering::Release);
+    }
+}
+
+struct SlotLock<'a> {
+    slot: &'a Slot,
+}
+
+impl Drop for SlotLock<'_> {
+    fn drop(&mut self) {
+        self.slot.unlock();
     }
 }
 
@@ -919,17 +1021,24 @@ struct ConfigurationLock;
 
 impl ConfigurationLock {
     fn acquire() -> Self {
-        #[cfg(test)]
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        loop {
+            if let Some(lock) = Self::acquire_until(wait_deadline()) {
+                return lock;
+            }
+        }
+    }
+
+    fn acquire_until(deadline: Instant) -> Option<Self> {
         while CONFIGURATION_LOCKED
             .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_err()
         {
-            #[cfg(test)]
-            assert_test_lock_progress(deadline, "configuration lock was not released within one second");
+            if wait_expired(deadline) {
+                return None;
+            }
             std::hint::spin_loop();
         }
-        Self
+        Some(Self)
     }
 }
 
@@ -937,13 +1046,6 @@ impl Drop for ConfigurationLock {
     fn drop(&mut self) {
         CONFIGURATION_LOCKED.store(false, Ordering::Release);
     }
-}
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))] // Test-only timeout failure is deliberately not exercised.
-fn assert_test_lock_progress(deadline: std::time::Instant, message: &str) {
-    assert!(std::time::Instant::now() < deadline, "{message}");
-    std::thread::yield_now();
 }
 
 const fn encode_policy(policy: RecordingPolicy) -> u64 {
@@ -1008,8 +1110,9 @@ fn last_recording_policies() -> RecordingPolicies {
     }
 }
 
-fn destructive_snapshot(disposition: crate::snapshot::EventBufferDisposition) -> Option<Events> {
+fn destructive_snapshot(disposition: crate::snapshot::EventBufferDisposition) -> Result<Option<Events>, crate::Error> {
     let _configuration = ConfigurationLock::acquire();
+    let deadline = wait_deadline();
     let allocation_policy = ALLOCATION_POLICY.load(Ordering::SeqCst);
     let general_policy = GENERAL_POLICY.load(Ordering::SeqCst);
     let arc_dereference_policy = ARC_DEREFERENCE_POLICY.load(Ordering::SeqCst);
@@ -1024,14 +1127,36 @@ fn destructive_snapshot(disposition: crate::snapshot::EventBufferDisposition) ->
     IO_POLICY.store(disabled_policy(io_policy), Ordering::SeqCst);
     CACHE_POLICY.store(disabled_policy(cache_policy), Ordering::SeqCst);
 
-    wait_for_writers();
-    let snapshot = snapshot_session(LAST_SESSION.load(Ordering::Acquire));
+    if !wait_for_writers_until(deadline) {
+        restore_recording_policies(
+            allocation_policy,
+            general_policy,
+            arc_dereference_policy,
+            runtime_task_policy,
+            io_policy,
+            cache_policy,
+            was_enabled.then(|| LAST_SESSION.load(Ordering::Acquire)),
+        );
+        return Err(crate::Error::new("seismograph snapshot timed out waiting for active event writers"));
+    }
+    let snapshot = snapshot_session_until(LAST_SESSION.load(Ordering::Acquire), deadline)?;
     let release = disposition == crate::snapshot::EventBufferDisposition::Release;
     let mut recorder = RECORDERS.load(Ordering::Acquire);
     while !recorder.is_null() {
         // SAFETY: recorders remain registered for process lifetime.
         let current = unsafe { &*recorder };
-        current.clear(release || current.retired.load(Ordering::Acquire));
+        if !current.clear(release || current.retired.load(Ordering::Acquire), deadline) {
+            restore_recording_policies(
+                allocation_policy,
+                general_policy,
+                arc_dereference_policy,
+                runtime_task_policy,
+                io_policy,
+                cache_policy,
+                was_enabled.then(|| LAST_SESSION.load(Ordering::Acquire)),
+            );
+            return Err(crate::Error::new("seismograph snapshot timed out clearing an event recorder"));
+        }
         recorder = current.next.load(Ordering::Acquire);
     }
 
@@ -1046,30 +1171,78 @@ fn destructive_snapshot(disposition: crate::snapshot::EventBufferDisposition) ->
     RUNTIME_TASK_POLICY.store(runtime_task_policy, Ordering::SeqCst);
     IO_POLICY.store(io_policy, Ordering::SeqCst);
     CACHE_POLICY.store(cache_policy, Ordering::SeqCst);
-    snapshot
+    Ok(snapshot)
 }
 
 const fn disabled_policy(policy: u64) -> u64 {
     policy & !(RECORDING_ENABLED as u64)
 }
 
+#[cfg(test)]
 fn wait_for_writers() {
+    assert!(
+        wait_for_writers_until(wait_deadline()),
+        "event writers did not quiesce within {RECORDER_WAIT_TIMEOUT:?}"
+    );
+}
+
+fn wait_for_writers_until(deadline: Instant) -> bool {
     let mut recorder = RECORDERS.load(Ordering::Acquire);
     while !recorder.is_null() {
         // SAFETY: recorders remain registered for process lifetime.
         let current = unsafe { &*recorder };
         while current.writer_active.load(Ordering::SeqCst) {
+            if wait_expired(deadline) {
+                return false;
+            }
             std::hint::spin_loop();
         }
         recorder = current.next.load(Ordering::Acquire);
     }
+    true
 }
 
+#[cfg(test)]
 fn snapshot_session(session: u64) -> Option<Events> {
+    snapshot_session_until(session, wait_deadline()).ok().flatten()
+}
+
+fn snapshot_session_until(session: u64, deadline: Instant) -> Result<Option<Events>, crate::Error> {
     if session == 0 {
-        return None;
+        return Ok(None);
     }
-    snapshot_from_recorders(session, RECORDERS.load(Ordering::Acquire))
+    snapshot_from_recorders_until(session, RECORDERS.load(Ordering::Acquire), deadline)
+}
+
+fn restore_recording_policies(
+    allocation_policy: u64,
+    general_policy: u64,
+    arc_dereference_policy: u64,
+    runtime_task_policy: u64,
+    io_policy: u64,
+    cache_policy: u64,
+    session: Option<u64>,
+) {
+    ALLOCATION_POLICY.store(allocation_policy, Ordering::SeqCst);
+    GENERAL_POLICY.store(general_policy, Ordering::SeqCst);
+    ARC_DEREFERENCE_POLICY.store(arc_dereference_policy, Ordering::SeqCst);
+    RUNTIME_TASK_POLICY.store(runtime_task_policy, Ordering::SeqCst);
+    IO_POLICY.store(io_policy, Ordering::SeqCst);
+    CACHE_POLICY.store(cache_policy, Ordering::SeqCst);
+    ACTIVE_SESSION.store(session.unwrap_or(0), Ordering::SeqCst);
+}
+
+fn wait_deadline() -> Instant {
+    Instant::now().checked_add(RECORDER_WAIT_TIMEOUT).unwrap_or_else(Instant::now)
+}
+
+fn wait_expired(deadline: Instant) -> bool {
+    if Instant::now() < deadline {
+        std::thread::yield_now();
+        false
+    } else {
+        true
+    }
 }
 
 fn local_recorder() -> *const ThreadRecorder {
@@ -2008,6 +2181,19 @@ mod tests {
             let _captured = finished_receiver.recv_timeout(std::time::Duration::from_secs(1)).unwrap();
         });
         configure(Configuration::default());
+    }
+
+    #[test]
+    fn writer_activity_is_cleared_during_panic_unwinding() {
+        let recorder = ThreadRecorder::new();
+        recorder.writer_active.store(true, Ordering::Release);
+
+        let _panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _writer = WriterActiveGuard { recorder: &recorder };
+            panic!("injected recording failure");
+        }));
+
+        assert!(!recorder.writer_active.load(Ordering::Acquire));
     }
 
     #[test]

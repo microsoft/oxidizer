@@ -65,6 +65,8 @@ impl std::error::Error for Error {
 /// # Errors
 ///
 /// Returns an error when the request is too large or writing fails.
+/// After an I/O error, the writer may contain a partial frame and must be
+/// discarded rather than reused for another frame.
 pub fn write_request(writer: &mut impl Write, request_id: u64, request: &Request) -> Result<(), Error> {
     let (kind, payload) = message::encode_request(request)?;
     write_frame(writer, kind, request_id, &payload)
@@ -75,6 +77,8 @@ pub fn write_request(writer: &mut impl Write, request_id: u64, request: &Request
 /// # Errors
 ///
 /// Returns an error when reading fails or the request is malformed.
+/// After an I/O error, the reader may be positioned within a frame and must be
+/// discarded rather than reused for another frame.
 pub fn read_request(reader: &mut impl Read) -> Result<(u64, Request), Error> {
     let frame = read_frame(reader, MAX_CONTROL_BYTES)?;
     message::decode_request(frame.kind, &frame.payload).map(|request| (frame.request_id, request))
@@ -85,6 +89,8 @@ pub fn read_request(reader: &mut impl Read) -> Result<(u64, Request), Error> {
 /// # Errors
 ///
 /// Returns an error when the response is too large or writing fails.
+/// After an I/O error, the writer may contain a partial frame and must be
+/// discarded rather than reused for another frame.
 pub fn write_response(writer: &mut impl Write, request_id: u64, response: &Response) -> Result<(), Error> {
     let (kind, payload) = message::encode_response(response)?;
     write_frame(writer, kind, request_id, payload.as_ref())
@@ -95,6 +101,8 @@ pub fn write_response(writer: &mut impl Write, request_id: u64, response: &Respo
 /// # Errors
 ///
 /// Returns an error when reading fails or the response is malformed.
+/// After an I/O error, the reader may be positioned within a frame and must be
+/// discarded rather than reused for another frame.
 pub fn read_response(reader: &mut impl Read) -> Result<(u64, Response), Error> {
     let frame = read_frame(reader, MAX_SNAPSHOT_BYTES)?;
     message::decode_response(frame.kind, &frame.payload).map(|response| (frame.request_id, response))
