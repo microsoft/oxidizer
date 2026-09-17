@@ -2,6 +2,14 @@
 // Licensed under the MIT License.
 
 //! Integration tests for allocator telemetry.
+//!
+//! Miri excludes this behavioral integration binary because each test captures
+//! and decodes a process-wide allocator snapshot, making the suite the
+//! interpreter's dominant artifact without adding a distinct unsafe path.
+//! Rallocator's library tests retain direct Miri coverage of the allocator and
+//! telemetry internals; this binary retains its complete native and
+//! cargo-careful coverage.
+#![cfg(not(miri))]
 #![expect(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,

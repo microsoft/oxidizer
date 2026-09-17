@@ -224,7 +224,7 @@ impl ServiceDefinition {
     }
 
     /// Renders the combined trait, bridge, and transcoder for tests.
-    #[cfg(test)]
+    #[cfg(all(test, not(miri)))]
     pub(crate) fn generate(&self, options: super::generator::CodegenOptions) -> TokenStream {
         let trait_code = self.trait_code();
         let bridge = if options.emit_tonic {
@@ -1035,7 +1035,7 @@ pub(crate) fn to_snake_case(name: &str) -> String {
     heck::AsSnakeCase(name).to_string()
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 #[expect(
     clippy::literal_string_with_formatting_args,
     reason = "assertions match generated `{field:__capN}` destructuring patterns verbatim, not format args"

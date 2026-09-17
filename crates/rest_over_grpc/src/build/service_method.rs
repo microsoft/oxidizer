@@ -96,7 +96,7 @@ impl ServiceMethod {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests {
     use http_path_template::{Grammar, PathTemplate};
     use routerama::HttpMethod;

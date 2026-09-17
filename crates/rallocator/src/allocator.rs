@@ -3838,6 +3838,17 @@ mod tests {
     use super::*;
     use crate::domain::Domain;
 
+    fn test_recorder_configuration() -> seismograph::recorder::Configuration {
+        seismograph::recorder::Configuration {
+            event_capacity_per_thread: if cfg!(miri) {
+                seismograph::recorder::EventBufferCapacity::new(64).unwrap()
+            } else {
+                seismograph::recorder::EventBufferCapacity::default()
+            },
+            ..Default::default()
+        }
+    }
+
     #[cfg(not(miri))]
     struct DirectTrackingConfig;
 
@@ -4753,7 +4764,7 @@ mod tests {
                 enabled: true,
                 ..Default::default()
             },
-            ..Default::default()
+            ..test_recorder_configuration()
         });
 
         let allocator = unsafe { Rallocator::<CallerTrackingConfig>::new() };
@@ -4958,7 +4969,7 @@ mod tests {
                 enabled: true,
                 ..Default::default()
             },
-            ..Default::default()
+            ..test_recorder_configuration()
         });
         let allocator = unsafe { Rallocator::<Standard>::new() };
         let layout = Layout::from_size_align(MEDIUM_SLICE_SIZE, 16).unwrap();

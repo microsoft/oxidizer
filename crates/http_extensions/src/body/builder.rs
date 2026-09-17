@@ -570,6 +570,10 @@ mod tests {
     // ── JSON body creation ───────────────────────────────────────────────
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "allocation-count performance coverage is native-only; Miri retains body serialization with bounded payloads"
+    )]
     fn json_serialization_makes_few_memory_allocations() {
         #[derive(Serialize)]
         struct LargePayload {

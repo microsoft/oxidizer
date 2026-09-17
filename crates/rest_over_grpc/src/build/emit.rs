@@ -96,7 +96,7 @@ pub(crate) fn generate_router_with_visibility(routes: &[Route], public: bool) ->
     generator.generate()
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests {
     use http_path_template::{Grammar, PathTemplate};
     use routerama::HttpMethod;

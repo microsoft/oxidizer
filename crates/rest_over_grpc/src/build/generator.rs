@@ -105,7 +105,7 @@ impl Generator {
     }
 
     /// The configured OpenAPI document metadata, if any.
-    #[cfg(all(test, feature = "build-openapi"))]
+    #[cfg(all(test, not(miri), feature = "build-openapi"))]
     pub(crate) fn openapi_info(&self) -> Option<&OpenApiInfo> {
         self.openapi.as_ref()
     }
@@ -285,7 +285,7 @@ pub fn compile_fds(descriptor_set: impl AsRef<[u8]>, out_dir: impl AsRef<Path>) 
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
 
