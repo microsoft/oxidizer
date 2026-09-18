@@ -1256,15 +1256,11 @@ where
                 None => return ptr::null_mut(),
             };
             // SAFETY: used bits reserve this entire, exclusively owned extent.
-            let true = (unsafe { commit_reserved_medium_batch(regions, address, span_size, slice_count, reserved_count) }) else {
+            let true = (unsafe {
+                commit_and_initialize_reserved_medium_batch(regions, address, span_size, slice_count, reserved_count, &mut batch, region)
+            }) else {
                 return ptr::null_mut();
             };
-            // Avoid a process-wide region lookup when publishing each fresh batch.
-            LAST_REGION.set(region);
-            for (index, entry) in batch[..reserved_count].iter_mut().enumerate() {
-                // SAFETY: every span fits inside the committed batch extent.
-                *entry = unsafe { address.add(index * span_size) };
-            }
             self.record_mapping(span_size * reserved_count);
             regions.record_fresh(span_size * reserved_count);
             record_medium_event(MediumEventKind::FreshCommit, reserved_count);
@@ -2685,20 +2681,27 @@ fn medium_slice_count(layout: Layout) -> Option<usize> {
     }
 }
 
-#[cfg_attr(test, mutants::skip)] // Reversing VM commit success can access inaccessible pages and terminate the test runner.
-unsafe fn commit_reserved_medium_batch(
+#[cfg_attr(test, mutants::skip)] // Mutating VM sizes or pointer offsets can access inaccessible pages and terminate the test runner.
+unsafe fn commit_and_initialize_reserved_medium_batch(
     regions: &MediumRegion,
     address: *mut u8,
     span_size: usize,
     slice_count: usize,
     reserved_count: usize,
+    batch: &mut [*mut u8; medium::BATCH_CAPACITY],
+    region: *mut RegionState,
 ) -> bool {
-    if unsafe { hal::commit(address, span_size * reserved_count) } {
-        true
-    } else {
+    if !unsafe { hal::commit(address, span_size * reserved_count) } {
         unsafe { regions.release_slices(address, slice_count * reserved_count) };
-        false
+        return false;
     }
+    // Avoid a process-wide region lookup when publishing each fresh batch.
+    LAST_REGION.set(region);
+    for (index, entry) in batch[..reserved_count].iter_mut().enumerate() {
+        // SAFETY: every span fits inside the committed batch extent.
+        *entry = unsafe { address.add(index * span_size) };
+    }
+    true
 }
 
 unsafe fn register_medium_allocation(address: *mut u8, layout: Layout, heap: &mut ReusableHeapState, tracking: Option<PendingTracking>) {
