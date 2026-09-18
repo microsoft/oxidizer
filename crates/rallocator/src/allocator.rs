@@ -5,6 +5,7 @@ use std::alloc::{GlobalAlloc, Layout};
 use std::cell::UnsafeCell;
 use std::hint::spin_loop;
 use std::marker::PhantomData;
+use std::num::NonZeroUsize;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, AtomicUsize, Ordering, fence};
 use std::{cmp, mem, ptr};
@@ -1248,7 +1249,9 @@ where
             // and spans too large to cache, so idle owners cannot strand credits.
             unsafe { medium::domain_shard(heap.domain, index) }.purge(false, hal::monotonic_millis());
         }
-        let span_size = medium_span_size(slice_count);
+        let span_size = slice_count
+            .checked_mul(MEDIUM_SLICE_SIZE)
+            .expect("medium slice count is bounded to keep its span size representable");
         let cache_class = local_medium_cache_class(slice_count, span_size, heap.medium_cache_max_bytes);
         if let Some(cache_index) = cache_class
             && let Some(address) = heap.medium_batch.pop(cache_index)
@@ -1261,13 +1264,17 @@ where
         let regions = medium::heap_regions(heap);
         let requested = cache_class.map_or(1, |class| heap.medium_batch.refill_count(class));
         let mut batch = [ptr::null_mut(); 16];
-        let reused = regions.take_batch(slice_count, &mut batch[..requested]);
-        let (address, count) = if reused != 0 {
+        let reused = NonZeroUsize::new(regions.take_batch(slice_count, &mut batch[..requested]));
+        let (address, count) = if let Some(reused) = reused {
+            let reused = reused.get();
             record_medium_event(MediumEventKind::GlobalCacheHit, reused);
             (batch[0], reused)
         } else {
             regions.purge(false, hal::monotonic_millis());
-            let ((address, region), reserved_count) = match regions.reserve_slices(heap.domain, slice_count * requested) {
+            let requested_slices = slice_count
+                .checked_mul(requested)
+                .expect("medium slice and refill counts are bounded to keep their product representable");
+            let ((address, region), reserved_count) = match regions.reserve_slices(heap.domain, requested_slices) {
                 Some(reservation) => (reservation, requested),
                 None if requested > 1 => {
                     let Some(reservation) = regions.reserve_slices(heap.domain, slice_count) else {
@@ -1285,8 +1292,11 @@ where
             }) else {
                 return MediumAllocation { address: ptr::null_mut() };
             };
-            self.record_mapping(span_size * reserved_count);
-            regions.record_fresh(span_size * reserved_count);
+            let committed_bytes = span_size
+                .checked_mul(reserved_count)
+                .expect("reserved medium batch count is bounded to keep its committed size representable");
+            self.record_mapping(committed_bytes);
+            regions.record_fresh(committed_bytes);
             record_medium_event(MediumEventKind::FreshCommit, reserved_count);
             (address, reserved_count)
         };
@@ -2689,12 +2699,6 @@ fn default_class<T: Tunables>(layout: Layout) -> Option<usize> {
 #[inline(always)]
 fn local_medium_class(slice_count: usize) -> Option<usize> {
     (slice_count.is_power_of_two() && slice_count <= (1 << (LOCAL_MEDIUM_CLASSES - 1))).then(|| slice_count.trailing_zeros() as usize)
-}
-
-#[inline(always)]
-#[cfg_attr(test, mutants::skip)] // Mutated span arithmetic breaks the reservation and commit size invariant.
-const fn medium_span_size(slice_count: usize) -> usize {
-    slice_count * MEDIUM_SLICE_SIZE
 }
 
 #[inline(always)]
@@ -4160,12 +4164,11 @@ mod tests {
     fn medium_cache_class_requires_a_supported_size_within_budget() {
         assert_eq!(
             (
-                medium_span_size(3),
                 local_medium_cache_class(1, MEDIUM_SLICE_SIZE, MEDIUM_SLICE_SIZE),
                 local_medium_cache_class(1, MEDIUM_SLICE_SIZE, MEDIUM_SLICE_SIZE - 1),
                 local_medium_cache_class(3, 3 * MEDIUM_SLICE_SIZE, usize::MAX),
             ),
-            (3 * MEDIUM_SLICE_SIZE, Some(0), None, None)
+            (Some(0), None, None)
         );
     }
 
