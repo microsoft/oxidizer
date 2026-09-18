@@ -61,7 +61,7 @@ anvil-mutants-diff: anvil-mutants-diff-validate-prereqs anvil-impact
         ps -eo pid,ppid,rss,vsz,comm,args --sort=-rss |
             head -n 12 |
             sed 's/^/ANVIL_MUTANT_TELEMETRY process /'
-        sleep 2
+        sleep 3
     done
     '@
         [System.IO.File]::WriteAllText($monitor_path, $monitor_script, [System.Text.UTF8Encoding]::new($false))
