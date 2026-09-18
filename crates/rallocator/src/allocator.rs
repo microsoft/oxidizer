@@ -801,6 +801,7 @@ impl MediumRegion {
         }
     }
 
+    #[cfg_attr(test, mutants::skip)] // A synthesized Some(null) violates the reserved-address invariant and can cause UB.
     fn allocate_slices(&self, domain: *mut DomainState, count: usize) -> Option<*mut u8> {
         self.reserve_slices(domain, count).map(|(address, _)| address)
     }
