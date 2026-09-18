@@ -123,6 +123,8 @@ impl CreditLease {
             self.bytes += pool.acquire(goal - self.bytes, budget.limit);
             if self.bytes < wanted {
                 self.retry_after = now.saturating_add(SAMPLE_INTERVAL_MS);
+            } else {
+                self.retry_after = 0;
             }
         }
         let total = pool.allocated.load(Ordering::Relaxed);
