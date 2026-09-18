@@ -178,9 +178,12 @@ use proc_macro::TokenStream;
 /// - Mockall generation rejects mutable methods and methods with restricted visibility because
 ///   it cannot generate a fake that matches the wrapper's delegated method set.
 /// - Mockall generation rejects generic impl blocks; use a manual fake for generic services.
+/// - Mockall generation rejects trait impl blocks; use a manual fake for trait implementations.
 /// - Receiver-less methods must return `Self`; other associated functions cannot select a real or
 ///   fake implementation to delegate to.
 /// - Typed receivers such as `self: Box<Self>` are rejected; use `self`, `&self`, or `&mut self`.
+/// - Direct `#[cfg(...)]` attributes are supported on structs. A `cfg_attr` that conditionally
+///   applies `cfg` is rejected because it cannot safely gate every generated item.
 /// - Complex parameter patterns in method signatures are not supported in public methods
 /// - Generic types in impl blocks require careful handling
 ///

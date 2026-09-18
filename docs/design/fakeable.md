@@ -40,6 +40,11 @@ implementation. Typed receivers such as `self: Box<Self>` are rejected; the
 supported receiver forms are `self`, `&self`, and `&mut self`. Parameters must
 use identifier patterns.
 
+Direct `#[cfg(...)]` attributes on a struct gate the helper module, wrapper, and
+fake constructor implementation together. A `cfg_attr` that conditionally
+applies `cfg` is rejected because propagating it selectively could leave
+generated items referring to a disabled type.
+
 ## Fake availability
 
 Fake storage and constructors compile under
@@ -61,8 +66,10 @@ Mockall type in the configured module, excluding constructors, private methods,
 and rejecting mutable-receiver or restricted-visibility methods that would make
 the generated fake incompatible with the wrapper. Generic impl blocks are also
 rejected because the generated Mockall type cannot preserve their generic
-parameters and bounds. Async methods are represented as methods returning
-`Future` so tests can provide asynchronous expectations.
+parameters and bounds. Trait impl blocks are rejected because their inherited
+method visibility would otherwise produce an incomplete mock API. Async methods
+are represented as methods returning `Future` so tests can provide asynchronous
+expectations.
 
 Mockall remains optional because manually implemented fakes are the primary
 mechanism and should not add a production dependency. The integration must be

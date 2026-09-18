@@ -7,7 +7,9 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{ItemImpl, ItemStruct, parse_quote};
+use syn::parse::Parser;
+use syn::punctuated::Punctuated;
+use syn::{ItemImpl, ItemStruct, Meta, Token, parse_quote};
 
 mod args;
 
@@ -55,6 +57,13 @@ fn process_struct(args: &FakeableArgs, item_struct: &ItemStruct) -> proc_macro2:
     let struct_vis = &item_struct.vis;
     let struct_generics = &item_struct.generics;
     let struct_attrs = &item_struct.attrs;
+
+    if let Some(attr) = struct_attrs.iter().find(|attr| cfg_attr_can_disable_item(attr)) {
+        return syn::Error::new_spanned(attr, "cfg_attr applying cfg is not supported; use a direct #[cfg(...)] attribute")
+            .into_compile_error();
+    }
+
+    let cfg_attrs: Vec<_> = struct_attrs.iter().filter(|attr| attr.path().is_ident("cfg")).collect();
 
     // Generate internal type names without prefix, to be placed in dedicated module
     let enum_name = quote::format_ident!("Enum");
@@ -128,6 +137,7 @@ fn process_struct(args: &FakeableArgs, item_struct: &ItemStruct) -> proc_macro2:
 
     quote! {
         // Helper module containing internal types
+        #(#cfg_attrs)*
         #[allow(non_snake_case)]
         mod #helper_module_name {
             use super::*;
@@ -154,6 +164,7 @@ fn process_struct(args: &FakeableArgs, item_struct: &ItemStruct) -> proc_macro2:
         }
 
         // Basic implementation for the wrapper struct
+        #(#cfg_attrs)*
         impl #struct_generics #struct_name #struct_generics {
             #fakes_cfg
             #struct_vis fn #fake_constructor_ident(fake_impl: #fake_impl_path) -> Self {
@@ -189,6 +200,14 @@ fn process_impl(args: &FakeableArgs, item_impl: &ItemImpl) -> proc_macro2::Token
 
     // Generate mockall fake if requested
     let mockall_fake = if args.generate_mockall_fake == Some(true) {
+        if item_impl.trait_.is_some() {
+            return syn::Error::new_spanned(
+                item_impl,
+                "generate_mockall_fake does not support trait impl blocks; use a manual fake implementation",
+            )
+            .into_compile_error();
+        }
+
         if !item_impl.generics.params.is_empty() {
             return syn::Error::new_spanned(
                 &item_impl.generics,
@@ -223,6 +242,40 @@ fn process_impl(args: &FakeableArgs, item_impl: &ItemImpl) -> proc_macro2::Token
 
         #mockall_fake
     }
+}
+
+fn cfg_attr_can_disable_item(attr: &syn::Attribute) -> bool {
+    if !attr.path().is_ident("cfg_attr") {
+        return false;
+    }
+
+    let Meta::List(list) = &attr.meta else {
+        return false;
+    };
+
+    cfg_attr_tokens_can_disable_item(list.tokens.clone())
+}
+
+fn cfg_attr_tokens_can_disable_item(tokens: TokenStream) -> bool {
+    let Ok(metas) = Punctuated::<Meta, Token![,]>::parse_terminated.parse2(tokens) else {
+        return false;
+    };
+
+    metas.iter().skip(1).any(meta_can_disable_item)
+}
+
+fn meta_can_disable_item(meta: &Meta) -> bool {
+    if meta.path().is_ident("cfg") {
+        return true;
+    }
+
+    if meta.path().is_ident("cfg_attr")
+        && let Meta::List(list) = meta
+    {
+        return cfg_attr_tokens_can_disable_item(list.tokens.clone());
+    }
+
+    false
 }
 
 /// Extracts the final type path segment from an impl block.
@@ -730,8 +783,6 @@ fn generate_mockall_fake(
 ///
 /// Handles both `#[expect(...)]` and `#[cfg_attr(something, expect(...))]`
 fn transform_expect_to_allow(attr: &syn::Attribute) -> syn::Attribute {
-    use syn::Meta;
-
     let mut attr = attr.clone();
 
     // Case 1: #[expect(...)] -> #[allow(...)]
@@ -806,11 +857,11 @@ mod output_verification;
 mod tests {
     use proc_macro2::TokenStream;
     use quote::{ToTokens, quote};
-    use syn::{Type, parse_quote};
+    use syn::{Meta, Type, parse_quote};
 
     use super::{
-        add_explicit_lifetimes, add_lifetime_to_references, contains_reference_in_generic, fakeable_impl, rewrite_expect_in_tokens,
-        transform_expect_to_allow,
+        add_explicit_lifetimes, add_lifetime_to_references, cfg_attr_can_disable_item, cfg_attr_tokens_can_disable_item,
+        contains_reference_in_generic, fakeable_impl, meta_can_disable_item, rewrite_expect_in_tokens, transform_expect_to_allow,
     };
 
     fn expansion(args: TokenStream, input: TokenStream) -> String {
@@ -892,6 +943,22 @@ mod tests {
         let transformed = transform_expect_to_allow(&attr);
 
         assert!(transformed.path().is_ident("expect"));
+    }
+
+    #[test]
+    fn classifies_cfg_attr_item_disabling_behavior() {
+        let derive_attr: syn::Attribute = parse_quote!(#[cfg_attr(test, derive(Clone))]);
+        let nested_cfg_attr: syn::Attribute = parse_quote!(
+            #[cfg_attr(test, cfg_attr(feature = "enabled", cfg(unix)))]
+        );
+        let name_value_attr: syn::Attribute = parse_quote!(#[cfg_attr = "invalid"]);
+        let unrelated_meta: Meta = parse_quote!(derive(Clone));
+
+        assert!(!cfg_attr_can_disable_item(&derive_attr));
+        assert!(cfg_attr_can_disable_item(&nested_cfg_attr));
+        assert!(!cfg_attr_can_disable_item(&name_value_attr));
+        assert!(!cfg_attr_tokens_can_disable_item(quote!(test, @)));
+        assert!(!meta_can_disable_item(&unrelated_meta));
     }
 
     #[test]

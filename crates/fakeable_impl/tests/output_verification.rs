@@ -452,3 +452,46 @@ fn fakeable_on_generic_impl_with_mockall_is_rejected() {
 
     assert!(result.contains("does not support generic impl blocks"));
 }
+
+#[test]
+fn fakeable_on_trait_impl_with_mockall_is_rejected() {
+    let input = quote! {
+        impl Service for MyService {
+            fn value(&self) -> i32 {
+                42
+            }
+        }
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! { generate_mockall_fake = true }, input).to_string();
+
+    assert!(result.contains("does not support trait impl blocks"));
+}
+
+#[test]
+fn fakeable_on_cfg_struct_gates_generated_items() {
+    let input = quote! {
+        #[cfg(feature = "enabled")]
+        struct MyService {
+            value: String,
+        }
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! { fake_impl = FakeMyService }, input);
+    let result_file = syn::parse_file(&result.to_string()).unwrap();
+    assert_snapshot!(prettyplease::unparse(&result_file));
+}
+
+#[test]
+fn fakeable_rejects_cfg_attr_that_can_disable_struct() {
+    let input = quote! {
+        #[cfg_attr(feature = "conditional", cfg(feature = "enabled"))]
+        struct MyService {
+            value: String,
+        }
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! { fake_impl = FakeMyService }, input).to_string();
+
+    assert!(result.contains("cfg_attr applying cfg is not supported"));
+}
