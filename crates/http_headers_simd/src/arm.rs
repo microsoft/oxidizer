@@ -266,6 +266,28 @@ pub(super) unsafe fn find_interesting(bytes: &[u8]) -> Option<usize> {
     crate::scalar::find_interesting(&bytes[offset..]).map(|index| offset + index)
 }
 
+/// # Safety
+///
+/// The processor must support NEON.
+#[target_feature(enable = "neon")]
+pub(super) unsafe fn find_either(bytes: &[u8], first: u8, second: u8) -> Option<usize> {
+    let mut offset = 0;
+    while offset + WIDTH <= bytes.len() {
+        let pointer = bytes.as_ptr().wrapping_add(offset);
+        // SAFETY: `offset + WIDTH <= bytes.len()` permits this unaligned 16-byte load.
+        let value = unsafe { vld1q_u8(pointer) };
+        let matches = vorrq_u8(vceqq_u8(value, vdupq_n_u8(first)), vceqq_u8(value, vdupq_n_u8(second)));
+        if any_set(matches) {
+            let mut lanes = [0_u8; WIDTH];
+            // SAFETY: `lanes` has exactly 16 writable bytes.
+            unsafe { vst1q_u8(lanes.as_mut_ptr(), matches) };
+            return lanes.iter().position(|byte| *byte != 0).map(|index| offset + index);
+        }
+        offset += WIDTH;
+    }
+    crate::scalar::find_either(&bytes[offset..], first, second).map(|index| offset + index)
+}
+
 #[target_feature(enable = "neon")]
 fn token_mask(value: uint8x16_t) -> uint8x16_t {
     let mut mask = vorrq_u8(in_range(value, b'0', b'9'), in_range(value, b'A', b'Z'));

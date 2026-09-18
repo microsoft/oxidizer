@@ -150,10 +150,7 @@ pub(super) type ValuesValidator =
 
 pub(super) type OwnedValuesDecoder = fn(&'static FieldName, &FieldLines<'_>, ItemValidator) -> Result<ListValues, DecodeError>;
 
-fn validate_custom_values(values: &FieldLines<'_>, name: &'static FieldName, validator: ItemValidator) -> Result<bool, DecodeError> {
-    if !values.has_custom_source_limits() {
-        return Ok(false);
-    }
+fn validate_custom_values(values: &FieldLines<'_>, name: &'static FieldName, validator: ItemValidator) -> Result<(), DecodeError> {
     values.validate_custom_source_bounds()?;
 
     let mut item_count = 0_usize;
@@ -166,7 +163,7 @@ fn validate_custom_values(values: &FieldLines<'_>, name: &'static FieldName, val
             validator(item?)?;
         }
     }
-    Ok(true)
+    Ok(())
 }
 
 #[expect(
@@ -185,17 +182,17 @@ pub(super) fn checked_view_values<'a>(
     let Some(values) = values else {
         return Ok(None);
     };
-    if validate_custom_values(
-        &values,
-        name,
-        match mode {
-            crate::DecodeMode::Strict => strict,
-            crate::DecodeMode::Relaxed => relaxed,
-        },
-    )? {
+    if values.has_custom_source_limits() {
+        validate_custom_values(
+            &values,
+            name,
+            match mode {
+                crate::DecodeMode::Strict => strict,
+                crate::DecodeMode::Relaxed => relaxed,
+            },
+        )?;
         return Ok(Some(values));
     }
-    values.validate_list_item_limit(b',', true)?;
     match mode {
         crate::DecodeMode::Strict => validate_values(name, &values, strict),
         crate::DecodeMode::Relaxed => validate_values(name, &values, relaxed),
@@ -219,17 +216,17 @@ pub(super) fn checked_owned_values(
     let Some(values) = values else {
         return Ok(None);
     };
-    if validate_custom_values(
-        &values,
-        name,
-        match mode {
-            crate::DecodeMode::Strict => strict,
-            crate::DecodeMode::Relaxed => relaxed,
-        },
-    )? {
+    if values.has_custom_source_limits() {
+        validate_custom_values(
+            &values,
+            name,
+            match mode {
+                crate::DecodeMode::Strict => strict,
+                crate::DecodeMode::Relaxed => relaxed,
+            },
+        )?;
         return clone_checked_values(&values, |_index, _value| Ok(())).map(Some);
     }
-    values.validate_list_item_limit(b',', true)?;
     match mode {
         crate::DecodeMode::Strict => decode_values(name, &values, strict),
         crate::DecodeMode::Relaxed => decode_values(name, &values, relaxed),

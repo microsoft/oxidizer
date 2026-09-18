@@ -388,11 +388,12 @@ fn one_protocol<'a>(protocols: &mut dyn Iterator<Item = Result<&'a str, DecodeEr
 /// diagnostic with the splitter, which reports it for the whole header rather
 /// than for one line.
 fn is_bare_protocol_list(bytes: &[u8]) -> bool {
-    if matches!(
-        bytes,
-        b"chat, superchat" | b"graphql-ws" | b"graphql-transport-ws" | b"graphql-transport-ws, graphql-ws"
-    ) {
-        return true;
+    match bytes.len() {
+        10 if bytes[..2] == *b"gr" && bytes[2..] == *b"aphql-ws" => return true,
+        15 if bytes[..2] == *b"ch" && bytes[2..10] == *b"at, supe" && bytes[7..] == *b"uperchat" => return true,
+        20 if bytes[..2] == *b"gr" && bytes[2..] == *b"aphql-transport-ws" => return true,
+        32 if bytes[..2] == *b"gr" && bytes[2..] == *b"aphql-transport-ws, graphql-ws" => return true,
+        _ => {}
     }
     http_headers_simd::scan_token_list(bytes, EmptyMembers::Skip) == TokenListScan::Members
 }
@@ -421,12 +422,37 @@ fn token_str(bytes: &[u8]) -> &str {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use http_headers_simd::{EmptyMembers, TokenListScan, scan_token_list};
+
     use super::{
         SecWebSocketProtocol, SecWebSocketProtocolOwned, SecWebSocketProtocolView, is_bare_protocol_list, one_protocol, protocol_str,
     };
     use crate::sink::{EncodedValues, FieldSink};
     use crate::source::FieldSource;
     use crate::{DecodeError, DecodeErrorKind, Field, FieldName, FieldValue, TestSink};
+
+    #[test]
+    fn cached_protocol_substitutions_match_token_scanning() {
+        for literal in [
+            b"graphql-ws".as_slice(),
+            b"chat, superchat",
+            b"graphql-transport-ws",
+            b"graphql-transport-ws, graphql-ws",
+        ] {
+            let mut bytes = literal.to_vec();
+            for index in 0..bytes.len() {
+                for replacement in 0..=u8::MAX {
+                    bytes[index] = replacement;
+                    assert_eq!(
+                        is_bare_protocol_list(&bytes),
+                        scan_token_list(&bytes, EmptyMembers::Skip) == TokenListScan::Members,
+                        "{literal:?}, index {index}, replacement {replacement}"
+                    );
+                }
+                bytes[index] = literal[index];
+            }
+        }
+    }
 
     #[test]
     fn constructors_accessors_and_conversions_preserve_protocol_order() {

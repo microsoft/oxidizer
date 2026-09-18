@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use super::shared::{CorsList, CorsListView, CorsMethodView, method_ref, validate_list};
+use super::shared::{CorsList, CorsListView, CorsMethodView, method_ref_validated, validate_list, validate_single_list};
 use crate::sink::{FieldSink, InsertError};
 use crate::source::FieldSource;
 use crate::{DecodeError, Field, FieldName, FieldValue, FieldValueRef, validate};
@@ -213,7 +213,7 @@ macro_rules! define_method_list {
                     .flat_map(|value| value.as_bytes().split(|byte| *byte == b','))
                     .map(validate::trim_ows)
                     .filter(|item| !item.is_empty())
-                    .filter_map(method_ref)
+                    .map(method_ref_validated)
             }
 
             /// Returns the number of list members, including duplicates.
@@ -362,7 +362,7 @@ macro_rules! define_method_list {
                     .flat_map(|value| value.as_bytes().split(|byte| *byte == b','))
                     .map(validate::trim_ows)
                     .filter(|item| !item.is_empty())
-                    .filter_map(method_ref)
+                    .map(method_ref_validated)
             }
 
             /// Returns the number of list members, including duplicates.
@@ -546,6 +546,12 @@ macro_rules! define_method_list {
                     return Ok(None);
                 };
                 lines.validate_list_item_limit(b',', true)?;
+                let mut repeated = lines.repeated();
+                let first = repeated.next().expect("FieldLines always contains at least one field line");
+                if repeated.next().is_none() {
+                    validate_single_list($name, first, true)?;
+                    return Ok(Some($borrowed(CorsListView { values: lines })));
+                }
                 validate_list($name, lines.repeated(), true)?;
                 Ok(Some($borrowed(CorsListView { values: lines })))
             }
@@ -572,7 +578,7 @@ macro_rules! define_method_list {
             type Error = DecodeError;
 
             fn try_from(value: FieldValue) -> Result<Self, Self::Error> {
-                Self::from_field_values(vec![value])
+                CorsList::from_field_value($name, value, true).map(Self)
             }
         }
 

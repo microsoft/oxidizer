@@ -219,7 +219,11 @@ impl<'a> FieldLines<'a> {
     /// assert_eq!(lines.exactly_one()?.as_bytes(), b"client/1");
     /// # Ok::<(), http_headers::DecodeError>(())
     /// ```
-    #[inline]
+    #[expect(
+        clippy::inline_always,
+        reason = "typed singleton decoding must eliminate the known source representation and intermediate result"
+    )]
+    #[inline(always)]
     pub fn exactly_one(self) -> Result<FieldValueRef<'a>, DecodeError> {
         // Specialized per representation rather than routed through
         // `repeated()`: the cardinality of a slice is already known, and
@@ -272,15 +276,14 @@ impl<'a> FieldLines<'a> {
     #[inline]
     pub(crate) fn exactly_one_owned(&self) -> Result<FieldValue, DecodeError> {
         self.validate_custom_source()?;
-        let invalid_bytes = || DecodeError::new(self.name, DecodeErrorKind::InvalidSyntax);
         match &self.repr {
-            Repr::Single(bytes) => FieldValueRef::new(bytes).try_to_field_value().map_err(|_invalid| invalid_bytes()),
+            Repr::Single(bytes) => Ok(FieldValueRef::new(bytes).to_validated_field_value()),
             Repr::Slice(values) => match values {
                 [value] => Ok(value.clone()),
                 _ => Err(DecodeError::new(self.name, DecodeErrorKind::UnexpectedMultipleValues)),
             },
             Repr::Borrowed(values) => match values {
-                [value] => value.try_to_field_value().map_err(|_invalid| invalid_bytes()),
+                [value] => Ok(value.to_validated_field_value()),
                 _ => Err(DecodeError::new(self.name, DecodeErrorKind::UnexpectedMultipleValues)),
             },
             #[cfg(feature = "http")]
@@ -443,11 +446,15 @@ impl<'a> FieldLines<'a> {
         matches!(&self.repr, Repr::Single(_) | Repr::Slice(_) | Repr::Borrowed(_))
     }
 
+    #[inline]
     pub(crate) fn validate_custom_source_bounds(&self) -> Result<(), DecodeError> {
         if !self.has_custom_source_limits() {
             return Ok(());
         }
+        self.validate_bounded_source()
+    }
 
+    fn validate_bounded_source(&self) -> Result<(), DecodeError> {
         let invalid = || DecodeError::new(self.name, DecodeErrorKind::InvalidSyntax);
         if self.len() > MAX_CUSTOM_FIELD_LINES {
             return Err(invalid());
@@ -465,6 +472,7 @@ impl<'a> FieldLines<'a> {
         Ok(())
     }
 
+    #[inline]
     pub(crate) fn validate_custom_source(&self) -> Result<(), DecodeError> {
         self.validate_custom_source_bounds()
     }
@@ -478,11 +486,15 @@ impl<'a> FieldLines<'a> {
         self.validate_list_item_limit_with(b',', true, false)
     }
 
+    #[inline]
     fn validate_list_item_limit_with(&self, delimiter: u8, skip_empty: bool, backslash_escapes: bool) -> Result<(), DecodeError> {
         if !self.has_custom_source_limits() {
             return Ok(());
         }
+        self.validate_bounded_list(delimiter, skip_empty, backslash_escapes)
+    }
 
+    fn validate_bounded_list(&self, delimiter: u8, skip_empty: bool, backslash_escapes: bool) -> Result<(), DecodeError> {
         let invalid = || DecodeError::new(self.name, DecodeErrorKind::InvalidSyntax);
         if self.len() > MAX_CUSTOM_FIELD_LINES {
             return Err(invalid());
@@ -671,15 +683,12 @@ impl<'a> Iterator for FieldLinesOwnedIter<'a> {
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         match &mut self.repr {
-            OwnedLinesRepr::Single(value) => value.take().and_then(|bytes| {
+            OwnedLinesRepr::Single(value) => value.take().map(|bytes| {
                 let value = FieldValueRef::new(bytes);
-                value.try_to_field_value().ok().map(|owned| (value, owned))
+                (value, value.to_validated_field_value())
             }),
             OwnedLinesRepr::Slice(values) => values.next().map(|value| (value.as_field_value_ref(), value.clone())),
-            OwnedLinesRepr::Borrowed(values) => values
-                .next()
-                .copied()
-                .and_then(|value| value.try_to_field_value().ok().map(|owned| (value, owned))),
+            OwnedLinesRepr::Borrowed(values) => values.next().copied().map(|value| (value, value.to_validated_field_value())),
             #[cfg(feature = "http")]
             OwnedLinesRepr::Http(values) => values.next().map(|value| (FieldValueRef::from(value), FieldValue::from(value))),
         }

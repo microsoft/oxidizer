@@ -735,18 +735,21 @@ fn parse_hsts(bytes: &[u8]) -> Result<HstsSummary, DecodeError> {
 fn parse_canonical_hsts(bytes: &[u8]) -> Option<HstsSummary> {
     let digits = bytes.strip_prefix(b"max-age=")?;
     let mut max_age = 0_u64;
-    let mut index = 0_usize;
-    while let Some(digit) = digits.get(index).map(|byte| byte.wrapping_sub(b'0'))
-        && digit <= 9
-    {
+    let mut digit_count = 0_usize;
+    let mut rest = digits;
+    while let Some((&byte, tail)) = rest.split_first() {
+        let digit = byte.wrapping_sub(b'0');
+        if digit > 9 {
+            break;
+        }
         max_age = max_age.checked_mul(10)?.checked_add(u64::from(digit))?;
-        index += 1;
+        digit_count += 1;
+        rest = tail;
     }
-    if index == 0 {
+    if digit_count == 0 {
         return None;
     }
 
-    let mut rest = &digits[index..];
     let mut include_subdomains = false;
     let mut preload = false;
     loop {
@@ -793,7 +796,14 @@ fn parse_hsts_directives(bytes: &[u8]) -> Result<HstsSummary, DecodeError> {
     let mut include_subdomains = false;
     let mut preload = false;
     for item in HstsItems::new(bytes) {
-        let (name, value) = split_hsts_directive(item)?;
+        if let Some(seconds) = parse_unquoted_max_age(item) {
+            if max_age.is_some() {
+                return Err(super::super::invalid_syntax(&FieldName::StrictTransportSecurity));
+            }
+            max_age = Some(seconds);
+            continue;
+        }
+        let (name, value) = split_hsts_directive_trimmed(item)?;
         if validate::eq_ignore_ascii_case(name, b"max-age") {
             if max_age.is_some() {
                 return Err(super::super::invalid_syntax(&FieldName::StrictTransportSecurity));
@@ -819,8 +829,21 @@ fn parse_hsts_directives(bytes: &[u8]) -> Result<HstsSummary, DecodeError> {
     })
 }
 
+fn parse_unquoted_max_age(bytes: &[u8]) -> Option<u64> {
+    let equals = bytes.iter().position(|byte| *byte == b'=')?;
+    if !validate::eq_ignore_ascii_case(&bytes[..equals], b"max-age") {
+        return None;
+    }
+    validate::decimal_u64(&bytes[equals + 1..])
+}
+
+#[cfg(test)]
 fn split_hsts_directive(bytes: &[u8]) -> Result<(&[u8], Option<&[u8]>), DecodeError> {
     let bytes = super::super::trim_ows(bytes);
+    split_hsts_directive_trimmed(bytes)
+}
+
+fn split_hsts_directive_trimmed(bytes: &[u8]) -> Result<(&[u8], Option<&[u8]>), DecodeError> {
     let equals = bytes.iter().position(|byte| *byte == b'=');
     let (name, value) = equals.map_or((bytes, None), |equals| (&bytes[..equals], Some(&bytes[equals + 1..])));
     if !validate::token(name) || value.is_some_and(|value| !valid_token_or_quoted(value)) {
@@ -831,7 +854,7 @@ fn split_hsts_directive(bytes: &[u8]) -> Result<(&[u8], Option<&[u8]>), DecodeEr
 
 fn parse_hsts_directive(bytes: &[u8]) -> Result<HstsDirectiveView<'_>, DecodeError> {
     let bytes = super::super::trim_ows(bytes);
-    let (name, value) = split_hsts_directive(bytes)?;
+    let (name, value) = split_hsts_directive_trimmed(bytes)?;
     let name = str::from_utf8(name).expect("HTTP token validation guarantees ASCII");
     Ok(HstsDirectiveView { raw: bytes, name, value })
 }
@@ -1172,6 +1195,7 @@ mod tests {
             b"max-age=",
             b"max-age=x",
             b"max-age=1; max-age=2",
+            b"max-age=\"1\"; max-age=\"2\"",
             b"max-age=1; includeSubDomains; includeSubDomains",
             b"max-age=1; includeSubDomains=yes",
             b"max-age=1; preload; preload",

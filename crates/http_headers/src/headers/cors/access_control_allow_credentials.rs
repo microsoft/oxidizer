@@ -265,15 +265,14 @@ impl TryFrom<FieldValue> for AccessControlAllowCredentialsOwned {
         }
     }
 }
-/// Recognizes the sole accepted credentials value, with or without whitespace.
-///
-/// The untrimmed form is the one seen on the wire, so it is matched directly
-/// before falling back to the trimming path.
+#[inline]
 fn is_credentials_true(bytes: &[u8]) -> bool {
-    if let [b't', b'r', b'u', b'e'] = bytes {
-        return true;
-    }
-    matches!(bytes.get(trimmed_range(bytes)), Some(b"true"))
+    bytes == b"true" || is_trimmed_credentials_true(bytes)
+}
+
+#[cold]
+fn is_trimmed_credentials_true(bytes: &[u8]) -> bool {
+    bytes.get(trimmed_range(bytes)) == Some(b"true".as_slice())
 }
 
 #[cfg(test)]

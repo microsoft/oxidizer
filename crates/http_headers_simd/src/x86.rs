@@ -36,7 +36,12 @@ pub(super) unsafe fn is_token(bytes: &[u8]) -> bool {
         }
         offset += WIDTH;
     }
-    crate::scalar::all_token_bytes(&bytes[offset..])
+    if offset == 0 || bytes.len() - offset < 8 {
+        return crate::scalar::all_token_bytes(&bytes[offset..]);
+    }
+    let pointer = bytes.as_ptr().wrapping_add(bytes.len() - WIDTH).cast();
+    // SAFETY: at least one full vector was consumed and this load ends at the slice end.
+    token_mask(unsafe { _mm_loadu_si128(pointer) }) == 0xffff
 }
 
 /// # Safety
@@ -138,7 +143,17 @@ pub(super) unsafe fn is_field_value(bytes: &[u8]) -> bool {
         }
         offset += WIDTH;
     }
-    crate::scalar::is_field_value(&bytes[offset..])
+    if offset == 0 || bytes.len() - offset == 1 {
+        return crate::scalar::is_field_value(&bytes[offset..]);
+    }
+    let pointer = bytes.as_ptr().wrapping_add(bytes.len() - WIDTH).cast();
+    // SAFETY: at least one full vector was consumed and this load ends at the slice end.
+    let value = unsafe { _mm_loadu_si128(pointer) };
+    let ascii = _mm_cmpgt_epi8(value, _mm_set1_epi8(-1));
+    let control = _mm_and_si128(ascii, _mm_cmpgt_epi8(_mm_set1_epi8(0x20), value));
+    let invalid_control = _mm_andnot_si128(_mm_cmpeq_epi8(value, _mm_set1_epi8(9)), control);
+    let del = _mm_cmpeq_epi8(value, _mm_set1_epi8(0x7f));
+    _mm_movemask_epi8(_mm_or_si128(invalid_control, del)) == 0
 }
 
 /// # Safety
@@ -183,6 +198,29 @@ pub(super) unsafe fn find_interesting(bytes: &[u8]) -> Option<usize> {
         offset += WIDTH;
     }
     crate::scalar::find_interesting(&bytes[offset..]).map(|index| offset + index)
+}
+
+/// # Safety
+///
+/// The processor must support SSE2.
+#[target_feature(enable = "sse2")]
+pub(super) unsafe fn find_either(bytes: &[u8], first: u8, second: u8) -> Option<usize> {
+    let mut offset = 0;
+    while offset + WIDTH <= bytes.len() {
+        let pointer = bytes.as_ptr().wrapping_add(offset).cast();
+        // SAFETY: `offset + WIDTH <= bytes.len()` permits this unaligned 16-byte load.
+        let value = unsafe { _mm_loadu_si128(pointer) };
+        let matches = _mm_or_si128(
+            _mm_cmpeq_epi8(value, _mm_set1_epi8(first.cast_signed())),
+            _mm_cmpeq_epi8(value, _mm_set1_epi8(second.cast_signed())),
+        );
+        let found = _mm_movemask_epi8(matches);
+        if found != 0 {
+            return Some(offset + found.trailing_zeros() as usize);
+        }
+        offset += WIDTH;
+    }
+    crate::scalar::find_either(&bytes[offset..], first, second).map(|index| offset + index)
 }
 
 /// Scans a reference with one nibble-table lookup per lane.

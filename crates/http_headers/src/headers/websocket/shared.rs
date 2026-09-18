@@ -48,18 +48,18 @@ pub(super) fn validate_canonical_base64(bytes: &[u8], decoded_length: usize, nam
     if canonical_tail { Ok(()) } else { Err(invalid_syntax(name)) }
 }
 
-/// Reduces the padding test to one branch over the whole run.
-///
-/// Each byte contributes a nonzero bit only when it differs from `=`, so the
-/// loop carries no data-dependent control flow and the fixed nonce and digest
-/// lengths let it collapse into a couple of compares.
+/// Lets the nonce's two padding bytes use one fixed-width comparison.
 #[expect(
     clippy::inline_always,
     reason = "specializing per call site folds the constant lengths into the scan"
 )]
 #[inline(always)]
 fn all_padding(bytes: &[u8]) -> bool {
-    bytes.iter().fold(0_u8, |differs, byte| differs | (byte ^ b'=')) == 0
+    if bytes.len() == 2 {
+        bytes == b"=="
+    } else {
+        bytes.iter().fold(0_u8, |differs, byte| differs | (byte ^ b'=')) == 0
+    }
 }
 
 /// Classifies every byte as a canonical final data character.
@@ -304,6 +304,9 @@ impl<'a> Iterator for CommaItems<'a> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use base64::Engine as _;
+    use base64::engine::general_purpose::STANDARD;
+
     use super::{
         CommaItems, base64_encoded_length, base64_sextet, canonical_tail_table, encode_fixed_base64, increment_item_count,
         is_canonical_tail_pad1, is_canonical_tail_pad2, trim_ows, validate_bare_list, validate_canonical_base64,
@@ -347,6 +350,46 @@ mod tests {
                 sextet.is_some_and(|value| value.trailing_zeros() >= 4),
                 "two-pad classification differs for {byte:#04x}"
             );
+        }
+    }
+
+    #[test]
+    fn fixed_base64_substitutions_match_standard_decoder() {
+        for decoded_length in [0, 1, 2, 3, 16, 20] {
+            let encoded = STANDARD.encode(vec![0x69; decoded_length]);
+            let mut bytes = encoded.into_bytes();
+            for index in 0..bytes.len() {
+                let original = bytes[index];
+                for byte in 0..=u8::MAX {
+                    bytes[index] = byte;
+                    let expected = STANDARD.decode(&bytes).is_ok_and(|decoded| decoded.len() == decoded_length);
+                    assert_eq!(
+                        validate_canonical_base64(&bytes, decoded_length, &FieldName::SecWebSocketKey).is_ok(),
+                        expected,
+                        "decoded length {decoded_length}, byte {index} replaced by {byte:#04x}"
+                    );
+                }
+                bytes[index] = original;
+            }
+            assert_eq!(
+                validate_canonical_base64(&bytes, decoded_length, &FieldName::SecWebSocketKey),
+                Ok(())
+            );
+        }
+    }
+
+    #[test]
+    fn padding_comparison_matches_each_byte() {
+        for length in 0..=4 {
+            let mut bytes = vec![b'='; length];
+            assert!(super::all_padding(&bytes));
+            for index in 0..length {
+                for byte in 0..=u8::MAX {
+                    bytes[index] = byte;
+                    assert_eq!(super::all_padding(&bytes), byte == b'=');
+                }
+                bytes[index] = b'=';
+            }
         }
     }
 

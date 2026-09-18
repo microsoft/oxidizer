@@ -840,12 +840,75 @@ const fn decimal_len(mut value: u64) -> usize {
 }
 
 fn parse_directive(bytes: &[u8]) -> Result<CacheDirectiveView<'_>, DecodeError> {
-    let directive = parse_directive_parts(bytes)?;
+    let directive = project_directive(bytes)?;
     let name = str::from_utf8(directive.name).expect("validated directive names contain only ASCII");
     Ok(CacheDirectiveView {
         name,
         value: directive.value,
         raw: bytes,
+    })
+}
+
+fn project_directive(bytes: &[u8]) -> Result<DirectiveParts<'_>, DecodeError> {
+    if bytes.is_empty() {
+        return Err(super::invalid_syntax(&FieldName::CacheControl));
+    }
+    if bytes.get(7) == Some(&b'=') && bytes.get(..7).is_some_and(|name| eq_ignore_ascii_case_scalar(name, b"max-age")) {
+        let value = &bytes[8..];
+        validate_directive_value(value, false)?;
+        return Ok(DirectiveParts {
+            name: &bytes[..7],
+            value: Some(value),
+            kind: DirectiveKind::MaxAge,
+            delta_seconds: None,
+        });
+    }
+    let bare_kind = match bytes.len() {
+        6 if eq_ignore_ascii_case_scalar(bytes, b"public") => Some(DirectiveKind::Other),
+        7 if eq_ignore_ascii_case_scalar(bytes, b"private") => Some(DirectiveKind::Other),
+        8 if eq_ignore_ascii_case_scalar(bytes, b"no-cache") => Some(DirectiveKind::NoCache),
+        8 if eq_ignore_ascii_case_scalar(bytes, b"no-store") => Some(DirectiveKind::Other),
+        9 if eq_ignore_ascii_case_scalar(bytes, b"immutable") => Some(DirectiveKind::Other),
+        12 if eq_ignore_ascii_case_scalar(bytes, b"no-transform") => Some(DirectiveKind::Other),
+        14 if eq_ignore_ascii_case_scalar(bytes, b"only-if-cached") => Some(DirectiveKind::Other),
+        15 if eq_ignore_ascii_case_scalar(bytes, b"must-revalidate") => Some(DirectiveKind::Other),
+        16 if eq_ignore_ascii_case_scalar(bytes, b"proxy-revalidate") => Some(DirectiveKind::Other),
+        _ => None,
+    };
+    if let Some(kind) = bare_kind {
+        return Ok(DirectiveParts {
+            name: bytes,
+            value: None,
+            kind,
+            delta_seconds: None,
+        });
+    }
+    let mut equals = None;
+    for (index, byte) in bytes.iter().copied().enumerate() {
+        if byte == b'=' {
+            equals = Some(index);
+            break;
+        }
+        if !is_token_byte(byte) {
+            return Err(DecodeError::new(&FieldName::CacheControl, DecodeErrorKind::InvalidToken));
+        }
+    }
+    let (name, value) = if let Some(equals) = equals {
+        let name = &bytes[..equals];
+        if name.is_empty() {
+            return Err(DecodeError::new(&FieldName::CacheControl, DecodeErrorKind::InvalidToken));
+        }
+        let value = &bytes[equals + 1..];
+        validate_directive_value(value, false)?;
+        (name, Some(value))
+    } else {
+        (bytes, None)
+    };
+    Ok(DirectiveParts {
+        name,
+        value,
+        kind: classify_directive(name),
+        delta_seconds: None,
     })
 }
 
@@ -1092,7 +1155,7 @@ mod tests {
 
     use super::{
         CacheControl, CacheControlOwned, CacheSummary, DirectiveItems, DirectiveKind, builder_wire_len, classify_directive, decimal_len,
-        observe_directives, observe_quoted_directives, parse_directive, parse_directive_parts, validate_directive_value,
+        observe_directives, observe_quoted_directives, parse_directive, parse_directive_parts, project_directive, validate_directive_value,
     };
     use crate::DecodeError;
 
@@ -1133,6 +1196,15 @@ mod tests {
     use crate::sink::{EncodedValues, FieldSink};
     use crate::source::FieldSource;
     use crate::{DecodeErrorKind, FieldName, FieldValue, TestSink};
+
+    #[test]
+    fn directive_projection_covers_bare_and_malformed_inputs() {
+        assert!(project_directive(b"").is_err());
+        let bare = project_directive(b"no-cache").expect("known bare directive");
+        assert_eq!(bare.name, b"no-cache");
+        assert_eq!(bare.value, None);
+        assert!(project_directive(b"bad value").is_err());
+    }
 
     #[test]
     fn builder_keeps_short_extensions_inline_and_spills_long_ones() {

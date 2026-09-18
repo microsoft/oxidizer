@@ -100,6 +100,11 @@ fn trim_ows(bytes: &[u8]) -> &[u8] {
     &bytes[start..end]
 }
 
+#[inline]
+fn find_delimiter_or_quote(bytes: &[u8], delimiter: u8) -> Option<usize> {
+    http_headers_simd::find_either(bytes, delimiter, b'"')
+}
+
 impl<'a> Iterator for DelimitedItems<'a> {
     type Item = Result<&'a [u8], DecodeError>;
 
@@ -127,7 +132,7 @@ impl<'a> Iterator for DelimitedItems<'a> {
             let mut quoted = false;
             let mut escaped = false;
             while self.position < bytes.len() {
-                if !quoted && let Some(skip) = crate::validate::find_interesting(&bytes[self.position..]) {
+                if !quoted && let Some(skip) = find_delimiter_or_quote(&bytes[self.position..], self.delimiter) {
                     self.position += skip;
                 } else if !quoted {
                     self.position = bytes.len();

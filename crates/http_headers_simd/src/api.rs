@@ -284,6 +284,23 @@ pub fn find_interesting(bytes: &[u8]) -> Option<usize> {
     dispatch::find_interesting(bytes)
 }
 
+/// Finds the first occurrence of either requested byte.
+///
+/// # Examples
+///
+/// ```
+/// assert_eq!(
+///     http_headers_simd::find_either(b"gzip, br", b',', b'"'),
+///     Some(4)
+/// );
+/// assert_eq!(http_headers_simd::find_either(b"gzip", b',', b'"'), None);
+/// ```
+#[must_use]
+#[inline]
+pub fn find_either(bytes: &[u8], first: u8, second: u8) -> Option<usize> {
+    dispatch::find_either(bytes, first, second)
+}
+
 /// Identifies the implementation selected for a sufficiently long input.
 ///
 /// # Examples
@@ -413,6 +430,23 @@ mod tests {
         for byte in u8::MIN..=u8::MAX {
             let expected = b",;\"\\ \t".contains(&byte).then_some(0);
             assert_eq!(find_interesting(&[byte]), expected, "byte {byte:#04x}");
+        }
+    }
+
+    #[test]
+    fn either_byte_search_matches_scalar_across_boundaries() {
+        for length in 0..=80 {
+            let mut bytes = vec![b'a'; length];
+            assert_eq!(find_either(&bytes, b',', b'"'), None);
+            for position in 0..length {
+                bytes[position] = if position % 2 == 0 { b',' } else { b'"' };
+                assert_eq!(
+                    find_either(&bytes, b',', b'"'),
+                    Some(position),
+                    "length {length}, position {position}"
+                );
+                bytes[position] = b'a';
+            }
         }
     }
 

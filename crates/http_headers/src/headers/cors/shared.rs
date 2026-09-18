@@ -371,6 +371,11 @@ impl CorsList {
         Ok(Self::from_values(values))
     }
 
+    pub(super) fn from_field_value(name: &'static FieldName, value: FieldValue, allow_empty: bool) -> Result<Self, DecodeError> {
+        validate_single_list(name, value.as_field_value_ref(), allow_empty)?;
+        Ok(Self::One(value))
+    }
+
     /// Validates and adopts field lines in one pass over the map entry.
     ///
     /// Decoding straight to owned storage keeps a second walk off the owned
@@ -420,7 +425,7 @@ impl CorsList {
         allow_empty: bool,
     ) -> Result<Self, DecodeError> {
         let mut saw_item = first_saw_item;
-        let mut stored = Vec::with_capacity(4);
+        let mut stored = Vec::with_capacity(2_usize.saturating_add(rest.size_hint().0));
         stored.push(first_owned);
         for (offset, (value, owned)) in iter::once((second, second_owned)).chain(rest).enumerate() {
             let Some(has_item) = validate_list_value(value.as_bytes()) else {
@@ -507,6 +512,12 @@ pub(super) fn view_list_values<'a>(
         return Ok(None);
     };
     values.validate_list_item_limit(b',', true)?;
+    let mut repeated = values.repeated();
+    let first = repeated.next().expect("FieldLines always contains at least one field line");
+    if repeated.next().is_none() {
+        validate_single_list(name, first, allow_empty)?;
+        return Ok(Some(CorsListView { values }));
+    }
     validate_list(name, values.repeated(), allow_empty)?;
     Ok(Some(CorsListView { values }))
 }
@@ -683,7 +694,7 @@ macro_rules! define_header_name_list {
                     .flat_map(|value| value.as_bytes().split(|byte| *byte == b','))
                     .map(validate::trim_ows)
                     .filter(|item| !item.is_empty())
-                    .filter_map(header_name_ref)
+                    .map(super::shared::header_name_ref_validated)
             }
 
             /// Returns the number of list members, including duplicates.
@@ -799,7 +810,7 @@ macro_rules! define_header_name_list {
                     .flat_map(|value| value.as_bytes().split(|byte| *byte == b','))
                     .map(validate::trim_ows)
                     .filter(|item| !item.is_empty())
-                    .filter_map(header_name_ref)
+                    .map(super::shared::header_name_ref_validated)
             }
 
             /// Returns the number of list members, including duplicates.
@@ -938,7 +949,7 @@ macro_rules! define_header_name_list {
             type Error = DecodeError;
 
             fn try_from(value: FieldValue) -> Result<Self, Self::Error> {
-                Self::from_field_values(vec![value])
+                CorsList::from_field_value($name, value, $allow_empty).map(Self)
             }
         }
 
@@ -1137,6 +1148,16 @@ fn validate_list_value(bytes: &[u8]) -> Option<bool> {
     }
 }
 
+pub(super) fn validate_single_list(name: &'static FieldName, value: FieldValueRef<'_>, allow_empty: bool) -> Result<(), DecodeError> {
+    let Some(saw_item) = validate_list_value(value.as_bytes()) else {
+        return Err(invalid_token(name).at_value(0));
+    };
+    if !saw_item && !allow_empty {
+        return Err(invalid_syntax(name));
+    }
+    Ok(())
+}
+
 /// Recognizes a short field line that is known to be well formed.
 ///
 /// The lines carried by these headers repeat heavily, and matching one whole
@@ -1229,6 +1250,14 @@ pub(super) fn method_ref(bytes: &[u8]) -> Option<CorsMethodView<'_>> {
     str::from_utf8(bytes).ok().map(CorsMethodView)
 }
 
+#[inline]
+pub(super) fn method_ref_validated(bytes: &[u8]) -> CorsMethodView<'_> {
+    common_method(bytes).map_or_else(
+        || CorsMethodView(str::from_utf8(bytes).expect("validated CORS methods are ASCII")),
+        CorsMethodView,
+    )
+}
+
 /// Borrows a registered method as text without decoding UTF-8.
 ///
 /// Registered method tokens are known constants, so matching one avoids the
@@ -1250,13 +1279,23 @@ pub(super) fn common_method(token: &[u8]) -> Option<&'static str> {
     }
 }
 
-#[expect(clippy::inline_always, reason = "preserves pre-split inlining in hot CORS field-name iteration")]
-#[inline(always)]
-pub(super) fn header_name_ref(bytes: &[u8]) -> Option<CorsHeaderNameView<'_>> {
+#[inline]
+pub(super) fn header_name_ref_validated(bytes: &[u8]) -> CorsHeaderNameView<'_> {
+    common_header_name(bytes).map_or_else(
+        || CorsHeaderNameView(str::from_utf8(bytes).expect("validated CORS field names are ASCII")),
+        CorsHeaderNameView,
+    )
+}
+
+#[cfg(test)]
+fn header_name_ref(bytes: &[u8]) -> Option<CorsHeaderNameView<'_>> {
     if let Some(name) = common_header_name(bytes) {
         return Some(CorsHeaderNameView(name));
     }
-    token_str(bytes).map(CorsHeaderNameView)
+    if bytes.is_empty() || !all_token_bytes(bytes) {
+        return None;
+    }
+    str::from_utf8(bytes).ok().map(CorsHeaderNameView)
 }
 
 #[expect(clippy::inline_always, reason = "preserves pre-split inlining in hot CORS field-name iteration")]
@@ -1274,15 +1313,6 @@ fn common_header_name(bytes: &[u8]) -> Option<&'static str> {
         b"cache-control" => Some("cache-control"),
         _ => None,
     }
-}
-
-#[expect(clippy::inline_always, reason = "preserves pre-split inlining in hot CORS field-name iteration")]
-#[inline(always)]
-fn token_str(bytes: &[u8]) -> Option<&str> {
-    if bytes.is_empty() || !all_token_bytes(bytes) {
-        return None;
-    }
-    str::from_utf8(bytes).ok()
 }
 
 #[expect(clippy::inline_always, reason = "preserves pre-split inlining in hot CORS list iteration")]

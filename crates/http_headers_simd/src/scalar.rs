@@ -54,6 +54,10 @@ pub(super) fn find_interesting(bytes: &[u8]) -> Option<usize> {
         .position(|byte| matches!(byte, b',' | b';' | b'"' | b'\\' | b' ' | b'\t'))
 }
 
+pub(super) fn find_either(bytes: &[u8], first: u8, second: u8) -> Option<usize> {
+    bytes.iter().position(|byte| *byte == first || *byte == second)
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {

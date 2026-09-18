@@ -396,20 +396,23 @@ fn accept_ranges_owned(values: Option<FieldLines<'_>>) -> Result<Option<AcceptRa
         return Ok(None);
     };
     values.validate_list_item_limit(b',', true)?;
-    let mut repeated = values.repeated_owned()?;
-    if let Some((first, _first_owned)) = repeated.next()
+    let mut repeated = values.repeated();
+    if let Some(first) = repeated.next()
         && repeated.next().is_none()
         && let Some(none) = canonical_unit(first.as_bytes())
     {
         return Ok(Some(AcceptRangesOwned { values: None, none }));
     }
 
-    let mut repeated = values.repeated_owned()?;
-    if let Some((first, first_owned)) = repeated.next()
+    let mut repeated = values.repeated();
+    if let Some(first) = repeated.next()
         && repeated.next().is_none()
         && let Some((units, none)) = scan_units(first.as_bytes())
     {
         validate_none_cardinality(units, none)?;
+        let first_owned = first
+            .try_to_field_value()
+            .map_err(|_invalid| invalid_syntax(&FieldName::AcceptRanges))?;
         return Ok(Some(AcceptRangesOwned {
             values: Some(FieldLinesIter::one(first_owned)),
             none,

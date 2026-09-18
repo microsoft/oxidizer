@@ -206,6 +206,19 @@ impl Repr {
 }
 
 impl FieldValue {
+    /// Creates a field value from bytes that already satisfy the field-value
+    /// grammar.
+    ///
+    /// Callers must validate `bytes` with [`crate::validate::field_value`]
+    /// before calling this helper.
+    #[inline]
+    pub(crate) fn from_validated_bytes(bytes: &[u8], sensitive: bool) -> Self {
+        debug_assert!(crate::validate::field_value(bytes));
+        Self {
+            repr: Repr::new(bytes, sensitive),
+        }
+    }
+
     /// Creates a value from a static string.
     ///
     /// # Panics
@@ -270,9 +283,7 @@ impl FieldValue {
     pub fn from_bytes(bytes: impl AsRef<[u8]>) -> Result<Self, InvalidFieldValue> {
         let bytes = bytes.as_ref();
         if validate::field_value(bytes) {
-            Ok(Self {
-                repr: Repr::new(bytes, false),
-            })
+            Ok(Self::from_validated_bytes(bytes, false))
         } else {
             Err(InvalidFieldValue)
         }
@@ -850,6 +861,11 @@ impl<'a> FieldValueRef<'a> {
     #[inline]
     pub fn try_to_field_value(self) -> Result<FieldValue, InvalidFieldValue> {
         FieldValue::from_bytes(self.bytes).map(|owned| owned.with_sensitive(self.sensitive))
+    }
+
+    #[inline]
+    pub(crate) fn to_validated_field_value(self) -> FieldValue {
+        FieldValue::from_validated_bytes(self.bytes, self.sensitive)
     }
 }
 

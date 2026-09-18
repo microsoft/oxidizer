@@ -122,6 +122,41 @@ name = "http_headers_name_recognition"
 harness = false
 required-features = ["benchmarking", "http"]
 
+[[bench]]
+name = "http_headers_policy"
+harness = false
+required-features = ["benchmarking", "http"]
+
+[[bench]]
+name = "http_headers_protocol"
+harness = false
+required-features = ["benchmarking", "http"]
+
+[[bench]]
+name = "http_headers_websocket_shapes"
+harness = false
+required-features = ["benchmarking", "http"]
+
+[[bench]]
+name = "http_headers_negotiation_shapes"
+harness = false
+required-features = ["benchmarking", "http"]
+
+[[bench]]
+name = "http_headers_auth_cors_shapes"
+harness = false
+required-features = ["benchmarking", "http"]
+
+[[bench]]
+name = "http_headers_conditional_range_shapes"
+harness = false
+required-features = ["benchmarking", "http"]
+
+[[bench]]
+name = "http_headers_policy_shapes"
+harness = false
+required-features = ["benchmarking", "http"]
+
 # >>> anvil-managed: anvil-lints
 [lints]
 workspace = true

@@ -52,7 +52,7 @@ use http_headers::headers::{
     ContentTypeView, SetCookie, SetCookieOwned, UserAgent, UserAgentOwned,
 };
 use http_headers::sink::{EncodedValues, FieldSink, InsertError};
-use http_headers::source::FieldSource;
+use http_headers::source::{FieldLines, FieldSource};
 use http_headers::{DecodeError, DecodeErrorKind, DecodeMode, Field, FieldValue, FieldValueRef};
 
 #[path = "http_headers_fixtures.rs"]
@@ -1362,6 +1362,16 @@ fn multi_line_list() -> Vec<Vec<u8>> {
     (0..8).map(|index| line[index * 64..][..64].to_vec()).collect()
 }
 
+fn comma_items_with_irrelevant_bytes() -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(512);
+    while bytes.len() < 512 {
+        bytes.extend_from_slice(b" alpha=bravo ; charlie = delta , ");
+    }
+    bytes.truncate(510);
+    bytes.extend_from_slice(b",x");
+    bytes
+}
+
 fn scan_all(bytes: &[u8], find: fn(&[u8]) -> Option<usize>) -> usize {
     let mut position = 0;
     let mut found = 0;
@@ -1701,6 +1711,20 @@ fn delimiters_multi_line_reference(lines: Vec<Vec<u8>>) -> (usize, Vec<Vec<u8>>)
         found += scan_all(line, http_headers_simd::benchmarking::find_interesting_scalar);
     }
     (expect_usize(found, 16), lines)
+}
+
+#[metabench::benchmark(
+    COMMA_ITEMS_IRRELEVANT_BYTES,
+    "scanning",
+    "comma_items_irrelevant_bytes",
+    gungraun_setup = comma_items_with_irrelevant_bytes,
+    gungraun_teardown = drop_it,
+)]
+#[bench::comma_items_irrelevant_bytes()]
+fn comma_items_irrelevant_bytes(bytes: Vec<u8>) -> (usize, Vec<u8>) {
+    let lines = FieldLines::single(&http_headers::FieldName::Vary, &bytes);
+    let total = lines.comma_items().map(|item| item.expect("valid item").len()).sum::<usize>();
+    (black_box(total), bytes)
 }
 
 // ── group: list_scanning ─────────────────────────────────────────────────────
@@ -2109,6 +2133,18 @@ fn downstream_agent() -> (HeaderMap, DownstreamAgent) {
     (empty_map(), DownstreamAgent(field_value(USER_AGENT_VALUE)))
 }
 
+struct RawUserAgentSource;
+
+impl FieldSource for RawUserAgentSource {
+    fn lines(&self, name: &'static http_headers::FieldName) -> Option<FieldLines<'_>> {
+        (name == &http_headers::FieldName::UserAgent).then(|| FieldLines::single(name, USER_AGENT_VALUE))
+    }
+}
+
+fn raw_user_agent_source() -> RawUserAgentSource {
+    RawUserAgentSource
+}
+
 #[metabench::benchmark(
     CUSTOM_BORROWED_BUILTIN,
     "custom",
@@ -2157,6 +2193,20 @@ fn custom_owned_builtin(map: &'static HeaderMap) -> usize {
 fn custom_owned_custom(map: &'static HeaderMap) -> usize {
     let agent = DownstreamAgent::owned(map).expect("valid user agent").expect("present user agent");
     let length = expect_bytes(agent.0.as_bytes(), USER_AGENT_VALUE);
+    consume(agent);
+    length
+}
+
+#[metabench::benchmark(
+    CUSTOM_OWNED_RAW_SOURCE,
+    "custom",
+    "custom_owned_raw_source",
+    gungraun_setup = raw_user_agent_source,
+)]
+#[bench::custom_owned_raw_source()]
+fn custom_owned_raw_source(source: RawUserAgentSource) -> usize {
+    let agent = UserAgent::owned(&source).expect("valid user agent").expect("present user agent");
+    let length = expect_bytes(agent.as_bytes(), USER_AGENT_VALUE);
     consume(agent);
     length
 }
@@ -2957,6 +3007,7 @@ metabench::main!(
                 DELIMITERS_SINGLE_LINE_REFERENCE,
                 DELIMITERS_MULTI_LINE_DISPATCHED,
                 DELIMITERS_MULTI_LINE_REFERENCE,
+                COMMA_ITEMS_IRRELEVANT_BYTES,
             ],
             gungraun_compare_by_id = true,
         },
@@ -3009,6 +3060,7 @@ metabench::main!(
                 CUSTOM_BORROWED_CUSTOM,
                 CUSTOM_OWNED_BUILTIN,
                 CUSTOM_OWNED_CUSTOM,
+                CUSTOM_OWNED_RAW_SOURCE,
                 CUSTOM_INSERT_BUILTIN,
                 CUSTOM_INSERT_CUSTOM,
             ],

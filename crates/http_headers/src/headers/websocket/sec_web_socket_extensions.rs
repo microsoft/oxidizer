@@ -874,15 +874,33 @@ fn validate_extension_header_value(value: FieldValueRef<'_>) -> Result<(), Decod
 ///
 /// `None` selects the structured parser when quoted-string syntax appears.
 fn validate_plain_extension_line(bytes: &[u8]) -> Result<Option<bool>, DecodeError> {
-    if matches!(
-        bytes,
-        b"permessage-deflate"
-            | b"permessage-deflate; client_max_window_bits"
-            | b"permessage-deflate; server_no_context_takeover; client_no_context_takeover"
-    ) {
-        return Ok(Some(true));
+    const WINDOW: &[u8; 42] = b"permessage-deflate; client_max_window_bits";
+    const TAKEOVER: &[u8; 74] = b"permessage-deflate; server_no_context_takeover; client_no_context_takeover";
+
+    // Keep early prefix rejection; bounded suffix comparisons avoid an outlined byte comparison.
+    match bytes.len() {
+        74 if bytes[..2] == *b"pe"
+            && bytes[2..18] == TAKEOVER[2..18]
+            && bytes[18..26] == TAKEOVER[18..26]
+            && bytes[26..42] == TAKEOVER[26..42]
+            && bytes[42..50] == TAKEOVER[42..50]
+            && bytes[50..66] == TAKEOVER[50..66]
+            && bytes[66..] == TAKEOVER[66..] =>
+        {
+            return Ok(Some(true));
+        }
+        42 if bytes[..2] == *b"pe"
+            && bytes[2..18] == WINDOW[2..18]
+            && bytes[18..22] == WINDOW[18..22]
+            && bytes[22..38] == WINDOW[22..38]
+            && bytes[38..] == WINDOW[38..] =>
+        {
+            return Ok(Some(true));
+        }
+        18 if bytes[..2] == *b"pe" && bytes[2..] == *b"rmessage-deflate" => return Ok(Some(true)),
+        _ => {}
     }
-    if bytes.contains(&b'"') {
+    if http_headers_simd::find_either(bytes, b'"', b'"').is_some() {
         return Ok(None);
     }
     let mut position = 0_usize;
@@ -1061,12 +1079,37 @@ fn skip_ows(bytes: &[u8], position: &mut usize) {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{
-        SecWebSocketExtensions, SecWebSocketExtensionsOwned, WebSocketExtensionParameterView, WebSocketExtensionParameters,
+        CommaItems, SecWebSocketExtensions, SecWebSocketExtensionsOwned, WebSocketExtensionParameterView, WebSocketExtensionParameters,
         WebSocketExtensionView, parse_extension, take_quoted_string, validate_plain_extension_line,
     };
     use crate::sink::{EncodedValues, FieldSink};
     use crate::source::FieldSource;
     use crate::{DecodeErrorKind, Field, FieldValue, TestSink};
+
+    #[test]
+    fn cached_extension_substitutions_match_structured_parsing() {
+        for literal in [
+            b"permessage-deflate".as_slice(),
+            b"permessage-deflate; client_max_window_bits",
+            b"permessage-deflate; server_no_context_takeover; client_no_context_takeover",
+        ] {
+            let mut bytes = literal.to_vec();
+            for index in 0..bytes.len() {
+                for replacement in 0..=u8::MAX {
+                    bytes[index] = replacement;
+                    let plain = validate_plain_extension_line(&bytes);
+                    if plain != Ok(None) {
+                        assert_eq!(
+                            plain == Ok(Some(true)),
+                            CommaItems::new(&bytes).all(|item| parse_extension(item).is_ok()),
+                            "{literal:?}, index {index}, replacement {replacement}"
+                        );
+                    }
+                }
+                bytes[index] = literal[index];
+            }
+        }
+    }
 
     #[test]
     fn builder_and_accessors_cover_flags_tokens_quotes_and_multiple_extensions() {

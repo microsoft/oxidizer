@@ -301,20 +301,27 @@ impl Field for SecWebSocketVersion {
 }
 
 /// Reads the version set a `Sec-WebSocket-Version` header holds.
-#[inline]
+#[expect(
+    clippy::inline_always,
+    reason = "keep the version 13 comparison and constant bitmap inside typed decode callers"
+)]
+#[inline(always)]
 fn decode_versions(values: Option<FieldLines<'_>>) -> Result<Option<SecWebSocketVersionOwned>, DecodeError> {
     let Some(values) = values else {
         return Ok(None);
     };
     values.validate_list_item_limit(b',', true)?;
-    // The request shape is one field line holding one bare version, which the
-    // whole-line parse answers without splitting on commas at all.
-    if let Some(lone) = lone_version(&values) {
-        return Ok(Some(SecWebSocketVersionOwned {
-            versions: VersionSet::one(lone),
-        }));
-    }
-    collect_version_lines(&values).map(|versions| Some(SecWebSocketVersionOwned { versions }))
+    let mut lines = values.repeated();
+    let lone = match (lines.next(), lines.next()) {
+        (Some(first), None) => Some(first.as_bytes()),
+        _ => None,
+    };
+    let versions = if lone == Some(b"13".as_slice()) {
+        VersionSet::one(13)
+    } else {
+        collect_version_lines(values, lone)?
+    };
+    Ok(Some(SecWebSocketVersionOwned { versions }))
 }
 
 impl TryFrom<&str> for SecWebSocketVersionOwned {
@@ -344,30 +351,21 @@ impl TryFrom<FieldValue> for SecWebSocketVersionOwned {
     }
 }
 
-/// Reports whether the header carries one field line holding one version.
-///
-/// A whole line that parses as a bare version has no comma to split on and no
-/// quote to interpret, so the general walk would reach the same answer.
-fn lone_version(values: &FieldLines<'_>) -> Option<u8> {
-    let mut lines = values.repeated();
-    match (lines.next(), lines.next()) {
-        (Some(first), None) => parse_version_value(first.as_bytes()),
-        _ => None,
-    }
-}
-
-/// Collects the field lines a `Sec-WebSocket-Version` fast path rejected.
-///
-/// The caller proved neither that there is exactly one line nor that it holds
-/// a bare version, so every line is split and parsed, reporting the same
-/// members and the same diagnostics the general walk always has.
+/// Decodes uncommon bare versions and advertised version lists.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "moving fallback storage keeps its stack materialization off the version 13 fast path"
+)]
 #[cold]
 #[inline(never)]
-fn collect_version_lines(values: &FieldLines<'_>) -> Result<VersionSet, DecodeError> {
+fn collect_version_lines(values: FieldLines<'_>, lone: Option<&[u8]>) -> Result<VersionSet, DecodeError> {
+    if let Some(version) = lone.and_then(parse_version_value) {
+        return Ok(VersionSet::one(version));
+    }
     let mut versions = VersionSet::EMPTY;
     for value in values.repeated() {
         if !collect_bare_version_line(value.as_bytes(), &mut versions)? {
-            return collect_quoted_version_lines(values);
+            return collect_quoted_version_lines(&values);
         }
     }
     require_version(!versions.is_empty())?;
@@ -452,10 +450,13 @@ const fn is_leading_digit(byte: u8) -> bool {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::{SecWebSocketVersion, SecWebSocketVersionOwned, VersionSet, parse_version, parse_version_value};
+    use super::{
+        SecWebSocketVersion, SecWebSocketVersionOwned, VersionSet, collect_quoted_version_lines, decode_versions, parse_version,
+        parse_version_value,
+    };
     use crate::sink::{EncodedValues, FieldSink};
     use crate::source::{FieldLines, FieldSource};
-    use crate::{DecodeErrorKind, Field, FieldName, FieldValue, TestSink};
+    use crate::{DecodeErrorKind, Field, FieldName, FieldValue, FieldValueRef, TestSink};
 
     struct Source<'a>(&'a [u8]);
 
@@ -567,6 +568,44 @@ mod tests {
         }
         assert_eq!(parse_version_value(b""), None);
         assert_eq!(parse_version_value(b"1234"), None);
+    }
+
+    #[test]
+    fn version_line_substitutions_match_structured_parsing() {
+        for literal in [
+            b"13".as_slice(),
+            b"7, 8, 13",
+            b" \t13\t ",
+            b" , , \t",
+            b"\"13",
+            b"\"13\"",
+            b"256, \"13",
+            b"13, \"13",
+            b"13\\13",
+            b"13, 256",
+        ] {
+            let mut bytes = literal.to_vec();
+            for index in 0..bytes.len() {
+                for replacement in 0..=u8::MAX {
+                    bytes[index] = replacement;
+                    for prefix in [None, Some(b"13".as_slice()), Some(b"256".as_slice())] {
+                        let repeated = [FieldValueRef::new(prefix.unwrap_or_default()), FieldValueRef::new(&bytes)];
+                        let lines = if prefix.is_some() {
+                            FieldLines::from_borrowed(&FieldName::SecWebSocketVersion, &repeated).unwrap()
+                        } else {
+                            FieldLines::single(&FieldName::SecWebSocketVersion, &bytes)
+                        };
+                        let expected = collect_quoted_version_lines(&lines).map(|versions| Some(versions.words));
+                        let actual = decode_versions(Some(lines)).map(|value| value.map(|value| value.versions.words));
+                        assert_eq!(
+                            actual, expected,
+                            "{literal:?}, index {index}, replacement {replacement}, prefix {prefix:?}"
+                        );
+                    }
+                }
+                bytes[index] = literal[index];
+            }
+        }
     }
 
     #[test]

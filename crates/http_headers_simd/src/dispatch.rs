@@ -105,6 +105,53 @@ pub(super) fn find_interesting(bytes: &[u8]) -> Option<usize> {
     }
 }
 
+#[inline]
+pub(super) fn find_either(bytes: &[u8], first: u8, second: u8) -> Option<usize> {
+    if bytes.len() < SIMD_THRESHOLD {
+        return scalar::find_either(bytes, first, second);
+    }
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    {
+        // SAFETY: the feature flag comes from runtime or compile-time detection.
+        unsafe { find_either_x86(bytes, first, second, sse2_available()) }
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        // SAFETY: the feature flag comes from runtime or compile-time detection.
+        unsafe { find_either_arm(bytes, first, second, neon_available()) }
+    }
+    #[cfg(not(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")))]
+    scalar::find_either(bytes, first, second)
+}
+
+/// Runs the `AArch64` byte-pair search with already-detected features.
+///
+/// # Safety
+///
+/// If `neon` is true, the processor must support NEON.
+#[cfg(target_arch = "aarch64")]
+unsafe fn find_either_arm(bytes: &[u8], first: u8, second: u8, neon: bool) -> Option<usize> {
+    if neon {
+        // SAFETY: the caller guarantees NEON support when `neon` is true.
+        return unsafe { crate::arm::find_either(bytes, first, second) };
+    }
+    scalar::find_either(bytes, first, second)
+}
+
+/// Runs the x86 byte-pair search with already-detected features.
+///
+/// # Safety
+///
+/// If `sse2` is true, the processor must support SSE2.
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+unsafe fn find_either_x86(bytes: &[u8], first: u8, second: u8, sse2: bool) -> Option<usize> {
+    if sse2 {
+        // SAFETY: the caller guarantees SSE2 support when `sse2` is true.
+        return unsafe { crate::x86::find_either(bytes, first, second) };
+    }
+    scalar::find_either(bytes, first, second)
+}
+
 /// Runs `AArch64` interesting-byte dispatch with already-detected features.
 ///
 /// # Safety
@@ -924,6 +971,16 @@ mod tests {
             unsafe { super::find_interesting_x86(&interesting, false) },
             Some(37)
         );
+        assert_eq!(
+            // SAFETY: x86-64 guarantees SSE2; the x86 guard above detects it.
+            unsafe { super::find_either_x86(&interesting, b',', b'"', true) },
+            Some(37)
+        );
+        assert_eq!(
+            // SAFETY: no feature instruction is used when the flag is false.
+            unsafe { super::find_either_x86(&interesting, b',', b'"', false) },
+            Some(37)
+        );
 
         assert!(
             // SAFETY: x86-64 guarantees SSE2; the x86 guard above detects it,
@@ -1059,6 +1116,8 @@ mod tests {
         interesting[37] = b',';
         // SAFETY: the false feature flag selects only the scalar fallback.
         assert_eq!(unsafe { super::find_interesting_arm(&interesting, false) }, Some(37));
+        // SAFETY: the false feature flag selects only the scalar fallback.
+        assert_eq!(unsafe { super::find_either_arm(&interesting, b',', b'"', false) }, Some(37));
         // SAFETY: the false feature flag selects only the scalar fallback.
         assert!(unsafe { super::all_base64_alphabet_arm(&long, false) });
 

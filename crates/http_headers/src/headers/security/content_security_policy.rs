@@ -6,7 +6,7 @@ use std::{fmt, str};
 use super::super::shared::FieldLinesIter;
 use crate::sink::{FieldSink, InsertError};
 use crate::source::{FieldLines, FieldSource};
-use crate::{DecodeError, DecodeErrorKind, Field, FieldName, FieldValue, FieldValueRef, validate};
+use crate::{DecodeError, DecodeErrorKind, Field, FieldName, FieldValue, FieldValueRef};
 
 /// Defines the `Content-Security-Policy` header.
 ///
@@ -151,10 +151,7 @@ impl ContentSecurityPolicyOwned {
     /// ```
     pub fn from_bytes(policy: impl AsRef<[u8]>) -> Result<Self, DecodeError> {
         let policy = policy.as_ref();
-        if !validate::field_value(policy) {
-            return Err(super::super::invalid_syntax(&FieldName::ContentSecurityPolicy));
-        }
-        let value = validated_field_value(policy);
+        let value = FieldValue::from_bytes(policy).map_err(|_invalid| super::super::invalid_syntax(&FieldName::ContentSecurityPolicy))?;
         Ok(Self::from_field_value(value))
     }
 
@@ -364,10 +361,6 @@ impl TryFrom<FieldValue> for ContentSecurityPolicyOwned {
 
 fn policy_str(bytes: &[u8]) -> Result<&str, DecodeError> {
     str::from_utf8(bytes).map_err(|_invalid| DecodeError::new(&FieldName::ContentSecurityPolicy, DecodeErrorKind::InvalidUtf8))
-}
-
-fn validated_field_value(bytes: &[u8]) -> FieldValue {
-    FieldValue::from_bytes(bytes).expect("field-value validation accepted these exact bytes")
 }
 
 #[cfg(test)]

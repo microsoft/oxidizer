@@ -34,6 +34,7 @@ pub(super) enum TagValues {
 
 pub(super) trait OwnedTagSource {
     fn next_tag(&mut self) -> Option<crate::headers::ETagOwned>;
+    fn remaining_hint(&self) -> usize;
 }
 
 pub(super) struct OwnedTagSourceAdapter<I>(pub(super) I);
@@ -47,6 +48,10 @@ where
     fn next_tag(&mut self) -> Option<crate::headers::ETagOwned> {
         self.0.next()
     }
+
+    fn remaining_hint(&self) -> usize {
+        self.0.size_hint().0
+    }
 }
 
 pub(super) fn tag_values_from_source(name: &'static FieldName, tags: &mut dyn OwnedTagSource) -> Result<TagValues, DecodeError> {
@@ -57,7 +62,7 @@ pub(super) fn tag_values_from_source(name: &'static FieldName, tags: &mut dyn Ow
     let Some(second) = tags.next_tag() else {
         return Ok(TagValues::One(first));
     };
-    let mut values = Vec::with_capacity(4);
+    let mut values = Vec::with_capacity(2_usize.saturating_add(tags.remaining_hint()).min(128));
     values.push(first);
     values.push(second.into_field_value());
     while let Some(tag) = tags.next_tag() {
@@ -818,6 +823,8 @@ enum ListItem<'a> {
 ///
 /// Empty items are skipped as required by the list grammar, so `None` means
 /// the field line held no further items.
+/// Projects one item from a line previously accepted by
+/// [`validate_tag_line_with`].
 fn next_list_item<'a>(bytes: &'a [u8], position: &mut usize) -> Option<ListItem<'a>> {
     let length = bytes.len();
     let mut index = *position;
@@ -849,9 +856,11 @@ fn next_list_item<'a>(bytes: &'a [u8], position: &mut usize) -> Option<ListItem<
             return Some(ListItem::Malformed);
         }
         index += 1;
-        while index < length && valid_opaque_byte(bytes[index]) {
-            index += 1;
-        }
+        let Some(closing) = bytes.get(index..)?.iter().position(|byte| *byte == b'"') else {
+            *position = length;
+            return Some(ListItem::Malformed);
+        };
+        index += closing;
         if bytes.get(index) != Some(&b'"') {
             *position = length;
             return Some(ListItem::Malformed);
@@ -1012,15 +1021,6 @@ pub(super) fn validate_tag_line_with(bytes: &[u8], state: TagListState, mode: cr
 #[inline(never)]
 pub(super) fn validate_tag_line_outlined_with(bytes: &[u8], state: TagListState, mode: crate::DecodeMode) -> Option<TagListState> {
     validate_tag_line_with(bytes, state, mode)
-}
-
-/// Returns whether `byte` is a legal `etagc`.
-///
-/// Every caller scans field-value bytes, which already exclude the controls
-/// and DEL the entity-tag grammar forbids, so HTAB, SP, and DQUOTE are the
-/// only bytes left to reject.
-const fn valid_opaque_byte(byte: u8) -> bool {
-    !matches!(byte, b'\t' | b' ' | b'"')
 }
 
 pub(super) fn parse_http_date(name: &'static FieldName, value: FieldValueRef<'_>) -> Result<SystemTime, DecodeError> {
@@ -1279,6 +1279,15 @@ mod tests {
                 self.values.clear();
             }
         }
+    }
+
+    #[test]
+    fn tag_iterator_rejects_an_unterminated_opaque_tag() {
+        let mut position = 0;
+        assert!(matches!(
+            super::next_list_item(b"\"unterminated", &mut position),
+            Some(super::ListItem::Malformed)
+        ));
     }
 
     #[test]

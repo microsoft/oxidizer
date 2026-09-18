@@ -49,8 +49,8 @@ pub mod benchmarking;
 pub use api::{Backend, backend, backend_for, simd_threshold};
 #[doc(inline)]
 pub use api::{
-    all_base64_alphabet, as_simple_uri_reference, ascii_str, eq_ignore_ascii_case, find_interesting, is_field_value, is_simple_uri_path,
-    is_token, is_token68, scan_byte_range_set, scan_token_list,
+    all_base64_alphabet, as_simple_uri_reference, ascii_str, eq_ignore_ascii_case, find_either, find_interesting, is_field_value,
+    is_simple_uri_path, is_token, is_token68, scan_byte_range_set, scan_token_list,
 };
 #[doc(inline)]
 pub use list::{EmptyMembers, TokenListScan};

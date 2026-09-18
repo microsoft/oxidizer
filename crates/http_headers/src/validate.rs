@@ -86,13 +86,6 @@ pub(super) fn eq_ignore_ascii_case(left: &[u8], right: &[u8]) -> bool {
     http_headers_simd::eq_ignore_ascii_case(left, right)
 }
 
-/// Finds the first comma, semicolon, quote, backslash, space, or tab.
-#[must_use]
-#[inline]
-pub(super) fn find_interesting(bytes: &[u8]) -> Option<usize> {
-    http_headers_simd::find_interesting(bytes)
-}
-
 /// Removes optional HTTP whitespace from both ends of a byte string.
 #[must_use]
 #[inline]
@@ -197,12 +190,6 @@ mod tests {
     fn eq_ignore_ascii_case_compares() {
         assert!(eq_ignore_ascii_case(b"gzip", b"GZIP"));
         assert!(!eq_ignore_ascii_case(b"gzip", b"br"));
-    }
-
-    #[test]
-    fn find_interesting_locates_delimiters() {
-        assert_eq!(find_interesting(b"token,next"), Some(5));
-        assert_eq!(find_interesting(b"token"), None);
     }
 
     #[test]

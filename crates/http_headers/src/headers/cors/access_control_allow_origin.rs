@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::fmt::{self, Write as _};
+use std::fmt;
 use std::net::Ipv6Addr;
 use std::ops::Range;
 use std::str::{self, FromStr as _};
@@ -763,6 +763,7 @@ fn label_classes(label: &[u8], common: u8) -> (bool, bool, bool) {
     (numeric, ipv4, domain)
 }
 
+#[inline(never)] // Keep IPv6 parsing and formatting off the domain-origin stack.
 fn valid_serialized_ipv6(address: &[u8]) -> bool {
     if address.is_empty()
         || address
@@ -775,10 +776,10 @@ fn valid_serialized_ipv6(address: &[u8]) -> bool {
     let Ok(parsed) = Ipv6Addr::from_str(text) else {
         return false;
     };
-    serialized_ipv6(parsed).as_bytes() == address
+    serialized_ipv6(parsed, address)
 }
 
-fn serialized_ipv6(address: Ipv6Addr) -> String {
+fn serialized_ipv6(address: Ipv6Addr, expected: &[u8]) -> bool {
     let segments = address.segments();
     let mut longest_start = None;
     let mut longest_len = 1_usize;
@@ -799,21 +800,35 @@ fn serialized_ipv6(address: Ipv6Addr) -> String {
         }
     }
 
-    let mut serialized = String::with_capacity(39);
+    let mut serialized = [0_u8; 39];
+    let mut written = 0_usize;
     let mut index = 0_usize;
     while index < segments.len() {
         if longest_start == Some(index) {
-            serialized.push_str("::");
+            serialized[written..written + 2].copy_from_slice(b"::");
+            written += 2;
             index += longest_len;
             continue;
         }
-        if !serialized.is_empty() && !serialized.ends_with(':') {
-            serialized.push(':');
+        if written != 0 && serialized[written - 1] != b':' {
+            serialized[written] = b':';
+            written += 1;
         }
-        write!(serialized, "{:x}", segments[index]).expect("writing an IPv6 segment to a string cannot fail");
+        written += write_hex_segment(segments[index], &mut serialized[written..]);
         index += 1;
     }
-    serialized
+    serialized.get(..written) == Some(expected)
+}
+
+fn write_hex_segment(segment: u16, output: &mut [u8]) -> usize {
+    let digits = b"0123456789abcdef";
+    let leading_zeros = segment.leading_zeros() as usize / 4;
+    let count = 4_usize.saturating_sub(leading_zeros).max(1);
+    for (index, slot) in output[..count].iter_mut().enumerate() {
+        let shift = (count - index - 1) * 4;
+        *slot = digits[usize::from((segment >> shift) & 0xf)];
+    }
+    count
 }
 
 #[cfg(test)]

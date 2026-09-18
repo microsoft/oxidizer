@@ -267,7 +267,7 @@ fn validate_with(bytes: &[u8], mode: crate::DecodeMode) -> Result<&str, DecodeEr
         return validate(bytes);
     }
     let text = str::from_utf8(bytes).map_err(|_invalid| super::invalid_syntax(&FieldName::Location))?;
-    if validate(bytes).is_ok() {
+    if is_simple_reference(bytes).is_some() || validate_general_reference(text).is_ok() {
         return Ok(text);
     }
     if !text.contains('\\') {
