@@ -1271,6 +1271,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "requires real TCP sockets")]
     fn active_client_limit_rejects_excess_connections() {
         let clients = Arc::new(ActiveClients::new());
         let mut registrations = Vec::new();

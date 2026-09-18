@@ -1356,6 +1356,7 @@ mod tests {
                 enabled: true,
                 ..Default::default()
             },
+            event_capacity_per_thread: recorder::EventBufferCapacity::new(64).unwrap(),
             ..Default::default()
         });
         recorder::record(recorder::event::EventClass::ArcDereference, || {

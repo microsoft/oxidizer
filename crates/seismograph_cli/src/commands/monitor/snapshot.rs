@@ -264,6 +264,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "million-event parallel release stress test requires native execution")]
     fn event_sets_at_the_parallel_release_threshold_are_released() {
         let mut events = vec![1_u8; 1_000_000];
         release_stacks(&mut events, |event| *event = 0);
@@ -271,6 +272,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "million-event parallel release stress test requires native execution")]
     fn large_event_sets_release_every_stack_before_returning() {
         let mut events = vec![1_u8; 1_000_003];
         release_stacks(&mut events, |event| *event = 0);

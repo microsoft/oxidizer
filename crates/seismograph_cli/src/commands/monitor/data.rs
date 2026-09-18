@@ -3186,6 +3186,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "quadratic differential stress test requires native execution")]
     fn thread_object_index_matches_reference_for_every_operation_and_event_order() {
         let mut events = Vec::new();
         for object in 1..=16 {
@@ -3245,8 +3246,9 @@ mod tests {
 
     #[test]
     fn thread_summary_shares_formatted_stacks_across_objects() {
+        let object_count = if cfg!(miri) { 32 } else { 2_000 };
         let events = Events {
-            events: (1..=2_000)
+            events: (1..=object_count)
                 .flat_map(|object| {
                     [1, 2].map(|thread| RuntimeEvent {
                         thread_id: ThreadId::new(thread),
@@ -3268,7 +3270,10 @@ mod tests {
                 .find(|operation| operation.kind == ThreadOperationKind::ArcClone)
                 .unwrap();
             let objects = &operation.participants[0].objects;
-            assert_eq!((operation.events, operation.objects, objects.len()), (2_000, 2_000, 2_000));
+            assert_eq!(
+                (operation.events, operation.objects, objects.len()),
+                (object_count, object_count, usize::try_from(object_count).unwrap())
+            );
             let first = objects.first().unwrap().selected_stack().unwrap();
             let last = objects.last().unwrap().related_stack().unwrap();
             assert!(Arc::ptr_eq(&first.frames, &last.frames));

@@ -100,6 +100,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "requires filesystem access")]
     fn loads_native_allocator_file_without_inventing_a_capture_time() {
         let allocator = seismograph_rallocator::snapshot::Snapshot::new(seismograph_rallocator::snapshot::Version::new(0, 1, 0));
         let mut data = vec![0; seismograph_rallocator::encoded_len(&allocator).unwrap()];
@@ -123,6 +124,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "requires filesystem access")]
     fn bad_container_and_sources_report_the_input_path() {
         for (name, bytes, expected) in [
             ("bad-container", b"not a snapshot".to_vec(), "malformed"),
@@ -146,6 +148,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "requires filesystem access")]
     fn missing_file_fails_before_terminal_initialization() {
         let path = path("missing");
         let error = super::super::view(super::super::ViewArgs {
@@ -186,6 +189,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "requires filesystem access")]
     fn file_loading_reports_ordered_progress_through_ready() {
         let bytes = native_bytes(seismograph::snapshot::SourceId::new(1), b"unknown source");
         let path = write("progress", &bytes);

@@ -893,7 +893,7 @@ impl ThreadRecorder {
     fn ring_lock_until(&self, deadline: Instant) -> Option<RingLock<'_>> {
         while self
             .ring_locked
-            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_err()
         {
             if wait_expired(deadline) {
@@ -1039,7 +1039,7 @@ impl Slot {
     fn lock_until(&self, deadline: Instant) -> Option<SlotLock<'_>> {
         while self
             .locked
-            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_err()
         {
             if wait_expired(deadline) {
@@ -1123,7 +1123,7 @@ impl ConfigurationLock {
 
     fn acquire_until(deadline: Instant) -> Option<Self> {
         while CONFIGURATION_LOCKED
-            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_err()
         {
             if wait_expired(deadline) {
@@ -1822,6 +1822,7 @@ mod tests {
                 enabled: true,
                 ..Default::default()
             },
+            event_capacity_per_thread: EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD).unwrap(),
             ..Default::default()
         });
         record(EventClass::General, || Record::object(EventKind::ArcClone, ObjectId::new(42)));
@@ -1843,6 +1844,7 @@ mod tests {
         let _test = TEST_LOCK.lock().unwrap();
         configure(Configuration {
             general_events: RecordingPolicy::all(false),
+            event_capacity_per_thread: EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD).unwrap(),
             ..Default::default()
         });
         let session = RecordingSession::from_raw(ACTIVE_SESSION.load(Ordering::Acquire)).unwrap();
@@ -1913,6 +1915,7 @@ mod tests {
                 capture_backtraces: !cfg!(miri),
                 ..Default::default()
             },
+            event_capacity_per_thread: EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD).unwrap(),
             ..Default::default()
         });
         record(EventClass::ArcDereference, || {
@@ -2010,6 +2013,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "statistical sampling stress test requires native execution")]
     fn object_sampling_selects_approximately_one_in_x_objects() {
         let sampling = EventSampling::one_in(100).unwrap();
         let selected = (0..65_536)
@@ -2575,6 +2579,7 @@ mod tests {
         let _test = TEST_LOCK.lock().unwrap();
         configure(Configuration {
             general_events: RecordingPolicy::all(false),
+            event_capacity_per_thread: EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD).unwrap(),
             ..Default::default()
         });
         let recorder = local_recorder();
@@ -2801,6 +2806,7 @@ mod tests {
                 event_sampling: sampling,
                 ..Default::default()
             },
+            event_capacity_per_thread: EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD).unwrap(),
             ..Default::default()
         });
         assert_eq!(select_object(skipped), None);
