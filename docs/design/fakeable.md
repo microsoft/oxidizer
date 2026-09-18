@@ -59,8 +59,10 @@ The optional `mockall` feature enables
 `generate_mockall_fake = true` on implementation blocks. The macro emits a
 Mockall type in the configured module, excluding constructors, private methods,
 and rejecting mutable-receiver or restricted-visibility methods that would make
-the generated fake incompatible with the wrapper. Async methods are represented
-as methods returning `Future` so tests can provide asynchronous expectations.
+the generated fake incompatible with the wrapper. Generic impl blocks are also
+rejected because the generated Mockall type cannot preserve their generic
+parameters and bounds. Async methods are represented as methods returning
+`Future` so tests can provide asynchronous expectations.
 
 Mockall remains optional because manually implemented fakes are the primary
 mechanism and should not add a production dependency. The integration must be

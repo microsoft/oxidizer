@@ -437,3 +437,18 @@ fn fakeable_on_impl_rejects_typed_self_receiver() {
 
     assert!(result.contains("typed self receivers are not supported"));
 }
+
+#[test]
+fn fakeable_on_generic_impl_with_mockall_is_rejected() {
+    let input = quote! {
+        impl<T> MyService<T> {
+            pub fn value(&self) -> &T {
+                &self.value
+            }
+        }
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! { generate_mockall_fake = true }, input).to_string();
+
+    assert!(result.contains("does not support generic impl blocks"));
+}

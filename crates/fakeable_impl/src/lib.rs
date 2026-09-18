@@ -189,6 +189,14 @@ fn process_impl(args: &FakeableArgs, item_impl: &ItemImpl) -> proc_macro2::Token
 
     // Generate mockall fake if requested
     let mockall_fake = if args.generate_mockall_fake == Some(true) {
+        if !item_impl.generics.params.is_empty() {
+            return syn::Error::new_spanned(
+                &item_impl.generics,
+                "generate_mockall_fake does not support generic impl blocks; use a manual fake implementation",
+            )
+            .into_compile_error();
+        }
+
         #[cfg(not(feature = "mockall"))]
         {
             return syn::Error::new_spanned(item_impl, "generate_mockall_fake requires the fakeable `mockall` feature")
