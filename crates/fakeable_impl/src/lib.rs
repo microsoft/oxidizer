@@ -246,19 +246,23 @@ fn generate_wrapper_impl(
     let mut delegation_methods: Vec<syn::ImplItem> = Vec::new();
 
     for item in &original_impl.items {
-        if let syn::ImplItem::Fn(method) = item {
-            // For trait impls, include all methods (they typically have Inherited visibility)
-            // For regular impls, only include public, pub(crate), and pub(super) methods
-            // Skip private methods to allow unsupported patterns and methods without self parameter
-            if !is_trait_impl {
-                let is_public_or_restricted = matches!(method.vis, syn::Visibility::Public(_) | syn::Visibility::Restricted(_));
-                if !is_public_or_restricted {
-                    continue;
+        match item {
+            syn::ImplItem::Fn(method) => {
+                // For trait impls, include all methods (they typically have Inherited visibility)
+                // For regular impls, only include public, pub(crate), and pub(super) methods
+                // Skip private methods to allow unsupported patterns and methods without self parameter
+                if !is_trait_impl {
+                    let is_public_or_restricted = matches!(method.vis, syn::Visibility::Public(_) | syn::Visibility::Restricted(_));
+                    if !is_public_or_restricted {
+                        continue;
+                    }
                 }
-            }
 
-            let delegation_method = generate_delegation_method(method, fakes_attribute, enum_name, struct_name, helper_module_name)?;
-            delegation_methods.push(syn::ImplItem::Fn(delegation_method));
+                let delegation_method = generate_delegation_method(method, fakes_attribute, enum_name, struct_name, helper_module_name)?;
+                delegation_methods.push(syn::ImplItem::Fn(delegation_method));
+            }
+            _ if is_trait_impl => delegation_methods.push(item.clone()),
+            _ => {}
         }
     }
 
@@ -1002,6 +1006,7 @@ mod tests {
         syn::parse_file(&unit).unwrap();
         syn::parse_file(&generic).unwrap();
         syn::parse_file(&associated_const).unwrap();
+        assert_eq!(associated_const.matches("VERSION").count(), 1);
     }
 
     #[test]

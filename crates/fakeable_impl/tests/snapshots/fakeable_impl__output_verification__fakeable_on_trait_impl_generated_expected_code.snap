@@ -2,19 +2,35 @@
 source: crates/fakeable_impl/src/../tests/output_verification.rs
 expression: "prettyplease::unparse(&result_file)"
 ---
-impl From<Something> for __fakeable__MyService::MyService {
-    fn from(something: Something) -> Self {
+impl Service for __fakeable__MyService::MyService {
+    type Output = Something;
+    const NAME: &'static str = "my-service";
+    fn create(something: Something) -> Self {
         Self { something }
     }
+    fn output(&self) -> &Self::Output {
+        &self.something
+    }
 }
-impl From<Something> for MyService {
+impl Service for MyService {
+    type Output = Something;
+    const NAME: &'static str = "my-service";
     #[allow(unused_mut)]
     #[allow(clippy::used_underscore_binding)]
-    fn from(something: Something) -> Self {
+    fn create(something: Something) -> Self {
         Self {
             inner: __fakeable__MyService::Enum::Real(
-                __fakeable__MyService::MyService::from(something),
+                __fakeable__MyService::MyService::create(something),
             ),
+        }
+    }
+    #[allow(unused_mut)]
+    #[allow(clippy::used_underscore_binding)]
+    fn output(&self) -> &Self::Output {
+        match &self.inner {
+            __fakeable__MyService::Enum::Real(real) => real.output(),
+            #[cfg(any(feature = "test-util", test))]
+            __fakeable__MyService::Enum::Fake(fake) => fake.output(),
         }
     }
 }

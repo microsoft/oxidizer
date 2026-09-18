@@ -32,10 +32,11 @@ async methods and methods returning `Self`.
 
 Only public or restricted inherent methods are delegated. Private helpers stay
 on the real implementation. Trait methods follow the same signature
-constraints. Methods without a receiver are supported only when they return
-`Self`, because other associated functions have no active instance from which
-to select the real or fake implementation. Parameters must use identifier
-patterns.
+constraints, while associated types and constants are preserved on both the
+hidden real implementation and wrapper implementation. Methods without a
+receiver are supported only when they return `Self`, because other associated
+functions have no active instance from which to select the real or fake
+implementation. Parameters must use identifier patterns.
 
 ## Fake availability
 

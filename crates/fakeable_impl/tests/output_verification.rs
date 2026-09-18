@@ -247,9 +247,17 @@ fn fakeable_on_impl_with_mockall_and_async_unit_function_generates_expected_code
 #[test]
 fn fakeable_on_trait_impl_generated_expected_code() {
     let input = quote! {
-        impl From<Something> for MyService {
-            fn from(something: Something) -> Self {
+        impl Service for MyService {
+            type Output = Something;
+
+            const NAME: &'static str = "my-service";
+
+            fn create(something: Something) -> Self {
                 Self { something }
+            }
+
+            fn output(&self) -> &Self::Output {
+                &self.something
             }
         }
     };

@@ -3,9 +3,10 @@
 
 #![expect(missing_docs, reason = "Test code")]
 
+use fakeable_test::generic_service::GenericService;
+use fakeable_test::generic_service::fakes::FakeGenericService;
 use fakeable_test::my_service::MyService;
 use fakeable_test::my_service::fakes::FakeMyService;
-use fakeable_test::{generic_service::GenericService, generic_service::fakes::FakeGenericService};
 use static_assertions::assert_impl_all;
 use thread_aware::ThreadAware;
 
