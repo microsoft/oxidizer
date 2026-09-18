@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.11.1] - 2026-09-16
+
+- ✨ Features
+
+  - add HTTP response decompression ([#746](https://github.com/microsoft/oxidizer/pull/746))
+
 ## [0.11.0] - 2026-09-10
 
 ### Breaking

@@ -566,10 +566,10 @@ what the macros produce, and only the `.stderr` snapshots pin where a diagnostic
 points. A change that keeps every snapshot green and breaks the tests under
 `crates/ohno/tests/` is a broken change.
 
-The compile-fail tests are ordinary integration tests, so `just test` runs them
-too. `just trybuild` narrows to them while iterating on a diagnostic — pass the
-test target's name as the filter, as in
-`just package=ohno trybuild display_diagnostics` — and `just trybuild-overwrite`
+The compile-fail tests are ordinary integration tests, so the Anvil test group
+runs them too. `just trybuild --package ohno --filter display_diagnostics`
+narrows to them while iterating on a diagnostic, and
+`just trybuild-overwrite --package ohno --filter display_diagnostics`
 rewrites the `.stderr` snapshots when a message or a span changes on purpose.
 Always read the resulting diff: a snapshot that changed for a reason you cannot
 name is a regression in a diagnostic, not a refresh.

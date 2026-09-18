@@ -7,16 +7,6 @@ yanked = "deny"
 # Scope of unmaintained-crate checks: "all" surfaces transitive
 # dependencies too; tighten to "workspace" if the noise is high.
 unmaintained = "all"
-# Adopter-owned: repo-specific advisory ignores.
-ignore = [
-    # quick-xml 0.39.4 has two DoS advisories fixed only in >=0.41.0, but it is pulled in
-    # transitively via the Azure SDK (typespec <- azure_core 1.0.0), which pins 0.39.x, so
-    # we cannot bump it until an upstream Azure SDK release moves to quick-xml >=0.41. Both
-    # are XML-parsing DoS issues with no production code path parsing untrusted XML here.
-    # Remove once azure_core/typespec upgrade quick-xml.
-    "RUSTSEC-2026-0194", # quadratic-time duplicate-attribute check
-    "RUSTSEC-2026-0195", # unbounded namespace-declaration allocation
-]
 # <<< anvil-managed: anvil-deny-advisories
 
 # >>> anvil-managed: anvil-deny-licenses

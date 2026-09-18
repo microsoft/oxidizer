@@ -17,8 +17,7 @@ const TEST_FIRST_LAYER_TASK_COUNT: usize = 10;
 const TEST_SECOND_LAYER_TASK_COUNT: usize = 100;
 
 fn main() {
-    // `scripts/run-examples.rs`, used by the GitHub Actions Examples step, sets this variable.
-    let (first_layer_task_count, second_layer_task_count) = if env::var_os("IS_TESTING").is_some() {
+    let (first_layer_task_count, second_layer_task_count) = if env::var_os("ANVIL_EXAMPLE").is_some() {
         (TEST_FIRST_LAYER_TASK_COUNT, TEST_SECOND_LAYER_TASK_COUNT)
     } else {
         (FIRST_LAYER_TASK_COUNT, SECOND_LAYER_TASK_COUNT)

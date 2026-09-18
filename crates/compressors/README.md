@@ -6,7 +6,7 @@
 [![crate.io](https://img.shields.io/crates/v/compressors.svg)](https://crates.io/crates/compressors)
 [![docs.rs](https://docs.rs/compressors/badge.svg)](https://docs.rs/compressors)
 [![MSRV](https://img.shields.io/crates/msrv/compressors)](https://crates.io/crates/compressors)
-[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml/badge.svg)](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/microsoft/oxidizer/blob/main/LICENSE)
 <a href="https://github.com/microsoft/oxidizer"><img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
@@ -216,27 +216,27 @@ See [`documentation`][__link22] for the longer form guides.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/compressors">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbjojVXQIV2Ewb89V-5l67DvobDbwJEokPYgIb-ONYOqfWe4RhZIKCaGJ5dGVzYnVmZjAuMTAuMIJrY29tcHJlc3NvcnNlMC4xLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbjojVXQIV2Ewb89V-5l67DvobDbwJEokPYgIb-ONYOqfWe4RhZIKCaGJ5dGVzYnVmZjAuMTAuMIJrY29tcHJlc3NvcnNlMC4xLjE
  [__link0]: https://crates.io/crates/bytesbuf/0.10.0
- [__link1]: https://docs.rs/compressors/0.1.0/compressors/?search=Result
- [__link10]: https://docs.rs/compressors/0.1.0/compressors/fn.decompress.html
- [__link11]: https://docs.rs/compressors/0.1.0/compressors/?search=core::Compression
+ [__link1]: https://docs.rs/compressors/0.1.1/compressors/?search=Result
+ [__link10]: https://docs.rs/compressors/0.1.1/compressors/fn.decompress.html
+ [__link11]: https://docs.rs/compressors/0.1.1/compressors/?search=core::Compression
  [__link12]: mod@crate::format
- [__link13]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressorBuilder::build_format
- [__link14]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
- [__link15]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources::with_pool_capacity
- [__link16]: https://docs.rs/compressors/0.1.0/compressors/?search=CompressionStream
- [__link17]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits::max_output_len
- [__link18]: https://docs.rs/compressors/0.1.0/compressors/?search=DecompressorLimits
- [__link19]: https://docs.rs/compressors/0.1.0/compressors/documentation/index.html
- [__link2]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
- [__link20]: https://docs.rs/compressors/0.1.0/compressors/?search=core::Compression
- [__link21]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
- [__link22]: https://docs.rs/compressors/0.1.0/compressors/documentation/index.html
+ [__link13]: https://docs.rs/compressors/0.1.1/compressors/?search=CompressorBuilder::build_format
+ [__link14]: https://docs.rs/compressors/0.1.1/compressors/?search=Resources
+ [__link15]: https://docs.rs/compressors/0.1.1/compressors/?search=Resources::with_pool_capacity
+ [__link16]: https://docs.rs/compressors/0.1.1/compressors/?search=CompressionStream
+ [__link17]: https://docs.rs/compressors/0.1.1/compressors/?search=DecompressorLimits::max_output_len
+ [__link18]: https://docs.rs/compressors/0.1.1/compressors/?search=DecompressorLimits
+ [__link19]: https://docs.rs/compressors/0.1.1/compressors/documentation/index.html
+ [__link2]: https://docs.rs/compressors/0.1.1/compressors/?search=Resources
+ [__link20]: https://docs.rs/compressors/0.1.1/compressors/?search=core::Compression
+ [__link21]: https://docs.rs/compressors/0.1.1/compressors/?search=Resources
+ [__link22]: https://docs.rs/compressors/0.1.1/compressors/documentation/index.html
  [__link3]: https://crates.io/crates/bytesbuf/0.10.0
  [__link4]: https://docs.rs/bytesbuf/0.10.0/bytesbuf/?search=BytesView
  [__link5]: https://docs.rs/bytesbuf/0.10.0/bytesbuf/?search=BytesBuf
- [__link6]: https://docs.rs/compressors/0.1.0/compressors/?search=Resources
+ [__link6]: https://docs.rs/compressors/0.1.1/compressors/?search=Resources
  [__link7]: https://docs.rs/bytesbuf/0.10.0/bytesbuf/?search=BytesView
  [__link8]: https://docs.rs/bytesbuf/0.10.0/bytesbuf/?search=BytesBuf
- [__link9]: https://docs.rs/compressors/0.1.0/compressors/fn.compress.html
+ [__link9]: https://docs.rs/compressors/0.1.1/compressors/fn.compress.html

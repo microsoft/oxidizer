@@ -14,8 +14,8 @@ include.workspace = true
 publish = false
 
 [package.metadata.cargo_check_external_types]
-# Internal crate (publish = false; listed in automation::INTERNAL_CRATES). Not a
-# public-API surface, so allow all external types.
+# Internal crate (publish = false). It has no public compatibility contract, so
+# allow all external types.
 allowed_external_types = ["*"]
 
 # Benchmark-only package: the support library is exercised by benchmark targets,

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.8.1] - 2026-09-16
+
+- 🔧 Maintenance
+
+  - Now requires `0.11.1` of `http_extensions`
+
 ## [0.8.0] - 2026-09-10
 
 ### Breaking
