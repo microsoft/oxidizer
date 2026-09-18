@@ -425,3 +425,8 @@ clippy.significant_drop_tightening = "allow"
 clippy.wildcard_imports = "allow"
 
 # <<< anvil-managed: anvil-workspace-lints
+
+# Repository-specific lint policy beyond the Anvil catalog.
+rust.missing_docs = "warn"
+rust.unreachable_pub = "warn"
+clippy.panic = "warn"
