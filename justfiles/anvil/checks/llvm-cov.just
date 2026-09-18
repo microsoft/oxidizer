@@ -131,7 +131,7 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs anvil-impact
         }
         $command = [regex]::Match(
             $failedProcess.Groups['command'].Value,
-            '(?s)^(?:"(?<quoted>[^"]+)"|(?<bare>\S+))\s+export\s+(?<arguments>.*)$'
+            '(?s)^(?:"(?<quoted>[^"]+)"|''(?<singleQuoted>[^'']+)''|(?<bare>\S+))\s+export\s+(?<arguments>.*)$'
         )
         if (-not $command.Success) {
             Write-Warning 'anvil-llvm-cov: the failed process was not an llvm-cov export command'
@@ -139,6 +139,8 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs anvil-impact
         }
         $llvmCov = if ($command.Groups['quoted'].Success) {
             $command.Groups['quoted'].Value
+        } elseif ($command.Groups['singleQuoted'].Success) {
+            $command.Groups['singleQuoted'].Value
         } else {
             $command.Groups['bare'].Value
         }
