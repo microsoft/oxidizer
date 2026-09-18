@@ -3838,13 +3838,19 @@ mod tests {
     use super::*;
     use crate::domain::Domain;
 
+    #[cfg(miri)]
+    fn test_event_buffer_capacity() -> seismograph::recorder::EventBufferCapacity {
+        seismograph::recorder::EventBufferCapacity::new(64).unwrap()
+    }
+
+    #[cfg(not(miri))]
+    fn test_event_buffer_capacity() -> seismograph::recorder::EventBufferCapacity {
+        seismograph::recorder::EventBufferCapacity::default()
+    }
+
     fn test_recorder_configuration() -> seismograph::recorder::Configuration {
         seismograph::recorder::Configuration {
-            event_capacity_per_thread: if cfg!(miri) {
-                seismograph::recorder::EventBufferCapacity::new(64).unwrap()
-            } else {
-                seismograph::recorder::EventBufferCapacity::default()
-            },
+            event_capacity_per_thread: test_event_buffer_capacity(),
             ..Default::default()
         }
     }

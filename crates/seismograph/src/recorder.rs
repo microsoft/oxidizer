@@ -173,17 +173,23 @@ static RECORDERS: AtomicPtr<ThreadRecorder> = AtomicPtr::new(ptr::null_mut());
 #[cfg(test)]
 pub(crate) static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+#[cfg(all(test, miri))]
+fn test_event_buffer_capacity() -> EventBufferCapacity {
+    EventBufferCapacity(MIN_EVENT_CAPACITY_PER_THREAD)
+}
+
+#[cfg(all(test, not(miri)))]
+fn test_event_buffer_capacity() -> EventBufferCapacity {
+    EventBufferCapacity::DEFAULT
+}
+
 #[cfg(test)]
 pub(crate) fn test_configuration() -> Configuration {
     Configuration {
         // Tests that care about capacity select it explicitly. Other tests need
         // only one complete recorder lifecycle, so Miri does not benefit from
         // initializing the production-sized 65,536-slot ring.
-        event_capacity_per_thread: if cfg!(miri) {
-            EventBufferCapacity(MIN_EVENT_CAPACITY_PER_THREAD)
-        } else {
-            EventBufferCapacity::DEFAULT
-        },
+        event_capacity_per_thread: test_event_buffer_capacity(),
         ..Configuration::default()
     }
 }
