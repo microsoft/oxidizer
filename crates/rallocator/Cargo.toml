@@ -41,7 +41,8 @@ windows-sys = { workspace = true, features = [
 
 [dependencies]
 allocation_hints.workspace = true
-allocator-api2-02.workspace = true
+# hashbrown 0.17 uses this older allocator trait version for system-backed tables.
+allocator-api2-02 = { package = "allocator-api2", version = "0.2.21", default-features = false, features = ["std"] }
 backtrace = { workspace = true, features = ["std"], optional = true }
 hashbrown = { workspace = true, features = ["allocator-api2"] }
 seismograph.workspace = true
