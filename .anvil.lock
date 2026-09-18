@@ -288,8 +288,18 @@ checksum = "sha256:b91854c7f0e6d14c74751f607d2c0e3dfcefef55f5178bbafae59d47e577a
 
 [[region]]
 host = "Cargo.toml"
-id = "anvil-workspace-lints"
-checksum = "sha256:8257f8c96103501ef0af020ce686ffcd7333fa5704f701b33758468baa9cdd98"
+id = "anvil-workspace-clippy-lints"
+checksum = "sha256:cf78b123235b694a8222e499e7ba91729de9325d1de3f5275e58a85880fabc4e"
+
+[[region]]
+host = "Cargo.toml"
+id = "anvil-workspace-rust-lints"
+checksum = "sha256:ade16a15a1ecfbe6a8f98aca044266f570a7e658bef51f4b3f6e23d8ebd14798"
+
+[[region]]
+host = "Cargo.toml"
+id = "anvil-workspace-rustdoc-lints"
+checksum = "sha256:5040c38d64a80ddedc2c51d25881841a1670de77e68bbd14b67ac66fd0062091"
 
 [[region]]
 host = "clippy.toml"
