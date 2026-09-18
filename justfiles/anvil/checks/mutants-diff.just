@@ -69,7 +69,7 @@ anvil-mutants-diff: anvil-mutants-diff-validate-prereqs anvil-impact
     }
     try {
         $env:CARGO_BUILD_JOBS = '1'
-        & cargo {{_anvil_stable_toolchain_args}} mutants --in-diff $diff_path --no-shuffle --jobs 1 --jobserver-tasks 1 --cargo-arg=--jobs=1 --all-logs --caught --re '^crates/http_headers/src/(decode_error|field)\.rs:|^crates/http_headers/src/field_name\.rs:(28:|302:)'
+        & cargo {{_anvil_stable_toolchain_args}} mutants --in-diff $diff_path --no-shuffle --jobs 1 --jobserver-tasks 1 --cargo-arg=--jobs=1 --all-logs --caught --re '^crates/http_headers/src/(decode_error|field)\.rs:|^crates/http_headers/src/field_name\.rs:(28:|302:)|^crates/http_headers_simd/src/api\.rs:36:5: replace ascii_str -> Option<&str> with None$'
         $status = $LASTEXITCODE
     } finally {
         if ($null -ne $monitor -and -not $monitor.HasExited) {
