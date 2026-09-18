@@ -43,14 +43,15 @@ timeout.
 requirements. Its setters merge constraints and retain enough provenance to diagnose conflicts.
 `build` returns the concrete, transport-erased `HttpClient`.
 
-`Transport` validates the complete library-facing baseline and produces a factory:
+`Transport` is dyn-compatible, validates the complete library-facing baseline, and produces a
+factory:
 
 ```rust,ignore
-pub trait Transport: Clone + Send + Sync + 'static {
+pub trait Transport: Send + Sync + 'static {
     fn register_config(&self, registry: &mut TransportConfigRegistry);
 
     fn validate(
-        self,
+        self: Arc<Self>,
         requirements: TransportRequirements,
         registry: TransportConfigRegistry,
         context: TransportContext,
@@ -63,8 +64,10 @@ pub struct TransportFactory {
 
 impl HttpClient {
     pub fn builder<T: Transport>(transport: T) -> HttpClientBuilder {
-        // Erase T into an internal cloneable construction closure.
+        Self::builder_erased(Arc::new(transport))
     }
+
+    pub fn builder_erased(transport: Arc<dyn Transport>) -> HttpClientBuilder;
 }
 ```
 
@@ -79,24 +82,23 @@ imply that every value is valid. For example, a transport can support connection
 rejecting an out-of-range duration, or require a named client credential that the application did
 not bind.
 
-`HttpClient::builder` asks the concrete transport to populate the typed registry, then captures it
-in an internal type-erased closure. The public trait remains generic and requires no allocation or
-boxed receiver:
+`HttpClient::builder` converts the concrete transport into `Arc<dyn Transport>` and asks it to
+populate the typed registry. The allocation is internal; transport implementations expose no
+boxed receiver. Applications that already select a transport dynamically can call
+`builder_erased` directly.
 
 ```rust,ignore
-let erased = Arc::new(move |requirements, registry, context| {
-    transport.clone().validate(requirements, registry, context)
-});
+let transport: Arc<dyn Transport> = Arc::new(transport);
 ```
 
-Builder cloning shares this closure and clones the registry. Each `build` clones the unbuilt
-transport configuration and consumes that clone during validation, so independently built clients
-do not share transport resources. The final registry is consumed by `validate`, ensuring every
-library mutation reaches the transport factory without exposing the raw map.
+Builder cloning shares the immutable transport configuration and clones the registry. Each
+`build` clones the `Arc` and consumes that reference during validation. The returned factory is
+new and independent, so built clients do not share sessions or pools unless the transport
+explicitly defines a shared isolation policy. The final registry is consumed by `validate`,
+ensuring every library mutation reaches the transport factory without exposing the raw map.
 
-The `Transport` trait need not be dyn-compatible because only `HttpClient::builder` performs
-erasure. Applications selecting a transport at runtime use an enum implementing `Transport`, or an
-explicit erased transport adapter built from the same closure contract.
+`self: Arc<Self>` is a dyn-compatible receiver and gives validation an owned reference it may
+retain in the factory. It avoids both a public `Box<Self>` receiver and a `clone_box` method.
 
 The factory receives no generic TLS or connection-options bag. Each implementation captures its
 validated configuration and translates semantic requirements directly into each materialized
@@ -189,13 +191,13 @@ transport configuration implementing `fetch::Transport`:
 ```rust,ignore
 impl fetch::Transport for RustlsHyperTransport {
     fn validate(
-        self,
+        self: Arc<Self>,
         requirements: TransportRequirements,
         registry: TransportConfigRegistry,
         context: TransportContext,
     ) -> Result<TransportFactory, TransportBuildError> {
         self.validate_tls(&requirements, &registry)?;
-        let validated = self;
+        let validated = Arc::clone(&self);
         Ok(TransportFactory::new(validated.isolation(), move |instance| {
             let connector = validated.build_tls_connector(&requirements, &instance)?;
             fetch_hyper_common::build(

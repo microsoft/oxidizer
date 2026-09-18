@@ -132,9 +132,10 @@ rejects unsupported values, missing credential bindings, and known host-version 
 before a client is returned. The resulting factory declares whether handlers are shared or isolated.
 
 `HttpClientBuilder` remains cloneable. The erased transport configuration therefore supports
-cloning before internal erasure; cloning a builder shares the erased construction closure, which
-creates a fresh transport-configuration clone for each `build`. Native sessions and pooled
-connections are never captured in the builder.
+dyn-compatible shared ownership: the builder stores `Arc<dyn Transport>`. Cloning a builder clones
+that immutable unbuilt configuration handle and its typed registry. Native sessions and pooled
+connections are never captured in the builder, and every `build` creates an independent validated
+factory.
 
 Materialization receives per-instance services such as response-body infrastructure, telemetry,
 runtime-thread affinity, and pool identity. It remains fallible because acquiring OS resources can
