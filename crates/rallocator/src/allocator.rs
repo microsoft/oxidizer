@@ -436,6 +436,10 @@ struct SlabAllocation {
     committed_bytes: usize,
 }
 
+struct MediumAllocation {
+    address: *mut u8,
+}
+
 struct MediumRegion {
     regions: AtomicPtr<RegionState>,
     state: SpinLock<MediumState>,
@@ -1222,9 +1226,21 @@ where
 
     #[cold]
     #[inline(never)]
-    fn allocate_medium(&self, layout: Layout, heap: &mut ReusableHeapState, mut tracking: Option<PendingTracking>) -> *mut u8 {
+    #[cfg_attr(test, mutants::skip)] // A permanent synthetic failure can strand dependent global allocators; the implementation remains mutation-tested below.
+    fn allocate_medium(&self, layout: Layout, heap: &mut ReusableHeapState, tracking: Option<PendingTracking>) -> *mut u8 {
+        self.allocate_medium_inner(layout, heap, tracking).address
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn allocate_medium_inner(
+        &self,
+        layout: Layout,
+        heap: &mut ReusableHeapState,
+        mut tracking: Option<PendingTracking>,
+    ) -> MediumAllocation {
         let Some(slice_count) = medium_slice_count(layout) else {
-            return ptr::null_mut();
+            return MediumAllocation { address: ptr::null_mut() };
         };
         if let Some(index) = heap.medium_batch.maintenance_shard() {
             // SAFETY: domains and shards are process-retained. Every medium
@@ -1240,7 +1256,7 @@ where
             unsafe { register_medium_allocation(address, layout, heap, tracking.take()) };
             self.record_allocation(layout.size());
             record_medium_event(MediumEventKind::TlsCacheHit, 1);
-            return address;
+            return MediumAllocation { address };
         }
         let regions = medium::heap_regions(heap);
         let cache_class = local_medium_class(slice_count).filter(|_| span_size <= heap.medium_cache_max_bytes);
@@ -1256,17 +1272,19 @@ where
                 Some(reservation) => (reservation, requested),
                 None if requested > 1 => {
                     let Some(reservation) = regions.reserve_slices(heap.domain, slice_count) else {
-                        return ptr::null_mut();
+                        return MediumAllocation { address: ptr::null_mut() };
                     };
                     (reservation, 1)
                 }
-                None => return ptr::null_mut(),
+                None => {
+                    return MediumAllocation { address: ptr::null_mut() };
+                }
             };
             // SAFETY: used bits reserve this entire, exclusively owned extent.
             let true = (unsafe {
                 commit_and_initialize_reserved_medium_batch(regions, address, span_size, slice_count, reserved_count, &mut batch, region)
             }) else {
-                return ptr::null_mut();
+                return MediumAllocation { address: ptr::null_mut() };
             };
             self.record_mapping(span_size * reserved_count);
             regions.record_fresh(span_size * reserved_count);
@@ -1281,7 +1299,7 @@ where
         }
         unsafe { register_medium_allocation(address, layout, heap, tracking) };
         self.record_allocation(layout.size());
-        address
+        MediumAllocation { address }
     }
 
     #[inline(never)]
