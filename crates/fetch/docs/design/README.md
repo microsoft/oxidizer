@@ -69,7 +69,7 @@ pub fn build_client(
     builder: fetch::HttpClientBuilder,
 ) -> fetch::Result<fetch::HttpClient> {
     builder
-        .client_certificate(fetch::ClientCredentialId::new("tvs-client"))
+        .tls_client_credential(fetch::ClientCredentialId::new("tvs-client"))
         .tls_server_name(
             fetch::Origin::https("localhost", service_port),
             fetch::ServerName::new("tvs.prod.example")?,

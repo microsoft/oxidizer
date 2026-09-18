@@ -111,7 +111,7 @@ stable type without understanding the underlying transport:
 pub fn configure(builder: HttpClientBuilder) -> Result<HttpClient> {
     builder
         .connection_lifetime(LIFETIME)
-        .client_certificate(ClientCredentialId::new("service-client"))
+        .tls_client_credential(ClientCredentialId::new("service-client"))
         .tls_server_name(
             Origin::https("localhost", SERVICE_PORT),
             ServerName::new("tvs.prod.example")?,
@@ -334,7 +334,7 @@ owner allowed replacement.
 The builder names one client credential per applicable destination scope:
 
 ```rust,ignore
-builder.client_certificate(ClientCredentialId::new("service-client"))
+builder.tls_client_credential(ClientCredentialId::new("service-client"))
 ```
 
 `ClientCredentialId` is a stable logical role, not a thumbprint, subject name, file path, or store
