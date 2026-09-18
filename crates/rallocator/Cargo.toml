@@ -26,6 +26,7 @@ loom.workspace = true
 [features]
 default = ["caller-symbolization"]
 caller-symbolization = ["dep:backtrace"]
+loom = []
 tuning-telemetry = []
 
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -58,6 +59,12 @@ seismograph_runtime = { path = "../seismograph_runtime" }
 [[test]]
 name = "snapshot_mappings"
 harness = false
+
+# Loom model-checking tests. `required-features = ["loom"]` lets `anvil-loom`
+# discover this target; the actual Loom build is selected by `--cfg loom`.
+[[test]]
+name = "loom"
+required-features = ["loom"]
 
 [[bench]]
 name = "mimalloc"
