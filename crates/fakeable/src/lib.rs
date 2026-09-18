@@ -5,6 +5,7 @@
     clippy::test_attr_in_doctest,
     reason = "doc examples show realistic test usage with #[test] attributes"
 )]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 //! Proc macros for streamlining the creation of fakeable structures.
 //!
@@ -98,6 +99,8 @@ use proc_macro::TokenStream;
 /// - **`fakes_feature`** (optional): Feature flag name for enabling fakes (default: "test-util")
 ///
 /// ```rust
+/// # #[cfg(feature = "mockall")]
+/// # mod example {
 /// #[fakeable::fakeable(
 ///     fake_impl = mocks::MockMyService,
 ///     fake_constructor = "create_fake",
@@ -115,6 +118,7 @@ use proc_macro::TokenStream;
 /// # impl MyService {
 /// #    // methods...
 /// # }
+/// # }
 /// ```
 ///
 /// ## For Impl Blocks
@@ -129,9 +133,11 @@ use proc_macro::TokenStream;
 ///
 /// By specifying `generate_mockall_fake = true` in the attribute for the impl block, this macro
 /// will generate a mock implementation using the `mockall` crate. The generated mock will be placed
-/// in the specified module (default: "mocks").
+/// in the specified module (default: "mocks"). This option requires the `mockall` Cargo feature.
 ///
 /// ```rust
+/// # #[cfg(feature = "mockall")]
+/// # mod example {
 /// #[fakeable::fakeable(
 ///     fake_impl = mocks::MockMyService,
 /// )]
@@ -143,6 +149,7 @@ use proc_macro::TokenStream;
 /// impl MyService {
 ///     // methods...
 /// }
+/// # }
 /// ```
 ///
 /// # Generated Code Structure
@@ -163,8 +170,10 @@ use proc_macro::TokenStream;
 ///
 /// # Limitations
 ///
-/// - Mutable methods (`&mut self`) are not well-supported by mockall and will panic in fake
-///   mode if used with mockall-generated mocks.
+/// - Mockall generation rejects mutable methods and methods with restricted visibility because
+///   it cannot generate a fake that matches the wrapper's delegated method set.
+/// - Receiver-less methods must return `Self`; other associated functions cannot select a real or
+///   fake implementation to delegate to.
 /// - Complex parameter patterns in method signatures are not supported in public methods
 /// - Generic types in impl blocks require careful handling
 ///
@@ -179,6 +188,8 @@ use proc_macro::TokenStream;
 /// Private methods remain available only on the real implementation and cannot be called
 /// through fake instances.
 #[proc_macro_attribute]
+#[cfg_attr(test, mutants::skip)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn fakeable(args: TokenStream, input: TokenStream) -> TokenStream {
     fakeable_impl(args.into(), input.into()).into()
 }

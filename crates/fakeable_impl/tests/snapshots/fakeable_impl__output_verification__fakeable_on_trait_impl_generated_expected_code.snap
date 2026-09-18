@@ -1,6 +1,5 @@
 ---
-source: sources/dev/crates/fakeable_impl/tests/output_verification.rs
-assertion_line: 243
+source: crates/fakeable_impl/src/../tests/output_verification.rs
 expression: "prettyplease::unparse(&result_file)"
 ---
 impl From<Something> for __fakeable__MyService::MyService {

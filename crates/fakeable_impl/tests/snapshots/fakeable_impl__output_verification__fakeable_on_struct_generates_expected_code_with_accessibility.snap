@@ -1,22 +1,20 @@
 ---
-source: sources/dev/crates/fakeable_impl/tests/output_verification.rs
+source: crates/fakeable_impl/src/../tests/output_verification.rs
 expression: "prettyplease::unparse(&result_file)"
 ---
 #[allow(non_snake_case)]
 mod __fakeable__MyService {
     use super::*;
-    #[derive(Clone, ThreadAware)]
     pub(super) enum Enum {
         Real(MyService),
-        #[cfg(any(feature = "fakes", test))]
+        #[cfg(any(feature = "test-util", test))]
         Fake(fakes::FakeMyService),
     }
-    #[derive(Clone, ThreadAware)]
     pub(super) struct MyService {
         pub(super) value: String,
         pub(super) other_value: i32,
     }
-    #[cfg(any(feature = "fakes", test))]
+    #[cfg(any(feature = "test-util", test))]
     const _: () = {
         let fake_size = ::core::mem::size_of::<fakes::FakeMyService>();
         let real_size = ::core::mem::size_of::<MyService>();
@@ -28,12 +26,11 @@ mod __fakeable__MyService {
         );
     };
 }
-#[derive(Clone, ThreadAware)]
 pub(super) struct MyService {
     inner: __fakeable__MyService::Enum,
 }
 impl MyService {
-    #[cfg(any(feature = "fakes", test))]
+    #[cfg(any(feature = "test-util", test))]
     pub(super) fn fake(fake_impl: fakes::FakeMyService) -> Self {
         Self {
             inner: __fakeable__MyService::Enum::Fake(fake_impl),

@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![expect(missing_docs, reason = "Test code")]
-
 use insta::assert_snapshot;
 use quote::quote;
+
+use crate as fakeable_impl;
 
 #[test]
 fn fakeable_on_struct_generates_expected_code() {
@@ -207,6 +207,21 @@ fn fakeable_on_impl_with_async_generates_expected_code() {
 }
 
 #[test]
+fn fakeable_on_impl_with_async_constructor_generates_expected_code() {
+    let input = quote! {
+        impl MyService {
+            pub async fn new(value: String) -> Self {
+                Self { value }
+            }
+        }
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! {}, input);
+    let result_file = syn::parse_file(&result.to_string()).unwrap();
+    assert_snapshot!(prettyplease::unparse(&result_file));
+}
+
+#[test]
 fn fakeable_on_impl_with_mockall_and_async_unit_function_generates_expected_code() {
     let input = quote! {
         impl MyService {
@@ -328,4 +343,76 @@ fn fakeable_on_impl_with_ref_receiver_returning_self_generates_expected_code() {
     let result = fakeable_impl::fakeable_impl(args, input);
     let result_file = syn::parse_file(&result.to_string()).unwrap();
     assert_snapshot!(prettyplease::unparse(&result_file));
+}
+
+#[test]
+fn fakeable_on_generic_impl_preserves_type_arguments() {
+    let input = quote! {
+        impl<T> MyService<T>
+        where
+            T: Clone,
+        {
+            pub fn new(value: T) -> Self {
+                Self { value }
+            }
+
+            pub fn value(&self) -> &T {
+                &self.value
+            }
+        }
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! {}, input);
+    let result_file = syn::parse_file(&result.to_string()).unwrap();
+    assert_snapshot!(prettyplease::unparse(&result_file));
+}
+
+#[test]
+fn fakeable_on_impl_with_mockall_preserves_async_where_clause() {
+    let input = quote! {
+        impl MyService {
+            pub async fn process<T>(&self, value: T) -> T
+            where
+                T: Send + 'static,
+            {
+                value
+            }
+        }
+    };
+
+    let args = quote! {
+        generate_mockall_fake = true
+    };
+
+    let result = fakeable_impl::fakeable_impl(args, input);
+    let result_file = syn::parse_file(&result.to_string()).unwrap();
+    assert_snapshot!(prettyplease::unparse(&result_file));
+}
+
+#[test]
+fn fakeable_on_impl_with_mockall_rejects_mutable_receiver() {
+    let input = quote! {
+        impl MyService {
+            pub fn update(&mut self) {}
+        }
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! { generate_mockall_fake = true }, input).to_string();
+
+    assert!(result.contains("does not support mutable receiver methods"));
+}
+
+#[test]
+fn fakeable_on_impl_with_mockall_rejects_restricted_visibility() {
+    let input = quote! {
+        impl MyService {
+            pub(crate) fn value(&self) -> i32 {
+                42
+            }
+        }
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! { generate_mockall_fake = true }, input).to_string();
+
+    assert!(result.contains("does not support restricted method visibility"));
 }

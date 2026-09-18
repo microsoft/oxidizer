@@ -1,0 +1,20 @@
+---
+source: crates/fakeable_impl/src/../tests/output_verification.rs
+expression: "prettyplease::unparse(&result_file)"
+---
+impl __fakeable__MyService::MyService {
+    pub async fn new(value: String) -> Self {
+        Self { value }
+    }
+}
+impl MyService {
+    #[allow(unused_mut)]
+    #[allow(clippy::used_underscore_binding)]
+    pub async fn new(value: String) -> Self {
+        Self {
+            inner: __fakeable__MyService::Enum::Real(
+                __fakeable__MyService::MyService::new(value).await,
+            ),
+        }
+    }
+}

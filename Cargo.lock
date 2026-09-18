@@ -1774,6 +1774,7 @@ name = "fakeable"
 version = "0.2.0"
 dependencies = [
  "fakeable_impl",
+ "mutants",
 ]
 
 [[package]]
@@ -1781,8 +1782,6 @@ name = "fakeable_impl"
 version = "0.2.0"
 dependencies = [
  "insta",
- "mockall",
- "mutants",
  "prettyplease 0.3.0",
  "proc-macro2",
  "quote",

@@ -1,5 +1,5 @@
 ---
-source: sources/dev/crates/fakeable/fakeable_impl/tests/output_verification.rs
+source: crates/fakeable_impl/src/../tests/output_verification.rs
 expression: "prettyplease::unparse(&result_file)"
 ---
 #[allow(non_snake_case)]
@@ -26,12 +26,12 @@ mod __fakeable__MyService {
         );
     };
 }
-pub(super) struct MyService {
+struct MyService {
     inner: __fakeable__MyService::Enum,
 }
 impl MyService {
     #[cfg(any(feature = "test-util", test))]
-    pub(super) fn fake(fake_impl: fakes::FakeMyService) -> Self {
+    fn fake(fake_impl: fakes::FakeMyService) -> Self {
         Self {
             inner: __fakeable__MyService::Enum::Fake(fake_impl),
         }

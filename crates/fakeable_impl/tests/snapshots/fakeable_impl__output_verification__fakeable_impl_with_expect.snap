@@ -1,5 +1,5 @@
 ---
-source: sources/dev/crates/fakeable/fakeable_impl/tests/output_verification.rs
+source: crates/fakeable_impl/src/../tests/output_verification.rs
 expression: "prettyplease::unparse(&result_file)"
 ---
 #[expect(dead_code)]

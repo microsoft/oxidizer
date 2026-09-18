@@ -36,6 +36,14 @@ thread_aware = { workspace = true, features = ["derive", "std"] }
 static_assertions = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
 
+[[test]]
+name = "usage_with_fakes"
+required-features = ["test-util"]
+
+[[test]]
+name = "usage_with_mockall"
+required-features = ["test-util"]
+
 # >>> anvil-managed: anvil-lints
 [lints]
 workspace = true

@@ -5,6 +5,7 @@
 name = "fakeable_impl"
 description = "Implementation details for the fakeable procedural macros."
 version = "0.2.0"
+autotests = false
 readme = "README.md"
 keywords = ["oxidizer", "fake", "mock", "testing"]
 categories = ["development-tools::testing", "rust-patterns"]
@@ -28,22 +29,16 @@ all-features = true
 
 [features]
 default = []
-mockall = ["dep:mockall"]
+mockall = []
 
 [dependencies]
-mockall = { workspace = true, optional = true }
 proc-macro2 = { workspace = true }
 quote = { workspace = true }
 syn = { workspace = true, features = ["clone-impls", "extra-traits", "full", "parsing", "printing", "proc-macro"] }
 
 [dev-dependencies]
 insta = { workspace = true }
-mutants = { workspace = true }
 prettyplease = { workspace = true }
-
-[[test]]
-name = "output_verification"
-required-features = ["mockall"]
 
 # >>> anvil-managed: anvil-lints
 [lints]

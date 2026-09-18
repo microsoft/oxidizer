@@ -3,6 +3,8 @@
 
 //! Implementation details for the `fakeable` procedural macros.
 
+#![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
+
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{ItemImpl, ItemStruct, parse_quote};
@@ -165,11 +167,12 @@ fn process_struct(args: &FakeableArgs, item_struct: &ItemStruct) -> proc_macro2:
 
 /// Process impl blocks
 fn process_impl(args: &FakeableArgs, item_impl: &ItemImpl) -> proc_macro2::TokenStream {
-    // Extract the struct name from the impl target
-    let struct_name = match extract_struct_name(item_impl) {
-        Ok(name) => name,
+    // Extract the struct segment from the impl target, including generic arguments.
+    let struct_segment = match extract_struct_segment(item_impl) {
+        Ok(segment) => segment,
         Err(err) => return err.into_compile_error(),
     };
+    let struct_name = &struct_segment.ident;
 
     // Generate internal type names without prefix, to be placed in dedicated module
     let enum_name = syn::Ident::new("Enum", proc_macro2::Span::call_site());
@@ -177,18 +180,30 @@ fn process_impl(args: &FakeableArgs, item_impl: &ItemImpl) -> proc_macro2::Token
     let fakes_attribute = &args.fakes_feature;
 
     let mut real_impl = item_impl.clone();
-    *real_impl.self_ty = parse_quote!(#helper_module_name::#struct_name);
+    *real_impl.self_ty = parse_quote!(#helper_module_name::#struct_segment);
 
-    let wrapper_impl = match generate_wrapper_impl(item_impl, &struct_name, &enum_name, &helper_module_name, fakes_attribute) {
+    let wrapper_impl = match generate_wrapper_impl(item_impl, struct_name, &enum_name, &helper_module_name, fakes_attribute) {
         Ok(impl_block) => impl_block,
         Err(err) => return err.into_compile_error(),
     };
 
     // Generate mockall fake if requested
     let mockall_fake = if args.generate_mockall_fake == Some(true) {
-        let fake_name = struct_name.to_string();
-        let fake_module = args.mockall_fake_module.as_deref().unwrap_or("fakes");
-        generate_mockall_fake(item_impl, &fake_name, fakes_attribute, fake_module)
+        #[cfg(not(feature = "mockall"))]
+        {
+            return syn::Error::new_spanned(item_impl, "generate_mockall_fake requires the fakeable `mockall` feature")
+                .into_compile_error();
+        }
+
+        #[cfg(feature = "mockall")]
+        {
+            let fake_name = struct_name.to_string();
+            let fake_module = args.mockall_fake_module.as_deref().unwrap_or("fakes");
+            match generate_mockall_fake(item_impl, &fake_name, fakes_attribute, fake_module) {
+                Ok(mock) => mock,
+                Err(err) => return err.into_compile_error(),
+            }
+        }
     } else {
         quote! {}
     };
@@ -202,19 +217,15 @@ fn process_impl(args: &FakeableArgs, item_impl: &ItemImpl) -> proc_macro2::Token
     }
 }
 
-/// Extracts the struct name from an impl block.
-fn extract_struct_name(item_impl: &ItemImpl) -> Result<proc_macro2::Ident, syn::Error> {
+/// Extracts the final type path segment from an impl block.
+fn extract_struct_segment(item_impl: &ItemImpl) -> Result<syn::PathSegment, syn::Error> {
     match &*item_impl.self_ty {
-        syn::Type::Path(type_path) => {
-            if let Some(segment) = type_path.path.segments.last() {
-                Ok(segment.ident.clone())
-            } else {
-                Err(syn::Error::new_spanned(
-                    &item_impl.self_ty,
-                    "unable to extract struct name from impl target",
-                ))
-            }
-        }
+        syn::Type::Path(type_path) => Ok(type_path
+            .path
+            .segments
+            .last()
+            .expect("syn type paths always contain at least one segment")
+            .clone()),
         _ => Err(syn::Error::new_spanned(&item_impl.self_ty, "impl target must be a simple path")),
     }
 }
@@ -472,11 +483,13 @@ fn returns_self(output: &syn::ReturnType) -> bool {
         syn::ReturnType::Default => false,
         syn::ReturnType::Type(_, ty) => {
             if let syn::Type::Path(type_path) = &**ty {
-                if let Some(segment) = type_path.path.segments.last() {
-                    segment.ident == "Self"
-                } else {
-                    false
-                }
+                type_path
+                    .path
+                    .segments
+                    .last()
+                    .expect("syn type paths always contain at least one segment")
+                    .ident
+                    == "Self"
             } else {
                 false
             }
@@ -488,20 +501,18 @@ fn returns_self(output: &syn::ReturnType) -> bool {
 /// for methods with impl Future return types, mockall supports futures to be returned by mocks, unlike
 /// for async methods, for which it only supports returning values that are wrapped in immediate futures.
 fn convert_async_to_impl_future(sig: &syn::Signature) -> proc_macro2::TokenStream {
-    let ident = &sig.ident;
-    let generics = &sig.generics;
-    let inputs = &sig.inputs;
-
     // Extract the original return type
     let output_type = match &sig.output {
         syn::ReturnType::Default => quote! { () },
         syn::ReturnType::Type(_, ty) => quote! { #ty },
     };
 
-    // Create the new signature without async but with impl Future return type
-    quote! {
-        fn #ident #generics(#inputs) -> impl std::future::Future<Output = #output_type> + Send
-    }
+    // Preserve qualifiers, generics, and the where-clause while replacing async
+    // with the future shape that Mockall can configure directly.
+    let mut converted = sig.clone();
+    converted.asyncness = None;
+    converted.output = parse_quote!(-> impl ::std::future::Future<Output = #output_type> + Send);
+    quote! { #converted }
 }
 
 /// Adds explicit lifetimes to a method signature for mockall compatibility.
@@ -602,7 +613,12 @@ fn add_lifetime_to_references(ty: &mut syn::Type, lifetime: &syn::Lifetime) {
 }
 
 /// Generates a mockall mock! macro for the given impl block.
-fn generate_mockall_fake(item_impl: &ItemImpl, fake_name: &str, fakes_attribute: &str, fake_module: &str) -> proc_macro2::TokenStream {
+fn generate_mockall_fake(
+    item_impl: &ItemImpl,
+    fake_name: &str,
+    fakes_attribute: &str,
+    fake_module: &str,
+) -> Result<proc_macro2::TokenStream, syn::Error> {
     // Use the provided name directly - mockall will add "Mock" prefix automatically
     let fake_ident = quote::format_ident!("{}", fake_name);
 
@@ -611,20 +627,37 @@ fn generate_mockall_fake(item_impl: &ItemImpl, fake_name: &str, fakes_attribute:
 
     for item in &item_impl.items {
         if let syn::ImplItem::Fn(method) = item {
-            // Skip non-public methods
-            let is_public = matches!(method.vis, syn::Visibility::Public(_));
-
             // Skip constructors (methods that don't take self and return Self)
             let has_self = method.sig.inputs.iter().any(|input| matches!(input, syn::FnArg::Receiver(_)));
+            let is_delegated = has_self && matches!(method.vis, syn::Visibility::Public(_) | syn::Visibility::Restricted(_));
 
-            // Skip mutable methods as mockall doesn't support them well
-            let is_mut = method
-                .sig
-                .inputs
-                .iter()
-                .any(|input| matches!(input, syn::FnArg::Receiver(receiver) if receiver.mutability.is_some()));
+            let is_mut = method.sig.inputs.iter().any(|input| {
+                matches!(
+                    input,
+                    syn::FnArg::Receiver(receiver)
+                        if receiver.mutability.is_some()
+                            || matches!(
+                                receiver.kind,
+                                syn::ReceiverKind::Reference(_, _, Some(_))
+                            )
+                )
+            });
 
-            if is_public && has_self && !is_mut {
+            if is_delegated && is_mut {
+                return Err(syn::Error::new_spanned(
+                    &method.sig,
+                    "generate_mockall_fake does not support mutable receiver methods; use a manual fake implementation",
+                ));
+            }
+
+            if is_delegated && matches!(method.vis, syn::Visibility::Restricted(_)) {
+                return Err(syn::Error::new_spanned(
+                    &method.vis,
+                    "generate_mockall_fake does not support restricted method visibility; use `pub` or a manual fake implementation",
+                ));
+            }
+
+            if is_delegated {
                 // Add explicit lifetimes to avoid mockall compilation errors
                 let sig_with_lifetimes = add_explicit_lifetimes(&method.sig);
 
@@ -643,7 +676,7 @@ fn generate_mockall_fake(item_impl: &ItemImpl, fake_name: &str, fakes_attribute:
 
     if fake_module == "." {
         // Generate in current module
-        quote! {
+        Ok(quote! {
             #fakes_cfg
             mockall::mock! {
                 #[derive(Debug)]
@@ -651,11 +684,11 @@ fn generate_mockall_fake(item_impl: &ItemImpl, fake_name: &str, fakes_attribute:
                     #(#mock_methods)*
                 }
             }
-        }
+        })
     } else {
         // Generate in specified module
         let module_ident = quote::format_ident!("{}", fake_module);
-        quote! {
+        Ok(quote! {
             #fakes_cfg
             #[allow(clippy::all)]
             #[allow(clippy::pedantic)]
@@ -669,7 +702,7 @@ fn generate_mockall_fake(item_impl: &ItemImpl, fake_name: &str, fakes_attribute:
                     }
                 }
             }
-        }
+        })
     }
 }
 
@@ -717,9 +750,8 @@ fn rewrite_expect_in_tokens(tokens: TokenStream) -> TokenStream {
                 if let Some(TokenTree::Group(group)) = iter.peek()
                     && group.delimiter() == proc_macro2::Delimiter::Parenthesis
                 {
-                    let Some(TokenTree::Group(group)) = iter.next() else {
-                        unreachable!()
-                    };
+                    let group = group.clone();
+                    let _ = iter.next();
 
                     // rewrite: expect(...) → allow(...)
                     let new_ident = syn::Ident::new("allow", ident.span());
@@ -744,4 +776,247 @@ fn rewrite_expect_in_tokens(tokens: TokenStream) -> TokenStream {
     }
 
     output
+}
+
+#[cfg(all(test, feature = "mockall"))]
+#[path = "../tests/output_verification.rs"]
+mod output_verification;
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use proc_macro2::TokenStream;
+    use quote::{ToTokens, quote};
+    use syn::{Type, parse_quote};
+
+    use super::{
+        add_explicit_lifetimes, add_lifetime_to_references, contains_reference_in_generic, fakeable_impl, rewrite_expect_in_tokens,
+        transform_expect_to_allow,
+    };
+
+    fn expansion(args: TokenStream, input: TokenStream) -> String {
+        fakeable_impl(args, input).to_string()
+    }
+
+    #[test]
+    fn detects_references_nested_in_generic_arguments() {
+        let nested: Type = parse_quote!(Option<Vec<&str>>);
+        let without_reference: Type = parse_quote!(Option<Vec<String>>);
+        let direct: Type = parse_quote!(&str);
+
+        assert!(contains_reference_in_generic(&nested));
+        assert!(!contains_reference_in_generic(&without_reference));
+        assert!(!contains_reference_in_generic(&direct));
+    }
+
+    #[test]
+    fn adds_lifetimes_below_direct_references() {
+        let mut ty: Type = parse_quote!(&Option<&str>);
+
+        add_lifetime_to_references(&mut ty, &parse_quote!('mock));
+
+        assert_eq!(ty.into_token_stream().to_string(), "& Option < & 'mock str >");
+    }
+
+    #[test]
+    fn adds_lifetimes_recursively_and_ignores_unrelated_types() {
+        let mut nested: Type = parse_quote!(Option<Vec<&str>>);
+        let mut explicit: Type = parse_quote!(Option<&'static str>);
+        let mut lifetime_argument: Type = parse_quote!(Container<'static>);
+        let mut tuple: Type = parse_quote!((u8, u16));
+
+        add_lifetime_to_references(&mut nested, &parse_quote!('mock));
+        add_lifetime_to_references(&mut explicit, &parse_quote!('mock));
+        add_lifetime_to_references(&mut lifetime_argument, &parse_quote!('mock));
+        add_lifetime_to_references(&mut tuple, &parse_quote!('mock));
+
+        assert_eq!(nested.into_token_stream().to_string(), "Option < Vec < & 'mock str > >");
+        assert_eq!(explicit.into_token_stream().to_string(), "Option < & 'static str >");
+        assert_eq!(lifetime_argument.into_token_stream().to_string(), "Container < 'static >");
+        assert_eq!(tuple.into_token_stream().to_string(), "(u8 , u16)");
+    }
+
+    #[test]
+    fn preserves_existing_explicit_lifetimes() {
+        let signature: syn::Signature = parse_quote!(fn value<'a>(&self, input: Option<&'a str>));
+
+        let converted = add_explicit_lifetimes(&signature);
+
+        assert_eq!(converted.into_token_stream().to_string(), signature.into_token_stream().to_string());
+    }
+
+    #[test]
+    fn rewrites_expect_inside_nested_groups() {
+        let rewritten = rewrite_expect_in_tokens(quote!([expect(dead_code)]));
+
+        assert_eq!(rewritten.to_string(), "[allow (dead_code)]");
+    }
+
+    #[test]
+    fn leaves_other_attributes_unchanged() {
+        let rewritten = rewrite_expect_in_tokens(quote!(deny(dead_code)));
+
+        assert_eq!(rewritten.to_string(), "deny (dead_code)");
+    }
+
+    #[test]
+    fn leaves_plain_expect_identifier_unchanged() {
+        let rewritten = rewrite_expect_in_tokens(quote!(expect));
+
+        assert_eq!(rewritten.to_string(), "expect");
+    }
+
+    #[test]
+    fn leaves_non_list_expect_attribute_unchanged() {
+        let attr: syn::Attribute = parse_quote!(#[expect = "reason"]);
+
+        let transformed = transform_expect_to_allow(&attr);
+
+        assert!(transformed.path().is_ident("expect"));
+    }
+
+    #[test]
+    fn reports_invalid_attribute_arguments() {
+        let input = quote!(
+            struct Service;
+        );
+        let cases = [
+            (
+                quote!(fakes_feature = "a", fakes_feature = "b"),
+                "fakes_feature specified multiple times",
+            ),
+            (quote!(fake_impl = First, fake_impl = Second), "fake_impl specified multiple times"),
+            (
+                quote!(fake_constructor = "a", fake_constructor = "b"),
+                "fake_constructor specified multiple times",
+            ),
+            (
+                quote!(generate_mockall_fake = true, generate_mockall_fake = true),
+                "generate_mockall_fake specified multiple times",
+            ),
+            (
+                quote!(mockall_fake_module = "a", mockall_fake_module = "b"),
+                "mockall_fake_module specified multiple times",
+            ),
+            (quote!(generate_mockall_fake = false), "generate_mockall_fake must be true"),
+            (quote!(generate_mockall_fake = "true"), "generate_mockall_fake must be true"),
+            (quote!(unknown = true), "unknown argument"),
+        ];
+
+        for (args, expected) in cases {
+            assert!(expansion(args, input.clone()).contains(expected));
+        }
+    }
+
+    #[test]
+    fn reports_invalid_macro_targets_and_signatures() {
+        assert!(
+            expansion(
+                quote!(),
+                quote!(
+                    enum Service {}
+                )
+            )
+            .contains("fakeable attribute can only be applied to structs or impl blocks")
+        );
+        assert!(
+            expansion(
+                quote!(),
+                quote!(
+                    struct Service;
+                )
+            )
+            .contains("fake_impl must be specified")
+        );
+        assert!(
+            expansion(
+                quote!(),
+                quote!(
+                    impl (u8, u16) {}
+                )
+            )
+            .contains("impl target must be a simple path")
+        );
+        assert!(
+            expansion(
+                quote!(),
+                quote! {
+                    impl Service {
+                        pub fn version() -> u32 {
+                            1
+                        }
+                    }
+                },
+            )
+            .contains("methods without self parameter are not supported")
+        );
+        assert!(
+            expansion(
+                quote!(),
+                quote! {
+                    impl Service {
+                        pub fn set(&self, (left, right): (u8, u8)) {
+                            let _ = (left, right);
+                        }
+                    }
+                },
+            )
+            .contains("complex parameter patterns are not supported")
+        );
+    }
+
+    #[test]
+    fn handles_all_struct_forms_and_impl_item_kinds() {
+        let tuple = expansion(
+            quote!(fake_impl = FakeService),
+            quote!(
+                struct Service(String);
+            ),
+        );
+        let unit = expansion(
+            quote!(fake_impl = FakeService),
+            quote!(
+                struct Service;
+            ),
+        );
+        let generic = expansion(
+            quote!(fake_impl = FakeService<T>),
+            quote!(
+                struct Service<T> {
+                    value: T,
+                }
+            ),
+        );
+        let associated_const = expansion(
+            quote!(),
+            quote! {
+                impl Service {
+                    const VERSION: u32 = 1;
+
+                    fn private(&self) {}
+                }
+            },
+        );
+
+        syn::parse_file(&tuple).unwrap();
+        syn::parse_file(&unit).unwrap();
+        syn::parse_file(&generic).unwrap();
+        syn::parse_file(&associated_const).unwrap();
+    }
+
+    #[test]
+    fn mockall_generation_skips_non_delegated_items() {
+        let generated = expansion(
+            quote!(generate_mockall_fake = true),
+            quote! {
+                impl Service {
+                    const VERSION: u32 = 1;
+
+                    fn private(&self) {}
+                }
+            },
+        );
+
+        syn::parse_file(&generated).unwrap();
+    }
 }

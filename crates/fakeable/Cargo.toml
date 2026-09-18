@@ -20,6 +20,11 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fakeable"
 [package.metadata.docs.rs]
 all-features = true
 
+# Thin proc-macro entry crate: expansion is exercised through consumer tests,
+# while the delegated implementation is measured in fakeable_impl.
+[package.metadata.coverage-gate]
+min-lines-percent = 0
+
 [lib]
 proc-macro = true
 
@@ -29,6 +34,9 @@ mockall = ["fakeable_impl/mockall"]
 
 [dependencies]
 fakeable_impl = { workspace = true }
+
+[dev-dependencies]
+mutants = { workspace = true }
 
 # >>> anvil-managed: anvil-lints
 [lints]

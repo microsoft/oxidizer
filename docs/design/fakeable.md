@@ -31,9 +31,11 @@ Methods with a receiver delegate to the matching real or fake method, including
 async methods and methods returning `Self`.
 
 Only public or restricted inherent methods are delegated. Private helpers stay
-on the real implementation. Trait implementations delegate all methods.
-Methods without a receiver are supported only when they return `Self`.
-Parameters must use identifier patterns.
+on the real implementation. Trait methods follow the same signature
+constraints. Methods without a receiver are supported only when they return
+`Self`, because other associated functions have no active instance from which
+to select the real or fake implementation. Parameters must use identifier
+patterns.
 
 ## Fake availability
 
@@ -52,8 +54,9 @@ type. Large fakes should be placed behind a pointer such as `Arc`.
 The optional `mockall` feature enables
 `generate_mockall_fake = true` on implementation blocks. The macro emits a
 Mockall type in the configured module, excluding constructors, private methods,
-and mutable-receiver methods. Async methods are represented as methods
-returning `Future` so tests can provide asynchronous expectations.
+and rejecting mutable-receiver or restricted-visibility methods that would make
+the generated fake incompatible with the wrapper. Async methods are represented
+as methods returning `Future` so tests can provide asynchronous expectations.
 
 Mockall remains optional because manually implemented fakes are the primary
 mechanism and should not add a production dependency. The integration must be

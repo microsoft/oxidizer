@@ -5,6 +5,7 @@
 
 use fakeable_test::my_service::MyService;
 use fakeable_test::my_service::fakes::FakeMyService;
+use fakeable_test::{generic_service::GenericService, generic_service::fakes::FakeGenericService};
 use static_assertions::assert_impl_all;
 use thread_aware::ThreadAware;
 
@@ -30,6 +31,15 @@ async fn test_fake_implementation() {
     fake_service.mutable(5);
     assert_eq!(fake_service.get_other_value(), 42); // Fake does not change state
     assert_eq!(fake_service.get_value_with_ref_arg("pre-", None), "pre-fake");
+}
+
+#[test]
+fn generic_service_preserves_type_arguments() {
+    let real = GenericService::new(41_u32);
+    assert_eq!(*real.value(), 41);
+
+    let fake = GenericService::fake(FakeGenericService(42_u32));
+    assert_eq!(*fake.value(), 42);
 }
 
 assert_impl_all!(MyService: ThreadAware, Clone);

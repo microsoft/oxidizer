@@ -1,5 +1,5 @@
 ---
-source: sources/dev/crates/fakeable/fakeable_impl/tests/output_verification.rs
+source: crates/fakeable_impl/src/../tests/output_verification.rs
 expression: "prettyplease::unparse(&result_file)"
 ---
 #[allow(non_snake_case)]
@@ -10,7 +10,17 @@ mod __fakeable__MyService {
         #[cfg(any(feature = "test-util", test))]
         Fake(fakes::FakeMyService),
     }
+    #[expect(dead_code)]
+    #[allow(whatever)]
     pub(super) struct MyService {
+        #[expect(unused)]
+        #[expect(another_expectation, reason = "demonstration")]
+        #[cfg_attr(test, expect(dead_code))]
+        #[cfg_attr(
+            feature = "some_feature",
+            expect(some_expectation, another_expectation)
+        )]
+        #[allow(whatever2)]
         pub(super) value: String,
         pub(super) other_value: i32,
     }
@@ -26,6 +36,8 @@ mod __fakeable__MyService {
         );
     };
 }
+#[allow(dead_code)]
+#[allow(whatever)]
 struct MyService {
     inner: __fakeable__MyService::Enum,
 }

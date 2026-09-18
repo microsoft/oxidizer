@@ -3,6 +3,7 @@
 
 //! Testing utilities and helpers for the `fakeable` framework.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(coverage_nightly, coverage(off))]
 #![allow(
     clippy::missing_errors_doc,
@@ -16,6 +17,8 @@
 #![expect(clippy::allow_attributes, reason = "for testing purposes")]
 
 pub mod my_service;
+
+pub mod generic_service;
 
 pub mod my_service_mockall;
 
