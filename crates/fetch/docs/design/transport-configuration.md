@@ -51,7 +51,7 @@ pub trait Transport: Send + Sync + 'static {
     fn register_config(&self, registry: &mut TransportConfigRegistry);
 
     fn validate(
-        self: Arc<Self>,
+        &self,
         requirements: TransportRequirements,
         registry: TransportConfigRegistry,
         context: TransportContext,
@@ -64,10 +64,10 @@ pub struct TransportFactory {
 
 impl HttpClient {
     pub fn builder<T: Transport>(transport: T) -> HttpClientBuilder {
-        Self::builder_erased(Arc::new(transport))
+        Self::builder_erased(Box::new(transport))
     }
 
-    pub fn builder_erased(transport: Arc<dyn Transport>) -> HttpClientBuilder;
+    pub fn builder_erased(transport: Box<dyn Transport>) -> HttpClientBuilder;
 }
 ```
 
@@ -82,23 +82,20 @@ imply that every value is valid. For example, a transport can support connection
 rejecting an out-of-range duration, or require a named client credential that the application did
 not bind.
 
-`HttpClient::builder` converts the concrete transport into `Arc<dyn Transport>` and asks it to
-populate the typed registry. The allocation is internal; transport implementations expose no
-boxed receiver. Applications that already select a transport dynamically can call
-`builder_erased` directly.
+`HttpClient::builder` boxes the concrete transport internally and asks it to populate the typed
+registry. Applications that already select a transport dynamically can call `builder_erased`.
+`Transport` itself is dyn-compatible and does not prescribe `Box`, `Arc`, or cloning in its method
+receivers.
 
-```rust,ignore
-let transport: Arc<dyn Transport> = Arc::new(transport);
-```
+The builder may convert the box to shared internal storage or use another cloneable erasure
+mechanism. Each `build` calls `validate` by shared reference. Validation creates an independently
+owned factory from the immutable transport configuration plus the consumed requirements, registry,
+and context. Built clients therefore do not share sessions or pools unless the returned factory
+explicitly defines a shared isolation policy.
 
-Builder cloning shares the immutable transport configuration and clones the registry. Each
-`build` clones the `Arc` and consumes that reference during validation. The returned factory is
-new and independent, so built clients do not share sessions or pools unless the transport
-explicitly defines a shared isolation policy. The final registry is consumed by `validate`,
-ensuring every library mutation reaches the transport factory without exposing the raw map.
-
-`self: Arc<Self>` is a dyn-compatible receiver and gives validation an owned reference it may
-retain in the factory. It avoids both a public `Box<Self>` receiver and a `clone_box` method.
+This separation is intentional: `&self` models reusable composition configuration, while
+`TransportFactory` owns validated per-client state. A concrete transport chooses how to clone or
+share its own configuration when constructing that factory.
 
 The factory receives no generic TLS or connection-options bag. Each implementation captures its
 validated configuration and translates semantic requirements directly into each materialized
@@ -191,13 +188,12 @@ transport configuration implementing `fetch::Transport`:
 ```rust,ignore
 impl fetch::Transport for RustlsHyperTransport {
     fn validate(
-        self: Arc<Self>,
+        &self,
         requirements: TransportRequirements,
         registry: TransportConfigRegistry,
         context: TransportContext,
     ) -> Result<TransportFactory, TransportBuildError> {
-        self.validate_tls(&requirements, &registry)?;
-        let validated = Arc::clone(&self);
+        let validated = self.validated_config(&requirements, &registry)?;
         Ok(TransportFactory::new(validated.isolation(), move |instance| {
             let connector = validated.build_tls_connector(&requirements, &instance)?;
             fetch_hyper_common::build(
