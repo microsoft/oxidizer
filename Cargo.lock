@@ -1774,6 +1774,7 @@ name = "fakeable"
 version = "0.2.0"
 dependencies = [
  "fakeable_impl",
+ "mockall",
  "mutants",
 ]
 

@@ -25,6 +25,10 @@ all-features = true
 [package.metadata.coverage-gate]
 min-lines-percent = 0
 
+# Used by feature-enabled doctests; cargo-udeps does not inspect doctest usage.
+[package.metadata.cargo-udeps.ignore]
+development = ["mockall"]
+
 [lib]
 proc-macro = true
 
@@ -36,6 +40,7 @@ mockall = ["fakeable_impl/mockall"]
 fakeable_impl = { workspace = true }
 
 [dev-dependencies]
+mockall = { workspace = true }
 mutants = { workspace = true }
 
 # >>> anvil-managed: anvil-lints

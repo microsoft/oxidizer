@@ -76,18 +76,22 @@ use proc_macro::TokenStream;
 ///         }
 ///     }
 /// }
+/// ```
 ///
-/// // Usage in tests
-/// #[cfg(test)]
-/// mod tests {
-///     use super::*;
+/// Fake constructors are enabled by a feature of the consuming crate, not a
+/// feature inherited from `fakeable`. A consumer using the default name
+/// declares and enables `test-util` for the test build:
 ///
-///     #[test]
-///     fn test_with_fake() {
-///         let service = UserService::fake(fakes::FakeUserService);
-///         assert_eq!(service.get_user(1), Some("Fake User".to_string()));
-///     }
-/// }
+/// ```toml
+/// [features]
+/// test-util = []
+/// ```
+///
+/// With that consumer feature enabled, tests can construct the configured fake:
+///
+/// ```rust,ignore
+/// let service = UserService::fake(fakes::FakeUserService);
+/// assert_eq!(service.get_user(1), Some("Fake User".to_string()));
 /// ```
 ///
 /// # Configuration Options
@@ -133,7 +137,8 @@ use proc_macro::TokenStream;
 ///
 /// By specifying `generate_mockall_fake = true` in the attribute for the impl block, this macro
 /// will generate a mock implementation using the `mockall` crate. The generated mock will be placed
-/// in the specified module (default: "mocks"). This option requires the `mockall` Cargo feature.
+/// in the specified module (default: "mocks"). This option requires the `fakeable` `mockall` Cargo
+/// feature and a direct `mockall` dependency in the consuming crate.
 ///
 /// ```rust
 /// # #[cfg(feature = "mockall")]

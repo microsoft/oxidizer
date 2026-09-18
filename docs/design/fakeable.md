@@ -44,9 +44,10 @@ use identifier patterns.
 
 Fake storage and constructors compile under
 `cfg(any(feature = "<fakes-feature>", test))`. The default feature name is
-`test-util`, and consumers can select another name with `fakes_feature`.
-Production builds therefore do not include the fake variant unless they
-explicitly enable the configured feature.
+`test-util`, and consumers can select another name with `fakes_feature`. This
+feature belongs to the consuming crate and must be declared there. Production
+builds therefore do not include the fake variant unless they explicitly enable
+the configured feature.
 
 To prevent accidental wrapper bloat, non-generic wrappers reject fake types
 that are both larger than 256 bytes and at least twice the size of the real
@@ -65,4 +66,6 @@ Mockall remains optional because manually implemented fakes are the primary
 mechanism and should not add a production dependency. The integration must be
 adopted carefully: its generated API depends on both `fakeable` and Mockall, so
 upgrading either can affect generated names, signatures, and expectations.
-Mockall-generated types should not be exposed as a stable public API.
+Consumers enable the `fakeable` `mockall` feature and declare their own direct
+`mockall` dependency. Mockall-generated types should not be exposed as a stable
+public API.
