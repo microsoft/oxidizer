@@ -36,7 +36,9 @@ constraints, while associated types and constants are preserved on both the
 hidden real implementation and wrapper implementation. Methods without a
 receiver are supported only when they return `Self`, because other associated
 functions have no active instance from which to select the real or fake
-implementation. Parameters must use identifier patterns.
+implementation. Typed receivers such as `self: Box<Self>` are rejected; the
+supported receiver forms are `self`, `&self`, and `&mut self`. Parameters must
+use identifier patterns.
 
 ## Fake availability
 

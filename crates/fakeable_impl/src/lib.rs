@@ -285,6 +285,13 @@ fn generate_delegation_method(
     let is_async = method_sig.asyncness.is_some();
     let receiver = method_sig.receiver();
 
+    if receiver.is_some_and(|receiver| matches!(receiver.kind, syn::ReceiverKind::Typed(_, _))) {
+        return Err(syn::Error::new_spanned(
+            method_sig,
+            "typed self receivers are not supported; use self, &self, or &mut self",
+        ));
+    }
+
     // Extract parameter names and determine if this is a constructor or returns Self
     let method_info = extract_method_info(method_sig)?;
     let fakes_cfg = fakes_cfg_attr(fakes_attribute);

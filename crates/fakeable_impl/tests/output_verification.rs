@@ -424,3 +424,16 @@ fn fakeable_on_impl_with_mockall_rejects_restricted_visibility() {
 
     assert!(result.contains("does not support restricted method visibility"));
 }
+
+#[test]
+fn fakeable_on_impl_rejects_typed_self_receiver() {
+    let input = quote! {
+        impl MyService {
+            pub fn take(self: Box<Self>) {}
+        }
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! {}, input).to_string();
+
+    assert!(result.contains("typed self receivers are not supported"));
+}

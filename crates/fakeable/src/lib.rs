@@ -174,6 +174,7 @@ use proc_macro::TokenStream;
 ///   it cannot generate a fake that matches the wrapper's delegated method set.
 /// - Receiver-less methods must return `Self`; other associated functions cannot select a real or
 ///   fake implementation to delegate to.
+/// - Typed receivers such as `self: Box<Self>` are rejected; use `self`, `&self`, or `&mut self`.
 /// - Complex parameter patterns in method signatures are not supported in public methods
 /// - Generic types in impl blocks require careful handling
 ///
