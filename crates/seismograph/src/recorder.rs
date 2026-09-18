@@ -174,11 +174,13 @@ static RECORDERS: AtomicPtr<ThreadRecorder> = AtomicPtr::new(ptr::null_mut());
 pub(crate) static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(all(test, miri))]
+#[cfg_attr(test, mutants::skip)]
 fn test_event_buffer_capacity() -> EventBufferCapacity {
     EventBufferCapacity(MIN_EVENT_CAPACITY_PER_THREAD)
 }
 
 #[cfg(all(test, not(miri)))]
+#[cfg_attr(test, mutants::skip)]
 fn test_event_buffer_capacity() -> EventBufferCapacity {
     EventBufferCapacity::DEFAULT
 }
