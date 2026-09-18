@@ -442,13 +442,18 @@ struct MediumRegion {
     remote: medium::RemoteMailbox,
 }
 
+const DOMAIN_MEDIUM_SHARD_COUNT: usize = medium::SHARD_COUNT - 1;
+const DOMAIN_MEDIUM_LANE_COUNT: usize = medium::SHARD_COUNT / 4;
+const _: () = assert!(DOMAIN_MEDIUM_SHARD_COUNT + 1 == medium::SHARD_COUNT);
+const _: () = assert!(DOMAIN_MEDIUM_LANE_COUNT * 4 == medium::SHARD_COUNT);
+
 #[repr(C, align(64))]
 pub(crate) struct DomainState {
     id: usize,
     is_default: AtomicBool,
     regions: MediumRegion,
-    medium_shards: [MediumRegion; medium::SHARD_COUNT - 1],
-    medium_lanes: [AtomicUsize; medium::SHARD_COUNT / 4],
+    medium_shards: [MediumRegion; DOMAIN_MEDIUM_SHARD_COUNT],
+    medium_lanes: [AtomicUsize; DOMAIN_MEDIUM_LANE_COUNT],
     next: AtomicPtr<Self>,
 }
 
@@ -842,8 +847,8 @@ impl DomainState {
             id: NEXT_DOMAIN_ID.fetch_add(1, Ordering::Relaxed),
             is_default: AtomicBool::new(false),
             regions: MediumRegion::new(),
-            medium_shards: [const { MediumRegion::new() }; medium::SHARD_COUNT - 1],
-            medium_lanes: [const { AtomicUsize::new(0) }; medium::SHARD_COUNT / 4],
+            medium_shards: [const { MediumRegion::new() }; DOMAIN_MEDIUM_SHARD_COUNT],
+            medium_lanes: [const { AtomicUsize::new(0) }; DOMAIN_MEDIUM_LANE_COUNT],
             next: AtomicPtr::new(ptr::null_mut()),
         }
     }
@@ -866,10 +871,10 @@ pub(crate) fn create_domain() -> *mut DomainState {
         ptr::addr_of_mut!((*state).is_default).write(AtomicBool::new(false));
         ptr::addr_of_mut!((*state).regions).write(MediumRegion::new());
         let shards = ptr::addr_of_mut!((*state).medium_shards).cast::<MediumRegion>();
-        for index in 0..medium::SHARD_COUNT - 1 {
+        for index in 0..DOMAIN_MEDIUM_SHARD_COUNT {
             shards.add(index).write(MediumRegion::new());
         }
-        ptr::addr_of_mut!((*state).medium_lanes).write([const { AtomicUsize::new(0) }; medium::SHARD_COUNT / 4]);
+        ptr::addr_of_mut!((*state).medium_lanes).write([const { AtomicUsize::new(0) }; DOMAIN_MEDIUM_LANE_COUNT]);
         ptr::addr_of_mut!((*state).next).write(AtomicPtr::new(ptr::null_mut()));
     }
 
