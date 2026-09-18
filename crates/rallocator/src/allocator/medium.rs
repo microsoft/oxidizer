@@ -665,6 +665,18 @@ impl MediumRegion {
         self.purge_with_policy(force, now, BudgetSource::Fixed(budget));
     }
 
+    #[cfg(test)]
+    pub(super) fn purge_with_unlimited_budget(&self, force: bool, now: u64) {
+        self.purge_with_budget(
+            force,
+            now,
+            MemoryBudget {
+                limit: usize::MAX,
+                pressured: false,
+            },
+        );
+    }
+
     fn purge_with_policy(&self, force: bool, now: u64, policy: BudgetSource) {
         let mut pending = [(ptr::null_mut::<u8>(), 0_usize); PURGE_WORK];
         {
