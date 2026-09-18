@@ -1559,8 +1559,7 @@ mod tests {
     fn remote_free_races_owner_retirement_without_retaining_heap_storage() {
         let domain = crate::domain::Domain::new().unwrap();
         let (sender, receiver) = std::sync::mpsc::channel();
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
-        let worker_barrier = barrier.clone();
+        let (retire_sender, retire_receiver) = std::sync::mpsc::channel();
         let worker = std::thread::spawn(move || {
             let allocator = allocator();
             let heap = create_bump_fallback_heap(crate::domain::state(domain));
@@ -1573,15 +1572,16 @@ mod tests {
                 assert!(!address.is_null());
                 sender.send(SendAddress(address)).unwrap();
             }
-            worker_barrier.wait();
+            retire_receiver.recv().unwrap();
             // SAFETY: the worker owns the heap; outstanding external allocations
             // keep retirement coordination alive while the consumer unregisters.
             unsafe { retire_general_heap(heap) };
         });
-        barrier.wait();
+        let addresses = (0..32).map(|_| receiver.recv().unwrap()).collect::<Vec<_>>();
+        retire_sender.send(()).unwrap();
         let allocator = allocator();
         let layout = Layout::from_size_align(MEDIUM_SLICE_SIZE, 16).unwrap();
-        for SendAddress(address) in receiver {
+        for SendAddress(address) in addresses {
             unsafe { allocator.deallocate_medium(address, layout, ptr::null_mut()) };
         }
         worker.join().unwrap();
