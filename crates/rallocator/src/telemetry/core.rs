@@ -1535,6 +1535,23 @@ mod tests {
 
     use super::*;
 
+    #[cfg(miri)]
+    fn test_event_buffer_capacity() -> seismograph::recorder::EventBufferCapacity {
+        seismograph::recorder::EventBufferCapacity::new(64).unwrap()
+    }
+
+    #[cfg(not(miri))]
+    fn test_event_buffer_capacity() -> seismograph::recorder::EventBufferCapacity {
+        seismograph::recorder::EventBufferCapacity::default()
+    }
+
+    fn test_recorder_configuration() -> seismograph::recorder::Configuration {
+        seismograph::recorder::Configuration {
+            event_capacity_per_thread: test_event_buffer_capacity(),
+            ..Default::default()
+        }
+    }
+
     fn sample_stats() -> Stats {
         Stats {
             allocated_bytes: 101,
@@ -2051,12 +2068,17 @@ mod tests {
                 event_sampling: seismograph::recorder::EventSampling::one_in(100).unwrap(),
                 ..Default::default()
             },
-            ..Default::default()
+            ..test_recorder_configuration()
         });
 
-        let selected = (0..10_000).filter(|_| begin_allocation().is_some()).count();
+        let attempts = if cfg!(miri) { 1_000 } else { 10_000 };
+        let selected = (0..attempts).filter(|_| begin_allocation().is_some()).count();
 
-        assert!((70..=130).contains(&selected), "selected {selected} allocations");
+        let expected_range = if cfg!(miri) { 5..=15 } else { 70..=130 };
+        assert!(
+            expected_range.contains(&selected),
+            "selected {selected} allocations from {attempts}"
+        );
         with_telemetry_suppressed(|| assert!(begin_allocation().is_none()));
         seismograph::recorder(seismograph::recorder::Configuration::default());
     }
@@ -2072,7 +2094,7 @@ mod tests {
                 enabled: true,
                 ..Default::default()
             },
-            ..Default::default()
+            ..test_recorder_configuration()
         });
         assert!(begin_allocation().is_some());
         with_telemetry_suppressed(|| assert!(begin_allocation().is_none()));
@@ -2089,7 +2111,7 @@ mod tests {
                 enabled: true,
                 ..Default::default()
             },
-            ..Default::default()
+            ..test_recorder_configuration()
         });
         let pending = begin_allocation().unwrap();
         seismograph::recorder(seismograph::recorder::Configuration {
@@ -2098,7 +2120,7 @@ mod tests {
                 event_sampling: seismograph::recorder::EventSampling::one_in(20).unwrap(),
                 ..Default::default()
             },
-            ..Default::default()
+            ..test_recorder_configuration()
         });
 
         let tracking = pending.commit(ptr::without_provenance_mut(16), Layout::new::<u64>(), 7, HeapKind::General);
@@ -2115,7 +2137,7 @@ mod tests {
                 enabled: true,
                 ..Default::default()
             },
-            ..Default::default()
+            ..test_recorder_configuration()
         });
         let layout = Layout::new::<u64>();
         let address = ptr::without_provenance_mut(16);
@@ -2127,7 +2149,7 @@ mod tests {
                 event_sampling: seismograph::recorder::EventSampling::one_in(20).unwrap(),
                 ..Default::default()
             },
-            ..Default::default()
+            ..test_recorder_configuration()
         });
 
         record_deallocation(tracking, address, layout, false);

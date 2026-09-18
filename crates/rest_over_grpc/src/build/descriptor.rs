@@ -571,7 +571,7 @@ fn root_path(path: &str) -> String {
     if rooted { path.to_owned() } else { format!("::{path}") }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};

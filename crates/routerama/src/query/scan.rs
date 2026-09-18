@@ -176,7 +176,14 @@ mod tests {
 
     #[test]
     fn scanning_matches_scalar_at_vector_boundaries() {
-        for length in 0..80 {
+        // Native tests retain every length through five SIMD-width boundaries.
+        // Under Miri, representative values immediately around each boundary
+        // exercise the same unsafe vector loads and scalar tail handling.
+        #[cfg(miri)]
+        let lengths = vec![0, 1, 15, 16, 17, 31, 32, 33, 63, 64, 65, 79];
+        #[cfg(not(miri))]
+        let lengths = (0..80).collect::<alloc::vec::Vec<_>>();
+        for length in lengths {
             for position in 0..=length {
                 let mut bytes = vec![b'a'; length];
                 if position < length {

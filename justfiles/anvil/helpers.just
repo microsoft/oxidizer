@@ -46,12 +46,15 @@
 # environment variables. `$include` is one of:
 #
 #   * "--workspace" (affected/required) or "" (modified) - the tier is
-#     unscoped: ANVIL_IMPACT=off, or no impact cache is present. Recipes splat
+#     unscoped: ANVIL_IMPACT=off, or no impact cache is present outside consume
+#     mode (under consume a missing cache is a hard failure, not an unscoped
+#     run). Recipes splat
 #     "--workspace" (an empty string is NOT $null, so recipes test truthiness
 #     rather than `?? "--workspace"`, which would splat an empty arg cargo
 #     rejects).
 #   * "--package A@v --package B@v" - the tier has members. Packages are
-#     version-qualified cargo specs so they remain portable between CI jobs.
+#     version-qualified cargo specs so they resolve uniquely even when a
+#     like-named crate is also a transitive dependency.
 #   * "--skip" - the tier is empty for this change (recipe exits 0).
 #
 # This keeps the per-recipe boilerplate to a single capture, a one-line skip

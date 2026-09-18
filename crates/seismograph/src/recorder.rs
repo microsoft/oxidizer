@@ -173,6 +173,29 @@ static RECORDERS: AtomicPtr<ThreadRecorder> = AtomicPtr::new(ptr::null_mut());
 #[cfg(test)]
 pub(crate) static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+#[cfg(all(test, miri))]
+#[cfg_attr(test, mutants::skip)]
+fn test_event_buffer_capacity() -> EventBufferCapacity {
+    EventBufferCapacity(MIN_EVENT_CAPACITY_PER_THREAD)
+}
+
+#[cfg(all(test, not(miri)))]
+#[cfg_attr(test, mutants::skip)]
+fn test_event_buffer_capacity() -> EventBufferCapacity {
+    EventBufferCapacity::DEFAULT
+}
+
+#[cfg(test)]
+pub(crate) fn test_configuration() -> Configuration {
+    Configuration {
+        // Tests that care about capacity select it explicitly. Other tests need
+        // only one complete recorder lifecycle, so Miri does not benefit from
+        // initializing the production-sized 65,536-slot ring.
+        event_capacity_per_thread: test_event_buffer_capacity(),
+        ..Configuration::default()
+    }
+}
+
 thread_local! {
     static SUPPRESSION_DEPTH: Cell<usize> = const { Cell::new(0) };
     static LOCAL_RECORDER: LocalRecorder = const { LocalRecorder::new() };
@@ -1232,7 +1255,7 @@ mod tests {
                 enabled: true,
                 ..Default::default()
             },
-            ..Default::default()
+            ..test_configuration()
         });
         record(EventClass::General, || Record::object(EventKind::ArcClone, ObjectId::new(42)));
         record(EventClass::ArcDereference, || {
@@ -1323,7 +1346,7 @@ mod tests {
                 capture_backtraces: !cfg!(miri),
                 ..Default::default()
             },
-            ..Default::default()
+            ..test_configuration()
         });
         record(EventClass::ArcDereference, || {
             Record::object(EventKind::ArcDeref, ObjectId::new(42))
@@ -1422,12 +1445,14 @@ mod tests {
     #[test]
     fn object_sampling_selects_approximately_one_in_x_objects() {
         let sampling = EventSampling::one_in(100).unwrap();
-        let selected = (0..65_536)
+        let population = if cfg!(miri) { 4_096 } else { 65_536 };
+        let selected = (0..population)
             .map(ObjectId::new)
             .filter(|object_id| sampling.includes(*object_id))
             .count();
 
-        assert!((560..=750).contains(&selected), "selected {selected} objects");
+        let expected_range = if cfg!(miri) { 30..=50 } else { 560..=750 };
+        assert!(expected_range.contains(&selected), "selected {selected} objects from {population}");
     }
 
     #[test]
@@ -2086,7 +2111,8 @@ mod tests {
         });
         started_receiver.recv().unwrap();
 
-        for _ in 0..32 {
+        let snapshots = if cfg!(miri) { 4 } else { 32 };
+        for _ in 0..snapshots {
             let _captured = snapshot(crate::snapshot::EventBufferDisposition::Release);
         }
         running.store(false, Ordering::Relaxed);

@@ -767,9 +767,12 @@ mod tests {
         assert_eq!(error.code(), Code::InvalidArgument);
         assert!(error.to_string().contains("nested too deeply"));
 
-        // Far past the bound, and through the public entry point, so the guard
-        // covers the serving path rather than just this helper.
-        let key = vec!["a"; 100_000].join(".");
+        // Also cover the public entry point. Native tests retain the far-past-
+        // the-bound stack-safety stress; under Miri, one segment beyond the
+        // bound reaches the same rejection without interpreting 100,000
+        // redundant segments.
+        let public_path_depth = if cfg!(miri) { MAX_QUERY_FIELD_DEPTH + 1 } else { 100_000 };
+        let key = vec!["a"; public_path_depth].join(".");
         let error =
             decode_request::<Shelf>(&[(key.as_str(), "1")], b"", RequestBodyKind::None).expect_err("over-deep field path is rejected");
         assert_eq!(error.code(), Code::InvalidArgument);

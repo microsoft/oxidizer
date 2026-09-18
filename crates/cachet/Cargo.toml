@@ -17,6 +17,12 @@ homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/cachet"
 
+# Cachet contains no runtime unsafe code. Its suite exercises cache behavior and
+# async orchestration, which remain covered by native tests and cargo-careful;
+# unsafe dependencies retain their own Miri suites.
+[package.metadata.anvil.miri]
+exclude = true
+
 [package.metadata.docs.rs]
 all-features = true
 

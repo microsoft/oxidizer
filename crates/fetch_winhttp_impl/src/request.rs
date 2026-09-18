@@ -858,11 +858,17 @@ mod tests {
 
     #[test]
     fn explicit_and_default_ports_support_bracketed_ipv6_authorities() {
-        for (uri, expected_host, expected_port) in [
+        for (index, (uri, expected_host, expected_port)) in [
             ("https://example.com:8443/", "example.com", 8443),
             ("https://[::1]:8443/", "[::1]", 8443),
             ("https://[::1]/", "[::1]", 443),
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if cfg!(miri) && index == 0 {
+                continue;
+            }
             let (response, record) = run_lifecycle(
                 request(Method::GET, uri),
                 TransportOptions::default(),
@@ -878,14 +884,20 @@ mod tests {
 
     #[test]
     fn invalid_explicit_ports_fail_before_native_io() {
-        for (uri, message) in [
+        for (index, (uri, message)) in [
             ("https://example.com:/", "empty explicit port"),
             ("https://example.com:12x/", "is not decimal"),
             ("https://example.com:65536/", "outside the valid range"),
             ("https://example.com:0/", "explicit port is zero"),
             ("https://[::1]:/", "empty explicit port"),
             ("https://[::1]:65536/", "outside the valid range"),
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if cfg!(miri) && index >= 4 {
+                continue;
+            }
             let (result, record) = run_lifecycle(
                 request(Method::GET, uri),
                 TransportOptions::default(),
@@ -930,11 +942,17 @@ mod tests {
 
     #[test]
     fn advanced_protocol_combinations_apply_required_semantics_without_downgrade() {
-        for (versions, expected_mask, negotiated) in [
+        for (index, (versions, expected_mask, negotiated)) in [
             (vec![Version::HTTP_2], 1, Version::HTTP_2),
             (vec![Version::HTTP_3], 2, Version::HTTP_3),
             (vec![Version::HTTP_2, Version::HTTP_3], 3, Version::HTTP_3),
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if cfg!(miri) && index != 2 {
+                continue;
+            }
             let mut options = TransportOptions::default();
             options.supported_http_versions = versions;
             let config = LifecycleConfig {
@@ -963,7 +981,7 @@ mod tests {
 
     #[test]
     fn tls_relaxations_are_independent_request_masks() {
-        for (tls, expected) in [
+        for (index, (tls, expected)) in [
             (WinHttpTlsConfig::default(), None),
             (WinHttpTlsConfig::builder().accept_invalid_certs(true).build(), Some(0x2300)),
             (WinHttpTlsConfig::builder().accept_invalid_hostnames(true).build(), Some(0x1000)),
@@ -974,7 +992,13 @@ mod tests {
                     .build(),
                 Some(0x3300),
             ),
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if cfg!(miri) && !matches!(index, 0 | 3) {
+                continue;
+            }
             let (response, record) = run_lifecycle(
                 request(Method::GET, "https://example.com/"),
                 TransportOptions::default(),
@@ -1014,7 +1038,7 @@ mod tests {
 
     #[test]
     fn revocation_is_requested_unless_certificate_validation_is_relaxed() {
-        for (tls, expected) in [
+        for (index, (tls, expected)) in [
             (WinHttpTlsConfig::default(), Some(WINHTTP_ENABLE_SSL_REVOCATION)),
             (WinHttpTlsConfig::builder().accept_invalid_certs(true).build(), None),
             // Host-name relaxation is unrelated to revocation, so the check stays.
@@ -1029,7 +1053,13 @@ mod tests {
                     .build(),
                 None,
             ),
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if cfg!(miri) && index >= 2 {
+                continue;
+            }
             let (response, record) = run_lifecycle(
                 request(Method::GET, "https://example.com/"),
                 TransportOptions::default(),
@@ -1314,7 +1344,13 @@ mod tests {
 
     #[test]
     fn unknown_length_uploads_use_automatic_chunking_for_every_supported_protocol() {
-        for (versions, protocol) in [(vec![Version::HTTP_11], 0), (vec![Version::HTTP_2], 1), (vec![Version::HTTP_3], 2)] {
+        for (index, (versions, protocol)) in [(vec![Version::HTTP_11], 0), (vec![Version::HTTP_2], 1), (vec![Version::HTTP_3], 2)]
+            .into_iter()
+            .enumerate()
+        {
+            if cfg!(miri) && index == 1 {
+                continue;
+            }
             let memory = GlobalPool::new();
             let body_builder = HttpBodyBuilder::new(memory.clone(), &Clock::new_frozen());
             let completed_writes = Arc::new(AtomicUsize::new(0));

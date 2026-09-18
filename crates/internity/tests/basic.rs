@@ -169,6 +169,10 @@ fn local_lexicon_implements_reader() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "default/custom hasher API behavior is covered natively; other Miri tests exercise threaded storage and resolution"
+)]
 fn threaded_default_with_hasher_get_and_is_empty() {
     let it = ThreadedLexicon::default();
     assert!(it.is_empty());
@@ -208,7 +212,10 @@ fn reader_is_empty_and_len() {
 #[test]
 fn freeze_preserves_handles_and_strings() {
     let mut it = LocalLexicon::new();
-    let syms: Vec<(Sym, String)> = (0..5000)
+    // Sixty-four entries still force storage growth and exercise every
+    // unchecked lookup path. Native tests retain the larger stress cardinality.
+    let entry_count = if cfg!(miri) { 64 } else { 5_000 };
+    let syms: Vec<(Sym, String)> = (0..entry_count)
         .map(|i| {
             let s = format!("frozen-symbol-{i:07}");
             (it.intern(&s), s)
@@ -260,6 +267,10 @@ fn local_rehash_panic_leaves_lexicon_consistent() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "the injected panic exercises safe hash-table rollback; native tests retain it and Miri covers threaded storage recovery separately"
+)]
 fn threaded_rehash_panic_leaves_lexicon_consistent() {
     let (hasher, armed) = panic_on_marker_hasher();
     let lexicon = ThreadedLexicon::with_hasher(hasher);
@@ -314,14 +325,17 @@ fn get_does_not_intern() {
 
 #[test]
 fn many_strings_across_chunks() {
-    let mut it = LocalLexicon::new();
     #[cfg(miri)]
-    let count = 2_000;
+    let (mut it, count) = (LocalLexicon::with_capacity(1, 64), 16);
     #[cfg(not(miri))]
-    let count = 50_000;
+    let (mut it, count) = (LocalLexicon::new(), 50_000);
 
     let mut syms = Vec::new();
-    // Enough long strings to force multiple byte chunks per shard.
+    // Miri starts with capacity for one entry and 64 bytes. Sixteen padded
+    // strings exceed that byte budget by more than 8x and force repeated
+    // offsets, table, and byte-buffer growth while keeping every unchecked
+    // resolution path in the final loop.
+    // Native tests retain the 50,000-entry stress workload.
     for i in 0..count {
         let s = format!("symbol-number-{i:08}-with-some-padding");
         syms.push((it.intern(&s), s));

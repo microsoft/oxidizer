@@ -17,6 +17,11 @@ homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/seismograph_cli"
 
+# The CLI is a safe integration layer. Native tests and cargo-careful cover its
+# behavior; Miri remains focused on seismograph's unsafe recorder and snapshot.
+[package.metadata.anvil.miri]
+exclude = true
+
 [[bin]]
 name = "seismograph"
 path = "src/main.rs"
