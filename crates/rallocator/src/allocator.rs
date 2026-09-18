@@ -1996,11 +1996,11 @@ pub(crate) fn telemetry_region_snapshots() -> Vec<tracking::RegionSnapshot> {
     let mut regions = Vec::new();
     let mut domain = DOMAINS.load(Ordering::Acquire);
     // SAFETY: published domains and regions are retained for the process lifetime.
-    while let Some(domain_ref) = (unsafe { domain.as_ref() }) {
+    while let Some(domain_ref) = unsafe { domain.as_ref() } {
         for index in 0..medium::SHARD_COUNT {
             let backing = unsafe { medium::domain_shard(domain, index) };
             let mut region = backing.regions.load(Ordering::Acquire);
-            while let Some(region_ref) = (unsafe { region.as_ref() }) {
+            while let Some(region_ref) = unsafe { region.as_ref() } {
                 regions.push((domain, region));
                 region = region_ref.next.load(Ordering::Acquire);
             }
@@ -2098,7 +2098,7 @@ pub(crate) fn telemetry_domain_snapshots() -> Vec<tracking::DomainSnapshot> {
     let mut snapshots = Vec::new();
     let mut domain = DOMAINS.load(Ordering::Acquire);
     // SAFETY: published domains are retained for the process lifetime.
-    while let Some(domain_ref) = (unsafe { domain.as_ref() }) {
+    while let Some(domain_ref) = unsafe { domain.as_ref() } {
         snapshots.push(tracking::DomainSnapshot {
             domain_id: domain_ref.id,
             is_default: domain_ref.is_default.load(Ordering::Acquire),
@@ -2869,11 +2869,11 @@ fn region_containing(address: *mut u8) -> Option<*mut RegionState> {
 fn region_containing_uncached(address: *mut u8) -> Option<*mut RegionState> {
     let mut domain = DOMAINS.load(Ordering::Acquire);
     // SAFETY: published domains and regions are retained for the process lifetime.
-    while let Some(domain_ref) = (unsafe { domain.as_ref() }) {
+    while let Some(domain_ref) = unsafe { domain.as_ref() } {
         for index in 0..medium::SHARD_COUNT {
             let backing = unsafe { medium::domain_shard(domain, index) };
             let mut region = backing.regions.load(Ordering::Acquire);
-            while let Some(region_ref) = (unsafe { region.as_ref() }) {
+            while let Some(region_ref) = unsafe { region.as_ref() } {
                 let base = region_ref.base;
                 if address.addr() >= base.addr() && address.addr() < base.addr() + MEDIUM_REGION_SIZE {
                     LAST_REGION.set(region);
@@ -3116,7 +3116,7 @@ unsafe fn publish_region(state: &mut MediumState, published_regions: &AtomicPtr<
 unsafe fn find_region(state: &MediumState, address: *mut u8) -> Option<*mut RegionState> {
     let mut region = state.regions;
     // SAFETY: the caller guarantees that the region list belongs to a live domain.
-    while let Some(region_ref) = (unsafe { region.as_ref() }) {
+    while let Some(region_ref) = unsafe { region.as_ref() } {
         let base = region_ref.base;
         if address.addr() >= base.addr() && address.addr() < base.addr() + MEDIUM_REGION_SIZE {
             return Some(region);
