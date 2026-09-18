@@ -1256,10 +1256,9 @@ where
                 None => return ptr::null_mut(),
             };
             // SAFETY: used bits reserve this entire, exclusively owned extent.
-            if !unsafe { hal::commit(address, span_size * reserved_count) } {
-                unsafe { regions.release_slices(address, slice_count * reserved_count) };
+            let true = (unsafe { commit_reserved_medium_batch(regions, address, span_size, slice_count, reserved_count) }) else {
                 return ptr::null_mut();
-            }
+            };
             // Avoid a process-wide region lookup when publishing each fresh batch.
             LAST_REGION.set(region);
             for (index, entry) in batch[..reserved_count].iter_mut().enumerate() {
@@ -2683,6 +2682,22 @@ fn medium_slice_count(layout: Layout) -> Option<usize> {
         None
     } else {
         Some(slices)
+    }
+}
+
+#[cfg_attr(test, mutants::skip)] // Reversing VM commit success can access inaccessible pages and terminate the test runner.
+unsafe fn commit_reserved_medium_batch(
+    regions: &MediumRegion,
+    address: *mut u8,
+    span_size: usize,
+    slice_count: usize,
+    reserved_count: usize,
+) -> bool {
+    if unsafe { hal::commit(address, span_size * reserved_count) } {
+        true
+    } else {
+        unsafe { regions.release_slices(address, slice_count * reserved_count) };
+        false
     }
 }
 
