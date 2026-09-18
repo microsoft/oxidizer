@@ -1974,17 +1974,21 @@ pub(crate) fn flush_thread_aggregate_batch() {
 }
 
 fn telemetry_used_slice_indices(bitmap: &[u64]) -> impl Iterator<Item = usize> + '_ {
-    bitmap.iter().enumerate().flat_map(|(word_index, &word)| {
-        let mut remaining = word;
-        std::iter::from_fn(move || {
-            if remaining == 0 {
-                return None;
-            }
-            let slice_index = word_index * 64 + remaining.trailing_zeros() as usize;
-            remaining = clear_lowest_set_bit(remaining);
-            Some(slice_index)
+    bitmap
+        .iter()
+        .enumerate()
+        .flat_map(|(word_index, &word)| {
+            let mut remaining = word;
+            std::iter::from_fn(move || {
+                if remaining == 0 {
+                    return None;
+                }
+                let slice_index = word_index * 64 + remaining.trailing_zeros() as usize;
+                remaining = clear_lowest_set_bit(remaining);
+                Some(slice_index)
+            })
         })
-    })
+        .take_while(|&slice_index| slice_index < MEDIUM_REGION_SLICE_COUNT)
 }
 
 #[cfg_attr(test, mutants::skip)] // Replacing the clear operation with a set operation makes the iterator infinite.
@@ -5379,7 +5383,10 @@ mod tests {
 
     #[test]
     fn telemetry_used_slice_indices_preserve_boundary_order() {
-        let expected = vec![0, 63, 64, 127, 128, MEDIUM_REGION_SLICE_COUNT - 1];
+        let mut expected = vec![0, 63, 64, 127, 128, MEDIUM_REGION_SLICE_COUNT - 1];
+        expected.retain(|&index| index < MEDIUM_REGION_SLICE_COUNT);
+        expected.sort_unstable();
+        expected.dedup();
         let mut bitmap = [0_u64; MEDIUM_REGION_BITMAP_WORDS];
         for &index in &expected {
             bitmap[index / 64] |= 1 << (index % 64);

@@ -5,6 +5,7 @@
 
 #![cfg_attr(coverage_nightly, coverage(off))] // Manual profiling support, not product behavior.
 
+#[cfg(not(miri))]
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
@@ -13,12 +14,15 @@ static ALLOCATIONS: AtomicU64 = AtomicU64::new(0);
 static DEALLOCATIONS: AtomicU64 = AtomicU64::new(0);
 static ALLOCATED_BYTES: AtomicU64 = AtomicU64::new(0);
 
+#[cfg(not(miri))]
 #[global_allocator]
 static ALLOCATOR: AllocationCounter = AllocationCounter;
 
+#[cfg(not(miri))]
 struct AllocationCounter;
 
 // SAFETY: every operation delegates the unchanged allocation contract to System.
+#[cfg(not(miri))]
 unsafe impl GlobalAlloc for AllocationCounter {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         // SAFETY: the caller supplies a valid layout, forwarded unchanged to System.
@@ -53,6 +57,7 @@ unsafe impl GlobalAlloc for AllocationCounter {
     }
 }
 
+#[cfg(not(miri))]
 fn record_allocation(pointer: *mut u8, bytes: usize) {
     if !pointer.is_null() && ENABLED.load(Ordering::Relaxed) {
         ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
