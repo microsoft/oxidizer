@@ -149,10 +149,15 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs anvil-impact
             return $reportExitCode
         }
         $responsePath = [System.IO.Path]::GetFullPath("$OutputPath.llvm-cov.rsp")
+        $responseArguments = [regex]::Replace(
+            $command.Groups['arguments'].Value,
+            "'(?<value>[^']*)'",
+            { param($match) '"' + $match.Groups['value'].Value.Replace('"', '\"') + '"' }
+        )
         try {
             [System.IO.File]::WriteAllText(
                 $responsePath,
-                $command.Groups['arguments'].Value,
+                $responseArguments,
                 [System.Text.UTF8Encoding]::new($false)
             )
             Write-Host 'anvil-llvm-cov: retrying Windows error 206 with an LLVM response file'
