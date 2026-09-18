@@ -33,8 +33,8 @@ mockall = { workspace = true }
 thread_aware = { workspace = true, features = ["derive", "std"] }
 
 [dev-dependencies]
+futures = { workspace = true, features = ["executor"] }
 static_assertions = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt"] }
 
 [[test]]
 name = "usage_with_fakes"

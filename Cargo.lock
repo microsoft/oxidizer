@@ -1793,10 +1793,10 @@ name = "fakeable_test"
 version = "0.0.0"
 dependencies = [
  "fakeable",
+ "futures",
  "mockall",
  "static_assertions",
  "thread_aware",
- "tokio",
 ]
 
 [[package]]
