@@ -901,6 +901,25 @@ mod tests {
         }
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))] // OS scheduling makes the number of polling iterations nondeterministic.
+    fn wait_for_active_clients(monitor: &Monitor, expected: usize) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let active_count = monitor
+                .active_clients
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .streams
+                .len();
+            if active_count == expected {
+                break;
+            }
+            assert!(Instant::now() < deadline, "listener did not accept the expected clients");
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     #[cfg_attr(miri, ignore)]
     #[test]
     fn connection_check_does_not_mistake_pending_data_or_would_block_for_disconnect() {
@@ -1234,21 +1253,7 @@ mod tests {
         let descriptor = monitor.descriptor().clone();
         let mut blocked = TcpStream::connect(descriptor.socket_address()).unwrap();
         blocked.write_all(b"SGMP").unwrap();
-        let deadline = Instant::now() + Duration::from_secs(2);
-        loop {
-            let active_count = monitor
-                .active_clients
-                .state
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .streams
-                .len();
-            if active_count == 1 {
-                break;
-            }
-            assert!(Instant::now() < deadline, "listener did not accept the blocked client");
-            thread::sleep(Duration::from_millis(10));
-        }
+        wait_for_active_clients(&monitor, 1);
 
         let mut responsive = TcpStream::connect(descriptor.socket_address()).unwrap();
         responsive.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
