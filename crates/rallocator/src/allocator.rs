@@ -5185,7 +5185,7 @@ mod tests {
         }
 
         let regions = unsafe { domain_regions(crate::domain::state(domain)) };
-        regions.purge(false, 0);
+        regions.purge_with_unlimited_budget(false, 0);
         {
             let mut state = regions.state.lock();
             assert!(!state.bins[0].free_list.is_null());
@@ -5193,9 +5193,9 @@ mod tests {
             state.bins[0].purge_after = 2;
             unsafe { (*state.regions).large_purge_after = 2 };
         }
-        regions.purge(false, 1);
+        regions.purge_with_unlimited_budget(false, 1);
         assert!(!regions.state.lock().bins[0].free_list.is_null());
-        regions.purge(true, 2);
+        regions.purge_with_unlimited_budget(true, 2);
         let state = regions.state.lock();
         assert!(state.bins[0].free_list.is_null());
         assert!(unsafe { (*state.regions).large_free }.is_null());
