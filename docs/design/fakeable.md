@@ -5,6 +5,9 @@ that can contain either its real implementation or a test implementation. It
 is intended for dependencies whose production API should remain concrete while
 tests need explicit, per-instance substitution without global state.
 
+The crate is experimental. Its attribute arguments, supported syntax, and
+generated code are not yet a stable compatibility contract.
+
 ## Package structure
 
 - `fakeable` is the public procedural-macro crate.
@@ -53,4 +56,7 @@ and mutable-receiver methods. Async methods are represented as methods
 returning `Future` so tests can provide asynchronous expectations.
 
 Mockall remains optional because manually implemented fakes are the primary
-mechanism and should not add a production dependency.
+mechanism and should not add a production dependency. The integration must be
+adopted carefully: its generated API depends on both `fakeable` and Mockall, so
+upgrading either can affect generated names, signatures, and expectations.
+Mockall-generated types should not be exposed as a stable public API.

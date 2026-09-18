@@ -13,6 +13,17 @@
 //! between real and fake implementations at runtime. The fake implementation is only
 //! compiled when the specified feature flag (default: "test-util") is enabled or during
 //! test builds.
+//!
+//! # Stability
+//!
+//! This crate is experimental. Its attribute arguments, supported Rust syntax,
+//! and generated code may change as usage experience develops.
+//!
+//! The optional `mockall` integration requires particular care. It exposes
+//! behavior generated jointly by `fakeable` and `mockall`, so changes in either
+//! crate can affect generated names, signatures, and expectations. Avoid
+//! exposing Mockall-generated types as a stable public API, and review upgrades
+//! for backwards compatibility before adopting them.
 
 use fakeable_impl::fakeable_impl;
 use proc_macro::TokenStream;
@@ -111,6 +122,10 @@ use proc_macro::TokenStream;
 /// - **`fakes_feature`** (optional): Feature flag name for enabling fakes (default: "test-util")
 ///
 /// # Optional mockall Mock Generation
+///
+/// This integration is experimental and should be used carefully. Generated
+/// Mockall types are not a stable compatibility boundary: upgrading either
+/// `fakeable` or `mockall` can change the generated API or behavior.
 ///
 /// By specifying `generate_mockall_fake = true` in the attribute for the impl block, this macro
 /// will generate a mock implementation using the `mockall` crate. The generated mock will be placed
