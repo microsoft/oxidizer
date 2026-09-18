@@ -59,6 +59,7 @@ benchmarking = { path = "../benchmarking" }
 criterion = { workspace = true }
 
 [target.'cfg(windows)'.dev-dependencies]
+anyhow = { workspace = true, features = ["std"] }
 bytes = { workspace = true }
 bytesbuf = { path = "../bytesbuf", default-features = false }
 ctor = { workspace = true }
@@ -70,15 +71,21 @@ fetch_winhttp_impl = { path = "../fetch_winhttp_impl", features = ["private-test
 futures = { workspace = true, features = ["executor", "std"] }
 http = { workspace = true }
 http-body = { workspace = true }
-http-body-util = { workspace = true }
+http-body-util = { workspace = true, features = ["channel"] }
 http_extensions = { path = "../http_extensions" }
+hyper = { workspace = true, features = ["http2", "server"] }
+hyper-util = { workspace = true, features = ["tokio"] }
 observed = { path = "../observed" }
 ohno = { path = "../ohno", features = ["app-err"] }
+rcgen = { workspace = true, features = ["aws_lc_rs"] }
+rustls = { workspace = true, features = ["aws-lc-rs", "std"] }
 testing_aids = { path = "../testing_aids" }
 # `test-util` freezes time in tests and benches; `tokio` drives a real clock in
 # the standalone examples.
 tick = { path = "../tick", features = ["test-util", "tokio"] }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "net", "rt", "rt-multi-thread", "time"] }
+tokio-rustls = { workspace = true, features = ["aws_lc_rs"] }
+windows-sys = { workspace = true, features = ["Win32_Networking_WinHttp"] }
 
 [[test]]
 name = "non_windows"

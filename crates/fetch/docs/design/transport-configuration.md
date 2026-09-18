@@ -1,0 +1,578 @@
+# Transport configuration
+
+Status: proposed stabilization contract. Examples describe the target API rather than the current
+implementation.
+
+This document defines how libraries configure networking requirements without choosing or
+understanding the selected transport.
+
+## Portable requirements
+
+A portable requirement describes an outcome that can be implemented by different mechanisms. Its
+contract is precise enough for a transport to decide whether a particular value is supported.
+
+Representative requirements include:
+
+- maximum connection age before retirement;
+- maximum idle age before a connection is no longer reused;
+- connection limits per destination;
+- connect deadline;
+- required and preferred HTTP protocol versions;
+- client-certificate authentication;
+- exact TLS server-name mapping;
+- cancellation and streaming guarantees.
+
+These requirements are stored separately from pipeline configuration and from the concrete
+transport configuration.
+
+```rust,ignore
+pub struct TransportRequirements {
+    connection: ConnectionRequirements,
+    protocols: ProtocolRequirements,
+    security: SecurityRequirements,
+}
+```
+
+The public types describe semantics, not backend controls. For example, a maximum connection
+lifetime is an upper bound on reuse, not a Hyper pool-poisoning interval or a WinHTTP session
+timeout.
+
+## Builder and transport mechanics
+
+`HttpClientBuilder` owns an erased transport configuration and an accumulated set of portable
+requirements. Its setters merge constraints and retain enough provenance to diagnose conflicts.
+`build` returns the concrete, transport-erased `HttpClient`.
+
+`Transport` is dyn-compatible, validates the complete library-facing baseline, and produces a
+factory:
+
+```rust,ignore
+pub trait Transport: Send + Sync + 'static {
+    fn register_config(&self, registry: &mut TransportConfigRegistry);
+
+    fn validate(
+        &self,
+        requirements: TransportRequirements,
+        registry: TransportConfigRegistry,
+        context: TransportContext,
+    ) -> Result<TransportFactory, TransportBuildError>;
+}
+
+pub struct TransportFactory {
+    // Type-erased, cloneable materialization closure and isolation policy.
+}
+
+impl HttpClient {
+    pub fn builder<T: Transport>(transport: T) -> HttpClientBuilder {
+        Self::builder_erased(Box::new(transport))
+    }
+
+    pub fn builder_erased(transport: Box<dyn Transport>) -> HttpClientBuilder;
+}
+```
+
+The application passes any complete transport to the same constructor:
+
+```rust,ignore
+let builder = HttpClient::builder(transport);
+```
+
+`validate` performs value and known-environment validation because structural support does not
+imply that every value is valid. For example, a transport can support connection lifetime while
+rejecting an out-of-range duration, or require a named client credential that the application did
+not bind.
+
+`HttpClient::builder` boxes the concrete transport internally and asks it to populate the typed
+registry. Applications that already select a transport dynamically can call `builder_erased`.
+`Transport` itself is dyn-compatible and does not prescribe `Box`, `Arc`, or cloning in its method
+receivers.
+
+The builder may convert the box to shared internal storage or use another cloneable erasure
+mechanism. Each `build` calls `validate` by shared reference. Validation creates an independently
+owned factory from the immutable transport configuration plus the consumed requirements, registry,
+and context. Built clients therefore do not share sessions or pools unless the returned factory
+explicitly defines a shared isolation policy.
+
+This separation is intentional: `&self` models reusable composition configuration, while
+`TransportFactory` owns validated per-client state. A concrete transport chooses how to clone or
+share its own configuration when constructing that factory.
+
+The factory receives no generic TLS or connection-options bag. Each implementation captures its
+validated configuration and translates semantic requirements directly into each materialized
+handler.
+
+## Composition and erasure
+
+Transport erasure occurs when the application creates the builder. Libraries then configure one
+stable type without understanding the underlying transport:
+
+```rust,ignore
+pub fn configure(builder: HttpClientBuilder) -> Result<HttpClient> {
+    builder
+        .connection_lifetime(LIFETIME)
+        .tls_client_credential(ClientCredentialId::new("service-client"))
+        .tls_server_name(
+            Origin::https("localhost", SERVICE_PORT),
+            ServerName::new("tvs.prod.example")?,
+        )
+        .build()
+}
+```
+
+The resulting client is likewise non-generic. Runtime-selected transports, application-selected
+transports, and fakes all follow this path. A fake implements the full transport contract and can
+record the received requirements.
+
+This design deliberately rejects partial transport capability profiles. A transport that cannot
+implement a library-facing baseline requirement is not a `fetch` transport. Differences in
+supported values or operating-system availability remain construction-time validation because
+Rust types cannot prove those environmental facts.
+
+### Transport configuration registry
+
+Erasure hides the transport from the portable API but does not make intentional backend integration
+impossible. Until `build`, the builder retains cloneable, type-indexed configuration values
+registered by the selected transport:
+
+```rust,ignore
+if let Some(options) = builder.transport_config_mut::<fetch_winhttp_config::WinHttpOptions>() {
+    options.use_integrated_proxy_discovery(true);
+}
+```
+
+Querying the registry is the supported way to identify optional configuration outside the portable
+baseline. A required type is checked at runtime because the builder is concrete and the application
+may select its transport dynamically. Libraries using this path depend on the configuration crate,
+not the transport implementation, and must define what absence means.
+
+Configuration crates contain no transport engine, TLS implementation, FFI binding, or crypto
+provider. Their types are unbuilt values that disappear when the builder is consumed. Each type
+defines whether contributions merge, replace, or conflict; transport construction validates the
+result. `fetch` exposes typed accessors rather than the raw type map.
+
+The registry itself is the only stable `fetch` surface. Configuration types are independently
+versioned. A major-version mismatch creates distinct Rust types, so lookup is fallible and errors
+identify the requested type. Companion crates remain small to minimize such version churn.
+
+Transport-specific companion config is the default when one backend exposes a useful mechanism.
+A separate semantic config crate is extracted only after multiple transports implement the same
+demonstrated library-facing contract. Configuration that necessarily exposes backend types stays
+with its composition crate instead of creating a second crate with the same dependency.
+
+## Hyper composition
+
+`fetch_hyper_common` owns the reusable HTTP engine but no TLS backend. Its connector boundary is a
+service from an endpoint to a Hyper-compatible I/O stream:
+
+```rust,ignore
+pub trait Connect<S>: Service<BaseUri, Out = Result<S>> + Clone
+where
+    S: HyperIo,
+{
+}
+```
+
+The engine applies connection deadlines and lifetime tracking around that final connector, then
+hands it to Hyper for pooling and HTTP dispatch. It is invoked by a composition crate only after
+the portable requirements are final. Its construction API no longer accepts a `TlsBackend`.
+
+```rust,ignore
+let handler = fetch_hyper_common::build(connector, requirements, context)?;
+```
+
+`fetch_hyper_rustls` and `fetch_hyper_native_tls` adapt a raw runtime connector into that final
+connector. They configure TLS backend policy, SNI, ALPN, certificate authentication, and
+backend-specific error conversion before delegating to `fetch_hyper_common`. Each exposes an unbuilt
+transport configuration implementing `fetch::Transport`:
+
+```rust,ignore
+impl fetch::Transport for RustlsHyperTransport {
+    fn validate(
+        &self,
+        requirements: TransportRequirements,
+        registry: TransportConfigRegistry,
+        context: TransportContext,
+    ) -> Result<TransportFactory, TransportBuildError> {
+        let validated = self.validated_config(&requirements, &registry)?;
+        Ok(TransportFactory::new(validated.isolation(), move |instance| {
+            let connector = validated.build_tls_connector(&requirements, &instance)?;
+            fetch_hyper_common::build(
+                connector,
+                &requirements,
+                &context,
+                instance,
+            )
+        }))
+    }
+}
+```
+
+Both composition crates materialize the same `fetch_hyper_common` handler; neither owns a second
+pool or HTTP implementation. Validation is deferred until libraries have added strict HTTP/2,
+TLS-name mappings, or credential requirements. Handler materialization remains later and
+repeatable, matching shared or per-runtime-thread transports and multiple dispatch pools.
+
+```text
+raw runtime connector
+        |
+        v
+unbuilt fetch_hyper_rustls or fetch_hyper_native_tls transport
+        |
+        | HttpClientBuilder::build(final requirements): validate
+        |
+        v
+validated transport factory
+        |
+        | materialize per runtime partition and pool
+        v
+TLS connector composition and OS resource acquisition
+        |
+        v
+fetch_hyper_common connection policy and HTTP engine
+        |
+        v
+Hyper HTTP/1.1 and HTTP/2
+```
+
+The current `fetch_hyper` crate is renamed and split at this boundary. Its
+`HyperTransportBuilder::build(TlsBackend)` and internal TLS connector move to the two composition
+crates, while its TLS-neutral engine becomes `fetch_hyper_common`. The current `fetch_tls`
+container is decomposed: portable requirements move to the portable requirement model, while
+rustls/native-tls objects move to their respective composition crates.
+
+## Library-facing surface
+
+The demonstrated library requirements fit one coherent builder:
+
+| Concern | Portable contract |
+| --- | --- |
+| Connection lifetime | Do not select a connection for a new request after its maximum age |
+| Idle lifetime | Do not reuse a connection after the configured idle age |
+| Connection limit | Bound total concurrent connections per origin |
+| Connect deadline | Bound establishment of a usable connection |
+| HTTP versions | Constrain the common HTTP/1.1 and HTTP/2 baseline |
+| Client authentication | Select a logical credential role provisioned by the application |
+| TLS endpoint identity | Authenticate an exact DNS name for a scoped request origin |
+| Pipeline behavior | Compose routing, resilience, telemetry, redaction, and response policy |
+
+Streaming, cancellation, standard chain trust, hostname validation, and revocation are transport
+invariants rather than optional builder settings. Backend tuning, proxy discovery, integrated
+authentication, custom verifier callbacks, and credential source modalities stay on concrete
+transport builders because applications own those mechanisms.
+
+Routine transport tuning is narrower still: a mechanism is not exposed merely because a backend
+offers a setter. HTTP flow-control sizing, kernel socket buffers, and congestion startup remain
+implementation policy unless a measured workload establishes a stable outcome that callers need
+to control.
+
+## Requirement strength
+
+Explicit portable configuration is a requirement unless the API says otherwise. This keeps a
+library's correctness, security, and resource assumptions from becoming best-effort behavior when
+an application selects a different transport.
+
+Requirement types encode the guarantee:
+
+- `ConnectionLifetime::at_most(duration)` limits reuse by connection age;
+- `ConnectionIdleAge::at_most(duration)` limits reuse after inactivity;
+- a protocol requirement constrains the common HTTP/1.1 and HTTP/2 baseline;
+- security policies are always required.
+
+An implementation either establishes the guarantee or returns an error. An implementation with
+coarser behavior can satisfy a requirement only when the coarse behavior still implies the stated
+guarantee. For example, retiring a connection earlier than a configured maximum lifetime is valid;
+retiring it later is not.
+
+Transport preferences are composition configuration. They may use additional protocols only where
+portable requirements leave that choice open and never weaken a portable requirement.
+
+## Protocol resolution
+
+Portable protocol configuration is a constraint, not the transport's candidate list. The default
+is unconstrained. Hyper compositions and WinHTTP normally supply HTTP/1.1 and HTTP/2 candidates;
+WinHTTP's `prefer_http3` adds HTTP/3 ahead of its ordinary fallbacks.
+
+Resolution filters transport candidates through the portable constraint:
+
+| Portable requirement | WinHTTP preference | Effective protocols |
+| --- | --- | --- |
+| Unspecified | Default | HTTP/1.1 and HTTP/2 |
+| Unspecified | Prefer HTTP/3 | HTTP/3 with HTTP/2 and HTTP/1.1 fallback |
+| Exact HTTP/2 | Prefer HTTP/3 | HTTP/2 only |
+| HTTP/1.1 or HTTP/2 | Prefer HTTP/3 | HTTP/1.1 and HTTP/2 |
+| Exact HTTP/1.1 | Prefer HTTP/3 | HTTP/1.1 only |
+
+A preference removed by a requirement is not an error. WinHTTP lowers the resolved set into its
+HTTP/2/HTTP/3 enable mask and sets `WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED` only when HTTP/1.1 is
+forbidden. The portable API does not expose HTTP/3 until it joins the common baseline; applications
+cannot require it through a transport-specific setting.
+
+## Constraint composition
+
+Multiple callers may contribute requirements to one builder. Setters merge constraints instead of
+overwriting prior values.
+
+Monotonic constraints combine naturally:
+
+- maximum ages and connection counts take the lowest bound;
+- minimum protocol or security constraints take the strongest compatible bound;
+- allowed sets intersect;
+- transport preferences apply only after portable constraints are resolved.
+
+Singleton resources require agreement. Two equivalent client-certificate sources are one
+requirement; two distinct required sources conflict unless the policy explicitly scopes selection.
+Errors identify the conflicting requirements and which configuration layer supplied them.
+
+There is no unrestricted "application wins" or "library wins" precedence. A later caller can
+tighten a requirement. Weakening or replacing it requires an explicit API that proves the earlier
+owner allowed replacement.
+
+## Client-certificate authentication
+
+The builder names one client credential per applicable destination scope:
+
+```rust,ignore
+builder.tls_client_credential(ClientCredentialId::new("service-client"))
+```
+
+`ClientCredentialId` is a stable logical role, not a thumbprint, subject name, file path, or store
+location. Those values identify a particular provisioning mechanism or certificate generation and
+would force library code to understand deployment details. A logical identifier remains stable
+through certificate rotation and across operating systems.
+
+The application supplies a certificate catalog when constructing the transport and binds logical
+identifiers to transport-native sources:
+
+```rust,ignore
+let transport = fetch_hyper_rustls::builder(runtime, connector)
+    .tls(rustls)
+    .client_certificates(
+        ClientCertificateCatalog::new()
+            .bind_windows_store("service-client", service_selector),
+    )
+    .build();
+```
+
+Concrete transport builders expose the binding forms they can consume. Rustls can bind key material,
+a Windows-store selector, or a signing provider. Native TLS can bind a materialized platform
+identity. WinHTTP can bind a Windows-store selector or imported key material. These forms are not
+part of the portable `HttpClientBuilder` API.
+
+Every supported transport implements named client-certificate authentication, so source modality
+does not require a capability trait. A missing identifier or a binding that cannot be materialized
+is a construction-time provisioning error, analogous to a missing named credential.
+
+Catalog entries may represent one certificate or an ordered set used for rotation. Rustls receives
+signature schemes and acceptable issuer distinguished names during its handshake and can select a
+compatible entry without exposing an identity unnecessarily. WinHTTP reports that a client
+certificate is needed and exposes the server issuer list before the request is retried, enabling
+the same selection. The current native-TLS API accepts one identity on the connector, so its
+catalog must select during construction and rotation requires rebuilding the client.
+
+Certificate discovery is fallible and can expose sensitive metadata. Transport builders may list
+registered logical identifiers and sanitized public-certificate descriptors for diagnostics.
+Libraries select a known logical identifier rather than enumerating certificates and inventing
+selection policy.
+
+Two different required identifiers for the same destination conflict. Rebinding an identifier is
+an application composition operation and is not available to a library after the transport builder
+has been handed off.
+
+## Connection lifetime
+
+Connection maximum lifetime is portable because the observable contract is portable even though
+pool implementations differ.
+
+Hyper records connection age and prevents an over-age connection from serving a new request.
+WinHTTP rotates session generations at the configured bound: new requests use the new generation,
+active requests drain on the old one, and the drained session closes its pool. Both satisfy the
+same upper-bound contract, though WinHTTP may retire younger connections early.
+
+Idle-age policy is also expressed as a bound, but supported values differ. Hyper can enforce the
+configured bound in its pool. WinHTTP can shorten its native idle behavior and can retain HTTP/2
+connections with keep-alive PINGs, but cannot guarantee every longer HTTP/1.1 retention request.
+The WinHTTP transport accepts values for which it can prove the portable contract and rejects the
+rest.
+
+Fine-grained HTTP/2 PING interval, acknowledgement timeout, and pool-poisoning settings remain
+Hyper-specific because they configure mechanisms rather than portable outcomes.
+
+## Streaming and trailers
+
+The transport request contract is full duplex for HTTP/2: request upload and response reception
+make independent progress. Response headers may complete `execute` while the upload remains active.
+The response retains the shared request lifetime until upload and download complete or either side
+is cancelled.
+
+Request bodies expose whether they may produce trailers before execution. Trailer production is
+asynchronous and fallible, like data-frame production. A transport validates support and framing
+before opening or sending the request. If unsupported, execution returns an explicit error without
+polling the body. Once response headers have been returned, any subsequent upload or trailer error
+is returned by the response's `UploadCompletion` future.
+
+```rust,ignore
+let body = body.with_trailers(async {
+    Ok(HeaderMap::from_iter([("digest", computed_digest()?)]))
+});
+
+let response = client.execute(request).await?;
+let upload = response.upload_completion();
+// The response body and upload may be driven concurrently.
+upload.await?;
+```
+
+Response bodies yield data and a terminal `Result` of trailers. A transport preserves received
+trailers for every protocol on which its platform exposes them. WinHTTP can query trailing headers
+after body completion on the supported Windows baseline; its implementation must not limit that
+path to HTTP/2 and HTTP/3.
+
+WinHTTP cannot send request trailers through its public API. A request declaring trailers therefore
+fails preflight on WinHTTP. This is an explicitly fallible request feature rather than a property
+silently omitted by the transport, and it is not part of the universal transport baseline.
+
+## Response decompression
+
+Transports preserve the wire response and leave native automatic decompression disabled. A
+`fetch` normalization layer applies configured `DecompressionOptions`: it advertises enabled
+content encodings, incrementally decodes response bodies, and removes or rewrites metadata that
+described the encoded representation. Because the layer is below pipeline selection, minimal and
+custom pipelines have the same behavior as the standard pipeline.
+
+Keeping decompression above transports prevents backend differences such as WinHTTP decoding only
+gzip/deflate while another transport supports Brotli or zstd. Request compression remains explicit
+caller behavior and is not implied by response decompression.
+
+## Data-path tuning policy
+
+The initial API does not expose the inherited socket and HTTP/2 tuning knobs.
+
+| Mechanism | Policy |
+| --- | --- |
+| Nagle algorithm | No caller setting. Socket-owning transports enable `TCP_NODELAY`; opaque transports must demonstrate equivalent small-write behavior. |
+| HTTP/2 initial stream receive window | Transport-selected policy. Prefer a mature adaptive strategy where available; otherwise choose a validated fixed default. |
+| Socket receive and send buffers | Leave to operating-system defaults and autotuning. |
+| Initial TCP congestion window | Leave to the operating system and network policy. |
+
+The Nagle decision is an invariant because ACK-dependent delays harm request headers, small
+streaming bodies, HTTP/2 control frames, and multiplexed RPC traffic. Protocol-aware write
+coalescing remains desirable, but it occurs before TCP and does not replace `TCP_NODELAY`.
+WinHTTP does not expose the socket setting, so its conformance is behavioral: a calibrated probe
+shows its HTTP/1.1 upload path tracking a `TCP_NODELAY` control rather than a Nagle control. This is
+retained as regression evidence, not treated as a documented WinHTTP guarantee.
+
+An HTTP/2 stream window is a receiver memory-and-throughput policy, not a service guarantee. A
+small window can make a high-bandwidth, high-latency response RTT-bound; a large window grants more
+outstanding data for every active stream. Hyper also offers adaptive flow control, while WinHTTP's
+window-update strategy and default are OS-owned. A portable numeric setter would expose only one
+piece of those policies and invite libraries to impose memory costs without knowing application
+concurrency.
+
+`SO_RCVBUF` and `SO_SNDBUF` are kernel queue capacities, distinct from application buffers, TLS
+records, TCP receive-window autotuning, and HTTP/2 flow control. Fixed values can constrain
+autotuning and multiply memory consumption by connection count. Application-level buffering may
+still be tuned internally to reduce I/O operation and allocation overhead.
+
+Initial congestion-window selection affects only connection startup, is path-dependent, and can
+increase burst loss or unfairness. Pooling and HTTP/2 amortize its effect. The Windows per-socket
+control is nonportable and poorly documented, and WinHTTP exposes no equivalent.
+
+These defaults require representative benchmarks rather than permanent configurability. A future
+option needs evidence that the default causes a material problem, a precise observable contract,
+and a coherent ownership model. Until then it is neither a portable builder method nor a supported
+advanced transport option.
+
+The current `SocketOptions`/`TokioTransportOptions` setters are migration residue and are removed
+from the stabilized surface. Socket-owning implementations still use the same low-level controls
+internally where required by these policies.
+
+## TLS policy
+
+TLS backend selection belongs to the application through its transport composition dependency.
+WinHTTP always uses SChannel.
+
+Portable security policy is configured through semantic requirements:
+
+- logical client-credential identifier;
+- exact TLS server name for a request origin;
+- trust anchors or platform trust;
+- minimum TLS properties;
+- mandatory revocation behavior.
+
+Each transport either enforces the policy or rejects construction. Security policy is never
+approximated.
+
+Backend-native extension points stay on composition builders. A raw rustls verifier or prebuilt
+rustls configuration belongs to `fetch_hyper_rustls`; a native-TLS connector belongs to
+`fetch_hyper_native_tls`; and SChannel mechanisms belong to `fetch_winhttp`. These types are
+intentionally unavailable through the portable builder and do not justify separate config crates,
+because their public APIs already require the backend dependency.
+
+### Endpoint and TLS identity
+
+Requests ordinarily use one origin for three related purposes:
+
+- the network destination (`D`);
+- the DNS name authenticated by TLS (`L`);
+- the HTTP `Host` or `:authority` value (`H`).
+
+The baseline permits a library to replace only `L` for a scoped HTTPS origin:
+
+```rust,ignore
+builder.tls_server_name(
+    Origin::https("localhost", service_port),
+    ServerName::new("tvs.prod.example")?,
+)
+```
+
+The request remains addressed to `https://localhost:<port>`. The transport connects to the
+original host and port, authenticates `tvs.prod.example`, and sends `localhost:<port>` as the HTTP
+authority. Ports are part of the origin, routing, authority, and pool key, but not SNI or
+certificate DNS-name matching. The API therefore scopes a mapping by the complete origin while
+accepting only a DNS name as the replacement identity.
+
+Mappings are exact and fixed at client construction. They do not accept verifier callbacks,
+regular expressions, certificate subjects, or alternate ports. This keeps transport mechanisms
+out of library code and avoids exposing modalities that the demonstrated localhost-to-service
+scenario does not need.
+
+Each backend lowers the same contract at its transport boundary:
+
+- Hyper with rustls dials `D`, supplies `L` to rustls, and preserves `H` on the request;
+- Hyper with native TLS dials `D`, calls the native TLS handshake with `L`, and preserves `H`;
+- WinHTTP passes `L` to `WinHttpConnect`, sets `D` through
+  `WINHTTP_OPTION_RESOLUTION_HOSTNAME`, and replaces `Host` with `H`.
+
+WinHTTP documents the resolution override and generic `Host` replacement. Current Windows
+versions also translate the replacement `Host` into HTTP/2 `:authority`, as verified by the
+executable backend probe, but Microsoft does not explicitly document that translation. The
+backend retains an integration test and fails construction on Windows versions that lack the
+resolution option. The complete documentation audit and executable evidence are recorded in the
+[WinHTTP resolution-hostname experiment](../../../fetch_winhttp/docs/resolution-hostname-experiment.md).
+
+Authority replacement is transport-generated state, not a persistent user header. A redirected or
+retried request recomputes `D`, `L`, and `H` from its effective origin and mapping; it must not
+blindly carry an earlier origin's replacement `Host` value to another destination.
+
+Connection reuse must be partitioned by the effective tuple `(D, port, L, H)`. Two origins or TLS
+identity mappings must never share a connection merely because WinHTTP or a Hyper pool would
+otherwise consider their default authority equal.
+
+This exact-name contract intentionally does not preserve the current TVS validator's open-ended
+SAN regular expressions or subject-name allowlists. Those rules can be replaced only when the
+service supplies a concrete DNS identity present in its certificates. Flexible matching, pinning,
+and custom roots cannot be portable requirements because not every supported transport can enforce
+them before disclosing a request. A transport-bound library may configure such a policy through
+the supporting composition crate and must reject other transports.
+
+## Growing the portable surface
+
+The backend inventory and decisions about which differences belong on the public builder are
+maintained in the [capability matrix](capability-matrix.md).
+
+The initial surface has no capability traits. A new library-facing requirement is added to the
+portable contract only when it has precise observable semantics and every supported transport can
+implement it. Otherwise it remains composition-owned or is represented by an independently
+versioned, dependency-light companion configuration type when libraries demonstrate a need to
+modify it after transport erasure. If a future requirement is essential to transport-independent
+libraries but fundamentally unavailable on a supported transport, the supported transport set or
+this design must change; a marker trait cannot manufacture the missing behavior.
