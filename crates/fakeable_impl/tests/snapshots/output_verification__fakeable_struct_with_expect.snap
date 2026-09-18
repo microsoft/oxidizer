@@ -1,0 +1,51 @@
+---
+source: sources/dev/crates/fakeable/fakeable_impl/tests/output_verification.rs
+expression: "prettyplease::unparse(&result_file)"
+---
+#[allow(non_snake_case)]
+mod __fakeable__MyService {
+    use super::*;
+    pub(super) enum Enum {
+        Real(MyService),
+        #[cfg(any(feature = "test-util", test))]
+        Fake(fakes::FakeMyService),
+    }
+    #[expect(dead_code)]
+    #[allow(whatever)]
+    pub(super) struct MyService {
+        #[expect(unused)]
+        #[expect(another_expectation, reason = "demonstration")]
+        #[cfg_attr(test, expect(dead_code))]
+        #[cfg_attr(
+            feature = "some_feature",
+            expect(some_expectation, another_expectation)
+        )]
+        #[allow(whatever2)]
+        pub(super) value: String,
+        pub(super) other_value: i32,
+    }
+    #[cfg(any(feature = "test-util", test))]
+    const _: () = {
+        let fake_size = ::core::mem::size_of::<fakes::FakeMyService>();
+        let real_size = ::core::mem::size_of::<MyService>();
+        assert!(
+            ! (fake_size > 256 && fake_size >= real_size.saturating_mul(2)),
+            concat!("fakeable: the fake implementation for `", stringify!(MyService),
+            "` is larger than 256 bytes and at least 2x the real type, which bloats the wrapper. ",
+            "Wrap the fake behind a pointer instead, e.g. `fake_impl = std::sync::Arc<...>`.")
+        );
+    };
+}
+#[allow(dead_code)]
+#[allow(whatever)]
+struct MyService {
+    inner: __fakeable__MyService::Enum,
+}
+impl MyService {
+    #[cfg(any(feature = "test-util", test))]
+    fn fake(fake_impl: fakes::FakeMyService) -> Self {
+        Self {
+            inner: __fakeable__MyService::Enum::Fake(fake_impl),
+        }
+    }
+}

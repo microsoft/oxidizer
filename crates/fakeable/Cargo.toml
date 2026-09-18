@@ -1,0 +1,36 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "fakeable"
+description = "Procedural macros for switching concrete types between real and fake implementations."
+version = "0.2.0"
+readme = "README.md"
+keywords = ["oxidizer", "fake", "mock", "testing"]
+categories = ["development-tools::testing", "rust-patterns"]
+
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fakeable"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[lib]
+proc-macro = true
+
+[features]
+default = []
+mockall = ["fakeable_impl/mockall"]
+
+[dependencies]
+fakeable_impl = { workspace = true }
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

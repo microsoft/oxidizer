@@ -1,0 +1,42 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "fakeable_test"
+description = "End-to-end test fixture for fakeable."
+version = "0.0.0"
+publish = false
+
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["*"]
+
+[package.metadata.cargo-machete]
+ignored = ["mockall"]
+
+[package.metadata.coverage-gate]
+min-lines-percent = 0
+
+[features]
+default = ["test-util"]
+test-util = []
+
+[dependencies]
+fakeable = { workspace = true, features = ["mockall"] }
+mockall = { workspace = true }
+thread_aware = { workspace = true, features = ["derive", "std"] }
+
+[dev-dependencies]
+static_assertions = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

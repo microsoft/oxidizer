@@ -1,0 +1,21 @@
+---
+source: sources/dev/crates/fakeable_impl/tests/output_verification.rs
+assertion_line: 243
+expression: "prettyplease::unparse(&result_file)"
+---
+impl From<Something> for __fakeable__MyService::MyService {
+    fn from(something: Something) -> Self {
+        Self { something }
+    }
+}
+impl From<Something> for MyService {
+    #[allow(unused_mut)]
+    #[allow(clippy::used_underscore_binding)]
+    fn from(something: Something) -> Self {
+        Self {
+            inner: __fakeable__MyService::Enum::Real(
+                __fakeable__MyService::MyService::from(something),
+            ),
+        }
+    }
+}

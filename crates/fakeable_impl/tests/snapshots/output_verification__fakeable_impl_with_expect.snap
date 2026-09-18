@@ -1,0 +1,42 @@
+---
+source: sources/dev/crates/fakeable/fakeable_impl/tests/output_verification.rs
+expression: "prettyplease::unparse(&result_file)"
+---
+#[expect(dead_code)]
+#[allow(whatever)]
+impl __fakeable__MyService::MyService {
+    #[expect(unused_async)]
+    #[expect(unused_self, reason = "demonstration")]
+    #[expect(excpectation1, expectaion2)]
+    #[cfg_attr(test, expect(dead_code))]
+    #[cfg_attr(feature = "some_feature", expect(some_expectation, another_expectation))]
+    #[allow(whatever)]
+    #[cfg_attr(test, allow(whatever2))]
+    pub async fn get_value(&self) -> &str {
+        #[cfg_attr(test)]
+        {
+            let a = 5;
+        }
+        "value"
+    }
+}
+#[expect(dead_code)]
+#[allow(whatever)]
+impl MyService {
+    #[allow(unused_async)]
+    #[allow(unused_self, reason = "demonstration")]
+    #[allow(excpectation1, expectaion2)]
+    #[cfg_attr(test, allow(dead_code))]
+    #[cfg_attr(feature = "some_feature", allow(some_expectation, another_expectation))]
+    #[allow(whatever)]
+    #[cfg_attr(test, allow(whatever2))]
+    #[allow(unused_mut)]
+    #[allow(clippy::used_underscore_binding)]
+    pub async fn get_value(&self) -> &str {
+        match &self.inner {
+            __fakeable__MyService::Enum::Real(real) => real.get_value().await,
+            #[cfg(any(feature = "test-util", test))]
+            __fakeable__MyService::Enum::Fake(fake) => fake.get_value().await,
+        }
+    }
+}

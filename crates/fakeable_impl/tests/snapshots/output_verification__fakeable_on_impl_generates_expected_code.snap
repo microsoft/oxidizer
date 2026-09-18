@@ -1,0 +1,107 @@
+---
+source: sources/dev/crates/fakeable/fakeable_impl/tests/output_verification.rs
+expression: "prettyplease::unparse(&result_file)"
+---
+impl __fakeable__MyService::MyService {
+    fn new(value: String, other_value: i32) -> Self {
+        Self { value, other_value }
+    }
+    pub fn new2(value: String) -> Self {
+        Self { value, other_value: 0 }
+    }
+    pub fn get_value(&self) -> &str {
+        &self.value
+    }
+    pub fn get_other_value(&self) -> i32 {
+        self.other_value
+    }
+    #[must_use]
+    pub fn self_fn(self) -> Self {
+        Self {
+            value: self.value,
+            other_value: self.other_value,
+        }
+    }
+    pub fn self_fn_consuming(self) -> String {
+        format!("Value: {}, Other: {}", self.value, self.other_value)
+    }
+    pub fn process(&self, prefix: impl AsRef<str>) -> String {
+        format!("{} Value: {}, Other: {}", prefix.as_ref(), self.value, self.other_value)
+    }
+    fn private_method_ignored(&self) {}
+    pub(super) fn pub_private_method_accepted(&self) {}
+}
+impl MyService {
+    #[allow(unused_mut)]
+    #[allow(clippy::used_underscore_binding)]
+    pub fn new2(value: String) -> Self {
+        Self {
+            inner: __fakeable__MyService::Enum::Real(
+                __fakeable__MyService::MyService::new2(value),
+            ),
+        }
+    }
+    #[allow(unused_mut)]
+    #[allow(clippy::used_underscore_binding)]
+    pub fn get_value(&self) -> &str {
+        match &self.inner {
+            __fakeable__MyService::Enum::Real(real) => real.get_value(),
+            #[cfg(any(feature = "test-util", test))]
+            __fakeable__MyService::Enum::Fake(fake) => fake.get_value(),
+        }
+    }
+    #[allow(unused_mut)]
+    #[allow(clippy::used_underscore_binding)]
+    pub fn get_other_value(&self) -> i32 {
+        match &self.inner {
+            __fakeable__MyService::Enum::Real(real) => real.get_other_value(),
+            #[cfg(any(feature = "test-util", test))]
+            __fakeable__MyService::Enum::Fake(fake) => fake.get_other_value(),
+        }
+    }
+    #[must_use]
+    #[allow(unused_mut)]
+    #[allow(clippy::used_underscore_binding)]
+    pub fn self_fn(self) -> Self {
+        match self.inner {
+            __fakeable__MyService::Enum::Real(real) => {
+                Self {
+                    inner: __fakeable__MyService::Enum::Real(real.self_fn()),
+                }
+            }
+            #[cfg(any(feature = "test-util", test))]
+            __fakeable__MyService::Enum::Fake(fake) => {
+                Self {
+                    inner: __fakeable__MyService::Enum::Fake(fake.self_fn()),
+                }
+            }
+        }
+    }
+    #[allow(unused_mut)]
+    #[allow(clippy::used_underscore_binding)]
+    pub fn self_fn_consuming(self) -> String {
+        match self.inner {
+            __fakeable__MyService::Enum::Real(real) => real.self_fn_consuming(),
+            #[cfg(any(feature = "test-util", test))]
+            __fakeable__MyService::Enum::Fake(fake) => fake.self_fn_consuming(),
+        }
+    }
+    #[allow(unused_mut)]
+    #[allow(clippy::used_underscore_binding)]
+    pub fn process(&self, prefix: impl AsRef<str>) -> String {
+        match &self.inner {
+            __fakeable__MyService::Enum::Real(real) => real.process(prefix),
+            #[cfg(any(feature = "test-util", test))]
+            __fakeable__MyService::Enum::Fake(fake) => fake.process(prefix),
+        }
+    }
+    #[allow(unused_mut)]
+    #[allow(clippy::used_underscore_binding)]
+    pub(super) fn pub_private_method_accepted(&self) {
+        match &self.inner {
+            __fakeable__MyService::Enum::Real(real) => real.pub_private_method_accepted(),
+            #[cfg(any(feature = "test-util", test))]
+            __fakeable__MyService::Enum::Fake(fake) => fake.pub_private_method_accepted(),
+        }
+    }
+}
