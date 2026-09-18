@@ -1995,17 +1995,19 @@ const fn clear_lowest_set_bit(value: u64) -> u64 {
 pub(crate) fn telemetry_region_snapshots() -> Vec<tracking::RegionSnapshot> {
     let mut regions = Vec::new();
     let mut domain = DOMAINS.load(Ordering::Acquire);
-    // SAFETY: published domains and regions are retained for the process lifetime.
-    while let Some(domain_ref) = unsafe { domain.as_ref() } {
+    while ptr::NonNull::new(domain).is_some() {
         for index in 0..medium::SHARD_COUNT {
+            // SAFETY: published domains and their shard storage are retained for the process lifetime.
             let backing = unsafe { medium::domain_shard(domain, index) };
             let mut region = backing.regions.load(Ordering::Acquire);
-            while let Some(region_ref) = unsafe { region.as_ref() } {
+            while ptr::NonNull::new(region).is_some() {
                 regions.push((domain, region));
-                region = region_ref.next.load(Ordering::Acquire);
+                // SAFETY: published regions are retained for the process lifetime.
+                region = unsafe { (*region).next.load(Ordering::Acquire) };
             }
         }
-        domain = domain_ref.next.load(Ordering::Acquire);
+        // SAFETY: published domains are retained for the process lifetime.
+        domain = unsafe { (*domain).next.load(Ordering::Acquire) };
     }
     let mut used_bitmaps = (0..regions.len()).map(|_| vec![0; MEDIUM_REGION_BITMAP_WORDS]).collect::<Vec<_>>();
     for ((_, region), used_bitmap) in regions.iter().zip(&mut used_bitmaps) {
@@ -2097,13 +2099,17 @@ pub(crate) fn telemetry_region_snapshots() -> Vec<tracking::RegionSnapshot> {
 pub(crate) fn telemetry_domain_snapshots() -> Vec<tracking::DomainSnapshot> {
     let mut snapshots = Vec::new();
     let mut domain = DOMAINS.load(Ordering::Acquire);
-    // SAFETY: published domains are retained for the process lifetime.
-    while let Some(domain_ref) = unsafe { domain.as_ref() } {
-        snapshots.push(tracking::DomainSnapshot {
-            domain_id: domain_ref.id,
-            is_default: domain_ref.is_default.load(Ordering::Acquire),
-        });
-        domain = domain_ref.next.load(Ordering::Acquire);
+    while ptr::NonNull::new(domain).is_some() {
+        // SAFETY: published domains are retained for the process lifetime.
+        let (domain_id, is_default, next) = unsafe {
+            (
+                (*domain).id,
+                (*domain).is_default.load(Ordering::Acquire),
+                (*domain).next.load(Ordering::Acquire),
+            )
+        };
+        snapshots.push(tracking::DomainSnapshot { domain_id, is_default });
+        domain = next;
     }
     snapshots.sort_unstable_by_key(|domain| domain.domain_id);
     snapshots
@@ -2868,21 +2874,24 @@ fn region_containing(address: *mut u8) -> Option<*mut RegionState> {
 #[inline(never)]
 fn region_containing_uncached(address: *mut u8) -> Option<*mut RegionState> {
     let mut domain = DOMAINS.load(Ordering::Acquire);
-    // SAFETY: published domains and regions are retained for the process lifetime.
-    while let Some(domain_ref) = unsafe { domain.as_ref() } {
+    while ptr::NonNull::new(domain).is_some() {
         for index in 0..medium::SHARD_COUNT {
+            // SAFETY: published domains and their shard storage are retained for the process lifetime.
             let backing = unsafe { medium::domain_shard(domain, index) };
             let mut region = backing.regions.load(Ordering::Acquire);
-            while let Some(region_ref) = unsafe { region.as_ref() } {
-                let base = region_ref.base;
+            while ptr::NonNull::new(region).is_some() {
+                // SAFETY: published regions are retained for the process lifetime.
+                let base = unsafe { (*region).base };
                 if address.addr() >= base.addr() && address.addr() < base.addr() + MEDIUM_REGION_SIZE {
                     LAST_REGION.set(region);
                     return Some(region);
                 }
-                region = region_ref.next.load(Ordering::Acquire);
+                // SAFETY: published regions are retained for the process lifetime.
+                region = unsafe { (*region).next.load(Ordering::Acquire) };
             }
         }
-        domain = domain_ref.next.load(Ordering::Acquire);
+        // SAFETY: published domains are retained for the process lifetime.
+        domain = unsafe { (*domain).next.load(Ordering::Acquire) };
     }
     None
 }
@@ -3115,13 +3124,14 @@ unsafe fn publish_region(state: &mut MediumState, published_regions: &AtomicPtr<
 
 unsafe fn find_region(state: &MediumState, address: *mut u8) -> Option<*mut RegionState> {
     let mut region = state.regions;
-    // SAFETY: the caller guarantees that the region list belongs to a live domain.
-    while let Some(region_ref) = unsafe { region.as_ref() } {
-        let base = region_ref.base;
+    while ptr::NonNull::new(region).is_some() {
+        // SAFETY: the caller guarantees that the region list belongs to a live domain.
+        let base = unsafe { (*region).base };
         if address.addr() >= base.addr() && address.addr() < base.addr() + MEDIUM_REGION_SIZE {
             return Some(region);
         }
-        region = region_ref.next.load(Ordering::Relaxed);
+        // SAFETY: the caller guarantees that the region list belongs to a live domain.
+        region = unsafe { (*region).next.load(Ordering::Relaxed) };
     }
     None
 }
@@ -3554,10 +3564,7 @@ unsafe fn drain_detached_remote_blocks<'a>(
         let mut count = 1;
         let mut cursor = next;
         while !cursor.is_null() {
-            // Corruption must not unwind through GlobalAlloc.
-            if count >= capacity {
-                std::process::abort();
-            }
+            abort_if_corrupt_remote_free_chain(count, capacity);
             count += 1;
             // SAFETY: pre-counting never releases or rewrites any chain metadata.
             cursor = unsafe { read_free_next(cursor) };
@@ -3582,6 +3589,17 @@ unsafe fn drain_detached_remote_blocks<'a>(
         if !claimed && let Some(claim) = gate() {
             claim.record(1);
         }
+    }
+}
+
+#[cold]
+#[inline(never)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Process termination cannot be observed by the in-process coverage harness.
+#[cfg_attr(test, mutants::skip)] // Removing the abort would make corrupt-chain traversal non-terminating.
+fn abort_if_corrupt_remote_free_chain(count: usize, capacity: usize) {
+    // Corruption must not unwind through GlobalAlloc.
+    if count >= capacity {
+        std::process::abort();
     }
 }
 

@@ -107,6 +107,7 @@ fn failed_replacement_mapping_preserves_original() {
     }
 }
 
+#[cfg(not(miri))]
 #[test]
 fn medium_growth_beyond_a_region_preserves_original_on_mapping_failure() {
     let _test = tracking::TEST_LOCK.lock().unwrap();

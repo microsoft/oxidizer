@@ -2688,7 +2688,9 @@ mod tests {
     fn render(app: &App) -> String {
         let backend = TestBackend::new(180, 60);
         let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|frame| app.draw(frame)).unwrap();
+        terminal
+            .draw(|frame| app.draw_with_snapshot_time(frame, |_| "00:00:00 (0s ago)".into()))
+            .unwrap();
         terminal
             .backend()
             .buffer()

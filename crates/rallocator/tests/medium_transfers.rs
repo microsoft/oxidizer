@@ -8,8 +8,9 @@ use std::thread;
 
 rallocator::rallocator!();
 
-const WORKERS: usize = 8;
-const BLOCKS: usize = 32;
+const WORKERS: usize = if cfg!(miri) { 2 } else { 8 };
+const BLOCKS: usize = if cfg!(miri) { 4 } else { 32 };
+const ROUNDS: usize = if cfg!(miri) { 2 } else { 16 };
 const SIZES: [usize; 4] = [32 * 1024, 64 * 1024, 96 * 1024, 256 * 1024];
 
 fn batch(worker: usize, round: usize) -> Vec<Vec<u8>> {
@@ -57,6 +58,7 @@ fn medium_buffers_survive_allocating_thread_exit() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "cross-thread reuse stress is exercised by native tests")]
 fn remote_medium_frees_complete_while_allocating_workers_wait() {
     thread::scope(|scope| {
         let (sender, receiver) = mpsc::sync_channel(WORKERS);
@@ -66,7 +68,7 @@ fn remote_medium_frees_complete_while_allocating_workers_wait() {
             let (acknowledge, acknowledged) = mpsc::sync_channel(0);
             acknowledgements.push(acknowledge);
             scope.spawn(move || {
-                for round in 0..16 {
+                for round in 0..ROUNDS {
                     sender.send((worker, round, batch(worker, round))).unwrap();
                     acknowledged.recv().unwrap();
                 }
