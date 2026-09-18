@@ -1,5 +1,8 @@
 # `fetch` design
 
+Status: proposed stabilization contract. Existing transports may require implementation work before
+this contract becomes the supported API.
+
 `fetch` provides a stable HTTP client and configuration surface over transports with different
 capabilities. Applications choose a transport, while libraries can configure the portable
 networking behavior they require without knowing which transport the application selected.
@@ -71,7 +74,7 @@ pub fn build_client(
             fetch::Origin::https("localhost", service_port),
             fetch::ServerName::new("tvs.prod.example")?,
         )
-        .connection_lifetime(Duration::from_minutes(30))
+        .connection_lifetime(Duration::from_mins(30))
         .standard_pipeline(configure_resilience)
         .build()
 }
@@ -230,7 +233,8 @@ congestion behavior.
 Avoiding Nagle/delayed-ACK stalls is a transport invariant, not a configurable tuning choice. A
 transport that owns TCP sockets disables Nagle. An opaque platform transport must demonstrate
 equivalent small-write behavior in an integration benchmark; the WinHTTP probe does so for the
-tested HTTP/1.1 path.
+tested HTTP/1.1 path. HTTP/2 qualification remains required before claiming the invariant for that
+WinHTTP code path.
 
 HTTP/2 receive windows remain transport-owned. Their useful value depends on bandwidth-delay
 product, concurrent streams, response consumption, memory budget, and whether the implementation
@@ -258,10 +262,11 @@ late body/trailer failures and successful half-close. Convenience APIs that cons
 response await both response completion and upload completion. Dropping either side cancels the
 shared request according to the normal cancellation contract.
 
-Response decompression is an invariant `fetch` layer immediately above every transport, including
+Response decompression is owned by a `fetch` layer immediately above every transport, including
 minimal and custom pipelines. Transports return wire-encoded bodies and do not enable native
-automatic decompression. `fetch` advertises only encodings it can decode, streams decompression,
-and normalizes the corresponding response headers uniformly across transports.
+automatic decompression. When `DecompressionOptions` enables formats, `fetch` advertises only
+encodings it can decode, streams decompression, and normalizes the corresponding response headers
+uniformly across transports.
 
 ## TLS and credentials
 

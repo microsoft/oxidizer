@@ -1,11 +1,14 @@
 # Transport capability matrix
 
+Status: target capability contract. “Supported” describes available backend/native capability;
+the merged implementations may still need wiring identified by this design.
+
 This document compares the supported Hyper TLS combinations with the planned WinHTTP transport. It
 separates differences that matter to libraries from backend mechanisms that should not expand the
 portable `fetch` API.
 
-The WinHTTP column describes the target contract grounded in the merged native implementation and
-the executable capability probes linked from this design.
+The WinHTTP column describes the target contract grounded in available native mechanisms, the
+merged implementation, and the executable capability probes linked from this design.
 
 The two Hyper columns share one TLS-neutral `fetch_hyper_common` engine. `fetch_hyper_rustls` and
 `fetch_hyper_native_tls` provide connector composition, not separate HTTP implementations.
@@ -69,7 +72,7 @@ a preference is not a conflict; no transport-specific API can require HTTP/3.
 | Coarse idle HTTP/2 health check | Supported | Supported with a native minimum interval | Transport-owned policy; no public option |
 | Keep-alive interval, acknowledgement timeout, and active-only mode | Supported by Hyper | Not available at the same granularity | Transport-specific |
 | Multiple dispatch pools | Implemented above the transport | Can use multiple transport instances | Pipeline policy, not a transport capability |
-| Avoid Nagle/delayed-ACK stalls | Set `TCP_NODELAY` on owned sockets | No setter, but calibrated HTTP/1.1 measurements match `TCP_NODELAY` behavior | Transport invariant with backend regression coverage |
+| Avoid Nagle/delayed-ACK stalls | Set `TCP_NODELAY` on owned sockets | No setter; calibrated HTTP/1.1 measurements match `TCP_NODELAY`, HTTP/2 still needs qualification | Transport invariant with backend regression coverage |
 | Kernel receive/send buffers | Configurable on owned sockets | No corresponding WinHTTP option | Operating-system default/autotuning |
 | Initial TCP congestion window | Windows custom connectors can call an undocumented `WSAIoctl`; no portable equivalent | No corresponding WinHTTP option | Operating-system/network policy |
 
@@ -104,7 +107,7 @@ Application buffers remain separate implementation details.
 | Full-duplex HTTP/2 | Supported | Native behavior demonstrated on Windows 11 build 26100; directional implementation required | Required invariant; retain platform compatibility coverage |
 | Request trailers | Supported by Hyper body frames | No public WinHTTP send API | Fallible request feature; WinHTTP rejects before sending |
 | Response trailers | Supported | Queryable after body completion, including HTTP/1.1 on the supported platform | Fallible terminal response-body frame |
-| Response decompression | Can be implemented natively or above transport | Native support differs by encoding | Always implemented by `fetch`; transports return encoded bodies |
+| Response decompression | Transport can preserve encoded responses | Native support differs by encoding | Owned by configured fetch-level decompression; transports return encoded bodies |
 | Cancellation when the request future is dropped | Supported | Planned through handle closure | Required `Transport` invariant |
 | Plain HTTP opt-in | Pipeline request validation plus transport support | Supported | Pipeline policy |
 | Runtime/executor selection | Hyper requires an adapter | WinHTTP owns asynchronous I/O callbacks | Transport construction |

@@ -1,5 +1,8 @@
 # Transport configuration
 
+Status: proposed stabilization contract. Examples describe the target API rather than the current
+implementation.
+
 This document defines how libraries configure networking requirements without choosing or
 understanding the selected transport.
 
@@ -414,10 +417,10 @@ silently omitted by the transport, and it is not part of the universal transport
 ## Response decompression
 
 Transports preserve the wire response and leave native automatic decompression disabled. A
-mandatory `fetch` normalization layer advertises the supported content encodings, incrementally
-decodes response bodies, and removes or rewrites metadata that described the encoded
-representation. Because the layer is below pipeline selection, minimal and custom pipelines have
-the same behavior as the standard pipeline.
+`fetch` normalization layer applies configured `DecompressionOptions`: it advertises enabled
+content encodings, incrementally decodes response bodies, and removes or rewrites metadata that
+described the encoded representation. Because the layer is below pipeline selection, minimal and
+custom pipelines have the same behavior as the standard pipeline.
 
 Keeping decompression above transports prevents backend differences such as WinHTTP decoding only
 gzip/deflate while another transport supports Brotli or zstd. Request compression remains explicit

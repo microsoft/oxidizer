@@ -1,6 +1,9 @@
 # `fetch_winhttp` design
 
-This document describes the user-visible behavior and design tenets of the
+Status: target contract for the `fetch` stabilization work. The merged implementation
+provides the native foundation but does not yet implement every behavior in this document.
+
+This document describes the intended user-visible behavior and design tenets of the
 `fetch_winhttp` crate. The implementation strategy - threading, FFI ownership,
 pooling, body-streaming mechanics, and the testing strategy - is documented separately
 in [implementation.md](implementation.md). Runnable demonstrations of each feature
@@ -64,12 +67,13 @@ erasure. Rustls/native-tls objects are never accepted or ignored by this transpo
 
 ### 1.3 Platform support
 
-The target contract requires Windows build 26100 or later (Windows 11 version 24H2 or
-Windows Server 2025). Full-duplex send/receive behavior is empirically verified on this
-build family, while Microsoft documents it only as available on "some versions of
-Windows." Transport validation rejects older builds. The executable duplex probe remains
-part of compatibility qualification for supported Windows updates. Resource failures
-that occur while materializing a later isolated partition remain per-partition failures.
+The target contract requires an explicitly qualified Windows SKU/build. Full-duplex
+send/receive behavior is empirically verified on Windows 11 version 24H2 build 26100,
+while Microsoft documents it only as available on "some versions of Windows." A build
+number alone is not proof: every supported client and server baseline must pass the
+executable duplex probe before release. Unqualified builds are rejected during transport
+validation. Resource failures that occur while materializing a later isolated partition
+remain per-partition failures.
 
 ## 2. Connection management
 

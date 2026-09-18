@@ -1,5 +1,8 @@
 # `fetch_winhttp` implementation
 
+Status: target implementation after `fetch` stabilization. Existing production code is the
+foundation and may lag this document until the redesign is implemented.
+
 This document describes the implementation strategy of the `fetch_winhttp` crate:
 the OS bindings facade, the WinHTTP asynchronous model, the threading and
 cancellation/FFI-ownership machinery, object pooling, body-streaming mechanics,
