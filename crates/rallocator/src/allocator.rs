@@ -1248,9 +1248,9 @@ where
             // and spans too large to cache, so idle owners cannot strand credits.
             unsafe { medium::domain_shard(heap.domain, index) }.purge(false, hal::monotonic_millis());
         }
-        let span_size = slice_count * MEDIUM_SLICE_SIZE;
-        if span_size <= heap.medium_cache_max_bytes
-            && let Some(cache_index) = local_medium_class(slice_count)
+        let span_size = medium_span_size(slice_count);
+        let cache_class = local_medium_cache_class(slice_count, span_size, heap.medium_cache_max_bytes);
+        if let Some(cache_index) = cache_class
             && let Some(address) = heap.medium_batch.pop(cache_index)
         {
             unsafe { register_medium_allocation(address, layout, heap, tracking.take()) };
@@ -1259,7 +1259,6 @@ where
             return MediumAllocation { address };
         }
         let regions = medium::heap_regions(heap);
-        let cache_class = local_medium_class(slice_count).filter(|_| span_size <= heap.medium_cache_max_bytes);
         let requested = cache_class.map_or(1, |class| heap.medium_batch.refill_count(class));
         let mut batch = [ptr::null_mut(); 16];
         let reused = regions.take_batch(slice_count, &mut batch[..requested]);
@@ -2690,6 +2689,18 @@ fn default_class<T: Tunables>(layout: Layout) -> Option<usize> {
 #[inline(always)]
 fn local_medium_class(slice_count: usize) -> Option<usize> {
     (slice_count.is_power_of_two() && slice_count <= (1 << (LOCAL_MEDIUM_CLASSES - 1))).then(|| slice_count.trailing_zeros() as usize)
+}
+
+#[inline(always)]
+#[cfg_attr(test, mutants::skip)] // Mutated span arithmetic breaks the reservation and commit size invariant.
+const fn medium_span_size(slice_count: usize) -> usize {
+    slice_count * MEDIUM_SLICE_SIZE
+}
+
+#[inline(always)]
+#[cfg_attr(test, mutants::skip)] // Disabling the cache changes only performance and makes workspace mutation tests exceed their timeout.
+fn local_medium_cache_class(slice_count: usize, span_size: usize, cache_max_bytes: usize) -> Option<usize> {
+    local_medium_class(slice_count).filter(|_| span_size <= cache_max_bytes)
 }
 
 #[inline(always)]
@@ -4142,6 +4153,19 @@ mod tests {
                 local_medium_class(1 << LOCAL_MEDIUM_CLASSES),
             ),
             (Some(0), Some(LOCAL_MEDIUM_CLASSES - 1), None, None)
+        );
+    }
+
+    #[test]
+    fn medium_cache_class_requires_a_supported_size_within_budget() {
+        assert_eq!(
+            (
+                medium_span_size(3),
+                local_medium_cache_class(1, MEDIUM_SLICE_SIZE, MEDIUM_SLICE_SIZE),
+                local_medium_cache_class(1, MEDIUM_SLICE_SIZE, MEDIUM_SLICE_SIZE - 1),
+                local_medium_cache_class(3, 3 * MEDIUM_SLICE_SIZE, usize::MAX),
+            ),
+            (3 * MEDIUM_SLICE_SIZE, Some(0), None, None)
         );
     }
 
