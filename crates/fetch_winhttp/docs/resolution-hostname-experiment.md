@@ -29,7 +29,7 @@ disabling all certificate validation.
 Run the probe on Windows:
 
 ```text
-cargo +1.93.0 run -p fetch_winhttp --example resolution_hostname
+cargo +1.95.0 run -p fetch_winhttp --example resolution_hostname
 ```
 
 The probe passes only when:

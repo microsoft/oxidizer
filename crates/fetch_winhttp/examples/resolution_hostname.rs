@@ -32,7 +32,7 @@ mod windows {
     use hyper::{Request, Response};
     use hyper_util::rt::{TokioExecutor, TokioIo};
     use rcgen::{CertifiedKey as GeneratedCertificate, generate_simple_self_signed};
-    use rustls::crypto::ring::sign::any_supported_type;
+    use rustls::crypto::aws_lc_rs::sign::any_supported_type;
     use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
     use rustls::server::{ClientHello, ResolvesServerCert};
     use rustls::sign::CertifiedKey;
@@ -51,7 +51,7 @@ mod windows {
     const RESOLUTION_HOST: &str = "localhost";
 
     pub(super) fn run() -> Result<()> {
-        rustls::crypto::ring::default_provider()
+        rustls::crypto::aws_lc_rs::default_provider()
             .install_default()
             .map_err(|provider| anyhow!("a rustls crypto provider is already installed: {provider:?}"))?;
 

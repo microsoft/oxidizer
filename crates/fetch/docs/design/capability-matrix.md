@@ -4,8 +4,8 @@ This document compares the supported Hyper TLS combinations with the planned Win
 separates differences that matter to libraries from backend mechanisms that should not expand the
 portable `fetch` API.
 
-The WinHTTP column describes the design on `u/makolnek/winhttp`; implementation work must verify
-the stated guarantees.
+The WinHTTP column describes the target contract grounded in the merged native implementation and
+the executable capability probes linked from this design.
 
 The two Hyper columns share one TLS-neutral `fetch_hyper_common` engine. `fetch_hyper_rustls` and
 `fetch_hyper_native_tls` provide connector composition, not separate HTTP implementations.
@@ -61,7 +61,7 @@ a preference is not a conflict; no transport-specific API can require HTTP/3.
 
 | Capability | Hyper + either TLS backend | WinHTTP | Public treatment |
 | --- | --- | --- | --- |
-| Fixed maximum connection lifetime | Enforced by retiring aged connections | Planned through `WINHTTP_OPTION_EXPIRE_CONNECTION` | Baseline |
+| Fixed maximum connection lifetime | Enforced by retiring aged connections | Session-generation rollover retires the pool no later than the bound | Baseline |
 | Per-connection lifetime callback | Supported by current Hyper options | No portable callback model | Transport-specific; fixed lifetime covers the demonstrated library need |
 | Maximum idle age | Arbitrary duration or unlimited | Shortening is supported; longer retention depends on protocol and native scavenging | Baseline with value/protocol validation |
 | Total connections per origin | Not provided by the current Hyper option | Native per-server cap | Baseline requirement, but Hyper needs a real total-concurrency implementation |
@@ -100,8 +100,8 @@ Application buffers remain separate implementation details.
 | End-to-end and attempt deadlines | Pipeline-owned | Pipeline-owned | Pipeline policy |
 | Connect deadline | Wraps connector establishment | Native resolve/connect controls with different phase boundaries | Baseline after defining one observable deadline |
 | Separate resolve/send/receive timers | Not exposed by the supported Hyper path | Native controls | Transport-specific |
-| Streaming request and response bodies | Supported | Planned | Required `Transport` invariant |
-| Full-duplex HTTP/2 | Supported | Demonstrated on Windows 11 build 26100 | Required invariant; retain platform compatibility coverage |
+| Streaming request and response bodies | Supported | Native upload/download paths implemented | Required `Transport` invariant |
+| Full-duplex HTTP/2 | Supported | Native behavior demonstrated on Windows 11 build 26100; directional implementation required | Required invariant; retain platform compatibility coverage |
 | Request trailers | Supported by Hyper body frames | No public WinHTTP send API | Fallible request feature; WinHTTP rejects before sending |
 | Response trailers | Supported | Queryable after body completion, including HTTP/1.1 on the supported platform | Fallible terminal response-body frame |
 | Response decompression | Can be implemented natively or above transport | Native support differs by encoding | Always implemented by `fetch`; transports return encoded bodies |

@@ -77,14 +77,14 @@ hyper = { workspace = true, features = ["http2", "server"] }
 hyper-util = { workspace = true, features = ["tokio"] }
 observed = { path = "../observed" }
 ohno = { path = "../ohno", features = ["app-err"] }
-rcgen = { workspace = true, features = ["crypto", "ring"] }
-rustls = { workspace = true, features = ["ring", "std"] }
+rcgen = { workspace = true, features = ["aws_lc_rs"] }
+rustls = { workspace = true, features = ["aws-lc-rs", "std"] }
 testing_aids = { path = "../testing_aids" }
 # `test-util` freezes time in tests and benches; `tokio` drives a real clock in
 # the standalone examples.
 tick = { path = "../tick", features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["macros", "net", "rt", "rt-multi-thread", "time"] }
-tokio-rustls = { workspace = true, features = ["ring"] }
+tokio-rustls = { workspace = true, features = ["aws_lc_rs"] }
 windows-sys = { workspace = true, features = ["Win32_Networking_WinHttp"] }
 
 [[test]]

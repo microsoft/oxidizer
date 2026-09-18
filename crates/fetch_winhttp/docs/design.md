@@ -11,18 +11,17 @@ area live in `crates/fetch_winhttp/examples/`.
 `fetch_winhttp` is a Windows-only custom transport for the [`fetch`] HTTP
 client. It services `fetch` requests by driving the operating system's [WinHTTP]
 client API in asynchronous WinHTTP I/O mode, as an alternative to the bundled
-`fetch_hyper` (hyper + rustls/native-tls) transport.
+Hyper composition transports.
 
 Why a WinHTTP transport:
 
 - **OS-managed TLS/trust.** WinHTTP terminates TLS through Schannel and uses the
   Windows certificate stores and system trust policy. Applications that must
   honor enterprise trust configuration or CTLs get that without bundling a userland
-  TLS stack. (Client certificates are a Schannel capability but are not exposed in
-  v1; see §4.1.)
+  TLS stack.
 - **OS-managed protocol stack.** HTTP/1.1, HTTP/2 and HTTP/3 negotiation,
-  connection pooling, keep-alive and automatic gzip/deflate decompression are
-  handled by the OS.
+  connection pooling, and keep-alive are handled by the OS. Response decompression
+  remains in `fetch` so content behavior is transport-independent.
 - **Smaller dependency surface.** No rustls/aws-lc-rs/native-tls/hyper on the
   request path.
 
@@ -32,78 +31,45 @@ WebSocket upgrades; proxies (§2.3).
 
 ### 1.1 Constructing a client
 
-A caller builds a WinHTTP-backed client the same way as the bundled Tokio transport,
-except the constructors arrive through an extension trait this crate implements on
-`fetch::HttpClient` (imported into scope):
+The application configures an unbuilt WinHTTP transport and passes it to `fetch`:
 
 ```rust,ignore
 use fetch::HttpClient;
-use fetch_winhttp::{HttpClientWinHttpExt, WinHttpDeps, WinHttpTlsConfig};
+use fetch_winhttp::WinHttpTransport;
 
-// Clock, memory pool, and telemetry sink come from the application's environment.
-// TLS configuration defaults when omitted.
-let deps = WinHttpDeps::builder(clock, global_pool, sink)
-    .tls(WinHttpTlsConfig::builder()
-        .accept_invalid_certs(true)                 // Schannel knobs, §4
-        .build())
+let transport = WinHttpTransport::builder()
+    .prefer_http3(true)
+    .client_certificates(certificate_catalog)
     .build();
 
-let client = HttpClient::builder_winhttp(deps)
-    .build();                    // a `fetch::HttpClientBuilder`, so the pipeline can be tuned first
+let client = HttpClient::builder(transport)
+    .build()?;
 ```
 
-The result is an ordinary `fetch` `HttpClient`; no other caller code changes.
-`WinHttpDeps` carries the mandatory environment dependencies needed by this transport:
-the timer-capable `tick::Clock`, `bytesbuf::mem::GlobalPool`, and `observed::Sink`.
-These values cannot be invented by the crate and therefore have no defaults. Its TLS
-configuration is user configuration and does default. `WinHttpDeps` and its
-component config types are `#[non_exhaustive]` and constructed through builders so new
-fields can be added compatibly:
+The result is an ordinary `fetch::HttpClient`. `fetch` supplies per-instance clocks,
+memory pools, telemetry, runtime affinity, and dispatch-pool identity through its
+transport factory context. The WinHTTP builder contains only composition configuration.
 
-```rust,ignore
-/// WinHTTP-specific dependencies. Construct with [`WinHttpDeps::builder`].
-#[derive(thread_aware::ThreadAware)]
-#[non_exhaustive]
-pub struct WinHttpDeps { /* clock, global pool, sink, TLS - private */ }
+The transport validates the final portable requirements when `HttpClientBuilder::build`
+runs, then produces an isolated factory. The factory creates one WinHTTP session for
+each runtime-thread and dispatch-pool partition. Session acquisition can still fail when
+a partition materializes later; that partition becomes an explicit failed handler.
 
-impl WinHttpDeps {
-    /// Starts building a `WinHttpDeps`.
-    pub fn builder(
-        clock: tick::Clock,
-        global_pool: bytesbuf::mem::GlobalPool,
-        sink: observed::Sink,
-    ) -> WinHttpDepsBuilder;
-}
+### 1.2 Transport-specific configuration
 
-/// Adds WinHTTP-transport constructors to `fetch::HttpClient`.
-pub trait HttpClientWinHttpExt {
-    /// Returns a builder for an `HttpClient` on the WinHTTP transport.
-    fn builder_winhttp(deps: impl Into<WinHttpDeps>) -> HttpClientBuilder;
-}
-```
-
-`WinHttpTlsConfig` (§4) follows the same builder + `#[non_exhaustive]` pattern.
-
-### 1.2 TLS is configured on the transport, not through `fetch`'s `TlsOptions`
-
-`fetch`'s generic `TlsOptions`/`TlsBackend` carries rustls/native-tls material
-(crypto providers, verifiers, client-cert resolvers) that is meaningless to
-Schannel. WinHTTP does TLS itself and accepts only a small set of knobs, so
-`fetch_winhttp` therefore ignores `fetch`'s TLS configuration entirely and takes its
-own `WinHttpTlsConfig` instead (§4). Different transports inherently support different TLS
-configuration models, so trying to configure TLS uniformly at the transport-abstract
-`fetch` level is over-abstraction on `fetch`'s part; see the fetch API stabilization
-feedback (../../fetch/docs/stabilization.md).
+Schannel mechanisms, HTTP/3 preference, and certificate provisioning belong to the
+WinHTTP composition builder. A dependency-light companion configuration crate is added
+only when libraries demonstrate a need to modify a WinHTTP setting after transport
+erasure. Rustls/native-tls objects are never accepted or ignored by this transport.
 
 ### 1.3 Platform support
 
-The transport requires Windows 11 version 21H2 (build 22000) or later, or
-Windows Server 2025 (build 26100) or later. Windows Server 2022 (build 20348)
-is not supported: the WinHTTP response-header query capabilities the transport
-relies on are documented as introduced in build 22000, which Windows Server 2022
-predates. The crate does not probe the OS build at session construction; on a
-below-floor host the client still builds and failures surface later as ordinary
-`request_winhttp` errors on the first request that needs the missing capability.
+The target contract requires Windows build 26100 or later (Windows 11 version 24H2 or
+Windows Server 2025). Full-duplex send/receive behavior is empirically verified on this
+build family, while Microsoft documents it only as available on "some versions of
+Windows." Transport validation rejects older builds. The executable duplex probe remains
+part of compatibility qualification for supported Windows updates. Resource failures
+that occur while materializing a later isolated partition remain per-partition failures.
 
 ## 2. Connection management
 
@@ -116,37 +82,19 @@ each other's connections. This is a security boundary: a strict client and one b
 with `accept_invalid_certs` (§4) cannot share an established TLS connection. The contract
 does not specify how connections are organized or reused within one client.
 
-### 2.1 Mapping generic transport options onto WinHTTP
+### 2.1 Portable connection requirements
 
-The generic `TransportOptions`, `Http2Options`, and `TlsOptions` accepted by `fetch`
-do not map one-to-one onto WinHTTP behavior, so some values are exact, some
-approximate, and some ignored:
+The transport honors the complete portable connection contract:
 
-| `fetch` option | Contract |
-|----------------|----------|
-| `connect_timeout` | Honored as a total connection-establishment deadline (§6.2). |
-| `request_filter` | Honored. |
-| `supported_http_versions` | Honored for HTTP/1.1, HTTP/2, and HTTP/3; other versions are rejected. |
-| `multiple_pools` | Accepted; its behavior remains defined by the generic `fetch` client contract. |
-| `max_connections = usize::MAX` (default) | Honored as no caller-imposed limit. |
-| finite `max_connections` | Ignored. |
-| `connection_idle_timeout` | Honored, raised to a minimum of 5 seconds and approximated above roughly 49 days. Bounds how long an unused connection stays eligible for reuse; it does not promise prompt socket release. |
-| `connection_lifetime = Unlimited` (default) | Honored. |
-| `connection_lifetime = Fixed(_)` / `PerConnection(_)` | Ignored (§2.2). |
-| `ConnectionKeepAlive::Disabled` (default) | Uses Windows defaults. |
-| `ConnectionKeepAlive::ActiveConnections { interval, timeout }` | The interval is honored on HTTP/2, raised to a minimum of 5 seconds, and on HTTP/3, raised to a minimum of 1 millisecond. It does not apply to HTTP/1.1, which has no keep-alive probe to send. The generic `timeout` is ignored. |
-| `ConnectionKeepAlive::ActiveAndIdleConnections { interval, timeout }` | Behaves like `ActiveConnections`; Windows does not distinguish these modes. |
-| `Http2Options::initial_max_send_streams` | Ignored; Windows owns HTTP/2 stream concurrency. |
-| `Http2Options::adaptive_window` | Ignored; Windows owns HTTP/2 flow control. |
-| `TransportOptions::extra` | Ignored; no v1 WinHTTP extension types are defined in the generic extension map. |
-| generic TLS `supported_http_versions` | Ignored; protocol selection comes from `TransportOptions::supported_http_versions`. |
-| generic TLS `client_identity` | Ignored; client certificates are out of scope (§4.1). |
-| generic TLS automatic/backend selection | Ignored; Schannel/WinHTTP is always the backend. |
-| preconfigured rustls/native-tls backend | Ignored; those backend objects cannot configure WinHTTP. |
-| rustls crypto provider or certificate verifier | Ignored; Schannel owns cryptography and certificate verification. |
-| rustls client-certificate resolver | Ignored; client certificates are out of scope (§4.1). |
+- total connect deadline;
+- maximum idle age, accepting values whose WinHTTP representation still implies the bound;
+- total concurrent connections per origin through `WINHTTP_OPTION_MAX_CONNS_PER_SERVER`;
+- maximum connection lifetime through session-generation rollover;
+- dispatch-pool isolation supplied by `fetch`.
 
-(The option mapping and the reasoning behind each floor are implementation.md §10.3.)
+A value WinHTTP cannot honor is rejected during validation. HTTP/2 flow-control,
+socket-buffer, keep-alive-probe, and pool-internal knobs are not portable requirements and
+are not received by this transport.
 
 `ConnectionInfo` (age, `is_expired`, poisoning) that `fetch_hyper` attaches to
 responses is not reproduced: this transport does not track the identity, age, or
@@ -162,24 +110,11 @@ to bound how long any single TCP/TLS connection stays in service so long-lived
 clients periodically re-establish connections (load-balancer rebalancing, cert
 rotation, routing changes).
 
-**v1 ignores `connection_lifetime` for `Fixed` and `PerConnection`.** The transport
-does not track the identity or age of individual connections (§2.1), so a bounded
-connection age is not part of its contract.
-
-`connection_idle_timeout` is honored and bounds how long an unused connection stays
-eligible for reuse. It does not bound the age of a continuously busy connection,
-which is the gap a caller setting `connection_lifetime` should expect to remain
-open.
-
-Windows expresses this window as an unsigned millisecond count with no "never evict"
-encoding, so `ConnectionIdleTimeout::Unlimited` and any window longer than roughly
-49 days both become the longest window Windows can express. A caller asking for
-indefinite retention gets a window long enough that no practical deployment reaches
-it, but not a guarantee that idle eviction is disabled.
-
-Unsupported generic connection options are ignored without runtime diagnostics. Their
-fidelity is documented here so callers can select transport-specific configuration
-knowingly.
+WinHTTP does not expose physical connection age, so the transport enforces maximum
+lifetime with session generations. Once a generation reaches the configured age, new
+requests use a fresh session while active requests drain on the old generation. Closing
+the drained session retires all remaining pooled connections. Younger connections may be
+retired early, which still satisfies the upper-bound contract.
 
 ### 2.3 Proxy support
 
@@ -195,7 +130,7 @@ outright is both simpler and faster than configuring it away.
 A caller who needs a proxy is not served by this transport. Supporting one would be a
 feature in its own right, with its own configuration surface, and is not planned.
 
-### 2.3 TCP and flow-control policy
+### 2.4 TCP and flow-control policy
 
 WinHTTP owns opaque sockets and exposes no raw socket handle, socket factory, `TCP_NODELAY`,
 `SO_RCVBUF`, `SO_SNDBUF`, or initial-congestion-window option. `WinHttpOptions` does not imitate
@@ -216,16 +151,18 @@ overhead; it is independent of these kernel and protocol controls.
 
 ## 3. HTTP protocol negotiation
 
-The transport supports HTTP/1.1, HTTP/2, and HTTP/3, all as first-class modes. Which
-versions a request may use comes from `fetch`'s `TransportOptions.supported_http_versions`:
+The transport normally offers HTTP/1.1 and HTTP/2. Its composition builder may enable
+`prefer_http3`, which allows WinHTTP to try HTTP/3 and fall back to the normal protocols.
+This is a preference, never an HTTP/3 requirement.
 
-- The listed versions are the ones allowed. An empty list means "no preference" and uses
-  `fetch`'s default (HTTP/1.1 and HTTP/2).
-- Listing only versions newer than HTTP/1.1 (for example HTTP/2 and/or HTTP/3 without
-  HTTP/1.1) disables the HTTP/1.1 fallback: if none of the required protocols can be
-  negotiated the request fails rather than downgrading.
-- A version the transport cannot speak (`HTTP/0.9`, `HTTP/1.0`) is rejected at request
-  construction with an `invalid_request` error, never silently dropped.
+Portable `fetch` protocol requirements take precedence. With no portable constraint,
+`prefer_http3` offers HTTP/3, HTTP/2, and HTTP/1.1. An exact HTTP/2 requirement disables
+HTTP/3 and sets `WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED`; an HTTP/1.1 requirement likewise
+disables newer protocols. A removed preference is not a conflict.
+
+The portable default is unconstrained rather than a closed protocol list. There is no
+WinHTTP-specific `require_http3`; HTTP/3 becomes a portable requirement only after every
+supported transport implements it.
 
 Negotiation, including ALPN, is performed by the OS during the TLS handshake; the
 transport does not negotiate manually. The version actually negotiated is reported on the
@@ -270,43 +207,34 @@ bundle and configures only a small set of `WinHttpTlsConfig` knobs (§1.2):
 
 (How these knobs reach Schannel is implementation.md §10.2.)
 
-### 4.1 Client certificates (mTLS) are out of scope for v1
+### 4.1 Named client certificates
 
-`fetch` does not require a transport to support client certificates: its mTLS surface
-(`fetch::tls::ClientIdentity`) travels inside the generic `TlsOptions` that `fetch_winhttp`
-deliberately ignores (§1.2), and a transport that offers no client identity is a
-conforming `fetch` transport. Client certificates are an uncommon feature the large
-majority of callers never use, and supporting them is a self-contained chunk of future
-work with its own lifetime and ownership concerns.
+Named client-certificate authentication is part of the portable baseline. Libraries
+select a logical credential role; the WinHTTP composition binds that role to a
+Windows-store selector or imported certificate/private-key material.
 
-v1 therefore does not implement client certificates; `WinHttpTlsConfig` exposes no
-client-identity field. A later iteration can add a WinHTTP-specific client-identity type
-if a concrete need appears.
+When a server requests a certificate, the transport queries its acceptable issuer list,
+selects a compatible binding, attaches the resulting `PCCERT_CONTEXT` through
+`WINHTTP_OPTION_CLIENT_CERT_CONTEXT`, and retries without exposing the provisioning
+modality to the library. Missing or ambiguous bindings fail transport validation or the
+authentication attempt explicitly.
 
 ## 5. WinHTTP-managed HTTP behavior
 
 The OS handles several HTTP behaviors internally. The transport configures each so it
 behaves consistently with the rest of `fetch`:
 
-- **Automatic decompression (always on).** The transport advertises
-  `Accept-Encoding: gzip, deflate`; gzip/deflate responses are transparently decoded
-  before the body is returned, with `Content-Encoding`/`Content-Length` stripped, so
-  callers always see a decoded body. `fetch` itself has no content decoding, so there is
-  no double-decode risk. No opt-out is exposed in v1, since it would only hand callers an
-  encoded body nothing downstream can decode.
-- **Brotli/zstd.** Not decoded (the OS does not support them); such responses arrive
-  still-encoded with `Content-Encoding` intact and pass through verbatim.
+- **Native automatic decompression is disabled.** The encoded body and original headers
+  reach the fetch-level streaming decompression layer.
 - **Request-body compression.** Not performed automatically; a caller that pre-encodes its
   body and sets `Content-Encoding` has it sent as-is.
-- **Request-response sequencing.** The request body is fully sent before response
-  reception begins.
-- **Trailers.** Response trailers exposed by WinHTTP are returned as `HttpBody` trailer
-  frames rather than discarded. HTTP/1.1 supports trailer fields after a chunked body,
-  but WinHTTP does not expose them; response trailers are therefore available only for
-  HTTP/2 and HTTP/3. Outgoing trailer frames are unsupported and fail the request rather
-  than being silently dropped. A trailer frame is reached only once the body yields it,
-  so that failure arrives after the headers and every preceding data frame have been
-  sent (§7).
+- **Full duplex.** For HTTP/2, response headers and body data may arrive while a known- or
+  unknown-length upload continues. The send and receive lanes have independent operation
+  slots and share one cancellation lifetime.
+- **Trailers.** Response trailers are queried after EOF and returned as terminal body
+  frames for every protocol on which WinHTTP exposes them, including HTTP/1.1 on the
+  supported platform. A request declaring trailers is rejected during preflight before
+  its body is polled or request bytes are sent, because WinHTTP has no send API for them.
 - **`Transfer-Encoding` is rejected in request headers.** The transport derives request
   framing from the body itself, so a caller-supplied transfer coding fails the request
   with `invalid_request` (§7) before anything is sent. Removing the header does not change
@@ -456,13 +384,14 @@ mapping below reflects the transport's current judgement and may change.
 
 HTTP status codes (4xx/5xx) never enter this mapping: they are successful
 transport outcomes carrying an error status, surfaced as `Ok(HttpResponse)`, and
-any retry policy on them lives in `seatbelt` above the transport. Automatic
-decompression handled by WinHTTP never surfaces as a transport error; only genuine
-wire/OS failures do.
+any retry policy on them lives in `seatbelt` above the transport. Response
+decompression occurs above this transport in `fetch`; only genuine wire/OS failures
+enter this mapping.
 
 ## 8. Telemetry
 
-The transport reports through the `observed::Sink` supplied in `WinHttpDeps` (§1.1).
+The transport reports through the `observed::Sink` supplied by the per-instance transport
+context (§1.1).
 The event, counter, and field names below are a stable surface that dashboards and
 alerts bind to; they are part of the contract, not incidental diagnostics.
 

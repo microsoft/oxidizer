@@ -61,7 +61,7 @@ after each response.
 Run the probe on Windows:
 
 ```text
-cargo +1.93.0 run -p fetch_winhttp --example full_duplex_streaming --all-features
+cargo +1.95.0 run -p fetch_winhttp --example full_duplex_streaming --all-features
 ```
 
 ### A pooling pitfall this experiment exposed
@@ -236,7 +236,7 @@ server-side frame wait via a `tokio::time::timeout`, exactly as the known-length
 Run the probe on Windows (the same binary covers both the known-length and unknown-length cases):
 
 ```text
-cargo +1.93.0 run -p fetch_winhttp --example full_duplex_streaming --all-features
+cargo +1.95.0 run -p fetch_winhttp --example full_duplex_streaming --all-features
 ```
 
 ### Observed result

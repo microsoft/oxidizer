@@ -1930,6 +1930,7 @@ version = "0.2.1"
 dependencies = [
  "all_the_time",
  "alloc_tracker",
+ "anyhow",
  "benchmarking",
  "bytes",
  "bytesbuf",
@@ -1942,11 +1943,17 @@ dependencies = [
  "http-body",
  "http-body-util",
  "http_extensions",
+ "hyper",
+ "hyper-util",
  "observed",
  "ohno 0.5.2",
+ "rcgen",
+ "rustls",
  "testing_aids",
  "tick",
  "tokio",
+ "tokio-rustls",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

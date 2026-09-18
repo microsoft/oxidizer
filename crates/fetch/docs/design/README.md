@@ -44,10 +44,14 @@ portable capability profiles: every supported transport, including external tran
 fakes, implements the complete library-facing baseline. Retaining the transport type in the builder
 would therefore add generic complexity without preventing a demonstrated incompatibility.
 
+During migration, existing transports may temporarily lag a newly defined baseline requirement.
+That gap is tracked as implementation work and is not represented as a permanent partial capability
+profile.
+
 The application configures transport-specific behavior before handing the transport to `fetch`:
 
 ```rust,ignore
-let transport = fetch::transport::winhttp()
+let transport = fetch_winhttp::WinHttpTransport::builder()
     .proxy(proxy)
     .integrated_authentication(true);
 
@@ -116,17 +120,23 @@ such a type into another crate would not isolate its dependency.
 
 ## Transport contract
 
-A transport configuration implements the complete portable contract and materializes the request
-handler at the bottom of the pipeline. During client construction it receives:
+A transport configuration implements the complete portable contract. Building a client first
+validates and resolves the final requirements, then produces a transport factory. The factory
+materializes handlers lazily for the runtime partitions and dispatch pools selected by `fetch`.
 
-- the resolved portable requirements;
-- shared assembly services such as response-body infrastructure and telemetry;
-- the runtime and threading context selected by its adapter.
+Validation receives the resolved portable requirements and shared assembly configuration. It
+rejects unsupported values, missing credential bindings, and known host-version incompatibilities
+before a client is returned. The resulting factory declares whether handlers are shared or isolated.
 
-Materialization remains fallible because a particular duration, credential binding, operating
-system version, or external resource may be invalid or unavailable. These are value, provisioning,
-or environment failures rather than structural capability mismatches, and they are reported before
-requests are sent.
+`HttpClientBuilder` remains cloneable. The erased transport configuration therefore supports
+object-safe cloning; cloning a builder clones only unbuilt configuration and its typed registry,
+never native sessions or pooled connections.
+
+Materialization receives per-instance services such as response-body infrastructure, telemetry,
+runtime-thread affinity, and pool identity. It remains fallible because acquiring OS resources can
+fail later, especially when an isolated client first reaches another runtime thread. Such a failure
+creates an explicitly failed handler for that partition; it is not converted into a success-shaped
+default or silently ignored.
 
 Runtime-selected and externally supplied transports use the same erased path. An external
 transport is accepted only by implementing the full portable contract; partial transports do not
@@ -147,8 +157,9 @@ fetch_hyper_native_tls -> fetch_hyper_common + hyper-tls + native-tls
 
 Each composition crate retains an application/runtime-provided network connector and backend
 configuration in an unbuilt type implementing `fetch::Transport`. When `HttpClientBuilder::build`
-supplies the final portable requirements, the composition crate configures TLS, SNI and ALPN, then
-delegates handler construction to `fetch_hyper_common`. It does not duplicate the HTTP engine.
+supplies the final portable requirements, the composition crate validates TLS, SNI, ALPN, and
+credential configuration and produces a factory. Each factory materialization then delegates
+handler construction to `fetch_hyper_common`. It does not duplicate the HTTP engine.
 Backend-specific verifier, signer, identity, and provider types live with that composition crate.
 
 WinHTTP is an independent full-stack transport. `fetch_winhttp` owns its sessions, pool, SChannel
@@ -159,7 +170,7 @@ adds Oxidizer runtime integration without creating another HTTP client or TLS AP
 
 | Crate | Responsibility |
 | --- | --- |
-| `fetch` | Stable client, pipeline, portable requirements, transport construction contract, and typed config registry |
+| `fetch` | Stable client, pipeline, portable requirements, validation/factory contract, and typed config registry |
 | `fetch_hyper_common` | Reusable TLS-neutral Hyper engine |
 | `fetch_hyper_rustls` | Rustls connector composition and rustls-specific mechanisms |
 | `fetch_hyper_native_tls` | Native-TLS connector composition and native-tls-specific mechanisms |
@@ -169,9 +180,10 @@ adds Oxidizer runtime integration without creating another HTTP client or TLS AP
 
 ## Stability boundaries
 
-Stabilizing `fetch` commits to `HttpClient`, `HttpClientBuilder`, the `Transport` construction
-contract, portable requirement semantics, and the generic typed configuration-registry protocol.
-It does not stabilize or re-export Hyper, WinHTTP, rustls, native-tls, or their configuration.
+Stabilizing `fetch` commits to `HttpClient`, `HttpClientBuilder`, the transport validation and
+factory contract, portable requirement semantics, and the generic typed configuration-registry
+protocol. It does not stabilize or re-export Hyper, WinHTTP, rustls, native-tls, or their
+configuration.
 
 The Hyper engine, TLS composition crates, WinHTTP transport, and any dependency-light configuration
 companions publish and evolve independently. A library opts into their stability and dependency
@@ -240,9 +252,11 @@ transport such as WinHTTP whose native API cannot send them.
 
 HTTP/2 transports support full-duplex streaming: response headers and body data may arrive before
 the request body completes, and upload may continue afterward. An upload or trailer failure before
-response headers fails request execution. A later upload failure remains observable through the
-response lifecycle rather than being discarded. Dropping either side cancels the shared request
-according to the normal cancellation contract.
+response headers fails request execution. A response returned while upload continues exposes an
+`UploadCompletion` future. Callers using duplex or streaming request bodies await it to observe
+late body/trailer failures and successful half-close. Convenience APIs that consume an entire
+response await both response completion and upload completion. Dropping either side cancels the
+shared request according to the normal cancellation contract.
 
 Response decompression is an invariant `fetch` layer immediately above every transport, including
 minimal and custom pipelines. Transports return wire-encoded bodies and do not enable native

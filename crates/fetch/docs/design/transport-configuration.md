@@ -40,15 +40,24 @@ timeout.
 requirements. Its setters merge constraints and retain enough provenance to diagnose conflicts.
 `build` returns the concrete, transport-erased `HttpClient`.
 
-`Transport` defines the complete library-facing baseline:
+`Transport` validates the complete library-facing baseline and produces a factory:
 
 ```rust,ignore
 pub trait Transport: Send + Sync + 'static {
-    fn build(
+    fn clone_transport(&self) -> Box<dyn Transport>;
+
+    fn register_config(&self, registry: &mut TransportConfigRegistry);
+
+    fn validate(
         self: Box<Self>,
         requirements: TransportRequirements,
+        registry: TransportConfigRegistry,
         context: TransportContext,
-    ) -> Result<TransportHandler, TransportBuildError>;
+    ) -> Result<TransportFactory, TransportBuildError>;
+}
+
+pub struct TransportFactory {
+    // Type-erased, cloneable materialization closure and isolation policy.
 }
 ```
 
@@ -58,12 +67,19 @@ The application passes any complete transport to the same constructor:
 let builder = HttpClient::builder(transport);
 ```
 
-`build` performs value and environment validation because structural support does not imply that
-every value is valid. For example, a transport can support connection lifetime while rejecting an
-out-of-range duration, or require a named client credential that the application did not bind.
+`validate` performs value and known-environment validation because structural support does not
+imply that every value is valid. For example, a transport can support connection lifetime while
+rejecting an out-of-range duration, or require a named client credential that the application did
+not bind.
 
-The transport receives no generic TLS or connection-options bag. Each implementation translates
-the semantic requirements directly into its own configuration.
+`HttpClient::builder` asks the concrete transport to populate the typed registry before erasure.
+Builder cloning calls `clone_transport` and clones the registry; both contain configuration only.
+At build time the final registry is consumed by `validate`, so every library mutation reaches the
+transport factory without exposing the raw map.
+
+The factory receives no generic TLS or connection-options bag. Each implementation captures its
+validated configuration and translates semantic requirements directly into each materialized
+handler.
 
 ## Composition and erasure
 
@@ -151,20 +167,31 @@ transport configuration implementing `fetch::Transport`:
 
 ```rust,ignore
 impl fetch::Transport for RustlsHyperTransport {
-    fn build(
+    fn validate(
         self: Box<Self>,
         requirements: TransportRequirements,
+        registry: TransportConfigRegistry,
         context: TransportContext,
-    ) -> Result<TransportHandler, TransportBuildError> {
-        let connector = self.build_tls_connector(&requirements)?;
-        fetch_hyper_common::build(connector, requirements, context)
+    ) -> Result<TransportFactory, TransportBuildError> {
+        self.validate_tls(&requirements, &registry)?;
+        let validated = *self;
+        Ok(TransportFactory::new(validated.isolation(), move |instance| {
+            let connector = validated.build_tls_connector(&requirements, &instance)?;
+            fetch_hyper_common::build(
+                connector,
+                &requirements,
+                &context,
+                instance,
+            )
+        }))
     }
 }
 ```
 
 Both composition crates materialize the same `fetch_hyper_common` handler; neither owns a second
-pool or HTTP implementation. Deferring this work is essential because a library may add strict
-HTTP/2, TLS-name mappings, or credential requirements after the application selects the transport.
+pool or HTTP implementation. Validation is deferred until libraries have added strict HTTP/2,
+TLS-name mappings, or credential requirements. Handler materialization remains later and
+repeatable, matching shared or per-runtime-thread transports and multiple dispatch pools.
 
 ```text
 raw runtime connector
@@ -172,10 +199,14 @@ raw runtime connector
         v
 unbuilt fetch_hyper_rustls or fetch_hyper_native_tls transport
         |
-        | HttpClientBuilder::build(final requirements)
+        | HttpClientBuilder::build(final requirements): validate
         |
         v
-TLS connector composition
+validated transport factory
+        |
+        | materialize per runtime partition and pool
+        v
+TLS connector composition and OS resource acquisition
         |
         v
 fetch_hyper_common connection policy and HTTP engine
@@ -334,9 +365,9 @@ Connection maximum lifetime is portable because the observable contract is porta
 pool implementations differ.
 
 Hyper records connection age and prevents an over-age connection from serving a new request.
-WinHTTP marks the connection serving a request for retirement with
-`WINHTTP_OPTION_EXPIRE_CONNECTION` when its age reaches the configured bound. Both satisfy the
-same upper-bound contract.
+WinHTTP rotates session generations at the configured bound: new requests use the new generation,
+active requests drain on the old one, and the drained session closes its pool. Both satisfy the
+same upper-bound contract, though WinHTTP may retire younger connections early.
 
 Idle-age policy is also expressed as a bound, but supported values differ. Hyper can enforce the
 configured bound in its pool. WinHTTP can shorten its native idle behavior and can retain HTTP/2
@@ -358,12 +389,17 @@ Request bodies expose whether they may produce trailers before execution. Traile
 asynchronous and fallible, like data-frame production. A transport validates support and framing
 before opening or sending the request. If unsupported, execution returns an explicit error without
 polling the body. Once response headers have been returned, any subsequent upload or trailer error
-must remain observable through the response lifecycle or an explicit request-completion result.
+is returned by the response's `UploadCompletion` future.
 
 ```rust,ignore
 let body = body.with_trailers(async {
     Ok(HeaderMap::from_iter([("digest", computed_digest()?)]))
 });
+
+let response = client.execute(request).await?;
+let upload = response.upload_completion();
+// The response body and upload may be driven concurrently.
+upload.await?;
 ```
 
 Response bodies yield data and a terminal `Result` of trailers. A transport preserves received
@@ -425,6 +461,10 @@ These defaults require representative benchmarks rather than permanent configura
 option needs evidence that the default causes a material problem, a precise observable contract,
 and a coherent ownership model. Until then it is neither a portable builder method nor a supported
 advanced transport option.
+
+The current `SocketOptions`/`TokioTransportOptions` setters are migration residue and are removed
+from the stabilized surface. Socket-owning implementations still use the same low-level controls
+internally where required by these policies.
 
 ## TLS policy
 

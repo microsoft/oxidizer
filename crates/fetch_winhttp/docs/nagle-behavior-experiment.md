@@ -31,7 +31,7 @@ Use the printed port and the WSL address from `wsl.exe hostname -I`:
 
 ```text
 $env:NAGLE_RECEIVER = "<wsl-address>:<printed-port>"
-cargo +1.93.0 run -p fetch_winhttp --example nagle_behavior
+cargo +1.95.0 run -p fetch_winhttp --example nagle_behavior
 ```
 
 An attempted Windows-only receiver was not usable: the current host rejects
