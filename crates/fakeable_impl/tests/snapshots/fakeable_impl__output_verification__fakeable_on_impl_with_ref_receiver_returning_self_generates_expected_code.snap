@@ -1,0 +1,72 @@
+---
+source: crates/fakeable_impl/src/../tests/output_verification.rs
+expression: "prettyplease::unparse(&result_file)"
+---
+impl __fakeable__MyService::MyService {
+    pub fn new(value: String) -> Self {
+        Self { value }
+    }
+    pub fn special_clone(&self) -> Self {
+        Self { value: self.value.clone() }
+    }
+    pub fn mut_transform(&mut self) -> Self {
+        Self { value: self.value.clone() }
+    }
+    pub fn get_value(&self) -> &str {
+        &self.value
+    }
+}
+impl MyService {
+    #[allow(unused_mut)]
+    #[allow(clippy::used_underscore_binding)]
+    pub fn new(value: String) -> Self {
+        Self {
+            inner: __fakeable__MyService::Enum::Real(
+                __fakeable__MyService::MyService::new(value),
+            ),
+        }
+    }
+    #[allow(unused_mut)]
+    #[allow(clippy::used_underscore_binding)]
+    pub fn special_clone(&self) -> Self {
+        match &self.inner {
+            __fakeable__MyService::Enum::Real(real) => {
+                Self {
+                    inner: __fakeable__MyService::Enum::Real(real.special_clone()),
+                }
+            }
+            #[cfg(any(feature = "test-util", test))]
+            __fakeable__MyService::Enum::Fake(fake) => {
+                Self {
+                    inner: __fakeable__MyService::Enum::Fake(fake.special_clone()),
+                }
+            }
+        }
+    }
+    #[allow(unused_mut)]
+    #[allow(clippy::used_underscore_binding)]
+    pub fn mut_transform(&mut self) -> Self {
+        match &mut self.inner {
+            __fakeable__MyService::Enum::Real(real) => {
+                Self {
+                    inner: __fakeable__MyService::Enum::Real(real.mut_transform()),
+                }
+            }
+            #[cfg(any(feature = "test-util", test))]
+            __fakeable__MyService::Enum::Fake(fake) => {
+                Self {
+                    inner: __fakeable__MyService::Enum::Fake(fake.mut_transform()),
+                }
+            }
+        }
+    }
+    #[allow(unused_mut)]
+    #[allow(clippy::used_underscore_binding)]
+    pub fn get_value(&self) -> &str {
+        match &self.inner {
+            __fakeable__MyService::Enum::Real(real) => real.get_value(),
+            #[cfg(any(feature = "test-util", test))]
+            __fakeable__MyService::Enum::Fake(fake) => fake.get_value(),
+        }
+    }
+}

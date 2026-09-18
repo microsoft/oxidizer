@@ -1770,6 +1770,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "fakeable"
+version = "0.2.0"
+dependencies = [
+ "fakeable_impl",
+ "mockall",
+ "mutants",
+]
+
+[[package]]
+name = "fakeable_impl"
+version = "0.2.0"
+dependencies = [
+ "insta",
+ "prettyplease 0.3.0",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.5",
+]
+
+[[package]]
+name = "fakeable_test"
+version = "0.0.0"
+dependencies = [
+ "fakeable",
+ "futures",
+ "mockall",
+ "static_assertions",
+ "thread_aware",
+]
+
+[[package]]
 name = "fast_time"
 version = "0.1.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"

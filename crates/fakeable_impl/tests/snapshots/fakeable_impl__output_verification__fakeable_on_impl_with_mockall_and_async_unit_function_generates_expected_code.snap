@@ -1,0 +1,49 @@
+---
+source: crates/fakeable_impl/src/../tests/output_verification.rs
+expression: "prettyplease::unparse(&result_file)"
+---
+impl __fakeable__MyService::MyService {
+    pub async fn async_method_unit(&self) {
+        println!("async method unit");
+    }
+    pub async fn async_method_return_value(&self) -> Result<(), SomeError> {
+        Ok(())
+    }
+}
+impl MyService {
+    #[allow(unused_mut)]
+    #[allow(clippy::used_underscore_binding)]
+    pub async fn async_method_unit(&self) {
+        match &self.inner {
+            __fakeable__MyService::Enum::Real(real) => real.async_method_unit().await,
+            #[cfg(any(feature = "test-util", test))]
+            __fakeable__MyService::Enum::Fake(fake) => fake.async_method_unit().await,
+        }
+    }
+    #[allow(unused_mut)]
+    #[allow(clippy::used_underscore_binding)]
+    pub async fn async_method_return_value(&self) -> Result<(), SomeError> {
+        match &self.inner {
+            __fakeable__MyService::Enum::Real(real) => {
+                real.async_method_return_value().await
+            }
+            #[cfg(any(feature = "test-util", test))]
+            __fakeable__MyService::Enum::Fake(fake) => {
+                fake.async_method_return_value().await
+            }
+        }
+    }
+}
+#[cfg(any(feature = "test-util", test))]
+#[allow(clippy::all)]
+#[allow(clippy::pedantic)]
+#[allow(clippy::style)]
+pub mod fakes {
+    use super::*;
+    mockall::mock! {
+        #[derive(Debug)] pub MyService { pub fn async_method_unit(& self) -> impl
+        ::std::future::Future < Output = () > + Send; pub fn async_method_return_value(&
+        self) -> impl ::std::future::Future < Output = Result < (), SomeError > > + Send;
+        }
+    }
+}
