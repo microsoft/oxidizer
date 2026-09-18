@@ -132,8 +132,9 @@ rejects unsupported values, missing credential bindings, and known host-version 
 before a client is returned. The resulting factory declares whether handlers are shared or isolated.
 
 `HttpClientBuilder` remains cloneable. The erased transport configuration therefore supports
-object-safe cloning; cloning a builder clones only unbuilt configuration and its typed registry,
-never native sessions or pooled connections.
+cloning before internal erasure; cloning a builder shares the erased construction closure, which
+creates a fresh transport-configuration clone for each `build`. Native sessions and pooled
+connections are never captured in the builder.
 
 Materialization receives per-instance services such as response-body infrastructure, telemetry,
 runtime-thread affinity, and pool identity. It remains fallible because acquiring OS resources can
@@ -173,7 +174,7 @@ adds Oxidizer runtime integration without creating another HTTP client or TLS AP
 
 | Crate | Responsibility |
 | --- | --- |
-| `fetch` | Stable client, pipeline, portable requirements, validation/factory contract, and typed config registry |
+| `fetch` | Stable client, pipeline, portable requirements, generic validation/factory contract, and typed config registry |
 | `fetch_hyper_common` | Reusable TLS-neutral Hyper engine |
 | `fetch_hyper_rustls` | Rustls connector composition and rustls-specific mechanisms |
 | `fetch_hyper_native_tls` | Native-TLS connector composition and native-tls-specific mechanisms |

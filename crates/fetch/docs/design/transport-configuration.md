@@ -46,13 +46,11 @@ requirements. Its setters merge constraints and retain enough provenance to diag
 `Transport` validates the complete library-facing baseline and produces a factory:
 
 ```rust,ignore
-pub trait Transport: Send + Sync + 'static {
-    fn clone_transport(&self) -> Box<dyn Transport>;
-
+pub trait Transport: Clone + Send + Sync + 'static {
     fn register_config(&self, registry: &mut TransportConfigRegistry);
 
     fn validate(
-        self: Box<Self>,
+        self,
         requirements: TransportRequirements,
         registry: TransportConfigRegistry,
         context: TransportContext,
@@ -61,6 +59,12 @@ pub trait Transport: Send + Sync + 'static {
 
 pub struct TransportFactory {
     // Type-erased, cloneable materialization closure and isolation policy.
+}
+
+impl HttpClient {
+    pub fn builder<T: Transport>(transport: T) -> HttpClientBuilder {
+        // Erase T into an internal cloneable construction closure.
+    }
 }
 ```
 
@@ -75,10 +79,24 @@ imply that every value is valid. For example, a transport can support connection
 rejecting an out-of-range duration, or require a named client credential that the application did
 not bind.
 
-`HttpClient::builder` asks the concrete transport to populate the typed registry before erasure.
-Builder cloning calls `clone_transport` and clones the registry; both contain configuration only.
-At build time the final registry is consumed by `validate`, so every library mutation reaches the
-transport factory without exposing the raw map.
+`HttpClient::builder` asks the concrete transport to populate the typed registry, then captures it
+in an internal type-erased closure. The public trait remains generic and requires no allocation or
+boxed receiver:
+
+```rust,ignore
+let erased = Arc::new(move |requirements, registry, context| {
+    transport.clone().validate(requirements, registry, context)
+});
+```
+
+Builder cloning shares this closure and clones the registry. Each `build` clones the unbuilt
+transport configuration and consumes that clone during validation, so independently built clients
+do not share transport resources. The final registry is consumed by `validate`, ensuring every
+library mutation reaches the transport factory without exposing the raw map.
+
+The `Transport` trait need not be dyn-compatible because only `HttpClient::builder` performs
+erasure. Applications selecting a transport at runtime use an enum implementing `Transport`, or an
+explicit erased transport adapter built from the same closure contract.
 
 The factory receives no generic TLS or connection-options bag. Each implementation captures its
 validated configuration and translates semantic requirements directly into each materialized
@@ -171,13 +189,13 @@ transport configuration implementing `fetch::Transport`:
 ```rust,ignore
 impl fetch::Transport for RustlsHyperTransport {
     fn validate(
-        self: Box<Self>,
+        self,
         requirements: TransportRequirements,
         registry: TransportConfigRegistry,
         context: TransportContext,
     ) -> Result<TransportFactory, TransportBuildError> {
         self.validate_tls(&requirements, &registry)?;
-        let validated = *self;
+        let validated = self;
         Ok(TransportFactory::new(validated.isolation(), move |instance| {
             let connector = validated.build_tls_connector(&requirements, &instance)?;
             fetch_hyper_common::build(
