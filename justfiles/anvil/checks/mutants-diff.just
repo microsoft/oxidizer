@@ -58,7 +58,7 @@ anvil-mutants-diff: anvil-mutants-diff-validate-prereqs anvil-impact
     while true; do
         printf 'ANVIL_MUTANT_TELEMETRY timestamp=%s\n' "$(date --utc --iso-8601=seconds)"
         free -m | sed 's/^/ANVIL_MUTANT_TELEMETRY /'
-        ps -eo pid,ppid,rss,vsz,comm --sort=-rss |
+        ps -eo pid,ppid,rss,vsz,comm,args --sort=-rss |
             head -n 12 |
             sed 's/^/ANVIL_MUTANT_TELEMETRY process /'
         sleep 2
@@ -69,7 +69,7 @@ anvil-mutants-diff: anvil-mutants-diff-validate-prereqs anvil-impact
     }
     try {
         $env:CARGO_BUILD_JOBS = '1'
-        & cargo {{_anvil_stable_toolchain_args}} mutants --in-diff $diff_path --no-shuffle --jobs 1 --jobserver-tasks 1 --cargo-arg=--jobs=1
+        & cargo {{_anvil_stable_toolchain_args}} mutants --in-diff $diff_path --no-shuffle --jobs 1 --jobserver-tasks 1 --cargo-arg=--jobs=1 --all-logs
         $status = $LASTEXITCODE
     } finally {
         if ($null -ne $monitor -and -not $monitor.HasExited) {
