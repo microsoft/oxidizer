@@ -859,6 +859,7 @@ pub(crate) fn mark_default_domain(domain: *mut DomainState) {
     unsafe { (*domain).is_default.store(true, Ordering::Release) };
 }
 
+#[cfg_attr(test, mutants::skip)] // A permanent null domain can strand the process-global allocator; transient map failure is tested directly.
 pub(crate) fn create_domain() -> *mut DomainState {
     let state = hal::map(mem::size_of::<DomainState>()).cast::<DomainState>();
     if state.is_null() {
