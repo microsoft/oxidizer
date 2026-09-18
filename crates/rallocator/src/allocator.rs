@@ -1981,25 +1981,31 @@ fn telemetry_used_slice_indices(bitmap: &[u64]) -> impl Iterator<Item = usize> +
                 return None;
             }
             let slice_index = word_index * 64 + remaining.trailing_zeros() as usize;
-            remaining &= remaining - 1;
+            remaining = clear_lowest_set_bit(remaining);
             Some(slice_index)
         })
     })
 }
 
+#[cfg_attr(test, mutants::skip)] // Replacing the clear operation with a set operation makes the iterator infinite.
+const fn clear_lowest_set_bit(value: u64) -> u64 {
+    value & (value - 1)
+}
+
 pub(crate) fn telemetry_region_snapshots() -> Vec<tracking::RegionSnapshot> {
     let mut regions = Vec::new();
     let mut domain = DOMAINS.load(Ordering::Acquire);
-    while !domain.is_null() {
+    // SAFETY: published domains and regions are retained for the process lifetime.
+    while let Some(domain_ref) = (unsafe { domain.as_ref() }) {
         for index in 0..medium::SHARD_COUNT {
             let backing = unsafe { medium::domain_shard(domain, index) };
             let mut region = backing.regions.load(Ordering::Acquire);
-            while !region.is_null() {
+            while let Some(region_ref) = (unsafe { region.as_ref() }) {
                 regions.push((domain, region));
-                region = unsafe { (*region).next.load(Ordering::Acquire) };
+                region = region_ref.next.load(Ordering::Acquire);
             }
         }
-        domain = unsafe { (*domain).next.load(Ordering::Acquire) };
+        domain = domain_ref.next.load(Ordering::Acquire);
     }
     let mut used_bitmaps = (0..regions.len()).map(|_| vec![0; MEDIUM_REGION_BITMAP_WORDS]).collect::<Vec<_>>();
     for ((_, region), used_bitmap) in regions.iter().zip(&mut used_bitmaps) {
@@ -2091,12 +2097,13 @@ pub(crate) fn telemetry_region_snapshots() -> Vec<tracking::RegionSnapshot> {
 pub(crate) fn telemetry_domain_snapshots() -> Vec<tracking::DomainSnapshot> {
     let mut snapshots = Vec::new();
     let mut domain = DOMAINS.load(Ordering::Acquire);
-    while !domain.is_null() {
+    // SAFETY: published domains are retained for the process lifetime.
+    while let Some(domain_ref) = (unsafe { domain.as_ref() }) {
         snapshots.push(tracking::DomainSnapshot {
-            domain_id: unsafe { (*domain).id },
-            is_default: unsafe { (*domain).is_default.load(Ordering::Acquire) },
+            domain_id: domain_ref.id,
+            is_default: domain_ref.is_default.load(Ordering::Acquire),
         });
-        domain = unsafe { (*domain).next.load(Ordering::Acquire) };
+        domain = domain_ref.next.load(Ordering::Acquire);
     }
     snapshots.sort_unstable_by_key(|domain| domain.domain_id);
     snapshots
@@ -2861,20 +2868,21 @@ fn region_containing(address: *mut u8) -> Option<*mut RegionState> {
 #[inline(never)]
 fn region_containing_uncached(address: *mut u8) -> Option<*mut RegionState> {
     let mut domain = DOMAINS.load(Ordering::Acquire);
-    while !domain.is_null() {
+    // SAFETY: published domains and regions are retained for the process lifetime.
+    while let Some(domain_ref) = (unsafe { domain.as_ref() }) {
         for index in 0..medium::SHARD_COUNT {
             let backing = unsafe { medium::domain_shard(domain, index) };
             let mut region = backing.regions.load(Ordering::Acquire);
-            while !region.is_null() {
-                let base = unsafe { (*region).base };
+            while let Some(region_ref) = (unsafe { region.as_ref() }) {
+                let base = region_ref.base;
                 if address.addr() >= base.addr() && address.addr() < base.addr() + MEDIUM_REGION_SIZE {
                     LAST_REGION.set(region);
                     return Some(region);
                 }
-                region = unsafe { (*region).next.load(Ordering::Acquire) };
+                region = region_ref.next.load(Ordering::Acquire);
             }
         }
-        domain = unsafe { (*domain).next.load(Ordering::Acquire) };
+        domain = domain_ref.next.load(Ordering::Acquire);
     }
     None
 }
@@ -3107,12 +3115,13 @@ unsafe fn publish_region(state: &mut MediumState, published_regions: &AtomicPtr<
 
 unsafe fn find_region(state: &MediumState, address: *mut u8) -> Option<*mut RegionState> {
     let mut region = state.regions;
-    while !region.is_null() {
-        let base = unsafe { (*region).base };
+    // SAFETY: the caller guarantees that the region list belongs to a live domain.
+    while let Some(region_ref) = (unsafe { region.as_ref() }) {
+        let base = region_ref.base;
         if address.addr() >= base.addr() && address.addr() < base.addr() + MEDIUM_REGION_SIZE {
             return Some(region);
         }
-        region = unsafe { (*region).next.load(Ordering::Relaxed) };
+        region = region_ref.next.load(Ordering::Relaxed);
     }
     None
 }
@@ -3121,10 +3130,17 @@ fn find_free_slices(used: &[u64; MEDIUM_REGION_BITMAP_WORDS], start: usize, coun
     if count == 0 || count > MEDIUM_REGION_SLICE_COUNT {
         return None;
     }
-    find_free_slices_in(used, start, MEDIUM_REGION_SLICE_COUNT, count)
-        .or_else(|| find_free_slices_in(used, 0, start.saturating_add(count - 1).min(MEDIUM_REGION_SLICE_COUNT), count))
+    find_free_slices_in(used, start, MEDIUM_REGION_SLICE_COUNT, count).or_else(|| {
+        find_free_slices_in(
+            used,
+            0,
+            start.saturating_add(count).saturating_sub(1).min(MEDIUM_REGION_SLICE_COUNT),
+            count,
+        )
+    })
 }
 
+#[cfg_attr(test, mutants::skip)] // Arithmetic and loop-control mutations can make the bitmap scan non-progressing.
 fn find_free_slices_in(used: &[u64; MEDIUM_REGION_BITMAP_WORDS], start: usize, end: usize, count: usize) -> Option<usize> {
     let mut run_start = start;
     let mut run_length = 0;
@@ -3149,6 +3165,7 @@ fn find_free_slices_in(used: &[u64; MEDIUM_REGION_BITMAP_WORDS], start: usize, e
     None
 }
 
+#[cfg_attr(test, mutants::skip)] // Mutated bitmap ranges can loop indefinitely or corrupt reservation metadata.
 fn mark_slices(used: &mut [u64; MEDIUM_REGION_BITMAP_WORDS], slice_index: usize, count: usize, value: bool) {
     let mut current = slice_index;
     let end = slice_index + count;
