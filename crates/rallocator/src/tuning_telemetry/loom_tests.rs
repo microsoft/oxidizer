@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Models the production admission protocol using Loom atomics. Its closed-bit
-//! transition calculation is shared with production; std atomics cannot be
-//! instrumented directly by Loom.
+//! Models the production admission protocol using Loom atomics and the same
+//! closed-bit transition calculation; std atomics cannot be instrumented
+//! directly by Loom.
 
 use loom::sync::Arc;
 use loom::sync::atomic::{AtomicUsize, Ordering};
