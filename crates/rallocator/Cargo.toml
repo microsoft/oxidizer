@@ -20,23 +20,29 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/rallocator"
 [target.'cfg(target_os = "linux")'.dependencies]
 libc.workspace = true
 
-[target.'cfg(target_os = "linux")'.dev-dependencies]
-mutants.workspace = true
+[target.'cfg(loom)'.dev-dependencies]
+loom.workspace = true
 
 [features]
 default = ["caller-symbolization"]
 caller-symbolization = ["dep:backtrace"]
+loom = []
 tuning-telemetry = []
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { workspace = true, features = [
     "Win32_System_Memory",
     "Win32_System_SystemInformation",
+    "Win32_System_Kernel",
+    "Win32_System_Threading",
 ] }
 
 [dependencies]
 allocation_hints.workspace = true
+# hashbrown 0.17 uses this older allocator trait version for system-backed tables.
+allocator-api2-02 = { package = "allocator-api2", version = "0.2.21", default-features = false, features = ["std"] }
 backtrace = { workspace = true, features = ["std"], optional = true }
+hashbrown = { workspace = true, features = ["allocator-api2"] }
 seismograph.workspace = true
 seismograph_rallocator.workspace = true
 
@@ -45,9 +51,20 @@ criterion.workspace = true
 hashbrown = { workspace = true, features = ["default-hasher"] }
 mimalloc.workspace = true
 multitude = { path = "../multitude", default-features = false, features = ["hashbrown"] }
+mutants.workspace = true
 performables = { path = "../performables", features = ["seismograph"] }
 seismograph = { path = "../seismograph", features = ["monitor"] }
 seismograph_runtime = { path = "../seismograph_runtime" }
+
+[[test]]
+name = "snapshot_mappings"
+harness = false
+
+# Loom model-checking tests. `required-features = ["loom"]` lets `anvil-loom`
+# discover this target; the actual Loom build is selected by `--cfg loom`.
+[[test]]
+name = "loom"
+required-features = ["loom"]
 
 [[bench]]
 name = "mimalloc"

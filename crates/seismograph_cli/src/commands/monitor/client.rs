@@ -196,6 +196,9 @@ fn command(descriptor: &MonitorDescriptor, request: &Request) -> Result<Response
         _ => return Err(Error::UnexpectedResponse),
     }
     write_request(&mut stream, 2, request).map_err(Error::Protocol)?;
+    if matches!(request, Request::CaptureSnapshot(_)) {
+        stream.set_read_timeout(None).map_err(Error::Io)?;
+    }
     let (request_id, response) = read_response(&mut stream).map_err(Error::Protocol)?;
     if request_id != 2 {
         return Err(Error::UnexpectedResponse);

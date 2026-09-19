@@ -17,7 +17,9 @@ pub(crate) struct Options {
 impl Options {
     /// The default locality segment size: 4 MiB.
     pub(crate) const DEFAULT_LOCALITY_SEGMENT_BYTES: usize = 4 * 1024 * 1024;
-    /// The default and largest supported per-heap medium cache entry: 8 MiB.
+    /// The default span-size eligibility limit: 8 MiB.
+    ///
+    /// The separate combined cache budget can limit retention further.
     pub(crate) const DEFAULT_MEDIUM_CACHE_MAX_BYTES: usize = MAX_MEDIUM_CACHE_BYTES;
 
     /// Returns the standard general-purpose heap options.
@@ -44,7 +46,9 @@ impl Options {
         self
     }
 
-    /// Sets the largest power-of-two medium span retained in the local cache.
+    /// Sets the largest power-of-two medium span eligible for the local cache.
+    ///
+    /// The allocator's combined per-heap byte budget still limits retention.
     ///
     /// # Panics
     ///
@@ -65,7 +69,7 @@ impl Options {
         self.locality_segment_bytes
     }
 
-    /// Returns the largest locally cached medium span.
+    /// Returns the local cache's span-size eligibility limit.
     #[must_use]
     pub(crate) const fn medium_cache_max_bytes(self) -> usize {
         self.medium_cache_max_bytes

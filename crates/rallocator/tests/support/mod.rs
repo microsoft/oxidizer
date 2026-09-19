@@ -52,7 +52,8 @@ pub(crate) fn stats() -> Option<Stats> {
         return None;
     }
     source.skip(2)?;
-    if source.u32()? != 13 * 8 {
+    // The current stats payload appends the one-byte peak-scope discriminator.
+    if source.u32()? != 13 * 8 + 1 {
         return None;
     }
     let allocated_bytes = source.u64()?;

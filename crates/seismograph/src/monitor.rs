@@ -8,6 +8,7 @@
 //! allows many instrumented processes to coexist without fixed-port
 //! coordination.
 
+use std::collections::HashMap;
 use std::net::{Ipv4Addr, Shutdown, SocketAddrV4, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -25,15 +26,19 @@ use crate::recorder::SuppressionGuard;
 
 const ACCEPT_RETRY_DELAY: Duration = Duration::from_millis(50);
 const CLIENT_AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(5);
-const CLIENT_READ_TIMEOUT: Duration = Duration::from_millis(250);
+// Abandoned interactive clients should release their worker and socket promptly.
+const CLIENT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const CLIENT_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+// Bound detached worker and socket overhead per monitored process.
+const MAX_CONCURRENT_CLIENTS: usize = 16;
+static SNAPSHOT_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
 /// Running localhost monitor.
 pub struct Monitor {
     descriptor: MonitorDescriptor,
     descriptor_path: PathBuf,
     stop: Arc<AtomicBool>,
-    active_client: Arc<Mutex<Option<TcpStream>>>,
+    active_clients: Arc<ActiveClients>,
     last_error: Arc<Mutex<Option<String>>>,
     thread: Option<JoinHandle<()>>,
 }
@@ -73,14 +78,7 @@ impl fmt::Debug for Monitor {
 impl Drop for Monitor {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
-        if let Some(stream) = self
-            .active_client
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .as_ref()
-        {
-            let _ = stream.shutdown(Shutdown::Both);
-        }
+        self.active_clients.shutdown_all();
         let _ = TcpStream::connect(self.descriptor.socket_address());
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
@@ -127,7 +125,7 @@ impl Builder {
             TcpListener,
             MonitorDescriptor,
             Arc<AtomicBool>,
-            Arc<Mutex<Option<TcpStream>>>,
+            Arc<ActiveClients>,
             Arc<Mutex<Option<String>>>,
             &Path,
         ) -> Result<JoinHandle<()>, Error>,
@@ -159,13 +157,13 @@ impl Builder {
         let descriptor_path = publish_descriptor(&directory, &descriptor)?;
 
         let stop = Arc::new(AtomicBool::new(false));
-        let active_client = Arc::new(Mutex::new(None));
+        let active_clients = Arc::new(ActiveClients::new());
         let last_error = Arc::new(Mutex::new(None));
         let thread = spawn(
             listener,
             descriptor.clone(),
             Arc::clone(&stop),
-            Arc::clone(&active_client),
+            Arc::clone(&active_clients),
             Arc::clone(&last_error),
             &descriptor_path,
         )?;
@@ -174,7 +172,7 @@ impl Builder {
             descriptor,
             descriptor_path,
             stop,
-            active_client,
+            active_clients,
             last_error,
             thread: Some(thread),
         })
@@ -225,13 +223,80 @@ fn publish_descriptor(directory: &Path, descriptor: &MonitorDescriptor) -> Resul
     Ok(descriptor_path)
 }
 
+struct ActiveClients {
+    state: Mutex<ActiveClientsState>,
+}
+
+struct ActiveClientsState {
+    accepting: bool,
+    next_id: u64,
+    streams: HashMap<u64, TcpStream>,
+}
+
+impl ActiveClients {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(ActiveClientsState {
+                accepting: true,
+                next_id: 0,
+                streams: HashMap::new(),
+            }),
+        }
+    }
+
+    fn register(self: &Arc<Self>, stream: &TcpStream) -> Result<Option<ActiveClient>, io::Error> {
+        let tracked_stream = stream.try_clone()?;
+        let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !state.accepting || state.streams.len() >= MAX_CONCURRENT_CLIENTS {
+            return Ok(None);
+        }
+        let id = state.next_id;
+        state.next_id = state
+            .next_id
+            .checked_add(1)
+            .ok_or_else(|| io::Error::other("monitor client identifier space exhausted"))?;
+        state.streams.insert(id, tracked_stream);
+        Ok(Some(ActiveClient {
+            id,
+            clients: Arc::clone(self),
+        }))
+    }
+
+    fn shutdown_all(&self) {
+        let streams = {
+            let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            state.accepting = false;
+            state.streams.drain().map(|(_id, stream)| stream).collect::<Vec<_>>()
+        };
+        for stream in streams {
+            let _ = stream.shutdown(Shutdown::Both);
+        }
+    }
+}
+
+struct ActiveClient {
+    id: u64,
+    clients: Arc<ActiveClients>,
+}
+
+impl Drop for ActiveClient {
+    fn drop(&mut self) {
+        self.clients
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .streams
+            .remove(&self.id);
+    }
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))] // OS accept and accepted-socket setup failures cannot be injected portably; request dispatch is tested through connected streams.
 fn run_listener(
     listener: &TcpListener,
     descriptor: &MonitorDescriptor,
-    stop: &AtomicBool,
-    active_client: &Mutex<Option<TcpStream>>,
-    last_error: &Mutex<Option<String>>,
+    stop: &Arc<AtomicBool>,
+    active_clients: &Arc<ActiveClients>,
+    last_error: &Arc<Mutex<Option<String>>>,
 ) {
     let _suppression = SuppressionGuard::enter();
     loop {
@@ -241,27 +306,27 @@ fn run_listener(
         match listener.accept() {
             Ok((stream, _peer)) => {
                 if let Err(error) = stream.set_nonblocking(false) {
-                    *last_error.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error.to_string());
+                    set_last_error(last_error, &error);
                     continue;
                 }
-                let client = match stream.try_clone() {
-                    Ok(client) => client,
+                let registration = match active_clients.register(&stream) {
+                    Ok(Some(registration)) => registration,
+                    Ok(None) => {
+                        let _ = stream.shutdown(Shutdown::Both);
+                        continue;
+                    }
                     Err(error) => {
-                        *last_error.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error.to_string());
+                        set_last_error(last_error, &error);
                         continue;
                     }
                 };
-                *active_client.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(client);
-                if let Err(error) = handle_client(stream, descriptor, stop) {
-                    *last_error.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error.to_string());
-                }
-                *active_client.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+                spawn_client_thread(stream, descriptor.clone(), Arc::clone(stop), registration, last_error);
             }
             Err(error) => {
                 if listener_accept_should_retry(error.kind()) {
                     thread::sleep(ACCEPT_RETRY_DELAY);
                 } else {
-                    *last_error.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error.to_string());
+                    set_last_error(last_error, &error);
                     break;
                 }
             }
@@ -277,12 +342,12 @@ fn spawn_listener_thread(
     listener: TcpListener,
     descriptor: MonitorDescriptor,
     stop: Arc<AtomicBool>,
-    active_client: Arc<Mutex<Option<TcpStream>>>,
+    active_clients: Arc<ActiveClients>,
     last_error: Arc<Mutex<Option<String>>>,
     descriptor_path: &Path,
 ) -> Result<JoinHandle<()>, Error> {
     spawn_listener_thread_with(
-        move || run_listener(&listener, &descriptor, &stop, &active_client, &last_error),
+        move || run_listener(&listener, &descriptor, &stop, &active_clients, &last_error),
         descriptor_path,
         |operation| thread::Builder::new().name("seismograph-monitor".into()).spawn(operation),
     )
@@ -299,14 +364,57 @@ fn spawn_listener_thread_with(
     })
 }
 
-fn handle_client(mut stream: TcpStream, descriptor: &MonitorDescriptor, stop: &AtomicBool) -> Result<(), ClientError> {
-    stream.set_read_timeout(Some(CLIENT_READ_TIMEOUT)).map_err(ClientError::Io)?;
+fn spawn_client_thread(
+    stream: TcpStream,
+    descriptor: MonitorDescriptor,
+    stop: Arc<AtomicBool>,
+    registration: ActiveClient,
+    last_error: &Arc<Mutex<Option<String>>>,
+) {
+    spawn_client_thread_with(stream, descriptor, stop, registration, last_error, |operation| {
+        thread::Builder::new().name("seismograph-monitor-client".into()).spawn(operation)
+    });
+}
+
+fn spawn_client_thread_with(
+    stream: TcpStream,
+    descriptor: MonitorDescriptor,
+    stop: Arc<AtomicBool>,
+    registration: ActiveClient,
+    last_error: &Arc<Mutex<Option<String>>>,
+    spawn: impl FnOnce(Box<dyn FnOnce() + Send>) -> io::Result<JoinHandle<()>>,
+) {
+    let worker_last_error = Arc::clone(last_error);
+    let spawn_result = spawn(Box::new(move || {
+        let _registration = registration;
+        let _suppression = SuppressionGuard::enter();
+        if let Err(error) = handle_client(stream, &descriptor, &stop) {
+            set_last_error(&worker_last_error, &error);
+        }
+    }));
+    if let Err(error) = spawn_result {
+        set_last_error(last_error, &error);
+    }
+}
+
+fn set_last_error(last_error: &Mutex<Option<String>>, error: &impl fmt::Display) {
+    *last_error.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error.to_string());
+}
+
+fn handle_client(stream: TcpStream, descriptor: &MonitorDescriptor, stop: &AtomicBool) -> Result<(), ClientError> {
+    handle_client_with_timeouts(stream, descriptor, stop, CLIENT_AUTHENTICATION_TIMEOUT, CLIENT_IDLE_TIMEOUT)
+}
+
+fn handle_client_with_timeouts(
+    mut stream: TcpStream,
+    descriptor: &MonitorDescriptor,
+    stop: &AtomicBool,
+    authentication_timeout: Duration,
+    idle_timeout: Duration,
+) -> Result<(), ClientError> {
     stream.set_write_timeout(Some(CLIENT_WRITE_TIMEOUT)).map_err(ClientError::Io)?;
 
-    let authentication_deadline = Instant::now()
-        .checked_add(CLIENT_AUTHENTICATION_TIMEOUT)
-        .expect("the five-second authentication timeout fits in Instant");
-    let (request_id, request) = read_request_retry_until(&mut stream, stop, Some(authentication_deadline))?;
+    let (request_id, request) = read_request_with_timeout(&mut stream, stop, authentication_timeout, ReadTimeout::Authentication)?;
     let Request::Hello { authentication } = request else {
         return Err(ClientError::HandshakeRequired);
     };
@@ -337,13 +445,21 @@ fn handle_client(mut stream: TcpStream, descriptor: &MonitorDescriptor, stop: &A
         if stop.load(Ordering::Acquire) {
             break;
         }
-        let (request_id, request) = match read_request_retry(&mut stream, stop) {
+        let (request_id, request) = match read_request_with_timeout(&mut stream, stop, idle_timeout, ReadTimeout::Idle) {
             Ok(request) => request,
-            Err(ClientError::Stopped | ClientError::Disconnected) => return Ok(()),
+            Err(ClientError::Stopped | ClientError::Disconnected | ClientError::IdleTimedOut) => return Ok(()),
             Err(error) => return Err(error),
         };
         let response = authenticated_response(&request);
-        seismograph_protocol::write_response(&mut stream, request_id, &response).map_err(ClientError::Protocol)?;
+        let snapshot_response = matches!(response, Response::Snapshot(_));
+        if snapshot_response {
+            stream.set_write_timeout(None).map_err(ClientError::Io)?;
+        }
+        let write_result = seismograph_protocol::write_response(&mut stream, request_id, &response);
+        if snapshot_response {
+            stream.set_write_timeout(Some(CLIENT_WRITE_TIMEOUT)).map_err(ClientError::Io)?;
+        }
+        write_result.map_err(ClientError::Protocol)?;
     }
     Ok(())
 }
@@ -351,19 +467,20 @@ fn handle_client(mut stream: TcpStream, descriptor: &MonitorDescriptor, stop: &A
 fn authenticated_response(request: &Request) -> Response {
     match request {
         Request::Hello { .. } => Response::Error("already authenticated".into()),
-        Request::SetRecording(configuration) => {
-            apply_recording_configuration(*configuration);
-            Response::Acknowledged
-        }
+        Request::SetRecording(configuration) => apply_recording_configuration(*configuration)
+            .map_or_else(|error| Response::Error(error.to_string()), |()| Response::Acknowledged),
         Request::SetCacheRecording(policy) => {
             let configuration = crate::recorder::configuration();
-            crate::recorder(crate::recorder::Configuration {
+            crate::recorder::try_configure(crate::recorder::Configuration {
                 cache: recorder_policy(*policy),
                 ..configuration
-            });
-            Response::Acknowledged
+            })
+            .map_or_else(|error| Response::Error(error.to_string()), |()| Response::Acknowledged)
         }
         Request::CaptureSnapshot(options) => {
+            let Ok(_snapshot) = SnapshotRequestGuard::acquire() else {
+                return Response::Error("a seismograph snapshot is already in progress".into());
+            };
             let event_buffers = match options.event_buffers {
                 EventBufferDisposition::Retain => crate::snapshot::EventBufferDisposition::Retain,
                 EventBufferDisposition::Clear => crate::snapshot::EventBufferDisposition::Clear,
@@ -379,13 +496,13 @@ fn authenticated_response(request: &Request) -> Response {
     }
 }
 
-fn apply_recording_configuration(configuration: RecordingConfiguration) {
+fn apply_recording_configuration(configuration: RecordingConfiguration) -> Result<(), crate::Error> {
     let event_capacity_per_thread = crate::recorder::EventBufferCapacity::new(
         usize::try_from(configuration.event_capacity_per_thread).expect("Seismograph requires a target whose usize can represent u32"),
     )
     .expect("the monitor protocol decoder validates event buffer capacity");
     let current = crate::recorder::configuration();
-    crate::recorder(crate::recorder::Configuration {
+    crate::recorder::try_configure(crate::recorder::Configuration {
         allocations: recorder_policy(configuration.allocations),
         general_events: recorder_policy(configuration.general_events),
         arc_dereferences: recorder_policy(configuration.arc_dereferences),
@@ -393,11 +510,14 @@ fn apply_recording_configuration(configuration: RecordingConfiguration) {
         io: recorder_policy(configuration.io),
         cache: current.cache,
         event_capacity_per_thread,
-    });
+    })
 }
 
 fn recorder_statistics_response() -> Response {
-    let statistics = crate::recorder::statistics();
+    let statistics = match crate::recorder::try_statistics() {
+        Ok(statistics) => statistics,
+        Err(error) => return Response::Error(error.to_string()),
+    };
     Response::RecorderStatistics(RecorderStatistics {
         thread_count: statistics.thread_count,
         total_events: statistics.total_events,
@@ -414,6 +534,23 @@ fn recorder_statistics_response() -> Response {
             usize::try_from(statistics.event_capacity_per_thread).unwrap_or(usize::MAX),
         ),
     })
+}
+
+struct SnapshotRequestGuard;
+
+impl SnapshotRequestGuard {
+    fn acquire() -> Result<Self, ()> {
+        SNAPSHOT_IN_PROGRESS
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .map(|_previous| Self)
+            .map_err(|_active| ())
+    }
+}
+
+impl Drop for SnapshotRequestGuard {
+    fn drop(&mut self) {
+        SNAPSHOT_IN_PROGRESS.store(false, Ordering::Release);
+    }
 }
 
 fn protocol_recording_configuration(
@@ -456,64 +593,73 @@ fn recorder_policy(policy: seismograph_protocol::message::RecordingPolicy) -> cr
 
 fn snapshot_response(snapshot: Result<crate::snapshot::Snapshot, crate::Error>) -> Response {
     match snapshot {
-        Ok(snapshot) => Response::Snapshot(snapshot.as_bytes().to_vec()),
+        Ok(snapshot) => Response::Snapshot(snapshot.into_bytes()),
         Err(error) => Response::Error(error.to_string()),
     }
 }
 
-fn read_request_retry(stream: &mut TcpStream, stop: &AtomicBool) -> Result<(u64, Request), ClientError> {
-    read_request_retry_until(stream, stop, None)
+struct DeadlineReader<'a> {
+    stream: &'a mut TcpStream,
+    deadline: Instant,
 }
 
-fn read_request_retry_until(stream: &mut TcpStream, stop: &AtomicBool, deadline: Option<Instant>) -> Result<(u64, Request), ClientError> {
-    read_request_retry_with(stop, deadline, || seismograph_protocol::read_request(stream))
-}
-
-fn read_request_retry_with(
-    stop: &AtomicBool,
-    deadline: Option<Instant>,
-    mut read: impl FnMut() -> Result<(u64, Request), seismograph_protocol::Error>,
-) -> Result<(u64, Request), ClientError> {
-    loop {
-        match read() {
-            Ok(request) => return Ok(request),
-            Err(error) => {
-                if let seismograph_protocol::Error::Io(io_error) = &error {
-                    match io_error_action(io_error.kind(), stop.load(Ordering::Acquire)) {
-                        IoErrorAction::Retry => {
-                            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
-                                return Err(ClientError::AuthenticationTimedOut);
-                            }
-                            continue;
-                        }
-                        IoErrorAction::Stopped => return Err(ClientError::Stopped),
-                        IoErrorAction::Disconnected => return Err(ClientError::Disconnected),
-                        IoErrorAction::Protocol => {}
-                    }
-                }
-                return Err(ClientError::Protocol(error));
-            }
+impl io::Read for DeadlineReader<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let remaining = self.deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(io::Error::new(io::ErrorKind::TimedOut, "monitor frame read timed out"));
         }
+        self.stream.set_read_timeout(Some(remaining))?;
+        io::Read::read(self.stream, buf)
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum IoErrorAction {
-    Retry,
-    Stopped,
-    Disconnected,
-    Protocol,
+fn read_request_with_timeout(
+    stream: &mut TcpStream,
+    stop: &AtomicBool,
+    timeout: Duration,
+    timeout_kind: ReadTimeout,
+) -> Result<(u64, Request), ClientError> {
+    let deadline = Instant::now()
+        .checked_add(timeout)
+        .ok_or_else(|| ClientError::Io(io::Error::new(io::ErrorKind::InvalidInput, "monitor read timeout is too large")))?;
+    let mut reader = DeadlineReader { stream, deadline };
+    seismograph_protocol::read_request(&mut reader).map_err(|error| classify_read_error(error, stop.load(Ordering::Acquire), timeout_kind))
 }
 
-fn io_error_action(kind: io::ErrorKind, stopped: bool) -> IoErrorAction {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReadTimeout {
+    Authentication,
+    Idle,
+}
+
+fn classify_read_error(error: seismograph_protocol::Error, stopped: bool, timeout: ReadTimeout) -> ClientError {
+    let seismograph_protocol::Error::Io(io_error) = error else {
+        return ClientError::Protocol(error);
+    };
+    let kind = io_error.kind();
     if matches!(kind, io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut) {
-        if stopped { IoErrorAction::Stopped } else { IoErrorAction::Retry }
-    } else if matches!(kind, io::ErrorKind::UnexpectedEof | io::ErrorKind::ConnectionReset) {
-        IoErrorAction::Disconnected
+        if stopped {
+            ClientError::Stopped
+        } else {
+            match timeout {
+                ReadTimeout::Authentication => ClientError::AuthenticationTimedOut,
+                ReadTimeout::Idle => ClientError::IdleTimedOut,
+            }
+        }
+    } else if matches!(
+        kind,
+        io::ErrorKind::UnexpectedEof
+            | io::ErrorKind::ConnectionReset
+            | io::ErrorKind::ConnectionAborted
+            | io::ErrorKind::BrokenPipe
+            | io::ErrorKind::NotConnected
+    ) {
+        ClientError::Disconnected
     } else if stopped {
-        IoErrorAction::Stopped
+        ClientError::Stopped
     } else {
-        IoErrorAction::Protocol
+        ClientError::Protocol(seismograph_protocol::Error::Io(io_error))
     }
 }
 
@@ -532,6 +678,7 @@ enum ClientError {
     HandshakeRequired,
     Authentication,
     AuthenticationTimedOut,
+    IdleTimedOut,
     Disconnected,
     Stopped,
 }
@@ -544,6 +691,7 @@ impl fmt::Display for ClientError {
             Self::HandshakeRequired => f.write_str("monitor handshake is required"),
             Self::Authentication => f.write_str("monitor authentication failed"),
             Self::AuthenticationTimedOut => f.write_str("monitor authentication timed out"),
+            Self::IdleTimedOut => f.write_str("monitor client idle timeout expired"),
             Self::Disconnected => f.write_str("monitor client disconnected"),
             Self::Stopped => f.write_str("monitor stopped"),
         }
@@ -648,15 +796,140 @@ impl std::error::Error for Error {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write as _;
+    use std::io::{Read as _, Write as _};
 
     use super::*;
+
+    #[test]
+    fn concurrent_snapshot_is_rejected_until_the_current_request_finishes() {
+        let _test = crate::recorder::TEST_LOCK.lock().unwrap();
+        let guard = SnapshotRequestGuard::acquire().unwrap();
+        let request = Request::CaptureSnapshot(SnapshotOptions::default());
+        let rejected = authenticated_response(&request);
+        drop(guard);
+        let resumed = authenticated_response(&request);
+        assert_eq!(
+            (rejected, matches!(resumed, Response::Snapshot(_))),
+            (Response::Error("a seismograph snapshot is already in progress".into()), true)
+        );
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn expired_frame_deadline_does_not_consume_a_buffered_request() {
+        let (mut client, mut server) = connected_pair();
+        seismograph_protocol::write_request(&mut client, 1, &Request::ReadRecorderStatistics).unwrap();
+        let error = DeadlineReader {
+            stream: &mut server,
+            deadline: Instant::now(),
+        }
+        .read(&mut [0; 1])
+        .unwrap_err();
+        let request = read_request_with_timeout(&mut server, &AtomicBool::new(false), Duration::from_secs(1), ReadTimeout::Idle).unwrap();
+        assert_eq!(
+            (error.kind(), request),
+            (io::ErrorKind::TimedOut, (1, Request::ReadRecorderStatistics))
+        );
+    }
+
+    #[test]
+    fn unclassified_io_failure_preserves_the_protocol_error() {
+        let error = classify_read_error(
+            seismograph_protocol::Error::Io(io::Error::new(io::ErrorKind::PermissionDenied, "socket denied")),
+            false,
+            ReadTimeout::Idle,
+        );
+        assert!(matches!(
+            error,
+            ClientError::Protocol(seismograph_protocol::Error::Io(error))
+                if error.kind() == io::ErrorKind::PermissionDenied && error.to_string() == "socket denied"
+        ));
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn client_spawn_failure_releases_registration_and_reports_error() {
+        let clients = Arc::new(ActiveClients::new());
+        let (mut peer, stream) = connected_pair();
+        let registration = clients.register(&stream).unwrap().unwrap();
+        let last_error = Arc::new(Mutex::new(None));
+        spawn_client_thread_with(
+            stream,
+            test_descriptor(),
+            Arc::new(AtomicBool::new(false)),
+            registration,
+            &last_error,
+            |_operation| Err(io::Error::other("worker unavailable")),
+        );
+        assert_eq!(
+            (
+                last_error.lock().unwrap().clone(),
+                clients.state.lock().unwrap().streams.len(),
+                connection_is_closed(&mut peer)
+            ),
+            (Some("worker unavailable".into()), 0, true)
+        );
+    }
 
     fn connected_pair() -> (TcpStream, TcpStream) {
         let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).unwrap();
         let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
         let (server, _) = listener.accept().unwrap();
         (client, server)
+    }
+
+    fn test_descriptor() -> MonitorDescriptor {
+        MonitorDescriptor {
+            name: "test".into(),
+            instance: None,
+            process_id: 1,
+            instance_id: InstanceId::from_bytes([1; 16]),
+            port: 1,
+            authentication: AuthenticationToken::from_bytes([2; 32]),
+        }
+    }
+
+    fn connection_is_closed(stream: &mut TcpStream) -> bool {
+        stream.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+        let mut byte = [0];
+        match stream.read(&mut byte) {
+            Ok(count) => count == 0,
+            Err(error) => matches!(
+                classify_read_error(seismograph_protocol::Error::Io(error), false, ReadTimeout::Idle),
+                ClientError::Disconnected
+            ),
+        }
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))] // OS scheduling makes the number of polling iterations nondeterministic.
+    fn wait_for_active_clients(monitor: &Monitor, expected: usize) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let active_count = monitor
+                .active_clients
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .streams
+                .len();
+            if active_count == expected {
+                break;
+            }
+            assert!(Instant::now() < deadline, "listener did not accept the expected clients");
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn connection_check_does_not_mistake_pending_data_or_would_block_for_disconnect() {
+        let (mut client, mut server) = connected_pair();
+        server.set_nonblocking(true).unwrap();
+        let idle_is_closed = connection_is_closed(&mut server);
+        client.write_all(&[1]).unwrap();
+        server.set_nonblocking(false).unwrap();
+        let readable_is_closed = connection_is_closed(&mut server);
+        assert_eq!((idle_is_closed, readable_is_closed), (false, false));
     }
 
     #[cfg_attr(miri, ignore)]
@@ -823,14 +1096,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[test]
     fn handshakes_are_required_and_authenticated() {
-        let descriptor = MonitorDescriptor {
-            name: "test".into(),
-            instance: None,
-            process_id: 1,
-            instance_id: InstanceId::from_bytes([1; 16]),
-            port: 1,
-            authentication: AuthenticationToken::from_bytes([2; 32]),
-        };
+        let descriptor = test_descriptor();
 
         let (mut client, server) = connected_pair();
         seismograph_protocol::write_request(&mut client, 1, &Request::ReadRecorderStatistics).unwrap();
@@ -848,9 +1114,8 @@ mod tests {
             },
         )
         .unwrap();
-        let stop = AtomicBool::new(true);
         assert!(matches!(
-            handle_client(server, &descriptor, &stop),
+            handle_client(server, &descriptor, &AtomicBool::new(false)),
             Err(ClientError::Authentication)
         ));
         assert_eq!(
@@ -879,51 +1144,158 @@ mod tests {
                 Response::Snapshot(_)
             ));
         }
+
+        let snapshot = crate::snapshot(crate::snapshot::SnapshotOptions::default()).unwrap();
+        let address = snapshot.as_bytes().as_ptr();
+        assert!(matches!(
+            snapshot_response(Ok(snapshot)),
+            Response::Snapshot(bytes) if std::ptr::eq(bytes.as_ptr(), address)
+        ));
     }
 
     #[cfg_attr(miri, ignore)]
     #[test]
     fn stopped_client_and_protocol_failures_are_reported() {
         let (mut client, mut server) = connected_pair();
-        server.set_read_timeout(Some(Duration::from_millis(1))).unwrap();
         assert!(matches!(
-            read_request_retry(&mut server, &AtomicBool::new(true)),
+            read_request_with_timeout(&mut server, &AtomicBool::new(true), Duration::from_millis(1), ReadTimeout::Idle),
             Err(ClientError::Stopped)
         ));
 
         client.write_all(b"not a protocol frame").unwrap();
         client.shutdown(Shutdown::Write).unwrap();
         assert!(matches!(
-            read_request_retry(&mut server, &AtomicBool::new(false)),
+            read_request_with_timeout(&mut server, &AtomicBool::new(false), Duration::from_secs(1), ReadTimeout::Idle),
             Err(ClientError::Protocol(_))
         ));
 
         let (client, mut server) = connected_pair();
         drop(client);
         assert!(matches!(
-            read_request_retry(&mut server, &AtomicBool::new(false)),
+            read_request_with_timeout(&mut server, &AtomicBool::new(false), Duration::from_secs(1), ReadTimeout::Idle),
             Err(ClientError::Disconnected)
         ));
 
-        let (mut client, mut server) = connected_pair();
-        server.set_read_timeout(Some(Duration::from_millis(1))).unwrap();
-        let writer = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(500));
-            seismograph_protocol::write_request(&mut client, 7, &Request::ReadRecorderStatistics).unwrap();
-        });
+        let (_client, mut server) = connected_pair();
         assert!(matches!(
-            read_request_retry(&mut server, &AtomicBool::new(false)),
-            Ok((7, Request::ReadRecorderStatistics))
+            read_request_with_timeout(&mut server, &AtomicBool::new(false), Duration::from_millis(1), ReadTimeout::Idle),
+            Err(ClientError::IdleTimedOut)
         ));
-        writer.join().unwrap();
 
         let (client, mut server) = connected_pair();
         server.shutdown(Shutdown::Read).unwrap();
         drop(client);
         assert!(matches!(
-            read_request_retry(&mut server, &AtomicBool::new(true)),
+            read_request_with_timeout(&mut server, &AtomicBool::new(true), Duration::from_secs(1), ReadTimeout::Idle),
             Err(ClientError::Stopped | ClientError::Disconnected)
         ));
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn partial_authentication_frame_timeout_closes_connection() {
+        let descriptor = test_descriptor();
+        let (mut client, server) = connected_pair();
+        let worker = thread::spawn(move || {
+            handle_client_with_timeouts(
+                server,
+                &descriptor,
+                &AtomicBool::new(false),
+                Duration::from_millis(50),
+                Duration::from_secs(1),
+            )
+        });
+
+        client.write_all(b"SGMP").unwrap();
+        let result = worker.join().unwrap();
+        assert_eq!(
+            (
+                matches!(result, Err(ClientError::AuthenticationTimedOut)),
+                connection_is_closed(&mut client),
+            ),
+            (true, true)
+        );
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn authenticated_idle_timeout_closes_connection() {
+        let descriptor = test_descriptor();
+        let authentication = descriptor.authentication;
+        let (mut client, server) = connected_pair();
+        let worker = thread::spawn(move || {
+            handle_client_with_timeouts(
+                server,
+                &descriptor,
+                &AtomicBool::new(false),
+                Duration::from_secs(1),
+                Duration::from_millis(50),
+            )
+        });
+
+        seismograph_protocol::write_request(&mut client, 1, &Request::Hello { authentication }).unwrap();
+        let hello = seismograph_protocol::read_response(&mut client).unwrap();
+        let result = worker.join().unwrap();
+        assert_eq!(
+            (
+                matches!(hello, (1, Response::Hello { .. })),
+                result.is_ok(),
+                connection_is_closed(&mut client),
+            ),
+            (true, true, true)
+        );
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn blocked_client_does_not_block_another_client() {
+        let monitor = Monitor::builder().name("monitor-concurrent-clients").start().unwrap();
+        let descriptor = monitor.descriptor().clone();
+        let mut blocked = TcpStream::connect(descriptor.socket_address()).unwrap();
+        blocked.write_all(b"SGMP").unwrap();
+        wait_for_active_clients(&monitor, 1);
+
+        let mut responsive = TcpStream::connect(descriptor.socket_address()).unwrap();
+        responsive.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        responsive.set_write_timeout(Some(Duration::from_secs(2))).unwrap();
+        seismograph_protocol::write_request(
+            &mut responsive,
+            1,
+            &Request::Hello {
+                authentication: descriptor.authentication,
+            },
+        )
+        .unwrap();
+
+        let response_received = matches!(
+            seismograph_protocol::read_response(&mut responsive),
+            Ok((1, Response::Hello { .. }))
+        );
+        drop(monitor);
+        assert_eq!((response_received, connection_is_closed(&mut blocked)), (true, true));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "requires real TCP sockets")]
+    fn active_client_limit_rejects_excess_connections() {
+        let clients = Arc::new(ActiveClients::new());
+        let mut registrations = Vec::new();
+        let mut peers = Vec::new();
+        for _ in 0..MAX_CONCURRENT_CLIENTS {
+            let (peer, stream) = connected_pair();
+            peers.push(peer);
+            registrations.push(clients.register(&stream).unwrap());
+        }
+        let (_peer, excess) = connected_pair();
+
+        assert_eq!(
+            (
+                peers.len(),
+                registrations.iter().all(Option::is_some),
+                clients.register(&excess).unwrap().is_none(),
+            ),
+            (MAX_CONCURRENT_CLIENTS, true, true)
+        );
     }
 
     #[test]
@@ -950,36 +1322,32 @@ mod tests {
             snapshot_response(Err(crate::Error::new("capture failed"))),
             Response::Error("capture failed".into())
         );
-        assert_eq!(io_error_action(io::ErrorKind::Other, false), IoErrorAction::Protocol);
-        assert_eq!(io_error_action(io::ErrorKind::Other, true), IoErrorAction::Stopped);
         assert!(listener_accept_should_retry(io::ErrorKind::WouldBlock));
         assert!(!listener_accept_should_retry(io::ErrorKind::Other));
 
-        let mut attempts = 0;
         assert!(matches!(
-            read_request_retry_with(&AtomicBool::new(false), None, || {
-                attempts += 1;
-                if attempts == 1 {
-                    Err(seismograph_protocol::Error::Io(io::Error::new(io::ErrorKind::TimedOut, "retry")))
-                } else {
-                    Ok((1, Request::ReadRecorderStatistics))
-                }
-            }),
-            Ok((1, Request::ReadRecorderStatistics))
+            classify_read_error(
+                seismograph_protocol::Error::Io(io::Error::new(io::ErrorKind::TimedOut, "timeout")),
+                false,
+                ReadTimeout::Authentication
+            ),
+            ClientError::AuthenticationTimedOut
         ));
         assert!(matches!(
-            read_request_retry_with(&AtomicBool::new(false), None, || {
-                Err(seismograph_protocol::Error::Io(io::Error::other("protocol")))
-            }),
-            Err(ClientError::Protocol(_))
+            classify_read_error(
+                seismograph_protocol::Error::Io(io::Error::new(io::ErrorKind::WouldBlock, "timeout")),
+                false,
+                ReadTimeout::Idle
+            ),
+            ClientError::IdleTimedOut
         ));
         assert!(matches!(
-            read_request_retry_with(&AtomicBool::new(false), Some(Instant::now()), || {
-                attempts += 1;
-                assert!(attempts <= 3, "expired authentication reads must not retry");
-                Err(seismograph_protocol::Error::Io(io::Error::new(io::ErrorKind::TimedOut, "retry")))
-            }),
-            Err(ClientError::AuthenticationTimedOut)
+            classify_read_error(
+                seismograph_protocol::Error::Io(io::Error::other("protocol")),
+                true,
+                ReadTimeout::Idle
+            ),
+            ClientError::Stopped
         ));
     }
 
@@ -993,6 +1361,7 @@ mod tests {
             ClientError::HandshakeRequired,
             ClientError::Authentication,
             ClientError::AuthenticationTimedOut,
+            ClientError::IdleTimedOut,
             ClientError::Disconnected,
             ClientError::Stopped,
         ];
@@ -1002,6 +1371,7 @@ mod tests {
             "monitor handshake is required",
             "monitor authentication failed",
             "monitor authentication timed out",
+            "monitor client idle timeout expired",
             "monitor client disconnected",
             "monitor stopped",
         ];

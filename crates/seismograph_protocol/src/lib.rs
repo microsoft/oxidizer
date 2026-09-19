@@ -65,6 +65,8 @@ impl std::error::Error for Error {
 /// # Errors
 ///
 /// Returns an error when the request is too large or writing fails.
+/// After an I/O error, the writer may contain a partial frame and must be
+/// discarded rather than reused for another frame.
 pub fn write_request(writer: &mut impl Write, request_id: u64, request: &Request) -> Result<(), Error> {
     let (kind, payload) = message::encode_request(request)?;
     write_frame(writer, kind, request_id, &payload)
@@ -75,6 +77,8 @@ pub fn write_request(writer: &mut impl Write, request_id: u64, request: &Request
 /// # Errors
 ///
 /// Returns an error when reading fails or the request is malformed.
+/// After an I/O error, the reader may be positioned within a frame and must be
+/// discarded rather than reused for another frame.
 pub fn read_request(reader: &mut impl Read) -> Result<(u64, Request), Error> {
     let frame = read_frame(reader, MAX_CONTROL_BYTES)?;
     message::decode_request(frame.kind, &frame.payload).map(|request| (frame.request_id, request))
@@ -85,9 +89,11 @@ pub fn read_request(reader: &mut impl Read) -> Result<(u64, Request), Error> {
 /// # Errors
 ///
 /// Returns an error when the response is too large or writing fails.
+/// After an I/O error, the writer may contain a partial frame and must be
+/// discarded rather than reused for another frame.
 pub fn write_response(writer: &mut impl Write, request_id: u64, response: &Response) -> Result<(), Error> {
     let (kind, payload) = message::encode_response(response)?;
-    write_frame(writer, kind, request_id, &payload)
+    write_frame(writer, kind, request_id, payload.as_ref())
 }
 
 /// Reads one response frame.
@@ -95,6 +101,8 @@ pub fn write_response(writer: &mut impl Write, request_id: u64, response: &Respo
 /// # Errors
 ///
 /// Returns an error when reading fails or the response is malformed.
+/// After an I/O error, the reader may be positioned within a frame and must be
+/// discarded rather than reused for another frame.
 pub fn read_response(reader: &mut impl Read) -> Result<(u64, Response), Error> {
     let frame = read_frame(reader, MAX_SNAPSHOT_BYTES)?;
     message::decode_response(frame.kind, &frame.payload).map(|response| (frame.request_id, response))
@@ -152,15 +160,14 @@ fn read_frame(reader: &mut impl Read, maximum: usize) -> Result<Frame, Error> {
         return Err(Error::MessageTooLarge);
     }
     let mut payload = Vec::new();
+    payload.try_reserve_exact(len).map_err(|_error| Error::MessageTooLarge)?;
     let mut chunk = [0_u8; FRAME_READ_CHUNK_BYTES];
     for _ in 0..len / chunk.len() {
-        payload.try_reserve_exact(chunk.len()).map_err(|_error| Error::MessageTooLarge)?;
         reader.read_exact(&mut chunk).map_err(Error::Io)?;
         payload.extend_from_slice(&chunk);
     }
     let tail_len = len % chunk.len();
     if tail_len != 0 {
-        payload.try_reserve_exact(tail_len).map_err(|_error| Error::MessageTooLarge)?;
         reader.read_exact(&mut chunk[..tail_len]).map_err(Error::Io)?;
         payload.extend_from_slice(&chunk[..tail_len]);
     }
@@ -302,6 +309,55 @@ mod tests {
             [
                 b'S', b'G', b'M', b'P', 7, 0, 105, 0, 9, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 1, 0, 1, 0, 0,
             ]
+        );
+    }
+
+    #[test]
+    fn snapshot_response_writes_the_original_payload_with_stable_framing() {
+        struct SnapshotWriter {
+            payload_address: *const u8,
+            header: [u8; FRAME_HEADER_BYTES],
+            written: usize,
+            flushed: bool,
+        }
+
+        impl Write for SnapshotWriter {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                let len = buf.len().min(3);
+                if self.written < FRAME_HEADER_BYTES {
+                    self.header[self.written..self.written + len].copy_from_slice(&buf[..len]);
+                } else {
+                    let offset = self.written - FRAME_HEADER_BYTES;
+                    assert_eq!(buf.as_ptr(), self.payload_address.wrapping_add(offset));
+                }
+                self.written += len;
+                Ok(len)
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                self.flushed = true;
+                Ok(())
+            }
+        }
+
+        let payload = vec![0xA5; 17];
+        let payload_len = payload.len();
+        let mut writer = SnapshotWriter {
+            payload_address: payload.as_ptr(),
+            header: [0; FRAME_HEADER_BYTES],
+            written: 0,
+            flushed: false,
+        };
+        let response = Response::Snapshot(payload);
+        write_response(&mut writer, 0x0102_0304_0506_0708, &response).unwrap();
+
+        assert_eq!(
+            (writer.header, writer.written, writer.flushed),
+            (
+                [b'S', b'G', b'M', b'P', 7, 0, 103, 0, 8, 7, 6, 5, 4, 3, 2, 1, 17, 0, 0, 0],
+                FRAME_HEADER_BYTES + payload_len,
+                true,
+            )
         );
     }
 

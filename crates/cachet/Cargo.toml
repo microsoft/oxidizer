@@ -50,6 +50,7 @@ service = ["dep:cachet_service", "dep:layered"]
 serialize = ["dep:serde", "dep:postcard", "dep:bytesbuf"]
 seismograph = [
     "anyspawn/seismograph",
+    "bytesbuf?/seismograph",
     "cachet_memory?/seismograph",
     "dep:seismograph",
     "tick/seismograph",
@@ -77,7 +78,7 @@ uniflight = { workspace = true }
 [dev-dependencies]
 alloc_tracker = { workspace = true }
 benchmarking = { path = "../benchmarking" }
-bytesbuf = { path = "../bytesbuf" }
+bytesbuf = { path = "../bytesbuf", features = ["seismograph"] }
 cachet_memory = { path = "../cachet_memory" }
 cachet_service = { path = "../cachet_service" }
 cachet_tier = { path = "../cachet_tier", features = ["test-util"] }

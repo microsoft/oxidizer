@@ -999,6 +999,7 @@ fn ownership_and_lock_operations_emit_runtime_telemetry() {
             capture_backtraces: true,
             ..Default::default()
         },
+        event_capacity_per_thread: seismograph::recorder::EventBufferCapacity::new(4_096).unwrap(),
         ..Default::default()
     });
 

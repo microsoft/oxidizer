@@ -47,10 +47,9 @@
 //!   section versions are skipped and reported through
 //!   [`snapshot::Snapshot::skipped_sections`].
 //!
-//! Metadata and statistics sections are required. Historical section versions
-//! accepted by the decoder receive documented neutral defaults for fields that
-//! did not yet exist. Producers must not change the meaning or byte order of an
-//! existing version.
+//! Metadata and statistics sections are required. Statistics must use the current
+//! section version; legacy statistics payloads are not supported. Producers must
+//! not change the meaning or byte order of an existing version.
 
 pub mod callers;
 pub mod snapshot;
@@ -90,7 +89,7 @@ use seismograph::recorder::io::{
 };
 use seismograph::recorder::runtime::{RuntimeEvent as RuntimeEventContext, RuntimeId, WorkerId as RuntimeWorkerId};
 use seismograph::recorder::thread::ThreadLog as RuntimeThreadLog;
-use snapshot::{Domain, Estimate, Histograms, Region, SizeClass, SkippedSectionFields, Snapshot, Stats};
+use snapshot::{Domain, Estimate, Histograms, PeakLiveBytesScope, Region, SizeClass, SkippedSectionFields, Snapshot, Stats};
 use topology::{Segment, Slice, SliceKind, TopologyRegion};
 use wire::format::{Header, Section};
 use wire::io::{Reader, Writer};
@@ -125,7 +124,8 @@ const RUNTIME_EVENTS_FIXED_LEN: usize = 81;
 const RUNTIME_THREAD_FIXED_LEN: usize = 24;
 const RUNTIME_EVENT_FIXED_LEN: usize = 92;
 const LEGACY_RUNTIME_EVENT_FIXED_LEN: usize = 26;
-const STATS_PAYLOAD_LEN: usize = 13 * 8;
+const STATS_SECTION_VERSION: u16 = 2;
+const STATS_PAYLOAD_LEN: usize = 13 * 8 + 1;
 
 /// An error reported while encoding or decoding a telemetry snapshot.
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -306,7 +306,7 @@ pub fn encode(snapshot: &Snapshot, output: &mut [u8]) -> Result<usize, Error> {
     writer.begin_section(SECTION_METADATA, SECTION_VERSION, 8)?;
     writer.write_u64(snapshot.metadata.capture_duration_nanos)?;
 
-    writer.begin_section(SECTION_STATS, SECTION_VERSION, STATS_PAYLOAD_LEN)?;
+    writer.begin_section(SECTION_STATS, STATS_SECTION_VERSION, STATS_PAYLOAD_LEN)?;
     write_stats(&mut writer, snapshot.stats)?;
 
     let size_classes_len = checked_add(4, checked_mul(snapshot.size_classes.len(), 4 + 8 + 9 * 8)?)?;
@@ -379,7 +379,17 @@ pub fn decode(bytes: &[u8]) -> Result<Snapshot, Error> {
             }
             seen_sections |= bit;
         }
-        if section.id() == SECTION_TOPOLOGY {
+        if section.id() == SECTION_STATS {
+            if section.version() != STATS_SECTION_VERSION {
+                snapshot
+                    .skipped_sections
+                    .push(snapshot::SkippedSection::from_fields(SkippedSectionFields {
+                        id: section.id(),
+                        version: section.version(),
+                    }));
+                continue;
+            }
+        } else if section.id() == SECTION_TOPOLOGY {
             if section.version() != SECTION_VERSION && section.version() != TOPOLOGY_SECTION_VERSION {
                 snapshot
                     .skipped_sections
@@ -477,6 +487,11 @@ fn write_stats(writer: &mut Writer<'_>, stats: Stats) -> Result<(), Error> {
     ] {
         writer.write_u64(value)?;
     }
+    writer.write_u8(match stats.peak_live_bytes_scope {
+        PeakLiveBytesScope::Unavailable => 0,
+        PeakLiveBytesScope::SnapshotSamples => 1,
+        PeakLiveBytesScope::Lifetime => 2,
+    })?;
     Ok(())
 }
 
@@ -495,6 +510,12 @@ fn read_stats(reader: &mut Reader<'_>) -> Result<Stats, Error> {
         pending_remote_blocks: reader.read_u64()?,
         remote_pushes_in_progress: reader.read_u64()?,
         drained_remote_blocks: reader.read_u64()?,
+        peak_live_bytes_scope: match reader.read_u8()? {
+            0 => PeakLiveBytesScope::Unavailable,
+            1 => PeakLiveBytesScope::SnapshotSamples,
+            2 => PeakLiveBytesScope::Lifetime,
+            _ => return Err(Error::malformed_section(SECTION_STATS)),
+        },
     })
 }
 
@@ -1780,6 +1801,13 @@ mod tests {
     )]
 
     use super::*;
+
+    #[test]
+    fn stats_writer_rejects_missing_peak_scope_storage() {
+        let mut bytes = [0; 13 * size_of::<u64>()];
+        let error = write_stats(&mut Writer::new(&mut bytes), Stats::default()).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Wire(WireError::UNEXPECTED_END));
+    }
 
     #[test]
     fn errors_have_descriptive_output_and_sources() {
