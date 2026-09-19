@@ -12,5 +12,4 @@ fn admitted_count(state: usize) -> Option<usize> {
     }
 }
 
-#[path = "../../src/tuning_telemetry/loom_tests.rs"]
 mod models;

@@ -49,6 +49,7 @@ pub(crate) unsafe fn decommit(address: *mut u8, size: usize) -> bool {
     unsafe { madvise(address.cast(), size, MADV_DONTNEED) == 0 && mprotect(address.cast(), size, PROT_NONE) == 0 }
 }
 
+#[cfg_attr(test, mutants::skip)] // The scheduler-selected CPU/NUMA hint has no stable value for mutation assertions.
 pub(crate) fn current_processor_location() -> (usize, usize) {
     let mut cpu = 0_u32;
     let mut node = 0_u32;

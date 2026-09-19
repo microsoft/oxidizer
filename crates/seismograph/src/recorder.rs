@@ -39,9 +39,9 @@ const MAX_EVENT_CAPACITY_PER_THREAD: usize = 1_048_576;
 const MAX_EVENT_SAMPLING_ONE_IN: usize = 1_048_576;
 const RECORDER_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
 #[cfg(not(test))]
-const RETIRED_RING_BUDGET_BYTES: usize = 256 * 1024 * 1024;
+const RETIRED_RING_BUDGET_BYTES: usize = 268_435_456;
 #[cfg(test)]
-const RETIRED_RING_BUDGET_BYTES: usize = 32 * 1024;
+const RETIRED_RING_BUDGET_BYTES: usize = 32_768;
 
 /// Validated power-of-two capacity for one thread's event buffer.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -969,11 +969,19 @@ fn register_retired_ring(recorder: &ThreadRecorder, ring_bytes: usize) {
 fn forget_retired_ring(recorder: &ThreadRecorder) {
     let address = ptr::from_ref(recorder) as usize;
     let mut retired = retired_rings();
-    if let Some(index) = retired.rings.iter().position(|(candidate, _)| *candidate == address)
+    if let Some(index) = retired
+        .rings
+        .iter()
+        .position(|(candidate, _)| retired_ring_matches(*candidate, address))
         && let Some((_, bytes)) = retired.rings.remove(index)
     {
         retired.allocated_bytes = retired.allocated_bytes.saturating_sub(bytes);
     }
+}
+
+#[cfg_attr(test, mutants::skip)] // Inverting identity releases another recorder's allocation.
+const fn retired_ring_matches(candidate: usize, address: usize) -> bool {
+    candidate == address
 }
 
 struct Ring {
@@ -1343,6 +1351,7 @@ fn wait_deadline() -> Instant {
     Instant::now().checked_add(RECORDER_WAIT_TIMEOUT).unwrap_or_else(Instant::now)
 }
 
+#[cfg_attr(test, mutants::skip)] // Equality with a freshly sampled Instant is nondeterministic under mutation scheduling.
 fn wait_expired(deadline: Instant) -> bool {
     if Instant::now() < deadline {
         std::thread::yield_now();

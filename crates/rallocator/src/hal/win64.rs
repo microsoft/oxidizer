@@ -7,6 +7,7 @@ use windows_sys::Win32::System::Kernel::PROCESSOR_NUMBER;
 use windows_sys::Win32::System::Memory::{MEM_COMMIT, MEM_DECOMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE, VirtualAlloc, VirtualFree};
 use windows_sys::Win32::System::SystemInformation::{GetTickCount64, GlobalMemoryStatusEx, MEMORYSTATUSEX};
 
+#[cfg_attr(test, mutants::skip)] // Linux mutation runs enumerate Windows-only source that cannot execute there.
 pub(crate) fn memory_status() -> Option<super::MemoryStatus> {
     memory_status_with(|status| {
         // SAFETY: the OS writes the correctly sized, stack-resident structure.
@@ -14,6 +15,7 @@ pub(crate) fn memory_status() -> Option<super::MemoryStatus> {
     })
 }
 
+#[cfg_attr(test, mutants::skip)] // Linux mutation runs enumerate Windows-only source that cannot execute there.
 fn memory_status_with(query: impl FnOnce(&mut MEMORYSTATUSEX) -> bool) -> Option<super::MemoryStatus> {
     let mut status = MEMORYSTATUSEX {
         dwLength: size_of::<MEMORYSTATUSEX>() as u32,
@@ -29,6 +31,7 @@ fn memory_status_with(query: impl FnOnce(&mut MEMORYSTATUSEX) -> bool) -> Option
 }
 use windows_sys::Win32::System::Threading::{GetCurrentProcessorNumberEx, GetNumaProcessorNodeEx};
 
+#[cfg_attr(test, mutants::skip)] // Linux mutation runs enumerate Windows-only source that cannot execute there.
 pub(crate) fn current_processor_location() -> (usize, usize) {
     processor_location_with(|processor, node| {
         // SAFETY: these allocation-free OS queries write only the stack outputs.
@@ -39,6 +42,7 @@ pub(crate) fn current_processor_location() -> (usize, usize) {
     })
 }
 
+#[cfg_attr(test, mutants::skip)] // Linux mutation runs enumerate Windows-only source that cannot execute there.
 fn processor_location_with(query: impl FnOnce(&mut PROCESSOR_NUMBER, &mut u16) -> bool) -> (usize, usize) {
     let mut processor = PROCESSOR_NUMBER {
         Group: 0,

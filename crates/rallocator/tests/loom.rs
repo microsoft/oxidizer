@@ -5,8 +5,8 @@
 
 #![cfg(loom)]
 
-#[path = "../src/telemetry/remote_counts/batch_loom_tests.rs"]
+#[path = "loom_models/remote_count_batches.rs"]
 mod remote_count_batches;
-#[path = "../src/telemetry/remote_counts/loom_tests.rs"]
+#[path = "loom_models/remote_counts.rs"]
 mod remote_counts;
 mod tuning_telemetry;

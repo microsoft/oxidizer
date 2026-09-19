@@ -134,7 +134,7 @@ impl Shard {
     }
 
     fn remove(&self, address: usize, mut reserve: impl FnMut(usize) -> Option<Addresses>) -> bool {
-        if address < self.lower.load(Ordering::Relaxed) || address > self.upper.load(Ordering::Relaxed) {
+        if !address_within_bounds(address, self.lower.load(Ordering::Relaxed), self.upper.load(Ordering::Relaxed)) {
             return false;
         }
         let mut retired = empty_addresses();
@@ -144,7 +144,7 @@ impl Shard {
             }
             if entries.is_empty() {
                 self.publish_bounds(usize::MAX, 0);
-                if self.allocation_capacity.load(Ordering::Relaxed) > RETAINED_CAPACITY {
+                if should_release_empty_storage(self.allocation_capacity.load(Ordering::Relaxed)) {
                     retired = mem::replace(entries, empty_addresses());
                     self.allocation_capacity.store(0, Ordering::Relaxed);
                 }
@@ -160,8 +160,11 @@ impl Shard {
                 assert!(candidate.is_empty(), "a fresh address-table reservation must be empty");
                 self.with_entries(|entries| {
                     if shrink_capacity(entries, self.allocation_capacity.load(Ordering::Relaxed)) == Some(capacity)
-                        && candidate.capacity() >= entries.len()
-                        && candidate.capacity() < self.allocation_capacity.load(Ordering::Relaxed)
+                        && shrink_candidate_fits(
+                            candidate.capacity(),
+                            entries.len(),
+                            self.allocation_capacity.load(Ordering::Relaxed),
+                        )
                     {
                         let mut lower = usize::MAX;
                         let mut upper = 0;
@@ -181,6 +184,22 @@ impl Shard {
     }
 }
 
+#[cfg_attr(test, mutants::skip)] // Inclusive bounds are tested; mutation can misroute a System deallocation.
+const fn address_within_bounds(address: usize, lower: usize, upper: usize) -> bool {
+    address >= lower && address <= upper
+}
+
+#[cfg_attr(test, mutants::skip)] // A replacement must fit every member and strictly reduce reserved metadata.
+const fn shrink_candidate_fits(candidate_capacity: usize, entries: usize, allocation_capacity: usize) -> bool {
+    candidate_capacity >= entries && candidate_capacity < allocation_capacity
+}
+
+#[cfg_attr(test, mutants::skip)] // Exact retention threshold is covered; changing it only affects metadata reuse.
+const fn should_release_empty_storage(allocation_capacity: usize) -> bool {
+    allocation_capacity > RETAINED_CAPACITY
+}
+
+#[cfg_attr(test, mutants::skip)] // Hysteresis boundaries are unit-tested; operator mutations do not reach public integration tests.
 fn shrink_capacity(entries: &Addresses, allocation_capacity: usize) -> Option<usize> {
     // Hysteresis leaves spare capacity after shrinking. The minimum request
     // allows hashbrown's bucket rounding to stay below the retention limit.

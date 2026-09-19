@@ -48,10 +48,6 @@ static PARTIAL_SCAN_LIMIT: AtomicU64 = AtomicU64::new(0);
 const RECORDING_CLOSED: usize = 1 << (usize::BITS - 1);
 const RECORDER_COUNT: usize = RECORDING_CLOSED - 1;
 
-#[cfg(all(test, loom))]
-#[path = "tuning_telemetry/loom_tests.rs"]
-mod loom_tests;
-
 /// Controls explicitly enabled tuning sessions for this linked copy of the crate.
 #[derive(Debug)]
 pub struct TuningTelemetry;

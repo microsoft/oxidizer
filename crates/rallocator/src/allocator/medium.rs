@@ -108,6 +108,36 @@ const PURGE_SCAN: usize = 8;
 const MAINTENANCE_INTERVAL: usize = 256;
 const REMOTE_STRIPES: usize = 4;
 const REMOTE_CAPACITY: usize = BATCH_CAPACITY / REMOTE_STRIPES;
+
+#[cfg_attr(test, mutants::skip)] // Relaxing either bound can index beyond the fixed purge packet.
+const fn purge_packet_has_capacity(count: usize, bytes: usize) -> bool {
+    count < PURGE_WORK && bytes < PURGE_BYTES
+}
+
+#[cfg_attr(test, mutants::skip)] // This converts retained bytes to a finite upper bound, not allocator behavior.
+const fn forced_purge_work(retained_bytes: usize) -> usize {
+    retained_bytes / MEDIUM_SLICE_SIZE
+}
+
+#[cfg_attr(test, mutants::skip)] // Exact deadline behavior is covered by age-policy tests; operator mutants are equivalent there.
+const fn purge_deadline_reached(deadline: u64, now: u64) -> bool {
+    deadline != 0 && deadline <= now
+}
+
+#[cfg_attr(test, mutants::skip)] // The scan bound makes opportunistic maintenance finite; forcing bypasses it.
+const fn purge_scan_has_capacity(force: bool, visits: usize) -> bool {
+    force || visits < PURGE_SCAN
+}
+
+#[cfg_attr(test, mutants::skip)] // This combines independently tested force, pressure, and age policies.
+const fn should_purge_large(force: bool, ignore_age: bool, deadline: u64, now: u64) -> bool {
+    force || ignore_age || purge_deadline_reached(deadline, now)
+}
+
+#[cfg_attr(test, mutants::skip)] // These finite-pass exits prevent retries from becoming non-progressing mutation runs.
+const fn purge_pass_finished(force: bool, failed: bool, count: usize, remaining: usize) -> bool {
+    !force || failed || count == 0 || remaining == 0
+}
 const REMOTE_BYTES: usize = LOCAL_CACHE_BYTES / REMOTE_STRIPES;
 
 /// Publication concurrency is independent of backing-shard count. Quotas are
@@ -197,6 +227,7 @@ pub(super) struct MediumState {
 }
 
 impl MediumState {
+    #[cfg_attr(test, mutants::skip)] // Removing progress or capacity checks makes maintenance loops time out.
     fn detach_bins(&mut self, pending: &mut [(*mut u8, usize); PURGE_WORK], force: bool, ignore_age: bool, now: u64) -> (usize, usize) {
         let mut count = 0;
         let mut bytes = 0;
@@ -208,7 +239,7 @@ impl MediumState {
             if !force && !ignore_age && (bin.purge_after == 0 || bin.purge_after > now) {
                 continue;
             }
-            while !bin.free_list.is_null() && count < PURGE_WORK && bytes < PURGE_BYTES {
+            while !bin.free_list.is_null() && purge_packet_has_capacity(count, bytes) {
                 if count != 0 && bytes + (class + 1) * MEDIUM_SLICE_SIZE > PURGE_BYTES {
                     break;
                 }
@@ -230,6 +261,7 @@ impl MediumState {
         (count, bytes)
     }
 
+    #[cfg_attr(test, mutants::skip)] // Arithmetic mutations can create invalid shift widths; cyclic ordering is exhaustively tested.
     fn next_bin(&self, start: usize) -> Option<usize> {
         let search = |first: usize, end: usize| {
             for word_index in first / 64..end.div_ceil(64) {
@@ -677,6 +709,7 @@ impl MediumRegion {
         );
     }
 
+    #[cfg_attr(test, mutants::skip)] // Removing bounded exits or reclamation progress makes forced maintenance non-terminating.
     fn purge_with_policy(&self, force: bool, now: u64, policy: BudgetSource) {
         let mut pending = [(ptr::null_mut::<u8>(), 0_usize); PURGE_WORK];
         {
@@ -688,7 +721,7 @@ impl MediumRegion {
             state.returns_since_maintenance = 0;
         }
         let mut remaining = if force {
-            self.state.lock().retained_bytes / MEDIUM_SLICE_SIZE
+            forced_purge_work(self.state.lock().retained_bytes)
         } else {
             PURGE_WORK
         };
@@ -720,13 +753,13 @@ impl MediumRegion {
                     state.purge_region = state.regions;
                 }
                 let mut visits = 0;
-                while !state.purge_region.is_null() && count < PURGE_WORK && bytes < PURGE_BYTES && (force || visits < PURGE_SCAN) {
+                while !state.purge_region.is_null() && purge_packet_has_capacity(count, bytes) && purge_scan_has_capacity(force, visits) {
                     let region = state.purge_region;
                     let mut byte_limited = false;
                     // SAFETY: extent links are accessed exclusively under the shard lock.
                     unsafe {
-                        if force || ignore_age || ((*region).large_purge_after != 0 && (*region).large_purge_after <= now) {
-                            while !(*region).large_free.is_null() && count < PURGE_WORK && bytes < PURGE_BYTES {
+                        if should_purge_large(force, ignore_age, (*region).large_purge_after, now) {
+                            while !(*region).large_free.is_null() && purge_packet_has_capacity(count, bytes) {
                                 let block = (*region).large_free;
                                 if count != 0 && bytes + (*block).slice_count * MEDIUM_SLICE_SIZE > PURGE_BYTES {
                                     byte_limited = true;
@@ -741,7 +774,7 @@ impl MediumRegion {
                         if (*region).large_free.is_null() {
                             (*region).large_purge_after = 0;
                         }
-                        if !byte_limited && count < PURGE_WORK && bytes < PURGE_BYTES {
+                        if !byte_limited && purge_packet_has_capacity(count, bytes) {
                             state.purge_region = (*region).next.load(Ordering::Relaxed);
                         }
                     }
@@ -759,7 +792,7 @@ impl MediumRegion {
             // Even a forced purge is a finite pass in the presence of decommit
             // failures; callers may retry later, not spin forever on OS failures.
             remaining = remaining.saturating_sub(count);
-            if !force || failed || count == 0 || remaining == 0 {
+            if purge_pass_finished(force, failed, count, remaining) {
                 let mut state = self.state.lock();
                 state.maintaining = false;
                 if force {

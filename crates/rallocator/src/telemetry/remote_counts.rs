@@ -110,12 +110,6 @@ pub(super) fn pushes_in_progress() -> usize {
     })
 }
 
-#[cfg(all(test, loom))]
-mod loom_tests;
-
-#[cfg(all(test, loom))]
-mod batch_loom_tests;
-
 #[cfg(test)]
 mod batch_tests;
 
