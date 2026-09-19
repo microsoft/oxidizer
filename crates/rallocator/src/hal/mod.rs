@@ -41,6 +41,7 @@ pub(crate) struct MemoryStatus {
 pub(crate) use platform::memory_status;
 
 #[cfg(miri)]
+#[cfg_attr(test, mutants::skip)] // Native mutation runs enumerate this Miri-only deterministic fixture.
 pub(crate) const fn memory_status() -> Option<MemoryStatus> {
     Some(MemoryStatus {
         total: 256 * 1024 * 1024 * 1024,
@@ -49,6 +50,7 @@ pub(crate) const fn memory_status() -> Option<MemoryStatus> {
 }
 
 #[cfg(miri)]
+#[cfg_attr(test, mutants::skip)] // Native mutation runs enumerate this Miri-only deterministic fixture.
 pub(crate) const fn current_processor_location() -> (usize, usize) {
     (0, 0)
 }

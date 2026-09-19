@@ -88,6 +88,7 @@ fn number(bytes: &[u8]) -> Option<usize> {
     found.then_some(value)
 }
 
+#[cfg_attr(test, mutants::skip)] // Direct syscall mechanics are environment-dependent; parsing and policy use injected readers below.
 fn read_file(path: &CStr, output: &mut [u8]) -> Option<usize> {
     // SAFETY: a NUL-terminated path and a live writable buffer are supplied.
     // Direct syscalls avoid reentrant allocation through filesystem abstractions.

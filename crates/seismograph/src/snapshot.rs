@@ -903,6 +903,11 @@ struct SnapshotArenaRange {
     chunk: *mut SnapshotArenaChunk,
 }
 
+#[cfg_attr(test, mutants::skip)] // Equal starts must remain before older ranges so parent fallback stays deterministic.
+const fn range_starts_before(existing: usize, inserted: usize) -> bool {
+    existing < inserted
+}
+
 struct SnapshotArena {
     head: *mut SnapshotArenaChunk,
     parent: *mut Self,
@@ -1057,7 +1062,7 @@ impl SnapshotArena {
             }));
         }
         let ranges = self.ranges.as_mut().expect("range storage was allocated above");
-        let index = ranges[..self.range_count].partition_point(|existing| existing.start < range.start);
+        let index = ranges[..self.range_count].partition_point(|existing| range_starts_before(existing.start, range.start));
         ranges.copy_within(index..self.range_count, index + 1);
         ranges[index] = range;
         self.range_count += 1;

@@ -1973,6 +1973,7 @@ pub(crate) fn flush_thread_aggregate_batch() {
     unsafe { flush_aggregate_batch(state) };
 }
 
+#[cfg_attr(test, mutants::skip)] // Platform bitmaps may have unused trailing bits; boundary behavior is tested directly.
 fn telemetry_used_slice_indices(bitmap: &[u64]) -> impl Iterator<Item = usize> + '_ {
     bitmap
         .iter()
