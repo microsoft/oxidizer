@@ -1,0 +1,42 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "zygote_rt"
+description = "Target-side runtime for low-latency zygote process launches."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["fork", "linux", "process", "runtime", "zygote"]
+categories = ["os::linux-apis"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/zygote_rt"
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
+# The allocation-free pre-runtime implementation includes kernel-version and
+# fatal-error paths that cannot be driven safely under coverage instrumentation.
+[package.metadata.coverage-gate]
+min-lines-percent = 52
+
+[features]
+default = []
+build = []
+private-test-util = []
+
+[dependencies]
+prost = { workspace = true, features = ["derive", "std"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { workspace = true }
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

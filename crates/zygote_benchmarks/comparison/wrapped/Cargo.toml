@@ -1,0 +1,23 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "zygote_bench_wrapped"
+version = "0.0.0"
+edition = "2024"
+publish = false
+build = "build.rs"
+
+[dependencies]
+zygote_rt = { path = "../../../zygote_rt" }
+
+[build-dependencies]
+zygote_rt = { path = "../../../zygote_rt", features = ["build"] }
+
+[[bin]]
+name = "wrapped_minimal"
+path = "../shared/minimal.rs"
+
+[[bin]]
+name = "wrapped_representative"
+path = "../shared/representative.rs"

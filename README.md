@@ -75,6 +75,8 @@ These are the primary crates built out of this repo:
 - [`thread_aware_core`](./crates/thread_aware_core/README.md) - Stable core traits and types for thread-aware state.
 - [`tick`](./crates/tick/README.md) - Provides primitives to interact with and manipulate machine time.
 - [`uniflight`](./crates/uniflight/README.md) - Coalesces duplicate async tasks into a single execution.
+- [`zygote_control`](./crates/zygote_control/README.md) - Repeatedly launches an integrated executable through an accelerated, `std::process`-style API.
+- [`zygote_rt`](./crates/zygote_rt/README.md) - Integrates executable targets with `zygote_control`, including optional prepared state.
 
 ## About this Repo
 

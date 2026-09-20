@@ -1,0 +1,119 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+name: Zygote test history
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+  merge_group: {}
+  workflow_dispatch:
+    inputs:
+      simulated_delay_ms:
+        description: Delay one synthetic history record to verify duration visibility
+        required: false
+        default: "0"
+      simulate_failure:
+        description: Record and fail one synthetic test outcome
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  scoped-tests:
+    name: "Zygote named test history (${{ matrix.os }})"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            runner: ubuntu-latest
+          - os: windows
+            runner: windows-latest
+          - os: linux-arm
+            runner: ubuntu-24.04-arm
+          - os: windows-arm
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/anvil-setup
+        with:
+          group: none
+      - name: Install Rust
+        run: just anvil-toolchain-stable-install
+      - name: Record individual test durations and outcomes
+        shell: pwsh
+        env:
+          ZYGOTE_HISTORY_OS: ${{ matrix.os }}
+          ZYGOTE_HISTORY_RUN: ${{ github.run_id }}
+          ZYGOTE_HISTORY_SHA: ${{ github.sha }}
+          ZYGOTE_HISTORY_DELAY_MS: ${{ inputs.simulated_delay_ms || '0' }}
+          ZYGOTE_HISTORY_SIMULATE_FAILURE: ${{ inputs.simulate_failure || 'false' }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $directory = 'target/zygote-test-history'
+          New-Item -ItemType Directory -Path $directory -Force | Out-Null
+          $records = [System.Collections.Generic.List[object]]::new()
+          $failed = $false
+          $delay = [int]$env:ZYGOTE_HISTORY_DELAY_MS
+          if ($delay -gt 0) {
+            $clock = [System.Diagnostics.Stopwatch]::StartNew()
+            Start-Sleep -Milliseconds $delay
+            $clock.Stop()
+            $records.Add([pscustomobject]@{os=$env:ZYGOTE_HISTORY_OS; run=$env:ZYGOTE_HISTORY_RUN; sha=$env:ZYGOTE_HISTORY_SHA; binary='synthetic'; name='deliberately_prolonged_fixture_build'; outcome='passed'; duration_ms=$clock.ElapsedMilliseconds})
+          }
+          if ($env:ZYGOTE_HISTORY_SIMULATE_FAILURE -eq 'true') {
+            $records.Add([pscustomobject]@{os=$env:ZYGOTE_HISTORY_OS; run=$env:ZYGOTE_HISTORY_RUN; sha=$env:ZYGOTE_HISTORY_SHA; binary='synthetic'; name='repeated_failure_probe'; outcome='failed'; duration_ms=0})
+            $failed = $true
+          }
+          foreach ($binary in @('launch_semantics', 'protocol')) {
+            $names = & cargo test --locked --package zygote_control --all-features --test $binary -- --list 2>&1
+            if ($LASTEXITCODE -ne 0) {
+              $records.Add([pscustomobject]@{os=$env:ZYGOTE_HISTORY_OS; run=$env:ZYGOTE_HISTORY_RUN; sha=$env:ZYGOTE_HISTORY_SHA; binary=$binary; name='discovery'; outcome='failed'; duration_ms=0})
+              $names | Out-File "$directory/$binary-discovery.log"
+              $failed = $true
+              continue
+            }
+            $tests = @($names | ForEach-Object {
+              if ("$_" -match '^(.+): test$') { $Matches[1] }
+            })
+            if ($tests.Count -eq 0) {
+              $records.Add([pscustomobject]@{os=$env:ZYGOTE_HISTORY_OS; run=$env:ZYGOTE_HISTORY_RUN; sha=$env:ZYGOTE_HISTORY_SHA; binary=$binary; name='discovery'; outcome='no-tests'; duration_ms=0})
+              $failed = $true
+              continue
+            }
+            $testIndex = 0
+            foreach ($test in $tests) {
+              $clock = [System.Diagnostics.Stopwatch]::StartNew()
+              $output = & cargo test --locked --package zygote_control --all-features --test $binary -- $test --exact --nocapture 2>&1
+              $exitCode = $LASTEXITCODE
+              $clock.Stop()
+              $log = "$directory/$binary-$testIndex.log"
+              $testIndex++
+              $output | Out-File -FilePath $log
+              $text = $output -join "`n"
+              $outcome = if ($exitCode -ne 0) { 'failed' } elseif ($text -match 'skipped:') { 'skipped' } else { 'passed' }
+              if ($exitCode -ne 0) {
+                $failed = $true
+                Write-Host "Failed: ${binary}::$test (see $log)"
+                Write-Host $text
+              }
+              $records.Add([pscustomobject]@{os=$env:ZYGOTE_HISTORY_OS; run=$env:ZYGOTE_HISTORY_RUN; sha=$env:ZYGOTE_HISTORY_SHA; binary=$binary; name=$test; outcome=$outcome; duration_ms=$clock.ElapsedMilliseconds})
+            }
+          }
+          $records | ConvertTo-Json -Depth 3 | Out-File -FilePath "$directory/results.json" -Encoding utf8
+          if ($failed) { exit 1 }
+      - name: Retain named test history
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: zygote-test-history-${{ matrix.os }}
+          path: target/zygote-test-history/
+          if-no-files-found: error
+          retention-days: 30

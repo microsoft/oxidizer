@@ -7139,3 +7139,36 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[package]]
+name = "zygote_benchmarks"
+version = "0.0.0"
+dependencies = [
+ "criterion",
+ "libc",
+ "metabench",
+ "prost",
+ "serde_json",
+ "windows-sys 0.61.2",
+ "zygote_control",
+ "zygote_rt",
+]
+
+[[package]]
+name = "zygote_control"
+version = "0.1.0"
+dependencies = [
+ "bitflags 2.13.1",
+ "libc",
+ "prost",
+ "windows-sys 0.61.2",
+ "zygote_rt",
+]
+
+[[package]]
+name = "zygote_rt"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "prost",
+]
