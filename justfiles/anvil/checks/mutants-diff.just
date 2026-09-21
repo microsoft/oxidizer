@@ -50,35 +50,8 @@ anvil-mutants-diff: anvil-mutants-diff-validate-prereqs anvil-impact
     # not a behaviour change for it.
     git diff "$base" --output=$diff_path
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    $monitor = $null
-    $monitor_path = Join-Path $tmp_dir 'anvil-mutants-memory-monitor.sh'
-    if ($IsLinux) {
-        $monitor_script = @'
-    #!/usr/bin/env bash
-    while true; do
-        printf 'ANVIL_MUTANT_TELEMETRY timestamp=%s\n' "$(date --utc --iso-8601=seconds)"
-        free -m | sed 's/^/ANVIL_MUTANT_TELEMETRY /'
-        ps -eo pid,ppid,rss,vsz,comm,args --sort=-rss |
-            head -n 12 |
-            sed 's/^/ANVIL_MUTANT_TELEMETRY process /'
-        sleep 3
-    done
-    '@
-        [System.IO.File]::WriteAllText($monitor_path, $monitor_script, [System.Text.UTF8Encoding]::new($false))
-        $monitor = Start-Process -FilePath '/bin/bash' -ArgumentList $monitor_path -NoNewWindow -PassThru
-    }
-    try {
-        $env:CARGO_BUILD_JOBS = '1'
-        & cargo {{_anvil_stable_toolchain_args}} mutants --in-diff $diff_path --no-shuffle --jobs 1 --jobserver-tasks 1 --cargo-arg=--jobs=1 --all-logs --re '^crates/http_headers/src/field_name\.rs:331:15: replace \+= with \*=$'
-        $status = $LASTEXITCODE
-    } finally {
-        if ($null -ne $monitor -and -not $monitor.HasExited) {
-            Stop-Process -Id $monitor.Id
-            $monitor.WaitForExit()
-        }
-        Remove-Item -LiteralPath $monitor_path -Force -ErrorAction SilentlyContinue
-    }
-    if ($status -ne 0) { exit $status }
+    & cargo {{_anvil_stable_toolchain_args}} mutants --in-diff $diff_path --no-shuffle --jobs 0
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # --- pr-mutants members ---
 
