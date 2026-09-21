@@ -64,6 +64,7 @@ use proc_macro::TokenStream;
 /// // Manual fake implementation
 /// #[cfg(any(feature = "test-util", test))]
 /// pub mod fakes {
+///     #[derive(Clone)]
 ///     pub struct FakeUserService;
 ///
 ///     impl FakeUserService {
@@ -137,7 +138,7 @@ use proc_macro::TokenStream;
 ///
 /// By specifying `generate_mockall_fake = true` in the attribute for the impl block, this macro
 /// will generate a mock implementation using the `mockall` crate. The generated mock will be placed
-/// in the specified module (default: "mocks"). This option requires the `fakeable` `mockall` Cargo
+/// in the specified module (default: "fakes"). This option requires the `fakeable` `mockall` Cargo
 /// feature and a direct `mockall` dependency in the consuming crate.
 ///
 /// ```rust
@@ -179,11 +180,18 @@ use proc_macro::TokenStream;
 ///   it cannot generate a fake that matches the wrapper's delegated method set.
 /// - Mockall generation rejects generic impl blocks; use a manual fake for generic services.
 /// - Mockall generation rejects trait impl blocks; use a manual fake for trait implementations.
+/// - Unsafe impl blocks are rejected because the macro cannot establish their safety invariants for
+///   the fake representation.
 /// - Receiver-less methods must return `Self`; other associated functions cannot select a real or
 ///   fake implementation to delegate to.
+/// - `mut self`, `Self` parameters, and nested `Self` return types such as `Option<Self>` are
+///   rejected because they cannot be translated across the wrapper boundary.
 /// - Typed receivers such as `self: Box<Self>` are rejected; use `self`, `&self`, or `&mut self`.
 /// - Direct `#[cfg(...)]` attributes are supported on structs. A `cfg_attr` that conditionally
 ///   applies `cfg` is rejected because it cannot safely gate every generated item.
+/// - Struct derives are copied to the wrapper and internal enum. The fake type must satisfy their
+///   bounds (for example, `Clone`), and derives that depend on struct shape or an enum default
+///   variant may be unsuitable.
 /// - Complex parameter patterns in method signatures are not supported in public methods
 /// - Generic types in impl blocks require careful handling
 ///

@@ -107,6 +107,7 @@ impl Parse for FakeableArg {
             }
             "fake_constructor" => {
                 let value: LitStr = input.parse()?;
+                validate_identifier(&value, "fake_constructor")?;
                 Ok(Self::FakeConstructor(value.value()))
             }
             "generate_mockall_fake" => {
@@ -125,6 +126,9 @@ impl Parse for FakeableArg {
             }
             "mockall_fake_module" => {
                 let value: LitStr = input.parse()?;
+                if value.value() != "." {
+                    validate_identifier(&value, "mockall_fake_module")?;
+                }
                 Ok(Self::MockallFakeModule(value.value()))
             }
             _ => Err(syn::Error::new_spanned(
@@ -133,4 +137,10 @@ impl Parse for FakeableArg {
             )),
         }
     }
+}
+
+fn validate_identifier(value: &LitStr, argument: &str) -> Result<()> {
+    syn::parse_str::<Ident>(&value.value())
+        .map(|_| ())
+        .map_err(|_error| syn::Error::new_spanned(value, format!("{argument} must be a valid Rust identifier")))
 }

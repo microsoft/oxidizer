@@ -1,0 +1,33 @@
+---
+source: crates/fakeable_impl/src/../tests/output_verification.rs
+expression: "prettyplease::unparse(&result_file)"
+---
+#[cfg(feature = "enabled")]
+impl __fakeable__MyService::MyService {
+    pub fn value(&self) -> i32 {
+        42
+    }
+}
+#[cfg(feature = "enabled")]
+impl MyService {
+    #[allow(unused_mut)]
+    #[allow(clippy::used_underscore_binding)]
+    pub fn value(&self) -> i32 {
+        match &self.inner {
+            __fakeable__MyService::Enum::Real(real) => real.value(),
+            #[cfg(any(feature = "test-util", test))]
+            __fakeable__MyService::Enum::Fake(fake) => fake.value(),
+        }
+    }
+}
+#[cfg(feature = "enabled")]
+#[cfg(any(feature = "test-util", test))]
+#[allow(clippy::all)]
+#[allow(clippy::pedantic)]
+#[allow(clippy::style)]
+pub mod fakes {
+    use super::*;
+    mockall::mock! {
+        #[derive(Debug)] pub MyService { pub fn value(& self) -> i32; }
+    }
+}

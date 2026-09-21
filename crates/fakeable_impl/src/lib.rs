@@ -56,6 +56,7 @@ fn process_struct(args: &FakeableArgs, item_struct: &ItemStruct) -> proc_macro2:
     let struct_name = &item_struct.ident;
     let struct_vis = &item_struct.vis;
     let struct_generics = &item_struct.generics;
+    let (impl_generics, type_generics, where_clause) = struct_generics.split_for_impl();
     let struct_attrs = &item_struct.attrs;
 
     if let Some(attr) = struct_attrs.iter().find(|attr| cfg_attr_can_disable_item(attr)) {
@@ -144,8 +145,8 @@ fn process_struct(args: &FakeableArgs, item_struct: &ItemStruct) -> proc_macro2:
 
             // Internal enum - needs derive attributes for wrapper struct to work
             #(#derive_attrs)*
-            pub(super) enum #enum_name #struct_generics {
-                Real(#struct_name #struct_generics),
+            pub(super) enum #enum_name #struct_generics #where_clause {
+                Real(#struct_name #type_generics),
                 #fakes_cfg
                 Fake(#fake_impl_path),
             }
@@ -159,13 +160,13 @@ fn process_struct(args: &FakeableArgs, item_struct: &ItemStruct) -> proc_macro2:
 
         // Wrapper struct
         #(#transformed_struct_attrs)*
-        #struct_vis struct #struct_name #struct_generics {
-            inner: #helper_module_name::#enum_name #struct_generics,
+        #struct_vis struct #struct_name #struct_generics #where_clause {
+            inner: #helper_module_name::#enum_name #type_generics,
         }
 
         // Basic implementation for the wrapper struct
         #(#cfg_attrs)*
-        impl #struct_generics #struct_name #struct_generics {
+        impl #impl_generics #struct_name #type_generics #where_clause {
             #fakes_cfg
             #struct_vis fn #fake_constructor_ident(fake_impl: #fake_impl_path) -> Self {
                 Self {
@@ -178,6 +179,21 @@ fn process_struct(args: &FakeableArgs, item_struct: &ItemStruct) -> proc_macro2:
 
 /// Process impl blocks
 fn process_impl(args: &FakeableArgs, item_impl: &ItemImpl) -> proc_macro2::TokenStream {
+    if let Some(unsafety) = &item_impl.unsafety {
+        return syn::Error::new_spanned(
+            unsafety,
+            "unsafe impl blocks are not supported because fake implementations cannot inherit the safety invariant",
+        )
+        .into_compile_error();
+    }
+
+    if let Some(attr) = item_impl.attrs.iter().find(|attr| cfg_attr_can_disable_item(attr)) {
+        return syn::Error::new_spanned(attr, "cfg_attr applying cfg is not supported; use a direct #[cfg(...)] attribute")
+            .into_compile_error();
+    }
+
+    let cfg_attrs: Vec<_> = item_impl.attrs.iter().filter(|attr| attr.path().is_ident("cfg")).collect();
+
     // Extract the struct segment from the impl target, including generic arguments.
     let struct_segment = match extract_struct_segment(item_impl) {
         Ok(segment) => segment,
@@ -226,9 +242,13 @@ fn process_impl(args: &FakeableArgs, item_impl: &ItemImpl) -> proc_macro2::Token
         {
             let fake_name = struct_name.to_string();
             let fake_module = args.mockall_fake_module.as_deref().unwrap_or("fakes");
-            match generate_mockall_fake(item_impl, &fake_name, fakes_attribute, fake_module) {
+            let generated = match generate_mockall_fake(item_impl, &fake_name, fakes_attribute, fake_module) {
                 Ok(mock) => mock,
                 Err(err) => return err.into_compile_error(),
+            };
+            quote! {
+                #(#cfg_attrs)*
+                #generated
             }
         }
     } else {
@@ -299,7 +319,7 @@ fn generate_wrapper_impl(
     helper_module_name: &proc_macro2::Ident,
     fakes_attribute: &str,
 ) -> Result<proc_macro2::TokenStream, syn::Error> {
-    let trait_path = &original_impl.trait_;
+    let trait_path = original_impl.trait_.as_ref().map(|(path, _)| path);
 
     // For trait impls, we need to implement all methods regardless of visibility
     let is_trait_impl = trait_path.is_some();
@@ -319,7 +339,8 @@ fn generate_wrapper_impl(
                     }
                 }
 
-                let delegation_method = generate_delegation_method(method, fakes_attribute, enum_name, struct_name, helper_module_name)?;
+                let delegation_method =
+                    generate_delegation_method(method, fakes_attribute, enum_name, struct_name, helper_module_name, trait_path)?;
                 delegation_methods.push(syn::ImplItem::Fn(delegation_method));
             }
             _ if is_trait_impl => delegation_methods.push(item.clone()),
@@ -339,6 +360,7 @@ fn generate_delegation_method(
     enum_name: &proc_macro2::Ident,
     real_struct_name: &proc_macro2::Ident,
     helper_module_name: &proc_macro2::Ident,
+    trait_path: Option<&syn::Path>,
 ) -> Result<syn::ImplItemFn, syn::Error> {
     let method_vis = &original_method.vis;
     let method_sig = &original_method.sig;
@@ -350,6 +372,34 @@ fn generate_delegation_method(
         return Err(syn::Error::new_spanned(
             method_sig,
             "typed self receivers are not supported; use self, &self, or &mut self",
+        ));
+    }
+
+    if receiver.is_some_and(|receiver| receiver.mutability.is_some() && matches!(receiver.kind, syn::ReceiverKind::Value)) {
+        return Err(syn::Error::new_spanned(
+            method_sig,
+            "mut self receivers are not supported; use self, &self, or &mut self",
+        ));
+    }
+
+    for input in &method_sig.inputs {
+        if let syn::FnArg::Typed(syn::PatType { ty, .. }) = input
+            && type_contains_bare_self(ty)
+        {
+            return Err(syn::Error::new_spanned(
+                ty,
+                "Self in method parameters is not supported across the wrapper boundary",
+            ));
+        }
+    }
+
+    if let syn::ReturnType::Type(_, ty) = &method_sig.output
+        && type_contains_bare_self(ty)
+        && !returns_self(&method_sig.output)
+    {
+        return Err(syn::Error::new_spanned(
+            ty,
+            "nested Self return types are not supported; only a direct Self return is supported",
         ));
     }
 
@@ -365,27 +415,32 @@ fn generate_delegation_method(
             method_name,
             &method_info.param_names,
             is_async,
+            trait_path,
         )
     } else if let Some(receiver) = receiver {
         if method_info.returns_self_with_receiver {
             generate_method_with_self_return_body(
                 enum_name,
+                real_struct_name,
                 helper_module_name,
                 method_name,
                 &method_info.param_names,
                 is_async,
                 &fakes_cfg,
                 receiver,
+                trait_path,
             )
         } else {
             generate_method_body(
                 enum_name,
+                real_struct_name,
                 helper_module_name,
                 method_name,
                 &method_info.param_names,
                 is_async,
                 &fakes_cfg,
                 receiver,
+                trait_path,
             )
         }
     } else {
@@ -416,10 +471,21 @@ fn generate_constructor_body(
     method_name: &proc_macro2::Ident,
     param_names: &[proc_macro2::Ident],
     is_async: bool,
+    trait_path: Option<&syn::Path>,
 ) -> proc_macro2::TokenStream {
     let await_suffix = is_async.then(|| quote! { .await });
-    let method_call = quote! {
-        #helper_module_name::#real_struct_name::#method_name(#(#param_names),*)#await_suffix
+    let method_call = if let Some(trait_path) = trait_path {
+        quote! {
+            <#helper_module_name::#real_struct_name as #trait_path>::#method_name(
+                #(#param_names),*
+            )#await_suffix
+        }
+    } else {
+        quote! {
+            #helper_module_name::#real_struct_name::#method_name(
+                #(#param_names),*
+            )#await_suffix
+        }
     };
 
     quote! {
@@ -430,21 +496,30 @@ fn generate_constructor_body(
 }
 
 /// Generates the body for immutable methods
+#[expect(clippy::too_many_arguments, reason = "Code generation inputs mirror the delegated method context")]
 fn generate_method_body(
     enum_name: &proc_macro2::Ident,
+    real_struct_name: &proc_macro2::Ident,
     helper_module_name: &proc_macro2::Ident,
     method_name: &proc_macro2::Ident,
     param_names: &[proc_macro2::Ident],
     is_async: bool,
     fakes_cfg: &proc_macro2::TokenStream,
     receiver: &syn::Receiver,
+    trait_path: Option<&syn::Path>,
 ) -> proc_macro2::TokenStream {
-    let real_call = generate_method_call(
-        &proc_macro2::Ident::new("real", proc_macro2::Span::call_site()),
-        method_name,
-        param_names,
-        is_async,
-    );
+    let real = proc_macro2::Ident::new("real", proc_macro2::Span::call_site());
+    let await_suffix = is_async.then(|| quote! { .await });
+    let real_call = if let Some(trait_path) = trait_path {
+        quote! {
+            <#helper_module_name::#real_struct_name as #trait_path>::#method_name(
+                #real,
+                #(#param_names),*
+            )#await_suffix
+        }
+    } else {
+        generate_method_call(&real, method_name, param_names, is_async)
+    };
     let fake_call = generate_method_call(
         &proc_macro2::Ident::new("fake", proc_macro2::Span::call_site()),
         method_name,
@@ -464,21 +539,30 @@ fn generate_method_body(
 /// Generates the body for methods with receivers that return Self.
 /// This is a hybrid approach: it matches on the inner enum (like regular methods)
 /// but wraps the returned Self value (like constructors).
+#[expect(clippy::too_many_arguments, reason = "Code generation inputs mirror the delegated method context")]
 fn generate_method_with_self_return_body(
     enum_name: &proc_macro2::Ident,
+    real_struct_name: &proc_macro2::Ident,
     helper_module_name: &proc_macro2::Ident,
     method_name: &proc_macro2::Ident,
     param_names: &[proc_macro2::Ident],
     is_async: bool,
     fakes_cfg: &proc_macro2::TokenStream,
     receiver: &syn::Receiver,
+    trait_path: Option<&syn::Path>,
 ) -> proc_macro2::TokenStream {
-    let real_call = generate_method_call(
-        &proc_macro2::Ident::new("real", proc_macro2::Span::call_site()),
-        method_name,
-        param_names,
-        is_async,
-    );
+    let real = proc_macro2::Ident::new("real", proc_macro2::Span::call_site());
+    let await_suffix = is_async.then(|| quote! { .await });
+    let real_call = if let Some(trait_path) = trait_path {
+        quote! {
+            <#helper_module_name::#real_struct_name as #trait_path>::#method_name(
+                #real,
+                #(#param_names),*
+            )#await_suffix
+        }
+    } else {
+        generate_method_call(&real, method_name, param_names, is_async)
+    };
     let fake_call = generate_method_call(
         &proc_macro2::Ident::new("fake", proc_macro2::Span::call_site()),
         method_name,
@@ -569,6 +653,27 @@ fn returns_self(output: &syn::ReturnType) -> bool {
     }
 }
 
+fn type_contains_bare_self(ty: &syn::Type) -> bool {
+    struct SelfVisitor {
+        found: bool,
+    }
+
+    impl<'ast> syn::visit::Visit<'ast> for SelfVisitor {
+        fn visit_type_path(&mut self, i: &'ast syn::TypePath) {
+            if i.qself.is_none() && i.path.segments.len() == 1 && i.path.segments[0].ident == "Self" {
+                self.found = true;
+                return;
+            }
+
+            syn::visit::visit_type_path(self, i);
+        }
+    }
+
+    let mut visitor = SelfVisitor { found: false };
+    syn::visit::Visit::visit_type(&mut visitor, ty);
+    visitor.found
+}
+
 /// Converts an async function signature to a non-async function with impl Future return type because
 /// for methods with impl Future return types, mockall supports futures to be returned by mocks, unlike
 /// for async methods, for which it only supports returning values that are wrapped in immediate futures.
@@ -592,19 +697,6 @@ fn convert_async_to_impl_future(sig: &syn::Signature) -> proc_macro2::TokenStrea
 fn add_explicit_lifetimes(sig: &syn::Signature) -> syn::Signature {
     let mut sig = sig.clone();
 
-    // Check if the signature already has explicit lifetime parameters
-    let has_explicit_lifetimes = sig
-        .generics
-        .params
-        .iter()
-        .any(|param| matches!(param, syn::GenericParam::Lifetime(_)));
-
-    // If there are already explicit lifetimes, return as-is
-    if has_explicit_lifetimes {
-        return sig;
-    }
-
-    // Check if any input types contain references that might need explicit lifetimes
     let needs_lifetime = sig.inputs.iter().any(|input| {
         if let syn::FnArg::Typed(syn::PatType { ty, .. }) = input {
             contains_reference_in_generic(ty)
@@ -613,19 +705,42 @@ fn add_explicit_lifetimes(sig: &syn::Signature) -> syn::Signature {
         }
     });
 
-    // If no references in generics are found, return as-is
     if !needs_lifetime {
         return sig;
     }
 
-    // Add a lifetime parameter 'mock
-    let lifetime: syn::LifetimeParam = syn::parse_quote!('mock);
-    sig.generics.params.insert(0, syn::GenericParam::Lifetime(lifetime));
+    let mut existing_lifetimes = std::collections::HashSet::new();
+    for param in &sig.generics.params {
+        if let syn::GenericParam::Lifetime(lifetime) = param {
+            existing_lifetimes.insert(lifetime.lifetime.ident.to_string());
+        }
+    }
+
+    let mut lifetime_name = None;
+    for suffix in 0..=existing_lifetimes.len() {
+        let candidate = if suffix == 0 { "mock".to_string() } else { format!("mock{suffix}") };
+        if !existing_lifetimes.contains(&candidate) {
+            lifetime_name = Some(candidate);
+            break;
+        }
+    }
+    let lifetime_name = lifetime_name.expect("one more candidate than existing lifetimes guarantees a free name");
+
+    let lifetime: syn::LifetimeParam = syn::parse_str(&format!("'{lifetime_name}")).expect("constructed from a valid Rust identifier");
+    let lifetime_value = lifetime.lifetime.clone();
+    let mut insert_at = sig.generics.params.len();
+    for (index, param) in sig.generics.params.iter().enumerate() {
+        if !matches!(param, syn::GenericParam::Lifetime(_)) {
+            insert_at = index;
+            break;
+        }
+    }
+    sig.generics.params.insert(insert_at, syn::GenericParam::Lifetime(lifetime));
 
     // Add the lifetime to all elided references in generic type arguments
     for input in &mut sig.inputs {
         if let syn::FnArg::Typed(syn::PatType { ty, .. }) = input {
-            add_lifetime_to_references(ty, &syn::parse_quote!('mock));
+            add_lifetime_to_references(ty, &lifetime_value);
         }
     }
 
@@ -634,54 +749,66 @@ fn add_explicit_lifetimes(sig: &syn::Signature) -> syn::Signature {
 
 /// Checks if a type contains references within generic arguments.
 fn contains_reference_in_generic(ty: &syn::Type) -> bool {
-    match ty {
-        syn::Type::Path(type_path) => {
-            for segment in &type_path.path.segments {
-                if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
-                    for arg in &args.args {
-                        if let syn::GenericArgument::Type(inner_ty) = arg
-                            && (matches!(inner_ty, syn::Type::Reference(_)) || contains_reference_in_generic(inner_ty))
-                        {
-                            return true;
-                        }
-                    }
-                }
-            }
-            false
-        }
-        // Direct references are fine
-        syn::Type::Reference(_) | _ => false,
+    contains_nested_elided_reference(ty, false)
+}
+
+fn contains_nested_elided_reference(ty: &syn::Type, nested: bool) -> bool {
+    struct NestedReferenceVisitor {
+        nested: bool,
+        found: bool,
     }
+
+    impl<'ast> syn::visit::Visit<'ast> for NestedReferenceVisitor {
+        fn visit_type(&mut self, i: &'ast syn::Type) {
+            if let syn::Type::Reference(reference) = i
+                && self.nested
+                && reference.lifetime.is_none()
+            {
+                self.found = true;
+                return;
+            }
+
+            let parent_nested = self.nested;
+            self.nested = true;
+            syn::visit::visit_type(self, i);
+            self.nested = parent_nested;
+        }
+    }
+
+    let mut visitor = NestedReferenceVisitor { nested, found: false };
+    syn::visit::Visit::visit_type(&mut visitor, ty);
+    visitor.found
 }
 
 /// Adds a lifetime to all elided references within generic type arguments.
 fn add_lifetime_to_references(ty: &mut syn::Type, lifetime: &syn::Lifetime) {
-    match ty {
-        syn::Type::Path(type_path) => {
-            for segment in &mut type_path.path.segments {
-                if let syn::PathArguments::AngleBracketed(args) = &mut segment.arguments {
-                    for arg in &mut args.args {
-                        if let syn::GenericArgument::Type(inner_ty) = arg {
-                            if let syn::Type::Reference(ref_ty) = inner_ty {
-                                // Only add lifetime if it's elided
-                                if ref_ty.lifetime.is_none() {
-                                    ref_ty.lifetime = Some(lifetime.clone());
-                                }
-                            } else {
-                                // Recursively process nested generics
-                                add_lifetime_to_references(inner_ty, lifetime);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        syn::Type::Reference(ref_ty) => {
-            // Process the inner type recursively
-            add_lifetime_to_references(&mut ref_ty.elem, lifetime);
-        }
-        _ => {}
+    add_lifetime_to_nested_references(ty, lifetime, false);
+}
+
+fn add_lifetime_to_nested_references(ty: &mut syn::Type, lifetime: &syn::Lifetime, nested: bool) {
+    struct LifetimeVisitor<'a> {
+        nested: bool,
+        lifetime: &'a syn::Lifetime,
     }
+
+    impl syn::visit_mut::VisitMut for LifetimeVisitor<'_> {
+        fn visit_type_mut(&mut self, i: &mut syn::Type) {
+            if let syn::Type::Reference(reference) = i
+                && self.nested
+                && reference.lifetime.is_none()
+            {
+                reference.lifetime = Some(self.lifetime.clone());
+            }
+
+            let parent_nested = self.nested;
+            self.nested = true;
+            syn::visit_mut::visit_type_mut(self, i);
+            self.nested = parent_nested;
+        }
+    }
+
+    let mut visitor = LifetimeVisitor { nested, lifetime };
+    syn::visit_mut::VisitMut::visit_type_mut(&mut visitor, ty);
 }
 
 /// Generates a mockall mock! macro for the given impl block.
@@ -871,10 +998,12 @@ mod tests {
     #[test]
     fn detects_references_nested_in_generic_arguments() {
         let nested: Type = parse_quote!(Option<Vec<&str>>);
+        let below_reference: Type = parse_quote!(&Option<&str>);
         let without_reference: Type = parse_quote!(Option<Vec<String>>);
         let direct: Type = parse_quote!(&str);
 
         assert!(contains_reference_in_generic(&nested));
+        assert!(contains_reference_in_generic(&below_reference));
         assert!(!contains_reference_in_generic(&without_reference));
         assert!(!contains_reference_in_generic(&direct));
     }
@@ -913,6 +1042,43 @@ mod tests {
         let converted = add_explicit_lifetimes(&signature);
 
         assert_eq!(converted.into_token_stream().to_string(), signature.into_token_stream().to_string());
+    }
+
+    #[test]
+    fn adds_noncolliding_lifetime_alongside_existing_lifetimes() {
+        let signature: syn::Signature = parse_quote!(
+            fn value<'mock, 'a>(
+                &self,
+                direct: &'a str,
+                nested: Option<&str>,
+            )
+        );
+
+        let converted = add_explicit_lifetimes(&signature);
+
+        assert_eq!(
+            converted.into_token_stream().to_string(),
+            "fn value < 'mock , 'a , 'mock1 > (& self , direct : & 'a str , nested : Option < & 'mock1 str > ,)"
+        );
+    }
+
+    #[test]
+    fn inserts_mock_lifetime_before_type_parameters() {
+        let signature: syn::Signature = parse_quote!(
+            fn value<'a, T>(
+                &self,
+                direct: &'a str,
+                nested: Option<&str>,
+                value: T,
+            )
+        );
+
+        let converted = add_explicit_lifetimes(&signature);
+
+        assert_eq!(
+            converted.into_token_stream().to_string(),
+            "fn value < 'a , 'mock , T > (& self , direct : & 'a str , nested : Option < & 'mock str > , value : T ,)"
+        );
     }
 
     #[test]
@@ -986,6 +1152,14 @@ mod tests {
             ),
             (quote!(generate_mockall_fake = false), "generate_mockall_fake must be true"),
             (quote!(generate_mockall_fake = "true"), "generate_mockall_fake must be true"),
+            (
+                quote!(fake_constructor = "create fake"),
+                "fake_constructor must be a valid Rust identifier",
+            ),
+            (
+                quote!(mockall_fake_module = "my-mocks"),
+                "mockall_fake_module must be a valid Rust identifier",
+            ),
             (quote!(unknown = true), "unknown argument"),
         ];
 

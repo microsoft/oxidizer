@@ -34,7 +34,7 @@ mockall = []
 [dependencies]
 proc-macro2 = { workspace = true }
 quote = { workspace = true }
-syn = { workspace = true, features = ["clone-impls", "extra-traits", "full", "parsing", "printing", "proc-macro"] }
+syn = { workspace = true, features = ["clone-impls", "extra-traits", "full", "parsing", "printing", "proc-macro", "visit", "visit-mut"] }
 
 [dev-dependencies]
 insta = { workspace = true }

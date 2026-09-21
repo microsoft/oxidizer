@@ -38,12 +38,24 @@ receiver are supported only when they return `Self`, because other associated
 functions have no active instance from which to select the real or fake
 implementation. Typed receivers such as `self: Box<Self>` are rejected; the
 supported receiver forms are `self`, `&self`, and `&mut self`. Parameters must
-use identifier patterns.
+use identifier patterns. `mut self`, parameters containing bare `Self`, and
+nested `Self` return types are rejected because their values cannot be
+translated across the wrapper boundary.
+
+Trait delegation uses fully qualified calls on the hidden real type so an
+inherent method with the same name cannot intercept a trait method call.
+Unsafe impl blocks are rejected because the macro cannot prove the unsafe
+trait's invariant for an arbitrary fake representation.
 
 Direct `#[cfg(...)]` attributes on a struct gate the helper module, wrapper, and
 fake constructor implementation together. A `cfg_attr` that conditionally
 applies `cfg` is rejected because propagating it selectively could leave
 generated items referring to a disabled type.
+
+Derive attributes are copied to the wrapper and internal enum. This requires
+the fake type to satisfy the same derive bounds, such as `Clone`. Derives that
+depend on the original struct shape or require an enum default variant may not
+be suitable.
 
 ## Fake availability
 

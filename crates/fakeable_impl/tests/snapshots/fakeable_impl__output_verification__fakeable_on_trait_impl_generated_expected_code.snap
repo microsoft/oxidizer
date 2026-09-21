@@ -11,6 +11,11 @@ impl Service for __fakeable__MyService::MyService {
     fn output(&self) -> &Self::Output {
         &self.something
     }
+    fn duplicate(&self) -> Self {
+        Self {
+            something: self.something.clone(),
+        }
+    }
 }
 impl Service for MyService {
     type Output = Something;
@@ -20,7 +25,7 @@ impl Service for MyService {
     fn create(something: Something) -> Self {
         Self {
             inner: __fakeable__MyService::Enum::Real(
-                __fakeable__MyService::MyService::create(something),
+                <__fakeable__MyService::MyService as Service>::create(something),
             ),
         }
     }
@@ -28,9 +33,30 @@ impl Service for MyService {
     #[allow(clippy::used_underscore_binding)]
     fn output(&self) -> &Self::Output {
         match &self.inner {
-            __fakeable__MyService::Enum::Real(real) => real.output(),
+            __fakeable__MyService::Enum::Real(real) => {
+                <__fakeable__MyService::MyService as Service>::output(real)
+            }
             #[cfg(any(feature = "test-util", test))]
             __fakeable__MyService::Enum::Fake(fake) => fake.output(),
+        }
+    }
+    #[allow(unused_mut)]
+    #[allow(clippy::used_underscore_binding)]
+    fn duplicate(&self) -> Self {
+        match &self.inner {
+            __fakeable__MyService::Enum::Real(real) => {
+                Self {
+                    inner: __fakeable__MyService::Enum::Real(
+                        <__fakeable__MyService::MyService as Service>::duplicate(real),
+                    ),
+                }
+            }
+            #[cfg(any(feature = "test-util", test))]
+            __fakeable__MyService::Enum::Fake(fake) => {
+                Self {
+                    inner: __fakeable__MyService::Enum::Fake(fake.duplicate()),
+                }
+            }
         }
     }
 }

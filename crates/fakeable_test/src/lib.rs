@@ -23,3 +23,5 @@ pub mod generic_service;
 pub mod my_service_mockall;
 
 pub mod my_service_unused_fake;
+
+pub mod trait_service;

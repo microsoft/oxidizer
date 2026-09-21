@@ -9,6 +9,9 @@ impl __fakeable__MyService::MyService {
     pub fn special_clone(&self) -> Self {
         Self { value: self.value.clone() }
     }
+    pub async fn async_clone(&self) -> Self {
+        Self { value: self.value.clone() }
+    }
     pub fn mut_transform(&mut self) -> Self {
         Self { value: self.value.clone() }
     }
@@ -39,6 +42,23 @@ impl MyService {
             __fakeable__MyService::Enum::Fake(fake) => {
                 Self {
                     inner: __fakeable__MyService::Enum::Fake(fake.special_clone()),
+                }
+            }
+        }
+    }
+    #[allow(unused_mut)]
+    #[allow(clippy::used_underscore_binding)]
+    pub async fn async_clone(&self) -> Self {
+        match &self.inner {
+            __fakeable__MyService::Enum::Real(real) => {
+                Self {
+                    inner: __fakeable__MyService::Enum::Real(real.async_clone().await),
+                }
+            }
+            #[cfg(any(feature = "test-util", test))]
+            __fakeable__MyService::Enum::Fake(fake) => {
+                Self {
+                    inner: __fakeable__MyService::Enum::Fake(fake.async_clone().await),
                 }
             }
         }

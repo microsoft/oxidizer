@@ -7,6 +7,8 @@ use fakeable_test::generic_service::GenericService;
 use fakeable_test::generic_service::fakes::FakeGenericService;
 use fakeable_test::my_service::MyService;
 use fakeable_test::my_service::fakes::FakeMyService;
+use fakeable_test::trait_service::fakes::FakeTraitService;
+use fakeable_test::trait_service::{TraitService, Value};
 use futures::executor::block_on;
 use static_assertions::assert_impl_all;
 use thread_aware::ThreadAware;
@@ -42,6 +44,18 @@ fn generic_service_preserves_type_arguments() {
 
     let fake = GenericService::fake(FakeGenericService(42_u32));
     assert_eq!(*fake.value(), 42);
+}
+
+#[test]
+fn trait_delegation_uses_the_trait_implementation() {
+    let real = TraitService::new();
+    assert_eq!(real.value(), 1);
+    assert_eq!(Value::value(&real), 2);
+    assert_eq!(Value::value(&Value::duplicate(&real)), 2);
+
+    let fake = TraitService::fake(FakeTraitService);
+    assert_eq!(Value::value(&fake), 3);
+    assert_eq!(Value::value(&Value::duplicate(&fake)), 3);
 }
 
 assert_impl_all!(MyService: ThreadAware, Clone);

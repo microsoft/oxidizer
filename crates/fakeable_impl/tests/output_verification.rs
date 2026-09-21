@@ -259,6 +259,12 @@ fn fakeable_on_trait_impl_generated_expected_code() {
             fn output(&self) -> &Self::Output {
                 &self.something
             }
+
+            fn duplicate(&self) -> Self {
+                Self {
+                    something: self.something.clone(),
+                }
+            }
         }
     };
 
@@ -336,6 +342,10 @@ fn fakeable_on_impl_with_ref_receiver_returning_self_generates_expected_code() {
                 Self { value: self.value.clone() }
             }
 
+            pub async fn async_clone(&self) -> Self {
+                Self { value: self.value.clone() }
+            }
+
             pub fn mut_transform(&mut self) -> Self {
                 Self { value: self.value.clone() }
             }
@@ -362,6 +372,25 @@ fn fakeable_on_generic_impl_preserves_type_arguments() {
         {
             pub fn new(value: T) -> Self {
                 Self { value }
+            }
+
+            #[test]
+            fn fakeable_on_bounded_generic_struct_preserves_generic_forms() {
+                let input = quote! {
+                    struct MyService<T: Clone>
+                    where
+                        T: Send,
+                    {
+                        value: T,
+                    }
+                };
+
+                let result = fakeable_impl::fakeable_impl(
+                    quote! { fake_impl = FakeMyService<T> },
+                    input,
+                );
+                let result_file = syn::parse_file(&result.to_string()).unwrap();
+                assert_snapshot!(prettyplease::unparse(&result_file));
             }
 
             pub fn value(&self) -> &T {
@@ -492,6 +521,94 @@ fn fakeable_rejects_cfg_attr_that_can_disable_struct() {
     };
 
     let result = fakeable_impl::fakeable_impl(quote! { fake_impl = FakeMyService }, input).to_string();
+
+    assert!(result.contains("cfg_attr applying cfg is not supported"));
+}
+
+#[test]
+fn fakeable_rejects_unsafe_impl() {
+    let input = quote! {
+        unsafe impl Send for MyService {}
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! {}, input).to_string();
+
+    assert!(result.contains("unsafe impl blocks are not supported"));
+}
+
+#[test]
+fn fakeable_rejects_mut_self_receiver() {
+    let input = quote! {
+        impl MyService {
+            pub fn consume(mut self) {
+                self.value.clear();
+            }
+        }
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! {}, input).to_string();
+
+    assert!(result.contains("mut self receivers are not supported"));
+}
+
+#[test]
+fn fakeable_rejects_self_parameter() {
+    let input = quote! {
+        impl MyService {
+            pub fn merge(self, other: Self) -> Self {
+                other
+            }
+        }
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! {}, input).to_string();
+
+    assert!(result.contains("Self in method parameters is not supported"));
+}
+
+#[test]
+fn fakeable_rejects_nested_self_return() {
+    let input = quote! {
+        impl MyService {
+            pub fn maybe(&self) -> Option<Self> {
+                None
+            }
+        }
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! {}, input).to_string();
+
+    assert!(result.contains("nested Self return types are not supported"));
+}
+
+#[test]
+fn fakeable_on_cfg_impl_gates_generated_mockall_module() {
+    let input = quote! {
+        #[cfg(feature = "enabled")]
+        impl MyService {
+            pub fn value(&self) -> i32 {
+                42
+            }
+        }
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! { generate_mockall_fake = true }, input);
+    let result_file = syn::parse_file(&result.to_string()).unwrap();
+    assert_snapshot!(prettyplease::unparse(&result_file));
+}
+
+#[test]
+fn fakeable_rejects_cfg_attr_that_can_disable_impl() {
+    let input = quote! {
+        #[cfg_attr(feature = "conditional", cfg(feature = "enabled"))]
+        impl MyService {
+            pub fn value(&self) -> i32 {
+                42
+            }
+        }
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! {}, input).to_string();
 
     assert!(result.contains("cfg_attr applying cfg is not supported"));
 }
