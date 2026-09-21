@@ -732,10 +732,11 @@ fn runtime_object_detail(id_prefix: &str, events: &[&seismograph::recorder::even
             format_count(count(RuntimeEventKind::OnceContention)),
         ),
         "channel" => format!(
-            "{} sends · {} receives · {} contentions · high watermark {} · {} closes · {threads}",
+            "{} sends · {} receives · {} send contentions · {} receive waits (empty) · high watermark {} · {} closes · {threads}",
             format_count(count(RuntimeEventKind::ChannelSend)),
             format_count(count(RuntimeEventKind::ChannelReceive)),
-            format_count(count(RuntimeEventKind::ChannelSendContention) + count(RuntimeEventKind::ChannelReceiveContention)),
+            format_count(count(RuntimeEventKind::ChannelSendContention)),
+            format_count(count(RuntimeEventKind::ChannelReceiveContention)),
             format_count(
                 events
                     .iter()
@@ -2525,7 +2526,7 @@ mod tests {
                 "1 waits · 1 blocked · 1 releases · 2 threads",
                 "1 waits · 1 blocked · 1 notifications · 2 threads",
                 "1 accesses · 1 initializations · 1 contentions · 2 threads",
-                "1 sends · 1 receives · 2 contentions · high watermark 0 · 1 closes · 2 threads",
+                "1 sends · 1 receives · 1 send contentions · 1 receive waits (empty) · high watermark 0 · 1 closes · 2 threads",
                 "2 threads",
             ]
         );

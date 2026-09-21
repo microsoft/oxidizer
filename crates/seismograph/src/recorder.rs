@@ -921,6 +921,7 @@ impl ThreadRecorder {
         drop(ring);
     }
 
+    #[cfg_attr(test, mutants::skip)] // Eviction release is covered with a held reader; removing it strands retired rings and blocks later tests.
     fn release_retired_ring(&self) {
         self.release_on_unlock.store(true, Ordering::Release);
         forget_retired_ring(self);
@@ -1129,6 +1130,7 @@ impl ConfigurationLock {
         }
     }
 
+    #[cfg_attr(test, mutants::skip)] // Lock timeout and reacquisition are tested directly; returning None unconditionally deadlocks configuration.
     fn acquire_until(deadline: Instant) -> Option<Self> {
         while CONFIGURATION_LOCKED
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)

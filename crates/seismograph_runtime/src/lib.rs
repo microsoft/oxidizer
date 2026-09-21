@@ -20,6 +20,19 @@
 //! Hot-path task, poll, transfer, and I/O methods update atomics and write the
 //! calling thread's bounded Seismograph ring without formatting or allocation.
 //!
+//! # Recording
+//!
+//! Linking this crate does not instrument a runtime automatically. The runtime
+//! must register itself and its workers and call the task instrumentation APIs.
+//! Registration makes runtime metadata and counters available in snapshots even
+//! when event recording is disabled. Event recording additionally requires
+//! [`seismograph::recorder::Configuration::runtime_tasks`] to be enabled; enabling
+//! general events alone does not enable runtime events.
+//!
+//! Recording can be enabled after runtimes and tasks have started. Subsequent
+//! events are recorded, but earlier lifecycle events are not replayed. Runtime
+//! metadata in the snapshot still describes those pre-existing registrations.
+//!
 //! ```
 //! use seismograph_runtime::RuntimeMetadata;
 //! use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
@@ -1070,6 +1083,51 @@ mod tests {
         );
         let second_snapshot = source_snapshot();
         assert_eq!(second_snapshot.addresses, first_snapshot.addresses);
+        seismograph::recorder(seismograph::recorder::Configuration::default());
+    }
+
+    #[test]
+    fn existing_tasks_record_after_runtime_recording_is_enabled() {
+        let _test = test_lock();
+        seismograph::recorder(seismograph::recorder::Configuration::default());
+        let runtime = register_runtime(RuntimeMetadata::new("late-recording", 1));
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let worker = worker.handle();
+        worker.attach_current_thread();
+        let task = runtime.handle().register_task(type_descriptor_id(1), None);
+        let metadata = source_snapshot();
+        assert!(
+            metadata
+                .runtimes
+                .iter()
+                .any(|entry| { entry.id == runtime.id() && entry.tasks.iter().any(|entry| entry.id == task.id()) })
+        );
+
+        for capture_backtraces in [false, true] {
+            seismograph::recorder(seismograph::recorder::Configuration {
+                runtime_tasks: seismograph::recorder::RecordingPolicy::all(capture_backtraces),
+                ..Default::default()
+            });
+            task.woken();
+            let poll = task.poll_started(&worker);
+            task.poll_finished(&worker, poll);
+            let encoded = seismograph::snapshot(seismograph::snapshot::SnapshotOptions {
+                event_buffers: seismograph::snapshot::EventBufferDisposition::Release,
+            })
+            .unwrap();
+            let decoded = seismograph::snapshot::decode(encoded.as_bytes()).unwrap();
+            let events = decoded
+                .events
+                .events
+                .iter()
+                .filter(|event| event.runtime().is_some_and(|context| context.runtime_id == runtime.id()))
+                .map(|event| (event.kind, event.call_stack.is_empty()))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                events,
+                vec![(EventKind::TaskPollStarted, true), (EventKind::TaskPollFinished, true)]
+            );
+        }
         seismograph::recorder(seismograph::recorder::Configuration::default());
     }
 

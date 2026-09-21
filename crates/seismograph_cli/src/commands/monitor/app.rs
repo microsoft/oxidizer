@@ -337,7 +337,7 @@ impl RecordingConfigurationPopup {
                 RecordingMode::Off => policy.enabled = false,
                 RecordingMode::On => {
                     policy.enabled = true;
-                    policy.capture_backtraces = false;
+                    policy.capture_backtraces = true;
                     policy.sampling_one_in = 1;
                 }
                 RecordingMode::Custom => policy.enabled = true,
@@ -375,11 +375,15 @@ fn recorder_policy_mut(
 const fn recording_mode(policy: seismograph_protocol::message::RecordingPolicy) -> RecordingMode {
     if !policy.enabled {
         RecordingMode::Off
-    } else if policy.capture_backtraces || policy.sampling_one_in != 1 {
+    } else if !policy.capture_backtraces || policy.sampling_one_in != 1 {
         RecordingMode::Custom
     } else {
         RecordingMode::On
     }
+}
+
+pub(super) fn recording_policy_label(policy: seismograph_protocol::message::RecordingPolicy) -> &'static str {
+    recording_mode(policy).label()
 }
 
 fn toggle_label(enabled: bool) -> String {
@@ -769,11 +773,14 @@ pub(super) struct App {
     pub(super) runtime_view: RuntimeViewState,
     pub(super) io_view: IoViewState,
     pub(super) cache_view: CacheViewState,
+    pub(super) panels: super::panels::Panels,
     pub(super) activity_samples: VecDeque<ActivitySample>,
     pub(super) recorder_statistics: Option<RecorderStatistics>,
     pub(super) snapshot_options: SnapshotOptions,
     pub(super) snapshot_error: Option<String>,
     pub(super) recording_configuration_popup: Option<RecordingConfigurationPopup>,
+    pub(super) filters: super::filter_ui::Filters,
+    pub(super) help: Option<super::help::Help>,
     activity_observed_at: Option<Instant>,
     pub(super) capture_started_at: Option<Instant>,
     pub(super) capture_step: Option<CaptureStep>,
@@ -782,6 +789,8 @@ pub(super) struct App {
     discovery_receiver: Option<Receiver<Result<Vec<Instance>, String>>>,
     statistics_receiver: Option<Receiver<Result<RecorderStatistics, String>>>,
     recording_receiver: Option<Receiver<Result<RecordingUpdate, String>>>,
+    connection_generation: u64,
+    recording_generation: u64,
     next_refresh: Instant,
 }
 
@@ -852,6 +861,7 @@ impl App {
         if let Screen::Offline { snapshot, .. } = &mut self.screen {
             self.status = loaded.heap_error.clone().unwrap_or_default();
             *snapshot = Some(loaded);
+            self.filter_snapshot_arrived();
         }
     }
 
@@ -868,11 +878,14 @@ impl App {
             runtime_view: RuntimeViewState::new(),
             io_view: IoViewState::new(),
             cache_view: CacheViewState::new(),
+            panels: super::panels::Panels::default(),
             activity_samples: VecDeque::new(),
             recorder_statistics: None,
             snapshot_options: SnapshotOptions::default(),
             snapshot_error: None,
             recording_configuration_popup: None,
+            filters: super::filter_ui::Filters::default(),
+            help: None,
             activity_observed_at: None,
             capture_started_at: None,
             capture_step: None,
@@ -881,6 +894,8 @@ impl App {
             discovery_receiver: None,
             statistics_receiver: None,
             recording_receiver: None,
+            connection_generation: 0,
+            recording_generation: 0,
             next_refresh: Instant::now(),
         }
     }
@@ -904,7 +919,7 @@ impl App {
             return;
         }
         if let Screen::Connected { descriptor, .. } = &self.screen {
-            if self.statistics_receiver.is_none() {
+            if self.statistics_receiver.is_none() && self.recording_receiver.is_none() {
                 self.start_recorder_statistics_with(descriptor.clone(), recorder_statistics);
             }
             return;
@@ -915,6 +930,13 @@ impl App {
     }
 
     pub(super) fn handle_key(&mut self, code: KeyCode) -> bool {
+        if self.handle_help_key(code) {
+            return false;
+        }
+        if self.filters.popup.is_some() {
+            self.handle_filter_key(code);
+            return false;
+        }
         if matches!(code, KeyCode::Char('q' | 'Q')) {
             return true;
         }
@@ -928,6 +950,10 @@ impl App {
         let capture_in_progress = self.capture_receiver.is_some();
         if self.recording_configuration_popup.is_some() {
             self.handle_recording_configuration_key(code);
+            return false;
+        }
+        if code == KeyCode::Char('F') {
+            self.open_filter_popup();
             return false;
         }
         if code == KeyCode::Char('s') {
@@ -949,21 +975,7 @@ impl App {
                 KeyCode::Down => {
                     self.selected = advance_selection(self.selected, self.instances.len());
                 }
-                KeyCode::Enter => {
-                    if let Some(instance) = self.instances.get(self.selected) {
-                        self.activity_samples.clear();
-                        self.recorder_statistics = None;
-                        self.activity_observed_at = None;
-                        self.screen = Screen::Connected {
-                            descriptor: instance.descriptor.clone(),
-                            recording: instance.recording,
-                            tab: MonitorTab::Info,
-                            snapshot: None,
-                        };
-                        self.snapshot_error = None;
-                        self.status.clear();
-                    }
-                }
+                KeyCode::Enter => self.connect_selected_instance(),
                 KeyCode::Char('r') => self.refresh(),
                 _ => {}
             },
@@ -983,6 +995,9 @@ impl App {
                 }
                 match code {
                     KeyCode::Esc => {
+                        self.filters.invalidate();
+                        self.connection_generation += 1;
+                        self.statistics_receiver = None;
                         self.screen = Screen::Browse;
                         self.refresh();
                     }
@@ -1010,6 +1025,27 @@ impl App {
             }
         }
         false
+    }
+
+    fn connect_selected_instance(&mut self) {
+        if let Some(instance) = self.instances.get(self.selected) {
+            self.filters.invalidate();
+            self.connection_generation += 1;
+            self.statistics_receiver = None;
+            self.discovery_receiver = None;
+            self.next_refresh = Instant::now();
+            self.activity_samples.clear();
+            self.recorder_statistics = None;
+            self.activity_observed_at = None;
+            self.screen = Screen::Connected {
+                descriptor: instance.descriptor.clone(),
+                recording: instance.recording,
+                tab: MonitorTab::Info,
+                snapshot: None,
+            };
+            self.snapshot_error = None;
+            self.status.clear();
+        }
     }
 
     fn handle_recording_configuration_key(&mut self, code: KeyCode) {
@@ -1047,8 +1083,11 @@ impl App {
 
     fn apply_recording_configuration_with<F>(&mut self, configuration: RecordingConfiguration, set_recording: F)
     where
-        F: FnOnce(&MonitorDescriptor, RecordingConfiguration) -> Result<(), super::Error> + Send + 'static,
+        F: FnOnce(&MonitorDescriptor, RecordingConfiguration) -> Result<RecordingConfiguration, super::Error> + Send + 'static,
     {
+        if self.recording_receiver.is_some() {
+            return;
+        }
         let Screen::Connected { descriptor, .. } = &self.screen else {
             self.recording_configuration_popup = None;
             return;
@@ -1063,12 +1102,21 @@ impl App {
             return;
         };
         self.recording_receiver = None;
+        // A failed multi-command update can still have changed part of the configuration.
+        self.next_refresh = Instant::now();
+        if self.recording_generation != self.connection_generation {
+            return;
+        }
         match result {
             Ok(update) => {
                 if let Screen::Connected { descriptor, recording, .. } = &mut self.screen
                     && descriptor.instance_id == update.descriptor.instance_id
                 {
                     *recording = update.configuration;
+                    if let Some(statistics) = &mut self.recorder_statistics {
+                        statistics.recording = update.configuration;
+                        statistics.event_capacity_per_thread = u64::from(update.configuration.event_capacity_per_thread);
+                    }
                 }
                 self.status = "Recording configuration applied".into();
             }
@@ -1127,8 +1175,17 @@ impl App {
             return;
         };
         self.statistics_receiver = None;
+        if !matches!(self.screen, Screen::Connected { .. }) || self.recording_receiver.is_some() {
+            return;
+        }
         match result {
-            Ok(statistics) => self.record_activity(statistics),
+            Ok(statistics) => {
+                if let Screen::Connected { recording, .. } = &mut self.screen {
+                    *recording = statistics.recording;
+                }
+                // The popup is a draft, not another copy of the live configuration.
+                self.record_activity(statistics);
+            }
             Err(error) => self.status = error,
         }
     }
@@ -1141,6 +1198,7 @@ impl App {
         match result {
             Ok(outcome) => {
                 self.snapshot_error = None;
+                self.status = outcome.status;
                 if let Screen::Connected { descriptor, snapshot, .. } = &mut self.screen
                     && capture_instance_id == Some(descriptor.instance_id)
                 {
@@ -1151,14 +1209,27 @@ impl App {
                     self.runtime_view.reset();
                     self.io_view.reset();
                     self.cache_view.reset();
+                    self.filter_snapshot_arrived();
                 }
-                self.status = outcome.status;
             }
+
             Err(error) => {
                 self.snapshot_error = Some(error.clone());
                 self.status = error;
             }
         }
+    }
+
+    pub(super) fn reset_filtered_views(&mut self) {
+        self.heap_view.reset();
+        self.allocation_view.reset_position();
+        self.primitive_view.focus = PrimitiveFocus::Types;
+        self.primitive_view.primitive_selected = 0;
+        self.primitive_view.reset_operations();
+        self.thread_view.reset();
+        self.runtime_view.reset();
+        self.io_view.reset();
+        self.cache_view.reset();
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -1218,12 +1289,12 @@ impl App {
         configuration: RecordingConfiguration,
         set_recording: F,
     ) where
-        F: FnOnce(&MonitorDescriptor, RecordingConfiguration) -> Result<(), super::Error> + Send + 'static,
+        F: FnOnce(&MonitorDescriptor, RecordingConfiguration) -> Result<RecordingConfiguration, super::Error> + Send + 'static,
     {
         let (sender, receiver) = unbounded();
         match thread::Builder::new().name("seismograph-recording".into()).spawn(move || {
             let result = set_recording(&descriptor, configuration)
-                .map(|()| RecordingUpdate { descriptor, configuration })
+                .map(|configuration| RecordingUpdate { descriptor, configuration })
                 .map_err(|error| error.to_string());
             let _receiver_closed = sender.send_sync(result);
         }) {
@@ -1235,6 +1306,10 @@ impl App {
     fn finish_start_recording_configuration(&mut self, receiver: Receiver<Result<RecordingUpdate, String>>, result: std::io::Result<()>) {
         match result {
             Ok(()) => {
+                // Dropping this receiver invalidates reads started before this write.
+                self.statistics_receiver = None;
+                self.discovery_receiver = None;
+                self.recording_generation = self.connection_generation;
                 self.recording_receiver = Some(receiver);
                 self.status = "Applying recording configuration...".into();
             }
@@ -1755,6 +1830,8 @@ mod tests {
             threads: ThreadSnapshot { threads: Vec::new() },
             captured_at: Some(SystemTime::UNIX_EPOCH),
             captured_instant: Some(Instant::now()),
+            filter_index: None,
+            filter_summary: super::super::filter_index::FilterSummary::default(),
         })
     }
 
@@ -1820,8 +1897,7 @@ mod tests {
                 ("Arc", "custom".into()),
                 ("  Backtraces", "on".into()),
                 ("  Sampling", "1/100 (1%)".into()),
-                ("Runtime tasks", "custom".into()),
-                ("  Backtraces", "on".into()),
+                ("Runtime tasks", "on".into()),
                 ("I/O", "custom".into()),
                 ("  Backtraces", "on".into()),
                 ("  Sampling", "1/4 (25%)".into()),
@@ -1945,7 +2021,7 @@ mod tests {
             fn $cycle() {
                 let mut configuration = RecordingConfiguration::default();
                 configuration.$policy.enabled = true;
-                configuration.$policy.capture_backtraces = true;
+                configuration.$policy.capture_backtraces = $sampling != 1;
                 configuration.$policy.sampling_one_in = $sampling;
                 let mut app = connected_app(MonitorTab::Info);
                 let mut popup = RecordingConfigurationPopup::new(configuration);
@@ -1969,7 +2045,7 @@ mod tests {
                 let upper_bound = app.recording_configuration_popup.unwrap();
 
                 let mut enabled = configuration;
-                enabled.$policy.capture_backtraces = false;
+                enabled.$policy.capture_backtraces = true;
                 enabled.$policy.sampling_one_in = 1;
                 let mut disabled = configuration;
                 disabled.$policy.enabled = false;
@@ -2002,6 +2078,7 @@ mod tests {
                 configuration.$policy.capture_backtraces = true;
                 let mut app = connected_app(MonitorTab::Info);
                 let mut popup = RecordingConfigurationPopup::new(configuration);
+                RecordingConfigurationField::$mode.adjust(&mut popup, 1);
                 popup.selected = popup
                     .fields()
                     .iter()
@@ -2195,6 +2272,7 @@ mod tests {
         let mut configuration = RecordingConfiguration::default();
         configuration.allocations.enabled = true;
         configuration.allocations.capture_backtraces = true;
+        configuration.allocations.sampling_one_in = 8;
         let mut popup = RecordingConfigurationPopup::new(configuration);
         RecordingConfigurationField::AllocationRecording.adjust(&mut popup, -1);
 
@@ -2209,7 +2287,7 @@ mod tests {
                 true,
                 seismograph_protocol::message::RecordingPolicy {
                     enabled: true,
-                    capture_backtraces: false,
+                    capture_backtraces: true,
                     sampling_one_in: 1,
                 }
             )
@@ -2956,7 +3034,7 @@ mod tests {
 
     #[test]
     fn statistics_messages_record_activity_and_handle_errors() {
-        let mut app = App::new();
+        let mut app = connected_app(MonitorTab::Info);
         let (sender, receiver) = unbounded();
         sender.send_sync(Ok(recorder_statistics_with_total(10))).unwrap();
         app.statistics_receiver = Some(receiver);
@@ -3011,7 +3089,7 @@ mod tests {
         let mut configuration = RecordingConfiguration::default();
         configuration.io.enabled = true;
 
-        app.apply_recording_configuration_with(configuration, |_descriptor, _configuration| Ok(()));
+        app.apply_recording_configuration_with(configuration, |_descriptor, configuration| Ok(configuration));
         let result = app
             .recording_receiver
             .take()
@@ -3023,6 +3101,218 @@ mod tests {
             (app.recording_configuration_popup, result.is_ok(), app.status.as_str(),),
             (None, true, "Applying recording configuration...")
         );
+    }
+
+    #[test]
+    fn live_recording_refresh_preserves_popup_edits() {
+        let mut app = connected_app(MonitorTab::Info);
+        let mut draft = RecordingConfigurationPopup::new(RecordingConfiguration::default());
+        RecordingConfigurationField::AllocationRecording.adjust(&mut draft, 1);
+        app.recording_configuration_popup = Some(draft);
+        let mut statistics = recorder_statistics_with_total(10);
+        statistics.recording.cache.enabled = true;
+        statistics.recording.io.capture_backtraces = true;
+        let (sender, receiver) = unbounded();
+        sender.send_sync(Ok(statistics)).unwrap();
+        app.statistics_receiver = Some(receiver);
+
+        app.poll_recorder_statistics();
+
+        assert_eq!(
+            (
+                connected_fields(&app.screen).unwrap().1,
+                app.recorder_statistics,
+                app.recording_configuration_popup,
+            ),
+            (statistics.recording, Some(statistics), Some(draft))
+        );
+    }
+
+    #[test]
+    fn recording_write_invalidates_older_reads_and_pauses_refresh() {
+        let mut app = connected_app(MonitorTab::Info);
+        let (statistics_sender, statistics_receiver) = unbounded();
+        statistics_sender.send_sync(Ok(recorder_statistics_with_total(10))).unwrap();
+        app.statistics_receiver = Some(statistics_receiver);
+        let (_sender, receiver) = unbounded();
+        app.finish_start_recording_configuration(receiver, Ok(()));
+
+        app.refresh_with(|| panic!("connected discovery"), |_| panic!("read during write"));
+        app.poll_recorder_statistics();
+
+        assert_eq!((app.statistics_receiver.is_none(), app.recorder_statistics), (true, None));
+    }
+
+    #[test]
+    fn reconnect_discards_previous_statistics_and_write_completion() {
+        let mut app = connected_app(MonitorTab::Info);
+        app.instances.push(Instance {
+            descriptor: descriptor(1),
+            recording: RecordingConfiguration::default(),
+        });
+        let (statistics_sender, statistics_receiver) = unbounded();
+        statistics_sender.send_sync(Ok(recorder_statistics_with_total(10))).unwrap();
+        app.statistics_receiver = Some(statistics_receiver);
+        let (sender, receiver) = unbounded();
+        let mut configuration = RecordingConfiguration::default();
+        configuration.io.enabled = true;
+        sender
+            .send_sync(Ok(RecordingUpdate {
+                descriptor: descriptor(1),
+                configuration,
+            }))
+            .unwrap();
+        app.finish_start_recording_configuration(receiver, Ok(()));
+        // Keep Escape's automatic discovery deterministic and local.
+        let (_discovery_sender, discovery_receiver) = unbounded();
+        app.discovery_receiver = Some(discovery_receiver);
+
+        app.handle_key(KeyCode::Esc);
+        app.handle_key(KeyCode::Enter);
+        app.poll_recorder_statistics();
+        app.poll_recording_configuration();
+
+        assert_eq!(
+            (
+                connected_fields(&app.screen).unwrap().1,
+                app.recorder_statistics,
+                app.status.as_str()
+            ),
+            (RecordingConfiguration::default(), None, "")
+        );
+    }
+
+    #[test]
+    fn failed_recording_write_schedules_authoritative_refresh() {
+        let mut app = connected_app(MonitorTab::Info);
+        app.next_refresh = Instant::now() + Duration::from_secs(60);
+        let (sender, receiver) = unbounded();
+        sender.send_sync(Err("cache update failed after legacy update".into())).unwrap();
+        app.finish_start_recording_configuration(receiver, Ok(()));
+
+        app.poll_recording_configuration();
+
+        assert_eq!(
+            (
+                app.next_refresh <= Instant::now(),
+                app.recording_receiver.is_none(),
+                app.status.as_str()
+            ),
+            (true, true, "cache update failed after legacy update")
+        );
+    }
+
+    #[test]
+    fn changing_instances_discards_queued_statistics() {
+        let mut app = connected_app(MonitorTab::Info);
+        app.instances.push(Instance {
+            descriptor: descriptor(2),
+            recording: RecordingConfiguration::default(),
+        });
+        let (sender, receiver) = unbounded();
+        sender.send_sync(Ok(recorder_statistics_with_total(10))).unwrap();
+        app.statistics_receiver = Some(receiver);
+        let (_discovery_sender, discovery_receiver) = unbounded();
+        app.discovery_receiver = Some(discovery_receiver);
+
+        app.handle_key(KeyCode::Esc);
+        app.handle_key(KeyCode::Enter);
+        app.poll_recorder_statistics();
+
+        assert_eq!(
+            (connected_fields(&app.screen).unwrap().0, app.recorder_statistics),
+            (descriptor(2).instance_id, None)
+        );
+    }
+
+    #[test]
+    fn recording_worker_uses_readback_instead_of_requested_configuration() {
+        let mut app = connected_app(MonitorTab::Info);
+        let authoritative = RecordingConfiguration {
+            event_capacity_per_thread: 128,
+            ..RecordingConfiguration::default()
+        };
+        app.apply_recording_configuration_with(RecordingConfiguration::default(), move |_, _| Ok(authoritative));
+        let receiver = app.recording_receiver.take().unwrap();
+        let result = receiver.recv_timeout_sync(Duration::from_secs(1)).unwrap();
+        assert_eq!(result.unwrap().configuration, authoritative);
+    }
+
+    #[test]
+    fn on_preset_enables_backtraces_without_sampling() {
+        let mut configuration = RecordingConfiguration::default();
+        configuration.allocations.enabled = true;
+        configuration.allocations.capture_backtraces = true;
+        configuration.allocations.sampling_one_in = 8;
+        let mut popup = RecordingConfigurationPopup::new(configuration);
+        RecordingConfigurationField::AllocationRecording.adjust(&mut popup, -1);
+
+        assert_eq!(
+            (
+                RecordingConfigurationField::AllocationRecording.value(popup),
+                popup.configuration().allocations,
+            ),
+            (
+                "on".to_owned(),
+                seismograph_protocol::message::RecordingPolicy {
+                    enabled: true,
+                    capture_backtraces: true,
+                    sampling_one_in: 1,
+                },
+            )
+        );
+    }
+
+    #[test]
+    fn every_on_preset_records_all_events_with_backtraces_and_reads_back_as_on() {
+        let actual = [
+            (RecordingConfigurationField::AllocationRecording, RecorderKind::Allocations),
+            (RecordingConfigurationField::GeneralRecording, RecorderKind::General),
+            (RecordingConfigurationField::ArcDereferenceRecording, RecorderKind::ArcDereferences),
+            (RecordingConfigurationField::RuntimeTaskRecording, RecorderKind::RuntimeTasks),
+            (RecordingConfigurationField::IoRecording, RecorderKind::Io),
+            (RecordingConfigurationField::CacheRecording, RecorderKind::Cache),
+        ]
+        .map(|(field, recorder)| {
+            let mut popup = RecordingConfigurationPopup::new(RecordingConfiguration::default());
+            field.adjust(&mut popup, 1);
+            let configuration = popup.configuration();
+            let readback = RecordingConfigurationPopup::new(configuration);
+            (
+                recorder_policy(configuration, recorder),
+                field.value(readback),
+                readback.configuration() == configuration,
+            )
+        });
+        assert_eq!(
+            actual,
+            std::array::from_fn(|_| (
+                seismograph_protocol::message::RecordingPolicy {
+                    enabled: true,
+                    capture_backtraces: true,
+                    sampling_one_in: 1,
+                },
+                "on".to_owned(),
+                true,
+            ))
+        );
+    }
+
+    #[test]
+    fn sampled_or_stackless_recording_is_custom() {
+        let policies = [
+            seismograph_protocol::message::RecordingPolicy {
+                enabled: true,
+                capture_backtraces: false,
+                sampling_one_in: 1,
+            },
+            seismograph_protocol::message::RecordingPolicy {
+                enabled: true,
+                capture_backtraces: true,
+                sampling_one_in: 8,
+            },
+        ];
+        assert_eq!(policies.map(recording_policy_label), ["custom", "custom"]);
     }
 
     #[test]

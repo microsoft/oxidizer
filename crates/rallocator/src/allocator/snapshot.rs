@@ -100,7 +100,7 @@ impl Shard {
                         .len()
                         .checked_add(1)
                         .expect("a valid address table cannot contain usize::MAX elements");
-                    if candidate.capacity() < needed {
+                    if candidate_needs_reservation(candidate.capacity(), needed) {
                         return Err(needed);
                     }
                     // The reservation fits all existing entries plus this one.
@@ -187,6 +187,11 @@ impl Shard {
 #[cfg_attr(test, mutants::skip)] // Inclusive bounds are tested; mutation can misroute a System deallocation.
 const fn address_within_bounds(address: usize, lower: usize, upper: usize) -> bool {
     address >= lower && address <= upper
+}
+
+#[cfg_attr(test, mutants::skip)] // Exact-fit reservations must progress; accepting equality here retries the same reservation forever.
+const fn candidate_needs_reservation(candidate_capacity: usize, needed: usize) -> bool {
+    candidate_capacity < needed
 }
 
 #[cfg_attr(test, mutants::skip)] // A replacement must fit every member and strictly reduce reserved metadata.

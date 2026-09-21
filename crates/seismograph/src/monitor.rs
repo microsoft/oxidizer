@@ -801,6 +801,59 @@ mod tests {
     use super::*;
 
     #[test]
+    fn stopped_runtime_recording_retains_session_policies_and_events() {
+        use crate::recorder::event::{BacktraceCapture, EventClass, EventKind, EventTimestamp, Record};
+        use crate::recorder::runtime::{RuntimeEvent, RuntimeId};
+
+        let _test = crate::recorder::TEST_LOCK.lock().unwrap();
+        let configuration = RecordingConfiguration {
+            runtime_tasks: seismograph_protocol::message::RecordingPolicy {
+                enabled: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            authenticated_response(&Request::SetRecording(configuration)),
+            Response::Acknowledged
+        );
+        crate::record(EventClass::RuntimeTask, || {
+            Record::runtime(
+                EventTimestamp::now(),
+                EventKind::TaskPollStarted,
+                RuntimeEvent {
+                    runtime_id: RuntimeId::from_raw(1).unwrap(),
+                    worker_id: None,
+                    subject_id: 1,
+                    related_id: 0,
+                    value_0: 0,
+                    value_1: 0,
+                },
+                BacktraceCapture::Never,
+            )
+        });
+        assert_eq!(
+            authenticated_response(&Request::SetRecording(RecordingConfiguration::default())),
+            Response::Acknowledged
+        );
+        let Response::RecorderStatistics(statistics) = authenticated_response(&Request::ReadRecorderStatistics) else {
+            panic!("expected recorder statistics");
+        };
+        let snapshot = crate::snapshot(crate::snapshot::SnapshotOptions::default()).unwrap();
+        let decoded = crate::snapshot::decode(snapshot.as_bytes()).unwrap();
+        assert_eq!(
+            (
+                statistics.recording,
+                statistics.retained_events,
+                decoded.events.recording.runtime_tasks.enabled,
+                decoded.events.events.len(),
+                crate::recorder::configuration().runtime_tasks.enabled,
+            ),
+            (configuration, 1, true, 1, false)
+        );
+    }
+
+    #[test]
     fn concurrent_snapshot_is_rejected_until_the_current_request_finishes() {
         let _test = crate::recorder::TEST_LOCK.lock().unwrap();
         let guard = SnapshotRequestGuard::acquire().unwrap();

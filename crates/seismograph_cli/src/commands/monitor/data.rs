@@ -16,6 +16,8 @@ pub(super) struct CapturedSnapshot {
     pub(super) threads: ThreadSnapshot,
     pub(super) captured_at: Option<SystemTime>,
     pub(super) captured_instant: Option<Instant>,
+    pub(super) filter_index: Option<Arc<super::filter_index::FilterIndex>>,
+    pub(super) filter_summary: super::filter_index::FilterSummary,
 }
 
 pub(super) struct RuntimeSnapshot {
@@ -73,6 +75,8 @@ pub(super) struct RuntimeMonitorSnapshot {
     pub(super) total_events: u64,
     pub(super) retained_events: u64,
     pub(super) lost_events: u64,
+    pub(super) runtime_events: u64,
+    pub(super) source_present: bool,
     pub(super) workers: Vec<RuntimeWorkerSummary>,
 }
 
@@ -266,7 +270,7 @@ impl RuntimeMonitorSnapshot {
                 RuntimeWorkerSummary {
                     runtime_id,
                     runtime_name: worker.runtime_name,
-                    worker_id,
+                    worker_id: Some(worker_id),
                     role: worker.role,
                     state: worker.state,
                     thread_id: worker.thread_id,
@@ -283,17 +287,33 @@ impl RuntimeMonitorSnapshot {
                 }
             })
             .collect::<Vec<_>>();
-        summaries.sort_unstable_by_key(|worker| (worker.runtime_id, worker.worker_id));
+        let mut unassigned = BTreeMap::<u64, RuntimeWorkerSummary>::new();
+        for (task_id, task) in tasks.iter().filter(|(_, task)| task.worker_ids.is_empty()) {
+            let group = unassigned.entry(task.runtime_id).or_insert_with(|| RuntimeWorkerSummary {
+                runtime_id: task.runtime_id,
+                runtime_name: source
+                    .and_then(|source| source.runtimes.iter().find(|runtime| runtime.id.get() == task.runtime_id))
+                    .map_or_else(|| format!("runtime #{}", task.runtime_id), |runtime| runtime.name.clone()),
+                role: "Unbound".into(),
+                state: "-".into(),
+                ..RuntimeWorkerSummary::default()
+            });
+            group.tasks.push(RuntimeTaskSummary::from_builder(*task_id, task));
+        }
+        summaries.extend(unassigned.into_values());
+        summaries.sort_unstable_by_key(|worker| (worker.runtime_id, worker.worker_id.is_none(), worker.worker_id));
         Self {
             total_events: events.total_events,
             retained_events: u64::try_from(events.events.len()).unwrap_or(u64::MAX),
             lost_events: events.lost_events,
+            runtime_events: u64::try_from(events.events.iter().filter(|event| event.runtime().is_some()).count()).unwrap_or(u64::MAX),
+            source_present: source.is_some(),
             workers: summaries,
         }
     }
 }
 
-fn runtime_task_id(kind: seismograph::recorder::event::EventKind, subject_id: u64, related_id: u64) -> Option<u64> {
+pub(super) fn runtime_task_id(kind: seismograph::recorder::event::EventKind, subject_id: u64, related_id: u64) -> Option<u64> {
     use seismograph::recorder::event::EventKind;
     match kind {
         EventKind::TaskSpawned
@@ -690,11 +710,11 @@ pub(super) const fn cache_event_label(kind: seismograph::recorder::event::EventK
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct RuntimeWorkerSummary {
     pub(super) runtime_id: u64,
     pub(super) runtime_name: String,
-    pub(super) worker_id: u64,
+    pub(super) worker_id: Option<u64>,
     pub(super) role: String,
     pub(super) state: String,
     pub(super) thread_id: Option<u64>,
@@ -1256,7 +1276,7 @@ impl PrimitiveOperationKind {
             Self::ChannelSend => "Send",
             Self::ChannelReceive => "Receive",
             Self::ChannelSendContention => "Send contention",
-            Self::ChannelReceiveContention => "Receive contention",
+            Self::ChannelReceiveContention => "Receive wait (empty)",
             Self::ChannelClose => "Close",
             Self::ChannelHighWatermark => "High watermark",
             Self::LockPoisoned => "Poisoned",
@@ -1317,7 +1337,6 @@ impl PrimitiveOperationKind {
                 | Self::CondvarContention
                 | Self::OnceContention
                 | Self::ChannelSendContention
-                | Self::ChannelReceiveContention
         )
     }
 }
@@ -1469,7 +1488,7 @@ impl ThreadSnapshot {
                 let retained_events = u64::try_from(events.len()).unwrap_or(u64::MAX);
                 let operations = ThreadOperationKind::ALL
                     .into_iter()
-                    .map(|kind| ThreadOperation::from_events(kind, thread_id, events, &events_by_object, &decoded.threads, &mut stacks))
+                    .map(|kind| ThreadOperation::from_events(kind, events, &events_by_object, &decoded.threads, &mut stacks))
                     .collect();
                 ThreadSummary {
                     thread_id,
@@ -1532,9 +1551,6 @@ fn accumulate_thread_objects<'a>(
             let mut selected_stacks = None;
             for related in object.chunk_by(|left, right| left.event.thread_id == right.event.thread_id) {
                 let participant_id = related[0].event.thread_id.get();
-                if participant_id == thread_id {
-                    continue;
-                }
                 let related_events = related
                     .iter()
                     .filter(|event| kind.is_related(event.event.kind))
@@ -1589,7 +1605,6 @@ impl ThreadOperation {
     #[cfg(test)]
     fn from_events<'a>(
         kind: ThreadOperationKind,
-        thread_id: u64,
         events: &[&'a seismograph::recorder::event::Event],
         events_by_object: &HashMap<u64, Vec<&'a seismograph::recorder::event::Event>>,
         thread_logs: &[seismograph::recorder::thread::ThreadLog],
@@ -1616,7 +1631,7 @@ impl ThreadOperation {
         for object_id in selected_by_object.keys() {
             for event in events_by_object.get(object_id).into_iter().flatten() {
                 let participant_id = event.thread_id.get();
-                if participant_id == thread_id || !kind.is_related(event.kind) {
+                if !kind.is_related(event.kind) {
                     continue;
                 }
                 let total = totals.entry(participant_id).or_default();
@@ -1940,7 +1955,7 @@ impl ThreadOperationKind {
             Self::ChannelSend => "Channel send",
             Self::ChannelSendContention => "Channel send contention",
             Self::ChannelReceive => "Channel receive",
-            Self::ChannelReceiveContention => "Channel receive contention",
+            Self::ChannelReceiveContention => "Channel receive wait (empty)",
             Self::ChannelClose => "Channel close",
             Self::ChannelHighWatermark => "Channel high watermark",
             Self::LockPoisoned => "Lock poisoned",
@@ -1954,26 +1969,32 @@ impl ThreadOperationKind {
             Self::Allocation => "Threads that deallocated these allocations",
             Self::Deallocation => "Threads that created these allocations",
             Self::ArcCreate | Self::ArcClone | Self::ArcDeref | Self::ArcDrop | Self::ArcRelocate => {
-                "Other threads observed on the same Arc objects"
+                "Threads (including self) observed on the same Arc objects"
             }
-            Self::MutexAccess | Self::MutexContention | Self::MutexRelease => "Other threads observed on the same Mutex objects",
+            Self::MutexAccess | Self::MutexContention | Self::MutexRelease => "Threads (including self) observed on the same Mutex objects",
             Self::RwLockReadAccess
             | Self::RwLockReadContention
             | Self::RwLockReadRelease
             | Self::RwLockWriteAccess
             | Self::RwLockWriteContention
-            | Self::RwLockWriteRelease => "Other threads observed on the same RwLock objects",
-            Self::BarrierAccess | Self::BarrierContention | Self::BarrierRelease => "Other threads observed on the same Barrier objects",
-            Self::CondvarAccess | Self::CondvarContention | Self::CondvarNotify => "Other threads observed on the same Condvar objects",
-            Self::OnceAccess | Self::OnceContention | Self::OnceInitialize => "Other threads observed on the same once-initialized objects",
+            | Self::RwLockWriteRelease => "Threads (including self) observed on the same RwLock objects",
+            Self::BarrierAccess | Self::BarrierContention | Self::BarrierRelease => {
+                "Threads (including self) observed on the same Barrier objects"
+            }
+            Self::CondvarAccess | Self::CondvarContention | Self::CondvarNotify => {
+                "Threads (including self) observed on the same Condvar objects"
+            }
+            Self::OnceAccess | Self::OnceContention | Self::OnceInitialize => {
+                "Threads (including self) observed on the same once-initialized objects"
+            }
             Self::ChannelSend
             | Self::ChannelSendContention
             | Self::ChannelReceive
             | Self::ChannelReceiveContention
             | Self::ChannelClose
-            | Self::ChannelHighWatermark => "Other threads observed on the same Channel objects",
+            | Self::ChannelHighWatermark => "Threads (including self) observed on the same Channel objects",
             Self::LockPoisoned | Self::LockPoisonObserved | Self::LockPoisonCleared => {
-                "Other threads observed on the same Mutex or RwLock objects"
+                "Threads (including self) observed on the same Mutex or RwLock objects"
             }
         }
     }
@@ -1988,7 +2009,6 @@ impl ThreadOperationKind {
                 | Self::CondvarContention
                 | Self::OnceContention
                 | Self::ChannelSendContention
-                | Self::ChannelReceiveContention
         )
     }
 
@@ -2298,6 +2318,18 @@ impl MemorySnapshot {
         snapshot: &seismograph_rallocator::snapshot::Snapshot,
         deallocated: &HashSet<(u64, u64)>,
     ) -> Self {
+        Self::from_snapshot_with_events(
+            snapshot,
+            deallocated,
+            snapshot.callers.as_ref().map_or(&[], |callers| callers.events.as_slice()),
+        )
+    }
+
+    pub(super) fn from_snapshot_with_events(
+        snapshot: &seismograph_rallocator::snapshot::Snapshot,
+        deallocated: &HashSet<(u64, u64)>,
+        events: &[seismograph_rallocator::callers::Event],
+    ) -> Self {
         let mut small_slices = 0;
         let mut medium_slices = 0;
         let mut bump_slices = 0;
@@ -2341,7 +2373,7 @@ impl MemorySnapshot {
             })
             .collect::<Vec<_>>();
         size_classes.sort_unstable_by_key(|class| class.block_bytes);
-        let tiers = memory_tiers(snapshot, &size_classes, &medium_allocations, deallocated);
+        let tiers = memory_tiers(snapshot, &size_classes, &medium_allocations, deallocated, events);
         Self {
             live_bytes: snapshot.stats.live_bytes,
             peak_live_bytes: snapshot.stats.peak_live_bytes,
@@ -2378,13 +2410,14 @@ fn memory_tiers(
     size_classes: &[MemorySizeClass],
     medium_allocations: &MediumAllocations,
     deallocated: &HashSet<(u64, u64)>,
+    events: &[seismograph_rallocator::callers::Event],
 ) -> Vec<MemoryTierData> {
     let lookups = snapshot
         .addresses
         .iter()
         .map(|lookup| (lookup.address, lookup))
         .collect::<HashMap<_, _>>();
-    let mut totals = retained_memory_totals(snapshot, size_classes, deallocated);
+    let mut totals = retained_memory_totals(snapshot, size_classes, deallocated, events);
     let small_current_allocations = size_classes.iter().map(|class| class.live_allocations).sum();
     let small_current_bytes = size_classes.iter().map(|class| class.requested_bytes).sum();
     MemoryTier::ALL
@@ -2442,22 +2475,20 @@ fn memory_tiers(
 }
 
 fn retained_memory_totals<'a>(
-    snapshot: &'a seismograph_rallocator::snapshot::Snapshot,
+    snapshot: &seismograph_rallocator::snapshot::Snapshot,
     size_classes: &[MemorySizeClass],
     deallocated: &HashSet<(u64, u64)>,
+    events: &'a [seismograph_rallocator::callers::Event],
 ) -> BTreeMap<MemoryTier, BTreeMap<u64, MemoryBucketTotal<'a>>> {
     use seismograph_rallocator::callers::EventKind;
 
     const MAX_SMALL_ALIGNMENT_BYTES: u64 = 4 * 1024;
 
-    let Some(callers) = &snapshot.callers else {
-        return BTreeMap::new();
-    };
     let maximum_small = size_classes.last().map_or(0, |class| class.block_bytes);
     let medium_slice = snapshot.topology.first().map_or(64 * 1024, |region| region.slice_bytes);
     let medium_region = snapshot.topology.first().map_or(1024 * 1024 * 1024, |region| region.region_bytes);
     let mut totals = BTreeMap::<MemoryTier, BTreeMap<u64, MemoryBucketTotal>>::new();
-    for event in callers.events.iter().filter(|event| event.kind == EventKind::Allocated) {
+    for event in events.iter().filter(|event| event.kind == EventKind::Allocated) {
         let tier = allocation_tier(
             event.size,
             event.align,
@@ -2589,6 +2620,18 @@ impl AllocationSnapshot {
         snapshot: &seismograph_rallocator::snapshot::Snapshot,
         deallocated: &HashSet<(u64, u64)>,
     ) -> Self {
+        Self::from_snapshot_with_events(
+            snapshot,
+            deallocated,
+            snapshot.callers.as_ref().map_or(&[], |callers| callers.events.as_slice()),
+        )
+    }
+
+    pub(super) fn from_snapshot_with_events(
+        snapshot: &seismograph_rallocator::snapshot::Snapshot,
+        deallocated: &HashSet<(u64, u64)>,
+        events: &[seismograph_rallocator::callers::Event],
+    ) -> Self {
         use seismograph_rallocator::callers::EventKind;
 
         #[derive(Default)]
@@ -2609,7 +2652,7 @@ impl AllocationSnapshot {
             };
         };
         let mut totals = HashMap::<&[u64], Total>::new();
-        for event in callers.events.iter().filter(|event| event.kind == EventKind::Allocated) {
+        for event in events.iter().filter(|event| event.kind == EventKind::Allocated) {
             let total = totals.entry(&event.call_stack).or_default();
             total.allocations = total.allocations.saturating_add(1);
             total.allocated_bytes = total.allocated_bytes.saturating_add(event.size);
@@ -2648,7 +2691,7 @@ impl AllocationSnapshot {
         Self {
             thread_count: u64::try_from(callers.threads.len()).unwrap_or(u64::MAX),
             total_events: callers.total_events,
-            retained_events: u64::try_from(callers.events.len()).unwrap_or(u64::MAX),
+            retained_events: u64::try_from(events.len()).unwrap_or(u64::MAX),
             lost_events: callers.lost_events,
             hotspots,
         }
@@ -2990,7 +3033,7 @@ mod tests {
                 "Send",
                 "Send contention",
                 "Receive",
-                "Receive contention",
+                "Receive wait (empty)",
                 "Close",
                 "High watermark",
                 "Poisoned",
@@ -3031,7 +3074,7 @@ mod tests {
         );
         assert_eq!(
             ThreadOperationKind::MutexAccess.relationship_label(),
-            "Other threads observed on the same Mutex objects"
+            "Threads (including self) observed on the same Mutex objects"
         );
         assert_eq!(
             (
@@ -3135,7 +3178,16 @@ mod tests {
             .filter(|operation| operation.events > 0)
             .map(|operation| (operation.events, operation.objects, operation.participants.len()))
             .collect::<Vec<_>>();
-        assert_eq!(operations, [(1, 1, 0), (1, 1, 0)]);
+        assert_eq!(operations, [(1, 1, 1), (1, 1, 1)]);
+        for thread in &snapshot.threads {
+            assert!(
+                thread
+                    .operations
+                    .iter()
+                    .flat_map(|operation| &operation.participants)
+                    .all(|participant| { participant.thread_id == thread.thread_id })
+            );
+        }
     }
 
     #[test]
@@ -3341,7 +3393,7 @@ mod tests {
         let worker = RuntimeWorkerSummary {
             runtime_id: 1,
             runtime_name: String::new(),
-            worker_id: 1,
+            worker_id: Some(1),
             role: String::new(),
             state: String::new(),
             thread_id: None,
@@ -3509,7 +3561,7 @@ mod tests {
     #[test]
     fn retained_memory_totals_and_task_ids_handle_missing_inputs() {
         let snapshot = seismograph_rallocator::snapshot::Snapshot::new(seismograph_rallocator::snapshot::Version::new(1, 0, 0));
-        assert!(retained_memory_totals(&snapshot, &[], &HashSet::new()).is_empty());
+        assert!(retained_memory_totals(&snapshot, &[], &HashSet::new(), &[]).is_empty());
         let tier = MemoryTierData {
             kind: MemoryTier::Small,
             current_allocations: 0,
@@ -3600,6 +3652,52 @@ mod tests {
                 populated.worker_ids,
             ),
             (0, 0, 0, 10, 10, 10, 10, vec![9])
+        );
+    }
+
+    #[test]
+    fn workerless_lifecycle_events_remain_visible_without_a_runtime_source() {
+        let events = [RuntimeEventKind::TaskSpawned, RuntimeEventKind::TaskCanceled]
+            .into_iter()
+            .enumerate()
+            .map(|(index, kind)| RuntimeEvent {
+                thread_id: ThreadId::new(1),
+                sequence: EventSequence::new(u64::try_from(index).unwrap()),
+                timestamp: EventTimestamp::from_ticks(u64::try_from(index).unwrap() + 1),
+                kind,
+                payload: EventPayload::Runtime(RuntimeEventPayload {
+                    runtime_id: RuntimeId::from_raw(1).unwrap(),
+                    worker_id: None,
+                    subject_id: 10,
+                    related_id: 0,
+                    value_0: 42,
+                    value_1: 0,
+                }),
+                call_stack: Vec::new(),
+            })
+            .collect();
+        let snapshot = RuntimeMonitorSnapshot::from_events(
+            &Events {
+                events,
+                ..Events::default()
+            },
+            None,
+            &[],
+        );
+        let group = &snapshot.workers[0];
+        assert_eq!(
+            (
+                snapshot.runtime_events,
+                snapshot.source_present,
+                group.runtime_id,
+                group.worker_id,
+                group
+                    .tasks
+                    .iter()
+                    .map(|task| (task.task_id, task.state.as_str(), task.completed_at))
+                    .collect::<Vec<_>>(),
+            ),
+            (2, false, 1, None, vec![(10, "Canceled", Some(2))])
         );
     }
 
@@ -4323,6 +4421,87 @@ mod tests {
     }
 
     #[test]
+    fn channel_receive_waits_remain_visible_without_counting_as_contention() {
+        let events = [RuntimeEventKind::ChannelReceiveContention, RuntimeEventKind::ChannelSendContention]
+            .into_iter()
+            .map(|kind| RuntimeEvent {
+                thread_id: ThreadId::new(1),
+                sequence: EventSequence::new(1),
+                timestamp: EventTimestamp::from_ticks(1),
+                kind,
+                payload: EventPayload::Object(ObjectId::new(7)),
+                call_stack: Vec::new(),
+            })
+            .collect::<Vec<_>>();
+        let snapshot = PrimitiveSnapshot::from_events(2, 0, &events, &[]);
+        let channel = snapshot.groups.iter().find(|group| group.kind == PrimitiveKind::Channel).unwrap();
+        let receive = channel
+            .operations
+            .iter()
+            .find(|operation| operation.kind == PrimitiveOperationKind::ChannelReceiveContention)
+            .unwrap();
+        assert_eq!(
+            (channel.events, channel.contentions, receive.events, receive.kind.is_contention()),
+            (2, 1, 1, false)
+        );
+        assert!(!ThreadOperationKind::ChannelReceiveContention.is_contention());
+        assert!(ThreadOperationKind::ChannelSendContention.is_contention());
+    }
+
+    #[test]
+    fn thread_snapshot_links_same_thread_allocations_and_channels() {
+        let events = [
+            (10, RuntimeEventKind::Allocation),
+            (10, RuntimeEventKind::Deallocation),
+            (20, RuntimeEventKind::ChannelSend),
+            (20, RuntimeEventKind::ChannelReceive),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, (object, kind))| RuntimeEvent {
+            thread_id: ThreadId::new(1),
+            sequence: EventSequence::new(u64::try_from(index).unwrap()),
+            timestamp: EventTimestamp::from_ticks(1),
+            kind,
+            payload: EventPayload::Object(ObjectId::new(object)),
+            call_stack: vec![RuntimeAddress::new(0x1000)],
+        })
+        .collect();
+        let snapshot = ThreadSnapshot::from_events(
+            &Events {
+                events,
+                ..Events::default()
+            },
+            &[],
+        );
+        let interactions = snapshot.threads[0]
+            .operations
+            .iter()
+            .filter(|operation| operation.events > 0)
+            .map(|operation| {
+                let participant = &operation.participants[0];
+                let object = &participant.objects[0];
+                (
+                    operation.kind,
+                    participant.thread_id,
+                    object.object_id,
+                    object.selected_events,
+                    object.related_events,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            interactions,
+            [
+                (ThreadOperationKind::Allocation, 1, 10, 1, 1),
+                (ThreadOperationKind::Deallocation, 1, 10, 1, 1),
+                (ThreadOperationKind::ChannelSend, 1, 20, 1, 2),
+                (ThreadOperationKind::ChannelReceive, 1, 20, 1, 2),
+            ]
+        );
+    }
+
+    #[test]
     fn lock_poison_events_correlate_with_their_lock_object_group() {
         let event = |sequence, object, kind| RuntimeEvent {
             thread_id: ThreadId::new(1),
@@ -4590,7 +4769,7 @@ mod tests {
                 task.average_poll_nanos,
                 task.max_poll_nanos,
             ),
-            (2, 2, 300, 400, 0.75, 10, Some(42), 2, 600, 300, 400)
+            (Some(2), 2, 300, 400, 0.75, 10, Some(42), 2, 600, 300, 400)
         );
         assert_eq!(
             (
@@ -4819,8 +4998,9 @@ mod tests {
                 6,
                 998,
                 vec![
-                    (1, "runtime", 2, "Core", "Running", Some(7), Some(12), vec![10, 12]),
-                    (1, "runtime", 3, "Blocking", "Parked", None, None, Vec::new()),
+                    (1, "runtime", Some(2), "Core", "Running", Some(7), Some(12), vec![10, 12]),
+                    (1, "runtime", Some(3), "Blocking", "Parked", None, None, Vec::new()),
+                    (1, "runtime", None, "Unbound", "-", None, None, vec![11]),
                 ],
                 RuntimeTaskSummary {
                     task_id: 10,
@@ -4931,7 +5111,8 @@ mod tests {
                 .find(|operation| operation.kind == kind)
                 .unwrap()
                 .participants
-                .first()
+                .iter()
+                .find(|participant| participant.thread_id != snapshot.threads[thread].thread_id)
                 .unwrap()
         };
         let allocation = operation(0, ThreadOperationKind::Allocation);

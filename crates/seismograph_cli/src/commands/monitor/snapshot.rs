@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use super::data::{AllocationSnapshot, CapturedSnapshot, MemorySnapshot, RuntimeSnapshot, deallocated_allocations};
+use super::filter_index::FilterIndex;
 
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Phase {
@@ -19,7 +20,7 @@ pub(super) enum Phase {
     Io,
     Cache,
     Threads,
-    ReleaseEvents,
+    IndexStacks,
     Ready,
 }
 
@@ -63,16 +64,10 @@ pub(super) fn prepare_with_progress(
     let heap_error = allocator
         .is_none()
         .then(|| format!("heap data unavailable: {}", super::Error::MissingMemorySource));
-    // Move symbol strings rather than duplicating the symbol tables.
     progress(Phase::Symbols);
-    drop(deallocated);
-    if let Some(callers) = allocator.as_mut().and_then(|snapshot| snapshot.callers.as_mut()) {
-        release_stacks(&mut callers.events, |event| drop(std::mem::take(&mut event.call_stack)));
-    }
     let mut addresses = allocator
-        .take()
-        .into_iter()
-        .flat_map(|allocator| allocator.addresses)
+        .iter()
+        .flat_map(|allocator| allocator.addresses.iter().cloned())
         .map(|lookup| (lookup.address, lookup))
         .collect::<std::collections::BTreeMap<_, _>>();
     if let Some(source) = &mut runtime_source {
@@ -91,11 +86,9 @@ pub(super) fn prepare_with_progress(
     }
     let addresses = addresses.into_values().collect::<Vec<_>>();
     let runtime = RuntimeSnapshot::from_events_with_progress(&decoded, &addresses, runtime_source.as_ref(), progress);
-    progress(Phase::ReleaseEvents);
-    release_stacks(&mut decoded.events.events, |event| drop(std::mem::take(&mut event.call_stack)));
-    drop(decoded);
-    drop(runtime_source);
-    drop(addresses);
+    progress(Phase::IndexStacks);
+    let filter_index = std::sync::Arc::new(FilterIndex::new(decoded, allocator, runtime_source, addresses, deallocated));
+    let filter_summary = filter_index.unfiltered_summary();
     progress(Phase::Ready);
     Ok(Box::new(CapturedSnapshot {
         memory,
@@ -108,10 +101,12 @@ pub(super) fn prepare_with_progress(
         threads: runtime.threads,
         captured_at: None,
         captured_instant: None,
+        filter_index: Some(filter_index),
+        filter_summary,
     }))
 }
 
-fn release_stacks<T: Send>(events: &mut [T], release: impl Fn(&mut T) + Sync) {
+pub(super) fn release_stacks<T: Send>(events: &mut [T], release: impl Fn(&mut T) + Sync) {
     // Large captures own tens of millions of independent stack allocations. Bound
     // reclamation parallelism so freeing them does not monopolize the whole host.
     const MINIMUM_EVENTS: usize = 1_000_000;
