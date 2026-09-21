@@ -8,7 +8,7 @@ use std::str;
 use super::super::invalid_syntax;
 use super::range::ByteRangeSpec;
 use super::shared::{parse_number, validate_range_unit_for};
-use crate::{DecodeError, DecodeErrorKind, FieldName, FieldValue, FieldValueRef, SingleValueField, validate};
+use crate::{DecodeError, FieldName, FieldValue, FieldValueRef, SingleValueField, validate};
 
 /// The complete representation length in a satisfied byte content range.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -299,8 +299,10 @@ impl ContentRangeOwned {
     ///
     /// # Errors
     ///
-    /// Returns an error when the unit is not a token or the payload contains
-    /// bytes outside the extension content-range grammar.
+    /// Returns an error when the unit is not a token, is the reserved
+    /// case-insensitive `bytes` unit, or the payload contains bytes outside
+    /// the extension content-range grammar. Use [`Self::bytes`] or
+    /// [`Self::unsatisfied_bytes`] for byte content ranges.
     /// # Examples
     ///
     /// ```rust
@@ -315,8 +317,9 @@ impl ContentRangeOwned {
     pub fn extension(unit: impl AsRef<str>, payload: impl AsRef<str>) -> Result<Self, DecodeError> {
         let unit = unit.as_ref();
         let payload = payload.as_ref();
-        if !validate::token(unit.as_bytes()) {
-            return Err(DecodeError::new(&FieldName::ContentRange, DecodeErrorKind::InvalidToken));
+        validate_range_unit_for(unit.as_bytes(), &FieldName::ContentRange)?;
+        if validate::eq_ignore_ascii_case(unit.as_bytes(), b"bytes") {
+            return Err(invalid_syntax(&FieldName::ContentRange));
         }
         if !valid_content_range_extension(payload.as_bytes()) {
             return Err(invalid_syntax(&FieldName::ContentRange));
@@ -564,23 +567,7 @@ fn content_range_from_parts(wire: String, unit_end: usize, parsed: Option<ByteCo
     }
 }
 
-impl TryFrom<&str> for ContentRangeOwned {
-    type Error = DecodeError;
-
-    fn try_from(wire: &str) -> Result<Self, Self::Error> {
-        let value = FieldValue::from_str(wire).map_err(|_invalid| invalid_syntax(&FieldName::ContentRange))?;
-        Self::try_from(value)
-    }
-}
-
-impl TryFrom<String> for ContentRangeOwned {
-    type Error = DecodeError;
-
-    fn try_from(wire: String) -> Result<Self, Self::Error> {
-        let value = FieldValue::try_from(wire).map_err(|_invalid| invalid_syntax(&FieldName::ContentRange))?;
-        Self::try_from(value)
-    }
-}
+super::super::shared::impl_string_conversions!(ContentRangeOwned, &FieldName::ContentRange, invalid_syntax, wire);
 
 impl TryFrom<FieldValue> for ContentRangeOwned {
     type Error = DecodeError;
@@ -591,21 +578,16 @@ impl TryFrom<FieldValue> for ContentRangeOwned {
 }
 
 fn content_range_from_value_with(value: FieldValue, mode: crate::DecodeMode) -> Result<ContentRangeOwned, DecodeError> {
-    let (unit_start, unit_end, payload_start, payload_end, byte_range) = {
+    let (unit_end, payload_end, byte_range) = {
         let parsed = parse_content_range_with(value.as_bytes(), mode)?;
-        let base = value.as_bytes().as_ptr() as usize;
-        (
-            parsed.unit.as_ptr() as usize - base,
-            parsed.unit.as_ptr() as usize - base + parsed.unit.len(),
-            parsed.payload.as_ptr() as usize - base,
-            parsed.payload.as_ptr() as usize - base + parsed.payload.len(),
-            parsed.byte_range,
-        )
+        // Every parser preserves the unit prefix followed by one SP.
+        let unit_end = parsed.unit.len();
+        (unit_end, unit_end + 1 + parsed.payload.len(), parsed.byte_range)
     };
     Ok(ContentRangeOwned {
         value,
-        unit: unit_start..unit_end,
-        payload: payload_start..payload_end,
+        unit: 0..unit_end,
+        payload: unit_end + 1..payload_end,
         parsed: byte_range,
     })
 }
@@ -639,6 +621,9 @@ fn parse_content_range_with(bytes: &[u8], mode: crate::DecodeMode) -> Result<Par
 }
 
 fn parse_content_range_relaxed(bytes: &[u8]) -> Result<ParsedContentRange<'_>, DecodeError> {
+    if !validate::field_value(bytes) {
+        return Err(invalid_syntax(&FieldName::ContentRange));
+    }
     let Some(separator) = bytes.iter().position(|byte| *byte == b' ') else {
         return Err(invalid_syntax(&FieldName::ContentRange));
     };
@@ -720,8 +705,8 @@ fn parse_byte_content_range_relaxed(bytes: &[u8]) -> Result<ByteContentRange, De
     if bytes[slash + 1..].contains(&b'/') {
         return Err(invalid_syntax(&FieldName::ContentRange));
     }
-    let included = bytes[..slash].trim_ascii_end();
-    let complete = bytes[slash + 1..].trim_ascii_start();
+    let included = trim_ows_end(&bytes[..slash]);
+    let complete = trim_ows_start(&bytes[slash + 1..]);
     if included == b"*" {
         return parse_number(complete, &FieldName::ContentRange).map(|complete_length| ByteContentRange::Unsatisfied { complete_length });
     }
@@ -731,8 +716,8 @@ fn parse_byte_content_range_relaxed(bytes: &[u8]) -> Result<ByteContentRange, De
     if included[dash + 1..].contains(&b'-') {
         return Err(invalid_syntax(&FieldName::ContentRange));
     }
-    let first = parse_number(included[..dash].trim_ascii_end(), &FieldName::ContentRange)?;
-    let last = parse_number(included[dash + 1..].trim_ascii_start(), &FieldName::ContentRange)?;
+    let first = parse_number(trim_ows_end(&included[..dash]), &FieldName::ContentRange)?;
+    let last = parse_number(trim_ows_start(&included[dash + 1..]), &FieldName::ContentRange)?;
     let complete_length = if complete == b"*" {
         None
     } else {
@@ -744,6 +729,20 @@ fn parse_byte_content_range_relaxed(bytes: &[u8]) -> Result<ByteContentRange, De
         last,
         complete_length,
     })
+}
+
+fn trim_ows_start(mut bytes: &[u8]) -> &[u8] {
+    while bytes.first().is_some_and(|byte| matches!(byte, b' ' | b'\t')) {
+        bytes = &bytes[1..];
+    }
+    bytes
+}
+
+fn trim_ows_end(mut bytes: &[u8]) -> &[u8] {
+    while bytes.last().is_some_and(|byte| matches!(byte, b' ' | b'\t')) {
+        bytes = &bytes[..bytes.len() - 1];
+    }
+    bytes
 }
 
 fn validate_satisfied_content_range(first: u64, last: u64, complete_length: Option<u64>) -> Result<(), DecodeError> {
@@ -768,11 +767,45 @@ mod tests {
     use std::ops::Bound;
 
     use super::{
-        ByteContentRange, CompleteLength, ContentRange, ContentRangeOwned, parse_byte_content_range, parse_byte_content_range_relaxed,
-        parse_content_range, parse_content_range_relaxed, parse_content_range_with, valid_content_range_extension,
-        validate_satisfied_content_range,
+        ByteContentRange, CompleteLength, ContentRange, ContentRangeOwned, content_range_from_value_with, parse_byte_content_range,
+        parse_byte_content_range_relaxed, parse_content_range, parse_content_range_relaxed, parse_content_range_with,
+        valid_content_range_extension, validate_satisfied_content_range,
     };
     use crate::{DecodeErrorKind, DecodeMode, FieldName, FieldValue, FieldValueRef, SingleValueField};
+
+    #[test]
+    fn relaxed_whitespace_trimming_is_directional_and_preserves_other_bytes() {
+        assert_eq!(super::trim_ows_start(b" \t1 \t"), b"1 \t");
+        assert_eq!(super::trim_ows_end(b" \t1 \t"), b" \t1");
+        for bytes in [b"".as_slice(), b" \t"] {
+            assert_eq!(super::trim_ows_start(bytes), b"");
+            assert_eq!(super::trim_ows_end(bytes), b"");
+        }
+        for byte in u8::MIN..=u8::MAX {
+            if !matches!(byte, b' ' | b'\t') {
+                let bytes = [byte, b'1', byte];
+                assert_eq!(super::trim_ows_start(&bytes), bytes);
+                assert_eq!(super::trim_ows_end(&bytes), bytes);
+            }
+        }
+    }
+
+    #[test]
+    fn owned_offsets_preserve_unit_and_payload_across_storage() {
+        for (wire, mode, unit, payload) in [
+            ("bytes 0-9/10", DecodeMode::Strict, "bytes", b"0-9/10".as_slice()),
+            ("Bytes 0 - 9 / 10", DecodeMode::Relaxed, "Bytes", b"0 - 9 / 10"),
+            ("items ", DecodeMode::Strict, "items", b""),
+            ("items first-last/complete", DecodeMode::Strict, "items", b"first-last/complete"),
+        ] {
+            for value in [FieldValue::from_static(wire), FieldValue::try_from(wire.to_owned()).unwrap()] {
+                let decoded = content_range_from_value_with(value, mode).unwrap();
+                assert_eq!(decoded.unit().unwrap(), unit);
+                assert_eq!(&decoded.value.as_bytes()[decoded.payload.clone()], payload);
+                assert_eq!(decoded.value.as_bytes(), wire.as_bytes());
+            }
+        }
+    }
 
     #[test]
     fn constructors_and_accessors_cover_byte_and_extension_forms() {
@@ -921,6 +954,7 @@ mod tests {
             None
         );
         assert!(parse_content_range_relaxed(b"items \x7f").is_err());
+        assert!(parse_content_range_relaxed(b"items \xff").is_err());
         assert!(parse_content_range_relaxed(b"bad/unit payload").is_err());
         assert!(parse_content_range_relaxed(b"bytes 0-x/2").is_err());
 

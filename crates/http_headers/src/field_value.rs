@@ -147,12 +147,16 @@ impl Repr {
         Self::Http { value, sensitive }
     }
 
-    /// Stores an owner's stable projection inline when short enough.
-    fn from_owner_bytes(bytes: Bytes, sensitive: bool) -> Self {
-        if bytes.len() <= INLINE_CAPACITY {
-            Self::new(&bytes, sensitive)
+    /// Stores owned bytes inline when short enough, otherwise shares their allocation.
+    fn from_owner_bytes(bytes: impl AsRef<[u8]> + Into<Bytes>, sensitive: bool) -> Self {
+        let slice = bytes.as_ref();
+        if slice.len() <= INLINE_CAPACITY {
+            Self::new(slice, sensitive)
         } else {
-            Self::Shared { bytes, sensitive }
+            Self::Shared {
+                bytes: bytes.into(),
+                sensitive,
+            }
         }
     }
 
@@ -216,6 +220,18 @@ impl FieldValue {
         debug_assert!(crate::validate::field_value(bytes));
         Self {
             repr: Repr::new(bytes, sensitive),
+        }
+    }
+
+    /// Adopts a validated buffer, copying inline only when short enough.
+    ///
+    /// Callers must establish the field-value grammar before handing over the
+    /// buffer. Longer values retain its allocation without copying the bytes.
+    #[cfg(any(test, feature = "headers-negotiation"))]
+    pub(crate) fn from_validated_owned_bytes(bytes: Vec<u8>, sensitive: bool) -> Self {
+        debug_assert!(validate::field_value(&bytes));
+        Self {
+            repr: Repr::from_owner_bytes(bytes, sensitive),
         }
     }
 
@@ -411,13 +427,13 @@ impl FieldValue {
     ///
     /// ```rust
     /// assert_eq!(
-    ///     http_headers::FieldValue::from_static("gzip").to_str()?,
+    ///     http_headers::FieldValue::from_static("gzip").try_as_str()?,
     ///     "gzip"
     /// );
     /// # Ok::<(), std::str::Utf8Error>(())
     /// ```
     #[inline]
-    pub fn to_str(&self) -> Result<&str, Utf8Error> {
+    pub fn try_as_str(&self) -> Result<&str, Utf8Error> {
         str::from_utf8(self.as_bytes())
     }
 
@@ -667,7 +683,7 @@ impl From<FieldValue> for Bytes {
 /// use http_headers::FieldValueRef;
 ///
 /// let value = FieldValueRef::new(b"gzip");
-/// assert_eq!(value.as_str()?, "gzip");
+/// assert_eq!(value.to_str()?, "gzip");
 /// # Ok::<(), std::str::Utf8Error>(())
 /// ```
 #[derive(Clone, Copy, Default)]
@@ -751,22 +767,8 @@ impl<'a> FieldValueRef<'a> {
 
     /// Returns the value as UTF-8.
     ///
-    /// # Errors
-    ///
-    /// Returns an error when the value is not UTF-8.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// assert_eq!(http_headers::FieldValueRef::new(b"gzip").as_str()?, "gzip");
-    /// # Ok::<(), std::str::Utf8Error>(())
-    /// ```
-    #[inline]
-    pub const fn as_str(self) -> Result<&'a str, Utf8Error> {
-        str::from_utf8(self.bytes)
-    }
-
-    /// Alias for [`FieldValueRef::as_str`].
+    /// Checks the bytes for valid UTF-8 without allocating. This does not
+    /// validate the HTTP field-value grammar.
     ///
     /// # Errors
     ///
@@ -780,7 +782,7 @@ impl<'a> FieldValueRef<'a> {
     /// ```
     #[inline]
     pub const fn to_str(self) -> Result<&'a str, Utf8Error> {
-        self.as_str()
+        str::from_utf8(self.bytes)
     }
 
     /// Returns the number of wire bytes.
@@ -807,30 +809,6 @@ impl<'a> FieldValueRef<'a> {
     #[inline]
     pub const fn is_empty(self) -> bool {
         self.bytes.is_empty()
-    }
-
-    /// Creates an owned value from the borrowed bytes.
-    ///
-    /// The sensitivity flag travels with the bytes.
-    ///
-    /// # Panics
-    ///
-    /// Panics if a caller constructed this reference from bytes that are not
-    /// a valid HTTP field value. [`FieldValueRef::try_to_field_value`] is the
-    /// fallible form, and is the recommended conversion for a reference whose
-    /// provenance a caller cannot vouch for.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// let owned = http_headers::FieldValueRef::new(b"gzip").to_field_value();
-    /// assert_eq!(owned.as_bytes(), b"gzip");
-    /// ```
-    #[must_use]
-    #[inline]
-    pub fn to_field_value(self) -> FieldValue {
-        self.try_to_field_value()
-            .expect("FieldValueRef must contain a valid HTTP field value")
     }
 
     /// Creates a validated owned value from the borrowed bytes.
@@ -1033,6 +1011,7 @@ mod tests {
     use std::collections::hash_map::DefaultHasher;
     use std::error::Error;
     use std::hash::{Hash, Hasher};
+    use std::ptr;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 
@@ -1052,12 +1031,67 @@ mod tests {
         assert!(matches!(shared.repr, Repr::Shared { .. }));
         assert_eq!(shared.as_bytes(), &[b'a'; INLINE_CAPACITY + 1]);
 
-        // Sensitivity and byte round-tripping survive both representations.
         for mut value in [inline, shared] {
             let bytes = value.as_bytes().to_vec();
             value.set_sensitive(true);
             assert!(value.is_sensitive());
             assert_eq!(value.clone().into_shared(), bytes);
+        }
+    }
+
+    #[test]
+    fn validated_owned_buffers_stay_inline_through_the_capacity_boundary() {
+        for length in [0, 1, INLINE_CAPACITY - 1, INLINE_CAPACITY] {
+            for sensitive in [false, true] {
+                let mut bytes = Vec::with_capacity(INLINE_CAPACITY * 2);
+                bytes.extend((0..length).map(|index| [b'\t', b' ', b'~', 0x80, 0xff][index % 5]));
+                let expected = bytes.clone();
+
+                let value = FieldValue::from_validated_owned_bytes(bytes, sensitive);
+
+                assert!(matches!(value.repr, Repr::Inline { .. }));
+                assert_eq!(value.as_bytes(), expected);
+                assert_eq!(value.is_sensitive(), sensitive);
+            }
+        }
+    }
+
+    #[test]
+    fn validated_owned_buffers_retain_payload_allocations_with_or_without_spare_capacity() {
+        for length in [INLINE_CAPACITY + 1, INLINE_CAPACITY * 2, INLINE_CAPACITY * 2 + 1] {
+            for spare in [0, 37] {
+                for sensitive in [false, true] {
+                    let mut bytes = Vec::with_capacity(length + spare);
+                    bytes.extend((0..length).map(|index| [b'\t', b' ', b'~', 0x80, 0xff][index % 5]));
+                    let expected = bytes.clone();
+                    let address = bytes.as_ptr();
+
+                    let value = FieldValue::from_validated_owned_bytes(bytes, sensitive);
+
+                    assert!(matches!(value.repr, Repr::Shared { .. }));
+                    assert!(ptr::eq(value.as_bytes().as_ptr(), address));
+                    assert_eq!(value.as_bytes(), expected);
+                    assert_eq!(value.is_sensitive(), sensitive);
+
+                    let retained = value.clone();
+                    drop(value);
+                    assert!(ptr::eq(retained.as_bytes().as_ptr(), address));
+                    assert_eq!(retained.as_bytes(), expected);
+                    assert_eq!(retained.is_sensitive(), sensitive);
+
+                    let shared = retained.into_shared();
+                    assert!(ptr::eq(shared.as_ptr(), address));
+                    assert_eq!(shared.as_ref(), expected);
+                }
+            }
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn validated_owned_buffers_debug_check_the_field_value_invariant() {
+        for invalid in [b"bad\nvalue".to_vec(), vec![0x7f; INLINE_CAPACITY + 1]] {
+            std::panic::catch_unwind(|| FieldValue::from_validated_owned_bytes(invalid, false)).unwrap_err();
         }
     }
 
@@ -1077,7 +1111,7 @@ mod tests {
 
         let copied = FieldValue::from_bytes(b"\t visible \xff").expect("valid field bytes");
         assert_eq!(copied.as_bytes(), b"\t visible \xff");
-        copied.to_str().expect_err("obs-text is not UTF-8");
+        copied.try_as_str().expect_err("obs-text is not UTF-8");
         assert_eq!(
             format!("{copied:?}"),
             "FieldValue([9, 32, 118, 105, 115, 105, 98, 108, 101, 32, 255])"
@@ -1087,7 +1121,7 @@ mod tests {
         FieldValue::from_str("line\nbreak").expect_err("newline is invalid");
 
         let shared = FieldValue::from_shared(Bytes::from_static(b"shared")).expect("valid");
-        assert_eq!(shared.to_str().expect("UTF-8"), "shared");
+        assert_eq!(shared.try_as_str().expect("UTF-8"), "shared");
         FieldValue::from_shared(Bytes::from_static(b"\r")).expect_err("carriage return is invalid");
         assert_eq!(shared.into_shared(), Bytes::from_static(b"shared"));
 
@@ -1139,7 +1173,6 @@ mod tests {
         let owned = FieldValue::from_static("abc");
         let borrowed = FieldValueRef::from(&owned);
         assert_eq!(borrowed.as_bytes(), b"abc");
-        assert_eq!(borrowed.as_str().expect("UTF-8"), "abc");
         assert_eq!(borrowed.to_str().expect("UTF-8"), "abc");
         assert_eq!(borrowed.len(), 3);
         assert!(!borrowed.is_empty());
@@ -1151,7 +1184,7 @@ mod tests {
         let from_bytes = FieldValueRef::from(b"abc".as_slice());
         assert_eq!(from_bytes.try_to_field_value().expect("valid bytes"), owned);
         assert_eq!(FieldValue::try_from(from_bytes).expect("valid bytes"), owned);
-        FieldValueRef::new(b"\xff").as_str().expect_err("obs-text is not UTF-8");
+        FieldValueRef::new(b"\xff").to_str().expect_err("obs-text is not UTF-8");
         assert_eq!(format!("{:?}", FieldValueRef::new(b"\xff")), "FieldValueRef(1 bytes)");
 
         let string = String::from("abc");
@@ -1205,23 +1238,6 @@ mod tests {
         let mut sensitive_hash = DefaultHasher::new();
         borrowed.hash(&mut sensitive_hash);
         assert_eq!(plain_hash.finish(), sensitive_hash.finish());
-    }
-
-    #[test]
-    fn borrowed_to_owned_conversion_reports_invalid_bytes() {
-        let invalid = FieldValueRef::new(b"bad\nvalue");
-        assert_eq!(invalid.try_to_field_value().expect_err("newline is invalid"), InvalidFieldValue);
-        FieldValue::try_from(invalid).expect_err("newline is invalid");
-        assert_eq!(
-            FieldValue::try_from(FieldValueRef::new(b"good value")).expect("valid"),
-            "good value"
-        );
-
-        let valid = FieldValueRef::new(b"good value").with_sensitive(true);
-        let owned = valid.to_field_value();
-        assert_eq!(owned, "good value");
-        assert!(owned.is_sensitive());
-        std::panic::catch_unwind(|| invalid.to_field_value()).expect_err("the infallible form still documents its panic");
     }
 
     #[cfg(feature = "http")]

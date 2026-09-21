@@ -128,6 +128,26 @@ harness = false
 required-features = ["benchmarking", "http"]
 
 [[bench]]
+name = "http_headers_typed_tokens"
+harness = false
+required-features = ["benchmarking", "http", "headers-negotiation"]
+
+[[bench]]
+name = "http_headers_location_semantics"
+harness = false
+required-features = ["benchmarking", "http", "headers-location"]
+
+[[bench]]
+name = "http_headers_authority_semantics"
+harness = false
+required-features = ["benchmarking", "http", "headers-negotiation", "headers-cors"]
+
+[[bench]]
+name = "http_headers_negotiation_semantics"
+harness = false
+required-features = ["benchmarking", "http", "headers-negotiation"]
+
+[[bench]]
 name = "http_headers_protocol"
 harness = false
 required-features = ["benchmarking", "http"]

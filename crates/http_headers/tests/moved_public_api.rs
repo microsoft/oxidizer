@@ -467,7 +467,7 @@ mod cors {
         let view = AccessControlRequestHeaders::view(&map)
             .expect("valid header-name list")
             .expect("present header-name list");
-        let names: Vec<&str> = view.iter().map(CorsHeaderNameView::as_str).collect();
+        let names: Vec<&str> = view.iter().map(FieldNameView::as_str).collect();
         assert_eq!(names, ["X-Trace", "content-type", "x-trace"]);
         assert_eq!(view.len(), 3);
         assert!(!view.is_empty());
@@ -476,14 +476,14 @@ mod cors {
         assert_eq!(names[0].as_ptr(), raw.as_bytes().as_ptr());
         assert!(view.iter().next().expect("first name").eq_ignore_ascii_case("x-trace"));
         assert_eq!(
-            view.iter().next().expect("first name").to_header_name().expect("validated name"),
+            view.iter().next().expect("first name").try_to_field_name().expect("validated name"),
             "x-trace"
         );
         assert_eq!(
             view.iter()
                 .next()
                 .expect("first name")
-                .to_http_header_name()
+                .try_to_http_header_name()
                 .expect("validated HTTP name"),
             "x-trace"
         );
@@ -498,7 +498,7 @@ mod cors {
         assert_eq!(exposed.field_values().count(), 1);
         assert!(!exposed.contains_wildcard());
         assert!(format!("{exposed:?}").contains("header_name_count"));
-        assert_eq!(exposed.iter().map(CorsHeaderNameView::as_str).collect::<Vec<_>>(), ["X-Trace"]);
+        assert_eq!(exposed.iter().map(FieldNameView::as_str).collect::<Vec<_>>(), ["X-Trace"]);
         map.insert(ACCESS_CONTROL_EXPOSE_HEADERS, HeaderValue::from_static("*"));
         let wildcard = AccessControlExposeHeaders::view(&map)
             .expect("valid wildcard exposed-header list")
@@ -522,7 +522,7 @@ mod cors {
     fn list_constructors_validate_tokens_and_keep_wildcard_syntactic() {
         let methods = AccessControlAllowMethodsOwned::from_methods([Method::GET.as_str(), "X-CUSTOM", "GET"]).expect("valid methods");
         assert_eq!(
-            methods.iter().map(CorsMethodView::as_str).collect::<Vec<_>>(),
+            methods.iter().map(MethodView::as_str).collect::<Vec<_>>(),
             ["GET", "X-CUSTOM", "GET"]
         );
         AccessControlAllowMethodsOwned::from_methods(["GET", "not a method"]).expect_err("methods must be tokens");
@@ -530,7 +530,7 @@ mod cors {
         let headers = AccessControlExposeHeadersOwned::from_header_names([http::header::CONTENT_TYPE.as_str(), "X-Extension"])
             .expect("valid field names");
         assert_eq!(
-            headers.iter().map(CorsHeaderNameView::as_str).collect::<Vec<_>>(),
+            headers.iter().map(FieldNameView::as_str).collect::<Vec<_>>(),
             ["content-type", "X-Extension"]
         );
         assert_eq!(headers.len(), 2);
@@ -674,7 +674,7 @@ mod cors {
             .expect("present request method");
         assert_eq!(view.method().as_str(), "X-REINDEX");
         assert_eq!(view.method().as_bytes().as_ptr(), raw.as_bytes().as_ptr());
-        assert_eq!(view.method().to_method().expect("validated method").as_str(), "X-REINDEX");
+        assert_eq!(view.method().try_to_method().expect("validated method").as_str(), "X-REINDEX");
 
         for invalid in ["", "GET, POST", "bad method", "\"PATCH\""] {
             AccessControlRequestMethodOwned::try_from(invalid).expect_err("request method must be one token");
@@ -689,7 +689,7 @@ mod cors {
         let view = AccessControlAllowMethods::view(&map)
             .expect("valid method list")
             .expect("present method list");
-        let methods: Vec<&str> = view.iter().map(CorsMethodView::as_str).collect();
+        let methods: Vec<&str> = view.iter().map(MethodView::as_str).collect();
         assert_eq!(methods, ["GET", "X-PURGE", "PATCH", "GET"]);
         assert_eq!(view.field_values().count(), 2);
 
@@ -1080,6 +1080,7 @@ mod negotiation {
             .expect("Host is present");
         assert_eq!(host.host().as_bytes(), b"caf\xc3\xa9.example");
         assert_eq!(host.port(), Some("443"));
+        drop(host);
 
         map.clear();
         map.insert(LOCATION, HeaderValue::from_static("/a\\b\\c"));

@@ -91,25 +91,14 @@ pub struct SecWebSocketProtocolView<'a> {
     values: FieldLines<'a>,
 }
 
-impl fmt::Debug for SecWebSocketProtocolOwned {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SecWebSocketProtocolOwned")
-            .field("value_count", &self.values.len())
-            .finish()
-    }
-}
+super::super::shared::impl_value_count_debug!(
+    SecWebSocketProtocolOwned => "SecWebSocketProtocolOwned",
+    SecWebSocketProtocolView<'_> => "SecWebSocketProtocolView",
+);
 
 impl fmt::Display for SecWebSocketProtocolOwned {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         super::super::shared::fmt_ascii_values(self.values.iter().map(FieldValue::as_field_value_ref), f)
-    }
-}
-
-impl fmt::Debug for SecWebSocketProtocolView<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SecWebSocketProtocolView")
-            .field("value_count", &self.values.len())
-            .finish()
     }
 }
 
@@ -316,11 +305,14 @@ impl Field for SecWebSocketProtocol {
         };
         lines.validate_list_item_limit(b',', true)?;
         let mut copied = FieldLinesIter::empty();
+        let mut present = false;
         for (value, owned) in lines.repeated_owned()? {
-            if !is_bare_protocol_list(value.as_bytes()) {
-                validate_header_value_list(value, &FieldName::SecWebSocketProtocol, validate_protocol)?;
-            }
+            present |= is_bare_protocol_list(value.as_bytes())
+                || validate_header_value_list(value, &FieldName::SecWebSocketProtocol, validate_protocol)?;
             copied.push(owned);
+        }
+        if !present {
+            return Err(invalid_syntax(&FieldName::SecWebSocketProtocol));
         }
         Ok(Some(SecWebSocketProtocolOwned { values: copied }))
     }
@@ -333,30 +325,16 @@ impl Field for SecWebSocketProtocol {
     }
 }
 
-impl TryFrom<&str> for SecWebSocketProtocolOwned {
-    type Error = DecodeError;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let value = FieldValue::from_str(value).map_err(|_invalid| invalid_syntax(&FieldName::SecWebSocketProtocol))?;
-        Self::try_from(value)
-    }
-}
-
-impl TryFrom<String> for SecWebSocketProtocolOwned {
-    type Error = DecodeError;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        let value = FieldValue::try_from(value).map_err(|_invalid| invalid_syntax(&FieldName::SecWebSocketProtocol))?;
-        Self::try_from(value)
-    }
-}
+super::super::shared::impl_string_conversions!(SecWebSocketProtocolOwned, &FieldName::SecWebSocketProtocol, invalid_syntax, value);
 
 impl TryFrom<FieldValue> for SecWebSocketProtocolOwned {
     type Error = DecodeError;
 
     fn try_from(value: FieldValue) -> Result<Self, Self::Error> {
-        if !is_bare_protocol_list(value.as_bytes()) {
-            validate_header_value_list(value.as_field_value_ref(), &FieldName::SecWebSocketProtocol, validate_protocol)?;
+        if !is_bare_protocol_list(value.as_bytes())
+            && !validate_header_value_list(value.as_field_value_ref(), &FieldName::SecWebSocketProtocol, validate_protocol)?
+        {
+            return Err(invalid_syntax(&FieldName::SecWebSocketProtocol));
         }
         Ok(Self {
             values: FieldLinesIter::one(value),
@@ -441,7 +419,7 @@ mod tests {
         ] {
             let mut bytes = literal.to_vec();
             for index in 0..bytes.len() {
-                for replacement in 0..=u8::MAX {
+                for replacement in crate::test_support::substitution_bytes(literal[index], index, literal.len()) {
                     bytes[index] = replacement;
                     assert_eq!(
                         is_bare_protocol_list(&bytes),
@@ -612,5 +590,15 @@ mod tests {
                 .kind(),
             DecodeErrorKind::InvalidToken
         );
+        for raw in ["", " \t ", ",", ", ,", " ,\t, "] {
+            assert_eq!(
+                SecWebSocketProtocolOwned::try_from(FieldValue::from_static(raw))
+                    .unwrap_err()
+                    .kind(),
+                DecodeErrorKind::InvalidSyntax
+            );
+        }
+        let protocol = SecWebSocketProtocolOwned::try_from(FieldValue::from_static("chat")).unwrap();
+        assert_eq!(protocol.selected(), Ok("chat"));
     }
 }

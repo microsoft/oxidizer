@@ -155,6 +155,8 @@ impl IfRangeOwned {
 
     /// Constructs a canonical IMF-fixdate alternative.
     ///
+    /// Fractional seconds are discarded to match the whole-second wire precision.
+    ///
     /// # Errors
     ///
     /// Returns an error when the date cannot be represented by `httpdate`.
@@ -171,10 +173,7 @@ impl IfRangeOwned {
     /// # Ok::<(), http_headers::DecodeError>(())
     /// ```
     pub fn date(date: SystemTime) -> Result<Self, DecodeError> {
-        Ok(Self {
-            value: format_http_date(&FieldName::IfRange, date)?,
-            parsed: IfRangeMetadata::Date(date),
-        })
+        format_http_date(&FieldName::IfRange, date).and_then(Self::try_from)
     }
 
     /// Returns the parsed alternative.
@@ -318,23 +317,7 @@ impl SingleValueField for IfRange {
     }
 }
 
-impl TryFrom<&str> for IfRangeOwned {
-    type Error = DecodeError;
-
-    fn try_from(wire: &str) -> Result<Self, Self::Error> {
-        let value = FieldValue::from_str(wire).map_err(|_invalid| crate::headers::invalid_syntax(&FieldName::IfRange))?;
-        Self::try_from(value)
-    }
-}
-
-impl TryFrom<String> for IfRangeOwned {
-    type Error = DecodeError;
-
-    fn try_from(wire: String) -> Result<Self, Self::Error> {
-        let value = FieldValue::try_from(wire).map_err(|_invalid| crate::headers::invalid_syntax(&FieldName::IfRange))?;
-        Self::try_from(value)
-    }
-}
+super::super::shared::impl_string_conversions!(IfRangeOwned, &FieldName::IfRange, crate::headers::invalid_syntax, wire);
 
 impl TryFrom<FieldValue> for IfRangeOwned {
     type Error = DecodeError;
@@ -385,11 +368,69 @@ fn parse_if_range_date_with(value: FieldValueRef<'_>, mode: crate::DecodeMode) -
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
     use std::time::{Duration, UNIX_EPOCH};
 
     use super::{IfRange, IfRangeOwned, IfRangeValueView};
     use crate::headers::ETagOwned;
     use crate::{DecodeErrorKind, DecodeMode, FieldName, FieldValue, SingleValueField};
+
+    fn hash(value: &impl Hash) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        value.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    #[test]
+    fn date_construction_matches_wire_precision_and_round_trip_identity() {
+        for seconds in [0, 1, 784_111_776, 784_111_777, 253_402_300_799] {
+            let whole = UNIX_EPOCH + Duration::from_secs(seconds);
+            let canonical = IfRangeOwned::date(whole).unwrap();
+            for nanos in [0, 1, 500_000_000, 999_999_999] {
+                let constructed = IfRangeOwned::date(whole + Duration::from_nanos(nanos)).unwrap();
+                assert_eq!(constructed.value().unwrap(), IfRangeValueView::Date(whole));
+                assert_eq!(constructed, canonical);
+                assert_eq!(hash(&constructed), hash(&canonical));
+
+                let wire = constructed.as_field_value();
+                let parsed = IfRangeOwned::try_from(wire.try_as_str().unwrap()).unwrap();
+                assert_eq!(constructed, parsed);
+                assert_eq!(hash(&constructed), hash(&parsed));
+                for mode in [DecodeMode::Strict, DecodeMode::Relaxed] {
+                    let view = IfRange::decode_view_with(wire.as_field_value_ref(), mode).unwrap();
+                    let owned = IfRange::decode_owned_with(wire.clone(), mode).unwrap();
+                    assert_eq!(view.value(), constructed.value().unwrap());
+                    assert_eq!(hash(&view.value()), hash(&constructed.value().unwrap()));
+                    assert_eq!(owned, constructed);
+                    assert_eq!(hash(&owned), hash(&constructed));
+                }
+
+                #[cfg(all(feature = "serde", feature = "headers-conditional"))]
+                {
+                    let serialized = serde_json::to_string(&constructed).unwrap();
+                    let decoded: IfRangeOwned = serde_json::from_str(&serialized).unwrap();
+                    assert_eq!(decoded, constructed);
+                    assert_eq!(decoded.value().unwrap(), IfRangeValueView::Date(whole));
+                    assert_eq!(hash(&decoded), hash(&constructed));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn date_constructor_retains_representable_bounds() {
+        // Windows SystemTime uses 100 ns intervals.
+        let before_epoch = UNIX_EPOCH - Duration::from_micros(1);
+        assert!(before_epoch < UNIX_EPOCH);
+        for instant in [
+            before_epoch,
+            UNIX_EPOCH - Duration::from_secs(1),
+            UNIX_EPOCH + Duration::from_hours(70_389_528),
+        ] {
+            assert_eq!(IfRangeOwned::date(instant).unwrap_err().kind(), DecodeErrorKind::InvalidNumber);
+        }
+    }
 
     #[test]
     fn constructors_accessors_and_trait_paths_preserve_the_selected_alternative() {

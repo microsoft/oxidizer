@@ -69,8 +69,8 @@ pub trait FieldValueWriter {
 ///
 /// ```rust
 /// use http_headers::sink::{
-///     FieldEncodeOutput, FieldEncoder, FieldValueWriter, InsertError, U64Encoder,
-///     ValueRefsEncoder,
+///     FieldEncodeOutput, FieldEncoder, FieldValueWriter, InsertError, InsertErrorKind,
+///     U64Encoder, ValueRefsEncoder,
 /// };
 /// use http_headers::{FieldSensitivity, FieldValue, FieldValueRef};
 ///
@@ -87,7 +87,7 @@ pub trait FieldValueWriter {
 /// impl FieldValueWriter for Writer<'_> {
 ///     fn write_bytes(&mut self, bytes: &[u8]) -> Result<(), InsertError> {
 ///         if self.bytes.len().saturating_add(bytes.len()) > self.expected {
-///             return Err(InsertError);
+///             return Err(InsertError::new(InsertErrorKind::InvalidEncoding));
 ///         }
 ///         self.bytes.extend_from_slice(bytes);
 ///         Ok(())
@@ -95,10 +95,10 @@ pub trait FieldValueWriter {
 ///
 ///     fn finish(self) -> Result<(), InsertError> {
 ///         if self.bytes.len() != self.expected {
-///             return Err(InsertError);
+///             return Err(InsertError::new(InsertErrorKind::InvalidEncoding));
 ///         }
 ///         let value = FieldValue::from_bytes(self.bytes)
-///             .map_err(|_| InsertError)?
+///             .map_err(|_| InsertError::new(InsertErrorKind::InvalidValue))?
 ///             .with_sensitivity(self.sensitivity);
 ///         self.output.push(value);
 ///         Ok(())
@@ -114,7 +114,9 @@ pub trait FieldValueWriter {
 ///         sensitivity: FieldSensitivity,
 ///     ) -> Result<Self::Writer<'_>, InsertError> {
 ///         let mut bytes = Vec::new();
-///         bytes.try_reserve_exact(length).map_err(|_| InsertError)?;
+///         bytes
+///             .try_reserve_exact(length)
+///             .map_err(|_| InsertError::new(InsertErrorKind::AllocationFailed))?;
 ///         Ok(Writer {
 ///             output: &mut self.0,
 ///             bytes,

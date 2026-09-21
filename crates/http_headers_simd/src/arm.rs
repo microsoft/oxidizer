@@ -323,10 +323,9 @@ fn base64_accept_mask(value: uint8x16_t) -> uint8x16_t {
 
 /// Marks the lanes inside the separator-free URI subset.
 ///
-/// The subset is three ranges plus a handful of isolated bytes, so it needs no
-/// table: `&`..`?` covers the sub-delims, digits, `:`, and `;` once `<` and `>`
-/// are removed, case folding merges both letter ranges, and `!`/`#` share a
-/// single compare after the low bit is forced on.
+/// The `&`..`?` range covers sub-delims, digits, `:`, and `;` after excluding
+/// `<` and `>`. Case folding merges the letter ranges; isolated bytes use
+/// equality comparisons. `#` is excluded for separate fragment counting.
 #[target_feature(enable = "neon")]
 fn simple_uri_accept_mask(value: uint8x16_t) -> uint8x16_t {
     let raised = vorrq_u8(value, vdupq_n_u8(2));
@@ -415,14 +414,17 @@ fn all_set(value: uint8x16_t) -> bool {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::arch;
     use std::time::Duration;
+    #[cfg(not(feature = "std"))]
+    use std::vec::Vec;
 
     use super::*;
 
     /// Puts every byte value in every lane of a token-list block.
     #[test]
     fn token_list_lanes_match_scalar_for_every_byte() {
-        if !std::arch::is_aarch64_feature_detected!("neon") {
+        if !arch::is_aarch64_feature_detected!("neon") {
             return;
         }
         for lane in 0..2 * WIDTH {
@@ -439,8 +441,9 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "Bolero corpus replay requires filesystem access unavailable under Miri isolation")]
     fn neon_matches_scalar() {
-        let available = std::arch::is_aarch64_feature_detected!("neon");
+        let available = arch::is_aarch64_feature_detected!("neon");
         if !available {
             return;
         }
@@ -494,7 +497,7 @@ mod tests {
 
     #[test]
     fn range_lanes_match_scalar_for_every_byte() {
-        if !std::arch::is_aarch64_feature_detected!("neon") {
+        if !arch::is_aarch64_feature_detected!("neon") {
             return;
         }
         for lane in 0..WINDOW {
@@ -510,7 +513,7 @@ mod tests {
 
     #[test]
     fn base64_and_uri_lanes_match_neon() {
-        if !std::arch::is_aarch64_feature_detected!("neon") {
+        if !arch::is_aarch64_feature_detected!("neon") {
             return;
         }
         for lane in 0..2 * WIDTH {

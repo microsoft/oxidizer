@@ -1,7 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use super::shared::{ListValues, check_quoted_value, check_quoted_values, validate_weighted_token};
+use super::accept_language_entry::AcceptLanguageEntry;
+use super::negotiation_members::{collect_members, validated_member};
+use super::shared::{ListValues, QuotedItems, check_quoted_value, check_quoted_values, validate_weighted_token};
 use crate::sink::{FieldSink, InsertError};
 use crate::source::{FieldLines, FieldSource};
 use crate::{DecodeError, Field, FieldName, FieldValue, FieldValueRef};
@@ -76,6 +78,54 @@ super::shared::list_header!(
     quoted
 );
 
+impl AcceptLanguageOwned {
+    /// Iterates typed language preferences in wire order without allocating.
+    ///
+    /// Empty list members are ignored and duplicates retained. A fresh
+    /// iterator traverses the wire again; yielded members retain scalar
+    /// metadata for repeated reads without parsing.
+    pub fn entries(&self) -> impl Iterator<Item = AcceptLanguageEntry<'_>> {
+        self.values
+            .iter()
+            .flat_map(|value| QuotedItems::comma(value.as_bytes(), &FieldName::AcceptLanguage))
+            .map(validated_member)
+            .map(AcceptLanguageEntry::from_validated)
+    }
+
+    /// Constructs one field line from typed basic language preferences.
+    ///
+    /// Order, duplicate ranges and original range spellings are retained.
+    /// Quality spelling and separators are written in canonical form. Empty input creates
+    /// a present empty list.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the aggregate wire size or member count exceeds the
+    /// custom-source budgets.
+    pub fn from_entries<'a>(entries: impl IntoIterator<Item = AcceptLanguageEntry<'a>>) -> Result<Self, DecodeError> {
+        collect_members(
+            entries,
+            &FieldName::AcceptLanguage,
+            AcceptLanguageEntry::encoded_len,
+            AcceptLanguageEntry::append_to,
+        )
+        .map(|values| Self { values })
+    }
+}
+
+impl<'a> AcceptLanguageView<'a> {
+    /// Iterates typed basic language ranges and qualities without allocating.
+    ///
+    /// Each new iterator traverses the wire again; scalar entry getters reuse
+    /// retained metadata rather than parsing.
+    pub fn entries(&self) -> impl Iterator<Item = AcceptLanguageEntry<'a>> + '_ {
+        self.values
+            .validated_comma_items()
+            .map(validated_member)
+            .map(AcceptLanguageEntry::from_validated)
+    }
+}
+
 fn validate_accept_language(bytes: &[u8]) -> Result<(), DecodeError> {
     validate_weighted_token(bytes, &FieldName::AcceptLanguage, valid_language_range, false)
 }
@@ -84,7 +134,7 @@ fn validate_accept_language_relaxed(bytes: &[u8]) -> Result<(), DecodeError> {
     validate_weighted_token(bytes, &FieldName::AcceptLanguage, valid_language_range, true)
 }
 
-fn valid_language_range(bytes: &[u8]) -> bool {
+pub(super) fn valid_language_range(bytes: &[u8]) -> bool {
     if bytes == b"*" {
         return true;
     }
@@ -98,8 +148,8 @@ fn valid_language_range(bytes: &[u8]) -> bool {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::super::shared::{WELL_KNOWN_ACCEPT_LANGUAGE, try_plain_items};
-    use super::super::weighted_token_scan::corpus::{exhaustive, fragment_lines};
+    use super::super::recognition_test_support::{self, exhaustive, fragment_lines};
+    use super::super::shared::WELL_KNOWN_ACCEPT_LANGUAGE;
     use super::super::weighted_token_scan::scan_accept_language_line;
     use super::{valid_language_range, validate_accept_language, validate_accept_language_relaxed};
     use crate::DecodeErrorKind;
@@ -135,33 +185,13 @@ mod tests {
         );
     }
 
-    fn general_parser_accepts(bytes: &[u8], relaxed: bool) -> bool {
-        let validator = if relaxed {
-            validate_accept_language_relaxed
-        } else {
-            validate_accept_language
-        };
-        matches!(try_plain_items(bytes, b',', true, validator), Ok(true))
-    }
-
     fn assert_recognition_is_sound(lines: &[Vec<u8>]) -> usize {
-        let mut recognized = 0;
-        for line in lines {
-            if !scan_accept_language_line(line) {
-                continue;
-            }
-            recognized += 1;
-            let shown = String::from_utf8_lossy(line);
-            assert!(
-                general_parser_accepts(line, false),
-                "recognized line {shown:?} must satisfy the strict member grammar"
-            );
-            assert!(
-                general_parser_accepts(line, true),
-                "recognized line {shown:?} must satisfy the relaxed member grammar"
-            );
-        }
-        recognized
+        recognition_test_support::assert_recognition_is_sound(
+            lines,
+            scan_accept_language_line,
+            validate_accept_language,
+            validate_accept_language_relaxed,
+        )
     }
 
     #[test]

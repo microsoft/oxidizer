@@ -971,3 +971,5 @@ JIT
 CSV
 subcommands
 POSIX
+preflight
+predecoded

@@ -152,25 +152,14 @@ pub struct ReferrerPolicyView<'a> {
     values: FieldLines<'a>,
 }
 
-impl fmt::Debug for ReferrerPolicyOwned {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ReferrerPolicyOwned")
-            .field("value_count", &self.values.len())
-            .finish()
-    }
-}
+super::super::shared::impl_value_count_debug!(
+    ReferrerPolicyOwned => "ReferrerPolicyOwned",
+    ReferrerPolicyView<'_> => "ReferrerPolicyView",
+);
 
 impl fmt::Display for ReferrerPolicyOwned {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         super::super::shared::fmt_ascii_values(self.values.iter().map(FieldValue::as_field_value_ref), f)
-    }
-}
-
-impl fmt::Debug for ReferrerPolicyView<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ReferrerPolicyView")
-            .field("value_count", &self.values.len())
-            .finish()
     }
 }
 
@@ -550,23 +539,7 @@ impl Field for ReferrerPolicy {
     }
 }
 
-impl TryFrom<&str> for ReferrerPolicyOwned {
-    type Error = DecodeError;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let value = FieldValue::from_str(value).map_err(|_invalid| super::super::invalid_syntax(&FieldName::ReferrerPolicy))?;
-        Self::try_from(value)
-    }
-}
-
-impl TryFrom<String> for ReferrerPolicyOwned {
-    type Error = DecodeError;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        let value = FieldValue::try_from(value).map_err(|_invalid| super::super::invalid_syntax(&FieldName::ReferrerPolicy))?;
-        Self::try_from(value)
-    }
-}
+super::super::shared::impl_string_conversions!(ReferrerPolicyOwned, &FieldName::ReferrerPolicy, super::super::invalid_syntax, value);
 
 impl TryFrom<FieldValue> for ReferrerPolicyOwned {
     type Error = DecodeError;
@@ -616,14 +589,17 @@ fn recognize_referrer_policy(bytes: &[u8]) -> Option<ReferrerPolicyValue> {
     if bytes == b"strict-origin-when-cross-origin" {
         return Some(ReferrerPolicyValue::StrictOriginWhenCrossOrigin);
     }
-    match bytes {
-        b"no-referrer" => Some(ReferrerPolicyValue::NoReferrer),
-        b"no-referrer-when-downgrade" => Some(ReferrerPolicyValue::NoReferrerWhenDowngrade),
-        b"origin" => Some(ReferrerPolicyValue::Origin),
-        b"origin-when-cross-origin" => Some(ReferrerPolicyValue::OriginWhenCrossOrigin),
-        b"same-origin" => Some(ReferrerPolicyValue::SameOrigin),
-        b"strict-origin" => Some(ReferrerPolicyValue::StrictOrigin),
-        b"unsafe-url" => Some(ReferrerPolicyValue::UnsafeUrl),
+    match bytes.len() {
+        11 => match bytes[0] {
+            b'n' if &bytes[1..3] == b"o-" && &bytes[3..] == b"referrer" => Some(ReferrerPolicyValue::NoReferrer),
+            b's' if bytes == b"same-origin" => Some(ReferrerPolicyValue::SameOrigin),
+            _ => None,
+        },
+        26 if bytes.starts_with(b"no-") && bytes == b"no-referrer-when-downgrade" => Some(ReferrerPolicyValue::NoReferrerWhenDowngrade),
+        6 if bytes[0] == b'o' && bytes == b"origin" => Some(ReferrerPolicyValue::Origin),
+        24 if bytes[0] == b'o' && bytes == b"origin-when-cross-origin" => Some(ReferrerPolicyValue::OriginWhenCrossOrigin),
+        13 if bytes[0] == b's' && bytes == b"strict-origin" => Some(ReferrerPolicyValue::StrictOrigin),
+        10 if bytes[0] == b'u' && bytes == b"unsafe-url" => Some(ReferrerPolicyValue::UnsafeUrl),
         _ => None,
     }
 }
@@ -683,7 +659,7 @@ impl<'a> Iterator for CommaItems<'a> {
 mod tests {
     use super::{
         CommaItems, ReferrerPolicy, ReferrerPolicyOwned, ReferrerPolicyTokenView, ReferrerPolicyValue, increment_item_count,
-        parse_referrer_policy_token,
+        parse_referrer_policy_token, recognize_referrer_policy,
     };
     use crate::sink::{EncodedValues, FieldSink};
     use crate::source::FieldSource;
@@ -715,6 +691,18 @@ mod tests {
             let token = parse_referrer_policy_token(wire.as_bytes()).expect("recognized policy parses");
             assert_eq!(token.as_str(), wire);
             assert_eq!(token.policy(), Some(policy));
+            let mut neighbor = wire.as_bytes().to_vec();
+            for index in 0..neighbor.len() {
+                for byte in crate::test_support::substitution_bytes(wire.as_bytes()[index], index, wire.len()) {
+                    neighbor[index] = byte;
+                    assert_eq!(
+                        recognize_referrer_policy(&neighbor),
+                        (byte == wire.as_bytes()[index]).then_some(policy),
+                        "{neighbor:?}"
+                    );
+                }
+                neighbor[index] = wire.as_bytes()[index];
+            }
         }
 
         let extension = parse_referrer_policy_token(b"future-policy").expect("extension token parses");

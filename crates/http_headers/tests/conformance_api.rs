@@ -9,7 +9,7 @@ use std::fmt::{self, Write as _};
 use std::time::Duration;
 
 use http_headers::headers::*;
-use http_headers::sink::{EncodedValues, FieldSink, InsertError, ValueRefsEncoder};
+use http_headers::sink::{EncodedValues, FieldSink, InsertError, InsertErrorKind, ValueRefsEncoder};
 use http_headers::source::{FieldLines, FieldSource};
 use http_headers::{DecodeError, FieldName, FieldSensitivity, FieldValue, FieldValueRef};
 
@@ -374,7 +374,7 @@ fn semantic_arguments_and_build_time_validation_preserve_output() {
             &FieldName::CacheControl,
             CacheControlOwned::builder().extension_value("bad name", "bad value"),
         ),
-        Err(InsertError)
+        Err(InsertError::new(InsertErrorKind::InvalidValue))
     );
 
     Sink.set_encoded(

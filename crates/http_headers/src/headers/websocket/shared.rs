@@ -235,17 +235,18 @@ pub(super) fn trim_ows(bytes: &[u8]) -> &[u8] {
     trimmed
 }
 
+/// Validates a physical line and reports whether it contributes any members.
 pub(super) fn validate_header_value_list(
     value: FieldValueRef<'_>,
     name: &'static FieldName,
     validate_item: fn(&[u8]) -> Result<(), DecodeError>,
-) -> Result<(), DecodeError> {
+) -> Result<bool, DecodeError> {
     let mut count = 0_usize;
     for item in CommaItems::new(value.as_bytes()) {
         validate_item(item)?;
         count = increment_item_count(count, name)?;
     }
-    if count == 0 { Err(invalid_syntax(name)) } else { Ok(()) }
+    Ok(count != 0)
 }
 
 pub(super) struct CommaItems<'a> {
@@ -312,8 +313,121 @@ mod tests {
         is_canonical_tail_pad1, is_canonical_tail_pad2, trim_ows, validate_bare_list, validate_canonical_base64,
         validate_header_value_list, validate_list, validate_present_item,
     };
-    use crate::source::FieldLines;
-    use crate::{DecodeErrorKind, FieldName, FieldValue};
+    use crate::headers::{SecWebSocketExtensions, SecWebSocketProtocol};
+    use crate::source::{FieldLines, FieldSource, MAX_CUSTOM_FIELD_LINES, MAX_CUSTOM_LIST_ITEMS};
+    use crate::{DecodeErrorKind, DecodeMode, Field, FieldName, FieldValue, FieldValueRef, TestSink};
+
+    struct RawSource<'a>(&'a [FieldValueRef<'a>]);
+
+    impl FieldSource for RawSource<'_> {
+        fn lines(&self, name: &'static FieldName) -> Option<FieldLines<'_>> {
+            FieldLines::from_borrowed(name, self.0)
+        }
+    }
+
+    fn assert_preserved<F: Field>(source: &impl FieldSource, mode: DecodeMode, expected: &[FieldValueRef<'_>]) {
+        assert!(F::view_with(source, mode).unwrap().is_some());
+        let owned = F::owned_with(source, mode).unwrap().unwrap();
+        let mut output = TestSink::new();
+        F::insert(&mut output, owned).unwrap();
+        let lines = output.lines(F::name()).unwrap();
+        assert_eq!(lines.repeated().collect::<Vec<_>>(), expected);
+        assert_eq!(
+            lines.repeated().map(FieldValueRef::is_sensitive).collect::<Vec<_>>(),
+            expected.iter().map(|value| value.is_sensitive()).collect::<Vec<_>>()
+        );
+    }
+
+    fn assert_rejected<F: Field>(source: &impl FieldSource, mode: DecodeMode) {
+        F::view_with(source, mode).map(|_| ()).unwrap_err();
+        F::owned_with(source, mode).map(|_| ()).unwrap_err();
+    }
+
+    #[test]
+    fn empty_physical_lines_preserve_nonempty_logical_lists() {
+        for empty in [b"".as_slice(), b" \t ", b",, \t,"] {
+            for wires in [
+                vec![empty, b"chat", b"superchat"],
+                vec![b"chat".as_slice(), empty, b"superchat"],
+                vec![b"chat".as_slice(), b"superchat", empty],
+                vec![empty, b"chat", empty, b"superchat", empty],
+            ] {
+                let values: Vec<_> = wires
+                    .iter()
+                    .enumerate()
+                    .map(|(index, bytes)| FieldValueRef::new(bytes).with_sensitive(index % 2 == 0))
+                    .collect();
+                let raw = RawSource(&values);
+                for mode in [DecodeMode::Strict, DecodeMode::Relaxed] {
+                    assert_preserved::<SecWebSocketProtocol>(&raw, mode, &values);
+                    assert_preserved::<SecWebSocketExtensions>(&raw, mode, &values);
+                    let protocols = SecWebSocketProtocol::view_with(&raw, mode).unwrap().unwrap();
+                    assert_eq!(protocols.protocols().collect::<Result<Vec<_>, _>>().unwrap(), ["chat", "superchat"]);
+                    let owned = SecWebSocketProtocol::owned_with(&raw, mode).unwrap().unwrap();
+                    assert_eq!(owned.protocols().collect::<Result<Vec<_>, _>>().unwrap(), ["chat", "superchat"]);
+                    let extensions = SecWebSocketExtensions::view_with(&raw, mode).unwrap().unwrap();
+                    assert_eq!(
+                        extensions.extensions().map(|item| item.unwrap().name()).collect::<Vec<_>>(),
+                        ["chat", "superchat"]
+                    );
+                    let owned = SecWebSocketExtensions::owned_with(&raw, mode).unwrap().unwrap();
+                    assert_eq!(
+                        owned.extensions().map(|item| item.unwrap().name()).collect::<Vec<_>>(),
+                        ["chat", "superchat"]
+                    );
+
+                    #[cfg(feature = "http")]
+                    {
+                        let mut map = http::HeaderMap::new();
+                        for name in [SecWebSocketProtocol::name(), SecWebSocketExtensions::name()] {
+                            for value in &values {
+                                map.append(name.as_str(), http::HeaderValue::try_from(*value).unwrap());
+                            }
+                        }
+                        assert_preserved::<SecWebSocketProtocol>(&map, mode, &values);
+                        assert_preserved::<SecWebSocketExtensions>(&map, mode, &values);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn empty_lines_do_not_hide_missing_or_malformed_members_or_source_limits() {
+        let empty = FieldValueRef::new(b", \t,");
+        let valid = FieldValueRef::new(b"chat");
+        let too_many_items = vec!["chat"; MAX_CUSTOM_LIST_ITEMS + 1].join(",");
+        let mut too_many_lines = vec![empty; MAX_CUSTOM_FIELD_LINES];
+        too_many_lines.push(valid);
+        for values in [
+            vec![FieldValueRef::new(b""), FieldValueRef::new(b" \t"), empty],
+            vec![empty, valid, FieldValueRef::new(b"not valid"), empty],
+            vec![empty, valid, FieldValueRef::new(b"bad\r\n"), empty],
+            vec![empty, valid, FieldValueRef::new(b"x; p=\"unterminated"), empty],
+            vec![empty, FieldValueRef::new(too_many_items.as_bytes()), empty],
+            too_many_lines,
+        ] {
+            let raw = RawSource(&values);
+            for mode in [DecodeMode::Strict, DecodeMode::Relaxed] {
+                assert_rejected::<SecWebSocketProtocol>(&raw, mode);
+                assert_rejected::<SecWebSocketExtensions>(&raw, mode);
+            }
+        }
+
+        #[cfg(feature = "http")]
+        for wires in [["", " \t", ",, "], ["", "chat", "not valid"], ["", "chat", "x; p=\"unterminated"]] {
+            let mut map = http::HeaderMap::new();
+            for name in [SecWebSocketProtocol::name(), SecWebSocketExtensions::name()] {
+                for wire in wires {
+                    map.append(name.as_str(), http::HeaderValue::from_str(wire).unwrap());
+                }
+            }
+            for mode in [DecodeMode::Strict, DecodeMode::Relaxed] {
+                assert_rejected::<SecWebSocketProtocol>(&map, mode);
+                assert_rejected::<SecWebSocketExtensions>(&map, mode);
+            }
+        }
+    }
 
     fn validate_alpha(item: &[u8]) -> Result<(), crate::DecodeError> {
         item.iter()
@@ -360,7 +474,7 @@ mod tests {
             let mut bytes = encoded.into_bytes();
             for index in 0..bytes.len() {
                 let original = bytes[index];
-                for byte in 0..=u8::MAX {
+                for byte in crate::test_support::substitution_bytes(original, index, bytes.len()) {
                     bytes[index] = byte;
                     let expected = STANDARD.decode(&bytes).is_ok_and(|decoded| decoded.len() == decoded_length);
                     assert_eq!(
@@ -547,14 +661,12 @@ mod tests {
         );
         assert_eq!(
             validate_header_value_list(value.as_field_value_ref(), &FieldName::SecWebSocketProtocol, validate_alpha,),
-            Ok(())
+            Ok(true)
         );
         let empty = FieldValue::from_static(",,,");
         assert_eq!(
-            validate_header_value_list(empty.as_field_value_ref(), &FieldName::SecWebSocketProtocol, validate_alpha,)
-                .expect_err("empty list")
-                .kind(),
-            DecodeErrorKind::InvalidSyntax
+            validate_header_value_list(empty.as_field_value_ref(), &FieldName::SecWebSocketProtocol, validate_alpha,),
+            Ok(false)
         );
     }
 }

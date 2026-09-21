@@ -14,6 +14,12 @@ use crate::source::FieldLines;
 /// You can use the `http` cargo feature to get an implementation of this trait for the common
 /// [`HeaderMap`](https://docs.rs/http/latest/http/header/struct.HeaderMap.html) type.
 ///
+/// Names at this boundary must be static descriptors. Custom descriptors can
+/// use a `static LazyLock<FieldName>`; locally constructed runtime names cannot
+/// be passed to this trait. Use the container's native API for dynamic lookup.
+/// [`FieldName::try_from_bytes`] remains available for validating, comparing,
+/// and converting runtime names.
+///
 /// # Examples
 ///
 /// ```rust
@@ -39,12 +45,15 @@ pub trait FieldSource {
     /// raw field line; a present zero-length field line is therefore distinct
     /// from absence.
     ///
-    /// Owned decoding accepts at most
+    /// Borrowed and owned decoding from custom sources accept at most
     /// [`MAX_CUSTOM_FIELD_BYTES`](crate::source::MAX_CUSTOM_FIELD_BYTES) total
     /// bytes and [`MAX_CUSTOM_FIELD_LINES`](crate::source::MAX_CUSTOM_FIELD_LINES)
     /// lines for one name. Delimited parsing accepts at most
     /// [`MAX_CUSTOM_LIST_ITEMS`](crate::source::MAX_CUSTOM_LIST_ITEMS) items.
-    /// Exceeding a limit returns a [`DecodeError`](crate::DecodeError).
+    /// Exceeding a limit returns
+    /// [`DecodeErrorKind::SourceLimitExceeded`](crate::DecodeErrorKind::SourceLimitExceeded).
+    /// The native `http::HeaderMap` representation is exempt; a custom source
+    /// backed by validated [`FieldValue`](crate::FieldValue) values is not.
     ///
     /// # Examples
     ///

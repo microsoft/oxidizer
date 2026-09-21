@@ -1,7 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use super::shared::{ListValues, check_quoted_value, check_quoted_values, validate_weighted_token};
+use super::accept_encoding_entry::AcceptEncodingEntry;
+use super::negotiation_members::{collect_members, validated_member};
+use super::shared::{ListValues, QuotedItems, check_quoted_value, check_quoted_values, validate_weighted_token};
 use crate::sink::{FieldSink, InsertError};
 use crate::source::{FieldLines, FieldSource};
 use crate::{DecodeError, Field, FieldName, FieldValue, FieldValueRef, validate};
@@ -76,6 +78,52 @@ super::shared::list_header!(
     quoted
 );
 
+impl AcceptEncodingOwned {
+    /// Iterates typed coding preferences in wire order, retaining duplicates.
+    ///
+    /// A fresh iterator traverses the wire again without allocating. Each
+    /// yielded member retains its coding and exact quality for repeated reads.
+    pub fn entries(&self) -> impl Iterator<Item = AcceptEncodingEntry<'_>> {
+        self.values
+            .iter()
+            .flat_map(|value| QuotedItems::comma(value.as_bytes(), &FieldName::AcceptEncoding))
+            .map(validated_member)
+            .map(AcceptEncodingEntry::from_validated)
+    }
+
+    /// Constructs one field line from typed coding preferences.
+    ///
+    /// Order and duplicates are preserved. Separators and quality spellings
+    /// are written in canonical form. Empty input creates an empty list, not a wildcard.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the aggregate wire size or member count exceeds the
+    /// custom-source budgets.
+    pub fn from_entries<'a>(entries: impl IntoIterator<Item = AcceptEncodingEntry<'a>>) -> Result<Self, DecodeError> {
+        collect_members(
+            entries,
+            &FieldName::AcceptEncoding,
+            AcceptEncodingEntry::encoded_len,
+            AcceptEncodingEntry::append_to,
+        )
+        .map(|values| Self { values })
+    }
+}
+
+impl<'a> AcceptEncodingView<'a> {
+    /// Iterates typed coding preferences without allocating or adding entries.
+    ///
+    /// Each new iterator traverses the wire again; member getters reuse their
+    /// retained components. Empty list members are ignored.
+    pub fn entries(&self) -> impl Iterator<Item = AcceptEncodingEntry<'a>> + '_ {
+        self.values
+            .validated_comma_items()
+            .map(validated_member)
+            .map(AcceptEncodingEntry::from_validated)
+    }
+}
+
 fn validate_accept_encoding(bytes: &[u8]) -> Result<(), DecodeError> {
     validate_weighted_token(bytes, &FieldName::AcceptEncoding, validate::token, false)
 }
@@ -87,8 +135,8 @@ fn validate_accept_encoding_relaxed(bytes: &[u8]) -> Result<(), DecodeError> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::super::shared::{WELL_KNOWN_ACCEPT_ENCODING, try_plain_items};
-    use super::super::weighted_token_scan::corpus::{exhaustive, fragment_lines};
+    use super::super::recognition_test_support::{self, exhaustive, fragment_lines};
+    use super::super::shared::WELL_KNOWN_ACCEPT_ENCODING;
     use super::super::weighted_token_scan::scan_accept_encoding_line;
     use super::{validate_accept_encoding, validate_accept_encoding_relaxed};
     use crate::DecodeErrorKind;
@@ -118,33 +166,13 @@ mod tests {
         );
     }
 
-    fn general_parser_accepts(bytes: &[u8], relaxed: bool) -> bool {
-        let validator = if relaxed {
-            validate_accept_encoding_relaxed
-        } else {
-            validate_accept_encoding
-        };
-        matches!(try_plain_items(bytes, b',', true, validator), Ok(true))
-    }
-
     fn assert_recognition_is_sound(lines: &[Vec<u8>]) -> usize {
-        let mut recognized = 0;
-        for line in lines {
-            if !scan_accept_encoding_line(line) {
-                continue;
-            }
-            recognized += 1;
-            let shown = String::from_utf8_lossy(line);
-            assert!(
-                general_parser_accepts(line, false),
-                "recognized line {shown:?} must satisfy the strict member grammar"
-            );
-            assert!(
-                general_parser_accepts(line, true),
-                "recognized line {shown:?} must satisfy the relaxed member grammar"
-            );
-        }
-        recognized
+        recognition_test_support::assert_recognition_is_sound(
+            lines,
+            scan_accept_encoding_line,
+            validate_accept_encoding,
+            validate_accept_encoding_relaxed,
+        )
     }
 
     #[test]

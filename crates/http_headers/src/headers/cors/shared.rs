@@ -3,14 +3,20 @@
 
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
-use std::{iter, slice, str};
+use std::{iter, slice};
 
+use http_headers_simd::{EmptyMembers, TokenListScan, scan_token_list};
+
+#[cfg(test)]
+use super::super::tokens::common_header_name;
+pub(super) use super::super::tokens::common_method;
+use super::super::{FieldNameView, MethodView};
 use crate::sink::EncodedValues;
 use crate::source::FieldLines;
 use crate::{DecodeError, DecodeErrorKind, FieldName, FieldValue, FieldValueRef, validate};
 
 /// One byte is an RFC 9110 token byte.
-pub(super) const CLASS_TOKEN: u8 = 1 << 0;
+const CLASS_TOKEN: u8 = 1 << 0;
 /// One byte is optional whitespace.
 pub(super) const CLASS_OWS: u8 = 1 << 1;
 /// One byte is an ASCII decimal digit.
@@ -72,200 +78,6 @@ fn byte_class(bytes: &[u8], index: usize) -> u8 {
     match bytes.get(index) {
         Some(byte) => BYTE_CLASS[usize::from(*byte)],
         None => 0,
-    }
-}
-
-/// A borrowed, validated HTTP method from a CORS field value.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-/// # Examples
-///
-/// ```
-/// use http_headers::headers::{AccessControlAllowMethodsOwned, CorsMethodView};
-///
-/// let value = AccessControlAllowMethodsOwned::from_methods(["GET"])?;
-/// let method: CorsMethodView<'_> = value.iter().next().expect("one method");
-/// assert_eq!(method.as_str(), "GET");
-/// # Ok::<(), http_headers::DecodeError>(())
-/// ```
-pub struct CorsMethodView<'a>(pub(super) &'a str);
-
-impl<'a> CorsMethodView<'a> {
-    /// Returns the method exactly as it appeared on the wire.
-    #[must_use]
-    /// # Examples
-    ///
-    /// ```
-    /// use http_headers::headers::AccessControlAllowMethodsOwned;
-    ///
-    /// let value = AccessControlAllowMethodsOwned::from_methods(["PATCH"])?;
-    /// let method = value.iter().next().expect("one method");
-    /// assert_eq!(method.as_str(), "PATCH");
-    /// # Ok::<(), http_headers::DecodeError>(())
-    /// ```
-    pub const fn as_str(self) -> &'a str {
-        self.0
-    }
-
-    /// Returns the method bytes.
-    #[must_use]
-    /// # Examples
-    ///
-    /// ```
-    /// use http_headers::headers::AccessControlAllowMethodsOwned;
-    ///
-    /// let value = AccessControlAllowMethodsOwned::from_methods(["DELETE"])?;
-    /// let method = value.iter().next().expect("one method");
-    /// assert_eq!(method.as_bytes(), b"DELETE");
-    /// # Ok::<(), http_headers::DecodeError>(())
-    /// ```
-    pub const fn as_bytes(self) -> &'a [u8] {
-        self.0.as_bytes()
-    }
-
-    /// Converts the borrowed method to [`http::Method`].
-    ///
-    /// Extension methods are preserved. This conversion is part of the `http`
-    /// feature; the wire bytes are available without it through
-    /// [`CorsMethodView::as_bytes`].
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the method is unexpectedly invalid.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # #[cfg(feature = "http")]
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let value = http_headers::headers::AccessControlRequestMethodOwned::from_method("GET")?;
-    /// assert_eq!(value.method()?.to_method()?, http::Method::GET);
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # }
-    /// # #[cfg(not(feature = "http"))]
-    /// # fn main() {}
-    /// ```
-    #[cfg(feature = "http")]
-    pub fn to_method(self) -> Result<http::Method, http::method::InvalidMethod> {
-        http::Method::from_bytes(self.0.as_bytes())
-    }
-}
-
-/// A borrowed, validated HTTP field name from a CORS field value.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-/// # Examples
-///
-/// ```
-/// use http_headers::headers::{AccessControlAllowHeadersOwned, CorsHeaderNameView};
-///
-/// let value = AccessControlAllowHeadersOwned::from_header_names(["content-type"])?;
-/// let name: CorsHeaderNameView<'_> = value.iter().next().expect("one field name");
-/// assert_eq!(name.as_str(), "content-type");
-/// # Ok::<(), http_headers::DecodeError>(())
-/// ```
-pub struct CorsHeaderNameView<'a>(pub(super) &'a str);
-
-impl<'a> CorsHeaderNameView<'a> {
-    /// Returns the field name exactly as it appeared on the wire.
-    #[must_use]
-    /// # Examples
-    ///
-    /// ```
-    /// use http_headers::headers::AccessControlAllowHeadersOwned;
-    ///
-    /// let value = AccessControlAllowHeadersOwned::from_header_names(["X-Trace-Id"])?;
-    /// let name = value.iter().next().expect("one field name");
-    /// assert_eq!(name.as_str(), "X-Trace-Id");
-    /// # Ok::<(), http_headers::DecodeError>(())
-    /// ```
-    pub const fn as_str(self) -> &'a str {
-        self.0
-    }
-
-    /// Returns the field-name bytes.
-    #[must_use]
-    /// # Examples
-    ///
-    /// ```
-    /// use http_headers::headers::AccessControlAllowHeadersOwned;
-    ///
-    /// let value = AccessControlAllowHeadersOwned::from_header_names(["authorization"])?;
-    /// let name = value.iter().next().expect("one field name");
-    /// assert_eq!(name.as_bytes(), b"authorization");
-    /// # Ok::<(), http_headers::DecodeError>(())
-    /// ```
-    pub const fn as_bytes(self) -> &'a [u8] {
-        self.0.as_bytes()
-    }
-
-    /// Compares this field name case-insensitively.
-    #[must_use]
-    /// # Examples
-    ///
-    /// ```
-    /// use http_headers::headers::AccessControlAllowHeadersOwned;
-    ///
-    /// let value = AccessControlAllowHeadersOwned::from_header_names(["X-Trace-Id"])?;
-    /// let name = value.iter().next().expect("one field name");
-    /// assert!(name.eq_ignore_ascii_case("x-trace-id"));
-    /// # Ok::<(), http_headers::DecodeError>(())
-    /// ```
-    pub fn eq_ignore_ascii_case(self, other: &str) -> bool {
-        self.0.eq_ignore_ascii_case(other)
-    }
-
-    /// Converts the borrowed field name to a [`FieldName`].
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the field name is unexpectedly invalid.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use http_headers::FieldValue;
-    ///
-    /// let value = http_headers::headers::AccessControlRequestHeadersOwned::try_from(
-    ///     FieldValue::from_static("x-trace-id"),
-    /// )?;
-    /// let name = value
-    ///     .iter()
-    ///     .next()
-    ///     .ok_or("expected one field name")?
-    ///     .to_header_name()?;
-    /// assert_eq!(name.as_str(), "x-trace-id");
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
-    pub fn to_header_name(self) -> Result<FieldName, crate::InvalidFieldName> {
-        FieldName::try_from_bytes(self.0.as_bytes())
-    }
-
-    /// Converts the borrowed field name to an [`http::HeaderName`].
-    ///
-    /// This conversion is part of the `http` feature.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the field name is unexpectedly invalid.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use http_headers::FieldValue;
-    ///
-    /// let value = http_headers::headers::AccessControlRequestHeadersOwned::try_from(
-    ///     FieldValue::from_static("x-trace-id"),
-    /// )?;
-    /// let name = value
-    ///     .iter()
-    ///     .next()
-    ///     .ok_or("expected one field name")?
-    ///     .to_http_header_name()?;
-    /// assert_eq!(name.as_str(), "x-trace-id");
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
-    #[cfg(feature = "http")]
-    pub fn to_http_header_name(self) -> Result<http::HeaderName, http::header::InvalidHeaderName> {
-        http::HeaderName::from_bytes(self.0.as_bytes())
     }
 }
 
@@ -678,6 +490,7 @@ macro_rules! define_header_name_list {
             /// Iterates field names in wire order without allocating.
             ///
             /// Duplicate names and their original casing are preserved.
+            /// Names compare and hash case-insensitively through [`FieldNameView`].
             /// # Examples
             ///
             /// ```
@@ -688,13 +501,8 @@ macro_rules! define_header_name_list {
             /// assert_eq!(names, ["content-type", "x-trace-id"]);
             /// # Ok::<(), http_headers::DecodeError>(())
             /// ```
-            pub fn iter(&self) -> impl Iterator<Item = CorsHeaderNameView<'_>> {
-                self.0
-                    .field_values()
-                    .flat_map(|value| value.as_bytes().split(|byte| *byte == b','))
-                    .map(validate::trim_ows)
-                    .filter(|item| !item.is_empty())
-                    .map(super::shared::header_name_ref_validated)
+            pub fn iter(&self) -> super::CorsHeaderNames<'_> {
+                super::CorsHeaderNames::new(self.0.field_values())
             }
 
             /// Returns the number of list members, including duplicates.
@@ -777,10 +585,20 @@ macro_rules! define_header_name_list {
             }
         }
 
+        impl<'a> IntoIterator for &'a $owned {
+            type Item = FieldNameView<'a>;
+            type IntoIter = super::CorsHeaderNames<'a>;
+
+            fn into_iter(self) -> Self::IntoIter {
+                self.iter()
+            }
+        }
+
         impl<'a> $borrowed<'a> {
             /// Iterates field names in wire order without allocating.
             ///
             /// Duplicate names and their original casing are preserved.
+            /// Names compare and hash case-insensitively through [`FieldNameView`].
             /// # Examples
             ///
             /// ```
@@ -803,7 +621,7 @@ macro_rules! define_header_name_list {
             /// # #[cfg(not(feature = "http"))]
             /// # fn main() {}
             /// ```
-            pub fn iter(&self) -> impl Iterator<Item = CorsHeaderNameView<'a>> + '_ {
+            pub fn iter(&self) -> impl Iterator<Item = FieldNameView<'a>> + '_ {
                 self.0
                     .values
                     .repeated()
@@ -1141,10 +959,10 @@ fn validate_list_value(bytes: &[u8]) -> Option<bool> {
     if let Some(members) = common_list_line(bytes) {
         return Some(members);
     }
-    match http_headers_simd::scan_token_list(bytes, http_headers_simd::EmptyMembers::Skip) {
-        http_headers_simd::TokenListScan::Members => Some(true),
-        http_headers_simd::TokenListScan::Empty => Some(false),
-        http_headers_simd::TokenListScan::Rejected => None,
+    match scan_token_list(bytes, EmptyMembers::Skip) {
+        TokenListScan::Members => Some(true),
+        TokenListScan::Empty => Some(false),
+        TokenListScan::Rejected => None,
     }
 }
 
@@ -1240,79 +1058,35 @@ fn validate_list_item(name: &'static FieldName, item: &[u8]) -> Result<(), Decod
 
 #[expect(clippy::inline_always, reason = "preserves pre-split inlining in hot CORS method iteration")]
 #[inline(always)]
-pub(super) fn method_ref(bytes: &[u8]) -> Option<CorsMethodView<'_>> {
+pub(super) fn method_ref(bytes: &[u8]) -> Option<MethodView<'_>> {
     if let Some(method) = common_method(bytes) {
-        return Some(CorsMethodView(method));
+        return Some(MethodView::from_validated(method.as_bytes()));
     }
     if bytes.is_empty() || !all_token_bytes(bytes) {
         return None;
     }
-    str::from_utf8(bytes).ok().map(CorsMethodView)
+    Some(MethodView::from_validated(bytes))
 }
 
 #[inline]
-pub(super) fn method_ref_validated(bytes: &[u8]) -> CorsMethodView<'_> {
-    common_method(bytes).map_or_else(
-        || CorsMethodView(str::from_utf8(bytes).expect("validated CORS methods are ASCII")),
-        CorsMethodView,
-    )
-}
-
-/// Borrows a registered method as text without decoding UTF-8.
-///
-/// Registered method tokens are known constants, so matching one avoids the
-/// general conversion; every other token falls back to it.
-#[expect(clippy::inline_always, reason = "preserves pre-split inlining in hot CORS method iteration")]
-#[inline(always)]
-pub(super) fn common_method(token: &[u8]) -> Option<&'static str> {
-    match token {
-        b"GET" => Some("GET"),
-        b"PUT" => Some("PUT"),
-        b"HEAD" => Some("HEAD"),
-        b"POST" => Some("POST"),
-        b"PATCH" => Some("PATCH"),
-        b"TRACE" => Some("TRACE"),
-        b"DELETE" => Some("DELETE"),
-        b"CONNECT" => Some("CONNECT"),
-        b"OPTIONS" => Some("OPTIONS"),
-        _ => None,
-    }
+pub(super) fn method_ref_validated(bytes: &[u8]) -> MethodView<'_> {
+    MethodView::from_validated(bytes)
 }
 
 #[inline]
-pub(super) fn header_name_ref_validated(bytes: &[u8]) -> CorsHeaderNameView<'_> {
-    common_header_name(bytes).map_or_else(
-        || CorsHeaderNameView(str::from_utf8(bytes).expect("validated CORS field names are ASCII")),
-        CorsHeaderNameView,
-    )
+pub(super) fn header_name_ref_validated(bytes: &[u8]) -> FieldNameView<'_> {
+    FieldNameView::from_validated(bytes)
 }
 
 #[cfg(test)]
-fn header_name_ref(bytes: &[u8]) -> Option<CorsHeaderNameView<'_>> {
+fn header_name_ref(bytes: &[u8]) -> Option<FieldNameView<'_>> {
     if let Some(name) = common_header_name(bytes) {
-        return Some(CorsHeaderNameView(name));
+        return Some(FieldNameView::from_validated(name.as_bytes()));
     }
     if bytes.is_empty() || !all_token_bytes(bytes) {
         return None;
     }
-    str::from_utf8(bytes).ok().map(CorsHeaderNameView)
-}
-
-#[expect(clippy::inline_always, reason = "preserves pre-split inlining in hot CORS field-name iteration")]
-#[inline(always)]
-fn common_header_name(bytes: &[u8]) -> Option<&'static str> {
-    match bytes {
-        b"content-type" => Some("content-type"),
-        b"authorization" => Some("authorization"),
-        b"x-request-id" => Some("x-request-id"),
-        b"etag" => Some("etag"),
-        b"origin" => Some("origin"),
-        b"accept" => Some("accept"),
-        b"x-requested-with" => Some("x-requested-with"),
-        b"content-length" => Some("content-length"),
-        b"cache-control" => Some("cache-control"),
-        _ => None,
-    }
+    Some(FieldNameView::from_validated(bytes))
 }
 
 #[expect(clippy::inline_always, reason = "preserves pre-split inlining in hot CORS list iteration")]
@@ -1362,7 +1136,7 @@ pub(super) fn invalid_number(name: &'static FieldName) -> DecodeError {
 mod tests {
     use std::collections::hash_map::DefaultHasher;
 
-    use super::super::test_support::TestMap;
+    use super::super::test_map::TestMap;
     use super::*;
     use crate::headers::{
         AccessControlAllowHeaders, AccessControlAllowHeadersOwned, AccessControlExposeHeaders, AccessControlExposeHeadersOwned,
@@ -1428,7 +1202,8 @@ mod tests {
         };
         let mut line = Vec::with_capacity(256);
         let mut accepted = 0_usize;
-        for _ in 0..20_000 {
+        let cases = if cfg!(miri) { 256 } else { 20_000 };
+        for _ in 0..cases {
             let length = LIST_SCAN_MIN_LEN + usize::try_from(next() % 160).unwrap_or_default();
             line.clear();
             while line.len() < length {
@@ -1452,7 +1227,7 @@ mod tests {
             assert_eq!(validate_list_value(&line), scan_list_value(&line));
         }
         assert!(
-            accepted > 1_000,
+            accepted > cases / 20,
             "the generated lines must exercise the accepting path, not only the fallback"
         );
     }
@@ -1467,19 +1242,19 @@ mod tests {
         assert_ne!(table[usize::from(b'f')] & CLASS_HEX, 0);
         assert_ne!(table[usize::from(b'+')] & CLASS_SCHEME, 0);
 
-        let method = CorsMethodView("CUSTOM");
+        let method = MethodView::new("CUSTOM").unwrap();
         assert_eq!(method.as_str(), "CUSTOM");
         assert_eq!(method.as_bytes(), b"CUSTOM");
         #[cfg(feature = "http")]
-        assert_eq!(method.to_method().expect("HTTP method").as_str(), "CUSTOM");
+        assert_eq!(method.try_to_method().expect("HTTP method").as_str(), "CUSTOM");
 
-        let name = CorsHeaderNameView("X-Trace-Id");
+        let name = FieldNameView::new("X-Trace-Id").unwrap();
         assert_eq!(name.as_str(), "X-Trace-Id");
         assert_eq!(name.as_bytes(), b"X-Trace-Id");
         assert!(name.eq_ignore_ascii_case("x-trace-id"));
-        assert_eq!(name.to_header_name().expect("native header name").as_str(), "x-trace-id");
+        assert_eq!(name.try_to_field_name().expect("native header name").as_str(), "x-trace-id");
         #[cfg(feature = "http")]
-        assert_eq!(name.to_http_header_name().expect("HTTP header name").as_str(), "x-trace-id");
+        assert_eq!(name.try_to_http_header_name().expect("HTTP header name").as_str(), "x-trace-id");
     }
 
     #[test]
@@ -1558,7 +1333,7 @@ mod tests {
         assert_eq!(allow.len(), 3);
         assert!(!allow.is_empty());
         assert_eq!(
-            allow.iter().map(CorsHeaderNameView::as_str).collect::<Vec<_>>(),
+            allow.iter().map(FieldNameView::as_str).collect::<Vec<_>>(),
             ["content-type", "X-Trace-Id", "content-type"]
         );
         assert_eq!(allow.field_values().count(), 1);

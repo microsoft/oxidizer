@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::{fmt, str};
+use std::str;
 
 use super::super::shared::FieldLinesIter;
 use crate::sink::{FieldSink, InsertError};
@@ -90,21 +90,10 @@ pub struct ContentSecurityPolicyView<'a> {
     values: FieldLines<'a>,
 }
 
-impl fmt::Debug for ContentSecurityPolicyOwned {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ContentSecurityPolicyOwned")
-            .field("value_count", &self.values.len())
-            .finish()
-    }
-}
-
-impl fmt::Debug for ContentSecurityPolicyView<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ContentSecurityPolicyView")
-            .field("value_count", &self.values.len())
-            .finish()
-    }
-}
+super::super::shared::impl_value_count_debug!(
+    ContentSecurityPolicyOwned => "ContentSecurityPolicyOwned",
+    ContentSecurityPolicyView<'_> => "ContentSecurityPolicyView",
+);
 
 impl ContentSecurityPolicyOwned {
     /// Constructs one opaque policy field value.

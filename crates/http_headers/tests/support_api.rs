@@ -7,7 +7,7 @@
 
 #[cfg(feature = "http")]
 use http_headers::headers::{LocationOwned, UserAgent, UserAgentOwned};
-use http_headers::sink::{EncodedValues, InsertError};
+use http_headers::sink::{EncodedValues, InsertError, InsertErrorKind};
 use http_headers::{DecodeError, DecodeErrorKind, FieldName, FieldValue};
 
 #[test]
@@ -34,7 +34,6 @@ fn encoded_values_and_errors_expose_stable_public_behavior() {
         (DecodeErrorKind::InvalidToken, "invalid token"),
         (DecodeErrorKind::InvalidNumber, "invalid number"),
         (DecodeErrorKind::UnterminatedQuote, "unterminated quoted string"),
-        (DecodeErrorKind::CacheTypeMismatch, "internal cache type mismatch"),
     ];
     for (kind, expected) in cases {
         assert_eq!(kind.to_string(), expected);
@@ -42,7 +41,7 @@ fn encoded_values_and_errors_expose_stable_public_behavior() {
     let error = DecodeError::new(&FieldName::ContentType, DecodeErrorKind::InvalidSyntax).at_value(2);
     assert_eq!(error.value_index(), Some(2));
     assert_eq!(error.to_string(), "invalid content-type header: invalid syntax at value 2");
-    assert_eq!(InsertError.to_string(), "field could not be encoded or stored");
+    assert_eq!(InsertError::new(InsertErrorKind::InvalidValue).to_string(), "invalid field value");
 }
 
 #[test]

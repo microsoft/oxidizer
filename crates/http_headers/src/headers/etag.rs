@@ -356,23 +356,7 @@ impl SingleValueField for ETag {
     }
 }
 
-impl TryFrom<&str> for ETagOwned {
-    type Error = DecodeError;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let value = FieldValue::from_str(value).map_err(|_invalid| super::invalid_syntax(&FieldName::Etag))?;
-        Self::try_from(value)
-    }
-}
-
-impl TryFrom<String> for ETagOwned {
-    type Error = DecodeError;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        let value = FieldValue::try_from(value).map_err(|_invalid| super::invalid_syntax(&FieldName::Etag))?;
-        Self::try_from(value)
-    }
-}
+super::shared::impl_string_conversions!(ETagOwned, &FieldName::Etag, super::invalid_syntax, value);
 
 impl TryFrom<FieldValue> for ETagOwned {
     type Error = DecodeError;

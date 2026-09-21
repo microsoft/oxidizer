@@ -3,7 +3,8 @@
 
 use std::fmt;
 
-use super::shared::{CorsHeaderNameView, CorsList, CorsListView, define_header_name_list};
+use super::super::FieldNameView;
+use super::shared::{CorsList, CorsListView, define_header_name_list};
 use crate::sink::{FieldSink, InsertError};
 use crate::source::FieldSource;
 use crate::{DecodeError, Field, FieldName, FieldValue, FieldValueRef, validate};

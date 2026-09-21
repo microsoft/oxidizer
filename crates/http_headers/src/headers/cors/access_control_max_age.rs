@@ -7,7 +7,7 @@ use std::time::Duration;
 use super::shared::{invalid_number, invalid_syntax, trimmed_range, untrimmed_range};
 use crate::sink::{EncodedValues, FieldSink, InsertError};
 use crate::source::FieldSource;
-use crate::{DecodeError, Field, FieldName, FieldValue, FieldValueRef, validate};
+use crate::{DecodeError, DecodeErrorKind, Field, FieldName, FieldValue, FieldValueRef, validate};
 
 /// Defines the `Access-Control-Max-Age` header.
 ///
@@ -81,8 +81,13 @@ impl AccessControlMaxAgeOwned {
         Self { seconds }
     }
 
-    /// Constructs a max age from a duration.
-    #[must_use]
+    /// Constructs a max age from a whole-second duration.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DecodeErrorKind::InvalidNumber`] if the duration contains
+    /// fractional seconds.
+    ///
     /// # Examples
     ///
     /// ```
@@ -90,14 +95,18 @@ impl AccessControlMaxAgeOwned {
     ///
     /// use http_headers::headers::AccessControlMaxAgeOwned;
     ///
-    /// let value = AccessControlMaxAgeOwned::from_duration(Duration::from_millis(2_500));
+    /// let value = AccessControlMaxAgeOwned::from_duration(Duration::from_secs(2))?;
     /// assert_eq!(value.seconds(), 2);
     /// assert_eq!(value.duration(), Duration::from_secs(2));
+    /// # Ok::<(), http_headers::DecodeError>(())
     /// ```
-    pub const fn from_duration(duration: Duration) -> Self {
-        Self {
-            seconds: duration.as_secs(),
+    pub const fn from_duration(duration: Duration) -> Result<Self, DecodeError> {
+        if duration.subsec_nanos() != 0 {
+            return Err(DecodeError::new(&FieldName::AccessControlMaxAge, DecodeErrorKind::InvalidNumber));
         }
+        Ok(Self {
+            seconds: duration.as_secs(),
+        })
     }
 
     /// Returns the max age in seconds.
@@ -180,6 +189,7 @@ impl Field for AccessControlMaxAge {
 
     /// Reads the count directly, since the field value carries nothing a
     /// borrowed form could retain that the count does not already capture.
+    #[inline]
     fn view_with<S>(source: &S, _mode: crate::DecodeMode) -> Result<Option<Self::View<'_>>, DecodeError>
     where
         S: FieldSource + ?Sized,
@@ -194,6 +204,7 @@ impl Field for AccessControlMaxAge {
 
     /// Reads the count without building a view, since the owned form keeps
     /// nothing else.
+    #[inline]
     fn owned_with<S>(source: &S, _mode: crate::DecodeMode) -> Result<Option<Self::Owned>, DecodeError>
     where
         S: FieldSource + ?Sized,
@@ -214,8 +225,10 @@ impl Field for AccessControlMaxAge {
     }
 }
 
-impl From<Duration> for AccessControlMaxAgeOwned {
-    fn from(duration: Duration) -> Self {
+impl TryFrom<Duration> for AccessControlMaxAgeOwned {
+    type Error = DecodeError;
+
+    fn try_from(duration: Duration) -> Result<Self, Self::Error> {
         Self::from_duration(duration)
     }
 }
@@ -226,23 +239,7 @@ impl From<AccessControlMaxAgeOwned> for Duration {
     }
 }
 
-impl TryFrom<&str> for AccessControlMaxAgeOwned {
-    type Error = DecodeError;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let value = FieldValue::from_str(value).map_err(|_invalid| invalid_syntax(&FieldName::AccessControlMaxAge))?;
-        Self::try_from(value)
-    }
-}
-
-impl TryFrom<String> for AccessControlMaxAgeOwned {
-    type Error = DecodeError;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        let value = FieldValue::try_from(value).map_err(|_invalid| invalid_syntax(&FieldName::AccessControlMaxAge))?;
-        Self::try_from(value)
-    }
-}
+super::super::shared::impl_string_conversions!(AccessControlMaxAgeOwned, &FieldName::AccessControlMaxAge, invalid_syntax, value);
 
 impl TryFrom<FieldValue> for AccessControlMaxAgeOwned {
     type Error = DecodeError;
@@ -259,7 +256,7 @@ mod tests {
     use std::time::Duration;
 
     use super::{AccessControlMaxAge, AccessControlMaxAgeOwned};
-    use crate::headers::cors::test_support::TestMap;
+    use crate::headers::cors::test_map::TestMap;
     use crate::{DecodeErrorKind, FieldName, FieldValue};
 
     #[test]
@@ -270,10 +267,10 @@ mod tests {
         assert_eq!(value.to_string(), "600");
         assert_eq!(value.into_field_value(), "600");
 
-        let from_duration = AccessControlMaxAgeOwned::from_duration(Duration::from_millis(2_500));
+        let from_duration = AccessControlMaxAgeOwned::from_duration(Duration::from_secs(2)).unwrap();
         assert_eq!(from_duration.seconds(), 2);
         assert_eq!(
-            AccessControlMaxAgeOwned::from(Duration::from_secs(9)),
+            AccessControlMaxAgeOwned::try_from(Duration::from_secs(9)).unwrap(),
             AccessControlMaxAgeOwned::new(9)
         );
         assert_eq!(Duration::from(AccessControlMaxAgeOwned::new(7)), Duration::from_secs(7));

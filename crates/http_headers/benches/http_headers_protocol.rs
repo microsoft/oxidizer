@@ -186,13 +186,17 @@ fn host_ipv_future(map: &'static HeaderMap) -> usize {
 #[metabench::benchmark(HOST_RELAXED_DOMAIN, GROUP, "host_relaxed_domain", gungraun_setup = host_domain)]
 fn host_relaxed_domain(value: FieldValue) -> (usize, FieldValue) {
     let view = <Host as SingleValueField>::decode_view_with(value.as_field_value_ref(), DecodeMode::Relaxed).expect("valid relaxed host");
-    (black_box(view.host().len() + view.port().map_or(0, str::len)), value)
+    let length = black_box(view.host().len() + view.port().map_or(0, str::len));
+    drop(view);
+    (length, value)
 }
 
 #[metabench::benchmark(HOST_RELAXED_IDNA, GROUP, "host_relaxed_idna", gungraun_setup = host_idna)]
 fn host_relaxed_idna(value: FieldValue) -> (usize, FieldValue) {
     let view = <Host as SingleValueField>::decode_view_with(value.as_field_value_ref(), DecodeMode::Relaxed).expect("valid relaxed host");
-    (black_box(view.host().len() + view.port().map_or(0, str::len)), value)
+    let length = black_box(view.host().len() + view.port().map_or(0, str::len));
+    drop(view);
+    (length, value)
 }
 
 #[metabench::benchmark(ETAG_OPAQUE_READ, GROUP, "etag_opaque_read", gungraun_setup = etag)]

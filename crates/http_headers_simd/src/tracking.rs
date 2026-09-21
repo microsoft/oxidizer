@@ -292,7 +292,7 @@ mod tests {
     #[test]
     fn concurrent_updates_produce_a_coherent_snapshot() {
         const THREADS: usize = 4;
-        const UPDATES: usize = 1_000;
+        const UPDATES: usize = if cfg!(miri) { 32 } else { 1_000 };
         let _serial = TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
 
         let before = allocation_stats();
@@ -432,16 +432,24 @@ mod tests {
                 drop(waiter_guard);
             });
 
-            assert!(!attempted_receive.recv().unwrap());
-            assert_eq!(acquired_receive.try_recv(), Err(TryRecvError::Empty));
+            let acquired_while_locked = attempted_receive.recv().unwrap();
+            let completed_while_locked = acquired_receive.try_recv();
             drop(guard);
 
-            resume_send.send(()).unwrap();
-            assert!(attempted_receive.recv().unwrap());
-            assert_eq!(acquired_receive.try_recv(), Err(TryRecvError::Empty));
+            // Weak compare-exchange can fail spuriously after the guard is released.
+            let mut acquired = acquired_while_locked;
+            while !acquired {
+                resume_send.send(()).unwrap();
+                acquired = attempted_receive.recv().unwrap();
+            }
+            let completed_before_resume = acquired_receive.try_recv();
             resume_send.send(()).unwrap();
             acquired_receive.recv().unwrap();
             waiter.join().unwrap();
+
+            assert!(!acquired_while_locked);
+            assert_eq!(completed_while_locked, Err(TryRecvError::Empty));
+            assert_eq!(completed_before_resume, Err(TryRecvError::Empty));
         });
     }
 }

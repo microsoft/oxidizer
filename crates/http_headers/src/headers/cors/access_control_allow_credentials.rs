@@ -236,23 +236,12 @@ impl Field for AccessControlAllowCredentials {
     }
 }
 
-impl TryFrom<&str> for AccessControlAllowCredentialsOwned {
-    type Error = DecodeError;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let value = FieldValue::from_str(value).map_err(|_invalid| invalid_syntax(&FieldName::AccessControlAllowCredentials))?;
-        Self::try_from(value)
-    }
-}
-
-impl TryFrom<String> for AccessControlAllowCredentialsOwned {
-    type Error = DecodeError;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        let value = FieldValue::try_from(value).map_err(|_invalid| invalid_syntax(&FieldName::AccessControlAllowCredentials))?;
-        Self::try_from(value)
-    }
-}
+super::super::shared::impl_string_conversions!(
+    AccessControlAllowCredentialsOwned,
+    &FieldName::AccessControlAllowCredentials,
+    invalid_syntax,
+    value
+);
 
 impl TryFrom<FieldValue> for AccessControlAllowCredentialsOwned {
     type Error = DecodeError;
@@ -279,7 +268,7 @@ fn is_trimmed_credentials_true(bytes: &[u8]) -> bool {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{AccessControlAllowCredentials, AccessControlAllowCredentialsOwned, is_credentials_true};
-    use crate::headers::cors::test_support::TestMap;
+    use crate::headers::cors::test_map::TestMap;
     use crate::{DecodeErrorKind, FieldName, FieldValue};
 
     #[test]

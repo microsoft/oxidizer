@@ -161,7 +161,8 @@ impl StrictTransportSecurityOwned {
     ///
     /// # Errors
     ///
-    /// Returns an error if field-value construction fails.
+    /// Returns [`DecodeErrorKind::InvalidNumber`] if `max_age` contains
+    /// fractional seconds, or an error if field-value construction fails.
     /// # Examples
     ///
     /// ```
@@ -179,6 +180,8 @@ impl StrictTransportSecurityOwned {
     }
 
     /// Creates an HSTS builder with the required `max-age`.
+    ///
+    /// Fractional seconds are rejected by [`StrictTransportSecurityBuilder::build`].
     #[must_use]
     /// # Examples
     ///
@@ -195,7 +198,7 @@ impl StrictTransportSecurityOwned {
     /// ```
     pub const fn builder(max_age: Duration) -> StrictTransportSecurityBuilder {
         StrictTransportSecurityBuilder {
-            max_age: Duration::from_secs(max_age.as_secs()),
+            max_age,
             include_subdomains: false,
             preload: false,
             extensions: Vec::new(),
@@ -502,8 +505,8 @@ impl StrictTransportSecurityBuilder {
     ///
     /// # Errors
     ///
-    /// Returns an error if an extension is malformed, uses a reserved name, or
-    /// field-value construction fails.
+    /// Returns an error if `max-age` contains fractional seconds, an extension
+    /// is malformed or uses a reserved name, or field-value construction fails.
     /// # Examples
     ///
     /// ```
@@ -519,6 +522,12 @@ impl StrictTransportSecurityBuilder {
     /// # Ok::<(), http_headers::DecodeError>(())
     /// ```
     pub fn build(self) -> Result<StrictTransportSecurityOwned, DecodeError> {
+        if self.max_age.subsec_nanos() != 0 {
+            return Err(DecodeError::new(
+                &FieldName::StrictTransportSecurity,
+                DecodeErrorKind::InvalidNumber,
+            ));
+        }
         if self.extensions.iter().any(|extension| {
             !validate::token(extension.name.as_bytes())
                 || known_hsts_name(extension.name.as_bytes())
@@ -682,23 +691,12 @@ impl SingleValueField for StrictTransportSecurity {
     }
 }
 
-impl TryFrom<&str> for StrictTransportSecurityOwned {
-    type Error = DecodeError;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let value = FieldValue::from_str(value).map_err(|_invalid| super::super::invalid_syntax(&FieldName::StrictTransportSecurity))?;
-        Self::try_from(value)
-    }
-}
-
-impl TryFrom<String> for StrictTransportSecurityOwned {
-    type Error = DecodeError;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        let value = FieldValue::try_from(value).map_err(|_invalid| super::super::invalid_syntax(&FieldName::StrictTransportSecurity))?;
-        Self::try_from(value)
-    }
-}
+super::super::shared::impl_string_conversions!(
+    StrictTransportSecurityOwned,
+    &FieldName::StrictTransportSecurity,
+    super::super::invalid_syntax,
+    value
+);
 
 impl TryFrom<FieldValue> for StrictTransportSecurityOwned {
     type Error = DecodeError;
@@ -830,11 +828,10 @@ fn parse_hsts_directives(bytes: &[u8]) -> Result<HstsSummary, DecodeError> {
 }
 
 fn parse_unquoted_max_age(bytes: &[u8]) -> Option<u64> {
-    let equals = bytes.iter().position(|byte| *byte == b'=')?;
-    if !validate::eq_ignore_ascii_case(&bytes[..equals], b"max-age") {
+    if bytes.get(7) != Some(&b'=') || !validate::eq_ignore_ascii_case(&bytes[..7], b"max-age") {
         return None;
     }
-    validate::decimal_u64(&bytes[equals + 1..])
+    validate::decimal_u64(&bytes[8..])
 }
 
 #[cfg(test)]
@@ -998,10 +995,31 @@ mod tests {
 
     use super::{
         HstsItems, StrictTransportSecurity, StrictTransportSecurityOwned, decimal_len, parse_delta_seconds, parse_hsts,
-        parse_hsts_directive, split_hsts_directive, valid_quoted_string,
+        parse_hsts_directive, parse_unquoted_max_age, split_hsts_directive, valid_quoted_string,
     };
     use crate::sink::{EncodedValues, FieldSink};
     use crate::{DecodeErrorKind, Field, FieldValue, FieldValueRef, TestSink};
+
+    #[test]
+    fn unquoted_max_age_preserves_fallback_boundaries() {
+        for (wire, expected) in [
+            (b"max-age=0".as_slice(), Some(0)),
+            (b"MAX-AGE=60", Some(60)),
+            (b"max-age=000000000000000000000000000060", Some(60)),
+            (b"max-age=18446744073709551615", Some(u64::MAX)),
+            (b"max-age=18446744073709551616", None),
+            (b"", None),
+            (b"max-age", None),
+            (b"max-age=", None),
+            (b"max-age=\"60\"", None),
+            (b"max-age =60", None),
+            (b"max-age= 60", None),
+            (b"max-age=60; x=y", None),
+            (b"x-extension=max-age=60", None),
+        ] {
+            assert_eq!(parse_unquoted_max_age(wire), expected, "{wire:?}");
+        }
+    }
 
     #[test]
     fn hsts_builder_keeps_short_extensions_inline_and_spills_long_ones() {

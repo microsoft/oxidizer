@@ -39,8 +39,14 @@ mod cors;
 #[cfg(any(test, feature = "headers-etag"))]
 mod etag;
 mod extension_value;
+#[cfg(any(test, feature = "headers-cors", feature = "headers-negotiation"))]
+mod field_name_view;
+#[cfg(any(test, feature = "headers-cors", feature = "headers-negotiation"))]
+mod invalid_method;
 #[cfg(any(test, feature = "headers-location"))]
 mod location;
+#[cfg(any(test, feature = "headers-cors", feature = "headers-negotiation"))]
+mod method_view;
 #[cfg(any(test, feature = "headers-negotiation"))]
 mod negotiation;
 #[cfg(any(test, feature = "headers-range"))]
@@ -50,6 +56,8 @@ mod security;
 #[cfg(any(test, feature = "headers-set-cookie"))]
 mod set_cookie;
 mod shared;
+#[cfg(any(test, feature = "headers-cors", feature = "headers-negotiation"))]
+mod tokens;
 #[cfg(any(test, feature = "headers-user-agent"))]
 mod user_agent;
 #[cfg(any(test, feature = "headers-websocket"))]
@@ -79,24 +87,37 @@ pub use content_type::{ContentType, ContentTypeOwned, ContentTypeView, MediaType
 pub use cors::{
     AccessControlAllowCredentials, AccessControlAllowCredentialsOwned, AccessControlAllowCredentialsView, AccessControlAllowHeaders,
     AccessControlAllowHeadersOwned, AccessControlAllowHeadersView, AccessControlAllowMethods, AccessControlAllowMethodsOwned,
-    AccessControlAllowMethodsView, AccessControlAllowOrigin, AccessControlAllowOriginOwned, AccessControlAllowOriginView,
-    AccessControlExposeHeaders, AccessControlExposeHeadersOwned, AccessControlExposeHeadersView, AccessControlMaxAge,
-    AccessControlMaxAgeOwned, AccessControlRequestHeaders, AccessControlRequestHeadersOwned, AccessControlRequestHeadersView,
-    AccessControlRequestMethod, AccessControlRequestMethodOwned, AccessControlRequestMethodView, CorsHeaderNameView, CorsMethodView,
+    AccessControlAllowMethodsView, AccessControlAllowOrigin, AccessControlAllowOriginKind, AccessControlAllowOriginOwned,
+    AccessControlAllowOriginView, AccessControlExposeHeaders, AccessControlExposeHeadersOwned, AccessControlExposeHeadersView,
+    AccessControlMaxAge, AccessControlMaxAgeOwned, AccessControlRequestHeaders, AccessControlRequestHeadersOwned,
+    AccessControlRequestHeadersView, AccessControlRequestMethod, AccessControlRequestMethodOwned, AccessControlRequestMethodView,
+    CorsHeaderNames, CorsMethods, OriginDomainView, OriginHost, OriginScheme, SerializedOriginView,
 };
 #[cfg(any(test, feature = "headers-etag"))]
 #[doc(inline)]
 pub use etag::{ETag, ETagOwned, ETagView};
 #[doc(inline)]
 pub use extension_value::ExtensionValue;
+#[cfg(any(test, feature = "headers-cors", feature = "headers-negotiation"))]
+#[doc(inline)]
+pub use field_name_view::FieldNameView;
+#[cfg(any(test, feature = "headers-cors", feature = "headers-negotiation"))]
+#[doc(inline)]
+pub use invalid_method::InvalidMethod;
 #[cfg(any(test, feature = "headers-location"))]
 #[doc(inline)]
-pub use location::{Location, LocationOwned, LocationView};
+pub use location::{Location, LocationOwned, LocationView, UriAuthority, UriReference};
+#[cfg(any(test, feature = "headers-cors", feature = "headers-negotiation"))]
+#[doc(inline)]
+pub use method_view::MethodView;
 #[cfg(any(test, feature = "headers-negotiation"))]
 #[doc(inline)]
 pub use negotiation::{
-    Accept, AcceptEncoding, AcceptEncodingOwned, AcceptEncodingView, AcceptLanguage, AcceptLanguageOwned, AcceptLanguageView, AcceptOwned,
-    AcceptView, Allow, AllowOwned, AllowView, Host, HostOwned, HostView, Server, ServerOwned, ServerView, Vary, VaryOwned, VaryView,
+    Accept, AcceptEncoding, AcceptEncodingEntry, AcceptEncodingOwned, AcceptEncodingView, AcceptEntry, AcceptLanguage, AcceptLanguageEntry,
+    AcceptLanguageOwned, AcceptLanguageView, AcceptOwned, AcceptView, Allow, AllowOwned, AllowView, ContentCoding, ContentCodingKind, Host,
+    HostKind, HostOwned, HostPortView, HostView, InexactQuality, InvalidQuality, IpvFutureView, LanguageRange, MediaRange, MediaRangeKind,
+    NegotiationParameter, NegotiationParameterValue, NegotiationParameters, NegotiationToken, PortConversionError, PortConversionErrorKind,
+    Quality, QualityView, RegisteredNameView, Server, ServerOwned, ServerView, Vary, VaryEntryView, VaryOwned, VaryView,
 };
 #[cfg(any(test, feature = "headers-range"))]
 #[doc(inline)]

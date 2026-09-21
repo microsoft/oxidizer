@@ -11,7 +11,9 @@ use compact_str::CompactString;
 use smallvec::SmallVec;
 
 use super::ExtensionValue;
-use crate::sink::{EncodedValues, FieldEncodeOutput, FieldEncoder, FieldSensitivity, FieldSink, FieldValueWriter, InsertError};
+use crate::sink::{
+    EncodedValues, FieldEncodeOutput, FieldEncoder, FieldSensitivity, FieldSink, FieldValueWriter, InsertError, InsertErrorKind,
+};
 use crate::source::{FieldLines, FieldSource};
 use crate::{DecodeError, DecodeErrorKind, Field, FieldName, FieldValue, FieldValueRef, validate};
 
@@ -608,6 +610,8 @@ impl CacheControlBuilder {
     }
 
     /// Adds `max-age`.
+    ///
+    /// Fractional seconds are rejected when building or encoding the header.
     #[must_use]
     /// # Examples
     ///
@@ -617,8 +621,7 @@ impl CacheControlBuilder {
     /// # Ok::<(), http_headers::DecodeError>(())
     /// ```
     pub fn max_age(mut self, duration: Duration) -> Self {
-        self.directives
-            .push(BuilderDirective::MaxAge(Duration::from_secs(duration.as_secs())));
+        self.directives.push(BuilderDirective::MaxAge(duration));
         self
     }
 
@@ -666,8 +669,8 @@ impl CacheControlBuilder {
     ///
     /// # Errors
     ///
-    /// Returns an error when no directives were added or any pending extension
-    /// is malformed.
+    /// Returns an error when no directives were added, any pending extension
+    /// is malformed, or a `max-age` duration contains fractional seconds.
     /// # Examples
     ///
     /// ```rust
@@ -689,14 +692,7 @@ impl CacheControlBuilder {
         if self.directives.is_empty() {
             return Err(DecodeError::new(&FieldName::CacheControl, DecodeErrorKind::InvalidSyntax));
         }
-        if self.directives.iter().any(|directive| {
-            let BuilderDirective::Extension { name, value } = directive else {
-                return false;
-            };
-            !validate::token(name.as_bytes()) || value.as_ref().is_some_and(|value| !valid_directive_value(value.as_bytes()))
-        }) {
-            return Err(super::invalid_syntax(&FieldName::CacheControl));
-        }
+        self.directives.iter().try_for_each(BuilderDirective::validate)?;
         let directives = self.directives;
         builder_wire_len(directives.iter().map(BuilderDirective::wire_len), directives.len()).and_then(|capacity| {
             let mut wire = String::with_capacity(capacity);
@@ -737,16 +733,12 @@ impl FieldEncoder for CacheControlBuilder {
         O: FieldEncodeOutput,
     {
         if self.directives.is_empty() {
-            return Err(InsertError);
+            return Err(InsertError::new(InsertErrorKind::InvalidValue));
         }
-        if self.directives.iter().any(|directive| {
-            let BuilderDirective::Extension { name, value } = directive else {
-                return false;
-            };
-            !validate::token(name.as_bytes()) || value.as_ref().is_some_and(|value| !valid_directive_value(value.as_bytes()))
-        }) {
-            return Err(InsertError);
-        }
+        self.directives
+            .iter()
+            .try_for_each(BuilderDirective::validate)
+            .map_err(|_invalid| InsertError::new(InsertErrorKind::InvalidValue))?;
         let length = self.directives.iter().map(BuilderDirective::wire_len).sum::<usize>() + self.directives.len().saturating_sub(1) * 2;
         let mut writer = output.begin_value(length, FieldSensitivity::NonSensitive)?;
         for (index, directive) in self.directives.into_iter().enumerate() {
@@ -790,6 +782,20 @@ where
 }
 
 impl BuilderDirective {
+    fn validate(&self) -> Result<(), DecodeError> {
+        match self {
+            Self::MaxAge(duration) if duration.subsec_nanos() != 0 => {
+                Err(DecodeError::new(&FieldName::CacheControl, DecodeErrorKind::InvalidNumber))
+            }
+            Self::Extension { name, value }
+                if !validate::token(name.as_bytes()) || value.as_ref().is_some_and(|value| !valid_directive_value(value.as_bytes())) =>
+            {
+                Err(super::invalid_syntax(&FieldName::CacheControl))
+            }
+            _ => Ok(()),
+        }
+    }
+
     fn wire_len(&self) -> usize {
         match self {
             Self::Static(value) => value.len(),
@@ -1017,25 +1023,17 @@ fn validate_token_value(bytes: &[u8], parse_seconds: bool) -> Result<Option<u64>
     if bytes.is_empty() {
         return Err(super::invalid_syntax(&FieldName::CacheControl));
     }
-    // Digits are a subset of `token`, so a parsed number settles validation
-    // too and skips the byte-at-a-time token scan below. A value that
-    // overflows falls through to that scan, which accepts it as a token while
-    // reporting no seconds.
+    // Failed decimal parsing still needs token validation, but a second
+    // decimal pass cannot produce a value.
     if parse_seconds && let Some(seconds) = validate::decimal_u64(bytes) {
         return Ok(Some(seconds));
     }
-    let mut seconds = parse_seconds.then_some(0_u64);
     for byte in bytes.iter().copied() {
         if !is_token_byte(byte) {
             return Err(super::invalid_syntax(&FieldName::CacheControl));
         }
-        seconds = seconds.and_then(|value| {
-            byte.is_ascii_digit()
-                .then(|| value.checked_mul(10)?.checked_add(u64::from(byte - b'0')))
-                .flatten()
-        });
     }
-    Ok(seconds)
+    Ok(None)
 }
 
 fn validate_quoted_value(bytes: &[u8], parse_seconds: bool) -> Result<Option<u64>, DecodeError> {
@@ -1203,6 +1201,11 @@ mod tests {
         let bare = project_directive(b"no-cache").expect("known bare directive");
         assert_eq!(bare.name, b"no-cache");
         assert_eq!(bare.value, None);
+        let bare = project_directive(b"no-store").unwrap();
+        assert_eq!(bare.name, b"no-store");
+        assert_eq!(bare.value, None);
+        assert!(matches!(bare.kind, DirectiveKind::Other));
+        assert_eq!(project_directive(b"=value").err().unwrap().kind(), DecodeErrorKind::InvalidToken);
         assert!(project_directive(b"bad value").is_err());
     }
 
@@ -1327,6 +1330,29 @@ mod tests {
         assert_eq!(decimal_len(9), 1);
         assert_eq!(decimal_len(10), 2);
         assert_eq!(decimal_len(u64::MAX), 20);
+    }
+
+    #[test]
+    fn decimal_fallback_preserves_token_validation() {
+        for (value, seconds) in [
+            (b"0".as_slice(), Some(0)),
+            (b"00000000000000000000000000000000000000060", Some(60)),
+            (b"18446744073709551615", Some(u64::MAX)),
+            (b"18446744073709551616", None),
+            (b"18446744073709551616!", None),
+            (b"123x", None),
+            (b"invalid", None),
+        ] {
+            assert_eq!(validate_directive_value(value, true), Ok(seconds), "{value:?}");
+            assert_eq!(validate_directive_value(value, false), Ok(None), "{value:?}");
+        }
+        for value in [b"".as_slice(), b"123 x", b"18446744073709551616/", b"invalid="] {
+            assert_eq!(
+                validate_directive_value(value, true).unwrap_err().kind(),
+                DecodeErrorKind::InvalidSyntax,
+                "{value:?}"
+            );
+        }
     }
 
     #[test]

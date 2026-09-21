@@ -10,10 +10,12 @@
 use std::mem;
 
 use http::header::Entry;
-use http::{HeaderMap, Request, Response};
+use http::{HeaderMap, HeaderName, HeaderValue, Request, Response};
 use smallvec::SmallVec;
 
-use crate::sink::{EncodedValues, FieldEncodeOutput, FieldEncoder, FieldSensitivity, FieldSink, FieldValueWriter, InsertError};
+use crate::sink::{
+    EncodedValues, FieldEncodeOutput, FieldEncoder, FieldSensitivity, FieldSink, FieldValueWriter, InsertError, InsertErrorKind,
+};
 use crate::source::{FieldLines, FieldSource};
 use crate::{FieldName, FieldValue};
 
@@ -23,7 +25,7 @@ impl FieldSource for HeaderMap {
     fn contains(&self, name: &'static FieldName) -> bool {
         match name.http_name() {
             Some(http_name) => self.contains_key(http_name),
-            None => self.contains_key(http::HeaderName::from_static(name.as_str())),
+            None => self.contains_key(HeaderName::from_static(name.as_str())),
         }
     }
 
@@ -34,7 +36,7 @@ impl FieldSource for HeaderMap {
         // custom typed name supplies validated static bytes without allocation.
         match name.http_name() {
             Some(http_name) => FieldLines::from_http(name, self.get_all(http_name)),
-            None => FieldLines::from_http(name, self.get_all(http::HeaderName::from_static(name.as_str()))),
+            None => FieldLines::from_http(name, self.get_all(HeaderName::from_static(name.as_str()))),
         }
     }
 }
@@ -58,7 +60,8 @@ impl FieldSink for HeaderMap {
         if output.values.len() > 1 {
             return append_http_values(self, http_name(name), output.values);
         }
-        self.try_reserve(output.values.len()).map_err(|_full| InsertError)?;
+        self.try_reserve(output.values.len())
+            .map_err(|_full| InsertError::new(InsertErrorKind::CapacityExceeded))?;
         let name = http_name(name);
         for value in output.values {
             self.append(name.clone(), value);
@@ -80,7 +83,7 @@ impl FieldSink for HeaderMap {
                 drop(self.remove(http_name));
             }
             None => {
-                drop(self.remove(http::HeaderName::from_static(name.as_str())));
+                drop(self.remove(HeaderName::from_static(name.as_str())));
             }
         }
     }
@@ -131,20 +134,20 @@ macro_rules! impl_http_message {
 impl_http_message!(Request);
 impl_http_message!(Response);
 
-fn http_name(name: &'static FieldName) -> http::HeaderName {
+fn http_name(name: &'static FieldName) -> HeaderName {
     match name.http_name() {
         Some(known) => known.clone(),
-        None => http::HeaderName::from_static(name.as_str()),
+        None => HeaderName::from_static(name.as_str()),
     }
 }
 
 #[derive(Default)]
 struct HttpOutput {
-    values: SmallVec<[http::HeaderValue; 1]>,
+    values: SmallVec<[HeaderValue; 1]>,
 }
 
 struct HttpWriter<'a> {
-    values: &'a mut SmallVec<[http::HeaderValue; 1]>,
+    values: &'a mut SmallVec<[HeaderValue; 1]>,
     state: WriterState,
     expected: usize,
     sensitive: bool,
@@ -160,13 +163,15 @@ struct HttpWriter<'a> {
 /// length and validity checks still happen in `finish`.
 enum WriterState {
     Empty,
-    Single(http::HeaderValue),
+    Single(HeaderValue),
     Buffered(SmallVec<[u8; 32]>),
 }
 
 fn buffered(expected: usize, bytes: &[u8]) -> Result<SmallVec<[u8; 32]>, InsertError> {
     let mut buffer = SmallVec::new();
-    buffer.try_reserve_exact(expected).map_err(|_error| InsertError)?;
+    buffer
+        .try_reserve_exact(expected)
+        .map_err(|_error| InsertError::new(InsertErrorKind::AllocationFailed))?;
     buffer.extend_from_slice(bytes);
     Ok(buffer)
 }
@@ -176,7 +181,7 @@ impl FieldEncodeOutput for HttpOutput {
 
     fn begin_value(&mut self, length: usize, sensitivity: FieldSensitivity) -> Result<Self::Writer<'_>, InsertError> {
         if length > isize::MAX as usize {
-            return Err(InsertError);
+            return Err(InsertError::new(InsertErrorKind::CapacityExceeded));
         }
         Ok(HttpWriter {
             values: &mut self.values,
@@ -188,12 +193,12 @@ impl FieldEncodeOutput for HttpOutput {
 
     fn push_value(&mut self, value: FieldValue) -> Result<(), InsertError> {
         self.values
-            .push(http::HeaderValue::try_from(value).map_err(|_invalid| InsertError)?);
+            .push(HeaderValue::try_from(value).map_err(|_invalid| InsertError::new(InsertErrorKind::InvalidValue))?);
         Ok(())
     }
 
     fn push_u64(&mut self, value: u64) -> Result<(), InsertError> {
-        self.values.push(http::HeaderValue::from(value));
+        self.values.push(HeaderValue::from(value));
         Ok(())
     }
 }
@@ -206,14 +211,14 @@ impl FieldValueWriter for HttpWriter<'_> {
             WriterState::Buffered(buffer) => buffer.len(),
         };
         if bytes.len() > self.expected.saturating_sub(written) {
-            return Err(InsertError);
+            return Err(InsertError::new(InsertErrorKind::InvalidEncoding));
         }
         self.state = match mem::replace(&mut self.state, WriterState::Empty) {
             // The single-shot case: the announced length arrives whole, so it
             // becomes the header value here and `finish` only has to push it.
             // An invalid slice falls back to the buffer so that the error
             // still surfaces from `finish`, as it does for every other writer.
-            WriterState::Empty if bytes.len() == self.expected => match http::HeaderValue::from_bytes(bytes) {
+            WriterState::Empty if bytes.len() == self.expected => match HeaderValue::from_bytes(bytes) {
                 Ok(value) => WriterState::Single(value),
                 Err(_invalid) => WriterState::Buffered(buffered(self.expected, bytes)?),
             },
@@ -232,20 +237,20 @@ impl FieldValueWriter for HttpWriter<'_> {
             WriterState::Single(value) => value,
             WriterState::Empty => {
                 if self.expected != 0 {
-                    return Err(InsertError);
+                    return Err(InsertError::new(InsertErrorKind::InvalidEncoding));
                 }
-                http::HeaderValue::from_static("")
+                HeaderValue::from_static("")
             }
             WriterState::Buffered(bytes) => {
                 if bytes.len() != self.expected {
-                    return Err(InsertError);
+                    return Err(InsertError::new(InsertErrorKind::InvalidEncoding));
                 }
                 if bytes.spilled() {
                     // `into_vec` retains the spilled allocation; doing this for
                     // inline bytes would allocate before constructing the value.
-                    http::HeaderValue::try_from(bytes.into_vec()).map_err(|_invalid| InsertError)?
+                    HeaderValue::try_from(bytes.into_vec()).map_err(|_invalid| InsertError::new(InsertErrorKind::InvalidValue))?
                 } else {
-                    http::HeaderValue::from_bytes(&bytes).map_err(|_invalid| InsertError)?
+                    HeaderValue::from_bytes(&bytes).map_err(|_invalid| InsertError::new(InsertErrorKind::InvalidValue))?
                 }
             }
         };
@@ -255,13 +260,17 @@ impl FieldValueWriter for HttpWriter<'_> {
     }
 }
 
-fn append_http_values(map: &mut HeaderMap, name: http::HeaderName, encoded: SmallVec<[http::HeaderValue; 1]>) -> Result<(), InsertError> {
-    map.try_reserve(encoded.len()).map_err(|_full| InsertError)?;
+fn append_http_values(map: &mut HeaderMap, name: HeaderName, encoded: SmallVec<[HeaderValue; 1]>) -> Result<(), InsertError> {
+    map.try_reserve(encoded.len())
+        .map_err(|_full| InsertError::new(InsertErrorKind::CapacityExceeded))?;
     let mut values = encoded.into_iter();
     let first = values
         .next()
         .expect("append_http_values is called only for multiple encoded values");
-    match map.try_entry(name).map_err(|_full| InsertError)? {
+    match map
+        .try_entry(name)
+        .map_err(|_full| InsertError::new(InsertErrorKind::CapacityExceeded))?
+    {
         Entry::Occupied(mut entry) => {
             entry.append(first);
             for value in values {
@@ -269,7 +278,9 @@ fn append_http_values(map: &mut HeaderMap, name: http::HeaderName, encoded: Smal
             }
         }
         Entry::Vacant(entry) => {
-            let mut entry = entry.try_insert_entry(first).map_err(|_full| InsertError)?;
+            let mut entry = entry
+                .try_insert_entry(first)
+                .map_err(|_full| InsertError::new(InsertErrorKind::CapacityExceeded))?;
             for value in values {
                 entry.append(value);
             }
@@ -279,14 +290,18 @@ fn append_http_values(map: &mut HeaderMap, name: http::HeaderName, encoded: Smal
 }
 
 /// Replaces every value stored under `name` with the encoded field lines.
-fn insert_http_values(map: &mut HeaderMap, name: http::HeaderName, encoded: SmallVec<[http::HeaderValue; 1]>) -> Result<(), InsertError> {
-    map.try_reserve(encoded.len()).map_err(|_full| InsertError)?;
+fn insert_http_values(map: &mut HeaderMap, name: HeaderName, encoded: SmallVec<[HeaderValue; 1]>) -> Result<(), InsertError> {
+    map.try_reserve(encoded.len())
+        .map_err(|_full| InsertError::new(InsertErrorKind::CapacityExceeded))?;
     let mut values = encoded.into_iter();
     let Some(first) = values.next() else {
         map.remove(&name);
         return Ok(());
     };
-    match map.try_entry(name).map_err(|_full| InsertError)? {
+    match map
+        .try_entry(name)
+        .map_err(|_full| InsertError::new(InsertErrorKind::CapacityExceeded))?
+    {
         Entry::Occupied(mut entry) => {
             entry.insert(first);
             for value in values {
@@ -294,7 +309,9 @@ fn insert_http_values(map: &mut HeaderMap, name: http::HeaderName, encoded: Smal
             }
         }
         Entry::Vacant(entry) => {
-            let mut entry = entry.try_insert_entry(first).map_err(|_full| InsertError)?;
+            let mut entry = entry
+                .try_insert_entry(first)
+                .map_err(|_full| InsertError::new(InsertErrorKind::CapacityExceeded))?;
             for value in values {
                 entry.append(value);
             }
@@ -308,12 +325,16 @@ fn insert_http_values(map: &mut HeaderMap, name: http::HeaderName, encoded: Smal
 mod tests {
     use std::sync::LazyLock;
 
-    use super::{HttpOutput, append_http_values, insert_http_values};
-    use crate::sink::{EncodedValues, FieldEncodeOutput, FieldSink, FieldValueWriter, InsertError, U64Encoder};
+    use super::{HttpOutput, append_http_values, buffered, insert_http_values};
+    use crate::sink::{EncodedValues, FieldEncodeOutput, FieldSink, FieldValueWriter, InsertError, InsertErrorKind, U64Encoder};
     use crate::source::FieldSource;
     use crate::{FieldValue, FieldValueRef};
 
     static CUSTOM: LazyLock<crate::FieldName> = LazyLock::new(|| crate::FieldName::from_static("x-trace-id"));
+
+    const ENCODING_ERROR: InsertError = InsertError::new(InsertErrorKind::InvalidEncoding);
+    const VALUE_ERROR: InsertError = InsertError::new(InsertErrorKind::InvalidValue);
+    const CAPACITY_ERROR: InsertError = InsertError::new(InsertErrorKind::CapacityExceeded);
 
     struct RejectEncoder;
 
@@ -322,7 +343,7 @@ mod tests {
         where
             O: FieldEncodeOutput,
         {
-            Err(InsertError)
+            Err(ENCODING_ERROR)
         }
     }
 
@@ -370,8 +391,8 @@ mod tests {
         assert!(!map.contains(&crate::FieldName::UserAgent));
         assert!(!map.contains(&CUSTOM));
 
-        assert_eq!(map.set_encoded(&crate::FieldName::UserAgent, RejectEncoder), Err(InsertError));
-        assert_eq!(map.append_encoded(&crate::FieldName::UserAgent, RejectEncoder), Err(InsertError));
+        assert_eq!(map.set_encoded(&crate::FieldName::UserAgent, RejectEncoder), Err(ENCODING_ERROR));
+        assert_eq!(map.append_encoded(&crate::FieldName::UserAgent, RejectEncoder), Err(ENCODING_ERROR));
         assert!(!map.contains(&crate::FieldName::UserAgent));
 
         insert_http_values(&mut map, http::header::USER_AGENT, smallvec::SmallVec::new()).expect("empty values remove");
@@ -414,14 +435,14 @@ mod tests {
             .begin_value(2, crate::sink::FieldSensitivity::NonSensitive)
             .expect("writer starts");
         short.write_bytes(b"x").expect("bytes append");
-        assert_eq!(short.finish(), Err(InsertError));
+        assert_eq!(short.finish(), Err(ENCODING_ERROR));
 
         let mut output = HttpOutput::default();
         let mut invalid = output
             .begin_value(1, crate::sink::FieldSensitivity::NonSensitive)
             .expect("writer starts");
         invalid.write_bytes(b"\n").expect("bytes append");
-        assert_eq!(invalid.finish(), Err(InsertError));
+        assert_eq!(invalid.finish(), Err(VALUE_ERROR));
 
         output.push_value(FieldValue::from_static("owned")).expect("owned value transfers");
         output.push_u64(u64::MAX).expect("integer value formats");
@@ -464,7 +485,7 @@ mod tests {
         for chunk in invalid_bytes.chunks(7) {
             writer.write_bytes(chunk).expect("chunk appends");
         }
-        assert_eq!(writer.finish(), Err(InsertError));
+        assert_eq!(writer.finish(), Err(VALUE_ERROR));
         assert!(output.values.is_empty());
 
         // A complete single-shot write rejects more bytes before buffering.
@@ -474,7 +495,7 @@ mod tests {
             .expect("writer starts");
         writer.write_bytes(b"abc").expect("whole value appends");
         writer.write_bytes(b"").expect("an empty continuation is a no-op");
-        assert_eq!(writer.write_bytes(b"d"), Err(InsertError));
+        assert_eq!(writer.write_bytes(b"d"), Err(ENCODING_ERROR));
         assert!(output.values.is_empty());
 
         // Nothing written at all: legal only for a zero-length value.
@@ -489,8 +510,19 @@ mod tests {
         let writer = output
             .begin_value(1, crate::sink::FieldSensitivity::NonSensitive)
             .expect("writer starts");
-        assert_eq!(writer.finish(), Err(InsertError));
+        assert_eq!(writer.finish(), Err(ENCODING_ERROR));
         assert!(output.values.is_empty());
+    }
+
+    #[test]
+    fn http_output_distinguishes_size_limits_from_reservation_failures() {
+        let mut output = HttpOutput::default();
+        assert_eq!(
+            output.begin_value(usize::MAX, crate::sink::FieldSensitivity::NonSensitive).err(),
+            Some(CAPACITY_ERROR)
+        );
+        assert!(output.values.is_empty());
+        assert_eq!(buffered(usize::MAX, b"x"), Err(InsertError::new(InsertErrorKind::AllocationFailed)));
     }
 
     /// The number of entries an `http::HeaderMap` holds once it can no longer
@@ -503,12 +535,18 @@ mod tests {
     fn saturated_map() -> http::HeaderMap {
         let mut map = http::HeaderMap::with_capacity(MAXIMUM_ENTRIES);
         map.insert(http::header::USER_AGENT, http::HeaderValue::from_static("original"));
+        #[cfg(not(miri))]
         let mut filler = String::new();
         for index in 0..MAXIMUM_ENTRIES - 1 {
-            filler.clear();
-            filler.push_str("x-fill-");
-            filler.push_str(&index.to_string());
-            let name = http::HeaderName::from_bytes(filler.as_bytes()).expect("generated name is legal");
+            #[cfg(not(miri))]
+            let name = {
+                filler.clear();
+                filler.push_str("x-fill-");
+                filler.push_str(&index.to_string());
+                http::HeaderName::from_bytes(filler.as_bytes()).expect("generated name is legal")
+            };
+            #[cfg(miri)]
+            let name = http::HeaderName::from_static(crate::miri_http_map::name(index));
             drop(map.insert(name, http::HeaderValue::from_static("v")));
         }
         assert_eq!(map.len(), MAXIMUM_ENTRIES);
@@ -521,14 +559,14 @@ mod tests {
         let mut map = saturated_map();
 
         // A new name needs a new entry the map cannot make room for.
-        assert_eq!(map.set_encoded(&CUSTOM, FieldValueRef::new(b"trace")), Err(InsertError));
+        assert_eq!(map.set_encoded(&CUSTOM, FieldValueRef::new(b"trace")), Err(CAPACITY_ERROR));
         assert!(!map.contains(&CUSTOM));
         assert_eq!(
             map.set_values(&CUSTOM, EncodedValues::single(FieldValue::from_static("trace"))),
-            Err(InsertError)
+            Err(CAPACITY_ERROR)
         );
         assert!(!map.contains(&CUSTOM));
-        assert_eq!(map.append_encoded(&CUSTOM, FieldValueRef::new(b"trace")), Err(InsertError));
+        assert_eq!(map.append_encoded(&CUSTOM, FieldValueRef::new(b"trace")), Err(CAPACITY_ERROR));
         assert!(!map.contains(&CUSTOM));
 
         // An existing name is rejected too: `try_reserve` guards the whole
@@ -538,11 +576,11 @@ mod tests {
                 &crate::FieldName::UserAgent,
                 EncodedValues::from_vec(vec![FieldValue::from_static("replacement"), FieldValue::from_static("additional"),]),
             ),
-            Err(InsertError)
+            Err(CAPACITY_ERROR)
         );
         assert_eq!(
             map.append_encoded(&crate::FieldName::UserAgent, FieldValueRef::new(b"appended")),
-            Err(InsertError)
+            Err(CAPACITY_ERROR)
         );
         assert_eq!(map[http::header::USER_AGENT], "original");
         assert_eq!(map.get_all(http::header::USER_AGENT).iter().count(), 1);
@@ -550,7 +588,7 @@ mod tests {
 
         let mut values = smallvec::SmallVec::<[http::HeaderValue; 1]>::new();
         values.push(http::HeaderValue::from_static("appended"));
-        assert_eq!(append_http_values(&mut map, http::header::USER_AGENT, values), Err(InsertError));
+        assert_eq!(append_http_values(&mut map, http::header::USER_AGENT, values), Err(CAPACITY_ERROR));
         assert_eq!(map[http::header::USER_AGENT], "original");
 
         // The private helper is reached the same way through both sinks; call
@@ -562,7 +600,7 @@ mod tests {
         values.push(http::HeaderValue::from_static("direct"));
         assert_eq!(
             insert_http_values(&mut map, http::HeaderName::from_static("x-direct"), values),
-            Err(InsertError)
+            Err(CAPACITY_ERROR)
         );
         assert!(!map.contains_key("x-direct"));
         assert_eq!(map.len(), MAXIMUM_ENTRIES);

@@ -3,7 +3,8 @@
 
 use std::fmt;
 
-use super::shared::{CorsList, CorsListView, CorsMethodView, method_ref_validated, validate_list, validate_single_list};
+use super::super::MethodView;
+use super::shared::{CorsList, CorsListView, method_ref_validated, validate_list, validate_single_list};
 use crate::sink::{FieldSink, InsertError};
 use crate::source::FieldSource;
 use crate::{DecodeError, Field, FieldName, FieldValue, FieldValueRef, validate};
@@ -194,6 +195,7 @@ macro_rules! define_method_list {
             /// Iterates methods in wire order without allocating.
             ///
             /// Duplicate methods are returned separately.
+            /// [`MethodView`] preserves spelling and compares case-sensitively.
             /// # Examples
             ///
             /// ```rust
@@ -207,13 +209,8 @@ macro_rules! define_method_list {
             /// assert_eq!(methods, ["GET", "POST"]);
             /// # Ok::<(), http_headers::DecodeError>(())
             /// ```
-            pub fn iter(&self) -> impl Iterator<Item = CorsMethodView<'_>> {
-                self.0
-                    .field_values()
-                    .flat_map(|value| value.as_bytes().split(|byte| *byte == b','))
-                    .map(validate::trim_ows)
-                    .filter(|item| !item.is_empty())
-                    .map(method_ref_validated)
+            pub fn iter(&self) -> super::CorsMethods<'_> {
+                super::CorsMethods::new(self.0.field_values())
             }
 
             /// Returns the number of list members, including duplicates.
@@ -326,10 +323,20 @@ macro_rules! define_method_list {
             }
         }
 
+        impl<'a> IntoIterator for &'a $owned {
+            type Item = MethodView<'a>;
+            type IntoIter = super::CorsMethods<'a>;
+
+            fn into_iter(self) -> Self::IntoIter {
+                self.iter()
+            }
+        }
+
         impl<'a> $borrowed<'a> {
             /// Iterates methods in wire order without allocating.
             ///
             /// Duplicate methods are returned separately.
+            /// [`MethodView`] preserves spelling and compares case-sensitively.
             /// # Examples
             ///
             /// ```rust
@@ -355,7 +362,7 @@ macro_rules! define_method_list {
             /// # #[cfg(not(feature = "http"))]
             /// # fn main() {}
             /// ```
-            pub fn iter(&self) -> impl Iterator<Item = CorsMethodView<'a>> + '_ {
+            pub fn iter(&self) -> impl Iterator<Item = MethodView<'a>> + '_ {
                 self.0
                     .values
                     .repeated()
@@ -603,14 +610,14 @@ define_method_list!(
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{AccessControlAllowMethods, AccessControlAllowMethodsOwned};
-    use crate::headers::cors::test_support::TestMap;
+    use crate::headers::cors::test_map::TestMap;
     use crate::{DecodeErrorKind, FieldName, FieldValue};
 
     #[test]
     fn constructors_and_accessors_cover_empty_wildcard_and_repeated_lists() {
         let methods = AccessControlAllowMethodsOwned::from_methods(["GET", "CUSTOM", "GET"]).expect("valid method list");
         assert_eq!(
-            methods.iter().map(super::CorsMethodView::as_str).collect::<Vec<_>>(),
+            methods.iter().map(super::MethodView::as_str).collect::<Vec<_>>(),
             ["GET", "CUSTOM", "GET"]
         );
         assert_eq!(methods.len(), 3);

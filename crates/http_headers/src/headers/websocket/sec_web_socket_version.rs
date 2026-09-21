@@ -324,23 +324,7 @@ fn decode_versions(values: Option<FieldLines<'_>>) -> Result<Option<SecWebSocket
     Ok(Some(SecWebSocketVersionOwned { versions }))
 }
 
-impl TryFrom<&str> for SecWebSocketVersionOwned {
-    type Error = DecodeError;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let value = FieldValue::from_str(value).map_err(|_invalid| invalid_syntax(&FieldName::SecWebSocketVersion))?;
-        Self::try_from(value)
-    }
-}
-
-impl TryFrom<String> for SecWebSocketVersionOwned {
-    type Error = DecodeError;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        let value = FieldValue::try_from(value).map_err(|_invalid| invalid_syntax(&FieldName::SecWebSocketVersion))?;
-        Self::try_from(value)
-    }
-}
+super::super::shared::impl_string_conversions!(SecWebSocketVersionOwned, &FieldName::SecWebSocketVersion, invalid_syntax, value);
 
 impl TryFrom<FieldValue> for SecWebSocketVersionOwned {
     type Error = DecodeError;
@@ -553,7 +537,11 @@ mod tests {
                 reference(&[first]),
                 "one-byte disagreement for {first:#04x}"
             );
-            for second in 0..=u8::MAX {
+            #[cfg(miri)]
+            if !crate::test_support::is_byte_case(first, b'0') {
+                continue;
+            }
+            for second in crate::test_support::byte_cases(b'0') {
                 let two = [first, second];
                 assert_eq!(parse_version_value(&two), reference(&two), "two-byte disagreement for {two:?}");
             }
@@ -586,7 +574,7 @@ mod tests {
         ] {
             let mut bytes = literal.to_vec();
             for index in 0..bytes.len() {
-                for replacement in 0..=u8::MAX {
+                for replacement in crate::test_support::substitution_bytes(literal[index], index, literal.len()) {
                     bytes[index] = replacement;
                     for prefix in [None, Some(b"13".as_slice()), Some(b"256".as_slice())] {
                         let repeated = [FieldValueRef::new(prefix.unwrap_or_default()), FieldValueRef::new(&bytes)];

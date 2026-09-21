@@ -21,16 +21,16 @@ pub(super) fn parse_number(bytes: &[u8], name: &'static FieldName) -> Result<u64
 mod tests {
     use super::super::{accept_ranges, range};
 
-    // These tests exercise private range and unit scanner implementations.
-
     #[test]
     fn fast_scanners_agree_with_the_general_implementations() {
         const ALPHABET: &[u8] = b"01-, a=\t9";
         const RANGE_ALPHABET: &[u8] = b"01-, ";
 
         let mut payload = Vec::new();
+        // Coprime strides keep every alphabet symbol represented at every position under Miri.
         for length in 0..=4_u32 {
-            for encoded in 0..ALPHABET.len().pow(length) {
+            let step = if cfg!(miri) && length > 2 { 11 } else { 1 };
+            for encoded in (0..ALPHABET.len().pow(length)).step_by(step) {
                 payload.clear();
                 let mut encoded = encoded;
                 for _position in 0..length {
@@ -76,7 +76,8 @@ mod tests {
         // Longer payloads exercise the multi-item paths of the word scanner,
         // which the short exhaustive sweep above never reaches.
         for length in 5..=7_u32 {
-            for encoded in 0..RANGE_ALPHABET.len().pow(length) {
+            let step = if cfg!(miri) { 61 } else { 1 };
+            for encoded in (0..RANGE_ALPHABET.len().pow(length)).step_by(step) {
                 payload.clear();
                 payload.extend_from_slice(b"bytes=");
                 let mut encoded = encoded;

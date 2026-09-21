@@ -8,7 +8,7 @@
 #![expect(clippy::unwrap_used, reason = "test failures provide sufficient context")]
 
 use http_headers::headers::{UserAgent, UserAgentOwned};
-use http_headers::sink::{EncodedValues, FieldEncodeOutput, FieldEncoder, FieldSink, InsertError};
+use http_headers::sink::{EncodedValues, FieldEncodeOutput, FieldEncoder, FieldSink, InsertError, InsertErrorKind};
 use http_headers::{FieldName, FieldSensitivity, FieldValue, FieldValueRef};
 
 struct RejectEncoder;
@@ -18,7 +18,7 @@ impl FieldEncoder for RejectEncoder {
     where
         O: FieldEncodeOutput,
     {
-        Err(InsertError)
+        Err(InsertError::new(InsertErrorKind::InvalidEncoding))
     }
 }
 
@@ -57,8 +57,14 @@ fn exercise(message: &mut impl FieldSink) {
             .is_sensitive()
     );
 
-    assert_eq!(message.set_encoded(&FieldName::UserAgent, RejectEncoder), Err(InsertError));
-    assert_eq!(message.append_encoded(&FieldName::UserAgent, RejectEncoder), Err(InsertError));
+    assert_eq!(
+        message.set_encoded(&FieldName::UserAgent, RejectEncoder),
+        Err(InsertError::new(InsertErrorKind::InvalidEncoding))
+    );
+    assert_eq!(
+        message.append_encoded(&FieldName::UserAgent, RejectEncoder),
+        Err(InsertError::new(InsertErrorKind::InvalidEncoding))
+    );
     assert_eq!(
         message
             .lines(&FieldName::UserAgent)

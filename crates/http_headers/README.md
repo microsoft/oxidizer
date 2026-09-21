@@ -41,7 +41,12 @@ Prefer borrowed views when the decoded value does not need to outlive the
 source as they are generally faster. Use owned structs when the parsed header
 data needs to be retained (such as in a cache).
 
-[`Field::view`][__link8] returns a header’s
+Source and sink operations use static field-name descriptors, including
+custom names stored in a `static LazyLock<FieldName>`. Locally constructed
+runtime names are supported by [`FieldName`][__link8] for validation and conversion,
+but dynamic lookup and mutation must use the container’s native API.
+
+[`Field::view`][__link9] returns a header’s
 borrowed `*View` type, whose lifetime is tied to the source.
 
 ```rust
@@ -75,7 +80,7 @@ if let Some(content_type) = ContentType::view(&headers)? {
 ```
 
 Prefer `view` unless the decoded value must outlive the source. Use
-[`Field::owned`][__link9] when you need to retain, move, or independently
+[`Field::owned`][__link10] when you need to retain, move, or independently
 store the result:
 
 ```rust
@@ -97,15 +102,45 @@ assert_eq!(owned.as_bytes(), b"example-client/1.0");
 Both methods return `Ok(None)` when the header is absent and `Err` when a
 present value is malformed.
 
+### Reading validated members
+
+Structured headers expose semantic values as well as their original wire
+representation. `AllowOwned::methods()` yields case-sensitive method tokens;
+`VaryOwned::entries()` distinguishes wildcard members from case-insensitive
+field names. These borrowed member reads do not allocate.
+
+```rust
+use http_headers::headers::{AllowOwned, MethodView, VaryOwned};
+
+let allow = AllowOwned::try_from("GET, HEAD, CUSTOM")?;
+assert!(allow.methods().any(|method| method == MethodView::GET));
+assert!(!allow.methods().any(|method| method == MethodView::POST));
+
+let vary = VaryOwned::try_from("Accept-Encoding, X-Tenant")?;
+assert!(!vary.contains_wildcard());
+assert!(vary.entries().any(|entry| {
+    entry
+        .field_name()
+        .is_some_and(|name| name.eq_ignore_ascii_case("x-tenant"))
+}));
+```
+
+The Accept family exposes typed ranges, parameters, and exact quality
+weights through `entries()`. Location exposes URI-reference components
+through `uri_reference()`. Host and Allow-Origin retain parsed authority
+components. Semantic access does not sort lists or replace the original
+field lines used for forwarding.
+
 ## Producing headers
 
-You produce headers by populating an implementation of the [`sink::FieldSink`][__link10] trait. The
+You produce headers by populating an implementation of the [`sink::FieldSink`][__link11] trait. The
 `http` cargo feature implements this trait for
-[`HeaderMap`][__link11],
-[`Request`][__link12], and
-[`Response`][__link13].
+[`HeaderMap`][__link12],
+[`Request`][__link13], and
+[`Response`][__link14].
 
-The [`sink::FieldSinkExt`][__link14] trait provides fluent methods that work for any sink:
+Enabling a header-family feature exposes `sink::FieldSinkExt`, whose fluent
+methods work for any sink. Core-only builds use [`sink::FieldSink`][__link15] directly.
 
 ```rust
 use std::time::Duration;
@@ -150,9 +185,9 @@ if let Some(agent) = UserAgent::view(&incoming)? {
 }
 ```
 
-[`Field::insert`][__link15] is the generic alternative when the descriptor type is
+[`Field::insert`][__link16] is the generic alternative when the descriptor type is
 already known. It replaces all existing field lines for that header;
-[`Field::remove`][__link16] removes them instead.
+[`Field::remove`][__link17] removes them instead.
 
 ```rust
 use http::HeaderMap;
@@ -187,7 +222,7 @@ assert_eq!(headers.get_all(http::header::SET_COOKIE).iter().count(), 2);
 ## Serialization
 
 The `serde` cargo feature implements Serde serialization and deserialization for every owned header
-struct, [`FieldName`][__link17], [`FieldValue`][__link18], and [`sink::EncodedValues`][__link19].
+struct, [`FieldName`][__link18], [`FieldValue`][__link19], and [`sink::EncodedValues`][__link20].
 Headers serialize as an ordered sequence of physical field values and
 deserialize through relaxed validation, which includes strict syntax and
 the documented interoperability deviations. This preserves round trips for
@@ -232,9 +267,9 @@ assert!(decoded.is_sensitive());
 
 ## Strict and relaxed reads
 
-[`Field::view`][__link20] and [`Field::owned`][__link21] use strict syntax. Applications that
-must accept specific common deviations can request [`DecodeMode::Relaxed`][__link22]
-through [`Field::view_with`][__link23] or [`Field::owned_with`][__link24]:
+[`Field::view`][__link21] and [`Field::owned`][__link22] use strict syntax. Applications that
+must accept specific common deviations can request [`DecodeMode::Relaxed`][__link23]
+through [`Field::view_with`][__link24] or [`Field::owned_with`][__link25]:
 
 ```rust
 use http_headers::headers::AcceptEncoding;
@@ -282,8 +317,8 @@ credentials.clear();
 
 ## Defining a custom single-value header
 
-Implement [`SingleValueField`][__link25] when a custom header is represented by exactly
-one field line. The crate then supplies its [`Field`][__link26] implementation,
+Implement [`SingleValueField`][__link26] when a custom header is represented by exactly
+one field line. The crate then supplies its [`Field`][__link27] implementation,
 including borrowed and owned reads, singleton cardinality checks, insertion,
 and removal.
 
@@ -348,10 +383,11 @@ impl SingleValueField for RequestId {
 
 ## Performance
 
-[`docs/PERF.md`][__link27]
-records comparative measurements against `headers 0.4.1`. Borrowed reads
-generally avoid allocations; some operations still cost more because this
-crate validates more grammar or returns richer semantic types.
+[`docs/PERF.md`][__link28]
+records comparative typed-decode-and-read measurements against `headers 0.4.1`.
+Results vary by header, ownership mode, and hardware, and include both faster
+and slower cases. The table does not measure comparative header production or
+end-to-end request processing. Borrowed reads generally avoid allocations.
 
 ## Cargo features
 
@@ -364,7 +400,7 @@ crate validates more grammar or returns richer semantic types.
 * `http`: optional adapter for `http::HeaderMap` and the `http` crate’s name,
   value, and method types.
 * `serde`: serialization and deserialization for owned headers,
-  [`FieldName`][__link28], [`FieldValue`][__link29], and [`sink::EncodedValues`][__link30].
+  [`FieldName`][__link29], [`FieldValue`][__link30], and [`sink::EncodedValues`][__link31].
 
 Disable default features to use only the core source, sink, name, and value
 APIs, then enable only the header families an application needs.
@@ -378,10 +414,10 @@ of the traits in this crate.
 
 ## Alternate crates
 
-This crate is an alternative to the popular [`headers`][__link31] crate.
+This crate is an alternative to the popular [`headers`][__link32] crate.
 `http_headers` has the following benefits:
 
-* Faster header parsing and production
+* Faster decoding for some headers in the measured configurations
 * Supports more headers
 * Performs more robust validation to avoid downstream surprises
 * Supports explicit relaxed parsing options to support common malformed headers
@@ -393,36 +429,37 @@ This crate is an alternative to the popular [`headers`][__link31] crate.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_headers">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbZ75bZm4izT4buOxogjSu1IIbtSUoTMts1fgbqJKLePQlG_JhZIGCbGh0dHBfaGVhZGVyc2UwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbfVFs3NqFhWgbBn84idxhrs4bC_HSVxhRRoYbYww44PeKrh5hZIGCbGh0dHBfaGVhZGVyc2UwLjEuMA
  [__link0]: https://docs.rs/http/latest/http/header/struct.HeaderMap.html
  [__link1]: https://docs.rs/http/latest/http/request/struct.Request.html
- [__link10]: https://docs.rs/http_headers/0.1.0/http_headers/?search=sink::FieldSink
- [__link11]: https://docs.rs/http/latest/http/header/struct.HeaderMap.html
- [__link12]: https://docs.rs/http/latest/http/request/struct.Request.html
- [__link13]: https://docs.rs/http/latest/http/response/struct.Response.html
- [__link14]: https://docs.rs/http_headers/0.1.0/http_headers/?search=sink::FieldSinkExt
- [__link15]: https://docs.rs/http_headers/0.1.0/http_headers/?search=Field::insert
- [__link16]: https://docs.rs/http_headers/0.1.0/http_headers/?search=Field::remove
- [__link17]: https://docs.rs/http_headers/0.1.0/http_headers/?search=FieldName
- [__link18]: https://docs.rs/http_headers/0.1.0/http_headers/?search=FieldValue
- [__link19]: https://docs.rs/http_headers/0.1.0/http_headers/?search=sink::EncodedValues
+ [__link10]: https://docs.rs/http_headers/0.1.0/http_headers/?search=Field::owned
+ [__link11]: https://docs.rs/http_headers/0.1.0/http_headers/?search=sink::FieldSink
+ [__link12]: https://docs.rs/http/latest/http/header/struct.HeaderMap.html
+ [__link13]: https://docs.rs/http/latest/http/request/struct.Request.html
+ [__link14]: https://docs.rs/http/latest/http/response/struct.Response.html
+ [__link15]: https://docs.rs/http_headers/0.1.0/http_headers/?search=sink::FieldSink
+ [__link16]: https://docs.rs/http_headers/0.1.0/http_headers/?search=Field::insert
+ [__link17]: https://docs.rs/http_headers/0.1.0/http_headers/?search=Field::remove
+ [__link18]: https://docs.rs/http_headers/0.1.0/http_headers/?search=FieldName
+ [__link19]: https://docs.rs/http_headers/0.1.0/http_headers/?search=FieldValue
  [__link2]: https://docs.rs/http/latest/http/response/struct.Response.html
- [__link20]: https://docs.rs/http_headers/0.1.0/http_headers/?search=Field::view
- [__link21]: https://docs.rs/http_headers/0.1.0/http_headers/?search=Field::owned
- [__link22]: https://docs.rs/http_headers/0.1.0/http_headers/?search=DecodeMode::Relaxed
- [__link23]: https://docs.rs/http_headers/0.1.0/http_headers/?search=Field::view_with
- [__link24]: https://docs.rs/http_headers/0.1.0/http_headers/?search=Field::owned_with
- [__link25]: https://docs.rs/http_headers/0.1.0/http_headers/?search=SingleValueField
- [__link26]: https://docs.rs/http_headers/0.1.0/http_headers/?search=Field
- [__link27]: https://github.com/microsoft/oxidizer/blob/main/crates/http_headers/docs/PERF.md
- [__link28]: https://docs.rs/http_headers/0.1.0/http_headers/?search=FieldName
- [__link29]: https://docs.rs/http_headers/0.1.0/http_headers/?search=FieldValue
+ [__link20]: https://docs.rs/http_headers/0.1.0/http_headers/?search=sink::EncodedValues
+ [__link21]: https://docs.rs/http_headers/0.1.0/http_headers/?search=Field::view
+ [__link22]: https://docs.rs/http_headers/0.1.0/http_headers/?search=Field::owned
+ [__link23]: https://docs.rs/http_headers/0.1.0/http_headers/?search=DecodeMode::Relaxed
+ [__link24]: https://docs.rs/http_headers/0.1.0/http_headers/?search=Field::view_with
+ [__link25]: https://docs.rs/http_headers/0.1.0/http_headers/?search=Field::owned_with
+ [__link26]: https://docs.rs/http_headers/0.1.0/http_headers/?search=SingleValueField
+ [__link27]: https://docs.rs/http_headers/0.1.0/http_headers/?search=Field
+ [__link28]: https://github.com/microsoft/oxidizer/blob/main/crates/http_headers/docs/PERF.md
+ [__link29]: https://docs.rs/http_headers/0.1.0/http_headers/?search=FieldName
  [__link3]: https://crates.io/crates/http
- [__link30]: https://docs.rs/http_headers/0.1.0/http_headers/?search=sink::EncodedValues
- [__link31]: https://crates.io/crates/headers
+ [__link30]: https://docs.rs/http_headers/0.1.0/http_headers/?search=FieldValue
+ [__link31]: https://docs.rs/http_headers/0.1.0/http_headers/?search=sink::EncodedValues
+ [__link32]: https://crates.io/crates/headers
  [__link4]: https://docs.rs/http_headers/0.1.0/http_headers/?search=source::FieldSource
  [__link5]: https://docs.rs/http/latest/http/header/struct.HeaderMap.html
  [__link6]: https://docs.rs/http/latest/http/request/struct.Request.html
  [__link7]: https://docs.rs/http/latest/http/response/struct.Response.html
- [__link8]: https://docs.rs/http_headers/0.1.0/http_headers/?search=Field::view
- [__link9]: https://docs.rs/http_headers/0.1.0/http_headers/?search=Field::owned
+ [__link8]: https://docs.rs/http_headers/0.1.0/http_headers/?search=FieldName
+ [__link9]: https://docs.rs/http_headers/0.1.0/http_headers/?search=Field::view

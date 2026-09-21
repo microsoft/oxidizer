@@ -20,6 +20,9 @@
 //! # }
 //! ```
 
+#[cfg(all(feature = "std", any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")))]
+use std::arch;
+
 use crate::{EmptyMembers, TokenListScan, base64, list, range, scalar, uri};
 
 /// Runs the production scalar token validator.
@@ -163,7 +166,7 @@ pub fn scan_token_list_scalar(bytes: &[u8], empty: EmptyMembers) -> TokenListSca
 #[must_use]
 pub fn is_simple_uri_path_sse2(bytes: &[u8]) -> Option<bool> {
     #[cfg(all(feature = "std", any(target_arch = "x86", target_arch = "x86_64")))]
-    if bytes.len() >= 16 && uri::has_origin_relative_prefix(bytes) && std::arch::is_x86_feature_detected!("sse2") {
+    if bytes.len() >= 16 && uri::has_origin_relative_prefix(bytes) && arch::is_x86_feature_detected!("sse2") {
         // SAFETY: runtime detection establishes SSE2 and the length check
         // satisfies the scanner's trailing-block precondition.
         return Some(unsafe { crate::x86::is_simple_uri_tail_sse2(bytes) });
@@ -186,7 +189,7 @@ pub fn is_simple_uri_path_sse2(bytes: &[u8]) -> Option<bool> {
 #[must_use]
 pub fn is_simple_uri_path_ssse3(bytes: &[u8]) -> Option<bool> {
     #[cfg(all(feature = "std", any(target_arch = "x86", target_arch = "x86_64")))]
-    if bytes.len() >= 16 && uri::has_origin_relative_prefix(bytes) && std::arch::is_x86_feature_detected!("ssse3") {
+    if bytes.len() >= 16 && uri::has_origin_relative_prefix(bytes) && arch::is_x86_feature_detected!("ssse3") {
         // SAFETY: runtime detection establishes SSSE3 and the length check
         // satisfies the scanner's trailing-block precondition.
         return Some(unsafe { crate::x86::is_simple_uri_tail_ssse3(bytes) });
@@ -209,7 +212,7 @@ pub fn is_simple_uri_path_ssse3(bytes: &[u8]) -> Option<bool> {
 #[must_use]
 pub fn is_simple_uri_path_sse42(bytes: &[u8]) -> Option<bool> {
     #[cfg(all(feature = "std", any(target_arch = "x86", target_arch = "x86_64")))]
-    if bytes.len() >= 16 && uri::has_origin_relative_prefix(bytes) && std::arch::is_x86_feature_detected!("sse4.2") {
+    if bytes.len() >= 16 && uri::has_origin_relative_prefix(bytes) && arch::is_x86_feature_detected!("sse4.2") {
         // SAFETY: runtime detection establishes SSE4.2 and the length
         // check satisfies the scanner's trailing-block precondition.
         return Some(unsafe { crate::x86::is_simple_uri_tail_sse42(bytes) });
@@ -232,7 +235,7 @@ pub fn is_simple_uri_path_sse42(bytes: &[u8]) -> Option<bool> {
 #[must_use]
 pub fn is_simple_uri_path_neon(bytes: &[u8]) -> Option<bool> {
     #[cfg(all(feature = "std", target_arch = "aarch64"))]
-    if bytes.len() >= 16 && uri::has_origin_relative_prefix(bytes) && std::arch::is_aarch64_feature_detected!("neon") {
+    if bytes.len() >= 16 && uri::has_origin_relative_prefix(bytes) && arch::is_aarch64_feature_detected!("neon") {
         // SAFETY: runtime detection establishes NEON and the length check
         // satisfies the scanner's trailing-block precondition.
         return Some(unsafe { crate::arm::is_simple_uri_tail(bytes) });
@@ -244,6 +247,8 @@ pub fn is_simple_uri_path_neon(bytes: &[u8]) -> Option<bool> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[cfg(all(not(feature = "std"), any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")))]
+    use std::arch;
     #[cfg(not(feature = "std"))]
     use std::vec;
 
@@ -254,11 +259,11 @@ mod tests {
         assert_eq!(is_simple_uri_path_sse2(path), Some(expected));
         assert_eq!(
             is_simple_uri_path_ssse3(path),
-            std::arch::is_x86_feature_detected!("ssse3").then_some(expected)
+            arch::is_x86_feature_detected!("ssse3").then_some(expected)
         );
         assert_eq!(
             is_simple_uri_path_sse42(path),
-            std::arch::is_x86_feature_detected!("sse4.2").then_some(expected)
+            arch::is_x86_feature_detected!("sse4.2").then_some(expected)
         );
         assert_eq!(is_simple_uri_path_neon(path), None);
     }
@@ -270,7 +275,7 @@ mod tests {
         assert_eq!(is_simple_uri_path_sse42(path), None);
         assert_eq!(
             is_simple_uri_path_neon(path),
-            std::arch::is_aarch64_feature_detected!("neon").then_some(expected)
+            arch::is_aarch64_feature_detected!("neon").then_some(expected)
         );
     }
 

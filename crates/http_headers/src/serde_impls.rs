@@ -2,6 +2,21 @@
 // Licensed under the MIT License.
 
 use std::fmt;
+#[cfg(any(
+    feature = "headers-authorization",
+    feature = "headers-conditional",
+    feature = "headers-content-length",
+    feature = "headers-content-type",
+    feature = "headers-cors",
+    feature = "headers-etag",
+    feature = "headers-location",
+    feature = "headers-negotiation",
+    feature = "headers-range",
+    feature = "headers-security",
+    feature = "headers-user-agent",
+    feature = "headers-websocket",
+))]
+use std::iter;
 
 use serde::de::{DeserializeSeed, Error as _, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -85,7 +100,7 @@ use crate::sink::{EncodedValues, FieldSensitivity};
     feature = "headers-websocket",
 ))]
 use crate::source::{FieldLines, FieldSource, MAX_CUSTOM_FIELD_BYTES, MAX_CUSTOM_FIELD_LINES};
-use crate::{FieldName, FieldValue, FieldValueRef};
+use crate::{DecodeErrorKind, FieldName, FieldValue, FieldValueRef};
 
 const FIELD_VALUE_FIELDS: &[&str] = &["bytes", "sensitivity"];
 // Bound speculative allocation from untrusted Serde size hints.
@@ -174,7 +189,10 @@ impl<'de> DeserializeSeed<'de> for FieldBytesSeed {
                     }
                 }
                 if seq.next_element::<IgnoredAny>()?.is_some() {
-                    return Err(A::Error::custom("field-value byte budget exceeded"));
+                    return Err(A::Error::custom(format_args!(
+                        "{}: field-value byte budget exceeded",
+                        DecodeErrorKind::SourceLimitExceeded
+                    )));
                 }
                 Ok(bytes)
             }
@@ -374,16 +392,26 @@ impl<'de> Visitor<'de> for FieldValuesVisitor {
                 return Ok(values);
             };
             list_budgets.observe(self.name, value.as_bytes()).map_err(A::Error::custom)?;
-            total_bytes = total_bytes
-                .checked_add(value.as_bytes().len())
-                .ok_or_else(|| A::Error::custom("aggregate field-value size overflow"))?;
+            total_bytes = checked_total_bytes::<A::Error>(total_bytes, value.as_bytes().len())?;
             values.push(value);
         }
         if seq.next_element::<IgnoredAny>()?.is_some() {
-            return Err(A::Error::custom("field-value line budget exceeded"));
+            return Err(A::Error::custom(format_args!(
+                "{}: field-value line budget exceeded",
+                DecodeErrorKind::SourceLimitExceeded
+            )));
         }
         Ok(values)
     }
+}
+
+fn checked_total_bytes<E: serde::de::Error>(total: usize, additional: usize) -> Result<usize, E> {
+    total.checked_add(additional).ok_or_else(|| {
+        E::custom(format_args!(
+            "{}: aggregate field-value size overflow",
+            DecodeErrorKind::SourceLimitExceeded
+        ))
+    })
 }
 
 fn deserialize_field_values<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<FieldValue>, D::Error> {
@@ -558,7 +586,7 @@ where
     H: SingleValueField,
     S: Serializer,
 {
-    serialize_field_values(std::iter::once(H::as_field_value(value).as_field_value_ref()), serializer)
+    serialize_field_values(iter::once(H::as_field_value(value).as_field_value_ref()), serializer)
 }
 
 #[cfg(any(
@@ -707,7 +735,7 @@ impl Serialize for AcceptRangesOwned {
 #[cfg(feature = "headers-content-type")]
 impl Serialize for ContentTypeOwned {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serialize_field_values(std::iter::once(self.field_value()), serializer)
+        serialize_field_values(iter::once(self.field_value()), serializer)
     }
 }
 
@@ -743,7 +771,7 @@ impl Serialize for SecWebSocketProtocolOwned {
 impl Serialize for SecWebSocketVersionOwned {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let value = self.field_value();
-        serialize_field_values(std::iter::once(value.as_field_value_ref()), serializer)
+        serialize_field_values(iter::once(value.as_field_value_ref()), serializer)
     }
 }
 
@@ -825,7 +853,7 @@ serde_deserialize_owned!(
 #[cfg(feature = "headers-cors")]
 impl Serialize for AccessControlAllowCredentialsOwned {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serialize_field_values(std::iter::once(FieldValueRef::new(b"true")), serializer)
+        serialize_field_values(iter::once(FieldValueRef::new(b"true")), serializer)
     }
 }
 
@@ -833,21 +861,21 @@ impl Serialize for AccessControlAllowCredentialsOwned {
 impl Serialize for AccessControlMaxAgeOwned {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let value = FieldValue::from(self.seconds());
-        serialize_field_values(std::iter::once(value.as_field_value_ref()), serializer)
+        serialize_field_values(iter::once(value.as_field_value_ref()), serializer)
     }
 }
 
 #[cfg(feature = "headers-cors")]
 impl Serialize for AccessControlAllowOriginOwned {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serialize_field_values(std::iter::once(self.field_value().as_field_value_ref()), serializer)
+        serialize_field_values(iter::once(self.field_value().as_field_value_ref()), serializer)
     }
 }
 
 #[cfg(feature = "headers-cors")]
 impl Serialize for AccessControlRequestMethodOwned {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serialize_field_values(std::iter::once(self.field_value()), serializer)
+        serialize_field_values(iter::once(self.field_value()), serializer)
     }
 }
 
@@ -855,7 +883,7 @@ impl Serialize for AccessControlRequestMethodOwned {
 impl Serialize for ContentLengthOwned {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let value = FieldValue::from(self.get());
-        serialize_field_values(std::iter::once(value.as_field_value_ref()), serializer)
+        serialize_field_values(iter::once(value.as_field_value_ref()), serializer)
     }
 }
 
@@ -894,5 +922,36 @@ impl<'de> Deserialize<'de> for SetCookieOwned {
         SetCookie::owned(&source)
             .map_err(D::Error::custom)?
             .ok_or_else(|| D::Error::custom("nonempty Set-Cookie values must decode as present"))
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use serde::de::value::Error;
+
+    use super::checked_total_bytes;
+
+    #[test]
+    fn aggregate_byte_count_preserves_representable_totals() {
+        for (total, additional, expected) in [
+            (0, 0, 0),
+            (12, 34, 46),
+            (0, usize::MAX, usize::MAX),
+            (usize::MAX - 1, 1, usize::MAX),
+        ] {
+            assert_eq!(checked_total_bytes::<Error>(total, additional).unwrap(), expected);
+        }
+        assert_eq!(checked_total_bytes::<Error>(usize::MAX, 0).unwrap(), usize::MAX);
+    }
+
+    #[test]
+    fn aggregate_byte_count_overflow_reports_source_limit_exceeded() {
+        for (total, additional) in [(usize::MAX, 1), (1, usize::MAX), (usize::MAX, usize::MAX)] {
+            assert_eq!(
+                checked_total_bytes::<Error>(total, additional).unwrap_err().to_string(),
+                "source limit exceeded: aggregate field-value size overflow"
+            );
+        }
     }
 }

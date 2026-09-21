@@ -203,25 +203,14 @@ pub struct WebSocketExtensionParameters<'a> {
     position: usize,
 }
 
-impl fmt::Debug for SecWebSocketExtensionsOwned {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SecWebSocketExtensionsOwned")
-            .field("value_count", &self.values.len())
-            .finish()
-    }
-}
+super::super::shared::impl_value_count_debug!(
+    SecWebSocketExtensionsOwned => "SecWebSocketExtensionsOwned",
+    SecWebSocketExtensionsView<'_> => "SecWebSocketExtensionsView",
+);
 
 impl fmt::Display for SecWebSocketExtensionsOwned {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         super::super::shared::fmt_ascii_values(self.values.iter().map(FieldValue::as_field_value_ref), f)
-    }
-}
-
-impl fmt::Debug for SecWebSocketExtensionsView<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SecWebSocketExtensionsView")
-            .field("value_count", &self.values.len())
-            .finish()
     }
 }
 
@@ -797,8 +786,9 @@ impl Field for SecWebSocketExtensions {
         lines.validate_list_item_limit(b',', true)?;
         lines.validate_list_item_limit(b';', false)?;
         let mut copied = FieldLinesIter::empty();
+        let mut present = false;
         for (value_index, (value, owned)) in lines.repeated_owned()?.enumerate() {
-            validate_extension_header_value(value).map_err(|error| {
+            present |= validate_extension_header_value(value).map_err(|error| {
                 if error.kind() == DecodeErrorKind::UnterminatedQuote {
                     error.at_value(value_index)
                 } else {
@@ -806,6 +796,9 @@ impl Field for SecWebSocketExtensions {
                 }
             })?;
             copied.push(owned);
+        }
+        if !present {
+            return Err(invalid_syntax(&FieldName::SecWebSocketExtensions));
         }
         Ok(Some(SecWebSocketExtensionsOwned { values: copied }))
     }
@@ -818,29 +811,20 @@ impl Field for SecWebSocketExtensions {
     }
 }
 
-impl TryFrom<&str> for SecWebSocketExtensionsOwned {
-    type Error = DecodeError;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let value = FieldValue::from_str(value).map_err(|_invalid| invalid_syntax(&FieldName::SecWebSocketExtensions))?;
-        Self::try_from(value)
-    }
-}
-
-impl TryFrom<String> for SecWebSocketExtensionsOwned {
-    type Error = DecodeError;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        let value = FieldValue::try_from(value).map_err(|_invalid| invalid_syntax(&FieldName::SecWebSocketExtensions))?;
-        Self::try_from(value)
-    }
-}
+super::super::shared::impl_string_conversions!(
+    SecWebSocketExtensionsOwned,
+    &FieldName::SecWebSocketExtensions,
+    invalid_syntax,
+    value
+);
 
 impl TryFrom<FieldValue> for SecWebSocketExtensionsOwned {
     type Error = DecodeError;
 
     fn try_from(value: FieldValue) -> Result<Self, Self::Error> {
-        validate_extension_header_value(value.as_field_value_ref())?;
+        if !validate_extension_header_value(value.as_field_value_ref())? {
+            return Err(invalid_syntax(&FieldName::SecWebSocketExtensions));
+        }
         Ok(Self {
             values: FieldLinesIter::one(value),
         })
@@ -862,10 +846,9 @@ fn validate_extensions(values: &FieldLines<'_>) -> Result<(), DecodeError> {
         .ok_or_else(|| DecodeError::new(&FieldName::SecWebSocketExtensions, DecodeErrorKind::MissingValue))
 }
 
-fn validate_extension_header_value(value: FieldValueRef<'_>) -> Result<(), DecodeError> {
+fn validate_extension_header_value(value: FieldValueRef<'_>) -> Result<bool, DecodeError> {
     match validate_plain_extension_line(value.as_bytes())? {
-        Some(true) => Ok(()),
-        Some(false) => Err(invalid_syntax(&FieldName::SecWebSocketExtensions)),
+        Some(present) => Ok(present),
         None => validate_header_value_list(value, &FieldName::SecWebSocketExtensions, validate_extension),
     }
 }
@@ -1095,7 +1078,7 @@ mod tests {
         ] {
             let mut bytes = literal.to_vec();
             for index in 0..bytes.len() {
-                for replacement in 0..=u8::MAX {
+                for replacement in crate::test_support::substitution_bytes(literal[index], index, literal.len()) {
                     bytes[index] = replacement;
                     let plain = validate_plain_extension_line(&bytes);
                     if plain != Ok(None) {

@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use super::accept_entry::AcceptEntry;
+use super::negotiation_members::{collect_members, validated_member};
 use super::shared::{
     ListValues, QuotedItems, check_quoted_value, check_quoted_values, invalid, invalid_syntax, parse_parameter, try_plain_items,
     validate_quality,
@@ -77,6 +79,70 @@ super::shared::list_header!(
     check_quoted_value,
     quoted
 );
+
+impl AcceptOwned {
+    /// Iterates typed preferences in field-line and member order.
+    ///
+    /// Empty list members are ignored. This allocation-free streaming
+    /// projection retains metadata in each yielded entry; a fresh iterator
+    /// traverses the wire again. Scalar entry getters do not parse again.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "headers-negotiation")]
+    /// # fn main() -> Result<(), http_headers::DecodeError> {
+    /// use http_headers::headers::{AcceptOwned, MediaRangeKind};
+    ///
+    /// let accept = AcceptOwned::try_from("text/html, text/*;q=0.5")?;
+    /// let mut preferences = accept.entries();
+    /// assert_eq!(
+    ///     preferences.next().unwrap().range().subtype().as_str(),
+    ///     "html"
+    /// );
+    /// let wildcard = preferences.next().unwrap();
+    /// assert_eq!(wildcard.range().kind(), MediaRangeKind::TypeWildcard);
+    /// assert_eq!(wildcard.quality().to_quality().unwrap().thousandths(), 500);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "headers-negotiation"))]
+    /// # fn main() {}
+    /// ```
+    pub fn entries(&self) -> impl Iterator<Item = AcceptEntry<'_>> {
+        self.values
+            .iter()
+            .flat_map(|value| QuotedItems::comma(value.as_bytes(), &FieldName::Accept))
+            .map(validated_member)
+            .map(AcceptEntry::from_validated)
+    }
+
+    /// Constructs one field line from typed preferences without sorting them.
+    ///
+    /// Quality spelling and separators are written in canonical form; token spelling and
+    /// parameter bytes are retained. An empty iterator creates a present empty
+    /// list. Use raw field values for byte-exact forwarding.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the aggregate wire size or member count exceeds the
+    /// custom-source budgets.
+    pub fn from_entries<'a>(entries: impl IntoIterator<Item = AcceptEntry<'a>>) -> Result<Self, DecodeError> {
+        collect_members(entries, &FieldName::Accept, AcceptEntry::encoded_len, AcceptEntry::append_to).map(|values| Self { values })
+    }
+}
+
+impl<'a> AcceptView<'a> {
+    /// Iterates typed preferences without allocating, preserving duplicates.
+    ///
+    /// Each new iterator traverses the wire again. Each yielded entry retains
+    /// its scalar components and media-parameter/extension boundaries.
+    pub fn entries(&self) -> impl Iterator<Item = AcceptEntry<'a>> + '_ {
+        self.values
+            .validated_comma_items()
+            .map(validated_member)
+            .map(AcceptEntry::from_validated)
+    }
+}
 
 fn validate_accept(bytes: &[u8]) -> Result<(), DecodeError> {
     validate_accept_with(bytes, false)
@@ -155,7 +221,7 @@ fn validate_accept_parameter(bytes: &[u8], quality_seen: &mut bool, relaxed: boo
 /// A slash is not a token byte, so a second one already fails the subtype
 /// check, and the scan that tells a repeated slash apart from an ordinary bad
 /// byte runs only when the range is being rejected anyway.
-fn validate_media_range(bytes: &[u8]) -> Result<(), DecodeError> {
+pub(super) fn validate_media_range(bytes: &[u8]) -> Result<(), DecodeError> {
     let mut halves = bytes.splitn(2, |byte| *byte == b'/');
     let type_ = halves.next().expect("splitting always yields a first half");
     let Some(subtype) = halves.next() else {
@@ -184,7 +250,8 @@ fn validate_media_range(bytes: &[u8]) -> Result<(), DecodeError> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::super::accept_scan::scan_accept_line;
-    use super::super::shared::{WELL_KNOWN_ACCEPT, invalid, invalid_syntax, try_plain_items};
+    use super::super::recognition_test_support::{self, exhaustive};
+    use super::super::shared::{WELL_KNOWN_ACCEPT, invalid, invalid_syntax};
     use super::{
         validate_accept, validate_accept_parameter, validate_accept_quoted, validate_accept_relaxed, validate_accept_with,
         validate_media_range,
@@ -261,32 +328,6 @@ mod tests {
         assert!(validate_media_range(b"text/*").is_ok());
     }
 
-    /// Validates a whole line the way the general parser does, without the
-    /// whole-line recognizer in front of it.
-    fn general_parser_accepts(bytes: &[u8], relaxed: bool) -> bool {
-        let validator = if relaxed { validate_accept_relaxed } else { validate_accept };
-        matches!(try_plain_items(bytes, b',', true, validator), Ok(true))
-    }
-
-    /// Builds every string up to `length` bytes over `alphabet`.
-    fn exhaustive(alphabet: &[u8], length: usize) -> Vec<Vec<u8>> {
-        let mut all = vec![Vec::new()];
-        let mut frontier = vec![Vec::new()];
-        for _ in 0..length {
-            let mut next = Vec::new();
-            for prefix in &frontier {
-                for byte in alphabet {
-                    let mut candidate = prefix.clone();
-                    candidate.push(*byte);
-                    next.push(candidate);
-                }
-            }
-            all.extend_from_slice(&next);
-            frontier = next;
-        }
-        all
-    }
-
     /// Builds every concatenation of up to `count` grammar fragments.
     fn fragment_lines(count: usize) -> Vec<Vec<u8>> {
         const FRAGMENTS: &[&str] = &[
@@ -324,39 +365,11 @@ mod tests {
             ";q=0.",
         ];
 
-        let mut lines = vec![Vec::new()];
-        for _ in 0..count {
-            let mut next = Vec::new();
-            for prefix in &lines {
-                for fragment in FRAGMENTS {
-                    let mut candidate = prefix.clone();
-                    candidate.extend_from_slice(fragment.as_bytes());
-                    next.push(candidate);
-                }
-            }
-            lines.extend_from_slice(&next);
-        }
-        lines
+        recognition_test_support::fragment_lines(FRAGMENTS, count)
     }
 
     fn assert_recognition_is_sound(lines: &[Vec<u8>]) -> usize {
-        let mut recognized = 0;
-        for line in lines {
-            if !scan_accept_line(line) {
-                continue;
-            }
-            recognized += 1;
-            let shown = String::from_utf8_lossy(line);
-            assert!(
-                general_parser_accepts(line, false),
-                "recognized line {shown:?} must satisfy the strict member grammar"
-            );
-            assert!(
-                general_parser_accepts(line, true),
-                "recognized line {shown:?} must satisfy the relaxed member grammar"
-            );
-        }
-        recognized
+        recognition_test_support::assert_recognition_is_sound(lines, scan_accept_line, validate_accept, validate_accept_relaxed)
     }
 
     #[test]
@@ -398,7 +411,7 @@ mod tests {
         }
     }
 
-    /// Validates a media range the way the original rule-at-a-time walk did.
+    /// Validates a media range with an independent rule-at-a-time reference parser.
     fn media_range_reference(bytes: &[u8]) -> Result<(), DecodeError> {
         let Some(slash) = bytes.iter().position(|byte| *byte == b'/') else {
             return Err(invalid_syntax(&FieldName::Accept));
@@ -444,8 +457,7 @@ mod tests {
         .map(|range| range.as_bytes().to_vec())
         .collect();
 
-        for byte in 0_u16..=255 {
-            let byte = u8::try_from(byte).unwrap_or(0);
+        for byte in crate::test_support::byte_cases(b't') {
             ranges.push(vec![byte]);
             ranges.push(vec![b't', byte, b'/', b'p']);
             ranges.push(vec![b't', b'/', byte, b'p']);
@@ -458,6 +470,9 @@ mod tests {
     #[test]
     fn single_pass_media_range_matches_the_rule_at_a_time_walk() {
         for range in media_ranges() {
+            #[cfg(miri)]
+            assert_eq!(validate_media_range(&range), media_range_reference(&range), "media range {range:?}");
+            #[cfg(not(miri))]
             assert_eq!(
                 format!("{:?}", validate_media_range(&range)),
                 format!("{:?}", media_range_reference(&range)),

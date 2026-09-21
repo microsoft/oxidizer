@@ -6,6 +6,8 @@
 use std::fmt;
 use std::io::Write as _;
 use std::marker::PhantomData;
+#[cfg(test)]
+use std::sync::{Arc, Mutex};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
@@ -19,7 +21,7 @@ use crate::{DecodeError, DecodeErrorKind, FieldName, FieldValue, FieldValueRef, 
 const DEFAULT_CREDENTIAL_RETAIN_LIMIT: usize = 64 * 1024;
 
 #[cfg(test)]
-type ZeroizationLog = std::sync::Arc<std::sync::Mutex<Vec<(usize, usize, Vec<u8>)>>>;
+type ZeroizationLog = Arc<Mutex<Vec<(usize, usize, Vec<u8>)>>>;
 
 /// The Bearer authorization scheme.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -940,6 +942,9 @@ mod tests {
 
     type ZeroizationObserver = Arc<Mutex<Vec<(usize, usize, Vec<u8>)>>>;
 
+    // Both sizes preserve base64 quantum alignment and heap-backed header values.
+    const CREDENTIAL_BLOCK_LEN: usize = if cfg!(miri) { 64 } else { 1_024 };
+
     fn observed_credentials() -> (BasicCredentials, ZeroizationObserver) {
         let observer = Arc::new(Mutex::new(Vec::new()));
         let mut credentials = BasicCredentials::new();
@@ -963,7 +968,7 @@ mod tests {
     fn basic_validator_matches_the_decoder_and_colon_oracle() {
         let valid = b"dXNlcjpwYXNzd29yZA==";
         for index in 0..valid.len() - 4 {
-            for byte in u8::MIN..=u8::MAX {
+            for byte in crate::test_support::substitution_bytes(valid[index], index, valid.len() - 4) {
                 let mut candidate = valid.to_vec();
                 candidate[index] = byte;
                 let oracle = STANDARD.decode(&candidate).is_ok_and(|decoded| decoded.contains(&b':'));
@@ -982,7 +987,7 @@ mod tests {
 
             let parsed = owned
                 .as_field_value()
-                .to_str()
+                .try_as_str()
                 .expect("ASCII authorization")
                 .parse::<AuthorizationOwned<Bearer>>()
                 .expect("FromStr accepts constructed value");
@@ -1043,7 +1048,7 @@ mod tests {
         assert!(format!("{owned:?}").contains("sensitive"));
         let parsed = owned
             .as_field_value()
-            .to_str()
+            .try_as_str()
             .expect("ASCII authorization")
             .parse::<AuthorizationOwned<Basic>>()
             .expect("basic FromStr");
@@ -1087,7 +1092,7 @@ mod tests {
 
     #[test]
     fn basic_credential_capacity_tracks_decoded_output_instead_of_encoded_input() {
-        let username = [b'a'; 4_096];
+        let username = [b'a'; CREDENTIAL_BLOCK_LEN * 4];
         let authorization = AuthorizationOwned::<Basic>::basic(username, b"").unwrap();
         let encoded_len = authorization.encoded_credentials().unwrap().len();
         let mut credentials = BasicCredentials::new();
@@ -1100,7 +1105,7 @@ mod tests {
     #[test]
     fn basic_credential_clear_zeroizes_the_initialized_range() {
         let (mut credentials, observer) = observed_credentials();
-        AuthorizationOwned::<Basic>::basic([b'a'; 1_024], [b'b'; 1_024])
+        AuthorizationOwned::<Basic>::basic([b'a'; CREDENTIAL_BLOCK_LEN], [b'b'; CREDENTIAL_BLOCK_LEN])
             .unwrap()
             .extract(&mut credentials)
             .unwrap();
@@ -1117,14 +1122,14 @@ mod tests {
     #[test]
     fn failed_basic_credential_decode_zeroizes_old_and_partial_output() {
         let (mut credentials, observer) = observed_credentials();
-        AuthorizationOwned::<Basic>::basic([b'a'; 1_024], b"secret")
+        AuthorizationOwned::<Basic>::basic([b'a'; CREDENTIAL_BLOCK_LEN], b"secret")
             .unwrap()
             .extract(&mut credentials)
             .unwrap();
         let old_len = credentials.username().len() + 1 + credentials.password().len();
         observer.lock().unwrap().clear();
 
-        let malformed = [STANDARD.encode([b'x'; 1_024]), "!".into()].concat();
+        let malformed = [STANDARD.encode([b'x'; CREDENTIAL_BLOCK_LEN]), "!".into()].concat();
         assert!(credentials.fill(malformed.as_bytes()).is_err());
 
         let snapshots = observer.lock().unwrap();
@@ -1149,7 +1154,7 @@ mod tests {
     #[test]
     fn basic_credential_reuse_bounds_later_wipes_to_the_short_output() {
         let (mut credentials, observer) = observed_credentials();
-        AuthorizationOwned::<Basic>::basic([b'a'; 2_048], [b'b'; 2_048])
+        AuthorizationOwned::<Basic>::basic([b'a'; CREDENTIAL_BLOCK_LEN * 2], [b'b'; CREDENTIAL_BLOCK_LEN * 2])
             .unwrap()
             .extract(&mut credentials)
             .unwrap();
@@ -1184,7 +1189,7 @@ mod tests {
             let old_capacity = credentials.capacity();
             observer.lock().unwrap().clear();
 
-            let decoded = [b"expanded:".as_slice(), &[b'x'; 8_192]].concat();
+            let decoded = [b"expanded:".as_slice(), &[b'x'; CREDENTIAL_BLOCK_LEN * 8]].concat();
             let encoded = STANDARD.encode(&decoded);
             credentials.fill(encoded.as_bytes()).unwrap();
             assert!(credentials.capacity() > old_capacity, "larger credentials must reallocate");
@@ -1201,14 +1206,18 @@ mod tests {
 
         let snapshots = observer.lock().unwrap();
         assert_eq!(snapshots.len(), 1);
-        assert_zeroized(&snapshots[0], b"expanded:".len() + 8_192, "post-reallocation drop");
+        assert_zeroized(
+            &snapshots[0],
+            b"expanded:".len() + CREDENTIAL_BLOCK_LEN * 8,
+            "post-reallocation drop",
+        );
     }
 
     #[test]
     fn dropping_basic_credentials_zeroizes_the_initialized_range() {
         let observer = {
             let (mut credentials, observer) = observed_credentials();
-            AuthorizationOwned::<Basic>::basic([b'a'; 1_024], b"secret")
+            AuthorizationOwned::<Basic>::basic([b'a'; CREDENTIAL_BLOCK_LEN], b"secret")
                 .unwrap()
                 .extract(&mut credentials)
                 .unwrap();

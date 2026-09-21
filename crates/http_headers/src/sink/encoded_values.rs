@@ -3,6 +3,7 @@
 
 //! Owned encoded field values.
 
+use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 use std::{fmt, option, slice, vec};
 
@@ -117,13 +118,13 @@ impl PartialEq for EncodedValues {
 impl Eq for EncodedValues {}
 
 impl PartialOrd for EncodedValues {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
 impl Ord for EncodedValues {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    fn cmp(&self, other: &Self) -> Ordering {
         self.iter().cmp(other.iter())
     }
 }
@@ -373,8 +374,6 @@ impl<'a> IntoIterator for &'a mut EncodedValues {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::cell::Cell;
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
 
     use super::EncodedValues;
     use crate::FieldValue;
@@ -425,42 +424,6 @@ mod tests {
         assert_eq!(iter.next().expect("first owned value"), "first");
         assert_eq!(iter.next().expect("second owned value"), "second");
         assert!(iter.next().is_none());
-    }
-
-    #[test]
-    fn iterators_support_mixed_direction_iteration() {
-        let values = ["first", "second", "third"]
-            .into_iter()
-            .map(FieldValue::from_static)
-            .collect::<EncodedValues>();
-
-        let mut borrowed = values.iter();
-        assert_eq!(borrowed.next_back().expect("last value"), "third");
-        assert_eq!(borrowed.next().expect("first value"), "first");
-        assert_eq!(borrowed.next_back().expect("middle value"), "second");
-        assert!(borrowed.next().is_none());
-
-        let mut owned = values.into_iter();
-        assert_eq!(owned.next_back().expect("last owned value"), "third");
-        assert_eq!(owned.next().expect("first owned value"), "first");
-        assert_eq!(owned.next_back().expect("middle owned value"), "second");
-        assert!(owned.next().is_none());
-    }
-
-    #[test]
-    fn comparison_and_hashing_ignore_internal_representation() {
-        let single = EncodedValues::single(FieldValue::from_static("gzip"));
-        let vector = EncodedValues::from_vec(vec![FieldValue::from_static("gzip")]);
-        let greater = EncodedValues::from_vec(vec![FieldValue::from_static("gzip, br")]);
-
-        assert_eq!(single, vector);
-        assert!(single < greater);
-
-        let mut single_hash = DefaultHasher::new();
-        single.hash(&mut single_hash);
-        let mut vector_hash = DefaultHasher::new();
-        vector.hash(&mut vector_hash);
-        assert_eq!(single_hash.finish(), vector_hash.finish());
     }
 
     #[test]

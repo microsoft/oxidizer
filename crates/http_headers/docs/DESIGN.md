@@ -9,14 +9,20 @@ storage.
 
 The core owns these abstractions and depends on no external header crate:
 
-- `FieldValue` stores validated wire bytes inline through 64 bytes and uses
-  shared `bytes::Bytes` storage for longer values. `FieldValueRef<'a>` is the
-  borrowed counterpart every decoder observes.
+- `FieldValue` stores copied or adopted owned wire bytes inline through 64
+  bytes and uses shared storage for longer values. `from_static` and
+  `from_shared` retain their backing storage even for short values.
+  `FieldValueRef<'a>` is the borrowed counterpart every decoder observes.
 - `FieldName` is the single map-key, wire-name, and typed-field name type. It
   has one variant for every recognized standard header and `Custom(Arc<str>)`
   for other names. Runtime parsing normalizes custom names to lowercase.
-  Typed APIs use `&'static FieldName`, so known variants and cached custom
-  names are passed without cloning their owned representation.
+  The source/sink boundary uses `&'static FieldName`, so known variants and
+  static custom descriptors are passed without cloning their owned representation.
+  Custom descriptors can use `static LazyLock<FieldName>`. Runtime-owned names
+  support validation, comparison, and conversion to container-specific names;
+  locally constructed names cannot be used for source/sink lookup, insertion,
+  append, removal, or `FieldLines` construction. Dynamic name operations use
+  the container's native API instead.
 - `source::FieldSource` supplies the `source::FieldLines` stored for a
   typed field, and `sink::FieldSink` stores them. Each generic operation
   obtains its key from `Field::name`: a container that indexes well-known
@@ -37,6 +43,11 @@ disabling the feature removes that dependency without removing any typed
 header.
 
 ## Owned headers and borrowed views
+
+`MethodView` and `FieldNameView` are shared by the CORS and negotiation
+families and are available when either family is enabled. Method identity is
+case-sensitive; field-name equality and hashing are ASCII-case-insensitive.
+Both views preserve the original wire spelling.
 
 Every `Field` definition associates a generic `View<'a>` and an `Owned`
 representation. `view` returns the view, which can borrow
@@ -81,6 +92,24 @@ single-value parsers do not interpret delimiters as list members. The
 `http::HeaderMap` representation is exempt because that adapter exposes
 already validated values and is not a custom `FieldSource`.
 
+Validated `FieldValue` slices supplied by custom sources remain subject to the
+same budgets. A budget rejection is `DecodeErrorKind::SourceLimitExceeded`,
+not `InvalidSyntax`; valid HTTP grammar can exceed an admission limit. Typed
+negotiation constructors use the same category for their byte and item bounds.
+Typed Serde deserialization also applies byte, line, and applicable list-item
+budgets during collection and maps admission failures into Serde errors with
+`source limit exceeded` diagnostics. Raw `FieldValue` and `EncodedValues`
+deserialization does not impose these typed-source budgets.
+
+For `FieldLines`, checks retain their scan order: field-line count is checked first, then
+aggregate byte count and raw-byte validity in physical line order. Thus an
+oversized line wins over invalid bytes in that same line, but invalid bytes
+in an earlier line can win over a later byte overflow. List preflight may
+reject an over-budget item before its grammar is parsed; streaming
+`DelimitedItems` instead diagnoses an unterminated quote before admitting
+that item. `InvalidSyntax` and the more specific grammar errors remain
+reserved for malformed input.
+
 This distinction is required for `Set-Cookie`, where each cookie remains a
 separate field line. List-valued headers can still treat multiple lines as one
 logical list without first allocating a flattened string.
@@ -114,6 +143,15 @@ stored value is malformed.
 `DecodeErrorKind`, and an optional zero-based field-value index. It
 deliberately does not retain or print raw field bytes because headers may
 contain credentials, cookies, signed URLs, or other secrets.
+
+`InsertError` is also `Copy`. Its non-exhaustive `InsertErrorKind` distinguishes
+invalid values, encoder length-contract violations, buffer reservation failures,
+and value/container capacity limits. It retains neither field contents nor an
+underlying error source. These categories describe failures, not retry policy:
+the built-in sinks reject lengths above `isize::MAX` as `CapacityExceeded`
+before reserving, while later buffer reservation failures are `AllocationFailed`.
+Neither category promises that retrying without other changes will help.
+No automatic recovery classification or `recoverable` dependency is imposed.
 
 Sensitive built-in types set `FieldValue::set_sensitive` where appropriate.
 Their `Debug` implementations, along with those for `FieldLines`,
@@ -204,9 +242,12 @@ as a Unicode string.
 
 ## Inline storage
 
-`FieldValue` stores up to 64 bytes inline. Longer values use shared
-`bytes::Bytes` storage, and values retained from the optional `http` adapter
-can retain the source `HeaderValue` without copying its private buffer.
+`FieldValue` copies byte slices and adopts owned strings or vectors into
+inline storage when they contain at most 64 bytes; longer values use shared
+`bytes::Bytes` storage. `from_static` and `from_shared` instead retain their
+static or shared backing storage regardless of length. The optional `http`
+adapter copies short values inline and can retain longer source
+`HeaderValue`s without copying their private buffers.
 Sensitivity is stored beside every representation and does not affect
 equality, ordering, or hashing.
 
@@ -249,20 +290,32 @@ is safe, so target-feature preconditions and pointer bounds cannot leak into
 
 The following surfaces are deliberate rather than oversights.
 
+**Duration-based max ages require whole seconds.** `AccessControlMaxAgeOwned`
+offers fallible duration construction and `TryFrom<Duration>`, not a lossy
+`From<Duration>`. `CacheControlBuilder` and `StrictTransportSecurityBuilder`
+retain the supplied duration and reject fractional seconds at build time;
+direct Cache-Control encoding and the CORS duration setter reject them before
+changing the sink. Constructors report `DecodeErrorKind::InvalidNumber`;
+insertion reports `InsertErrorKind::InvalidValue`. No path silently floors a
+caller-supplied max age.
+
 **`SetCookieOwned` stays construction-fallible; no `FromIterator`/`Extend`.**
 `SetCookieOwned::push` and `push_str` validate every field value
 against `SET_COOKIE`'s nonempty-field-value grammar and reject one that
-fails, and that stays the only way to build one up. `EncodedValues`'
+fails. `EncodedValues`'
 `FromIterator`/`Extend` adopt trusted, already-encoded `FieldValue` storage,
 not attacker-reachable cookie content; a `FromIterator`/
 `Extend` impl for `SetCookieOwned` would need to either silently drop invalid
-values (breaking the invariant every stored value passes validation) or
+values or
 panic (turning untrusted request- or response-adjacent data into a crash
-surface), and neither is acceptable for a type whose whole job is holding
-values that survive round-tripping intact. `iter()`, `IntoIterator for
-SetCookieOwned`, `&SetCookieOwned`, and `&mut SetCookieOwned` are safe because reading and
-encoding existing values cannot invalidate them. Construction goes through
-`push`/`push_str` and their `Result`, not an infallible collection trait.
+surface), and neither is acceptable.
+
+Immutable iteration preserves validity, but `iter_mut` and
+`IntoIterator for &mut SetCookieOwned` can replace an entry with an empty
+`FieldValue`: valid raw storage, but not a valid cookie field line.
+`SetCookie::insert` and `FieldSinkExt::append_set_cookie` therefore revalidate
+nonemptiness before changing the sink and restore cookie sensitivity.
+An empty collection remains valid; it is an empty stored entry that fails.
 
 **Built-in descriptors forward essential `Field` operations.** Every built-in
 descriptor exposes inherent `view`, `owned`, `insert`, and `remove` methods so
@@ -296,20 +349,23 @@ field names, decode errors and modes, and the `Field` traits. No type is
 re-exported from two paths, so there is one way to import each name and
 `cargo doc` lists it once.
 
-**One unconditional header-family set, no per-family dependency features.**
-`sha1`, `fluent-uri`, `httpdate`, and `base64` stay unconditional
-dependencies rather than gaining one Cargo feature per header family. The
-`http` and `serde` features provide integrations rather than selecting header
-families. Gating these four dependencies would multiply the
-`cargo hack --each-feature` and docs.rs feature-power-set combinations, and
-feature unification means one dependent enabling a family
-silently compiles it for every other crate in the same build — a surprise
-users would need this document to explain either way. A consumer that reads
-only `Content-Type` and `Content-Length` pays a modest, fixed compile-time
-and binary-size cost for four small, non-`unsafe`, pure-Rust dependencies
-with no transitive weight comparable to `http_headers_simd`'s own footprint.
-The Cargo default feature set is empty, but all built-in header families are
-unconditional; per-family features are not planned.
+**All header families by default, individually selectable when needed.**
+The default `headers-all` feature enables every built-in header family.
+Disabling default features leaves the core field names, values, errors,
+traits, and source/sink APIs; consumers then enable only the `headers-*`
+families they need. Family features activate their optional dependencies:
+for example, `headers-location` enables `fluent-uri`, while
+`headers-authorization` enables `base64` and `zeroize`.
+`headers-conditional` also enables `headers-etag`.
+
+The `http` and `serde` features add integrations independently of family
+selection. Serde supports owned headers from whichever families are enabled;
+neither integration enables all families. A consumer selecting only
+`Content-Type` and `Content-Length` therefore need not enable the optional
+dependencies of unrelated families. Cargo features remain additive, so
+another dependent can enable more families for the same resolved package.
+[`COMPATIBILITY.md`](COMPATIBILITY.md#feature-flags) lists the complete feature
+and dependency mapping.
 
 **Opaque owned headers retain `FieldValue`.** Their owned forms clone and hold
 the validated `FieldValue` rather than introducing a second opaque-byte

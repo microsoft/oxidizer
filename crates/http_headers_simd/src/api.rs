@@ -301,7 +301,10 @@ pub fn find_either(bytes: &[u8], first: u8, second: u8) -> Option<usize> {
     dispatch::find_either(bytes, first, second)
 }
 
-/// Identifies the implementation selected for a sufficiently long input.
+/// Reports the available backend tier at [`simd_threshold`].
+///
+/// Equivalent to [`backend_for`] at that length, not an operation-specific
+/// kernel selection.
 ///
 /// # Examples
 ///
@@ -322,7 +325,16 @@ pub fn backend() -> Backend {
     dispatch::backend()
 }
 
-/// Identifies the implementation selected for an input of `len` bytes.
+/// Reports an available backend tier using the shared byte-scanner cutoff.
+///
+/// Returns [`Backend::Scalar`] below [`simd_threshold`]. At or above that
+/// cutoff, the reported tier describes available instruction sets, not the
+/// exact kernel every scanner selects: for example, x86 token validation uses
+/// SSE2 even when this helper reports [`Backend::Sse42`].
+///
+/// Equality, URI-tail, base64, and token-list scanning have separate cutoffs
+/// documented by [`simd_threshold`], so this helper does not predict their
+/// scalar/SIMD choice.
 ///
 /// # Examples
 ///
@@ -340,7 +352,18 @@ pub fn backend_for(len: usize) -> Backend {
     dispatch::backend_for(len)
 }
 
-/// Returns the minimum input length eligible for SIMD dispatch.
+/// Returns the shared byte-scanner cutoff, not a crate-wide SIMD minimum.
+///
+/// This cutoff applies to [`is_token`], [`is_token68`], [`is_field_value`],
+/// [`find_interesting`], and [`find_either`]: 16 bytes on x86/x86-64 and 32 bytes
+/// on other architectures, subject to instruction-set availability.
+///
+/// [`eq_ignore_ascii_case`] uses a separate 32-byte cutoff. URI-tail scanning,
+/// [`all_base64_alphabet`], and [`scan_token_list`] use 16-byte cutoffs.
+/// For [`as_simple_uri_reference`], the URI cutoff applies to the tail after
+/// any absolute authority prefix, not to the length of the whole reference.
+/// Range-window classification in [`scan_byte_range_set`] and ASCII conversion
+/// in [`ascii_str`] do not use this shared cutoff.
 ///
 /// # Examples
 ///
@@ -386,6 +409,11 @@ pub enum Backend {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[cfg(all(
+        any(feature = "benchmarking", feature = "test-util"),
+        any(target_arch = "x86", target_arch = "x86_64")
+    ))]
+    use std::arch;
     #[cfg(not(feature = "std"))]
     use std::format;
     use std::time::Duration;
@@ -396,6 +424,19 @@ mod tests {
 
     use super::*;
     use crate::{base64, list, range, scalar, uri};
+
+    fn lane_bytes(length: usize) -> impl Iterator<Item = u8> {
+        // Miri keeps every byte in every lane across two blocks and a tail.
+        // Other lengths retain the boundaries of each byte class.
+        (u8::MIN..=u8::MAX).filter(move |byte| {
+            !cfg!(miri)
+                || length == 33
+                || matches!(
+                    *byte,
+                    0 | b'\t' | b'\n' | b'\r' | 0x1f..=b'0' | b'9'..=b'A' | b'Z'..=b'a' | b'z'..=0x80 | 0xff
+                )
+        })
+    }
 
     #[test]
     fn token_byte_class_is_exhaustive() {
@@ -519,7 +560,7 @@ mod tests {
     fn simd_lanes_match_scalar_for_every_byte() {
         for length in [16, 17, 31, 32, 33, 48] {
             for lane in 0..length {
-                for byte in u8::MIN..=u8::MAX {
+                for byte in lane_bytes(length) {
                     let mut bytes = vec![b'a'; length];
                     bytes[lane] = byte;
                     let context = format!("byte {byte:#04x} at lane {lane}, length {length}");
@@ -537,7 +578,7 @@ mod tests {
     fn simple_uri_lanes_match_scalar_for_every_byte() {
         for length in [16, 17, 23, 31, 32, 33, 48, 49] {
             for lane in 1..length {
-                for byte in u8::MIN..=u8::MAX {
+                for byte in lane_bytes(length) {
                     let mut bytes = vec![b'a'; length];
                     bytes[0] = b'/';
                     bytes[lane] = byte;
@@ -619,7 +660,7 @@ mod tests {
         let prefix = b"https://example.com";
         for length in [24, 32, 33, 48, 49] {
             for lane in 0..length {
-                for byte in u8::MIN..=u8::MAX {
+                for byte in lane_bytes(length) {
                     let mut bytes = vec![b'a'; length];
                     bytes[..prefix.len()].copy_from_slice(prefix);
                     bytes[prefix.len()] = b'/';
@@ -733,6 +774,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "Bolero corpus replay requires filesystem access unavailable under Miri isolation")]
     fn differential_properties() {
         bolero::check!()
             .with_iterations(4_096)
@@ -774,7 +816,7 @@ mod tests {
         {
             let selected = backend();
             assert!([Backend::Sse2, Backend::Sse42].contains(&selected));
-            assert_eq!(selected == Backend::Sse42, std::arch::is_x86_feature_detected!("sse4.2"));
+            assert_eq!(selected == Backend::Sse42, arch::is_x86_feature_detected!("sse4.2"));
         }
     }
 
@@ -811,11 +853,9 @@ mod tests {
 
     /// Slides every short byte pattern across a block boundary.
     ///
-    /// The accelerated scanners carry three pieces of state between blocks —
-    /// whether the previous byte was a token byte, whether a token-initiated
-    /// whitespace run is still open, and the running member counts — so the
-    /// interesting inputs are the ones whose structure straddles a block, and
-    /// this places every pattern at every offset around one.
+    /// The scanners carry token/whitespace state and whether token or empty
+    /// members have occurred across blocks. Patterns straddling a block
+    /// exercise those transitions at every nearby offset.
     #[test]
     fn token_list_scan_matches_scalar_across_block_boundaries() {
         let alphabet = b"a,\t %";
@@ -833,7 +873,7 @@ mod tests {
     fn token_list_tails_match_scalar_for_every_length_and_byte() {
         for length in 16..=33_usize {
             for lane in 0..length {
-                for byte in u8::MIN..=u8::MAX {
+                for byte in lane_bytes(length) {
                     let mut input = vec![b'a'; length];
                     input[lane] = byte;
                     for empty in [EmptyMembers::Skip, EmptyMembers::Reject] {

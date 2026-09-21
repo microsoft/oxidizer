@@ -410,75 +410,135 @@ fn hostile_collection_hints_cannot_drive_unbounded_deserialization_allocations()
     .unwrap();
     assert_eq!(valid.iter().next().unwrap().as_bytes(), b"a");
 
-    let byte_boundary = FieldValue::deserialize(HostileFieldValueDeserializer {
-        byte_count: MAX_CUSTOM_FIELD_BYTES,
+    for (byte_limit, extra_byte, line_limit, extra_line) in [
+        (65_536, 65_537, 128, 129),
+        (
+            MAX_CUSTOM_FIELD_BYTES,
+            MAX_CUSTOM_FIELD_BYTES + 1,
+            MAX_CUSTOM_FIELD_LINES,
+            MAX_CUSTOM_FIELD_LINES + 1,
+        ),
+    ] {
+        let byte_boundary = FieldValue::deserialize(HostileFieldValueDeserializer {
+            byte_count: byte_limit,
+            byte_hint: usize::MAX,
+        })
+        .unwrap();
+        assert_eq!(byte_boundary.as_bytes().len(), byte_limit);
+
+        let oversized_bytes = FieldValue::deserialize(HostileFieldValueDeserializer {
+            byte_count: extra_byte,
+            byte_hint: usize::MAX,
+        })
+        .unwrap();
+        assert_eq!(oversized_bytes.as_bytes().len(), extra_byte);
+
+        let line_boundary = EncodedValues::deserialize(HostileValuesDeserializer {
+            remaining: line_limit,
+            reported: usize::MAX,
+            byte_count: 0,
+            byte_hint: usize::MAX,
+        })
+        .unwrap();
+        assert_eq!(line_boundary.len(), line_limit);
+
+        let oversized_lines = EncodedValues::deserialize(HostileValuesDeserializer {
+            remaining: extra_line,
+            reported: usize::MAX,
+            byte_count: 0,
+            byte_hint: usize::MAX,
+        })
+        .unwrap();
+        assert_eq!(oversized_lines.len(), extra_line);
+
+        let oversized_typed_bytes = UserAgentOwned::deserialize(HostileValuesDeserializer {
+            remaining: 1,
+            reported: usize::MAX,
+            byte_count: extra_byte,
+            byte_hint: usize::MAX,
+        });
+        assert_eq!(
+            oversized_typed_bytes.unwrap_err().to_string(),
+            "source limit exceeded: field-value byte budget exceeded"
+        );
+
+        let line_boundary = SetCookieOwned::deserialize(HostileValuesDeserializer {
+            remaining: line_limit,
+            reported: usize::MAX,
+            byte_count: 1,
+            byte_hint: usize::MAX,
+        })
+        .unwrap();
+        assert_eq!(line_boundary.len(), line_limit);
+
+        let oversized_typed_lines = SetCookieOwned::deserialize(HostileValuesDeserializer {
+            remaining: extra_line,
+            reported: usize::MAX,
+            byte_count: 1,
+            byte_hint: usize::MAX,
+        });
+        assert_eq!(
+            oversized_typed_lines.unwrap_err().to_string(),
+            "source limit exceeded: field-value line budget exceeded"
+        );
+    }
+}
+
+#[test]
+fn typed_serde_accumulates_the_byte_budget_across_field_lines() {
+    let boundary = SetCookieOwned::deserialize(HostileValuesDeserializer {
+        remaining: 2,
+        reported: usize::MAX,
+        byte_count: 32_768,
         byte_hint: usize::MAX,
     })
     .unwrap();
-    assert_eq!(byte_boundary.as_bytes().len(), MAX_CUSTOM_FIELD_BYTES);
+    assert_eq!(boundary.len(), 2);
+    assert_eq!(boundary.iter().map(|value| value.as_bytes().len()).sum::<usize>(), 65_536);
+    assert!(boundary.iter().all(|value| value.as_bytes().len() == 32_768));
 
-    let oversized_bytes = FieldValue::deserialize(HostileFieldValueDeserializer {
-        byte_count: MAX_CUSTOM_FIELD_BYTES + 1,
+    let oversized = SetCookieOwned::deserialize(HostileValuesDeserializer {
+        remaining: 2,
+        reported: usize::MAX,
+        byte_count: 32_769,
         byte_hint: usize::MAX,
     })
-    .unwrap();
-    assert_eq!(oversized_bytes.as_bytes().len(), MAX_CUSTOM_FIELD_BYTES + 1);
-
-    let line_boundary = EncodedValues::deserialize(HostileValuesDeserializer {
-        remaining: MAX_CUSTOM_FIELD_LINES,
-        reported: usize::MAX,
-        byte_count: 0,
-        byte_hint: usize::MAX,
-    })
-    .unwrap();
-    assert_eq!(line_boundary.len(), MAX_CUSTOM_FIELD_LINES);
-
-    let oversized_lines = EncodedValues::deserialize(HostileValuesDeserializer {
-        remaining: MAX_CUSTOM_FIELD_LINES + 1,
-        reported: usize::MAX,
-        byte_count: 0,
-        byte_hint: usize::MAX,
-    })
-    .unwrap();
-    assert_eq!(oversized_lines.len(), MAX_CUSTOM_FIELD_LINES + 1);
-
-    let oversized_typed_bytes = UserAgentOwned::deserialize(HostileValuesDeserializer {
-        remaining: 1,
-        reported: usize::MAX,
-        byte_count: MAX_CUSTOM_FIELD_BYTES + 1,
-        byte_hint: usize::MAX,
-    });
-    assert!(oversized_typed_bytes.is_err());
-
-    let line_boundary = SetCookieOwned::deserialize(HostileValuesDeserializer {
-        remaining: MAX_CUSTOM_FIELD_LINES,
-        reported: usize::MAX,
-        byte_count: 1,
-        byte_hint: usize::MAX,
-    })
-    .unwrap();
-    assert_eq!(line_boundary.len(), MAX_CUSTOM_FIELD_LINES);
-
-    let oversized_typed_lines = SetCookieOwned::deserialize(HostileValuesDeserializer {
-        remaining: MAX_CUSTOM_FIELD_LINES + 1,
-        reported: usize::MAX,
-        byte_count: 1,
-        byte_hint: usize::MAX,
-    });
-    assert!(oversized_typed_lines.is_err());
+    .unwrap_err();
+    assert_eq!(oversized.to_string(), "source limit exceeded: field-value byte budget exceeded");
 }
 
 #[test]
 fn typed_serde_enforces_list_item_budgets_at_the_collection_boundary() {
-    let boundary = std::iter::repeat_n("*/*", MAX_CUSTOM_LIST_ITEMS).collect::<Vec<_>>().join(",");
-    let boundary = EncodedValues::single(FieldValue::try_from(boundary).unwrap());
-    let json = serde_json::to_string(&boundary).unwrap();
-    assert!(serde_json::from_str::<AcceptOwned>(&json).is_ok());
+    for (item_limit, extra_item) in [(1_024, 1_025), (MAX_CUSTOM_LIST_ITEMS, MAX_CUSTOM_LIST_ITEMS + 1)] {
+        let boundary = std::iter::repeat_n("*/*", item_limit).collect::<Vec<_>>().join(",");
+        let boundary = EncodedValues::single(FieldValue::try_from(boundary).unwrap());
+        let json = serde_json::to_string(&boundary).unwrap();
+        assert_eq!(serde_json::from_str::<AcceptOwned>(&json).unwrap().entries().count(), item_limit);
 
-    let over_limit = std::iter::repeat_n("*/*", MAX_CUSTOM_LIST_ITEMS + 1).collect::<Vec<_>>().join(",");
-    let over_limit = EncodedValues::single(FieldValue::try_from(over_limit).unwrap());
-    let json = serde_json::to_string(&over_limit).unwrap();
-    assert!(serde_json::from_str::<AcceptOwned>(&json).is_err());
+        let over_limit = std::iter::repeat_n("*/*", extra_item).collect::<Vec<_>>().join(",");
+        let over_limit = EncodedValues::single(FieldValue::try_from(over_limit).unwrap());
+        let json = serde_json::to_string(&over_limit).unwrap();
+        assert!(
+            serde_json::from_str::<AcceptOwned>(&json)
+                .unwrap_err()
+                .to_string()
+                .contains("invalid accept header: source limit exceeded")
+        );
+    }
+}
+
+#[test]
+fn typed_serde_preserves_grammar_error_kinds() {
+    for (wire, expected) in [
+        ("text/html;x", "invalid accept header: invalid syntax"),
+        ("text/pl ain", "invalid accept header: invalid token"),
+        ("text/html;x=\"bad", "invalid accept header: unterminated quoted string"),
+    ] {
+        let encoded = EncodedValues::single(FieldValue::from_str(wire).unwrap());
+        let json = serde_json::to_string(&encoded).unwrap();
+        let error = serde_json::from_str::<AcceptOwned>(&json).unwrap_err().to_string();
+        assert!(error.starts_with(expected), "{error}");
+    }
 }
 
 #[test]
@@ -501,12 +561,14 @@ fn field_value_deserialization_covers_sequence_metadata_and_diagnostics() {
     assert!(serde_json::from_str::<FieldValue>(r#"{"bytes":"not bytes","sensitivity":"NonSensitive"}"#).is_err());
     assert!(serde_json::from_str::<EncodedValues>("null").is_err());
 
-    let boundary = UserAgentOwned::deserialize(HostileValuesDeserializer {
-        remaining: 1,
-        reported: usize::MAX,
-        byte_count: MAX_CUSTOM_FIELD_BYTES,
-        byte_hint: usize::MAX,
-    })
-    .unwrap();
-    assert_eq!(boundary.as_bytes().len(), MAX_CUSTOM_FIELD_BYTES);
+    for byte_count in [65_536, MAX_CUSTOM_FIELD_BYTES] {
+        let boundary = UserAgentOwned::deserialize(HostileValuesDeserializer {
+            remaining: 1,
+            reported: usize::MAX,
+            byte_count,
+            byte_hint: usize::MAX,
+        })
+        .unwrap();
+        assert_eq!(boundary.as_bytes().len(), byte_count);
+    }
 }

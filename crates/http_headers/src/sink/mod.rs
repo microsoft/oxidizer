@@ -70,4 +70,4 @@ pub use field_sink::FieldSink;
 #[doc(inline)]
 pub use field_sink_ext::FieldSinkExt;
 #[doc(inline)]
-pub use insert_error::InsertError;
+pub use insert_error::{InsertError, InsertErrorKind};

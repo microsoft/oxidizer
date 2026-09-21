@@ -3,6 +3,8 @@
 
 //! Whole-line recognizer for the common shape of an `Accept` field line.
 
+use crate::validate::token_byte;
+
 /// The byte classes an `Accept` field line is built from.
 ///
 /// Dense indices keep the table small, and padding the row to sixteen lets the
@@ -143,36 +145,12 @@ const fn class_table() -> [u8; 256] {
             b',' => CLASS_COMMA,
             b'=' => CLASS_EQUALS,
             b' ' | b'\t' => CLASS_OWS,
-            _ if is_token_byte(value) => CLASS_TCHAR,
+            _ if token_byte(value) => CLASS_TCHAR,
             _ => CLASS_OTHER,
         };
         byte += 1;
     }
     table
-}
-
-/// Returns whether one byte is an RFC 9110 `tchar`.
-const fn is_token_byte(byte: u8) -> bool {
-    matches!(
-        byte,
-        b'!' | b'#'
-            | b'$'
-            | b'%'
-            | b'&'
-            | b'\''
-            | b'*'
-            | b'+'
-            | b'-'
-            | b'.'
-            | b'^'
-            | b'_'
-            | b'`'
-            | b'|'
-            | b'~'
-            | b'0'..=b'9'
-            | b'A'..=b'Z'
-            | b'a'..=b'z'
-    )
 }
 
 /// Returns whether a class is one of the `tchar` classes.
@@ -402,13 +380,15 @@ pub(super) fn scan_accept_line(bytes: &[u8]) -> bool {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::hint::black_box;
+
     use super::{ACCEPTING, CLASS, CLASSES, REJECTED, STATES, TRANSITION, class_table, row, transition_table};
 
     #[test]
     fn runtime_tables_match_the_static_tables() {
-        assert_eq!(std::hint::black_box(class_table()), CLASS);
+        assert_eq!(black_box(class_table()), CLASS);
 
-        let generated = std::hint::black_box(transition_table());
+        let generated = black_box(transition_table());
         assert_eq!(generated, TRANSITION);
 
         for class in 0..CLASSES {

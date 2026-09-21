@@ -7,7 +7,7 @@ use std::str::FromStr;
 use std::{fmt, slice, vec};
 
 use super::shared::FieldLinesIter;
-use crate::sink::{FieldSink, InsertError};
+use crate::sink::{FieldSink, InsertError, InsertErrorKind};
 use crate::source::{FieldLines, FieldSource};
 use crate::{DecodeError, Field, FieldName, FieldValue, FieldValueRef};
 
@@ -236,7 +236,7 @@ impl SetCookieOwned {
         }
 
         if self.values.iter().any(FieldValue::is_empty) {
-            return Err(InsertError);
+            return Err(InsertError::new(InsertErrorKind::InvalidValue));
         }
 
         Ok(match self.values {
@@ -429,9 +429,11 @@ fn decode_view_values(values: Option<FieldLines<'_>>) -> Result<Option<SetCookie
         return Ok(None);
     };
     values.validate_custom_source()?;
-    for value in values.repeated() {
+    let mut iter = values.repeated();
+    if let Some(value) = iter.next() {
         validate(value)?;
     }
+    iter.try_for_each(validate)?;
     Ok(Some(SetCookieView { values }))
 }
 
@@ -469,7 +471,7 @@ mod tests {
     )]
 
     use super::{SetCookie, SetCookieOwned};
-    use crate::sink::{EncodedValues, FieldSink};
+    use crate::sink::{EncodedValues, FieldSink, InsertError, InsertErrorKind};
     use crate::source::{FieldLines, FieldSource};
     use crate::{DecodeErrorKind, FieldName, FieldValue, TestSink};
 
@@ -556,7 +558,10 @@ mod tests {
         *cookies.iter_mut().next().expect("one cookie") = FieldValue::from_static("");
 
         let mut sink = TestSink::new();
-        assert_eq!(SetCookie::insert(&mut sink, cookies), Err(crate::sink::InsertError));
+        assert_eq!(
+            SetCookie::insert(&mut sink, cookies),
+            Err(InsertError::new(InsertErrorKind::InvalidValue))
+        );
         assert!(sink.lines(&FieldName::SetCookie).is_none());
 
         let mut cookies = SetCookieOwned::new();
@@ -564,7 +569,7 @@ mod tests {
         *(&mut cookies).into_iter().next().expect("one cookie") = FieldValue::from_static("");
         assert_eq!(
             crate::sink::FieldSinkExt::append_set_cookie(&mut sink, cookies).err(),
-            Some(crate::sink::InsertError)
+            Some(InsertError::new(InsertErrorKind::InvalidValue))
         );
         assert!(sink.lines(&FieldName::SetCookie).is_none());
     }

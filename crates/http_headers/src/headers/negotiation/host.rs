@@ -1,8 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::fmt::Write as _;
-use std::net::Ipv6Addr;
+use std::borrow::Cow;
+use std::fmt::{self, Write as _};
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::ops::Range;
 use std::str::{self, FromStr as _};
 
@@ -10,6 +11,9 @@ use idna::domain_to_ascii;
 
 use super::shared::{invalid, invalid_syntax};
 use crate::{DecodeError, DecodeErrorKind, FieldName, FieldValue, FieldValueRef, SingleValueField, validate};
+
+mod components;
+pub use components::{HostKind, HostPortView, IpvFutureView, PortConversionError, PortConversionErrorKind, RegisteredNameView};
 
 /// Defines the `Host` header.
 ///
@@ -41,6 +45,8 @@ pub struct Host {
 
 /// Owned value for the `Host` header.
 ///
+/// Debug output omits authority components when the field value is sensitive.
+///
 /// # Specification
 ///
 /// Defined by [RFC 9110 section 7.2].
@@ -57,14 +63,21 @@ pub struct Host {
 /// and `Host: [2001:db8::1]:443` uses an IPv6 literal.
 ///
 /// [RFC 9110 section 7.2]: https://www.rfc-editor.org/rfc/rfc9110#section-7.2
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct HostOwned {
     value: FieldValue,
     parsed: ParsedHost,
 }
 
-/// Borrowed value for the `Host` header.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+/// A view of the `Host` header with retained validated components.
+///
+/// Ordinary ASCII values borrow their storage without allocating. Relaxed
+/// international names retain an owned IDNA normalization, separately from the
+/// borrowed original bytes. [`HostOwned::as_view`] borrows that normalization
+/// instead of copying it.
+///
+/// Debug output omits authority components when the field value is sensitive.
+#[derive(Clone, Eq, Hash, PartialEq)]
 /// # Examples
 ///
 /// ```rust
@@ -81,9 +94,214 @@ pub struct HostView<'a> {
     value: FieldValueRef<'a>,
     host: &'a str,
     port: Option<&'a str>,
+    kind: ParsedHostKind,
+    normalized: Option<Cow<'a, str>>,
+    numeric_port: Option<Result<u16, PortConversionError>>,
+}
+
+impl fmt::Debug for HostOwned {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug = f.debug_struct("HostOwned");
+        debug.field("value", &self.value);
+        if self.value.is_sensitive() {
+            debug.finish_non_exhaustive()
+        } else {
+            debug.field("parsed", &self.parsed).finish()
+        }
+    }
+}
+
+impl fmt::Debug for HostView<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug = f.debug_struct("HostView");
+        debug.field("value", &self.value);
+        if self.value.is_sensitive() {
+            debug.finish_non_exhaustive()
+        } else {
+            debug
+                .field("host", &self.host)
+                .field("port", &self.port)
+                .field("kind", &self.kind)
+                .field("normalized", &self.normalized)
+                .field("numeric_port", &self.numeric_port)
+                .finish()
+        }
+    }
 }
 
 impl HostOwned {
+    /// Constructs an authority from validated components without parsing them again.
+    ///
+    /// Registered names preserve their spelling and retained normalization.
+    /// IP addresses use their standard textual representation; `IPvFuture` uses
+    /// a lowercase `v` prefix and preserves its version and address spelling.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if adding a port to a relaxed international name would
+    /// introduce a second port delimiter in its retained IDNA normalization.
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "validated components and String formatting cannot violate field-value invariants"
+    )]
+    pub fn from_parts(host: HostKind<'_>, port: Option<HostPortView<'_>>) -> Result<Self, DecodeError> {
+        if let HostKind::RegisteredName(name) = host
+            && port.is_some()
+            && name.normalized() != name.as_str()
+        {
+            let normalized = name.normalized();
+            if normalized.starts_with('[') {
+                if !normalized.ends_with(']') {
+                    return Err(invalid(&FieldName::Host, DecodeErrorKind::InvalidNumber));
+                }
+            } else if normalized.contains(':') {
+                return Err(invalid_syntax(&FieldName::Host));
+            }
+        }
+        let host_capacity = match host {
+            HostKind::RegisteredName(name) => name.as_str().len(),
+            HostKind::Ipv4(_) => 15,
+            HostKind::Ipv6(_) => 41,
+            HostKind::IpvFuture(address) => address.version().len().saturating_add(address.address().len()).saturating_add(4),
+        };
+        let port_capacity = port.map_or(0, |port| port.as_str().len().saturating_add(1));
+        let mut wire = String::with_capacity(host_capacity.saturating_add(port_capacity));
+        let mut normalized = None;
+        let kind = match host {
+            HostKind::RegisteredName(name) => {
+                wire.push_str(name.as_str());
+                if name.normalized() != name.as_str() {
+                    normalized = Some(name.normalized().to_owned());
+                }
+                ParsedHostKind::RegisteredName
+            }
+            HostKind::Ipv4(address) => {
+                write!(wire, "{address}").expect("writing an IP address into a String cannot fail");
+                ParsedHostKind::Ipv4(address)
+            }
+            HostKind::Ipv6(address) => {
+                write!(wire, "[{address}]").expect("writing an IP address into a String cannot fail");
+                ParsedHostKind::Ipv6(address)
+            }
+            HostKind::IpvFuture(address) => {
+                write!(wire, "[{address}]").expect("writing a validated IPvFuture address into a String cannot fail");
+                ParsedHostKind::IpvFuture {
+                    dot: address.version().len() + 2,
+                }
+            }
+        };
+        let host_end = wire.len();
+        let port_start = port.map(|port| {
+            wire.push(':');
+            wire.push_str(port.as_str());
+            host_end + 1
+        });
+        Ok(Self {
+            value: FieldValue::try_from(wire).expect("validated host and decimal port components are valid field value bytes"),
+            parsed: ParsedHost {
+                host_end,
+                port_start,
+                kind,
+                normalized,
+                numeric_port: port.map(HostPortView::to_u16),
+            },
+        })
+    }
+
+    /// Constructs an IPv4 authority with an optional checked network port.
+    #[must_use]
+    pub fn from_ipv4(address: Ipv4Addr, port: Option<u16>) -> Self {
+        Self::from_address(HostKind::Ipv4(address), port)
+    }
+
+    /// Constructs a bracketed IPv6 authority with an optional checked network port.
+    #[must_use]
+    pub fn from_ipv6(address: Ipv6Addr, port: Option<u16>) -> Self {
+        Self::from_address(HostKind::Ipv6(address), port)
+    }
+
+    fn from_address(host: HostKind<'_>, port: Option<u16>) -> Self {
+        let mut buffer = itoa::Buffer::new();
+        let port = port.map(|port| HostPortView {
+            text: buffer.format(port),
+            numeric: Ok(port),
+        });
+        Self::from_parts(host, port).expect("IP address construction cannot introduce an IDNA-normalized port delimiter")
+    }
+
+    /// Borrows the retained parsing results without repeating validation or IDNA.
+    #[must_use]
+    #[inline]
+    #[expect(clippy::missing_panics_doc, reason = "the offsets are private and validated at construction")]
+    pub fn as_view(&self) -> HostView<'_> {
+        HostView {
+            value: self.value.as_field_value_ref(),
+            host: self.host().expect("host offsets were validated when constructing this value"),
+            port: self.port().expect("port offsets were validated when constructing this value"),
+            kind: self.parsed.kind,
+            normalized: self.parsed.normalized.as_deref().map(Cow::Borrowed),
+            numeric_port: self.parsed.numeric_port,
+        }
+    }
+
+    /// Returns the validated host kind and retained address or name components.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::net::Ipv6Addr;
+    ///
+    /// use http_headers::headers::{HostKind, HostOwned};
+    ///
+    /// let value = HostOwned::from_ipv6(Ipv6Addr::LOCALHOST, Some(443));
+    /// assert_eq!(value.kind(), HostKind::Ipv6(Ipv6Addr::LOCALHOST));
+    /// assert_eq!(value.network_port(), Ok(Some(443)));
+    /// ```
+    #[must_use]
+    #[inline]
+    #[expect(clippy::missing_panics_doc, reason = "the offsets are private and validated at construction")]
+    pub fn kind(&self) -> HostKind<'_> {
+        self.parsed.kind.project(
+            self.host().expect("host offsets were validated when constructing this value"),
+            self.parsed.normalized.as_deref(),
+        )
+    }
+
+    /// Returns the validated textual port, including an explicitly empty port.
+    #[must_use]
+    #[inline]
+    #[expect(clippy::missing_panics_doc, reason = "the offsets are private and validated at construction")]
+    pub fn port_view(&self) -> Option<HostPortView<'_>> {
+        self.port()
+            .expect("port offsets were validated when constructing this value")
+            .zip(self.parsed.numeric_port)
+            .map(|(text, numeric)| HostPortView { text, numeric })
+    }
+
+    /// Returns the checked network port, or `None` only when no port is present.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an explicitly empty port or a value above `u16::MAX`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use http_headers::headers::{HostOwned, PortConversionErrorKind};
+    ///
+    /// let value = HostOwned::try_from("example.com:65536")?;
+    /// assert_eq!(value.port()?, Some("65536"));
+    /// assert_eq!(
+    ///     value.network_port().unwrap_err().kind(),
+    ///     PortConversionErrorKind::Overflow
+    /// );
+    /// # Ok::<(), http_headers::DecodeError>(())
+    /// ```
+    #[inline]
+    pub fn network_port(&self) -> Result<Option<u16>, PortConversionError> {
+        self.parsed.numeric_port.transpose()
+    }
+
     /// Constructs a host without a port.
     ///
     /// # Errors
@@ -132,8 +350,17 @@ impl HostOwned {
         let mut wire = String::with_capacity(host.len().saturating_add(6));
         wire.push_str(host);
         wire.push(':');
-        write!(&mut wire, "{port}").map_err(|_| invalid_syntax(&FieldName::Host))?;
-        Self::try_from(wire)
+        write!(&mut wire, "{port}").map_err(|_invalid| invalid_syntax(&FieldName::Host))?;
+        let mut parsed = match parse_host(host.as_bytes()) {
+            Ok(parsed) if parsed.port_start.is_none() => parsed,
+            _ => return Self::try_from(wire),
+        };
+        parsed.port_start = Some(host.len() + 1);
+        parsed.numeric_port = Some(Ok(port));
+        Ok(Self {
+            value: FieldValue::try_from(wire).map_err(|_invalid| invalid_syntax(&FieldName::Host))?,
+            parsed,
+        })
     }
 
     /// Returns the URI host, including brackets around an IP literal.
@@ -177,11 +404,7 @@ impl HostOwned {
             .transpose()
     }
 
-    /// Returns where the port begins, which the stored name settles on its own.
-    ///
-    /// A name that stops short of the authority's end is followed by the colon
-    /// that a port begins one byte after, and a name without a port runs to the
-    /// end, so the offset the parse produced never has to be kept.
+    /// Returns the retained port offset.
     const fn port_start(&self) -> Option<usize> {
         self.parsed.port_start
     }
@@ -239,6 +462,34 @@ impl HostOwned {
 super::super::shared::impl_field_value_conversion!(HostOwned, |value| value.value);
 
 impl<'a> HostView<'a> {
+    /// Returns the validated host kind and retained address or name components.
+    ///
+    /// A relaxed international name borrows its normalization from this view.
+    #[must_use]
+    #[inline]
+    pub fn kind(&self) -> HostKind<'_> {
+        self.kind.project(self.host, self.normalized.as_deref())
+    }
+
+    /// Returns the validated textual port, including an explicitly empty port.
+    #[must_use]
+    #[inline]
+    pub fn port_view(&self) -> Option<HostPortView<'a>> {
+        self.port
+            .zip(self.numeric_port)
+            .map(|(text, numeric)| HostPortView { text, numeric })
+    }
+
+    /// Returns the checked network port, or `None` only when no port is present.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an explicitly empty port or a value above `u16::MAX`.
+    #[inline]
+    pub fn network_port(&self) -> Result<Option<u16>, PortConversionError> {
+        self.numeric_port.transpose()
+    }
+
     /// Returns the URI host, including brackets around an IP literal.
     #[must_use]
     /// # Examples
@@ -248,7 +499,7 @@ impl<'a> HostView<'a> {
     /// assert_eq!(value.host()?, "example.com");
     /// # Ok::<(), http_headers::DecodeError>(())
     /// ```
-    pub const fn host(self) -> &'a str {
+    pub const fn host(&self) -> &'a str {
         self.host
     }
 
@@ -267,7 +518,7 @@ impl<'a> HostView<'a> {
     /// assert_eq!(without_port.port(), None);
     /// # Ok::<(), http_headers::DecodeError>(())
     /// ```
-    pub const fn port(self) -> Option<&'a str> {
+    pub const fn port(&self) -> Option<&'a str> {
         self.port
     }
 
@@ -286,7 +537,7 @@ impl<'a> HostView<'a> {
     /// assert_eq!(view.as_str()?, "example.com:8080");
     /// # Ok::<(), http_headers::DecodeError>(())
     /// ```
-    pub fn as_str(self) -> Result<&'a str, DecodeError> {
+    pub fn as_str(&self) -> Result<&'a str, DecodeError> {
         self.value
             .to_str()
             .map_err(|_invalid| invalid(&FieldName::Host, DecodeErrorKind::InvalidUtf8))
@@ -304,7 +555,7 @@ impl<'a> HostView<'a> {
     /// assert_eq!(view.as_field_value().as_bytes(), b"example.org");
     /// # Ok::<(), http_headers::DecodeError>(())
     /// ```
-    pub const fn as_field_value(self) -> FieldValueRef<'a> {
+    pub const fn as_field_value(&self) -> FieldValueRef<'a> {
         self.value
     }
 }
@@ -326,7 +577,14 @@ impl SingleValueField for Host {
             // Without a port the host runs to the end of the authority.
             None => (authority, None),
         };
-        Ok(HostView { value, host, port })
+        Ok(HostView {
+            value,
+            host,
+            port,
+            kind: parsed.kind,
+            normalized: parsed.normalized.map(Cow::Owned),
+            numeric_port: parsed.numeric_port,
+        })
     }
 
     #[expect(
@@ -347,7 +605,14 @@ impl SingleValueField for Host {
             Some(start) => (&authority[..parsed.host_end], Some(&authority[start..])),
             None => (authority, None),
         };
-        Ok(HostView { value, host, port })
+        Ok(HostView {
+            value,
+            host,
+            port,
+            kind: parsed.kind,
+            normalized: parsed.normalized.map(Cow::Owned),
+            numeric_port: parsed.numeric_port,
+        })
     }
 
     fn decode_owned_with(value: FieldValue, mode: crate::DecodeMode) -> Result<Self::Owned, DecodeError> {
@@ -364,23 +629,7 @@ impl SingleValueField for Host {
     }
 }
 
-impl TryFrom<&str> for HostOwned {
-    type Error = DecodeError;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let value = FieldValue::from_str(value).map_err(|_invalid| invalid_syntax(&FieldName::Host))?;
-        Self::try_from(value)
-    }
-}
-
-impl TryFrom<String> for HostOwned {
-    type Error = DecodeError;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        let value = FieldValue::try_from(value).map_err(|_invalid| invalid_syntax(&FieldName::Host))?;
-        Self::try_from(value)
-    }
-}
+super::super::shared::impl_string_conversions!(HostOwned, &FieldName::Host, invalid_syntax, value);
 
 impl TryFrom<FieldValue> for HostOwned {
     type Error = DecodeError;
@@ -396,10 +645,38 @@ impl TryFrom<FieldValue> for HostOwned {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 struct ParsedHost {
     host_end: usize,
     port_start: Option<usize>,
+    kind: ParsedHostKind,
+    normalized: Option<String>,
+    numeric_port: Option<Result<u16, PortConversionError>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+enum ParsedHostKind {
+    RegisteredName,
+    Ipv4(Ipv4Addr),
+    Ipv6(Ipv6Addr),
+    IpvFuture { dot: usize },
+}
+
+impl ParsedHostKind {
+    fn project<'a>(self, host: &'a str, normalized: Option<&'a str>) -> HostKind<'a> {
+        match self {
+            Self::RegisteredName => HostKind::RegisteredName(RegisteredNameView {
+                original: host,
+                normalized: normalized.unwrap_or(host),
+            }),
+            Self::Ipv4(address) => HostKind::Ipv4(address),
+            Self::Ipv6(address) => HostKind::Ipv6(address),
+            Self::IpvFuture { dot } => HostKind::IpvFuture(IpvFutureView {
+                version: &host[2..dot],
+                address: &host[dot + 1..host.len() - 1],
+            }),
+        }
+    }
 }
 
 #[expect(
@@ -415,26 +692,34 @@ fn parse_host(bytes: &[u8]) -> Result<ParsedHost, DecodeError> {
         return parse_ip_literal_host(bytes);
     }
     let mut index = 0;
+    let mut ipv4_candidate = first.is_ascii_digit();
     while index < bytes.len() {
         // The table already covers the alphanumerics, `-`, and `.` that make
         // up nearly every host, so one load settles a byte where a range test
         // ahead of the load would cost several compares.
         match HOST_CLASS[usize::from(bytes[index])] {
-            HOST_REG_NAME => index += 1,
+            HOST_REG_NAME => {
+                ipv4_candidate = ipv4_candidate && (bytes[index].is_ascii_digit() || bytes[index] == b'.');
+                index += 1;
+            }
             HOST_PERCENT => {
                 if !bytes.get(index + 1).is_some_and(u8::is_ascii_hexdigit) || !bytes.get(index + 2).is_some_and(u8::is_ascii_hexdigit) {
                     return Err(invalid_syntax(&FieldName::Host));
                 }
+                ipv4_candidate = false;
                 index += 3;
             }
             HOST_COLON => {
                 if index == 0 {
                     return Err(invalid_syntax(&FieldName::Host));
                 }
-                validate_port(&bytes[index + 1..])?;
+                let numeric_port = validate_port(&bytes[index + 1..])?;
                 return Ok(ParsedHost {
                     host_end: index,
                     port_start: Some(index + 1),
+                    kind: registered_host_kind(&bytes[..index], ipv4_candidate),
+                    normalized: None,
+                    numeric_port: Some(numeric_port),
                 });
             }
             _ => return Err(invalid_syntax(&FieldName::Host)),
@@ -443,7 +728,20 @@ fn parse_host(bytes: &[u8]) -> Result<ParsedHost, DecodeError> {
     Ok(ParsedHost {
         host_end: bytes.len(),
         port_start: None,
+        kind: registered_host_kind(bytes, ipv4_candidate),
+        normalized: None,
+        numeric_port: None,
     })
+}
+
+fn registered_host_kind(bytes: &[u8], ipv4_candidate: bool) -> ParsedHostKind {
+    if ipv4_candidate {
+        let text = str::from_utf8(bytes).expect("the registered-name scan accepts only ASCII");
+        if let Ok(address) = text.parse() {
+            return ParsedHostKind::Ipv4(address);
+        }
+    }
+    ParsedHostKind::RegisteredName
 }
 
 fn parse_host_with(bytes: &[u8], mode: crate::DecodeMode) -> Result<ParsedHost, DecodeError> {
@@ -469,14 +767,19 @@ fn parse_international_host(bytes: &[u8]) -> Result<ParsedHost, DecodeError> {
         _ => (authority, None, None),
     };
     let mut normalized = domain_to_ascii(host).map_err(|_invalid| invalid_syntax(&FieldName::Host))?;
+    let normalized_end = normalized.len();
     if let Some(port) = port {
         normalized.push(':');
         normalized.push_str(port);
     }
-    parse_host(normalized.as_bytes())?;
+    let parsed = parse_host(normalized.as_bytes())?;
+    normalized.truncate(normalized_end);
     Ok(ParsedHost {
         host_end: host.len(),
         port_start,
+        kind: ParsedHostKind::RegisteredName,
+        normalized: Some(normalized),
+        numeric_port: port.and(parsed.numeric_port),
     })
 }
 
@@ -485,10 +788,13 @@ fn parse_international_host(bytes: &[u8]) -> Result<ParsedHost, DecodeError> {
 /// A byte that a field value may never contain, a byte outside ASCII, and a
 /// second colon are syntax errors wherever they appear, so they outrank the
 /// numeric error reported for a merely non-decimal port.
-fn validate_port(bytes: &[u8]) -> Result<(), DecodeError> {
+fn validate_port(bytes: &[u8]) -> Result<Result<u16, PortConversionError>, DecodeError> {
     let mut decimal = true;
+    let mut numeric = Some(0_u16);
     for byte in bytes {
         if byte.is_ascii_digit() {
+            // A u16 accumulator and a decimal digit produce at most 655_359.
+            numeric = numeric.and_then(|value| u16::try_from(u32::from(value) * 10 + u32::from(*byte - b'0')).ok());
             continue;
         }
         if *byte == b':' || *byte == b'@' || *byte == 0x7f || (*byte < b' ' && *byte != b'\t') {
@@ -500,7 +806,15 @@ fn validate_port(bytes: &[u8]) -> Result<(), DecodeError> {
         decimal = false;
     }
     if decimal {
-        Ok(())
+        Ok(if bytes.is_empty() {
+            Err(PortConversionError {
+                kind: PortConversionErrorKind::Empty,
+            })
+        } else {
+            numeric.ok_or(PortConversionError {
+                kind: PortConversionErrorKind::Overflow,
+            })
+        })
     } else {
         Err(invalid(&FieldName::Host, DecodeErrorKind::InvalidNumber))
     }
@@ -544,16 +858,29 @@ fn parse_ip_literal_host(bytes: &[u8]) -> Result<ParsedHost, DecodeError> {
         .position(|byte| *byte == b']')
         .ok_or_else(|| invalid_syntax(&FieldName::Host))?;
     let literal = &bytes[1..close];
-    if !valid_ip_literal(literal) {
-        return Err(invalid_syntax(&FieldName::Host));
-    }
+    let kind = parse_ip_literal(literal).ok_or_else(|| invalid_syntax(&FieldName::Host))?;
     let suffix = &bytes[close + 1..];
+    let mut numeric_port = None;
     let port_start = if suffix.is_empty() {
         None
     } else if let Some(port) = suffix.strip_prefix(b":") {
-        if !port.iter().all(u8::is_ascii_digit) {
-            return Err(invalid(&FieldName::Host, DecodeErrorKind::InvalidNumber));
+        let mut numeric = Some(0_u16);
+        for byte in port {
+            if !byte.is_ascii_digit() {
+                return Err(invalid(&FieldName::Host, DecodeErrorKind::InvalidNumber));
+            }
+            // A u16 accumulator and a decimal digit produce at most 655_359.
+            numeric = numeric.and_then(|value| u16::try_from(u32::from(value) * 10 + u32::from(*byte - b'0')).ok());
         }
+        numeric_port = Some(if port.is_empty() {
+            Err(PortConversionError {
+                kind: PortConversionErrorKind::Empty,
+            })
+        } else {
+            numeric.ok_or(PortConversionError {
+                kind: PortConversionErrorKind::Overflow,
+            })
+        });
         Some(close + 2)
     } else {
         return Err(invalid_syntax(&FieldName::Host));
@@ -561,33 +888,34 @@ fn parse_ip_literal_host(bytes: &[u8]) -> Result<ParsedHost, DecodeError> {
     Ok(ParsedHost {
         host_end: close + 1,
         port_start,
+        kind,
+        normalized: None,
+        numeric_port,
     })
 }
 
-fn valid_ip_literal(bytes: &[u8]) -> bool {
-    let Ok(value) = str::from_utf8(bytes) else {
-        return false;
-    };
-    if Ipv6Addr::from_str(value).is_ok() {
-        return true;
-    }
+fn parse_ip_literal(bytes: &[u8]) -> Option<ParsedHostKind> {
+    let value = str::from_utf8(bytes).ok()?;
     let Some(versioned) = bytes.strip_prefix(b"v").or_else(|| bytes.strip_prefix(b"V")) else {
-        return false;
+        return Ipv6Addr::from_str(value).ok().map(ParsedHostKind::Ipv6);
     };
-    let Some(dot) = versioned.iter().position(|byte| *byte == b'.') else {
-        return false;
-    };
+    let dot = versioned.iter().position(|byte| *byte == b'.')?;
     let version = &versioned[..dot];
     let address = &versioned[dot + 1..];
-    !version.is_empty()
+    let valid = !version.is_empty()
         && version.iter().all(u8::is_ascii_hexdigit)
         && !address.is_empty()
         && address
             .iter()
             .copied()
-            .all(|byte| is_unreserved(byte) || is_sub_delim(byte) || byte == b':')
+            .all(|byte| is_unreserved(byte) || is_sub_delim(byte) || byte == b':');
+    valid.then_some(ParsedHostKind::IpvFuture { dot: dot + 2 })
 }
 
+#[cfg(test)]
+fn valid_ip_literal(bytes: &[u8]) -> bool {
+    parse_ip_literal(bytes).is_some()
+}
 const fn is_unreserved(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~')
 }
@@ -716,6 +1044,7 @@ mod tests {
             <Host as SingleValueField>::decode_view_with(value.as_field_value_ref(), DecodeMode::Relaxed).expect("relaxed borrowed host");
         assert_eq!(view.host(), "münich.example");
         assert_eq!(view.port(), Some("443"));
+        drop(view);
         let owned = <Host as SingleValueField>::decode_owned_with(value, DecodeMode::Relaxed).expect("relaxed owned host");
         assert_eq!(owned.as_str(), Ok("münich.example:443"));
         assert_eq!(owned.host(), Ok("münich.example"));
@@ -726,6 +1055,7 @@ mod tests {
             .expect("relaxed host without port");
         assert_eq!(view.host(), "münich.example");
         assert_eq!(view.port(), None);
+        drop(view);
         let owned = <Host as SingleValueField>::decode_owned_with(value, DecodeMode::Relaxed).expect("relaxed owned host without port");
         assert_eq!(owned.host(), Ok("münich.example"));
         assert_eq!(owned.port(), Ok(None));
@@ -788,6 +1118,9 @@ mod tests {
             parsed: super::ParsedHost {
                 host_end: 6,
                 port_start: Some(6),
+                kind: super::ParsedHostKind::RegisteredName,
+                normalized: None,
+                numeric_port: None,
             },
         };
         assert_eq!(
@@ -805,6 +1138,9 @@ mod tests {
             parsed: super::ParsedHost {
                 host_end: 1,
                 port_start: None,
+                kind: super::ParsedHostKind::RegisteredName,
+                normalized: None,
+                numeric_port: None,
             },
         };
         assert_eq!(malformed.as_str().expect_err("invalid UTF-8").kind(), DecodeErrorKind::InvalidUtf8);
@@ -812,6 +1148,9 @@ mod tests {
             value: non_utf8.as_field_value_ref(),
             host: "",
             port: None,
+            kind: super::ParsedHostKind::RegisteredName,
+            normalized: None,
+            numeric_port: None,
         };
         assert_eq!(view.as_str().expect_err("invalid UTF-8 view").kind(), DecodeErrorKind::InvalidUtf8);
     }

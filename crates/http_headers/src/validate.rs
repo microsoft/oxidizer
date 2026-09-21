@@ -12,6 +12,7 @@
     test,
     feature = "headers-cache-control",
     feature = "headers-content-type",
+    feature = "headers-cors",
     feature = "headers-negotiation",
     feature = "headers-range",
     feature = "headers-security",

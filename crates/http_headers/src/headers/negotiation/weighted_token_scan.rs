@@ -346,47 +346,10 @@ pub(super) fn scan_accept_language_line(bytes: &[u8]) -> bool {
 }
 
 #[cfg(test)]
-pub(super) mod corpus {
-    /// Builds every string up to `length` bytes over `alphabet`.
-    pub(in super::super) fn exhaustive(alphabet: &[u8], length: usize) -> Vec<Vec<u8>> {
-        let mut all = vec![Vec::new()];
-        let mut frontier = vec![Vec::new()];
-        for _ in 0..length {
-            let mut next = Vec::new();
-            for prefix in &frontier {
-                for byte in alphabet {
-                    let mut candidate = prefix.clone();
-                    candidate.push(*byte);
-                    next.push(candidate);
-                }
-            }
-            all.extend_from_slice(&next);
-            frontier = next;
-        }
-        all
-    }
-
-    /// Builds every concatenation of up to `count` of the given fragments.
-    pub(in super::super) fn fragment_lines(fragments: &[&str], count: usize) -> Vec<Vec<u8>> {
-        let mut lines = vec![Vec::new()];
-        for _ in 0..count {
-            let mut next = Vec::new();
-            for prefix in &lines {
-                for fragment in fragments {
-                    let mut candidate = prefix.clone();
-                    candidate.extend_from_slice(fragment.as_bytes());
-                    next.push(candidate);
-                }
-            }
-            lines.extend_from_slice(&next);
-        }
-        lines
-    }
-}
-
-#[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::hint::black_box;
+
     use super::{
         CLASS, CLASSES, Item, LANGUAGE_ACCEPTING, LANGUAGE_STAR, LANGUAGE_TRANSITION, PRIMARY_LAST, PRIMARY_ONE, REJECTED,
         SHARED_ACCEPTING, STATES, SUBTAG_LAST, SUBTAG_ONE, TOKEN, TOKEN_ACCEPTING, TOKEN_TRANSITION, class_table, range_mask, row,
@@ -395,10 +358,10 @@ mod tests {
 
     #[test]
     fn runtime_tables_match_the_static_tables() {
-        assert_eq!(std::hint::black_box(class_table()), CLASS);
+        assert_eq!(black_box(class_table()), CLASS);
 
         for (item, table) in [(Item::Token, &TOKEN_TRANSITION), (Item::LanguageRange, &LANGUAGE_TRANSITION)] {
-            let generated = std::hint::black_box(transition_table(item));
+            let generated = black_box(transition_table(item));
             assert_eq!(&generated, table);
 
             for class in 0..CLASSES {
@@ -420,8 +383,8 @@ mod tests {
         let token = SHARED_ACCEPTING | (1 << TOKEN);
         let language = SHARED_ACCEPTING
             | (1 << LANGUAGE_STAR)
-            | std::hint::black_box(range_mask(PRIMARY_ONE, PRIMARY_LAST))
-            | std::hint::black_box(range_mask(SUBTAG_ONE, SUBTAG_LAST));
+            | black_box(range_mask(PRIMARY_ONE, PRIMARY_LAST))
+            | black_box(range_mask(SUBTAG_ONE, SUBTAG_LAST));
 
         assert_eq!(token, TOKEN_ACCEPTING);
         assert_eq!(language, LANGUAGE_ACCEPTING);

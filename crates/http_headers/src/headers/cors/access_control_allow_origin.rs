@@ -2,7 +2,8 @@
 // Licensed under the MIT License.
 
 use std::fmt;
-use std::net::Ipv6Addr;
+use std::fmt::Write as _;
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::ops::Range;
 use std::str::{self, FromStr as _};
 
@@ -12,6 +13,9 @@ use super::shared::{
 use crate::sink::{EncodedValues, FieldSink, InsertError};
 use crate::source::FieldSource;
 use crate::{DecodeError, DecodeErrorKind, Field, FieldName, FieldValue, FieldValueRef};
+
+mod components;
+pub use components::{AccessControlAllowOriginKind, OriginDomainView, OriginHost, OriginScheme, SerializedOriginView};
 
 /// Defines the `Access-Control-Allow-Origin` header.
 ///
@@ -117,7 +121,44 @@ struct ParsedOrigin {
 enum OriginKind {
     Wildcard,
     Null,
-    Origin,
+    Origin(ParsedTuple),
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct ParsedTuple {
+    scheme: OriginScheme,
+    host_start: usize,
+    host_end: usize,
+    host: ParsedOriginHost,
+    port: Option<u16>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum ParsedOriginHost {
+    Domain,
+    Ipv4(Ipv4Addr),
+    Ipv6(Ipv6Addr),
+}
+
+impl OriginKind {
+    fn project(self, serialized: &str) -> AccessControlAllowOriginKind<'_> {
+        match self {
+            Self::Wildcard => AccessControlAllowOriginKind::Wildcard,
+            Self::Null => AccessControlAllowOriginKind::Null,
+            Self::Origin(tuple) => AccessControlAllowOriginKind::Origin(SerializedOriginView {
+                serialized,
+                scheme: tuple.scheme,
+                host: match tuple.host {
+                    ParsedOriginHost::Domain => OriginHost::Domain(OriginDomainView {
+                        text: &serialized[tuple.host_start..tuple.host_end],
+                    }),
+                    ParsedOriginHost::Ipv4(address) => OriginHost::Ipv4(address),
+                    ParsedOriginHost::Ipv6(address) => OriginHost::Ipv6(address),
+                },
+                port: tuple.port,
+            }),
+        }
+    }
 }
 
 impl fmt::Debug for AccessControlAllowOriginOwned {
@@ -137,6 +178,127 @@ impl fmt::Debug for AccessControlAllowOriginView<'_> {
 }
 
 impl AccessControlAllowOriginOwned {
+    /// Constructs a canonical serialized origin from validated components.
+    ///
+    /// Default ports are omitted. IPv6 uses compressed lowercase hexadecimal,
+    /// including for IPv4-mapped addresses; no path or trailing slash is added.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if an HTTP or HTTPS domain with an explicit non-default
+    /// port exceeds the existing 253-byte serialized-authority limit.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::net::Ipv6Addr;
+    ///
+    /// use http_headers::headers::{
+    ///     AccessControlAllowOriginKind, AccessControlAllowOriginOwned, OriginHost, OriginScheme,
+    /// };
+    ///
+    /// let value = AccessControlAllowOriginOwned::from_parts(
+    ///     OriginScheme::Https,
+    ///     OriginHost::Ipv6(Ipv6Addr::LOCALHOST),
+    ///     Some(443),
+    /// )?;
+    /// assert_eq!(value.as_str()?, "https://[::1]");
+    /// if let AccessControlAllowOriginKind::Origin(origin) = value.kind() {
+    ///     assert_eq!(origin.port(), None);
+    ///     assert_eq!(origin.effective_port(), 443);
+    /// }
+    /// # Ok::<(), http_headers::DecodeError>(())
+    /// ```
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "validated components and String formatting cannot violate field-value invariants"
+    )]
+    pub fn from_parts(scheme: OriginScheme, host: OriginHost<'_>, port: Option<u16>) -> Result<Self, DecodeError> {
+        let host_capacity = match host {
+            OriginHost::Domain(domain) => domain.as_str().len(),
+            OriginHost::Ipv4(_) => 15,
+            OriginHost::Ipv6(_) => 41,
+        };
+        let mut serialized = String::with_capacity(host_capacity.saturating_add(scheme.as_str().len() + 9));
+        serialized.push_str(scheme.as_str());
+        serialized.push_str("://");
+        let host_start = serialized.len();
+        let host = match host {
+            OriginHost::Domain(domain) => {
+                serialized.push_str(domain.as_str());
+                ParsedOriginHost::Domain
+            }
+            OriginHost::Ipv4(address) => {
+                write!(serialized, "{address}").expect("writing an IPv4 address into a String cannot fail");
+                ParsedOriginHost::Ipv4(address)
+            }
+            OriginHost::Ipv6(address) => {
+                let mut buffer = [0; 39];
+                serialized.push('[');
+                serialized.push_str(serialize_ipv6(address, &mut buffer));
+                serialized.push(']');
+                ParsedOriginHost::Ipv6(address)
+            }
+        };
+        let host_end = serialized.len();
+        let port = port.filter(|port| *port != scheme.default_port());
+        if let Some(port) = port {
+            write!(serialized, ":{port}").expect("writing a network port into a String cannot fail");
+        }
+        let end = serialized.len();
+        if matches!(scheme, OriginScheme::Http | OriginScheme::Https) && port.is_some() && end - host_start > 253 {
+            return Err(invalid_syntax(&FieldName::AccessControlAllowOrigin));
+        }
+        Ok(Self {
+            value: FieldValue::try_from(serialized).expect("serialized validated origin components are valid field value bytes"),
+            parsed: ParsedOrigin {
+                start: 0,
+                end,
+                kind: OriginKind::Origin(ParsedTuple {
+                    scheme,
+                    host_start,
+                    host_end,
+                    host,
+                    port,
+                }),
+            },
+        })
+    }
+
+    /// Returns wildcard, null, or retained serialized-origin components.
+    #[must_use]
+    #[inline]
+    #[expect(clippy::missing_panics_doc, reason = "the offsets are private and validated at construction")]
+    pub fn kind(&self) -> AccessControlAllowOriginKind<'_> {
+        self.parsed.kind.project(
+            self.as_str()
+                .expect("semantic offsets were validated when constructing this origin"),
+        )
+    }
+
+    /// Borrows the original bytes and retained components without parsing again.
+    #[must_use]
+    #[inline]
+    #[expect(clippy::missing_panics_doc, reason = "the offsets are private and validated at construction")]
+    pub fn as_view(&self) -> AccessControlAllowOriginView<'_> {
+        AccessControlAllowOriginView {
+            value: self.value.as_field_value_ref(),
+            serialized: self
+                .as_str()
+                .expect("semantic offsets were validated when constructing this origin"),
+            start: self.parsed.start,
+            end: self.parsed.end,
+            kind: self.parsed.kind,
+        }
+    }
+
+    /// Returns the original field value, including surrounding whitespace.
+    #[must_use]
+    #[inline]
+    pub const fn as_field_value(&self) -> &FieldValue {
+        &self.value
+    }
+
     /// Constructs the wildcard value.
     #[must_use]
     /// # Examples
@@ -205,7 +367,7 @@ impl AccessControlAllowOriginOwned {
     /// ```
     pub fn from_origin(origin: impl AsRef<str>) -> Result<Self, DecodeError> {
         let parsed = Self::try_from(origin.as_ref())?;
-        if parsed.parsed.kind == OriginKind::Origin {
+        if matches!(parsed.parsed.kind, OriginKind::Origin(_)) {
             Ok(parsed)
         } else {
             Err(invalid_syntax(&FieldName::AccessControlAllowOrigin))
@@ -264,7 +426,7 @@ impl AccessControlAllowOriginOwned {
     /// # Ok::<(), http_headers::DecodeError>(())
     /// ```
     pub fn origin(&self) -> Result<Option<&str>, DecodeError> {
-        if self.parsed.kind != OriginKind::Origin {
+        if !matches!(self.parsed.kind, OriginKind::Origin(_)) {
             return Ok(None);
         }
         semantic_str(
@@ -325,6 +487,13 @@ impl fmt::Display for AccessControlAllowOriginOwned {
 }
 
 impl<'a> AccessControlAllowOriginView<'a> {
+    /// Returns wildcard, null, or retained serialized-origin components.
+    #[must_use]
+    #[inline]
+    pub fn kind(self) -> AccessControlAllowOriginKind<'a> {
+        self.kind.project(self.serialized)
+    }
+
     /// Returns whether this is the wildcard value.
     #[must_use]
     /// # Examples
@@ -389,7 +558,7 @@ impl<'a> AccessControlAllowOriginView<'a> {
     /// # Ok::<(), http_headers::DecodeError>(())
     /// ```
     pub const fn origin(self) -> Option<&'a str> {
-        if matches!(self.kind, OriginKind::Origin) {
+        if matches!(self.kind, OriginKind::Origin(_)) {
             Some(self.serialized)
         } else {
             None
@@ -441,7 +610,7 @@ impl<'a> AccessControlAllowOriginView<'a> {
     ///     HeaderValue::from_static(" https://example.com "),
     /// );
     /// let value = AccessControlAllowOrigin::view(&headers)?.expect("present");
-    /// assert_eq!(value.as_field_value().as_str()?, " https://example.com ");
+    /// assert_eq!(value.as_field_value().to_str()?, " https://example.com ");
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// # }
     /// # #[cfg(not(feature = "http"))]
@@ -502,23 +671,12 @@ impl Field for AccessControlAllowOrigin {
     }
 }
 
-impl TryFrom<&str> for AccessControlAllowOriginOwned {
-    type Error = DecodeError;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let value = FieldValue::from_str(value).map_err(|_invalid| invalid_syntax(&FieldName::AccessControlAllowOrigin))?;
-        Self::try_from(value)
-    }
-}
-
-impl TryFrom<String> for AccessControlAllowOriginOwned {
-    type Error = DecodeError;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        let value = FieldValue::try_from(value).map_err(|_invalid| invalid_syntax(&FieldName::AccessControlAllowOrigin))?;
-        Self::try_from(value)
-    }
-}
+super::super::shared::impl_string_conversions!(
+    AccessControlAllowOriginOwned,
+    &FieldName::AccessControlAllowOrigin,
+    invalid_syntax,
+    value
+);
 
 impl TryFrom<FieldValue> for AccessControlAllowOriginOwned {
     type Error = DecodeError;
@@ -538,8 +696,7 @@ fn parse_allow_origin_value(value: FieldValueRef<'_>) -> Result<(ParsedOrigin, &
     let kind = match serialized.as_bytes() {
         b"*" => OriginKind::Wildcard,
         b"null" => OriginKind::Null,
-        origin if valid_serialized_origin(origin) => OriginKind::Origin,
-        _ => return Err(invalid_syntax(&FieldName::AccessControlAllowOrigin)),
+        origin => OriginKind::Origin(parse_serialized_origin(origin).ok_or_else(|| invalid_syntax(&FieldName::AccessControlAllowOrigin))?),
     };
     Ok((
         ParsedOrigin {
@@ -551,17 +708,34 @@ fn parse_allow_origin_value(value: FieldValueRef<'_>) -> Result<(ParsedOrigin, &
     ))
 }
 
-fn valid_serialized_origin(origin: &[u8]) -> bool {
+fn parse_serialized_origin(origin: &[u8]) -> Option<ParsedTuple> {
     if let Some(valid) = common_http_origin(origin) {
-        return valid;
+        return valid.then(|| {
+            let scheme = if origin.starts_with(b"https:") {
+                OriginScheme::Https
+            } else {
+                OriginScheme::Http
+            };
+            ParsedTuple {
+                scheme,
+                host_start: scheme.as_str().len() + 3,
+                host_end: origin.len(),
+                host: ParsedOriginHost::Domain,
+                port: None,
+            }
+        });
     }
-    let Some((scheme, authority)) = split_scheme(origin) else {
-        return false;
-    };
-    if !matches!(scheme, b"ftp" | b"http" | b"https" | b"ws" | b"wss") {
-        return false;
-    }
-    valid_serialized_authority(authority, scheme)
+    let (scheme, authority) = split_scheme(origin)?;
+    let typed_scheme = OriginScheme::parse(scheme)?;
+    let (host, host_len, port) = parse_serialized_authority(authority, scheme)?;
+    let host_start = scheme.len() + 3;
+    Some(ParsedTuple {
+        scheme: typed_scheme,
+        host_start,
+        host_end: host_start + host_len,
+        host,
+        port,
+    })
 }
 
 fn common_http_origin(origin: &[u8]) -> Option<bool> {
@@ -623,23 +797,21 @@ fn split_scheme(origin: &[u8]) -> Option<(&[u8], &[u8])> {
     Some((origin.get(..index)?, origin.get(rest..)?))
 }
 
-fn valid_serialized_authority(authority: &[u8], scheme: &[u8]) -> bool {
-    let Some((&first, rest)) = authority.split_first() else {
-        return false;
-    };
+fn parse_serialized_authority(authority: &[u8], scheme: &[u8]) -> Option<(ParsedOriginHost, usize, Option<u16>)> {
+    let (&first, rest) = authority.split_first()?;
 
     if first == b'[' {
         if rest
             .iter()
             .any(|byte| BYTE_CLASS[usize::from(*byte)] & CLASS_AUTHORITY == 0 && *byte != b':')
         {
-            return false;
+            return None;
         }
-        let Some(close) = rest.iter().position(|byte| *byte == b']') else {
-            return false;
-        };
+        let close = rest.iter().position(|byte| *byte == b']')?;
         let (host, suffix) = rest.split_at(close);
-        return valid_serialized_ipv6(host) && valid_serialized_port_suffix(suffix.get(1..).unwrap_or_default(), scheme);
+        let address = parse_serialized_ipv6(host)?;
+        let port = parse_serialized_port_suffix(suffix.get(1..)?, scheme)?;
+        return Some((ParsedOriginHost::Ipv6(address), close + 2, port));
     }
 
     let mut colon = None;
@@ -648,7 +820,7 @@ fn valid_serialized_authority(authority: &[u8], scheme: &[u8]) -> bool {
             continue;
         }
         if byte != b':' || colon.is_some() {
-            return false;
+            return None;
         }
         colon = Some(index);
     }
@@ -657,58 +829,53 @@ fn valid_serialized_authority(authority: &[u8], scheme: &[u8]) -> bool {
         Some(index) => (authority.get(..index).unwrap_or_default(), authority.get(index.saturating_add(1)..)),
         None => (authority, None),
     };
-    if host.is_empty() || port.is_some_and(|port| !valid_serialized_port(port, scheme)) {
-        return false;
-    }
-    valid_serialized_host(host)
+    let port = match port {
+        Some(port) => Some(parse_serialized_port(port, scheme)?),
+        None => None,
+    };
+    Some((parse_serialized_host(host)?, host.len(), port))
 }
 
-fn valid_serialized_port_suffix(suffix: &[u8], scheme: &[u8]) -> bool {
+#[expect(clippy::option_option, reason = "outer None is invalid syntax; inner None is a valid absent port")]
+fn parse_serialized_port_suffix(suffix: &[u8], scheme: &[u8]) -> Option<Option<u16>> {
     match suffix.split_first() {
-        None => true,
-        Some((&b':', port)) => valid_serialized_port(port, scheme),
-        Some(_) => false,
+        None => Some(None),
+        Some((&b':', port)) => parse_serialized_port(port, scheme).map(Some),
+        Some(_) => None,
     }
 }
 
-fn valid_serialized_port(port: &[u8], scheme: &[u8]) -> bool {
+fn parse_serialized_port(port: &[u8], scheme: &[u8]) -> Option<u16> {
     if port.is_empty() || port.len() > 5 || (port.len() > 1 && port.first() == Some(&b'0')) {
-        return false;
+        return None;
     }
     let mut value = 0_u32;
     for &byte in port {
         if BYTE_CLASS[usize::from(byte)] & CLASS_DIGIT == 0 {
-            return false;
+            return None;
         }
         value = value * 10 + u32::from(byte.wrapping_sub(b'0'));
     }
-    if value > u32::from(u16::MAX) {
-        return false;
+    let value = u16::try_from(value).ok()?;
+    if OriginScheme::parse(scheme).is_some_and(|scheme| value == scheme.default_port()) {
+        return None;
     }
-    let default_port = if scheme == b"ftp" {
-        21
-    } else if scheme == b"http" || scheme == b"ws" {
-        80
-    } else if scheme == b"https" || scheme == b"wss" {
-        443
-    } else {
-        return true;
-    };
-    value != default_port
+    Some(value)
 }
 
-fn valid_serialized_host(host: &[u8]) -> bool {
+fn parse_serialized_host(host: &[u8]) -> Option<ParsedOriginHost> {
     let host = match host.split_last() {
         Some((&b'.', head)) => head,
         _ => host,
     };
     if host.is_empty() || host.len() > 253 {
-        return false;
+        return None;
     }
     let mut label_count = 0_usize;
     let mut all_numeric = true;
     let mut valid_ipv4 = true;
     let mut valid_domain = true;
+    let mut octets = [0; 4];
     let mut start = 0_usize;
     let mut common = u8::MAX;
     for (index, &byte) in host.iter().enumerate() {
@@ -717,43 +884,51 @@ fn valid_serialized_host(host: &[u8]) -> bool {
             continue;
         }
         let label = host.get(start..index).unwrap_or_default();
-        let (numeric, ipv4, domain) = label_classes(label, common);
+        let (numeric, ipv4, domain) = parsed_label_classes(label, common);
         all_numeric &= numeric;
-        valid_ipv4 &= ipv4;
+        valid_ipv4 &= ipv4.is_some();
+        if let Some(octet) = octets.get_mut(label_count) {
+            *octet = ipv4.unwrap_or_default();
+        }
         valid_domain &= domain;
         label_count = label_count.saturating_add(1);
         start = index.saturating_add(1);
         common = u8::MAX;
     }
     let label = host.get(start..).unwrap_or_default();
-    let (numeric, ipv4, domain) = label_classes(label, common);
+    let (numeric, ipv4, domain) = parsed_label_classes(label, common);
     all_numeric &= numeric;
-    valid_ipv4 &= ipv4;
+    valid_ipv4 &= ipv4.is_some();
+    if let Some(octet) = octets.get_mut(label_count) {
+        *octet = ipv4.unwrap_or_default();
+    }
     valid_domain &= domain;
     label_count = label_count.saturating_add(1);
 
     if all_numeric {
-        label_count == 4 && valid_ipv4
+        (label_count == 4 && valid_ipv4).then_some(ParsedOriginHost::Ipv4(Ipv4Addr::from(octets)))
     } else {
-        valid_domain
+        valid_domain.then_some(ParsedOriginHost::Domain)
     }
 }
 
 /// Classifies one host label as numeric, a valid IPv4 octet, and a valid domain label.
 ///
 /// `common` is the intersection of the byte classes of every byte in `label`.
-fn label_classes(label: &[u8], common: u8) -> (bool, bool, bool) {
+fn parsed_label_classes(label: &[u8], common: u8) -> (bool, Option<u8>, bool) {
     let (Some(&first), Some(&last)) = (label.first(), label.last()) else {
-        return (false, false, false);
+        return (false, None, false);
     };
 
     let numeric = common & CLASS_DIGIT != 0;
-    let ipv4 = numeric && label.len() <= 3 && (label.len() == 1 || first != b'0') && {
+    let ipv4 = if numeric && label.len() <= 3 && (label.len() == 1 || first != b'0') {
         let mut value = 0_u32;
         for &byte in label {
             value = value * 10 + u32::from(byte.wrapping_sub(b'0'));
         }
-        value <= 255
+        u8::try_from(value).ok()
+    } else {
+        None
     };
     let domain = common & CLASS_DOMAIN != 0
         && label.len() <= 63
@@ -764,22 +939,23 @@ fn label_classes(label: &[u8], common: u8) -> (bool, bool, bool) {
 }
 
 #[inline(never)] // Keep IPv6 parsing and formatting off the domain-origin stack.
-fn valid_serialized_ipv6(address: &[u8]) -> bool {
+fn parse_serialized_ipv6(address: &[u8]) -> Option<Ipv6Addr> {
+    // Canonical hexadecimal IPv6 has at most eight four-digit groups and seven colons.
     if address.is_empty()
+        || address.len() > 39
         || address
             .iter()
             .any(|byte| BYTE_CLASS[usize::from(*byte)] & CLASS_HEX == 0 && *byte != b':')
     {
-        return false;
+        return None;
     }
-    let text = str::from_utf8(address).expect("serialized IPv6 bytes are ASCII");
-    let Ok(parsed) = Ipv6Addr::from_str(text) else {
-        return false;
-    };
-    serialized_ipv6(parsed, address)
+    let text = http_headers_simd::ascii_str(address).expect("serialized IPv6 bytes are ASCII");
+    let parsed = Ipv6Addr::from_str(text).ok()?;
+    let mut buffer = [0; 39];
+    (serialize_ipv6(parsed, &mut buffer).as_bytes() == address).then_some(parsed)
 }
 
-fn serialized_ipv6(address: Ipv6Addr, expected: &[u8]) -> bool {
+fn serialize_ipv6(address: Ipv6Addr, serialized: &mut [u8; 39]) -> &str {
     let segments = address.segments();
     let mut longest_start = None;
     let mut longest_len = 1_usize;
@@ -800,7 +976,6 @@ fn serialized_ipv6(address: Ipv6Addr, expected: &[u8]) -> bool {
         }
     }
 
-    let mut serialized = [0_u8; 39];
     let mut written = 0_usize;
     let mut index = 0_usize;
     while index < segments.len() {
@@ -817,7 +992,7 @@ fn serialized_ipv6(address: Ipv6Addr, expected: &[u8]) -> bool {
         written += write_hex_segment(segments[index], &mut serialized[written..]);
         index += 1;
     }
-    serialized.get(..written) == Some(expected)
+    http_headers_simd::ascii_str(&serialized[..written]).expect("IPv6 serialization writes only ASCII hexadecimal digits and colons")
 }
 
 fn write_hex_segment(segment: u16, output: &mut [u8]) -> usize {
@@ -868,12 +1043,40 @@ fn semantic_str<'a>(name: &'static FieldName, bytes: &'a [u8], range: Range<usiz
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{
-        AccessControlAllowOrigin, AccessControlAllowOriginOwned, OriginKind, ParsedOrigin, common_http_origin, label_classes, semantic_str,
-        split_scheme, valid_domain_label, valid_h16_sequence, valid_serialized_authority, valid_serialized_host, valid_serialized_ipv6,
-        valid_serialized_origin, valid_serialized_port, valid_serialized_port_suffix, visible_ascii_str,
+        AccessControlAllowOrigin, AccessControlAllowOriginOwned, OriginKind, ParsedOrigin, common_http_origin, semantic_str, split_scheme,
+        valid_domain_label, valid_h16_sequence, visible_ascii_str,
     };
-    use crate::headers::cors::test_support::TestMap;
+    use crate::headers::cors::test_map::TestMap;
     use crate::{DecodeErrorKind, FieldName, FieldValue};
+
+    fn label_classes(label: &[u8], common: u8) -> (bool, bool, bool) {
+        let (numeric, octet, domain) = super::parsed_label_classes(label, common);
+        (numeric, octet.is_some(), domain)
+    }
+
+    fn valid_serialized_origin(origin: &[u8]) -> bool {
+        super::parse_serialized_origin(origin).is_some()
+    }
+
+    fn valid_serialized_authority(authority: &[u8], scheme: &[u8]) -> bool {
+        super::parse_serialized_authority(authority, scheme).is_some()
+    }
+
+    fn valid_serialized_host(host: &[u8]) -> bool {
+        super::parse_serialized_host(host).is_some()
+    }
+
+    fn valid_serialized_ipv6(address: &[u8]) -> bool {
+        super::parse_serialized_ipv6(address).is_some()
+    }
+
+    fn valid_serialized_port(port: &[u8], scheme: &[u8]) -> bool {
+        super::parse_serialized_port(port, scheme).is_some()
+    }
+
+    fn valid_serialized_port_suffix(suffix: &[u8], scheme: &[u8]) -> bool {
+        super::parse_serialized_port_suffix(suffix, scheme).is_some()
+    }
 
     #[test]
     fn constructors_accessors_display_and_header_paths_preserve_wire_values() {
@@ -1122,7 +1325,7 @@ mod tests {
             parsed: ParsedOrigin {
                 start: 2,
                 end: 3,
-                kind: OriginKind::Origin,
+                kind: OriginKind::Origin(super::parse_serialized_origin(b"https://example.com").unwrap()),
             },
         };
         assert_eq!(
@@ -1142,7 +1345,7 @@ mod tests {
             parsed: ParsedOrigin {
                 start: 0,
                 end: 1,
-                kind: OriginKind::Origin,
+                kind: OriginKind::Origin(super::parse_serialized_origin(b"https://example.com").unwrap()),
             },
         };
         assert_eq!(

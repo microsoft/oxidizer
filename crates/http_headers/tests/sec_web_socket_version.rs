@@ -89,5 +89,5 @@ fn version_thirteen_preserves_custom_source_limits() {
     source.0.resize(MAX_CUSTOM_FIELD_LINES, FieldValue::from_static("13"));
     assert_versions(&source, &[13]);
     source.0.push(FieldValue::from_static("13"));
-    assert_error(&source, DecodeErrorKind::InvalidSyntax);
+    assert_error(&source, DecodeErrorKind::SourceLimitExceeded);
 }

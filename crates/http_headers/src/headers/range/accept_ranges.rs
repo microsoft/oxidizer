@@ -428,23 +428,7 @@ fn accept_ranges_owned(values: Option<FieldLines<'_>>) -> Result<Option<AcceptRa
     Ok(Some(AcceptRangesOwned { values: collected, none }))
 }
 
-impl TryFrom<&str> for AcceptRangesOwned {
-    type Error = DecodeError;
-
-    fn try_from(wire: &str) -> Result<Self, Self::Error> {
-        let value = FieldValue::from_str(wire).map_err(|_invalid| invalid_syntax(&FieldName::AcceptRanges))?;
-        Self::try_from(value)
-    }
-}
-
-impl TryFrom<String> for AcceptRangesOwned {
-    type Error = DecodeError;
-
-    fn try_from(wire: String) -> Result<Self, Self::Error> {
-        let value = FieldValue::try_from(wire).map_err(|_invalid| invalid_syntax(&FieldName::AcceptRanges))?;
-        Self::try_from(value)
-    }
-}
+super::super::shared::impl_string_conversions!(AcceptRangesOwned, &FieldName::AcceptRanges, invalid_syntax, wire);
 
 impl TryFrom<FieldValue> for AcceptRangesOwned {
     type Error = DecodeError;
@@ -628,7 +612,7 @@ fn validate_range_unit(bytes: &[u8]) -> Result<(), DecodeError> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{
-        AcceptRanges, AcceptRangesOwned, canonical_unit, is_none_unit, lone_canonical_unit, scan_units, validate_accept_ranges,
+        AcceptRanges, AcceptRangesOwned, accept_ranges_view, canonical_unit, is_none_unit, scan_units, validate_accept_ranges,
         validate_accept_ranges_slow, validate_none_cardinality, validate_units_slow,
     };
     use crate::sink::{EncodedValues, FieldSink, InsertError};
@@ -669,6 +653,52 @@ mod tests {
 
         fn remove_values(&mut self, _name: &'static FieldName) {
             self.values.clear();
+        }
+    }
+
+    #[test]
+    fn singleton_probes_preserve_exact_units_and_canonical_storage() {
+        for (lines, none, units, canonical) in [
+            (&["bytes"][..], false, &["bytes"][..], true),
+            (&["none"][..], true, &["none"][..], true),
+            (&["Bytes"][..], false, &["Bytes"][..], false),
+            (&[" \tbytes \t"][..], false, &["bytes"][..], false),
+            (&["bytes, items"][..], false, &["bytes", "items"][..], false),
+            (&["bytes", "items", "records"][..], false, &["bytes", "items", "records"][..], false),
+        ] {
+            let store = Store::new(lines);
+            let borrowed = AcceptRanges::view(&store).unwrap().unwrap();
+            let owned = AcceptRanges::owned(&store).unwrap().unwrap();
+            assert_eq!(borrowed.is_none(), none, "{lines:?}");
+            assert_eq!(owned.is_none(), none, "{lines:?}");
+            assert_eq!(borrowed.units().collect::<Vec<_>>(), units, "{lines:?}");
+            assert_eq!(owned.units().collect::<Vec<_>>(), units, "{lines:?}");
+            assert_eq!(borrowed.values.is_none(), canonical, "{lines:?}");
+            assert_eq!(owned.values.is_none(), canonical, "{lines:?}");
+        }
+    }
+
+    #[test]
+    fn borrowed_singleton_probe_matches_owned_values_and_errors() {
+        for lines in [
+            &[][..],
+            &["bytes"],
+            &["none"],
+            &["Bytes"],
+            &[" \tbytes \t"],
+            &["bytes, items"],
+            &["bytes", "items", "records"],
+            &["none", "bytes"],
+            &["bytes", "bad/unit"],
+            &["\"bytes"],
+            &[""],
+        ] {
+            let store = Store::new(lines);
+            let borrowed = AcceptRanges::view(&store)
+                .map(|view| view.map(|view| (view.is_none(), view.units().map(str::to_owned).collect::<Vec<_>>())));
+            let owned = AcceptRanges::owned(&store)
+                .map(|value| value.map(|value| (value.is_none(), value.units().map(str::to_owned).collect::<Vec<_>>())));
+            assert_eq!(borrowed, owned, "{lines:?}");
         }
     }
 
@@ -847,7 +877,9 @@ mod tests {
 
         let one = [FieldValue::from_static("bytes")];
         let values = FieldLines::from_slice(&FieldName::AcceptRanges, &one).expect("one value");
-        assert_eq!(lone_canonical_unit(&values), Some(false));
+        let view = accept_ranges_view(Some(values)).unwrap().unwrap();
+        assert!(!view.is_none());
+        assert!(view.values.is_none());
 
         let invalid = [FieldValue::from_static("\"unterminated")];
         let values = FieldLines::from_slice(&FieldName::AcceptRanges, &invalid).expect("one value");

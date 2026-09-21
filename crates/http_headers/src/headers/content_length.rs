@@ -194,7 +194,32 @@ fn parse_decimal_ows(bytes: &[u8]) -> Option<u64> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::str;
+
     use super::parse_decimal_ows;
+
+    #[test]
+    fn decimal_parser_matches_independent_whitespace_and_digit_oracle() {
+        for wire in [
+            b" \t00123\t ".as_slice(),
+            b"18446744073709551615",
+            b"18446744073709551616",
+            b"000000000000000000000000000001",
+        ] {
+            for offset in 0..wire.len() {
+                for replacement in crate::test_support::substitution_bytes(wire[offset], offset, wire.len()) {
+                    let mut candidate = wire.to_vec();
+                    candidate[offset] = replacement;
+                    let expected = str::from_utf8(&candidate)
+                        .ok()
+                        .map(|text| text.trim_matches([' ', '\t']))
+                        .filter(|text| !text.is_empty() && text.as_bytes().iter().all(u8::is_ascii_digit))
+                        .and_then(|text| text.parse::<u64>().ok());
+                    assert_eq!(parse_decimal_ows(&candidate), expected, "{candidate:?}");
+                }
+            }
+        }
+    }
 
     #[test]
     fn decimal_parser_rejects_every_invalid_shape() {

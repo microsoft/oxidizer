@@ -5,24 +5,29 @@
 
 #![cfg(feature = "headers-all")]
 
-use std::collections::HashMap;
-use std::panic;
 use std::sync::LazyLock;
+use std::{panic, str};
 
+#[cfg(feature = "http")]
+use http::HeaderName;
 use http_headers::headers::{
-    AcceptRanges, AcceptRangesOwned, Authorization, AuthorizationOwned, Basic, BasicCredentials, ContentLength, ContentLengthOwned, ETag,
-    ETagOwned, IfMatch, IfMatchOwned, IfNoneMatch, IfNoneMatchOwned, IfRange, IfRangeOwned, ReferrerPolicy, ReferrerPolicyOwned,
-    ReferrerPolicyValue, SecWebSocketVersion, SecWebSocketVersionOwned, SetCookie, SetCookieOwned, UserAgent,
+    AcceptRanges, AcceptRangesOwned, Authorization, AuthorizationOwned, Basic, BasicCredentials, ContentLength, ContentLengthOwned,
+    ContentType, ETag, ETagOwned, IfMatch, IfMatchOwned, IfNoneMatch, IfNoneMatchOwned, IfRange, IfRangeOwned, ReferrerPolicy,
+    ReferrerPolicyOwned, ReferrerPolicyValue, SecWebSocketVersion, SecWebSocketVersionOwned, SetCookie, SetCookieOwned, UserAgent,
 };
 use http_headers::sink::{EncodedValues, FieldSink, FieldSinkExt, InsertError};
 use http_headers::source::{FieldLines, FieldSource};
-use http_headers::{DecodeError, DecodeErrorKind, Field, FieldName, FieldValue, FieldValueRef, SingleValueField};
+use http_headers::{DecodeError, DecodeErrorKind, DecodeMode, Field, FieldName, FieldValue, FieldValueRef, SingleValueField};
+
+use self::common::TestMap;
+
+mod common;
+#[cfg(all(miri, feature = "http"))]
+#[path = "../src/miri_http_map.rs"]
+mod miri_http_map;
 
 static REQUEST_ID: LazyLock<FieldName> = LazyLock::new(|| FieldName::from_static("x-request-id"));
 static EMPTY: LazyLock<FieldName> = LazyLock::new(|| FieldName::from_static("x-empty"));
-
-#[derive(Default)]
-struct TestMap(HashMap<FieldName, Vec<FieldValue>>);
 
 impl TestMap {
     fn new() -> Self {
@@ -37,43 +42,12 @@ impl TestMap {
         self.0.entry(name).or_default().push(value);
     }
 
-    fn get_all(&self, name: &FieldName) -> &[FieldValue] {
-        self.0.get(name).map_or(&[], Vec::as_slice)
-    }
-
     fn contains_name(&self, name: &FieldName) -> bool {
         self.0.contains_key(name)
     }
 
     fn names(&self) -> impl Iterator<Item = &FieldName> {
         self.0.keys()
-    }
-}
-
-impl FieldSource for TestMap {
-    fn lines(&self, name: &'static FieldName) -> Option<FieldLines<'_>> {
-        FieldLines::from_slice(name, self.get_all(name))
-    }
-}
-
-impl FieldSink for TestMap {
-    fn set_values(&mut self, name: &'static FieldName, values: EncodedValues) -> Result<(), InsertError> {
-        if values.is_empty() {
-            self.0.remove(name);
-        } else {
-            self.0.insert(name.clone(), values.into_iter().collect());
-        }
-
-        Ok(())
-    }
-
-    fn append_values(&mut self, name: &'static FieldName, values: EncodedValues) -> Result<(), InsertError> {
-        self.0.entry(name.clone()).or_default().extend(values);
-        Ok(())
-    }
-
-    fn remove_values(&mut self, name: &'static FieldName) {
-        self.0.remove(name);
     }
 }
 
@@ -110,12 +84,12 @@ fn deferred_and_fluent_writes_work_with_downstream_sinks() {
     compatibility
         .set_content_length(42)
         .expect("in-memory insertion succeeds")
-        .set_content_type(http_headers::headers::ContentType::json())
+        .set_content_type(ContentType::json())
         .expect("in-memory insertion succeeds");
     let dynamic_sink: &mut dyn FieldSink = &mut compatibility;
     dynamic_sink.remove_values(&FieldName::ContentLength);
 
-    http_headers::headers::ContentType::json()
+    ContentType::json()
         .insert_into(&mut compatibility)
         .expect("in-memory insertion succeeds");
     compatibility.set_content_length(42).expect("in-memory insertion succeeds");
@@ -177,14 +151,14 @@ impl Field for EmptyHeader {
         &EMPTY
     }
 
-    fn view_with<S>(source: &S, _mode: http_headers::DecodeMode) -> Result<Option<Self::View<'_>>, DecodeError>
+    fn view_with<S>(source: &S, _mode: DecodeMode) -> Result<Option<Self::View<'_>>, DecodeError>
     where
         S: FieldSource + ?Sized,
     {
         Ok(source.contains(Self::name()).then_some(Self))
     }
 
-    fn owned_with<S>(source: &S, mode: http_headers::DecodeMode) -> Result<Option<Self::Owned>, DecodeError>
+    fn owned_with<S>(source: &S, mode: DecodeMode) -> Result<Option<Self::Owned>, DecodeError>
     where
         S: FieldSource + ?Sized,
     {
@@ -500,14 +474,22 @@ fn insert_reports_full_map_without_replacing_values() {
     use http::{HeaderMap, HeaderValue};
 
     let old = HeaderValue::from_static("old");
+    #[cfg(not(miri))]
     let mut map = HeaderMap::new();
+    #[cfg(miri)]
+    let mut map = HeaderMap::with_capacity(miri_http_map::CAPACITY);
     map.insert(REQUEST_ID.as_str(), old.clone());
     for index in 0_u64.. {
-        let name = http::HeaderName::try_from(format!("x-fill-{index}")).expect("generated header name is valid");
+        #[cfg(not(miri))]
+        let name = HeaderName::try_from(format!("x-fill-{index}")).expect("generated header name is valid");
+        #[cfg(miri)]
+        let name = HeaderName::from_static(miri_http_map::name(usize::try_from(index).unwrap()));
         if map.try_insert(name, HeaderValue::from_static("fill")).is_err() {
             break;
         }
     }
+    #[cfg(miri)]
+    assert_eq!(map.len(), miri_http_map::CAPACITY);
 
     let result = RequestId::insert(&mut map, RequestId(FieldValue::from_static("new")));
     assert!(result.is_err());
@@ -570,14 +552,14 @@ fn publicly_constructible_names_convert_without_panicking() {
             FieldName::from_static("x-trace-id"),
             FieldName::try_from_bytes(b"X-Vendor-Field").expect("valid name"),
             FieldName::try_from_bytes(vec![b'a'; (1 << 16) - 1]).expect("valid name"),
-            FieldName::from(&http::HeaderName::from_lowercase(b"x\"y").expect("http admits `\"`")),
+            FieldName::from(&HeaderName::from_lowercase(b"x\"y").expect("http admits `\"`")),
         ])
         .collect::<Vec<_>>();
 
     for name in names {
-        let converted = name.try_to_http_name().expect("every name converts");
+        let converted = name.try_to_http_header_name().expect("every name converts");
         assert_eq!(converted.as_str(), name.as_str());
-        assert_eq!(http::HeaderName::from(&name), converted);
+        assert_eq!(HeaderName::from(&name), converted);
         let round_trip = FieldName::from(&converted);
         assert_eq!(round_trip, name);
         assert_eq!(round_trip.index(), name.index());
@@ -587,14 +569,14 @@ fn publicly_constructible_names_convert_without_panicking() {
 #[cfg(feature = "http")]
 #[test]
 fn http_names_holding_a_quote_convert_without_panicking() {
-    let quoted = http::HeaderName::from_lowercase(b"x\"y").expect("http admits `\"`");
+    let quoted = HeaderName::from_lowercase(b"x\"y").expect("http admits `\"`");
     let converted = FieldName::from(&quoted);
     assert_eq!(converted.as_str(), "x\"y");
     assert_eq!(converted.index(), None);
     assert_eq!(FieldName::from(quoted.clone()), converted);
 
-    assert_eq!(http::HeaderName::from(&converted), quoted);
-    assert_eq!(converted.try_to_http_name().expect("round trips"), quoted);
+    assert_eq!(HeaderName::from(&converted), quoted);
+    assert_eq!(converted.try_to_http_header_name().expect("round trips"), quoted);
 
     FieldName::try_from_bytes(b"x\"y").expect_err("this crate's own parser rejects `\"`");
 }
@@ -602,17 +584,18 @@ fn http_names_holding_a_quote_convert_without_panicking() {
 #[test]
 fn field_names_respect_the_http_length_limit() {
     const MAX: usize = (1 << 16) - 1;
+    static OVER_LONG: [u8; MAX + 1] = [b'a'; MAX + 1];
 
     FieldName::try_from_bytes(vec![b'a'; MAX + 1]).expect_err("an over-long name is rejected");
-    panic::catch_unwind(|| FieldName::from_static(String::from_utf8(vec![b'a'; MAX + 1]).expect("ASCII").leak()))
-        .expect_err("an over-long static name panics");
+    let over_long = str::from_utf8(&OVER_LONG).unwrap();
+    panic::catch_unwind(|| FieldName::from_static(over_long)).unwrap_err();
 
     let longest = FieldName::try_from_bytes(vec![b'a'; MAX]).expect("the longest name is valid");
     assert_eq!(longest.as_str().len(), MAX);
 
     #[cfg(feature = "http")]
     {
-        let converted = http::HeaderName::from(&longest);
+        let converted = HeaderName::from(&longest);
         assert_eq!(converted.as_str().len(), MAX);
         assert_eq!(FieldName::from(&converted), longest);
     }

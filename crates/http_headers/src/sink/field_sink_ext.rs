@@ -65,6 +65,8 @@ use crate::headers::{
 use crate::headers::{SetCookie, SetCookieOwned, SetCookieView};
 #[cfg(any(test, feature = "headers-user-agent"))]
 use crate::headers::{UserAgent, UserAgentOwned, UserAgentView};
+#[cfg(any(test, feature = "headers-cors"))]
+use crate::sink::InsertErrorKind;
 #[cfg(any(test, feature = "headers-content-length", feature = "headers-cors"))]
 use crate::sink::U64Encoder;
 #[cfg(any(
@@ -625,7 +627,8 @@ pub trait FieldSinkExt: FieldSink + Sized {
     ///
     /// # Errors
     ///
-    /// Returns an error without changing the sink when storage fails.
+    /// Returns an error without changing the sink when the plan is invalid
+    /// or storage fails.
     #[cfg(any(test, feature = "headers-cache-control"))]
     fn set_cache_control(&mut self, plan: CacheControlBuilder) -> Result<&mut Self, InsertError> {
         self.set_encoded(<CacheControl as Field>::name(), plan)?;
@@ -643,14 +646,17 @@ pub trait FieldSinkExt: FieldSink + Sized {
         Ok(self)
     }
 
-    /// Replaces `Access-Control-Max-Age` from a duration.
+    /// Replaces `Access-Control-Max-Age` from a whole-second duration.
     ///
     /// # Errors
     ///
-    /// Returns an error without changing the sink when storage fails.
+    /// Returns [`InsertErrorKind::InvalidValue`] without changing the sink
+    /// if the duration contains fractional seconds, or an error if storage fails.
     #[cfg(any(test, feature = "headers-cors"))]
     fn set_access_control_max_age_duration(&mut self, duration: Duration) -> Result<&mut Self, InsertError> {
-        self.set_access_control_max_age(duration.as_secs())
+        let value =
+            AccessControlMaxAgeOwned::from_duration(duration).map_err(|_invalid| InsertError::new(InsertErrorKind::InvalidValue))?;
+        self.set_access_control_max_age(value.seconds())
     }
 
     /// Appends the supplied `Set-Cookie` field lines.
@@ -697,11 +703,11 @@ mod tests {
 
     impl FieldSink for RejectSink {
         fn set_values(&mut self, _name: &'static FieldName, _values: crate::sink::EncodedValues) -> Result<(), InsertError> {
-            Err(InsertError)
+            Err(InsertError::new(InsertErrorKind::CapacityExceeded))
         }
 
         fn append_values(&mut self, _name: &'static FieldName, _values: crate::sink::EncodedValues) -> Result<(), InsertError> {
-            Err(InsertError)
+            Err(InsertError::new(InsertErrorKind::CapacityExceeded))
         }
 
         fn remove_values(&mut self, _name: &'static FieldName) {
@@ -933,7 +939,10 @@ mod tests {
     #[test]
     fn empty_cache_plan_reports_insertion_error() {
         let mut sink = TestSink::new();
-        assert_eq!(sink.set_cache_control(CacheControlOwned::builder()).err(), Some(InsertError));
+        assert_eq!(
+            sink.set_cache_control(CacheControlOwned::builder()).err(),
+            Some(InsertError::new(InsertErrorKind::InvalidValue))
+        );
     }
 
     #[test]
@@ -942,14 +951,23 @@ mod tests {
         assert_eq!(
             sink.set_user_agent(UserAgentOwned::try_from_static("client/1").expect("valid"))
                 .err(),
-            Some(InsertError)
+            Some(InsertError::new(InsertErrorKind::CapacityExceeded))
         );
-        assert_eq!(sink.set_content_length(42).err(), Some(InsertError));
-        assert_eq!(sink.set_access_control_max_age(600).err(), Some(InsertError));
+        assert_eq!(
+            sink.set_content_length(42).err(),
+            Some(InsertError::new(InsertErrorKind::CapacityExceeded))
+        );
+        assert_eq!(
+            sink.set_access_control_max_age(600).err(),
+            Some(InsertError::new(InsertErrorKind::CapacityExceeded))
+        );
 
         let mut cookies = SetCookieOwned::new();
         cookies.push_str("a=1").expect("valid cookie");
-        assert_eq!(sink.append_set_cookie(cookies).err(), Some(InsertError));
+        assert_eq!(
+            sink.append_set_cookie(cookies).err(),
+            Some(InsertError::new(InsertErrorKind::CapacityExceeded))
+        );
 
         sink.remove_values(&FieldName::UserAgent);
         assert!(sink.removed);

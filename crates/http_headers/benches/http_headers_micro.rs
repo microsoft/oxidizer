@@ -2118,7 +2118,15 @@ impl Field for DownstreamAgent {
     where
         S: FieldSource + ?Sized,
     {
-        Self::view_with(source, mode).map(|view| view.map(|view| Self(view.0.to_field_value())))
+        Self::view_with(source, mode).map(|view| {
+            view.map(|view| {
+                Self(
+                    view.0
+                        .try_to_field_value()
+                        .expect("view_with validated the HTTP field-value grammar"),
+                )
+            })
+        })
     }
 
     fn insert<S>(sink: &mut S, value: Self::Owned) -> Result<(), InsertError>

@@ -4,19 +4,21 @@
 //! Unified `http_headers` benchmarks for storage and custom-sink encoding decisions.
 
 use std::hint::black_box;
+use std::iter;
 use std::sync::{LazyLock, OnceLock};
-use std::{iter, mem};
 
 use compact_str::CompactString;
 use criterion::{BatchSize, BenchmarkId, Criterion};
 use http::HeaderMap;
-use http_headers::headers::{ContentLength, ContentType};
-use http_headers::sink::{
-    EncodedValues, FieldEncodeOutput, FieldEncoder, FieldSink, FieldSinkExt, FieldValueWriter, InsertError, ValueRefsEncoder,
-};
+use http_headers::sink::{EncodedValues, FieldSink, InsertError, ValueRefsEncoder};
 use http_headers::source::{FieldLines, FieldSource};
-use http_headers::{Field, FieldName, FieldValue, FieldValueRef};
+use http_headers::{FieldName, FieldValue, FieldValueRef};
 use smallvec::SmallVec;
+
+use self::storage_operations::{AppendInput, MapOutput};
+
+#[path = "../tests/common/http_headers_storage_operations.rs"]
+mod storage_operations;
 
 const STORAGE_TEXT: &str = "http_headers_storage/storage_text";
 const TEXT: &str = "http_headers_storage/text";
@@ -179,26 +181,6 @@ fn minimal_sink_append_encoded(input: CustomSinkInput) -> usize {
     black_box(sink.values.len())
 }
 
-struct ChunkedEncoder {
-    bytes: &'static [u8],
-    chunks: usize,
-}
-
-impl FieldEncoder for ChunkedEncoder {
-    fn encode<O>(self, output: &mut O) -> Result<(), InsertError>
-    where
-        O: FieldEncodeOutput,
-    {
-        let mut writer = output.begin_value(self.bytes.len(), http_headers::FieldSensitivity::NonSensitive)?;
-        if !self.bytes.is_empty() {
-            for piece in self.bytes.chunks(self.bytes.len().div_ceil(self.chunks)) {
-                writer.write_bytes(piece)?;
-            }
-        }
-        writer.finish()
-    }
-}
-
 fn short_value_map() -> (HeaderMap, &'static str) {
     (HeaderMap::with_capacity(4), SHORT_VALUE)
 }
@@ -233,31 +215,15 @@ streamed_setup!(streamed_65536_map, STREAMED_65536);
 #[metabench::benchmark(HTTP_WRITER_BORROWED, MAP_WRITER, "http_writer_borrowed")]
 #[bench::short(setup = short_value_map)]
 #[bench::long(setup = long_value_map)]
-fn http_writer_borrowed(state: (HeaderMap, &'static str)) -> usize {
-    let (mut map, value) = state;
-    map.set_encoded(<ContentType as Field>::name(), FieldValueRef::new(value.as_bytes()))
-        .expect("preallocated map has capacity");
-    let length = black_box(map.len());
-    mem::forget(map);
-    length
+fn http_writer_borrowed(state: (HeaderMap, &'static str)) -> MapOutput {
+    storage_operations::http_writer_borrowed(state)
 }
 
 #[metabench::benchmark(HTTP_WRITER_STREAMED, MAP_WRITER, "http_writer_streamed")]
 #[bench::short(setup = short_value_map)]
 #[bench::long(setup = long_value_map)]
-fn http_writer_streamed(state: (HeaderMap, &'static str)) -> usize {
-    let (mut map, value) = state;
-    map.set_encoded(
-        <ContentType as Field>::name(),
-        ChunkedEncoder {
-            bytes: value.as_bytes(),
-            chunks: 4,
-        },
-    )
-    .expect("preallocated map has capacity");
-    let length = black_box(map.len());
-    mem::forget(map);
-    length
+fn http_writer_streamed(state: (HeaderMap, &'static str)) -> MapOutput {
+    storage_operations::http_writer_streamed(state)
 }
 
 #[metabench::benchmark(HTTP_WRITER_STREAMED_SIZED, MAP_WRITER, "http_writer_streamed_sized")]
@@ -267,27 +233,16 @@ fn http_writer_streamed(state: (HeaderMap, &'static str)) -> usize {
 #[bench::bytes_65(setup = streamed_65_map)]
 #[bench::bytes_4096(setup = streamed_4096_map)]
 #[bench::bytes_65536(setup = streamed_65536_map)]
-fn http_writer_streamed_sized(state: (HeaderMap, &'static [u8])) -> usize {
-    let (mut map, value) = state;
-    map.set_encoded(<ContentType as Field>::name(), ChunkedEncoder { bytes: value, chunks: 4 })
-        .expect("preallocated map has capacity");
-    let length = black_box(map.len());
-    mem::forget(map);
-    length
+fn http_writer_streamed_sized(state: (HeaderMap, &'static [u8])) -> MapOutput {
+    storage_operations::http_writer_streamed_sized(state)
 }
 
 #[metabench::benchmark(HTTP_WRITER_MATERIALIZED, MAP_WRITER, "http_writer_materialized")]
 #[bench::long(setup = long_owned_map)]
-fn http_writer_materialized(state: (HeaderMap, FieldValue)) -> usize {
-    let (mut map, value) = state;
-    map.set_values(<ContentType as Field>::name(), EncodedValues::single(value))
-        .expect("preallocated map has capacity");
-    let length = black_box(map.len());
-    mem::forget(map);
-    length
+fn http_writer_materialized(state: (HeaderMap, FieldValue)) -> MapOutput {
+    storage_operations::http_writer_materialized(state)
 }
 
-type AppendInput = (HeaderMap, &'static FieldName, EncodedValues);
 type AppendCase = (&'static str, fn() -> AppendInput);
 
 fn append_input(name: &'static FieldName, occupied: bool, count: usize) -> AppendInput {
@@ -346,31 +301,20 @@ append_setup!(custom_occupied_64, &CUSTOM_APPEND_NAME, true, 64);
 #[bench::custom_occupied_4(setup = custom_occupied_4)]
 #[bench::custom_occupied_16(setup = custom_occupied_16)]
 #[bench::custom_occupied_64(setup = custom_occupied_64)]
-fn http_append_values(input: AppendInput) -> usize {
-    let (mut map, name, values) = input;
-    map.append_values(name, values).expect("preallocated map has capacity");
-    let length = black_box(map.len());
-    mem::forget(map);
-    length
+fn http_append_values(input: AppendInput) -> MapOutput {
+    storage_operations::http_append_values(input)
 }
 
 #[metabench::benchmark(CONTENT_LENGTH_MATERIALIZED, DEFERRED_INSERTION, "content_length_materialized")]
 #[bench::materialized(setup = empty_http_map)]
-fn content_length_materialized(mut map: HeaderMap) -> usize {
-    map.set_values(<ContentLength as Field>::name(), EncodedValues::single(FieldValue::from(1_024_u64)))
-        .expect("preallocated map has capacity");
-    let length = black_box(map.len());
-    mem::forget(map);
-    length
+fn content_length_materialized(map: HeaderMap) -> MapOutput {
+    storage_operations::content_length_materialized(map)
 }
 
 #[metabench::benchmark(CONTENT_LENGTH_DEFERRED_HTTP, DEFERRED_INSERTION, "content_length_deferred_http")]
 #[bench::deferred_http(setup = empty_http_map)]
-fn content_length_deferred_http(mut map: HeaderMap) -> usize {
-    map.set_content_length(1_024).expect("preallocated map has capacity");
-    let length = black_box(map.len());
-    mem::forget(map);
-    length
+fn content_length_deferred_http(map: HeaderMap) -> MapOutput {
+    storage_operations::content_length_deferred_http(map)
 }
 
 #[metabench::benchmark(ONE_VEC, REPEATED_VALUES, "one_vec")]

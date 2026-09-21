@@ -1,8 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::slice;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use std::{slice, str};
+
+use http_headers_simd::ascii_str;
 
 use crate::sink::EncodedValues;
 use crate::{DecodeError, DecodeErrorKind, FieldName, FieldValue, FieldValueRef};
@@ -861,10 +863,11 @@ fn next_list_item<'a>(bytes: &'a [u8], position: &mut usize) -> Option<ListItem<
             return Some(ListItem::Malformed);
         };
         index += closing;
-        if bytes.get(index) != Some(&b'"') {
-            *position = length;
-            return Some(ListItem::Malformed);
-        }
+        assert_eq!(
+            bytes.get(index),
+            Some(&b'"'),
+            "position() found a quote in this same immutable slice"
+        );
         index += 1;
         ListItem::Tag(ConditionalTagView {
             wire: &bytes[start..index],
@@ -941,7 +944,7 @@ const TAG_CLASS: [u8; 256] = {
 ///
 /// Returns `None` when the line violates the grammar or repeats a wildcard.
 #[inline]
-pub(super) fn validate_tag_line(bytes: &[u8], state: TagListState) -> Option<TagListState> {
+fn validate_tag_line(bytes: &[u8], state: TagListState) -> Option<TagListState> {
     validate_tag_line_with(bytes, state, crate::DecodeMode::Strict)
 }
 
@@ -1031,7 +1034,7 @@ pub(super) fn parse_http_date(name: &'static FieldName, value: FieldValueRef<'_>
     if bytes.first().is_some_and(|byte| matches!(byte, b' ' | b'\t')) || bytes.last().is_some_and(|byte| matches!(byte, b' ' | b'\t')) {
         return Err(crate::headers::invalid_syntax(name));
     }
-    let wire = str::from_utf8(bytes).map_err(|_invalid| crate::headers::invalid_syntax(name))?;
+    let wire = ascii_str(bytes).ok_or_else(|| crate::headers::invalid_syntax(name))?;
     httpdate::parse_http_date(wire).map_err(|_invalid| crate::headers::invalid_syntax(name))
 }
 
@@ -1046,8 +1049,8 @@ pub(super) fn parse_http_date_with(
     if let Ok(date) = parse_http_date(name, value) {
         return Ok(date);
     }
-    let wire = str::from_utf8(value.as_bytes())
-        .map_err(|_invalid| crate::headers::invalid_syntax(name))?
+    let wire = ascii_str(value.as_bytes())
+        .ok_or_else(|| crate::headers::invalid_syntax(name))?
         .trim_matches([' ', '\t']);
     parse_relaxed_http_date(wire).ok_or_else(|| crate::headers::invalid_syntax(name))
 }
@@ -1081,8 +1084,23 @@ fn parse_relaxed_http_date(wire: &str) -> Option<SystemTime> {
     if clock.next().is_some() || hour > 23 || minute > 59 || second > 59 {
         return None;
     }
-    let normalized = format!("{weekday}, {day:02} {month} {year:04} {hour:02}:{minute:02}:{second:02} GMT");
-    httpdate::parse_http_date(&normalized).ok()
+    // The validated fixed-width form needs neither heap storage nor formatting dispatch.
+    let mut normalized = *b"Sun, 00 Jan 0000 00:00:00 GMT";
+    normalized[..3].copy_from_slice(weekday.as_bytes());
+    normalized[5..7].copy_from_slice(&date_decimal_pair(day));
+    normalized[8..11].copy_from_slice(month.as_bytes());
+    normalized[12..14].copy_from_slice(&date_decimal_pair(year / 100));
+    normalized[14..16].copy_from_slice(&date_decimal_pair(year % 100));
+    normalized[17..19].copy_from_slice(&date_decimal_pair(hour));
+    normalized[20..22].copy_from_slice(&date_decimal_pair(minute));
+    normalized[23..25].copy_from_slice(&date_decimal_pair(second));
+    let normalized = ascii_str(&normalized).expect("validated date names and decimal digits are ASCII");
+    httpdate::parse_http_date(normalized).ok()
+}
+
+fn date_decimal_pair(value: u16) -> [u8; 2] {
+    let value = u8::try_from(value).expect("validated two-digit date components are at most 99");
+    [b'0' + value / 10, b'0' + value % 10]
 }
 
 fn parse_short_decimal(value: &str, max_digits: usize) -> Option<u16> {
@@ -1141,10 +1159,7 @@ fn parse_imf_fixdate(bytes: &[u8]) -> Option<u64> {
     if bytes[4] != b' ' || bytes[16] != b' ' || bytes[19] != b':' {
         return None;
     }
-    if bytes[22] != b':' || bytes[25] != b' ' || bytes[26] != b'G' || bytes[27] != b'M' {
-        return None;
-    }
-    if bytes[28] != b'T' {
+    if bytes[22] != b':' || word_at(bytes, 25) != u32::from_le_bytes(*b" GMT") {
         return None;
     }
 
@@ -1231,12 +1246,12 @@ pub(super) fn format_http_date(name: &'static FieldName, date: SystemTime) -> Re
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::iter;
     use std::time::{Duration, UNIX_EPOCH};
+    use std::{iter, str};
 
     use super::{
-        MAX_HTTP_DATE_SECONDS, TagIter, parse_http_date, parse_http_date_with, parse_imf_fixdate, parse_relaxed_http_date,
-        parse_short_decimal, two_digits, validate_tag_line_with,
+        ListItem, MAX_HTTP_DATE_SECONDS, TagIter, date_decimal_pair, next_list_item, parse_http_date, parse_http_date_with,
+        parse_imf_fixdate, parse_relaxed_http_date, parse_short_decimal, two_digits, validate_tag_line_with,
     };
     use crate::headers::{
         ETagOwned, IfMatch, IfMatchOwned, IfModifiedSince, IfModifiedSinceOwned, IfNoneMatch, IfNoneMatchOwned, IfUnmodifiedSince,
@@ -1244,7 +1259,7 @@ mod tests {
     };
     use crate::sink::{EncodedValues, FieldSink, InsertError};
     use crate::source::{FieldLines, FieldSource};
-    use crate::{DecodeErrorKind, DecodeMode, Field, FieldName, FieldValue, SingleValueField};
+    use crate::{DecodeErrorKind, DecodeMode, Field, FieldName, FieldValue, FieldValueRef, SingleValueField};
 
     struct Source {
         name: &'static FieldName,
@@ -1288,6 +1303,52 @@ mod tests {
             super::next_list_item(b"\"unterminated", &mut position),
             Some(super::ListItem::Malformed)
         ));
+    }
+
+    #[test]
+    fn tag_projection_preserves_quotes_and_advances_past_valid_separators() {
+        for bytes in [b"\"\"".as_slice(), b"\"strong\"", b"W/\"weak\"", b"w/\"weak\""] {
+            let mut position = 0;
+            let Some(ListItem::Tag(tag)) = next_list_item(bytes, &mut position) else {
+                panic!("valid quoted tag was not retained");
+            };
+            assert_eq!(tag.as_bytes(), bytes);
+            assert_eq!(position, bytes.len());
+            assert!(next_list_item(bytes, &mut position).is_none());
+        }
+
+        let bytes = b" \t\"one\" \t, w/\"two\"";
+        let mut position = 0;
+        for expected in [b"\"one\"".as_slice(), b"w/\"two\""] {
+            let Some(ListItem::Tag(tag)) = next_list_item(bytes, &mut position) else {
+                panic!("comma-separated tag was not retained");
+            };
+            assert_eq!(tag.as_bytes(), expected);
+        }
+        assert_eq!(position, bytes.len());
+        assert!(next_list_item(bytes, &mut position).is_none());
+    }
+
+    #[test]
+    fn tag_projection_rejects_missing_quotes_weak_slashes_and_bad_separators() {
+        for bytes in [
+            b"bare".as_slice(),
+            b"Wbad",
+            b"W/'wrong'",
+            b"\"open",
+            b"W/\"open",
+            b"\"tag'x",
+            b"\"tag\" suffix",
+            b"\"tag\";\"next\"",
+        ] {
+            let mut position = 0;
+            assert!(
+                matches!(next_list_item(bytes, &mut position), Some(ListItem::Malformed)),
+                "{bytes:?}"
+            );
+            assert_eq!(position, bytes.len());
+            assert!(next_list_item(bytes, &mut position).is_none());
+        }
     }
 
     #[test]
@@ -1671,6 +1732,70 @@ mod tests {
         exercise!(LastModified, LastModifiedOwned, &FieldName::LastModified);
         exercise!(IfModifiedSince, IfModifiedSinceOwned, &FieldName::IfModifiedSince);
         exercise!(IfUnmodifiedSince, IfUnmodifiedSinceOwned, &FieldName::IfUnmodifiedSince);
+    }
+
+    #[test]
+    fn obsolete_dates_match_the_reference_for_every_byte_substitution() {
+        for wire in [b"Sun Nov  6 08:49:37 1994".as_slice(), b"Sunday, 06-Nov-94 08:49:37 GMT"] {
+            for offset in 0..wire.len() {
+                for byte in crate::test_support::substitution_bytes(wire[offset], offset, wire.len()) {
+                    let mut input = wire.to_vec();
+                    input[offset] = byte;
+                    let expected = str::from_utf8(&input)
+                        .ok()
+                        .filter(|text| !text.starts_with([' ', '\t']) && !text.ends_with([' ', '\t']))
+                        .and_then(|text| httpdate::parse_http_date(text).ok())
+                        .ok_or_else(|| crate::headers::invalid_syntax(&FieldName::IfModifiedSince));
+                    assert_eq!(
+                        parse_http_date(&FieldName::IfModifiedSince, FieldValueRef::new(&input)),
+                        expected,
+                        "{input:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn date_normalization_matches_canonical_reference_dates() {
+        for value in 0..100_u16 {
+            assert_eq!(date_decimal_pair(value).as_slice(), format!("{value:02}").as_bytes());
+        }
+        for (short, canonical) in [
+            ("Thu, 1 Jan 1970 0:0:0 UTC", "Thu, 01 Jan 1970 00:00:00 GMT"),
+            ("Tue, 8 Nov 1994 8:9:7 UTC", "Tue, 08 Nov 1994 08:09:07 GMT"),
+            ("Tue, 29 Feb 2000 9:8:7 UTC", "Tue, 29 Feb 2000 09:08:07 GMT"),
+            ("Thu, 29 Feb 2024 0:0:0 UTC", "Thu, 29 Feb 2024 00:00:00 GMT"),
+            ("Fri, 31 Dec 9999 23:59:59 UTC", "Fri, 31 Dec 9999 23:59:59 GMT"),
+            ("Tue, 8 Nov 1994 8:9:7 GMT", "Tue, 08 Nov 1994 08:09:07 GMT"),
+            ("Tue, 0 Nov 1994 8:9:7 UTC", "Tue, 00 Nov 1994 08:09:07 GMT"),
+            ("Mon, 29 Feb 2100 0:0:0 UTC", "Mon, 29 Feb 2100 00:00:00 GMT"),
+            ("Fri, 31 Apr 2020 0:0:0 UTC", "Fri, 31 Apr 2020 00:00:00 GMT"),
+            ("Tue, 8 Nov 1994 24:0:0 UTC", "Tue, 08 Nov 1994 24:00:00 GMT"),
+        ] {
+            assert_eq!(parse_relaxed_http_date(short), httpdate::parse_http_date(canonical).ok(), "{short}");
+        }
+    }
+
+    #[test]
+    fn imf_date_checks_every_gmt_tail_byte() {
+        let wire = *b"Sun, 06 Nov 1994 08:49:37 GMT";
+        let seconds = httpdate::parse_http_date("Sun, 06 Nov 1994 08:49:37 GMT")
+            .unwrap()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        for (offset, &original) in wire.iter().enumerate().skip(25) {
+            for replacement in u8::MIN..=u8::MAX {
+                let mut modified = wire;
+                modified[offset] = replacement;
+                assert_eq!(
+                    parse_imf_fixdate(&modified),
+                    (replacement == original).then_some(seconds),
+                    "offset {offset}, replacement {replacement}"
+                );
+            }
+        }
     }
 
     #[test]

@@ -5,7 +5,7 @@
 
 use smallvec::SmallVec;
 
-use crate::sink::{EncodedValues, FieldEncodeOutput, FieldEncoder, FieldSensitivity, FieldValueWriter, InsertError};
+use crate::sink::{EncodedValues, FieldEncodeOutput, FieldEncoder, FieldSensitivity, FieldValueWriter, InsertError, InsertErrorKind};
 use crate::source::FieldSource;
 use crate::{FieldName, FieldValue};
 
@@ -38,12 +38,13 @@ impl FieldEncodeOutput for CollectOutput {
     )]
     #[inline(always)]
     fn begin_value(&mut self, length: usize, sensitivity: FieldSensitivity) -> Result<Self::Writer<'_>, InsertError> {
+        if length > isize::MAX as usize {
+            return Err(InsertError::new(InsertErrorKind::CapacityExceeded));
+        }
         let bytes = if length <= FIELD_VALUE_INLINE_CAPACITY {
             WriterBytes::Inline(CollectBytes::new())
         } else {
-            let mut bytes = Vec::new();
-            bytes.try_reserve_exact(length).map_err(|_error| InsertError)?;
-            WriterBytes::Spilled(bytes)
+            WriterBytes::Spilled(reserve_bytes(length)?)
         };
         Ok(CollectWriter {
             values: &mut self.values,
@@ -59,6 +60,14 @@ impl FieldEncodeOutput for CollectOutput {
     }
 }
 
+fn reserve_bytes(length: usize) -> Result<Vec<u8>, InsertError> {
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(length)
+        .map_err(|_error| InsertError::new(InsertErrorKind::AllocationFailed))?;
+    Ok(bytes)
+}
+
 impl FieldValueWriter for CollectWriter<'_> {
     #[expect(
         clippy::inline_always,
@@ -71,7 +80,7 @@ impl FieldValueWriter for CollectWriter<'_> {
             WriterBytes::Spilled(buffer) => buffer.len(),
         };
         if bytes.len() > self.expected.saturating_sub(written) {
-            return Err(InsertError);
+            return Err(InsertError::new(InsertErrorKind::InvalidEncoding));
         }
         match &mut self.bytes {
             WriterBytes::Inline(buffer) => buffer.extend_from_slice(bytes),
@@ -91,13 +100,13 @@ impl FieldValueWriter for CollectWriter<'_> {
             WriterBytes::Spilled(bytes) => bytes.len(),
         };
         if length != self.expected {
-            return Err(InsertError);
+            return Err(InsertError::new(InsertErrorKind::InvalidEncoding));
         }
         let value = match self.bytes {
             WriterBytes::Inline(bytes) => FieldValue::from_bytes(bytes),
             WriterBytes::Spilled(bytes) => FieldValue::try_from(bytes),
         }
-        .map_err(|_invalid| InsertError)?
+        .map_err(|_invalid| InsertError::new(InsertErrorKind::InvalidValue))?
         .with_sensitive(self.sensitive);
         self.values.push(value);
         Ok(())
@@ -106,9 +115,15 @@ impl FieldValueWriter for CollectWriter<'_> {
 
 /// A container that can store the field lines of a field.
 ///
-/// Most callers create headers with [`crate::sink::FieldSinkExt`] or
-/// [`crate::Field::insert`]. Implement this trait only when integrating a
-/// custom field container.
+/// With a header-family feature enabled, most callers create headers with
+/// `crate::sink::FieldSinkExt` or [`crate::Field::insert`]. Core-only builds
+/// can use this trait directly. Implement it only when integrating a custom
+/// field container.
+///
+/// All name-taking methods require static descriptors, just like
+/// [`FieldSource`]. Custom descriptors can use a `static LazyLock<FieldName>`.
+/// Use the container's native API to insert, append, or remove fields whose
+/// names are constructed locally at runtime.
 ///
 /// # Required and provided methods
 ///
@@ -213,9 +228,13 @@ pub trait FieldSink: FieldSource {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::{CollectOutput, FIELD_VALUE_INLINE_CAPACITY, FieldSink};
+    #[cfg(feature = "http")]
+    use http::{HeaderMap, HeaderValue, header};
+
+    use super::{CollectOutput, FIELD_VALUE_INLINE_CAPACITY, FieldSink, reserve_bytes};
     use crate::sink::{
-        EncodedValues, FieldEncodeOutput, FieldEncoder, FieldSensitivity, FieldValueWriter, InsertError, U64Encoder, ValueRefsEncoder,
+        EncodedValues, FieldEncodeOutput, FieldEncoder, FieldSensitivity, FieldValueWriter, InsertError, InsertErrorKind, U64Encoder,
+        ValueRefsEncoder,
     };
     use crate::source::{FieldLines, FieldSource};
     use crate::{FieldName, FieldValue, FieldValueRef};
@@ -283,11 +302,19 @@ mod tests {
 
     impl FieldValueWriter for Writer {
         fn write_bytes(&mut self, _bytes: &[u8]) -> Result<(), InsertError> {
-            if self.reject_write { Err(InsertError) } else { Ok(()) }
+            if self.reject_write {
+                Err(InsertError::new(InsertErrorKind::InvalidEncoding))
+            } else {
+                Ok(())
+            }
         }
 
         fn finish(self) -> Result<(), InsertError> {
-            if self.reject_finish { Err(InsertError) } else { Ok(()) }
+            if self.reject_finish {
+                Err(InsertError::new(InsertErrorKind::InvalidValue))
+            } else {
+                Ok(())
+            }
         }
     }
 
@@ -314,7 +341,7 @@ mod tests {
         type Writer<'a> = Writer;
 
         fn begin_value(&mut self, _length: usize, _sensitivity: FieldSensitivity) -> Result<Self::Writer<'_>, InsertError> {
-            Err(InsertError)
+            Err(InsertError::new(InsertErrorKind::AllocationFailed))
         }
 
         fn push_value(&mut self, _value: FieldValue) -> Result<(), InsertError> {
@@ -336,7 +363,7 @@ mod tests {
         }
 
         fn push_value(&mut self, _value: FieldValue) -> Result<(), InsertError> {
-            Err(InsertError)
+            Err(InsertError::new(InsertErrorKind::CapacityExceeded))
         }
     }
 
@@ -390,7 +417,7 @@ mod tests {
             values: vec![FieldValue::from_static("original")],
             append_calls: 0,
         };
-        for encoder in [
+        for (encoder, expected_kind) in [
             BytesEncoder {
                 expected: 2,
                 bytes: b"x",
@@ -411,8 +438,18 @@ mod tests {
                 bytes: b"x",
                 sensitive: false,
             },
-        ] {
-            assert_eq!(sink.set_encoded(&FieldName::UserAgent, encoder), Err(InsertError));
+        ]
+        .into_iter()
+        .zip([
+            InsertErrorKind::InvalidEncoding,
+            InsertErrorKind::InvalidValue,
+            InsertErrorKind::InvalidEncoding,
+            InsertErrorKind::CapacityExceeded,
+        ]) {
+            assert_eq!(
+                sink.set_encoded(&FieldName::UserAgent, encoder),
+                Err(InsertError::new(expected_kind))
+            );
             assert_eq!(sink.values[0].as_bytes(), b"original");
         }
 
@@ -425,26 +462,82 @@ mod tests {
                     sensitive: false,
                 },
             ),
-            Err(InsertError)
+            Err(InsertError::new(InsertErrorKind::InvalidValue))
         );
         assert_eq!(sink.values.len(), 1);
         assert_eq!(sink.append_calls, 0);
-        assert_eq!(InsertError.to_string(), "field could not be encoded or stored");
+    }
+
+    #[test]
+    fn impossible_capacities_are_rejected_before_sink_mutation() {
+        let mut sink = Sink {
+            values: vec![FieldValue::from_static("original")],
+            append_calls: 0,
+        };
+        for length in [isize::MAX as usize + 1, usize::MAX] {
+            let encoder = || BytesEncoder {
+                expected: length,
+                bytes: b"x",
+                sensitive: false,
+            };
+            let expected = Err(InsertError::new(InsertErrorKind::CapacityExceeded));
+            assert_eq!(sink.set_encoded(&FieldName::UserAgent, encoder()), expected);
+            assert_eq!(sink.append_encoded(&FieldName::UserAgent, encoder()), expected);
+            assert_eq!(sink.values, [FieldValue::from_static("original")]);
+            assert_eq!(sink.append_calls, 0);
+
+            #[cfg(feature = "http")]
+            {
+                let mut map = HeaderMap::new();
+                map.insert(header::USER_AGENT, HeaderValue::from_static("original"));
+                let original = map.clone();
+                assert_eq!(map.set_encoded(&FieldName::UserAgent, encoder()), expected);
+                assert_eq!(map.append_encoded(&FieldName::UserAgent, encoder()), expected);
+                assert_eq!(map, original);
+            }
+        }
+    }
+
+    #[test]
+    fn buffer_reservation_reports_failure_without_a_large_allocation() {
+        // Capacity overflow exercises reservation failure without requesting memory.
+        assert_eq!(reserve_bytes(usize::MAX), Err(InsertError::new(InsertErrorKind::AllocationFailed)));
+        let buffer = reserve_bytes(FIELD_VALUE_INLINE_CAPACITY + 1).unwrap();
+        assert!(buffer.is_empty());
+        assert!(buffer.capacity() > FIELD_VALUE_INLINE_CAPACITY);
     }
 
     #[test]
     fn encoders_propagate_each_output_failure_without_masking_it() {
-        assert_eq!(U64Encoder::new(42).encode(&mut RejectBegin), Err(InsertError));
-        assert_eq!(U64Encoder::new(42).encode(&mut RejectWrite), Err(InsertError));
-        assert_eq!(FieldValueRef::new(b"value").encode(&mut RejectBegin), Err(InsertError));
-        assert_eq!(FieldValueRef::new(b"value").encode(&mut RejectWrite), Err(InsertError));
-        assert_eq!(FieldValueRef::new(b"value").encode(&mut RejectFinish), Err(InsertError));
+        assert_eq!(
+            U64Encoder::new(42).encode(&mut RejectBegin),
+            Err(InsertError::new(InsertErrorKind::AllocationFailed))
+        );
+        assert_eq!(
+            U64Encoder::new(42).encode(&mut RejectWrite),
+            Err(InsertError::new(InsertErrorKind::InvalidEncoding))
+        );
+        assert_eq!(
+            FieldValueRef::new(b"value").encode(&mut RejectBegin),
+            Err(InsertError::new(InsertErrorKind::AllocationFailed))
+        );
+        assert_eq!(
+            FieldValueRef::new(b"value").encode(&mut RejectWrite),
+            Err(InsertError::new(InsertErrorKind::InvalidEncoding))
+        );
+        assert_eq!(
+            FieldValueRef::new(b"value").encode(&mut RejectFinish),
+            Err(InsertError::new(InsertErrorKind::InvalidValue))
+        );
 
         let borrowed = [FieldValueRef::new(b"value")];
-        assert_eq!(ValueRefsEncoder::new(borrowed).encode(&mut RejectWrite), Err(InsertError));
+        assert_eq!(
+            ValueRefsEncoder::new(borrowed).encode(&mut RejectWrite),
+            Err(InsertError::new(InsertErrorKind::InvalidEncoding))
+        );
         assert_eq!(
             EncodedValues::single(FieldValue::from_static("value")).encode(&mut RejectOwned),
-            Err(InsertError)
+            Err(InsertError::new(InsertErrorKind::CapacityExceeded))
         );
         assert_eq!(FieldValue::from_static("value").encode(&mut RejectWrite), Ok(()));
         assert_eq!(FieldValue::from_static("value").encode(&mut RejectBegin), Ok(()));
@@ -455,13 +548,19 @@ mod tests {
             bytes: b"value",
             sensitive: false,
         };
-        assert_eq!(encoder.encode(&mut RejectBegin), Err(InsertError));
+        assert_eq!(
+            encoder.encode(&mut RejectBegin),
+            Err(InsertError::new(InsertErrorKind::AllocationFailed))
+        );
         let encoder = BytesEncoder {
             expected: 5,
             bytes: b"value",
             sensitive: false,
         };
-        assert_eq!(encoder.encode(&mut RejectWrite), Err(InsertError));
+        assert_eq!(
+            encoder.encode(&mut RejectWrite),
+            Err(InsertError::new(InsertErrorKind::InvalidEncoding))
+        );
 
         let sink = Sink {
             values: vec![FieldValue::from_static("value")],

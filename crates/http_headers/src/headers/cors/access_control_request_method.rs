@@ -4,7 +4,8 @@
 use std::fmt;
 use std::ops::Range;
 
-use super::shared::{CorsMethodView, common_method, invalid_syntax, invalid_token, method_ref, trimmed_range, untrimmed_range};
+use super::super::MethodView;
+use super::shared::{common_method, invalid_syntax, invalid_token, method_ref, trimmed_range, untrimmed_range};
 use crate::sink::{EncodedValues, FieldSink, InsertError};
 use crate::source::{FieldLines, FieldSource};
 use crate::{DecodeError, DecodeErrorKind, Field, FieldName, FieldValue, FieldValueRef};
@@ -96,9 +97,9 @@ impl RequestMethodStore {
         }
     }
 
-    fn as_method(&self) -> Result<CorsMethodView<'_>, DecodeError> {
+    fn as_method(&self) -> Result<MethodView<'_>, DecodeError> {
         match self {
-            Self::Registered(method) => Ok(CorsMethodView(method)),
+            Self::Registered(method) => Ok(MethodView::from_validated(method.as_bytes())),
             Self::Extension(value) => extension_method(value.as_bytes()),
         }
     }
@@ -150,7 +151,7 @@ fn registered_method(token: &[u8]) -> Option<&'static str> {
 /// ```
 pub struct AccessControlRequestMethodView<'a> {
     value: FieldValueRef<'a>,
-    method: CorsMethodView<'a>,
+    method: MethodView<'a>,
 }
 
 impl AccessControlRequestMethodOwned {
@@ -175,6 +176,8 @@ impl AccessControlRequestMethodOwned {
 
     /// Returns the method without allocating.
     ///
+    /// [`MethodView`] preserves spelling and compares case-sensitively.
+    ///
     /// # Errors
     ///
     /// Returns an error if stored metadata does not match the field value.
@@ -190,7 +193,7 @@ impl AccessControlRequestMethodOwned {
     /// assert_eq!(extension.method()?.as_str(), "CUSTOM");
     /// # Ok::<(), http_headers::DecodeError>(())
     /// ```
-    pub fn method(&self) -> Result<CorsMethodView<'_>, DecodeError> {
+    pub fn method(&self) -> Result<MethodView<'_>, DecodeError> {
         self.method.as_method()
     }
 
@@ -231,6 +234,8 @@ impl fmt::Display for AccessControlRequestMethodOwned {
 
 impl<'a> AccessControlRequestMethodView<'a> {
     /// Returns the method without allocating.
+    ///
+    /// [`MethodView`] preserves spelling and compares case-sensitively.
     #[must_use]
     /// # Examples
     ///
@@ -252,7 +257,7 @@ impl<'a> AccessControlRequestMethodView<'a> {
     /// assert_eq!(view.method().as_str(), "PATCH");
     /// # Ok::<(), http_headers::DecodeError>(())
     /// ```
-    pub const fn method(self) -> CorsMethodView<'a> {
+    pub const fn method(self) -> MethodView<'a> {
         self.method
     }
 
@@ -289,15 +294,15 @@ impl<'a> AccessControlRequestMethodView<'a> {
 /// Registered methods are recognized whole, so the common case never reaches
 /// the token scan behind it.
 #[inline]
-fn request_method_of(bytes: &[u8]) -> Result<CorsMethodView<'_>, DecodeError> {
+fn request_method_of(bytes: &[u8]) -> Result<MethodView<'_>, DecodeError> {
     match common_method(bytes) {
-        Some(method) => Ok(CorsMethodView(method)),
+        Some(method) => Ok(MethodView::from_validated(method.as_bytes())),
         None => extension_method(bytes),
     }
 }
 
 /// Validates a field value that no registered method matched.
-fn extension_method(bytes: &[u8]) -> Result<CorsMethodView<'_>, DecodeError> {
+fn extension_method(bytes: &[u8]) -> Result<MethodView<'_>, DecodeError> {
     let token = &bytes[request_method_range(bytes)];
     method_ref(token).ok_or_else(|| invalid_token(&FieldName::AccessControlRequestMethod))
 }
@@ -382,23 +387,12 @@ impl TryFrom<http::Method> for AccessControlRequestMethodOwned {
     }
 }
 
-impl TryFrom<&str> for AccessControlRequestMethodOwned {
-    type Error = DecodeError;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let value = FieldValue::from_str(value).map_err(|_invalid| invalid_syntax(&FieldName::AccessControlRequestMethod))?;
-        Self::try_from(value)
-    }
-}
-
-impl TryFrom<String> for AccessControlRequestMethodOwned {
-    type Error = DecodeError;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        let value = FieldValue::try_from(value).map_err(|_invalid| invalid_syntax(&FieldName::AccessControlRequestMethod))?;
-        Self::try_from(value)
-    }
-}
+super::super::shared::impl_string_conversions!(
+    AccessControlRequestMethodOwned,
+    &FieldName::AccessControlRequestMethod,
+    invalid_syntax,
+    value
+);
 
 impl TryFrom<FieldValue> for AccessControlRequestMethodOwned {
     type Error = DecodeError;
@@ -420,7 +414,7 @@ impl TryFrom<FieldValue> for AccessControlRequestMethodOwned {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{AccessControlRequestMethod, AccessControlRequestMethodOwned, RequestMethodStore, registered_method};
-    use crate::headers::cors::test_support::TestMap;
+    use crate::headers::cors::test_map::TestMap;
     use crate::{DecodeErrorKind, FieldName, FieldValue};
 
     #[test]

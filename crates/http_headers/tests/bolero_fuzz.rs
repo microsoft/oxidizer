@@ -5,8 +5,7 @@
 
 #![cfg(feature = "headers-all")]
 
-use std::any::TypeId;
-use std::collections::HashMap;
+use std::any::type_name;
 use std::sync::LazyLock;
 use std::time::Duration;
 use std::{iter, slice, str};
@@ -21,8 +20,12 @@ use http_headers::headers::{
     SetCookie, SetCookieOwned, StrictTransportSecurity, UserAgent, UserAgentOwned, Vary, XContentTypeOptions,
 };
 use http_headers::sink::{EncodedValues, FieldSink, InsertError};
-use http_headers::source::{FieldLines, FieldSource, MAX_CUSTOM_LIST_ITEMS};
-use http_headers::{DecodeError, DecodeErrorKind, Field, FieldName, FieldValue, FieldValueRef};
+use http_headers::source::{FieldSource, MAX_CUSTOM_LIST_ITEMS};
+use http_headers::{DecodeError, DecodeErrorKind, DecodeMode, Field, FieldName, FieldValue, FieldValueRef};
+
+use self::common::TestMap;
+
+mod common;
 
 const BOUNDED_ITERATIONS: usize = 2_048;
 const BOUNDED_TEST_TIME: Duration = Duration::from_millis(400);
@@ -32,9 +35,6 @@ const MAX_FIELD_LINES_U8: u8 = 3;
 static COMMA_LIST: LazyLock<FieldName> = LazyLock::new(|| FieldName::from_static("x-comma-list"));
 static SEMICOLON_LIST: LazyLock<FieldName> = LazyLock::new(|| FieldName::from_static("x-semicolon-list"));
 
-#[derive(Default)]
-struct TestMap(HashMap<FieldName, Vec<FieldValue>>);
-
 impl TestMap {
     fn new() -> Self {
         Self::default()
@@ -42,36 +42,6 @@ impl TestMap {
 
     fn append(&mut self, name: FieldName, value: FieldValue) {
         self.0.entry(name).or_default().push(value);
-    }
-
-    fn get_all(&self, name: &FieldName) -> &[FieldValue] {
-        self.0.get(name).map_or(&[], Vec::as_slice)
-    }
-}
-
-impl FieldSource for TestMap {
-    fn lines(&self, name: &'static FieldName) -> Option<FieldLines<'_>> {
-        FieldLines::from_slice(name, self.get_all(name))
-    }
-}
-
-impl FieldSink for TestMap {
-    fn set_values(&mut self, name: &'static FieldName, values: EncodedValues) -> Result<(), InsertError> {
-        if values.is_empty() {
-            self.0.remove(name);
-        } else {
-            self.0.insert(name.clone(), values.into_iter().collect());
-        }
-        Ok(())
-    }
-
-    fn append_values(&mut self, name: &'static FieldName, values: EncodedValues) -> Result<(), InsertError> {
-        self.0.entry(name.clone()).or_default().extend(values);
-        Ok(())
-    }
-
-    fn remove_values(&mut self, name: &'static FieldName) {
-        self.0.remove(name);
     }
 }
 
@@ -87,6 +57,13 @@ macro_rules! bounded {
 enum ParseOutcome {
     Parsed(Vec<Vec<u8>>),
     Rejected(DecodeErrorKind, Option<usize>),
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum DecoderOutcome {
+    Absent,
+    Present,
+    Rejected,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -108,6 +85,47 @@ struct SemicolonItems(Vec<Vec<u8>>);
 
 type DelimitedOutcome = Result<Vec<Vec<u8>>, (DecodeErrorKind, Option<usize>)>;
 
+// Deliberately disagrees so the generic oracle cannot silently skip a Field.
+struct AsymmetricField<const BORROWED_ACCEPTS: bool>;
+
+impl<const BORROWED_ACCEPTS: bool> Field for AsymmetricField<BORROWED_ACCEPTS> {
+    type View<'a> = ();
+    type Owned = FieldValue;
+
+    fn name() -> &'static FieldName {
+        &COMMA_LIST
+    }
+
+    fn view_with<S>(_source: &S, _mode: DecodeMode) -> Result<Option<Self::View<'_>>, DecodeError>
+    where
+        S: FieldSource + ?Sized,
+    {
+        if BORROWED_ACCEPTS {
+            Ok(Some(()))
+        } else {
+            Err(DecodeError::new(Self::name(), DecodeErrorKind::InvalidSyntax))
+        }
+    }
+
+    fn owned_with<S>(_source: &S, _mode: DecodeMode) -> Result<Option<Self::Owned>, DecodeError>
+    where
+        S: FieldSource + ?Sized,
+    {
+        if BORROWED_ACCEPTS {
+            Err(DecodeError::new(Self::name(), DecodeErrorKind::InvalidSyntax))
+        } else {
+            Ok(Some(FieldValue::from_static("member")))
+        }
+    }
+
+    fn insert<S>(sink: &mut S, value: Self::Owned) -> Result<(), InsertError>
+    where
+        S: FieldSink + ?Sized,
+    {
+        sink.set_values(Self::name(), EncodedValues::single(value))
+    }
+}
+
 impl Field for CommaItems {
     type View<'a> = Self;
     type Owned = Self;
@@ -116,7 +134,7 @@ impl Field for CommaItems {
         &COMMA_LIST
     }
 
-    fn view_with<S>(source: &S, _mode: http_headers::DecodeMode) -> Result<Option<Self::View<'_>>, http_headers::DecodeError>
+    fn view_with<S>(source: &S, _mode: DecodeMode) -> Result<Option<Self::View<'_>>, DecodeError>
     where
         S: FieldSource + ?Sized,
     {
@@ -131,7 +149,7 @@ impl Field for CommaItems {
             .map(Some)
     }
 
-    fn owned_with<S>(source: &S, mode: http_headers::DecodeMode) -> Result<Option<Self::Owned>, http_headers::DecodeError>
+    fn owned_with<S>(source: &S, mode: DecodeMode) -> Result<Option<Self::Owned>, DecodeError>
     where
         S: FieldSource + ?Sized,
     {
@@ -154,7 +172,7 @@ impl Field for SemicolonItems {
         &SEMICOLON_LIST
     }
 
-    fn view_with<S>(source: &S, _mode: http_headers::DecodeMode) -> Result<Option<Self::View<'_>>, http_headers::DecodeError>
+    fn view_with<S>(source: &S, _mode: DecodeMode) -> Result<Option<Self::View<'_>>, DecodeError>
     where
         S: FieldSource + ?Sized,
     {
@@ -169,7 +187,7 @@ impl Field for SemicolonItems {
             .map(Some)
     }
 
-    fn owned_with<S>(source: &S, mode: http_headers::DecodeMode) -> Result<Option<Self::Owned>, http_headers::DecodeError>
+    fn owned_with<S>(source: &S, mode: DecodeMode) -> Result<Option<Self::Owned>, DecodeError>
     where
         S: FieldSource + ?Sized,
     {
@@ -292,49 +310,48 @@ fn content_type_owned_outcome(map: &TestMap) -> ContentTypeOutcome {
     }
 }
 
-fn assert_parser_consistency<H: Field>(values: &[FieldValue]) {
-    let map = map_with_values::<H>(values);
-    let borrowed = borrowed_outcome::<H>(&map);
-    let owned = owned_outcome::<H>(&map);
-    if has_independent_owned_decoder::<H>() {
-        let owned_status = match &owned {
-            ParseOutcome::Parsed(_) => ParseOutcome::Parsed(Vec::new()),
-            ParseOutcome::Rejected(kind, index) => ParseOutcome::Rejected(*kind, *index),
-        };
-        assert_eq!(
-            borrowed,
-            owned_status,
-            "{} borrowed and owned decoders disagree",
-            std::any::type_name::<H>()
-        );
-    }
-
-    if let ParseOutcome::Parsed(encoded) = owned {
-        let round_trip_values: Vec<_> = encoded
-            .iter()
-            .map(|bytes| FieldValue::from_bytes(bytes).expect("a header must encode valid FieldValue bytes"))
-            .collect();
-        let round_trip = map_with_values::<H>(&round_trip_values);
-        assert_eq!(owned_outcome::<H>(&round_trip), ParseOutcome::Parsed(encoded));
+fn normalized_outcome<T>(result: &Result<Option<T>, DecodeError>) -> DecoderOutcome {
+    // Field promises the same admission policy, not identical diagnostics:
+    // empty WebSocket protocol lists report MissingValue from the view and
+    // InvalidSyntax from the owned decoder.
+    match result {
+        Ok(None) => DecoderOutcome::Absent,
+        Ok(Some(_)) => DecoderOutcome::Present,
+        Err(_) => DecoderOutcome::Rejected,
     }
 }
 
-fn has_independent_owned_decoder<H: Field>() -> bool {
-    let id = TypeId::of::<H>();
-    [
-        TypeId::of::<IfMatch>(),
-        TypeId::of::<IfNoneMatch>(),
-        TypeId::of::<AcceptRanges>(),
-        TypeId::of::<AccessControlAllowOrigin>(),
-        TypeId::of::<AccessControlAllowHeaders>(),
-        TypeId::of::<AccessControlAllowMethods>(),
-        TypeId::of::<AccessControlExposeHeaders>(),
-        TypeId::of::<AccessControlRequestHeaders>(),
-        TypeId::of::<AccessControlRequestMethod>(),
-        TypeId::of::<SecWebSocketVersion>(),
-        TypeId::of::<ReferrerPolicy>(),
-    ]
-    .contains(&id)
+fn assert_parser_consistency<H: Field>(values: &[FieldValue]) {
+    let map = map_with_values::<H>(values);
+    for mode in [DecodeMode::Strict, DecodeMode::Relaxed] {
+        let borrowed = H::view_with(&map, mode);
+        let owned = H::owned_with(&map, mode);
+        assert_eq!(
+            normalized_outcome(&borrowed),
+            normalized_outcome(&owned),
+            "{} {mode:?} borrowed and owned decoders disagree: borrowed error {:?}, owned error {:?}, values {values:?}",
+            type_name::<H>(),
+            borrowed.as_ref().err(),
+            owned.as_ref().err()
+        );
+
+        if let Ok(header) = owned {
+            let encoded = header.map_or_else(Vec::new, inserted_bytes::<H>);
+            let round_trip_values: Vec<_> = encoded
+                .iter()
+                .map(|bytes| FieldValue::from_bytes(bytes).expect("a header must encode valid FieldValue bytes"))
+                .collect();
+            let round_trip = map_with_values::<H>(&round_trip_values);
+            let decoded = H::owned_with(&round_trip, mode).expect("encoding a decoded header must preserve acceptance in the same mode");
+            // Empty lists may encode no lines and become absent on decoding.
+            assert_eq!(
+                decoded.map_or_else(Vec::new, inserted_bytes::<H>),
+                encoded,
+                "{} {mode:?} owned encode/decode round trip changed field bytes",
+                type_name::<H>()
+            );
+        }
+    }
 }
 
 fn assert_duplicate_singleton_rejected<H: Field>(value: FieldValue) {
@@ -383,7 +400,7 @@ fn trim_ows(bytes: &[u8]) -> &[u8] {
 
 fn push_reference_item(output: &mut Vec<Vec<u8>>, item: &[u8]) -> Result<(), (DecodeErrorKind, Option<usize>)> {
     if output.len() == MAX_CUSTOM_LIST_ITEMS {
-        return Err((DecodeErrorKind::InvalidSyntax, None));
+        return Err((DecodeErrorKind::SourceLimitExceeded, None));
     }
     output.push(item.to_vec());
     Ok(())
@@ -502,6 +519,60 @@ fn bounded_bytes(input: &[u8], start: usize) -> Vec<u8> {
 }
 
 #[test]
+#[should_panic(expected = "borrowed and owned decoders disagree")]
+fn parser_consistency_rejects_borrowed_only_acceptance() {
+    assert_parser_consistency::<AsymmetricField<true>>(&[FieldValue::from_static("member")]);
+}
+
+#[test]
+#[should_panic(expected = "borrowed and owned decoders disagree")]
+fn parser_consistency_rejects_owned_only_acceptance() {
+    assert_parser_consistency::<AsymmetricField<false>>(&[FieldValue::from_static("member")]);
+}
+
+#[test]
+fn parser_outcomes_distinguish_absence_presence_and_rejection() {
+    assert_eq!(normalized_outcome::<()>(&Ok(None)), DecoderOutcome::Absent);
+    assert_eq!(normalized_outcome(&Ok(Some(()))), DecoderOutcome::Present);
+    assert_eq!(
+        normalized_outcome::<()>(&Err(DecodeError::new(&COMMA_LIST, DecodeErrorKind::InvalidSyntax))),
+        DecoderOutcome::Rejected
+    );
+}
+
+#[test]
+fn websocket_parity_preserves_distinct_diagnostics_and_empty_line_semantics() {
+    let empty = [FieldValue::from_static(", ,")];
+    let map = map_with_values::<SecWebSocketProtocol>(&empty);
+    assert_eq!(
+        borrowed_outcome::<SecWebSocketProtocol>(&map),
+        ParseOutcome::Rejected(DecodeErrorKind::MissingValue, None)
+    );
+    assert_eq!(
+        owned_outcome::<SecWebSocketProtocol>(&map),
+        ParseOutcome::Rejected(DecodeErrorKind::InvalidSyntax, None)
+    );
+
+    for raw in [
+        &[][..],
+        &[""],
+        &[" \t "],
+        &[", ,"],
+        &["\"unterminated"],
+        &["chat"],
+        &["", "chat"],
+        &["chat", ""],
+        &[" ,\t, ", "chat", ""],
+    ] {
+        let values: Vec<_> = raw.iter().map(|value| FieldValue::from_static(value)).collect();
+        assert_parser_consistency::<SecWebSocketProtocol>(&values);
+        assert_parser_consistency::<SecWebSocketExtensions>(&values);
+        assert_parser_consistency::<CacheControl>(&values);
+    }
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "Bolero corpus replay requires filesystem access unavailable under Miri isolation")]
 fn arbitrary_header_values_do_not_panic() {
     bounded!().for_each(|input: &[u8]| {
         let values = shaped_field_values(input);
@@ -524,6 +595,7 @@ fn arbitrary_header_values_do_not_panic() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "Bolero corpus replay requires filesystem access unavailable under Miri isolation")]
 fn expanded_header_values_do_not_panic() {
     bounded!().for_each(|input: &[u8]| {
         let values = shaped_field_values(input);
@@ -564,6 +636,7 @@ fn expanded_header_values_do_not_panic() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "Bolero corpus replay requires filesystem access unavailable under Miri isolation")]
 fn comma_and_quoted_delimiters_match_reference() {
     bounded!().for_each(|input: &[u8]| {
         let values = shaped_field_values(input);
@@ -576,6 +649,7 @@ fn comma_and_quoted_delimiters_match_reference() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "Bolero corpus replay requires filesystem access unavailable under Miri isolation")]
 fn content_type_cached_and_uncached_agree() {
     bounded!().for_each(|input: &[u8]| {
         let value = shaped_field_value(input);
@@ -604,6 +678,7 @@ fn content_type_cached_and_uncached_agree() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "Bolero corpus replay requires filesystem access unavailable under Miri isolation")]
 fn scalar_and_simd_agree() {
     bounded!().with_type::<(Vec<u8>, Vec<u8>)>().for_each(|(left, right)| {
         let left = &left[..left.len().min(MAX_VALUE_LENGTH)];
@@ -632,6 +707,7 @@ fn scalar_and_simd_agree() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "Bolero corpus replay requires filesystem access unavailable under Miri isolation")]
 fn typed_round_trips() {
     bounded!().for_each(|input: &[u8]| {
         let number = input
@@ -838,11 +914,11 @@ fn protocol_regression_seeds() {
     ];
     assert_eq!(
         reference_delimited(&item_limit_before_quote, b';'),
-        Err((DecodeErrorKind::InvalidSyntax, None))
+        Err((DecodeErrorKind::SourceLimitExceeded, None))
     );
     assert_eq!(
         delimited_outcome::<SemicolonItems>(&item_limit_before_quote),
-        Err((DecodeErrorKind::InvalidSyntax, None))
+        Err((DecodeErrorKind::SourceLimitExceeded, None))
     );
 
     let all_empty = [FieldValue::from_static(",, ,\t,,")];

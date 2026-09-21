@@ -60,7 +60,7 @@ impl Hash for ListValues {
     reason = "specializing per call site folds the validator into the field line walk"
 )]
 #[cfg_attr(not(coverage_nightly), inline(always))]
-pub(super) fn clone_checked_values(
+fn clone_checked_values(
     values: &FieldLines<'_>,
     mut validate_value: impl FnMut(usize, FieldValueRef<'_>) -> Result<(), DecodeError>,
 ) -> Result<ListValues, DecodeError> {
@@ -156,9 +156,11 @@ fn validate_custom_values(values: &FieldLines<'_>, name: &'static FieldName, val
     let mut item_count = 0_usize;
     for value in values.repeated() {
         for item in QuotedItems::comma(value.as_bytes(), name) {
-            item_count = item_count.checked_add(1).ok_or_else(|| invalid_syntax(name))?;
+            item_count = item_count
+                .checked_add(1)
+                .ok_or_else(|| invalid(name, DecodeErrorKind::SourceLimitExceeded))?;
             if item_count > MAX_CUSTOM_LIST_ITEMS {
-                return Err(invalid_syntax(name));
+                return Err(invalid(name, DecodeErrorKind::SourceLimitExceeded));
             }
             validator(item?)?;
         }
@@ -889,12 +891,7 @@ fn scan_token_list_general(bytes: &[u8]) -> bool {
 /// A line only reaches this function once [`scan_token_list`] has rejected it,
 /// so the delimiter-aware scan it performs always fails as well.
 #[cold]
-pub(super) fn token_list_error(
-    name: &'static FieldName,
-    bytes: &[u8],
-    validator: ItemValidator,
-    value_index: Option<usize>,
-) -> DecodeError {
+fn token_list_error(name: &'static FieldName, bytes: &[u8], validator: ItemValidator, value_index: Option<usize>) -> DecodeError {
     for item in QuotedItems::comma(bytes, name) {
         match item {
             Ok(item) => {
@@ -1033,7 +1030,7 @@ pub(super) fn parse_parameter<'a>(
     Ok((name, value, compact))
 }
 
-fn valid_parameter_value(bytes: &[u8]) -> bool {
+pub(super) fn valid_parameter_value(bytes: &[u8]) -> bool {
     validate::token(bytes) || valid_quoted_string(bytes)
 }
 
@@ -1126,13 +1123,31 @@ impl<'a> Iterator for QuotedItems<'a> {
     type Item = Result<&'a [u8], DecodeError>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.finished {
+            return None;
+        }
+        let remaining = &self.bytes[self.position..];
+        if remaining.len() <= 1 && !remaining.first().is_some_and(|byte| *byte == self.delimiter || *byte == b'"') {
+            self.position = self.bytes.len();
+            self.finished = true;
+            let item = validate::trim_ows(&self.bytes[self.start..]);
+            return (!self.skip_empty || !item.is_empty()).then_some(Ok(item));
+        }
         loop {
             if self.finished {
                 return None;
             }
             let mut quoted = false;
             let mut escaped = false;
-            while let Some(byte) = self.bytes.get(self.position).copied() {
+            while self.position < self.bytes.len() {
+                if !quoted {
+                    let Some(skip) = http_headers_simd::find_either(&self.bytes[self.position..], self.delimiter, b'"') else {
+                        self.position = self.bytes.len();
+                        break;
+                    };
+                    self.position += skip;
+                }
+                let byte = self.bytes[self.position];
                 if escaped {
                     escaped = false;
                 } else if quoted && byte == b'\\' {
@@ -1179,6 +1194,178 @@ pub(super) use borrowed_list_items;
 pub(super) use decode_owned_list;
 pub(super) use list_header;
 pub(super) use owned_list_items;
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod quoted_items_differential_tests {
+    use super::QuotedItems;
+    use crate::{DecodeErrorKind, FieldName};
+
+    type ScanItem<'a> = Result<&'a [u8], (DecodeErrorKind, Option<usize>)>;
+
+    #[derive(Clone, Copy)]
+    enum State {
+        Outside,
+        Quoted,
+        Escaped,
+    }
+
+    fn trim(mut bytes: &[u8]) -> &[u8] {
+        while bytes.first().is_some_and(|byte| matches!(*byte, b' ' | b'\t')) {
+            bytes = &bytes[1..];
+        }
+        while bytes.last().is_some_and(|byte| matches!(*byte, b' ' | b'\t')) {
+            bytes = &bytes[..bytes.len() - 1];
+        }
+        bytes
+    }
+
+    fn scalar(bytes: &[u8], delimiter: u8) -> Vec<ScanItem<'_>> {
+        let mut items = Vec::new();
+        let mut state = State::Outside;
+        let mut start = 0;
+        for (index, byte) in bytes.iter().copied().enumerate() {
+            state = match (state, byte) {
+                (State::Outside, b'"') | (State::Escaped, _) => State::Quoted,
+                (State::Quoted, b'\\') => State::Escaped,
+                (State::Quoted, b'"') => State::Outside,
+                (State::Outside, _) if byte == delimiter => {
+                    let item = trim(&bytes[start..index]);
+                    if delimiter != b',' || !item.is_empty() {
+                        items.push(Ok(item));
+                    }
+                    start = index + 1;
+                    State::Outside
+                }
+                (state, _) => state,
+            };
+        }
+        match state {
+            State::Outside => {
+                let item = trim(&bytes[start..]);
+                if delimiter != b',' || !item.is_empty() {
+                    items.push(Ok(item));
+                }
+            }
+            State::Quoted | State::Escaped => items.push(Err((DecodeErrorKind::UnterminatedQuote, None))),
+        }
+        items
+    }
+
+    fn scanned(bytes: &[u8], delimiter: u8) -> Vec<ScanItem<'_>> {
+        let mut scanner = match delimiter {
+            b',' => QuotedItems::comma(bytes, &FieldName::Accept),
+            _ => QuotedItems::semicolon(bytes, &FieldName::Accept),
+        };
+        let items = scanner
+            .by_ref()
+            .map(|item| item.map_err(|error| (error.kind(), error.value_index())))
+            .collect();
+        assert!(scanner.next().is_none());
+        assert!(scanner.next().is_none());
+        items
+    }
+
+    #[test]
+    fn quote_escape_and_empty_member_results_are_explicit() {
+        assert_eq!(
+            scanned(b"br\\,gzip,\"x\\,y\",tail\\", b','),
+            vec![Ok(b"br\\".as_slice()), Ok(b"gzip"), Ok(b"\"x\\,y\""), Ok(b"tail\\")],
+        );
+        assert_eq!(
+            scanned(b"a,\"unterminated\\", b','),
+            vec![Ok(b"a".as_slice()), Err((DecodeErrorKind::UnterminatedQuote, None))],
+        );
+        assert_eq!(
+            scanned(b";\t;\"a;b\";;", b';'),
+            vec![Ok(b"".as_slice()), Ok(b""), Ok(b"\"a;b\""), Ok(b""), Ok(b"")],
+        );
+        assert_eq!(scanned(b"\x80,\xff", b','), vec![Ok(b"\x80".as_slice()), Ok(b"\xff")]);
+    }
+
+    #[test]
+    fn scalar_oracle_matches_empty_and_single_byte_tails() {
+        for delimiter in *b",;" {
+            assert_eq!(scanned(b"", delimiter), scalar(b"", delimiter));
+            for byte in crate::test_support::byte_cases(delimiter) {
+                for prefix in [b"".as_slice(), b"x", b"\"quoted\""] {
+                    let mut bytes = prefix.to_vec();
+                    if !prefix.is_empty() {
+                        bytes.push(delimiter);
+                    }
+                    assert_eq!(scanned(&bytes, delimiter), scalar(&bytes, delimiter));
+                    bytes.push(byte);
+                    assert_eq!(
+                        scanned(&bytes, delimiter),
+                        scalar(&bytes, delimiter),
+                        "{bytes:?}, delimiter {delimiter}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn scalar_oracle_matches_quote_and_delimiter_placements() {
+        const CASES: &[&[u8]] = &[
+            b"",
+            b"|",
+            b"||",
+            b" \t|",
+            b"\\|tail",
+            b"\"a|b\"|tail",
+            b"\"a\\\"|b\"|tail",
+            b"\"a\\\\\"|tail",
+            b"\"a\\",
+            b"\"a",
+            b"\\\"a|tail",
+            b"\x80|\xff",
+            b"\"a\\\xff|b\"|tail",
+            b"\0|\r\n",
+        ];
+        const BOUNDARIES: &[usize] = &[0, 1, 7, 8, 15, 16, 17, 31, 32, 33, 47, 48, 63, 64, 65, 95, 96, 127, 128, 129];
+        for delimiter in *b",;" {
+            for (offset_index, offset) in [0, 1, 7, 15].into_iter().enumerate() {
+                for (boundary_index, &prefix) in BOUNDARIES.iter().enumerate() {
+                    for suffix in [0, 65] {
+                        // Miri pairs alignment and tail shape; every boundary/case keeps both tails.
+                        if cfg!(miri) && (offset_index + boundary_index) % 2 != usize::from(suffix != 0) {
+                            continue;
+                        }
+                        for case in CASES {
+                            let mut backing = vec![b'x'; offset + prefix];
+                            backing.extend(case.iter().map(|byte| if *byte == b'|' { delimiter } else { *byte }));
+                            backing.resize(backing.len() + suffix, b'y');
+                            let bytes = &backing[offset..];
+                            assert_eq!(
+                                scanned(bytes, delimiter),
+                                scalar(bytes, delimiter),
+                                "{bytes:?}, delimiter {delimiter}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn scalar_oracle_matches_each_byte_around_vector_boundaries() {
+        for delimiter in *b",;" {
+            for boundary in [15, 16, 17, 31, 32, 33, 63, 64, 65] {
+                for byte in crate::test_support::byte_cases(delimiter) {
+                    let mut bytes = vec![b'x'; boundary];
+                    bytes.extend_from_slice(&[byte, delimiter, b'"', byte, b'\\', byte, b'"', delimiter, byte]);
+                    assert_eq!(
+                        scanned(&bytes, delimiter),
+                        scalar(&bytes, delimiter),
+                        "{bytes:?}, delimiter {delimiter}"
+                    );
+                }
+            }
+        }
+    }
+}
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -1231,8 +1418,8 @@ mod weighted_token_tests {
         .map(|member| member.as_bytes().to_vec())
         .collect();
 
-        members.extend((0_u16..=255).map(|byte| vec![u8::try_from(byte).unwrap_or(0)]));
-        members.extend((0_u16..=255).map(|byte| vec![b'g', u8::try_from(byte).unwrap_or(0), b'z']));
+        members.extend(crate::test_support::byte_cases(b'g').map(|byte| vec![byte]));
+        members.extend(crate::test_support::byte_cases(b'g').map(|byte| vec![b'g', byte, b'z']));
         members
     }
 
@@ -1246,6 +1433,9 @@ mod weighted_token_tests {
                     let fast = validate_weighted_token(&member, &FieldName::Accept, item_validator, relaxed);
                     let slow = reference(&member, &FieldName::Accept, item_validator, relaxed);
 
+                    #[cfg(miri)]
+                    assert_eq!(fast, slow, "member {member:?}, relaxed: {relaxed}");
+                    #[cfg(not(miri))]
                     assert_eq!(
                         format!("{fast:?}"),
                         format!("{slow:?}"),
@@ -1277,7 +1467,6 @@ mod token_list_tests {
         }
     }
 
-    // These tests exercise private well-known tables and token-list scanners.
     use super::{
         LONG_WELL_KNOWN_TOKEN_LISTS, QuotedItems, SHORT_WELL_KNOWN_TOKEN_LISTS, is_well_known_token_list, scan_token_list,
         scan_token_list_general,
@@ -1850,7 +2039,7 @@ mod token_list_tests {
         let mut mutated = Vec::new();
         for line in well_known_lines() {
             for position in 0..line.len() {
-                for replacement in 0..=u8::MAX {
+                for replacement in crate::test_support::substitution_bytes(line[position], position, line.len()) {
                     mutated.clear();
                     mutated.extend_from_slice(line);
                     mutated[position] = replacement;
@@ -1877,7 +2066,8 @@ mod token_list_tests {
     #[test]
     fn fast_scan_agrees_with_the_delimited_scan() {
         let alphabet: &[u8] = b"a,; \t\"\\!\x00\x80";
-        for length in 0..=4 {
+        let maximum_length = if cfg!(miri) { 2 } else { 4 };
+        for length in 0..=maximum_length {
             let mut counters = vec![0_usize; length];
             let mut input = vec![0_u8; length];
             loop {
@@ -1908,6 +2098,28 @@ mod token_list_tests {
             }
         }
 
+        #[cfg(miri)]
+        for value in [
+            b"a,a".as_slice(),
+            b"a,,",
+            b",a,",
+            b" a ",
+            b"a,\t",
+            b"a\\a",
+            b"a;!",
+            b"a\0a",
+            b"\"a\"",
+            b"a,\"",
+            b"a\"a",
+            b"a,\x80",
+            b"a, a",
+            b"a,,a",
+            b"a ,a",
+            b"a,\\a",
+        ] {
+            assert_eq!(scan_token_list(value), delimited_scan(value), "{value:?}");
+        }
+
         for value in [
             &b"GET, POST"[..],
             b"accept-encoding, origin",
@@ -1935,6 +2147,9 @@ mod token_list_tests {
         let alphabet: &[u8] = b"a,; \t\"\\!\x00\x80\x7f";
         let mut mutated = Vec::new();
         for length in 0..=base.len() {
+            if cfg!(miri) && length != base.len() && !matches!(length, 0..=2 | 7..=9 | 15..=17 | 31..=33 | 47..=49 | 63..=65) {
+                continue;
+            }
             let line = &base[..length];
             assert_eq!(scan_token_list(line), delimited_scan(line), "{:?}", line.escape_ascii().to_string());
             for position in 0..length {
@@ -1953,7 +2168,8 @@ mod token_list_tests {
         }
 
         let mut state = 0x2545_f491_4f6c_dd1d_u64;
-        for _ in 0..200_000 {
+        let cases = if cfg!(miri) { 256 } else { 200_000 };
+        for _ in 0..cases {
             state = state
                 .wrapping_mul(6_364_136_223_846_793_005)
                 .wrapping_add(1_442_695_040_888_963_407);

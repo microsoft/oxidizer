@@ -11,10 +11,13 @@ mod access_control_expose_headers;
 mod access_control_max_age;
 mod access_control_request_headers;
 mod access_control_request_method;
+mod cors_header_names;
+mod cors_methods;
+mod cors_tokens;
 mod shared;
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-mod test_support;
+mod test_map;
 
 #[doc(inline)]
 pub use access_control_allow_credentials::{
@@ -25,7 +28,10 @@ pub use access_control_allow_headers::{AccessControlAllowHeaders, AccessControlA
 #[doc(inline)]
 pub use access_control_allow_methods::{AccessControlAllowMethods, AccessControlAllowMethodsOwned, AccessControlAllowMethodsView};
 #[doc(inline)]
-pub use access_control_allow_origin::{AccessControlAllowOrigin, AccessControlAllowOriginOwned, AccessControlAllowOriginView};
+pub use access_control_allow_origin::{
+    AccessControlAllowOrigin, AccessControlAllowOriginKind, AccessControlAllowOriginOwned, AccessControlAllowOriginView, OriginDomainView,
+    OriginHost, OriginScheme, SerializedOriginView,
+};
 #[doc(inline)]
 pub use access_control_expose_headers::{AccessControlExposeHeaders, AccessControlExposeHeadersOwned, AccessControlExposeHeadersView};
 #[doc(inline)]
@@ -35,4 +41,6 @@ pub use access_control_request_headers::{AccessControlRequestHeaders, AccessCont
 #[doc(inline)]
 pub use access_control_request_method::{AccessControlRequestMethod, AccessControlRequestMethodOwned, AccessControlRequestMethodView};
 #[doc(inline)]
-pub use shared::{CorsHeaderNameView, CorsMethodView};
+pub use cors_header_names::CorsHeaderNames;
+#[doc(inline)]
+pub use cors_methods::CorsMethods;

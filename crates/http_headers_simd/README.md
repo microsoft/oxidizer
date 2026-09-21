@@ -19,9 +19,14 @@ SIMD implementation details for the
 **Do not depend on this crate directly.** Use `http_headers` instead.
 
 The default `std` feature enables runtime CPU-feature detection.
-With default features disabled, dispatch uses compile-time target features
-and architecture-specific fallbacks. The `benchmarking` and `test-util`
-features expose unstable repository instrumentation only.
+With default features disabled, x86 and x86-64 use compile-time features
+plus cached runtime `CPUID` detection for SSSE3 and SSE4.2 when those features
+are not enabled at compile time. SSE2 is guaranteed on x86-64 and requires
+compile-time support on x86. `AArch64` NEON availability follows compile-time
+target features. Unavailable accelerated paths fall back to scalar code.
+
+The `benchmarking` and `test-util` features expose unstable repository
+instrumentation only.
 
 
 <hr/>

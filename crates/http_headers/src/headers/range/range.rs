@@ -5,6 +5,8 @@ use std::fmt::Write as _;
 use std::ops::{Bound, RangeBounds};
 use std::{fmt, str};
 
+use http_headers_simd::ascii_str;
+
 use super::super::{invalid_syntax, trim_ows};
 use super::shared::{parse_number, validate_range_unit_for};
 use crate::{DecodeError, DecodeErrorKind, FieldName, FieldValue, FieldValueRef, SingleValueField, validate};
@@ -71,7 +73,7 @@ fn parse_range_relaxed(bytes: &[u8]) -> Result<ParsedRange<'_>, DecodeError> {
     let unit_bytes = trim_ows(&bytes[..separator]);
     let payload = trim_ows(&bytes[separator + 1..]);
     validate_range_unit_for(unit_bytes, &FieldName::Range)?;
-    let unit = str::from_utf8(unit_bytes).expect("validated range units are ASCII");
+    let unit = ascii_str(unit_bytes).expect("validated range units are ASCII");
     let is_bytes = validate::eq_ignore_ascii_case(unit_bytes, b"bytes");
     if is_bytes {
         validate_byte_range_set_relaxed(payload)?;
@@ -380,8 +382,9 @@ impl RangeOwned {
     ///
     /// # Errors
     ///
-    /// Returns an error when the unit is not a token or the payload is not
-    /// nonempty visible ASCII.
+    /// Returns an error when the unit is not a token, is the reserved
+    /// case-insensitive `bytes` unit, or the payload is not nonempty visible
+    /// ASCII. Use [`Self::bytes`] for byte ranges.
     /// # Examples
     ///
     /// ```rust
@@ -396,8 +399,9 @@ impl RangeOwned {
     pub fn extension(unit: impl AsRef<str>, range_set: impl AsRef<str>) -> Result<Self, DecodeError> {
         let unit = unit.as_ref();
         let range_set = range_set.as_ref();
-        if !validate::token(unit.as_bytes()) {
-            return Err(DecodeError::new(&FieldName::Range, DecodeErrorKind::InvalidToken));
+        validate_range_unit_for(unit.as_bytes(), &FieldName::Range)?;
+        if validate::eq_ignore_ascii_case(unit.as_bytes(), b"bytes") {
+            return Err(invalid_syntax(&FieldName::Range));
         }
         if !valid_extension_payload(range_set.as_bytes()) {
             return Err(invalid_syntax(&FieldName::Range));
@@ -495,6 +499,7 @@ impl RangeOwned {
         if self.bytes { None } else { self.range_set() }
     }
 
+    #[inline]
     fn range_set(&self) -> Option<&[u8]> {
         let bytes = self.value.as_bytes();
         bytes.get(separator_index(bytes)?.saturating_add(1)..).map(trim_ows)
@@ -676,23 +681,7 @@ impl SingleValueField for Range {
     }
 }
 
-impl TryFrom<&str> for RangeOwned {
-    type Error = DecodeError;
-
-    fn try_from(wire: &str) -> Result<Self, Self::Error> {
-        let value = FieldValue::from_str(wire).map_err(|_invalid| invalid_syntax(&FieldName::Range))?;
-        Self::try_from(value)
-    }
-}
-
-impl TryFrom<String> for RangeOwned {
-    type Error = DecodeError;
-
-    fn try_from(wire: String) -> Result<Self, Self::Error> {
-        let value = FieldValue::try_from(wire).map_err(|_invalid| invalid_syntax(&FieldName::Range))?;
-        Self::try_from(value)
-    }
-}
+super::super::shared::impl_string_conversions!(RangeOwned, &FieldName::Range, invalid_syntax, wire);
 
 impl TryFrom<FieldValue> for RangeOwned {
     type Error = DecodeError;
@@ -747,7 +736,7 @@ pub(super) fn parse_range_slow(bytes: &[u8]) -> Result<ParsedRange<'_>, DecodeEr
     let unit_bytes = &bytes[..separator];
     let payload = &bytes[separator + 1..];
     validate_range_unit_for(unit_bytes, &FieldName::Range)?;
-    let unit = str::from_utf8(unit_bytes).expect("validated range units are ASCII");
+    let unit = ascii_str(unit_bytes).expect("validated range units are ASCII");
     let is_bytes = validate::eq_ignore_ascii_case(unit_bytes, b"bytes");
     if is_bytes {
         validate_byte_range_set(bytes, separator + 1)?;
@@ -877,14 +866,13 @@ fn scan_byte_range_set(bytes: &[u8], start: usize) -> bool {
             return true;
         }
 
-        // The window always holds the delimiter, and a rotation that reaches
-        // past it only ever yields a digit, which stops the optional space.
+        // The delimiter fits the word, but following OWS may lie beyond it.
         let rest = word.rotate_right((item as u32) << 3);
         if rest as u8 != b',' {
             return false;
         }
         at = end + 1;
-        if matches!((rest >> 8) as u8, b' ' | b'\t') {
+        if matches!(bytes.get(at), Some(b' ' | b'\t')) {
             at += 1;
         }
     }
@@ -1033,7 +1021,8 @@ mod tests {
 
     use super::{
         ByteRangeIter, ByteRangeSpec, Range, RangeOwned, digit_run, nondigit_bits, parse_byte_spec, parse_byte_spec_relaxed, parse_range,
-        parse_range_with, scan_byte_range_set, scan_byte_range_spec, valid_extension_payload, validate_byte_range_set_relaxed, word_at,
+        parse_range_with, scan_byte_range_set, scan_byte_range_spec, valid_extension_payload, validate_byte_range_set_relaxed,
+        validate_byte_range_set_slow, word_at,
     };
     use crate::{DecodeErrorKind, DecodeMode, FieldName, FieldValue, FieldValueRef, SingleValueField};
 
@@ -1268,6 +1257,60 @@ mod tests {
                 .kind(),
             DecodeErrorKind::InvalidSyntax
         );
+    }
+
+    #[test]
+    fn range_unit_projection_preserves_opaque_payloads_and_rejects_unicode_units() {
+        for (wire, mode, unit, payload) in [
+            (
+                b"items=first:last".as_slice(),
+                DecodeMode::Strict,
+                "items",
+                b"first:last".as_slice(),
+            ),
+            (b" Items = first:last ", DecodeMode::Relaxed, "Items", b"first:last"),
+            (b"Bytes=0-9", DecodeMode::Strict, "Bytes", b"0-9"),
+            (b" BYTES = 0 - 9 ", DecodeMode::Relaxed, "BYTES", b"0 - 9"),
+        ] {
+            let parsed = parse_range_with(wire, mode).unwrap();
+            assert_eq!(parsed.unit, unit);
+            assert_eq!(parsed.payload, payload);
+        }
+        for wire in [
+            b"it\xc3\xa9ms=opaque".as_slice(),
+            b"\xff=opaque",
+            b"Byt\x80s=0-9",
+            b"items=\xff\x80",
+        ] {
+            for mode in [DecodeMode::Strict, DecodeMode::Relaxed] {
+                assert!(parse_range_with(wire, mode).is_err(), "{wire:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn word_scanner_reads_ows_after_full_windows() {
+        for wire in [
+            "100-109, 200-209",
+            "100-109,\t200-209",
+            "100-109,200-209",
+            "-123456, 200-209",
+            "123456-, 200-209",
+        ] {
+            assert!(scan_byte_range_set(wire.as_bytes(), 0), "{wire}");
+            validate_byte_range_set_slow(wire.as_bytes()).unwrap();
+        }
+        for separator in u8::MIN..=u8::MAX {
+            let mut wire = b"100-109,".to_vec();
+            wire.push(separator);
+            wire.extend_from_slice(b"200-209");
+            if scan_byte_range_set(&wire, 0) {
+                assert!(validate_byte_range_set_slow(&wire).is_ok(), "{wire:?}");
+            }
+        }
+        for wire in ["100-109, \t200-209", "100-109, ", "100-109, 300-299", "100-109,\t"] {
+            assert!(!scan_byte_range_set(wire.as_bytes(), 0), "{wire}");
+        }
     }
 
     #[test]

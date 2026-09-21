@@ -426,8 +426,10 @@ mod tests {
 
         // The wide alphabet covers every class, and the narrow one reaches the
         // lengths that hold two specifications and a separator between them.
-        sweep(ALPHABET, 0..=5);
-        sweep(NARROW, 6..=8);
+        let wide_max = if cfg!(miri) { 3 } else { 5 };
+        let narrow_max = if cfg!(miri) { 7 } else { 8 };
+        sweep(ALPHABET, 0..=wide_max);
+        sweep(NARROW, 6..=narrow_max);
     }
 
     #[test]

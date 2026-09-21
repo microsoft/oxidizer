@@ -33,6 +33,11 @@
 //! source as they are generally faster. Use owned structs when the parsed header
 //! data needs to be retained (such as in a cache).
 //!
+//! Source and sink operations use static field-name descriptors, including
+//! custom names stored in a `static LazyLock<FieldName>`. Locally constructed
+//! runtime names are supported by [`FieldName`] for validation and conversion,
+//! but dynamic lookup and mutation must use the container's native API.
+//!
 //! [`Field::view`] returns a header's
 //! borrowed `*View` type, whose lifetime is tied to the source.
 //!
@@ -101,6 +106,41 @@
 //! Both methods return `Ok(None)` when the header is absent and `Err` when a
 //! present value is malformed.
 //!
+//! ## Reading validated members
+//!
+//! Structured headers expose semantic values as well as their original wire
+//! representation. `AllowOwned::methods()` yields case-sensitive method tokens;
+//! `VaryOwned::entries()` distinguishes wildcard members from case-insensitive
+//! field names. These borrowed member reads do not allocate.
+//!
+//! ```rust
+//! # #[cfg(feature = "headers-negotiation")]
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! use http_headers::headers::{AllowOwned, MethodView, VaryOwned};
+//!
+//! let allow = AllowOwned::try_from("GET, HEAD, CUSTOM")?;
+//! assert!(allow.methods().any(|method| method == MethodView::GET));
+//! assert!(!allow.methods().any(|method| method == MethodView::POST));
+//!
+//! let vary = VaryOwned::try_from("Accept-Encoding, X-Tenant")?;
+//! assert!(!vary.contains_wildcard());
+//! assert!(vary.entries().any(|entry| {
+//!     entry
+//!         .field_name()
+//!         .is_some_and(|name| name.eq_ignore_ascii_case("x-tenant"))
+//! }));
+//! # Ok(())
+//! # }
+//! # #[cfg(not(feature = "headers-negotiation"))]
+//! # fn main() {}
+//! ```
+//!
+//! The Accept family exposes typed ranges, parameters, and exact quality
+//! weights through `entries()`. Location exposes URI-reference components
+//! through `uri_reference()`. Host and Allow-Origin retain parsed authority
+//! components. Semantic access does not sort lists or replace the original
+//! field lines used for forwarding.
+//!
 //! # Producing headers
 //!
 //! You produce headers by populating an implementation of the [`sink::FieldSink`] trait. The
@@ -109,7 +149,8 @@
 //! [`Request`](https://docs.rs/http/latest/http/request/struct.Request.html), and
 //! [`Response`](https://docs.rs/http/latest/http/response/struct.Response.html).
 //!
-//! The [`sink::FieldSinkExt`] trait provides fluent methods that work for any sink:
+//! Enabling a header-family feature exposes `sink::FieldSinkExt`, whose fluent
+//! methods work for any sink. Core-only builds use [`sink::FieldSink`] directly.
 //!
 //! ```rust
 //! # #[cfg(all(feature = "http", feature = "headers-all"))]
@@ -414,9 +455,10 @@
 //! # Performance
 //!
 //! [`docs/PERF.md`](https://github.com/microsoft/oxidizer/blob/main/crates/http_headers/docs/PERF.md)
-//! records comparative measurements against `headers 0.4.1`. Borrowed reads
-//! generally avoid allocations; some operations still cost more because this
-//! crate validates more grammar or returns richer semantic types.
+//! records comparative typed-decode-and-read measurements against `headers 0.4.1`.
+//! Results vary by header, ownership mode, and hardware, and include both faster
+//! and slower cases. The table does not measure comparative header production or
+//! end-to-end request processing. Borrowed reads generally avoid allocations.
 //!
 //! # Cargo features
 //!
@@ -446,7 +488,7 @@
 //! This crate is an alternative to the popular [`headers`](https://crates.io/crates/headers) crate.
 //! `http_headers` has the following benefits:
 //!
-//! - Faster header parsing and production
+//! - Faster decoding for some headers in the measured configurations
 //! - Supports more headers
 //! - Performs more robust validation to avoid downstream surprises
 //! - Supports explicit relaxed parsing options to support common malformed headers
@@ -478,12 +520,17 @@ mod field_value;
 pub mod headers;
 #[cfg(feature = "http")]
 mod http_adapter;
+#[cfg(all(test, miri, feature = "http"))]
+mod miri_http_map;
 #[cfg(feature = "serde")]
 mod serde_impls;
 pub mod sink;
 pub mod source;
 #[cfg(test)]
 mod test_sink;
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod test_support;
 mod validate;
 
 #[doc(inline)]

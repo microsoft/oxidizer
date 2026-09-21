@@ -8,7 +8,7 @@
 use std::iter;
 
 use http_headers::headers::{SecWebSocketExtensions, SecWebSocketProtocol, SecWebSocketVersion};
-use http_headers::source::{FieldLines, FieldSource, MAX_CUSTOM_FIELD_BYTES, MAX_CUSTOM_FIELD_LINES, MAX_CUSTOM_LIST_ITEMS};
+use http_headers::source::{FieldLines, FieldSource};
 use http_headers::{DecodeError, DecodeErrorKind, DecodeMode, Field, FieldName, FieldValueRef};
 
 struct RawSource<'a> {
@@ -31,17 +31,23 @@ impl FieldSource for RawSource<'_> {
 }
 
 fn check<F: Field>(values: &[&[u8]], view: Result<bool, DecodeError>, owned: Result<bool, DecodeError>) {
+    // Miri checks every real budget with both ownerships, without repeating the
+    // large inputs across source representations and mode-independent decoders.
+    let budget_sample = cfg!(miri) && (values.len() >= 128 || values.iter().any(|value| value.len() >= 1_024));
     let mut source = RawSource {
         name: F::name(),
         values: values.iter().map(|bytes| FieldValueRef::new(bytes)).collect(),
         single: false,
     };
     for single in [false, true] {
-        if single && values.len() != 1 {
+        if single && (values.len() != 1 || budget_sample) {
             continue;
         }
         source.single = single;
         for mode in [DecodeMode::Strict, DecodeMode::Relaxed] {
+            if budget_sample && mode == DecodeMode::Relaxed {
+                continue;
+            }
             assert_eq!(
                 F::view_with(&source, mode).map(|value| value.is_some()),
                 view,
@@ -60,26 +66,27 @@ fn check<F: Field>(values: &[&[u8]], view: Result<bool, DecodeError>, owned: Res
 
 fn check_limits<F: Field>(item: &[u8], members_at_limit: usize) {
     let invalid = Err(DecodeError::new(F::name(), DecodeErrorKind::InvalidSyntax));
+    let limit = Err(DecodeError::new(F::name(), DecodeErrorKind::SourceLimitExceeded));
     let mut bytes = item.to_vec();
-    bytes.resize(MAX_CUSTOM_FIELD_BYTES, b' ');
+    bytes.resize(65_536, b' ');
     check::<F>(&[&bytes], Ok(true), Ok(true));
     bytes.push(b' ');
-    check::<F>(&[&bytes], invalid, invalid);
+    check::<F>(&[&bytes], limit, limit);
 
-    let mut lines = vec![item; MAX_CUSTOM_FIELD_LINES];
+    let mut lines = vec![item; 128];
     check::<F>(&lines, Ok(true), Ok(true));
     lines.push(item);
-    check::<F>(&lines, invalid, invalid);
+    check::<F>(&lines, limit, limit);
 
     let mut members = iter::repeat_n(item, members_at_limit).collect::<Vec<_>>().join(&b',');
     check::<F>(&[&members], Ok(true), Ok(true));
     members.push(b',');
     members.extend_from_slice(item);
-    check::<F>(&[&members], invalid, invalid);
+    check::<F>(&[&members], limit, limit);
 
     // Source validation precedes even a malformed first grammar item.
-    check::<F>(&[b"/", &bytes], invalid, invalid);
-    check::<F>(&[b"/", &members], invalid, invalid);
+    check::<F>(&[b"/", &bytes], limit, limit);
+    check::<F>(&[b"/", &members], limit, limit);
     for invalid_bytes in [b"\r".as_slice(), b"\n", b"\0", b"\x1f", b"\x7f"] {
         check::<F>(&[invalid_bytes], invalid, invalid);
         check::<F>(&[b"\"unterminated", invalid_bytes], invalid, invalid);
@@ -88,23 +95,26 @@ fn check_limits<F: Field>(item: &[u8], members_at_limit: usize) {
 
 #[test]
 fn websocket_custom_source_limits_cover_bare_and_quoted_paths() {
-    check_limits::<SecWebSocketVersion>(b"13", MAX_CUSTOM_LIST_ITEMS);
-    check_limits::<SecWebSocketProtocol>(b"chat", MAX_CUSTOM_LIST_ITEMS);
-    check_limits::<SecWebSocketExtensions>(b"permessage-deflate", MAX_CUSTOM_LIST_ITEMS);
+    check_limits::<SecWebSocketVersion>(b"13", 1_024);
+    check_limits::<SecWebSocketProtocol>(b"chat", 1_024);
+    check_limits::<SecWebSocketExtensions>(b"permessage-deflate", 1_024);
     // Each parameter adds a semicolon; the initial extension also consumes an item.
-    check_limits::<SecWebSocketExtensions>(b"x; p=\"ab\"", MAX_CUSTOM_LIST_ITEMS - 1);
+    check_limits::<SecWebSocketExtensions>(b"x; p=\"ab\"", 1_023);
 }
 
 #[test]
 fn websocket_extension_parameter_budget_covers_quoted_values() {
     let mut bytes = b"x".to_vec();
-    for _ in 1..MAX_CUSTOM_LIST_ITEMS {
+    for _ in 1..1_024 {
         bytes.extend_from_slice(b";p=\"a\\b\"");
     }
     check::<SecWebSocketExtensions>(&[&bytes], Ok(true), Ok(true));
     bytes.extend_from_slice(b";p=\"a\\b\"");
-    let invalid = Err(DecodeError::new(&FieldName::SecWebSocketExtensions, DecodeErrorKind::InvalidSyntax));
-    check::<SecWebSocketExtensions>(&[&bytes], invalid, invalid);
+    let limit = Err(DecodeError::new(
+        &FieldName::SecWebSocketExtensions,
+        DecodeErrorKind::SourceLimitExceeded,
+    ));
+    check::<SecWebSocketExtensions>(&[&bytes], limit, limit);
 }
 
 #[test]
@@ -134,7 +144,7 @@ fn websocket_fallback_errors_preserve_kind_and_physical_line_index() {
 #[test]
 fn http_websocket_versions_are_not_subject_to_custom_source_limits() {
     let mut map = http::HeaderMap::new();
-    for _ in 0..MAX_CUSTOM_FIELD_LINES {
+    for _ in 0..128 {
         map.append(http::header::SEC_WEBSOCKET_VERSION, http::HeaderValue::from_static("13"));
     }
     map.append(http::header::SEC_WEBSOCKET_VERSION, http::HeaderValue::from_static("255"));

@@ -134,6 +134,46 @@ macro_rules! impl_field_value_conversion {
 
 pub(super) use impl_field_value_conversion;
 
+macro_rules! impl_string_conversions {
+    ($owned:ty, $name:expr, $invalid:path, $input:ident) => {
+        impl TryFrom<&str> for $owned {
+            type Error = $crate::DecodeError;
+
+            fn try_from($input: &str) -> Result<Self, Self::Error> {
+                let value = $crate::FieldValue::from_str($input).map_err(|_invalid| $invalid($name))?;
+                Self::try_from(value)
+            }
+        }
+
+        impl TryFrom<String> for $owned {
+            type Error = $crate::DecodeError;
+
+            fn try_from($input: String) -> Result<Self, Self::Error> {
+                let value = $crate::FieldValue::try_from($input).map_err(|_invalid| $invalid($name))?;
+                Self::try_from(value)
+            }
+        }
+    };
+}
+
+pub(super) use impl_string_conversions;
+
+macro_rules! impl_value_count_debug {
+    ($($value:ty => $name:literal),+ $(,)?) => {
+        $(
+            impl std::fmt::Debug for $value {
+                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.debug_struct($name)
+                        .field("value_count", &self.values.len())
+                        .finish()
+                }
+            }
+        )+
+    };
+}
+
+pub(super) use impl_value_count_debug;
+
 fn parse_field_value(name: &'static FieldName, value: &str) -> Result<FieldValue, DecodeError> {
     match FieldValue::from_str(value) {
         Ok(value) => Ok(value),

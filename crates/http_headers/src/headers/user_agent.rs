@@ -190,23 +190,7 @@ impl SingleValueField for UserAgent {
     }
 }
 
-impl TryFrom<&str> for UserAgentOwned {
-    type Error = DecodeError;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let value = FieldValue::from_str(value).map_err(|_invalid| super::invalid_syntax(&FieldName::UserAgent))?;
-        Self::try_from(value)
-    }
-}
-
-impl TryFrom<String> for UserAgentOwned {
-    type Error = DecodeError;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        let value = FieldValue::try_from(value).map_err(|_invalid| super::invalid_syntax(&FieldName::UserAgent))?;
-        Self::try_from(value)
-    }
-}
+super::shared::impl_string_conversions!(UserAgentOwned, &FieldName::UserAgent, super::invalid_syntax, value);
 
 impl TryFrom<FieldValue> for UserAgentOwned {
     type Error = DecodeError;
@@ -219,7 +203,7 @@ impl TryFrom<FieldValue> for UserAgentOwned {
 
 #[inline]
 fn validate(value: FieldValueRef<'_>) -> Result<(), DecodeError> {
-    if super::has_non_ows(value.as_bytes()) {
+    if crate::validate::field_value(value.as_bytes()) && super::has_non_ows(value.as_bytes()) {
         Ok(())
     } else {
         Err(super::invalid_syntax(&FieldName::UserAgent))
@@ -236,7 +220,83 @@ mod tests {
 
     use super::{UserAgent, UserAgentOwned};
     use crate::sink::FieldSink;
-    use crate::{DecodeErrorKind, FieldName, FieldValue, SingleValueField, TestSink};
+    use crate::source::{FieldLines, FieldSource};
+    use crate::{DecodeErrorKind, DecodeMode, Field, FieldName, FieldValue, FieldValueRef, SingleValueField, TestSink};
+
+    struct RawSource<'a>(FieldValueRef<'a>);
+
+    impl FieldSource for RawSource<'_> {
+        fn lines(&self, name: &'static FieldName) -> Option<FieldLines<'_>> {
+            FieldLines::from_borrowed(name, std::slice::from_ref(&self.0))
+        }
+    }
+
+    #[test]
+    fn direct_and_source_decoders_reject_every_forbidden_field_byte() {
+        for byte in (0..=0x1f).chain(std::iter::once(0x7f)).filter(|byte| *byte != b'\t') {
+            let wire = [b'x', byte, b'y'];
+            let value = FieldValueRef::new(&wire);
+            let source = RawSource(value);
+            assert_eq!(UserAgent::decode_view(value).unwrap_err().kind(), DecodeErrorKind::InvalidSyntax);
+            assert_eq!(
+                UserAgentOwned::try_from(String::from_utf8(wire.to_vec()).unwrap())
+                    .unwrap_err()
+                    .kind(),
+                DecodeErrorKind::InvalidSyntax
+            );
+            for mode in [DecodeMode::Strict, DecodeMode::Relaxed] {
+                assert_eq!(
+                    UserAgent::decode_view_with(value, mode).unwrap_err().kind(),
+                    DecodeErrorKind::InvalidSyntax
+                );
+                assert_eq!(
+                    UserAgent::view_with(&source, mode).unwrap_err().kind(),
+                    DecodeErrorKind::InvalidSyntax
+                );
+                assert_eq!(
+                    UserAgent::owned_with(&source, mode).unwrap_err().kind(),
+                    DecodeErrorKind::InvalidSyntax
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn opaque_wire_bytes_and_sensitivity_survive_both_decode_modes() {
+        for wire in [b" \tclient/1 (opaque)\t ".as_slice(), b" \t\x80\xff\t "] {
+            for sensitive in [false, true] {
+                let value = FieldValueRef::new(wire).with_sensitive(sensitive);
+                let source = RawSource(value);
+                for mode in [DecodeMode::Strict, DecodeMode::Relaxed] {
+                    let direct = UserAgent::decode_view_with(value, mode).unwrap();
+                    let view = UserAgent::view_with(&source, mode).unwrap().unwrap();
+                    let owned = UserAgent::decode_owned_with(value.try_to_field_value().unwrap(), mode).unwrap();
+                    let sourced = UserAgent::owned_with(&source, mode).unwrap().unwrap();
+                    assert_eq!(direct.as_bytes(), wire);
+                    assert_eq!(view.as_bytes(), wire);
+                    assert_eq!(direct.field_value().is_sensitive(), sensitive);
+                    assert_eq!(view.field_value().is_sensitive(), sensitive);
+                    assert_eq!(owned, sourced);
+                    assert_eq!(UserAgent::as_field_value(&owned).as_bytes(), wire);
+                    assert_eq!(UserAgent::as_field_value(&owned).is_sensitive(), sensitive);
+                    if wire.contains(&0xff) {
+                        assert_eq!(direct.as_str().unwrap_err().kind(), DecodeErrorKind::InvalidUtf8);
+                    }
+                    #[cfg(feature = "http")]
+                    {
+                        let mut map = http::HeaderMap::new();
+                        map.insert(http::header::USER_AGENT, http::HeaderValue::try_from(value).unwrap());
+                        let view = UserAgent::view_with(&map, mode).unwrap().unwrap();
+                        let mapped = UserAgent::owned_with(&map, mode).unwrap().unwrap();
+                        assert_eq!(view.as_bytes(), wire);
+                        assert_eq!(view.field_value().is_sensitive(), sensitive);
+                        assert_eq!(mapped, owned);
+                        assert_eq!(UserAgent::as_field_value(&mapped).is_sensitive(), sensitive);
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn constructors_accessors_and_header_round_trip() {

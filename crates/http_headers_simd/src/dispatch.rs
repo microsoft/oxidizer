@@ -12,8 +12,8 @@ use crate::{base64, scalar, uri};
 /// On an AMD EPYC 7763, x86-64 Criterion and Callgrind measurements at 16,
 /// 17, and 31 bytes favored SIMD for token, `token68`, field-value, and
 /// interesting-byte scans. Their 16-byte instruction counts fell by 40-63%
-/// and wall-clock times by 31-65%. Architectures not measured here retain the
-/// previous two-vector crossover.
+/// and wall-clock times by 31-65%. Architectures not measured here use a
+/// two-vector crossover.
 pub(super) const SIMD_THRESHOLD: usize = if cfg!(any(target_arch = "x86", target_arch = "x86_64")) {
     16
 } else {
@@ -25,8 +25,8 @@ pub(super) const SIMD_THRESHOLD: usize = if cfg!(any(target_arch = "x86", target
 /// The same x86-64 measurements did not justify lowering this crossover:
 /// SIMD saved 12 instructions at 16 and 17 bytes but cost 185 at 31 bytes.
 /// Raising it to 48 saved work at 47 bytes but regressed 32- and 33-byte
-/// cases, so 32 remains the best monotonic cutoff. `AArch64` retains its prior
-/// threshold because no measurements support changing it.
+/// cases, so 32 remains the best measured monotonic cutoff. `AArch64` uses 32
+/// because no measurements support another threshold.
 const EQUALITY_SIMD_THRESHOLD: usize = 32;
 
 /// The shortest reference the URI subset scanner vectorizes.
@@ -688,7 +688,9 @@ const fn sse2_available() -> bool {
 fn sse2_available() -> bool {
     #[cfg(feature = "std")]
     {
-        std::arch::is_x86_feature_detected!("sse2")
+        use std::arch;
+
+        arch::is_x86_feature_detected!("sse2")
     }
     #[cfg(not(feature = "std"))]
     {
@@ -704,7 +706,9 @@ fn ssse3_available() -> bool {
     }
     #[cfg(all(not(target_feature = "ssse3"), feature = "std"))]
     {
-        std::arch::is_x86_feature_detected!("ssse3")
+        use std::arch;
+
+        arch::is_x86_feature_detected!("ssse3")
     }
     #[cfg(all(not(target_feature = "ssse3"), not(feature = "std")))]
     {
@@ -744,7 +748,9 @@ fn sse42_available() -> bool {
     }
     #[cfg(all(not(target_feature = "sse4.2"), feature = "std"))]
     {
-        std::arch::is_x86_feature_detected!("sse4.2")
+        use std::arch;
+
+        arch::is_x86_feature_detected!("sse4.2")
     }
     #[cfg(all(not(target_feature = "sse4.2"), not(feature = "std")))]
     {
@@ -779,7 +785,9 @@ fn cached_sse42_available() -> bool {
 fn neon_available() -> bool {
     #[cfg(feature = "std")]
     {
-        std::arch::is_aarch64_feature_detected!("neon")
+        use std::arch;
+
+        arch::is_aarch64_feature_detected!("neon")
     }
     #[cfg(not(feature = "std"))]
     {
@@ -833,6 +841,8 @@ fn backend_for_x86(packed_ranges: bool, baseline: bool) -> crate::Backend {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    use std::arch;
     #[cfg(not(feature = "std"))]
     use std::vec;
 
@@ -934,15 +944,15 @@ mod tests {
         #[cfg(target_arch = "x86")]
         assert_eq!(
             super::sse2_available(),
-            cfg!(target_feature = "sse2") || cfg!(feature = "std") && std::arch::is_x86_feature_detected!("sse2")
+            cfg!(target_feature = "sse2") || cfg!(feature = "std") && arch::is_x86_feature_detected!("sse2")
         );
         assert_eq!(
             super::ssse3_available(),
-            cfg!(target_feature = "ssse3") || std::arch::is_x86_feature_detected!("ssse3")
+            cfg!(target_feature = "ssse3") || arch::is_x86_feature_detected!("ssse3")
         );
         assert_eq!(
             super::sse42_available(),
-            cfg!(target_feature = "sse4.2") || std::arch::is_x86_feature_detected!("sse4.2")
+            cfg!(target_feature = "sse4.2") || arch::is_x86_feature_detected!("sse4.2")
         );
     }
 
@@ -950,7 +960,7 @@ mod tests {
     #[test]
     fn lower_x86_dispatch_tiers_and_scalar_fallbacks_are_directly_tested() {
         #[cfg(target_arch = "x86")]
-        if !std::arch::is_x86_feature_detected!("sse2") {
+        if !arch::is_x86_feature_detected!("sse2") {
             return;
         }
 
@@ -1027,7 +1037,7 @@ mod tests {
             // SAFETY: false feature flags select the scalar implementation.
             unsafe { super::is_simple_uri_path_x86(&long, false, false, false) }
         );
-        let ssse3 = std::arch::is_x86_feature_detected!("ssse3");
+        let ssse3 = arch::is_x86_feature_detected!("ssse3");
         assert_eq!(
             ssse3.then(|| {
                 // SAFETY: runtime detection establishes SSSE3 support and the input
@@ -1077,9 +1087,10 @@ mod tests {
     ))]
     #[test]
     fn no_std_ssse3_detection_is_stable_after_caching() {
-        let first = super::ssse3_available();
+        let expected = arch::is_x86_feature_detected!("ssse3");
+        assert_eq!(super::ssse3_available(), expected);
         for _ in 0..8 {
-            assert_eq!(super::ssse3_available(), first);
+            assert_eq!(super::ssse3_available(), expected);
         }
     }
 
@@ -1090,9 +1101,10 @@ mod tests {
     ))]
     #[test]
     fn no_std_sse42_detection_is_stable_after_caching() {
-        let first = super::sse42_available();
+        let expected = arch::is_x86_feature_detected!("sse4.2");
+        assert_eq!(super::sse42_available(), expected);
         for _ in 0..8 {
-            assert_eq!(super::sse42_available(), first);
+            assert_eq!(super::sse42_available(), expected);
         }
     }
 

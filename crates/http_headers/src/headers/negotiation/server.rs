@@ -211,23 +211,7 @@ impl SingleValueField for Server {
     }
 }
 
-impl TryFrom<&str> for ServerOwned {
-    type Error = DecodeError;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let value = FieldValue::from_str(value).map_err(|_invalid| invalid_syntax(&FieldName::Server))?;
-        Self::try_from(value)
-    }
-}
-
-impl TryFrom<String> for ServerOwned {
-    type Error = DecodeError;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        let value = FieldValue::try_from(value).map_err(|_invalid| invalid_syntax(&FieldName::Server))?;
-        Self::try_from(value)
-    }
-}
+super::super::shared::impl_string_conversions!(ServerOwned, &FieldName::Server, invalid_syntax, value);
 
 impl TryFrom<FieldValue> for ServerOwned {
     type Error = DecodeError;
@@ -240,7 +224,7 @@ impl TryFrom<FieldValue> for ServerOwned {
 
 #[inline]
 fn validate_server(value: FieldValueRef<'_>) -> Result<(), DecodeError> {
-    if super::super::has_non_ows(value.as_bytes()) {
+    if crate::validate::field_value(value.as_bytes()) && super::super::has_non_ows(value.as_bytes()) {
         Ok(())
     } else {
         Err(invalid_syntax(&FieldName::Server))
@@ -254,7 +238,78 @@ mod tests {
     use std::hash::{Hash, Hasher};
 
     use super::{Server, ServerOwned, validate_server};
-    use crate::{DecodeErrorKind, FieldName, FieldValue, FieldValueRef, SingleValueField};
+    use crate::source::{FieldLines, FieldSource};
+    use crate::{DecodeErrorKind, DecodeMode, Field, FieldName, FieldValue, FieldValueRef, SingleValueField};
+
+    struct RawSource<'a>(FieldValueRef<'a>);
+
+    impl FieldSource for RawSource<'_> {
+        fn lines(&self, name: &'static FieldName) -> Option<FieldLines<'_>> {
+            FieldLines::from_borrowed(name, std::slice::from_ref(&self.0))
+        }
+    }
+
+    #[test]
+    fn direct_and_source_decoders_reject_every_forbidden_field_byte() {
+        for byte in (0..=0x1f).chain(std::iter::once(0x7f)).filter(|byte| *byte != b'\t') {
+            let wire = [b'x', byte, b'y'];
+            let value = FieldValueRef::new(&wire);
+            let source = RawSource(value);
+            assert_eq!(Server::decode_view(value).unwrap_err().kind(), DecodeErrorKind::InvalidSyntax);
+            assert_eq!(
+                ServerOwned::try_from(String::from_utf8(wire.to_vec()).unwrap()).unwrap_err().kind(),
+                DecodeErrorKind::InvalidSyntax
+            );
+            for mode in [DecodeMode::Strict, DecodeMode::Relaxed] {
+                assert_eq!(
+                    Server::decode_view_with(value, mode).unwrap_err().kind(),
+                    DecodeErrorKind::InvalidSyntax
+                );
+                assert_eq!(Server::view_with(&source, mode).unwrap_err().kind(), DecodeErrorKind::InvalidSyntax);
+                assert_eq!(
+                    Server::owned_with(&source, mode).unwrap_err().kind(),
+                    DecodeErrorKind::InvalidSyntax
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn opaque_wire_bytes_and_sensitivity_survive_both_decode_modes() {
+        for wire in [b" \tserver/1 (opaque)\t ".as_slice(), b" \t\x80\xff\t "] {
+            for sensitive in [false, true] {
+                let value = FieldValueRef::new(wire).with_sensitive(sensitive);
+                let source = RawSource(value);
+                for mode in [DecodeMode::Strict, DecodeMode::Relaxed] {
+                    let direct = Server::decode_view_with(value, mode).unwrap();
+                    let view = Server::view_with(&source, mode).unwrap().unwrap();
+                    let owned = Server::decode_owned_with(value.try_to_field_value().unwrap(), mode).unwrap();
+                    let sourced = Server::owned_with(&source, mode).unwrap().unwrap();
+                    assert_eq!(direct.as_bytes(), wire);
+                    assert_eq!(view.as_bytes(), wire);
+                    assert_eq!(direct.as_field_value().is_sensitive(), sensitive);
+                    assert_eq!(view.as_field_value().is_sensitive(), sensitive);
+                    assert_eq!(owned, sourced);
+                    assert_eq!(owned.as_field_value().as_bytes(), wire);
+                    assert_eq!(owned.as_field_value().is_sensitive(), sensitive);
+                    if wire.contains(&0xff) {
+                        assert_eq!(direct.as_str().unwrap_err().kind(), DecodeErrorKind::InvalidUtf8);
+                    }
+                    #[cfg(feature = "http")]
+                    {
+                        let mut map = http::HeaderMap::new();
+                        map.insert(http::header::SERVER, http::HeaderValue::try_from(value).unwrap());
+                        let view = Server::view_with(&map, mode).unwrap().unwrap();
+                        let mapped = Server::owned_with(&map, mode).unwrap().unwrap();
+                        assert_eq!(view.as_bytes(), wire);
+                        assert_eq!(view.as_field_value().is_sensitive(), sensitive);
+                        assert_eq!(mapped, owned);
+                        assert_eq!(mapped.as_field_value().is_sensitive(), sensitive);
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn owned_and_borrowed_server_values_preserve_opaque_wire_data() {

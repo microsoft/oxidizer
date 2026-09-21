@@ -43,6 +43,12 @@ macro_rules! known_headers {
         /// ASCII case-insensitive, so a parsed `Accept` and the constant
         /// [`FieldName::Accept`] are the same value.
         ///
+        /// Runtime names support validation, comparison, and conversion to
+        /// container-specific names. The [`crate::source::FieldSource`] and
+        /// [`crate::sink::FieldSink`] traits instead require static descriptors;
+        /// a locally constructed name cannot be used at that boundary. Use
+        /// the container's native API for dynamic name operations.
+        ///
         /// # Examples
         ///
         /// ```rust
@@ -401,6 +407,10 @@ impl FieldName {
     ///
     /// A name is at most 65,535 bytes long.
     ///
+    /// The returned name is owned, not a static descriptor. It can be compared
+    /// and converted for a container's native API, but a local value cannot be
+    /// passed to [`crate::source::FieldSource`] or [`crate::sink::FieldSink`].
+    ///
     /// # Errors
     ///
     /// Returns an error when `bytes` is not an HTTP token, or is longer than
@@ -485,14 +495,17 @@ impl FieldName {
     /// # fn main() -> Result<(), http_headers::InvalidFieldName> {
     /// use http_headers::FieldName;
     ///
-    /// assert_eq!(FieldName::Accept.try_to_http_name()?, http::header::ACCEPT);
+    /// assert_eq!(
+    ///     FieldName::Accept.try_to_http_header_name()?,
+    ///     http::header::ACCEPT
+    /// );
     /// # Ok::<(), http_headers::InvalidFieldName>(())
     /// # }
     /// # #[cfg(not(feature = "http"))]
     /// # fn main() {}
     /// ```
     #[cfg(feature = "http")]
-    pub fn try_to_http_name(&self) -> Result<http::HeaderName, InvalidFieldName> {
+    pub fn try_to_http_header_name(&self) -> Result<http::HeaderName, InvalidFieldName> {
         if let Some(known) = self.http_name() {
             return Ok(known.clone());
         }
@@ -642,7 +655,7 @@ mod http_conversions {
     impl From<&FieldName> for http::HeaderName {
         /// Converts a name into the `http` crate's own name type.
         fn from(name: &FieldName) -> Self {
-            name.try_to_http_name().unwrap_or_else(|_invalid| invalid_custom_name())
+            name.try_to_http_header_name().unwrap_or_else(|_invalid| invalid_custom_name())
         }
     }
 
@@ -680,7 +693,7 @@ mod http_conversions {
     )]
     fn invalid_custom_name() -> ! {
         panic!(
-            "`FieldName::Custom` holds bytes that are not a valid HTTP field name; use `FieldName::try_to_http_name` to convert without panicking"
+            "`FieldName::Custom` holds bytes that are not a valid HTTP field name; use `FieldName::try_to_http_header_name` to convert without panicking"
         );
     }
 
@@ -803,7 +816,7 @@ mod tests {
         std::panic::catch_unwind(|| http::HeaderName::from(&invalid_custom))
             .expect_err("only a broken in-crate invariant reaches the panic");
         invalid_custom
-            .try_to_http_name()
+            .try_to_http_header_name()
             .expect_err("the fallible conversion reports it instead of panicking");
     }
 

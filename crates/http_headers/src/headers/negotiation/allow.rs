@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use super::MethodView;
 use super::shared::{ListValues, check_token_value, check_token_values, invalid};
 use crate::sink::{FieldSink, InsertError};
 use crate::source::{FieldLines, FieldSource};
@@ -66,6 +67,45 @@ super::shared::list_header!(
     check_token_value,
     token
 );
+
+impl AllowOwned {
+    /// Iterates validated, case-sensitive methods in wire order.
+    ///
+    /// Empty list members are ignored. Iteration does not allocate or
+    /// revalidate token syntax.
+    #[inline]
+    pub fn methods(&self) -> impl Iterator<Item = MethodView<'_>> {
+        self.items().map(MethodView::from_validated)
+    }
+
+    /// Constructs one field line from validated method tokens.
+    ///
+    /// Order and duplicates are retained; an empty iterator produces a valid
+    /// empty Allow field. Formatting does not reparse the method grammar.
+    #[must_use]
+    pub fn from_methods<'a>(methods: impl IntoIterator<Item = MethodView<'a>>) -> Self {
+        let mut wire = String::new();
+        for method in methods {
+            if !wire.is_empty() {
+                wire.push_str(", ");
+            }
+            wire.push_str(method.as_str());
+        }
+        Self {
+            values: ListValues::One(FieldValue::from_validated_owned_bytes(wire.into_bytes(), false)),
+        }
+    }
+}
+
+impl<'a> AllowView<'a> {
+    /// Iterates validated methods without allocating or revalidating tokens.
+    ///
+    /// Methods retain their case-sensitive spelling and wire order.
+    #[inline]
+    pub fn methods(&self) -> impl Iterator<Item = MethodView<'a>> + '_ {
+        self.items().map(MethodView::from_validated)
+    }
+}
 
 fn validate_allow_item(bytes: &[u8]) -> Result<(), DecodeError> {
     if validate::token(bytes) {

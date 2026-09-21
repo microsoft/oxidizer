@@ -14,6 +14,7 @@ use crate::{DecodeError, DecodeErrorKind, FieldName, FieldValue, FieldValueRef};
 /// The limit is enforced before typed decoding accepts custom-source bytes.
 /// The validated `http::HeaderMap` adapter is exempt, so callers using it must
 /// enforce suitable aggregate header limits at the transport or server layer.
+/// Exceeding this budget returns [`DecodeErrorKind::SourceLimitExceeded`].
 pub const MAX_CUSTOM_FIELD_BYTES: usize = 64 * 1024;
 
 /// Maximum field lines accepted for one name from a custom [`FieldSource`](crate::source::FieldSource).
@@ -21,6 +22,7 @@ pub const MAX_CUSTOM_FIELD_BYTES: usize = 64 * 1024;
 /// The limit is enforced before typed decoding accepts custom-source lines.
 /// The validated `http::HeaderMap` adapter is exempt, so callers using it must
 /// enforce suitable aggregate header limits at the transport or server layer.
+/// Exceeding this budget returns [`DecodeErrorKind::SourceLimitExceeded`].
 pub const MAX_CUSTOM_FIELD_LINES: usize = 128;
 
 /// Maximum parsed list items accepted during one custom-source field decode.
@@ -29,6 +31,7 @@ pub const MAX_CUSTOM_FIELD_LINES: usize = 128;
 /// accepting a further item. The validated `http::HeaderMap` adapter is exempt,
 /// so callers using it must enforce suitable aggregate header limits at the
 /// transport or server layer.
+/// Exceeding this budget returns [`DecodeErrorKind::SourceLimitExceeded`].
 pub const MAX_CUSTOM_LIST_ITEMS: usize = 1_024;
 
 /// The storage a [`FieldLines`] iterates.
@@ -54,6 +57,10 @@ enum Repr<'a> {
 /// instance always contains at least one field line; absence is represented by
 /// `None`. Line order is preserved, a zero-length line remains a present line,
 /// and the lines can be iterated repeatedly.
+///
+/// The associated name is a static descriptor, independent of the lifetime of
+/// the field bytes. Locally constructed runtime names cannot be passed to the
+/// constructors; see [`crate::source::FieldSource`].
 ///
 /// # Examples
 ///
@@ -272,7 +279,7 @@ impl<'a> FieldLines<'a> {
     /// Returns an error if there is no field line, if there is more than one,
     /// if a source handed out bytes that are not a valid field value, or if a
     /// custom source exceeds [`MAX_CUSTOM_FIELD_BYTES`] or
-    /// [`MAX_CUSTOM_FIELD_LINES`].
+    /// [`MAX_CUSTOM_FIELD_LINES`] (reported as [`DecodeErrorKind::SourceLimitExceeded`]).
     #[inline]
     pub(crate) fn exactly_one_owned(&self) -> Result<FieldValue, DecodeError> {
         self.validate_custom_source()?;
@@ -300,6 +307,28 @@ impl<'a> FieldLines<'a> {
         }
     }
 
+    /// Iterates the raw field lines in insertion order.
+    ///
+    /// This is equivalent to [`Self::repeated`] and iteration over `&FieldLines`.
+    /// Line boundaries and sensitivity markers are preserved without parsing
+    /// or validating the bytes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use http_headers::FieldName;
+    /// use http_headers::source::FieldLines;
+    ///
+    /// let lines = FieldLines::single(&FieldName::SetCookie, b"a=1");
+    /// assert_eq!(lines.iter().next().unwrap().as_bytes(), b"a=1");
+    /// assert_eq!(lines.iter().count(), lines.repeated().count());
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn iter(&self) -> FieldLinesIter<'a> {
+        self.repeated()
+    }
+
     /// Reiterates the field lines in insertion order.
     ///
     /// # Examples
@@ -310,7 +339,9 @@ impl<'a> FieldLines<'a> {
     ///
     /// let lines = FieldLines::single(&FieldName::SetCookie, b"a=1");
     /// assert_eq!(lines.repeated().count(), 1);
-    /// assert_eq!(lines.repeated().count(), 1);
+    /// for line in &lines {
+    ///     assert_eq!(line.as_bytes(), b"a=1");
+    /// }
     /// ```
     #[must_use]
     #[inline]
@@ -330,16 +361,16 @@ impl<'a> FieldLines<'a> {
     /// view with a representation-aware owned clone.
     ///
     /// This is what an owned decoder should walk instead of calling
-    /// [`FieldValueRef::to_field_value`] on the output of [`Self::repeated`]:
+    /// [`FieldValueRef::try_to_field_value`] on the output of [`Self::repeated`]:
     /// it keeps [`Repr::Slice`] from paying for a byte copy that a cheap
     /// clone would have avoided.
     ///
     /// # Errors
     ///
     /// Returns an invalid-syntax error when raw single or borrowed lines
-    /// contain bytes that cannot form an HTTP field value, or when a custom
-    /// source exceeds [`MAX_CUSTOM_FIELD_BYTES`] or
-    /// [`MAX_CUSTOM_FIELD_LINES`].
+    /// contain bytes that cannot form an HTTP field value. Returns
+    /// [`DecodeErrorKind::SourceLimitExceeded`] when a custom source exceeds
+    /// [`MAX_CUSTOM_FIELD_BYTES`] or [`MAX_CUSTOM_FIELD_LINES`].
     #[inline]
     #[cfg(any(
         test,
@@ -416,6 +447,21 @@ impl<'a> FieldLines<'a> {
         DelimitedItems::new(self, b',')
     }
 
+    /// Iterates comma members after source preflight has already succeeded.
+    ///
+    /// The caller must have established that `validate_custom_source()` succeeds
+    /// for these exact retained lines, not for another call to `FieldSource::lines`.
+    /// Only source bounds and field-value preflight are omitted: quoting and
+    /// item limits remain checked.
+    /// Debug builds recheck the caller's precondition.
+    #[cfg(any(test, feature = "headers-negotiation"))]
+    pub(crate) fn validated_comma_items(&self) -> DelimitedItems<'a> {
+        #[cfg(debug_assertions)]
+        self.validate_custom_source()
+            .expect("the caller must retain the exact lines whose source preflight is known to succeed");
+        DelimitedItems::from_validated_source(self, b',')
+    }
+
     /// Iterates semicolon-delimited items across all field lines.
     ///
     /// Unlike [`Self::comma_items`], empty items are yielded rather than
@@ -455,18 +501,21 @@ impl<'a> FieldLines<'a> {
     }
 
     fn validate_bounded_source(&self) -> Result<(), DecodeError> {
-        let invalid = || DecodeError::new(self.name, DecodeErrorKind::InvalidSyntax);
+        let limit = || DecodeError::new(self.name, DecodeErrorKind::SourceLimitExceeded);
         if self.len() > MAX_CUSTOM_FIELD_LINES {
-            return Err(invalid());
+            return Err(limit());
         }
 
         let validate_bytes = matches!(&self.repr, Repr::Single(_) | Repr::Borrowed(_));
         let mut total_bytes = 0_usize;
         for value in self.repeated() {
             let bytes = value.as_bytes();
-            total_bytes = total_bytes.checked_add(bytes.len()).ok_or_else(invalid)?;
-            if total_bytes > MAX_CUSTOM_FIELD_BYTES || (validate_bytes && !crate::validate::field_value(bytes)) {
-                return Err(invalid());
+            total_bytes = total_bytes.checked_add(bytes.len()).ok_or_else(limit)?;
+            if total_bytes > MAX_CUSTOM_FIELD_BYTES {
+                return Err(limit());
+            }
+            if validate_bytes && !crate::validate::field_value(bytes) {
+                return Err(DecodeError::new(self.name, DecodeErrorKind::InvalidSyntax));
             }
         }
         Ok(())
@@ -495,9 +544,9 @@ impl<'a> FieldLines<'a> {
     }
 
     fn validate_bounded_list(&self, delimiter: u8, skip_empty: bool, backslash_escapes: bool) -> Result<(), DecodeError> {
-        let invalid = || DecodeError::new(self.name, DecodeErrorKind::InvalidSyntax);
+        let limit = || DecodeError::new(self.name, DecodeErrorKind::SourceLimitExceeded);
         if self.len() > MAX_CUSTOM_FIELD_LINES {
-            return Err(invalid());
+            return Err(limit());
         }
 
         let validate_bytes = matches!(&self.repr, Repr::Single(_) | Repr::Borrowed(_));
@@ -505,13 +554,26 @@ impl<'a> FieldLines<'a> {
         let mut item_count = 0_usize;
         for value in self.repeated() {
             let bytes = value.as_bytes();
-            total_bytes = total_bytes.checked_add(bytes.len()).ok_or_else(invalid)?;
-            if total_bytes > MAX_CUSTOM_FIELD_BYTES || (validate_bytes && !crate::validate::field_value(bytes)) {
-                return Err(invalid());
+            total_bytes = total_bytes.checked_add(bytes.len()).ok_or_else(limit)?;
+            if total_bytes > MAX_CUSTOM_FIELD_BYTES {
+                return Err(limit());
+            }
+            if validate_bytes && !crate::validate::field_value(bytes) {
+                return Err(DecodeError::new(self.name, DecodeErrorKind::InvalidSyntax));
             }
             update_list_item_count(self.name, bytes, delimiter, skip_empty, backslash_escapes, &mut item_count)?;
         }
         Ok(())
+    }
+}
+
+impl<'a> IntoIterator for &FieldLines<'a> {
+    type Item = FieldValueRef<'a>;
+    type IntoIter = FieldLinesIter<'a>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 
@@ -724,8 +786,33 @@ impl FusedIterator for FieldLinesOwnedIter<'_> {}
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::{FieldLines, MAX_CUSTOM_LIST_ITEMS, Repr, update_list_item_count};
-    use crate::{DecodeErrorKind, FieldName, FieldValue, FieldValueRef};
+    use super::{FieldLines, Repr, update_list_item_count};
+    use crate::headers::SetCookie;
+    use crate::source::FieldSource;
+    use crate::{DecodeErrorKind, Field, FieldName, FieldValue, FieldValueRef};
+
+    #[test]
+    fn set_cookie_handles_an_internal_empty_field_lines_representation() {
+        struct EmptySource;
+
+        impl FieldSource for EmptySource {
+            fn lines(&self, name: &'static FieldName) -> Option<FieldLines<'_>> {
+                Some(FieldLines {
+                    name,
+                    repr: Repr::Slice(&[]),
+                })
+            }
+        }
+
+        let source = EmptySource;
+        let view = <SetCookie as Field>::view(&source).unwrap().unwrap();
+        assert_eq!(view.len(), 0);
+        assert_eq!(view.iter().count(), 0);
+        let owned = <SetCookie as Field>::owned(&source).unwrap().unwrap();
+        assert_eq!(owned.len(), 0);
+        assert!(owned.is_empty());
+        assert_eq!(owned.iter().count(), 0);
+    }
 
     #[test]
     fn exactly_one_specializes_every_representation() {
@@ -866,14 +953,18 @@ mod tests {
     }
 
     #[test]
-    fn list_budget_rejects_before_the_final_item() {
-        let mut item_count = MAX_CUSTOM_LIST_ITEMS;
-        assert_eq!(
-            update_list_item_count(&FieldName::Vary, b"one,two", b',', true, true, &mut item_count)
-                .expect_err("the next delimited item exceeds the budget")
-                .kind(),
-            DecodeErrorKind::InvalidSyntax
-        );
+    fn list_budget_and_counter_overflow_rejections_are_admission_errors() {
+        for initial in [1_024, usize::MAX] {
+            for bytes in [b"one,two".as_slice(), b"one"] {
+                let mut item_count = initial;
+                assert_eq!(
+                    update_list_item_count(&FieldName::Vary, bytes, b',', true, true, &mut item_count)
+                        .unwrap_err()
+                        .kind(),
+                    DecodeErrorKind::SourceLimitExceeded
+                );
+            }
+        }
     }
 
     #[test]

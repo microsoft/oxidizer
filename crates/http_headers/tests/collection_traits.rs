@@ -7,39 +7,17 @@
 
 use std::collections::{HashMap, HashSet};
 
-use http_headers::headers::{CacheControlOwned, ContentTypeOwned, ETagOwned, LocationOwned, SetCookie, SetCookieOwned, UserAgentOwned};
-use http_headers::sink::{EncodedValues, FieldSink, InsertError};
-use http_headers::source::{FieldLines, FieldSource};
-use http_headers::{Field, FieldName, FieldValue};
+#[cfg(feature = "http")]
+use http::{HeaderMap, HeaderValue, header};
+use http_headers::headers::{
+    self, CacheControlOwned, ContentTypeOwned, ETagOwned, LocationOwned, SetCookie, SetCookieOwned, UserAgentOwned,
+};
+use http_headers::sink::{EncodedValues, FieldSink};
+use http_headers::{DecodeError, Field, FieldSensitivity, FieldValue};
 
-#[derive(Default)]
-struct TestSink(HashMap<FieldName, Vec<FieldValue>>);
+use self::common::TestMap;
 
-impl FieldSource for TestSink {
-    fn lines(&self, name: &'static FieldName) -> Option<FieldLines<'_>> {
-        self.0.get(name).and_then(|values| FieldLines::from_slice(name, values))
-    }
-}
-
-impl FieldSink for TestSink {
-    fn set_values(&mut self, name: &'static FieldName, values: EncodedValues) -> Result<(), InsertError> {
-        if values.is_empty() {
-            self.0.remove(name);
-        } else {
-            self.0.insert(name.clone(), values.into_iter().collect());
-        }
-        Ok(())
-    }
-
-    fn append_values(&mut self, name: &'static FieldName, values: EncodedValues) -> Result<(), InsertError> {
-        self.0.entry(name.clone()).or_default().extend(values);
-        Ok(())
-    }
-
-    fn remove_values(&mut self, name: &'static FieldName) {
-        self.0.remove(name);
-    }
-}
+mod common;
 
 #[test]
 fn encoded_values_support_collection_iteration() {
@@ -49,7 +27,7 @@ fn encoded_values_support_collection_iteration() {
 
     assert_eq!((&encoded).into_iter().len(), 2);
     for value in &mut encoded {
-        value.set_sensitivity(http_headers::FieldSensitivity::Sensitive);
+        value.set_sensitivity(FieldSensitivity::Sensitive);
     }
     assert!(encoded.iter().all(FieldValue::is_sensitive));
     assert_eq!(encoded.into_iter().len(), 2);
@@ -64,13 +42,13 @@ fn set_cookie_supports_safe_collection_iteration() {
 
     assert_eq!((&cookies).into_iter().len(), 2);
     for value in &mut cookies {
-        value.set_sensitivity(http_headers::FieldSensitivity::Sensitive);
+        value.set_sensitivity(FieldSensitivity::Sensitive);
     }
     let rebuilt = cookies
         .into_iter()
         .try_fold(SetCookieOwned::new(), |mut rebuilt, value| {
             rebuilt.push(value)?;
-            Ok::<_, http_headers::DecodeError>(rebuilt)
+            Ok::<_, DecodeError>(rebuilt)
         })
         .expect("stored values preserve the Set-Cookie invariant");
     assert_eq!(rebuilt.len(), 2);
@@ -87,7 +65,7 @@ fn set_cookie_public_helpers_cover_empty_invalid_and_view_states() {
     assert!(!parsed.is_empty());
     assert!(format!("{parsed:?}").contains("value_count"));
 
-    let mut table = TestSink::default();
+    let mut table = TestMap::default();
     SetCookie::insert(&mut table, parsed).expect("table accepts cookie");
     let view = SetCookie::view(&table).expect("valid cookie view").expect("cookie is present");
     assert!(!view.is_empty());
@@ -100,11 +78,11 @@ fn set_cookie_public_helpers_cover_empty_invalid_and_view_states() {
 
     #[cfg(feature = "http")]
     {
-        let mut map = http::HeaderMap::new();
+        let mut map = HeaderMap::new();
         SetCookie::insert(&mut map, "b=2".parse::<SetCookieOwned>().expect("valid cookie")).expect("HTTP map accepts cookie");
         assert!(SetCookie::view(&map).expect("valid HTTP view").is_some());
         assert!(SetCookie::owned(&map).expect("valid HTTP value").is_some());
-        map.insert(http::header::SET_COOKIE, http::HeaderValue::from_static(""));
+        map.insert(header::SET_COOKIE, HeaderValue::from_static(""));
         SetCookie::view(&map).expect_err("empty cookie is invalid");
         SetCookie::owned(&map).expect_err("empty cookie is invalid");
     }
@@ -128,44 +106,44 @@ fn shared_from_str_error_mapping_covers_every_generated_impl() {
     }
 
     assert_invalid!(
-        http_headers::headers::AcceptOwned,
-        http_headers::headers::AcceptEncodingOwned,
-        http_headers::headers::AcceptLanguageOwned,
-        http_headers::headers::AcceptRangesOwned,
-        http_headers::headers::AccessControlAllowCredentialsOwned,
-        http_headers::headers::AccessControlAllowHeadersOwned,
-        http_headers::headers::AccessControlAllowMethodsOwned,
-        http_headers::headers::AccessControlAllowOriginOwned,
-        http_headers::headers::AccessControlExposeHeadersOwned,
-        http_headers::headers::AccessControlMaxAgeOwned,
-        http_headers::headers::AccessControlRequestHeadersOwned,
-        http_headers::headers::AccessControlRequestMethodOwned,
-        http_headers::headers::AllowOwned,
-        http_headers::headers::CacheControlOwned,
-        http_headers::headers::ContentRangeOwned,
-        http_headers::headers::ContentSecurityPolicyOwned,
-        http_headers::headers::ContentTypeOwned,
-        http_headers::headers::ETagOwned,
-        http_headers::headers::HostOwned,
-        http_headers::headers::IfMatchOwned,
-        http_headers::headers::IfModifiedSinceOwned,
-        http_headers::headers::IfNoneMatchOwned,
-        http_headers::headers::IfRangeOwned,
-        http_headers::headers::IfUnmodifiedSinceOwned,
-        http_headers::headers::LastModifiedOwned,
-        http_headers::headers::LocationOwned,
-        http_headers::headers::RangeOwned,
-        http_headers::headers::ReferrerPolicyOwned,
-        http_headers::headers::SecWebSocketAcceptOwned,
-        http_headers::headers::SecWebSocketExtensionsOwned,
-        http_headers::headers::SecWebSocketKeyOwned,
-        http_headers::headers::SecWebSocketProtocolOwned,
-        http_headers::headers::SecWebSocketVersionOwned,
-        http_headers::headers::ServerOwned,
-        http_headers::headers::StrictTransportSecurityOwned,
-        http_headers::headers::UserAgentOwned,
-        http_headers::headers::VaryOwned,
-        http_headers::headers::XContentTypeOptionsOwned,
+        headers::AcceptOwned,
+        headers::AcceptEncodingOwned,
+        headers::AcceptLanguageOwned,
+        headers::AcceptRangesOwned,
+        headers::AccessControlAllowCredentialsOwned,
+        headers::AccessControlAllowHeadersOwned,
+        headers::AccessControlAllowMethodsOwned,
+        headers::AccessControlAllowOriginOwned,
+        headers::AccessControlExposeHeadersOwned,
+        headers::AccessControlMaxAgeOwned,
+        headers::AccessControlRequestHeadersOwned,
+        headers::AccessControlRequestMethodOwned,
+        headers::AllowOwned,
+        headers::CacheControlOwned,
+        headers::ContentRangeOwned,
+        headers::ContentSecurityPolicyOwned,
+        headers::ContentTypeOwned,
+        headers::ETagOwned,
+        headers::HostOwned,
+        headers::IfMatchOwned,
+        headers::IfModifiedSinceOwned,
+        headers::IfNoneMatchOwned,
+        headers::IfRangeOwned,
+        headers::IfUnmodifiedSinceOwned,
+        headers::LastModifiedOwned,
+        headers::LocationOwned,
+        headers::RangeOwned,
+        headers::ReferrerPolicyOwned,
+        headers::SecWebSocketAcceptOwned,
+        headers::SecWebSocketExtensionsOwned,
+        headers::SecWebSocketKeyOwned,
+        headers::SecWebSocketProtocolOwned,
+        headers::SecWebSocketVersionOwned,
+        headers::ServerOwned,
+        headers::StrictTransportSecurityOwned,
+        headers::UserAgentOwned,
+        headers::VaryOwned,
+        headers::XContentTypeOptionsOwned,
     );
 }
 
@@ -178,15 +156,15 @@ fn shared_ascii_display_covers_every_generated_impl() {
         }};
     }
 
-    assert_display!(http_headers::headers::ContentRangeOwned, "bytes 0-1/2");
-    assert_display!(http_headers::headers::HostOwned, "example.com");
-    assert_display!(http_headers::headers::IfModifiedSinceOwned, "Sun, 06 Nov 1994 08:49:37 GMT");
-    assert_display!(http_headers::headers::IfUnmodifiedSinceOwned, "Sun, 06 Nov 1994 08:49:37 GMT");
-    assert_display!(http_headers::headers::LastModifiedOwned, "Sun, 06 Nov 1994 08:49:37 GMT");
-    assert_display!(http_headers::headers::RangeOwned, "bytes=0-1");
-    assert_display!(http_headers::headers::SecWebSocketAcceptOwned, "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
-    assert_display!(http_headers::headers::SecWebSocketKeyOwned, "dGhlIHNhbXBsZSBub25jZQ==");
-    assert_display!(http_headers::headers::XContentTypeOptionsOwned, "nosniff");
+    assert_display!(headers::ContentRangeOwned, "bytes 0-1/2");
+    assert_display!(headers::HostOwned, "example.com");
+    assert_display!(headers::IfModifiedSinceOwned, "Sun, 06 Nov 1994 08:49:37 GMT");
+    assert_display!(headers::IfUnmodifiedSinceOwned, "Sun, 06 Nov 1994 08:49:37 GMT");
+    assert_display!(headers::LastModifiedOwned, "Sun, 06 Nov 1994 08:49:37 GMT");
+    assert_display!(headers::RangeOwned, "bytes=0-1");
+    assert_display!(headers::SecWebSocketAcceptOwned, "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
+    assert_display!(headers::SecWebSocketKeyOwned, "dGhlIHNhbXBsZSBub25jZQ==");
+    assert_display!(headers::XContentTypeOptionsOwned, "nosniff");
 }
 
 #[test]

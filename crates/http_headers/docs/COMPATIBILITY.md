@@ -39,10 +39,41 @@ Declared in `crates/http_headers/Cargo.toml`:
 
 | Feature | Default | Effect |
 |---|---|---|
-| *(none)* | — | The typed header API: constructors, `FieldSource`/`FieldSink`, `BasicCredentials`, and the built-in header families. No optional dependency is pulled in. |
+| No features (`default-features = false`) | — | Core field names, values, errors, `Field`/`SingleValueField`, and source/sink APIs. No built-in header families or optional dependencies are enabled by this crate. |
+| `headers-all` | on | Enables all built-in header families listed below, including their optional dependencies. |
 | `http` | off | Adds an optional `http::HeaderMap` adapter and conversions to and from the `http` crate's name, value, and method types. The adapter may retain `HeaderValue` storage internally; typed-header semantics do not change. |
-| `serde` | off | Enables serialization and deserialization for owned headers, `FieldName`, `FieldValue`, and `EncodedValues` (`dep:serde`). |
+| `serde` | off | Enables serialization and deserialization for `FieldName`, `FieldValue`, `EncodedValues`, and owned headers from enabled families (`dep:serde`). Does not enable header families itself. |
 | `benchmarking` | off | Exposes private-backend instrumentation (`http_headers_simd/benchmarking`) needed by the workspace benchmarks. Not for downstream use; the surface it exposes is not covered by the semver policy above. |
+
+To select individual families, disable default features and enable the required
+`headers-*` features. Each family below is enabled by `headers-all`.
+`BasicCredentials` belongs to `headers-authorization`, not the feature-free core.
+
+| Family feature | Additional optional dependencies or family features |
+|---|---|
+| `headers-authorization` | `base64`, `zeroize` |
+| `headers-cache-control` | `compact_str` |
+| `headers-conditional` | `httpdate`, `headers-etag` |
+| `headers-content-length` | None |
+| `headers-content-type` | None |
+| `headers-cors` | None |
+| `headers-etag` | None |
+| `headers-location` | `fluent-uri` |
+| `headers-negotiation` | `idna` |
+| `headers-range` | None |
+| `headers-security` | `compact_str` |
+| `headers-set-cookie` | None |
+| `headers-user-agent` | None |
+| `headers-websocket` | `base64`, `sha1` |
+
+For example, this selects only the two named families and the HTTP adapter:
+
+```toml
+http_headers = { version = "0.1", default-features = false, features = ["headers-content-length", "headers-content-type", "http"] }
+```
+
+Cargo features are additive: another dependency enabling a family or
+`headers-all` can enable it for the same package in the resolved build.
 
 Enabling `benchmarking` is not a supported way to depend on this crate; the
 items it exposes can change or disappear in a patch release. Ordinary header
@@ -102,8 +133,12 @@ implementation will be added except where one already exists.
 
 `DecodeMode::Strict` is the default used by `view`, `owned`, direct
 `TryFrom` constructors, and Basic credential decoding.
-`DecodeMode::Relaxed` is available only through `view_with` and
-`owned_with`; it is not a raw-value or skip-validation mode.
+For typed reads from a `FieldSource`, select `DecodeMode::Relaxed` through
+`Field::view_with` or `Field::owned_with`. Direct single-value decoding accepts
+the mode through `SingleValueField::decode_view_with` and
+`SingleValueField::decode_owned_with`; standalone quality parsing accepts it
+through `QualityView::parse`. Relaxed decoding is not a raw-value or
+skip-validation mode.
 
 Relaxed decoding recognizes the following interoperability deviations:
 

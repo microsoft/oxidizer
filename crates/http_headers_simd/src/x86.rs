@@ -838,10 +838,9 @@ fn simple_uri_reject_mask_ssse3(value: __m128i) -> u32 {
 
 /// Marks the lanes outside the separator-free URI subset.
 ///
-/// The subset is three ranges plus a handful of isolated bytes, so it needs no
-/// table: `&`..`?` covers the sub-delims, digits, `:`, and `;` once `<` and `>`
-/// are removed, case folding merges both letter ranges, and `!`/`#` share a
-/// single compare after the low bit is forced on.
+/// The `&`..`?` range covers sub-delims, digits, `:`, and `;` after excluding
+/// `<` and `>`. Case folding merges the letter ranges; isolated bytes use
+/// equality comparisons. `#` is excluded for separate fragment counting.
 #[target_feature(enable = "sse2")]
 fn simple_uri_reject_mask(value: __m128i) -> u32 {
     let raised = _mm_or_si128(value, _mm_set1_epi8(2));
@@ -879,6 +878,7 @@ fn in_range(value: __m128i, start: u8, end: u8) -> __m128i {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::arch;
     use std::time::Duration;
     #[cfg(not(feature = "std"))]
     use std::vec;
@@ -888,13 +888,14 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg_attr(miri, ignore = "Bolero corpus replay requires filesystem access unavailable under Miri isolation")]
     fn sse2_matches_scalar() {
         #[cfg(target_arch = "x86")]
-        if !std::arch::is_x86_feature_detected!("sse2") {
+        if !arch::is_x86_feature_detected!("sse2") {
             return;
         }
-        let sse42 = std::arch::is_x86_feature_detected!("sse4.2");
-        let ssse3 = std::arch::is_x86_feature_detected!("ssse3");
+        let sse42 = arch::is_x86_feature_detected!("sse4.2");
+        let ssse3 = arch::is_x86_feature_detected!("ssse3");
         bolero::check!()
             .with_iterations(4_096)
             .with_test_time(Duration::from_millis(400))
@@ -1004,10 +1005,10 @@ mod tests {
     #[test]
     fn token_list_lanes_match_scalar_for_every_byte() {
         #[cfg(target_arch = "x86")]
-        if !std::arch::is_x86_feature_detected!("sse2") {
+        if !arch::is_x86_feature_detected!("sse2") {
             return;
         }
-        let sse42 = std::arch::is_x86_feature_detected!("sse4.2");
+        let sse42 = arch::is_x86_feature_detected!("sse4.2");
         for lane in 0..2 * WIDTH {
             for byte in u8::MIN..=u8::MAX {
                 let mut block = [b'a'; 2 * WIDTH];
@@ -1033,7 +1034,7 @@ mod tests {
     #[test]
     fn range_lanes_match_scalar_for_every_byte() {
         #[cfg(target_arch = "x86")]
-        if !std::arch::is_x86_feature_detected!("sse2") {
+        if !arch::is_x86_feature_detected!("sse2") {
             return;
         }
         for lane in 0..WINDOW {
@@ -1050,11 +1051,11 @@ mod tests {
     #[test]
     fn base64_and_uri_lanes_match_every_x86_backend() {
         #[cfg(target_arch = "x86")]
-        if !std::arch::is_x86_feature_detected!("sse2") {
+        if !arch::is_x86_feature_detected!("sse2") {
             return;
         }
-        let sse42 = std::arch::is_x86_feature_detected!("sse4.2");
-        let ssse3 = std::arch::is_x86_feature_detected!("ssse3");
+        let sse42 = arch::is_x86_feature_detected!("sse4.2");
+        let ssse3 = arch::is_x86_feature_detected!("ssse3");
         for lane in 0..2 * WIDTH {
             for byte in u8::MIN..=u8::MAX {
                 let mut base64_block = [b'A'; 2 * WIDTH];
@@ -1107,7 +1108,7 @@ mod tests {
     #[test]
     fn long_sse2_scanners_cover_full_blocks_and_overlapping_tails() {
         #[cfg(target_arch = "x86")]
-        if !std::arch::is_x86_feature_detected!("sse2") {
+        if !arch::is_x86_feature_detected!("sse2") {
             return;
         }
 
@@ -1170,7 +1171,7 @@ mod tests {
     #[test]
     fn long_uri_paths_cover_every_available_x86_backend() {
         #[cfg(target_arch = "x86")]
-        if !std::arch::is_x86_feature_detected!("sse2") {
+        if !arch::is_x86_feature_detected!("sse2") {
             return;
         }
 
@@ -1207,10 +1208,10 @@ mod tests {
         }
 
         exercise(is_simple_uri_tail_sse2);
-        let _ = std::arch::is_x86_feature_detected!("ssse3").then(|| {
+        let _ = arch::is_x86_feature_detected!("ssse3").then(|| {
             exercise(is_simple_uri_tail_ssse3);
         });
-        let _ = std::arch::is_x86_feature_detected!("sse4.2").then(|| {
+        let _ = arch::is_x86_feature_detected!("sse4.2").then(|| {
             exercise(is_simple_uri_tail_sse42);
         });
     }
@@ -1218,7 +1219,7 @@ mod tests {
     #[test]
     fn short_sse2_list_folds_and_lane_fallbacks_are_explicit() {
         #[cfg(target_arch = "x86")]
-        if !std::arch::is_x86_feature_detected!("sse2") {
+        if !arch::is_x86_feature_detected!("sse2") {
             return;
         }
         let one = [b'a'; WIDTH];
@@ -1233,6 +1234,9 @@ mod tests {
             unsafe { scan_short_token_list_sse2(&two, EmptyMembers::Skip, true) },
             TokenListScan::Members
         );
+        #[cfg(target_pointer_width = "32")]
+        assert_eq!(lanes_of(usize::MAX), u32::MAX);
+        #[cfg(target_pointer_width = "64")]
         assert_eq!(lanes_of(usize::MAX), WIDTH_LANES);
         #[cfg(target_pointer_width = "64")]
         assert_eq!(

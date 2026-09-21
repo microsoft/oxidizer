@@ -3,11 +3,22 @@
 
 //! Validated URI-reference support for the `Location` header.
 
+use std::hash::{Hash, Hasher};
 use std::{fmt, str};
 
 use fluent_uri::Uri;
 
 use crate::{DecodeError, FieldName, FieldValue, FieldValueRef, SingleValueField};
+
+mod component;
+mod construction;
+mod metadata;
+mod uri_authority;
+mod uri_reference;
+
+use metadata::Metadata;
+pub use uri_authority::UriAuthority;
+pub use uri_reference::UriReference;
 
 /// Defines the `Location` header.
 ///
@@ -60,11 +71,20 @@ pub struct Location {
 ///
 /// [RFC 9110 section 10.2.2]: https://www.rfc-editor.org/rfc/rfc9110#section-10.2.2
 /// [RFC 3986 section 4]: https://www.rfc-editor.org/rfc/rfc3986#section-4
-#[derive(Clone, Eq, Hash, PartialEq)]
-pub struct LocationOwned(FieldValue);
+#[derive(Clone)]
+pub struct LocationOwned {
+    value: FieldValue,
+    metadata: Metadata,
+    normalized: Option<String>,
+}
 
 /// Borrowed value for the `Location` header.
-#[derive(Clone, Copy, Eq, Hash, PartialEq)]
+///
+/// Ordinary views borrow without allocation. A relaxed value containing
+/// backslashes also retains an owned, slash-normalized semantic spelling.
+/// Cloning such a view clones that buffer; raw access always borrows the
+/// original source and structured access borrows this view.
+#[derive(Clone)]
 /// # Examples
 ///
 /// ```
@@ -79,6 +99,8 @@ pub struct LocationOwned(FieldValue);
 /// ```
 pub struct LocationView<'a> {
     text: &'a str,
+    metadata: Metadata,
+    normalized: Option<String>,
 }
 
 impl fmt::Debug for LocationOwned {
@@ -94,6 +116,65 @@ impl fmt::Debug for LocationView<'_> {
 }
 
 impl LocationOwned {
+    /// Constructs a URI-reference from validated authority and encoded components.
+    ///
+    /// Components are not percent-encoded automatically. A missing component is
+    /// distinct from `Some("")`. The authority must already satisfy its grammar,
+    /// while the remaining components and their contextual constraints are
+    /// validated here. The assembled reference is not parsed again.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::DecodeErrorKind::InvalidSyntax`] for invalid components
+    /// or combinations: an authority requires an empty or slash-prefixed path;
+    /// without an authority the path cannot start with `//`; without a scheme,
+    /// a relative path's first segment cannot contain a colon.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use http_headers::headers::{LocationOwned, UriAuthority};
+    ///
+    /// let authority = UriAuthority::new(None, "example.com", Some("443"))?;
+    /// let location =
+    ///     LocationOwned::from_components(Some("https"), Some(authority), "/a%2Fb", Some(""), None)?;
+    /// assert_eq!(location.as_str()?, "https://example.com:443/a%2Fb?");
+    /// # Ok::<(), http_headers::DecodeError>(())
+    /// ```
+    pub fn from_components(
+        scheme: Option<&str>,
+        authority: Option<UriAuthority<'_>>,
+        path: &str,
+        query: Option<&str>,
+        fragment: Option<&str>,
+    ) -> Result<Self, DecodeError> {
+        construction::from_components(scheme, authority, path, query, fragment)
+    }
+
+    /// Returns retained URI components without repeating URI grammar validation.
+    ///
+    /// In relaxed mode these describe the backslash-normalized spelling, while
+    /// [`Self::as_str`] and forwarding retain the original wire spelling.
+    #[inline]
+    #[must_use]
+    pub fn uri_reference(&self) -> UriReference<'_> {
+        UriReference::from_metadata(self.semantic_text(), &self.metadata)
+    }
+
+    fn semantic_text(&self) -> &str {
+        self.normalized.as_deref().unwrap_or_else(|| {
+            self.as_str()
+                .expect("all Location constructors validate UTF-8 and storage is immutable")
+        })
+    }
+
+    /// Whether relaxed decoding replaced backslashes in the semantic spelling.
+    #[inline]
+    #[must_use]
+    pub const fn was_normalized(&self) -> bool {
+        self.normalized.is_some()
+    }
+
     /// Returns the URI-reference bytes.
     #[must_use]
     /// # Examples
@@ -106,7 +187,7 @@ impl LocationOwned {
     /// # Ok::<(), http_headers::DecodeError>(())
     /// ```
     pub fn as_bytes(&self) -> &[u8] {
-        self.0.as_bytes()
+        self.value.as_bytes()
     }
 
     /// Returns the URI-reference as UTF-8.
@@ -121,7 +202,7 @@ impl LocationOwned {
     /// # Ok::<(), http_headers::DecodeError>(())
     /// ```
     pub fn as_str(&self) -> Result<&str, DecodeError> {
-        str::from_utf8(self.0.as_bytes()).map_err(|_invalid| super::invalid_syntax(&FieldName::Location))
+        str::from_utf8(self.value.as_bytes()).map_err(|_invalid| invalid())
     }
 
     /// Returns reusable wire storage.
@@ -141,9 +222,27 @@ impl LocationOwned {
     }
 }
 
-super::shared::impl_field_value_conversion!(LocationOwned, |value| value.0);
+super::shared::impl_field_value_conversion!(LocationOwned, |value| value.value);
 
 impl<'a> LocationView<'a> {
+    /// Returns retained components, borrowing any normalized backing from this view.
+    ///
+    /// Ordinary decoding borrows the source without allocation. Relaxed
+    /// backslash normalization retains one owned semantic buffer; reading these
+    /// components neither allocates nor normalizes again.
+    #[inline]
+    #[must_use]
+    pub fn uri_reference(&self) -> UriReference<'_> {
+        UriReference::from_metadata(self.normalized.as_deref().unwrap_or(self.text), &self.metadata)
+    }
+
+    /// Whether relaxed decoding replaced backslashes in the semantic spelling.
+    #[inline]
+    #[must_use]
+    pub const fn was_normalized(&self) -> bool {
+        self.normalized.is_some()
+    }
+
     /// Returns the URI-reference bytes.
     #[must_use]
     /// # Examples
@@ -157,7 +256,7 @@ impl<'a> LocationView<'a> {
     /// assert_eq!(view.as_bytes(), b"../people?tab=1#profile");
     /// # Ok::<(), http_headers::DecodeError>(())
     /// ```
-    pub fn as_bytes(self) -> &'a [u8] {
+    pub fn as_bytes(&self) -> &'a [u8] {
         self.text.as_bytes()
     }
 
@@ -178,7 +277,7 @@ impl<'a> LocationView<'a> {
         clippy::unnecessary_wraps,
         reason = "the fallible signature intentionally matches the owned representation"
     )]
-    pub const fn as_str(self) -> Result<&'a str, DecodeError> {
+    pub const fn as_str(&self) -> Result<&'a str, DecodeError> {
         Ok(self.text)
     }
 }
@@ -193,8 +292,7 @@ impl SingleValueField for Location {
 
     #[inline]
     fn decode_view(value: FieldValueRef<'_>) -> Result<Self::View<'_>, DecodeError> {
-        let text = validate(value.as_bytes())?;
-        Ok(LocationView { text })
+        validate(value.as_bytes())
     }
 
     #[inline]
@@ -203,22 +301,27 @@ impl SingleValueField for Location {
     }
 
     fn decode_view_with(value: FieldValueRef<'_>, mode: crate::DecodeMode) -> Result<Self::View<'_>, DecodeError> {
-        let text = validate_with(value.as_bytes(), mode)?;
-        Ok(LocationView { text })
+        validate_with(value.as_bytes(), mode)
     }
 
     fn decode_owned_with(mut value: FieldValue, mode: crate::DecodeMode) -> Result<Self::Owned, DecodeError> {
-        validate_with(value.as_bytes(), mode)?;
+        let view = validate_with(value.as_bytes(), mode)?;
+        let metadata = view.metadata;
+        let normalized = view.normalized;
         value.set_sensitive(true);
-        Ok(LocationOwned(value))
+        Ok(LocationOwned {
+            value,
+            metadata,
+            normalized,
+        })
     }
 
     fn as_field_value(value: &Self::Owned) -> &FieldValue {
-        &value.0
+        &value.value
     }
 
     fn into_field_value(value: Self::Owned) -> FieldValue {
-        value.0
+        value.value
     }
 }
 
@@ -246,35 +349,63 @@ impl TryFrom<FieldValue> for LocationOwned {
     type Error = DecodeError;
 
     fn try_from(mut value: FieldValue) -> Result<Self, Self::Error> {
-        validate(value.as_bytes())?;
+        let metadata = validate(value.as_bytes())?.metadata;
         value.set_sensitive(true);
-        Ok(Self(value))
+        Ok(Self {
+            value,
+            metadata,
+            normalized: None,
+        })
     }
 }
 
 #[inline]
-fn validate(bytes: &[u8]) -> Result<&str, DecodeError> {
+fn validate(bytes: &[u8]) -> Result<LocationView<'_>, DecodeError> {
     if let Some(text) = is_simple_reference(bytes) {
-        return Ok(text);
+        return Ok(LocationView {
+            text,
+            metadata: Metadata::from_simple(text),
+            normalized: None,
+        });
     }
-    let text = str::from_utf8(bytes).map_err(|_invalid| super::invalid_syntax(&FieldName::Location))?;
-    validate_general_reference(text)?;
-    Ok(text)
+    let text = str::from_utf8(bytes).map_err(|_invalid| invalid())?;
+    let metadata = validate_general_reference(text)?;
+    Ok(LocationView {
+        text,
+        metadata,
+        normalized: None,
+    })
 }
 
-fn validate_with(bytes: &[u8], mode: crate::DecodeMode) -> Result<&str, DecodeError> {
+fn validate_with(bytes: &[u8], mode: crate::DecodeMode) -> Result<LocationView<'_>, DecodeError> {
     if mode == crate::DecodeMode::Strict {
         return validate(bytes);
     }
-    let text = str::from_utf8(bytes).map_err(|_invalid| super::invalid_syntax(&FieldName::Location))?;
-    if is_simple_reference(bytes).is_some() || validate_general_reference(text).is_ok() {
-        return Ok(text);
+    if let Some(text) = is_simple_reference(bytes) {
+        return Ok(LocationView {
+            text,
+            metadata: Metadata::from_simple(text),
+            normalized: None,
+        });
+    }
+    let text = str::from_utf8(bytes).map_err(|_invalid| invalid())?;
+    if let Ok(metadata) = validate_general_reference(text) {
+        return Ok(LocationView {
+            text,
+            metadata,
+            normalized: None,
+        });
     }
     if !text.contains('\\') {
-        return Err(super::invalid_syntax(&FieldName::Location));
+        return Err(invalid());
     }
-    validate_general_reference(&text.replace('\\', "/"))?;
-    Ok(text)
+    let normalized = text.replace('\\', "/");
+    let metadata = validate_general_reference(&normalized)?;
+    Ok(LocationView {
+        text,
+        metadata,
+        normalized: Some(normalized),
+    })
 }
 
 /// Validates everything the origin-relative scanner declines to recognize.
@@ -285,20 +416,16 @@ fn validate_with(bytes: &[u8], mode: crate::DecodeMode) -> Result<&str, DecodeEr
 /// validation semantics.
 #[cold]
 #[inline(never)]
-fn validate_general_reference(value: &str) -> Result<(), DecodeError> {
+fn validate_general_reference(value: &str) -> Result<Metadata, DecodeError> {
     validate_general_reference_len(value.len())?;
     Uri::parse(value)
-        .map(|_parsed| ())
-        .map_err(|_invalid| super::invalid_syntax(&FieldName::Location))
+        .map(|parsed| Metadata::from_parsed(&parsed))
+        .map_err(|_invalid| invalid())
 }
 
 #[inline]
 fn validate_general_reference_len(length: usize) -> Result<(), DecodeError> {
-    if i32::try_from(length).is_ok() {
-        Ok(())
-    } else {
-        Err(super::invalid_syntax(&FieldName::Location))
-    }
+    if i32::try_from(length).is_ok() { Ok(()) } else { Err(invalid()) }
 }
 
 /// Accepts the references that need no RFC 3986 parse.
@@ -312,6 +439,38 @@ fn is_simple_reference(bytes: &[u8]) -> Option<&str> {
     http_headers_simd::as_simple_uri_reference(bytes)
 }
 
+fn invalid() -> DecodeError {
+    super::invalid_syntax(&FieldName::Location)
+}
+
+impl PartialEq for LocationOwned {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl Eq for LocationOwned {}
+
+impl Hash for LocationOwned {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.value.hash(state);
+    }
+}
+
+impl PartialEq for LocationView<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.text == other.text
+    }
+}
+
+impl Eq for LocationView<'_> {}
+
+impl Hash for LocationView<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.text.hash(state);
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -323,6 +482,18 @@ mod tests {
     use super::{Location, LocationOwned, validate, validate_general_reference, validate_general_reference_len, validate_with};
     use crate::sink::FieldSink;
     use crate::{DecodeErrorKind, DecodeMode, FieldName, FieldValue, SingleValueField, TestSink};
+
+    #[test]
+    #[should_panic(expected = "all Location constructors validate UTF-8 and storage is immutable")]
+    fn owned_semantic_projection_checks_its_utf8_invariant() {
+        let malformed = LocationOwned {
+            value: FieldValue::try_from(vec![0xff]).unwrap(),
+            metadata: validate(b"").unwrap().metadata,
+            normalized: None,
+        };
+        assert_eq!(malformed.as_str().unwrap_err().kind(), DecodeErrorKind::InvalidSyntax);
+        let _uri = malformed.uri_reference();
+    }
 
     #[test]
     fn constructors_accessors_debug_and_round_trip() {
@@ -376,9 +547,10 @@ mod tests {
                             let Some(text) = super::is_simple_reference(&candidate) else {
                                 continue;
                             };
-                            assert!(
-                                validate_general_reference(text).is_ok(),
-                                "recognized {text:?} that the general parser rejects"
+                            assert_eq!(
+                                super::Metadata::from_simple(text),
+                                validate_general_reference(text).unwrap(),
+                                "recognized {text:?} with different components"
                             );
                         }
                     }
@@ -401,8 +573,8 @@ mod tests {
         assert!(validate(&[0xff]).is_err());
 
         assert!(validate_with(b"/a\\b", DecodeMode::Strict).is_err());
-        assert_eq!(validate_with(b"/simple", DecodeMode::Relaxed), Ok("/simple"));
-        assert_eq!(validate_with(b"/a\\b", DecodeMode::Relaxed), Ok("/a\\b"));
+        assert_eq!(validate_with(b"/simple", DecodeMode::Relaxed).unwrap().as_str(), Ok("/simple"));
+        assert_eq!(validate_with(b"/a\\b", DecodeMode::Relaxed).unwrap().as_str(), Ok("/a\\b"));
         assert!(validate_with(b"bad\\%zz", DecodeMode::Relaxed).is_err());
         assert!(validate_with(b"%zz", DecodeMode::Relaxed).is_err());
         assert!(validate_with(&[0xff], DecodeMode::Relaxed).is_err());
@@ -430,7 +602,11 @@ mod tests {
         assert!(LocationOwned::try_from(String::from("\n")).is_err());
         assert!(validate_general_reference_len(i32::MAX as usize).is_ok());
         assert!(validate_general_reference_len(i32::MAX as usize + 1).is_err());
-        let malformed = LocationOwned(invalid);
+        let malformed = LocationOwned {
+            value: invalid,
+            metadata: validate(b"").unwrap().metadata,
+            normalized: None,
+        };
         assert_eq!(
             malformed.as_str().expect_err("malformed private storage is not UTF-8").kind(),
             DecodeErrorKind::InvalidSyntax

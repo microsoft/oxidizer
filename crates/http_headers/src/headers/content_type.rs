@@ -3,6 +3,7 @@
 
 //! Structured `Content-Type` parsing with lazy parameters.
 
+use std::hash::{Hash, Hasher};
 use std::ops::Range;
 use std::str;
 
@@ -52,6 +53,9 @@ impl ContentType {
 
 /// Owned value for the `Content-Type` header.
 ///
+/// Equality and hashing use the original field-value bytes, ignoring
+/// sensitivity and the parsed metadata cache.
+///
 /// # Specification
 ///
 /// Defined by [RFC 9110 section 8.3].
@@ -70,10 +74,24 @@ impl ContentType {
 /// quoted parameter.
 ///
 /// [RFC 9110 section 8.3]: https://www.rfc-editor.org/rfc/rfc9110#section-8.3
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct ContentTypeOwned {
     value: FieldValue,
     metadata: ContentTypeMetadata,
+}
+
+impl PartialEq for ContentTypeOwned {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl Eq for ContentTypeOwned {}
+
+impl Hash for ContentTypeOwned {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.value.hash(state);
+    }
 }
 
 /// Borrowed value for the `Content-Type` header.
@@ -609,23 +627,7 @@ impl Field for ContentType {
     }
 }
 
-impl TryFrom<&str> for ContentTypeOwned {
-    type Error = DecodeError;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let value = FieldValue::from_str(value).map_err(|_invalid| super::invalid_syntax(&FieldName::ContentType))?;
-        Self::try_from(value)
-    }
-}
-
-impl TryFrom<String> for ContentTypeOwned {
-    type Error = DecodeError;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        let value = FieldValue::try_from(value).map_err(|_invalid| super::invalid_syntax(&FieldName::ContentType))?;
-        Self::try_from(value)
-    }
-}
+super::shared::impl_string_conversions!(ContentTypeOwned, &FieldName::ContentType, super::invalid_syntax, value);
 
 impl TryFrom<FieldValue> for ContentTypeOwned {
     type Error = DecodeError;
@@ -675,6 +677,7 @@ fn parse_metadata(bytes: &[u8]) -> Result<ContentTypeMetadata, DecodeError> {
     Ok(ContentTypeMetadata::Parsed(Box::new(head)))
 }
 
+#[inline]
 fn parse_metadata_with(bytes: &[u8], mode: crate::DecodeMode) -> Result<ContentTypeMetadata, DecodeError> {
     if mode == crate::DecodeMode::Strict {
         return parse_metadata(bytes);
@@ -863,7 +866,10 @@ impl Iterator for ParameterScanner<'_> {
 
 fn take_token(bytes: &[u8], position: &mut usize) -> Result<Range<usize>, DecodeError> {
     let start = *position;
-    while bytes.get(*position).is_some_and(|byte| is_token_byte(*byte)) {
+    while bytes
+        .get(*position)
+        .is_some_and(|byte| TOKEN_BITS[usize::from(*byte >> 6)] & (1_u64 << (*byte & 63)) != 0)
+    {
         *position += 1;
     }
 
@@ -874,32 +880,28 @@ fn take_token(bytes: &[u8], position: &mut usize) -> Result<Range<usize>, Decode
     }
 }
 
-const fn is_token_byte(byte: u8) -> bool {
-    matches!(
-        byte,
-        b'!' | b'#'
-            | b'$'
-            | b'%'
-            | b'&'
-            | b'\''
-            | b'*'
-            | b'+'
-            | b'-'
-            | b'.'
-            | b'^'
-            | b'_'
-            | b'`'
-            | b'|'
-            | b'~'
-            | b'0'..=b'9'
-            | b'A'..=b'Z'
-            | b'a'..=b'z'
-    )
-}
+// Four words avoid branch-heavy token classification without a 256-byte lookup table.
+static TOKEN_BITS: [u64; 4] = {
+    let mut table = [0; 4];
+    let mut byte = 0_u8;
+    loop {
+        if validate::token_byte(byte) {
+            table[(byte >> 6) as usize] |= 1_u64 << (byte & 63);
+        }
+        if byte == u8::MAX {
+            break;
+        }
+        byte += 1;
+    }
+    table
+};
 
 fn take_parameter_value(bytes: &[u8], position: &mut usize) -> Result<Range<usize>, DecodeError> {
     if bytes.get(*position) != Some(&b'"') {
-        return take_token(bytes, position);
+        let mut end = *position;
+        let token = take_token(bytes, &mut end)?;
+        *position = end;
+        return Ok(token);
     }
     let start = *position;
     *position += 1;
@@ -1003,6 +1005,7 @@ mod tests {
     use super::{
         ContentType, ContentTypeHead, ContentTypeMetadata, ContentTypeOwned, InlineParameter, ParameterRange, common_metadata, component,
         narrow_offset, narrow_parameter_range, parameter_from_inline, parameter_from_range, parse_metadata_with, take_parameter_value,
+        take_token,
     };
     use crate::sink::FieldSink;
     use crate::source::{FieldLines, FieldSource};
@@ -1024,6 +1027,29 @@ mod tests {
         let view = ContentType::view(&source).expect("valid media type").expect("media type present");
         assert_eq!(view.parameters().count(), 1);
         assert_eq!(view.type_(), Ok("application"));
+    }
+
+    #[test]
+    fn token_prefix_scanning_checks_every_byte_and_preserves_the_delimiter() {
+        const TOKEN_CHARACTERS: &[u8] = b"!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+        for byte in u8::MIN..=u8::MAX {
+            let bytes = [b'/', byte, b'/'];
+            let mut position = 1;
+            let token = take_token(&bytes, &mut position);
+            if TOKEN_CHARACTERS.contains(&byte) {
+                assert_eq!(token, Ok(1..2), "{byte}");
+                assert_eq!(position, 2, "{byte}");
+            } else {
+                assert_eq!(token.unwrap_err().kind(), DecodeErrorKind::InvalidToken, "{byte}");
+                assert_eq!(position, 1, "{byte}");
+            }
+            let prefixed = [b'/', b'a', byte, b'/'];
+            let mut position = 1;
+            let end = if TOKEN_CHARACTERS.contains(&byte) { 3 } else { 2 };
+            assert_eq!(take_token(&prefixed, &mut position), Ok(1..end), "{byte}");
+            assert_eq!(position, end, "{byte}");
+        }
     }
 
     #[test]

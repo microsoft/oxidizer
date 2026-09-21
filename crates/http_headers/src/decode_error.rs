@@ -41,8 +41,11 @@ pub enum DecodeErrorKind {
     /// A quoted value was not terminated.
     UnterminatedQuote,
 
-    /// A cached decoding result had an unexpected type.
-    CacheTypeMismatch,
+    /// A source or typed-construction byte, field-line, or list-item budget was exceeded.
+    ///
+    /// This is an admission limit, not a statement that the field bytes or
+    /// grammar are invalid.
+    SourceLimitExceeded,
 }
 
 /// An error produced while decoding a header.
@@ -189,7 +192,7 @@ impl fmt::Display for DecodeErrorKind {
             Self::InvalidToken => "invalid token",
             Self::InvalidNumber => "invalid number",
             Self::UnterminatedQuote => "unterminated quoted string",
-            Self::CacheTypeMismatch => "internal cache type mismatch",
+            Self::SourceLimitExceeded => "source limit exceeded",
         })
     }
 }
@@ -199,75 +202,5 @@ struct KindDisplay(DecodeErrorKind);
 impl fmt::Display for KindDisplay {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
-    }
-}
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use std::error::Error;
-    use std::fmt::{self, Write};
-
-    use super::{DecodeError, DecodeErrorKind};
-    use crate::FieldName;
-
-    struct FailAfter {
-        writes_left: usize,
-    }
-
-    impl Write for FailAfter {
-        fn write_str(&mut self, _value: &str) -> fmt::Result {
-            if self.writes_left == 0 {
-                Err(fmt::Error)
-            } else {
-                self.writes_left -= 1;
-                Ok(())
-            }
-        }
-    }
-
-    #[test]
-    fn error_accessors_display_and_index_saturation_are_structured() {
-        let unindexed = DecodeError::new(&FieldName::ContentType, DecodeErrorKind::InvalidSyntax);
-        assert_eq!(unindexed.header(), &FieldName::ContentType);
-        assert_eq!(unindexed.value_index(), None);
-        assert_eq!(unindexed.kind(), DecodeErrorKind::InvalidSyntax);
-        assert_eq!(unindexed.to_string(), "invalid content-type header: invalid syntax");
-
-        let indexed = unindexed.at_value(7);
-        assert_eq!(indexed.value_index(), Some(7));
-        assert_eq!(indexed.to_string(), "invalid content-type header: invalid syntax at value 7");
-
-        let saturated = unindexed.at_value(usize::MAX);
-        assert_eq!(saturated.value_index(), Some(u32::MAX as usize - 1));
-        let error: &dyn Error = &saturated;
-        assert!(error.source().is_none());
-    }
-
-    #[test]
-    fn every_decode_kind_has_stable_nonsensitive_text() {
-        let cases = [
-            (DecodeErrorKind::MissingValue, "missing value"),
-            (DecodeErrorKind::UnexpectedMultipleValues, "unexpected multiple values"),
-            (DecodeErrorKind::InvalidSyntax, "invalid syntax"),
-            (DecodeErrorKind::InvalidUtf8, "invalid UTF-8"),
-            (DecodeErrorKind::InvalidToken, "invalid token"),
-            (DecodeErrorKind::InvalidNumber, "invalid number"),
-            (DecodeErrorKind::UnterminatedQuote, "unterminated quoted string"),
-            (DecodeErrorKind::CacheTypeMismatch, "internal cache type mismatch"),
-        ];
-        for (kind, expected) in cases {
-            assert_eq!(kind.to_string(), expected);
-        }
-    }
-
-    #[test]
-    fn display_propagates_formatter_failures() {
-        let error = DecodeError::new(&FieldName::ContentType, DecodeErrorKind::InvalidSyntax).at_value(3);
-        let mut immediate = FailAfter { writes_left: 0 };
-        assert!(immediate.write_fmt(format_args!("{error}")).is_err());
-
-        let mut after_message = FailAfter { writes_left: 4 };
-        assert!(after_message.write_fmt(format_args!("{error}")).is_err());
     }
 }

@@ -10,7 +10,9 @@ use std::sync::LazyLock;
 
 use http::{HeaderMap, HeaderValue};
 use http_headers::headers::{Accept, Allow, SetCookie, SetCookieOwned, UserAgent};
-use http_headers::sink::{EncodedValues, FieldEncodeOutput, FieldEncoder, FieldSink as _, FieldSinkExt, FieldValueWriter, InsertError};
+use http_headers::sink::{
+    EncodedValues, FieldEncodeOutput, FieldEncoder, FieldSink as _, FieldSinkExt, FieldValueWriter, InsertError, InsertErrorKind,
+};
 use http_headers::source::FieldSource;
 use http_headers::{DecodeError, DecodeErrorKind, Field, FieldName, FieldSensitivity, FieldValue, FieldValueRef, SingleValueField};
 
@@ -226,7 +228,7 @@ fn deferred_map_rejects_bad_encoders_without_replacement() {
     let mut map = HeaderMap::new();
     map.insert(http::header::USER_AGENT, HeaderValue::from_static("original"));
 
-    for encoder in [
+    for (encoder, expected_kind) in [
         BytesEncoder {
             expected: 2,
             bytes: b"x",
@@ -247,8 +249,18 @@ fn deferred_map_rejects_bad_encoders_without_replacement() {
             bytes: b"x",
             sensitive: false,
         },
-    ] {
-        assert_eq!(map.set_encoded(&FieldName::UserAgent, encoder), Err(InsertError));
+    ]
+    .into_iter()
+    .zip([
+        InsertErrorKind::InvalidEncoding,
+        InsertErrorKind::InvalidValue,
+        InsertErrorKind::InvalidEncoding,
+        InsertErrorKind::CapacityExceeded,
+    ]) {
+        assert_eq!(
+            map.set_encoded(&FieldName::UserAgent, encoder),
+            Err(InsertError::new(expected_kind))
+        );
         assert_eq!(map[http::header::USER_AGENT], "original");
     }
 }

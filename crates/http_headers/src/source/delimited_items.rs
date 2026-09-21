@@ -22,6 +22,9 @@ use crate::{DecodeError, DecodeErrorKind, FieldName};
 /// [`DecodeErrorKind::UnterminatedQuote`] with the affected field-line index.
 /// Custom sources are also rejected before yielding an item when their byte or
 /// line budget is exceeded, and after [`MAX_CUSTOM_LIST_ITEMS`] parsed items.
+/// These admission failures yield [`DecodeErrorKind::SourceLimitExceeded`]
+/// once, then end iteration. Invalid field bytes remain
+/// [`DecodeErrorKind::InvalidSyntax`].
 ///
 /// # Examples
 ///
@@ -79,10 +82,28 @@ impl<'a> DelimitedItems<'a> {
         }
     }
 
+    #[cfg(any(test, feature = "headers-negotiation"))]
+    pub(super) fn from_validated_source(values: &FieldLines<'a>, delimiter: u8) -> Self {
+        Self {
+            name: values.name(),
+            values: values.repeated(),
+            delimiter,
+            skip_empty: delimiter == b',',
+            current: None,
+            start: 0,
+            position: 0,
+            value_index: 0,
+            item_count: 0,
+            pending_error: None,
+            limited: values.has_custom_source_limits(),
+            finished: false,
+        }
+    }
+
     fn item(&mut self, item: &'a [u8]) -> Result<&'a [u8], DecodeError> {
         if self.limited && self.item_count == MAX_CUSTOM_LIST_ITEMS {
             self.finished = true;
-            return Err(DecodeError::new(self.name, DecodeErrorKind::InvalidSyntax));
+            return Err(DecodeError::new(self.name, DecodeErrorKind::SourceLimitExceeded));
         }
         if self.limited {
             self.item_count += 1;
@@ -176,8 +197,121 @@ impl<'a> Iterator for DelimitedItems<'a> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use crate::source::FieldLines;
-    use crate::{DecodeErrorKind, FieldName, FieldValue};
+    use std::iter;
+
+    use crate::source::{FieldLines, MAX_CUSTOM_FIELD_BYTES, MAX_CUSTOM_FIELD_LINES, MAX_CUSTOM_LIST_ITEMS};
+    use crate::{DecodeError, DecodeErrorKind, FieldName, FieldValue, FieldValueRef};
+
+    fn assert_validated_iteration_matches_checked(values: &FieldLines<'_>) {
+        values.validate_custom_source().unwrap();
+        for _ in 0..3 {
+            let mut checked = values.comma_items();
+            let mut validated = values.validated_comma_items();
+            loop {
+                let expected = checked.next();
+                assert_eq!(validated.next(), expected);
+                if expected.is_none() {
+                    break;
+                }
+            }
+            assert_eq!(checked.next(), None);
+            assert_eq!(validated.next(), None);
+            assert_eq!(validated.next(), None);
+        }
+    }
+
+    #[test]
+    fn validated_iteration_matches_all_retained_source_representations() {
+        let bytes = [
+            b" \t, alpha, \"b,;\\\"\xff\", bare\\, tail,, ".as_slice(),
+            b"",
+            b"alpha, beta;q=0.000000000000000000001",
+        ];
+        for line in bytes {
+            assert_validated_iteration_matches_checked(&FieldLines::single(&FieldName::Accept, line));
+        }
+        let stored: Vec<_> = bytes.into_iter().map(|line| FieldValue::from_bytes(line).unwrap()).collect();
+        assert_validated_iteration_matches_checked(&FieldLines::from_slice(&FieldName::Accept, &stored).unwrap());
+        let borrowed: Vec<_> = bytes.into_iter().map(FieldValueRef::new).collect();
+        assert_validated_iteration_matches_checked(&FieldLines::from_borrowed(&FieldName::Accept, &borrowed).unwrap());
+
+        #[cfg(feature = "http")]
+        {
+            let mut map = http::HeaderMap::new();
+            for line in bytes {
+                map.append(http::header::ACCEPT, http::HeaderValue::from_bytes(line).unwrap());
+            }
+            let values = FieldLines::from_http(&FieldName::Accept, map.get_all(http::header::ACCEPT)).unwrap();
+            assert_validated_iteration_matches_checked(&values);
+        }
+    }
+
+    #[test]
+    fn validated_iteration_keeps_quote_errors_and_custom_item_limits() {
+        let split_quotes = [
+            FieldValueRef::new(b"alpha,\"unterminated"),
+            FieldValueRef::new(b"\"escaped\\"),
+            FieldValueRef::new(b"omega"),
+        ];
+        let values = FieldLines::from_borrowed(&FieldName::Accept, &split_quotes).unwrap();
+        assert_validated_iteration_matches_checked(&values);
+        let actual = values.validated_comma_items().collect::<Vec<_>>();
+        assert_eq!(
+            actual,
+            [
+                Ok(b"alpha".as_slice()),
+                Err(DecodeError::new(&FieldName::Accept, DecodeErrorKind::UnterminatedQuote).at_value(0)),
+                Err(DecodeError::new(&FieldName::Accept, DecodeErrorKind::UnterminatedQuote).at_value(1)),
+                Ok(b"omega".as_slice()),
+            ]
+        );
+
+        for count in [MAX_CUSTOM_LIST_ITEMS - 1, MAX_CUSTOM_LIST_ITEMS, MAX_CUSTOM_LIST_ITEMS + 1] {
+            let bytes = iter::repeat_n("alpha", count).collect::<Vec<_>>().join(",");
+            let values = FieldLines::single(&FieldName::Accept, bytes.as_bytes());
+            assert_validated_iteration_matches_checked(&values);
+            let mut entries = values.validated_comma_items();
+            for _ in 0..count.min(MAX_CUSTOM_LIST_ITEMS) {
+                assert_eq!(entries.next(), Some(Ok(b"alpha".as_slice())));
+            }
+            if count > MAX_CUSTOM_LIST_ITEMS {
+                assert_eq!(
+                    entries.next(),
+                    Some(Err(DecodeError::new(&FieldName::Accept, DecodeErrorKind::SourceLimitExceeded)))
+                );
+            }
+            assert_eq!(entries.next(), None);
+        }
+    }
+
+    #[test]
+    fn public_iteration_keeps_source_preflight_error_precedence() {
+        fn rejected(values: &FieldLines<'_>, kind: DecodeErrorKind) {
+            let expected = DecodeError::new(&FieldName::Accept, kind);
+            assert_eq!(values.validate_custom_source(), Err(expected));
+            let mut items = values.comma_items();
+            assert_eq!(items.next(), Some(Err(expected)));
+            assert_eq!(items.next(), None);
+            assert_eq!(items.next(), None);
+        }
+
+        let raw_invalid = [FieldValueRef::new(b"\"unterminated"), FieldValueRef::new(b"\r")];
+        rejected(
+            &FieldLines::from_borrowed(&FieldName::Accept, &raw_invalid).unwrap(),
+            DecodeErrorKind::InvalidSyntax,
+        );
+        let too_many_lines = vec![FieldValueRef::new(b"\"unterminated"); MAX_CUSTOM_FIELD_LINES + 1];
+        rejected(
+            &FieldLines::from_borrowed(&FieldName::Accept, &too_many_lines).unwrap(),
+            DecodeErrorKind::SourceLimitExceeded,
+        );
+        let mut too_many_bytes = vec![b'a'; MAX_CUSTOM_FIELD_BYTES + 1];
+        too_many_bytes[0] = b'"';
+        rejected(
+            &FieldLines::single(&FieldName::Accept, &too_many_bytes),
+            DecodeErrorKind::SourceLimitExceeded,
+        );
+    }
 
     #[test]
     fn delimited_iteration_handles_ows_empty_items_quotes_escapes_and_errors() {
