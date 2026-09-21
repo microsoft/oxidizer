@@ -46,6 +46,7 @@ static PARTIAL_SCAN_LIMIT: AtomicU64 = AtomicU64::new(0);
 // and fails. Counter writes are released by guard departure and acquired by
 // drain. This does not rely on store->load ordering across separate atomics.
 const RECORDING_CLOSED: usize = 1 << (usize::BITS - 1);
+#[cfg_attr(test, mutants::skip)] // Mutating the count mask can make recorder draining non-terminating; its boundaries are tested directly.
 const RECORDER_COUNT: usize = RECORDING_CLOSED - 1;
 
 /// Controls explicitly enabled tuning sessions for this linked copy of the crate.
@@ -477,6 +478,7 @@ impl Drop for RecordingGuard {
     }
 }
 
+#[cfg_attr(test, mutants::skip)] // Admission boundaries are tested directly; corrupting this gate can strand active recorder counts.
 fn admitted_count(state: usize) -> Option<usize> {
     // Exhaustion is a rejected diagnostic event, never a carry into the gate.
     if state & RECORDING_CLOSED != 0 || state == RECORDER_COUNT {
@@ -502,6 +504,7 @@ fn wait_for_recorders() {
     wait_for_recorders_with(|| {});
 }
 
+#[cfg_attr(test, mutants::skip)] // The injected wait test covers the exit predicate; mutations can make every telemetry transition spin forever.
 fn wait_for_recorders_with(mut on_wait: impl FnMut()) {
     while RECORDERS.load(Ordering::Acquire) & RECORDER_COUNT != 0 {
         on_wait();

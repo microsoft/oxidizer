@@ -223,7 +223,7 @@ mod tests {
                     "Io",
                     "Cache",
                     "Threads",
-                    "ReleaseEvents",
+                    "IndexStacks",
                     "Ready",
                 ]
                 .map(String::from)
@@ -272,6 +272,35 @@ mod tests {
             snapshot.threads.threads.iter().map(|thread| thread.retained_events).sum::<u64>(),
             snapshot.allocations.as_ref().map_or(0, |allocations| allocations.hotspots.len()),
         );
+        let index = snapshot.filter_index.as_ref().unwrap();
+        let filter =
+            super::super::filter::FilterSpec::parse("crate:performables", "", false, super::super::filter::RuntimeStackMode::Event)
+                .unwrap();
+        let filtering_started = std::time::Instant::now();
+        let filtered = index.render(&filter);
+        println!(
+            "Filtered snapshot in {:.3}s: {} / {} events, {} unknown",
+            filtering_started.elapsed().as_secs_f64(),
+            filtered.filter_summary.events.shown,
+            filtered.filter_summary.events.total,
+            filtered.filter_summary.events.unknown,
+        );
+        assert!(filtered.filter_summary.events.shown <= filtered.filter_summary.events.total);
+        drop(filtered);
+        let restored = index.render(&super::super::filter::FilterSpec::default());
+        assert_eq!(
+            (
+                restored.filter_summary,
+                restored.primitives.total_events,
+                restored.primitives.lost_events
+            ),
+            (
+                snapshot.filter_summary,
+                snapshot.primitives.total_events,
+                snapshot.primitives.lost_events
+            ),
+        );
+        drop(restored);
         assert_eq!((snapshot.captured_at, snapshot.captured_instant), (None, None));
         let mut app = super::super::app::App::offline(path);
         app.finish_offline_load(snapshot);

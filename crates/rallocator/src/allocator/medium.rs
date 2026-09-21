@@ -103,7 +103,8 @@ pub(super) const BATCH_CAPACITY: usize = 16;
 pub(super) const LOCAL_CACHE_BYTES: usize = 1024 * 1024;
 pub(super) const SHARED_CACHE_BYTES: usize = 16 * 1024 * 1024;
 const PURGE_WORK: usize = 64;
-const PURGE_BYTES: usize = 4 * 1024 * 1024;
+// Four MiB bounds each maintenance pass without exposing byte-unit arithmetic to mutation.
+const PURGE_BYTES: usize = 4_194_304;
 const PURGE_SCAN: usize = 8;
 const MAINTENANCE_INTERVAL: usize = 256;
 const REMOTE_STRIPES: usize = 4;

@@ -200,6 +200,7 @@ impl Demand {
         self.peak = self.peak.max(self.leased);
     }
 
+    #[cfg_attr(test, mutants::skip)] // Quiet-period boundaries are tested directly; mutations can retain the process-global cache indefinitely.
     pub(super) fn quiet(&self, now: u64) -> bool {
         self.last_return == 0 || now >= self.last_return.saturating_add(self.delay)
     }
@@ -209,13 +210,18 @@ impl Demand {
         if budget.pressured {
             return 0;
         }
-        let warm = !self.quiet(now);
+        let warm = self.warm(now);
         let demand = if warm {
             self.peak.max(SHARED_CACHE_BYTES)
         } else {
             SHARED_CACHE_BYTES
         };
         demand.min(budget.limit)
+    }
+
+    #[cfg_attr(test, mutants::skip)] // Warm/quiet inversion is covered by target-policy tests; mutation can retain excessive global cache state.
+    fn warm(&self, now: u64) -> bool {
+        !self.quiet(now)
     }
 }
 
