@@ -6,7 +6,7 @@
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
-use super::{Metadata, UriAuthority};
+use super::{ComponentRanges, UriAuthority};
 
 /// A validated URI-reference with constant-time component projections.
 ///
@@ -49,22 +49,22 @@ pub struct UriReference<'a> {
 }
 
 impl<'a> UriReference<'a> {
-    pub(super) fn from_metadata(text: &'a str, metadata: &Metadata) -> Self {
-        let authority = metadata.authority_host.as_ref().map(|host| {
-            let start = metadata.scheme_end.map_or(2, |end| end.get() + 3);
+    pub(super) fn from_component_ranges(text: &'a str, ranges: &ComponentRanges) -> Self {
+        let authority = ranges.authority_host.as_ref().map(|host| {
+            let start = ranges.scheme_end.map_or(2, |end| end.get() + 3);
             UriAuthority {
                 userinfo: (host.start != start).then(|| &text[start..host.start - 1]),
                 host: &text[host.clone()],
-                port: (host.end != metadata.path.start).then(|| &text[host.end + 1..metadata.path.start]),
+                port: (host.end != ranges.path.start).then(|| &text[host.end + 1..ranges.path.start]),
             }
         });
         Self {
             text,
-            scheme: metadata.scheme_end.map(|end| &text[..end.get()]),
+            scheme: ranges.scheme_end.map(|end| &text[..end.get()]),
             authority,
-            path: &text[metadata.path.clone()],
-            query: metadata.query_end.map(|end| &text[metadata.path.end + 1..end.get()]),
-            fragment: metadata.fragment_start.map(|start| &text[start.get()..]),
+            path: &text[ranges.path.clone()],
+            query: ranges.query_end.map(|end| &text[ranges.path.end + 1..end.get()]),
+            fragment: ranges.fragment_start.map(|start| &text[start.get()..]),
         }
     }
 

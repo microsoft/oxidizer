@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Retained boundaries in the validated semantic spelling.
+//! Retained component ranges in the validated semantic spelling.
 
 use std::num::NonZeroUsize;
 use std::ops::Range;
@@ -10,7 +10,7 @@ use fluent_uri::Uri;
 use http_headers_simd::find_either;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct Metadata {
+pub(super) struct ComponentRanges {
     pub(super) scheme_end: Option<NonZeroUsize>,
     pub(super) authority_host: Option<Range<usize>>,
     pub(super) path: Range<usize>,
@@ -18,7 +18,7 @@ pub(super) struct Metadata {
     pub(super) fragment_start: Option<NonZeroUsize>,
 }
 
-impl Metadata {
+impl ComponentRanges {
     pub(super) fn from_parsed(parsed: &Uri<&str>) -> Self {
         let scheme_end = parsed.scheme().and_then(|scheme| NonZeroUsize::new(scheme.as_str().len()));
         let prefix_end = scheme_end.map_or(0, |end| end.get() + 1);

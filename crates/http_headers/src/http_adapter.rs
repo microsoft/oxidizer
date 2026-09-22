@@ -176,6 +176,19 @@ fn buffered(expected: usize, bytes: &[u8]) -> Result<SmallVec<[u8; 32]>, InsertE
     Ok(buffer)
 }
 
+fn try_push_http_value(values: &mut SmallVec<[HeaderValue; 1]>, value: HeaderValue) -> Result<(), InsertError> {
+    reserve_http_values(values, 1)?;
+    values.push(value);
+    Ok(())
+}
+
+fn reserve_http_values(values: &mut SmallVec<[HeaderValue; 1]>, additional: usize) -> Result<(), InsertError> {
+    values
+        .try_reserve(additional)
+        .map_err(|_error| InsertError::new(InsertErrorKind::AllocationFailed))?;
+    Ok(())
+}
+
 impl FieldEncodeOutput for HttpOutput {
     type Writer<'a> = HttpWriter<'a>;
 
@@ -192,14 +205,12 @@ impl FieldEncodeOutput for HttpOutput {
     }
 
     fn push_value(&mut self, value: FieldValue) -> Result<(), InsertError> {
-        self.values
-            .push(HeaderValue::try_from(value).map_err(|_invalid| InsertError::new(InsertErrorKind::InvalidValue))?);
-        Ok(())
+        let value = HeaderValue::try_from(value).map_err(|_invalid| InsertError::new(InsertErrorKind::InvalidValue))?;
+        try_push_http_value(&mut self.values, value)
     }
 
     fn push_u64(&mut self, value: u64) -> Result<(), InsertError> {
-        self.values.push(HeaderValue::from(value));
-        Ok(())
+        try_push_http_value(&mut self.values, HeaderValue::from(value))
     }
 }
 
@@ -255,8 +266,7 @@ impl FieldValueWriter for HttpWriter<'_> {
             }
         };
         value.set_sensitive(self.sensitive);
-        self.values.push(value);
-        Ok(())
+        try_push_http_value(self.values, value)
     }
 }
 
@@ -325,7 +335,7 @@ fn insert_http_values(map: &mut HeaderMap, name: HeaderName, encoded: SmallVec<[
 mod tests {
     use std::sync::LazyLock;
 
-    use super::{HttpOutput, append_http_values, buffered, insert_http_values};
+    use super::{HttpOutput, append_http_values, buffered, insert_http_values, reserve_http_values, try_push_http_value};
     use crate::sink::{EncodedValues, FieldEncodeOutput, FieldSink, FieldValueWriter, InsertError, InsertErrorKind, U64Encoder};
     use crate::source::FieldSource;
     use crate::{FieldValue, FieldValueRef};
@@ -523,6 +533,15 @@ mod tests {
         );
         assert!(output.values.is_empty());
         assert_eq!(buffered(usize::MAX, b"x"), Err(InsertError::new(InsertErrorKind::AllocationFailed)));
+
+        let mut values = smallvec::smallvec![http::HeaderValue::from_static("original")];
+        assert_eq!(
+            reserve_http_values(&mut values, usize::MAX),
+            Err(InsertError::new(InsertErrorKind::AllocationFailed))
+        );
+        assert_eq!(values.as_slice(), &[http::HeaderValue::from_static("original")]);
+        try_push_http_value(&mut values, http::HeaderValue::from_static("second")).unwrap();
+        assert_eq!(values.len(), 2);
     }
 
     /// The number of entries an `http::HeaderMap` holds once it can no longer

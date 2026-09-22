@@ -4,6 +4,7 @@
 //! Owned encoded field values.
 
 use std::cmp::Ordering;
+use std::collections::TryReserveError;
 use std::hash::{Hash, Hasher};
 use std::{fmt, option, slice, vec};
 
@@ -200,6 +201,11 @@ impl EncodedValues {
         } else {
             self.first = Some(value);
         }
+    }
+
+    pub(crate) fn try_reserve(&mut self, additional: usize) -> Result<(), TryReserveError> {
+        let rest_additional = additional.saturating_sub(usize::from(self.is_empty()));
+        self.rest.try_reserve(rest_additional)
     }
 
     /// Returns the number of field values.
@@ -457,5 +463,17 @@ mod tests {
         assert_eq!(one.len(), 1);
         let collected: EncodedValues = [FieldValue::from_static("a"), FieldValue::from_static("b")].into_iter().collect();
         assert_eq!(collected.len(), 2);
+    }
+
+    #[test]
+    fn fallible_growth_reports_failure_without_changing_values() {
+        let mut values = EncodedValues::single(FieldValue::from_static("original"));
+        assert!(values.try_reserve(usize::MAX).is_err());
+        assert_eq!(values.len(), 1);
+        assert_eq!(values.iter().next().unwrap(), "original");
+
+        values.try_reserve(1).unwrap();
+        values.push(FieldValue::from_static("second"));
+        assert_eq!(values.len(), 2);
     }
 }

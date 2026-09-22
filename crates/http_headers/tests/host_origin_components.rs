@@ -61,6 +61,32 @@ mod host {
     use super::*;
 
     #[test]
+    fn empty_host_is_valid_across_borrowed_owned_and_source_paths() {
+        let view = <Host as SingleValueField>::decode_view(FieldValueRef::new(b"")).unwrap();
+        assert_eq!(view.host(), "");
+        assert_eq!(view.port(), None);
+
+        let owned = HostOwned::try_from("").unwrap();
+        assert_eq!(owned.host().unwrap(), "");
+        assert_eq!(owned.port().unwrap(), None);
+
+        let source = Values::new(&FieldName::Host, "");
+        let sourced = Host::view(&source).unwrap().unwrap();
+        assert_eq!(sourced.host(), "");
+        assert_eq!(sourced.port(), None);
+
+        let parsed_error = HostOwned::try_from(":443").unwrap_err().kind();
+        assert_eq!(parsed_error, DecodeErrorKind::InvalidSyntax);
+        assert_eq!(HostOwned::with_port("", 443).unwrap_err().kind(), parsed_error);
+        assert_eq!(
+            HostOwned::from_parts(view.kind(), Some(HostPortView::new("443").unwrap()))
+                .unwrap_err()
+                .kind(),
+            parsed_error
+        );
+    }
+
+    #[test]
     fn ascii_names_borrow_and_ipv4_classification_does_not_coerce_registered_names() {
         for wire in [
             "Example.COM",

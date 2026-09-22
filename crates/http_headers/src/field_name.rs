@@ -200,7 +200,7 @@ macro_rules! known_headers {
             /// ```
             #[cfg(feature = "http")]
             #[must_use]
-            #[inline(always)]
+            #[inline]
             pub fn http_name(&self) -> Option<&'static http::HeaderName> {
                 match self {
                     $(Self::$variant => Some(&http::header::$konst),)+

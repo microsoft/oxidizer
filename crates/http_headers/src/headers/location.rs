@@ -16,7 +16,7 @@ mod metadata;
 mod uri_authority;
 mod uri_reference;
 
-use metadata::Metadata;
+use metadata::ComponentRanges;
 pub use uri_authority::UriAuthority;
 pub use uri_reference::UriReference;
 
@@ -74,7 +74,7 @@ pub struct Location {
 #[derive(Clone)]
 pub struct LocationOwned {
     value: FieldValue,
-    metadata: Metadata,
+    component_ranges: ComponentRanges,
     normalized: Option<String>,
 }
 
@@ -99,7 +99,7 @@ pub struct LocationOwned {
 /// ```
 pub struct LocationView<'a> {
     text: &'a str,
-    metadata: Metadata,
+    component_ranges: ComponentRanges,
     normalized: Option<String>,
 }
 
@@ -158,7 +158,7 @@ impl LocationOwned {
     #[inline]
     #[must_use]
     pub fn uri_reference(&self) -> UriReference<'_> {
-        UriReference::from_metadata(self.semantic_text(), &self.metadata)
+        UriReference::from_component_ranges(self.semantic_text(), &self.component_ranges)
     }
 
     fn semantic_text(&self) -> &str {
@@ -233,7 +233,7 @@ impl<'a> LocationView<'a> {
     #[inline]
     #[must_use]
     pub fn uri_reference(&self) -> UriReference<'_> {
-        UriReference::from_metadata(self.normalized.as_deref().unwrap_or(self.text), &self.metadata)
+        UriReference::from_component_ranges(self.normalized.as_deref().unwrap_or(self.text), &self.component_ranges)
     }
 
     /// Whether relaxed decoding replaced backslashes in the semantic spelling.
@@ -306,12 +306,12 @@ impl SingleValueField for Location {
 
     fn decode_owned_with(mut value: FieldValue, mode: crate::DecodeMode) -> Result<Self::Owned, DecodeError> {
         let view = validate_with(value.as_bytes(), mode)?;
-        let metadata = view.metadata;
+        let component_ranges = view.component_ranges;
         let normalized = view.normalized;
         value.set_sensitive(true);
         Ok(LocationOwned {
             value,
-            metadata,
+            component_ranges,
             normalized,
         })
     }
@@ -349,11 +349,11 @@ impl TryFrom<FieldValue> for LocationOwned {
     type Error = DecodeError;
 
     fn try_from(mut value: FieldValue) -> Result<Self, Self::Error> {
-        let metadata = validate(value.as_bytes())?.metadata;
+        let component_ranges = validate(value.as_bytes())?.component_ranges;
         value.set_sensitive(true);
         Ok(Self {
             value,
-            metadata,
+            component_ranges,
             normalized: None,
         })
     }
@@ -364,15 +364,15 @@ fn validate(bytes: &[u8]) -> Result<LocationView<'_>, DecodeError> {
     if let Some(text) = is_simple_reference(bytes) {
         return Ok(LocationView {
             text,
-            metadata: Metadata::from_simple(text),
+            component_ranges: ComponentRanges::from_simple(text),
             normalized: None,
         });
     }
     let text = str::from_utf8(bytes).map_err(|_invalid| invalid())?;
-    let metadata = validate_general_reference(text)?;
+    let component_ranges = validate_general_reference(text)?;
     Ok(LocationView {
         text,
-        metadata,
+        component_ranges,
         normalized: None,
     })
 }
@@ -384,15 +384,15 @@ fn validate_with(bytes: &[u8], mode: crate::DecodeMode) -> Result<LocationView<'
     if let Some(text) = is_simple_reference(bytes) {
         return Ok(LocationView {
             text,
-            metadata: Metadata::from_simple(text),
+            component_ranges: ComponentRanges::from_simple(text),
             normalized: None,
         });
     }
     let text = str::from_utf8(bytes).map_err(|_invalid| invalid())?;
-    if let Ok(metadata) = validate_general_reference(text) {
+    if let Ok(component_ranges) = validate_general_reference(text) {
         return Ok(LocationView {
             text,
-            metadata,
+            component_ranges,
             normalized: None,
         });
     }
@@ -400,10 +400,10 @@ fn validate_with(bytes: &[u8], mode: crate::DecodeMode) -> Result<LocationView<'
         return Err(invalid());
     }
     let normalized = text.replace('\\', "/");
-    let metadata = validate_general_reference(&normalized)?;
+    let component_ranges = validate_general_reference(&normalized)?;
     Ok(LocationView {
         text,
-        metadata,
+        component_ranges,
         normalized: Some(normalized),
     })
 }
@@ -416,10 +416,10 @@ fn validate_with(bytes: &[u8], mode: crate::DecodeMode) -> Result<LocationView<'
 /// validation semantics.
 #[cold]
 #[inline(never)]
-fn validate_general_reference(value: &str) -> Result<Metadata, DecodeError> {
+fn validate_general_reference(value: &str) -> Result<ComponentRanges, DecodeError> {
     validate_general_reference_len(value.len())?;
     Uri::parse(value)
-        .map(|parsed| Metadata::from_parsed(&parsed))
+        .map(|parsed| ComponentRanges::from_parsed(&parsed))
         .map_err(|_invalid| invalid())
 }
 
@@ -488,7 +488,7 @@ mod tests {
     fn owned_semantic_projection_checks_its_utf8_invariant() {
         let malformed = LocationOwned {
             value: FieldValue::try_from(vec![0xff]).unwrap(),
-            metadata: validate(b"").unwrap().metadata,
+            component_ranges: validate(b"").unwrap().component_ranges,
             normalized: None,
         };
         assert_eq!(malformed.as_str().unwrap_err().kind(), DecodeErrorKind::InvalidSyntax);
@@ -536,25 +536,32 @@ mod tests {
     #[test]
     fn the_recognized_subset_agrees_with_the_general_parser() {
         let alphabet = b"aZ0:@/?#%[].+-_~!$&'()*,;=\\ \t";
-        for first in alphabet {
-            for second in alphabet {
-                for third in alphabet {
-                    for fourth in alphabet {
-                        let bytes = [*first, *second, *third, *fourth];
-                        for prefix in [b"".as_slice(), b"https://h.example".as_slice()] {
-                            let mut candidate = prefix.to_vec();
-                            candidate.extend_from_slice(&bytes);
-                            let Some(text) = super::is_simple_reference(&candidate) else {
-                                continue;
-                            };
-                            assert_eq!(
-                                super::Metadata::from_simple(text),
-                                validate_general_reference(text).unwrap(),
-                                "recognized {text:?} with different components"
-                            );
-                        }
-                    }
-                }
+        let radix = alphabet.len();
+        let case_count = radix.pow(if cfg!(miri) { 2 } else { 4 });
+        for encoded in 0..case_count {
+            let mut value = encoded;
+            let mut indices = [0; 4];
+            for index in &mut indices {
+                *index = value % radix;
+                value /= radix;
+            }
+            if cfg!(miri) {
+                // Pairwise seeds still place every alphabet byte in every position.
+                indices[2] = (indices[0] + indices[1]) % radix;
+                indices[3] = (indices[0] + 2 * indices[1]) % radix;
+            }
+            let bytes = indices.map(|index| alphabet[index]);
+            for prefix in [b"".as_slice(), b"https://h.example".as_slice()] {
+                let mut candidate = prefix.to_vec();
+                candidate.extend_from_slice(&bytes);
+                let Some(text) = super::is_simple_reference(&candidate) else {
+                    continue;
+                };
+                assert_eq!(
+                    super::ComponentRanges::from_simple(text),
+                    validate_general_reference(text).unwrap(),
+                    "recognized {text:?} with different components"
+                );
             }
         }
     }
@@ -604,7 +611,7 @@ mod tests {
         assert!(validate_general_reference_len(i32::MAX as usize + 1).is_err());
         let malformed = LocationOwned {
             value: invalid,
-            metadata: validate(b"").unwrap().metadata,
+            component_ranges: validate(b"").unwrap().component_ranges,
             normalized: None,
         };
         assert_eq!(

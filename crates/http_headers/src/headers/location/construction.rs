@@ -6,7 +6,7 @@
 use std::num::NonZeroUsize;
 
 use super::component::Component;
-use super::{LocationOwned, Metadata, UriAuthority, invalid, is_simple_reference, validate_general_reference_len};
+use super::{ComponentRanges, LocationOwned, UriAuthority, invalid, is_simple_reference, validate_general_reference_len};
 use crate::{DecodeError, FieldValue};
 
 pub(super) fn from_components(
@@ -76,7 +76,7 @@ pub(super) fn from_components(
     value.set_sensitive(true);
     Ok(LocationOwned {
         value,
-        metadata: Metadata {
+        component_ranges: ComponentRanges {
             scheme_end,
             authority_host,
             path: path_start..path_end,

@@ -55,9 +55,20 @@ impl FieldEncodeOutput for CollectOutput {
     }
 
     fn push_value(&mut self, value: FieldValue) -> Result<(), InsertError> {
-        self.values.push(value);
-        Ok(())
+        try_push_collected_value(&mut self.values, value)
     }
+}
+
+fn reserve_collected_values(values: &mut EncodedValues, additional: usize) -> Result<(), InsertError> {
+    values
+        .try_reserve(additional)
+        .map_err(|_error| InsertError::new(InsertErrorKind::AllocationFailed))
+}
+
+fn try_push_collected_value(values: &mut EncodedValues, value: FieldValue) -> Result<(), InsertError> {
+    reserve_collected_values(values, 1)?;
+    values.push(value);
+    Ok(())
 }
 
 fn reserve_bytes(length: usize) -> Result<Vec<u8>, InsertError> {
@@ -108,8 +119,7 @@ impl FieldValueWriter for CollectWriter<'_> {
         }
         .map_err(|_invalid| InsertError::new(InsertErrorKind::InvalidValue))?
         .with_sensitive(self.sensitive);
-        self.values.push(value);
-        Ok(())
+        try_push_collected_value(self.values, value)
     }
 }
 
@@ -231,7 +241,7 @@ mod tests {
     #[cfg(feature = "http")]
     use http::{HeaderMap, HeaderValue, header};
 
-    use super::{CollectOutput, FIELD_VALUE_INLINE_CAPACITY, FieldSink, reserve_bytes};
+    use super::{CollectOutput, FIELD_VALUE_INLINE_CAPACITY, FieldSink, reserve_bytes, reserve_collected_values};
     use crate::sink::{
         EncodedValues, FieldEncodeOutput, FieldEncoder, FieldSensitivity, FieldValueWriter, InsertError, InsertErrorKind, U64Encoder,
         ValueRefsEncoder,
@@ -505,6 +515,13 @@ mod tests {
         let buffer = reserve_bytes(FIELD_VALUE_INLINE_CAPACITY + 1).unwrap();
         assert!(buffer.is_empty());
         assert!(buffer.capacity() > FIELD_VALUE_INLINE_CAPACITY);
+
+        let mut values = EncodedValues::single(FieldValue::from_static("original"));
+        assert_eq!(
+            reserve_collected_values(&mut values, usize::MAX),
+            Err(InsertError::new(InsertErrorKind::AllocationFailed))
+        );
+        assert_eq!(values.iter().next().unwrap(), "original");
     }
 
     #[test]

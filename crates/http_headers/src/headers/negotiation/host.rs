@@ -60,7 +60,8 @@ pub struct Host {
 /// ```
 ///
 /// `Host: example.com` names a host, `Host: example.com:8080` includes a port,
-/// and `Host: [2001:db8::1]:443` uses an IPv6 literal.
+/// and `Host: [2001:db8::1]:443` uses an IPv6 literal. An empty field value
+/// represents a target URI without an authority component.
 ///
 /// [RFC 9110 section 7.2]: https://www.rfc-editor.org/rfc/rfc9110#section-7.2
 #[derive(Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -138,8 +139,9 @@ impl HostOwned {
     ///
     /// # Errors
     ///
-    /// Returns an error if adding a port to a relaxed international name would
-    /// introduce a second port delimiter in its retained IDNA normalization.
+    /// Returns an error if a port is supplied for an empty registered name, or
+    /// if adding a port to a relaxed international name would introduce a
+    /// second port delimiter in its retained IDNA normalization.
     #[expect(
         clippy::missing_panics_doc,
         reason = "validated components and String formatting cannot violate field-value invariants"
@@ -147,15 +149,19 @@ impl HostOwned {
     pub fn from_parts(host: HostKind<'_>, port: Option<HostPortView<'_>>) -> Result<Self, DecodeError> {
         if let HostKind::RegisteredName(name) = host
             && port.is_some()
-            && name.normalized() != name.as_str()
         {
-            let normalized = name.normalized();
-            if normalized.starts_with('[') {
-                if !normalized.ends_with(']') {
-                    return Err(invalid(&FieldName::Host, DecodeErrorKind::InvalidNumber));
-                }
-            } else if normalized.contains(':') {
+            if name.as_str().is_empty() {
                 return Err(invalid_syntax(&FieldName::Host));
+            }
+            if name.normalized() != name.as_str() {
+                let normalized = name.normalized();
+                if normalized.starts_with('[') {
+                    if !normalized.ends_with(']') {
+                        return Err(invalid(&FieldName::Host, DecodeErrorKind::InvalidNumber));
+                    }
+                } else if normalized.contains(':') {
+                    return Err(invalid_syntax(&FieldName::Host));
+                }
             }
         }
         let host_capacity = match host {
@@ -347,6 +353,9 @@ impl HostOwned {
     /// ```
     pub fn with_port(host: impl AsRef<str>, port: u16) -> Result<Self, DecodeError> {
         let host = host.as_ref();
+        if host.is_empty() {
+            return Err(invalid_syntax(&FieldName::Host));
+        }
         let mut wire = String::with_capacity(host.len().saturating_add(6));
         wire.push_str(host);
         wire.push(':');
@@ -686,7 +695,13 @@ impl ParsedHostKind {
 #[inline(always)]
 fn parse_host(bytes: &[u8]) -> Result<ParsedHost, DecodeError> {
     let Some(first) = bytes.first().copied() else {
-        return Err(invalid_syntax(&FieldName::Host));
+        return Ok(ParsedHost {
+            host_end: 0,
+            port_start: None,
+            kind: ParsedHostKind::RegisteredName,
+            normalized: None,
+            numeric_port: None,
+        });
     };
     if first == b'[' {
         return parse_ip_literal_host(bytes);
@@ -767,6 +782,9 @@ fn parse_international_host(bytes: &[u8]) -> Result<ParsedHost, DecodeError> {
         _ => (authority, None, None),
     };
     let mut normalized = domain_to_ascii(host).map_err(|_invalid| invalid_syntax(&FieldName::Host))?;
+    if normalized.is_empty() {
+        return Err(invalid_syntax(&FieldName::Host));
+    }
     let normalized_end = normalized.len();
     if let Some(port) = port {
         normalized.push(':');
@@ -976,6 +994,7 @@ mod tests {
     #[test]
     fn strict_parser_covers_registered_names_ports_and_literal_forms() {
         for valid in [
+            b"".as_slice(),
             b"example.com".as_slice(),
             b"exa_mple~host",
             b"example%20host",
@@ -986,8 +1005,7 @@ mod tests {
             assert!(parse_host(valid).is_ok(), "{valid:?}");
         }
         for invalid in [
-            b"".as_slice(),
-            b":80",
+            b":80".as_slice(),
             b"host%2",
             b"host%zz",
             b"host@name",
