@@ -2071,10 +2071,10 @@ mod tests {
             ..test_recorder_configuration()
         });
 
-        let attempts = if cfg!(miri) { 1_000 } else { 10_000 };
+        let attempts = if cfg!(miri) { 4_096 } else { 10_000 };
         let selected = (0..attempts).filter(|_| begin_allocation().is_some()).count();
 
-        let expected_range = if cfg!(miri) { 5..=15 } else { 70..=130 };
+        let expected_range = if cfg!(miri) { 20..=65 } else { 70..=130 };
         assert!(
             expected_range.contains(&selected),
             "selected {selected} allocations from {attempts}"

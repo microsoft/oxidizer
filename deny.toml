@@ -11,29 +11,25 @@ unmaintained = "all"
 
 # >>> anvil-managed: anvil-deny-licenses
 [licenses]
+# Adopter-owned: curated allowlist. Add new entries only from "Permissive OSS
+# licenses" on https://docs.opensource.microsoft.com/legal/resources/oss-licenses-by-type/.
 allow = [
     "MIT",
     "Apache-2.0",
-    "Apache-2.0 WITH LLVM-exception",
+    "ISC",
     "BSD-2-Clause",
     "BSD-3-Clause",
-    "ISC",
-    "MPL-2.0",
     "Unicode-DFS-2016",
     "Unicode-3.0",
     "Zlib",
+    "BSL-1.0",
+    # CDLA-Permissive-2.0 covers the Mozilla CA certificate data bundled by
+    # `webpki-root-certs` (pulled in transitively via `rustls-platform-verifier`).
+    "CDLA-Permissive-2.0",
 ]
-confidence-threshold = 0.93
-# <<< anvil-managed: anvil-deny-licenses
-
-# Repository-specific policy extending the managed [licenses] table.
+confidence-threshold = 0.8
 unused-allowed-license = "allow"
-
-# CDLA-Permissive-2.0 covers the Mozilla CA certificate data bundled by
-# `webpki-root-certs` (pulled in transitively via `rustls-platform-verifier`).
-[[licenses.exceptions]]
-allow = ["CDLA-Permissive-2.0"]
-name = "webpki-root-certs"
+# <<< anvil-managed: anvil-deny-licenses
 
 # >>> anvil-managed: anvil-deny-bans
 [bans]

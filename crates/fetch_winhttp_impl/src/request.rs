@@ -858,15 +858,12 @@ mod tests {
 
     #[test]
     fn explicit_and_default_ports_support_bracketed_ipv6_authorities() {
-        for (index, (uri, expected_host, expected_port)) in [
-            ("https://example.com:8443/", "example.com", 8443),
-            ("https://[::1]:8443/", "[::1]", 8443),
-            ("https://[::1]/", "[::1]", 443),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            if cfg!(miri) && index == 0 {
+        for (miri_case, uri, expected_host, expected_port) in [
+            (false, "https://example.com:8443/", "example.com", 8443),
+            (true, "https://[::1]:8443/", "[::1]", 8443),
+            (true, "https://[::1]/", "[::1]", 443),
+        ] {
+            if cfg!(miri) && !miri_case {
                 continue;
             }
             let (response, record) = run_lifecycle(
@@ -884,18 +881,15 @@ mod tests {
 
     #[test]
     fn invalid_explicit_ports_fail_before_native_io() {
-        for (index, (uri, message)) in [
-            ("https://example.com:/", "empty explicit port"),
-            ("https://example.com:12x/", "is not decimal"),
-            ("https://example.com:65536/", "outside the valid range"),
-            ("https://example.com:0/", "explicit port is zero"),
-            ("https://[::1]:/", "empty explicit port"),
-            ("https://[::1]:65536/", "outside the valid range"),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            if cfg!(miri) && index >= 4 {
+        for (miri_case, uri, message) in [
+            (true, "https://example.com:/", "empty explicit port"),
+            (true, "https://example.com:12x/", "is not decimal"),
+            (true, "https://example.com:65536/", "outside the valid range"),
+            (true, "https://example.com:0/", "explicit port is zero"),
+            (false, "https://[::1]:/", "empty explicit port"),
+            (false, "https://[::1]:65536/", "outside the valid range"),
+        ] {
+            if cfg!(miri) && !miri_case {
                 continue;
             }
             let (result, record) = run_lifecycle(
@@ -942,15 +936,12 @@ mod tests {
 
     #[test]
     fn advanced_protocol_combinations_apply_required_semantics_without_downgrade() {
-        for (index, (versions, expected_mask, negotiated)) in [
-            (vec![Version::HTTP_2], 1, Version::HTTP_2),
-            (vec![Version::HTTP_3], 2, Version::HTTP_3),
-            (vec![Version::HTTP_2, Version::HTTP_3], 3, Version::HTTP_3),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            if cfg!(miri) && index != 2 {
+        for (miri_case, versions, expected_mask, negotiated) in [
+            (false, vec![Version::HTTP_2], 1, Version::HTTP_2),
+            (false, vec![Version::HTTP_3], 2, Version::HTTP_3),
+            (true, vec![Version::HTTP_2, Version::HTTP_3], 3, Version::HTTP_3),
+        ] {
+            if cfg!(miri) && !miri_case {
                 continue;
             }
             let mut options = TransportOptions::default();
@@ -981,22 +972,24 @@ mod tests {
 
     #[test]
     fn tls_relaxations_are_independent_request_masks() {
-        for (index, (tls, expected)) in [
-            (WinHttpTlsConfig::default(), None),
-            (WinHttpTlsConfig::builder().accept_invalid_certs(true).build(), Some(0x2300)),
-            (WinHttpTlsConfig::builder().accept_invalid_hostnames(true).build(), Some(0x1000)),
+        for (miri_case, tls, expected) in [
+            (true, WinHttpTlsConfig::default(), None),
+            (false, WinHttpTlsConfig::builder().accept_invalid_certs(true).build(), Some(0x2300)),
             (
+                false,
+                WinHttpTlsConfig::builder().accept_invalid_hostnames(true).build(),
+                Some(0x1000),
+            ),
+            (
+                true,
                 WinHttpTlsConfig::builder()
                     .accept_invalid_certs(true)
                     .accept_invalid_hostnames(true)
                     .build(),
                 Some(0x3300),
             ),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            if cfg!(miri) && !matches!(index, 0 | 3) {
+        ] {
+            if cfg!(miri) && !miri_case {
                 continue;
             }
             let (response, record) = run_lifecycle(
@@ -1038,26 +1031,25 @@ mod tests {
 
     #[test]
     fn revocation_is_requested_unless_certificate_validation_is_relaxed() {
-        for (index, (tls, expected)) in [
-            (WinHttpTlsConfig::default(), Some(WINHTTP_ENABLE_SSL_REVOCATION)),
-            (WinHttpTlsConfig::builder().accept_invalid_certs(true).build(), None),
+        for (miri_case, tls, expected) in [
+            (true, WinHttpTlsConfig::default(), Some(WINHTTP_ENABLE_SSL_REVOCATION)),
+            (true, WinHttpTlsConfig::builder().accept_invalid_certs(true).build(), None),
             // Host-name relaxation is unrelated to revocation, so the check stays.
             (
+                false,
                 WinHttpTlsConfig::builder().accept_invalid_hostnames(true).build(),
                 Some(WINHTTP_ENABLE_SSL_REVOCATION),
             ),
             (
+                false,
                 WinHttpTlsConfig::builder()
                     .accept_invalid_certs(true)
                     .accept_invalid_hostnames(true)
                     .build(),
                 None,
             ),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            if cfg!(miri) && index >= 2 {
+        ] {
+            if cfg!(miri) && !miri_case {
                 continue;
             }
             let (response, record) = run_lifecycle(
@@ -1344,11 +1336,12 @@ mod tests {
 
     #[test]
     fn unknown_length_uploads_use_automatic_chunking_for_every_supported_protocol() {
-        for (index, (versions, protocol)) in [(vec![Version::HTTP_11], 0), (vec![Version::HTTP_2], 1), (vec![Version::HTTP_3], 2)]
-            .into_iter()
-            .enumerate()
-        {
-            if cfg!(miri) && index == 1 {
+        for (miri_case, versions, protocol) in [
+            (true, vec![Version::HTTP_11], 0),
+            (false, vec![Version::HTTP_2], 1),
+            (true, vec![Version::HTTP_3], 2),
+        ] {
+            if cfg!(miri) && !miri_case {
                 continue;
             }
             let memory = GlobalPool::new();

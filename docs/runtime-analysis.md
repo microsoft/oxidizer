@@ -68,10 +68,11 @@ The following package-level exclusions are intentional:
   build-time descriptor and code-generation unit tests. The build half is safe
   Rust and remains covered by native tests and `cargo careful`.
 - `rallocator` keeps its library and allocator integration suites under Miri,
-  but omits `tests/telemetry.rs`. That binary repeatedly captures and decodes
-  process-wide snapshots; direct Miri tests in the library cover the allocator
-  and telemetry internals, while native tests and `cargo careful` retain the
-  end-to-end snapshot assertions.
+  but omits `tests/telemetry.rs` and `tests/performables_telemetry.rs`. Those
+  binaries repeatedly capture and decode process-wide snapshots or validate a
+  safe dependency graph; direct Miri tests in the library, `performables`, and
+  `seismograph` cover the unsafe internals, while native tests and
+  `cargo careful` retain the end-to-end assertions.
 - `templated_uri` remains selected because it is a consumer-facing integration
   surface, but deterministic pseudo-fuzz breadth is reduced under Miri.
 - `internity` keeps unchecked storage and resolution paths under Miri. Native
@@ -83,6 +84,10 @@ The following package-level exclusions are intentional:
 - `performables` retains direct ownership and synchronization coverage. Its
   channel telemetry integration uses the minimum supported event-ring capacity
   only under Miri; ring-capacity behavior remains covered in `seismograph`.
+- `seismograph` retains direct recorder and snapshot coverage. Under Miri its
+  object-sampling population, repeated snapshot count, and default test event
+  ring capacity are reduced while still exercising selection, capture, and
+  buffer lifecycle transitions.
 - `fetch_winhttp_impl` retains callback, raw-context, handle, operation-buffer,
   and foreign-thread lifecycle coverage. Native tests keep exhaustive TLS,
   protocol, and port-option matrices; Miri executes representative cases.

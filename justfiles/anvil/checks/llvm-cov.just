@@ -82,6 +82,11 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs anvil-impact
         }
         exit 0
     }
+    if ($IsWindows) {
+        # llvm-cov passes every instrumented binary as a separate argument.
+        # Keep those paths short enough for Windows CreateProcess.
+        $env:CARGO_LLVM_COV_TARGET_DIR = 'target/.c'
+    }
     if ($testOnlyPkg.Count -gt 0) {
         Write-Host 'anvil-llvm-cov: running tests without coverage for opted-out packages'
         foreach ($cfg in $configs) {
@@ -97,17 +102,14 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs anvil-impact
     # choose and must exist before --output-path runs.
     [System.IO.Directory]::CreateDirectory('target/coverage') | Out-Null
     function Invoke-AnvilLcovReport {
-        param(
-            [Parameter(Mandatory)][string] $OutputPath,
-            [Parameter(Mandatory)][string[]] $PackageArgs
-        )
+        param([Parameter(Mandatory)][string] $OutputPath)
 
         # Capture cargo-llvm-cov's diagnostic because it is the only place its
         # private object discovery result is exposed. Keep displaying it so a
         # non-retriable failure has the same evidence as a direct invocation.
         $reportOutput = @()
         $reportExitCode = 1
-        & cargo '+{{ rust_nightly }}' llvm-cov report @PackageArgs --lcov --output-path $OutputPath 2>&1 |
+        & cargo '+{{ rust_nightly }}' llvm-cov report --lcov --output-path $OutputPath 2>&1 |
             Tee-Object -Variable reportOutput |
             ForEach-Object { Write-Host $_.ToString() }
         $reportExitCode = $LASTEXITCODE
@@ -131,7 +133,7 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs anvil-impact
         }
         $command = [regex]::Match(
             $failedProcess.Groups['command'].Value,
-            '(?s)^(?:"(?<quoted>[^"]+)"|''(?<singleQuoted>[^'']+)''|(?<bare>\S+))\s+export\s+(?<arguments>.*)$'
+            '(?s)^(?:"(?<quoted>[^"]+)"|(?<bare>\S+))\s+export\s+(?<arguments>.*)$'
         )
         if (-not $command.Success) {
             Write-Warning 'anvil-llvm-cov: the failed process was not an llvm-cov export command'
@@ -139,8 +141,6 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs anvil-impact
         }
         $llvmCov = if ($command.Groups['quoted'].Success) {
             $command.Groups['quoted'].Value
-        } elseif ($command.Groups['singleQuoted'].Success) {
-            $command.Groups['singleQuoted'].Value
         } else {
             $command.Groups['bare'].Value
         }
@@ -149,15 +149,10 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs anvil-impact
             return $reportExitCode
         }
         $responsePath = [System.IO.Path]::GetFullPath("$OutputPath.llvm-cov.rsp")
-        $responseArguments = [regex]::Replace(
-            $command.Groups['arguments'].Value,
-            "'(?<value>[^']*)'",
-            { param($match) '"' + $match.Groups['value'].Value.Replace('"', '\"') + '"' }
-        )
         try {
             [System.IO.File]::WriteAllText(
                 $responsePath,
-                $responseArguments,
+                $command.Groups['arguments'].Value,
                 [System.Text.UTF8Encoding]::new($false)
             )
             Write-Host 'anvil-llvm-cov: retrying Windows error 206 with an LLVM response file'
@@ -208,7 +203,7 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs anvil-impact
         # The same lcov report feeds the gate, Codecov, and ADO. On Windows,
         # retry only CreateProcess error 206 through llvm-cov's response-file
         # support; all other cargo-llvm-cov failures propagate unchanged.
-        $reportExitCode = Invoke-AnvilLcovReport "target/coverage/lcov-$($cfg.name).info" $pkg
+        $reportExitCode = Invoke-AnvilLcovReport "target/coverage/lcov-$($cfg.name).info"
         if ($reportExitCode -ne 0) { exit $reportExitCode }
     }
     # Local coverage gate: cargo-coverage-gate compares per-package line

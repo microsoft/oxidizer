@@ -1,7 +1,7 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
-# >>> anvil-managed: anvil-spellcheck-root
+# >>> anvil-managed: anvil-spellcheck
 # Check spelling in code comments marked as dev/developer comments
 # (e.g., `// TODO:`, `// FIXME:`). Set to false to skip them.
 dev_comments = false
@@ -9,9 +9,7 @@ dev_comments = false
 # Whether to skip spell checking README files. Set to false to include
 # README files in spell checking.
 skip_readme = false
-# <<< anvil-managed: anvil-spellcheck-root
 
-# >>> anvil-managed: anvil-spellcheck-hunspell
 [Hunspell]
 # Language dictionary. "en_US" uses the built-in English (US) dictionary.
 lang = "en_US"
@@ -59,12 +57,10 @@ use_builtin = true
 #   ASCII punctuation (default): ' ` & @
 #   Misc (default)              : \u00A7 section, \u00B6 pilcrow, \u2026 ellipsis
 tokenization_splitchars = "\",;:.!?#(){}[]|/_-\u2012\u2013\u2014\u2015\u2190\u2192\u2212'`&@\u00A7\u00B6\u2026"
-# <<< anvil-managed: anvil-spellcheck-hunspell
 
-# >>> anvil-managed: anvil-spellcheck-quirks
 [Hunspell.quirks]
 # Treat CamelCase identifiers as concatenations of dictionary words
 # (e.g., `TcpStream` = `Tcp` + `Stream`). Lowers false-positive rate
 # substantially on Rust codebases.
 allow_concatenation = true
-# <<< anvil-managed: anvil-spellcheck-quirks
+# <<< anvil-managed: anvil-spellcheck
