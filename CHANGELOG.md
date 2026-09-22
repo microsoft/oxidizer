@@ -27,6 +27,8 @@ Please see each crate's change log below:
 - [`fundle_macros_impl`](./crates/fundle_macros_impl/CHANGELOG.md)
 - [`http_compression`](./crates/http_compression/CHANGELOG.md)
 - [`http_extensions`](./crates/http_extensions/CHANGELOG.md)
+- [`http_headers`](./crates/http_headers/CHANGELOG.md)
+- [`http_headers_simd`](./crates/http_headers_simd/CHANGELOG.md)
 - [`http_path_template`](./crates/http_path_template/CHANGELOG.md)
 - [`internity`](./crates/internity/CHANGELOG.md)
 - [`layered`](./crates/layered/CHANGELOG.md)
