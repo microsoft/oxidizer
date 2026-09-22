@@ -329,7 +329,9 @@ const MAX_KNOWN_LEN: usize = max_known_len();
 ///
 /// `LENGTH_BUCKETS[n]..LENGTH_BUCKETS[n + 1]` is the range of slots holding
 /// the names of length `n`, so the table carries one extra terminating entry.
-const LENGTH_BUCKETS: [usize; MAX_KNOWN_LEN + 2] = {
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(test, mutants::skip)] // Mutated induction variables can make const evaluation non-terminating.
+const fn length_buckets() -> [usize; MAX_KNOWN_LEN + 2] {
     let mut starts = [0; MAX_KNOWN_LEN + 2];
     let mut index = 0;
     while index < KNOWN_TEXTS.len() {
@@ -342,10 +344,14 @@ const LENGTH_BUCKETS: [usize; MAX_KNOWN_LEN + 2] = {
         length += 1;
     }
     starts
-};
+}
+
+const LENGTH_BUCKETS: [usize; MAX_KNOWN_LEN + 2] = length_buckets();
 
 /// Well-known name indexes, grouped by name length.
-const KNOWN_BY_LENGTH: [usize; KNOWN_TEXTS.len()] = {
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(test, mutants::skip)] // Mutated induction variables can make const evaluation non-terminating.
+const fn known_by_length() -> [usize; KNOWN_TEXTS.len()] {
     let mut grouped = [0; KNOWN_TEXTS.len()];
     let mut cursors = LENGTH_BUCKETS;
     let mut index = 0;
@@ -356,7 +362,9 @@ const KNOWN_BY_LENGTH: [usize; KNOWN_TEXTS.len()] = {
         index += 1;
     }
     grouped
-};
+}
+
+const KNOWN_BY_LENGTH: [usize; KNOWN_TEXTS.len()] = known_by_length();
 
 /// Returns the well-known names that are `length` bytes long.
 ///
@@ -374,7 +382,9 @@ fn known_candidates(length: usize) -> Option<&'static [usize]> {
 /// Every slot of a bucket holds a name of that bucket's length, and the
 /// buckets cover every well-known name exactly once, so recognition can
 /// compare only the names of the input's length and still see all of them.
-const _: () = {
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(test, mutants::skip)] // Mutated induction variables can make const evaluation non-terminating.
+const fn validate_recognition_tables() {
     assert!(
         KNOWN_TEXTS.len() == FieldName::COUNT,
         "KNOWN_TEXTS length must equal FieldName::COUNT"
@@ -400,7 +410,9 @@ const _: () = {
         }
         length += 1;
     }
-};
+}
+
+const _: () = validate_recognition_tables();
 
 impl FieldName {
     /// Creates a name from arbitrary bytes, lowercasing them.
