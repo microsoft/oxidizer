@@ -11,10 +11,11 @@ mod system_tasks;
 use std::error::Error;
 
 use echo_driver::{
-    EchoContext, EchoIoError, created_driver_count as echo_created_driver_count, shutdown_driver_count as echo_shutdown_driver_count,
+    EchoContext, EchoIoError, created_driver_count as echo_created_driver_count, discovered_sample_driver_count,
+    shutdown_driver_count as echo_shutdown_driver_count,
 };
 use runtime::Runtime;
-use sample_driver::{SampleContext, SampleIoError, created_driver_count, shutdown_driver_count};
+use sample_driver::{SampleContext, SampleIoError, created_driver_count, discovered_echo_driver_count, shutdown_driver_count};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let runtime = Runtime::start()?;
@@ -33,6 +34,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let echo = runtime.get_context::<EchoContext>();
     assert_eq!(echo_created_driver_count(), Runtime::WORKER_COUNT);
+    assert_eq!(discovered_sample_driver_count(), Runtime::WORKER_COUNT);
+    assert_eq!(discovered_echo_driver_count(), Runtime::WORKER_COUNT);
     assert_eq!(echo, runtime.get_context::<EchoContext>());
     assert_eq!(echo_created_driver_count(), Runtime::WORKER_COUNT);
     assert_eq!(echo.perform_io("arty"), Ok("ARTY".to_owned()));

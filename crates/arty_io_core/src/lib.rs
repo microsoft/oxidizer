@@ -18,6 +18,7 @@
 //! - [`DriverProvider`] creates and connects the per-worker adapters for a driver.
 //! - [`DriverContext`] describes the worker and runtime facilities available during driver
 //!   creation.
+//! - [`DriverHandle`] connects drivers during same-worker registration.
 //! - [`ShutdownError`] reports unsuccessful graceful shutdown.
 //! - [`SystemTasks`] lets a driver delegate blocking system work to the runtime.
 //!
@@ -52,10 +53,15 @@
 //!
 //! The runtime clones the provider for each active worker, relocates each clone to that worker,
 //! and invokes [`DriverProvider::create`] on the worker thread. [`DriverContext`] identifies the
-//! worker and supplies runtime facilities such as [`SystemTasks`]. The returned [`Driver`] stays
-//! on that thread for its entire lifetime; it is deliberately not required to be [`Send`] or
-//! [`Sync`]. Creation runs inline and must return promptly; waiting there for another worker to
+//! worker, supplies runtime facilities such as [`SystemTasks`], and provides construction-time
+//! [`DriverHandle`] values for drivers registered earlier on that worker. The returned [`Driver`]
+//! stays on that thread for its entire lifetime; it is deliberately not required to be [`Send`]
+//! or [`Sync`]. Creation runs inline and must return promptly; waiting there for another worker to
 //! make progress can deadlock registration.
+//!
+//! After storing the new driver, the runtime calls [`Driver::on_driver_registered`] on every
+//! driver registered earlier on that worker, in registration order. The callback receives the new
+//! driver's [`DriverHandle`] and completes before the worker acknowledges registration.
 //!
 //! After creation, the runtime obtains the worker's context through [`Driver::context`] and may
 //! cache both that context and the driver's [interruptor][Driver::interruptor]. The interruptor
@@ -64,10 +70,11 @@
 //! driver instance. Later requests reuse the registration and return the context cached for the
 //! calling worker. A runtime may retain the provider to initialize workers created later.
 //!
-//! Driver creation is infallible at the type level. If [`DriverProvider::create`] panics, the
-//! runtime does not continue with a driver registered on only part of its worker set. A driver
-//! with conditional platform or permission requirements therefore exposes its own capability
-//! check for consumers to call before requesting its context.
+//! Driver registration is infallible at the type level. If [`DriverProvider::create`] or
+//! [`Driver::on_driver_registered`] panics, the runtime does not continue with a driver registered
+//! or connected on only part of its worker set. A driver with conditional platform or permission
+//! requirements therefore exposes its own capability check for consumers to call before
+//! requesting its context.
 //!
 //! ## Driving I/O
 //!
@@ -78,10 +85,11 @@
 //! The runtime exclusively owns each driver and calls every [`Driver`] method only on its owning
 //! thread. A zero wait to [`Driver::process_completions`] performs a non-blocking completion pass
 //! without consuming a pending interrupt; a bounded or unbounded wait lets the same call provide
-//! the worker's idle point. The driver's interruptor is latched, so it ends either the current
-//! blocking wait or the next one without preventing pending completions from being processed.
-//! Runtime policy decides which driver supplies a worker's waiting point and how additional
-//! drivers are scheduled.
+//! the worker's idle point. Before processing a cycle, the runtime captures one
+//! [`Instant`](std::time::Instant) and passes it unchanged to every driver visited in that cycle.
+//! The driver's interruptor is latched, so it ends either the current blocking wait or the next
+//! one without preventing pending completions from being processed. Runtime policy decides which
+//! driver supplies a worker's waiting point and how additional drivers are scheduled.
 //!
 //! Operations may be submitted from other threads while the driver waits. A driver therefore
 //! separates its state into two parts:
@@ -130,6 +138,7 @@
 
 mod driver;
 mod driver_context;
+mod driver_handle;
 mod io_context;
 mod provider;
 mod provider_context;
@@ -138,6 +147,7 @@ mod system_tasks;
 
 pub use driver::Driver;
 pub use driver_context::DriverContext;
+pub use driver_handle::DriverHandle;
 pub use io_context::IoContext;
 pub use provider::DriverProvider;
 pub use provider_context::ProviderContext;

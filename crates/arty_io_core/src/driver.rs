@@ -2,9 +2,9 @@
 // Licensed under the MIT License.
 
 use std::task::Waker;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use crate::{IoContext, ShutdownError};
+use crate::{DriverHandle, IoContext, ShutdownError};
 
 /// One async worker's adapter to an I/O subsystem.
 ///
@@ -47,6 +47,32 @@ pub trait Driver: 'static {
     /// The handle through which consumers start operations on this driver.
     type Context: IoContext;
 
+    /// Returns the handle exposed while another driver is registered on this thread.
+    ///
+    /// An implementation may expose the concrete driver or a smaller driver-owned value when that
+    /// is the intended integration surface. The runtime borrows the returned handle only while
+    /// creating or notifying another driver; recipients cannot retain it.
+    #[must_use]
+    fn handle(&self) -> DriverHandle<'_>;
+
+    /// Notifies this driver that another driver was registered on the same thread.
+    ///
+    /// The runtime calls this after storing the new driver and before acknowledging its
+    /// registration. Earlier drivers are notified in registration order; the new driver is not
+    /// notified about itself because it already received the earlier drivers through
+    /// [`DriverContext::drivers`](crate::DriverContext::drivers).
+    ///
+    /// This callback runs inline on the owning thread. It must return promptly and cannot retain
+    /// the borrowed handle, but it can downcast the handle and clone independently owned shared
+    /// state.
+    ///
+    /// # Panics
+    ///
+    /// Panics when this driver cannot integrate the newly registered driver. As with a panic from
+    /// [`DriverProvider::create`](crate::DriverProvider::create), the runtime cannot continue with
+    /// a partially connected registration.
+    fn on_driver_registered(&mut self, _driver: DriverHandle<'_>) {}
+
     /// Returns a context bound to this driver instance.
     ///
     /// After shutdown starts, the returned context is closed and rejects new operations.
@@ -59,9 +85,14 @@ pub trait Driver: 'static {
     /// [`Duration::MAX`] requests an unbounded wait. A mechanism with coarser timing rounds finite
     /// waits up without converting one into an unbounded wait.
     ///
+    /// `cycle_start` is captured once when the runtime decides to process completions and is
+    /// passed unchanged to every driver visited in that cycle. Drivers can therefore make
+    /// consistent deadline decisions without observing different times because of scheduling
+    /// order.
+    ///
     /// Operations may be submitted from other threads while this method waits. The implementation
     /// must not hold anything across the wait that a submitter needs.
-    fn process_completions(&mut self, max_wait: Duration);
+    fn process_completions(&mut self, max_wait: Duration, cycle_start: Instant);
 
     /// Returns a handle that causes the current or next completion wait to return.
     ///

@@ -42,6 +42,14 @@ serves.
 
 - A provider clone is relocated to the worker before creation.
 - `DriverContext::thread` identifies that worker and its runtime owner.
+- `DriverContext::drivers` exposes type-erased handles for drivers whose
+  registration previously completed on that worker.
+- Existing driver handles are immutable, remain on their owning worker, and are
+  available only during creation of the new driver.
+- After storing a new driver, the runtime calls `Driver::on_driver_registered`
+  on every driver registered earlier on that worker, in registration order.
+- Registration is acknowledged only after every earlier driver has received
+  the new driver's type-erased handle.
 - A relocated provider clone is consumed exactly once.
 - The provider decides whether instances share queues, memory, threads, or
   nothing.
@@ -58,6 +66,8 @@ The runtime does not dictate how an I/O subsystem distributes work.
   adapt consuming shutdown to boxed storage.
 - The runtime chooses the driver-owning thread before creation and invokes
   `process_completions` only from that thread.
+- The runtime captures one `Instant` when it starts a completion-processing
+  cycle and passes that value unchanged to every driver visited in the cycle.
 - A driver may delegate work through the runtime-owned `SystemTasks` handle.
 - A driver or provider may create any number of private threads.
 - Primary, satellite, and thread-pinning policy are runtime implementation
@@ -106,13 +116,14 @@ Shutdown must not rely on an unsafe trait or a caller-checked inertness flag.
 - The runtime reports shutdown failures and continues shutting down its
   remaining drivers. Shutdown completion is not a memory-safety precondition.
 
-## R7: Initialization failure is fatal
+## R7: Registration failure is fatal
 
-Driver creation is infallible at the type level.
+Driver registration is infallible at the type level.
 
 - A provider panics when its driver cannot be initialized.
-- The runtime does not continue after a worker fails to initialize a registered
-  driver.
+- An existing driver panics when it cannot integrate a newly registered driver.
+- The runtime does not continue after a worker fails to initialize a driver or
+  notify an existing driver.
 - A driver with conditional availability exposes a capability check that a
   consumer calls before requesting its context.
 
@@ -134,7 +145,8 @@ The initial contract deliberately excludes:
 
 - a runtime driver registry or `get_or_init` API;
 - primary-driver selection and satellite threads;
-- memory pools, clocks, telemetry, and ecosystem-specific error types;
+- memory pools, configurable clock services, telemetry, and ecosystem-specific
+  error types;
 - batching and wake-coalescing optimizations;
 - `no_std` support;
 - a default I/O implementation.

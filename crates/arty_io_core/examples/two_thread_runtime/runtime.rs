@@ -8,7 +8,7 @@ use std::fmt;
 use std::sync::{Mutex, PoisonError, mpsc};
 use std::thread::{self, JoinHandle};
 
-use arty_io_core::{Driver, DriverContext, DriverProvider, IoContext, ProviderContext, ShutdownError, SystemTasks};
+use arty_io_core::{Driver, DriverContext, DriverHandle, DriverProvider, IoContext, ProviderContext, ShutdownError, SystemTasks};
 use thread_aware_core::{Thread, ThreadAware};
 
 use super::system_tasks::runtime_system_tasks;
@@ -16,7 +16,8 @@ use super::system_tasks::runtime_system_tasks;
 type ContextBox = Box<dyn Any + Send>;
 type ContextCache = HashMap<TypeId, ContextBox>;
 type DriverStore = Vec<Box<dyn ErasedDriver>>;
-type Install = Box<dyn FnOnce(DriverContext, &mut DriverStore) -> ContextBox + Send>;
+type InstalledDriver = (ContextBox, Box<dyn ErasedDriver>);
+type Install = Box<dyn for<'a> FnOnce(DriverContext<'a>) -> InstalledDriver + Send>;
 type ShutdownResult = Result<(), ShutdownError>;
 
 enum Command {
@@ -34,10 +35,20 @@ impl fmt::Debug for Command {
 }
 
 trait ErasedDriver {
+    fn handle(&self) -> DriverHandle<'_>;
+    fn on_driver_registered(&mut self, driver: DriverHandle<'_>);
     fn shutdown(self: Box<Self>) -> Result<(), ShutdownError>;
 }
 
 impl<D: Driver> ErasedDriver for D {
+    fn handle(&self) -> DriverHandle<'_> {
+        Driver::handle(self)
+    }
+
+    fn on_driver_registered(&mut self, driver: DriverHandle<'_>) {
+        Driver::on_driver_registered(self, driver);
+    }
+
     fn shutdown(self: Box<Self>) -> Result<(), ShutdownError> {
         Driver::shutdown(*self)
     }
@@ -117,12 +128,12 @@ impl Runtime {
         for worker in &self.workers {
             let mut worker_provider = provider.clone();
             let (reply_tx, reply_rx) = mpsc::channel();
-            let install = Box::new(move |context: DriverContext, drivers: &mut DriverStore| {
+            let install: Install = Box::new(move |context: DriverContext<'_>| {
                 worker_provider.relocate(None, context.thread());
                 let driver = worker_provider.create(context);
                 let context = driver.context();
-                drivers.push(Box::new(driver));
-                Box::new(context) as ContextBox
+                let driver: Box<dyn ErasedDriver> = Box::new(driver);
+                (Box::new(context) as ContextBox, driver)
             });
 
             worker
@@ -214,8 +225,17 @@ fn run_worker(worker: &Thread, system_tasks: &SystemTasks, commands: &mpsc::Rece
     while let Ok(command) = commands.recv() {
         match command {
             Command::Install { install, reply } => {
-                let context = DriverContext::new(worker.clone(), system_tasks.clone());
-                let context = install(context, &mut drivers);
+                let (context, driver) = {
+                    let driver_handles = drivers.iter().map(|driver| driver.handle()).collect();
+                    let context = DriverContext::new(worker.clone(), system_tasks.clone(), driver_handles);
+                    install(context)
+                };
+                drivers.push(driver);
+                let (driver, existing_drivers) = drivers.split_last_mut().expect("the new driver was pushed immediately above");
+                let driver = driver.handle();
+                for existing_driver in existing_drivers {
+                    existing_driver.on_driver_registered(driver);
+                }
                 let _ = reply.send(context);
             }
             Command::Stop { reply } => {

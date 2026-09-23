@@ -5,12 +5,15 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::Waker;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use arty_io_core::{Driver, DriverContext, DriverProvider, IoContext, ProviderContext, ShutdownError};
+use arty_io_core::{Driver, DriverContext, DriverHandle, DriverProvider, IoContext, ProviderContext, ShutdownError};
 use thread_aware_core::{Thread, ThreadAware};
 
+use super::sample_driver::SampleDriver;
+
 static CREATED_DRIVERS: AtomicUsize = AtomicUsize::new(0);
+static DISCOVERED_SAMPLE_DRIVERS: AtomicUsize = AtomicUsize::new(0);
 static SHUTDOWN_DRIVERS: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Clone, Debug)]
@@ -71,11 +74,17 @@ impl DriverProvider for EchoProvider {
     type Context = EchoContext;
     type Driver = EchoDriver;
 
-    fn create(self, _context: DriverContext) -> Self::Driver {
+    fn create(self, context: DriverContext<'_>) -> Self::Driver {
         // The count is diagnostic only and does not synchronize driver creation.
         CREATED_DRIVERS.fetch_add(1, Ordering::Relaxed);
+        let sample_driver_count = context
+            .drivers()
+            .iter()
+            .filter(|driver| driver.handle().is::<SampleDriver>())
+            .count();
+        DISCOVERED_SAMPLE_DRIVERS.fetch_add(sample_driver_count, Ordering::Relaxed);
         let driver_thread = thread::current().id();
-        println!("initializing echo I/O driver on {driver_thread:?}");
+        println!("initializing echo I/O driver on {driver_thread:?} alongside {sample_driver_count} sample driver(s)");
 
         EchoDriver {
             state: Arc::new(EchoState {
@@ -100,13 +109,17 @@ impl Drop for EchoDriver {
 impl Driver for EchoDriver {
     type Context = EchoContext;
 
+    fn handle(&self) -> DriverHandle<'_> {
+        DriverHandle::new(self)
+    }
+
     fn context(&self) -> Self::Context {
         EchoContext {
             state: Arc::clone(&self.state),
         }
     }
 
-    fn process_completions(&mut self, _max_wait: Duration) {}
+    fn process_completions(&mut self, _max_wait: Duration, _cycle_start: Instant) {}
 
     fn interruptor(&self) -> Waker {
         Waker::noop().clone()
@@ -126,6 +139,11 @@ impl Driver for EchoDriver {
 pub(super) fn created_driver_count() -> usize {
     // The count is diagnostic only and does not synchronize driver creation.
     CREATED_DRIVERS.load(Ordering::Relaxed)
+}
+
+pub(super) fn discovered_sample_driver_count() -> usize {
+    // The count is diagnostic only and does not synchronize driver creation.
+    DISCOVERED_SAMPLE_DRIVERS.load(Ordering::Relaxed)
 }
 
 pub(super) fn shutdown_driver_count() -> usize {

@@ -5,24 +5,30 @@ use std::fmt;
 
 use thread_aware_core::Thread;
 
-use crate::SystemTasks;
+use crate::{DriverHandle, SystemTasks};
 
 /// Placement and runtime facilities supplied when one driver instance is created.
 ///
-/// The fields are private so that future versions can add facilities without preventing existing
-/// driver implementations from compiling.
-pub struct DriverContext {
+/// The context also exposes drivers already registered on the same thread. Those drivers may be
+/// thread-local, so this context is neither [`Send`] nor [`Sync`] and must remain on the thread
+/// where the runtime constructs it.
+pub struct DriverContext<'a> {
     thread: Thread,
     system_tasks: SystemTasks,
+    drivers: Vec<DriverHandle<'a>>,
 }
 
-impl DriverContext {
+impl<'a> DriverContext<'a> {
     /// Creates the context for one driver instance.
     ///
     /// This constructor is intended for runtime implementations and driver tests.
     #[must_use]
-    pub fn new(thread: Thread, system_tasks: SystemTasks) -> Self {
-        Self { thread, system_tasks }
+    pub fn new(thread: Thread, system_tasks: SystemTasks, drivers: Vec<DriverHandle<'a>>) -> Self {
+        Self {
+            thread,
+            system_tasks,
+            drivers,
+        }
     }
 
     /// Returns the async worker this driver instance serves.
@@ -36,12 +42,22 @@ impl DriverContext {
     pub const fn system_tasks(&self) -> &SystemTasks {
         &self.system_tasks
     }
+
+    /// Returns drivers registered earlier on this thread, in runtime-defined order.
+    ///
+    /// Each type-erased handle is valid only for this creation call. A driver can inspect or
+    /// downcast a handle and clone any independently owned state it needs to retain.
+    #[must_use]
+    pub fn drivers(&self) -> &[DriverHandle<'a>] {
+        &self.drivers
+    }
 }
 
-impl fmt::Debug for DriverContext {
+impl fmt::Debug for DriverContext<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DriverContext")
             .field("thread", &self.thread)
+            .field("driver_count", &self.drivers.len())
             .finish_non_exhaustive()
     }
 }

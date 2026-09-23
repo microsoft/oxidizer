@@ -26,6 +26,7 @@ IoContext::provider(ProviderContext)
 DriverProvider::create(DriverContext)
         |
         +-- Driver + IoContext
+        +-- construction-time access to earlier drivers on this worker
         +-- completion processing and wake-up
         +-- optional SystemTasks use
         +-- optional provider-owned threads
@@ -58,7 +59,10 @@ calling worker.
 `ProviderContext` is the runtime-to-provider extension point. It is empty in the
 initial contract. `DriverContext` is the separate per-worker extension point
 passed to `DriverProvider::create`; it identifies the owning worker and exposes
-runtime facilities needed by the driver.
+runtime facilities needed by the driver. It also carries type-erased handles for
+drivers registered earlier on that worker. This lets a new driver discover and
+connect to compatible local drivers without moving thread-local driver state or
+exposing the runtime's registry.
 
 ## Registration stays in the runtime
 
@@ -71,6 +75,21 @@ self-contained provider. The runtime can store that provider when the context
 type is first requested and use it to create all current or future worker
 instances.
 
+Before creating a driver on a worker, the runtime collects handles from drivers
+whose registration has already completed on that worker. The current driver is
+not included, and handle order is runtime-defined. These are immutable,
+construction-time references: the returned `'static` driver cannot retain them,
+but it can downcast a compatible handle and clone independently owned shared
+state. Because a handle may refer to a thread-local driver, `DriverContext`
+remains on the worker that assembled it.
+
+After creating and storing the new driver, the runtime calls
+`Driver::on_driver_registered` on every earlier driver in registration order.
+Each callback receives the new driver's type-erased handle and runs on the
+owning worker before registration is acknowledged. This makes discovery
+bidirectional without allowing either side to retain a borrowed driver
+reference.
+
 Different major versions of one driver crate naturally have different Rust
 context types and `TypeId` values. They coexist as long as both versions use
 the same `arty_io_core` contract.
@@ -82,6 +101,12 @@ An I/O subsystem chooses its own execution strategy. Before calling
 driver. Completion processing and blocking shutdown run only on that thread.
 Internally, the driver may process completions there, delegate system work, or
 coordinate with threads managed by its provider.
+
+At the start of each completion-processing cycle, the runtime captures one
+`Instant` and passes that same value to every driver it visits. A shared snapshot
+lets drivers compare deadlines consistently without later drivers observing
+time advanced merely because they were scheduled later in the cycle. It is not
+a completion timestamp or a general runtime clock service.
 
 This avoids exposing primary or satellite roles as public API. Those are
 placement choices the runtime may change later.
@@ -139,9 +164,10 @@ an ordinary error source chain.
 
 ## Creation failure
 
-Creation is infallible at the type level. A provider that cannot initialize its
-driver panics because the runtime cannot continue coherently with a driver
-registered on only part of its worker set.
+Registration is infallible at the type level. A provider that cannot initialize
+its driver, or an existing driver that cannot integrate a newly registered
+driver, panics because the runtime cannot continue coherently with a driver
+registered or connected on only part of its worker set.
 
 A driver with conditional platform or permission requirements exposes a
 capability check. The consumer calls that check before
@@ -194,5 +220,5 @@ The initial API does not decide:
 - how runtimes order independent driver shutdown calls;
 - whether a reusable latched-interruptor implementation belongs in a later
   utility crate;
-- which memory pool, clock, or telemetry facilities drivers may eventually
+- which memory pool, clock service, or telemetry facilities drivers may eventually
   receive.

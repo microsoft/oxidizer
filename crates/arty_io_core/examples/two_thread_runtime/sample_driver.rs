@@ -5,12 +5,15 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::Waker;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use arty_io_core::{Driver, DriverContext, DriverProvider, IoContext, ProviderContext, ShutdownError};
+use arty_io_core::{Driver, DriverContext, DriverHandle, DriverProvider, IoContext, ProviderContext, ShutdownError};
 use thread_aware_core::{Thread, ThreadAware};
 
+use super::echo_driver::EchoDriver;
+
 static CREATED_DRIVERS: AtomicUsize = AtomicUsize::new(0);
+static DISCOVERED_ECHO_DRIVERS: AtomicUsize = AtomicUsize::new(0);
 static SHUTDOWN_DRIVERS: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Clone, Debug)]
@@ -83,7 +86,7 @@ impl DriverProvider for SampleProvider {
     type Context = SampleContext;
     type Driver = SampleDriver;
 
-    fn create(self, _context: DriverContext) -> Self::Driver {
+    fn create(self, _context: DriverContext<'_>) -> Self::Driver {
         // The count is diagnostic only and does not synchronize driver creation.
         CREATED_DRIVERS.fetch_add(1, Ordering::Relaxed);
         let driver_thread = thread::current().id();
@@ -113,13 +116,23 @@ impl Drop for SampleDriver {
 impl Driver for SampleDriver {
     type Context = SampleContext;
 
+    fn handle(&self) -> DriverHandle<'_> {
+        DriverHandle::new(self)
+    }
+
+    fn on_driver_registered(&mut self, driver: DriverHandle<'_>) {
+        if driver.handle().is::<EchoDriver>() {
+            DISCOVERED_ECHO_DRIVERS.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
     fn context(&self) -> Self::Context {
         SampleContext {
             state: Arc::clone(&self.state),
         }
     }
 
-    fn process_completions(&mut self, _max_wait: Duration) {}
+    fn process_completions(&mut self, _max_wait: Duration, _cycle_start: Instant) {}
 
     fn interruptor(&self) -> Waker {
         Waker::noop().clone()
@@ -139,6 +152,11 @@ impl Driver for SampleDriver {
 pub(super) fn created_driver_count() -> usize {
     // The count is diagnostic only and does not synchronize driver creation.
     CREATED_DRIVERS.load(Ordering::Relaxed)
+}
+
+pub(super) fn discovered_echo_driver_count() -> usize {
+    // The count is diagnostic only and does not synchronize driver registration.
+    DISCOVERED_ECHO_DRIVERS.load(Ordering::Relaxed)
 }
 
 pub(super) fn shutdown_driver_count() -> usize {
