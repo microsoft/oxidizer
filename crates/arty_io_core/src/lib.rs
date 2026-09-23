@@ -127,7 +127,7 @@
 //!
 //! # Example
 //!
-//! The [fixed two-thread runtime example](https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/examples/two_thread_runtime/main.rs)
+//! The [fixed single-thread runtime example](https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/examples/single_thread_runtime/main.rs)
 //! starts both worker threads before `get_context::<SampleContext>()` uses the context type to
 //! inject its associated driver.
 //!

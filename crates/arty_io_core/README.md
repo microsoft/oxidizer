@@ -133,7 +133,7 @@ graceful, never whether destruction is sound.
 
 ## Example
 
-The [fixed two-thread runtime example][__link32]
+The [fixed single-thread runtime example][__link32]
 starts both worker threads before `get_context::<SampleContext>()` uses the context type to
 inject its associated driver.
 
@@ -148,7 +148,7 @@ inject its associated driver.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbpbFT6nwwGBcbWvJyK0njof0brEzoQ9fADpUb1mhPx2FDo9NhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbYyE8VhlgtNsbi7u0nqVmoxAbMVpz_S_AhIkbm-eb86lCA5NhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
  [__link0]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver
  [__link1]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=IoContext
  [__link10]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=IoContext::provider
@@ -175,7 +175,7 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link3]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverProvider
  [__link30]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=SystemTaskSpawner
  [__link31]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=ShutdownError
- [__link32]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/examples/two_thread_runtime/main.rs
+ [__link32]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/examples/single_thread_runtime/main.rs
  [__link33]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/REQUIREMENTS.md
  [__link34]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/DESIGN.md
  [__link4]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverOptions
