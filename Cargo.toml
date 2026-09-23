@@ -33,8 +33,11 @@ homepage = "https://github.com/microsoft/oxidizer"
 #
 # The `docs/**/*.md` glob matches only Markdown, so compile-time `include_str!`
 # doc fragments are packaged while binary diagram assets beside them are not.
+# Bolero corpus and crash files are development artifacts regardless of
+# whether their targets are integration tests or private source-level tests.
 include = [
     "/src/**",
+    "!/src/__fuzz__/**",
     "/build.rs",
     "/tests/**",
     "!/tests/__fuzz__/**",
@@ -100,6 +103,7 @@ chumsky = { version = "0.13.0", default-features = false }
 clap = { version = "4.6.4", default-features = false }
 # The latest command-group release still uses nix 0.27 on Unix; accept the duplicate until upstream updates.
 command-group = { version = "5.0.1", default-features = false }
+compact_str = { version = "0.10.0", default-features = false }
 compressors = { path = "crates/compressors", default-features = false, version = "0.1.1" }
 const-hex = { version = "1.15.0", default-features = false }
 criterion = { version = "0.8.2", default-features = false }
@@ -127,6 +131,7 @@ fetch_tls = { path = "crates/fetch_tls", default-features = false, version = "0.
 fetch_winhttp = { path = "crates/fetch_winhttp", default-features = false, version = "0.2.1" }
 fetch_winhttp_impl = { path = "crates/fetch_winhttp_impl", default-features = false, version = "0.2.1" }
 flate2 = { version = "1.1.10", default-features = false }
+fluent-uri = { version = "0.1.4", default-features = false }
 foldhash = { version = "0.2.0", default-features = false }
 fundle = { path = "crates/fundle", default-features = false, version = "0.4.0" }
 fundle_macros = { path = "crates/fundle_macros", default-features = false, version = "=0.4.0" }
@@ -142,17 +147,23 @@ gungraun-summary = { version = "=6.0.0", default-features = false }
 h3 = { version = "0.0.8", default-features = false }
 h3-quinn = { version = "0.0.10", default-features = false }
 hashbrown = { version = "0.17.0", default-features = false }
+# Pinned exactly because the differential benchmarks use this release as their baseline.
+headers = { version = "=0.4.1", default-features = false }
 heck = { version = "0.5.0", default-features = false }
 http = { version = "1.4.1", default-features = false, features = ["std"] }
 http-body = { version = "1.0.1", default-features = false }
 http-body-util = { version = "0.1.3", default-features = false }
 http_compression = { path = "crates/http_compression", default-features = false, version = "0.1.1" }
 http_extensions = { path = "crates/http_extensions", default-features = false, version = "0.11.1" }
+http_headers = { path = "crates/http_headers", default-features = false, version = "0.1.0" }
+http_headers_simd = { path = "crates/http_headers_simd", default-features = false, version = "=0.1.0" }
 http_path_template = { path = "crates/http_path_template", default-features = false, version = "0.2.1" }
+httpdate = { version = "1.0.3", default-features = false }
 hyper = { version = "1.10.1", default-features = false }
 hyper-rustls = { version = "0.27.9", default-features = false }
 hyper-tls = { version = "0.6.0", default-features = false }
 hyper-util = { version = "0.1.20", default-features = false }
+idna = { version = "1.1.0", default-features = false }
 infinity_pool = { version = "0.8.1", default-features = false }
 insta = { version = "1.44.1", default-features = false }
 internity = { path = "crates/internity", default-features = false, version = "0.2.1" }
@@ -198,6 +209,7 @@ opentelemetry-stdout = { version = "0.32.0", default-features = false }
 opentelemetry_sdk = { version = "0.32.0", default-features = false }
 opool = { version = "0.2.0", default-features = false }
 parking_lot = { version = "0.12.5", default-features = false }
+paste = { package = "pastey", version = "0.2.3", default-features = false }
 path-tree = { version = "0.8.3", default-features = false }
 pbjson = { version = "0.9.0", default-features = false }
 pbjson-build = { version = "0.9.0", default-features = false }
@@ -231,7 +243,7 @@ route-recognizer = { version = "0.3.1", default-features = false }
 routerama = { path = "crates/routerama", default-features = false, version = "0.1.1" }
 routerama_build = { path = "crates/routerama_build", default-features = false, version = "=0.1.1" }
 routerama_macros = { path = "crates/routerama_macros", default-features = false, version = "=0.1.1" }
-rstest = { version = "0.26.0", default-features = false }
+rstest = { version = "0.27.0", default-features = false }
 rustc-hash = { version = "2.1.0", default-features = false }
 rustls = { version = "0.23.40", default-features = false }
 rustls-pki-types = { version = "1.14.1", default-features = false }
@@ -252,6 +264,7 @@ serde_html_form = { version = "0.4.1", default-features = false }
 serde_json = { version = "1.0.145", default-features = false }
 serde_urlencoded = { version = "0.7.1", default-features = false }
 serial_test = { version = "4.0.1", default-features = false }
+sha1 = { version = "0.10.7", default-features = false }
 sharded-slab = { version = "0.1.7", default-features = false }
 slab = { version = "0.4.12", default-features = false }
 slotmap = { version = "1.1.1", default-features = false }
@@ -303,6 +316,7 @@ windows-sys = { version = "0.61.2", default-features = false }
 wiremock = { version = "0.6.5", default-features = false }
 xxhash-rust = { version = "0.8.15", default-features = false }
 zerocopy = { version = "0.8.26", default-features = false }
+zeroize = { version = "1.9.0", default-features = false }
 zstd-safe = { version = "8.0.0", default-features = false }
 
 # >>> anvil-managed: anvil-workspace-lints
@@ -382,6 +396,7 @@ clippy.multiple_unsafe_ops_per_block = "warn"
 clippy.redundant_type_annotations = "warn"
 clippy.renamed_function_params = "warn"
 clippy.semicolon_outside_block = "warn"
+clippy.too_long_first_doc_paragraph = "warn"
 clippy.undocumented_unsafe_blocks = "warn"
 clippy.unnecessary_safety_comment = "warn"
 clippy.unnecessary_safety_doc = "warn"

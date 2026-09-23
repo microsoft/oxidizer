@@ -1,0 +1,127 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+//! Policy, opaque-field and URI-reference parser shapes.
+
+use http_headers::DecodeErrorKind;
+use http_headers::headers::{
+    CacheControl, ContentSecurityPolicy, Location, ReferrerPolicy, SetCookie, StrictTransportSecurity, UserAgent, XContentTypeOptions,
+};
+
+#[path = "http_headers_shapes_common.rs"]
+mod shapes;
+
+use shapes::Expected;
+
+shapes::define_shapes!(
+    "http_headers_policy_shapes/parse";
+    (cache_control_canonical, CacheControl, &["max-age=3600, private"], Strict, Expected::Valid),
+    (cache_control_immutable, CacheControl, &["public, max-age=31536000, immutable"], Strict, Expected::Valid),
+    (cache_control_max_age_only, CacheControl, &["max-age=3600"], Strict, Expected::Valid),
+    (cache_control_overflow_token, CacheControl, &["max-age=18446744073709551616"], Strict, Expected::Valid),
+    (cache_control_first_valid_seconds, CacheControl, &["max-age=invalid, max-age=\"45\", max-age=90"], Strict, Expected::Valid),
+    (cache_control_quoted_extensions, CacheControl, &["no-cache, x-mode=\"fast, safe\", x-note=\"a\\\"b\", max-age=60"], Strict, Expected::Valid),
+    (cache_control_mixed_case_ows, CacheControl, &[" \tPUBLIC,\tMAX-AGE=60, NO-CACHE \t"], Strict, Expected::Valid),
+    (cache_control_repeated, CacheControl, &["max-age=3600", "public, must-revalidate", "no-transform, s-maxage=120"], Strict, Expected::Valid),
+    (cache_control_many_extensions, CacheControl, &["max-age=3600, ext0=value0, ext1=value1, ext2=value2, ext3=value3, ext4=value4, ext5=value5, ext6=value6, ext7=value7, ext8=value8, ext9=value9, ext10=value10, ext11=value11, ext12=value12, ext13=value13, ext14=value14, ext15=value15, ext16=value16, ext17=value17, ext18=value18, ext19=value19, ext20=value20, ext21=value21, ext22=value22, ext23=value23, ext24=value24, ext25=value25, ext26=value26, ext27=value27, ext28=value28, ext29=value29, ext30=value30, ext31=value31, public"], Strict, Expected::Valid),
+    (cache_control_empty, CacheControl, &[""], Strict, Expected::Valid),
+    (cache_control_empty_members, CacheControl, &[",, no-cache,", ",,,"], Strict, Expected::Valid),
+    (cache_control_bad_name, CacheControl, &["max-age =30"], Strict, Expected::Error(DecodeErrorKind::InvalidToken)),
+    (cache_control_bad_value, CacheControl, &["max-age= 30"], Strict, Expected::Error(DecodeErrorKind::InvalidSyntax)),
+    (cache_control_unterminated_quote, CacheControl, &["public", "x-note=\"unterminated"], Strict, Expected::Error(DecodeErrorKind::UnterminatedQuote)),
+    (cache_control_absent, CacheControl, &[], Strict, Expected::Absent),
+
+    (content_security_policy_canonical, ContentSecurityPolicy, &["default-src 'self'"], Strict, Expected::Valid),
+    (content_security_policy_nonce, ContentSecurityPolicy, &["default-src 'self'; script-src 'nonce-abcdefghijklmno'; object-src 'none'; base-uri 'self'"], Strict, Expected::Valid),
+    (content_security_policy_large, ContentSecurityPolicy, &["default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.example.com https://analytics.example.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://api.example.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"], Strict, Expected::Valid),
+    (content_security_policy_repeated_two, ContentSecurityPolicy, &["default-src 'self'", "frame-ancestors 'none'"], Strict, Expected::Valid),
+    (content_security_policy_repeated_sixteen, ContentSecurityPolicy, &["default-src 'self'", "script-src 'none'", "img-src https:", "style-src 'self'", "font-src https:", "connect-src 'self'", "frame-src 'none'", "object-src 'none'", "base-uri 'self'", "form-action 'self'", "frame-ancestors 'none'", "upgrade-insecure-requests", "block-all-mixed-content", "worker-src 'self'", "manifest-src 'self'", "media-src 'none'"], Strict, Expected::Valid),
+    (content_security_policy_empty, ContentSecurityPolicy, &[""], Strict, Expected::Valid),
+    (content_security_policy_opaque_fallback, ContentSecurityPolicy, &["\tunknown-directive value, other; report-to=\"unterminated"], Strict, Expected::Valid),
+    (content_security_policy_absent, ContentSecurityPolicy, &[], Strict, Expected::Absent),
+
+    (referrer_policy_canonical, ReferrerPolicy, &["strict-origin-when-cross-origin"], Strict, Expected::Valid),
+    (referrer_policy_no_referrer, ReferrerPolicy, &["no-referrer"], Strict, Expected::Valid),
+    (referrer_policy_unknown_only, ReferrerPolicy, &["future-policy"], Strict, Expected::Valid),
+    (referrer_policy_ows, ReferrerPolicy, &[" \tstrict-origin-when-cross-origin \t"], Strict, Expected::Valid),
+    (referrer_policy_repeated_recognized, ReferrerPolicy, &["no-referrer", "strict-origin"], Strict, Expected::Valid),
+    (referrer_policy_repeated_mixed, ReferrerPolicy, &["future-policy, no-referrer", "origin, strict-origin-when-cross-origin"], Strict, Expected::Valid),
+    (referrer_policy_repeated_eight, ReferrerPolicy, &["no-referrer", "no-referrer-when-downgrade", "origin", "origin-when-cross-origin", "same-origin", "strict-origin", "strict-origin-when-cross-origin", "unsafe-url"], Strict, Expected::Valid),
+    (referrer_policy_many_extensions, ReferrerPolicy, &["future-origin-policy, vendor-origin-policy, private-origin-policy, site-origin-policy, strict-site-policy, private-network-policy, source-origin-policy, target-origin-policy, no-referrer, origin, same-origin, strict-origin, future-policy, strict-origin-when-cross-origin"], Strict, Expected::Valid),
+    (referrer_policy_empty_members, ReferrerPolicy, &[" , no-referrer,\t, origin , "], Strict, Expected::Valid),
+    (referrer_policy_empty, ReferrerPolicy, &[""], Strict, Expected::Error(DecodeErrorKind::MissingValue)),
+    (referrer_policy_bad_token, ReferrerPolicy, &["not a token"], Strict, Expected::Error(DecodeErrorKind::InvalidToken)),
+    (referrer_policy_unterminated_quote, ReferrerPolicy, &["origin, \"strict-origin"], Strict, Expected::Error(DecodeErrorKind::UnterminatedQuote)),
+    (referrer_policy_absent, ReferrerPolicy, &[], Strict, Expected::Absent),
+
+    (strict_transport_security_canonical, StrictTransportSecurity, &["max-age=31536000; includeSubDomains"], Strict, Expected::Valid),
+    (strict_transport_security_preload, StrictTransportSecurity, &["max-age=63072000; includeSubDomains; preload"], Strict, Expected::Valid),
+    (strict_transport_security_max_age_only, StrictTransportSecurity, &["max-age=60"], Strict, Expected::Valid),
+    (strict_transport_security_maximum_seconds, StrictTransportSecurity, &["max-age=18446744073709551615"], Strict, Expected::Valid),
+    (strict_transport_security_mixed_case, StrictTransportSecurity, &["MAX-AGE=31536000; includeSubDomains; preload"], Strict, Expected::Valid),
+    (strict_transport_security_reordered, StrictTransportSecurity, &["preload; includeSubDomains; max-age=31536000"], Strict, Expected::Valid),
+    (strict_transport_security_quoted_seconds, StrictTransportSecurity, &["max-age=\"31536000\"; includeSubDomains"], Strict, Expected::Valid),
+    (strict_transport_security_escaped_seconds, StrictTransportSecurity, &["MAX-AGE=\"6\\0\"; includeSubDomains; preload; future=\"a,b\""], Strict, Expected::Valid),
+    (strict_transport_security_quoted_extension, StrictTransportSecurity, &["MAX-AGE=60 ; includeSubDomains ; x-vendor=\"a;b\"; report-to=\"a\\\";b\""], Strict, Expected::Valid),
+    (strict_transport_security_many_extensions, StrictTransportSecurity, &["max-age=31536000; includeSubDomains; preload; rollout=stable; report-to=audit; policy-version=20260918; x-region=global; x-service=frontend; x-owner=platform; x-mode=enforce; x-audit=enabled; x-source=edge; x-route=public; x-build=123456789012345678901"], Strict, Expected::Valid),
+    (strict_transport_security_repeated_field, StrictTransportSecurity, &["max-age=60", "max-age=120"], Strict, Expected::Error(DecodeErrorKind::UnexpectedMultipleValues)),
+    (strict_transport_security_empty, StrictTransportSecurity, &[""], Strict, Expected::Error(DecodeErrorKind::InvalidSyntax)),
+    (strict_transport_security_overflow, StrictTransportSecurity, &["max-age=18446744073709551616"], Strict, Expected::Error(DecodeErrorKind::InvalidNumber)),
+    (strict_transport_security_duplicate_subdomains, StrictTransportSecurity, &["max-age=60; includeSubDomains; includeSubDomains"], Strict, Expected::Error(DecodeErrorKind::InvalidSyntax)),
+    (strict_transport_security_absent, StrictTransportSecurity, &[], Strict, Expected::Absent),
+
+    (x_content_type_options_canonical, XContentTypeOptions, &["nosniff"], Strict, Expected::Valid),
+    (x_content_type_options_case, XContentTypeOptions, &["NoSniff"], Strict, Expected::Error(DecodeErrorKind::InvalidSyntax)),
+    (x_content_type_options_ows, XContentTypeOptions, &["nosniff "], Strict, Expected::Error(DecodeErrorKind::InvalidSyntax)),
+    (x_content_type_options_empty, XContentTypeOptions, &[""], Strict, Expected::Error(DecodeErrorKind::InvalidSyntax)),
+    (x_content_type_options_repeated, XContentTypeOptions, &["nosniff", "nosniff"], Strict, Expected::Error(DecodeErrorKind::UnexpectedMultipleValues)),
+    (x_content_type_options_absent, XContentTypeOptions, &[], Strict, Expected::Absent),
+
+    (location_relative, Location, &["/next"], Strict, Expected::Valid),
+    (location_absolute, Location, &["https://example.com/en-us/docs/reference/index.html?utm_source=newsletter&utm_campaign=spring&page=3"], Strict, Expected::Valid),
+    (location_absolute_port, Location, &["https://example.com:8443/docs"], Strict, Expected::Valid),
+    (location_parent_relative, Location, &["../people?tab=1#profile"], Strict, Expected::Valid),
+    (location_query_only, Location, &["?page=2"], Strict, Expected::Valid),
+    (location_fragment_only, Location, &["#profile"], Strict, Expected::Valid),
+    (location_empty, Location, &[""], Strict, Expected::Valid),
+    (location_network_relative, Location, &["//cdn.example.com/assets/main.css"], Strict, Expected::Valid),
+    (location_userinfo, Location, &["https://user:pass@example.com/docs"], Strict, Expected::Valid),
+    (location_ipv6, Location, &["https://[2001:db8::1]:8443/docs?x=1#top"], Strict, Expected::Valid),
+    (location_ipvfuture, Location, &["https://[v1.address]/"], Strict, Expected::Valid),
+    (location_mailto, Location, &["mailto:user@example.com"], Strict, Expected::Valid),
+    (location_urn, Location, &["urn:example:animal:ferret:nose"], Strict, Expected::Valid),
+    (location_file_empty_authority, Location, &["file:///var/docs/index.html"], Strict, Expected::Valid),
+    (location_percent_encoded_long, Location, &["/download/reports/2026%2F09%2F18/quarterly%20summary.csv?filename=quarterly%20summary.csv&response-content-disposition=attachment%3B%20filename%3Dsummary.csv&redirect=https%3A%2F%2Fexample.com%2Faccount%3Ftab%3Dreports#download"], Strict, Expected::Valid),
+    (location_invalid_percent, Location, &["/bad%2"], Strict, Expected::Error(DecodeErrorKind::InvalidSyntax)),
+    (location_invalid_scheme, Location, &["1abc:def"], Strict, Expected::Error(DecodeErrorKind::InvalidSyntax)),
+    (location_strict_backslash, Location, &["/a\\b\\c"], Strict, Expected::Error(DecodeErrorKind::InvalidSyntax)),
+    (location_relaxed_backslash, Location, &["/a\\b\\c"], Relaxed, Expected::Valid),
+    (location_relaxed_common, Location, &["https://example.com/docs?x=1#top"], Relaxed, Expected::Valid),
+    (location_relaxed_percent_encoded, Location, &["https://example.com/a%20path?query=1#fragment"], Relaxed, Expected::Valid),
+    (location_relaxed_invalid_neighbor, Location, &["bad\\%zz"], Relaxed, Expected::Error(DecodeErrorKind::InvalidSyntax)),
+    (location_relaxed_invalid_without_backslash, Location, &["%zz"], Relaxed, Expected::Error(DecodeErrorKind::InvalidSyntax)),
+    (location_repeated, Location, &["/first", "/second"], Strict, Expected::Error(DecodeErrorKind::UnexpectedMultipleValues)),
+    (location_absent, Location, &[], Strict, Expected::Absent),
+
+    (set_cookie_canonical, SetCookie, &["session=benchmark-session-value; Path=/; HttpOnly; Secure; SameSite=Lax"], Strict, Expected::Valid),
+    (set_cookie_small, SetCookie, &["a=1"], Strict, Expected::Valid),
+    (set_cookie_expires, SetCookie, &["theme=dark; Expires=Wed, 21 Oct 2037 07:28:00 GMT; Path=/; SameSite=Lax"], Strict, Expected::Valid),
+    (set_cookie_repeated_four, SetCookie, &["session=benchmark-session-value; Path=/; HttpOnly; Secure; SameSite=Lax", "csrf=benchmark-csrf-value; Path=/; Secure; SameSite=Strict", "theme=dark; Path=/; Max-Age=31536000", "locale=en-US; Path=/; Max-Age=31536000"], Strict, Expected::Valid),
+    (set_cookie_repeated_sixteen, SetCookie, &["a=1", "b=2", "c=3", "d=4", "e=5", "f=6", "g=7", "h=8", "i=9", "j=10", "k=11", "l=12", "m=13", "n=14", "o=15", "p=16"], Strict, Expected::Valid),
+    (set_cookie_long, SetCookie, &["preferences=locale%3Den-US%26theme%3Ddark%26timezone%3DAmerica%2FLos_Angeles%26layout%3Dcompact%26notifications%3Denabled%26dashboard%3Doverview%26accessibility%3Dhigh-contrast%26table-columns%3Dname%2Cowner%2Cstatus%2Cupdated%26navigation%3Dexpanded; Path=/; Domain=example.com; Max-Age=31536000; Secure; SameSite=Lax"], Strict, Expected::Valid),
+    (set_cookie_opaque, SetCookie, &["opaque; not-a-cookie-pair; future=\"unterminated, value"], Strict, Expected::Valid),
+    (set_cookie_empty, SetCookie, &[""], Strict, Expected::Error(DecodeErrorKind::InvalidSyntax)),
+    (set_cookie_late_empty, SetCookie, &["a=1; Path=/", "b=2; HttpOnly", ""], Strict, Expected::Error(DecodeErrorKind::InvalidSyntax)),
+    (set_cookie_absent, SetCookie, &[], Strict, Expected::Absent),
+
+    (user_agent_canonical, UserAgent, &["curl/8.5.0"], Strict, Expected::Valid),
+    (user_agent_browser, UserAgent, &["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"], Strict, Expected::Valid),
+    (user_agent_client_comment, UserAgent, &["example-client/1.0 (integration test)"], Strict, Expected::Valid),
+    (user_agent_long_components, UserAgent, &["ExampleApplication/4.2 Runtime/9.0 (Linux; x86_64; production) HttpClient/3.1 Telemetry/2.4 Identity/5.0 RetryPolicy/1.2 TraceContext/1.0 ProxySupport/2.1 Component/1.0 (build 20260918; feature-set-extended) Deployment/2026.09 Region/global Compatibility/legacy"], Strict, Expected::Valid),
+    (user_agent_padded, UserAgent, &["                                                                client/1"], Strict, Expected::Valid),
+    (user_agent_opaque, UserAgent, &["not-a-product (unclosed; \"opaque, value"], Strict, Expected::Valid),
+    (user_agent_empty, UserAgent, &[""], Strict, Expected::Error(DecodeErrorKind::InvalidSyntax)),
+    (user_agent_blank, UserAgent, &[" \t \t "], Strict, Expected::Error(DecodeErrorKind::InvalidSyntax)),
+    (user_agent_repeated, UserAgent, &["client/1", "proxy/2"], Strict, Expected::Error(DecodeErrorKind::UnexpectedMultipleValues)),
+    (user_agent_absent, UserAgent, &[], Strict, Expected::Absent),
+);

@@ -6,6 +6,8 @@ exclude_globs = [
     # Fixture scaffolding for the `fetch_winhttp` tests, benchmarks and examples.
     "crates/fetch_winhttp_impl/src/testing/**",
     "crates/fakeable_test/**",
+    "crates/http_headers/**",
+    "crates/http_headers_simd/**",
     "crates/observed_testing/**",
     "crates/rest_over_grpc_examples/**",
     "crates/rest_over_grpc_tests/**",
