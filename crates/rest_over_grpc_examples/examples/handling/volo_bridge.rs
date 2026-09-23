@@ -10,9 +10,9 @@
 //! Writing a custom bridge for a non-`tonic` gRPC stack — here a stand-in for
 //! [`volo`](https://github.com/cloudwego/volo)-grpc.
 //!
-//! `rest_over_grpc::build` emits a built-in bridge for `tonic` by default: a
-//! blanket `impl Library for T where T: <tonic server trait>`, so a service
-//! written once against `tonic` also serves REST. For any other stack you write
+//! `rest_over_grpc::build` emits a guarded adapter for `tonic` by default, so a
+//! service written once against `tonic` also serves REST when its authorization
+//! policy is explicit. For any other stack you write
 //! the bridge yourself — implement the generated
 //! [`pb::Library`](rest_over_grpc_examples::custom::pb::Library) trait for your service,
 //! delegating each RPC to your framework's handler and converting its
@@ -23,12 +23,12 @@
 //! `volo-grpc` would generate. Two caveats about what a real bridge would do
 //! differently:
 //!
-//! * **Blanket vs. concrete.** A real bridge belongs in the crate that defines
-//!   `pb::Library` (alongside the generated code), where the orphan rule lets it
-//!   be a blanket `impl<T> Library for T where T: volo_gen::LibraryServer` —
-//!   exactly like the built-in `tonic` bridge. Here the bridge lives in a
-//!   downstream example, so it must be a *concrete* `impl Library for
-//!   MyShelfService` (a foreign trait on a local type) to satisfy coherence.
+//! * **Generated vs. concrete.** A reusable bridge can live in the crate that
+//!   defines `pb::Library` (alongside the generated code) and wrap a handler
+//!   with its own REST authorization check, as the built-in `tonic` adapter
+//!   does. Here the bridge lives in a downstream example, so it uses a
+//!   *concrete* `impl Library for MyShelfService` (a foreign trait on a local
+//!   type) to satisfy coherence.
 //! * **Message types.** `volo` generates its own (`pilota`) message types; a
 //!   real bridge would convert those to the `prost` types this crate uses. For
 //!   focus, this stand-in reuses the `prost` messages directly.

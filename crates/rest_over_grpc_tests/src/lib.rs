@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![forbid(unsafe_code)]
+
 //! Build-time generated fixtures exercised by this crate's benchmarks and the
 //! `rest_over_grpc` end-to-end / correctness tests.
 //!

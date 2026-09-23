@@ -9,7 +9,7 @@ use proc_macro2::TokenStream;
 /// The generated code is split into its distinct pieces:
 ///
 /// - [`service_trait`](Self::service_trait) — the service trait.
-/// - [`tonic_bridge`](Self::tonic_bridge) — the blanket `impl` bridging a
+/// - [`tonic_bridge`](Self::tonic_bridge) — the guarded wrapper bridging a
 ///   `tonic`-generated server, present only when
 ///   [`GeneratorBuilder::emit_tonic_bridge`](crate::build::GeneratorBuilder::emit_tonic_bridge)
 ///   is enabled.
@@ -66,7 +66,7 @@ impl GeneratedOutput {
         &self.service_trait
     }
 
-    /// The blanket `impl` bridging a `tonic`-generated server, when the tonic
+    /// The guarded wrapper bridging a `tonic`-generated server, when the tonic
     /// bridge is enabled; otherwise `None`.
     #[must_use]
     pub fn tonic_bridge(&self) -> Option<&TokenStream> {

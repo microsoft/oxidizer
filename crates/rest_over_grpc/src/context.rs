@@ -39,10 +39,22 @@ use http::{HeaderMap, HeaderName, HeaderValue};
 ///     "/v1/shelves/7"
 /// );
 /// ```
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct Context {
     request_headers: HeaderMap,
     response_headers: HeaderMap,
+}
+
+impl core::fmt::Debug for Context {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        // HeaderValue::Debug only masks values explicitly marked sensitive.
+        // Incoming headers are untrusted and may include unmarked credentials;
+        // response headers can contain credentials (for example Set-Cookie) too.
+        f.debug_struct("Context")
+            .field("request_header_names", &self.request_headers.keys().collect::<Vec<_>>())
+            .field("response_header_names", &self.response_headers.keys().collect::<Vec<_>>())
+            .finish()
+    }
 }
 
 impl Context {
@@ -264,6 +276,24 @@ mod tests {
         let cx = Context::new(request);
         assert_eq!(cx.request_headers().get(header::HOST).unwrap(), "example.test");
         assert!(cx.response_headers().is_empty());
+    }
+
+    #[test]
+    fn debug_shows_header_names_without_leaking_unmarked_credentials() {
+        let mut request = HeaderMap::new();
+        request.insert(header::AUTHORIZATION, HeaderValue::from_static("Bearer secret-token-123"));
+        request.insert("x-api-key", HeaderValue::from_static("api-secret-456"));
+        request.insert(header::USER_AGENT, HeaderValue::from_static("curl/8"));
+        let mut context = Context::new(request);
+        context.insert_response_header(header::SET_COOKIE, HeaderValue::from_static("session=secret-cookie-789"));
+
+        let debug = format!("{context:?}");
+        assert!(debug.contains("authorization"));
+        assert!(debug.contains("user-agent"));
+        assert!(debug.contains("set-cookie"));
+        for secret in ["secret-token-123", "api-secret-456", "secret-cookie-789"] {
+            assert!(!debug.contains(secret), "Context::Debug must redact header values");
+        }
     }
 
     #[test]

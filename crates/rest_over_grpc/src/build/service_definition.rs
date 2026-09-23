@@ -42,7 +42,10 @@ use super::{DescriptorError, DescriptorOptions};
 ///     None,
 /// );
 ///
-/// let (_transcoder, generated) = Generator::new().add(library).generate();
+/// let (_transcoder, generated) = Generator::new()
+///     .add(library)
+///     .generate()
+///     .expect("generation succeeds");
 /// assert!(
 ///     generated[0]
 ///         .service_trait()
@@ -130,8 +133,8 @@ impl ServiceDefinition {
     /// `info` for the title, version, and servers, or `None` if the service
     /// carries no OpenAPI state (i.e. it was not decoded from a descriptor).
     #[cfg(feature = "build-openapi")]
-    pub(crate) fn openapi_spec(&self, info: &OpenApiInfo) -> Option<String> {
-        self.openapi.as_ref().map(|builder| builder.render(info))
+    pub(crate) fn openapi_spec(&self, info: &OpenApiInfo) -> std::io::Result<Option<String>> {
+        self.openapi.as_ref().map(|builder| builder.render(info)).transpose()
     }
 
     /// Registers one REST RPC on the service.
@@ -154,7 +157,10 @@ impl ServiceDefinition {
     /// let mut generator = ServiceDefinition::new("LibraryService", None);
     /// generator.add_method(rule, "crate::pb::GetShelfRequest", "crate::pb::Shelf", None);
     ///
-    /// let (_transcoder, generated) = Generator::new().add(generator).generate();
+    /// let (_transcoder, generated) = Generator::new()
+    ///     .add(generator)
+    ///     .generate()
+    ///     .expect("generation succeeds");
     /// assert!(
     ///     generated[0]
     ///         .service_trait()
@@ -243,17 +249,31 @@ impl ServiceDefinition {
     /// Emits the `tonic` bridge for a service implemented against a `tonic`
     /// server trait.
     ///
-    /// The emitted code forwards unary handlers directly and maps streamed
-    /// responses through `rest_over_grpc::codegen_helpers::map_stream_status`.
+    /// The emitted wrapper requires either an explicit REST authorization guard
+    /// or acknowledgment that authorization is enforced before the transcoder.
+    /// Calling a tonic server trait directly does not run tonic interceptors.
+    /// Route matching and bounded request decoding happen before the generated
+    /// service method invokes its guard. Tonic status details are forwarded as
+    /// labeled base64 JSON objects; status metadata is forwarded as response
+    /// headers for unary/init errors. Once stream headers are committed,
+    /// item-error metadata is instead carried in labeled JSON details.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one generated bridge contains constructors, status conversion, and handler arms"
+    )]
     pub(crate) fn tonic_bridge(&self) -> TokenStream {
         let our_trait = ident(&self.trait_name);
         let snake = to_snake_case(&self.trait_name);
-        let tonic_trait = type_path(&format!("{snake}_server::{}", prost_type_identifier(&self.trait_name)));
+        let tonic_trait_name = prost_type_identifier(&self.trait_name);
+        let tonic_module = tonic_snake_case(&tonic_trait_name);
+        let tonic_trait = type_path(&format!("super::{tonic_module}_server::{tonic_trait_name}"));
+        let convert_status = ident(&format!("__rest_over_grpc_{snake}_convert_status"));
+        let convert_stream_status = ident(&format!("__rest_over_grpc_{snake}_convert_stream_status"));
 
         let arms = self.methods.iter().map(|m| {
             let fn_ident = ident(&to_snake_case(m.rpc()));
-            let req_ty = type_path(m.request_type());
-            let resp_ty = type_path(m.response_type());
+            let req_ty = bridge_type_path(m.request_type());
+            let resp_ty = bridge_type_path(m.response_type());
 
             if m.server_streaming() {
                 // Map both initiation and per-item tonic errors.
@@ -266,23 +286,26 @@ impl ServiceDefinition {
                         ::rest_over_grpc::handling::ResponseStream<#resp_ty>,
                         ::rest_over_grpc::handling::Status,
                     > {
-                        fn __convert_status(status: ::tonic::Status) -> ::rest_over_grpc::handling::Status {
-                            ::rest_over_grpc::handling::Status::new(
-                                ::rest_over_grpc::handling::Code::from_i32(status.code() as i32)
-                                    .unwrap_or(::rest_over_grpc::handling::Code::Unknown),
-                                status.message(),
-                            )
-                        }
                         let mut __request = ::tonic::Request::new(request);
                         *__request.metadata_mut() =
                             ::tonic::metadata::MetadataMap::from_headers(cx.take_request_headers());
-                        let (__metadata, __stream, _) = <Self as #tonic_trait>::#fn_ident(self, __request)
+                        (self.guard)(__request.metadata()).map_err(|status| {
+                            cx.merge_response_headers(status.metadata().clone().into_headers());
+                            Self::#convert_status(status)
+                        })?;
+                        let (__metadata, __stream, _) = <T as #tonic_trait>::#fn_ident(&self.service, __request)
                             .await
-                            .map_err(__convert_status)?
+                            .map_err(|status| {
+                                cx.merge_response_headers(status.metadata().clone().into_headers());
+                                Self::#convert_status(status)
+                            })?
                             .into_parts();
                         cx.merge_response_headers(__metadata.into_headers());
                         ::core::result::Result::Ok(::std::boxed::Box::pin(
-                            ::rest_over_grpc::codegen_helpers::map_stream_status(__stream, __convert_status),
+                            ::rest_over_grpc::codegen_helpers::map_stream_status(
+                                __stream,
+                                Self::#convert_stream_status as fn(::tonic::Status) -> ::rest_over_grpc::handling::Status,
+                            ),
                         ))
                     }
                 };
@@ -297,30 +320,139 @@ impl ServiceDefinition {
                     let mut __request = ::tonic::Request::new(request);
                     *__request.metadata_mut() =
                         ::tonic::metadata::MetadataMap::from_headers(cx.take_request_headers());
-                    match <Self as #tonic_trait>::#fn_ident(self, __request).await {
+                    (self.guard)(__request.metadata()).map_err(|status| {
+                        cx.merge_response_headers(status.metadata().clone().into_headers());
+                        Self::#convert_status(status)
+                    })?;
+                    match <T as #tonic_trait>::#fn_ident(&self.service, __request).await {
                         ::core::result::Result::Ok(response) => {
                             let (__metadata, __message, _) = response.into_parts();
                             cx.merge_response_headers(__metadata.into_headers());
                             ::core::result::Result::Ok(__message)
                         }
                         ::core::result::Result::Err(status) => {
-                            ::core::result::Result::Err(::rest_over_grpc::handling::Status::new(
-                                ::rest_over_grpc::handling::Code::from_i32(status.code() as i32)
-                                    .unwrap_or(::rest_over_grpc::handling::Code::Unknown),
-                                status.message(),
-                            ))
+                            cx.merge_response_headers(status.metadata().clone().into_headers());
+                            ::core::result::Result::Err(Self::#convert_status(status))
                         }
                     }
                 }
             }
         });
 
+        let bridge = ident(&format!("{}RestBridge", self.trait_name));
+        let bridge_module = ident(&format!("__rest_over_grpc_bridge_{}", self.trait_name));
         let doc = format!(
-            " Bridges `tonic`'s `{0}` server trait to [`{0}`], so a single `tonic`\n implementation also serves REST via `transcode`.",
+            " Adapts `tonic`'s `{0}` server trait to REST. Tonic transport interceptors\n are not invoked: construct with `with_guard` or deliberately acknowledge external\n authorization with `externally_authenticated`. Route matching and bounded request\n decoding happen before the guard, so malformed requests can return `400` without\n invoking it.",
             self.trait_name
         );
         quote! {
+            #[allow(non_snake_case, reason = "preserve the service name to keep bridge namespaces distinct")]
+            pub mod #bridge_module {
+            #[allow(unused_imports, reason = "generated types may refer to sibling protobuf types")]
+            use super::*;
+
             #[doc = #doc]
+            #[derive(Clone)]
+            pub struct #bridge<T, G> {
+                service: T,
+                guard: G,
+            }
+
+            impl<T, G> ::core::fmt::Debug for #bridge<T, G> {
+                fn fmt(&self, formatter: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                    formatter.debug_struct(::core::stringify!(#bridge)).finish_non_exhaustive()
+                }
+            }
+
+            impl<T, G> #bridge<T, G>
+            where
+                G: ::core::ops::Fn(&::tonic::metadata::MetadataMap)
+                    -> ::core::result::Result<(), ::tonic::Status>,
+            {
+                /// Checks REST request metadata after route matching and bounded
+                /// request decoding, but before invoking any tonic handler.
+                ///
+                /// A malformed request can therefore return `400 Bad Request`
+                /// without invoking the guard.
+                pub fn with_guard(service: T, guard: G) -> Self {
+                    Self { service, guard }
+                }
+
+                #[allow(dead_code, reason = "empty service definitions have no bridged RPCs")]
+                fn #convert_status(status: ::tonic::Status) -> ::rest_over_grpc::handling::Status {
+                    let mut converted = ::rest_over_grpc::handling::Status::new(
+                        ::rest_over_grpc::handling::Code::from_i32(status.code() as i32)
+                            .unwrap_or(::rest_over_grpc::handling::Code::Unknown),
+                        status.message(),
+                    );
+                    if !status.details().is_empty() {
+                        converted = converted.with_detail(
+                            ::rest_over_grpc::codegen_helpers::grpc_status_details(status.details())
+                        );
+                    }
+                    converted
+                }
+
+                #[allow(dead_code, reason = "services without streaming RPCs do not use this converter")]
+                fn #convert_stream_status(status: ::tonic::Status) -> ::rest_over_grpc::handling::Status {
+                    // Stream item errors occur after response headers are committed.
+                    // Carry their metadata losslessly in the error detail instead.
+                    let metadata = status.metadata().clone();
+                    let mut converted = Self::#convert_status(status);
+                    if !metadata.is_empty() {
+                        converted = converted.with_details(metadata.iter().map(|entry| {
+                            match entry {
+                                ::tonic::metadata::KeyAndValueRef::Ascii(key, value) => {
+                                    match value.to_str() {
+                                        ::core::result::Result::Ok(text) => {
+                                            ::rest_over_grpc::codegen_helpers::grpc_ascii_metadata(
+                                                key.as_str(),
+                                                text,
+                                            )
+                                        }
+                                        ::core::result::Result::Err(_) => {
+                                            ::rest_over_grpc::codegen_helpers::grpc_opaque_metadata(
+                                                key.as_str(),
+                                                value.as_encoded_bytes(),
+                                            )
+                                        }
+                                    }
+                                }
+                                ::tonic::metadata::KeyAndValueRef::Binary(key, value) => {
+                                    match value.to_bytes() {
+                                        ::core::result::Result::Ok(bytes) => {
+                                            ::rest_over_grpc::codegen_helpers::grpc_binary_metadata(
+                                                key.as_str(),
+                                                bytes.as_ref(),
+                                            )
+                                        }
+                                        ::core::result::Result::Err(_) => {
+                                            ::rest_over_grpc::codegen_helpers::grpc_opaque_metadata(
+                                                key.as_str(),
+                                                value.as_encoded_bytes(),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }));
+                    }
+                    converted
+                }
+            }
+
+            impl<T> #bridge<T, fn(&::tonic::metadata::MetadataMap) -> ::core::result::Result<(), ::tonic::Status>> {
+                /// Acknowledges that authorization is enforced outside this bridge,
+                /// before requests reach the transcoder. Tonic interceptors do not run.
+                pub fn externally_authenticated(service: T) -> Self {
+                    fn acknowledged(_: &::tonic::metadata::MetadataMap)
+                        -> ::core::result::Result<(), ::tonic::Status> {
+                        ::core::result::Result::Ok(())
+                    }
+                    Self { service, guard: acknowledged }
+                }
+            }
+
             #[allow(
                 clippy::all,
                 clippy::pedantic,
@@ -330,11 +462,14 @@ impl ServiceDefinition {
                 unused,
                 reason = "code generated by rest_over_grpc::build"
             )]
-            impl<T> #our_trait for T
+            impl<T, G> #our_trait for #bridge<T, G>
             where
                 T: #tonic_trait,
+                G: ::core::ops::Fn(&::tonic::metadata::MetadataMap)
+                    -> ::core::result::Result<(), ::tonic::Status> + ::core::marker::Send + ::core::marker::Sync,
             {
                 #(#arms)*
+            }
             }
         }
     }
@@ -543,14 +678,23 @@ fn transcoder_try_transcode_method(arms: &[TokenStream], send_bound: &TokenStrea
         ) -> impl ::core::future::Future<Output = ::core::option::Option<::rest_over_grpc::transcoding::TranscodeResponse>> #send_bound {
             async move {
                 let (path, query) = ::rest_over_grpc::codegen_helpers::split_query(target);
-                let query_pairs = query
-                    .map(::rest_over_grpc::codegen_helpers::parse_query)
-                    .unwrap_or_default();
 
                 let matched = match Route::resolve(method, path) {
                     ::core::option::Option::Some(matched) => matched,
                     ::core::option::Option::None => {
                         return ::core::option::Option::None;
+                    }
+                };
+
+                let query_pairs = match ::rest_over_grpc::codegen_helpers::QueryPairs::parse_limited(query.unwrap_or("")) {
+                    ::core::result::Result::Ok(pairs) => pairs,
+                    ::core::result::Result::Err(error) => {
+                        let status = error.into_status();
+                        return ::core::option::Option::Some(
+                            ::rest_over_grpc::transcoding::TranscodeResponse::Unary(
+                                ::rest_over_grpc::transcoding::HttpResponse::from_status(&status),
+                            ),
+                        );
                     }
                 };
 
@@ -838,15 +982,12 @@ fn qualified_type_path(path: &str, module: &str) -> TokenStream {
 }
 
 /// The `let __stream_encoding = …;` binding for a server-streaming arm. It
-/// negotiates the encoding from the request `Context`'s `Accept` header, so only
+/// negotiates the encoding from all of the request `Context`'s `Accept` headers, so only
 /// a matched streaming route pays the lookup (unary routes skip it entirely).
 fn stream_encoding_binding() -> TokenStream {
     quote! {
-        let __stream_encoding = ::rest_over_grpc::codegen_helpers::StreamEncoding::from_accept(
-            cx.request_headers()
-                .get("accept")
-                .and_then(|value| value.to_str().ok())
-                .unwrap_or(""),
+        let __stream_encoding = ::rest_over_grpc::codegen_helpers::StreamEncoding::from_accept_values(
+            cx.request_headers().get_all("accept").iter().filter_map(|value| value.to_str().ok()),
         );
     }
 }
@@ -1014,6 +1155,19 @@ pub(crate) fn prost_type_identifier(name: &str) -> String {
     prost_identifier(&heck::AsUpperCamelCase(name).to_string())
 }
 
+/// Resolves a package-relative message path from inside a generated bridge
+/// module nested one level below the protobuf package.
+fn bridge_type_path(path: &str) -> TokenStream {
+    let trimmed = path.trim_start();
+    if trimmed.starts_with("::") || trimmed.starts_with("crate::") || trimmed.starts_with("$crate") {
+        return type_path(path);
+    }
+    if let Some(relative) = trimmed.strip_prefix("self::") {
+        return type_path(&format!("super::{relative}"));
+    }
+    type_path(&format!("super::{trimmed}"))
+}
+
 /// Parses a fully-qualified Rust type path string into tokens, falling back to a
 /// `compile_error!` invocation if the string is not a valid token sequence.
 fn type_path(path: &str) -> TokenStream {
@@ -1035,7 +1189,22 @@ pub(crate) fn to_snake_case(name: &str) -> String {
     heck::AsSnakeCase(name).to_string()
 }
 
+/// Matches tonic-build's service-module naming, which inserts an underscore
+/// before every uppercase letter after the first.
+fn tonic_snake_case(name: &str) -> String {
+    let mut snake = String::with_capacity(name.len());
+    let mut chars = name.chars().peekable();
+    while let Some(ch) = chars.next() {
+        snake.push(ch.to_ascii_lowercase());
+        if chars.peek().is_some_and(|next| next.is_uppercase()) {
+            snake.push('_');
+        }
+    }
+    snake
+}
+
 #[cfg(all(test, not(miri)))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[expect(
     clippy::literal_string_with_formatting_args,
     reason = "assertions match generated `{field:__capN}` destructuring patterns verbatim, not format args"
@@ -1063,6 +1232,26 @@ mod tests {
         assert_eq!(to_snake_case("already_snake"), "already_snake");
         assert_eq!(to_snake_case("GetHTTPConfig"), "get_http_config");
         assert_eq!(to_snake_case("MyHTTPService"), "my_http_service");
+    }
+
+    #[test]
+    fn tonic_snake_case_matches_service_module_naming() {
+        assert_eq!(tonic_snake_case("Greeter"), "greeter");
+        assert_eq!(tonic_snake_case("ABCServiceX"), "a_b_c_service_x");
+        assert_eq!(tonic_snake_case("AbcServiceX"), "abc_service_x");
+        assert_eq!(tonic_snake_case("Self_"), "self_");
+    }
+
+    #[test]
+    fn bridge_type_paths_are_qualified_through_the_package_module() {
+        assert_eq!(bridge_type_path("Request").to_string(), "super :: Request");
+        assert_eq!(
+            bridge_type_path("super::other::Thing").to_string(),
+            "super :: super :: other :: Thing"
+        );
+        assert_eq!(bridge_type_path("self::Request").to_string(), "super :: Request");
+        assert_eq!(bridge_type_path("::prost_types::Empty").to_string(), ":: prost_types :: Empty");
+        assert_eq!(bridge_type_path("crate::pb::Request").to_string(), "crate :: pb :: Request");
     }
 
     #[test]
@@ -1211,7 +1400,7 @@ mod tests {
             "the reserved `Self` trait must be raw-sanitized: {pretty}"
         );
         assert!(
-            pretty.contains("self_server::Self_"),
+            pretty.contains("self__server::Self_"),
             "the tonic bridge must reference the sanitized trait: {pretty}"
         );
     }
@@ -1460,7 +1649,8 @@ mod tests {
         assert!(flat.contains("::rest_over_grpc::codegen_helpers::map_stream_status("));
         assert!(flat.contains(".into_parts()"));
         assert!(flat.contains("cx.merge_response_headers(__metadata.into_headers())"));
-        assert!(flat.contains("__convert_status"));
+        assert!(flat.contains("(self.guard)(__request.metadata())"));
+        assert!(flat.contains("__rest_over_grpc_library_convert_status"));
         assert!(flat.contains("::tonic::metadata::MetadataMap::from_headers(cx.take_request_headers())"));
     }
 
@@ -1478,8 +1668,10 @@ mod tests {
         let file: syn::File = syn::parse2(bridge).expect("bridge must be valid Rust");
         let pretty = prettyplease::unparse(&file);
 
-        assert!(pretty.contains("impl<T> Library for T"));
-        assert!(pretty.contains("T: library_server::Library"));
+        assert!(pretty.contains("impl<T, G> Library for LibraryRestBridge<T, G>"));
+        assert!(pretty.contains("T: super::library_server::Library"));
+        assert!(pretty.contains("pub fn externally_authenticated"));
+        assert!(pretty.contains("pub fn with_guard"));
         assert!(pretty.contains("tonic::Request::new(request)"));
         assert!(pretty.contains("MetadataMap::from_headers"));
         assert!(pretty.contains("request_headers()"));

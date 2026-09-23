@@ -20,7 +20,6 @@ use smallvec::{SmallVec, smallvec};
 
 use super::request_body_kind::RequestBodyKind;
 use super::{TranscodeError, percent};
-
 /// Decodes through the overlay when the direct field-body path does not apply.
 pub(crate) fn try_decode_overlay<T: DeserializeOwned>(
     body_kind: &RequestBodyKind,
@@ -89,21 +88,18 @@ fn normalized_key(key: &str) -> Cow<'_, str> {
 type QueryValues<'de> = SmallVec<[Cow<'de, str>; 2]>;
 type FlatOverlay<'de> = SmallVec<[(&'de str, QueryValues<'de>); 8]>;
 type FlatOverlayIndex<'de> = HashMap<&'de str, usize>;
-type GroupedFlatQuery<'de> = (FlatOverlay<'de>, Option<FlatOverlayIndex<'de>>);
+type GroupedFlatQuery<'de> = (FlatOverlay<'de>, Option<FlatOverlayIndex<'de>>, HashSet<Cow<'de, str>>);
 
 fn decode_flat<T: DeserializeOwned>(body: Option<&[u8]>, query: &[(&str, &str)]) -> Result<T, TranscodeError> {
-    let (overlay, _overlay_index) = group_flat_query(query)?;
+    let (overlay, _overlay_index, query_norms) = group_flat_query(query)?;
 
-    let mut body_entries = match body {
-        Some(bytes) if !bytes.is_empty() => match from_slice::<BodyTop<'_>>(bytes) {
+    let body_entries = match body {
+        Some(bytes) if !bytes.is_empty() => match parse_body_with_overrides(bytes, &query_norms) {
             Ok(top) => top.entries,
             Err(_) => return Err(classify_body_error(bytes)),
         },
         _ => Vec::new(),
     };
-
-    let query_norms: HashSet<Cow<'_, str>> = overlay.iter().map(|(key, _)| normalized_key(key)).collect();
-    body_entries.retain(|(key, _)| !query_norms.contains(&normalized_key(key)));
 
     let map = OverlayMap {
         body: body_entries.into_iter(),
@@ -116,6 +112,7 @@ fn decode_flat<T: DeserializeOwned>(body: Option<&[u8]>, query: &[(&str, &str)])
 fn group_flat_query<'de>(query: &[(&'de str, &'de str)]) -> Result<GroupedFlatQuery<'de>, TranscodeError> {
     let mut overlay = FlatOverlay::new();
     let mut overlay_index: Option<FlatOverlayIndex<'de>> = None;
+    let mut query_norms = HashSet::new();
     for (key, value) in query {
         let decoded = percent::decode_query(value).ok_or_else(|| TranscodeError::invalid_encoding("query parameter value"))?;
         let existing = match &overlay_index {
@@ -125,6 +122,7 @@ fn group_flat_query<'de>(query: &[(&'de str, &'de str)]) -> Result<GroupedFlatQu
         if let Some(index) = existing {
             overlay[index].1.push(decoded);
         } else {
+            query_norms.insert(normalized_key(key));
             if overlay_index.is_none() && overlay.len() == overlay.inline_size() {
                 let mut index = HashMap::with_capacity(query.len());
                 index.extend(overlay.iter().enumerate().map(|(position, (existing, _))| (*existing, position)));
@@ -136,7 +134,7 @@ fn group_flat_query<'de>(query: &[(&'de str, &'de str)]) -> Result<GroupedFlatQu
             overlay.push((key, smallvec![decoded]));
         }
     }
-    Ok((overlay, overlay_index))
+    Ok((overlay, overlay_index, query_norms))
 }
 
 fn classify_body_error(bytes: &[u8]) -> TranscodeError {
@@ -153,11 +151,35 @@ struct BodyTop<'de> {
     entries: Vec<(String, &'de RawValue)>,
 }
 
+struct BodyTopSeed<'a, 'q> {
+    overrides: Option<&'a HashSet<Cow<'q, str>>>,
+}
+
+fn parse_body_with_overrides<'de>(bytes: &'de [u8], overrides: &HashSet<Cow<'_, str>>) -> Result<BodyTop<'de>, JsonError> {
+    let mut deserializer = JsonDeserializer::from_slice(bytes);
+    let body = BodyTopSeed {
+        overrides: Some(overrides),
+    }
+    .deserialize(&mut deserializer)?;
+    deserializer.end()?;
+    Ok(body)
+}
+
 impl<'de> serde::Deserialize<'de> for BodyTop<'de> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct TopVisitor;
+        BodyTopSeed { overrides: None }.deserialize(deserializer)
+    }
+}
 
-        impl<'de> Visitor<'de> for TopVisitor {
+impl<'de> DeserializeSeed<'de> for BodyTopSeed<'_, '_> {
+    type Value = BodyTop<'de>;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+        struct TopVisitor<'a, 'q> {
+            overrides: Option<&'a HashSet<Cow<'q, str>>>,
+        }
+
+        impl<'de> Visitor<'de> for TopVisitor<'_, '_> {
             type Value = BodyTop<'de>;
 
             #[cfg_attr(test, mutants::skip)]
@@ -170,16 +192,21 @@ impl<'de> serde::Deserialize<'de> for BodyTop<'de> {
                 let mut seen: HashMap<String, ()> = HashMap::new();
                 while let Some(key) = map.next_key::<String>()? {
                     let value: &'de RawValue = map.next_value()?;
-                    if seen.insert(normalized_key(&key).into_owned(), ()).is_some() {
+                    let normalized = normalized_key(&key);
+                    let overridden = self.overrides.is_some_and(|overrides| overrides.contains(normalized.as_ref()));
+                    // Validate duplicates before filtering overridden fields.
+                    if seen.insert(normalized.into_owned(), ()).is_some() {
                         return Err(serde::de::Error::custom("request body contains a duplicate field"));
                     }
-                    entries.push((key, value));
+                    if !overridden {
+                        entries.push((key, value));
+                    }
                 }
                 Ok(BodyTop { entries })
             }
         }
 
-        deserializer.deserialize_map(TopVisitor)
+        deserializer.deserialize_map(TopVisitor { overrides: self.overrides })
     }
 }
 
@@ -445,7 +472,8 @@ enum QueryNode {
 /// The cap is fixed and deliberately not configurable — a depth a caller could
 /// raise would not bound anything.
 const MAX_QUERY_FIELD_DEPTH: usize = 64;
-
+/// The caller checks pair, name, and value budgets before constructing this
+/// vector-backed tree; percent-decoding cannot increase the name byte length.
 fn decode_tree<T: DeserializeOwned>(body: Option<&[u8]>, query: &[(&str, &str)]) -> Result<T, TranscodeError> {
     let body = match body {
         Some(bytes) if !bytes.is_empty() => match from_slice::<BodyTop<'_>>(bytes) {
@@ -587,6 +615,7 @@ impl<'de> MapAccess<'de> for TreeMap<'de> {
             }),
             Some(TreePending::Node(QueryNode::Map(query), body)) => {
                 let body = match body {
+                    Some(raw) if raw.get().trim() == "null" => Vec::new(),
                     Some(raw) => from_str::<BodyTop<'_>>(raw.get()).map_err(serde::de::Error::custom)?.entries,
                     None => Vec::new(),
                 };
@@ -604,6 +633,7 @@ mod tests {
     use super::*;
     use crate::codegen_helpers::decode_request;
     use crate::handling::Code;
+    use crate::path::{MAX_QUERY_KEY_BYTES, MAX_QUERY_PAIRS};
 
     #[derive(Debug, Deserialize, PartialEq)]
     struct Shelf {
@@ -675,7 +705,7 @@ mod tests {
             ("g", "7"),
             ("a", "8"),
         ];
-        let (overlay, index) = group_flat_query(&query).expect("query groups");
+        let (overlay, index, _) = group_flat_query(&query).expect("query groups");
         assert!(!overlay.spilled());
         assert!(index.is_none());
         assert!(overlay.iter().all(|(_, values)| !values.spilled()));
@@ -695,7 +725,7 @@ mod tests {
             ("h", "8"),
             ("i", "9"),
         ];
-        let (overlay, index) = group_flat_query(&query).expect("query groups");
+        let (overlay, index, _) = group_flat_query(&query).expect("query groups");
         assert!(overlay.spilled());
         assert_eq!(index.expect("large query is indexed").len(), query.len());
     }
@@ -703,7 +733,7 @@ mod tests {
     #[test]
     fn repeated_flat_query_does_not_build_a_hash_index() {
         let query = [("tag", "a"); 16];
-        let (overlay, index) = group_flat_query(&query).expect("query groups");
+        let (overlay, index, _) = group_flat_query(&query).expect("query groups");
         assert_eq!(overlay.len(), 1);
         assert!(index.is_none());
     }
@@ -853,6 +883,17 @@ mod tests {
         let body = br#"{"include_archived":false,"includeArchived":true}"#;
         let error = decode_flat::<Options>(Some(body), &[]).expect_err("mixed-case duplicate body fields are rejected");
         assert!(error.to_string().contains("duplicate field"));
+
+        let error = decode_flat::<Options>(Some(body), &[("includeArchived", "true")])
+            .expect_err("a query override must not hide duplicate body fields");
+        assert!(error.to_string().contains("duplicate field"));
+    }
+
+    #[test]
+    fn flat_body_filter_rejects_trailing_json_after_overrides() {
+        let body = br#"{"shelf":"body","theme":"history"} true"#;
+        let error = decode_flat::<Shelf>(Some(body), &[("shelf", "query")]).expect_err("trailing body JSON is invalid");
+        assert_eq!(error.code(), Code::InvalidArgument);
     }
 
     #[derive(Debug, PartialEq)]
@@ -1046,6 +1087,57 @@ mod tests {
         );
         let _ = decode_tree::<Root>(Some(b"{"), &[("nested.value", "7")]).expect_err("invalid body");
         let _ = decode_tree::<Root>(None, &[("nested.value", "7"), ("nested", "8")]).expect_err("conflicting query paths");
+    }
+
+    #[test]
+    fn dotted_query_overrides_null_nested_body_without_accepting_non_objects() {
+        #[derive(Debug, Deserialize, PartialEq)]
+        struct Root {
+            nested: Option<Nested>,
+        }
+        #[derive(Debug, Deserialize, PartialEq)]
+        struct Nested {
+            value: i32,
+        }
+
+        let expected = Root {
+            nested: Some(Nested { value: 7 }),
+        };
+        let whole: Root = decode_request(&[("nested.value", "7")], br#"{"nested":null}"#, RequestBodyKind::Whole).unwrap();
+        assert_eq!(whole, expected);
+        let field: Root = decode_request(&[("nested.value", "7")], b"null", RequestBodyKind::Field("nested")).unwrap();
+        assert_eq!(field, expected);
+        for invalid in [br#""string""#.as_slice(), b"7", b"[]"] {
+            let error = decode_request::<Root>(&[("nested.value", "7")], invalid, RequestBodyKind::Field("nested")).unwrap_err();
+            assert_eq!(error.code(), Code::InvalidArgument);
+        }
+    }
+
+    #[test]
+    fn dotted_query_has_an_independent_count_and_name_budget() {
+        #[derive(Debug, Deserialize)]
+        struct Root {
+            nested: Nested,
+        }
+        #[derive(Debug, Deserialize)]
+        struct Nested {
+            value: Vec<String>,
+        }
+
+        let accepted = vec![("nested.value", "7"); MAX_QUERY_PAIRS];
+        let decoded: Root = decode_request(&accepted, b"", RequestBodyKind::None).unwrap();
+        assert_eq!(decoded.nested.value.len(), MAX_QUERY_PAIRS);
+
+        let rejected = vec![("nested.value", "7"); MAX_QUERY_PAIRS + 1];
+        let error = decode_request::<Root>(&rejected, b"", RequestBodyKind::None).unwrap_err();
+        assert_eq!(error.code(), Code::InvalidArgument);
+        let names: Vec<String> = (0..=MAX_QUERY_PAIRS).map(|i| format!("nested.field{i}")).collect();
+        let distinct: Vec<_> = names.iter().map(|name| (name.as_str(), "7")).collect();
+        let error = decode_request::<Root>(&distinct, b"", RequestBodyKind::None).unwrap_err();
+        assert_eq!(error.code(), Code::InvalidArgument);
+        let pathological = format!("nested.{}", "a".repeat(MAX_QUERY_KEY_BYTES));
+        let error = decode_request::<Root>(&[(&pathological, "7")], b"", RequestBodyKind::None).unwrap_err();
+        assert_eq!(error.code(), Code::InvalidArgument);
     }
 
     #[test]

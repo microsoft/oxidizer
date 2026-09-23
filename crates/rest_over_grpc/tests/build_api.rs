@@ -6,10 +6,78 @@
 //! the smaller building blocks.
 
 #![cfg(all(feature = "build", not(miri)))] // filesystem I/O is unsupported under Miri.
+#![allow(
+    clippy::unwrap_used,
+    clippy::panic,
+    reason = "scratch-directory fixture assertions run only in tests"
+)]
+
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use http_path_template::{Grammar, PathTemplate};
-use rest_over_grpc::build::{Binding, Generator, HttpRule, ResponseBody, ServiceDefinition, generate_router};
+#[cfg(feature = "private-test-util")]
+use rest_over_grpc::build::generate_router;
+use rest_over_grpc::build::{Binding, Generator, HttpRule, ResponseBody, ServiceDefinition};
 use routerama::HttpMethod;
+
+static NEXT_DIR: AtomicUsize = AtomicUsize::new(0);
+
+struct ScratchDir(PathBuf);
+
+impl ScratchDir {
+    fn new(label: &str) -> Self {
+        let target = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target");
+        std::fs::create_dir_all(&target).unwrap();
+        loop {
+            let unique = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
+            let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+            let path = target.join(format!("rog_build_api_{label}_{}_{timestamp}_{unique}", std::process::id()));
+            match std::fs::create_dir(&path) {
+                Ok(()) => {
+                    assert!(std::fs::read_dir(&path).unwrap().next().is_none(), "new scratch directory is empty");
+                    return Self(path);
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => panic!("cannot create scratch directory: {error}"),
+            }
+        }
+    }
+}
+
+impl AsRef<Path> for ScratchDir {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl std::ops::Deref for ScratchDir {
+    type Target = PathBuf;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for ScratchDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+#[test]
+fn scratch_directories_are_fresh_and_cleaned_up() {
+    let old_path = {
+        let old = ScratchDir::new("owned");
+        std::fs::write(old.join("stale.rest.rs"), "stale").unwrap();
+        let fresh = ScratchDir::new("owned");
+        assert_ne!(old.0, fresh.0);
+        assert!(!fresh.join("stale.rest.rs").exists());
+        old.0.clone()
+    };
+    assert!(!old_path.exists());
+}
 
 fn rule(rpc: &str, method: HttpMethod, pattern: &str) -> HttpRule {
     HttpRule::new(
@@ -32,7 +100,7 @@ fn generator_renders_and_inspects_services() {
     let mut generator = Generator::new();
     generator.add(library).add_all([ServiceDefinition::new("Empty", None)]);
 
-    let (transcoder, generated) = generator.generate();
+    let (transcoder, generated) = generator.generate().unwrap();
     assert_eq!(generated.len(), 2);
     assert!(transcoder.to_string().contains("struct Transcoder"));
     let library = generated.iter().find(|g| g.trait_name() == "Library").expect("Library generated");
@@ -44,10 +112,8 @@ fn generator_renders_and_inspects_services() {
 
 #[test]
 fn generator_writes_one_file_per_module() {
-    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target")
-        .join(format!("rog_build_it_write_{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("scratch dir");
+    let dir = ScratchDir::new("write");
+    assert!(!dir.join("library.rest.rs").exists());
 
     let mut library = ServiceDefinition::new("Library", None);
     library.add_method(
@@ -64,10 +130,8 @@ fn generator_writes_one_file_per_module() {
 
 #[test]
 fn generator_concatenates_services_sharing_a_module() {
-    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target")
-        .join(format!("rog_build_it_shared_{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("scratch dir");
+    let dir = ScratchDir::new("shared");
+    assert!(!dir.join("catalog.rest.rs").exists());
 
     let mut books = ServiceDefinition::new("Books", None);
     books.set_module_name("catalog").add_method(
@@ -109,6 +173,7 @@ fn binding_exposes_method_and_template() {
     assert_eq!(binding.template().verb(), Some("archive"));
 }
 
+#[cfg(feature = "private-test-util")]
 #[test]
 fn generate_router_is_standalone_and_covers_additional_bindings() {
     let rule = rule("GetShelf", HttpMethod::GET, "/v1/shelves/{shelf}").add_binding(Binding::new(
@@ -131,19 +196,12 @@ mod descriptor {
     /// Compiles an inline proto (with the vendored `google.api` annotations) into
     /// an encoded `FileDescriptorSet`, mirroring what a `build.rs` produces.
     fn descriptor_set(source: &str) -> Vec<u8> {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let unique = NEXT.fetch_add(1, Ordering::Relaxed);
-
         let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let scratch = manifest
-            .join("target")
-            .join(format!("rog_build_it_desc_{}_{unique}", std::process::id()));
-        std::fs::create_dir_all(&scratch).expect("scratch dir");
+        let scratch = super::ScratchDir::new("descriptor");
         std::fs::write(scratch.join("api.proto"), source).expect("write proto");
 
         let annotations = manifest.join("tests").join("proto");
-        let mut compiler = protox::Compiler::new([scratch.as_path(), annotations.as_path()]).expect("compiler");
+        let mut compiler = protox::Compiler::new([scratch.0.as_path(), annotations.as_path()]).expect("compiler");
         compiler.include_imports(true);
         compiler.open_file("api.proto").expect("proto compiles");
         compiler.encode_file_descriptor_set()
@@ -176,10 +234,8 @@ mod descriptor {
     #[test]
     fn compile_fds_writes_generated_code() {
         let descriptor = descriptor_set(PROTO);
-        let out = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("target")
-            .join(format!("rog_build_it_out_{}", std::process::id()));
-        std::fs::create_dir_all(&out).expect("out dir");
+        let out = super::ScratchDir::new("compile_fds");
+        assert!(!out.join("api.rest.rs").exists());
 
         compile_fds(&descriptor, &out).expect("compiles and writes");
         let written = std::fs::read_to_string(out.join("api.rest.rs")).expect("output file exists");
@@ -189,7 +245,9 @@ mod descriptor {
     #[test]
     fn compile_fds_reports_a_write_error() {
         let descriptor = descriptor_set(PROTO);
-        let bad = std::path::PathBuf::from("/rest_over_grpc_codegen_nonexistent_dir/nested");
+        let dir = super::ScratchDir::new("write_error");
+        let bad = dir.join("missing").join("nested");
+        assert!(!bad.exists());
         let error = compile_fds(&descriptor, &bad).expect_err("write fails");
         assert!(error.to_string().contains("failed to write"));
         assert!(std::error::Error::source(&error).is_some());
@@ -201,10 +259,8 @@ mod descriptor {
         use rest_over_grpc::build::OpenApiInfo;
 
         let descriptor = descriptor_set(PROTO);
-        let out = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("target")
-            .join(format!("rog_build_it_openapi_named_{}", std::process::id()));
-        std::fs::create_dir_all(&out).expect("out dir");
+        let out = super::ScratchDir::new("openapi_named");
+        assert!(!out.join("api.openapi.json").exists());
 
         Generator::builder()
             .emit_tonic_bridge(false)
@@ -235,10 +291,8 @@ mod descriptor {
             }
         "#;
         let descriptor = descriptor_set(NO_PACKAGE);
-        let out = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("target")
-            .join(format!("rog_build_it_openapi_default_{}", std::process::id()));
-        std::fs::create_dir_all(&out).expect("out dir");
+        let out = super::ScratchDir::new("openapi_default");
+        assert!(!out.join("s.openapi.json").exists());
 
         Generator::builder()
             .emit_tonic_bridge(false)
@@ -265,10 +319,8 @@ mod descriptor {
             service B { rpc GetB(R) returns (R) { option (google.api.http) = { get: "/v1/b/{id}" }; } }
         "#;
         let descriptor = descriptor_set(TWO_SERVICES);
-        let out = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("target")
-            .join(format!("rog_build_it_openapi_merge_{}", std::process::id()));
-        std::fs::create_dir_all(&out).expect("out dir");
+        let out = super::ScratchDir::new("openapi_merge");
+        assert!(!out.join("shared.openapi.json").exists());
 
         Generator::builder()
             .emit_tonic_bridge(false)
@@ -285,6 +337,65 @@ mod descriptor {
 
     #[cfg(feature = "build-openapi")]
     #[test]
+    fn write_merges_different_verbs_on_one_openapi_path_and_rejects_duplicate_verb() {
+        use rest_over_grpc::build::OpenApiInfo;
+
+        const TWO_SERVICES: &str = r#"
+            syntax = "proto3";
+            package shared;
+            import "google/api/annotations.proto";
+            message R { string id = 1; }
+            service A { rpc Get(R) returns (R) { option (google.api.http) = { get: "/v1/items/{id}" }; } }
+            service B { rpc Delete(R) returns (R) { option (google.api.http) = { delete: "/v1/items/{id}" }; } }
+            service C { rpc OtherGet(R) returns (R) { option (google.api.http) = { get: "/v1/items/{id}" }; } }
+        "#;
+        let descriptor = descriptor_set(TWO_SERVICES);
+        let services = ServiceDefinition::from_fds(&descriptor, &DescriptorOptions::new()).unwrap();
+        let out = super::ScratchDir::new("openapi_verbs");
+        assert!(!out.join("shared.openapi.json").exists());
+        let mut generator = Generator::builder()
+            .emit_tonic_bridge(false)
+            .emit_openapi_spec(Some(OpenApiInfo::new("Shared", "v1")))
+            .build();
+        generator.add_all(services[..2].to_vec());
+        generator.write(&out).unwrap();
+        let spec: serde_json::Value = serde_json::from_slice(&std::fs::read(out.join("shared.openapi.json")).unwrap()).unwrap();
+        assert_eq!(spec["paths"]["/v1/items/{id}"]["get"]["operationId"], "Get");
+        assert_eq!(spec["paths"]["/v1/items/{id}"]["delete"]["operationId"], "Delete");
+        generator.add(services[2].clone());
+        let error = generator.write(&out).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(error.to_string().contains("get /v1/items/{id}"));
+    }
+
+    #[cfg(feature = "build-openapi")]
+    #[test]
+    fn generate_reports_conflicting_operations_in_one_service() {
+        use rest_over_grpc::build::OpenApiInfo;
+
+        let descriptor = descriptor_set(
+            r#"
+            syntax = "proto3";
+            package conflicts;
+            import "google/api/annotations.proto";
+            message R { string id = 1; }
+            service S {
+                rpc First(R) returns (R) { option (google.api.http) = { get: "/v1/items/{id}" }; }
+                rpc Second(R) returns (R) { option (google.api.http) = { get: "/v1/items/{id}" }; }
+            }
+            "#,
+        );
+        let mut generator = Generator::builder()
+            .emit_openapi_spec(Some(OpenApiInfo::new("Conflicts", "v1")))
+            .build();
+        generator.add_all(ServiceDefinition::from_fds(descriptor, &DescriptorOptions::new()).unwrap());
+        let error = generator.generate().err().unwrap();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(error.to_string().contains("get /v1/items/{id}"));
+    }
+
+    #[cfg(feature = "build-openapi")]
+    #[test]
     fn generate_exposes_the_openapi_spec_per_service() {
         use rest_over_grpc::build::{HttpRule, OpenApiInfo};
         use routerama::HttpMethod;
@@ -295,7 +406,7 @@ mod descriptor {
             .emit_openapi_spec(Some(OpenApiInfo::new("Things API", "v1")))
             .build();
         with_spec.add_all(ServiceDefinition::from_fds(&descriptor, &DescriptorOptions::new().package(".api")).expect("decode"));
-        let generated = with_spec.generate().1;
+        let generated = with_spec.generate().unwrap().1;
         let spec = generated[0]
             .openapi_spec()
             .expect("descriptor-decoded service carries an OpenAPI spec");
@@ -305,7 +416,7 @@ mod descriptor {
 
         let mut no_spec = Generator::new();
         no_spec.add_all(ServiceDefinition::from_fds(&descriptor, &DescriptorOptions::new().package(".api")).expect("decode"));
-        assert!(no_spec.generate().1[0].openapi_spec().is_none());
+        assert!(no_spec.generate().unwrap().1[0].openapi_spec().is_none());
 
         let mut manual = Generator::builder()
             .emit_openapi_spec(Some(OpenApiInfo::new("Manual", "v1")))
@@ -322,6 +433,6 @@ mod descriptor {
             None,
         );
         manual.add(service);
-        assert!(manual.generate().1[0].openapi_spec().is_none());
+        assert!(manual.generate().unwrap().1[0].openapi_spec().is_none());
     }
 }

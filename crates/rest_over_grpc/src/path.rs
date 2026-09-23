@@ -10,6 +10,15 @@
 use core::ops::Index;
 use core::slice::{self, SliceIndex};
 
+use crate::transcode::TranscodeError;
+
+/// Maximum number of query pairs accepted by the generated request path.
+pub(crate) const MAX_QUERY_PAIRS: usize = 128;
+/// Maximum aggregate raw query-name bytes accepted by the generated request path.
+pub(crate) const MAX_QUERY_KEY_BYTES: usize = 4096;
+/// Maximum raw query length, including empty separators and value bytes.
+pub(crate) const MAX_QUERY_BYTES: usize = 16 * 1024;
+
 /// Splits a request path-and-query string into the path and the raw query
 /// string (the part after the first `?`), if any.
 ///
@@ -52,6 +61,36 @@ pub struct QueryPairs<'a> {
 }
 
 impl<'a> QueryPairs<'a> {
+    /// Parses a raw query with the request overlay's fixed work budget.
+    ///
+    /// Unlike [`parse_query`], rejects excess pairs or aggregate key bytes
+    /// incrementally, before collecting the remainder of a large query.
+    /// The raw query is limited to 16 KiB as well, so even empty separators
+    /// and long values cannot bypass the work budget.
+    ///
+    /// # Errors
+    ///
+    /// Returns an invalid-argument transcoding error when the query exceeds
+    /// 128 pairs, 4096 aggregate raw name bytes, or 16 KiB in total.
+    pub fn parse_limited(query: &'a str) -> Result<Self, TranscodeError> {
+        if query.len() > MAX_QUERY_BYTES {
+            return Err(TranscodeError::structure("query exceeds the request query size limit"));
+        }
+        let mut pairs = Self::default();
+        let mut key_bytes = 0usize;
+        for pair in query.split('&').filter(|pair| !pair.is_empty()) {
+            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+            key_bytes = key_bytes.saturating_add(key.len());
+            if pairs.len() == MAX_QUERY_PAIRS || key_bytes > MAX_QUERY_KEY_BYTES {
+                return Err(TranscodeError::structure(
+                    "query exceeds the parameter count or field-name size limit",
+                ));
+            }
+            pairs.pairs.push((key, value));
+        }
+        Ok(pairs)
+    }
+
     /// Returns the parsed pairs as a slice.
     #[must_use]
     pub fn as_slice(&self) -> &[(&'a str, &'a str)] {
@@ -168,6 +207,32 @@ mod tests {
         assert_eq!(parse_query("a=1&b=2&flag").as_slice(), [("a", "1"), ("b", "2"), ("flag", "")]);
         assert!(parse_query("").is_empty());
         assert!(!parse_query("a=1").is_empty());
+    }
+
+    #[test]
+    fn limited_parser_rejects_oversize_input_before_collecting_it() {
+        let at_limit = "a=1&".repeat(MAX_QUERY_PAIRS);
+        assert_eq!(QueryPairs::parse_limited(&at_limit).unwrap().len(), MAX_QUERY_PAIRS);
+        let over_limit = format!("{at_limit}a=1");
+        assert_eq!(
+            QueryPairs::parse_limited(&over_limit).unwrap_err().code(),
+            crate::handling::Code::InvalidArgument
+        );
+        let name = "x".repeat(MAX_QUERY_KEY_BYTES);
+        assert_eq!(QueryPairs::parse_limited(&name).unwrap().len(), 1);
+        assert_eq!(
+            QueryPairs::parse_limited(&format!("{name}x")).unwrap_err().code(),
+            crate::handling::Code::InvalidArgument
+        );
+        assert_eq!(
+            QueryPairs::parse_limited(&"&".repeat(MAX_QUERY_BYTES + 1)).unwrap_err().code(),
+            crate::handling::Code::InvalidArgument
+        );
+        let exact_raw_limit = format!("a={}", "x".repeat(MAX_QUERY_BYTES - 2));
+        assert_eq!(
+            QueryPairs::parse_limited(&exact_raw_limit).unwrap()[0],
+            ("a", &exact_raw_limit[2..])
+        );
     }
 
     #[test]

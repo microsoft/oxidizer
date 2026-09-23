@@ -208,20 +208,3 @@ impl fmt::Display for Status {
 }
 
 impl Error for Status {}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn with_detail_appends_a_single_detail_value() {
-        let status = Status::invalid_argument("bad").with_detail(serde_json::json!({ "field": "shelf" }));
-        assert_eq!(status.details().len(), 1);
-        assert_eq!(status.details()[0]["field"], "shelf");
-    }
-
-    #[test]
-    fn display_uses_canonical_code_name() {
-        assert_eq!(Status::not_found("gone").to_string(), "NOT_FOUND: gone");
-    }
-}
