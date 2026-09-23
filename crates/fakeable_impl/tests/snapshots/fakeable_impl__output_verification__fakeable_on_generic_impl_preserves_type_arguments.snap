@@ -9,20 +9,6 @@ where
     pub fn new(value: T) -> Self {
         Self { value }
     }
-    #[test]
-    fn fakeable_on_bounded_generic_struct_preserves_generic_forms() {
-        let input = quote! {
-            struct MyService < T : Clone > where T : Send, { value : T, }
-        };
-        let result = fakeable_impl::fakeable_impl(
-            quote! {
-                fake_impl = FakeMyService < T >
-            },
-            input,
-        );
-        let result_file = syn::parse_file(&result.to_string()).unwrap();
-        assert_snapshot!(prettyplease::unparse(& result_file));
-    }
     pub fn value(&self) -> &T {
         &self.value
     }
@@ -36,7 +22,7 @@ where
     pub fn new(value: T) -> Self {
         Self {
             inner: __fakeable__MyService::Enum::Real(
-                __fakeable__MyService::MyService::new(value),
+                <__fakeable__MyService::MyService<T>>::new(value),
             ),
         }
     }

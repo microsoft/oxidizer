@@ -25,7 +25,7 @@ impl MyService {
     pub fn new(value: String) -> Self {
         Self {
             inner: __fakeable__MyService::Enum::Real(
-                __fakeable__MyService::MyService::new(value),
+                <__fakeable__MyService::MyService>::new(value),
             ),
         }
     }

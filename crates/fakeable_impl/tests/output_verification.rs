@@ -374,25 +374,6 @@ fn fakeable_on_generic_impl_preserves_type_arguments() {
                 Self { value }
             }
 
-            #[test]
-            fn fakeable_on_bounded_generic_struct_preserves_generic_forms() {
-                let input = quote! {
-                    struct MyService<T: Clone>
-                    where
-                        T: Send,
-                    {
-                        value: T,
-                    }
-                };
-
-                let result = fakeable_impl::fakeable_impl(
-                    quote! { fake_impl = FakeMyService<T> },
-                    input,
-                );
-                let result_file = syn::parse_file(&result.to_string()).unwrap();
-                assert_snapshot!(prettyplease::unparse(&result_file));
-            }
-
             pub fn value(&self) -> &T {
                 &self.value
             }
@@ -400,6 +381,22 @@ fn fakeable_on_generic_impl_preserves_type_arguments() {
     };
 
     let result = fakeable_impl::fakeable_impl(quote! {}, input);
+    let result_file = syn::parse_file(&result.to_string()).unwrap();
+    assert_snapshot!(prettyplease::unparse(&result_file));
+}
+
+#[test]
+fn fakeable_on_bounded_generic_struct_preserves_generic_forms() {
+    let input = quote! {
+        struct MyService<T: Clone>
+        where
+            T: Send,
+        {
+            value: T,
+        }
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! { fake_impl = FakeMyService<T> }, input);
     let result_file = syn::parse_file(&result.to_string()).unwrap();
     assert_snapshot!(prettyplease::unparse(&result_file));
 }
@@ -567,6 +564,39 @@ fn fakeable_rejects_self_parameter() {
 }
 
 #[test]
+fn fakeable_rejects_self_in_method_generic_bounds() {
+    let input = quote! {
+        impl MyService {
+            pub fn consume<T: Marker<Self>>(&self, value: T) {
+                let _ = value;
+            }
+        }
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! {}, input).to_string();
+
+    assert!(result.contains("Self in method generic bounds or where predicates is not supported"));
+}
+
+#[test]
+fn fakeable_rejects_self_in_method_where_predicate() {
+    let input = quote! {
+        impl MyService {
+            pub fn consume<T>(&self, value: T)
+            where
+                T: Marker<Self>,
+            {
+                let _ = value;
+            }
+        }
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! {}, input).to_string();
+
+    assert!(result.contains("Self in method generic bounds or where predicates is not supported"));
+}
+
+#[test]
 fn fakeable_rejects_nested_self_return() {
     let input = quote! {
         impl MyService {
@@ -589,10 +619,50 @@ fn fakeable_on_cfg_impl_gates_generated_mockall_module() {
             pub fn value(&self) -> i32 {
                 42
             }
+
         }
     };
 
     let result = fakeable_impl::fakeable_impl(quote! { generate_mockall_fake = true }, input);
+    let result_file = syn::parse_file(&result.to_string()).unwrap();
+    assert_snapshot!(prettyplease::unparse(&result_file));
+}
+
+#[test]
+fn fakeable_mockall_rejects_higher_ranked_nested_elision() {
+    let input = quote! {
+        impl MyService {
+            pub fn call(&self, callback: for<'mock> fn(Option<&str>)) {
+                callback(None);
+            }
+        }
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! { generate_mockall_fake = true }, input).to_string();
+
+    assert!(result.contains("higher-ranked lifetime binders"));
+}
+
+#[test]
+fn fakeable_on_generic_trait_impl_preserves_hidden_type_arguments() {
+    let input = quote! {
+        impl<T> Service for MyService<T>
+        where
+            T: Clone,
+        {
+            fn value(&self) -> i32 {
+                42
+            }
+
+            fn duplicate(&self) -> Self {
+                Self {
+                    value: self.value.clone(),
+                }
+            }
+        }
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! {}, input);
     let result_file = syn::parse_file(&result.to_string()).unwrap();
     assert_snapshot!(prettyplease::unparse(&result_file));
 }

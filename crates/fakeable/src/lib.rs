@@ -187,8 +187,9 @@ use proc_macro::TokenStream;
 /// - `mut self`, `Self` parameters, and nested `Self` return types such as `Option<Self>` are
 ///   rejected because they cannot be translated across the wrapper boundary.
 /// - Typed receivers such as `self: Box<Self>` are rejected; use `self`, `&self`, or `&mut self`.
-/// - Direct `#[cfg(...)]` attributes are supported on structs. A `cfg_attr` that conditionally
-///   applies `cfg` is rejected because it cannot safely gate every generated item.
+/// - Direct `#[cfg(...)]` attributes are supported on structs and impl blocks. A `cfg_attr` that
+///   conditionally applies `cfg` is rejected because it cannot safely gate every generated item.
+/// - Mockall generation rejects nested elided references beneath higher-ranked lifetime binders.
 /// - Struct derives are copied to the wrapper and internal enum. The fake type must satisfy their
 ///   bounds (for example, `Clone`), and derives that depend on struct shape or an enum default
 ///   variant may be unsuitable.

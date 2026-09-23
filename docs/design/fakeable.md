@@ -48,8 +48,9 @@ Unsafe impl blocks are rejected because the macro cannot prove the unsafe
 trait's invariant for an arbitrary fake representation.
 
 Direct `#[cfg(...)]` attributes on a struct gate the helper module, wrapper, and
-fake constructor implementation together. A `cfg_attr` that conditionally
-applies `cfg` is rejected because propagating it selectively could leave
+fake constructor implementation together. Direct cfg attributes on impl blocks
+also gate generated Mockall output. A `cfg_attr` that conditionally applies
+`cfg` is rejected on either item because propagating it selectively could leave
 generated items referring to a disabled type.
 
 Derive attributes are copied to the wrapper and internal enum. This requires
@@ -81,7 +82,8 @@ rejected because the generated Mockall type cannot preserve their generic
 parameters and bounds. Trait impl blocks are rejected because their inherited
 method visibility would otherwise produce an incomplete mock API. Async methods
 are represented as methods returning `Future` so tests can provide asynchronous
-expectations.
+expectations. Signatures with nested elided references beneath higher-ranked
+lifetime binders are rejected rather than rewritten across the binder boundary.
 
 Mockall remains optional because manually implemented fakes are the primary
 mechanism and should not add a production dependency. The integration must be

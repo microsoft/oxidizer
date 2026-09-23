@@ -13,7 +13,7 @@ impl MyService {
     pub async fn new(value: String) -> Self {
         Self {
             inner: __fakeable__MyService::Enum::Real(
-                __fakeable__MyService::MyService::new(value).await,
+                <__fakeable__MyService::MyService>::new(value).await,
             ),
         }
     }
