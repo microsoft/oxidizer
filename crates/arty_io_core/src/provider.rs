@@ -3,7 +3,7 @@
 
 use thread_aware_core::ThreadAware;
 
-use crate::{Driver, DriverContext, IoContext};
+use crate::{Driver, DriverOptions, IoContext};
 
 /// Creates and connects one driver type's per-worker instances.
 ///
@@ -21,7 +21,7 @@ pub trait DriverProvider: Clone + ThreadAware + Sized + 'static {
     ///
     /// This method runs on the thread that will own the returned driver. It must return promptly
     /// and must not wait for async workers to make progress. Consuming the relocated provider clone
-    /// makes the one-creation-per-worker lifecycle explicit. The context exposes drivers registered
+    /// makes the one-creation-per-worker lifecycle explicit. The options expose drivers registered
     /// earlier on the same thread; inspect those handles during this call and clone any independently
     /// owned state the new driver needs to retain.
     ///
@@ -30,5 +30,5 @@ pub trait DriverProvider: Clone + ThreadAware + Sized + 'static {
     /// Panics when this worker's driver instance cannot be initialized. Driver registration is
     /// runtime-fundamental: after one worker fails to initialize, the runtime cannot continue in a
     /// coherent partially registered state.
-    fn create(self, context: DriverContext<'_>) -> Self::Driver;
+    fn create(self, options: DriverOptions<'_>) -> Self::Driver;
 }

@@ -5,14 +5,14 @@ use std::fmt;
 
 /// Runtime facilities supplied when an I/O provider is created.
 ///
-/// This context is empty in the current contract. Its private representation allows future
+/// These options are empty in the current contract. Their private representation allows future
 /// versions to add optional runtime facilities without changing [`IoContext::provider`][crate::IoContext::provider].
-pub struct ProviderContext {
+pub struct ProviderOptions {
     _private: (),
 }
 
-impl ProviderContext {
-    /// Creates a provider context.
+impl ProviderOptions {
+    /// Creates provider options.
     ///
     /// This constructor is intended for runtime implementations and provider tests.
     #[must_use]
@@ -21,14 +21,14 @@ impl ProviderContext {
     }
 }
 
-impl Default for ProviderContext {
+impl Default for ProviderOptions {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl fmt::Debug for ProviderContext {
+impl fmt::Debug for ProviderOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ProviderContext").finish_non_exhaustive()
+        f.debug_struct("ProviderOptions").finish_non_exhaustive()
     }
 }

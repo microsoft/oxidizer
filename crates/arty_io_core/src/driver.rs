@@ -21,7 +21,7 @@ use crate::{DriverHandle, IoContext, ShutdownError};
 ///
 /// # Driver state
 ///
-/// State reached by contexts, interruptors, background threads, or operating-system callbacks is
+/// State reached by contexts, wakers, background threads, or operating-system callbacks is
 /// shared independently of the driver and uses appropriate reference counting and synchronization.
 /// Each in-flight operation owns every resource it uses through a reference count, pool lease, or
 /// equivalent handle.
@@ -55,12 +55,12 @@ pub trait Driver: 'static {
     #[must_use]
     fn handle(&self) -> DriverHandle<'_>;
 
-    /// Notifies this driver that another driver was registered on the same thread.
+    /// Notifies this driver that a peer driver was registered on the same thread.
     ///
     /// The runtime calls this after storing the new driver and before acknowledging its
     /// registration. Earlier drivers are notified in registration order; the new driver is not
     /// notified about itself because it already received the earlier drivers through
-    /// [`DriverContext::drivers`](crate::DriverContext::drivers).
+    /// [`DriverOptions::drivers`](crate::DriverOptions::drivers).
     ///
     /// This callback runs inline on the owning thread. It must return promptly and cannot retain
     /// the borrowed handle, but it can downcast the handle and clone independently owned shared
@@ -68,10 +68,12 @@ pub trait Driver: 'static {
     ///
     /// # Panics
     ///
-    /// Panics when this driver cannot integrate the newly registered driver. As with a panic from
+    /// Panics when this driver cannot integrate the newly registered peer. As with a panic from
     /// [`DriverProvider::create`](crate::DriverProvider::create), the runtime cannot continue with
     /// a partially connected registration.
-    fn on_driver_registered(&mut self, _driver: DriverHandle<'_>) {}
+    fn on_peer_registered(&mut self, peer: DriverHandle<'_>) {
+        let _ = peer;
+    }
 
     /// Returns a context bound to this driver instance.
     ///
@@ -99,10 +101,10 @@ pub trait Driver: 'static {
     /// Interrupts are latched: an interrupt raised before a blocking wait makes the next blocking
     /// wait behave like a non-blocking poll. An interrupt only ends the wait; pending completions
     /// are still processed. Same-thread interrupts are honored. Redundant interrupts may be
-    /// coalesced, but an interrupt is never dropped. The returned interruptor remains safe to
+    /// coalesced, but an interrupt is never dropped. The returned waker remains safe to
     /// invoke after the driver is dropped.
     #[must_use]
-    fn interruptor(&self) -> Waker;
+    fn waker(&self) -> Waker;
 
     /// Shuts down the driver.
     ///

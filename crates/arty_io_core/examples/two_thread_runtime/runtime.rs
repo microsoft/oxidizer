@@ -2,32 +2,52 @@
 // Licensed under the MIT License.
 
 use std::any::{Any, TypeId};
-use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
-use std::sync::{Mutex, PoisonError, mpsc};
+use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 
-use arty_io_core::{Driver, DriverContext, DriverHandle, DriverProvider, IoContext, ProviderContext, ShutdownError, SystemTasks};
+use arty_io_core::{Driver, DriverHandle, DriverOptions, DriverProvider, IoContext, ProviderOptions, ShutdownError, SystemTaskSpawner};
 use thread_aware_core::{Thread, ThreadAware};
 
-use super::system_tasks::runtime_system_tasks;
+use super::spawner::runtime_spawner;
 
 type ContextBox = Box<dyn Any + Send>;
-type ContextCache = HashMap<TypeId, ContextBox>;
 type DriverStore = Vec<Box<dyn ErasedDriver>>;
-type InstalledDriver = (ContextBox, Box<dyn ErasedDriver>);
-type Install = Box<dyn for<'a> FnOnce(DriverContext<'a>) -> InstalledDriver + Send>;
+type Install = Box<dyn for<'a> FnOnce(DriverOptions<'a>) -> Box<dyn ErasedDriver> + Send>;
+type Initialize = Box<dyn for<'a> FnOnce(DriverOptions<'a>) -> Initialization + Send>;
 type ShutdownResult = Result<(), ShutdownError>;
 
+struct Initialization {
+    context: ContextBox,
+    driver: Box<dyn ErasedDriver>,
+    peer_installs: Vec<(mpsc::Sender<Command>, Install)>,
+}
+
 enum Command {
-    Install { install: Install, reply: mpsc::Sender<ContextBox> },
-    Stop { reply: mpsc::Sender<ShutdownResult> },
+    Context {
+        context_type: TypeId,
+        reply: mpsc::Sender<Option<ContextBox>>,
+    },
+    Initialize {
+        context_type: TypeId,
+        initialize: Initialize,
+        reply: mpsc::Sender<ContextBox>,
+    },
+    Install {
+        install: Install,
+        reply: mpsc::Sender<()>,
+    },
+    Stop {
+        reply: mpsc::Sender<ShutdownResult>,
+    },
 }
 
 impl fmt::Debug for Command {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Context { .. } => f.write_str("Context"),
+            Self::Initialize { .. } => f.write_str("Initialize"),
             Self::Install { .. } => f.write_str("Install"),
             Self::Stop { .. } => f.write_str("Stop"),
         }
@@ -36,7 +56,9 @@ impl fmt::Debug for Command {
 
 trait ErasedDriver {
     fn handle(&self) -> DriverHandle<'_>;
-    fn on_driver_registered(&mut self, driver: DriverHandle<'_>);
+    fn on_peer_registered(&mut self, peer: DriverHandle<'_>);
+    fn context_type(&self) -> TypeId;
+    fn context(&self) -> ContextBox;
     fn shutdown(self: Box<Self>) -> Result<(), ShutdownError>;
 }
 
@@ -45,8 +67,16 @@ impl<D: Driver> ErasedDriver for D {
         Driver::handle(self)
     }
 
-    fn on_driver_registered(&mut self, driver: DriverHandle<'_>) {
-        Driver::on_driver_registered(self, driver);
+    fn on_peer_registered(&mut self, peer: DriverHandle<'_>) {
+        Driver::on_peer_registered(self, peer);
+    }
+
+    fn context_type(&self) -> TypeId {
+        TypeId::of::<D::Context>()
+    }
+
+    fn context(&self) -> ContextBox {
+        Box::new(Driver::context(self))
     }
 
     fn shutdown(self: Box<Self>) -> Result<(), ShutdownError> {
@@ -61,7 +91,6 @@ struct Worker {
 
 pub(super) struct Runtime {
     workers: Vec<Worker>,
-    contexts: Mutex<ContextCache>,
     stopped: bool,
 }
 
@@ -71,14 +100,14 @@ impl Runtime {
 
     pub(super) fn start() -> Result<Self, RuntimeError> {
         let owner = thread_aware_core::__private::v1::new_owner();
-        let system_tasks = runtime_system_tasks();
+        let spawner = runtime_spawner();
         let mut workers = Vec::with_capacity(Self::WORKER_COUNT);
 
         for numa_node_id in Self::NUMA_NODES {
             let (commands_tx, commands_rx) = mpsc::channel();
             let (ready_tx, ready_rx) = mpsc::channel();
             let worker_owner = owner.clone();
-            let worker_system_tasks = system_tasks.clone();
+            let worker_spawner = spawner.clone();
 
             let thread = thread::spawn(move || {
                 let numa_node = thread_aware_core::__private::v1::new_numa_node(numa_node_id);
@@ -88,7 +117,7 @@ impl Runtime {
                     return;
                 }
 
-                run_worker(&worker, &worker_system_tasks, &commands_rx);
+                run_worker(&worker, &worker_spawner, &commands_rx);
             });
 
             ready_rx
@@ -100,61 +129,100 @@ impl Runtime {
             });
         }
 
-        Ok(Self {
-            workers,
-            contexts: Mutex::default(),
-            stopped: false,
-        })
+        Ok(Self { workers, stopped: false })
     }
 
     pub(super) fn get_context<C>(&self) -> C
     where
         C: IoContext,
     {
-        // Keep the guard for the entire registration. If any worker fails to initialize, the
-        // resulting panic poisons this mutex and permanently prevents another registration attempt.
-        let mut cache = self
-            .contexts
-            .lock()
-            .expect("a failed driver registration makes the runtime unusable");
-
-        if let Some(context) = cache.get(&TypeId::of::<C>()).and_then(|context| context.downcast_ref::<C>()) {
-            return context.clone();
+        if let Some(context) = self.try_get_context::<C>() {
+            return context;
         }
 
-        let provider = C::provider(ProviderContext::new());
-        let mut caller_context = None;
+        self.initialize_context::<C>()
+    }
 
-        for worker in &self.workers {
-            let mut worker_provider = provider.clone();
-            let (reply_tx, reply_rx) = mpsc::channel();
-            let install: Install = Box::new(move |context: DriverContext<'_>| {
-                worker_provider.relocate(None, context.thread());
-                let driver = worker_provider.create(context);
-                let context = driver.context();
-                let driver: Box<dyn ErasedDriver> = Box::new(driver);
-                (Box::new(context) as ContextBox, driver)
-            });
+    /// Asks a worker for a context created by the driver it already owns.
+    ///
+    /// This small control-thread example represents calls as belonging to worker 0. A real
+    /// runtime uses the driver of the worker on which `get_context` is called.
+    fn try_get_context<C>(&self) -> Option<C>
+    where
+        C: IoContext,
+    {
+        let worker = self.workers.first().expect("the fixed runtime always has at least one worker");
+        let (reply_tx, reply_rx) = mpsc::channel();
 
-            worker
-                .commands
-                .send(Command::Install { install, reply: reply_tx })
-                .expect("a Runtime-owned worker must remain alive during context registration");
+        worker
+            .commands
+            .send(Command::Context {
+                context_type: TypeId::of::<C>(),
+                reply: reply_tx,
+            })
+            .expect("a Runtime-owned worker must remain alive during context retrieval");
 
-            let context = reply_rx
-                .recv()
-                .expect("driver initialization failure must terminate context registration");
-            let context = *context
-                .downcast::<C>()
-                .expect("the install closure always boxes the requested context type");
-            caller_context.get_or_insert(context);
-        }
+        let context = reply_rx.recv().expect("a worker replies before it stops serving commands")?;
 
-        // This small control-thread example represents calls as belonging to worker 0. A real
-        // runtime selects the context of the worker on which get_context is called.
-        let context = caller_context.expect("the fixed runtime always has at least one worker");
-        cache.insert(TypeId::of::<C>(), Box::new(context.clone()));
-        context
+        Some(downcast_context(context))
+    }
+
+    fn initialize_context<C>(&self) -> C
+    where
+        C: IoContext,
+    {
+        let worker = self.workers.first().expect("the fixed runtime always has at least one worker");
+        let initialize = self.context_initializer::<C>();
+        let (reply_tx, reply_rx) = mpsc::channel();
+
+        worker
+            .commands
+            .send(Command::Initialize {
+                context_type: TypeId::of::<C>(),
+                initialize,
+                reply: reply_tx,
+            })
+            .expect("a Runtime-owned worker must remain alive during context registration");
+
+        let context = reply_rx
+            .recv()
+            .expect("driver initialization failure must terminate context registration");
+        downcast_context(context)
+    }
+
+    fn context_initializer<C>(&self) -> Initialize
+    where
+        C: IoContext,
+    {
+        let peer_commands = self
+            .workers
+            .iter()
+            .skip(1)
+            .map(|worker| worker.commands.clone())
+            .collect::<Vec<_>>();
+        Box::new(move |options: DriverOptions<'_>| {
+            let mut provider = C::provider(ProviderOptions::new());
+            let peer_installs = peer_commands
+                .into_iter()
+                .map(|commands| {
+                    let mut peer_provider = provider.clone();
+                    let install: Install = Box::new(move |options: DriverOptions<'_>| {
+                        peer_provider.relocate(None, options.thread());
+                        Box::new(peer_provider.create(options)) as Box<dyn ErasedDriver>
+                    });
+                    (commands, install)
+                })
+                .collect();
+
+            provider.relocate(None, options.thread());
+            let driver = provider.create(options);
+            let context = Box::new(Driver::context(&driver)) as ContextBox;
+            Initialization {
+                context,
+                driver: Box::new(driver),
+                peer_installs,
+            }
+        })
     }
 
     pub(super) fn shutdown(mut self) -> Result<(), RuntimeError> {
@@ -166,8 +234,6 @@ impl Runtime {
             return Ok(());
         }
         self.stopped = true;
-
-        self.contexts.get_mut().unwrap_or_else(PoisonError::into_inner).clear();
 
         let mut failure = None;
         let mut shutdowns = Vec::with_capacity(self.workers.len());
@@ -219,24 +285,55 @@ impl Drop for Runtime {
     }
 }
 
-fn run_worker(worker: &Thread, system_tasks: &SystemTasks, commands: &mpsc::Receiver<Command>) {
+fn run_worker(worker: &Thread, spawner: &SystemTaskSpawner, commands: &mpsc::Receiver<Command>) {
     let mut drivers = DriverStore::new();
 
     while let Ok(command) = commands.recv() {
         match command {
-            Command::Install { install, reply } => {
-                let (context, driver) = {
-                    let driver_handles = drivers.iter().map(|driver| driver.handle()).collect();
-                    let context = DriverContext::new(worker.clone(), system_tasks.clone(), driver_handles);
-                    install(context)
-                };
-                drivers.push(driver);
-                let (driver, existing_drivers) = drivers.split_last_mut().expect("the new driver was pushed immediately above");
-                let driver = driver.handle();
-                for existing_driver in existing_drivers {
-                    existing_driver.on_driver_registered(driver);
+            Command::Context { context_type, reply } => {
+                let _ = reply.send(find_context(&drivers, context_type));
+            }
+            Command::Initialize {
+                context_type,
+                initialize,
+                reply,
+            } => {
+                // Context lookup and initialization share this queue, so this second check
+                // serializes concurrent misses without a mutex.
+                if let Some(context) = find_context(&drivers, context_type) {
+                    let _ = reply.send(context);
+                    continue;
                 }
+
+                let Initialization {
+                    context,
+                    driver,
+                    peer_installs,
+                } = {
+                    let options = driver_options(worker, spawner, &drivers);
+                    initialize(options)
+                };
+                register_driver(&mut drivers, driver);
+
+                for (commands, install) in peer_installs {
+                    let (reply_tx, reply_rx) = mpsc::channel();
+                    commands
+                        .send(Command::Install { install, reply: reply_tx })
+                        .expect("a Runtime-owned worker must remain alive during context registration");
+                    reply_rx
+                        .recv()
+                        .expect("driver initialization failure must terminate context registration");
+                }
+
                 let _ = reply.send(context);
+            }
+            Command::Install { install, reply } => {
+                let driver = {
+                    let options = driver_options(worker, spawner, &drivers);
+                    install(options)
+                };
+                register_driver(&mut drivers, driver);
+                let _ = reply.send(());
             }
             Command::Stop { reply } => {
                 let result = shutdown_drivers(drivers);
@@ -245,6 +342,31 @@ fn run_worker(worker: &Thread, system_tasks: &SystemTasks, commands: &mpsc::Rece
             }
         }
     }
+}
+
+fn find_context(drivers: &DriverStore, context_type: TypeId) -> Option<ContextBox> {
+    drivers
+        .iter()
+        .find(|driver| driver.context_type() == context_type)
+        .map(|driver| driver.context())
+}
+
+fn driver_options<'a>(worker: &Thread, spawner: &SystemTaskSpawner, drivers: &'a DriverStore) -> DriverOptions<'a> {
+    let driver_handles = drivers.iter().map(|driver| driver.handle()).collect();
+    DriverOptions::new(worker.clone(), spawner.clone(), driver_handles)
+}
+
+fn register_driver(drivers: &mut DriverStore, driver: Box<dyn ErasedDriver>) {
+    drivers.push(driver);
+    let (driver, existing_drivers) = drivers.split_last_mut().expect("the new driver was pushed immediately above");
+    let driver = driver.handle();
+    for existing_driver in existing_drivers {
+        existing_driver.on_peer_registered(driver);
+    }
+}
+
+fn downcast_context<C: IoContext>(context: ContextBox) -> C {
+    *context.downcast::<C>().expect("a driver always builds its own context type")
 }
 
 fn shutdown_drivers(drivers: DriverStore) -> ShutdownResult {
@@ -289,5 +411,53 @@ impl Error for RuntimeError {
             Self::Message(_) => None,
             Self::DriverShutdown(error) => Some(error),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sample_driver::{SampleContext, created_driver_count};
+
+    #[test]
+    fn initialization_rechecks_context_after_a_miss() {
+        let runtime = Runtime::start().unwrap();
+        let commands = &runtime.workers.first().unwrap().commands;
+
+        for _ in 0..2 {
+            let (reply_tx, reply_rx) = mpsc::channel();
+            commands
+                .send(Command::Context {
+                    context_type: TypeId::of::<SampleContext>(),
+                    reply: reply_tx,
+                })
+                .unwrap();
+            assert!(reply_rx.recv().unwrap().is_none());
+        }
+
+        let (first_reply_tx, first_reply_rx) = mpsc::channel();
+        commands
+            .send(Command::Initialize {
+                context_type: TypeId::of::<SampleContext>(),
+                initialize: runtime.context_initializer::<SampleContext>(),
+                reply: first_reply_tx,
+            })
+            .unwrap();
+
+        let (second_reply_tx, second_reply_rx) = mpsc::channel();
+        commands
+            .send(Command::Initialize {
+                context_type: TypeId::of::<SampleContext>(),
+                initialize: runtime.context_initializer::<SampleContext>(),
+                reply: second_reply_tx,
+            })
+            .unwrap();
+
+        let first = downcast_context::<SampleContext>(first_reply_rx.recv().unwrap());
+        let second = downcast_context::<SampleContext>(second_reply_rx.recv().unwrap());
+        assert_eq!(first, second);
+        assert_eq!(created_driver_count(), Runtime::WORKER_COUNT);
+
+        runtime.shutdown().unwrap();
     }
 }

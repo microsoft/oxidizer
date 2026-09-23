@@ -7,7 +7,7 @@ use std::task::Waker;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use arty_io_core::{Driver, DriverContext, DriverHandle, DriverProvider, IoContext, ProviderContext, ShutdownError};
+use arty_io_core::{Driver, DriverHandle, DriverOptions, DriverProvider, IoContext, ProviderOptions, ShutdownError};
 use thread_aware_core::{Thread, ThreadAware};
 
 use super::sample_driver::SampleDriver;
@@ -58,7 +58,7 @@ impl ThreadAware for EchoContext {
 impl IoContext for EchoContext {
     type Provider = EchoProvider;
 
-    fn provider(_context: ProviderContext) -> Self::Provider {
+    fn provider(_options: ProviderOptions) -> Self::Provider {
         EchoProvider
     }
 }
@@ -74,10 +74,10 @@ impl DriverProvider for EchoProvider {
     type Context = EchoContext;
     type Driver = EchoDriver;
 
-    fn create(self, context: DriverContext<'_>) -> Self::Driver {
+    fn create(self, options: DriverOptions<'_>) -> Self::Driver {
         // The count is diagnostic only and does not synchronize driver creation.
         CREATED_DRIVERS.fetch_add(1, Ordering::Relaxed);
-        let sample_driver_count = context
+        let sample_driver_count = options
             .drivers()
             .iter()
             .filter(|driver| driver.handle().is::<SampleDriver>())
@@ -121,7 +121,7 @@ impl Driver for EchoDriver {
 
     fn process_completions(&mut self, _max_wait: Duration, _cycle_start: Instant) {}
 
-    fn interruptor(&self) -> Waker {
+    fn waker(&self) -> Waker {
         Waker::noop().clone()
     }
 

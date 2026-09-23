@@ -12,49 +12,49 @@ use std::task::{Wake, Waker};
 use std::time::{Duration, Instant};
 use std::{fmt, io, thread};
 
-use arty_io_core::{Driver, DriverContext, DriverHandle, DriverProvider, IoContext, ProviderContext, ShutdownError, SystemTasks};
+use arty_io_core::{Driver, DriverHandle, DriverOptions, DriverProvider, IoContext, ProviderOptions, ShutdownError, SystemTaskSpawner};
 use static_assertions::{assert_impl_all, assert_not_impl_any};
 use thread_aware_core::{Thread, ThreadAware};
 
-assert_impl_all!(DriverContext<'static>: fmt::Debug);
-assert_not_impl_any!(DriverContext<'static>: Send, Sync);
+assert_impl_all!(DriverOptions<'static>: fmt::Debug);
+assert_not_impl_any!(DriverOptions<'static>: Send, Sync);
 assert_impl_all!(DriverHandle<'static>: Copy, fmt::Debug);
 assert_not_impl_any!(DriverHandle<'static>: Send, Sync);
-assert_impl_all!(ProviderContext: Send, Sync, fmt::Debug);
+assert_impl_all!(ProviderOptions: Send, Sync, fmt::Debug);
 assert_impl_all!(ShutdownError: Send, Sync, fmt::Debug, fmt::Display, Error);
-assert_impl_all!(SystemTasks: Clone, Send, Sync, fmt::Debug);
+assert_impl_all!(SystemTaskSpawner: Clone, Send, Sync, fmt::Debug);
 
 #[test]
-fn public_contexts_expose_runtime_facilities() {
+fn public_options_expose_runtime_facilities() {
     let accepted = Arc::new(AtomicUsize::new(0));
     let accepted_by_callback = Arc::clone(&accepted);
-    let system_tasks = SystemTasks::new(move |task| {
+    let spawner = SystemTaskSpawner::from_fn(move |task| {
         accepted_by_callback.fetch_add(1, Ordering::Relaxed);
         task();
     });
     let worker = worker_thread();
-    let context = DriverContext::new(worker.clone(), system_tasks, Vec::new());
+    let options = DriverOptions::new(worker.clone(), spawner, Vec::new());
 
-    context.system_tasks().spawn(|| {});
+    options.spawner().spawn(|| {});
 
-    assert_eq!(context.thread(), &worker);
-    assert!(context.drivers().is_empty());
+    assert_eq!(options.thread(), &worker);
+    assert!(options.drivers().is_empty());
     assert_eq!(accepted.load(Ordering::Relaxed), 1);
-    assert!(format!("{context:?}").contains("DriverContext"));
-    assert!(format!("{:?}", ProviderContext::default()).contains("ProviderContext"));
+    assert!(format!("{options:?}").contains("DriverOptions"));
+    assert!(format!("{:?}", ProviderOptions::default()).contains("ProviderOptions"));
 }
 
 #[test]
-fn driver_context_exposes_drivers_registered_on_the_thread() {
+fn driver_options_expose_drivers_registered_on_the_thread() {
     let existing_driver = LocalDriver::new(Rc::default());
     let handles = vec![existing_driver.handle()];
-    let context = DriverContext::new(worker_thread(), SystemTasks::new(|task| task()), handles);
+    let options = DriverOptions::new(worker_thread(), SystemTaskSpawner::from_fn(|task| task()), handles);
 
-    let drivers = context.drivers();
+    let drivers = options.drivers();
 
     assert_eq!(drivers.len(), 1);
     assert!(drivers[0].handle().is::<LocalDriver>());
-    assert!(format!("{context:?}").contains("driver_count"));
+    assert!(format!("{options:?}").contains("driver_count"));
     assert!(format!("{:?}", drivers[0]).contains("DriverHandle"));
 }
 
@@ -63,7 +63,7 @@ fn driver_is_notified_when_another_driver_is_registered() {
     let mut driver = LocalDriver::new(Rc::default());
     let registered_driver = LeaseDriver::new();
 
-    driver.on_driver_registered(registered_driver.handle());
+    driver.on_peer_registered(registered_driver.handle());
 
     assert_eq!(driver.registered_driver_count, 1);
 }
@@ -85,13 +85,13 @@ fn driver_is_boxable_with_its_context_type() {
 }
 
 #[test]
-fn provider_creation_uses_both_contexts() {
-    fn provider_for<C: IoContext>(context: ProviderContext) -> C::Provider {
-        C::provider(context)
+fn provider_creation_uses_both_options() {
+    fn provider_for<C: IoContext>(options: ProviderOptions) -> C::Provider {
+        C::provider(options)
     }
 
-    let provider: TestProvider = provider_for::<TestContext>(ProviderContext::new());
-    let driver = provider.create(driver_context());
+    let provider: TestProvider = provider_for::<TestContext>(ProviderOptions::new());
+    let driver = provider.create(driver_options());
 
     assert_eq!(driver.context(), TestContext(7));
 }
@@ -153,8 +153,8 @@ fn shutdown_error_can_be_created_from_message() {
 }
 
 #[test]
-fn shutdown_error_can_be_created_from_cause() {
-    let error = ShutdownError::from_cause(io::Error::other("completion queue failed"));
+fn shutdown_error_can_be_created_from_source() {
+    let error = ShutdownError::from_source(io::Error::other("completion queue failed"));
 
     assert!(error.to_string().contains("shutdown"));
     assert!(error.source().is_some_and(|cause| cause.to_string().contains("completion queue")));
@@ -171,7 +171,7 @@ fn different_driver_types_have_distinct_identity() {
 fn completion_processing_supports_latched_interrupt() {
     let mut driver = LocalDriver::new(Rc::default());
 
-    driver.interruptor().wake_by_ref();
+    driver.waker().wake_by_ref();
     driver.process_completions(Duration::MAX, Instant::now());
 
     assert_eq!(driver.completion_queue.waits.load(Ordering::Relaxed), 1);
@@ -194,7 +194,7 @@ fn completion_cycle_uses_one_time_snapshot() {
 fn non_blocking_completion_processing_preserves_latched_interrupt() {
     let mut driver = LocalDriver::new(Rc::default());
 
-    driver.interruptor().wake_by_ref();
+    driver.waker().wake_by_ref();
     driver.process_completions(Duration::ZERO, Instant::now());
 
     assert!(*driver.completion_queue.latch.raised.lock().unwrap());
@@ -205,12 +205,12 @@ fn non_blocking_completion_processing_preserves_latched_interrupt() {
 }
 
 #[test]
-fn interruptor_remains_valid_after_driver_drop() {
+fn waker_remains_valid_after_driver_drop() {
     let driver = LocalDriver::new(Rc::default());
-    let interruptor = driver.interruptor();
+    let waker = driver.waker();
 
     drop(driver);
-    interruptor.wake();
+    waker.wake();
 }
 
 #[derive(Debug, Default)]
@@ -266,7 +266,7 @@ impl TestCompletionQueue {
         *raised = false;
     }
 
-    fn interruptor(&self) -> Waker {
+    fn waker(&self) -> Waker {
         Waker::from(Arc::clone(&self.latch))
     }
 }
@@ -312,8 +312,8 @@ impl Driver for LocalDriver {
         DriverHandle::new(self)
     }
 
-    fn on_driver_registered(&mut self, driver: DriverHandle<'_>) {
-        if driver.handle().is::<LeaseDriver>() {
+    fn on_peer_registered(&mut self, peer: DriverHandle<'_>) {
+        if peer.handle().is::<LeaseDriver>() {
             self.registered_driver_count += 1;
         }
     }
@@ -326,8 +326,8 @@ impl Driver for LocalDriver {
         self.completion_queue.process_completions(max_wait, cycle_start);
     }
 
-    fn interruptor(&self) -> Waker {
-        self.completion_queue.interruptor()
+    fn waker(&self) -> Waker {
+        self.completion_queue.waker()
     }
 
     fn shutdown(mut self) -> Result<(), ShutdownError> {
@@ -347,7 +347,7 @@ impl ThreadAware for TestContext {
 impl IoContext for TestContext {
     type Provider = TestProvider;
 
-    fn provider(_context: ProviderContext) -> Self::Provider {
+    fn provider(_options: ProviderOptions) -> Self::Provider {
         TestProvider
     }
 }
@@ -363,7 +363,7 @@ impl DriverProvider for TestProvider {
     type Context = TestContext;
     type Driver = LocalDriver;
 
-    fn create(self, _context: DriverContext<'_>) -> Self::Driver {
+    fn create(self, _options: DriverOptions<'_>) -> Self::Driver {
         LocalDriver::new(Rc::default())
     }
 }
@@ -395,7 +395,7 @@ impl ThreadAware for LeaseContext {
 impl IoContext for LeaseContext {
     type Provider = LeaseProvider;
 
-    fn provider(_context: ProviderContext) -> Self::Provider {
+    fn provider(_options: ProviderOptions) -> Self::Provider {
         LeaseProvider
     }
 }
@@ -411,7 +411,7 @@ impl DriverProvider for LeaseProvider {
     type Context = LeaseContext;
     type Driver = LeaseDriver;
 
-    fn create(self, _context: DriverContext<'_>) -> Self::Driver {
+    fn create(self, _options: DriverOptions<'_>) -> Self::Driver {
         LeaseDriver::new()
     }
 }
@@ -480,7 +480,7 @@ impl Driver for LeaseDriver {
 
     fn process_completions(&mut self, _max_wait: Duration, _cycle_start: Instant) {}
 
-    fn interruptor(&self) -> Waker {
+    fn waker(&self) -> Waker {
         Waker::noop().clone()
     }
 
@@ -518,8 +518,8 @@ impl Driver for LeaseDriver {
     }
 }
 
-fn driver_context() -> DriverContext<'static> {
-    DriverContext::new(worker_thread(), SystemTasks::new(|task| task()), Vec::new())
+fn driver_options() -> DriverOptions<'static> {
+    DriverOptions::new(worker_thread(), SystemTaskSpawner::from_fn(|task| task()), Vec::new())
 }
 
 fn worker_thread() -> Thread {

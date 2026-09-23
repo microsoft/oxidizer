@@ -13,7 +13,7 @@ pub struct ShutdownError {
 #[derive(Debug)]
 enum ShutdownErrorKind {
     Message(Box<str>),
-    Cause(Box<dyn Error + Send + Sync + 'static>),
+    Source(Box<dyn Error + Send + Sync + 'static>),
 }
 
 impl ShutdownError {
@@ -25,11 +25,11 @@ impl ShutdownError {
         }
     }
 
-    /// Creates an error from an underlying cause.
+    /// Creates an error from an underlying source.
     #[must_use]
-    pub fn from_cause(cause: impl Error + Send + Sync + 'static) -> Self {
+    pub fn from_source(source: impl Error + Send + Sync + 'static) -> Self {
         Self {
-            kind: ShutdownErrorKind::Cause(Box::new(cause)),
+            kind: ShutdownErrorKind::Source(Box::new(source)),
         }
     }
 }
@@ -38,7 +38,7 @@ impl fmt::Display for ShutdownError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
             ShutdownErrorKind::Message(message) => f.write_str(message),
-            ShutdownErrorKind::Cause(_) => f.write_str("i/o driver shutdown failed"),
+            ShutdownErrorKind::Source(_) => f.write_str("i/o driver shutdown failed"),
         }
     }
 }
@@ -47,7 +47,7 @@ impl Error for ShutdownError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match &self.kind {
             ShutdownErrorKind::Message(_) => None,
-            ShutdownErrorKind::Cause(cause) => Some(cause.as_ref()),
+            ShutdownErrorKind::Source(source) => Some(source.as_ref()),
         }
     }
 }

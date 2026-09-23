@@ -7,7 +7,7 @@ use std::task::Waker;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use arty_io_core::{Driver, DriverContext, DriverHandle, DriverProvider, IoContext, ProviderContext, ShutdownError};
+use arty_io_core::{Driver, DriverHandle, DriverOptions, DriverProvider, IoContext, ProviderOptions, ShutdownError};
 use thread_aware_core::{Thread, ThreadAware};
 
 use super::echo_driver::EchoDriver;
@@ -70,7 +70,7 @@ impl ThreadAware for SampleContext {
 impl IoContext for SampleContext {
     type Provider = SampleProvider;
 
-    fn provider(_context: ProviderContext) -> Self::Provider {
+    fn provider(_options: ProviderOptions) -> Self::Provider {
         SampleProvider
     }
 }
@@ -86,7 +86,7 @@ impl DriverProvider for SampleProvider {
     type Context = SampleContext;
     type Driver = SampleDriver;
 
-    fn create(self, _context: DriverContext<'_>) -> Self::Driver {
+    fn create(self, _options: DriverOptions<'_>) -> Self::Driver {
         // The count is diagnostic only and does not synchronize driver creation.
         CREATED_DRIVERS.fetch_add(1, Ordering::Relaxed);
         let driver_thread = thread::current().id();
@@ -120,8 +120,8 @@ impl Driver for SampleDriver {
         DriverHandle::new(self)
     }
 
-    fn on_driver_registered(&mut self, driver: DriverHandle<'_>) {
-        if driver.handle().is::<EchoDriver>() {
+    fn on_peer_registered(&mut self, peer: DriverHandle<'_>) {
+        if peer.handle().is::<EchoDriver>() {
             DISCOVERED_ECHO_DRIVERS.fetch_add(1, Ordering::Relaxed);
         }
     }
@@ -134,7 +134,7 @@ impl Driver for SampleDriver {
 
     fn process_completions(&mut self, _max_wait: Duration, _cycle_start: Instant) {}
 
-    fn interruptor(&self) -> Waker {
+    fn waker(&self) -> Waker {
         Waker::noop().clone()
     }
 

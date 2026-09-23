@@ -6,7 +6,7 @@
 mod echo_driver;
 mod runtime;
 mod sample_driver;
-mod system_tasks;
+mod spawner;
 
 use std::error::Error;
 

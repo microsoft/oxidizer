@@ -20,8 +20,8 @@ The crate is the semver chokepoint for the driver ecosystem.
 The contract supports registration after runtime startup.
 
 - The requested `IoContext` type identifies its provider and driver.
-- The runtime supplies a `ProviderContext` when creating the provider.
-- `ProviderContext` is empty in the initial contract and can gain optional
+- The runtime supplies a `ProviderOptions` when creating the provider.
+- `ProviderOptions` is empty in the initial contract and can gain optional
   runtime facilities later without changing the provider factory signature.
 - `get_context::<MyContext>()` needs no provider value or runtime configuration.
 - The first lookup returns only after every active worker has initialized the
@@ -30,10 +30,10 @@ The contract supports registration after runtime startup.
 - Registration is keyed by the context's Rust type identity.
 - Semver-incompatible versions of one driver crate can be registered together
   because their context types have distinct identities.
-- The runtime owns synchronization, cancellation, rollback, and caching for
+- The runtime owns synchronization, cancellation, and rollback for
   registration.
-- Later lookups return the cached worker-local context without creating more
-  driver instances.
+- Later lookups obtain a worker-local context from the registered driver
+  without creating more driver instances.
 
 ## R3: Per-worker initialization
 
@@ -41,12 +41,12 @@ The runtime explicitly initializes a driver adapter for each async worker it
 serves.
 
 - A provider clone is relocated to the worker before creation.
-- `DriverContext::thread` identifies that worker and its runtime owner.
-- `DriverContext::drivers` exposes type-erased handles for drivers whose
+- `DriverOptions::thread` identifies that worker and its runtime owner.
+- `DriverOptions::drivers` exposes type-erased handles for drivers whose
   registration previously completed on that worker.
 - Existing driver handles are immutable, remain on their owning worker, and are
   available only during creation of the new driver.
-- After storing a new driver, the runtime calls `Driver::on_driver_registered`
+- After storing a new driver, the runtime calls `Driver::on_peer_registered`
   on every driver registered earlier on that worker, in registration order.
 - Registration is acknowledged only after every earlier driver has received
   the new driver's type-erased handle.
@@ -68,7 +68,7 @@ The runtime does not dictate how an I/O subsystem distributes work.
   `process_completions` only from that thread.
 - The runtime captures one `Instant` when it starts a completion-processing
   cycle and passes that value unchanged to every driver visited in the cycle.
-- A driver may delegate work through the runtime-owned `SystemTasks` handle.
+- A driver may delegate work through the runtime-owned `SystemTaskSpawner` handle.
 - A driver or provider may create any number of private threads.
 - Primary, satellite, and thread-pinning policy are runtime implementation
   details and are not public driver roles.
@@ -83,7 +83,7 @@ A driver interrupt has the following semantics:
 - An interrupt raised by the driver's own thread is honored.
 - Redundant interrupts may be coalesced.
 - An interrupt is never dropped.
-- An interruptor remains memory-safe after its driver is gone.
+- A waker remains memory-safe after its driver is gone.
 
 ## R6: Safe and blocking shutdown
 
@@ -136,7 +136,7 @@ The runtime facility for synchronous I/O work uses `SystemTask` terminology.
 - It does not run on an async worker.
 - Submission returns before the work completes.
 - The facility remains available through driver shutdown.
-- `DriverContext` exposes a crate-owned cloneable handle rather than the runtime's
+- `DriverOptions` exposes a crate-owned cloneable handle rather than the runtime's
   shared-ownership implementation type.
 
 ## R9: Scope of the initial API

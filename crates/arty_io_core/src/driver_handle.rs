@@ -7,8 +7,8 @@ use std::fmt;
 /// A registration-time view of a driver on the current thread.
 ///
 /// A runtime supplies these through
-/// [`DriverContext::drivers`](crate::DriverContext::drivers) and
-/// [`Driver::on_driver_registered`](crate::Driver::on_driver_registered). The handle can be
+/// [`DriverOptions::drivers`](crate::DriverOptions::drivers) and
+/// [`Driver::on_peer_registered`](crate::Driver::on_peer_registered). The handle can be
 /// inspected or downcast through [`Any`] but cannot outlive the call that received it.
 #[derive(Clone, Copy)]
 pub struct DriverHandle<'a> {

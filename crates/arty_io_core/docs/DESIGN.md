@@ -19,16 +19,16 @@ The contract follows four design rules:
 one registered driver type
         |
         v
-IoContext::provider(ProviderContext)
+IoContext::provider(ProviderOptions)
         |
         | clone, relocate, consume once per worker
         v
-DriverProvider::create(DriverContext)
+DriverProvider::create(DriverOptions)
         |
         +-- Driver + IoContext
         +-- construction-time access to earlier drivers on this worker
         +-- completion processing and wake-up
-        +-- optional SystemTasks use
+        +-- optional SystemTaskSpawner use
         +-- optional provider-owned threads
 ```
 
@@ -49,15 +49,15 @@ Runtimes that erase unrelated context types use a private owning shim, which is
 also where they adapt the by-value `shutdown` method to boxed storage.
 
 Every consumer context implements `IoContext`, whose associated `Provider` and
-`provider(ProviderContext)` function are the complete registration recipe. A
+`provider(ProviderOptions)` function are the complete registration recipe. A
 runtime method such as `get_context::<MyContext>()` therefore needs only the
 context type. The first request creates the provider, initializes its driver on
 every active worker, and returns only after all workers acknowledge completion.
-Later requests reuse the registered driver and return the cached context for the
-calling worker.
+Later requests reuse the registered driver and obtain a context from the driver
+on the calling worker.
 
-`ProviderContext` is the runtime-to-provider extension point. It is empty in the
-initial contract. `DriverContext` is the separate per-worker extension point
+`ProviderOptions` is the runtime-to-provider extension point. It is empty in the
+initial contract. `DriverOptions` is the separate per-worker extension point
 passed to `DriverProvider::create`; it identifies the owning worker and exposes
 runtime facilities needed by the driver. It also carries type-erased handles for
 drivers registered earlier on that worker. This lets a new driver discover and
@@ -67,8 +67,8 @@ exposing the runtime's registry.
 ## Registration stays in the runtime
 
 Lazy registration requires a type-keyed registry, synchronization between
-workers, caching, and rollback after failed creation. None of these mechanisms
-need to be shared with a driver, so none belong in this crate.
+workers, and rollback after failed creation. None of these mechanisms need to
+be shared with a driver, so none belong in this crate.
 
 The contract enables lazy registration by making the context select a
 self-contained provider. The runtime can store that provider when the context
@@ -80,11 +80,11 @@ whose registration has already completed on that worker. The current driver is
 not included, and handle order is runtime-defined. These are immutable,
 construction-time references: the returned `'static` driver cannot retain them,
 but it can downcast a compatible handle and clone independently owned shared
-state. Because a handle may refer to a thread-local driver, `DriverContext`
+state. Because a handle may refer to a thread-local driver, `DriverOptions`
 remains on the worker that assembled it.
 
 After creating and storing the new driver, the runtime calls
-`Driver::on_driver_registered` on every earlier driver in registration order.
+`Driver::on_peer_registered` on every earlier driver in registration order.
 Each callback receives the new driver's type-erased handle and runs on the
 owning worker before registration is acknowledged. This makes discovery
 bidirectional without allowing either side to retain a borrowed driver
@@ -111,7 +111,7 @@ a completion timestamp or a general runtime clock service.
 This avoids exposing primary or satellite roles as public API. Those are
 placement choices the runtime may change later.
 
-The driver's interruptor follows a strict latched contract. Without latching,
+The driver's waker follows a strict latched contract. Without latching,
 an interrupt between the runtime's final work check and the actual wait can be
 lost and the worker can sleep forever. A non-blocking completion pass does not
 consume the latch; the next call that is willing to block observes it. An
@@ -150,7 +150,7 @@ needed, remains isolated behind the driver's private ownership types.
 
 The runtime removes a driver from its normal completion loop and transfers
 ownership into `shutdown`. The call performs whatever completion processing,
-waiting, cancellation, and cleanup the implementation requires. `SystemTasks`
+waiting, cancellation, and cleanup the implementation requires. `SystemTaskSpawner`
 remains available until the call returns. The driver owns the liveness policy
 for this blocking phase and returns an error instead of waiting indefinitely.
 It does not depend on work that can run only after its own shutdown returns,
@@ -176,7 +176,7 @@ capability check. The consumer calls that check before
 ## System tasks
 
 Some I/O mechanisms need synchronous calls that cannot run on an async worker.
-`SystemTasks` is intentionally narrower than an async scheduler:
+`SystemTaskSpawner` is intentionally narrower than an async scheduler:
 
 - it accepts only synchronous `FnOnce` work;
 - work is explicitly allowed to block;
@@ -184,7 +184,7 @@ Some I/O mechanisms need synchronous calls that cannot run on an async worker.
 - it stays alive through driver shutdown.
 
 The cloneable handle hides the runtime's shared-ownership mechanism instead of
-exposing `Arc<dyn ...>` in `DriverContext`. Its generic `spawn` method boxes only
+exposing `Arc<dyn ...>` in `DriverOptions`. Its generic `spawn` method boxes only
 at the internal callback boundary.
 
 ## Compatibility
@@ -200,9 +200,9 @@ Driver authors depend on `thread_aware_core` when implementing relocation.
 
 Future additions follow these rules:
 
-- Add optional provider facilities through private `ProviderContext` fields and
+- Add optional provider facilities through private `ProviderOptions` fields and
   new accessors.
-- Add optional per-driver facilities through private `DriverContext` fields and
+- Add optional per-driver facilities through private `DriverOptions` fields and
   new accessors.
 - Adding a new mandatory constructor input is a breaking change and requires
   explicit stabilization review.
@@ -218,7 +218,7 @@ The initial API does not decide:
 - whether workers or drivers are pinned to processors;
 - whether registrations cover existing workers atomically;
 - how runtimes order independent driver shutdown calls;
-- whether a reusable latched-interruptor implementation belongs in a later
+- whether a reusable latched-waker implementation belongs in a later
   utility crate;
 - which memory pool, clock service, or telemetry facilities drivers may eventually
   receive.
