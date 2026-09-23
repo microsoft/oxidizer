@@ -4,32 +4,31 @@
 use std::fmt;
 use std::sync::Arc;
 
-/// A synchronous unit of work that an I/O driver delegates to the runtime.
+/// A blocking task submitted by an I/O driver.
 pub type SystemTask = Box<dyn FnOnce() + Send + 'static>;
 
-/// A cloneable spawner for running I/O system work on runtime-owned threads.
+/// A spawner for blocking system work.
 ///
-/// An I/O driver may use this facility instead of creating threads of its own. Submitted work is
-/// not an async application task and never runs on an async worker. The runtime callback must
-/// permit the work to block.
+/// Tasks run on runtime-owned system threads, not on async workers. A task may block.
 ///
-/// The facility remains available until every driver that received it has completed shutdown, so
-/// cleanup work submitted during shutdown can still run.
+/// The runtime keeps the spawner available until every driver has completed shutdown.
 #[derive(Clone)]
 pub struct SystemTaskSpawner {
     spawn: Arc<dyn Fn(SystemTask) + Send + Sync + 'static>,
 }
 
 impl SystemTaskSpawner {
-    /// Creates a spawner backed by a runtime callback.
+    /// Creates a spawner that submits tasks through `spawn`.
     ///
-    /// The callback accepts work for execution and returns without waiting for it to finish.
+    /// The callback must return after accepting a task, without waiting for the task to finish.
     #[must_use]
     pub fn from_fn(spawn: impl Fn(SystemTask) + Send + Sync + 'static) -> Self {
         Self { spawn: Arc::new(spawn) }
     }
 
-    /// Accepts `task` for execution and returns without waiting for it to finish.
+    /// Submits `task` for execution.
+    ///
+    /// This method returns after the task is accepted, without waiting for it to finish.
     pub fn spawn(&self, task: impl FnOnce() + Send + 'static) {
         (self.spawn)(Box::new(task));
     }

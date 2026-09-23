@@ -1,12 +1,12 @@
 # Requirements
 
 `arty_io_core` is the shared contract between the Arty runtime and independently
-versioned I/O drivers. It describes interoperability requirements, not runtime
-registration policy or a specific operating-system completion mechanism.
+versioned I/O drivers. It specifies interoperability, not runtime registration
+policy or a particular operating-system completion mechanism.
 
 ## R1: Stable shared vocabulary
 
-The crate is the semver chokepoint for the driver ecosystem.
+The crate is the shared, versioned API for the driver ecosystem.
 
 - A runtime and every driver it hosts name the same `arty_io_core` types.
 - Public signatures prefer standard-library types.
@@ -30,8 +30,7 @@ The contract supports registration after runtime startup.
 - Registration is keyed by the context's Rust type identity.
 - Semver-incompatible versions of one driver crate can be registered together
   because their context types have distinct identities.
-- The runtime owns synchronization, cancellation, and rollback for
-  registration.
+- The runtime owns registration coordination, cancellation, and rollback.
 - Later lookups obtain a worker-local context from the registered driver
   without creating more driver instances.
 
@@ -73,16 +72,16 @@ The runtime does not dictate how an I/O subsystem distributes work.
 - Primary, satellite, and thread-pinning policy are runtime implementation
   details and are not public driver roles.
 
-## R5: Reliable interruption
+## R5: Reliable wake-ups
 
-A driver interrupt has the following semantics:
+A driver wake-up has the following semantics:
 
-- An interrupt raised before a blocking wait is latched for the next blocking wait.
-- A non-blocking completion pass does not consume a pending interrupt.
-- An interrupt does not prevent pending completions from being processed.
-- An interrupt raised by the driver's own thread is honored.
-- Redundant interrupts may be coalesced.
-- An interrupt is never dropped.
+- A wake-up raised before a blocking wait is latched for the next blocking wait.
+- A non-blocking completion pass does not consume a pending wake-up.
+- A wake-up does not prevent pending completions from being processed.
+- A wake-up raised by the driver's own thread is honored.
+- Redundant wake-ups may be coalesced.
+- A wake-up is never dropped.
 - A waker remains memory-safe after its driver is gone.
 
 ## R6: Safe and blocking shutdown
@@ -102,7 +101,7 @@ Shutdown must not rely on an unsafe trait or a caller-checked inertness flag.
 - Shutdown closes admission before waiting for active operations and
   operating-system callbacks to drain.
 - Shutdown may return `ShutdownError`, constructed from either a descriptive
-  message or an underlying cause.
+  message or an underlying source.
 - The driver bounds its own shutdown wait and returns `ShutdownError` rather
   than blocking indefinitely.
 - A driver does not wait for work that can run only after its shutdown returns,

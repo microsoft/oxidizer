@@ -3,18 +3,16 @@
 
 use std::fmt;
 
-/// Runtime facilities supplied when an I/O provider is created.
+/// Options for creating a driver provider.
 ///
-/// These options are empty in the current contract. Their private representation allows future
-/// versions to add optional runtime facilities without changing [`IoContext::provider`][crate::IoContext::provider].
+/// This type is currently empty. Its private representation allows compatible versions to add
+/// optional runtime facilities.
 pub struct ProviderOptions {
     _private: (),
 }
 
 impl ProviderOptions {
-    /// Creates provider options.
-    ///
-    /// This constructor is intended for runtime implementations and provider tests.
+    /// Creates an empty set of provider options.
     #[must_use]
     pub const fn new() -> Self {
         Self { _private: () }

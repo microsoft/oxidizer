@@ -7,129 +7,62 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty_io_core/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty_io_core/favicon.ico")]
 
-//! Stable contracts for integrating external I/O drivers with the Arty runtime.
+//! Contracts for integrating I/O drivers with an async runtime.
 //!
-//! The runtime hosts drivers supplied by libraries and applications rather than depending on one
-//! I/O implementation. This crate contains the small vocabulary both sides share:
+//! This crate defines the types shared by runtimes and drivers that evolve independently. It
+//! provides neither a runtime nor an I/O implementation.
 //!
-//! - [`Driver`] is the adapter between one worker and an I/O subsystem.
-//! - [`IoContext`] is the consumer handle that selects its provider.
-//! - [`ProviderOptions`] supplies runtime facilities when that provider is created.
-//! - [`DriverProvider`] creates and connects the per-worker adapters for a driver.
-//! - [`DriverOptions`] describes the worker and runtime facilities available during driver
-//!   creation.
-//! - [`DriverHandle`] connects drivers during same-worker registration.
-//! - [`ShutdownError`] reports unsuccessful graceful shutdown.
-//! - [`SystemTaskSpawner`] lets a driver delegate blocking system work to the runtime.
+//! # Core types
 //!
-//! Registration and driver placement are runtime behavior, not part of this crate. Keeping those
-//! policies outside the contract allows the runtime and drivers to evolve independently.
+//! - [`IoContext`] is the consumer-facing handle that selects a [`DriverProvider`].
+//! - [`DriverProvider`] creates one [`Driver`] for each runtime worker.
+//! - [`Driver`] is the thread-local adapter between a worker and an I/O subsystem.
+//! - [`ProviderOptions`] and [`DriverOptions`] carry runtime facilities during registration.
+//! - [`DriverHandle`] lets drivers discover peers registered on the same worker.
+//! - [`SystemTaskSpawner`] runs blocking system work on runtime-owned threads.
+//! - [`ShutdownError`] reports a failure to complete graceful shutdown.
 //!
-//! # Runtime and driver lifecycle
+//! # Registration
 //!
-//! The contract separates one provider per registered driver type, one driver per runtime worker,
-//! and contexts that consumers may move and retain independently:
+//! A runtime registers a driver when an [`IoContext`] type is first requested. It calls
+//! [`IoContext::provider`] once, then clones and relocates the provider for each active worker.
+//! Each relocated provider is consumed by [`DriverProvider::create`].
 //!
-//! ```text
-//! context request
-//!       |
-//!       v
-//! IoContext::provider(ProviderOptions)
-//!       |
-//!       | clone and relocate once per worker
-//!       v
-//! DriverProvider::create(DriverOptions)
-//!       |
-//!       +-- Driver: owned and driven by that worker
-//!       +-- Context: obtained from the driver for consumers
-//! ```
+//! [`DriverOptions`] identifies the worker, supplies runtime facilities, and contains handles to
+//! drivers registered earlier on that worker. After storing the new driver, the runtime calls
+//! [`Driver::on_peer_registered`] on those earlier drivers. This gives both the new driver and its
+//! peers an opportunity to exchange independently owned shared state.
 //!
-//! ## Registration and initialization
+//! The first context request completes after every active worker has created its driver. Later
+//! requests obtain a context from the driver on the calling worker. Registration is infallible at
+//! the type level: a provider or peer callback panics if registration cannot be completed.
 //!
-//! A consumer asks the runtime for a concrete [`IoContext`] type. On the first request for that
-//! type, the runtime creates a [`ProviderOptions`], calls [`IoContext::provider`], and registers
-//! the resulting [`DriverProvider`]. Registration, synchronization, and rollback remain runtime
-//! concerns.
+//! # Driving I/O
 //!
-//! The runtime clones the provider for each active worker, relocates each clone to that worker,
-//! and invokes [`DriverProvider::create`] on the worker thread. [`DriverOptions`] identifies the
-//! worker, supplies runtime facilities such as [`SystemTaskSpawner`], and provides construction-time
-//! [`DriverHandle`] values for drivers registered earlier on that worker. The returned [`Driver`]
-//! stays on that thread for its entire lifetime; it is deliberately not required to be [`Send`]
-//! or [`Sync`]. Creation runs inline and must return promptly; waiting there for another worker to
-//! make progress can deadlock registration.
+//! A runtime owns each driver and invokes its methods only on the worker that created it. Drivers
+//! are therefore not required to implement [`Send`] or [`Sync`].
 //!
-//! After storing the new driver, the runtime calls [`Driver::on_peer_registered`] on every
-//! driver registered earlier on that worker, in registration order. The callback receives the new
-//! driver's [`DriverHandle`] and completes before the worker acknowledges registration.
+//! [`Driver::process_completions`] processes pending work and optionally waits for more.
+//! [`Driver::waker`] interrupts the current or next blocking wait. Contexts may move between
+//! workers and may outlive the driver that created them.
 //!
-//! After creation, the runtime may cache the driver's [waker][Driver::waker]. The waker honors
-//! interrupts raised by the driver's own thread and remains safe to invoke after the driver is
-//! gone. The first context request completes only after every active worker has created its driver
-//! instance. Later requests reuse the registration and obtain a context from the calling worker's
-//! driver through [`Driver::context`]. A runtime may retain the provider to initialize workers
-//! created later.
+//! State reachable from a context, waker, background thread, or operating-system callback must be
+//! owned independently of the driver and synchronized as necessary. State used only by the owning
+//! worker may remain directly in the driver.
 //!
-//! Driver registration is infallible at the type level. If [`DriverProvider::create`] or
-//! [`Driver::on_peer_registered`] panics, the runtime does not continue with a driver registered
-//! or connected on only part of its worker set. A driver with conditional platform or permission
-//! requirements therefore exposes its own capability check for consumers to call before
-//! requesting its context.
+//! # Shutdown
 //!
-//! ## Driving I/O
+//! [`Driver::shutdown`] consumes the driver, closes admission to new operations, and waits for
+//! active work to drain. It returns [`ShutdownError`] when graceful cleanup cannot be completed.
+//! The runtime keeps [`SystemTaskSpawner`] available until shutdown returns.
 //!
-//! Consumers start operations through contexts. Contexts may be cloned, relocated between
-//! workers, and retained after their original driver is gone. Relocation may improve locality, but
-//! correctness must not depend on it.
-//!
-//! The runtime exclusively owns each driver and calls every [`Driver`] method only on its owning
-//! thread. A zero wait to [`Driver::process_completions`] performs a non-blocking completion pass
-//! without consuming a pending interrupt; a bounded or unbounded wait lets the same call provide
-//! the worker's idle point. Before processing a cycle, the runtime captures one
-//! [`Instant`](std::time::Instant) and passes it unchanged to every driver visited in that cycle.
-//! The driver's waker is latched, so it ends either the current blocking wait or the next
-//! one without preventing pending completions from being processed. Runtime policy decides which
-//! driver supplies a worker's waiting point and how additional drivers are scheduled.
-//!
-//! Operations may be submitted from other threads while the driver waits. A driver therefore
-//! separates its state into two parts:
-//!
-//! - State reached by contexts, wakers, background threads, or operating-system callbacks
-//!   is shared independently of the driver and uses appropriate reference counting and
-//!   synchronization. Each in-flight operation owns every resource it uses through a reference
-//!   count, pool lease, or equivalent handle; contexts themselves hold no per-operation state and
-//!   therefore do not delay shutdown.
-//! - Completion buffers, queue-reader state, batching state, and lifecycle state used only on the
-//!   owning thread remain ordinary driver fields accessed through `&mut self`.
-//!
-//! In particular, [`Driver::process_completions`] must not hold anything across a blocking wait
-//! that a submitter needs to make a completion possible, such as a lock, queue slot, or pool
-//! capacity.
-//!
-//! ## Shutdown
-//!
-//! Shutdown is cooperative, but it is not a memory-safety protocol:
-//!
-//! 1. The runtime removes the driver from its normal completion loop and calls
-//!    [`Driver::shutdown`], transferring ownership of the driver.
-//! 2. `shutdown` closes admission, blocks while active operations and operating-system callbacks
-//!    drain, and performs graceful cleanup. It owns the liveness policy for that wait and returns
-//!    an error rather than blocking indefinitely. Contexts remain valid but reject new operations.
-//! 3. [`SystemTaskSpawner`] remains available until `shutdown` returns.
-//! 4. `shutdown` returns [`ShutdownError`] when graceful cleanup cannot be completed. The runtime
-//!    records or reports the error and continues shutting down its remaining drivers.
-//!
-//! A driver must nevertheless be safe to drop at any point, including during unwinding or after a
-//! shutdown error. Dropping closes admission if necessary. Storage that an operating system can
-//! reach only by raw pointer must have an independent owner that is retained rather than
-//! invalidated on a premature drop. A successful shutdown determines whether cleanup was
-//! graceful, never whether destruction is sound.
+//! A driver must be safe to drop at every point in its lifecycle, including during unwinding and
+//! after a shutdown error. Contexts remain valid after shutdown but reject new operations.
 //!
 //! # Example
 //!
-//! The [fixed single-thread runtime example](https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/examples/single_thread_runtime/main.rs)
-//! starts both worker threads before `get_context::<SampleContext>()` uses the context type to
-//! inject its associated driver.
+//! The [single-thread runtime example](https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/examples/single_thread_runtime/main.rs)
+//! demonstrates lazy registration of two context types and same-worker driver discovery.
 //!
 //! # Project documents
 //!

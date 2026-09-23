@@ -4,7 +4,7 @@
 use std::error::Error;
 use std::fmt;
 
-/// An error that prevented an I/O driver from completing graceful shutdown.
+/// An error returned when a driver cannot complete graceful shutdown.
 #[derive(Debug)]
 pub struct ShutdownError {
     kind: ShutdownErrorKind,
@@ -17,7 +17,7 @@ enum ShutdownErrorKind {
 }
 
 impl ShutdownError {
-    /// Creates an error from a descriptive message.
+    /// Creates an error with the given message.
     #[must_use]
     pub fn from_message(message: impl Into<String>) -> Self {
         Self {
@@ -25,7 +25,7 @@ impl ShutdownError {
         }
     }
 
-    /// Creates an error from an underlying source.
+    /// Creates an error with the given source.
     #[must_use]
     pub fn from_source(source: impl Error + Send + Sync + 'static) -> Self {
         Self {

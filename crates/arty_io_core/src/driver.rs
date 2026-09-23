@@ -6,128 +6,89 @@ use std::time::{Duration, Instant};
 
 use crate::{DriverHandle, IoContext, ShutdownError};
 
-/// One async worker's adapter to an I/O subsystem.
+/// A thread-local adapter between a runtime worker and an I/O subsystem.
 ///
-/// A driver is created on the thread that owns it and remains on that thread for its entire
-/// lifetime. It deliberately has no [`Send`] or [`Sync`] requirement. A driver may delegate work
-/// to threads owned by its provider, use runtime system workers, or process completions directly
-/// on its owning thread.
+/// A runtime creates a driver on its owning worker and invokes every method on that worker.
+/// Drivers are not required to implement [`Send`] or [`Sync`].
 ///
-/// # Context
+/// State reachable from a context, waker, background thread, or operating-system callback must
+/// remain valid independently of the driver. State used only by the owning worker may remain
+/// directly in the driver and be accessed through
+/// [`process_completions`](Self::process_completions).
 ///
-/// A context is the handle through which consumers start I/O operations. Contexts may move
-/// between runtime workers and may outlive the driver. Operations attempted after driver shutdown
-/// must fail safely.
-///
-/// # Driver state
-///
-/// State reached by contexts, wakers, background threads, or operating-system callbacks is
-/// shared independently of the driver and uses appropriate reference counting and synchronization.
-/// Each in-flight operation owns every resource it uses through a reference count, pool lease, or
-/// equivalent handle.
-///
-/// Completion buffers, queue-reader state, batching state, and lifecycle state used only on the
-/// owning thread remain ordinary driver fields. Exclusive runtime ownership lets
-/// [`process_completions`](Self::process_completions) access that state through `&mut self`
-/// without interior mutability.
-///
-/// # Shutdown safety
-///
-/// A driver must always be safe to drop, even when shutdown has not completed. Dropping a driver
-/// closes admission if necessary. If external code or the operating system can still access a
-/// resource, dropping the driver must retain that resource rather than invalidate it.
-///
-/// Contexts remain valid after their driver is gone and reject new operations once admission is
-/// closed. In-flight operations own reference-counted handles, pool leases, or equivalent safe
-/// ownership for every resource they access. When an operating system retains only a raw pointer
-/// into pooled storage, the implementation must retain the storage owner independently of the
-/// driver. Any unsafe platform code stays private to that implementation rather than spreading
-/// into this stable contract or its runtime caller.
+/// A driver must be safe to drop before, during, or after shutdown. Its contexts may outlive it
+/// and must reject new operations after admission is closed.
 pub trait Driver: 'static {
-    /// The handle through which consumers start operations on this driver.
+    /// The context type created by this driver.
     type Context: IoContext;
 
-    /// Returns the handle exposed while another driver is registered on this thread.
+    /// Returns the handle exposed to drivers registered on the same worker.
     ///
-    /// An implementation may expose the concrete driver or a smaller driver-owned value when that
-    /// is the intended integration surface. The runtime borrows the returned handle only while
-    /// creating or notifying another driver; recipients cannot retain it.
+    /// The handle may expose the driver itself or a smaller driver-owned value. The runtime
+    /// borrows it only while creating or notifying another driver.
     #[must_use]
     fn handle(&self) -> DriverHandle<'_>;
 
-    /// Notifies this driver that a peer driver was registered on the same thread.
+    /// Notifies this driver that `peer` was registered on the same worker.
     ///
-    /// The runtime calls this after storing the new driver and before acknowledging its
-    /// registration. Earlier drivers are notified in registration order; the new driver is not
-    /// notified about itself because it already received the earlier drivers through
-    /// [`DriverOptions::drivers`](crate::DriverOptions::drivers).
-    ///
-    /// This callback runs inline on the owning thread. It must return promptly and cannot retain
-    /// the borrowed handle, but it can downcast the handle and clone independently owned shared
-    /// state.
+    /// The runtime calls this method after storing the new driver and before completing its
+    /// registration. The callback runs on the owning worker and cannot retain `peer`, but it may
+    /// clone independently owned state exposed by the handle.
     ///
     /// # Panics
     ///
-    /// Panics when this driver cannot integrate the newly registered peer. As with a panic from
-    /// [`DriverProvider::create`](crate::DriverProvider::create), the runtime cannot continue with
-    /// a partially connected registration.
+    /// Implementations must panic if the peer cannot be integrated. The runtime cannot continue
+    /// with a partially connected registration.
     fn on_peer_registered(&mut self, peer: DriverHandle<'_>) {
         let _ = peer;
     }
 
-    /// Returns a context bound to this driver instance.
+    /// Returns a context for this driver.
     ///
-    /// After shutdown starts, the returned context is closed and rejects new operations.
+    /// The context may outlive the driver. It must reject new operations after admission is
+    /// closed.
     #[must_use]
     fn context(&self) -> Self::Context;
 
-    /// Waits for and processes completion events.
+    /// Processes completion events, waiting up to `max_wait` for more work.
     ///
-    /// [`Duration::ZERO`] requests a non-blocking poll and does not consume a pending interrupt.
-    /// [`Duration::MAX`] requests an unbounded wait. A mechanism with coarser timing rounds finite
-    /// waits up without converting one into an unbounded wait.
+    /// [`Duration::ZERO`] performs a non-blocking poll and does not consume a pending wake-up.
+    /// [`Duration::MAX`] permits an unbounded wait. Implementations with coarser timing round a
+    /// finite duration up without treating it as unbounded.
     ///
-    /// `cycle_start` is captured once when the runtime decides to process completions and is
-    /// passed unchanged to every driver visited in that cycle. Drivers can therefore make
-    /// consistent deadline decisions without observing different times because of scheduling
-    /// order.
+    /// The runtime captures `cycle_start` once and passes it unchanged to every driver visited in
+    /// the same completion cycle.
     ///
-    /// Operations may be submitted from other threads while this method waits. The implementation
-    /// must not hold anything across the wait that a submitter needs.
+    /// This method must not hold a resource across the wait if another thread needs that resource
+    /// to submit work or make a completion available.
     fn process_completions(&mut self, max_wait: Duration, cycle_start: Instant);
 
-    /// Returns a handle that causes the current or next completion wait to return.
+    /// Returns a waker for interrupting completion waits.
     ///
-    /// Interrupts are latched: an interrupt raised before a blocking wait makes the next blocking
-    /// wait behave like a non-blocking poll. An interrupt only ends the wait; pending completions
-    /// are still processed. Same-thread interrupts are honored. Redundant interrupts may be
-    /// coalesced, but an interrupt is never dropped. The returned waker remains safe to
-    /// invoke after the driver is dropped.
+    /// Wake-ups are latched. Waking before a blocking wait makes the next blocking call to
+    /// [`process_completions`](Self::process_completions) behave like a non-blocking poll. A
+    /// wake-up ends only the wait; pending completions are still processed.
+    ///
+    /// Wake-ups from the owning worker must be observed. Redundant wake-ups may be coalesced, but
+    /// no wake-up may be lost. The returned waker remains safe to invoke after the driver is
+    /// dropped.
     #[must_use]
     fn waker(&self) -> Waker;
 
-    /// Shuts down the driver.
+    /// Gracefully shuts down the driver.
     ///
-    /// This method consumes the driver, closes admission to new operations, and blocks while
-    /// existing operations and operating-system callbacks drain. Context handles do not
-    /// themselves delay shutdown because they remain valid in a closed state.
+    /// This method closes admission to new operations and waits for active operations and
+    /// operating-system callbacks to drain. Context handles do not themselves delay shutdown.
     ///
-    /// The implementation remains responsible for making progress on its own completions and for
-    /// bounding the wait. It must not wait indefinitely or depend on work that can run only after
-    /// this call returns, such as another driver on the same runtime thread. When graceful cleanup
-    /// cannot complete within the driver's policy, it returns an error.
+    /// The implementation must continue making progress on its own completions, must not wait
+    /// indefinitely, and must not depend on work that can run only after this method returns.
     ///
-    /// [`Drop::drop`] still runs on the consumed value after this method returns. Cleanup shared by
-    /// shutdown and `Drop` must therefore be idempotent or guarded. A driver that needs ownership
-    /// of one of its fields during shutdown can store that field in an [`Option`] and take it
-    /// before waiting.
-    ///
-    /// Regardless of the result, the consumed driver must remain safe to drop and contexts must
-    /// reject new operations.
+    /// [`Drop::drop`] runs after this method returns. Shared cleanup must therefore be idempotent
+    /// or otherwise guarded. Regardless of the result, the driver must remain safe to drop and its
+    /// contexts must reject new operations.
     ///
     /// # Errors
     ///
-    /// Returns an error when graceful cleanup exceeds the driver's liveness policy or an
-    /// underlying cleanup operation fails.
+    /// Returns an error if graceful cleanup cannot be completed.
     fn shutdown(self) -> Result<(), ShutdownError>;
 }

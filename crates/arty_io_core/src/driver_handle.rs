@@ -4,27 +4,23 @@
 use std::any::Any;
 use std::fmt;
 
-/// A registration-time view of a driver on the current thread.
+/// A borrowed, type-erased handle to a driver on the current worker.
 ///
-/// A runtime supplies these through
-/// [`DriverOptions::drivers`](crate::DriverOptions::drivers) and
-/// [`Driver::on_peer_registered`](crate::Driver::on_peer_registered). The handle can be
-/// inspected or downcast through [`Any`] but cannot outlive the call that received it.
+/// The underlying value can be inspected or downcast through [`Any`]. The handle cannot outlive
+/// the registration operation that receives it.
 #[derive(Clone, Copy)]
 pub struct DriverHandle<'a> {
     driver: &'a dyn Any,
 }
 
 impl<'a> DriverHandle<'a> {
-    /// Creates a handle for an already registered driver.
-    ///
-    /// This constructor is intended for driver implementations and tests.
+    /// Creates a handle to `driver`.
     #[must_use]
     pub const fn new(driver: &'a dyn Any) -> Self {
         Self { driver }
     }
 
-    /// Returns the type-erased handle exposed by the registered driver.
+    /// Returns the underlying type-erased value.
     #[must_use]
     pub const fn handle(&self) -> &'a dyn Any {
         self.driver

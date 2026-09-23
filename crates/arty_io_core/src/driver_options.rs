@@ -7,11 +7,9 @@ use thread_aware_core::Thread;
 
 use crate::{DriverHandle, SystemTaskSpawner};
 
-/// Placement and runtime facilities supplied when one driver instance is created.
+/// Options for creating a driver on a runtime worker.
 ///
-/// The options also expose drivers already registered on the same thread. Those drivers may be
-/// thread-local, so these options are neither [`Send`] nor [`Sync`] and must remain on the thread
-/// where the runtime constructs it.
+/// These options may borrow thread-local drivers and are therefore neither [`Send`] nor [`Sync`].
 pub struct DriverOptions<'a> {
     thread: Thread,
     spawner: SystemTaskSpawner,
@@ -19,30 +17,29 @@ pub struct DriverOptions<'a> {
 }
 
 impl<'a> DriverOptions<'a> {
-    /// Creates the options for one driver instance.
-    ///
-    /// This constructor is intended for runtime implementations and driver tests.
+    /// Creates options for `thread`.
     #[must_use]
     pub fn new(thread: Thread, spawner: SystemTaskSpawner, drivers: Vec<DriverHandle<'a>>) -> Self {
         Self { thread, spawner, drivers }
     }
 
-    /// Returns the async worker this driver instance serves.
+    /// Returns the worker that will own the driver.
     #[must_use]
     pub const fn thread(&self) -> &Thread {
         &self.thread
     }
 
-    /// Returns the runtime-owned spawner for blocking I/O system work.
+    /// Returns the spawner for blocking system work.
     #[must_use]
     pub const fn spawner(&self) -> &SystemTaskSpawner {
         &self.spawner
     }
 
-    /// Returns drivers registered earlier on this thread, in runtime-defined order.
+    /// Returns handles to drivers registered earlier on this worker.
     ///
-    /// Each type-erased handle is valid only for this creation call. A driver can inspect or
-    /// downcast a handle and clone any independently owned state it needs to retain.
+    /// The handles appear in runtime-defined order and are valid only for the current call to
+    /// [`DriverProvider::create`](crate::DriverProvider::create). A driver may downcast a handle
+    /// and clone independently owned state from it.
     #[must_use]
     pub fn drivers(&self) -> &[DriverHandle<'a>] {
         &self.drivers
