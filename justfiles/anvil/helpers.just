@@ -46,18 +46,35 @@
 # environment variables. `$include` is one of:
 #
 #   * "--workspace" (affected/required) or "" (modified) - the tier is
-#     unscoped: ANVIL_IMPACT=off, or no impact cache is present. Recipes splat
+#     unscoped: ANVIL_IMPACT=off, or no impact cache is present outside consume
+#     mode (under consume a missing cache is a hard failure, not an unscoped
+#     run). Recipes splat
 #     "--workspace" (an empty string is NOT $null, so recipes test truthiness
 #     rather than `?? "--workspace"`, which would splat an empty arg cargo
 #     rejects).
 #   * "--package A@v --package B@v" - the tier has members. Packages are
-#     version-qualified cargo specs so they remain portable between CI jobs.
+#     version-qualified cargo specs so they resolve uniquely even when a
+#     like-named crate is also a transitive dependency.
 #   * "--skip" - the tier is empty for this change (recipe exits 0).
 #
-# This keeps the per-recipe boilerplate to a single capture, a one-line skip
-# guard, and the cargo invocation. Modified-tier recipes never forward
-# `$include`; they only check the skip sentinel and then let their command
-# determine its normal input domain.
+# Those three values are only meaningful when the resolver succeeded, so every
+# caller captures its exit code and propagates it before reading `$include`:
+#
+#   $impactExit = $LASTEXITCODE
+#   if ($impactExit -ne 0) { exit $impactExit }
+#
+# `$ErrorActionPreference = 'Stop'` does not fail a recipe on a native
+# command's nonzero exit, so without that guard a failed lookup (a missing
+# cache under ANVIL_IMPACT=consume, an unreadable include file, an
+# unrecognized ANVIL_IMPACT value) would leave `$include` empty and the check
+# would silently widen to its unscoped default and pass. The same reason
+# anvil-impact fails loudly in consume mode applies to reading the cache it
+# asserts: a broken scope must stop the check, not quietly rescope it.
+#
+# This keeps the per-recipe boilerplate to a single capture, the exit-code
+# guard, a one-line skip guard, and the cargo invocation. Modified-tier
+# recipes never forward `$include`; they only check the skip sentinel and then
+# let their command determine its normal input domain.
 #
 # Every recipe whose body uses multi-line conditionals or array-splat
 # splicing is annotated with [script("pwsh", "-NoProfile")]. pwsh is preinstalled on

@@ -26,6 +26,8 @@ anvil-examples run="false" package="" example="" timeout="30": anvil-examples-va
         exit 2
     }
     $include = (& "{{ just_executable() }}" _anvil-impact-include affected)
+    $impactExit = $LASTEXITCODE
+    if ($impactExit -ne 0) { exit $impactExit }
     if (-not $package -and $include -eq '--skip') { Write-Host 'anvil-examples: no affected packages; skipping'; exit 0 }
     $pkgArgs = @(if ($package) { '--package'; $package } elseif ($include) { -split $include } else { '--workspace' })
     $exampleArgs = @(if ($example) { '--example'; $example } else { '--examples' })
