@@ -26,8 +26,7 @@ pub(crate) fn cautious_capacity<T>(hint: Option<usize>) -> usize {
 }
 
 impl<S: BuildHasher> LocalLexicon<S> {
-    /// Deserialize a value, interning its [`Sym`](crate::Sym) fields into this
-    /// lexicon.
+    /// Deserialize a value, interning its [`Sym`](crate::Sym) fields.
     ///
     /// This is the interner-aware counterpart to [`serde::Deserialize`]. The
     /// return type `T` must implement [`DeserializeIn`], which the derive macro
@@ -46,11 +45,13 @@ impl<S: BuildHasher> LocalLexicon<S> {
     ///     name: internity::Sym,
     /// }
     ///
+    /// # fn main() -> Result<(), serde_json::Error> {
     /// let mut lexicon = LocalLexicon::new();
-    /// let record: Record = lexicon
-    ///     .deserialize_in(&mut serde_json::Deserializer::from_str(r#"{"name":"a"}"#))
-    ///     .unwrap();
+    /// let record: Record =
+    ///     lexicon.deserialize_in(&mut serde_json::Deserializer::from_str(r#"{"name":"a"}"#))?;
     /// assert_eq!(lexicon.resolve(record.name), "a");
+    /// # Ok(())
+    /// # }
     /// ```
     /// Deserialization is not transactional: strings interned before an error
     /// remain in this lexicon.
@@ -69,8 +70,7 @@ impl<S: BuildHasher> LocalLexicon<S> {
 
 #[cfg(feature = "std")]
 impl<S: BuildHasher> crate::ThreadedLexicon<S> {
-    /// Deserialize a value, interning its [`Sym`](crate::Sym) fields into this
-    /// concurrent lexicon.
+    /// Deserialize a value, interning its [`Sym`](crate::Sym) fields concurrently.
     ///
     /// # Errors
     ///
@@ -85,11 +85,13 @@ impl<S: BuildHasher> crate::ThreadedLexicon<S> {
     ///     name: internity::Sym,
     /// }
     ///
+    /// # fn main() -> Result<(), serde_json::Error> {
     /// let lexicon = ThreadedLexicon::new();
-    /// let record: Record = lexicon
-    ///     .deserialize_in(&mut serde_json::Deserializer::from_str(r#"{"name":"a"}"#))
-    ///     .unwrap();
+    /// let record: Record =
+    ///     lexicon.deserialize_in(&mut serde_json::Deserializer::from_str(r#"{"name":"a"}"#))?;
     /// assert_eq!(lexicon.clone().freeze().resolve(record.name), "a");
+    /// # Ok(())
+    /// # }
     /// ```
     /// Deserialization is not transactional: strings interned before an error
     /// remain in this lexicon.

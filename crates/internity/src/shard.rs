@@ -10,16 +10,11 @@
 //! reader machinery: plain `Vec`s under the lock suffice, and the whole module is
 //! free of `unsafe`.
 //!
-//! `intern` uses an **upgradable-read fast path**: an already-interned string (a
-//! dedup hit) resolves under an upgradable read lock, then a genuine miss
-//! atomically upgrades that guard to the exclusive write lock to insert.
-//!
-//! Concurrency trade-off: `parking_lot::RwLock` permits only **one** upgradable
-//! read guard at a time, so two `intern` calls landing on the *same* shard
-//! serialize against each other even when both are dedup hits. Plain `read()`
-//! guards (used by `get`) may coexist with the upgradable guard and with each
-//! other. `intern` calls on *different* shards proceed independently. Sharding
-//! therefore parallelizes interning across shards, not within a single shard.
+//! Interning takes an upgradable read guard. A miss atomically upgrades it to
+//! exclusive access without a second dedup probe; ordinary lookups can still
+//! acquire shared read guards while an interning hit holds the upgradable guard.
+
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 use parking_lot::{RwLock, RwLockReadGuard, RwLockUpgradableReadGuard};
 
@@ -42,12 +37,16 @@ pub(crate) type ShardReadGuard<'a> = RwLockReadGuard<'a, ShardWrite>;
 #[repr(align(128))]
 pub(crate) struct Shard {
     state: RwLock<ShardWrite>,
+    // A shard cannot exceed LOCAL_MASK entries, so this cannot wrap even on
+    // 32-bit targets.
+    generation: AtomicUsize,
 }
 
 impl Shard {
     pub(crate) fn with_capacity(strings: usize, bytes: usize) -> Self {
         Self {
             state: RwLock::new(ShardWrite::with_capacity(strings, bytes)),
+            generation: AtomicUsize::new(0),
         }
     }
 
@@ -59,48 +58,41 @@ impl Shard {
 
     /// Interns `s` (hash `h`) into the shard identified by `idx`.
     ///
-    /// The hit check runs under an **upgradable read lock**, which coexists with
-    /// other threads' `read()`s (concurrent lookups don't block it). A miss
-    /// upgrades that same guard **atomically** to exclusive access — no other
-    /// writer can have inserted in between — so two threads racing on the same new
-    /// string can never create two handles, and the insert needs no re-probe.
+    /// An upgradable guard serializes same-shard interners but lets `get` take
+    /// shared read guards. A miss upgrades atomically, so it needs no recheck.
     #[inline]
-    pub(crate) fn intern<R: Fn(&[u8]) -> u64>(&self, idx: usize, h: u64, s: &str, rehash: &R) -> Sym {
+    pub(crate) fn intern(&self, idx: usize, h: u64, s: &str) -> Sym {
         let up = self.state.upgradable_read();
         if let Some(sym) = up.get(h, s) {
             return sym;
         }
-        // Miss: upgrade atomically to exclusive access (no other writer can have
-        // inserted in between — we held the upgradable lock throughout), then
-        // insert without re-probing. Readers of this shard briefly block while
-        // the exclusive guard is held.
         let mut w = RwLockUpgradableReadGuard::upgrade(up);
-        w.insert_new(idx, h, s, rehash)
+        let sym = w.insert_new(idx, h, s);
+        self.generation.fetch_add(1, Ordering::Release);
+        sym
     }
 
     /// Interns the UTF-8 string held in `bytes` (hash `h`), validating UTF-8 only
     /// on a dedup miss.
     ///
-    /// Mirrors [`intern`](Self::intern), but probes by raw bytes so an
-    /// already-interned entry (a hit) returns without re-validating: the stored
-    /// string is byte-equal to `bytes` and was validated on its first insert. Only
-    /// a genuine miss runs `str::from_utf8` — while still holding the upgradable
-    /// read lock, before upgrading to insert.
+    /// Mirrors [`intern`](Self::intern), but probes by raw bytes so an existing
+    /// entry returns without re-validating: it was validated on first insertion.
+    /// A miss validates before upgrading to the write lock.
     #[inline]
-    pub(crate) fn intern_bytes<R: Fn(&[u8]) -> u64>(
-        &self,
-        idx: usize,
-        h: u64,
-        bytes: &[u8],
-        rehash: &R,
-    ) -> Result<Sym, core::str::Utf8Error> {
+    pub(crate) fn intern_bytes(&self, idx: usize, h: u64, bytes: &[u8]) -> Result<Sym, core::str::Utf8Error> {
         let up = self.state.upgradable_read();
         if let Some(sym) = up.get_bytes(h, bytes) {
             return Ok(sym);
         }
         let s = core::str::from_utf8(bytes)?;
         let mut w = RwLockUpgradableReadGuard::upgrade(up);
-        Ok(w.insert_new(idx, h, s, rehash))
+        let sym = w.insert_new(idx, h, s);
+        self.generation.fetch_add(1, Ordering::Release);
+        Ok(sym)
+    }
+
+    pub(crate) fn generation(&self) -> usize {
+        self.generation.load(Ordering::Acquire)
     }
 
     /// Looks up `s` without interning it.
@@ -119,10 +111,15 @@ impl Shard {
     /// Acquires a read guard on this shard's interning state.
     ///
     /// Callers hold a guard on every shard at once to establish a point-in-time
-    /// snapshot boundary: while any read guard is held, an in-flight `intern` miss
-    /// cannot upgrade to the exclusive write lock, so no insertion can commit.
+    /// snapshot boundary: while any read guard is held, an `intern` miss
+    /// cannot acquire the exclusive write lock, so no insertion can commit.
     pub(crate) fn read_guard(&self) -> ShardReadGuard<'_> {
         self.state.read()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn write_available(&self) -> bool {
+        self.state.try_write().is_some()
     }
 
     /// Copies the `(offsets, bytes)` blob into a flat [`ShardReader`] from an

@@ -14,9 +14,9 @@
 //! wrap the value in [`SerializeInWith`] to hand it to a Serde entry point.
 //!
 //! ```
+//! use internity::LocalLexicon;
 //! use internity::de::DeserializeIn;
 //! use internity::se::{SerializeIn, SerializeInWith};
-//! use internity::{LocalLexicon, Reader};
 //!
 //! #[derive(SerializeIn, DeserializeIn)]
 //! struct Record {
@@ -24,6 +24,7 @@
 //!     count: u64,
 //! }
 //!
+//! # fn main() -> Result<(), serde_json::Error> {
 //! // Serialize with a reader: the `Sym` becomes its string.
 //! let mut lexicon = LocalLexicon::new();
 //! let record = Record {
@@ -31,15 +32,15 @@
 //!     count: 3,
 //! };
 //! let reader = lexicon.freeze();
-//! let json = serde_json::to_string(&SerializeInWith::new(&record, &reader)).unwrap();
+//! let json = serde_json::to_string(&SerializeInWith::new(&record, &reader))?;
 //! assert_eq!(json, r#"{"name":"widget","count":3}"#);
 //!
 //! // Deserialize into a fresh interner: the same handle comes back.
 //! let mut restored = LocalLexicon::new();
-//! let back: Record = restored
-//!     .deserialize_in(&mut serde_json::Deserializer::from_str(&json))
-//!     .unwrap();
+//! let back: Record = restored.deserialize_in(&mut serde_json::Deserializer::from_str(&json))?;
 //! assert_eq!(restored.resolve(back.name), "widget");
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Ordinary Serde and `SerializeIn`

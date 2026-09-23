@@ -12,6 +12,7 @@
 use internity::de::DeserializeIn;
 use internity::{LocalLexicon, Sym};
 use serde::Deserialize;
+use serde::de::{MapAccess, Visitor, value};
 
 fn de_in<T: for<'de> DeserializeIn<'de, LocalLexicon>>(lex: &mut LocalLexicon, json: &str) -> Result<T, serde_json::Error> {
     T::deserialize_in(lex, &mut serde_json::Deserializer::from_str(json))
@@ -78,6 +79,160 @@ fn aliases_match_serde() {
         let interned: AliasIn = de_in(&mut lex, json).unwrap();
         assert_eq!(plain.last, lex.resolve(interned.last));
     }
+}
+
+#[test]
+fn duplicate_fields_and_aliases_match_serde() {
+    for json in [r#"{"last":"a","last":"b"}"#, r#"{"last":"a","surname":"b"}"#] {
+        let plain_error = de::<AliasPlain>(json).err().unwrap().to_string();
+        let mut lex = LocalLexicon::new();
+        let interned_error = de_in::<AliasIn>(&mut lex, json).err().unwrap().to_string();
+        assert!(plain_error.contains("duplicate field `last`"), "{plain_error}");
+        assert!(interned_error.contains("duplicate field `last`"), "{interned_error}");
+    }
+}
+
+#[derive(DeserializeIn)]
+#[serde(deny_unknown_fields)]
+struct NonStringFields {
+    #[serde(default)]
+    first: Option<Sym>,
+    #[serde(default)]
+    second: Option<Sym>,
+    #[serde(default, alias = "surname")]
+    last: Option<Sym>,
+}
+
+enum FieldIdentifier {
+    Bytes(&'static [u8]),
+    Index(u64),
+}
+
+impl<'de> serde::Deserializer<'de> for FieldIdentifier {
+    type Error = value::Error;
+
+    fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
+        self.deserialize_identifier(visitor)
+    }
+
+    fn deserialize_identifier<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
+        match self {
+            Self::Bytes(bytes) => visitor.visit_bytes(bytes),
+            Self::Index(index) => visitor.visit_u64(index),
+        }
+    }
+
+    serde::forward_to_deserialize_any! {
+        bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
+        bytes byte_buf option unit unit_struct newtype_struct seq tuple tuple_struct
+        map struct enum ignored_any
+    }
+}
+
+struct FieldMap {
+    fields: std::vec::IntoIter<(FieldIdentifier, &'static str)>,
+    value: Option<&'static str>,
+}
+
+impl<'de> MapAccess<'de> for FieldMap {
+    type Error = value::Error;
+
+    fn next_key_seed<K: serde::de::DeserializeSeed<'de>>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error> {
+        match self.fields.next() {
+            Some((identifier, value)) => {
+                self.value = Some(value);
+                seed.deserialize(identifier).map(Some)
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn next_value_seed<V: serde::de::DeserializeSeed<'de>>(&mut self, seed: V) -> Result<V::Value, Self::Error> {
+        let value = self
+            .value
+            .take()
+            .ok_or_else(|| serde::de::Error::custom("value requested without a key"))?;
+        seed.deserialize(serde_json::Value::String(value.to_owned()))
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+struct NonStringMap(Vec<(FieldIdentifier, &'static str)>);
+
+impl<'de> serde::Deserializer<'de> for NonStringMap {
+    type Error = value::Error;
+
+    fn deserialize_any<V: Visitor<'de>>(self, _visitor: V) -> Result<V::Value, Self::Error> {
+        Err(serde::de::Error::custom("only struct maps are supported"))
+    }
+
+    fn deserialize_struct<V: Visitor<'de>>(
+        self,
+        _name: &'static str,
+        _fields: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value, Self::Error> {
+        visitor.visit_map(FieldMap {
+            fields: self.0.into_iter(),
+            value: None,
+        })
+    }
+
+    serde::forward_to_deserialize_any! {
+        bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
+        bytes byte_buf option unit unit_struct newtype_struct seq tuple tuple_struct
+        map enum identifier ignored_any
+    }
+}
+
+#[test]
+fn byte_alias_and_numeric_field_identifiers_decode_independently() {
+    let mut lex = LocalLexicon::new();
+    let decoded = NonStringFields::deserialize_in(
+        &mut lex,
+        NonStringMap(vec![
+            (FieldIdentifier::Bytes(b"surname"), "family"),
+            (FieldIdentifier::Index(1), "given"),
+        ]),
+    )
+    .unwrap();
+    assert_eq!(decoded.first.map(|sym| lex.resolve(sym)), None);
+    assert_eq!(decoded.second.map(|sym| lex.resolve(sym)), Some("given"));
+    assert_eq!(decoded.last.map(|sym| lex.resolve(sym)), Some("family"));
+
+    for (identifier, message) in [
+        (FieldIdentifier::Bytes(b"unknown"), "unknown field `unknown`"),
+        (FieldIdentifier::Index(3), "a valid field index"),
+    ] {
+        let error = NonStringFields::deserialize_in(&mut LocalLexicon::new(), NonStringMap(vec![(identifier, "value")]))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(error.contains(message), "{error}");
+    }
+}
+
+#[derive(DeserializeIn)]
+struct LenientByteFields {
+    #[serde(default)]
+    last: Option<Sym>,
+}
+
+#[test]
+fn invalid_utf8_field_identifiers_respect_unknown_field_policy() {
+    let invalid = b"\xff";
+    let mut lex = LocalLexicon::new();
+    let decoded = LenientByteFields::deserialize_in(&mut lex, NonStringMap(vec![(FieldIdentifier::Bytes(invalid), "value")])).unwrap();
+    assert!(decoded.last.is_none());
+
+    let error = NonStringFields::deserialize_in(
+        &mut LocalLexicon::new(),
+        NonStringMap(vec![(FieldIdentifier::Bytes(invalid), "value")]),
+    )
+    .err()
+    .unwrap()
+    .to_string();
+    assert!(error.contains("unknown field"), "{error}");
 }
 
 // ----- skip + field default -------------------------------------------------

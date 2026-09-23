@@ -19,21 +19,27 @@
 //! This is the *only* module that uses `unsafe`. Given valid interner-produced
 //! storage, [`resolve`] is memory-safe for any `index` and returns `None` when it
 //! is out of range. The hot-path [`str_at`] helper additionally requires an
-//! in-range index produced by the storage's own dedup table. Callers must uphold
-//! that offsets are monotonic, remain within `bytes`, and delimit valid UTF-8 —
-//! guaranteed by construction because ranges are recorded only when appending a
-//! `&str`.
+//! in-range index from a same-storage dedup handle or from a bounded iterator
+//! position in `0..offsets.len() - 1`. Callers must uphold that offsets are
+//! monotonic, remain within `bytes`, and delimit valid UTF-8 — guaranteed by
+//! construction because ranges are recorded only when appending a `&str`.
+
+/// Computes the end offset before appending bytes to CSR storage.
+pub(crate) fn checked_end(current: usize, appended: usize) -> Option<u32> {
+    current.checked_add(appended).and_then(|end| u32::try_from(end).ok())
+}
 
 /// Reconstructs the string at an **in-range** dense/local `index`
 /// (`bytes[offsets[index]..offsets[index + 1]]`).
 ///
-/// Used on the hot interning-compare path, where `index` comes from a handle the
-/// table just produced and is therefore always valid.
+/// `index` must come from this storage's dedup table, or be a bounded iterator
+/// position in `0..offsets.len() - 1`.
 #[inline]
 pub(crate) fn str_at<'a>(offsets: &[u32], bytes: &'a [u8], index: usize) -> &'a str {
-    // SAFETY: callers only pass an index obtained from this storage's dedup table.
+    // SAFETY: a same-storage dedup handle or a bounded iterator position
+    // establishes index < offsets.len() - 1.
     let start = unsafe { *offsets.get_unchecked(index) as usize };
-    // SAFETY: the same table-produced index guarantees the adjacent end exists.
+    // SAFETY: that bound also establishes index + 1 < offsets.len().
     let end = unsafe { *offsets.get_unchecked(index + 1) as usize };
     // SAFETY: offsets are monotonic and end at `bytes.len()`.
     let stored = unsafe { bytes.get_unchecked(start..end) };
@@ -61,6 +67,13 @@ pub(crate) fn resolve<'a>(offsets: &[u32], bytes: &'a [u8], index: usize) -> Opt
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn checked_end_rejects_overflow_and_truncation() {
+        assert_eq!(super::checked_end(u32::MAX as usize - 1, 1), Some(u32::MAX));
+        assert_eq!(super::checked_end(u32::MAX as usize - 1, 2), None);
+        assert_eq!(super::checked_end(usize::MAX, 1), None);
+    }
+
     #[test]
     fn resolve_rejects_an_overflowing_index() {
         assert_eq!(super::resolve(&[0], b"", usize::MAX), None);

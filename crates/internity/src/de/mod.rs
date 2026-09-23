@@ -24,13 +24,14 @@
 //!     count: u64,
 //! }
 //!
+//! # fn main() -> Result<(), serde_json::Error> {
 //! let mut lexicon = LocalLexicon::new();
 //! let json = r#"{"name":"widget","count":3}"#;
-//! let record: Record = lexicon
-//!     .deserialize_in(&mut serde_json::Deserializer::from_str(json))
-//!     .unwrap();
+//! let record: Record = lexicon.deserialize_in(&mut serde_json::Deserializer::from_str(json))?;
 //! assert_eq!(lexicon.resolve(record.name), "widget");
 //! assert_eq!(record.count, 3);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Ordinary Serde and `DeserializeIn`
