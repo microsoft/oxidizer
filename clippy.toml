@@ -26,12 +26,14 @@ semicolon-outside-block-ignore-multiline = true
 # failure. Without these, every test triggers the lint.
 allow-panic-in-tests = true
 allow-unwrap-in-tests = true
-doc-valid-idents = ["OpenAPI", "WinHTTP", ".."]
 
 # Aspirational: when clippy.wildcard_imports is re-enabled (currently
-# allowed in cargo-lints-body.toml due to upstream bug rust-clippy#15036),
+# allowed in cargo-clippy-lints.toml due to upstream bug rust-clippy#15036),
 # we want the stricter variant that warns on ALL wildcard imports
 # including prelude. Setting it now means flipping the lint level to
 # warn later is a one-line change with no tuning afterthought.
 warn-on-all-wildcard-imports = true
 # <<< anvil-managed: anvil-clippy
+
+# Oxidizer-specific identifiers accepted in documentation.
+doc-valid-idents = ["OpenAPI", "WinHTTP", ".."]
