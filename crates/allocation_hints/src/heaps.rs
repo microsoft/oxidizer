@@ -429,6 +429,15 @@ mod tests {
     }
 
     #[test]
+    fn general_option_boundaries_reject_non_powers_of_two_and_accept_disabled_cache() {
+        let options = general::Options::new().with_medium_cache_max_bytes(0);
+
+        assert_eq!(options.medium_cache_max_bytes(), 0);
+        std::panic::catch_unwind(|| general::Options::new().with_locality_segment_bytes(3 * 64 * 1024)).unwrap_err();
+        std::panic::catch_unwind(|| general::Options::new().with_medium_cache_max_bytes(3 * 64 * 1024)).unwrap_err();
+    }
+
+    #[test]
     fn bump_options_round_trip() {
         let options = bump::Options::default()
             .with_max_allocation_bytes(1024)
@@ -445,6 +454,42 @@ mod tests {
             ),
             (1024, 128, 2, 8)
         );
+    }
+
+    #[test]
+    fn bump_option_boundaries_are_exact() {
+        let minimum = bump::Options::new()
+            .with_max_allocation_bytes(1)
+            .with_max_alignment(1)
+            .with_retained_chunks(1);
+        let maximum = bump::Options::new()
+            .with_max_allocation_bytes(32 * 1024)
+            .with_max_alignment(32 * 1024)
+            .with_max_retained_chunks(usize::MAX);
+
+        assert_eq!(
+            (
+                minimum.max_allocation_bytes(),
+                minimum.max_alignment(),
+                minimum.retained_chunks(),
+                minimum.max_retained_chunks(),
+                maximum.max_allocation_bytes(),
+                maximum.max_alignment(),
+                maximum.max_retained_chunks(),
+            ),
+            (1, 1, 1, 1, 32 * 1024, 32 * 1024, usize::MAX)
+        );
+    }
+
+    #[test]
+    fn bump_option_boundaries_reject_values_outside_the_contract() {
+        std::panic::catch_unwind(|| bump::Options::new().with_max_allocation_bytes(0)).unwrap_err();
+        std::panic::catch_unwind(|| bump::Options::new().with_max_allocation_bytes(32 * 1024 + 1)).unwrap_err();
+        std::panic::catch_unwind(|| bump::Options::new().with_max_alignment(0)).unwrap_err();
+        std::panic::catch_unwind(|| bump::Options::new().with_max_alignment(3)).unwrap_err();
+        std::panic::catch_unwind(|| bump::Options::new().with_max_alignment(64 * 1024)).unwrap_err();
+        std::panic::catch_unwind(|| bump::Options::new().with_retained_chunks(0)).unwrap_err();
+        std::panic::catch_unwind(|| bump::Options::new().with_retained_chunks(2).with_max_retained_chunks(1)).unwrap_err();
     }
 
     #[test]

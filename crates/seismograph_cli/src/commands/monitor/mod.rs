@@ -4,14 +4,26 @@
 mod app;
 mod client;
 mod data;
+mod filter;
+mod filter_index;
+mod filter_ui;
+mod help;
+mod help_content;
+mod mouse;
+mod offline;
+mod panels;
+#[cfg(test)]
+mod profile;
+mod snapshot;
 mod ui;
 
 use std::io::Write;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use std::{fmt, io};
 
 use clap::Args;
-use crossterm::event::{self, Event, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode};
 use ratatui::Terminal;
@@ -25,6 +37,30 @@ pub(crate) struct VerbArgs {
     pub(crate) terminal_error: Option<io::ErrorKind>,
 }
 
+/// Arguments for inspecting a saved snapshot.
+#[derive(Args, Debug)]
+pub(crate) struct ViewArgs {
+    /// Native .seismograph file to open without connecting to a process.
+    #[arg(value_name = "SNAPSHOT-FILE")]
+    pub(crate) snapshot_file: PathBuf,
+}
+
+/// Opens the offline snapshot TUI.
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub(crate) fn view(args: ViewArgs) -> Result<(), Error> {
+    // Open before entering raw mode so missing files also fail in redirected shells.
+    let file = std::fs::File::open(&args.snapshot_file).map_err(|error| Error::snapshot_file(&args.snapshot_file, error))?;
+    let app = app::App::offline(args.snapshot_file.clone());
+    let loader = offline::Loader::start(args.snapshot_file.clone(), file)?;
+    run_terminal(app, Some(loader)).map_err(|error| match error {
+        Error::SnapshotFile { .. } => error,
+        error => Error::SnapshotFile {
+            path: args.snapshot_file,
+            message: error.to_string(),
+        },
+    })
+}
+
 /// Runs the live monitor TUI.
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn verb(args: VerbArgs) -> Result<(), Error> {
@@ -35,16 +71,35 @@ pub(crate) fn verb(args: VerbArgs) -> Result<(), Error> {
     #[cfg(not(test))]
     let _ = args;
 
+    run_terminal(app::App::new(), None)
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn run_terminal(mut app: app::App, mut loader: Option<offline::Loader>) -> Result<(), Error> {
     let _terminal_guard = TerminalGuard::enter()?;
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend).map_err(Error::Io)?;
     terminal.clear().map_err(Error::Io)?;
-
-    let mut app = app::App::new();
     app.refresh();
+    let mut load_error = None;
+
     loop {
+        if let Some(active) = &mut loader
+            && let Some(result) = active.poll()
+        {
+            match result {
+                Ok(snapshot) => app.finish_offline_load(snapshot),
+                Err(error) => {
+                    app.snapshot_error = Some(error.to_string());
+                    app.status = "Snapshot loading failed; F1 explains unavailable data. q/Esc exits.".into();
+                    load_error = Some(error);
+                }
+            }
+            loader = None;
+        }
         app.poll_discovery();
         app.poll_snapshot_capture();
+        app.poll_filter();
         app.poll_recorder_statistics();
         app.poll_recording_configuration();
         terminal.draw(|frame| app.draw(frame)).map_err(Error::Io)?;
@@ -53,11 +108,13 @@ pub(crate) fn verb(args: VerbArgs) -> Result<(), Error> {
             .saturating_duration_since(Instant::now())
             .min(Duration::from_millis(200));
         if event::poll(wait).map_err(Error::Io)? {
-            let Event::Key(key) = event::read().map_err(Error::Io)? else {
-                continue;
-            };
-            if should_exit(&mut app, key) {
-                return Ok(());
+            match event::read().map_err(Error::Io)? {
+                Event::Key(key) if should_exit(&mut app, key) => return load_error.map_or(Ok(()), Err),
+                Event::Mouse(mouse) => {
+                    let size = terminal.size().map_err(Error::Io)?;
+                    app.handle_mouse(mouse, ratatui::layout::Rect::new(0, 0, size.width, size.height));
+                }
+                _ => {}
             }
         }
         if refresh_is_due(Instant::now(), app.next_refresh()) {
@@ -72,7 +129,7 @@ fn refresh_is_due(now: Instant, next_refresh: Instant) -> bool {
 
 fn should_exit(app: &mut app::App, key: crossterm::event::KeyEvent) -> bool {
     let control_c = key.code == crossterm::event::KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL);
-    key.kind == KeyEventKind::Press && (control_c || app.handle_key(key.code))
+    key.kind == KeyEventKind::Press && ((control_c && app.help.is_none()) || app.handle_key(key.code))
 }
 
 struct TerminalGuard<W: Write, D: FnMut() -> io::Result<()>> {
@@ -84,7 +141,9 @@ impl TerminalGuard<io::Stdout, fn() -> io::Result<()>> {
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn enter() -> Result<Self, Error> {
         enable_raw_mode().map_err(Error::Io)?;
-        if let Err(error) = execute!(io::stdout(), EnterAlternateScreen) {
+        if let Err(error) = execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture) {
+            let _ = execute!(io::stdout(), DisableMouseCapture);
+            let _ = execute!(io::stdout(), LeaveAlternateScreen);
             let _ = disable_raw_mode();
             return Err(Error::Io(error));
         }
@@ -98,6 +157,7 @@ impl TerminalGuard<io::Stdout, fn() -> io::Result<()>> {
 impl<W: Write, D: FnMut() -> io::Result<()>> Drop for TerminalGuard<W, D> {
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn drop(&mut self) {
+        let _ = execute!(self.output, DisableMouseCapture);
         let _ = execute!(self.output, LeaveAlternateScreen);
         let _ = (self.disable_raw_mode)();
     }
@@ -113,6 +173,16 @@ pub(crate) enum Error {
     Clock(String),
     MissingMemorySource,
     UnexpectedResponse,
+    SnapshotFile { path: PathBuf, message: String },
+}
+
+impl Error {
+    fn snapshot_file(path: &std::path::Path, error: impl fmt::Display) -> Self {
+        Self::SnapshotFile {
+            path: path.to_owned(),
+            message: error.to_string(),
+        }
+    }
 }
 
 impl fmt::Display for Error {
@@ -125,6 +195,7 @@ impl fmt::Display for Error {
             Self::Clock(message) => write!(formatter, "system clock failed: {message}"),
             Self::MissingMemorySource => formatter.write_str("snapshot does not contain rallocator memory telemetry"),
             Self::UnexpectedResponse => formatter.write_str("monitor returned an unexpected response"),
+            Self::SnapshotFile { path, message } => write!(formatter, "failed to open snapshot '{}': {message}", path.display()),
         }
     }
 }
@@ -135,7 +206,7 @@ impl std::error::Error for Error {
             Self::Io(error) => Some(error),
             Self::Protocol(error) => Some(error),
             Self::MemorySnapshot(error) => Some(error),
-            Self::Remote(_) | Self::Clock(_) | Self::MissingMemorySource | Self::UnexpectedResponse => None,
+            Self::Remote(_) | Self::Clock(_) | Self::MissingMemorySource | Self::UnexpectedResponse | Self::SnapshotFile { .. } => None,
         }
     }
 }
@@ -244,7 +315,7 @@ mod tests {
             },
         });
 
-        assert_eq!(output, b"\x1b[?1049l");
+        assert!(output.ends_with(b"\x1b[?1049l"));
         assert!(raw_mode_disabled.get());
     }
 }

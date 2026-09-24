@@ -32,6 +32,19 @@ silently interpreting them as the current layout.
 Hot-path task, poll, transfer, and I/O methods update atomics and write the
 calling thread’s bounded Seismograph ring without formatting or allocation.
 
+## Recording
+
+Linking this crate does not instrument a runtime automatically. The runtime
+must register itself and its workers and call the task instrumentation APIs.
+Registration makes runtime metadata and counters available in snapshots even
+when event recording is disabled. Event recording additionally requires
+[`seismograph::recorder::Configuration::runtime_tasks`][__link3] to be enabled; enabling
+general events alone does not enable runtime events.
+
+Recording can be enabled after runtimes and tasks have started. Subsequent
+events are recorded, but earlier lifecycle events are not replayed. Runtime
+metadata in the snapshot still describes those pre-existing registrations.
+
 ```rust
 use seismograph_runtime::RuntimeMetadata;
 use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
@@ -47,7 +60,8 @@ worker.attach_current_thread();
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seismograph_runtime">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbGuCr4V5oEbkbU68wP3quWdYbTmP3Q-7aH4kbtcnOqiKEc39hZIKCa3NlaXNtb2dyYXBoZTAuMS4wgnNzZWlzbW9ncmFwaF9ydW50aW1lZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbKsogrckyB14bRGpG1g3BfWEbj9gLU0B1t9Ebq6j_ZIOy_h9hZIKCa3NlaXNtb2dyYXBoZTAuMS4wgnNzZWlzbW9ncmFwaF9ydW50aW1lZTAuMS4w
  [__link0]: https://crates.io/crates/seismograph/0.1.0
  [__link1]: https://docs.rs/seismograph_runtime/0.1.0/seismograph_runtime/?search=snapshot::source::ID
  [__link2]: https://docs.rs/seismograph_runtime/0.1.0/seismograph_runtime/?search=snapshot::decode
+ [__link3]: https://docs.rs/seismograph/0.1.0/seismograph/?search=recorder::Configuration::runtime_tasks

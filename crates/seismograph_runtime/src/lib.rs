@@ -20,6 +20,19 @@
 //! Hot-path task, poll, transfer, and I/O methods update atomics and write the
 //! calling thread's bounded Seismograph ring without formatting or allocation.
 //!
+//! # Recording
+//!
+//! Linking this crate does not instrument a runtime automatically. The runtime
+//! must register itself and its workers and call the task instrumentation APIs.
+//! Registration makes runtime metadata and counters available in snapshots even
+//! when event recording is disabled. Event recording additionally requires
+//! [`seismograph::recorder::Configuration::runtime_tasks`] to be enabled; enabling
+//! general events alone does not enable runtime events.
+//!
+//! Recording can be enabled after runtimes and tasks have started. Subsequent
+//! events are recorded, but earlier lifecycle events are not replayed. Runtime
+//! metadata in the snapshot still describes those pre-existing registrations.
+//!
 //! ```
 //! use seismograph_runtime::RuntimeMetadata;
 //! use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
@@ -626,11 +639,19 @@ fn complete_task(
     terminal_counter: &AtomicU64,
     backtrace: BacktraceCapture,
 ) {
+    let suppression = SuppressionGuard::enter();
+    let removed = {
+        let mut tasks = lock(&control.tasks);
+        let previous_len = tasks.len();
+        tasks.retain(|task| task.id != task_id);
+        tasks.len() != previous_len
+    };
+    drop(suppression);
+    if !removed {
+        return;
+    }
     decrement_saturating(&control.counters.live_tasks);
     terminal_counter.fetch_add(1, Ordering::Relaxed);
-    let suppression = SuppressionGuard::enter();
-    lock(&control.tasks).retain(|task| task.id != task_id);
-    drop(suppression);
     record_now(control, worker_id, kind, task_id.get(), 0, 0, 0, backtrace);
 }
 
@@ -869,6 +890,95 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_terminal_callback_is_ignored() {
+        let _test = test_lock();
+        seismograph::recorder(seismograph::recorder::Configuration {
+            runtime_tasks: seismograph::recorder::RecordingPolicy {
+                enabled: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let runtime = register_runtime(RuntimeMetadata::new("duplicate-terminal", 1));
+        let runtime_id = runtime.id();
+        let task = runtime.handle().task_spawned(type_descriptor_id(1), None);
+
+        runtime.handle().task_completed(task, None);
+        runtime.handle().task_completed(task, None);
+
+        assert_eq!(
+            runtime.counters().snapshot(),
+            Counters {
+                spawned_tasks: 1,
+                completed_tasks: 1,
+                ..Counters::default()
+            }
+        );
+        let events = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+        let terminal_events = seismograph::snapshot::decode(events.as_bytes())
+            .unwrap()
+            .events
+            .events
+            .into_iter()
+            .filter(|event| event.kind == EventKind::TaskCompleted)
+            .filter_map(|event| event.runtime())
+            .filter(|event| event.runtime_id == runtime_id && event.subject_id == task.get())
+            .count();
+        assert_eq!(terminal_events, 1);
+        seismograph::recorder(seismograph::recorder::Configuration::default());
+    }
+
+    #[test]
+    fn unknown_terminal_callback_is_ignored() {
+        let _test = test_lock();
+        seismograph::recorder(seismograph::recorder::Configuration {
+            runtime_tasks: seismograph::recorder::RecordingPolicy {
+                enabled: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let runtime = register_runtime(RuntimeMetadata::new("unknown-terminal", 1));
+        let runtime_id = runtime.id();
+        let live_task = runtime.handle().task_spawned(type_descriptor_id(1), None);
+        let unknown_task = TaskId::from_raw(u64::MAX).unwrap();
+
+        runtime.handle().task_canceled(unknown_task, None);
+
+        assert_eq!(
+            runtime.counters().snapshot(),
+            Counters {
+                spawned_tasks: 1,
+                live_tasks: 1,
+                ..Counters::default()
+            }
+        );
+        let snapshot = source_snapshot();
+        assert!(
+            snapshot
+                .runtimes
+                .iter()
+                .find(|runtime| runtime.id == runtime_id)
+                .unwrap()
+                .tasks
+                .iter()
+                .any(|task| task.id == live_task)
+        );
+        let events = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+        let terminal_events = seismograph::snapshot::decode(events.as_bytes())
+            .unwrap()
+            .events
+            .events
+            .into_iter()
+            .filter(|event| event.kind == EventKind::TaskCanceled)
+            .filter_map(|event| event.runtime())
+            .filter(|event| event.runtime_id == runtime_id && event.subject_id == unknown_task.get())
+            .count();
+        assert_eq!(terminal_events, 0);
+        seismograph::recorder(seismograph::recorder::Configuration::default());
+    }
+
+    #[test]
     fn task_readiness_retains_first_wake_until_poll() {
         let _test = test_lock();
         seismograph::recorder(seismograph::recorder::Configuration {
@@ -977,6 +1087,51 @@ mod tests {
     }
 
     #[test]
+    fn existing_tasks_record_after_runtime_recording_is_enabled() {
+        let _test = test_lock();
+        seismograph::recorder(seismograph::recorder::Configuration::default());
+        let runtime = register_runtime(RuntimeMetadata::new("late-recording", 1));
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let worker = worker.handle();
+        worker.attach_current_thread();
+        let task = runtime.handle().register_task(type_descriptor_id(1), None);
+        let metadata = source_snapshot();
+        assert!(
+            metadata
+                .runtimes
+                .iter()
+                .any(|entry| { entry.id == runtime.id() && entry.tasks.iter().any(|entry| entry.id == task.id()) })
+        );
+
+        for capture_backtraces in [false, true] {
+            seismograph::recorder(seismograph::recorder::Configuration {
+                runtime_tasks: seismograph::recorder::RecordingPolicy::all(capture_backtraces),
+                ..Default::default()
+            });
+            task.woken();
+            let poll = task.poll_started(&worker);
+            task.poll_finished(&worker, poll);
+            let encoded = seismograph::snapshot(seismograph::snapshot::SnapshotOptions {
+                event_buffers: seismograph::snapshot::EventBufferDisposition::Release,
+            })
+            .unwrap();
+            let decoded = seismograph::snapshot::decode(encoded.as_bytes()).unwrap();
+            let events = decoded
+                .events
+                .events
+                .iter()
+                .filter(|event| event.runtime().is_some_and(|context| context.runtime_id == runtime.id()))
+                .map(|event| (event.kind, event.call_stack.is_empty()))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                events,
+                vec![(EventKind::TaskPollStarted, true), (EventKind::TaskPollFinished, true)]
+            );
+        }
+        seismograph::recorder(seismograph::recorder::Configuration::default());
+    }
+
+    #[test]
     fn typed_api_records_fixed_runtime_payloads() {
         let _test = test_lock();
         seismograph::recorder(seismograph::recorder::Configuration {
@@ -1047,19 +1202,34 @@ mod tests {
         });
         let runtime = register_runtime(RuntimeMetadata::new("lifecycle", 2).lifecycle_backtraces(BacktraceCapture::Always));
         let runtime_id = runtime.id();
-        let source = runtime.register_worker(WorkerMetadata::new(WorkerRole::Blocking));
-        let destination = runtime.register_worker(WorkerMetadata::new(WorkerRole::Io));
+        let source = runtime.register_worker(WorkerMetadata::new(WorkerRole::Blocking).processor_index(7));
+        let destination = runtime.register_worker(WorkerMetadata::new(WorkerRole::Io).processor_index(11));
         source.handle().parked();
         let parked = source_snapshot();
         let runtime_snapshot = parked.runtimes.iter().find(|candidate| candidate.id == runtime_id).unwrap();
         assert_eq!(
-            runtime_snapshot
-                .workers
-                .iter()
-                .find(|worker| worker.id == source.id())
-                .unwrap()
-                .state,
-            WorkerState::Parked
+            (
+                runtime_snapshot.name.as_str(),
+                runtime_snapshot.configured_workers,
+                runtime_snapshot.lifecycle_backtraces,
+                runtime_snapshot
+                    .workers
+                    .iter()
+                    .find(|worker| worker.id == source.id())
+                    .map(|worker| (worker.role, worker.state, worker.processor_index)),
+                runtime_snapshot
+                    .workers
+                    .iter()
+                    .find(|worker| worker.id == destination.id())
+                    .map(|worker| (worker.role, worker.state, worker.processor_index)),
+            ),
+            (
+                "lifecycle",
+                2,
+                BacktraceCapture::Always,
+                Some((WorkerRole::Blocking, WorkerState::Parked, Some(7))),
+                Some((WorkerRole::Io, WorkerState::Running, Some(11))),
+            )
         );
         source.handle().unparked();
         let running = source_snapshot();
@@ -1118,8 +1288,9 @@ mod tests {
             (
                 runtime.counters().snapshot().canceled_tasks,
                 runtime.counters().snapshot().panicked_tasks,
+                runtime.counters().snapshot().live_tasks,
             ),
-            (1, 2)
+            (1, 1, 1)
         );
         drop(source);
         drop(destination);
@@ -1159,10 +1330,16 @@ mod tests {
             .map(|(kind, _)| kind)
             .collect::<Vec<_>>();
         for expected in [
+            EventKind::RuntimeCreated,
+            EventKind::RuntimeStopping,
+            EventKind::WorkerParked,
             EventKind::WorkerUnparked,
+            EventKind::TransferStarted,
             EventKind::InstanceRelocated,
             EventKind::TransferFinished,
             EventKind::TaskMaterialized,
+            EventKind::TaskCanceled,
+            EventKind::TaskPanicked,
             EventKind::RuntimeStopped,
         ] {
             assert_eq!(

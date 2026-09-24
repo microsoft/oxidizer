@@ -659,6 +659,7 @@ unpadded
 unredacted
 unregister
 unregistered
+unregistering
 unregisters
 unresolvable
 unrounded
@@ -704,9 +705,16 @@ zerocopy
 backend's
 deallocated
 decommit
+decommits
+decommitted
+decommitting
 filename
 hoc
 rallocator
+rallocator's
+representability
+resize
+untracked
 subregions
 tunables
 unmappings
@@ -762,6 +770,11 @@ sharding
 zstd
 unsafety
 userland
+cgroup
+inbox
+loom_tests
+prewarming
+procfs
 WebIO
 WebSocket
 wiremock

@@ -19,6 +19,7 @@ use performables::sync::mutex::Mutex;
 rallocator::rallocator!();
 
 const REQUEST_WORKERS: usize = 8;
+const MAX_PENDING_COMPLETIONS: usize = REQUEST_WORKERS * 256;
 const ROUTE_COUNT: usize = 4_096;
 const REQUEST_INTERVAL: Duration = Duration::from_millis(10);
 const ROUTE_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
@@ -73,7 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let service = Arc::new(Service {
         routes: RwLock::new(build_routes(0)),
-        completions: Mutex::new(VecDeque::with_capacity(REQUEST_WORKERS * 64)),
+        completions: Mutex::new(VecDeque::with_capacity(MAX_PENDING_COMPLETIONS)),
         configuration: Arc::new(ConfigurationSnapshot {
             tenant: "telemetry-load-test".to_owned(),
             scoring_weights: (0..128).map(|index| f64::from(index) / 127.0).collect(),
@@ -200,18 +201,25 @@ fn route_request(service: &Arc<Service>, request: &Arc<Request>) -> (u32, u64, u
 
 fn publish_completion(service: &Arc<Service>, completion: Completion) {
     let mut completions = block_on(service.completions.lock());
+    if completions.len() == MAX_PENDING_COMPLETIONS {
+        completions.pop_front();
+    }
     completions.push_back(completion);
-    if completions.len().is_multiple_of(64) {
-        serialize_completion_batch(&completions);
+    let batch_checksum = completions
+        .len()
+        .is_multiple_of(64)
+        .then(|| completion_batch_checksum(&completions));
+    drop(completions);
+    if let Some(checksum) = batch_checksum {
+        black_box(checksum);
+        thread::sleep(Duration::from_micros(250));
     }
 }
 
-fn serialize_completion_batch(completions: &VecDeque<Completion>) {
-    let checksum = completions.iter().rev().take(64).fold(0_u64, |value, completion| {
+fn completion_batch_checksum(completions: &VecDeque<Completion>) -> u64 {
+    completions.iter().rev().take(64).fold(0_u64, |value, completion| {
         value ^ completion.checksum ^ completion.request.id ^ u64::from(completion.partition) ^ completion.generation
-    });
-    black_box(checksum);
-    thread::sleep(Duration::from_micros(250));
+    })
 }
 
 fn routing_refresher(service: &Arc<Service>, start: &std::sync::Barrier) {
@@ -230,9 +238,11 @@ fn routing_refresher(service: &Arc<Service>, start: &std::sync::Barrier) {
 fn completion_consumer(service: &Arc<Service>, start: &std::sync::Barrier) {
     start.wait();
     loop {
-        let mut completions = block_on(service.completions.lock());
-        let drain_count = completions.len().min(128);
-        let drained = completions.drain(..drain_count).collect::<Vec<_>>();
+        let drained = {
+            let mut completions = block_on(service.completions.lock());
+            let drain_count = completions.len().min(128);
+            completions.drain(..drain_count).collect::<Vec<_>>()
+        };
         black_box(
             drained
                 .iter()
@@ -242,7 +252,6 @@ fn completion_consumer(service: &Arc<Service>, start: &std::sync::Barrier) {
         if !drained.is_empty() {
             thread::sleep(Duration::from_micros(400));
         }
-        drop(completions);
         thread::sleep(COMPLETION_POLL_INTERVAL);
     }
 }

@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 pub(super) struct CapturedSnapshot {
@@ -13,8 +14,10 @@ pub(super) struct CapturedSnapshot {
     pub(super) io: IoMonitorSnapshot,
     pub(super) cache: CacheMonitorSnapshot,
     pub(super) threads: ThreadSnapshot,
-    pub(super) captured_at: SystemTime,
-    pub(super) captured_instant: Instant,
+    pub(super) captured_at: Option<SystemTime>,
+    pub(super) captured_instant: Option<Instant>,
+    pub(super) filter_index: Option<Arc<super::filter_index::FilterIndex>>,
+    pub(super) filter_summary: super::filter_index::FilterSummary,
 }
 
 pub(super) struct RuntimeSnapshot {
@@ -26,22 +29,43 @@ pub(super) struct RuntimeSnapshot {
 }
 
 impl RuntimeSnapshot {
+    #[cfg(test)]
     pub(super) fn from_events(
         decoded: &seismograph::snapshot::DecodedSnapshot,
         addresses: &[seismograph_rallocator::callers::AddressLookup],
         runtime_source: Option<&seismograph_runtime::snapshot::Snapshot>,
     ) -> Self {
+        Self::from_events_with_progress(decoded, addresses, runtime_source, &mut |_| {})
+    }
+
+    pub(super) fn from_events_with_progress(
+        decoded: &seismograph::snapshot::DecodedSnapshot,
+        addresses: &[seismograph_rallocator::callers::AddressLookup],
+        runtime_source: Option<&seismograph_runtime::snapshot::Snapshot>,
+        progress: &mut impl FnMut(super::snapshot::Phase),
+    ) -> Self {
+        use super::snapshot::Phase;
+        progress(Phase::Primitives);
+        let primitives = PrimitiveSnapshot::from_events(
+            decoded.events.total_events,
+            decoded.events.lost_events,
+            &decoded.events.events,
+            addresses,
+        );
+        progress(Phase::Runtime);
+        let runtime = RuntimeMonitorSnapshot::from_events(&decoded.events, runtime_source, addresses);
+        progress(Phase::Io);
+        let io = IoMonitorSnapshot::from_events(&decoded.events);
+        progress(Phase::Cache);
+        let cache = CacheMonitorSnapshot::from_events(&decoded.events);
+        progress(Phase::Threads);
+        let threads = ThreadSnapshot::from_events(&decoded.events, addresses);
         Self {
-            primitives: PrimitiveSnapshot::from_events(
-                decoded.events.total_events,
-                decoded.events.lost_events,
-                &decoded.events.events,
-                addresses,
-            ),
-            runtime: RuntimeMonitorSnapshot::from_events(&decoded.events, runtime_source, addresses),
-            io: IoMonitorSnapshot::from_events(&decoded.events),
-            cache: CacheMonitorSnapshot::from_events(&decoded.events),
-            threads: ThreadSnapshot::from_events(&decoded.events, addresses),
+            primitives,
+            runtime,
+            io,
+            cache,
+            threads,
         }
     }
 }
@@ -51,6 +75,8 @@ pub(super) struct RuntimeMonitorSnapshot {
     pub(super) total_events: u64,
     pub(super) retained_events: u64,
     pub(super) lost_events: u64,
+    pub(super) runtime_events: u64,
+    pub(super) source_present: bool,
     pub(super) workers: Vec<RuntimeWorkerSummary>,
 }
 
@@ -244,7 +270,7 @@ impl RuntimeMonitorSnapshot {
                 RuntimeWorkerSummary {
                     runtime_id,
                     runtime_name: worker.runtime_name,
-                    worker_id,
+                    worker_id: Some(worker_id),
                     role: worker.role,
                     state: worker.state,
                     thread_id: worker.thread_id,
@@ -261,17 +287,33 @@ impl RuntimeMonitorSnapshot {
                 }
             })
             .collect::<Vec<_>>();
-        summaries.sort_unstable_by_key(|worker| (worker.runtime_id, worker.worker_id));
+        let mut unassigned = BTreeMap::<u64, RuntimeWorkerSummary>::new();
+        for (task_id, task) in tasks.iter().filter(|(_, task)| task.worker_ids.is_empty()) {
+            let group = unassigned.entry(task.runtime_id).or_insert_with(|| RuntimeWorkerSummary {
+                runtime_id: task.runtime_id,
+                runtime_name: source
+                    .and_then(|source| source.runtimes.iter().find(|runtime| runtime.id.get() == task.runtime_id))
+                    .map_or_else(|| format!("runtime #{}", task.runtime_id), |runtime| runtime.name.clone()),
+                role: "Unbound".into(),
+                state: "-".into(),
+                ..RuntimeWorkerSummary::default()
+            });
+            group.tasks.push(RuntimeTaskSummary::from_builder(*task_id, task));
+        }
+        summaries.extend(unassigned.into_values());
+        summaries.sort_unstable_by_key(|worker| (worker.runtime_id, worker.worker_id.is_none(), worker.worker_id));
         Self {
             total_events: events.total_events,
             retained_events: u64::try_from(events.events.len()).unwrap_or(u64::MAX),
             lost_events: events.lost_events,
+            runtime_events: u64::try_from(events.events.iter().filter(|event| event.runtime().is_some()).count()).unwrap_or(u64::MAX),
+            source_present: source.is_some(),
             workers: summaries,
         }
     }
 }
 
-fn runtime_task_id(kind: seismograph::recorder::event::EventKind, subject_id: u64, related_id: u64) -> Option<u64> {
+pub(super) fn runtime_task_id(kind: seismograph::recorder::event::EventKind, subject_id: u64, related_id: u64) -> Option<u64> {
     use seismograph::recorder::event::EventKind;
     match kind {
         EventKind::TaskSpawned
@@ -668,11 +710,11 @@ pub(super) const fn cache_event_label(kind: seismograph::recorder::event::EventK
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct RuntimeWorkerSummary {
     pub(super) runtime_id: u64,
     pub(super) runtime_name: String,
-    pub(super) worker_id: u64,
+    pub(super) worker_id: Option<u64>,
     pub(super) role: String,
     pub(super) state: String,
     pub(super) thread_id: Option<u64>,
@@ -921,9 +963,22 @@ impl PrimitiveSnapshot {
         addresses: &[seismograph_rallocator::callers::AddressLookup],
     ) -> Self {
         let lookups = addresses.iter().map(|lookup| (lookup.address, lookup)).collect::<HashMap<_, _>>();
+        let mut selected = [false; 256];
+        for kind in PrimitiveKind::ALL {
+            for operation in kind.operations() {
+                selected[usize::from(operation.event_kind().wire_value())] = true;
+            }
+        }
+        let mut events_by_kind: [Vec<&seismograph::recorder::event::Event>; 256] = std::array::from_fn(|_| Vec::new());
+        for event in events {
+            let kind = usize::from(event.kind.wire_value());
+            if selected[kind] {
+                events_by_kind[kind].push(event);
+            }
+        }
         let groups = PrimitiveKind::ALL
             .into_iter()
-            .map(|kind| PrimitiveGroup::from_events(kind, events, &lookups))
+            .map(|kind| PrimitiveGroup::from_events(kind, &events_by_kind, &lookups))
             .collect();
         Self {
             total_events,
@@ -945,19 +1000,28 @@ pub(super) struct PrimitiveGroup {
 impl PrimitiveGroup {
     fn from_events(
         kind: PrimitiveKind,
-        events: &[seismograph::recorder::event::Event],
+        events_by_kind: &[Vec<&seismograph::recorder::event::Event>; 256],
         lookups: &HashMap<u64, &seismograph_rallocator::callers::AddressLookup>,
     ) -> Self {
-        let object_ids = events
+        let object_ids = kind
+            .operations()
             .iter()
-            .filter(|event| kind.identifies(event.kind))
+            .filter(|operation| !operation.is_lock_poison())
+            .flat_map(|operation| &events_by_kind[usize::from(operation.event_kind().wire_value())])
             .filter_map(|event| event.object_id().map(seismograph::recorder::event::ObjectId::get))
             .collect::<HashSet<_>>();
         let operations = kind
             .operations()
             .iter()
             .copied()
-            .map(|operation| PrimitiveOperation::from_events(operation, events, lookups, &object_ids))
+            .map(|operation| {
+                PrimitiveOperation::from_events(
+                    operation,
+                    &events_by_kind[usize::from(operation.event_kind().wire_value())],
+                    lookups,
+                    &object_ids,
+                )
+            })
             .collect::<Vec<_>>();
         Self {
             kind,
@@ -1000,13 +1064,13 @@ pub(super) struct PrimitiveOperation {
 impl PrimitiveOperation {
     fn from_events(
         kind: PrimitiveOperationKind,
-        events: &[seismograph::recorder::event::Event],
+        events: &[&seismograph::recorder::event::Event],
         lookups: &HashMap<u64, &seismograph_rallocator::callers::AddressLookup>,
         object_ids: &HashSet<u64>,
     ) -> Self {
         let matching = events
             .iter()
-            .filter(|event| event.kind == kind.event_kind())
+            .copied()
             .filter(|event| !kind.is_lock_poison() || event.object_id().is_some_and(|object_id| object_ids.contains(&object_id.get())))
             .collect::<Vec<_>>();
         let objects = matching
@@ -1017,17 +1081,19 @@ impl PrimitiveOperation {
             .iter()
             .map(|event| event.thread_id.get())
             .collect::<std::collections::HashSet<_>>();
-        let mut totals = HashMap::<Vec<u64>, u64>::new();
+        let mut totals = HashMap::<&[seismograph::recorder::event::Address], u64>::new();
         for event in &matching {
-            let stack = event.call_stack.iter().map(|address| address.get()).collect::<Vec<_>>();
-            *totals.entry(stack).or_default() += 1;
+            *totals.entry(&event.call_stack).or_default() += 1;
         }
         let mut hotspots = totals
             .into_iter()
-            .map(|(stack, count)| PrimitiveHotspot {
-                count,
-                application_stack: primitive_stack(&stack, lookups, AllocationStackFilter::Application),
-                complete_stack: primitive_stack(&stack, lookups, AllocationStackFilter::All),
+            .map(|(stack, count)| {
+                let stack = stack.iter().map(|address| address.get()).collect::<Vec<_>>();
+                PrimitiveHotspot {
+                    count,
+                    application_stack: primitive_stack(&stack, lookups, AllocationStackFilter::Application),
+                    complete_stack: primitive_stack(&stack, lookups, AllocationStackFilter::All),
+                }
             })
             .collect::<Vec<_>>();
         hotspots.sort_unstable_by_key(|hotspot| std::cmp::Reverse(hotspot.count));
@@ -1107,6 +1173,7 @@ impl PrimitiveKind {
         }
     }
 
+    #[cfg(test)]
     fn identifies(self, kind: seismograph::recorder::event::EventKind) -> bool {
         self.operations()
             .iter()
@@ -1209,7 +1276,7 @@ impl PrimitiveOperationKind {
             Self::ChannelSend => "Send",
             Self::ChannelReceive => "Receive",
             Self::ChannelSendContention => "Send contention",
-            Self::ChannelReceiveContention => "Receive contention",
+            Self::ChannelReceiveContention => "Receive wait (empty)",
             Self::ChannelClose => "Close",
             Self::ChannelHighWatermark => "High watermark",
             Self::LockPoisoned => "Poisoned",
@@ -1270,7 +1337,6 @@ impl PrimitiveOperationKind {
                 | Self::CondvarContention
                 | Self::OnceContention
                 | Self::ChannelSendContention
-                | Self::ChannelReceiveContention
         )
     }
 }
@@ -1310,6 +1376,80 @@ pub(super) struct ThreadSnapshot {
 
 impl ThreadSnapshot {
     fn from_events(decoded: &seismograph::recorder::event::Events, addresses: &[seismograph_rallocator::callers::AddressLookup]) -> Self {
+        let mut operations_by_kind = [None; 256];
+        for (index, kind) in ThreadOperationKind::ALL.into_iter().enumerate() {
+            operations_by_kind[usize::from(kind.event_kind().wire_value())] = Some(index);
+        }
+        let mut threads = decoded
+            .threads
+            .iter()
+            .map(|thread| {
+                let mut summary = empty_thread_summary(thread.thread_id.get());
+                summary.name.clone_from(&thread.name);
+                summary.total_events = thread.total_events;
+                summary.lost_events = thread.lost_events;
+                (summary.thread_id, summary)
+            })
+            .collect::<HashMap<_, _>>();
+        let mut objects = Vec::new();
+        for event in &decoded.events {
+            let id = event.thread_id.get();
+            let thread = threads.entry(id).or_insert_with(|| empty_thread_summary(id));
+            thread.retained_events += 1;
+            if let Some(operation) = operations_by_kind[usize::from(event.kind.wire_value())] {
+                thread.operations[operation].events += 1;
+                if let Some(object) = event.object_id() {
+                    objects.push(ThreadObjectEvent {
+                        object_id: object.get(),
+                        event,
+                    });
+                }
+            }
+        }
+        // A flat index replaces per-object vectors and per-thread object maps. Cache the
+        // object ID beside the reference so sorting does not chase the full event payload.
+        objects.sort_unstable_by(|left, right| {
+            left.object_id
+                .cmp(&right.object_id)
+                .then_with(|| left.event.thread_id.get().cmp(&right.event.thread_id.get()))
+                .then_with(|| left.event.kind.wire_value().cmp(&right.event.kind.wire_value()))
+        });
+        let mut stacks = ThreadStacks::new(addresses);
+        let relations = accumulate_thread_objects(&objects, &mut threads, &operations_by_kind, &mut stacks);
+        for ((thread_id, operation, _), mut participant) in relations {
+            participant.objects.sort_unstable_by(|left, right| {
+                right
+                    .hotness()
+                    .cmp(&left.hotness())
+                    .then_with(|| right.related_events.cmp(&left.related_events))
+                    .then_with(|| left.object_id.cmp(&right.object_id))
+            });
+            threads
+                .get_mut(&thread_id)
+                .unwrap_or_else(|| unreachable!("relations only refer to indexed threads"))
+                .operations[operation]
+                .participants
+                .push(participant);
+        }
+        let mut threads = threads
+            .into_values()
+            .map(|mut thread| {
+                thread.total_events = thread.total_events.max(thread.retained_events);
+                for operation in &mut thread.operations {
+                    operation.participants.sort_unstable_by_key(|participant| participant.thread_id);
+                }
+                thread
+            })
+            .collect::<Vec<_>>();
+        threads.sort_unstable_by_key(|thread| thread.thread_id);
+        Self { threads }
+    }
+
+    #[cfg(test)]
+    fn from_events_reference(
+        decoded: &seismograph::recorder::event::Events,
+        addresses: &[seismograph_rallocator::callers::AddressLookup],
+    ) -> Self {
         #[derive(Default)]
         struct Metadata {
             name: String,
@@ -1317,7 +1457,7 @@ impl ThreadSnapshot {
             lost_events: u64,
         }
 
-        let lookups = addresses.iter().map(|lookup| (lookup.address, lookup)).collect::<HashMap<_, _>>();
+        let mut stacks = ThreadStacks::new(addresses);
         let mut metadata = decoded
             .threads
             .iter()
@@ -1348,7 +1488,7 @@ impl ThreadSnapshot {
                 let retained_events = u64::try_from(events.len()).unwrap_or(u64::MAX);
                 let operations = ThreadOperationKind::ALL
                     .into_iter()
-                    .map(|kind| ThreadOperation::from_events(kind, thread_id, events, &events_by_object, &decoded.threads, &lookups))
+                    .map(|kind| ThreadOperation::from_events(kind, events, &events_by_object, &decoded.threads, &mut stacks))
                     .collect();
                 ThreadSummary {
                     thread_id,
@@ -1362,6 +1502,85 @@ impl ThreadSnapshot {
             .collect();
         Self { threads }
     }
+}
+
+fn empty_thread_summary(thread_id: u64) -> ThreadSummary {
+    ThreadSummary {
+        thread_id,
+        name: String::new(),
+        total_events: 0,
+        retained_events: 0,
+        lost_events: 0,
+        operations: ThreadOperationKind::ALL
+            .into_iter()
+            .map(|kind| ThreadOperation {
+                kind,
+                events: 0,
+                objects: 0,
+                participants: Vec::new(),
+            })
+            .collect(),
+    }
+}
+
+struct ThreadObjectEvent<'a> {
+    object_id: u64,
+    event: &'a seismograph::recorder::event::Event,
+}
+
+fn accumulate_thread_objects<'a>(
+    objects: &[ThreadObjectEvent<'a>],
+    threads: &mut HashMap<u64, ThreadSummary>,
+    operations_by_kind: &[Option<usize>; 256],
+    stacks: &mut ThreadStacks<'a>,
+) -> HashMap<(u64, usize, u64), ThreadParticipant> {
+    let mut relations = HashMap::<(u64, usize, u64), ThreadParticipant>::new();
+    for object in objects.chunk_by(|left, right| left.object_id == right.object_id) {
+        for selected in object.chunk_by(|left, right| left.event.thread_id == right.event.thread_id && left.event.kind == right.event.kind)
+        {
+            let first = &selected[0];
+            let thread_id = first.event.thread_id.get();
+            let operation =
+                operations_by_kind[usize::from(first.event.kind.wire_value())].expect("the index contains only supported operation kinds");
+            let kind = ThreadOperationKind::ALL[operation];
+            threads
+                .get_mut(&thread_id)
+                .unwrap_or_else(|| unreachable!("all event threads were indexed"))
+                .operations[operation]
+                .objects += 1;
+            let mut selected_stacks = None;
+            for related in object.chunk_by(|left, right| left.event.thread_id == right.event.thread_id) {
+                let participant_id = related[0].event.thread_id.get();
+                let related_events = related
+                    .iter()
+                    .filter(|event| kind.is_related(event.event.kind))
+                    .map(|event| event.event);
+                let count = u64::try_from(related_events.clone().count()).unwrap_or(u64::MAX);
+                if count == 0 {
+                    continue;
+                }
+                let selected_stacks =
+                    selected_stacks.get_or_insert_with(|| thread_stacks(selected.iter().map(|event| event.event), kind, stacks));
+                let participant = relations
+                    .entry((thread_id, operation, participant_id))
+                    .or_insert_with(|| ThreadParticipant {
+                        thread_id: participant_id,
+                        name: threads.get(&participant_id).map_or_else(String::new, |thread| thread.name.clone()),
+                        events: 0,
+                        objects: Vec::new(),
+                    });
+                participant.events = participant.events.saturating_add(count);
+                participant.objects.push(ThreadObject {
+                    object_id: first.object_id,
+                    selected_events: u64::try_from(selected.len()).unwrap_or(u64::MAX),
+                    related_events: count,
+                    selected_stacks: selected_stacks.clone(),
+                    related_stacks: thread_stacks(related_events, kind, stacks),
+                });
+            }
+        }
+    }
+    relations
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1383,13 +1602,13 @@ pub(super) struct ThreadOperation {
 }
 
 impl ThreadOperation {
-    fn from_events(
+    #[cfg(test)]
+    fn from_events<'a>(
         kind: ThreadOperationKind,
-        thread_id: u64,
-        events: &[&seismograph::recorder::event::Event],
-        events_by_object: &HashMap<u64, Vec<&seismograph::recorder::event::Event>>,
+        events: &[&'a seismograph::recorder::event::Event],
+        events_by_object: &HashMap<u64, Vec<&'a seismograph::recorder::event::Event>>,
         thread_logs: &[seismograph::recorder::thread::ThreadLog],
-        lookups: &HashMap<u64, &seismograph_rallocator::callers::AddressLookup>,
+        stacks: &mut ThreadStacks<'a>,
     ) -> Self {
         #[derive(Default)]
         struct ParticipantTotal<'a> {
@@ -1402,15 +1621,17 @@ impl ThreadOperation {
             .copied()
             .filter(|event| event.kind == kind.event_kind())
             .collect::<Vec<_>>();
-        let objects = matching
-            .iter()
-            .filter_map(|event| event.object_id().map(seismograph::recorder::event::ObjectId::get))
-            .collect::<HashSet<_>>();
+        let mut selected_by_object = HashMap::<u64, Vec<&seismograph::recorder::event::Event>>::new();
+        for event in &matching {
+            if let Some(object_id) = event.object_id() {
+                selected_by_object.entry(object_id.get()).or_default().push(event);
+            }
+        }
         let mut totals = BTreeMap::<u64, ParticipantTotal<'_>>::new();
-        for object_id in &objects {
+        for object_id in selected_by_object.keys() {
             for event in events_by_object.get(object_id).into_iter().flatten() {
                 let participant_id = event.thread_id.get();
-                if participant_id == thread_id || !kind.is_related(event.kind) {
+                if !kind.is_related(event.kind) {
                     continue;
                 }
                 let total = totals.entry(participant_id).or_default();
@@ -1425,12 +1646,8 @@ impl ThreadOperation {
                     .objects
                     .into_iter()
                     .map(|(object_id, related_events)| {
-                        let selected_events = matching
-                            .iter()
-                            .copied()
-                            .filter(|event| event.object_id().is_some_and(|id| id.get() == object_id))
-                            .collect::<Vec<_>>();
-                        ThreadObject::from_events(kind, object_id, &selected_events, &related_events, lookups)
+                        let selected_events = selected_by_object.get(&object_id).map_or(&[][..], Vec::as_slice);
+                        ThreadObject::from_events(kind, object_id, selected_events, &related_events, stacks)
                     })
                     .collect::<Vec<_>>();
                 participant_objects.sort_unstable_by(|left, right| {
@@ -1454,7 +1671,7 @@ impl ThreadOperation {
         Self {
             kind,
             events: u64::try_from(matching.len()).unwrap_or(u64::MAX),
-            objects: u64::try_from(objects.len()).unwrap_or(u64::MAX),
+            objects: u64::try_from(selected_by_object.len()).unwrap_or(u64::MAX),
             participants,
         }
     }
@@ -1473,24 +1690,25 @@ pub(super) struct ThreadObject {
     pub(super) object_id: u64,
     pub(super) selected_events: u64,
     pub(super) related_events: u64,
-    selected_stacks: Vec<ThreadStack>,
-    related_stacks: Vec<ThreadStack>,
+    selected_stacks: ThreadStackSet,
+    related_stacks: ThreadStackSet,
 }
 
 impl ThreadObject {
-    fn from_events(
+    #[cfg(test)]
+    fn from_events<'a>(
         kind: ThreadOperationKind,
         object_id: u64,
-        selected_events: &[&seismograph::recorder::event::Event],
-        related_events: &[&seismograph::recorder::event::Event],
-        lookups: &HashMap<u64, &seismograph_rallocator::callers::AddressLookup>,
+        selected_events: &[&'a seismograph::recorder::event::Event],
+        related_events: &[&'a seismograph::recorder::event::Event],
+        stacks: &mut ThreadStacks<'a>,
     ) -> Self {
         Self {
             object_id,
             selected_events: u64::try_from(selected_events.len()).unwrap_or(u64::MAX),
             related_events: u64::try_from(related_events.len()).unwrap_or(u64::MAX),
-            selected_stacks: thread_stacks(selected_events.iter().copied(), kind, lookups),
-            related_stacks: thread_stacks(related_events.iter().copied(), kind, lookups),
+            selected_stacks: thread_stacks(selected_events.iter().copied(), kind, stacks),
+            related_stacks: thread_stacks(related_events.iter().copied(), kind, stacks),
         }
     }
 
@@ -1510,46 +1728,125 @@ impl ThreadObject {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct ThreadStack {
     pub(super) count: u64,
-    application_stack: Vec<String>,
-    complete_stack: Vec<String>,
+    frames: Arc<ThreadFrames>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ThreadFrames {
+    application: Vec<String>,
+    complete: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum ThreadStackSet {
+    Empty,
+    One(ThreadStack),
+    Many(Vec<ThreadStack>),
+}
+
+impl ThreadStackSet {
+    fn first(&self) -> Option<&ThreadStack> {
+        match self {
+            Self::Empty => None,
+            Self::One(stack) => Some(stack),
+            Self::Many(stacks) => stacks.first(),
+        }
+    }
+}
+
+impl From<Vec<ThreadStack>> for ThreadStackSet {
+    fn from(mut stacks: Vec<ThreadStack>) -> Self {
+        match stacks.len() {
+            0 => Self::Empty,
+            1 => Self::One(stacks.remove(0)),
+            _ => Self::Many(stacks),
+        }
+    }
 }
 
 impl ThreadStack {
     pub(super) fn stack(&self, filter: AllocationStackFilter) -> &[String] {
         match filter {
-            AllocationStackFilter::Application => &self.application_stack,
-            AllocationStackFilter::All => &self.complete_stack,
+            AllocationStackFilter::Application => &self.frames.application,
+            AllocationStackFilter::All => &self.frames.complete,
         }
+    }
+}
+
+/// Resolves each distinct stack once, even when millions of objects share it.
+struct ThreadStacks<'a> {
+    lookups: HashMap<u64, &'a seismograph_rallocator::callers::AddressLookup>,
+    allocation: HashMap<&'a [seismograph::recorder::event::Address], ThreadStack>,
+    primitive: HashMap<&'a [seismograph::recorder::event::Address], ThreadStack>,
+}
+
+impl<'a> ThreadStacks<'a> {
+    fn new(addresses: &'a [seismograph_rallocator::callers::AddressLookup]) -> Self {
+        Self {
+            lookups: addresses.iter().map(|lookup| (lookup.address, lookup)).collect(),
+            allocation: HashMap::new(),
+            primitive: HashMap::new(),
+        }
+    }
+
+    fn get(&mut self, addresses: &'a [seismograph::recorder::event::Address], kind: ThreadOperationKind, count: u64) -> ThreadStack {
+        let cache = if kind.is_allocation() {
+            &mut self.allocation
+        } else {
+            &mut self.primitive
+        };
+        let stack = cache.entry(addresses).or_insert_with(|| {
+            let addresses = addresses.iter().map(|address| address.get()).collect::<Vec<_>>();
+            let format = |filter| {
+                if kind.is_allocation() {
+                    hotspot_stack(&addresses, &self.lookups, filter)
+                } else {
+                    primitive_stack(&addresses, &self.lookups, filter)
+                }
+            };
+            ThreadStack {
+                count: 0,
+                frames: Arc::new(ThreadFrames {
+                    application: format(AllocationStackFilter::Application),
+                    complete: format(AllocationStackFilter::All),
+                }),
+            }
+        });
+        ThreadStack { count, ..stack.clone() }
     }
 }
 
 fn thread_stacks<'a>(
     events: impl Iterator<Item = &'a seismograph::recorder::event::Event>,
     kind: ThreadOperationKind,
-    lookups: &HashMap<u64, &seismograph_rallocator::callers::AddressLookup>,
-) -> Vec<ThreadStack> {
-    let mut totals = HashMap::<Vec<u64>, u64>::new();
-    for event in events {
-        let stack = event.call_stack.iter().map(|address| address.get()).collect::<Vec<_>>();
-        *totals.entry(stack).or_default() += 1;
-    }
-    let stack = |addresses: &[u64], filter| {
-        if kind.is_allocation() {
-            hotspot_stack(addresses, lookups, filter)
-        } else {
-            primitive_stack(addresses, lookups, filter)
-        }
+    cache: &mut ThreadStacks<'a>,
+) -> ThreadStackSet {
+    let mut events = events;
+    let Some(first) = events.next() else {
+        return ThreadStackSet::Empty;
     };
+    let mut count = 1;
+    let second = loop {
+        let Some(event) = events.next() else {
+            return ThreadStackSet::One(cache.get(&first.call_stack, kind, count));
+        };
+        if event.call_stack != first.call_stack {
+            break event;
+        }
+        count += 1;
+    };
+    let mut totals = HashMap::<&[seismograph::recorder::event::Address], u64>::new();
+    totals.insert(&first.call_stack, count);
+    totals.insert(&second.call_stack, 1);
+    for event in events {
+        *totals.entry(&event.call_stack).or_default() += 1;
+    }
     let mut stacks = totals
         .into_iter()
-        .map(|(addresses, count)| ThreadStack {
-            count,
-            application_stack: stack(&addresses, AllocationStackFilter::Application),
-            complete_stack: stack(&addresses, AllocationStackFilter::All),
-        })
+        .map(|(addresses, count)| cache.get(addresses, kind, count))
         .collect::<Vec<_>>();
     stacks.sort_unstable_by_key(|stack| std::cmp::Reverse(stack.count));
-    stacks
+    stacks.into()
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1658,7 +1955,7 @@ impl ThreadOperationKind {
             Self::ChannelSend => "Channel send",
             Self::ChannelSendContention => "Channel send contention",
             Self::ChannelReceive => "Channel receive",
-            Self::ChannelReceiveContention => "Channel receive contention",
+            Self::ChannelReceiveContention => "Channel receive wait (empty)",
             Self::ChannelClose => "Channel close",
             Self::ChannelHighWatermark => "Channel high watermark",
             Self::LockPoisoned => "Lock poisoned",
@@ -1672,26 +1969,32 @@ impl ThreadOperationKind {
             Self::Allocation => "Threads that deallocated these allocations",
             Self::Deallocation => "Threads that created these allocations",
             Self::ArcCreate | Self::ArcClone | Self::ArcDeref | Self::ArcDrop | Self::ArcRelocate => {
-                "Other threads observed on the same Arc objects"
+                "Threads (including self) observed on the same Arc objects"
             }
-            Self::MutexAccess | Self::MutexContention | Self::MutexRelease => "Other threads observed on the same Mutex objects",
+            Self::MutexAccess | Self::MutexContention | Self::MutexRelease => "Threads (including self) observed on the same Mutex objects",
             Self::RwLockReadAccess
             | Self::RwLockReadContention
             | Self::RwLockReadRelease
             | Self::RwLockWriteAccess
             | Self::RwLockWriteContention
-            | Self::RwLockWriteRelease => "Other threads observed on the same RwLock objects",
-            Self::BarrierAccess | Self::BarrierContention | Self::BarrierRelease => "Other threads observed on the same Barrier objects",
-            Self::CondvarAccess | Self::CondvarContention | Self::CondvarNotify => "Other threads observed on the same Condvar objects",
-            Self::OnceAccess | Self::OnceContention | Self::OnceInitialize => "Other threads observed on the same once-initialized objects",
+            | Self::RwLockWriteRelease => "Threads (including self) observed on the same RwLock objects",
+            Self::BarrierAccess | Self::BarrierContention | Self::BarrierRelease => {
+                "Threads (including self) observed on the same Barrier objects"
+            }
+            Self::CondvarAccess | Self::CondvarContention | Self::CondvarNotify => {
+                "Threads (including self) observed on the same Condvar objects"
+            }
+            Self::OnceAccess | Self::OnceContention | Self::OnceInitialize => {
+                "Threads (including self) observed on the same once-initialized objects"
+            }
             Self::ChannelSend
             | Self::ChannelSendContention
             | Self::ChannelReceive
             | Self::ChannelReceiveContention
             | Self::ChannelClose
-            | Self::ChannelHighWatermark => "Other threads observed on the same Channel objects",
+            | Self::ChannelHighWatermark => "Threads (including self) observed on the same Channel objects",
             Self::LockPoisoned | Self::LockPoisonObserved | Self::LockPoisonCleared => {
-                "Other threads observed on the same Mutex or RwLock objects"
+                "Threads (including self) observed on the same Mutex or RwLock objects"
             }
         }
     }
@@ -1706,7 +2009,6 @@ impl ThreadOperationKind {
                 | Self::CondvarContention
                 | Self::OnceContention
                 | Self::ChannelSendContention
-                | Self::ChannelReceiveContention
         )
     }
 
@@ -1870,6 +2172,7 @@ impl AllocationSort {
 pub(super) struct MemorySnapshot {
     pub(super) live_bytes: u64,
     pub(super) peak_live_bytes: u64,
+    pub(super) peak_live_bytes_scope: seismograph_rallocator::snapshot::PeakLiveBytesScope,
     pub(super) mapped_bytes: u64,
     pub(super) allocations: u64,
     pub(super) reserved_bytes: u64,
@@ -1997,16 +2300,36 @@ struct MemoryHotspotTotal {
 }
 
 #[derive(Default)]
-struct MemoryBucketTotal {
+struct MemoryBucketTotal<'a> {
     allocations: u64,
     allocated_bytes: u64,
     live_allocations: u64,
     live_bytes: u64,
-    hotspots: HashMap<Vec<u64>, MemoryHotspotTotal>,
+    hotspots: HashMap<&'a [u64], MemoryHotspotTotal>,
 }
 
 impl MemorySnapshot {
+    #[cfg(test)]
     pub(super) fn from_snapshot(snapshot: &seismograph_rallocator::snapshot::Snapshot) -> Self {
+        Self::from_snapshot_with_deallocated(snapshot, &deallocated_allocations(snapshot))
+    }
+
+    pub(super) fn from_snapshot_with_deallocated(
+        snapshot: &seismograph_rallocator::snapshot::Snapshot,
+        deallocated: &HashSet<(u64, u64)>,
+    ) -> Self {
+        Self::from_snapshot_with_events(
+            snapshot,
+            deallocated,
+            snapshot.callers.as_ref().map_or(&[], |callers| callers.events.as_slice()),
+        )
+    }
+
+    pub(super) fn from_snapshot_with_events(
+        snapshot: &seismograph_rallocator::snapshot::Snapshot,
+        deallocated: &HashSet<(u64, u64)>,
+        events: &[seismograph_rallocator::callers::Event],
+    ) -> Self {
         let mut small_slices = 0;
         let mut medium_slices = 0;
         let mut bump_slices = 0;
@@ -2050,10 +2373,11 @@ impl MemorySnapshot {
             })
             .collect::<Vec<_>>();
         size_classes.sort_unstable_by_key(|class| class.block_bytes);
-        let tiers = memory_tiers(snapshot, &size_classes, &medium_allocations);
+        let tiers = memory_tiers(snapshot, &size_classes, &medium_allocations, deallocated, events);
         Self {
             live_bytes: snapshot.stats.live_bytes,
             peak_live_bytes: snapshot.stats.peak_live_bytes,
+            peak_live_bytes_scope: snapshot.stats.peak_live_bytes_scope,
             mapped_bytes: snapshot.stats.mapped_bytes,
             allocations: snapshot.stats.allocations,
             reserved_bytes: snapshot.regions.iter().map(|region| region.reserved_bytes).sum(),
@@ -2085,13 +2409,15 @@ fn memory_tiers(
     snapshot: &seismograph_rallocator::snapshot::Snapshot,
     size_classes: &[MemorySizeClass],
     medium_allocations: &MediumAllocations,
+    deallocated: &HashSet<(u64, u64)>,
+    events: &[seismograph_rallocator::callers::Event],
 ) -> Vec<MemoryTierData> {
     let lookups = snapshot
         .addresses
         .iter()
         .map(|lookup| (lookup.address, lookup))
         .collect::<HashMap<_, _>>();
-    let mut totals = retained_memory_totals(snapshot, size_classes);
+    let mut totals = retained_memory_totals(snapshot, size_classes, deallocated, events);
     let small_current_allocations = size_classes.iter().map(|class| class.live_allocations).sum();
     let small_current_bytes = size_classes.iter().map(|class| class.requested_bytes).sum();
     MemoryTier::ALL
@@ -2148,28 +2474,21 @@ fn memory_tiers(
         .collect()
 }
 
-fn retained_memory_totals(
+fn retained_memory_totals<'a>(
     snapshot: &seismograph_rallocator::snapshot::Snapshot,
     size_classes: &[MemorySizeClass],
-) -> BTreeMap<MemoryTier, BTreeMap<u64, MemoryBucketTotal>> {
+    deallocated: &HashSet<(u64, u64)>,
+    events: &'a [seismograph_rallocator::callers::Event],
+) -> BTreeMap<MemoryTier, BTreeMap<u64, MemoryBucketTotal<'a>>> {
     use seismograph_rallocator::callers::EventKind;
 
     const MAX_SMALL_ALIGNMENT_BYTES: u64 = 4 * 1024;
 
-    let Some(callers) = &snapshot.callers else {
-        return BTreeMap::new();
-    };
-    let deallocated = callers
-        .events
-        .iter()
-        .filter(|event| event.kind == EventKind::Deallocated)
-        .map(|event| (event.thread_log_id, event.allocation_id))
-        .collect::<HashSet<_>>();
     let maximum_small = size_classes.last().map_or(0, |class| class.block_bytes);
     let medium_slice = snapshot.topology.first().map_or(64 * 1024, |region| region.slice_bytes);
     let medium_region = snapshot.topology.first().map_or(1024 * 1024 * 1024, |region| region.region_bytes);
     let mut totals = BTreeMap::<MemoryTier, BTreeMap<u64, MemoryBucketTotal>>::new();
-    for event in callers.events.iter().filter(|event| event.kind == EventKind::Allocated) {
+    for event in events.iter().filter(|event| event.kind == EventKind::Allocated) {
         let tier = allocation_tier(
             event.size,
             event.align,
@@ -2188,7 +2507,7 @@ fn retained_memory_totals(
         let total = totals.entry(tier).or_default().entry(bucket).or_default();
         total.allocations = total.allocations.saturating_add(1);
         total.allocated_bytes = total.allocated_bytes.saturating_add(event.size);
-        let hotspot = total.hotspots.entry(event.call_stack.clone()).or_default();
+        let hotspot = total.hotspots.entry(&event.call_stack).or_default();
         hotspot.allocations = hotspot.allocations.saturating_add(1);
         hotspot.allocated_bytes = hotspot.allocated_bytes.saturating_add(event.size);
         if !deallocated.contains(&(event.thread_log_id, event.allocation_id)) {
@@ -2243,7 +2562,7 @@ fn histogram_bounds(bucket: u64) -> (u64, u64) {
 fn memory_bucket(
     lower_bytes: u64,
     upper_bytes: u64,
-    total: MemoryBucketTotal,
+    total: MemoryBucketTotal<'_>,
     lookups: &HashMap<u64, &seismograph_rallocator::callers::AddressLookup>,
 ) -> MemoryBucket {
     let mut hotspots = total
@@ -2254,8 +2573,8 @@ fn memory_bucket(
             allocated_bytes: total.allocated_bytes,
             live_allocations: total.live_allocations,
             live_bytes: total.live_bytes,
-            application_stack: hotspot_stack(&stack, lookups, AllocationStackFilter::Application),
-            complete_stack: hotspot_stack(&stack, lookups, AllocationStackFilter::All),
+            application_stack: hotspot_stack(stack, lookups, AllocationStackFilter::Application),
+            complete_stack: hotspot_stack(stack, lookups, AllocationStackFilter::All),
         })
         .collect::<Vec<_>>();
     hotspots.sort_unstable_by(|left, right| {
@@ -2279,8 +2598,40 @@ fn memory_bucket(
     }
 }
 
+pub(super) fn deallocated_allocations(snapshot: &seismograph_rallocator::snapshot::Snapshot) -> HashSet<(u64, u64)> {
+    // Remote frees carry the allocating owner's key but the freeing thread's sequence,
+    // so the encoded order does not guarantee that allocations precede deallocations.
+    snapshot
+        .callers
+        .iter()
+        .flat_map(|callers| &callers.events)
+        .filter(|event| event.kind == seismograph_rallocator::callers::EventKind::Deallocated)
+        .map(|event| (event.thread_log_id, event.allocation_id))
+        .collect()
+}
+
 impl AllocationSnapshot {
+    #[cfg(test)]
     pub(super) fn from_snapshot(snapshot: &seismograph_rallocator::snapshot::Snapshot) -> Self {
+        Self::from_snapshot_with_deallocated(snapshot, &deallocated_allocations(snapshot))
+    }
+
+    pub(super) fn from_snapshot_with_deallocated(
+        snapshot: &seismograph_rallocator::snapshot::Snapshot,
+        deallocated: &HashSet<(u64, u64)>,
+    ) -> Self {
+        Self::from_snapshot_with_events(
+            snapshot,
+            deallocated,
+            snapshot.callers.as_ref().map_or(&[], |callers| callers.events.as_slice()),
+        )
+    }
+
+    pub(super) fn from_snapshot_with_events(
+        snapshot: &seismograph_rallocator::snapshot::Snapshot,
+        deallocated: &HashSet<(u64, u64)>,
+        events: &[seismograph_rallocator::callers::Event],
+    ) -> Self {
         use seismograph_rallocator::callers::EventKind;
 
         #[derive(Default)]
@@ -2300,22 +2651,15 @@ impl AllocationSnapshot {
                 hotspots: Vec::new(),
             };
         };
-        let mut totals = HashMap::<Vec<u64>, Total>::new();
-        let mut live = HashMap::<(u64, u64), (Vec<u64>, u64)>::new();
-        for event in &callers.events {
-            if event.kind == EventKind::Allocated {
-                let total = totals.entry(event.call_stack.clone()).or_default();
-                total.allocations = total.allocations.saturating_add(1);
-                total.allocated_bytes = total.allocated_bytes.saturating_add(event.size);
-                live.insert((event.thread_log_id, event.allocation_id), (event.call_stack.clone(), event.size));
-            } else if event.kind == EventKind::Deallocated {
-                live.remove(&(event.thread_log_id, event.allocation_id));
+        let mut totals = HashMap::<&[u64], Total>::new();
+        for event in events.iter().filter(|event| event.kind == EventKind::Allocated) {
+            let total = totals.entry(&event.call_stack).or_default();
+            total.allocations = total.allocations.saturating_add(1);
+            total.allocated_bytes = total.allocated_bytes.saturating_add(event.size);
+            if !deallocated.contains(&(event.thread_log_id, event.allocation_id)) {
+                total.live_allocations = total.live_allocations.saturating_add(1);
+                total.live_bytes = total.live_bytes.saturating_add(event.size);
             }
-        }
-        for (_, (stack, size)) in live {
-            let total = totals.entry(stack).or_default();
-            total.live_allocations = total.live_allocations.saturating_add(1);
-            total.live_bytes = total.live_bytes.saturating_add(size);
         }
         let lookups = snapshot
             .addresses
@@ -2325,8 +2669,8 @@ impl AllocationSnapshot {
         let mut hotspots = totals
             .into_iter()
             .map(|(stack, total)| {
-                let application_stack = hotspot_stack(&stack, &lookups, AllocationStackFilter::Application);
-                let complete_stack = hotspot_stack(&stack, &lookups, AllocationStackFilter::All);
+                let application_stack = hotspot_stack(stack, &lookups, AllocationStackFilter::Application);
+                let complete_stack = hotspot_stack(stack, &lookups, AllocationStackFilter::All);
                 AllocationHotspot {
                     allocations: total.allocations,
                     allocated_bytes: total.allocated_bytes,
@@ -2347,7 +2691,7 @@ impl AllocationSnapshot {
         Self {
             thread_count: u64::try_from(callers.threads.len()).unwrap_or(u64::MAX),
             total_events: callers.total_events,
-            retained_events: u64::try_from(callers.events.len()).unwrap_or(u64::MAX),
+            retained_events: u64::try_from(events.len()).unwrap_or(u64::MAX),
             lost_events: callers.lost_events,
             hotspots,
         }
@@ -2689,7 +3033,7 @@ mod tests {
                 "Send",
                 "Send contention",
                 "Receive",
-                "Receive contention",
+                "Receive wait (empty)",
                 "Close",
                 "High watermark",
                 "Poisoned",
@@ -2730,7 +3074,7 @@ mod tests {
         );
         assert_eq!(
             ThreadOperationKind::MutexAccess.relationship_label(),
-            "Other threads observed on the same Mutex objects"
+            "Threads (including self) observed on the same Mutex objects"
         );
         assert_eq!(
             (
@@ -2767,13 +3111,83 @@ mod tests {
         ];
 
         assert_eq!(
-            thread_stacks(events.iter(), ThreadOperationKind::ArcClone, &HashMap::new()),
-            vec![ThreadStack {
+            thread_stacks(events.iter(), ThreadOperationKind::ArcClone, &mut ThreadStacks::new(&[])),
+            ThreadStackSet::One(ThreadStack {
                 count: 2,
-                application_stack: vec!["0x0000000000001000".into()],
-                complete_stack: vec!["0x0000000000001000".into()],
-            }]
+                frames: Arc::new(ThreadFrames {
+                    application: vec!["0x0000000000001000".into()],
+                    complete: vec!["0x0000000000001000".into()],
+                }),
+            })
         );
+    }
+
+    #[test]
+    fn empty_thread_events_have_no_representative_stack() {
+        let stacks = thread_stacks(std::iter::empty(), ThreadOperationKind::ArcClone, &mut ThreadStacks::new(&[]));
+        assert_eq!((stacks.first(), &stacks), (None, &ThreadStackSet::Empty));
+    }
+
+    #[test]
+    fn compact_stack_sets_preserve_the_first_stack_and_order() {
+        let stack = |count| ThreadStack {
+            count,
+            frames: Arc::new(ThreadFrames {
+                application: vec!["application::run".into()],
+                complete: vec!["application::run".into()],
+            }),
+        };
+        let first = stack(3);
+        let second = stack(1);
+        let empty = ThreadStackSet::from(Vec::new());
+        let one = ThreadStackSet::from(vec![first.clone()]);
+        let many = ThreadStackSet::from(vec![first.clone(), second.clone()]);
+        assert_eq!(
+            (empty, one, many.first(), &many),
+            (
+                ThreadStackSet::Empty,
+                ThreadStackSet::One(first.clone()),
+                Some(&first),
+                &ThreadStackSet::Many(vec![first.clone(), second]),
+            ),
+        );
+    }
+
+    #[test]
+    fn unrelated_operations_on_the_same_object_do_not_link_threads() {
+        let events = Events {
+            events: [RuntimeEventKind::ArcClone, RuntimeEventKind::MutexAccess]
+                .into_iter()
+                .enumerate()
+                .map(|(index, kind)| RuntimeEvent {
+                    thread_id: ThreadId::new(u64::try_from(index).unwrap() + 1),
+                    sequence: EventSequence::new(1),
+                    timestamp: EventTimestamp::from_ticks(1),
+                    kind,
+                    payload: EventPayload::Object(ObjectId::new(7)),
+                    call_stack: Vec::new(),
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let snapshot = ThreadSnapshot::from_events(&events, &[]);
+        let operations = snapshot
+            .threads
+            .iter()
+            .flat_map(|thread| &thread.operations)
+            .filter(|operation| operation.events > 0)
+            .map(|operation| (operation.events, operation.objects, operation.participants.len()))
+            .collect::<Vec<_>>();
+        assert_eq!(operations, [(1, 1, 1), (1, 1, 1)]);
+        for thread in &snapshot.threads {
+            assert!(
+                thread
+                    .operations
+                    .iter()
+                    .flat_map(|operation| &operation.participants)
+                    .all(|participant| { participant.thread_id == thread.thread_id })
+            );
+        }
     }
 
     #[test]
@@ -2821,6 +3235,101 @@ mod tests {
                 "0x0000000000000004".to_owned(),
             )
         );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "quadratic differential stress test requires native execution")]
+    fn thread_object_index_matches_reference_for_every_operation_and_event_order() {
+        let mut events = Vec::new();
+        for object in 1..=16 {
+            for thread in 1..=4 {
+                for (index, kind) in ThreadOperationKind::ALL.into_iter().enumerate() {
+                    for repetition in 0..=(index % 3) {
+                        events.push(RuntimeEvent {
+                            thread_id: ThreadId::new(thread),
+                            sequence: EventSequence::new(u64::try_from(events.len()).unwrap()),
+                            timestamp: EventTimestamp::from_ticks(1),
+                            kind: kind.event_kind(),
+                            payload: EventPayload::Object(ObjectId::new(object)),
+                            call_stack: vec![RuntimeAddress::new(0x1000 + u64::try_from(repetition % 2).unwrap())],
+                        });
+                    }
+                }
+            }
+        }
+        let mut decoded = Events {
+            events,
+            threads: vec![ThreadLog {
+                thread_id: ThreadId::new(99),
+                name: "empty thread".into(),
+                total_events: 12,
+                lost_events: 5,
+            }],
+            ..Default::default()
+        };
+        let canonical = |mut snapshot: ThreadSnapshot| {
+            for object in snapshot
+                .threads
+                .iter_mut()
+                .flat_map(|thread| &mut thread.operations)
+                .flat_map(|operation| &mut operation.participants)
+                .flat_map(|participant| &mut participant.objects)
+            {
+                for stacks in [&mut object.selected_stacks, &mut object.related_stacks] {
+                    if let ThreadStackSet::Many(stacks) = stacks {
+                        stacks.sort_unstable_by(|left, right| {
+                            left.count
+                                .cmp(&right.count)
+                                .then_with(|| left.frames.complete.cmp(&right.frames.complete))
+                        });
+                    }
+                }
+            }
+            snapshot
+        };
+        for _ in 0..2 {
+            assert_eq!(
+                canonical(ThreadSnapshot::from_events(&decoded, &[])),
+                canonical(ThreadSnapshot::from_events_reference(&decoded, &[])),
+            );
+            decoded.events.reverse();
+        }
+    }
+
+    #[test]
+    fn thread_summary_shares_formatted_stacks_across_objects() {
+        let object_count = if cfg!(miri) { 32 } else { 2_000 };
+        let events = Events {
+            events: (1..=object_count)
+                .flat_map(|object| {
+                    [1, 2].map(|thread| RuntimeEvent {
+                        thread_id: ThreadId::new(thread),
+                        sequence: EventSequence::new(object),
+                        timestamp: EventTimestamp::from_ticks(object),
+                        kind: RuntimeEventKind::ArcClone,
+                        payload: EventPayload::Object(ObjectId::new(object)),
+                        call_stack: vec![RuntimeAddress::new(0x1000)],
+                    })
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let snapshot = ThreadSnapshot::from_events(&events, &[]);
+        for thread in &snapshot.threads {
+            let operation = thread
+                .operations
+                .iter()
+                .find(|operation| operation.kind == ThreadOperationKind::ArcClone)
+                .unwrap();
+            let objects = &operation.participants[0].objects;
+            assert_eq!(
+                (operation.events, operation.objects, objects.len()),
+                (object_count, object_count, usize::try_from(object_count).unwrap())
+            );
+            let first = objects.first().unwrap().selected_stack().unwrap();
+            let last = objects.last().unwrap().related_stack().unwrap();
+            assert!(Arc::ptr_eq(&first.frames, &last.frames));
+        }
     }
 
     #[test]
@@ -2884,7 +3393,7 @@ mod tests {
         let worker = RuntimeWorkerSummary {
             runtime_id: 1,
             runtime_name: String::new(),
-            worker_id: 1,
+            worker_id: Some(1),
             role: String::new(),
             state: String::new(),
             thread_id: None,
@@ -3017,12 +3526,14 @@ mod tests {
             object_id: 1,
             selected_events: 2,
             related_events: 3,
-            selected_stacks: vec![ThreadStack {
+            selected_stacks: ThreadStackSet::One(ThreadStack {
                 count: 1,
-                application_stack: vec!["selected".into()],
-                complete_stack: vec!["selected-all".into()],
-            }],
-            related_stacks: Vec::new(),
+                frames: Arc::new(ThreadFrames {
+                    application: vec!["selected".into()],
+                    complete: vec!["selected-all".into()],
+                }),
+            }),
+            related_stacks: ThreadStackSet::Empty,
         };
 
         assert_eq!(
@@ -3050,7 +3561,7 @@ mod tests {
     #[test]
     fn retained_memory_totals_and_task_ids_handle_missing_inputs() {
         let snapshot = seismograph_rallocator::snapshot::Snapshot::new(seismograph_rallocator::snapshot::Version::new(1, 0, 0));
-        assert!(retained_memory_totals(&snapshot, &[]).is_empty());
+        assert!(retained_memory_totals(&snapshot, &[], &HashSet::new(), &[]).is_empty());
         let tier = MemoryTierData {
             kind: MemoryTier::Small,
             current_allocations: 0,
@@ -3145,6 +3656,52 @@ mod tests {
     }
 
     #[test]
+    fn workerless_lifecycle_events_remain_visible_without_a_runtime_source() {
+        let events = [RuntimeEventKind::TaskSpawned, RuntimeEventKind::TaskCanceled]
+            .into_iter()
+            .enumerate()
+            .map(|(index, kind)| RuntimeEvent {
+                thread_id: ThreadId::new(1),
+                sequence: EventSequence::new(u64::try_from(index).unwrap()),
+                timestamp: EventTimestamp::from_ticks(u64::try_from(index).unwrap() + 1),
+                kind,
+                payload: EventPayload::Runtime(RuntimeEventPayload {
+                    runtime_id: RuntimeId::from_raw(1).unwrap(),
+                    worker_id: None,
+                    subject_id: 10,
+                    related_id: 0,
+                    value_0: 42,
+                    value_1: 0,
+                }),
+                call_stack: Vec::new(),
+            })
+            .collect();
+        let snapshot = RuntimeMonitorSnapshot::from_events(
+            &Events {
+                events,
+                ..Events::default()
+            },
+            None,
+            &[],
+        );
+        let group = &snapshot.workers[0];
+        assert_eq!(
+            (
+                snapshot.runtime_events,
+                snapshot.source_present,
+                group.runtime_id,
+                group.worker_id,
+                group
+                    .tasks
+                    .iter()
+                    .map(|task| (task.task_id, task.state.as_str(), task.completed_at))
+                    .collect::<Vec<_>>(),
+            ),
+            (2, false, 1, None, vec![(10, "Canceled", Some(2))])
+        );
+    }
+
+    #[test]
     fn lifetime_task_ignores_retained_spawn_event() {
         let mut task = RuntimeTaskBuilder {
             metric_scope: RuntimeTaskMetricScope::Lifetime,
@@ -3202,7 +3759,7 @@ mod tests {
     fn memory_bucket_ranks_equal_counts_by_allocated_bytes() {
         let mut total = MemoryBucketTotal::default();
         total.hotspots.insert(
-            vec![1],
+            &[1],
             MemoryHotspotTotal {
                 allocations: 1,
                 allocated_bytes: 10,
@@ -3210,7 +3767,7 @@ mod tests {
             },
         );
         total.hotspots.insert(
-            vec![2],
+            &[2],
             MemoryHotspotTotal {
                 allocations: 1,
                 allocated_bytes: 20,
@@ -3369,6 +3926,7 @@ mod tests {
             MemorySnapshot {
                 live_bytes: 10,
                 peak_live_bytes: 20,
+                peak_live_bytes_scope: seismograph_rallocator::snapshot::PeakLiveBytesScope::Unavailable,
                 mapped_bytes: 30,
                 allocations: 40,
                 reserved_bytes: 1_024,
@@ -3609,6 +4167,48 @@ mod tests {
     }
 
     #[test]
+    fn allocation_liveness_pairs_remote_frees_before_allocations_by_owner_and_id() {
+        let mut snapshot = seismograph_rallocator::snapshot::Snapshot::new(seismograph_rallocator::snapshot::Version::new(0, 1, 0));
+        let event = |owner, thread, sequence, kind, size, stack| {
+            Event::from_fields(EventFields {
+                thread_log_id: owner,
+                event_thread_id: thread,
+                sequence,
+                allocation_id: 7,
+                kind,
+                heap_id: 1,
+                heap_kind: HeapKind::General,
+                freed_after_heap_release: false,
+                address: 0x1000,
+                size,
+                align: 8,
+                call_stack: vec![stack],
+            })
+        };
+        snapshot.callers = Some(Callers::from_fields(CallersFields {
+            session_id: 1,
+            total_events: 3,
+            lost_events: 0,
+            threads: Vec::new(),
+            events: vec![
+                event(1, 2, 1, EventKind::Deallocated, 65_536, 0x3000),
+                event(1, 1, 100, EventKind::Allocated, 65_536, 0x1000),
+                event(2, 2, 100, EventKind::Allocated, 32, 0x2000),
+            ],
+            thread_names: Vec::new(),
+        }));
+        let allocations = AllocationSnapshot::from_snapshot(&snapshot);
+        assert_eq!(
+            allocations
+                .hotspots
+                .iter()
+                .map(|hotspot| (hotspot.allocated_bytes, hotspot.live_allocations, hotspot.live_bytes))
+                .collect::<Vec<_>>(),
+            [(65_536, 0, 0), (32, 1, 32)],
+        );
+    }
+
+    #[test]
     fn allocation_snapshot_ranks_hotspots_by_count_then_bytes() {
         let mut snapshot = seismograph_rallocator::snapshot::Snapshot::new(seismograph_rallocator::snapshot::Version::new(0, 1, 0));
         let event = |allocation_id, kind, size, call_stack| {
@@ -3817,6 +4417,87 @@ mod tests {
         assert_eq!(
             snapshot.groups.iter().map(|group| group.contentions).collect::<Vec<_>>(),
             vec![0, 2, 2, 0, 0, 0, 0]
+        );
+    }
+
+    #[test]
+    fn channel_receive_waits_remain_visible_without_counting_as_contention() {
+        let events = [RuntimeEventKind::ChannelReceiveContention, RuntimeEventKind::ChannelSendContention]
+            .into_iter()
+            .map(|kind| RuntimeEvent {
+                thread_id: ThreadId::new(1),
+                sequence: EventSequence::new(1),
+                timestamp: EventTimestamp::from_ticks(1),
+                kind,
+                payload: EventPayload::Object(ObjectId::new(7)),
+                call_stack: Vec::new(),
+            })
+            .collect::<Vec<_>>();
+        let snapshot = PrimitiveSnapshot::from_events(2, 0, &events, &[]);
+        let channel = snapshot.groups.iter().find(|group| group.kind == PrimitiveKind::Channel).unwrap();
+        let receive = channel
+            .operations
+            .iter()
+            .find(|operation| operation.kind == PrimitiveOperationKind::ChannelReceiveContention)
+            .unwrap();
+        assert_eq!(
+            (channel.events, channel.contentions, receive.events, receive.kind.is_contention()),
+            (2, 1, 1, false)
+        );
+        assert!(!ThreadOperationKind::ChannelReceiveContention.is_contention());
+        assert!(ThreadOperationKind::ChannelSendContention.is_contention());
+    }
+
+    #[test]
+    fn thread_snapshot_links_same_thread_allocations_and_channels() {
+        let events = [
+            (10, RuntimeEventKind::Allocation),
+            (10, RuntimeEventKind::Deallocation),
+            (20, RuntimeEventKind::ChannelSend),
+            (20, RuntimeEventKind::ChannelReceive),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, (object, kind))| RuntimeEvent {
+            thread_id: ThreadId::new(1),
+            sequence: EventSequence::new(u64::try_from(index).unwrap()),
+            timestamp: EventTimestamp::from_ticks(1),
+            kind,
+            payload: EventPayload::Object(ObjectId::new(object)),
+            call_stack: vec![RuntimeAddress::new(0x1000)],
+        })
+        .collect();
+        let snapshot = ThreadSnapshot::from_events(
+            &Events {
+                events,
+                ..Events::default()
+            },
+            &[],
+        );
+        let interactions = snapshot.threads[0]
+            .operations
+            .iter()
+            .filter(|operation| operation.events > 0)
+            .map(|operation| {
+                let participant = &operation.participants[0];
+                let object = &participant.objects[0];
+                (
+                    operation.kind,
+                    participant.thread_id,
+                    object.object_id,
+                    object.selected_events,
+                    object.related_events,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            interactions,
+            [
+                (ThreadOperationKind::Allocation, 1, 10, 1, 1),
+                (ThreadOperationKind::Deallocation, 1, 10, 1, 1),
+                (ThreadOperationKind::ChannelSend, 1, 20, 1, 2),
+                (ThreadOperationKind::ChannelReceive, 1, 20, 1, 2),
+            ]
         );
     }
 
@@ -4088,7 +4769,7 @@ mod tests {
                 task.average_poll_nanos,
                 task.max_poll_nanos,
             ),
-            (2, 2, 300, 400, 0.75, 10, Some(42), 2, 600, 300, 400)
+            (Some(2), 2, 300, 400, 0.75, 10, Some(42), 2, 600, 300, 400)
         );
         assert_eq!(
             (
@@ -4317,8 +4998,9 @@ mod tests {
                 6,
                 998,
                 vec![
-                    (1, "runtime", 2, "Core", "Running", Some(7), Some(12), vec![10, 12]),
-                    (1, "runtime", 3, "Blocking", "Parked", None, None, Vec::new()),
+                    (1, "runtime", Some(2), "Core", "Running", Some(7), Some(12), vec![10, 12]),
+                    (1, "runtime", Some(3), "Blocking", "Parked", None, None, Vec::new()),
+                    (1, "runtime", None, "Unbound", "-", None, None, vec![11]),
                 ],
                 RuntimeTaskSummary {
                     task_id: 10,
@@ -4429,7 +5111,8 @@ mod tests {
                 .find(|operation| operation.kind == kind)
                 .unwrap()
                 .participants
-                .first()
+                .iter()
+                .find(|participant| participant.thread_id != snapshot.threads[thread].thread_id)
                 .unwrap()
         };
         let allocation = operation(0, ThreadOperationKind::Allocation);

@@ -26,7 +26,7 @@ use seismograph_rallocator::callers::{
 };
 use seismograph_rallocator::snapshot::{
     Domain as EncodedDomain, DomainFields as EncodedDomainFields, Estimate as EncodedEstimate, EstimateFields as EncodedEstimateFields,
-    Histograms as EncodedHistograms, HistogramsFields as EncodedHistogramsFields, Region as EncodedRegion,
+    Histograms as EncodedHistograms, HistogramsFields as EncodedHistogramsFields, PeakLiveBytesScope, Region as EncodedRegion,
     RegionFields as EncodedRegionFields, SizeClass as EncodedSizeClass, SizeClassFields as EncodedSizeClassFields,
     Snapshot as EncodedSnapshot, Stats as EncodedStats, StatsFields as EncodedStatsFields, Version,
 };
@@ -36,10 +36,9 @@ use seismograph_rallocator::topology::{
 };
 
 use crate::allocator::{enter_tracking_internal, restore_tracking_internal};
+use crate::cache_line::CacheLine;
 use crate::config::MAX_SIZE_CLASSES;
-use crate::hal;
 
-const SNAPSHOT_ARENA_CHUNK_BYTES: usize = 4 * 1024 * 1024;
 static RALLOCATOR_SOURCE: seismograph::snapshot::Source = seismograph::snapshot::Source::new(
     seismograph_rallocator::source::ID,
     seismograph_rallocator::source::NAME,
@@ -48,172 +47,39 @@ static RALLOCATOR_SOURCE: seismograph::snapshot::Source = seismograph::snapshot:
 );
 
 thread_local! {
-    static ACTIVE_SNAPSHOT_ARENA: Cell<*mut SnapshotArena> = const { Cell::new(ptr::null_mut()) };
-}
-
-#[repr(C)]
-struct SnapshotArenaChunk {
-    previous: *mut Self,
-    mapping_bytes: usize,
-    cursor: usize,
-    dedicated: bool,
-}
-
-struct SnapshotArena {
-    head: *mut SnapshotArenaChunk,
-    parent: *mut Self,
-}
-
-impl SnapshotArena {
-    const fn new() -> Self {
-        Self {
-            head: ptr::null_mut(),
-            parent: ptr::null_mut(),
-        }
-    }
-
-    fn allocate(&mut self, layout: Layout) -> *mut u8 {
-        let size = layout.size().max(1);
-        if !self.head.is_null() && !unsafe { (*self.head).dedicated } {
-            let address = unsafe { allocate_from_snapshot_chunk(self.head, size, layout.align()) };
-            if !address.is_null() {
-                return address;
-            }
-        }
-
-        let required_bytes = snapshot_required_bytes(layout, size);
-        let dedicated = required_bytes > SNAPSHOT_ARENA_CHUNK_BYTES / 2;
-        let mapping_bytes = if dedicated {
-            required_bytes
-        } else {
-            SNAPSHOT_ARENA_CHUNK_BYTES.max(required_bytes)
-        };
-        let mapping = hal::map(mapping_bytes);
-        if mapping.is_null() {
-            return ptr::null_mut();
-        }
-
-        let chunk = mapping.cast::<SnapshotArenaChunk>();
-        // SAFETY: hal::map returned a writable mapping of mapping_bytes, which is
-        // large enough for the header and requested allocation by construction.
-        unsafe {
-            chunk.write(SnapshotArenaChunk {
-                previous: self.head,
-                mapping_bytes,
-                cursor: size_of::<SnapshotArenaChunk>(),
-                dedicated,
-            });
-        }
-        self.head = chunk;
-        // SAFETY: chunk was initialized above and belongs exclusively to this arena.
-        unsafe { allocate_from_snapshot_chunk(chunk, size, layout.align()) }
-    }
-
-    fn deallocate(&mut self, address: *mut u8) -> bool {
-        let mut link = &raw mut self.head;
-        while !unsafe { *link }.is_null() {
-            let chunk = unsafe { *link };
-            let start = chunk.addr();
-            let end = start.saturating_add(unsafe { (*chunk).mapping_bytes });
-            if address.addr() >= start && address.addr() < end {
-                if unsafe { (*chunk).dedicated } {
-                    unsafe {
-                        *link = (*chunk).previous;
-                        hal::unmap(chunk.cast(), (*chunk).mapping_bytes);
-                    }
-                }
-                return true;
-            }
-            link = unsafe { &raw mut (*chunk).previous };
-        }
-
-        if self.parent.is_null() {
-            false
-        } else {
-            // SAFETY: nested arenas are stack-scoped on this thread, so the parent
-            // remains alive and is not accessed concurrently while the child is active.
-            unsafe { (*self.parent).deallocate(address) }
-        }
-    }
-}
-
-impl Drop for SnapshotArena {
-    fn drop(&mut self) {
-        let mut chunk = self.head;
-        while !chunk.is_null() {
-            let previous = unsafe { (*chunk).previous };
-            let mapping_bytes = unsafe { (*chunk).mapping_bytes };
-            // SAFETY: every chunk was obtained from hal::map by this arena and has
-            // not been unmapped unless it was first unlinked by deallocate.
-            unsafe { hal::unmap(chunk.cast(), mapping_bytes) };
-            chunk = previous;
-        }
-    }
+    static SNAPSHOT_ALLOCATION_DEPTH: Cell<usize> = const { Cell::new(0) };
 }
 
 struct SnapshotArenaActivation {
-    previous: *mut SnapshotArena,
+    depth_entered: bool,
 }
 
 impl Drop for SnapshotArenaActivation {
     fn drop(&mut self) {
-        let _ = ACTIVE_SNAPSHOT_ARENA.try_with(|active| active.set(self.previous));
+        if self.depth_entered {
+            // TLS destruction needs no restoration; never allocate while releasing this guard.
+            let _ = SNAPSHOT_ALLOCATION_DEPTH.try_with(|depth| depth.set(depth.get() - 1));
+        }
     }
-}
-
-#[cfg_attr(coverage_nightly, coverage(off))] // A valid Layout guarantees this calculation cannot overflow.
-fn snapshot_required_bytes(layout: Layout, size: usize) -> usize {
-    size_of::<SnapshotArenaChunk>()
-        .checked_add(layout.align() - 1)
-        .and_then(|bytes| bytes.checked_add(size))
-        .expect("Layout guarantees its padded size is representable")
-}
-
-unsafe fn allocate_from_snapshot_chunk(chunk: *mut SnapshotArenaChunk, size: usize, alignment: usize) -> *mut u8 {
-    let cursor = unsafe { (*chunk).cursor };
-    let Some(aligned) = cursor.checked_add(alignment - 1).map(|value| value & !(alignment - 1)) else {
-        return ptr::null_mut();
-    };
-    let Some(end) = aligned.checked_add(size) else {
-        return ptr::null_mut();
-    };
-    if end > unsafe { (*chunk).mapping_bytes } {
-        return ptr::null_mut();
-    }
-    unsafe { (*chunk).cursor = end };
-    unsafe { chunk.cast::<u8>().add(aligned) }
 }
 
 pub(crate) fn with_snapshot_arena<R>(operation: impl FnOnce() -> R) -> R {
-    let mut arena = SnapshotArena::new();
-    let previous = ACTIVE_SNAPSHOT_ARENA
-        .try_with(|active| {
-            let previous = active.get();
-            arena.parent = previous;
-            active.set(ptr::from_mut(&mut arena));
-            previous
+    let depth_entered = SNAPSHOT_ALLOCATION_DEPTH
+        .try_with(|depth| {
+            depth.set(
+                depth
+                    .get()
+                    .checked_add(1)
+                    .expect("snapshot activation depth fits within the thread stack"),
+            );
         })
-        .unwrap_or(ptr::null_mut());
-    let _activation = SnapshotArenaActivation { previous };
+        .is_ok();
+    let _activation = SnapshotArenaActivation { depth_entered };
     operation()
 }
 
-pub(crate) fn snapshot_arena_allocate(layout: Layout) -> Option<*mut u8> {
-    ACTIVE_SNAPSHOT_ARENA
-        .try_with(|active| {
-            let arena = active.get();
-            (!arena.is_null()).then(|| unsafe { (*arena).allocate(layout) })
-        })
-        .unwrap_or(None)
-}
-
-pub(crate) fn snapshot_arena_deallocate(address: *mut u8) -> bool {
-    ACTIVE_SNAPSHOT_ARENA
-        .try_with(|active| {
-            let arena = active.get();
-            !arena.is_null() && unsafe { (*arena).deallocate(address) }
-        })
-        .unwrap_or(false)
+pub(crate) fn snapshot_collection_active() -> bool {
+    SNAPSHOT_ALLOCATION_DEPTH.try_with(|depth| depth.get() != 0).unwrap_or(false)
 }
 
 /// A value with deterministic lower and upper bounds.
@@ -236,22 +102,30 @@ impl<T: Copy> Estimate<T> {
 
 /// Cheap lifetime aggregate statistics collected by the allocator.
 ///
-/// Fields are read from independent atomic counters. A value is memory-safe
-/// and individually valid, but it is not a transactional process-wide snapshot.
+/// Fields are independent observations, not a transactional process-wide snapshot.
+/// Pending and in-progress remote gauges remain single-atomic observations.
+/// Cumulative remote frees and drains fold 64 fixed slots with relaxed loads:
+/// they can be stale and need not equal a common-instant scalar total during the
+/// query. Synchronized quiescent totals are exact modulo `usize`; causally ordered
+/// folds do not regress without overflow. These two fields require 128 loads.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct Stats {
     pub allocated_bytes: usize,
     pub deallocated_bytes: usize,
     pub live_bytes: usize,
+    /// Maximum aggregate-query observation, not an allocation-time lifetime peak.
     pub peak_live_bytes: usize,
+    pub peak_live_bytes_scope: PeakLiveBytesScope,
     pub mapped_bytes: usize,
     pub os_mappings: usize,
     pub os_unmappings: usize,
     pub allocations: usize,
     pub deallocations: usize,
     pub remote_frees: usize,
+    /// Normal-list logical claims remove pending nodes before any recycling.
     pub pending_remote_blocks: usize,
     remote_pushes_in_progress: usize,
+    /// Cumulative logical claims, not physical reclamation or a quiescence proof.
     pub drained_remote_blocks: usize,
 }
 
@@ -312,16 +186,17 @@ impl std::fmt::Debug for SnapshotError {
 impl std::error::Error for SnapshotError {}
 
 static NEXT_ALLOCATION_ID: AtomicUsize = AtomicUsize::new(1);
-static AGGREGATES_AVAILABLE: AtomicBool = AtomicBool::new(false);
-static PEAK_LIVE_BYTES: AtomicUsize = AtomicUsize::new(0);
+static AGGREGATES_AVAILABLE: CacheLine<AtomicBool> = CacheLine::new(AtomicBool::new(false));
+// Retain the complete cell under LTO without making hot accesses indirect:
+// marking the atomic itself #[used] introduced an extra GOT load.
+#[used]
+static AGGREGATES_AVAILABLE_STORAGE: &CacheLine<AtomicBool> = &AGGREGATES_AVAILABLE;
+static SAMPLED_LIVE_BYTES_MAX: AtomicUsize = AtomicUsize::new(0);
 static MAPPED_BYTES: AtomicUsize = AtomicUsize::new(0);
 static BUMP_COMMITTED_BYTES: AtomicUsize = AtomicUsize::new(0);
 static OS_MAPPINGS: AtomicUsize = AtomicUsize::new(0);
 static OS_UNMAPPINGS: AtomicUsize = AtomicUsize::new(0);
-static REMOTE_FREES: AtomicUsize = AtomicUsize::new(0);
 static PENDING_REMOTE_BLOCKS: AtomicUsize = AtomicUsize::new(0);
-static REMOTE_PUSHES_IN_PROGRESS: AtomicUsize = AtomicUsize::new(0);
-static DRAINED_REMOTE_BLOCKS: AtomicUsize = AtomicUsize::new(0);
 #[cfg(test)]
 static PREPARE_ADDRESS_RESOLUTION_CALLS: AtomicUsize = AtomicUsize::new(0);
 const HISTOGRAM_BUCKETS: usize = usize::BITS as usize + 1;
@@ -333,6 +208,10 @@ static SIZE_CLASS_ALLOCATIONS: [AtomicUsize; MAX_SIZE_CLASSES] = [const { Atomic
 static SIZE_CLASS_DEALLOCATIONS: [AtomicUsize; MAX_SIZE_CLASSES] = [const { AtomicUsize::new(0) }; MAX_SIZE_CLASSES];
 static SIZE_CLASS_ALLOCATED_BYTES: [AtomicUsize; MAX_SIZE_CLASSES] = [const { AtomicUsize::new(0) }; MAX_SIZE_CLASSES];
 static SIZE_CLASS_DEALLOCATED_BYTES: [AtomicUsize; MAX_SIZE_CLASSES] = [const { AtomicUsize::new(0) }; MAX_SIZE_CLASSES];
+#[cfg(test)]
+mod availability_tests;
+#[cfg(test)]
+mod remote_accounting_tests;
 #[cfg(test)]
 pub(crate) static TEST_LOCK: Mutex<()> = Mutex::new(());
 thread_local! {
@@ -395,6 +274,13 @@ impl SizeClassAggregateSnapshot {
 }
 
 impl AggregateSnapshot {
+    fn add_shard(&mut self, shard: &AggregateShard) {
+        self.allocated_bytes = self.allocated_bytes.wrapping_add(shard.allocated_bytes.load(Ordering::Relaxed));
+        self.deallocated_bytes = self.deallocated_bytes.wrapping_add(shard.deallocated_bytes.load(Ordering::Relaxed));
+        self.allocations = self.allocations.wrapping_add(shard.allocations.load(Ordering::Relaxed));
+        self.deallocations = self.deallocations.wrapping_add(shard.deallocations.load(Ordering::Relaxed));
+    }
+
     const fn new() -> Self {
         Self {
             allocated_bytes: 0,
@@ -414,41 +300,56 @@ pub(crate) fn stats() -> Option<Stats> {
 }
 
 fn aggregate_stats(aggregates: &AggregateSnapshot) -> Stats {
+    aggregate_stats_with_memory(
+        aggregates,
+        MAPPED_BYTES.load(Ordering::Relaxed),
+        BUMP_COMMITTED_BYTES.load(Ordering::Relaxed),
+    )
+}
+
+fn aggregate_stats_with_memory(aggregates: &AggregateSnapshot, mapped_bytes: usize, bump_bytes: usize) -> Stats {
+    aggregate_stats_with_sampled_peak(aggregates, mapped_bytes, bump_bytes, &SAMPLED_LIVE_BYTES_MAX)
+}
+
+fn aggregate_stats_with_sampled_peak(
+    aggregates: &AggregateSnapshot,
+    mapped_bytes: usize,
+    bump_bytes: usize,
+    sampled_max: &AtomicUsize,
+) -> Stats {
     let live_bytes = aggregates.allocated_bytes.saturating_sub(aggregates.deallocated_bytes);
-    let peak_live_bytes = PEAK_LIVE_BYTES.fetch_max(live_bytes, Ordering::Relaxed).max(live_bytes);
+    let peak_live_bytes = sampled_max.fetch_max(live_bytes, Ordering::Relaxed).max(live_bytes);
     Stats {
         allocated_bytes: aggregates.allocated_bytes,
         deallocated_bytes: aggregates.deallocated_bytes,
         live_bytes,
         peak_live_bytes,
-        mapped_bytes: MAPPED_BYTES
-            .load(Ordering::Relaxed)
-            .saturating_add(BUMP_COMMITTED_BYTES.load(Ordering::Relaxed)),
+        peak_live_bytes_scope: PeakLiveBytesScope::SnapshotSamples,
+        mapped_bytes: mapped_bytes.saturating_add(bump_bytes),
         os_mappings: OS_MAPPINGS.load(Ordering::Relaxed),
         os_unmappings: OS_UNMAPPINGS.load(Ordering::Relaxed),
         allocations: aggregates.allocations,
         deallocations: aggregates.deallocations,
-        remote_frees: REMOTE_FREES.load(Ordering::Relaxed),
+        remote_frees: super::remote_counts::frees(),
         pending_remote_blocks: PENDING_REMOTE_BLOCKS.load(Ordering::Relaxed),
-        remote_pushes_in_progress: REMOTE_PUSHES_IN_PROGRESS.load(Ordering::Relaxed),
-        drained_remote_blocks: DRAINED_REMOTE_BLOCKS.load(Ordering::Relaxed),
+        remote_pushes_in_progress: super::remote_counts::pushes_in_progress(),
+        drained_remote_blocks: super::remote_counts::drained(),
     }
 }
 
 fn aggregate_snapshot() -> Option<AggregateSnapshot> {
-    if !AGGREGATES_AVAILABLE.load(Ordering::Acquire) {
+    aggregate_snapshot_if_available(AGGREGATES_AVAILABLE.load(Ordering::Acquire))
+}
+
+fn aggregate_snapshot_if_available(available: bool) -> Option<AggregateSnapshot> {
+    if !available {
         return None;
     }
     let mut snapshot = AggregateSnapshot::new();
     let mut current = AGGREGATE_REGISTRY.load(Ordering::Acquire);
     while !current.is_null() {
         let shard = unsafe { &*current };
-        snapshot.allocated_bytes = snapshot.allocated_bytes.wrapping_add(shard.allocated_bytes.load(Ordering::Relaxed));
-        snapshot.deallocated_bytes = snapshot
-            .deallocated_bytes
-            .wrapping_add(shard.deallocated_bytes.load(Ordering::Relaxed));
-        snapshot.allocations = snapshot.allocations.wrapping_add(shard.allocations.load(Ordering::Relaxed));
-        snapshot.deallocations = snapshot.deallocations.wrapping_add(shard.deallocations.load(Ordering::Relaxed));
+        snapshot.add_shard(shard);
         current = shard.next.load(Ordering::Acquire);
     }
     Some(snapshot)
@@ -538,8 +439,8 @@ fn try_snapshot_with_runtime_events(
             });
             encoded.addresses = resolve_addresses(callers.as_ref(), encoded.runtime_events.as_ref());
             #[cfg(all(not(miri), feature = "caller-symbolization"))]
-            // Backtrace retains process-global caches allocated from the active
-            // snapshot arena, so release them before that arena is unmapped.
+            // Release symbolization caches after capture rather than retaining
+            // potentially large diagnostic-only allocations indefinitely.
             backtrace::clear_symbol_cache();
             encoded.metadata.capture_duration_nanos = u64::try_from(started_at.elapsed().as_nanos()).unwrap_or(u64::MAX);
 
@@ -618,7 +519,7 @@ fn producer_version() -> Version {
 }
 
 fn encode_stats(stats: Stats) -> EncodedStats {
-    EncodedStats::from_fields(EncodedStatsFields {
+    let mut encoded = EncodedStats::from_fields(EncodedStatsFields {
         allocated_bytes: stats.allocated_bytes as u64,
         deallocated_bytes: stats.deallocated_bytes as u64,
         live_bytes: stats.live_bytes as u64,
@@ -632,7 +533,9 @@ fn encode_stats(stats: Stats) -> EncodedStats {
         pending_remote_blocks: stats.pending_remote_blocks as u64,
         remote_pushes_in_progress: stats.remote_pushes_in_progress as u64,
         drained_remote_blocks: stats.drained_remote_blocks as u64,
-    })
+    });
+    encoded.peak_live_bytes_scope = stats.peak_live_bytes_scope;
+    encoded
 }
 
 fn encode_estimate(estimate: Estimate<usize>) -> EncodedEstimate {
@@ -1122,6 +1025,23 @@ pub(crate) fn record_deallocation_stats(size: usize) {
     record_deallocation_in(aggregate_shard(), size);
 }
 
+/// Account for newly requested or relinquished bytes without allocating/freeing
+/// an object. Together with the final layout's deallocation, these deltas conserve
+/// live requested bytes and leave allocation identities/counts unchanged.
+pub(crate) fn record_resize(class: Option<(usize, usize)>, old_size: usize, new_size: usize) {
+    if telemetry_suppressed() {
+        return;
+    }
+    let allocated = new_size.saturating_sub(old_size);
+    let deallocated = old_size.saturating_sub(new_size);
+    let shard = aggregate_shard();
+    add_owner(shard, &shard.allocated_bytes, allocated);
+    add_owner(shard, &shard.deallocated_bytes, deallocated);
+    if let Some((index, block_bytes)) = class {
+        publish_size_class_batch(index, block_bytes, 0, 0, allocated, deallocated);
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn record_small_allocation(_class_index: usize, _block_bytes: usize, requested_bytes: usize) {
     if telemetry_suppressed() {
@@ -1167,33 +1087,75 @@ pub(crate) fn publish_size_class_batch(
     SIZE_CLASS_DEALLOCATED_BYTES[class_index].fetch_add(deallocated_bytes, Ordering::Relaxed);
 }
 
-pub(crate) fn begin_remote_free() {
-    if !AGGREGATES_AVAILABLE.load(Ordering::Relaxed) {
-        return;
+/// Positive availability observed by this producer, not an ownership or recorder
+/// admission token. Aggregate availability has true-only publication and is not
+/// reset by recording-session transitions.
+///
+/// Producer progress uses a stable TLS counter slot. The non-Send marker keeps
+/// begin and finish on the same thread without adding runtime state.
+#[derive(Debug)]
+pub(crate) struct RemoteFreeAvailability(bool, std::marker::PhantomData<*mut ()>);
+
+impl RemoteFreeAvailability {
+    const fn new(available: bool) -> Self {
+        Self(available, std::marker::PhantomData)
     }
-    REMOTE_PUSHES_IN_PROGRESS.fetch_add(1, Ordering::Relaxed);
-    REMOTE_FREES.fetch_add(1, Ordering::Relaxed);
-    PENDING_REMOTE_BLOCKS.fetch_add(1, Ordering::Relaxed);
+
+    fn available_at_finish(self, available: &AtomicBool) -> bool {
+        // Same-thread read-read coherence preserves a positive begin observation.
+        // A missing observation still requires the original finish load.
+        self.0 || available.load(Ordering::Relaxed)
+    }
 }
 
-pub(crate) fn finish_remote_free() {
-    if AGGREGATES_AVAILABLE.load(Ordering::Relaxed) {
-        REMOTE_PUSHES_IN_PROGRESS.fetch_sub(1, Ordering::Relaxed);
+pub(crate) fn begin_remote_free() -> RemoteFreeAvailability {
+    if !AGGREGATES_AVAILABLE.load(Ordering::Relaxed) {
+        return RemoteFreeAvailability::new(false);
+    }
+    super::remote_counts::record_started_free();
+    PENDING_REMOTE_BLOCKS.fetch_add(1, Ordering::Relaxed);
+    RemoteFreeAvailability::new(true)
+}
+
+pub(crate) fn finish_remote_free(availability: RemoteFreeAvailability) {
+    if availability.available_at_finish(&AGGREGATES_AVAILABLE) {
+        super::remote_counts::record_finished_free();
     }
 }
 
 pub(crate) fn record_remote_retired_free() {
     if !telemetry_suppressed() && AGGREGATES_AVAILABLE.load(Ordering::Relaxed) {
-        REMOTE_FREES.fetch_add(1, Ordering::Relaxed);
+        super::remote_counts::record_free();
     }
 }
 
-pub(crate) fn record_remote_drain() {
-    if !AGGREGATES_AVAILABLE.load(Ordering::Relaxed) {
-        return;
+/// A positive gate result, consumed once by the consumer before recycling.
+#[derive(Debug)]
+pub(crate) struct RemoteDrainClaim<'a> {
+    pending: &'a AtomicUsize,
+}
+
+impl<'a> RemoteDrainClaim<'a> {
+    pub(crate) fn if_available(available: &AtomicBool, pending: &'a AtomicUsize) -> Option<Self> {
+        available.load(Ordering::Relaxed).then_some(Self { pending })
     }
-    PENDING_REMOTE_BLOCKS.fetch_sub(1, Ordering::Relaxed);
-    DRAINED_REMOTE_BLOCKS.fetch_add(1, Ordering::Relaxed);
+
+    pub(crate) fn record(self, count: usize) {
+        // Separate modulo updates, both before recycling any claimed node.
+        // This changes intermediate observations, not physical ownership.
+        self.pending.fetch_sub(count, Ordering::Relaxed);
+        super::remote_counts::record_drain(count);
+    }
+}
+
+pub(crate) fn remote_drain_claim() -> Option<RemoteDrainClaim<'static>> {
+    RemoteDrainClaim::if_available(&AGGREGATES_AVAILABLE, &PENDING_REMOTE_BLOCKS)
+}
+
+pub(crate) fn record_remote_drain() {
+    if let Some(claim) = remote_drain_claim() {
+        claim.record(1);
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1534,6 +1496,8 @@ mod tests {
     use std::thread;
 
     use super::*;
+    #[cfg(not(miri))]
+    use crate::hal;
 
     fn sample_stats() -> Stats {
         Stats {
@@ -1541,6 +1505,7 @@ mod tests {
             deallocated_bytes: 41,
             live_bytes: 60,
             peak_live_bytes: 80,
+            peak_live_bytes_scope: PeakLiveBytesScope::SnapshotSamples,
             mapped_bytes: 256,
             os_mappings: 7,
             os_unmappings: 3,
@@ -1551,6 +1516,62 @@ mod tests {
             remote_pushes_in_progress: 2,
             drained_remote_blocks: 1,
         }
+    }
+
+    #[test]
+    fn reporting_freed_before_first_query_does_not_invent_a_lifetime_peak() {
+        let sampled_max = AtomicUsize::new(0);
+        let aggregate = AggregateSnapshot {
+            allocated_bytes: 262_144,
+            deallocated_bytes: 262_144,
+            allocations: 1,
+            deallocations: 1,
+        };
+
+        let encoded = encode_stats(aggregate_stats_with_sampled_peak(&aggregate, 0, 0, &sampled_max));
+
+        assert_eq!(
+            (
+                encoded.live_bytes,
+                encoded.sampled_peak_live_bytes(),
+                encoded.lifetime_peak_live_bytes()
+            ),
+            (0, Some(0), None),
+        );
+    }
+
+    #[test]
+    fn reporting_sample_maximum_survives_later_zero_live_queries_without_claiming_lifetime_scope() {
+        let sampled_max = AtomicUsize::new(0);
+        let mut aggregate = AggregateSnapshot {
+            allocated_bytes: 262_144,
+            deallocated_bytes: 0,
+            allocations: 1,
+            deallocations: 0,
+        };
+        aggregate_stats_with_sampled_peak(&aggregate, 0, 0, &sampled_max);
+        aggregate.deallocated_bytes = aggregate.allocated_bytes;
+        aggregate.deallocations = 1;
+
+        let encoded = encode_stats(aggregate_stats_with_sampled_peak(&aggregate, 0, 0, &sampled_max));
+
+        assert_eq!(
+            (
+                encoded.live_bytes,
+                encoded.sampled_peak_live_bytes(),
+                encoded.lifetime_peak_live_bytes()
+            ),
+            (0, Some(262_144), None),
+        );
+    }
+
+    #[test]
+    fn reporting_unavailable_aggregates_do_not_publish_a_sampled_peak() {
+        let encoded = encode_stats(snapshot_stats(None));
+        assert_eq!(
+            (encoded.sampled_peak_live_bytes(), encoded.lifetime_peak_live_bytes()),
+            (None, None)
+        );
     }
 
     fn no_encoded_len(_: &EncodedSnapshot) -> Option<usize> {
@@ -1578,112 +1599,37 @@ mod tests {
         false
     }
 
-    #[cfg(not(miri))]
     #[test]
-    fn snapshot_arena_handles_chunk_reuse_dedicated_allocations_and_nested_deallocation() {
-        let mut arena = SnapshotArena::new();
-        hal::fail_next_map();
-        assert!(arena.allocate(Layout::new::<u64>()).is_null());
-
-        let small_layout = Layout::from_size_align(64, 64).unwrap();
-        let first = arena.allocate(small_layout);
-        let reusable_chunk = arena.head;
-        let second = arena.allocate(small_layout);
-        assert!(!first.is_null());
-        assert!(!second.is_null());
-        assert_eq!(arena.head, reusable_chunk);
-        assert_eq!(first.addr() % small_layout.align(), 0);
-        assert_eq!(second.addr() % small_layout.align(), 0);
-
-        let mut half_chunk_arena = SnapshotArena::new();
-        let half_chunk_layout = Layout::from_size_align(SNAPSHOT_ARENA_CHUNK_BYTES / 2 - size_of::<SnapshotArenaChunk>(), 1).unwrap();
-        assert!(!half_chunk_arena.allocate(half_chunk_layout).is_null());
-        assert!(!unsafe { (*half_chunk_arena.head).dedicated });
-        assert_eq!(unsafe { (*half_chunk_arena.head).mapping_bytes }, SNAPSHOT_ARENA_CHUNK_BYTES);
-
-        let dedicated_layout = Layout::from_size_align(SNAPSHOT_ARENA_CHUNK_BYTES, 4_096).unwrap();
-        let dedicated = arena.allocate(dedicated_layout);
-        assert!(!dedicated.is_null());
-        assert!(arena.deallocate(first));
-        assert!(arena.deallocate(dedicated));
-        assert!(!arena.deallocate(dedicated));
-        assert!(!arena.deallocate(ptr::without_provenance_mut(1)));
-
-        let mut child = SnapshotArena::new();
-        child.parent = ptr::from_mut(&mut arena);
-        let child_address = child.allocate(Layout::new::<u32>());
-        assert!(!child_address.is_null());
-        assert!(child.deallocate(second));
-        assert!(child.deallocate(child_address));
-
-        let chunk = arena.head;
-        let original_cursor = unsafe { (*chunk).cursor };
-        unsafe { (*chunk).cursor = (*chunk).mapping_bytes - 1 };
-        assert!(!unsafe { allocate_from_snapshot_chunk(chunk, 1, 1) }.is_null());
-        unsafe { (*chunk).cursor = usize::MAX };
-        assert!(unsafe { allocate_from_snapshot_chunk(chunk, 1, 2) }.is_null());
-        unsafe { (*chunk).cursor = usize::MAX - 1 };
-        assert!(unsafe { allocate_from_snapshot_chunk(chunk, 2, 1) }.is_null());
-        unsafe { (*chunk).cursor = (*chunk).mapping_bytes };
-        assert!(unsafe { allocate_from_snapshot_chunk(chunk, 1, 1) }.is_null());
-        unsafe { (*chunk).cursor = original_cursor };
-
-        let mapping_end = unsafe { chunk.cast::<u8>().add((*chunk).mapping_bytes) };
-        assert!(!arena.deallocate(mapping_end));
-    }
-
-    #[test]
-    fn active_snapshot_arena_routes_allocations_and_restores_nested_arenas() {
-        let layout = Layout::new::<u64>();
-        assert!(snapshot_arena_allocate(layout).is_none());
-        assert!(!snapshot_arena_deallocate(ptr::without_provenance_mut(1)));
-
+    fn inactive_snapshot_guard_does_not_release_an_outer_scope() {
         with_snapshot_arena(|| {
-            let outer_arena = ACTIVE_SNAPSHOT_ARENA.with(Cell::get);
-            let outer = snapshot_arena_allocate(layout).unwrap();
-            with_snapshot_arena(|| assert!(snapshot_arena_deallocate(outer)));
-            assert_eq!(ACTIVE_SNAPSHOT_ARENA.with(Cell::get), outer_arena);
-            let inner = with_snapshot_arena(|| snapshot_arena_allocate(layout).unwrap());
-            assert!(!snapshot_arena_deallocate(inner));
+            drop(SnapshotArenaActivation { depth_entered: false });
+            assert_eq!(SNAPSHOT_ALLOCATION_DEPTH.get(), 1);
         });
-
-        assert!(ACTIVE_SNAPSHOT_ARENA.with(Cell::get).is_null());
-        assert!(snapshot_arena_allocate(layout).is_none());
+        assert_eq!(SNAPSHOT_ALLOCATION_DEPTH.get(), 0);
     }
 
     #[test]
-    fn snapshot_arena_size_calculation_is_exact() {
-        assert_eq!(SNAPSHOT_ARENA_CHUNK_BYTES, 4 * 1024 * 1024);
-        assert_eq!(
-            snapshot_required_bytes(Layout::from_size_align(17, 64).unwrap(), 17),
-            size_of::<SnapshotArenaChunk>() + 63 + 17
-        );
+    fn snapshot_allocation_scope_restores_nested_depth() {
+        assert!(!snapshot_collection_active());
+        with_snapshot_arena(|| {
+            assert!(snapshot_collection_active());
+            with_snapshot_arena(|| assert!(snapshot_collection_active()));
+            assert!(snapshot_collection_active());
+        });
+        assert!(!snapshot_collection_active());
     }
 
-    #[cfg(not(miri))]
     #[test]
-    fn dropping_snapshot_arena_unmaps_its_chunks() {
-        let before = hal::unmap_count();
-        {
-            let mut arena = SnapshotArena::new();
-            let address = arena.allocate(Layout::new::<u64>());
-            assert!(!address.is_null());
-        }
-
-        assert_eq!(hal::unmap_count(), before + 1);
+    fn snapshot_allocation_scope_restores_after_unwind() {
+        let result = std::panic::catch_unwind(|| with_snapshot_arena(|| panic!("injected capture failure")));
+        assert!(result.is_err());
+        assert!(!snapshot_collection_active());
     }
 
     #[test]
     fn aggregate_stats_add_mapped_and_bump_bytes_exactly() {
-        let _test = TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
-        let mapped = MAPPED_BYTES.swap(1_000, Ordering::Relaxed);
-        let bump = BUMP_COMMITTED_BYTES.swap(234, Ordering::Relaxed);
-        let stats = aggregate_stats(&AggregateSnapshot::new());
-        MAPPED_BYTES.store(usize::MAX, Ordering::Relaxed);
-        BUMP_COMMITTED_BYTES.store(1, Ordering::Relaxed);
-        let saturated = aggregate_stats(&AggregateSnapshot::new());
-        MAPPED_BYTES.store(mapped, Ordering::Relaxed);
-        BUMP_COMMITTED_BYTES.store(bump, Ordering::Relaxed);
+        let stats = aggregate_stats_with_memory(&AggregateSnapshot::new(), 1_000, 234);
+        let saturated = aggregate_stats_with_memory(&AggregateSnapshot::new(), usize::MAX, 1);
 
         assert_eq!(stats.mapped_bytes, 1_234);
         assert_eq!(saturated.mapped_bytes, usize::MAX);
@@ -2008,15 +1954,19 @@ mod tests {
             assert!(telemetry_suppressed());
             record_allocation(1);
             record_deallocation_stats(1);
+            record_resize(Some((0, 8)), 1, 2);
             record_small_allocation(0, 8, 1);
             record_small_deallocation(0, 1);
             record_remote_retired_free();
         });
         assert!(!telemetry_suppressed());
 
-        AGGREGATES_AVAILABLE.store(false, Ordering::Release);
-        assert!(stats().is_none());
-        begin_remote_free();
+        // Other allocator tests keep recording concurrently. Exercise the
+        // unavailable branch without resetting their process-lifetime state.
+        assert!(aggregate_snapshot_if_available(false).is_none());
+        let availability = begin_remote_free();
+        finish_remote_free(availability);
+        record_remote_drain();
         let prepare_calls = PREPARE_ADDRESS_RESOLUTION_CALLS.load(Ordering::Relaxed);
         let _ = try_snapshot_with_runtime_events(None, true);
         let expected_prepare_calls = if cfg!(all(feature = "caller-symbolization", not(miri))) {
@@ -2139,8 +2089,8 @@ mod tests {
 
         assert!(events.events.is_empty());
         seismograph::recorder(seismograph::recorder::Configuration::default());
-        begin_remote_free();
-        finish_remote_free();
+        let availability = begin_remote_free();
+        finish_remote_free(availability);
         record_remote_drain();
 
         record_mapping(8);
@@ -2150,8 +2100,8 @@ mod tests {
         record_deallocation_stats(3);
         record_small_allocation(0, 8, 3);
         record_small_deallocation(0, 3);
-        begin_remote_free();
-        finish_remote_free();
+        let availability = begin_remote_free();
+        finish_remote_free(availability);
         record_remote_retired_free();
         record_remote_drain();
         record_unmapping(8);
@@ -2186,18 +2136,45 @@ mod tests {
     }
 
     #[test]
+    fn aggregate_merge_is_independent_of_disabled_probe_and_prior_history() {
+        record_allocation(4096);
+        record_deallocation_stats(4096);
+        suppression_and_counter_recorders_cover_disabled_paths();
+        aggregate_shards_merge_cross_thread_deallocations();
+    }
+
+    #[test]
     fn aggregate_shards_merge_cross_thread_deallocations() {
-        let _test = TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
         let size = 2_048;
-        let stats_before = stats().unwrap_or_default();
+        let allocations = std::thread::spawn(move || {
+            record_allocation(size);
+            aggregate_shard()
+        })
+        .join()
+        .unwrap();
+        let deallocations = std::thread::spawn(move || {
+            record_deallocation_stats(size);
+            aggregate_shard()
+        })
+        .join()
+        .unwrap();
 
-        record_allocation(size);
-        std::thread::spawn(move || record_deallocation_stats(size)).join().unwrap();
-
-        let stats_after = stats().unwrap();
-        assert_eq!(stats_after.allocated_bytes, stats_before.allocated_bytes + size);
-        assert_eq!(stats_after.deallocated_bytes, stats_before.deallocated_bytes + size);
-        assert_eq!(stats_after.live_bytes, stats_before.live_bytes);
+        // Merge the two test-owned shards through the production summation path,
+        // not a delta over every concurrently running allocator test's counters.
+        let mut snapshot = AggregateSnapshot::new();
+        snapshot.add_shard(allocations);
+        snapshot.add_shard(deallocations);
+        let stats = aggregate_stats(&snapshot);
+        assert_eq!(
+            (
+                stats.allocated_bytes,
+                stats.deallocated_bytes,
+                stats.live_bytes,
+                stats.allocations,
+                stats.deallocations
+            ),
+            (size, size, 0, 1, 1),
+        );
     }
 
     #[test]

@@ -11,6 +11,9 @@ use libc::{
 
 const ALLOCATION_ALIGNMENT: usize = 2 * 1024 * 1024;
 
+mod memory;
+pub(crate) use memory::memory_status;
+
 pub(crate) fn map(size: usize) -> *mut u8 {
     map_aligned(size, PROT_READ | PROT_WRITE)
 }
@@ -41,7 +44,19 @@ pub(crate) unsafe fn commit_locality_slab(_address: *mut u8, _slab_size: usize) 
 }
 
 pub(crate) unsafe fn decommit(address: *mut u8, size: usize) -> bool {
-    unsafe { mprotect(address.cast(), size, PROT_NONE) == 0 && madvise(address.cast(), size, MADV_DONTNEED) == 0 }
+    // Discard before revoking access: on failure callers may put the span back in
+    // a committed free list. The reserved range contains no holes.
+    unsafe { madvise(address.cast(), size, MADV_DONTNEED) == 0 && mprotect(address.cast(), size, PROT_NONE) == 0 }
+}
+
+#[cfg_attr(test, mutants::skip)] // The scheduler-selected CPU/NUMA hint has no stable value for mutation assertions.
+pub(crate) fn current_processor_location() -> (usize, usize) {
+    let mut cpu = 0_u32;
+    let mut node = 0_u32;
+    // SAFETY: getcpu writes only the two supplied integers. Unlike topology
+    // libraries or sysfs enumeration this syscall cannot reenter the allocator.
+    let result = unsafe { libc::syscall(libc::SYS_getcpu, &raw mut cpu, &raw mut node, ptr::null_mut::<u8>()) };
+    if result == 0 { (cpu as usize, node as usize) } else { (0, 0) }
 }
 
 pub(crate) unsafe fn unmap(address: *mut u8, size: usize) {

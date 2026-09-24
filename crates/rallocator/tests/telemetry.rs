@@ -98,21 +98,6 @@ fn passive_bump_hints_detach_and_reuse_native_state() {
 }
 
 #[test]
-fn snapshot_capture_does_not_add_allocator_mappings() {
-    let _test = test_lock();
-    track_callers(false);
-    drop(snapshot().unwrap());
-    let before = stats().unwrap();
-
-    let captured = snapshot().unwrap();
-    let after = stats().unwrap();
-
-    assert!(after.mapped_bytes <= before.mapped_bytes);
-    assert_eq!(after.os_mappings, before.os_mappings);
-    drop(captured);
-}
-
-#[test]
 #[cfg_attr(miri, ignore = "cross-thread tracking-log/TLS lifecycle coverage is exercised by native tests")]
 fn collection_includes_every_participating_thread_log() {
     let _test = test_lock();

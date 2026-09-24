@@ -287,6 +287,10 @@ mod tests {
     fn recording_gates_work_and_enabled_operations_emit_pairs() {
         let _test = TEST_LOCK.lock().unwrap();
         seismograph::recorder(Configuration::default());
+        let release = SnapshotOptions {
+            event_buffers: seismograph::snapshot::EventBufferDisposition::Release,
+        };
+        seismograph::snapshot(release).unwrap();
         let calls = AtomicUsize::new(0);
         let resource = Resource::new(IoResourceKind::File);
 
@@ -301,6 +305,17 @@ mod tests {
         });
 
         assert_eq!(calls.load(Ordering::Relaxed), 0);
+        let disabled = seismograph::snapshot(release).unwrap();
+        let disabled = seismograph::snapshot::decode(disabled.as_bytes()).unwrap().events;
+        assert_eq!(
+            (
+                disabled.total_events,
+                disabled.lost_events,
+                disabled.threads.len(),
+                disabled.events.len(),
+            ),
+            (0, 0, 0, 0)
+        );
 
         seismograph::recorder(Configuration {
             io: RecordingPolicy::all(false),
@@ -315,7 +330,15 @@ mod tests {
         let snapshot = seismograph::snapshot(SnapshotOptions::default()).unwrap();
         let decoded = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap();
         let events = &decoded.events.events;
-        assert_eq!(events.len(), 2);
+        assert_eq!(
+            (
+                decoded.events.total_events,
+                decoded.events.lost_events,
+                decoded.events.threads.len(),
+                events.len(),
+            ),
+            (2, 0, 1, 2)
+        );
         assert_eq!(events[0].kind, EventKind::IoWriteStarted);
         assert_eq!(events[1].kind, EventKind::IoWriteFinished);
         let start = events[0].io().unwrap();

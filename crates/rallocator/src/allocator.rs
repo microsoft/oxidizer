@@ -5,10 +5,12 @@ use std::alloc::{GlobalAlloc, Layout};
 use std::cell::UnsafeCell;
 use std::hint::spin_loop;
 use std::marker::PhantomData;
+use std::num::NonZeroUsize;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, AtomicUsize, Ordering, fence};
 use std::{cmp, mem, ptr};
 
+use crate::cache_line::CacheLine;
 use crate::config::{Config, MAX_SIZE_CLASSES, SizeClassLayout, SizeClassTables, Standard, Tunables, valid_size_classes};
 use crate::hal;
 use crate::hal::{read_free_next, read_free_requested, release_free_metadata, write_free_next, write_free_requested};
@@ -16,6 +18,11 @@ use crate::heap::HeapTarget;
 use crate::heap::bump::{self, BumpState};
 use crate::heap::general::Options as GeneralOptions;
 use crate::telemetry::{self as tracking, HeapKind as TrackingHeapKind, PendingTracking, TrackingAllocation};
+mod medium;
+mod realloc;
+mod snapshot;
+use medium::{MediumCache, MediumState};
+
 #[cfg(feature = "tuning-telemetry")]
 use crate::tuning_telemetry::{self, ClassEvent, MediumEvent};
 
@@ -99,6 +106,13 @@ macro_rules! check_remote_refill_contention {
 /// A global allocator with thread-local general-purpose size-class slabs.
 ///
 /// Process-wide allocation totals are retained in batched thread-local counters.
+///
+/// Reallocation can retain an untracked ordinary small block in the same size
+/// class on its owning heap, or an untracked medium allocation in the same
+/// physical span. Requested-byte totals include growth and shrink adjustments;
+/// an in-place resize does not emit allocation/free events or increment their
+/// counts. Other representations use allocate-copy-free. An unchanged size is
+/// a no-op, including for tracked allocations.
 pub struct Rallocator<C = Standard>
 where
     C: Config + Send + Sync + 'static,
@@ -108,7 +122,7 @@ where
     config: PhantomData<C>,
 }
 static GLOBAL_ALLOCATOR_ACTIVE: AtomicBool = AtomicBool::new(false);
-static DOMAINS: AtomicPtr<DomainState> = AtomicPtr::new(ptr::null_mut());
+static DOMAINS: CacheLine<AtomicPtr<DomainState>> = CacheLine::new(AtomicPtr::new(ptr::null_mut()));
 static PASSIVE_THREAD_HEAPS: AtomicPtr<RemoteHeapState> = AtomicPtr::new(ptr::null_mut());
 static NEXT_DOMAIN_ID: AtomicUsize = AtomicUsize::new(1);
 static DIRECT_ALLOCATIONS: SpinLock<DirectAllocationState> = SpinLock::new(DirectAllocationState { head: ptr::null_mut() });
@@ -315,7 +329,8 @@ pub(crate) struct ReusableHeapState {
     context_class_lists: [ClassCold; MAX_SIZE_CLASSES],
     locality_next: *mut u8,
     locality_end: *mut u8,
-    medium_cache: [*mut u8; LOCAL_MEDIUM_CLASSES],
+    medium_batch: MediumCache,
+    medium_shard: *const MediumRegion,
     locality_segment_slices: usize,
     medium_cache_max_bytes: usize,
     pub(crate) domain: *mut DomainState,
@@ -422,22 +437,29 @@ struct SlabAllocation {
     committed_bytes: usize,
 }
 
+struct MediumAllocation {
+    address: *mut u8,
+}
+
 struct MediumRegion {
     regions: AtomicPtr<RegionState>,
     state: SpinLock<MediumState>,
+    remote: medium::RemoteMailbox,
 }
+
+const DOMAIN_MEDIUM_SHARD_COUNT: usize = medium::SHARD_COUNT - 1;
+const DOMAIN_MEDIUM_LANE_COUNT: usize = medium::SHARD_COUNT / 4;
+const _: () = assert!(DOMAIN_MEDIUM_SHARD_COUNT + 1 == medium::SHARD_COUNT);
+const _: () = assert!(DOMAIN_MEDIUM_LANE_COUNT * 4 == medium::SHARD_COUNT);
 
 #[repr(C, align(64))]
 pub(crate) struct DomainState {
     id: usize,
     is_default: AtomicBool,
     regions: MediumRegion,
+    medium_shards: [MediumRegion; DOMAIN_MEDIUM_SHARD_COUNT],
+    medium_lanes: [AtomicUsize; DOMAIN_MEDIUM_LANE_COUNT],
     next: AtomicPtr<Self>,
-}
-
-struct MediumState {
-    regions: *mut RegionState,
-    last_region: *mut RegionState,
 }
 
 struct DirectAllocationState {
@@ -447,13 +469,16 @@ struct DirectAllocationState {
 struct RegionState {
     base: *mut u8,
     domain: *mut DomainState,
+    backing: *const MediumRegion,
+    free_slices: usize,
+    available_next: *mut Self,
+    available_previous: *mut Self,
     next_slice: usize,
     large_free: *mut LargeFreeBlock,
     large_purge_after: u64,
     used: [u64; MEDIUM_REGION_BITMAP_WORDS],
     physical: [PhysicalSliceMeta; MEDIUM_REGION_SLICE_COUNT],
     allocations: [MediumAllocationMeta; MEDIUM_REGION_SLICE_COUNT],
-    bins: [MediumBin; MEDIUM_MAX_SLICES],
     next: AtomicPtr<Self>,
 }
 
@@ -743,7 +768,8 @@ impl ReusableHeapState {
             context_class_lists: [ClassCold::new(); MAX_SIZE_CLASSES],
             locality_next: ptr::null_mut(),
             locality_end: ptr::null_mut(),
-            medium_cache: [ptr::null_mut(); LOCAL_MEDIUM_CLASSES],
+            medium_batch: MediumCache::new(),
+            medium_shard: ptr::null(),
             locality_segment_slices: options.locality_segment_bytes() / MEDIUM_SLICE_SIZE,
             medium_cache_max_bytes: options.medium_cache_max_bytes(),
             domain,
@@ -775,21 +801,25 @@ impl MediumRegion {
     const fn new() -> Self {
         Self {
             regions: AtomicPtr::new(ptr::null_mut()),
-            state: SpinLock::new(MediumState {
-                regions: ptr::null_mut(),
-                last_region: ptr::null_mut(),
-            }),
+            state: SpinLock::new(MediumState::new()),
+            remote: medium::RemoteMailbox::new(),
         }
     }
 
+    #[cfg_attr(test, mutants::skip)] // A synthesized Some(null) violates the reserved-address invariant and can cause UB.
     fn allocate_slices(&self, domain: *mut DomainState, count: usize) -> Option<*mut u8> {
-        let mut state = self.state.lock();
-        unsafe { allocate_slices_locked(&mut state, &self.regions, domain, count) }
+        self.reserve_slices(domain, count).map(|(address, _)| address)
     }
 
     unsafe fn release_slices(&self, address: *mut u8, count: usize) {
-        let state = self.state.lock();
-        let region = unsafe { find_region(&state, address) }.expect("released slices must belong to an allocator region");
+        // Resolve immutable identity before locking; normal production releases
+        // hit the region cache and never walk a region list under the shard lock.
+        let containing = region_containing(address);
+        let mut state = self.state.lock();
+        let region = containing
+            .or_else(|| unsafe { find_region(&state, address) })
+            .expect("released slices must belong to an allocator region");
+        debug_assert!(ptr::eq(unsafe { (*region).backing }, self));
         let slice_index = (address.addr() - unsafe { (*region).base.addr() }) / MEDIUM_SLICE_SIZE;
         debug_assert_eq!(address.addr() % MEDIUM_SLICE_SIZE, 0);
         debug_assert!(slice_index + count <= MEDIUM_REGION_SLICE_COUNT);
@@ -807,16 +837,24 @@ impl MediumRegion {
                 metadata.segment_utilization_tracked[1].store(false, Ordering::Relaxed);
             }
             mark_slices(&mut (*region).used, slice_index, count, false);
+            medium::release_availability(&mut state, region, count);
         }
     }
 }
 
 impl DomainState {
+    #[cfg(test)]
+    #[expect(
+        clippy::large_stack_arrays,
+        reason = "Synthetic test domains use stack fixtures; production initializes mapped storage in place"
+    )]
     fn new() -> Self {
         Self {
             id: NEXT_DOMAIN_ID.fetch_add(1, Ordering::Relaxed),
             is_default: AtomicBool::new(false),
             regions: MediumRegion::new(),
+            medium_shards: [const { MediumRegion::new() }; DOMAIN_MEDIUM_SHARD_COUNT],
+            medium_lanes: [const { AtomicUsize::new(0) }; DOMAIN_MEDIUM_LANE_COUNT],
             next: AtomicPtr::new(ptr::null_mut()),
         }
     }
@@ -826,12 +864,26 @@ pub(crate) fn mark_default_domain(domain: *mut DomainState) {
     unsafe { (*domain).is_default.store(true, Ordering::Release) };
 }
 
+#[cfg_attr(test, mutants::skip)] // A permanent null domain can strand the process-global allocator; transient map failure is tested directly.
 pub(crate) fn create_domain() -> *mut DomainState {
     let state = hal::map(mem::size_of::<DomainState>()).cast::<DomainState>();
     if state.is_null() {
         return ptr::null_mut();
     }
-    unsafe { state.write(DomainState::new()) };
+    // SAFETY: this mapping is exclusively owned and large enough for DomainState.
+    // Initialize each shard separately to avoid a domain-sized stack temporary
+    // when first entering the global allocator on a small-stack thread.
+    unsafe {
+        ptr::addr_of_mut!((*state).id).write(NEXT_DOMAIN_ID.fetch_add(1, Ordering::Relaxed));
+        ptr::addr_of_mut!((*state).is_default).write(AtomicBool::new(false));
+        ptr::addr_of_mut!((*state).regions).write(MediumRegion::new());
+        let shards = ptr::addr_of_mut!((*state).medium_shards).cast::<MediumRegion>();
+        for index in 0..DOMAIN_MEDIUM_SHARD_COUNT {
+            shards.add(index).write(MediumRegion::new());
+        }
+        ptr::addr_of_mut!((*state).medium_lanes).write([const { AtomicUsize::new(0) }; DOMAIN_MEDIUM_LANE_COUNT]);
+        ptr::addr_of_mut!((*state).next).write(AtomicPtr::new(ptr::null_mut()));
+    }
 
     let mut head = DOMAINS.load(Ordering::Acquire);
     loop {
@@ -1145,14 +1197,12 @@ where
             .map(|address| (address, slice_count))
             .or_else(|| regions.allocate_slices(heap.domain, 1).map(|address| (address, 1)));
         let Some((slab, slice_count)) = segment else {
-            let slab = hal::map(SLAB_SIZE);
-            if !slab.is_null() {
-                self.record_mapping(SLAB_SIZE);
-            }
+            // Normal slabs must belong to a registered region. The caller can
+            // fall back to a tagged direct allocation when no region is available.
             return SlabAllocation {
-                address: slab,
-                segment_slices: DIRECT_SLAB_SEGMENT,
-                committed_bytes: SLAB_SIZE,
+                address: ptr::null_mut(),
+                segment_slices: 0,
+                committed_bytes: 0,
             };
         };
 
@@ -1177,186 +1227,142 @@ where
 
     #[cold]
     #[inline(never)]
-    fn allocate_medium(&self, layout: Layout, heap: &mut ReusableHeapState, mut tracking: Option<PendingTracking>) -> *mut u8 {
-        let Some(slice_count) = medium_slice_count(layout) else {
-            return ptr::null_mut();
-        };
-        let span_size = slice_count * MEDIUM_SLICE_SIZE;
-        if span_size <= heap.medium_cache_max_bytes
-            && let Some(cache_index) = local_medium_class(slice_count)
-        {
-            let cached = unsafe { heap.medium_cache.get_unchecked_mut(cache_index) };
-            if !cached.is_null() {
-                let address = *cached;
-                *cached = ptr::null_mut();
-                unsafe { register_medium_allocation(address, layout, heap, tracking.take()) };
-                self.record_allocation(layout.size());
-                record_medium_event(MediumEventKind::TlsCacheHit, 1);
-                return address;
-            }
-        }
-        let regions = unsafe { domain_regions(heap.domain) };
-        let mut state = regions.state.lock();
-
-        let class_index = medium_class(layout);
-        let mut region = state.regions;
-        while !region.is_null() {
-            let cached = if let Some(class_index) = class_index {
-                let bin = unsafe { &mut (*region).bins[class_index] };
-                let cached = bin.free_list;
-                if !cached.is_null() {
-                    bin.free_list = unsafe { (*cached).next };
-                    if bin.free_list.is_null() {
-                        bin.purge_after = 0;
-                    }
-                }
-                cached.cast()
-            } else {
-                unsafe { take_large_extent(region, slice_count) }.unwrap_or(ptr::null_mut())
-            };
-            if !cached.is_null() {
-                unsafe { register_medium_allocation(cached, layout, heap, tracking.take()) };
-                self.record_allocation(layout.size());
-                record_medium_event(MediumEventKind::GlobalCacheHit, 1);
-                return cached;
-            }
-            region = unsafe { (*region).next.load(Ordering::Relaxed) };
-        }
-
-        self.purge_medium_locked(&mut state, false);
-        let Some(address) = (unsafe { allocate_slices_locked(&mut state, &regions.regions, heap.domain, slice_count) }) else {
-            return ptr::null_mut();
-        };
-
-        if !unsafe { hal::commit(address, span_size) } {
-            let region = unsafe { find_region(&state, address) }.expect("allocated span must belong to an allocator region");
-            let slice_index = (address.addr() - unsafe { (*region).base.addr() }) / MEDIUM_SLICE_SIZE;
-            unsafe { mark_slices(&mut (*region).used, slice_index, slice_count, false) };
-            return ptr::null_mut();
-        }
-        unsafe { register_medium_allocation(address, layout, heap, tracking) };
-        self.record_mapping(span_size);
-        self.record_allocation(layout.size());
-        record_medium_event(MediumEventKind::FreshCommit, 1);
-        address
+    #[cfg_attr(test, mutants::skip)] // A permanent synthetic failure can strand dependent global allocators; the implementation remains mutation-tested below.
+    fn allocate_medium(&self, layout: Layout, heap: &mut ReusableHeapState, tracking: Option<PendingTracking>) -> *mut u8 {
+        self.allocate_medium_inner(layout, heap, tracking).address
     }
 
     #[cold]
+    #[inline(never)]
+    fn allocate_medium_inner(
+        &self,
+        layout: Layout,
+        heap: &mut ReusableHeapState,
+        mut tracking: Option<PendingTracking>,
+    ) -> MediumAllocation {
+        let Some(slice_count) = medium_slice_count(layout) else {
+            return MediumAllocation { address: ptr::null_mut() };
+        };
+        if let Some(index) = heap.medium_batch.maintenance_shard() {
+            // SAFETY: domains and shards are process-retained. Every medium
+            // allocation drives bounded cross-shard work, including cache misses
+            // and spans too large to cache, so idle owners cannot strand credits.
+            unsafe { medium::domain_shard(heap.domain, index) }.purge(false, hal::monotonic_millis());
+        }
+        let span_size = slice_count
+            .checked_mul(MEDIUM_SLICE_SIZE)
+            .expect("medium slice count is bounded to keep its span size representable");
+        let cache_class = local_medium_cache_class(slice_count, span_size, heap.medium_cache_max_bytes);
+        if let Some(cache_index) = cache_class
+            && let Some(address) = heap.medium_batch.pop(cache_index)
+        {
+            unsafe { register_medium_allocation(address, layout, heap, tracking.take()) };
+            self.record_allocation(layout.size());
+            record_medium_event(MediumEventKind::TlsCacheHit, 1);
+            return MediumAllocation { address };
+        }
+        let regions = medium::heap_regions(heap);
+        let requested = cache_class.map_or(1, |class| heap.medium_batch.refill_count(class));
+        let mut batch = [ptr::null_mut(); 16];
+        let reused = NonZeroUsize::new(regions.take_batch(slice_count, &mut batch[..requested]));
+        let (address, count) = if let Some(reused) = reused {
+            let reused = reused.get();
+            record_medium_event(MediumEventKind::GlobalCacheHit, reused);
+            (batch[0], reused)
+        } else {
+            regions.purge(false, hal::monotonic_millis());
+            let requested_slices = slice_count
+                .checked_mul(requested)
+                .expect("medium slice and refill counts are bounded to keep their product representable");
+            let ((address, region), reserved_count) = match regions.reserve_slices(heap.domain, requested_slices) {
+                Some(reservation) => (reservation, requested),
+                None if requested > 1 => {
+                    let Some(reservation) = regions.reserve_slices(heap.domain, slice_count) else {
+                        return MediumAllocation { address: ptr::null_mut() };
+                    };
+                    (reservation, 1)
+                }
+                None => {
+                    return MediumAllocation { address: ptr::null_mut() };
+                }
+            };
+            // SAFETY: used bits reserve this entire, exclusively owned extent.
+            let true = (unsafe {
+                commit_and_initialize_reserved_medium_batch(regions, address, span_size, slice_count, reserved_count, &mut batch, region)
+            }) else {
+                return MediumAllocation { address: ptr::null_mut() };
+            };
+            let committed_bytes = span_size
+                .checked_mul(reserved_count)
+                .expect("reserved medium batch count is bounded to keep its committed size representable");
+            self.record_mapping(committed_bytes);
+            regions.record_fresh(committed_bytes);
+            record_medium_event(MediumEventKind::FreshCommit, reserved_count);
+            (address, reserved_count)
+        };
+        if let Some(class) = cache_class {
+            for &cached in batch[1..count].iter().rev() {
+                let inserted = heap.medium_batch.push(class, cached);
+                debug_assert!(inserted, "refill count accounts for the combined cache budget");
+            }
+        }
+        unsafe { register_medium_allocation(address, layout, heap, tracking) };
+        self.record_allocation(layout.size());
+        MediumAllocation { address }
+    }
+
     #[inline(never)]
     unsafe fn deallocate_medium(&self, address: *mut u8, layout: Layout, heap: *mut ReusableHeapState) {
         let Some(slice_count) = medium_slice_count(layout) else {
             return;
         };
         let span_size = slice_count * MEDIUM_SLICE_SIZE;
-        let mut address = address;
         let (owner, owner_retirable, coordination, operation, tracking_allocation) = unsafe { unregister_medium_allocation(address, heap) };
         let _operation = operation;
         let _external_release = ExternalAllocationReleaseGuard::new(coordination, owner_retirable);
         tracking::record_deallocation(tracking_allocation, address, layout, false);
-        let cache_locally = !heap.is_null() && ptr::eq(owner, heap) && span_size <= unsafe { (*heap).medium_cache_max_bytes };
+        let cache_locally = !heap.is_null()
+            && ptr::eq(owner, heap)
+            && span_size <= medium::LOCAL_CACHE_BYTES
+            && span_size <= unsafe { (*heap).medium_cache_max_bytes };
         if cache_locally && let Some(cache_index) = local_medium_class(slice_count) {
-            let cached = unsafe { (*heap).medium_cache.get_unchecked_mut(cache_index) };
-            let displaced = *cached;
-            *cached = address;
-            self.record_deallocation(layout.size());
-            record_medium_event(MediumEventKind::CachedFree, 1);
-            if displaced.is_null() {
+            // SAFETY: only the owning thread mutates its heap-local cache.
+            if unsafe { (*heap).medium_batch.push(cache_index, address) } {
+                self.record_deallocation(layout.size());
+                record_medium_event(MediumEventKind::CachedFree, 1);
                 return;
             }
-            address = displaced;
+            let mut evicted = [(ptr::null_mut(), 0); medium::BATCH_CAPACITY];
+            // SAFETY: the owning thread exclusively owns these unregistered
+            // spans. Evicting all classes makes room without exceeding the
+            // combined byte budget, even when the incoming class is larger.
+            let count = unsafe { (*heap).medium_batch.drain(&mut evicted) };
+            assert_ne!(count, 0, "a budget-admitted span can only overflow a nonempty local cache");
+            let inserted = unsafe { (*heap).medium_batch.push(cache_index, address) };
+            assert!(inserted, "an emptied medium cache must fit a span admitted by its byte budget");
+            let region = region_containing(evicted[0].0).expect("evicted spans retain their region identity");
+            let regions = unsafe { medium::region_backing(region) };
+            // SAFETY: a heap's stable backing shard owns every eviction entry.
+            unsafe { regions.return_batch(&evicted[..count], C::Tunables::MEDIUM_PURGE_DELAY_MS) };
+            self.record_deallocation(layout.size());
+            record_medium_event(MediumEventKind::CachedFree, 1);
+            record_medium_event(MediumEventKind::GlobalFree, count);
+            return;
         }
         let region = region_containing(address).expect("medium allocation must belong to an allocator region");
-        let regions = unsafe { domain_regions((*region).domain) };
-        let state = regions.state.lock();
-        let region = unsafe { find_region(&state, address) }.expect("medium allocation must belong to an allocator region");
-        if let Some(class_index) = medium_class(layout) {
-            let bin = unsafe { &mut (*region).bins[class_index] };
-            let block = address.cast::<MediumFreeBlock>();
-            unsafe {
-                block.write(MediumFreeBlock { next: bin.free_list });
-            }
-            bin.free_list = block;
-            if bin.purge_after == 0 {
-                bin.purge_after = hal::monotonic_millis().saturating_add(C::Tunables::MEDIUM_PURGE_DELAY_MS);
-            }
+        // SAFETY: immutable region identity routes frees even after migration or
+        // heap retirement. The retirement guards above protect only unregistering.
+        let regions = unsafe { medium::region_backing(region) };
+        if ptr::eq(owner, heap) {
+            // SAFETY: the owning heap transferred this unregistered span.
+            unsafe { regions.return_span(address, slice_count, C::Tunables::MEDIUM_PURGE_DELAY_MS) };
         } else {
-            unsafe { insert_large_extent(region, address, slice_count) };
-            if unsafe { (*region).large_purge_after } == 0 {
-                unsafe {
-                    (*region).large_purge_after = hal::monotonic_millis().saturating_add(C::Tunables::MEDIUM_PURGE_DELAY_MS);
-                }
-            }
+            // SAFETY: unregistering transferred this reserved, committed span
+            // exclusively to shared backing; the mailbox retains no heap pointer.
+            unsafe { regions.return_remote_span(address, slice_count, C::Tunables::MEDIUM_PURGE_DELAY_MS) };
         }
-        if !cache_locally || local_medium_class(slice_count).is_none() {
-            self.record_deallocation(layout.size());
-        }
+        self.record_deallocation(layout.size());
         record_medium_event(MediumEventKind::GlobalFree, 1);
-    }
-
-    fn purge_medium_locked(&self, state: &mut MediumState, force: bool) {
-        self.purge_medium_locked_at(state, force, hal::monotonic_millis());
-    }
-
-    fn purge_medium_locked_at(&self, state: &mut MediumState, force: bool, now: u64) {
-        let mut region = state.regions;
-        while !region.is_null() {
-            let base = unsafe { (*region).base };
-            for class_index in 0..MEDIUM_MAX_SLICES {
-                let bin = unsafe { &mut (*region).bins[class_index] };
-                let deadline = bin.purge_after;
-                if bin.free_list.is_null() || (!force && (deadline == 0 || deadline > now)) {
-                    continue;
-                }
-
-                let slice_count = class_index + 1;
-                let span_size = slice_count * MEDIUM_SLICE_SIZE;
-                let mut block = bin.free_list;
-                bin.free_list = ptr::null_mut();
-                bin.purge_after = 0;
-
-                while !block.is_null() {
-                    let next = unsafe { (*block).next };
-                    let slice_index = (block.addr() - base.addr()) / MEDIUM_SLICE_SIZE;
-                    let decommitted = unsafe { hal::decommit(block.cast(), span_size) };
-                    debug_assert!(decommitted || cfg!(test));
-                    if decommitted {
-                        unsafe { mark_slices(&mut (*region).used, slice_index, slice_count, false) };
-                        self.record_unmapping(span_size);
-                        if !force {
-                            record_medium_event(MediumEventKind::PurgedSpan, 1);
-                        }
-                    }
-                    block = next;
-                }
-            }
-
-            if !unsafe { (*region).large_free.is_null() }
-                && (force || (unsafe { (*region).large_purge_after } != 0 && unsafe { (*region).large_purge_after } <= now))
-            {
-                let mut block = unsafe { (*region).large_free };
-                unsafe {
-                    (*region).large_free = ptr::null_mut();
-                    (*region).large_purge_after = 0;
-                }
-                while !block.is_null() {
-                    let next = unsafe { (*block).next };
-                    let slice_count = unsafe { (*block).slice_count };
-                    let span_size = slice_count * MEDIUM_SLICE_SIZE;
-                    let slice_index = (block.addr() - base.addr()) / MEDIUM_SLICE_SIZE;
-                    let decommitted = unsafe { hal::decommit(block.cast(), span_size) };
-                    debug_assert!(decommitted || cfg!(test));
-                    if decommitted {
-                        unsafe { mark_slices(&mut (*region).used, slice_index, slice_count, false) };
-                        self.record_unmapping(span_size);
-                        if !force {
-                            record_medium_event(MediumEventKind::PurgedSpan, 1);
-                        }
-                    }
-                    block = next;
-                }
-            }
-            region = unsafe { (*region).next.load(Ordering::Relaxed) };
-        }
     }
 
     #[cold]
@@ -1376,9 +1382,11 @@ where
         owner: *mut ReusableHeapState,
     ) -> *mut u8 {
         let requested_size = cmp::max(layout.size(), 1);
+        // The prefix stores a pointer, so even byte-aligned payloads need pointer alignment.
+        let alignment = cmp::max(layout.align(), align_of::<*mut ExtraHeader>());
         let default_class = if has_context { default_class::<C::Tunables>(layout) } else { None };
-        let discriminator_space = if default_class.is_some() { layout.align() } else { 0 };
-        let mapping_size = direct_mapping_size(requested_size, layout.align(), discriminator_space)
+        let discriminator_space = if default_class.is_some() { alignment } else { 0 };
+        let mapping_size = direct_mapping_size(requested_size, alignment, discriminator_space)
             .expect("valid allocation layouts must have a representable mapping size");
 
         let mapping_address = hal::map(mapping_size);
@@ -1393,7 +1401,7 @@ where
         self.record_mapping(mapping_size);
 
         let first_user_address = unsafe { mapping_address.add(EXTRA_SIZE + HEADER_OFFSET) };
-        let offset = hal::align_offset(first_user_address, layout.align());
+        let offset = hal::align_offset(first_user_address, alignment);
         if offset == usize::MAX {
             unsafe { hal::unmap(mapping_address, mapping_size) };
             self.record_unmapping(mapping_size);
@@ -1404,7 +1412,7 @@ where
         if let Some(class_index) = default_class {
             let block_size = ConfigSizeClasses::<C>::SIZES[class_index];
             if user_address.addr() & (block_size - 1) == 0 {
-                user_address = unsafe { user_address.add(layout.align()) };
+                user_address = unsafe { user_address.add(alignment) };
             }
         }
         let extra = mapping_address.cast::<ExtraHeader>();
@@ -1457,7 +1465,8 @@ where
             self.pop_or_refill_remote(remote, class_index, true, layout.size())
         };
         if block.is_null() {
-            return ptr::null_mut();
+            // SAFETY: the heap and pending record retain this call's ownership and layout.
+            return unsafe { self.allocate_direct(layout, true, tracking, heap) };
         }
 
         let block_size = ConfigSizeClasses::<C>::SIZES[class_index];
@@ -1674,6 +1683,11 @@ where
     C::Tunables: Send + Sync + 'static,
     ConfigSizeClasses<C>: Send + Sync + 'static,
 {
+    unsafe fn realloc(&self, address: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        // SAFETY: the caller supplies this allocator's live allocation and its current layout.
+        unsafe { realloc::reallocate::<Self, C::Tunables>(self, address, layout, new_size) }
+    }
+
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         GLOBAL_ALLOCATOR_ACTIVE.store(true, Ordering::Release);
         let state = unsafe { allocation_thread_state() };
@@ -1777,6 +1791,9 @@ where
             unsafe { synchronize_passive_hint(state, false, allocation_hints::active_hint()) };
         }
         let region = region_containing(address);
+        if region.is_none() && unsafe { snapshot::try_deallocate(address, layout) } {
+            return;
+        }
         let segment = allocation_segment(address);
         // Allocations entering this branch are preceded within their segment by
         // allocator-owned metadata. Segment-base allocations are excluded above,
@@ -1844,26 +1861,23 @@ where
     C::Tunables: Send + Sync + 'static,
     ConfigSizeClasses<C>: Send + Sync + 'static,
 {
+    unsafe fn realloc(&self, address: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        // SAFETY: using the wrapper for fallback preserves snapshot allocation routing.
+        unsafe { realloc::reallocate::<Self, C::Tunables>(self, address, layout, new_size) }
+    }
+
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        if !seismograph::snapshot::snapshot_arena_allocation_suspended() {
-            if let Some(address) = seismograph::snapshot::snapshot_arena_allocate(layout) {
-                return address;
-            }
-            if let Some(address) = tracking::snapshot_arena_allocate(layout) {
-                return address;
-            }
-        }
         GLOBAL_ALLOCATOR_ACTIVE.store(true, Ordering::Release);
+        if !seismograph::snapshot::snapshot_arena_allocation_suspended()
+            && (seismograph::snapshot::snapshot_collection_active() || tracking::snapshot_collection_active())
+        {
+            // SAFETY: the GlobalAlloc caller provides a valid nonzero layout.
+            return unsafe { snapshot::allocate(layout) };
+        }
         unsafe { self.allocator.alloc(layout) }
     }
 
     unsafe fn dealloc(&self, address: *mut u8, layout: Layout) {
-        if seismograph::snapshot::snapshot_arena_deallocate(address) {
-            return;
-        }
-        if tracking::snapshot_arena_deallocate(address) {
-            return;
-        }
         GLOBAL_ALLOCATOR_ACTIVE.store(true, Ordering::Release);
         unsafe { self.allocator.dealloc(address, layout) };
     }
@@ -1959,20 +1973,50 @@ pub(crate) fn flush_thread_aggregate_batch() {
     unsafe { flush_aggregate_batch(state) };
 }
 
+#[cfg_attr(test, mutants::skip)] // Platform bitmaps may have unused trailing bits; boundary behavior is tested directly.
+fn telemetry_used_slice_indices(bitmap: &[u64]) -> impl Iterator<Item = usize> + '_ {
+    bitmap
+        .iter()
+        .enumerate()
+        .flat_map(|(word_index, &word)| {
+            let mut remaining = word;
+            std::iter::from_fn(move || {
+                if remaining == 0 {
+                    return None;
+                }
+                let slice_index = word_index * 64 + remaining.trailing_zeros() as usize;
+                remaining = clear_lowest_set_bit(remaining);
+                Some(slice_index)
+            })
+        })
+        .take_while(|&slice_index| slice_index < MEDIUM_REGION_SLICE_COUNT)
+}
+
+#[cfg_attr(test, mutants::skip)] // Replacing the clear operation with a set operation makes the iterator infinite.
+const fn clear_lowest_set_bit(value: u64) -> u64 {
+    value & (value - 1)
+}
+
 pub(crate) fn telemetry_region_snapshots() -> Vec<tracking::RegionSnapshot> {
     let mut regions = Vec::new();
     let mut domain = DOMAINS.load(Ordering::Acquire);
-    while !domain.is_null() {
-        let mut region = unsafe { (*domain).regions.regions.load(Ordering::Acquire) };
-        while !region.is_null() {
-            regions.push((domain, region));
-            region = unsafe { (*region).next.load(Ordering::Acquire) };
+    while ptr::NonNull::new(domain).is_some() {
+        for index in 0..medium::SHARD_COUNT {
+            // SAFETY: published domains and their shard storage are retained for the process lifetime.
+            let backing = unsafe { medium::domain_shard(domain, index) };
+            let mut region = backing.regions.load(Ordering::Acquire);
+            while ptr::NonNull::new(region).is_some() {
+                regions.push((domain, region));
+                // SAFETY: published regions are retained for the process lifetime.
+                region = unsafe { (*region).next.load(Ordering::Acquire) };
+            }
         }
+        // SAFETY: published domains are retained for the process lifetime.
         domain = unsafe { (*domain).next.load(Ordering::Acquire) };
     }
     let mut used_bitmaps = (0..regions.len()).map(|_| vec![0; MEDIUM_REGION_BITMAP_WORDS]).collect::<Vec<_>>();
-    for ((domain, region), used_bitmap) in regions.iter().zip(&mut used_bitmaps) {
-        let _state = unsafe { (*(*domain)).regions.state.lock() };
+    for ((_, region), used_bitmap) in regions.iter().zip(&mut used_bitmaps) {
+        let _state = unsafe { medium::region_backing(*region) }.state.lock();
         used_bitmap.copy_from_slice(unsafe { &(**region).used });
     }
 
@@ -1980,10 +2024,7 @@ pub(crate) fn telemetry_region_snapshots() -> Vec<tracking::RegionSnapshot> {
     for (region_index, ((_, region), used_bitmap)) in regions.into_iter().zip(used_bitmaps).enumerate() {
         let used_slices = used_bitmap.iter().map(|word| word.count_ones() as usize).sum();
         let mut slices = Vec::with_capacity(used_slices);
-        for slice_index in 0..MEDIUM_REGION_SLICE_COUNT {
-            if used_bitmap[slice_index / 64] & (1_u64 << (slice_index % 64)) == 0 {
-                continue;
-            }
+        for slice_index in telemetry_used_slice_indices(&used_bitmap) {
             let physical = unsafe { &(*region).physical[slice_index] };
             let kind_and_span = physical.kind_and_span.load(Ordering::Acquire);
             let kind = match kind_and_span & PHYSICAL_KIND_MASK {
@@ -2063,12 +2104,17 @@ pub(crate) fn telemetry_region_snapshots() -> Vec<tracking::RegionSnapshot> {
 pub(crate) fn telemetry_domain_snapshots() -> Vec<tracking::DomainSnapshot> {
     let mut snapshots = Vec::new();
     let mut domain = DOMAINS.load(Ordering::Acquire);
-    while !domain.is_null() {
-        snapshots.push(tracking::DomainSnapshot {
-            domain_id: unsafe { (*domain).id },
-            is_default: unsafe { (*domain).is_default.load(Ordering::Acquire) },
-        });
-        domain = unsafe { (*domain).next.load(Ordering::Acquire) };
+    while ptr::NonNull::new(domain).is_some() {
+        // SAFETY: published domains are retained for the process lifetime.
+        let (domain_id, is_default, next) = unsafe {
+            (
+                (*domain).id,
+                (*domain).is_default.load(Ordering::Acquire),
+                (*domain).next.load(Ordering::Acquire),
+            )
+        };
+        snapshots.push(tracking::DomainSnapshot { domain_id, is_default });
+        domain = next;
     }
     snapshots.sort_unstable_by_key(|domain| domain.domain_id);
     snapshots
@@ -2128,20 +2174,14 @@ pub(crate) unsafe fn retire_general_heap(state: *mut ReusableHeapState) {
         }
     }
 
-    for (cache_index, cached) in heap.medium_cache.iter_mut().enumerate() {
-        if cached.is_null() {
-            continue;
-        }
-        let slice_count = 1_usize << cache_index;
-        let bytes = slice_count * MEDIUM_SLICE_SIZE;
-        let decommitted = unsafe { hal::decommit(*cached, bytes) };
-        debug_assert!(decommitted || cfg!(test));
-        if decommitted {
-            let regions = unsafe { domain_regions(heap.domain) };
-            unsafe { regions.release_slices(*cached, slice_count) };
-            tracking::record_unmapping(bytes);
-        }
-        *cached = ptr::null_mut();
+    let mut medium_pending = [(ptr::null_mut(), 0); medium::BATCH_CAPACITY];
+    let medium_count = heap.medium_batch.drain(&mut medium_pending);
+    if medium_count != 0 {
+        let region = region_containing(medium_pending[0].0).expect("cached spans retain their region identity");
+        // SAFETY: the heap's stable shard owns all of its local spans, and
+        // retirement has exclusive access to the bounded heap-local cache.
+        let regions = unsafe { medium::region_backing(region) };
+        unsafe { regions.retire_packet(&mut medium_pending[..medium_count]) };
     }
     let mut retained = 0;
     let mut segment = heap.segments;
@@ -2395,7 +2435,7 @@ unsafe fn release_retired_storage(address: *mut u8, direct_mapping: bool, commit
             return false;
         }
         let region = region_containing(address).expect("retired slices must belong to an allocator region");
-        let regions = unsafe { domain_regions((*region).domain) };
+        let regions = unsafe { medium::region_backing(region) };
         unsafe { regions.release_slices(address, release_bytes / MEDIUM_SLICE_SIZE) };
     }
     tracking::record_unmapping(committed_bytes);
@@ -2526,7 +2566,7 @@ pub(crate) unsafe fn release_bump_chunk(address: *mut u8) {
     if decommitted {
         tracking::record_bump_decommit(MEDIUM_SLICE_SIZE);
         let region = region_containing(address).expect("bump chunk must belong to an allocator region");
-        let regions = unsafe { domain_regions((*region).domain) };
+        let regions = unsafe { medium::region_backing(region) };
         unsafe { regions.release_slices(address, 1) };
     }
 }
@@ -2649,6 +2689,12 @@ fn context_required_size(size: usize, alignment: usize) -> Option<usize> {
 }
 
 fn direct_mapping_size(requested_size: usize, alignment: usize, discriminator_space: usize) -> Option<usize> {
+    let alignment = cmp::max(alignment, align_of::<*mut ExtraHeader>());
+    let discriminator_space = if discriminator_space == 0 {
+        0
+    } else {
+        cmp::max(discriminator_space, align_of::<*mut ExtraHeader>())
+    };
     requested_size
         .checked_add(alignment - 1)
         .and_then(|size| size.checked_add(discriminator_space))
@@ -2669,14 +2715,14 @@ fn default_class<T: Tunables>(layout: Layout) -> Option<usize> {
 }
 
 #[inline(always)]
-fn medium_class(layout: Layout) -> Option<usize> {
-    let slices = medium_slice_count(layout)?;
-    if slices > MEDIUM_MAX_SLICES { None } else { Some(slices - 1) }
+fn local_medium_class(slice_count: usize) -> Option<usize> {
+    (slice_count.is_power_of_two() && slice_count <= (1 << (LOCAL_MEDIUM_CLASSES - 1))).then(|| slice_count.trailing_zeros() as usize)
 }
 
 #[inline(always)]
-fn local_medium_class(slice_count: usize) -> Option<usize> {
-    (slice_count.is_power_of_two() && slice_count <= (1 << (LOCAL_MEDIUM_CLASSES - 1))).then(|| slice_count.trailing_zeros() as usize)
+#[cfg_attr(test, mutants::skip)] // Disabling the cache changes only performance and makes workspace mutation tests exceed their timeout.
+fn local_medium_cache_class(slice_count: usize, span_size: usize, cache_max_bytes: usize) -> Option<usize> {
+    local_medium_class(slice_count).filter(|_| span_size <= cache_max_bytes)
 }
 
 #[inline(always)]
@@ -2691,6 +2737,29 @@ fn medium_slice_count(layout: Layout) -> Option<usize> {
     } else {
         Some(slices)
     }
+}
+
+#[cfg_attr(test, mutants::skip)] // Mutating VM sizes or pointer offsets can access inaccessible pages and terminate the test runner.
+unsafe fn commit_and_initialize_reserved_medium_batch(
+    regions: &MediumRegion,
+    address: *mut u8,
+    span_size: usize,
+    slice_count: usize,
+    reserved_count: usize,
+    batch: &mut [*mut u8; medium::BATCH_CAPACITY],
+    region: *mut RegionState,
+) -> bool {
+    if !unsafe { hal::commit(address, span_size * reserved_count) } {
+        unsafe { regions.release_slices(address, slice_count * reserved_count) };
+        return false;
+    }
+    // Avoid a process-wide region lookup when publishing each fresh batch.
+    LAST_REGION.set(region);
+    for (index, entry) in batch[..reserved_count].iter_mut().enumerate() {
+        // SAFETY: every span fits inside the committed batch extent.
+        *entry = unsafe { address.add(index * span_size) };
+    }
+    true
 }
 
 unsafe fn register_medium_allocation(address: *mut u8, layout: Layout, heap: &mut ReusableHeapState, tracking: Option<PendingTracking>) {
@@ -2747,8 +2816,14 @@ unsafe fn unregister_medium_allocation(
     }
     metadata.requested_bytes.store(0, Ordering::Relaxed);
     metadata.usable_bytes.store(0, Ordering::Relaxed);
-    let tracking_allocation_id = metadata.tracking_allocation_id.swap(0, Ordering::Relaxed);
-    let tracking_session_id = metadata.tracking_session_id.swap(0, Ordering::Relaxed);
+    // The unique freeing caller owns this still-reserved span. Registration
+    // cannot reuse its metadata until we return it to a cache or shared backing;
+    // retirement does not write these IDs. Keep atomic access, but no RMW is
+    // needed to take the tracking record, including on a remote free.
+    let tracking_allocation_id = metadata.tracking_allocation_id.load(Ordering::Relaxed);
+    let tracking_session_id = metadata.tracking_session_id.load(Ordering::Relaxed);
+    metadata.tracking_allocation_id.store(0, Ordering::Relaxed);
+    metadata.tracking_session_id.store(0, Ordering::Relaxed);
     unsafe { &(*region).physical[slice_index] }.owner.store(0, Ordering::Release);
     (
         owner,
@@ -2787,6 +2862,7 @@ unsafe fn unregister_direct_allocation(extra: *mut ExtraHeader) {
     }
 }
 
+#[inline]
 fn region_containing(address: *mut u8) -> Option<*mut RegionState> {
     let cached = LAST_REGION.get();
     if !cached.is_null() {
@@ -2796,17 +2872,30 @@ fn region_containing(address: *mut u8) -> Option<*mut RegionState> {
         }
     }
 
+    region_containing_uncached(address)
+}
+
+// Keep the complete shard scan out of the cached lookup used by ordinary frees.
+#[inline(never)]
+fn region_containing_uncached(address: *mut u8) -> Option<*mut RegionState> {
     let mut domain = DOMAINS.load(Ordering::Acquire);
-    while !domain.is_null() {
-        let mut region = unsafe { (*domain).regions.regions.load(Ordering::Acquire) };
-        while !region.is_null() {
-            let base = unsafe { (*region).base };
-            if address.addr() >= base.addr() && address.addr() < base.addr() + MEDIUM_REGION_SIZE {
-                LAST_REGION.set(region);
-                return Some(region);
+    while ptr::NonNull::new(domain).is_some() {
+        for index in 0..medium::SHARD_COUNT {
+            // SAFETY: published domains and their shard storage are retained for the process lifetime.
+            let backing = unsafe { medium::domain_shard(domain, index) };
+            let mut region = backing.regions.load(Ordering::Acquire);
+            while ptr::NonNull::new(region).is_some() {
+                // SAFETY: published regions are retained for the process lifetime.
+                let base = unsafe { (*region).base };
+                if address.addr() >= base.addr() && address.addr() < base.addr() + MEDIUM_REGION_SIZE {
+                    LAST_REGION.set(region);
+                    return Some(region);
+                }
+                // SAFETY: published regions are retained for the process lifetime.
+                region = unsafe { (*region).next.load(Ordering::Acquire) };
             }
-            region = unsafe { (*region).next.load(Ordering::Acquire) };
         }
+        // SAFETY: published domains are retained for the process lifetime.
         domain = unsafe { (*domain).next.load(Ordering::Acquire) };
     }
     None
@@ -2982,27 +3071,19 @@ fn allocation_slab(address: *mut u8) -> *mut SlabHeader {
     allocation_segment(address).cast()
 }
 
-unsafe fn allocate_slices_locked(
-    state: &mut MediumState,
-    published_regions: &AtomicPtr<RegionState>,
-    domain: *mut DomainState,
-    count: usize,
-) -> Option<*mut u8> {
-    let region =
-        unsafe { find_region_with_free_slices(state, count) }.or_else(|| unsafe { append_region(state, published_regions, domain) })?;
-    let slice_index = find_free_slices(unsafe { &(*region).used }, unsafe { (*region).next_slice }, count)?;
-    unsafe {
-        mark_slices(&mut (*region).used, slice_index, count, true);
-        (*region).next_slice = (slice_index + count) % MEDIUM_REGION_SLICE_COUNT;
-        Some((*region).base.add(slice_index * MEDIUM_SLICE_SIZE))
-    }
-}
-
+#[cfg(all(test, not(miri)))]
 unsafe fn append_region(
     state: &mut MediumState,
     published_regions: &AtomicPtr<RegionState>,
     domain: *mut DomainState,
 ) -> Option<*mut RegionState> {
+    // SAFETY: test-only convenience wrapper; production creates regions before locking.
+    let region = unsafe { create_region(domain, domain_regions(domain)) }?;
+    unsafe { publish_region(state, published_regions, region) };
+    Some(region)
+}
+
+unsafe fn create_region(domain: *mut DomainState, backing: *const MediumRegion) -> Option<*mut RegionState> {
     let base = hal::reserve(MEDIUM_REGION_SIZE);
     if base.is_null() {
         return None;
@@ -3015,6 +3096,10 @@ unsafe fn append_region(
     unsafe {
         ptr::addr_of_mut!((*metadata).base).write(base);
         ptr::addr_of_mut!((*metadata).domain).write(domain);
+        ptr::addr_of_mut!((*metadata).backing).write(backing);
+        ptr::addr_of_mut!((*metadata).free_slices).write(MEDIUM_REGION_SLICE_COUNT);
+        ptr::addr_of_mut!((*metadata).available_next).write(ptr::null_mut());
+        ptr::addr_of_mut!((*metadata).available_previous).write(ptr::null_mut());
         ptr::addr_of_mut!((*metadata).next_slice).write(0);
         ptr::addr_of_mut!((*metadata).large_free).write(ptr::null_mut());
         ptr::addr_of_mut!((*metadata).large_purge_after).write(0);
@@ -3025,12 +3110,14 @@ unsafe fn append_region(
             physical.add(index).write(PhysicalSliceMeta::new());
             allocations.add(index).write(MediumAllocationMeta::new());
         }
-        let bins = ptr::addr_of_mut!((*metadata).bins).cast::<MediumBin>();
-        for index in 0..MEDIUM_MAX_SLICES {
-            bins.add(index).write(MediumBin::new());
-        }
         ptr::addr_of_mut!((*metadata).next).write(AtomicPtr::new(ptr::null_mut()));
     }
+    Some(metadata)
+}
+
+unsafe fn publish_region(state: &mut MediumState, published_regions: &AtomicPtr<RegionState>, metadata: *mut RegionState) {
+    // SAFETY: caller holds the shard lock and owns fully initialized metadata.
+    unsafe { medium::add_available(state, metadata) };
     if state.regions.is_null() {
         state.regions = metadata;
         published_regions.store(metadata, Ordering::Release);
@@ -3038,70 +3125,75 @@ unsafe fn append_region(
         unsafe { (*state.last_region).next.store(metadata, Ordering::Release) };
     }
     state.last_region = metadata;
-    Some(metadata)
 }
 
 unsafe fn find_region(state: &MediumState, address: *mut u8) -> Option<*mut RegionState> {
     let mut region = state.regions;
-    while !region.is_null() {
+    while ptr::NonNull::new(region).is_some() {
+        // SAFETY: the caller guarantees that the region list belongs to a live domain.
         let base = unsafe { (*region).base };
         if address.addr() >= base.addr() && address.addr() < base.addr() + MEDIUM_REGION_SIZE {
             return Some(region);
         }
-        region = unsafe { (*region).next.load(Ordering::Relaxed) };
-    }
-    None
-}
-
-unsafe fn find_region_with_free_slices(state: &mut MediumState, count: usize) -> Option<*mut RegionState> {
-    let mut region = state.regions;
-    while !region.is_null() {
-        if find_free_slices(unsafe { &(*region).used }, unsafe { (*region).next_slice }, count).is_some() {
-            return Some(region);
-        }
+        // SAFETY: the caller guarantees that the region list belongs to a live domain.
         region = unsafe { (*region).next.load(Ordering::Relaxed) };
     }
     None
 }
 
 fn find_free_slices(used: &[u64; MEDIUM_REGION_BITMAP_WORDS], start: usize, count: usize) -> Option<usize> {
-    find_free_slices_in(used, start, MEDIUM_REGION_SLICE_COUNT, count)
-        .or_else(|| find_free_slices_in(used, 0, MEDIUM_REGION_SLICE_COUNT, count))
+    if count == 0 || count > MEDIUM_REGION_SLICE_COUNT {
+        return None;
+    }
+    find_free_slices_in(used, start, MEDIUM_REGION_SLICE_COUNT, count).or_else(|| {
+        find_free_slices_in(
+            used,
+            0,
+            start.saturating_add(count).saturating_sub(1).min(MEDIUM_REGION_SLICE_COUNT),
+            count,
+        )
+    })
 }
 
+#[cfg_attr(test, mutants::skip)] // Arithmetic and loop-control mutations can make the bitmap scan non-progressing.
 fn find_free_slices_in(used: &[u64; MEDIUM_REGION_BITMAP_WORDS], start: usize, end: usize, count: usize) -> Option<usize> {
     let mut run_start = start;
     let mut run_length = 0;
-    for slice_index in start..end {
-        if slice_is_used(used, slice_index) {
-            run_start = slice_index + 1;
+    let mut slice_index = start;
+    while slice_index < end {
+        let bits = used[slice_index / 64] >> (slice_index % 64);
+        let remaining = (64 - slice_index % 64).min(end - slice_index);
+        if bits & 1 != 0 {
+            let occupied = (bits.trailing_ones() as usize).min(remaining);
+            slice_index += occupied;
+            run_start = slice_index;
             run_length = 0;
         } else {
-            run_length += 1;
-            if run_length == count {
+            let free = (bits.trailing_zeros() as usize).min(remaining);
+            run_length += free;
+            if run_length >= count {
                 return Some(run_start);
             }
+            slice_index += free;
         }
     }
     None
 }
 
-fn slice_is_used(used: &[u64; MEDIUM_REGION_BITMAP_WORDS], slice_index: usize) -> bool {
-    let word = slice_index / 64;
-    let bit = slice_index % 64;
-    used[word] & (1_u64 << bit) != 0
-}
-
+#[cfg_attr(test, mutants::skip)] // Mutated bitmap ranges can loop indefinitely or corrupt reservation metadata.
 fn mark_slices(used: &mut [u64; MEDIUM_REGION_BITMAP_WORDS], slice_index: usize, count: usize, value: bool) {
-    for index in 0..count {
-        let current = slice_index + index;
+    let mut current = slice_index;
+    let end = slice_index + count;
+    while current < end {
         let word = current / 64;
-        let mask = 1_u64 << (current % 64);
+        let bits = (64 - current % 64).min(end - current);
+        let mask = (u64::MAX >> (64 - bits)) << (current % 64);
         if value {
             used[word] |= mask;
         } else {
             used[word] &= !mask;
         }
+        current += bits;
     }
 }
 
@@ -3293,7 +3385,7 @@ unsafe fn push_remote_block(slab: *mut SlabHeader, address: *mut u8, class_index
         Some(operation)
     };
     let remote = unsafe { &(*slab).remote_free };
-    tracking::begin_remote_free();
+    let availability = tracking::begin_remote_free();
     let mut head = remote.load(Ordering::Relaxed);
     loop {
         unsafe {
@@ -3304,7 +3396,7 @@ unsafe fn push_remote_block(slab: *mut SlabHeader, address: *mut u8, class_index
         wait_at_test_cas_barrier();
         match remote.compare_exchange_weak(head, address, Ordering::Release, Ordering::Relaxed) {
             Ok(_) => {
-                tracking::finish_remote_free();
+                tracking::finish_remote_free(availability);
                 unsafe { queue_remote_slab(slab) };
                 return;
             }
@@ -3438,14 +3530,81 @@ unsafe fn recycle_local_block<T: Tunables>(slab: *mut SlabHeader, address: *mut 
 #[cold]
 #[inline(never)]
 unsafe fn drain_remote_blocks<T: Tunables>(slab: *mut SlabHeader, class_index: usize) {
-    let mut block = unsafe { (*slab).remote_free.swap(ptr::null_mut(), Ordering::Acquire) };
-    while !block.is_null() {
-        let next = unsafe { read_free_next(block) };
-        tracking::record_remote_drain();
-        unsafe { (*slab).requested_bytes -= read_free_requested(block) };
-        unsafe { release_free_metadata(block) };
-        unsafe { recycle_local_block::<T>(slab, block, class_index) };
+    // SAFETY: this heap exclusively owns slab processing; Acquire transfers the
+    // published chain and its HAL metadata, not any subsequently published head.
+    let block = unsafe { (*slab).remote_free.swap(ptr::null_mut(), Ordering::Acquire) };
+    if block.is_null() {
+        return;
+    }
+    // SAFETY: detached nodes stay live until the closure releases them; no
+    // concurrent owner can recycle them or retire this slab.
+    unsafe {
+        drain_detached_remote_blocks(block, (*slab).usable_blocks as usize, tracking::remote_drain_claim, |block| {
+            (*slab).requested_bytes -= read_free_requested(block);
+            release_free_metadata(block);
+            recycle_local_block::<T>(slab, block, class_index);
+        });
+    }
+}
+
+/// Logically claims an owned detached list before recycling. Callbacks let tests
+/// observe the claim boundary without resetting process-global counters.
+///
+/// # Safety
+/// The chain contains distinct live nodes, at most `capacity`, with immutable HAL
+/// next metadata until processed. `process` may release only its current node;
+/// it must not invalidate any other node or retire the slab.
+unsafe fn drain_detached_remote_blocks<'a>(
+    mut block: *mut u8,
+    capacity: usize,
+    mut gate: impl FnMut() -> Option<tracking::RemoteDrainClaim<'a>>,
+    mut process: impl FnMut(*mut u8),
+) {
+    if block.is_null() {
+        return;
+    }
+    // SAFETY: the detached head retains its published metadata until process.
+    let mut next = unsafe { read_free_next(block) };
+    let claimed = if let Some(claim) = gate() {
+        let mut count = 1;
+        let mut cursor = next;
+        while !cursor.is_null() {
+            abort_if_corrupt_remote_free_chain(count, capacity);
+            count += 1;
+            // SAFETY: pre-counting never releases or rewrites any chain metadata.
+            cursor = unsafe { read_free_next(cursor) };
+        }
+        // True-only availability publication preserves a positive observation
+        // for this consumer. No further gates are needed for the claimed list.
+        claim.record(count);
+        true
+    } else {
+        false
+    };
+    loop {
+        // A false first gate has already consumed this node's skip: do not
+        // recheck it if availability becomes true before its processing.
+        process(block);
         block = next;
+        if block.is_null() {
+            break;
+        }
+        // SAFETY: process released only its predecessor, not this next node.
+        next = unsafe { read_free_next(block) };
+        if !claimed && let Some(claim) = gate() {
+            claim.record(1);
+        }
+    }
+}
+
+#[cold]
+#[inline(never)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Process termination cannot be observed by the in-process coverage harness.
+#[cfg_attr(test, mutants::skip)] // Removing the abort would make corrupt-chain traversal non-terminating.
+fn abort_if_corrupt_remote_free_chain(count: usize, capacity: usize) {
+    // Corruption must not unwind through GlobalAlloc.
+    if count >= capacity {
+        std::process::abort();
     }
 }
 
@@ -3830,6 +3989,9 @@ unsafe fn read_header(address: *mut u8) -> *mut ExtraHeader {
 }
 
 #[cfg(test)]
+mod drain_batch_tests;
+
+#[cfg(test)]
 mod tests {
     #[cfg(not(miri))]
     use std::ptr::NonNull;
@@ -3947,6 +4109,109 @@ mod tests {
         assert!(direct_mapping_size(usize::MAX, 16, 0).is_none());
     }
 
+    #[cfg(not(miri))]
+    #[test]
+    fn free_slice_search_does_not_count_bits_past_a_bitmap_word() {
+        let mut used = [u64::MAX; MEDIUM_REGION_BITMAP_WORDS];
+        used[0] = 1;
+        assert_eq!(find_free_slices_in(&used, 1, 128, 64), None);
+        used[1] &= !1;
+        assert_eq!(find_free_slices_in(&used, 1, 128, 64), Some(1));
+        used[1] = 0;
+        assert_eq!(find_free_slices_in(&used, 1, 65, 65), None);
+        assert_eq!(find_free_slices_in(&used, 1, 66, 65), Some(1));
+    }
+
+    #[cfg(not(miri))]
+    #[test]
+    fn region_lookup_excludes_the_mapping_end_address() {
+        const CHILD: &str = "RALLOCATOR_REGION_BOUNDARY_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "allocator::tests::region_lookup_excludes_the_mapping_end_address"])
+                .env(CHILD, "1")
+                .status()
+                .unwrap();
+            assert!(status.success());
+            return;
+        }
+        // Isolate the registry so another test cannot map a region adjacent to
+        // this one and legitimately own the address immediately after its end.
+        let domain = crate::domain::state(crate::domain::Domain::new().unwrap());
+        // SAFETY: the domain and its published regions remain process-retained.
+        let backing = unsafe { domain_regions(domain) };
+        let (base, region) = backing.reserve_slices(domain, 1).unwrap();
+        assert_eq!(region_containing_uncached(base), Some(region));
+        assert_eq!(region_containing_uncached(base.wrapping_add(MEDIUM_REGION_SIZE)), None);
+        // SAFETY: this uncommitted span never escaped the fixture.
+        unsafe { backing.release_slices(base, 1) };
+    }
+
+    #[test]
+    fn allocation_size_arithmetic_has_exact_boundaries() {
+        let context_overhead = HEADER_OFFSET + EXTRA_SIZE;
+        assert_eq!(context_required_size(0, 1), Some(1 + context_overhead));
+        assert_eq!(context_required_size(17, 64), Some(17 + 64 + EXTRA_SIZE));
+        assert_eq!(context_required_size(usize::MAX - context_overhead, 1), Some(usize::MAX));
+        assert_eq!(context_required_size(usize::MAX - context_overhead + 1, 1), None);
+
+        let direct_overhead = (64 - 1) + 32 + HEADER_OFFSET + EXTRA_SIZE;
+        assert_eq!(direct_mapping_size(1, 64, 32), Some(1 + direct_overhead));
+        assert_eq!(direct_mapping_size(usize::MAX - direct_overhead, 64, 32), Some(usize::MAX));
+        assert_eq!(direct_mapping_size(usize::MAX - direct_overhead + 1, 64, 32), None);
+        let pointer_alignment = align_of::<*mut ExtraHeader>();
+        assert_eq!(
+            direct_mapping_size(1, 1, 1),
+            Some(2 * pointer_alignment + HEADER_OFFSET + EXTRA_SIZE)
+        );
+    }
+
+    #[test]
+    fn medium_size_arithmetic_has_exact_boundaries() {
+        assert_eq!(medium_slice_count(Layout::from_size_align(0, 1).unwrap()), Some(1));
+        assert_eq!(
+            medium_slice_count(Layout::from_size_align(MEDIUM_SLICE_SIZE, MAX_MEDIUM_ALIGNMENT).unwrap()),
+            Some(1)
+        );
+        assert_eq!(
+            medium_slice_count(Layout::from_size_align(MEDIUM_SLICE_SIZE + 1, 1).unwrap()),
+            Some(2)
+        );
+        assert_eq!(
+            medium_slice_count(Layout::from_size_align(MEDIUM_REGION_SIZE, 1).unwrap()),
+            Some(MEDIUM_REGION_SLICE_COUNT)
+        );
+        assert_eq!(
+            medium_slice_count(Layout::from_size_align(MEDIUM_REGION_SIZE + 1, 1).unwrap()),
+            None
+        );
+        assert_eq!(
+            medium_slice_count(Layout::from_size_align(1, MAX_MEDIUM_ALIGNMENT * 2).unwrap()),
+            None
+        );
+        assert_eq!(
+            (
+                local_medium_class(1),
+                local_medium_class(1 << (LOCAL_MEDIUM_CLASSES - 1)),
+                local_medium_class(3),
+                local_medium_class(1 << LOCAL_MEDIUM_CLASSES),
+            ),
+            (Some(0), Some(LOCAL_MEDIUM_CLASSES - 1), None, None)
+        );
+    }
+
+    #[test]
+    fn medium_cache_class_requires_a_supported_size_within_budget() {
+        assert_eq!(
+            (
+                local_medium_cache_class(1, MEDIUM_SLICE_SIZE, MEDIUM_SLICE_SIZE),
+                local_medium_cache_class(1, MEDIUM_SLICE_SIZE, MEDIUM_SLICE_SIZE - 1),
+                local_medium_cache_class(3, 3 * MEDIUM_SLICE_SIZE, usize::MAX),
+            ),
+            (Some(0), None, None)
+        );
+    }
+
     #[test]
     fn allocator_bit_layout_constants_are_exact() {
         assert_eq!(OPERATION_RETIRED, usize::MAX ^ (usize::MAX >> 1));
@@ -4025,10 +4290,7 @@ mod tests {
         let mut domain = DomainState::new();
         let domain_pointer = ptr::from_mut(&mut domain);
         let published = AtomicPtr::new(ptr::null_mut());
-        let mut medium = MediumState {
-            regions: ptr::null_mut(),
-            last_region: ptr::null_mut(),
-        };
+        let mut medium = MediumState::new();
         hal::fail_next_reserve();
         assert!(unsafe { append_region(&mut medium, &published, domain_pointer) }.is_none());
         hal::fail_next_map();
@@ -4054,7 +4316,7 @@ mod tests {
 
     #[cfg(not(miri))]
     #[test]
-    fn slab_initialization_and_fallback_cover_capacity_edges() {
+    fn slab_initialization_propagates_region_capacity_failure() {
         let (first_block, block_count) = slab_block_layout(ConfigSizeClasses::<Standard>::SIZES[0]);
         assert!(first_block < block_count);
 
@@ -4068,9 +4330,9 @@ mod tests {
         hal::fail_next_reserve();
         hal::fail_next_map();
         let fallback = allocator.allocate_slab(&mut heap);
-        assert!(!fallback.address.is_null());
-        assert_eq!(fallback.segment_slices, DIRECT_SLAB_SEGMENT);
-        unsafe { hal::unmap(fallback.address, SLAB_SIZE) };
+        assert!(fallback.address.is_null());
+        assert_eq!(fallback.segment_slices, 0);
+        assert_eq!(fallback.committed_bytes, 0);
 
         let region = regions.state.lock().regions;
         unmap_test_region(regions, region);
@@ -4091,8 +4353,7 @@ mod tests {
             hal::unmap((*region).base, MEDIUM_REGION_SIZE);
             hal::unmap(region.cast(), size_of::<RegionState>());
         }
-        state.regions = ptr::null_mut();
-        state.last_region = ptr::null_mut();
+        *state = MediumState::new();
         regions.regions.store(ptr::null_mut(), Ordering::Relaxed);
     }
 
@@ -4445,7 +4706,70 @@ mod tests {
         let mut isolated_thread = ThreadState::new();
         isolated_thread.default_heap = ptr::from_mut(&mut heap);
         hal::fail_next_commit_locality_segment();
+        hal::fail_next_map();
         assert!(unsafe { allocator.allocate_with_context(Layout::new::<u8>(), None, ptr::from_mut(&mut isolated_thread),) }.is_null());
+
+        let layout = Layout::new::<u8>();
+        hal::fail_next_commit_locality_segment();
+        // SAFETY: the isolated thread borrows the live heap until this allocation is freed.
+        let contextual = unsafe { allocator.allocate_with_context(layout, None, ptr::from_mut(&mut isolated_thread)) };
+        assert!(!contextual.is_null());
+        // SAFETY: contextual is live and is released once with its original layout.
+        unsafe {
+            assert_eq!(read_header(contextual).addr() & TAG_MASK, DIRECT_TAG);
+            allocator.dealloc(contextual, layout);
+        }
+
+        isolated_thread.passive_remote = ptr::from_mut(remote.as_mut());
+        hal::fail_next_commit();
+        // SAFETY: both borrowed heap states remain live throughout allocation and deallocation.
+        let contextual = unsafe { allocator.allocate_with_context(layout, None, ptr::from_mut(&mut isolated_thread)) };
+        assert!(!contextual.is_null());
+        // SAFETY: contextual is live and is released once with its original layout.
+        unsafe {
+            assert_eq!(read_header(contextual).addr() & TAG_MASK, DIRECT_TAG);
+            allocator.dealloc(contextual, layout);
+        }
+    }
+
+    #[cfg(not(miri))]
+    #[test]
+    fn context_refill_failure_preserves_allocation_tracking() {
+        let _test = tracking::TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let domain = new_domain();
+        let allocator = unsafe { Rallocator::<Standard>::new() };
+        let mut heap = ReusableHeapState::new(GeneralOptions::new(), crate::domain::state(domain));
+        let mut isolated_thread = ThreadState::new();
+        isolated_thread.default_heap = ptr::from_mut(&mut heap);
+        let layout = Layout::new::<u8>();
+        seismograph::recorder(seismograph::recorder::Configuration {
+            allocations: seismograph::recorder::RecordingPolicy {
+                enabled: true,
+                capture_backtraces: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let pending = tracking::begin_allocation().unwrap();
+        hal::fail_next_commit_locality_segment();
+        // SAFETY: the borrowed heap is live and pending describes this allocation.
+        let address = unsafe { allocator.allocate_with_context(layout, Some(pending), ptr::from_mut(&mut isolated_thread)) };
+        let recorded = ptr::NonNull::new(address).map(|address| {
+            // SAFETY: the successful context allocation owns its header until matching deallocation.
+            unsafe {
+                let header = read_header(address.as_ptr());
+                let extra = &*header.map_addr(|address| address & !TAG_MASK);
+                let result = (
+                    header.addr() & TAG_MASK,
+                    extra.tracking.allocation_id() != 0,
+                    extra.tracking.recording_session().is_some(),
+                );
+                allocator.dealloc(address.as_ptr(), layout);
+                result
+            }
+        });
+        seismograph::recorder(seismograph::recorder::Configuration::default());
+        assert_eq!(recorded, Some((DIRECT_TAG, true, true)));
     }
 
     #[cfg(not(miri))]
@@ -4607,8 +4931,7 @@ mod tests {
             hal::unmap((*region).base, MEDIUM_REGION_SIZE);
             hal::unmap(region.cast(), size_of::<RegionState>());
         }
-        state.regions = ptr::null_mut();
-        state.last_region = ptr::null_mut();
+        *state = MediumState::new();
         regions.regions.store(ptr::null_mut(), Ordering::Relaxed);
 
         std::thread::spawn(|| {
@@ -4863,21 +5186,20 @@ mod tests {
         }
 
         let regions = unsafe { domain_regions(crate::domain::state(domain)) };
-        let mut state = regions.state.lock();
-        allocator.purge_medium_locked_at(&mut state, false, 0);
-        assert!(!unsafe { (*state.regions).bins[0].free_list }.is_null());
-        assert!(!unsafe { (*state.regions).large_free }.is_null());
-        unsafe {
-            (*state.regions).bins[0].purge_after = 2;
-            (*state.regions).large_purge_after = 2;
+        regions.purge_with_unlimited_budget(false, 0);
+        {
+            let mut state = regions.state.lock();
+            assert!(!state.bins[0].free_list.is_null());
+            assert!(!unsafe { (*state.regions).large_free }.is_null());
+            state.bins[0].purge_after = 2;
+            unsafe { (*state.regions).large_purge_after = 2 };
         }
-        allocator.purge_medium_locked_at(&mut state, false, 1);
-        assert!(!unsafe { (*state.regions).bins[0].free_list }.is_null());
-        assert!(!unsafe { (*state.regions).large_free }.is_null());
-        allocator.purge_medium_locked_at(&mut state, false, 2);
-        assert!(unsafe { (*state.regions).bins[0].free_list }.is_null());
+        regions.purge_with_unlimited_budget(false, 1);
+        assert!(!regions.state.lock().bins[0].free_list.is_null());
+        regions.purge_with_unlimited_budget(true, 2);
+        let state = regions.state.lock();
+        assert!(state.bins[0].free_list.is_null());
         assert!(unsafe { (*state.regions).large_free }.is_null());
-        allocator.purge_medium_locked(&mut state, true);
     }
 
     #[cfg(not(miri))]
@@ -4890,27 +5212,34 @@ mod tests {
         let fixed = allocator.allocate_medium(fixed_layout, &mut heap, None);
         unsafe { allocator.deallocate_medium(fixed, fixed_layout, ptr::from_mut(&mut heap)) };
         let regions = unsafe { domain_regions(crate::domain::state(domain)) };
-        {
-            let mut state = regions.state.lock();
-            unsafe { (*state.regions).bins[0].purge_after = 1 };
-            hal::fail_next_decommit();
-            allocator.purge_medium_locked(&mut state, false);
-        }
-        assert!(unsafe { hal::decommit(fixed, MEDIUM_SLICE_SIZE) });
-        unsafe { regions.release_slices(fixed, 1) };
+        regions.state.lock().bins[0].purge_after = 1;
+        hal::fail_next_decommit();
+        regions.purge(true, hal::monotonic_millis());
+        assert!(!slices_are_free(fixed, 1));
+        // The failed operation restores accessibility and list ownership.
+        let mut recovered = [ptr::null_mut()];
+        assert_eq!(regions.take_batch(1, &mut recovered), 1);
+        assert_eq!(recovered[0], fixed);
+        unsafe { regions.decommit_span(fixed, 1, 0) };
+        assert!(slices_are_free(fixed, 1));
 
-        let large_layout = Layout::from_size_align((MEDIUM_MAX_SLICES + 1) * MEDIUM_SLICE_SIZE, 16).unwrap();
-        let large = allocator.allocate_medium(large_layout, &mut heap, None);
-        unsafe { allocator.deallocate_medium(large, large_layout, ptr::from_mut(&mut heap)) };
-        {
-            let mut state = regions.state.lock();
-            unsafe { (*state.regions).large_purge_after = 1 };
-            hal::fail_next_decommit();
-            allocator.purge_medium_locked(&mut state, false);
-        }
-        let slices = medium_slice_count(large_layout).unwrap();
-        assert!(unsafe { hal::decommit(large, slices * MEDIUM_SLICE_SIZE) });
-        unsafe { regions.release_slices(large, slices) };
+        // Own a detached large span directly so OS memory pressure cannot
+        // decommit it during an earlier allocator free and skip this check.
+        let slices = MEDIUM_MAX_SLICES + 1;
+        let bytes = slices * MEDIUM_SLICE_SIZE;
+        let large = regions.allocate_slices(crate::domain::state(domain), slices).unwrap();
+        // SAFETY: the test exclusively owns this reserved span until reclamation.
+        assert!(unsafe { hal::commit(large, bytes) });
+        tracking::record_mapping(bytes);
+        regions.record_fresh(bytes);
+        hal::fail_next_decommit();
+        assert!(!unsafe { regions.decommit_span(large, slices, 0) });
+        assert!(!slices_are_free(large, slices));
+        let mut recovered = [ptr::null_mut()];
+        assert_eq!(regions.take_batch(slices, &mut recovered), 1);
+        assert_eq!(recovered[0], large);
+        assert!(unsafe { regions.decommit_span(large, slices, 0) });
+        assert!(slices_are_free(large, slices));
     }
 
     #[test]
@@ -4928,10 +5257,7 @@ mod tests {
         record_small_segment(outside, 0, false, ptr::null_mut(), 1, false);
         assert_eq!(allocation_segment(outside).addr(), outside.addr() & !(SLAB_SIZE - 1));
 
-        let state = MediumState {
-            regions: ptr::null_mut(),
-            last_region: ptr::null_mut(),
-        };
+        let state = MediumState::new();
         assert!(unsafe { find_region(&state, outside) }.is_none());
         assert!(!slices_are_free(ptr::null_mut(), 1));
     }
@@ -4952,6 +5278,28 @@ mod tests {
 
     #[test]
     fn tracked_medium_allocation_stays_region_backed_and_emits_a_pair() {
+        assert_tracked_medium_free(TrackedMediumFree::Local);
+    }
+
+    #[test]
+    fn tracked_medium_remote_free_preserves_event_identity() {
+        assert_tracked_medium_free(TrackedMediumFree::Remote);
+    }
+
+    #[test]
+    fn tracked_medium_free_after_owner_exit_preserves_event_identity() {
+        assert_tracked_medium_free(TrackedMediumFree::OwnerExited);
+    }
+
+    enum TrackedMediumFree {
+        Local,
+        Remote,
+        OwnerExited,
+    }
+
+    fn assert_tracked_medium_free(free: TrackedMediumFree) {
+        use seismograph::recorder::event::EventKind;
+
         let _test = tracking::TEST_LOCK.lock().unwrap();
         seismograph::recorder(seismograph::recorder::Configuration {
             allocations: seismograph::recorder::RecordingPolicy {
@@ -4963,14 +5311,40 @@ mod tests {
         let allocator = unsafe { Rallocator::<Standard>::new() };
         let layout = Layout::from_size_align(MEDIUM_SLICE_SIZE, 16).unwrap();
 
-        let address = unsafe { allocator.alloc(layout) };
+        let address = if matches!(free, TrackedMediumFree::OwnerExited) {
+            std::thread::spawn(move || {
+                // SAFETY: this allocator uses the same configuration as the
+                // freeing thread; SendAddress transfers the live allocation.
+                let allocator = unsafe { Rallocator::<Standard>::new() };
+                SendAddress(unsafe { allocator.alloc(layout) })
+            })
+            .join()
+            .unwrap()
+            .0
+        } else {
+            // SAFETY: layout is valid and the returned block stays live below.
+            unsafe { allocator.alloc(layout) }
+        };
         assert!(!address.is_null());
         let region = region_containing(address).unwrap();
         let slice_index = (address.addr() - unsafe { (*region).base.addr() }) / MEDIUM_SLICE_SIZE;
         let metadata = unsafe { &(*region).allocations[slice_index] };
         assert_ne!(metadata.tracking_allocation_id.load(Ordering::Relaxed), 0);
         assert_ne!(metadata.tracking_session_id.load(Ordering::Relaxed), 0);
-        unsafe { allocator.dealloc(address, layout) };
+        if matches!(free, TrackedMediumFree::Remote) {
+            let transfer = SendAddress(address);
+            std::thread::spawn(move || {
+                let transfer = transfer;
+                // SAFETY: the move transfers sole ownership of this allocation,
+                // and the original layout/configuration is used for its free.
+                unsafe { Rallocator::<Standard>::new().dealloc(transfer.0, layout) };
+            })
+            .join()
+            .unwrap();
+        } else {
+            // SAFETY: sole ownership survived any allocating-thread retirement.
+            unsafe { allocator.dealloc(address, layout) };
+        }
         assert_eq!(metadata.tracking_allocation_id.load(Ordering::Relaxed), 0);
         assert_eq!(metadata.tracking_session_id.load(Ordering::Relaxed), 0);
 
@@ -4989,15 +5363,57 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        assert_eq!(
-            matching.iter().map(|event| event.kind).collect::<Vec<_>>(),
-            vec![
-                seismograph::recorder::event::EventKind::Allocation,
-                seismograph::recorder::event::EventKind::Deallocation,
-            ]
-        );
+        // Snapshot buffers are per-thread, not a globally ordered event stream.
+        assert_eq!(matching.len(), 2);
+        assert_eq!(matching.iter().filter(|event| event.kind == EventKind::Allocation).count(), 1);
+        assert_eq!(matching.iter().filter(|event| event.kind == EventKind::Deallocation).count(), 1);
         assert_eq!(matching[0].object_id(), matching[1].object_id());
         seismograph::recorder(seismograph::recorder::Configuration::default());
+    }
+
+    #[test]
+    fn telemetry_used_slice_indices_cover_empty_and_full_bitmaps() {
+        assert_eq!(
+            (
+                telemetry_used_slice_indices(&[0; MEDIUM_REGION_BITMAP_WORDS]).collect::<Vec<_>>(),
+                telemetry_used_slice_indices(&[u64::MAX; MEDIUM_REGION_BITMAP_WORDS]).collect::<Vec<_>>(),
+            ),
+            (Vec::<usize>::new(), (0..MEDIUM_REGION_SLICE_COUNT).collect::<Vec<_>>())
+        );
+    }
+
+    #[test]
+    fn telemetry_used_slice_indices_preserve_boundary_order() {
+        let mut expected = vec![0, 63, 64, 127, 128, MEDIUM_REGION_SLICE_COUNT - 1];
+        expected.retain(|&index| index < MEDIUM_REGION_SLICE_COUNT);
+        expected.sort_unstable();
+        expected.dedup();
+        let mut bitmap = [0_u64; MEDIUM_REGION_BITMAP_WORDS];
+        for &index in &expected {
+            bitmap[index / 64] |= 1 << (index % 64);
+        }
+        assert_eq!(telemetry_used_slice_indices(&bitmap).collect::<Vec<_>>(), expected);
+    }
+
+    #[test]
+    fn telemetry_used_slice_indices_match_original_dense_scan() {
+        let bitmaps: Vec<[u64; MEDIUM_REGION_BITMAP_WORDS]> = [1_u64, 0x5555_5555_5555_5555, 0x8000_0000_0000_0001, u64::MAX]
+            .into_iter()
+            .map(|seed| std::array::from_fn(|index| seed.rotate_left(index as u32) ^ (index as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)))
+            .collect();
+        let actual = bitmaps
+            .iter()
+            .map(|bitmap| telemetry_used_slice_indices(bitmap).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+        let expected = bitmaps
+            .iter()
+            .map(|bitmap| {
+                (0..MEDIUM_REGION_SLICE_COUNT)
+                    .filter(|&index| bitmap[index / 64] & (1_u64 << (index % 64)) != 0)
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(actual, expected);
     }
 
     #[test]
@@ -5284,8 +5700,7 @@ mod tests {
             hal::unmap((*region).base, MEDIUM_REGION_SIZE);
             hal::unmap(region.cast(), size_of::<RegionState>());
         }
-        state.regions = ptr::null_mut();
-        state.last_region = ptr::null_mut();
+        *state = MediumState::new();
         regions.regions.store(ptr::null_mut(), Ordering::Relaxed);
     }
 
@@ -5620,6 +6035,9 @@ mod tests {
 
     #[test]
     fn bitmap_and_extent_helpers_cover_wrapping_and_coalescing() {
+        let empty = [0; MEDIUM_REGION_BITMAP_WORDS];
+        assert_eq!(find_free_slices(&empty, 0, 0), None);
+        assert_eq!(find_free_slices(&empty, 0, MEDIUM_REGION_SLICE_COUNT + 1), None);
         let mut used = [0; MEDIUM_REGION_BITMAP_WORDS];
         mark_slices(&mut used, 0, 2, true);
         mark_slices(&mut used, 4, 2, true);
@@ -5678,8 +6096,7 @@ mod tests {
             }
             region = next;
         }
-        state.regions = ptr::null_mut();
-        state.last_region = ptr::null_mut();
+        *state = MediumState::new();
         regions.regions.store(ptr::null_mut(), Ordering::Relaxed);
     }
 
@@ -5763,11 +6180,11 @@ mod tests {
         assert!(slices_are_free(segment, 1));
     }
 
-    fn slices_are_free(address: *mut u8, count: usize) -> bool {
+    pub(super) fn slices_are_free(address: *mut u8, count: usize) -> bool {
         let Some(containing) = region_containing(address) else {
             return false;
         };
-        let regions = unsafe { domain_regions((*containing).domain) };
+        let regions = unsafe { medium::region_backing(containing) };
         let _state = regions.state.lock();
         let region = containing;
         let first = (address.addr() - unsafe { (*region).base.addr() }) / MEDIUM_SLICE_SIZE;

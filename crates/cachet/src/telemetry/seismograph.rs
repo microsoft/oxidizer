@@ -23,12 +23,23 @@ fn cache_name_id(name: CacheName) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use seismograph::recorder::event::{EventClass, EventKind, ObjectId};
+    use seismograph::recorder::event::{EventClass, EventKind, Events, ObjectId};
     use seismograph::recorder::{Configuration, RecordingPolicy};
     use seismograph::snapshot::{EventBufferDisposition, SnapshotOptions};
     use serial_test::serial;
 
     use super::*;
+
+    fn assert_aggregate_state_is_consistent(events: &Events) {
+        assert_eq!(
+            (events.total_events, events.lost_events, events.events.len(),),
+            (
+                events.threads.iter().map(|thread| thread.total_events).sum(),
+                events.threads.iter().map(|thread| thread.lost_events).sum(),
+                usize::try_from(events.total_events - events.lost_events).unwrap(),
+            )
+        );
+    }
 
     #[test]
     #[serial]
@@ -36,10 +47,22 @@ mod tests {
         const CACHE_NAME: CacheName = "seismograph-cache-event-test";
 
         seismograph::recorder(Configuration::default());
-        let _ = seismograph::snapshot(SnapshotOptions {
+        let release = SnapshotOptions {
             event_buffers: EventBufferDisposition::Release,
-        });
+        };
+        seismograph::snapshot(release).unwrap();
         record_event(CACHE_NAME, false, EventKind::CacheHit);
+        let snapshot = seismograph::snapshot(release).unwrap();
+        let disabled = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap().events;
+        assert_aggregate_state_is_consistent(&disabled);
+        assert_eq!(
+            disabled
+                .events
+                .iter()
+                .filter(|event| event.object_id() == Some(ObjectId::new(cache_name_id(CACHE_NAME))))
+                .count(),
+            0
+        );
 
         seismograph::recorder(Configuration {
             cache: RecordingPolicy::all(false),
@@ -48,10 +71,7 @@ mod tests {
         record_event(CACHE_NAME, false, EventKind::CacheHit);
         record_event(CACHE_NAME, true, EventKind::CacheMiss);
 
-        let snapshot = seismograph::snapshot(SnapshotOptions {
-            event_buffers: EventBufferDisposition::Release,
-        })
-        .unwrap();
+        let snapshot = seismograph::snapshot(release).unwrap();
         let decoded = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap();
         let tier_id = ObjectId::new(cache_name_id(CACHE_NAME));
         let events = decoded
@@ -63,6 +83,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(events, vec![(EventKind::CacheHit, Some(0)), (EventKind::CacheMiss, Some(1))]);
+        assert_aggregate_state_is_consistent(&decoded.events);
         assert_eq!(decoded.events.recording.cache, RecordingPolicy::all(false));
         assert_eq!(EventKind::CacheHit.class(), EventClass::Cache);
         seismograph::recorder(Configuration::default());
@@ -102,6 +123,7 @@ mod tests {
         .unwrap();
         let decoded = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap();
         let tier_id = ObjectId::new(cache_name_id(CACHE_NAME));
+        assert_aggregate_state_is_consistent(&decoded.events);
         assert_eq!(
             decoded
                 .events
