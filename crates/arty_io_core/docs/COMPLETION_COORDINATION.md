@@ -26,8 +26,8 @@ provide interoperability between incompatible copies of the contract itself.
 ## Why the current boundary is insufficient
 
 The current [driver interface](../src/driver.rs) combines completion processing
-and waiting in `process_completions(max_wait)`. Its `interruptor` is a handle for
-ending that driver's current or next wait. It supplies one direction:
+and waiting in `process_completions(max_wait, cycle_start)`. Its `waker` returns a
+handle for ending that driver's current or next wait. It supplies one direction:
 
 ```text
 runtime task, command, or shutdown activity -> interrupt the driver's wait
@@ -50,8 +50,8 @@ owner thread processes them:
 5. B cannot publish the task wake until the worker services B.
 ```
 
-B's interruptor targets B, not A. Nothing in the contract connects B's native
-readiness to A's wait. Returning a future or combining interruptors does not
+B's waker targets B, not A. Nothing in the contract connects B's native
+readiness to A's wait. Returning a future or combining wakers does not
 create that connection; some implementation still has to observe the native
 source.
 
@@ -228,7 +228,7 @@ Separate control packets from operation completions, retain native errors, and
 avoid allocating a new object for every completion merely to cross this
 boundary.
 
-An existing `process_completions(Duration::ZERO) -> ()` does not prove that its
+An existing `process_completions(Duration::ZERO, cycle_start) -> ()` does not prove that its
 queue is drained. Legacy drivers remain on their declared hosting path until
 they implement the stronger progress and notification guarantees.
 
@@ -277,7 +277,7 @@ Preserve the existing safety requirements:
 - Operations, callbacks, and operating-system-visible storage retain independent
   ownership. Cancellation is a request, not permission to free native storage.
 - Source leases cover queued and executing dispatches as well as active I/O.
-  Stale wake packets and retained interruptors cannot target freed or reused
+  Stale wake packets and retained wakers cannot target freed or reused
   registrations.
 - Routing generations or tombstones prevent stale dispatch, but do not replace
   ownership of buffers still accessible to the operating system.
@@ -314,7 +314,7 @@ abstract interface.
 ## Relationship to the existing contract
 
 Keep context-selected providers, lazy acquisition, context caching, and
-thread-local driver ownership. `ProviderContext` and `DriverContext` are natural
+thread-local driver ownership. `ProviderOptions` and `DriverOptions` are natural
 places to supply optional coordination facilities without exposing a concrete
 runtime type. Native adapters can provide platform-specific registration while
 the scheduling contract stays independent of operation representations.
@@ -340,7 +340,7 @@ cases include a hot source beside a sparse source, a completion arriving during
 parking, same-thread and remote interruption, registration during operation,
 budget exhaustion without another notification, and failed partial attachment.
 
-Shutdown scenarios must retain contexts and interruptors, race admission with
+Shutdown scenarios must retain contexts and wakers, race admission with
 shutdown, include pending native operations, and account for late control
 packets. Thread-local and provider-shared source arrangements both matter.
 
