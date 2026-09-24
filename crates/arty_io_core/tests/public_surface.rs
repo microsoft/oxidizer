@@ -25,6 +25,13 @@ assert_impl_all!(ShutdownError: Send, Sync, fmt::Debug, fmt::Display, Error);
 assert_impl_all!(SystemTaskSpawner: Clone, Send, Sync, fmt::Debug);
 
 #[test]
+fn system_task_spawner_debug() {
+    let spawner = SystemTaskSpawner::from_fn(|task| task());
+
+    assert_eq!(format!("{spawner:?}"), "SystemTaskSpawner { .. }");
+}
+
+#[test]
 fn public_options_expose_runtime_facilities() {
     let accepted = Arc::new(AtomicUsize::new(0));
     let accepted_by_callback = Arc::clone(&accepted);
