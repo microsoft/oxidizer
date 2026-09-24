@@ -60,11 +60,11 @@ Zero-duration scans avoid blocking on the wrong driver but consume CPU while
 idle. A dedicated observer solves progress at the cost of threads and possible
 cross-thread completion delivery.
 
-The [two-thread example](../examples/two_thread_runtime/runtime.rs) demonstrates
-registration and retained contexts, not a native completion loop. Its workers
-receive control commands, and its example operations execute synchronously.
-Coexistence of context types alone therefore does not establish coordinated
-completion progress.
+The [single-thread example](../examples/single_thread_runtime/runtime.rs)
+demonstrates lazy registration and peer discovery, not a native completion loop.
+Its worker receives control commands; the example drivers do not perform I/O or
+service native sources. Discovering peers alone therefore does not establish
+coordinated completion progress.
 
 ## Native constraints
 
@@ -323,7 +323,7 @@ The proposal changes more than how a runtime picks a primary driver. Coordinated
 participation affects the [execution model](REQUIREMENTS.md#r4-driver-owned-execution-strategy),
 cooperative draining changes the [blocking shutdown model](REQUIREMENTS.md#r6-safe-and-blocking-shutdown),
 and recoverable attachment needs a failure policy different from the current
-[fatal initialization policy](REQUIREMENTS.md#r7-initialization-failure-is-fatal).
+[fatal registration policy](REQUIREMENTS.md#r7-registration-failure-is-fatal).
 These require an explicit contract decision;
 optional context accessors alone do not give existing drivers those guarantees.
 
