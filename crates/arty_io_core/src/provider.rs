@@ -3,30 +3,33 @@
 
 use thread_aware_core::ThreadAware;
 
-use crate::{Driver, DriverContext, IoContext};
+use crate::{Driver, DriverOptions, IoContext};
 
-/// Creates and connects one driver type's per-worker instances.
+/// A factory for per-worker driver and context pairs.
 ///
-/// A runtime keeps one provider per registered driver type. For each worker it clones and
-/// relocates the provider, then consumes that clone to create the worker's driver instance.
-/// Shared queues, registries, and driver-owned threads remain private provider state.
+/// A runtime clones and relocates the provider for each worker, then consumes the relocated clone
+/// to create that worker's pair. State shared by driver instances remains private to the provider.
 pub trait DriverProvider: Clone + ThreadAware + Sized + 'static {
-    /// The context type whose request selects this provider.
+    /// The context type associated with this provider.
     type Context: IoContext<Provider = Self>;
 
     /// The driver type created by this provider.
-    type Driver: Driver<Context = Self::Context>;
+    type Driver: Driver;
 
-    /// Creates the driver instance serving one async worker.
+    /// Creates a driver and context for the worker described by `options`.
     ///
-    /// This method runs on the thread that will own the returned driver. It must return promptly
-    /// and must not wait for async workers to make progress. Consuming the relocated provider clone
-    /// makes the one-creation-per-worker lifecycle explicit.
+    /// The runtime calls this method on the worker that will own the driver. The implementation
+    /// must return promptly and must not wait for another runtime worker to make progress.
+    /// The context may outlive the driver and must reject new operations after admission is
+    /// closed.
+    ///
+    /// [`DriverOptions::drivers`](crate::DriverOptions::drivers) contains borrowed handles to
+    /// drivers registered earlier on the same worker. The new driver may clone independently owned
+    /// state from those handles.
     ///
     /// # Panics
     ///
-    /// Panics when this worker's driver instance cannot be initialized. Driver registration is
-    /// runtime-fundamental: after one worker fails to initialize, the runtime cannot continue in a
-    /// coherent partially registered state.
-    fn create(self, context: DriverContext) -> Self::Driver;
+    /// Implementations must panic if the driver cannot be created. The runtime cannot continue
+    /// with a partially completed registration.
+    fn create(self, options: DriverOptions<'_>) -> (Self::Driver, Self::Context);
 }
