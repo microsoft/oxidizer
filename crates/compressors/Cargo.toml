@@ -3,7 +3,7 @@
 
 [package]
 name = "compressors"
-version = "0.1.0"
+version = "0.1.1"
 description = "Streaming compression and decompression over bytesbuf byte sequences"
 readme = "README.md"
 keywords = ["compression", "gzip", "streaming", "zero-copy"]
@@ -61,7 +61,9 @@ bytesbuf = { workspace = true, features = ["std"] }
 # unlike the `zlib`/`zlib-ng` bindings, is pure Rust, so the deflate family stays free of C on a path
 # that parses untrusted input. The cost is recorded above -- it is what keeps this crate out of Miri.
 flate2 = { workspace = true, features = ["zlib-rs"], optional = true }
+foldhash = { workspace = true }
 futures-core = { workspace = true, optional = true }
+performables = { workspace = true }
 pin-project-lite = { workspace = true, optional = true }
 recoverable = { workspace = true }
 thread_aware = { workspace = true, features = ["std"] }
@@ -73,12 +75,12 @@ cfg_aliases = { workspace = true }
 [dev-dependencies]
 bolero = { workspace = true, features = ["std"] }
 brotli = { workspace = true, features = ["std"] }
-bytesbuf = { workspace = true, features = ["std", "test-util"] }
+bytesbuf = { path = "../bytesbuf", features = ["std", "test-util"] }
 criterion = { workspace = true }
 flate2 = { workspace = true, features = ["zlib-rs"] }
 futures = { workspace = true, features = ["executor"] }
 futures-core = { workspace = true }
-metabench = { workspace = true }
+metabench = { path = "../metabench" }
 mutants = { workspace = true }
 pin-project-lite = { workspace = true }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["std", "test-utils"] }
@@ -100,5 +102,7 @@ harness = false
 name = "compressors_codec"
 required-features = ["brotli", "deflate", "futures-stream", "gzip", "zlib", "zstd"]
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

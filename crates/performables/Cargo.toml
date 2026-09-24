@@ -29,7 +29,7 @@ allowed_external_types = [
 [features]
 default = []
 # Marker feature selecting the Loom model-checking test target. The model itself
-# is compiled under `--cfg loom` by the workspace's `just loom` recipe.
+# is compiled under `--cfg loom` by `just anvil-loom`.
 loom = []
 seismograph = ["dep:seismograph"]
 serde = ["dep:serde"]
@@ -45,7 +45,7 @@ loom = { workspace = true }
 [dev-dependencies]
 criterion.workspace = true
 serde = { workspace = true, features = ["std"] }
-thread_aware = { workspace = true, features = ["test-utils"] }
+thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
 
 [[bench]]
 name = "performables_uncontended"
@@ -66,5 +66,7 @@ name = "loom_sync_primitives"
 path = "tests/loom_sync_primitives.rs"
 required-features = ["loom"]
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

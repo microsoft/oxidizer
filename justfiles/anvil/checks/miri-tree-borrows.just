@@ -12,7 +12,7 @@
 # `#[cfg_attr(miri_<profile>, ignore = "<reason>")]`, keeping the
 # suppression next to the test rather than in a sidecar file.
 # The cfg names are declared in the workspace check-cfg list
-# (regions/cargo-lints-body.toml) so non-miri builds don't warn.
+# (regions/cargo-rust-lints.toml) so non-miri builds don't warn.
 #
 # Under scheduled-runtime-analysis these profiles run full-workspace:
 # that tier sets ANVIL_IMPACT=off, so _anvil-impact-include resolves

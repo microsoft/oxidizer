@@ -88,7 +88,7 @@
     consumer's final result is breaking, and stops on any weaker result.
 
     cargo-semver-checks remains a hard dependency for ordinary library packages
-    (install the version pinned in constants.env). Missing external-type metadata
+    (install it with `just anvil-semver-check-setup`). Missing external-type metadata
     is treated conservatively as possible exposure.
 
     On an MSVC host, these scripts set CARGO_TARGET_<HOST>_LINKER to rust-lld.exe

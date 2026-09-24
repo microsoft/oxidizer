@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.7.1] - 2026-09-16
+
+- 🔧 Maintenance
+
+  - Now requires `0.17.1` of `fetch`
+
 ## [0.7.0] - 2026-09-10
 
 ### Breaking

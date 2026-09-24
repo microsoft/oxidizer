@@ -7,9 +7,9 @@ machine-dependent: the ratios between rows are the durable signal, not the
 absolute values.
 
 This report is a curated set of customer-facing scenarios. The crate also carries
-internal Callgrind instruction-count benches (`benches/internity_compare_cg.rs`)
-used for optimization work, which are not published here; run them with
-`cargo bench --bench internity_compare_cg`.
+internal Callgrind instruction-count benches in the consolidated metabench target
+(`benches/internity.rs`) used for optimization work, which are not published here;
+run them with `cargo bench --bench internity -- --gungraun`.
 
 **Workload:** a corpus of ≈6000 identifier-like strings, exercised through three customer operations — `insert` (interning a string for the first time), `reuse` (interning a string that is already interned) and `lookup` (resolving a handle back to its string).
 
@@ -25,35 +25,35 @@ One table per operation, comparing internity against every other interner measur
 
 | Interner | Time | Δ vs internity |
 |---|---:|---:|
-| `internity` | 211.04 µs | ref |
-| `internity-threaded` | 360.17 µs | +70.7% |
-| `lasso` | 518.43 µs | +145.7% |
-| `string-interner` | 253.26 µs | +20.0% |
-| `symbol_table` | 387.03 µs | +83.4% |
+| `internity` | 509.43 µs | ref |
+| `internity-threaded` | 598.58 µs | +17.5% |
+| `lasso` | 803.13 µs | +57.7% |
+| `string-interner` | 394.88 µs | -22.5% |
+| `symbol_table` | 667.99 µs | +31.1% |
 
 ### `reuse` — single-threaded
 
 | Interner | Time | Δ vs internity |
 |---|---:|---:|
-| `internity` | 92.31 µs | ref |
-| `internity-threaded` | 145.93 µs | +58.1% |
-| `lasso` | 237.94 µs | +157.8% |
-| `string-interner` | 100.02 µs | +8.3% |
-| `symbol_table` | 142.39 µs | +54.2% |
-| `ustr` | 196.80 µs | +113.2% |
-| `string_cache` | 233.91 µs | +153.4% |
+| `internity` | 172.99 µs | ref |
+| `internity-threaded` | 300.31 µs | +73.6% |
+| `lasso` | 307.40 µs | +77.7% |
+| `string-interner` | 112.97 µs | -34.7% |
+| `symbol_table` | 180.79 µs | +4.5% |
+| `ustr` | 257.11 µs | +48.6% |
+| `string_cache` | 288.79 µs | +66.9% |
 
 ### `lookup` — single-threaded
 
 | Interner | Time | Δ vs internity |
 |---|---:|---:|
-| `internity` | 9.08 µs | ref |
-| `internity-frozen` | 9.25 µs | +1.9% |
-| `lasso` | 7.85 µs | -13.6% |
-| `string-interner` | 10.16 µs | +11.9% |
-| `symbol_table` | 50.56 µs | +456.6% |
-| `ustr` | 7.12 µs | -21.6% |
-| `string_cache` | 7.84 µs | -13.7% |
+| `internity` | 10.17 µs | ref |
+| `internity-frozen` | 9.97 µs | -2.0% |
+| `lasso` | 9.58 µs | -5.8% |
+| `string-interner` | 11.47 µs | +12.8% |
+| `symbol_table` | 49.37 µs | +385.5% |
+| `ustr` | 8.19 µs | -19.4% |
+| `string_cache` | 9.35 µs | -8.0% |
 
 ## Concurrent scaling
 
@@ -63,29 +63,29 @@ One table per operation, with a column per thread count. Each cell is the wall-c
 
 | Interner | 1 thr | 2 thr | 4 thr | 8 thr | Δ vs internity @ 8 thr |
 |---|---:|---:|---:|---:|---:|
-| `internity` | 438.17 µs | 561.64 µs | 815.32 µs | 918.81 µs | ref |
-| `lasso-threaded` | 1.16 ms | 1.22 ms | 1.10 ms | 1.12 ms | +22.0% |
-| `symbol_table` | 472.10 µs | 685.49 µs | 756.23 µs | 850.84 µs | -7.4% |
+| `internity` | 598.07 µs | 1.59 ms | 2.10 ms | 2.45 ms | ref |
+| `lasso-threaded` | 1.60 ms | 3.07 ms | 2.75 ms | 2.74 ms | +12.0% |
+| `symbol_table` | 699.97 µs | 2.03 ms | 2.04 ms | 2.25 ms | -8.3% |
 
 ### `reuse` — concurrent
 
 | Interner | 1 thr | 2 thr | 4 thr | 8 thr | Δ vs internity @ 8 thr |
 |---|---:|---:|---:|---:|---:|
-| `internity` | 208.27 µs | 389.05 µs | 663.22 µs | 1.08 ms | ref |
-| `lasso-threaded` | 378.76 µs | 567.68 µs | 801.27 µs | 1.15 ms | +6.2% |
-| `symbol_table` | 209.73 µs | 414.49 µs | 782.68 µs | 1.47 ms | +35.2% |
-| `ustr` | 254.52 µs | 388.25 µs | 635.26 µs | 1.05 ms | -3.4% |
-| `string_cache` | 367.43 µs | 563.51 µs | 815.99 µs | 1.18 ms | +9.1% |
+| `internity` | 291.91 µs | 890.36 µs | 1.27 ms | 2.87 ms | ref |
+| `lasso-threaded` | 490.32 µs | 893.87 µs | 1.31 ms | 1.93 ms | -32.9% |
+| `symbol_table` | 311.90 µs | 757.93 µs | 1.40 ms | 2.77 ms | -3.3% |
+| `ustr` | 460.31 µs | 690.44 µs | 1.67 ms | 3.04 ms | +5.9% |
+| `string_cache` | 538.54 µs | 1.30 ms | 1.95 ms | 4.30 ms | +49.8% |
 
 ### `lookup` — concurrent
 
 | Interner | 1 thr | 2 thr | 4 thr | 8 thr | Δ vs internity @ 8 thr |
 |---|---:|---:|---:|---:|---:|
-| `internity` | 41.85 µs | 135.00 µs | 320.05 µs | 586.95 µs | ref |
-| `lasso-resolver` | 24.81 µs | 132.07 µs | 310.51 µs | 581.45 µs | -0.9% |
-| `symbol_table` | 74.17 µs | 280.95 µs | 522.33 µs | 1.10 ms | +87.6% |
-| `ustr` | 26.90 µs | 133.57 µs | 312.52 µs | 582.73 µs | -0.7% |
-| `string_cache` | 39.24 µs | 137.49 µs | 313.03 µs | 591.38 µs | +0.8% |
+| `internity` | 88.38 µs | 313.37 µs | 557.64 µs | 1.35 ms | ref |
+| `lasso-resolver` | 97.14 µs | 253.20 µs | 409.29 µs | 1.11 ms | -17.8% |
+| `symbol_table` | 181.39 µs | 528.90 µs | 1.32 ms | 2.74 ms | +102.4% |
+| `ustr` | 137.81 µs | 158.25 µs | 532.71 µs | 1.13 ms | -16.6% |
+| `string_cache` | 188.22 µs | 192.22 µs | 745.06 µs | 1.26 ms | -7.1% |
 
 ## Memory footprint
 

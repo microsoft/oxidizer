@@ -1,0 +1,24 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[campaign]
+package = "http_headers_simd"
+default_engine = "libfuzzer"
+default_time = "60s"
+default_max_input_length = 1024
+corpus_root = "crates/http_headers_simd/src/__fuzz__"
+
+[[target]]
+name = "differential_properties"
+test = "unit"
+description = "Compare every dispatched scanner with its scalar reference over arbitrary bytes."
+
+[[target]]
+name = "sse2_matches_scalar"
+test = "unit"
+description = "Compare the x86 backends with scalar references over arbitrary bytes."
+
+[[target]]
+name = "neon_matches_scalar"
+test = "unit"
+description = "Compare the NEON backend with scalar references over arbitrary bytes."

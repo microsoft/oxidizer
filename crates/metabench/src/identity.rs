@@ -4,7 +4,7 @@
 use std::fmt;
 
 /// Identifies one logical benchmark across all supported engines: Criterion,
-/// Gungraun, allocation tracking, and perf-based instruction counting.
+/// Gungraun, allocation tracking, Linux `perf`, and Intel `VTune`.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct BenchmarkIdentity {
     group: &'static str,

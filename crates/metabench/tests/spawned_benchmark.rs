@@ -27,6 +27,7 @@ fn cargo() -> Command {
         "METABENCH_INTERNAL_WORKER_TOKEN",
         "METABENCH_INTERNAL_PERF_CONTROL",
         "METABENCH_INTERNAL_PERF_ACK",
+        "METABENCH_INTERNAL_VTUNE_RESULT_DIR",
         "CRITERION_HOME",
         "CARGO_CRITERION_PORT",
         "GUNGRAUN_HOME",
@@ -65,7 +66,7 @@ fn run(arguments: &[&str]) -> Output {
             "--profile",
             "bench",
             "--example",
-            "basic",
+            "metabench_basic",
             "--",
         ])
         .args(arguments)
@@ -161,7 +162,7 @@ exit "$status"
             "--profile",
             "bench",
             "--example",
-            "basic",
+            "metabench_basic",
             "--",
             "--perf",
             "--show-engine-output",
@@ -186,12 +187,324 @@ exit "$status"
     assert_eq!(perf["cache-misses"]["value"], 1.0);
 }
 
+/// Builds the `examples/fake_vtune.rs` fixture once per test binary run and
+/// returns the directory containing it under the literal name `vtune`
+/// (`vtune.exe` on Windows) so tests can prepend that directory to `PATH`
+/// and have `Command::new("vtune")` resolve to it. Written in Rust rather
+/// than a POSIX shell script so the vtune control-protocol and CSV-report
+/// tests below run identically on Linux, macOS, and Windows; see
+/// `examples/fake_vtune.rs` for the exact protocol it understands.
+fn fake_vtune_directory() -> &'static Path {
+    static DIRECTORY: OnceLock<PathBuf> = OnceLock::new();
+
+    DIRECTORY.get_or_init(|| {
+        let _guard = CARGO_SUBPROCESS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let build_output = cargo()
+            .args([
+                "build",
+                "--quiet",
+                "-p",
+                "metabench",
+                "--profile",
+                "bench",
+                "--example",
+                "fake_vtune",
+                "--message-format=json",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            build_output.status.success(),
+            "failed to build the fake vtune fixture; stdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&build_output.stdout),
+            String::from_utf8_lossy(&build_output.stderr)
+        );
+        // Locate the built executable through cargo's JSON build log rather
+        // than assuming a directory layout for the `bench` profile (custom
+        // profiles may or may not share the built-in `release` directory).
+        let built = String::from_utf8_lossy(&build_output.stdout)
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .find_map(|message| {
+                (message["reason"] == "compiler-artifact" && message["target"]["name"] == "fake_vtune")
+                    .then(|| message["executable"].as_str().map(PathBuf::from))
+                    .flatten()
+            })
+            .expect("cargo build --message-format=json always reports the built example's executable path");
+        let directory = tempfile::tempdir().unwrap().keep();
+        let vtune_path = directory.join(if cfg!(windows) { "vtune.exe" } else { "vtune" });
+        std::fs::copy(&built, &vtune_path).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&vtune_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        directory
+    })
+}
+
+/// The workspace's packaging allowlist deliberately keeps `/examples/**` out
+/// of the published `.crate` (examples are dev-only, per the top-level
+/// `Cargo.toml` policy), while `/tests/**` (this file) is packaged. A
+/// `cargo test` run from a published tarball therefore cannot build the
+/// `fake_vtune` fixture this file's vtune tests depend on.
+///
+/// This guard only covers the vtune tests added alongside it; it is not a
+/// claim that the rest of this file (`run`/`run_target`'s unconditional
+/// `--example metabench_basic`/`--example parameterized` invocations) can run from a
+/// published tarball. Those tests have depended on unpackaged examples since
+/// before this fixture existed, and fixing that pre-existing, file-wide gap
+/// is a separate concern from hardening the new vtune coverage this guard
+/// protects.
+fn fake_vtune_fixture_available() -> bool {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("fake_vtune.rs")
+        .is_file()
+}
+
+/// Published crate tarballs contain only the files this crate's packaging
+/// allowlist (`Cargo.toml`'s workspace-inherited `include`) selects, which
+/// never covers the workspace root manifest one level above `crates/`. Its
+/// presence therefore distinguishes a full repository checkout (where
+/// `examples/fake_vtune.rs` is expected to exist and its absence would be an
+/// accidental move/rename bug) from a published-tarball build (where the
+/// fixture's absence is an intentional packaging choice).
+fn is_full_repository_checkout() -> bool {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.toml").is_file()
+}
+
+/// Returns `true` if the calling test should proceed. If the `fake_vtune`
+/// fixture is unavailable, this either skips the test (published-tarball
+/// case, expected) or panics (full repository checkout, where the fixture's
+/// absence means it was accidentally moved or renamed rather than
+/// intentionally excluded from packaging).
+fn require_fake_vtune_fixture_or_skip() -> bool {
+    if fake_vtune_fixture_available() {
+        return true;
+    }
+    assert!(
+        !is_full_repository_checkout(),
+        "examples/fake_vtune.rs is missing from a full repository checkout; the vtune integration \
+         tests depend on it and it should not have been moved or renamed without updating this file"
+    );
+    eprintln!("skipping: fake_vtune fixture source is not packaged (see fake_vtune_fixture_available)");
+    false
+}
+
+/// Prepends [`fake_vtune_directory`] to the current `PATH` so a spawned
+/// `metabench` worker resolves `vtune` to the fixture.
+fn path_with_fake_vtune() -> std::ffi::OsString {
+    std::env::join_paths(
+        std::iter::once(fake_vtune_directory().to_owned()).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())),
+    )
+    .unwrap()
+}
+
+#[test]
+fn vtune_measures_exact_workload_and_writes_metrics() {
+    if !require_fake_vtune_fixture_or_skip() {
+        return;
+    }
+    let path = path_with_fake_vtune();
+    let _guard = CARGO_SUBPROCESS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let directory = tempfile::tempdir().unwrap();
+    let command_log = directory.path().join("vtune-commands.log");
+    let json = directory.path().join("report.json");
+    let markdown = directory.path().join("report.md");
+    // Also forwards `--vtune-arg -knob`, exercising `fake_vtune`'s validation
+    // of the full `-collect-with runsa [<forwarded args>] --start-paused
+    // -result-dir <dir>` collection-launch shape (not just the trailing `--`)
+    // with a non-empty forwarded-argument list in the middle of it.
+    let output = cargo()
+        .env("PATH", path)
+        .env("VTUNE_TEST_COMMAND_LOG", &command_log)
+        .args([
+            "run",
+            "--quiet",
+            "-p",
+            "metabench",
+            "--profile",
+            "bench",
+            "--example",
+            "metabench_basic",
+            "--",
+            "--vtune",
+            "--show-engine-output",
+            "--no-baseline",
+            "--vtune-arg",
+            "-knob",
+            "--export-json",
+        ])
+        .arg(&json)
+        .arg("--export-md")
+        .arg(&markdown)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // The fixture rejects any control verb other than resume/pause, so
+    // finding both confirms `begin`/`Guard::drop` actually invoked the real
+    // control protocol rather than skipping it.
+    let commands = std::fs::read_to_string(&command_log).unwrap();
+    assert!(
+        commands
+            .lines()
+            .any(|line| line.starts_with("resume ") && line.len() > "resume ".len()),
+        "commands: {commands}"
+    );
+    assert!(
+        commands
+            .lines()
+            .any(|line| line.starts_with("pause ") && line.len() > "pause ".len()),
+        "commands: {commands}"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("vtune-report-invoked"),
+        "expected --show-engine-output to surface the vtune report command's own stderr; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("vtune-worker-invoked"),
+        "expected --show-engine-output to surface the vtune worker command's own stderr; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&std::fs::read(json).unwrap()).unwrap();
+    let vtune = &report["entries"][0]["results"]["vtune"]["metrics"];
+    assert_eq!(vtune["INST_RETIRED.ANY"]["value"], 1234.0);
+    assert_eq!(vtune["INST_RETIRED.ANY"]["display_name"], "INST RETIRED ANY");
+    assert_eq!(vtune["CPU_CLK_UNHALTED.THREAD"]["value"], 567.0);
+}
+
+#[test]
+fn vtune_suppresses_report_output_without_show_engine_output() {
+    if !require_fake_vtune_fixture_or_skip() {
+        return;
+    }
+    let path = path_with_fake_vtune();
+    let _guard = CARGO_SUBPROCESS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let directory = tempfile::tempdir().unwrap();
+    let json = directory.path().join("report.json");
+    // Deliberately omits `--show-engine-output`: both vtune commands' own
+    // stdout/stderr must be suppressed, distinguishing each `!show_output`
+    // guard in `launch_vtune_worker` from its negation.
+    let output = cargo()
+        .env("PATH", path)
+        .args([
+            "run",
+            "--quiet",
+            "-p",
+            "metabench",
+            "--profile",
+            "bench",
+            "--example",
+            "metabench_basic",
+            "--",
+            "--vtune",
+            "--no-baseline",
+            "--export-json",
+        ])
+        .arg(&json)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !String::from_utf8_lossy(&output.stderr).contains("vtune-report-invoked"),
+        "expected the vtune report command's stderr to be suppressed without --show-engine-output; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !String::from_utf8_lossy(&output.stderr).contains("vtune-worker-invoked"),
+        "expected the vtune worker command's stderr to be suppressed without --show-engine-output; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn vtune_command_failure_surfaces_vtune_control_error() {
+    if !require_fake_vtune_fixture_or_skip() {
+        return;
+    }
+    let path = path_with_fake_vtune();
+    let _guard = CARGO_SUBPROCESS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    // Fails the `-command resume` call `vtune::begin` makes from inside the
+    // worker, so the worker should surface `Error::VtuneControl` instead of
+    // silently measuring nothing.
+    let output = cargo()
+        .env("PATH", path)
+        .env("FAKE_VTUNE_FAIL_COMMAND", "resume")
+        .args([
+            "run",
+            "--quiet",
+            "-p",
+            "metabench",
+            "--profile",
+            "bench",
+            "--example",
+            "metabench_basic",
+            "--",
+            "--vtune",
+            "--show-engine-output",
+            "--no-baseline",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "expected the failed vtune resume to fail the run");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("failed to control the VTune collection"), "stderr: {stderr}");
+}
+
+#[test]
+fn vtune_pause_failure_surfaces_vtune_control_error() {
+    if !require_fake_vtune_fixture_or_skip() {
+        return;
+    }
+    let path = path_with_fake_vtune();
+    let _guard = CARGO_SUBPROCESS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    // Distinct from the resume-failure test above: `resume` succeeds so
+    // `vtune::begin` returns a `Guard`, and only the `-command pause` call
+    // `Guard::drop` makes at the end of the measured workload fails. This
+    // exercises `Guard::drop`'s own error-recording path rather than
+    // `begin`'s.
+    let output = cargo()
+        .env("PATH", path)
+        .env("FAKE_VTUNE_FAIL_COMMAND", "pause")
+        .args([
+            "run",
+            "--quiet",
+            "-p",
+            "metabench",
+            "--profile",
+            "bench",
+            "--example",
+            "metabench_basic",
+            "--",
+            "--vtune",
+            "--show-engine-output",
+            "--no-baseline",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "expected the failed vtune pause to fail the run");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("failed to control the VTune collection"), "stderr: {stderr}");
+}
+
 #[test]
 fn help_reaches_metabench_parent() {
     let stdout = successful_stdout(&["--help"]);
 
     assert!(stdout.starts_with("Usage: BENCHMARK [METABENCH OPTIONS] [ENGINE OPTIONS]\n"));
-    assert!(stdout.contains("BENCH_ENGINE may select criterion, gungraun, perf, or allocations"));
+    assert!(stdout.contains("BENCH_ENGINE may select criterion, gungraun, perf, vtune, or allocations"));
 }
 
 #[test]

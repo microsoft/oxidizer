@@ -3,9 +3,9 @@
 
 // Shared benchmark data: a realistic, GitHub-like route table, each capture
 // tagged with the type routerama's `#[resolver]` coerces it to, plus the
-// concrete request paths looked up. `include!`d by `harness.rs` and by
-// `scripts/perf_report.rs` (which regenerates `bench_router.rs` from it), so
-// it defines only data items.
+// concrete request paths looked up. `include!`d by `tests/bench_router.rs` and
+// by `scripts/perf_report.rs` (which regenerates `bench_router.rs` from it),
+// so it defines only data items.
 
 /// How a captured variable is coerced, matching the field type routerama's
 /// `#[resolver]` gives it. Competitors coerce each capture the same way so the

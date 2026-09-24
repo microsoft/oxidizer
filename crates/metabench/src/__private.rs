@@ -10,6 +10,7 @@ pub use gungraun;
 pub use crate::allocation::begin as begin_allocation_measurement;
 pub use crate::perf::begin as begin_perf_measurement;
 pub use crate::runner::{EngineSet, run};
+pub use crate::vtune::begin as begin_vtune_measurement;
 
 #[must_use]
 pub fn default_criterion() -> criterion::Criterion {

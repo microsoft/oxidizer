@@ -7,9 +7,11 @@
 # `.dockerignore`, so this scopes the exec-image build context without the
 # repository having to own a root ignore file or having one silently overridden.
 #
-# The build context is the repository root but the image only needs two things.
-# Excluding everything else keeps a cold build from streaming the whole
-# worktree (and every stale `target/`) to the daemon.
+# The build context is the repository root but the image needs a small, named
+# set out of it. Excluding everything else keeps a cold build from streaming the
+# whole worktree (and every stale `target/`) to the daemon -- and, because the
+# setup region copies the context whole, this file decides what the image
+# contains.
 #
 # The context is narrowed to `justfiles/anvil/` rather than all of `justfiles/`
 # so that a cold build does not stream unrelated trees to the daemon. The
@@ -29,6 +31,11 @@
 # The root `Cargo.toml` is admitted for the declared MSRV, the only build input
 # that lives in repository source rather than in the recipe tree. The workspace
 # members it names stay out: they are a checkout, and the image is not one.
+#
+# Both spellings are admitted and neither is required: a repository that pins
+# by other means gets an image whose compiler is the declared MSRV, and
+# admitting only the TOML would give one that pins with the extensionless file
+# an image that disagreed with its own checkout.
 *
 !justfiles
 justfiles/*
@@ -39,4 +46,5 @@ justfiles/anvil/**/*.anvil-proposed
 !.anvil/container
 .anvil/container/**/*.anvil-proposed
 !rust-toolchain.toml
+!rust-toolchain
 !Cargo.toml
