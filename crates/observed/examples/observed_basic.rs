@@ -5,7 +5,7 @@
 //!
 //! Run with:
 //! ```sh
-//! cargo run -p observed --example basic
+//! cargo run -p observed --example observed_basic
 //! ```
 
 use std::sync::Arc;
