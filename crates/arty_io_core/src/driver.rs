@@ -36,9 +36,7 @@ pub trait Driver: 'static {
     ///
     /// Implementations must panic if the peer cannot be integrated. The runtime cannot continue
     /// with a partially connected registration.
-    fn on_peer_registered(&mut self, peer: DriverHandle<'_>) {
-        let _ = peer;
-    }
+    fn on_peer_registered(&mut self, _peer: DriverHandle<'_>) {}
 
     /// Processes completion events, waiting up to `max_wait` for more work.
     ///
