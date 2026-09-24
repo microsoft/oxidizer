@@ -26,25 +26,30 @@ trait ErasedDriver {
     fn shutdown(self: Box<Self>) -> Result<(), ShutdownError>;
 }
 
-impl<D: Driver> ErasedDriver for D {
+struct RegisteredDriver<D, C> {
+    driver: D,
+    context: C,
+}
+
+impl<D: Driver, C: IoContext> ErasedDriver for RegisteredDriver<D, C> {
     fn handle(&self) -> DriverHandle<'_> {
-        Driver::handle(self)
+        Driver::handle(&self.driver)
     }
 
     fn on_peer_registered(&mut self, peer: DriverHandle<'_>) {
-        Driver::on_peer_registered(self, peer);
+        Driver::on_peer_registered(&mut self.driver, peer);
     }
 
     fn context_type(&self) -> TypeId {
-        TypeId::of::<D::Context>()
+        TypeId::of::<C>()
     }
 
     fn context(&self) -> ContextBox {
-        Box::new(Driver::context(self))
+        Box::new(self.context.clone())
     }
 
     fn shutdown(self: Box<Self>) -> Result<(), ShutdownError> {
-        Driver::shutdown(*self)
+        Driver::shutdown(self.driver)
     }
 }
 
@@ -113,10 +118,10 @@ impl Runtime {
             let mut provider = C::provider(ProviderOptions::new());
             let options = driver_options(worker, spawner, drivers);
             provider.relocate(None, options.thread());
-            let driver = provider.create(options);
-            let context = Driver::context(&driver);
-            register_driver(drivers, Box::new(driver));
-            let _ = reply_tx.send(context);
+            let (driver, context) = provider.create(options);
+            let reply_context = context.clone();
+            register_driver(drivers, driver, context);
+            let _ = reply_tx.send(reply_context);
         });
         reply_rx
             .recv()
@@ -165,7 +170,7 @@ fn find_context<C: IoContext>(drivers: &DriverStore) -> Option<C> {
             *driver
                 .context()
                 .downcast::<C>()
-                .expect("a driver always builds its own context type")
+                .expect("context type matched by TypeId immediately above")
         })
 }
 
@@ -174,8 +179,8 @@ fn driver_options<'a>(worker: &Thread, spawner: &SystemTaskSpawner, drivers: &'a
     DriverOptions::new(worker.clone(), spawner.clone(), driver_handles)
 }
 
-fn register_driver(drivers: &mut DriverStore, driver: Box<dyn ErasedDriver>) {
-    drivers.push(driver);
+fn register_driver<D: Driver, C: IoContext>(drivers: &mut DriverStore, driver: D, context: C) {
+    drivers.push(Box::new(RegisteredDriver { driver, context }));
     let (driver, existing_drivers) = drivers.split_last_mut().expect("the new driver was pushed immediately above");
     let driver = driver.handle();
     for existing_driver in existing_drivers {

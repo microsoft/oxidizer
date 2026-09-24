@@ -4,7 +4,7 @@
 use std::task::Waker;
 use std::time::{Duration, Instant};
 
-use crate::{DriverHandle, IoContext, ShutdownError};
+use crate::{DriverHandle, ShutdownError};
 
 /// A thread-local adapter between a runtime worker and an I/O subsystem.
 ///
@@ -16,12 +16,9 @@ use crate::{DriverHandle, IoContext, ShutdownError};
 /// directly in the driver and be accessed through
 /// [`process_completions`](Self::process_completions).
 ///
-/// A driver must be safe to drop before, during, or after shutdown. Its contexts may outlive it
-/// and must reject new operations after admission is closed.
+/// A driver must be safe to drop before, during, or after shutdown. Its associated contexts may
+/// outlive it and must reject new operations after admission is closed.
 pub trait Driver: 'static {
-    /// The context type created by this driver.
-    type Context: IoContext;
-
     /// Returns the handle exposed to drivers registered on the same worker.
     ///
     /// The handle may expose the driver itself or a smaller driver-owned value. The runtime
@@ -42,13 +39,6 @@ pub trait Driver: 'static {
     fn on_peer_registered(&mut self, peer: DriverHandle<'_>) {
         let _ = peer;
     }
-
-    /// Returns a context for this driver.
-    ///
-    /// The context may outlive the driver. It must reject new operations after admission is
-    /// closed.
-    #[must_use]
-    fn context(&self) -> Self::Context;
 
     /// Processes completion events, waiting up to `max_wait` for more work.
     ///

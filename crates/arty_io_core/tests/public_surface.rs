@@ -61,7 +61,7 @@ fn driver_options_expose_drivers_registered_on_the_thread() {
 #[test]
 fn driver_is_notified_when_another_driver_is_registered() {
     let mut driver = LocalDriver::new(Rc::default());
-    let registered_driver = LeaseDriver::new();
+    let registered_driver = LeaseDriver::new(Arc::default());
 
     driver.on_peer_registered(registered_driver.handle());
 
@@ -77,11 +77,10 @@ fn driver_can_remain_thread_local() {
 }
 
 #[test]
-fn driver_is_boxable_with_its_context_type() {
-    let driver: Box<dyn Driver<Context = TestContext>> = Box::new(LocalDriver::new(Rc::default()));
+fn driver_is_boxable() {
+    let driver: Box<dyn Driver> = Box::new(LocalDriver::new(Rc::default()));
 
     assert!(driver.handle().handle().is::<LocalDriver>());
-    assert_eq!(driver.context(), TestContext(7));
 }
 
 #[test]
@@ -91,9 +90,10 @@ fn provider_creation_uses_both_options() {
     }
 
     let provider: TestProvider = provider_for::<TestContext>(ProviderOptions::new());
-    let driver = provider.create(driver_options());
+    let (driver, context) = provider.create(driver_options());
 
-    assert_eq!(driver.context(), TestContext(7));
+    assert!(driver.handle().handle().is::<LocalDriver>());
+    assert_eq!(context, TestContext(7));
 }
 
 #[test]
@@ -109,8 +109,7 @@ fn shutdown_consumes_the_driver() {
 
 #[test]
 fn shutdown_waits_for_active_operations_not_contexts() {
-    let driver = LeaseDriver::new();
-    let context = driver.context();
+    let (driver, context) = LeaseProvider.create(driver_options());
     let operation = context.begin_operation().expect("admission is open before shutdown");
     let (shutdown_tx, shutdown_rx) = mpsc::channel();
 
@@ -136,8 +135,7 @@ fn shutdown_waits_for_active_operations_not_contexts() {
 
 #[test]
 fn dropping_driver_closes_context_admission() {
-    let driver = LeaseDriver::new();
-    let context = driver.context();
+    let (driver, context) = LeaseProvider.create(driver_options());
 
     drop(driver);
 
@@ -280,7 +278,6 @@ struct ShutdownState {
 #[derive(Debug)]
 struct LocalDriver {
     state: Rc<ShutdownState>,
-    context: TestContext,
     completion_queue: TestCompletionQueue,
     owned_resource: Option<Box<()>>,
     registered_driver_count: usize,
@@ -290,7 +287,6 @@ impl LocalDriver {
     fn new(state: Rc<ShutdownState>) -> Self {
         Self {
             state,
-            context: TestContext(7),
             completion_queue: TestCompletionQueue::default(),
             owned_resource: Some(Box::new(())),
             registered_driver_count: 0,
@@ -306,8 +302,6 @@ impl Drop for LocalDriver {
 }
 
 impl Driver for LocalDriver {
-    type Context = TestContext;
-
     fn handle(&self) -> DriverHandle<'_> {
         DriverHandle::new(self)
     }
@@ -316,10 +310,6 @@ impl Driver for LocalDriver {
         if peer.handle().is::<LeaseDriver>() {
             self.registered_driver_count += 1;
         }
-    }
-
-    fn context(&self) -> Self::Context {
-        self.context.clone()
     }
 
     fn process_completions(&mut self, max_wait: Duration, cycle_start: Instant) {
@@ -363,8 +353,8 @@ impl DriverProvider for TestProvider {
     type Context = TestContext;
     type Driver = LocalDriver;
 
-    fn create(self, _options: DriverOptions<'_>) -> Self::Driver {
-        LocalDriver::new(Rc::default())
+    fn create(self, _options: DriverOptions<'_>) -> (Self::Driver, Self::Context) {
+        (LocalDriver::new(Rc::default()), TestContext(7))
     }
 }
 
@@ -411,8 +401,9 @@ impl DriverProvider for LeaseProvider {
     type Context = LeaseContext;
     type Driver = LeaseDriver;
 
-    fn create(self, _options: DriverOptions<'_>) -> Self::Driver {
-        LeaseDriver::new()
+    fn create(self, _options: DriverOptions<'_>) -> (Self::Driver, Self::Context) {
+        let state = Arc::default();
+        (LeaseDriver::new(Arc::clone(&state)), LeaseContext { state })
     }
 }
 
@@ -453,8 +444,8 @@ struct LeaseDriver {
 }
 
 impl LeaseDriver {
-    fn new() -> Self {
-        Self { state: Arc::default() }
+    fn new(state: Arc<LeaseState>) -> Self {
+        Self { state }
     }
 }
 
@@ -466,16 +457,8 @@ impl Drop for LeaseDriver {
 }
 
 impl Driver for LeaseDriver {
-    type Context = LeaseContext;
-
     fn handle(&self) -> DriverHandle<'_> {
         DriverHandle::new(self)
-    }
-
-    fn context(&self) -> Self::Context {
-        LeaseContext {
-            state: Arc::clone(&self.state),
-        }
     }
 
     fn process_completions(&mut self, _max_wait: Duration, _cycle_start: Instant) {}

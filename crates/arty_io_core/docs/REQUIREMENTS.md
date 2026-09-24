@@ -25,19 +25,20 @@ The contract supports registration after runtime startup.
   runtime facilities later without changing the provider factory signature.
 - `get_context::<MyContext>()` needs no provider value or runtime configuration.
 - The first lookup returns only after every active worker has initialized the
-  associated driver.
-- A provider remains sufficient to create every per-worker driver instance.
+  associated driver and context.
+- A provider remains sufficient to create every per-worker driver and context
+  pair.
 - Registration is keyed by the context's Rust type identity.
 - Semver-incompatible versions of one driver crate can be registered together
   because their context types have distinct identities.
 - The runtime owns registration coordination, cancellation, and rollback.
-- Later lookups obtain a worker-local context from the registered driver
-  without creating more driver instances.
+- Later lookups clone the worker-local context stored alongside the registered
+  driver without creating more driver instances.
 
 ## R3: Per-worker initialization
 
-The runtime explicitly initializes a driver adapter for each async worker it
-serves.
+The runtime explicitly initializes a driver adapter and context for each async
+worker it serves.
 
 - A provider clone is relocated to the worker before creation.
 - `DriverOptions::thread` identifies that worker and its runtime owner.
@@ -60,9 +61,9 @@ The runtime does not dictate how an I/O subsystem distributes work.
 - Completion processing takes `&mut self`, reflecting the runtime's exclusive
   ownership of a thread-local driver without forcing implementations to add
   interior mutability.
-- `Driver` remains dyn-compatible when its `Context` associated type is
-  specified. A runtime may use a private owning shim to erase context types and
-  adapt consuming shutdown to boxed storage.
+- `Driver` remains dyn-compatible. A runtime may use a private owning shim to
+  store and erase the associated context type and adapt consuming shutdown to
+  boxed storage.
 - The runtime chooses the driver-owning thread before creation and invokes
   `process_completions` only from that thread.
 - The runtime captures one `Instant` when it starts a completion-processing
@@ -119,7 +120,7 @@ Shutdown must not rely on an unsafe trait or a caller-checked inertness flag.
 
 Driver registration is infallible at the type level.
 
-- A provider panics when its driver cannot be initialized.
+- A provider panics when its driver and context cannot be initialized.
 - An existing driver panics when it cannot integrate a newly registered driver.
 - The runtime does not continue after a worker fails to initialize a driver or
   notify an existing driver.

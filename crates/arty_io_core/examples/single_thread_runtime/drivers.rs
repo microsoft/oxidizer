@@ -33,17 +33,15 @@ impl DriverProvider for SampleProvider {
     type Context = SampleContext;
     type Driver = SampleDriver;
 
-    fn create(self, _options: DriverOptions<'_>) -> Self::Driver {
+    fn create(self, _options: DriverOptions<'_>) -> (Self::Driver, Self::Context) {
         println!("initializing sample driver");
-        SampleDriver
+        (SampleDriver, SampleContext)
     }
 }
 
 pub(super) struct SampleDriver;
 
 impl Driver for SampleDriver {
-    type Context = SampleContext;
-
     fn handle(&self) -> DriverHandle<'_> {
         DriverHandle::new(self)
     }
@@ -52,10 +50,6 @@ impl Driver for SampleDriver {
         if peer.handle().is::<EchoDriver>() {
             println!("sample driver discovered echo driver");
         }
-    }
-
-    fn context(&self) -> Self::Context {
-        SampleContext
     }
 
     fn process_completions(&mut self, _max_wait: Duration, _cycle_start: Instant) {}
@@ -96,24 +90,18 @@ impl DriverProvider for EchoProvider {
     type Context = EchoContext;
     type Driver = EchoDriver;
 
-    fn create(self, options: DriverOptions<'_>) -> Self::Driver {
+    fn create(self, options: DriverOptions<'_>) -> (Self::Driver, Self::Context) {
         let sample_registered = options.drivers().iter().any(|driver| driver.handle().is::<SampleDriver>());
         println!("initializing echo driver; sample driver registered: {sample_registered}");
-        EchoDriver
+        (EchoDriver, EchoContext)
     }
 }
 
 pub(super) struct EchoDriver;
 
 impl Driver for EchoDriver {
-    type Context = EchoContext;
-
     fn handle(&self) -> DriverHandle<'_> {
         DriverHandle::new(self)
-    }
-
-    fn context(&self) -> Self::Context {
-        EchoContext
     }
 
     fn process_completions(&mut self, _max_wait: Duration, _cycle_start: Instant) {}

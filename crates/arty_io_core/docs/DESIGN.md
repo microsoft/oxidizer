@@ -34,25 +34,26 @@ DriverProvider::create(DriverOptions)
 ```
 
 `DriverProvider` is the cross-worker factory. It may hold state shared by the
-drivers it creates. Each relocated provider clone creates one `Driver`.
+drivers it creates. Each relocated provider clone creates one `(Driver,
+IoContext)` pair.
 
-`Driver` is thread-local. Its `Context` is the movable handle held by consumers.
-`ThreadAware` relocation may optimize a context for its destination worker, but
-correctness cannot depend on relocation.
+`Driver` is thread-local. Its associated `IoContext` is the movable handle held
+by consumers. `ThreadAware` relocation may optimize a context for its
+destination worker, but correctness cannot depend on relocation.
 
 The runtime owns each driver exclusively, so completion processing receives
 `&mut self`. This lets a driver mutate thread-local state directly without
 adding synchronization or dynamic borrow checks solely to satisfy the contract.
 
-`Driver` is dyn-compatible once its `Context` associated type is specified.
-Runtimes that erase unrelated context types use a private owning shim, which is
-also where they adapt the by-value `shutdown` method to boxed storage.
+`Driver` is dyn-compatible. Runtimes that erase unrelated context types use a
+private owning shim to store the context beside its driver, which is also where
+they adapt the by-value `shutdown` method to boxed storage.
 
 Every consumer context implements `IoContext`. Its associated `Provider` and
 `provider(ProviderOptions)` function form the registration recipe. A runtime
 method such as `get_context::<MyContext>()` therefore needs only the context
-type. The first request creates the provider and initializes a driver on every
-active worker. Later requests reuse that registration.
+type. The first request creates the provider and initializes a driver and
+context on every active worker. Later requests reuse that registration.
 
 `ProviderOptions` is the runtime-to-provider extension point. It is empty in the
 initial contract. `DriverOptions` is the separate per-worker extension point
@@ -80,12 +81,11 @@ but it can downcast a compatible handle and clone independently owned shared
 state. Because a handle may refer to a thread-local driver, `DriverOptions`
 remains on the worker that assembled it.
 
-After creating and storing the new driver, the runtime calls
-`Driver::on_peer_registered` on every earlier driver in registration order.
-Each callback receives the new driver's type-erased handle and runs on the
-owning worker before registration is acknowledged. This makes discovery
-bidirectional without allowing either side to retain a borrowed driver
-reference.
+After creating and storing the new driver and context, the runtime calls
+`Driver::on_peer_registered` on every earlier driver in registration order. Each
+callback receives the new driver's type-erased handle and runs on the owning
+worker before registration is acknowledged. This makes discovery bidirectional
+without allowing either side to retain a borrowed driver reference.
 
 Different major versions of a driver crate have distinct context types and
 `TypeId` values. They can coexist when both versions use the same
@@ -157,9 +157,9 @@ standard error source chain.
 ## Creation failure
 
 Registration is infallible at the type level. A provider that cannot initialize
-its driver, or an existing driver that cannot integrate a newly registered
-driver, panics because the runtime cannot continue coherently with a driver
-registered or connected on only part of its worker set.
+its driver and context, or an existing driver that cannot integrate a newly
+registered driver, panics because the runtime cannot continue coherently with a
+driver registered or connected on only part of its worker set.
 
 A driver with conditional platform or permission requirements exposes a
 capability check. The consumer calls that check before

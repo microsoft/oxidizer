@@ -15,7 +15,7 @@
 //! # Core types
 //!
 //! - [`IoContext`] is the consumer-facing handle that selects a [`DriverProvider`].
-//! - [`DriverProvider`] creates one [`Driver`] for each runtime worker.
+//! - [`DriverProvider`] creates one [`Driver`] and [`IoContext`] for each runtime worker.
 //! - [`Driver`] is the thread-local adapter between a worker and an I/O subsystem.
 //! - [`ProviderOptions`] and [`DriverOptions`] carry runtime facilities during registration.
 //! - [`DriverHandle`] lets drivers discover peers registered on the same worker.
@@ -26,16 +26,18 @@
 //!
 //! A runtime registers a driver when an [`IoContext`] type is first requested. It calls
 //! [`IoContext::provider`] once, then clones and relocates the provider for each active worker.
-//! Each relocated provider is consumed by [`DriverProvider::create`].
+//! Each relocated provider is consumed by [`DriverProvider::create`], which returns the worker's
+//! driver and context.
 //!
 //! [`DriverOptions`] identifies the worker, supplies runtime facilities, and contains handles to
 //! drivers registered earlier on that worker. After storing the new driver, the runtime calls
 //! [`Driver::on_peer_registered`] on those earlier drivers. This gives both the new driver and its
 //! peers an opportunity to exchange independently owned shared state.
 //!
-//! The first context request completes after every active worker has created its driver. Later
-//! requests obtain a context from the driver on the calling worker. Registration is infallible at
-//! the type level: a provider or peer callback panics if registration cannot be completed.
+//! The first context request completes after every active worker has created its driver and
+//! context. Later requests clone the context stored alongside the driver on the calling worker.
+//! Registration is infallible at the type level: a provider or peer callback panics if
+//! registration cannot be completed.
 //!
 //! # Driving I/O
 //!
@@ -44,7 +46,7 @@
 //!
 //! [`Driver::process_completions`] processes pending work and optionally waits for more.
 //! [`Driver::waker`] interrupts the current or next blocking wait. Contexts may move between
-//! workers and may outlive the driver that created them.
+//! workers and may outlive their associated driver.
 //!
 //! State reachable from a context, waker, background thread, or operating-system callback must be
 //! owned independently of the driver and synchronized as necessary. State used only by the owning
