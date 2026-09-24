@@ -34,7 +34,6 @@ fn disabled_event_captured_by_default_processor_with_flag() {
         processor.single_event(),
         ExpectedEvent::new("internal.trace_detail", Severity::Debug)
             .dimension("detail", "42")
-            .log()
             .disabled(),
     );
 }
@@ -49,10 +48,7 @@ fn disabled_event_filtered_by_log_and_metric_proc() {
 
     let events = processor.events();
     assert_eq!(events.len(), 1);
-    assert_eq!(
-        events[0],
-        ExpectedEvent::new("test.probe", Severity::Info).dimension("value", "1").log()
-    );
+    assert_eq!(events[0], ExpectedEvent::new("test.probe", Severity::Info).dimension("value", "1"));
 }
 
 #[test]

@@ -75,20 +75,21 @@ mod tests {
     use std::sync::atomic::{self, AtomicUsize};
 
     use static_assertions::assert_impl_all;
-    use thread_aware::affinity::{Affinity, pinned_affinities};
+    use thread_aware::{Relocator, Thread};
 
     use super::*;
     use crate::mem::GlobalPool;
 
-    assert_impl_all!(OpaqueMemory: MemoryShared);
+    assert_impl_all!(OpaqueMemory: MemoryShared, ThreadAware);
 
     #[test]
     fn wraps_inner() {
         let provider = GlobalPool::new();
         let memory = OpaqueMemory::new(provider);
+        let cloned = memory.clone();
 
-        let builder = memory.reserve(1024);
-        assert!(builder.capacity() >= 1024);
+        assert!(memory.reserve(1024).capacity() >= 1024);
+        assert!(cloned.reserve(1024).capacity() >= 1024);
     }
 
     #[test]
@@ -98,18 +99,6 @@ mod tests {
 
         // Call reserve via the Memory trait to verify the impl block
         let builder = Memory::reserve(&memory, 1024);
-        assert!(builder.capacity() >= 1024);
-    }
-
-    #[test]
-    fn relocate_does_not_break_reservation() {
-        let mut memory = OpaqueMemory::new(GlobalPool::new());
-
-        let affinities = pinned_affinities(&[2]);
-        memory.relocate(Some(affinities[0]), affinities[1]);
-
-        // The adapter must remain usable after relocation.
-        let builder = memory.reserve(1024);
         assert!(builder.capacity() >= 1024);
     }
 
@@ -129,7 +118,7 @@ mod tests {
         }
 
         impl ThreadAware for TrackingMemory {
-            fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+            fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
                 self.relocated.fetch_add(1, atomic::Ordering::SeqCst);
                 self.inner.relocate(source, destination);
             }
@@ -141,22 +130,8 @@ mod tests {
             inner: GlobalPool::new(),
         });
 
-        let affinities = pinned_affinities(&[2]);
-        memory.relocate(Some(affinities[0]), affinities[1]);
+        _ = Relocator::between_threads().relocate(&mut memory);
 
         assert_eq!(relocated.load(atomic::Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn clone_is_usable_independently() {
-        let memory = OpaqueMemory::new(GlobalPool::new());
-        let mut clone = memory.clone();
-
-        // Relocating the clone must leave both the clone and the original usable.
-        let affinities = pinned_affinities(&[2]);
-        clone.relocate(Some(affinities[0]), affinities[1]);
-
-        assert!(memory.reserve(64).capacity() >= 64);
-        assert!(clone.reserve(64).capacity() >= 64);
     }
 }

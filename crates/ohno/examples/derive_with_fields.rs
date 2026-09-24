@@ -1,11 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Prints `InvalidQuery`
+//! Prints an `InvalidQuery` through both `Display` and `Debug`.
 
 use ohno::{Error, OhnoCore};
 
 #[derive(Error)]
+#[display("invalid query: {operation} on {table}")]
 struct InvalidQuery {
     operation: String,
     table: String,

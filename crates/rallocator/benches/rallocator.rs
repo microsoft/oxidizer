@@ -8,6 +8,5 @@ mod workloads;
 rallocator::rallocator!();
 
 fn main() {
-    rallocator::initialize();
     workloads::run("rallocator");
 }

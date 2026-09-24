@@ -150,14 +150,15 @@
 //!
 //! # Thread-aware relocation
 //!
-//! All clock types implement [`ThreadAware`](thread_aware::ThreadAware), supporting per-core
-//! timer isolation in thread-per-core runtime architectures.
+//! All clock types implement [`ThreadAware`](thread_aware::ThreadAware), supporting per-thread
+//! timer isolation in thread-isolated runtime architectures.
 //!
 //! When an [`InactiveClock`][runtime::InactiveClock] is
-//! [relocated](thread_aware::ThreadAware::relocate) to a target thread, the underlying timer
-//! storage is duplicated per core. After activation, each thread's [`Clock`] and
-//! [`ClockDriver`][runtime::ClockDriver] operate on an independent set of timers with no
-//! cross-thread lock contention.
+//! [relocated](thread_aware::ThreadAware::relocate) between coordinates owned by the same runtime,
+//! the underlying timer storage is duplicated per thread. After activation, each thread's
+//! [`Clock`] and [`ClockDriver`][runtime::ClockDriver] operate on an independent set of timers with
+//! no cross-thread lock contention. A cross-owner relocation remains functional but retains the
+//! existing timer storage, so it does not establish destination-local state.
 //!
 //! [`ClockControl`] clocks are unaffected by relocation, all clones always share the same
 //! controlled time state regardless of thread, so a single `ClockControl` can drive time for
@@ -344,7 +345,7 @@ macro_rules! thread_aware_move {
     ($($t:ty),+ $(,)?) => {
         $(
             impl thread_aware::ThreadAware for $t {
-                fn relocate(&mut self, _source: Option<thread_aware::affinity::Affinity>, _destination: thread_aware::affinity::Affinity) {}
+                fn relocate(&mut self, _source: Option<&thread_aware::Thread>, _destination: &thread_aware::Thread) {}
             }
         )+
     };

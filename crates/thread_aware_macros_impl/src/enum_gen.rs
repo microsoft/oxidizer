@@ -66,7 +66,7 @@ pub(crate) fn build_enum_body(_name: &syn::Ident, data: &DataEnum, root_path: &s
                         // field-name shorthand, so that no field name can reach the relocation
                         // call. A field spelled like one of the generated parameters would
                         // otherwise shadow it, and the call would pass the field where an
-                        // `Affinity` is expected.
+                        // `Thread` is expected.
                         let binding = field_binding(i);
                         bindings.push(quote! { #ident: ref mut #binding });
                         let mut path = root_path.clone();

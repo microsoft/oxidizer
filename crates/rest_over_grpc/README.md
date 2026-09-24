@@ -6,7 +6,7 @@
 [![crate.io](https://img.shields.io/crates/v/rest_over_grpc.svg)](https://crates.io/crates/rest_over_grpc)
 [![docs.rs](https://docs.rs/rest_over_grpc/badge.svg)](https://docs.rs/rest_over_grpc)
 [![MSRV](https://img.shields.io/crates/msrv/rest_over_grpc)](https://crates.io/crates/rest_over_grpc)
-[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml/badge.svg)](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/microsoft/oxidizer/blob/main/LICENSE)
 <a href="https://github.com/microsoft/oxidizer"><img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
@@ -199,6 +199,14 @@ and bidirectional RPCs have no `google.api.http` mapping and are rejected by
 Requests are buffered and parsed as JSON, so there is no incremental request
 body path and binary payloads must fit JSON-friendly encoding.
 
+Query parameter field paths are limited to 64 levels of nesting. A dotted
+key such as `?a.b.c=1` builds one level per segment, so a path deeper than
+the limit is rejected as an invalid request rather than decoded, truncated,
+or allowed to exhaust the stack. The limit is fixed and not configurable: it
+bounds the recursion an untrusted request can drive, and a bound a caller
+could raise would not bound anything. It stays far above the nesting any
+real proto message uses.
+
 ## Cargo features
 
 * `serving` (default): [`serve_http`][__link29], [`serve_http_fn`][__link30], and [`RestBody`][__link31].
@@ -218,44 +226,44 @@ as an Axum fallback service.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/rest_over_grpc">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb4yyDbhLmywUbUgoeDyjY0hYb_gBd7xtnrJEbm_ruDQCrgu9hZIOCZ2xheWVyZWRlMC4zLjaCbnJlc3Rfb3Zlcl9ncnBjZTAuMi4wgm10b3dlcl9zZXJ2aWNlZTAuMy4z
- [__link0]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=handling::Status
- [__link1]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=serving::RestService::new
- [__link10]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=transcoding::Transcode::try_transcode
- [__link11]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=transcoding::HttpResponse
- [__link12]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=transcoding::StreamingResponse
- [__link13]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=transcoding::Transcode::transcode
- [__link14]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=transcoding::Transcode::try_transcode
- [__link15]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=handling::Context
- [__link16]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/build/index.html
- [__link17]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=handling::ResponseStream
- [__link18]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=handling::Status
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbvTkfRkZSF74bFkiR2XTYsVUbNpV_rR9ivr4bQqiJonBozh9hZIOCZ2xheWVyZWRlMC4zLjeCbnJlc3Rfb3Zlcl9ncnBjZTAuMi4xg210b3dlci1zZXJ2aWNlZTAuMy4zbXRvd2VyX3NlcnZpY2U
+ [__link0]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=handling::Status
+ [__link1]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=serving::RestService::new
+ [__link10]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=transcoding::Transcode::try_transcode
+ [__link11]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=transcoding::HttpResponse
+ [__link12]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=transcoding::StreamingResponse
+ [__link13]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=transcoding::Transcode::transcode
+ [__link14]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=transcoding::Transcode::try_transcode
+ [__link15]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=handling::Context
+ [__link16]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/build/index.html
+ [__link17]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=handling::ResponseStream
+ [__link18]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=handling::Status
  [__link19]: https://github.com/microsoft/oxidizer/blob/main/crates/rest_over_grpc_examples/Cargo.toml
- [__link2]: https://docs.rs/tower_service/0.3.3/tower_service/?search=Service
- [__link20]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=build::Generator::builder
- [__link21]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=build::GeneratorBuilder::emit_tonic_bridge
+ [__link2]: https://docs.rs/tower-service/0.3.3/tower_service/?search=Service
+ [__link20]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=build::Generator::builder
+ [__link21]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=build::GeneratorBuilder::emit_tonic_bridge
  [__link22]: https://github.com/microsoft/oxidizer/blob/main/crates/rest_over_grpc_examples/build.rs
  [__link23]: https://github.com/microsoft/oxidizer/blob/main/crates/rest_over_grpc_examples/src/tonic_bridge.rs
  [__link24]: https://github.com/microsoft/oxidizer/blob/main/crates/rest_over_grpc_examples/src/tonic_bridge.rs
  [__link25]: https://github.com/microsoft/oxidizer/tree/main/crates/rest_over_grpc_examples#examples
  [__link26]: https://github.com/microsoft/oxidizer/blob/main/crates/rest_over_grpc/examples/generate_service.rs
  [__link27]: https://github.com/microsoft/oxidizer/blob/main/crates/rest_over_grpc_examples/build.rs
- [__link28]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/build/index.html
- [__link29]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=serving::serve_http
- [__link3]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=serving::RestService
- [__link30]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=serving::serve_http_fn
- [__link31]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=serving::RestBody
- [__link32]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=serving::RestService
- [__link33]: https://docs.rs/tower_service/0.3.3/tower_service/?search=Service
- [__link34]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=serving::RestService
- [__link35]: https://docs.rs/layered/0.3.6/layered/?search=Service
- [__link36]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=transcoding::HttpResponse
- [__link37]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=transcoding::StreamingResponse
- [__link38]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=transcoding::TranscodeResponse
- [__link39]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=serving::RestService
- [__link4]: https://docs.rs/layered/0.3.6/layered/?search=Service
- [__link5]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=serving::RestService
+ [__link28]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/build/index.html
+ [__link29]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=serving::serve_http
+ [__link3]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=serving::RestService
+ [__link30]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=serving::serve_http_fn
+ [__link31]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=serving::RestBody
+ [__link32]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=serving::RestService
+ [__link33]: https://docs.rs/tower-service/0.3.3/tower_service/?search=Service
+ [__link34]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=serving::RestService
+ [__link35]: https://docs.rs/layered/0.3.7/layered/?search=Service
+ [__link36]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=transcoding::HttpResponse
+ [__link37]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=transcoding::StreamingResponse
+ [__link38]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=transcoding::TranscodeResponse
+ [__link39]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=serving::RestService
+ [__link4]: https://docs.rs/layered/0.3.7/layered/?search=Service
+ [__link5]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=serving::RestService
  [__link6]: https://docs.rs/axum-core/latest/axum_core/response/trait.IntoResponse.html
- [__link7]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=serving::serve_http
- [__link8]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=serving::serve_http_fn
- [__link9]: https://docs.rs/rest_over_grpc/0.2.0/rest_over_grpc/?search=transcoding::Transcode::transcode
+ [__link7]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=serving::serve_http
+ [__link8]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=serving::serve_http_fn
+ [__link9]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=transcoding::Transcode::transcode

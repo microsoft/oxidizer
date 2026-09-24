@@ -106,8 +106,7 @@ fn redaction_modes_on_classified_fields() {
         passthrough_proc.single_event(),
         ExpectedEvent::new("user.action", Severity::Info)
             .dimension("action_code", 42i64)
-            .dimension("user", "Alice")
-            .log(),
+            .dimension("user", "Alice"),
     );
 
     // Erase: classified string becomes empty
@@ -115,8 +114,7 @@ fn redaction_modes_on_classified_fields() {
         erase_proc.single_event(),
         ExpectedEvent::new("user.action", Severity::Info)
             .dimension("action_code", 42i64)
-            .dimension("user", "")
-            .log(),
+            .dimension("user", ""),
     );
 
     // Replace('*'): each character replaced
@@ -124,8 +122,7 @@ fn redaction_modes_on_classified_fields() {
         replace_proc.single_event(),
         ExpectedEvent::new("user.action", Severity::Info)
             .dimension("action_code", 42i64)
-            .dimension("user", "*****")
-            .log(),
+            .dimension("user", "*****"),
     );
 }
 
@@ -148,8 +145,7 @@ fn per_class_redaction_applies_different_rules() {
         ExpectedEvent::new("auth.token_used", Severity::Info)
             .dimension("request_id", 99i64)
             .dimension("token", "")
-            .dimension("user", "***")
-            .log(),
+            .dimension("user", "***"),
     );
 }
 
@@ -179,8 +175,7 @@ fn public_classified_type_with_passthrough_per_class() {
         processor.single_event(),
         ExpectedEvent::new("service.started", Severity::Info)
             .dimension("port", 8080i64)
-            .dimension("service", "my-service")
-            .log(),
+            .dimension("service", "my-service"),
     );
 }
 
@@ -213,8 +208,7 @@ fn enrichment_string_values_are_redacted() {
         processor.single_event(),
         ExpectedEvent::new("test.probe", Severity::Info)
             .dimension("tenant", "*******")
-            .dimension("value", "*")
-            .log(),
+            .dimension("value", "*"),
     );
 }
 
@@ -243,8 +237,7 @@ fn enrichment_sensitive_values_are_redacted() {
         processor.single_event(),
         ExpectedEvent::new("test.probe", Severity::Info)
             .dimension("retry_count", "")
-            .dimension("value", "")
-            .log(),
+            .dimension("value", ""),
     );
 }
 
@@ -279,8 +272,7 @@ fn enrichment_redaction_uses_per_processor_engine() {
         pass_proc.single_event(),
         ExpectedEvent::new("test.probe", Severity::Info)
             .dimension("user_email", "alice@example.com")
-            .dimension("value", "1")
-            .log(),
+            .dimension("value", "1"),
     );
 
     // Erase processor removes the enrichment value
@@ -288,8 +280,7 @@ fn enrichment_redaction_uses_per_processor_engine() {
         erase_proc.single_event(),
         ExpectedEvent::new("test.probe", Severity::Info)
             .dimension("user_email", "")
-            .dimension("value", "")
-            .log(),
+            .dimension("value", ""),
     );
 }
 
@@ -318,8 +309,7 @@ fn insert_mode_replaces_with_custom_string() {
         processor.single_event(),
         ExpectedEvent::new("user.action", Severity::Info)
             .dimension("action_code", 1i64)
-            .dimension("user", "[REDACTED]")
-            .log(),
+            .dimension("user", "[REDACTED]"),
     );
 }
 
@@ -350,8 +340,7 @@ fn passthrough_for_specific_class_erase_rest() {
         ExpectedEvent::new("auth.token_used", Severity::Info)
             .dimension("request_id", 1i64)
             .dimension("token", "")
-            .dimension("user", "Alice")
-            .log(),
+            .dimension("user", "Alice"),
     );
 }
 
@@ -401,7 +390,6 @@ fn data_class_fields_are_redacted_without_being_cloned() {
         processor.single_event(),
         ExpectedEvent::new("data_class.borrowed", Severity::Info)
             .dimension("payload", "****")
-            .dimension("optional", "**")
-            .log(),
+            .dimension("optional", "**"),
     );
 }

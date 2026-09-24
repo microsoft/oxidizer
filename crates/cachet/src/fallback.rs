@@ -105,9 +105,13 @@ where
 
         if let Some(ref v) = fallback_value {
             // Insert errors are intentionally swallowed - a failed promotion should not
-            // fail the overall get. The CacheWrapper around the primary tier already
-            // records telemetry for the insert (Inserted, Rejected, or Error).
-            let _ = self.inner.primary.insert(key.clone(), v.clone()).await;
+            // fail the overall get. CacheWrapper records the insert outcome, while this
+            // match records the corresponding promotion outcome.
+            match self.inner.primary.insert(key.clone(), v.clone()).await {
+                Ok(InsertOutcome::Accepted) => self.inner.telemetry.record_promotion_accepted(self.inner.name),
+                Ok(InsertOutcome::Rejected) => self.inner.telemetry.record_promotion_rejected(self.inner.name),
+                Err(_) => self.inner.telemetry.record_promotion_failed(self.inner.name),
+            }
         }
 
         Ok(fallback_value)

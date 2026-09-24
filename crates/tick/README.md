@@ -6,7 +6,7 @@
 [![crate.io](https://img.shields.io/crates/v/tick.svg)](https://crates.io/crates/tick)
 [![docs.rs](https://docs.rs/tick/badge.svg)](https://docs.rs/tick)
 [![MSRV](https://img.shields.io/crates/msrv/tick)](https://crates.io/crates/tick)
-[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml/badge.svg)](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/microsoft/oxidizer/blob/main/LICENSE)
 <a href="https://github.com/microsoft/oxidizer"><img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
@@ -141,14 +141,15 @@ examples for more details.
 
 ## Thread-aware relocation
 
-All clock types implement [`ThreadAware`][__link31], supporting per-core
-timer isolation in thread-per-core runtime architectures.
+All clock types implement [`ThreadAware`][__link31], supporting per-thread
+timer isolation in thread-isolated runtime architectures.
 
 When an [`InactiveClock`][__link32] is
-[relocated][__link33] to a target thread, the underlying timer
-storage is duplicated per core. After activation, each thread’s [`Clock`][__link34] and
-[`ClockDriver`][__link35] operate on an independent set of timers with no
-cross-thread lock contention.
+[relocated][__link33] between coordinates owned by the same runtime,
+the underlying timer storage is duplicated per thread. After activation, each thread’s
+[`Clock`][__link34] and [`ClockDriver`][__link35] operate on an independent set of timers with
+no cross-thread lock contention. A cross-owner relocation remains functional but retains the
+existing timer storage, so it does not establish destination-local state.
 
 [`ClockControl`][__link36] clocks are unaffected by relocation, all clones always share the same
 controlled time state regardless of thread, so a single `ClockControl` can drive time for
@@ -291,53 +292,53 @@ contain additional examples of how to use the time primitives.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbyb3-aFGC5KAbJcla10Ve5zcbhtxTPShzY-8bjBP3DyvGe3BhZIKCbHRocmVhZF9hd2FyZWYwLjExLjCCZHRpY2tlMC42LjA
- [__link0]: https://docs.rs/tick/0.6.0/tick/?search=ClockControl
- [__link1]: https://docs.rs/tick/0.6.0/tick/?search=Clock
- [__link10]: https://docs.rs/tick/0.6.0/tick/?search=Error
- [__link11]: https://docs.rs/tick/0.6.0/tick/fmt/index.html
- [__link12]: https://docs.rs/tick/0.6.0/tick/runtime/index.html
- [__link13]: https://docs.rs/tick/0.6.0/tick/?search=FutureExt
- [__link14]: https://docs.rs/tick/0.6.0/tick/?search=SystemTimeExt
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQboHuu5M6pCuEb3VZo280w0XAbKK68kBCH6YMb59kPPAtIPCVhZIKCbHRocmVhZF9hd2FyZWYwLjEyLjCCZHRpY2tlMC43LjA
+ [__link0]: https://docs.rs/tick/0.7.0/tick/?search=ClockControl
+ [__link1]: https://docs.rs/tick/0.7.0/tick/?search=Clock
+ [__link10]: https://docs.rs/tick/0.7.0/tick/?search=Error
+ [__link11]: https://docs.rs/tick/0.7.0/tick/fmt/index.html
+ [__link12]: https://docs.rs/tick/0.7.0/tick/runtime/index.html
+ [__link13]: https://docs.rs/tick/0.7.0/tick/?search=FutureExt
+ [__link14]: https://docs.rs/tick/0.7.0/tick/?search=SystemTimeExt
  [__link15]: https://doc.rust-lang.org/stable/std/?search=time::SystemTime
- [__link16]: https://docs.rs/tick/0.6.0/tick/?search=SimpleClock
- [__link17]: https://docs.rs/tick/0.6.0/tick/?search=Clock
- [__link18]: https://docs.rs/tick/0.6.0/tick/?search=SimpleClock::new_system
- [__link19]: https://docs.rs/tick/0.6.0/tick/?search=SimpleClock
- [__link2]: https://docs.rs/tick/0.6.0/tick/?search=Clock
- [__link20]: https://docs.rs/tick/0.6.0/tick/?search=Clock
+ [__link16]: https://docs.rs/tick/0.7.0/tick/?search=SimpleClock
+ [__link17]: https://docs.rs/tick/0.7.0/tick/?search=Clock
+ [__link18]: https://docs.rs/tick/0.7.0/tick/?search=SimpleClock::new_system
+ [__link19]: https://docs.rs/tick/0.7.0/tick/?search=SimpleClock
+ [__link2]: https://docs.rs/tick/0.7.0/tick/?search=Clock
+ [__link20]: https://docs.rs/tick/0.7.0/tick/?search=Clock
  [__link21]: https://doc.rust-lang.org/stable/std/convert/trait.AsRef.html
- [__link22]: https://docs.rs/tick/0.6.0/tick/?search=Clock::simple_clock
- [__link23]: https://docs.rs/tick/0.6.0/tick/?search=ClockControl::to_simple_clock
- [__link24]: https://docs.rs/tick/0.6.0/tick/?search=ClockControl
- [__link25]: https://docs.rs/tick/0.6.0/tick/?search=Clock
- [__link26]: https://docs.rs/tick/0.6.0/tick/?search=Stopwatch
+ [__link22]: https://docs.rs/tick/0.7.0/tick/?search=Clock::simple_clock
+ [__link23]: https://docs.rs/tick/0.7.0/tick/?search=ClockControl::to_simple_clock
+ [__link24]: https://docs.rs/tick/0.7.0/tick/?search=ClockControl
+ [__link25]: https://docs.rs/tick/0.7.0/tick/?search=Clock
+ [__link26]: https://docs.rs/tick/0.7.0/tick/?search=Stopwatch
  [__link27]: https://doc.rust-lang.org/stable/std/convert/trait.AsRef.html
  [__link28]: https://crates.io/crates/jiff
  [__link29]: https://crates.io/crates/chrono
- [__link3]: https://docs.rs/tick/0.6.0/tick/?search=SimpleClock
+ [__link3]: https://docs.rs/tick/0.7.0/tick/?search=SimpleClock
  [__link30]: https://crates.io/crates/time
- [__link31]: https://docs.rs/thread_aware/0.11.0/thread_aware/?search=ThreadAware
- [__link32]: https://docs.rs/tick/0.6.0/tick/?search=runtime::InactiveClock
- [__link33]: https://docs.rs/thread_aware/0.11.0/thread_aware/?search=ThreadAware::relocate
- [__link34]: https://docs.rs/tick/0.6.0/tick/?search=Clock
- [__link35]: https://docs.rs/tick/0.6.0/tick/?search=runtime::ClockDriver
- [__link36]: https://docs.rs/tick/0.6.0/tick/?search=ClockControl
- [__link37]: https://docs.rs/tick/0.6.0/tick/runtime/index.html
- [__link38]: https://docs.rs/tick/0.6.0/tick/?search=Clock
- [__link39]: https://docs.rs/tick/0.6.0/tick/?search=Clock::instant
+ [__link31]: https://docs.rs/thread_aware/0.12.0/thread_aware/?search=ThreadAware
+ [__link32]: https://docs.rs/tick/0.7.0/tick/?search=runtime::InactiveClock
+ [__link33]: https://docs.rs/thread_aware/0.12.0/thread_aware/?search=ThreadAware::relocate
+ [__link34]: https://docs.rs/tick/0.7.0/tick/?search=Clock
+ [__link35]: https://docs.rs/tick/0.7.0/tick/?search=runtime::ClockDriver
+ [__link36]: https://docs.rs/tick/0.7.0/tick/?search=ClockControl
+ [__link37]: https://docs.rs/tick/0.7.0/tick/runtime/index.html
+ [__link38]: https://docs.rs/tick/0.7.0/tick/?search=Clock
+ [__link39]: https://docs.rs/tick/0.7.0/tick/?search=Clock::instant
  [__link4]: https://doc.rust-lang.org/stable/std/convert/trait.AsRef.html
- [__link40]: https://docs.rs/tick/0.6.0/tick/?search=Stopwatch
+ [__link40]: https://docs.rs/tick/0.7.0/tick/?search=Stopwatch
  [__link41]: https://tokio.rs/
- [__link42]: https://docs.rs/tick/0.6.0/tick/?search=Clock::new_tokio
- [__link43]: https://docs.rs/tick/0.6.0/tick/?search=ClockControl
+ [__link42]: https://docs.rs/tick/0.7.0/tick/?search=Clock::new_tokio
+ [__link43]: https://docs.rs/tick/0.7.0/tick/?search=ClockControl
  [__link44]: https://serde.rs/
- [__link45]: https://docs.rs/tick/0.6.0/tick/fmt/index.html
+ [__link45]: https://docs.rs/tick/0.7.0/tick/fmt/index.html
  [__link46]: https://doc.rust-lang.org/stable/std/?search=time::Instant::now
- [__link47]: https://docs.rs/tick/0.6.0/tick/?search=Clock
+ [__link47]: https://docs.rs/tick/0.7.0/tick/?search=Clock
  [__link48]: https://github.com/microsoft/oxidizer/tree/main/crates/tick/examples
- [__link5]: https://docs.rs/tick/0.6.0/tick/?search=Clock
- [__link6]: https://docs.rs/tick/0.6.0/tick/?search=ClockControl
- [__link7]: https://docs.rs/tick/0.6.0/tick/?search=Stopwatch
- [__link8]: https://docs.rs/tick/0.6.0/tick/?search=Delay
- [__link9]: https://docs.rs/tick/0.6.0/tick/?search=PeriodicTimer
+ [__link5]: https://docs.rs/tick/0.7.0/tick/?search=Clock
+ [__link6]: https://docs.rs/tick/0.7.0/tick/?search=ClockControl
+ [__link7]: https://docs.rs/tick/0.7.0/tick/?search=Stopwatch
+ [__link8]: https://docs.rs/tick/0.7.0/tick/?search=Delay
+ [__link9]: https://docs.rs/tick/0.7.0/tick/?search=PeriodicTimer

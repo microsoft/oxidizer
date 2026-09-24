@@ -6,7 +6,7 @@
 [![crate.io](https://img.shields.io/crates/v/msvc_spectre_libs_build.svg)](https://crates.io/crates/msvc_spectre_libs_build)
 [![docs.rs](https://docs.rs/msvc_spectre_libs_build/badge.svg)](https://docs.rs/msvc_spectre_libs_build)
 [![MSRV](https://img.shields.io/crates/msrv/msvc_spectre_libs_build)](https://crates.io/crates/msvc_spectre_libs_build)
-[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml/badge.svg)](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/microsoft/oxidizer/blob/main/LICENSE)
 <a href="https://github.com/microsoft/oxidizer"><img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
@@ -113,18 +113,18 @@ assert_eq!(SpectreArch::from_target_arch("riscv64"), None);
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/msvc_spectre_libs_build">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbC52U2RKb8ycb6eQqnl9haVYb52EFsO7a-swbt-X_H4uXCoJhZIGCd21zdmNfc3BlY3RyZV9saWJzX2J1aWxkZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbC52U2RKb8ycb6eQqnl9haVYb52EFsO7a-swbt-X_H4uXCoJhZIGCd21zdmNfc3BlY3RyZV9saWJzX2J1aWxkZTAuMS4x
  [__link0]: https://docs.rs/msvc_spectre_libs
  [__link1]: https://docs.rs/msvc_spectre_libs
- [__link10]: https://docs.rs/msvc_spectre_libs_build/0.1.0/msvc_spectre_libs_build/flags/index.html
- [__link11]: https://docs.rs/msvc_spectre_libs_build/0.1.0/msvc_spectre_libs_build/?search=plan::plan
+ [__link10]: https://docs.rs/msvc_spectre_libs_build/0.1.1/msvc_spectre_libs_build/flags/index.html
+ [__link11]: https://docs.rs/msvc_spectre_libs_build/0.1.1/msvc_spectre_libs_build/?search=plan::plan
  [__link12]: https://github.com/microsoft/oxidizer/blob/main/crates/msvc_spectre_libs/docs/design.md
  [__link13]: https://github.com/microsoft/oxidizer/blob/main/crates/msvc_spectre_libs/docs/implementation.md
  [__link2]: https://docs.rs/msvc_spectre_libs
- [__link3]: https://docs.rs/msvc_spectre_libs_build/0.1.0/msvc_spectre_libs_build/plan/index.html
- [__link4]: https://docs.rs/msvc_spectre_libs_build/0.1.0/msvc_spectre_libs_build/?search=plan::plan
- [__link5]: https://docs.rs/msvc_spectre_libs_build/0.1.0/msvc_spectre_libs_build/?search=plan::BuildEnvironment
- [__link6]: https://docs.rs/msvc_spectre_libs_build/0.1.0/msvc_spectre_libs_build/?search=toolchain::Toolchain
- [__link7]: https://docs.rs/msvc_spectre_libs_build/0.1.0/msvc_spectre_libs_build/?search=plan::Plan
- [__link8]: https://docs.rs/msvc_spectre_libs_build/0.1.0/msvc_spectre_libs_build/toolchain/index.html
- [__link9]: https://docs.rs/msvc_spectre_libs_build/0.1.0/msvc_spectre_libs_build/resolve/index.html
+ [__link3]: https://docs.rs/msvc_spectre_libs_build/0.1.1/msvc_spectre_libs_build/plan/index.html
+ [__link4]: https://docs.rs/msvc_spectre_libs_build/0.1.1/msvc_spectre_libs_build/?search=plan::plan
+ [__link5]: https://docs.rs/msvc_spectre_libs_build/0.1.1/msvc_spectre_libs_build/?search=plan::BuildEnvironment
+ [__link6]: https://docs.rs/msvc_spectre_libs_build/0.1.1/msvc_spectre_libs_build/?search=toolchain::Toolchain
+ [__link7]: https://docs.rs/msvc_spectre_libs_build/0.1.1/msvc_spectre_libs_build/?search=plan::Plan
+ [__link8]: https://docs.rs/msvc_spectre_libs_build/0.1.1/msvc_spectre_libs_build/toolchain/index.html
+ [__link9]: https://docs.rs/msvc_spectre_libs_build/0.1.1/msvc_spectre_libs_build/resolve/index.html

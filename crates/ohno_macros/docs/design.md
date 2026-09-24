@@ -250,6 +250,8 @@ trait `impl` carries all three, as does the single inherent `impl` holding the
 constructors. That covers lifetimes, type parameters and where clauses in one
 rule, which is what R1.3's "all of them carry the input's generics" asks for.
 
+Every generated trait `impl` carries `#[automatically_derived]`.
+
 Two values recur below: the core field's member, and the type's name as a string
 literal — the default message the runtime falls back to when nothing else
 renders.
@@ -278,10 +280,12 @@ error type becomes infallible.
 including the core, so it iterates the full field list and branches once on
 style, into `debug_struct` for a named struct or `debug_tuple` for a tuple one.
 
-It is the one generated item that is **not** `#[automatically_derived]`.
-Dead-code analysis ignores field reads inside a derived `Debug`, so marking this
-one would make every field that only `Debug` reads look unused in the user's own
-crate.
+`Debug` carries `#[rustc_trivial_field_reads]`, so marking this impl
+`#[automatically_derived]` makes dead-code analysis discard its field reads. A
+field that nothing but `Debug` reads is then reported, which is the answer
+`#[derive(Debug)]` gives too. The core and any field the `#[display]` template
+names stay live, because the other generated impls read them and their traits
+carry no such attribute.
 
 **Constructors** are emitted unless the model suppresses them. `new` takes one
 parameter per non-core field and defaults the core; `caused_by` takes the same
@@ -562,10 +566,10 @@ what the macros produce, and only the `.stderr` snapshots pin where a diagnostic
 points. A change that keeps every snapshot green and breaks the tests under
 `crates/ohno/tests/` is a broken change.
 
-The compile-fail tests are ordinary integration tests, so `just test` runs them
-too. `just trybuild` narrows to them while iterating on a diagnostic — pass the
-test target's name as the filter, as in
-`just package=ohno trybuild display_diagnostics` — and `just trybuild-overwrite`
+The compile-fail tests are ordinary integration tests, so the Anvil test group
+runs them too. `just trybuild --package ohno --filter display_diagnostics`
+narrows to them while iterating on a diagnostic, and
+`just trybuild-overwrite --package ohno --filter display_diagnostics`
 rewrites the `.stderr` snapshots when a message or a span changes on purpose.
 Always read the resulting diff: a snapshot that changed for a reason you cannot
 name is a regression in a diagnostic, not a refresh.

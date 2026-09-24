@@ -4,7 +4,7 @@
 [package]
 name = "fetch_tls"
 description = "TLS configurations and APIs used by 'fetch' crate."
-version = "0.4.0"
+version = "0.4.1"
 readme = "README.md"
 keywords = ["oxidizer", "tls", "fetch", "http", "client"]
 categories = ["network-programming"]
@@ -41,13 +41,13 @@ rustls = ["dep:rustls"]
 native-tls = ["dep:native-tls"]
 
 [dependencies]
-# internal
-ohno = { workspace = true }
 
 # external
 base64 = { workspace = true }
 http = { workspace = true }
 native-tls = { workspace = true, optional = true, features = ["alpn"] }
+# internal
+ohno = { workspace = true }
 # No crypto provider feature is enabled here; callers supply one via
 # `TlsBackendBuilder::configure_rustls`. See the crate docs for details.
 rustls = { workspace = true, features = [

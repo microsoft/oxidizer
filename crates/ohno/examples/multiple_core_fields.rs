@@ -7,6 +7,7 @@ use ohno::{Error, OhnoCore};
 
 #[derive(Error)]
 struct MyError {
+    #[expect(dead_code, reason = "carried as data; the example is about disambiguating the core")]
     metadata: OhnoCore,
     #[error] // Mark the primary error field
     main_error: OhnoCore,

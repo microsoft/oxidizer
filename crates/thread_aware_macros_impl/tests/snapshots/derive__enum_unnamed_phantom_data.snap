@@ -8,10 +8,8 @@ impl<
 > ::thread_aware::ThreadAware for EnumUnnamedPhantom<T, U> {
     fn relocate(
         &mut self,
-        __thread_aware_source: ::core::option::Option<
-            ::thread_aware::affinity::Affinity,
-        >,
-        __thread_aware_destination: ::thread_aware::affinity::Affinity,
+        __thread_aware_source: ::core::option::Option<&::thread_aware::Thread>,
+        __thread_aware_destination: &::thread_aware::Thread,
     ) {
         match *self {
             Self::Variant(

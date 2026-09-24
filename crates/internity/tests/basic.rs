@@ -364,6 +364,10 @@ fn freeze_while_shared_copies_and_preserves_handles() {
 
 #[test]
 #[cfg(not(all(miri, windows)))]
+#[cfg_attr(
+    miri_strict_provenance,
+    ignore = "parking_lot_core uses integer-to-pointer casts on Unix, which strict-provenance Miri rejects"
+)]
 fn concurrent_intern_is_consistent() {
     let it = ThreadedLexicon::new();
     #[cfg(miri)]
@@ -408,6 +412,10 @@ fn concurrent_intern_is_consistent() {
 
 #[test]
 #[cfg(not(all(miri, windows)))]
+#[cfg_attr(
+    miri_strict_provenance,
+    ignore = "parking_lot_core uses integer-to-pointer casts on Unix, which strict-provenance Miri rejects"
+)]
 fn concurrent_intern_then_concurrent_resolve() {
     let it = ThreadedLexicon::new();
     #[cfg(miri)]
@@ -775,6 +783,10 @@ fn threaded_intern_bytes_through_lexicon_trait() {
 }
 
 #[cfg(not(all(miri, windows)))]
+#[cfg_attr(
+    miri_strict_provenance,
+    ignore = "parking_lot_core uses integer-to-pointer casts on Unix, which strict-provenance Miri rejects"
+)]
 #[test]
 fn threaded_intern_bytes_is_consistent_across_threads() {
     let lexicon = ThreadedLexicon::new();

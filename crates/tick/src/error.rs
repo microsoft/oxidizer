@@ -108,13 +108,12 @@ mod tests {
 
     use jiff::SignedDuration;
     use thread_aware::ThreadAware;
-    use thread_aware::affinity::pinned_affinities;
 
     use super::*;
 
     #[test]
     fn assert_types() {
-        static_assertions::assert_impl_all!(Error: Send, Sync);
+        static_assertions::assert_impl_all!(Error: Send, Sync, ThreadAware);
     }
 
     #[test]
@@ -159,16 +158,5 @@ mod tests {
         assert!(matches!(error.kind(), ErrorKind::SystemTimeError(_)));
         assert_eq!(error.to_string(), expected_message);
         assert!(error.source().is_some());
-    }
-
-    #[test]
-    fn thread_aware_ok() {
-        let error = Error::other(std::io::Error::other("dummy"));
-        let affinities = pinned_affinities(&[2]);
-
-        let mut error = error;
-        error.relocate(Some(affinities[0]), affinities[0]);
-
-        assert!(matches!(error.kind(), ErrorKind::Other(_)));
     }
 }

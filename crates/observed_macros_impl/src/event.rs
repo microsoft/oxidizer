@@ -21,7 +21,8 @@ use syn::punctuated::Punctuated;
 use syn::{Attribute, Error, Field, Fields, Generics, Ident, ItemStruct, LitStr, Meta, Result, Token};
 
 use crate::field_attrs::{
-    Dimension, FieldRedaction, IfNone, LogRouting, MetricRouting, SharedFieldAttrs, is_borrowed_str, is_reference_type, option_inner_type,
+    Dimension, FieldRedaction, IfNone, LogRouting, MetricRouting, SharedFieldAttrs, is_borrowed_str, is_mutable_reference_type,
+    is_reference_type, option_inner_type,
 };
 
 // ================================================================================================
@@ -722,6 +723,13 @@ fn parse_field_def(field: &Field) -> Result<FieldDef> {
         return Err(Error::new_spanned(field, "`#[if_none(...)]` is only valid on `Option<T>` fields"));
     }
 
+    // A field is read through `&self` while the event is visited, so an exclusive
+    // borrow can never be handed out. Rejecting it here names the field; letting it
+    // through fails later inside the expansion, against generated code the author
+    // never wrote. `Option<&mut T>` is checked too, because the inner type is what
+    // the visit body dereferences.
+    reject_mutable_reference(field)?;
+
     Ok(FieldDef {
         ident,
         ty: field.ty.clone(),
@@ -731,6 +739,23 @@ fn parse_field_def(field: &Field) -> Result<FieldDef> {
         redaction: shared.redaction.unwrap_or_default(),
         if_none: shared.if_none.unwrap_or_default(),
     })
+}
+
+/// Rejects an event field that is (or wraps) a mutable reference.
+fn reject_mutable_reference(field: &Field) -> Result<()> {
+    let inner = option_inner_type(&field.ty);
+    let inspected = inner.unwrap_or(&field.ty);
+    if !is_mutable_reference_type(inspected) {
+        return Ok(());
+    }
+    let wrapper = if inner.is_some() { "`Option<&mut T>` field" } else { "field" };
+    Err(Error::new_spanned(
+        &field.ty,
+        format!(
+            "an event {wrapper} cannot hold a mutable reference; event fields are read through `&self` when the event is \
+             visited, so they support only shared references. Use `&T` instead of `&mut T`",
+        ),
+    ))
 }
 
 // ================================================================================================

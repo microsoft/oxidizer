@@ -37,7 +37,6 @@ pub(crate) fn generate(model: &Model) -> TokenStream {
     let caused_by_body = construct(&model.shape, &initializers(model, &quote!(#core::from(error))));
 
     quote! {
-        #[automatically_derived]
         impl #impl_generics #ident #ty_generics #where_clause {
             /// Creates the error with no source.
             #[allow(dead_code, reason = "generated for every error type, used at the author's discretion")]

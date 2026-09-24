@@ -65,13 +65,11 @@ fn severity_filter_drops_low_severity_events() {
     assert_eq!(events.len(), 2);
     assert_eq!(
         events[0],
-        ExpectedEvent::new("auth.failed", Severity::Warn).dimension("attempts", "3").log()
+        ExpectedEvent::new("auth.failed", Severity::Warn).dimension("attempts", "3")
     );
     assert_eq!(
         events[1],
-        ExpectedEvent::new("system.crash", Severity::Fatal)
-            .dimension("exit_code", "1")
-            .log()
+        ExpectedEvent::new("system.crash", Severity::Fatal).dimension("exit_code", "1")
     );
 }
 
@@ -130,7 +128,7 @@ fn multiple_processors_receive_events_independently() {
     assert_eq!(warn_processor.len(), 1);
     assert_eq!(
         warn_processor.single_event(),
-        ExpectedEvent::new("auth.failed", Severity::Warn).dimension("attempts", "5").log()
+        ExpectedEvent::new("auth.failed", Severity::Warn).dimension("attempts", "5")
     );
 }
 
@@ -175,7 +173,6 @@ fn composite_fans_out_to_each_child() {
         ExpectedEvent::new("user.login", Severity::Info)
             .dimension("mfa_used", "false")
             .dimension("user_id", "1")
-            .log()
     );
 }
 
@@ -198,7 +195,6 @@ fn emitter_clone_shares_processors() {
         ExpectedEvent::new("user.login", Severity::Info)
             .dimension("mfa_used", "true")
             .dimension("user_id", "99")
-            .log()
     );
 }
 

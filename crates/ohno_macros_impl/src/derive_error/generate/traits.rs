@@ -149,9 +149,7 @@ pub(crate) fn debug(model: &Model) -> TokenStream {
     };
 
     quote! {
-        // Not `#[automatically_derived]`: dead-code analysis skips field reads in a derived
-        // `Debug`, so marking this one would make every field that only `Debug` reads look unused
-        // in the user's own crate.
+        #[automatically_derived]
         impl #impl_generics ::core::fmt::Debug for #ident #ty_generics #where_clause {
             fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                 #body

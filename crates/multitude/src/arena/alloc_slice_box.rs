@@ -12,7 +12,7 @@ use core::ptr::{self, NonNull};
 use allocator_api2::alloc::Allocator;
 
 use super::alloc_prefixed::worst_case_thin_slice_payload;
-use super::alloc_value::{MAX_SMART_PTR_ALIGN, acquire_chunk_ref};
+use super::alloc_value::acquire_chunk_ref;
 use super::{Arena, ExpectAlloc};
 use crate::AllocError;
 use crate::r#box::Box;
@@ -229,7 +229,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Box: `Box::drop` runs `drop_in_place` on the slice eagerly. Copy fast path.
     #[inline]
     fn impl_alloc_slice_box_copy<T: Copy>(&self, src: &[T]) -> Result<Box<[T], A>, AllocError> {
-        check_slice_box_layout::<T>(src.len())?;
+        check_slice_box_layout::<T, _>(self, src.len())?;
         let len = src.len();
         // Precompute byte size so the reservation helper skips checked_mul.
         let payload_bytes = mem::size_of_val(src);
@@ -248,7 +248,7 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline]
     #[cfg_attr(test, mutants::skip)] // `+= → *=` on the fill counter ⇒ infinite loop
     fn impl_alloc_slice_box_with<T, F: FnMut(usize) -> T>(&self, len: usize, mut f: F) -> Result<Box<[T], A>, AllocError> {
-        check_slice_box_layout::<T>(len)?;
+        check_slice_box_layout::<T, _>(self, len)?;
         // Check overflow before the refill loop.
         let payload_bytes = mem::size_of::<T>().checked_mul(len).ok_or(AllocError::CAPACITY_OVERFLOW)?;
         let ptr = self.reserve_slice_box::<T>(len, payload_bytes, |slot_ptr| {
@@ -379,8 +379,8 @@ impl<A: Allocator + Clone> Arena<A> {
 /// smart-pointer header recovery. Slice length is full-width in the
 /// chunk prefix.
 #[inline]
-fn check_slice_box_layout<T>(_len: usize) -> Result<(), AllocError> {
-    if mem::align_of::<T>() >= MAX_SMART_PTR_ALIGN {
+fn check_slice_box_layout<T, A: Allocator + Clone>(arena: &Arena<A>, _len: usize) -> Result<(), AllocError> {
+    if arena.rejects_smart_ptr_align(mem::align_of::<T>()) {
         return Err(AllocError::ALIGNMENT_TOO_LARGE);
     }
     Ok(())

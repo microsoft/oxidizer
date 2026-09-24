@@ -8,7 +8,6 @@ BreakerLayer {
             kind: "controlled",
             timers: 0,
             alive: true,
-            affinity: None,
             ..
         },
         name: "test_pipeline",

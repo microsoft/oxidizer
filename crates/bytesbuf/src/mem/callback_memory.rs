@@ -132,7 +132,7 @@ mod tests {
     use std::sync::atomic::{self, AtomicUsize};
 
     use static_assertions::assert_impl_all;
-    use thread_aware::affinity::{Affinity, pinned_affinities};
+    use thread_aware::{Relocator, Thread};
 
     use super::*;
     use crate::mem::MemoryShared;
@@ -166,7 +166,7 @@ mod tests {
     }
 
     impl ThreadAware for RelocationObserver {
-        fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
             self.relocations.fetch_add(1, atomic::Ordering::SeqCst);
         }
     }
@@ -237,8 +237,7 @@ mod tests {
             |observer: &RelocationObserver, min_bytes| observer.inner.reserve(min_bytes),
         );
 
-        let affinities = pinned_affinities(&[2]);
-        provider.relocate(Some(affinities[0]), affinities[1]);
+        _ = Relocator::between_threads().relocate(&mut provider);
 
         assert_eq!(relocations.load(atomic::Ordering::SeqCst), 1);
 

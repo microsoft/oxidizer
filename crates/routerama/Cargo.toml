@@ -3,7 +3,7 @@
 
 [package]
 name = "routerama"
-version = "0.1.0"
+version = "0.1.1"
 description = "Blazingly fast HTTP route resolution and query string processing"
 readme = "README.md"
 keywords = ["http", "router", "routing", "path", "url"]
@@ -47,8 +47,10 @@ bolero = { workspace = true, features = ["std"] }
 # because bolero-libfuzzer references `bolero_engine::any::run` but does
 # not itself activate that feature on `bolero-engine`.
 criterion = { workspace = true }
+gungraun = { workspace = true, features = ["default"] }
 itoa = { workspace = true }
 matchit = { workspace = true }
+metabench = { path = "../metabench" }
 mutants = { workspace = true }
 path-tree = { workspace = true }
 regex = { workspace = true, features = ["std", "perf"] }
@@ -58,54 +60,9 @@ serde_html_form = { workspace = true, features = ["de", "ser", "std"] }
 serde_urlencoded = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net"] }
 
-# Callgrind instruction-count benchmarks (Valgrind is Linux-only).
-[target.'cfg(target_os = "linux")'.dev-dependencies]
-gungraun = { workspace = true, features = ["default"] }
-
-[lints]
-workspace = true
-
 [[bench]]
-name = "criterion_routers"
+name = "routerama"
 harness = false
-
-[[bench]]
-name = "gungraun_routers"
-harness = false
-
-[[bench]]
-name = "routerama_static"
-harness = false
-
-[[bench]]
-name = "routerama_static_cg"
-harness = false
-
-[[bench]]
-name = "routerama_dynamic"
-harness = false
-
-[[bench]]
-name = "routerama_dynamic_cg"
-harness = false
-
-[[bench]]
-name = "routerama_mixed"
-harness = false
-
-[[bench]]
-name = "routerama_mixed_cg"
-harness = false
-
-[[bench]]
-name = "routerama_query"
-harness = false
-required-features = ["query"]
-
-[[bench]]
-name = "routerama_query_cg"
-harness = false
-required-features = ["query"]
 
 [[example]]
 name = "query_strings"
@@ -122,3 +79,8 @@ required-features = ["query"]
 [[test]]
 name = "query_allocations"
 required-features = ["query"]
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

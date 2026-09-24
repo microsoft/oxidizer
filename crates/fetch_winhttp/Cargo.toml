@@ -4,7 +4,7 @@
 [package]
 name = "fetch_winhttp"
 description = "WinHTTP-based HTTP transport for the fetch client (Windows only)."
-version = "0.1.1"
+version = "0.2.1"
 readme = "README.md"
 keywords = ["oxidizer", "http", "client", "winhttp", "windows"]
 categories = ["network-programming", "web-programming::http-client"]
@@ -25,7 +25,7 @@ allowed_external_types = [
     # from here; this crate is the supported surface for all of it.
     "fetch_winhttp_impl::*",
     "observed::*",
-    "thread_aware::core::ThreadAware",
+    "thread_aware_core::thread_aware::ThreadAware",
     "tick::clock::Clock",
 ]
 
@@ -60,9 +60,9 @@ criterion = { workspace = true }
 
 [target.'cfg(windows)'.dev-dependencies]
 bytes = { workspace = true }
-bytesbuf = { workspace = true }
+bytesbuf = { path = "../bytesbuf", default-features = false }
 ctor = { workspace = true }
-fetch = { workspace = true }
+fetch = { path = "../fetch" }
 # The localhost fixtures the tests, benchmarks and examples below are written
 # against. See `docs/private-test-utils.md` for why they are reached through a
 # feature on the implementation crate rather than from a package of their own.
@@ -71,9 +71,9 @@ futures = { workspace = true, features = ["executor", "std"] }
 http = { workspace = true }
 http-body = { workspace = true }
 http-body-util = { workspace = true }
-http_extensions = { workspace = true }
-observed = { workspace = true }
-ohno = { workspace = true, features = ["app-err"] }
+http_extensions = { path = "../http_extensions" }
+observed = { path = "../observed" }
+ohno = { path = "../ohno", features = ["app-err"] }
 testing_aids = { path = "../testing_aids" }
 # `test-util` freezes time in tests and benches; `tokio` drives a real clock in
 # the standalone examples.
@@ -92,5 +92,7 @@ harness = false
 name = "fw_client"
 harness = false
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.0] - 2026-09-10
+
+### Maintenance
+
+- Now requires `0.5.1` of `cachet_tier`
+- Now requires `0.5.2` of `ohno`
+- Now requires `0.12.0` of `thread_aware`
+
+### Breaking
+
+- adopt thread_aware_core across workspace ([#721](https://github.com/microsoft/oxidizer/pull/721))
+
 ## [0.7.0] - 2026-08-27
 
 - ⚠️ Breaking

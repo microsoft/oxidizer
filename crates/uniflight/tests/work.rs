@@ -247,8 +247,8 @@ async fn per_numa_strategy() {
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
-async fn per_core_strategy() {
-    let group = Merger::<String, String, _>::new_per_core();
+async fn per_thread_strategy() {
+    let group = Merger::<String, String, _>::new_per_thread();
     let result = group.execute("key", || async { "Result".to_string() }).await;
     assert_eq!(result, Ok("Result".to_string()));
 }

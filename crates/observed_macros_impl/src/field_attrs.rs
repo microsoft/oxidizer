@@ -317,6 +317,17 @@ pub(crate) fn is_reference_type(ty: &syn::Type) -> bool {
     matches!(unwrap_groups(ty), syn::Type::Reference(_))
 }
 
+/// Returns whether `ty` is, or borrows through, a mutable reference.
+///
+/// The recursion matches [`strip_reference`], so a nested `&&mut T` is caught as
+/// well as a bare `&mut T`.
+pub(crate) fn is_mutable_reference_type(ty: &syn::Type) -> bool {
+    match unwrap_groups(ty) {
+        syn::Type::Reference(reference) => reference.mutability.is_some() || is_mutable_reference_type(&reference.elem),
+        _ => false,
+    }
+}
+
 /// Returns the inner type `T` if `ty` is syntactically `Option<T>`.
 ///
 /// This is a purely syntactic match (the same approach `serde`/`clap`/`templated_uri`

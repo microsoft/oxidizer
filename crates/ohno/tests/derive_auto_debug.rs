@@ -23,7 +23,10 @@ struct MultiFieldError {
 
 // Test tuple struct with automatic Debug
 #[derive(Error)]
-struct TupleError(String, #[error] OhnoCore);
+struct TupleError(
+    #[expect(dead_code, reason = "read only by the generated Debug")] String,
+    #[error] OhnoCore,
+);
 
 // Test unit struct conversion with automatic Debug
 #[derive(Error)]

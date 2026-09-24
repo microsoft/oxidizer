@@ -6,7 +6,7 @@
 [![crate.io](https://img.shields.io/crates/v/anyspawn.svg)](https://crates.io/crates/anyspawn)
 [![docs.rs](https://docs.rs/anyspawn/badge.svg)](https://docs.rs/anyspawn)
 [![MSRV](https://img.shields.io/crates/msrv/anyspawn)](https://crates.io/crates/anyspawn)
-[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml/badge.svg)](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/microsoft/oxidizer/blob/main/LICENSE)
 <a href="https://github.com/microsoft/oxidizer"><img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
@@ -40,8 +40,8 @@ assert_eq!(result, 2);
 ## Thread-Aware Support
 
 `Spawner` implements [`ThreadAware`][__link3] and supports
-per-core isolation via custom [`SpawnCustom`][__link4] implementations, enabling
-contention-free, NUMA-friendly task dispatch.
+per-thread state via custom [`SpawnCustom`][__link4] implementations, allowing runtime
+integrations to adapt task dispatch after relocation.
 
 ## Features
 
@@ -54,11 +54,11 @@ contention-free, NUMA-friendly task dispatch.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/anyspawn">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQblHE7Bl8YSN4bb97k0EOW-rkbZQa-GdodS-cbCkeYjGZgZ-BhZIKCaGFueXNwYXduZTAuOC4wgmx0aHJlYWRfYXdhcmVmMC4xMS4w
- [__link0]: https://docs.rs/anyspawn/0.8.0/anyspawn/?search=Spawner
- [__link1]: https://docs.rs/anyspawn/0.8.0/anyspawn/?search=SpawnCustom
- [__link2]: https://docs.rs/anyspawn/0.8.0/anyspawn/?search=CustomSpawnerBuilder
- [__link3]: https://docs.rs/thread_aware/0.11.0/thread_aware/?search=ThreadAware
- [__link4]: https://docs.rs/anyspawn/0.8.0/anyspawn/?search=SpawnCustom
- [__link5]: https://docs.rs/anyspawn/0.8.0/anyspawn/?search=Spawner::new_tokio
- [__link6]: https://docs.rs/anyspawn/0.8.0/anyspawn/?search=Spawner::new_tokio_with_handle
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbdP7zL-Rj49Ybglp2cxGMPI4b-K3GVaoD2YQbQVf8GeDtMClhZIKCaGFueXNwYXduZTAuOS4wgmx0aHJlYWRfYXdhcmVmMC4xMi4w
+ [__link0]: https://docs.rs/anyspawn/0.9.0/anyspawn/?search=Spawner
+ [__link1]: https://docs.rs/anyspawn/0.9.0/anyspawn/?search=SpawnCustom
+ [__link2]: https://docs.rs/anyspawn/0.9.0/anyspawn/?search=CustomSpawnerBuilder
+ [__link3]: https://docs.rs/thread_aware/0.12.0/thread_aware/?search=ThreadAware
+ [__link4]: https://docs.rs/anyspawn/0.9.0/anyspawn/?search=SpawnCustom
+ [__link5]: https://docs.rs/anyspawn/0.9.0/anyspawn/?search=Spawner::new_tokio
+ [__link6]: https://docs.rs/anyspawn/0.9.0/anyspawn/?search=Spawner::new_tokio_with_handle

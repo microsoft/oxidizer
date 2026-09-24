@@ -65,19 +65,22 @@ fn impl_transfer(input: &DeriveInput, root_path: &Path) -> syn::Result<TokenStre
         }
     };
 
-    // Build paths: <root_path>::ThreadAware and <root_path>::affinity::Affinity
+    // Build paths: <root_path>::ThreadAware and <root_path>::Thread
     let mut thread_aware_path = root_path.clone();
-    let mut affinity_path = root_path.clone();
+    let mut thread_path = root_path.clone();
     // Append segments manually (Paths are immutable; construct via parse_quote!)
     thread_aware_path.segments.push(parse_quote!(ThreadAware));
-    affinity_path.segments.push(parse_quote!(affinity));
-    affinity_path.segments.push(parse_quote!(Affinity));
+    thread_path.segments.push(parse_quote!(Thread));
 
     let (source_ident, destination_ident) = param_idents();
 
     Ok(quote! {
         impl #impl_generics #thread_aware_path for #name #ty_generics #where_clause {
-            fn relocate(&mut self, #source_ident: ::core::option::Option<#affinity_path>, #destination_ident: #affinity_path) {
+            fn relocate(
+                &mut self,
+                #source_ident: ::core::option::Option<&#thread_path>,
+                #destination_ident: &#thread_path,
+            ) {
                 #body
             }
         }

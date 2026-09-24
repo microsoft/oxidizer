@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.0] - 2026-09-10
+
+### Changed
+
+- Align `fundle`, `fundle_macros`, and `fundle_macros_impl` on the `0.4.0`
+  release line.
+
+### Maintenance
+
+- Now requires `0.4.0` of `fundle_macros`
+
+### Bug Fixes
+
+- silence newly-firing clippy lints from Rust 1.98 ([#700](https://github.com/microsoft/oxidizer/pull/700))
+
 ## [0.3.5] - 2026-07-24
 
 - 🔧 Maintenance
@@ -158,4 +173,3 @@
 - ✔️ Tasks
 
   - Add logo files and other readme cleanup ([#40](https://github.com/microsoft/oxidizer/pull/40))
-

@@ -121,79 +121,6 @@ fn try_alloc_slice_arc_ok() {
     assert!(v.iter().all(|&x| x == 0));
 }
 
-// Windows cannot materialize a 64 KiB-aligned value in its default stack;
-// non-slice variants check the same alignment guard there.
-#[cfg(not(align_capped_backend))]
-#[derive(FromZeros)]
-#[repr(C, align(65536))]
-struct OverAligned {
-    _data: u8,
-}
-
-#[test]
-#[cfg(not(align_capped_backend))]
-fn try_alloc_box_over_aligned_returns_err() {
-    let arena = Arena::new();
-    let result = arena.zerocopy().try_alloc_box::<OverAligned>();
-    assert!(result.is_err());
-}
-
-#[test]
-#[cfg(not(align_capped_backend))]
-fn try_alloc_arc_over_aligned_returns_err() {
-    let arena = Arena::new();
-    let result = arena.zerocopy().try_alloc_arc::<OverAligned>();
-    assert!(result.is_err());
-}
-
-#[test]
-#[cfg(not(align_capped_backend))]
-fn try_alloc_slice_box_over_aligned_returns_err() {
-    let arena = Arena::new();
-    let result = arena.zerocopy().try_alloc_slice_box::<OverAligned>(4);
-    assert!(result.is_err());
-}
-
-#[test]
-#[cfg(not(align_capped_backend))]
-fn try_alloc_slice_arc_over_aligned_returns_err() {
-    let arena = Arena::new();
-    let result = arena.zerocopy().try_alloc_slice_arc::<OverAligned>(4);
-    assert!(result.is_err());
-}
-
-#[test]
-#[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
-#[should_panic = "arena allocation failed"]
-fn alloc_box_panics_on_over_aligned() {
-    let arena = Arena::new();
-    let _ = arena.zerocopy().alloc_box::<OverAligned>();
-}
-
-#[test]
-#[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
-#[should_panic = "arena allocation failed"]
-fn alloc_arc_panics_on_over_aligned() {
-    let arena = Arena::new();
-    let _ = arena.zerocopy().alloc_arc::<OverAligned>();
-}
-
-#[test]
-#[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
-#[should_panic = "arena allocation failed"]
-fn alloc_slice_box_panics_on_over_aligned() {
-    let arena = Arena::new();
-    let _ = arena.zerocopy().alloc_slice_box::<OverAligned>(4);
-}
-
-#[test]
-#[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
-#[should_panic = "arena allocation failed"]
-fn alloc_slice_arc_panics_on_over_aligned() {
-    let arena = Arena::new();
-    let _ = arena.zerocopy().alloc_slice_arc::<OverAligned>(4);
-}
-
 #[test]
 fn zerocopy_view_debug() {
     let arena = Arena::new();
@@ -224,22 +151,6 @@ fn try_alloc_ref_scalar_ok() {
 }
 
 #[test]
-#[cfg(not(align_capped_backend))]
-fn try_alloc_ref_over_aligned_returns_err() {
-    let arena = Arena::new();
-    let result = arena.zerocopy().try_alloc::<OverAligned>();
-    assert!(result.is_err());
-}
-
-#[test]
-#[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
-#[should_panic = "arena allocation failed"]
-fn alloc_ref_panics_on_over_aligned() {
-    let arena = Arena::new();
-    let _ = arena.zerocopy().alloc::<OverAligned>();
-}
-
-#[test]
 fn alloc_ref_is_mutable() {
     let arena = Arena::new();
     let mut v = arena.zerocopy().alloc::<u32>();
@@ -267,22 +178,6 @@ fn try_alloc_slice_ref_ok() {
     let arena = Arena::new();
     let s = arena.zerocopy().try_alloc_slice::<u16>(3).unwrap();
     assert_eq!(&*s, &[0, 0, 0]);
-}
-
-#[test]
-#[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
-fn try_alloc_slice_ref_over_aligned_returns_err() {
-    let arena = Arena::new();
-    let result = arena.zerocopy().try_alloc_slice::<OverAligned>(4);
-    assert!(result.is_err());
-}
-
-#[test]
-#[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
-#[should_panic = "arena allocation failed"]
-fn alloc_slice_ref_panics_on_over_aligned() {
-    let arena = Arena::new();
-    let _ = arena.zerocopy().alloc_slice::<OverAligned>(4);
 }
 
 #[test]

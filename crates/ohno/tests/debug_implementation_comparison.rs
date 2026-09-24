@@ -19,7 +19,9 @@ fn test_named_struct_debug_structure() {
     pub(crate) struct TestNamedStruct {
         #[error]
         pub inner: OhnoCore,
+        #[expect(dead_code, reason = "read only by the generated Debug")]
         pub code: i32,
+        #[expect(dead_code, reason = "read only by the generated Debug")]
         pub message: String,
     }
 
@@ -46,7 +48,11 @@ fn test_tuple_struct_debug_structure() {
     pub(crate) struct RefTupleStruct(pub OhnoCore, pub String, pub i32);
 
     #[derive(Error)]
-    pub(crate) struct TestTupleStruct(#[error] pub OhnoCore, pub String, pub i32);
+    pub(crate) struct TestTupleStruct(
+        #[error] pub OhnoCore,
+        #[expect(dead_code, reason = "read only by the generated Debug")] pub String,
+        #[expect(dead_code, reason = "read only by the generated Debug")] pub i32,
+    );
 
     let ref_struct = RefTupleStruct(OhnoCore::from("error_content"), "additional_info".to_string(), 42);
 
@@ -103,6 +109,7 @@ fn test_struct_with_enum_field_debug_structure() {
     struct TestEnumFieldStruct {
         #[error]
         error: OhnoCore,
+        #[expect(dead_code, reason = "read only by the generated Debug")]
         status: TestStatus,
     }
 

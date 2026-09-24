@@ -3,16 +3,17 @@
 
 //! Telemetry types for enriching `fetch` metrics and inspecting connections.
 //!
-//! [`TelemetryAttributes`] lets you attach custom [`KeyValue`] attributes to a
+//! [`TelemetryAttributes`][crate::telemetry::TelemetryAttributes] lets you attach custom
+//! [`KeyValue`][opentelemetry::KeyValue] attributes to a
 //! request so they are merged into the metrics recorded for it.
-//! [`ConnectionInfo`] reports details about the connection that served a response.
+//! [`ConnectionInfo`][crate::telemetry::ConnectionInfo] reports details about the connection that
+//! served a response.
 //!
 //! For the full list of emitted metrics and their attributes, see the
 //! [telemetry reference](crate::_documentation::telemetry).
 
 use std::borrow::Cow;
 use std::fmt;
-use std::sync::Arc;
 
 /// Diagnostic information about the connection that served an HTTP response.
 ///
@@ -24,6 +25,7 @@ use http::Version;
 use http::uri::Scheme;
 use opentelemetry::metrics::{Meter, MeterProvider};
 use opentelemetry::{InstrumentationScope, KeyValue, Value};
+use performables::arc::Arc;
 
 pub(crate) const METER_NAME: &str = "fetch";
 
@@ -36,12 +38,15 @@ pub(crate) const FETCH_TRANSPORT_ATTRIBUTE: &str = "fetch.transport";
 /// Instrumentation-scope attribute identifying the name of a client instance.
 pub(crate) const HTTP_CLIENT_NAME_ATTRIBUTE: &str = "http.client.name";
 
+/// Fits the built-in HTTP attributes in the common case; larger custom sets spill to the heap.
+const TELEMETRY_ATTRIBUTES_INLINE_CAPACITY: usize = 9;
+
 /// A set of key-value attributes that enrich `fetch` telemetry.
 ///
 /// Attach these to a request (via its extensions) to merge custom dimensions
 /// into the metrics recorded for that request.
 #[derive(Debug, Clone, Default)]
-pub struct TelemetryAttributes(smallvec::SmallVec<[KeyValue; 9]>);
+pub struct TelemetryAttributes(smallvec::SmallVec<[KeyValue; TELEMETRY_ATTRIBUTES_INLINE_CAPACITY]>);
 
 impl TelemetryAttributes {
     /// Creates an empty set of telemetry attributes.
@@ -117,8 +122,12 @@ impl Metering {
     /// The scope is only materialized when the meter is created, so a client
     /// name set either before or after this call is reflected in the eventual
     /// meter.
-    pub(crate) fn with_provider(mut self, provider: Arc<dyn MeterProvider + Send + Sync>) -> Self {
-        self.provider = Some(provider);
+    pub(crate) fn with_provider<P>(mut self, provider: P) -> Self
+    where
+        P: MeterProvider + Send + Sync + 'static,
+    {
+        let provider: Box<dyn MeterProvider + Send + Sync> = Box::new(provider);
+        self.provider = Some(provider.into());
         self
     }
 
@@ -228,8 +237,8 @@ mod tests {
         Metering::new(Cow::Borrowed("tokio"), Cow::Borrowed("hyper"), Cow::Borrowed(client_name))
     }
 
-    fn test_provider() -> Arc<dyn MeterProvider + Send + Sync> {
-        Arc::new(opentelemetry_sdk::metrics::SdkMeterProvider::builder().build())
+    fn test_provider() -> opentelemetry_sdk::metrics::SdkMeterProvider {
+        opentelemetry_sdk::metrics::SdkMeterProvider::builder().build()
     }
 
     #[test]

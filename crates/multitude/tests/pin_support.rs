@@ -68,18 +68,6 @@ fn alloc_arc_pin_with_cross_thread() {
     assert_eq!(addr_before, addr_thread, "Arc-pinned value must keep its address across threads");
 }
 
-#[cfg(not(align_capped_backend))]
-#[test]
-fn try_alloc_uninit_box_pin_rejects_over_alignment() {
-    // Avoid constructing the 32 KiB-aligned value on the stack.
-    #[repr(align(32768))]
-    #[expect(dead_code, reason = "drives the over-alignment guard before init runs")]
-    struct HalfChunk(u8);
-    let arena = Arena::new();
-    let r: Result<Pin<Box<MaybeUninit<HalfChunk>>>, _> = arena.try_alloc_uninit_box_pin::<HalfChunk>();
-    r.unwrap_err();
-}
-
 #[test]
 fn box_from_into_pin_value() {
     let arena = Arena::new();

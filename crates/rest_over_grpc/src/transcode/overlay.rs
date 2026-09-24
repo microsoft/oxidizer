@@ -433,6 +433,19 @@ enum QueryNode {
     Leaf(SmallVec<[String; 2]>),
 }
 
+/// The deepest `.`-separated field path a query parameter may name.
+///
+/// A dotted query key builds one [`QueryNode`] level per segment, and both that
+/// build and the matching deserialization descend once per level. The bound
+/// keeps an untrusted request from driving that descent past the stack, while
+/// staying far above the nesting any real proto message uses.
+///
+/// Known limitation: a query parameter whose field path nests deeper than this
+/// is rejected with `Code::InvalidArgument`, never truncated and never decoded.
+/// The cap is fixed and deliberately not configurable — a depth a caller could
+/// raise would not bound anything.
+const MAX_QUERY_FIELD_DEPTH: usize = 64;
+
 fn decode_tree<T: DeserializeOwned>(body: Option<&[u8]>, query: &[(&str, &str)]) -> Result<T, TranscodeError> {
     let body = match body {
         Some(bytes) if !bytes.is_empty() => match from_slice::<BodyTop<'_>>(bytes) {
@@ -449,16 +462,26 @@ fn decode_tree_entries<T: DeserializeOwned>(body: Vec<(String, &RawValue)>, quer
     for (key, value) in query {
         let key = percent::decode_query(key).ok_or_else(|| TranscodeError::invalid_encoding("query parameter name"))?;
         let value = percent::decode_query(value).ok_or_else(|| TranscodeError::invalid_encoding("query parameter value"))?;
-        insert_query_node(&mut query_root, key.split('.'), value.into_owned())?;
+        insert_query_node(&mut query_root, key.split('.'), value.into_owned(), MAX_QUERY_FIELD_DEPTH)?;
     }
     T::deserialize(TreeDeserializer { body, query: query_root }).map_err(TranscodeError::deserialize)
 }
 
+/// Inserts `value` at the `.`-separated field `path`, descending one level per
+/// segment.
+///
+/// `remaining_depth` is the number of levels still allowed; it starts at
+/// [`MAX_QUERY_FIELD_DEPTH`] and is spent one per segment so an untrusted key
+/// cannot recurse without bound.
 fn insert_query_node<'a>(
     map: &mut Vec<(String, QueryNode)>,
     mut path: impl Iterator<Item = &'a str> + Clone,
     value: String,
+    remaining_depth: usize,
 ) -> Result<(), TranscodeError> {
+    let Some(remaining_depth) = remaining_depth.checked_sub(1) else {
+        return Err(TranscodeError::structure("query parameter field path is nested too deeply"));
+    };
     let key = path
         .next()
         .ok_or_else(|| TranscodeError::structure("query parameter has an empty field path"))?;
@@ -478,7 +501,7 @@ fn insert_query_node<'a>(
     };
     if has_more {
         match node {
-            QueryNode::Map(children) => insert_query_node(children, path, value)?,
+            QueryNode::Map(children) => insert_query_node(children, path, value, remaining_depth)?,
             QueryNode::Leaf(_) => return Err(TranscodeError::structure("query field conflicts with a nested field")),
         }
     } else {
@@ -579,6 +602,8 @@ mod tests {
     use serde::Deserialize;
 
     use super::*;
+    use crate::codegen_helpers::decode_request;
+    use crate::handling::Code;
 
     #[derive(Debug, Deserialize, PartialEq)]
     struct Shelf {
@@ -731,6 +756,31 @@ mod tests {
 
         let field_mapped: Option<Result<Shelf, _>> = try_decode_overlay(&RequestBodyKind::Field("shelf"), &[], b"{}");
         assert!(field_mapped.is_none(), "body-mapped field must fall back to the value path");
+    }
+
+    #[test]
+    fn a_deeply_nested_query_field_path_is_rejected_instead_of_recursing() {
+        // A key deeper than the bound used to recurse once per segment until the
+        // stack overflowed and aborted the process.
+        let key = vec!["a"; MAX_QUERY_FIELD_DEPTH + 1].join(".");
+        let error = decode_tree::<Shelf>(None, &[(key.as_str(), "1")]).expect_err("over-deep field path is rejected");
+        assert_eq!(error.code(), Code::InvalidArgument);
+        assert!(error.to_string().contains("nested too deeply"));
+
+        // Far past the bound, and through the public entry point, so the guard
+        // covers the serving path rather than just this helper.
+        let key = vec!["a"; 100_000].join(".");
+        let error =
+            decode_request::<Shelf>(&[(key.as_str(), "1")], b"", RequestBodyKind::None).expect_err("over-deep field path is rejected");
+        assert_eq!(error.code(), Code::InvalidArgument);
+    }
+
+    #[test]
+    fn a_field_path_at_the_depth_bound_is_still_accepted() {
+        let key = vec!["a"; MAX_QUERY_FIELD_DEPTH].join(".");
+        // Rejected for naming an unknown field, not for its depth.
+        let error = decode_tree::<Shelf>(None, &[(key.as_str(), "1")]).expect_err("unknown nested field");
+        assert!(!error.to_string().contains("nested too deeply"));
     }
 
     #[test]

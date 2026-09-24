@@ -40,8 +40,3 @@ pub(crate) unsafe fn read_free_requested(block: *mut u8) -> usize {
 
 #[inline(always)]
 pub(crate) unsafe fn release_free_metadata(_block: *mut u8) {}
-
-#[inline(always)]
-pub(crate) unsafe fn peek_free_requested(block: *mut u8) -> usize {
-    unsafe { read_free_requested(block) }
-}

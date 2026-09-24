@@ -25,9 +25,7 @@
 //! emit!(sink, MyEvent { count: 42 });
 //!
 //! let event = processor.single_event();
-//! let expected = ExpectedEvent::new("my.event", Severity::Info)
-//!     .dimension("count", 42i64)
-//!     .log();
+//! let expected = ExpectedEvent::new("my.event", Severity::Info).dimension("count", 42i64);
 //! assert_eq!(event, expected);
 //! ```
 

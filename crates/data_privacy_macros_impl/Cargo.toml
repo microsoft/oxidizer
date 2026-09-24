@@ -4,7 +4,7 @@
 [package]
 name = "data_privacy_macros_impl"
 description = "Macros for the data_privacy crate."
-version = "0.10.3"
+version = "0.13.0"
 readme = "README.md"
 keywords = ["oxidizer", "compliance", "privacy", "redaction", "scrubbing"]
 categories = ["data-structures"]
@@ -39,7 +39,7 @@ syn = { workspace = true, features = [
 
 [dev-dependencies]
 insta = { workspace = true, features = ["yaml"] }
-testing_aids = { workspace = true }
+testing_aids = { path = "../testing_aids" }
 
 # >>> anvil-managed: anvil-lints
 [lints]

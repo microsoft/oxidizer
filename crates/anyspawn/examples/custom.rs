@@ -7,16 +7,15 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use anyspawn::{BoxedBlockingTask, BoxedFuture, SpawnCustom, Spawner};
-use thread_aware::ThreadAware;
-use thread_aware::affinity::Affinity;
 use thread_aware::closure::ThreadAwareAsyncFnOnce;
+use thread_aware::{Thread, ThreadAware};
 
 /// A simple spawner that runs futures on background threads.
 #[derive(Clone)]
 struct ThreadPoolSpawner;
 
 impl ThreadAware for ThreadPoolSpawner {
-    fn relocate(&mut self, _: Option<Affinity>, _: Affinity) {}
+    fn relocate(&mut self, _: Option<&Thread>, _: &Thread) {}
 }
 
 impl SpawnCustom for ThreadPoolSpawner {

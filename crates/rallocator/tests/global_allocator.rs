@@ -15,33 +15,30 @@ use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use allocation_hints::heap::general::Options as GeneralOptions;
-use allocation_hints::heap::{Heap, Options};
-use allocation_hints::{Hint, with_hint};
-use rallocator::telemetry::stats;
+use allocation_hints::heaps::{Heap, general};
+use allocation_hints::with_hint;
+use support::stats;
 
-rallocator::config!(TrackingConfig { track_aggregates: true });
+mod support;
 
-rallocator::rallocator!(TrackingConfig);
+rallocator::rallocator!();
 
 static TEST_LOCK: Mutex<()> = Mutex::new(());
 
 const OLD_BUMP_MARKER: usize = 0x5241_4C4C_4152_454E;
 
 fn general_heap() -> Heap {
-    rallocator::initialize();
-    Heap::with_options(Options::general(
-        GeneralOptions::new()
+    Heap::general(
+        general::Options::new()
             .with_locality_segment_bytes(64 * 1024)
             .with_medium_cache_max_bytes(0),
-    ))
+    )
 }
 
 #[test]
-fn global_allocator_and_general_heap_retirement_work() {
+fn global_allocator_and_passive_general_heap_lifecycle_work() {
     let _test = TEST_LOCK.lock().unwrap();
-    rallocator::initialize();
-    let mut values = with_hint(Hint::new(), || Vec::with_capacity(128));
+    let mut values = Vec::with_capacity(128);
     values.extend(0..128_u64);
     assert_eq!(values.iter().sum::<u64>(), 8_128);
     let boxed = Box::new(String::from("allocated by rallocator"));
@@ -62,41 +59,20 @@ fn global_allocator_and_general_heap_retirement_work() {
     assert!(current_stats.allocations > 0);
     assert!(current_stats.live_bytes > 0);
 
-    drop(Heap::new());
     let before = stats().unwrap();
-    let heap = general_heap();
-    with_hint(Hint::new().with_heap(&heap), || drop(Box::new([0_u8; 64])));
-    let allocated = stats().unwrap();
-    assert!(allocated.os_mappings > before.os_mappings);
-    drop(heap);
-    assert!(stats().unwrap().os_unmappings > allocated.os_unmappings);
-
-    let before = stats().unwrap();
-    let heap = general_heap();
-    let value = with_hint(Hint::new().with_heap(&heap), || Box::new([1_u8; 64]));
-    drop(heap);
-    assert_eq!(*value, [1_u8; 64]);
-    drop(value);
+    for _ in 0..10 {
+        let heap = general_heap();
+        with_hint(&heap, || drop(Box::new([0_u8; 64])));
+        drop(heap);
+    }
     assert!(stats().unwrap().os_unmappings > before.os_unmappings);
 
-    let before = stats().unwrap();
     let heap = general_heap();
-    let (first, second) = with_hint(Hint::new().with_heap(&heap), || (Box::new([1_u8; 64]), Box::new([2_u8; 128])));
+    let (first, second) = with_hint(&heap, || (Box::new([1_u8; 64]), Box::new([2_u8; 128])));
     drop(heap);
     drop(first);
     assert_eq!(*second, [2_u8; 128]);
     drop(second);
-    assert!(stats().unwrap().os_unmappings > before.os_unmappings);
-
-    let before = stats().unwrap();
-    let heap = Heap::with_options(Options::general(
-        GeneralOptions::new()
-            .with_locality_segment_bytes(64 * 1024)
-            .with_medium_cache_max_bytes(64 * 1024),
-    ));
-    with_hint(Hint::new().with_heap(&heap), || drop(Vec::<u8>::with_capacity(64 * 1024)));
-    drop(heap);
-    assert!(stats().unwrap().os_unmappings > before.os_unmappings);
 
     let value = Arc::new(AtomicPtr::<[u8; 64]>::new(ptr::null_mut()));
     let completed = Arc::new(AtomicUsize::new(0));
@@ -123,13 +99,11 @@ fn global_allocator_and_general_heap_retirement_work() {
     wait_for_sequence(&completed, 2);
     let iterations = if cfg!(miri) { 4 } else { 100 };
     for iteration in 0..iterations {
-        let before = stats().unwrap();
         let heap = general_heap();
-        let allocation = with_hint(Hint::new().with_heap(&heap), || Box::new([3_u8; 64]));
+        let allocation = with_hint(&heap, || Box::new([3_u8; 64]));
         value.store(Box::into_raw(allocation), Ordering::Release);
         drop(heap);
         wait_for_sequence(&completed, iteration + 3);
-        assert!(stats().unwrap().os_unmappings > before.os_unmappings);
     }
     stop.store(true, Ordering::Release);
     remote.join().unwrap();
@@ -143,14 +117,11 @@ fn wait_for_sequence(completed: &AtomicUsize, expected: usize) {
 
 #[test]
 fn escaped_medium_and_direct_allocations_outlive_their_heap_handle() {
-    rallocator::initialize();
     let _test = TEST_LOCK.lock().unwrap();
     let heap = general_heap();
     let medium_layout = Layout::from_size_align(128 * 1024, 16).unwrap();
     let direct_layout = Layout::from_size_align(64, 128 * 1024).unwrap();
-    let (medium, direct) = with_hint(Hint::new().with_heap(&heap), || unsafe {
-        (alloc(medium_layout), alloc(direct_layout))
-    });
+    let (medium, direct) = with_hint(&heap, || unsafe { (alloc(medium_layout), alloc(direct_layout)) });
     assert!(!medium.is_null());
     assert!(!direct.is_null());
     drop(heap);
@@ -164,7 +135,6 @@ fn escaped_medium_and_direct_allocations_outlive_their_heap_handle() {
 #[test]
 fn zeroed_allocation_and_reallocation_cover_general_routes() {
     let _test = TEST_LOCK.lock().unwrap();
-    rallocator::initialize();
 
     for layout in [
         Layout::from_size_align(64, 16).unwrap(),
@@ -215,14 +185,12 @@ unsafe fn assert_reallocation_preserves_prefix(original_size: usize, alignment: 
 
 #[test]
 fn medium_payload_cannot_forge_bump_ownership() {
-    rallocator::initialize();
     let _test = TEST_LOCK.lock().unwrap();
     unsafe { allocate_forged_payload(Layout::from_size_align(3 * size_of::<usize>(), 64 * 1024).unwrap()) };
 }
 
 #[test]
 fn direct_payload_cannot_forge_bump_ownership() {
-    rallocator::initialize();
     let _test = TEST_LOCK.lock().unwrap();
     let before = stats().unwrap();
     unsafe { allocate_forged_payload(Layout::from_size_align(3 * size_of::<usize>(), 128 * 1024).unwrap()) };

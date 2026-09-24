@@ -6,7 +6,7 @@
 [![crate.io](https://img.shields.io/crates/v/templated_uri.svg)](https://crates.io/crates/templated_uri)
 [![docs.rs](https://docs.rs/templated_uri/badge.svg)](https://docs.rs/templated_uri)
 [![MSRV](https://img.shields.io/crates/msrv/templated_uri)](https://crates.io/crates/templated_uri)
-[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml/badge.svg)](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/microsoft/oxidizer/blob/main/LICENSE)
 <a href="https://github.com/microsoft/oxidizer"><img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
@@ -198,22 +198,22 @@ and servers based on [`hyper`][__link16] like [`reqwest`][__link17].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/templated_uri">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbreJMElgxp0kbqex4QSgBMK8bdglL8RqN6aobvSfumN6CAithZIKCZGh0dHBlMS40LjKCbXRlbXBsYXRlZF91cmllMC41LjA
- [__link0]: https://docs.rs/templated_uri/0.5.0/templated_uri/?search=Uri
- [__link1]: https://docs.rs/templated_uri/0.5.0/templated_uri/?search=BaseUri
- [__link10]: https://docs.rs/templated_uri/0.5.0/templated_uri/?search=Escape
- [__link11]: https://docs.rs/templated_uri/0.5.0/templated_uri/?search=Raw
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbreJMElgxp0kbqex4QSgBMK8bdglL8RqN6aobvSfumN6CAithZIKCZGh0dHBlMS41LjCCbXRlbXBsYXRlZF91cmllMC42LjA
+ [__link0]: https://docs.rs/templated_uri/0.6.0/templated_uri/?search=Uri
+ [__link1]: https://docs.rs/templated_uri/0.6.0/templated_uri/?search=BaseUri
+ [__link10]: https://docs.rs/templated_uri/0.6.0/templated_uri/?search=Escape
+ [__link11]: https://docs.rs/templated_uri/0.6.0/templated_uri/?search=Raw
  [__link12]: https://datatracker.ietf.org/doc/html/rfc6570#section-2.3
  [__link13]: https://docs.rs/http/latest/http/
- [__link14]: https://docs.rs/templated_uri/0.5.0/templated_uri/?search=Uri
- [__link15]: https://docs.rs/http/1.4.2/http/?search=Uri
+ [__link14]: https://docs.rs/templated_uri/0.6.0/templated_uri/?search=Uri
+ [__link15]: https://docs.rs/http/1.5.0/http/?search=Uri
  [__link16]: https://docs.rs/hyper/latest/hyper/
  [__link17]: https://docs.rs/reqwest/latest/reqwest/
- [__link2]: https://docs.rs/templated_uri/0.5.0/templated_uri/?search=BaseUri
- [__link3]: https://docs.rs/templated_uri/0.5.0/templated_uri/?search=BasePath
- [__link4]: https://docs.rs/templated_uri/0.5.0/templated_uri/?search=PathAndQueryTemplate
- [__link5]: https://docs.rs/templated_uri/0.5.0/templated_uri/?search=Escaped
- [__link6]: https://docs.rs/templated_uri/0.5.0/templated_uri/?search=EscapedString
- [__link7]: https://docs.rs/templated_uri/0.5.0/templated_uri/?search=Escaped
- [__link8]: https://docs.rs/templated_uri/0.5.0/templated_uri/?search=EscapedString
+ [__link2]: https://docs.rs/templated_uri/0.6.0/templated_uri/?search=BaseUri
+ [__link3]: https://docs.rs/templated_uri/0.6.0/templated_uri/?search=BasePath
+ [__link4]: https://docs.rs/templated_uri/0.6.0/templated_uri/?search=PathAndQueryTemplate
+ [__link5]: https://docs.rs/templated_uri/0.6.0/templated_uri/?search=Escaped
+ [__link6]: https://docs.rs/templated_uri/0.6.0/templated_uri/?search=EscapedString
+ [__link7]: https://docs.rs/templated_uri/0.6.0/templated_uri/?search=Escaped
+ [__link8]: https://docs.rs/templated_uri/0.6.0/templated_uri/?search=EscapedString
  [__link9]: https://datatracker.ietf.org/doc/html/rfc6570

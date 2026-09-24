@@ -40,10 +40,7 @@ fn event_without_metrics_is_log_only() {
     emit!(sink, LogEvent { value: 1 });
 
     let event = processor.single_event();
-    assert_eq!(
-        event,
-        ExpectedEvent::new("test.probe", Severity::Info).dimension("value", 1i64).log(),
-    );
+    assert_eq!(event, ExpectedEvent::new("test.probe", Severity::Info).dimension("value", 1i64));
     assert_eq!(event.field_metrics().len(), 0);
 }
 

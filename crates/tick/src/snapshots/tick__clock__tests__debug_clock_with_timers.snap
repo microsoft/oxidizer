@@ -6,6 +6,5 @@ Clock {
     kind: "controlled",
     timers: 2,
     alive: true,
-    affinity: None,
     ..
 }

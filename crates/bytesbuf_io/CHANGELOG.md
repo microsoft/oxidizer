@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.10.0] - 2026-09-10
+
+### Breaking
+
+- Now requires `0.10.0` of `bytesbuf`
+- Now requires `0.5.2` of `ohno`
+
+### Documentation
+
+- Correct the `bytesbuf` documentation link to use `docs.rs`.
+
 ## [0.9.0] - 2026-08-27
 
 - ⚠️ Breaking

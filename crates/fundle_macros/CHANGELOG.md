@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.0] - 2026-09-10
+
+### Maintenance
+
+- Now requires `0.4.0` of `fundle_macros_impl`
+
 ## [0.3.5] - 2026-07-24
 
 - 🔧 Maintenance
@@ -145,4 +151,3 @@
 - ✔️ Tasks
 
   - Add logo files and other readme cleanup ([#40](https://github.com/microsoft/oxidizer/pull/40))
-

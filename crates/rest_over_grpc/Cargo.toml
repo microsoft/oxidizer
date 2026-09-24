@@ -3,7 +3,7 @@
 
 [package]
 name = "rest_over_grpc"
-version = "0.2.0"
+version = "0.2.1"
 description = "Automatically transcode gRPC services to REST/JSON endpoints"
 documentation = "https://docs.rs/rest_over_grpc"
 readme = "README.md"
@@ -144,5 +144,7 @@ required-features = ["serving"]
 name = "generate_service"
 required-features = ["build"]
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

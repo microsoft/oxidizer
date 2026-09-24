@@ -257,10 +257,9 @@ fn metric_only_event_exports_no_log_record() {
 }
 
 /// The exported record name comes from the log signal rather than the event
-/// name, and the emitting crate is recorded as `code.namespace`. The two names
-/// differ here, so a mapping that fell back to the event name is caught.
+/// name, and source attributes omit deprecated crate namespace metadata.
 #[test]
-fn maps_log_name_and_source_crate() {
+fn maps_log_name_without_deprecated_source_crate_attribute() {
     let (sink, provider, exporter) = otel_emitter();
 
     emit!(sink, CacheLookup { hits: 3 });
@@ -272,10 +271,7 @@ fn maps_log_name_and_source_crate() {
     assert_eq!(record.event_name(), Some("cache.lookup.completed"));
 
     let attrs: Vec<_> = record.attributes_iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-    assert!(matches!(
-        find_attr(&attrs, "code.namespace"),
-        Some(AnyValue::String(s)) if s.as_ref() == env!("CARGO_PKG_NAME")
-    ));
+    assert!(find_attr(&attrs, "code.namespace").is_none());
 }
 
 #[test]

@@ -14,7 +14,7 @@ use observed::{Enrichment, Sink, emit, event};
 
 use crate::taxonomy::MicrosoftEnterpriseDataTaxonomy;
 
-const DC: DataClass = DataClass::new("microsoft", "PublicNonPersonalData");
+const DC: DataClass = MicrosoftEnterpriseDataTaxonomy::PublicNonPersonalData.data_class();
 
 // ---------------------------------------------------------------------------
 // Classified newtypes
@@ -69,16 +69,11 @@ struct TokenValidated {
 
 /// A failed token validation attempt.
 ///
-/// Records each failure as an up-down counter metric (increments on failure).
+/// Records each failure as a monotonic counter metric.
 #[event("token.validation_failed")]
 #[warning("Token validation failed")]
-#[updown_counter(failure_count, name = "token.validation.failures")]
+#[counter(name = "token.validation.failures")]
 struct TokenValidationFailed {
-    /// Failure count - recorded as an up-down counter metric.
-    // TODO: replace #[unredacted] with classified type once metric fields support non-numeric Values
-    #[unredacted]
-    failure_count: i64,
-
     /// Error code identifying the failure reason.
     #[data_class(DC)]
     error_code: i64,
@@ -129,7 +124,6 @@ pub(crate) fn validate_token(sink: &Sink, valid: bool) {
             emit!(
                 sink,
                 TokenValidationFailed {
-                    failure_count: 1,
                     error_code: 401, // expired
                 }
             );

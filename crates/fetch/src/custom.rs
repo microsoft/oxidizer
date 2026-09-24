@@ -9,18 +9,18 @@
 //! transports (the Tokio transport and the test fakes) reuse the same machinery
 //! internally.
 //!
-//! The free-standing [`create_builder`] function is the entry point: it returns
+//! The free-standing [`create_builder`][crate::custom::create_builder] function is the entry point: it returns
 //! an [`HttpClientBuilder`] so the pipeline (middleware, options, …) can be
 //! tailored before [`HttpClientBuilder::build`] is called.
 
 use std::borrow::Cow;
 use std::fmt::Debug;
-use std::sync::Arc;
 
 use bytesbuf::mem::GlobalPool;
 use http_extensions::{HttpBodyBuilder, RequestHandler};
 use opentelemetry::metrics::Meter;
-use thread_aware::{PerCore, ThreadAware, unaware};
+use performables::arc::{Arc, PerThread};
+use thread_aware::ThreadAware;
 use tick::Clock;
 
 use crate::handlers::TransportHandler;
@@ -31,9 +31,9 @@ use crate::{HttpClient, HttpClientBuilder};
 /// Threading model required by a custom transport.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ThreadAware)]
 pub enum Isolation {
-    /// Each core owns its own pipeline; the factory is invoked once per core.
+    /// Each runtime thread gets its own pipeline; the factory is invoked once per thread partition.
     Isolated,
-    /// A single pipeline is shared across all cores.
+    /// A single pipeline is shared across all runtime threads.
     Shared,
 }
 
@@ -61,7 +61,7 @@ where
 /// Per-pool-slot context handed to a user-supplied transport factory.
 ///
 /// The client constructs one [`CustomContext`] each time it needs a new transport handler
-/// (typically once per connection pool slot, per core). `Extras` mirrors the same
+/// (typically once per connection pool slot, per thread). `Extras` mirrors the same
 /// parameter on [`CustomDeps`].
 #[derive(Debug)]
 #[non_exhaustive]
@@ -204,9 +204,9 @@ impl HttpClient {
         F: Fn(CustomContext<Extras>) -> TransportHandler + Send + Sync + 'static,
         Extras: ThreadAware + Send + Sync + Clone + 'static,
     {
-        // The factory is shared across cores via `Arc`. The original `CustomDeps` is
+        // The factory is shared across threads via `performables::Arc`. The original `CustomDeps` is
         // carried alongside it so its `extras` are cloned into a fresh `CustomContext`
-        // for every handler the per-core transport builds.
+        // for every handler the per-thread transport builds.
         let factory = Arc::new(factory);
 
         let transport = Transport {
@@ -215,19 +215,21 @@ impl HttpClient {
             clock: deps.clock.clone(),
             global_pool: deps.global_pool.clone(),
             isolation,
-            inner: thread_aware::Arc::new_with((deps, unaware(factory)), |(deps, factory)| {
-                Arc::new(move |options, meter, pool_index| {
-                    let context = CustomContext {
-                        body_builder: create_body_builder(&deps.global_pool, &deps.clock, &options),
-                        clock: deps.clock.clone(),
-                        pool_index,
-                        extras: deps.extras.clone(),
-                        options: options.transport.clone(),
-                        tls: options.tls.clone(),
-                        meter,
-                    };
-                    factory.0(context)
-                })
+            inner: Arc::new_with_data((deps, factory), |(deps, factory)| {
+                let transport: Box<dyn Fn(ClientOptions, Meter, PoolIndex) -> TransportHandler + Send + Sync> =
+                    Box::new(move |options, meter, pool_index| {
+                        let context = CustomContext {
+                            body_builder: create_body_builder(&deps.global_pool, &deps.clock, &options),
+                            clock: deps.clock.clone(),
+                            pool_index,
+                            extras: deps.extras.clone(),
+                            options: options.transport.clone(),
+                            tls: options.tls.clone(),
+                            meter,
+                        };
+                        factory(context)
+                    });
+                TransportFn::from(transport)
             }),
         };
 
@@ -243,7 +245,7 @@ pub(crate) struct Transport {
     runtime_name: Cow<'static, str>,
     #[thread_aware(skip)]
     name: Cow<'static, str>,
-    inner: thread_aware::Arc<TransportFn, PerCore>,
+    inner: Arc<TransportFn, PerThread>,
     clock: Clock,
     global_pool: GlobalPool,
     isolation: Isolation,
@@ -332,9 +334,9 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
-    async fn isolated_runtime_uses_per_core_handler() {
-        // `Isolation::Isolated` is the right choice for thread-per-core transports;
-        // it must still serve requests correctly when there is only one core in play.
+    async fn isolated_runtime_uses_per_thread_handler() {
+        // `Isolation::Isolated` is the right choice for thread-isolated transports;
+        // it must still serve requests correctly when there is only one thread in play.
         let client = create_builder("test-runtime", "test", ok_factory, Isolation::Isolated, custom_deps())
             .insecure_allow_http()
             .build();

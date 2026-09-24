@@ -39,6 +39,7 @@ impl<A, B> ::ohno::ErrorExt for T<A, B> {
         self.inner.backtrace()
     }
 }
+#[automatically_derived]
 impl<A, B> ::core::fmt::Debug for T<A, B> {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("T")
@@ -48,7 +49,6 @@ impl<A, B> ::core::fmt::Debug for T<A, B> {
             .finish()
     }
 }
-#[automatically_derived]
 impl<A, B> T<A, B> {
     /// Creates the error with no source.
     #[allow(
@@ -129,6 +129,7 @@ impl<'a> ::ohno::ErrorExt for T<'a> {
         self.inner.backtrace()
     }
 }
+#[automatically_derived]
 impl<'a> ::core::fmt::Debug for T<'a> {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("T")
@@ -137,7 +138,6 @@ impl<'a> ::core::fmt::Debug for T<'a> {
             .finish()
     }
 }
-#[automatically_derived]
 impl<'a> T<'a> {
     /// Creates the error with no source.
     #[allow(
@@ -227,6 +227,7 @@ where
         self.inner.backtrace()
     }
 }
+#[automatically_derived]
 impl<A> ::core::fmt::Debug for T<A>
 where
     A: Clone,
@@ -235,7 +236,6 @@ where
         f.debug_struct("T").field("a", &self.a).field("inner", &self.inner).finish()
     }
 }
-#[automatically_derived]
 impl<A> T<A>
 where
     A: Clone,

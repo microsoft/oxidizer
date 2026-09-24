@@ -23,7 +23,7 @@ One pass allocates a mixed working set — 1,000 `u64` values, 1,000 32-byte sli
 
 | Workload | Multitude arena | System allocator (mimalloc) | Δ vs system allocator | Speedup |
 |---|---:|---:|---:|---:|
-| Allocate and release 3,000 mixed objects | 10.23 µs | 30.65 µs | -66.6% | 3.00× |
+| Allocate and release 3,000 mixed objects | 13.31 µs | 40.07 µs | -66.8% | 3.01× |
 
 ## Multitude vs. Bumpalo, head-to-head
 
@@ -31,16 +31,16 @@ Identical workloads run against `multitude` and [`bumpalo`](https://crates.io/cr
 
 | Workload | Multitude | Bumpalo | Δ |
 |---|---:|---:|---:|
-| Sized value (`alloc`) | 1.41 µs | 1.42 µs | -0.9% |
-| String copy (`alloc_str`) | 3.28 µs | 4.08 µs | -19.5% |
-| Slice copy (`alloc_slice_copy`) | 3.31 µs | 3.41 µs | -3.0% |
-| Slice clone (`alloc_slice_clone`) | 2.91 µs | 3.21 µs | -9.3% |
-| Slice from closure (`alloc_slice_fill_with`) | 1.93 µs | 1.89 µs | +1.9% |
-| Slice from iterator (`alloc_slice_fill_iter`) | 1.93 µs | 1.96 µs | -1.2% |
-| Growable string (`alloc_string`) | 2.99 µs | 4.34 µs | -31.1% |
-| Growable string, preallocated (`alloc_string_with_capacity`) | 3.05 µs | 3.66 µs | -16.6% |
-| Growable vector (`alloc_vec`) | 1.04 µs | 1.18 µs | -12.0% |
-| Growable vector, preallocated (`alloc_vec_with_capacity`) | 1.05 µs | 1.01 µs | +3.8% |
+| Sized value (`alloc`) | 1.77 µs | 1.81 µs | -2.0% |
+| String copy (`alloc_str`) | 5.98 µs | 5.40 µs | +10.7% |
+| Slice copy (`alloc_slice_copy`) | 5.24 µs | 4.27 µs | +22.6% |
+| Slice clone (`alloc_slice_clone`) | 4.30 µs | 5.75 µs | -25.2% |
+| Slice from closure (`alloc_slice_fill_with`) | 2.40 µs | 2.70 µs | -11.1% |
+| Slice from iterator (`alloc_slice_fill_iter`) | 2.48 µs | 2.53 µs | -2.0% |
+| Growable string (`alloc_string`) | 4.95 µs | 5.99 µs | -17.4% |
+| Growable string, preallocated (`alloc_string_with_capacity`) | 4.59 µs | 4.96 µs | -7.5% |
+| Growable vector (`alloc_vec`) | 1.35 µs | 1.56 µs | -13.3% |
+| Growable vector, preallocated (`alloc_vec_with_capacity`) | 1.49 µs | 1.52 µs | -2.0% |
 
 ## Allocation teardown
 
@@ -48,15 +48,15 @@ Setup is outside the measured region: each implementation starts with the same n
 
 | Allocations | Implementation | Time | Δ vs standard allocator |
 |---:|---|---:|---:|
-| 1 | Standard allocator | 5 ns | +0.0% |
-| 1 | Multitude | 3 ns | -38.7% |
-| 1 | Bumpalo | 6 ns | +38.2% |
-| 32 | Standard allocator | 411 ns | +0.0% |
-| 32 | Multitude | 3 ns | -99.3% |
-| 32 | Bumpalo | 6 ns | -98.6% |
-| 1000 | Standard allocator | 13.17 µs | +0.0% |
-| 1000 | Multitude | 4 ns | -100.0% |
-| 1000 | Bumpalo | 8 ns | -99.9% |
+| 1 | Standard allocator | 10 ns | +0.0% |
+| 1 | Multitude | 12 ns | +25.0% |
+| 1 | Bumpalo | 7 ns | -30.5% |
+| 32 | Standard allocator | 598 ns | +0.0% |
+| 32 | Multitude | 15 ns | -97.4% |
+| 32 | Bumpalo | 7 ns | -98.8% |
+| 1000 | Standard allocator | 28.85 µs | +0.0% |
+| 1000 | Multitude | 17 ns | -99.9% |
+| 1000 | Bumpalo | 33 ns | -99.9% |
 
 ### Reset plus the next allocation
 
@@ -64,9 +64,9 @@ This extends the pure-reset diagnostic through the first 64-byte allocation of t
 
 | Previous allocations | Multitude | Bumpalo | Δ |
 |---:|---:|---:|---:|
-| 1 | 8 ns | 6 ns | +34.3% |
-| 32 | 8 ns | 7 ns | +25.4% |
-| 1000 | 10 ns | 9 ns | +9.9% |
+| 1 | 28 ns | 9 ns | +195.0% |
+| 32 | 31 ns | 9 ns | +241.0% |
+| 1000 | 37 ns | 40 ns | -6.7% |
 
 ## Serde deserialization
 
@@ -74,8 +74,8 @@ The arena and standard paths deserialize the same JSON document into equivalent 
 
 | Workload | Arena | Standard `serde_json` | Δ |
 |---|---:|---:|---:|
-| Typed record | 436 ns | 456 ns | -4.5% |
-| Dynamic value | 621 ns | 661 ns | -6.0% |
+| Typed record | 882 ns | 873 ns | +1.0% |
+| Dynamic value | 1.07 µs | 1.22 µs | -12.3% |
 
 ### Reused-allocator lifecycle
 
@@ -85,9 +85,9 @@ This is the shape of a server that reuses one allocator per request: deserialize
 
 | Implementation | Time | Δ vs standard Serde |
 |---|---:|---:|
-| Standard Serde | 436 ns | +0.0% |
-| Multitude | 423 ns | -3.0% |
-| Bumpalo (manual seed) | 382 ns | -12.5% |
+| Standard Serde | 977 ns | +0.0% |
+| Multitude | 842 ns | -13.8% |
+| Bumpalo (manual seed) | 766 ns | -21.7% |
 
 #### 32-record batch
 
@@ -95,9 +95,9 @@ The same complete lifecycle for 32 independent JSON documents in one reusable al
 
 | Implementation | Time | Δ vs standard Serde |
 |---|---:|---:|
-| Standard Serde | 18.76 µs | +0.0% |
-| Multitude | 12.67 µs | -32.4% |
-| Bumpalo (manual seed) | 12.68 µs | -32.4% |
+| Standard Serde | 38.16 µs | +0.0% |
+| Multitude | 22.53 µs | -41.0% |
+| Bumpalo (manual seed) | 21.67 µs | -43.2% |
 
 ## Record-batch decoding
 
@@ -105,11 +105,11 @@ A synthetic batch of 16 wide records, decoded either into standard collections o
 
 | Workload | Standard | Arena | Δ |
 |---|---:|---:|---:|
-| Decode a batch of wide records | 54.07 µs | 40.48 µs | -25.1% |
-| String fields, no escapes | 55.88 µs | 40.43 µs | -27.6% |
-| String fields, escaped | 76.42 µs | 60.97 µs | -20.2% |
-| Retain one record in eight | 54.73 µs | 41.46 µs | -24.2% |
-| Malformed input (error path) | 56.20 µs | 40.70 µs | -27.6% |
+| Decode a batch of wide records | 97.07 µs | 66.41 µs | -31.6% |
+| String fields, no escapes | 112.94 µs | 79.28 µs | -29.8% |
+| String fields, escaped | 132.63 µs | 105.53 µs | -20.4% |
+| Retain one record in eight | 91.46 µs | 73.14 µs | -20.0% |
+| Malformed input (error path) | 118.90 µs | 78.13 µs | -34.3% |
 
 ### Reset-per-refresh workload
 
@@ -117,8 +117,8 @@ The most end-to-end scenario in this report: each iteration parses 1,000 escaped
 
 | Implementation | Time | Δ vs standard collections |
 |---|---:|---:|
-| Standard collections | 5.12 ms | +0.0% |
-| Arena, `Vec` output, reset per refresh | 3.93 ms | -23.2% |
-| Arena, per-record output, reset per refresh | 3.88 ms | -24.1% |
-| Arena, raw-value scan, per-record output | 3.35 ms | -34.6% |
-| Arena, raw-value scan, indexed selection | 3.33 ms | -35.0% |
+| Standard collections | 10.08 ms | +0.0% |
+| Arena, `Vec` output, reset per refresh | 7.64 ms | -24.2% |
+| Arena, per-record output, reset per refresh | 7.34 ms | -27.1% |
+| Arena, raw-value scan, per-record output | 6.19 ms | -38.6% |
+| Arena, raw-value scan, indexed selection | 6.73 ms | -33.2% |

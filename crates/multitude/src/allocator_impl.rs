@@ -9,13 +9,6 @@ use allocator_api2::alloc::{AllocError, Allocator};
 use crate::Arena;
 use crate::arena::alloc_value::acquire_chunk_ref;
 use crate::internal::chunk_ref::ChunkRef;
-use crate::internal::constants::max_smart_ptr_align;
-
-/// Exclusive upper bound on `layout.align()` accepted by
-/// `Allocator::allocate`. Alignments at or above this value are rejected: the
-/// returned pointer must lie strictly inside the first `CHUNK_ALIGN` bytes of
-/// its chunk so the header-recovery mask can recover the chunk pointer.
-const MAX_SMART_PTR_ALIGN: usize = max_smart_ptr_align();
 
 /// `&Arena<A>` is the allocator handle: cheap to copy and backed by
 /// chunks. `allocate` bumps the chunk refcount; `deallocate`
@@ -34,7 +27,7 @@ unsafe impl<A: Allocator + Clone> Allocator for &Arena<A> {
         // Reject alignments at/above the smart-pointer ceiling (as `alloc_box` /
         // `alloc_arc` do): the header-from-mask helper requires the value to lie
         // strictly inside the first `CHUNK_ALIGN` bytes of the chunk.
-        if layout.align() >= MAX_SMART_PTR_ALIGN {
+        if self.rejects_smart_ptr_align(layout.align()) {
             return Err(AllocError);
         }
         // Zero-byte allocations need a non-null, well-aligned pointer but no
@@ -270,7 +263,7 @@ mod tests {
         unsafe { LegacyAllocator::deallocate(&handle, p.cast::<u8>(), empty_layout) };
 
         // Unsupported alignment remains a recoverable allocator error.
-        let over_aligned = Layout::from_size_align(8, super::MAX_SMART_PTR_ALIGN).unwrap();
+        let over_aligned = Layout::from_size_align(8, arena.smart_ptr_align_cap()).unwrap();
         LegacyAllocator::allocate(&handle, over_aligned).expect_err("over-aligned request must be rejected");
     }
 }

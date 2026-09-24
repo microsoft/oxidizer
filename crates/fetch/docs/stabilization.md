@@ -120,7 +120,7 @@ transport like WinHTTP owns its own connection pool and does not key anything on
 externally supplied `PoolIndex` value (see fetch_winhttp implementation.md §8); because
 `fetch` calls the factory once per slot, each slot opens its own WinHTTP session and pool,
 so nominally separate pools do stay separate - the resource profile is one session/pool per
-(core × pool slot), not a single collapsed pool. The open question is ownership: since
+(thread × pool slot), not a single collapsed pool. The open question is ownership: since
 connection management generally cannot be generalized across transports, pool partitioning
 most likely belongs on the transport layer, which may retire the `PoolIndex` surface in its
 current shape. Where pool management lives should be settled as part of the v2 "what do we

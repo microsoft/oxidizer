@@ -4,7 +4,7 @@
 [package]
 name = "bytesbuf"
 description = "Types for creating and manipulating byte sequences."
-version = "0.9.0"
+version = "0.10.0"
 readme = "README.md"
 keywords = ["oxidizer", "buffers", "io", "zero-copy"]
 categories = ["data-structures", "network-programming"]
@@ -23,9 +23,9 @@ allowed_external_types = [
     "bytes::buf::buf_impl::Buf",
     "bytes::buf::uninit_slice::UninitSlice",
     "bytes::buf::buf_mut::BufMut",
-    "thread_aware::affinity::MemoryAffinity",
-    "thread_aware::affinity::PinnedAffinity",
-    "thread_aware::core::ThreadAware",
+    "thread_aware_core::thread::Thread",
+    "thread_aware_core::thread_aware::ThreadAware",
+    "seismograph_io::*",
 ]
 
 [package.metadata.docs.rs]
@@ -35,15 +35,24 @@ all-features = true
 default = ["std"]
 # Enables the global memory pool, standard I/O adapters, and metrics. Disable for `#![no_std]`
 # environments; the crate still requires `alloc`.
-std = ["dep:nm", "dep:plurality", "thread_aware/std", "bytes?/std"]
+std = [
+    "dep:nm",
+    "dep:performables",
+    "dep:plurality",
+    "thread_aware/std",
+    "bytes?/std",
+]
 # Interoperability with the `bytes` crate.
 bytes-compat = ["dep:bytes"]
+seismograph = ["std", "dep:seismograph_io", "performables/seismograph"]
 test-util = ["std"]
 
 [dependencies]
 bytes = { workspace = true, optional = true }
 nm = { workspace = true, optional = true }
+performables = { workspace = true, default-features = false, optional = true }
 plurality = { workspace = true, optional = true }
+seismograph_io = { workspace = true, optional = true }
 smallvec = { workspace = true, features = ["const_new", "union"] }
 thread_aware = { workspace = true, default-features = false, features = ["derive"] }
 
@@ -58,6 +67,7 @@ nm = { workspace = true }
 plurality = { path = "../plurality" }
 static_assertions = { workspace = true }
 testing_aids = { path = "../testing_aids" }
+thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
 
 # Gungraun (Callgrind) requires Valgrind, which is Linux-only. Gating the dependency on Linux keeps
 # it out of Windows and macOS resolution so `cargo-machete`/`cargo-udeps` do not flag it as unused.

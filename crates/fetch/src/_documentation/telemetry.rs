@@ -169,5 +169,7 @@
 //! | `request_hyper.connect.connection_refused` | Server refused the connection |
 //! | `request_hyper.connect.other` | TLS or unclassified connection error |
 //! | `scheme_not_allowed` | HTTP scheme blocked before reaching the network |
-//! | `content_encoding_unsupported` | Response used an encoding the client cannot decode |
+//! | `compression_invalid` | Response body was malformed for its declared compression format |
+//! | `compression_limit_exceeded` | Decompression would have exceeded the configured limits |
+//! | `compression_unsupported` | Response used a compression format that is not enabled |
 //! | `abandoned` | Caller dropped the future (e.g. outer timeout) |

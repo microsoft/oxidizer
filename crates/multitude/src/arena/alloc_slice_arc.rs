@@ -12,7 +12,7 @@ use core::ptr::NonNull;
 use allocator_api2::alloc::Allocator;
 
 use super::alloc_prefixed::worst_case_strong_slice_payload;
-use super::alloc_value::{MAX_SMART_PTR_ALIGN, acquire_chunk_ref};
+use super::alloc_value::acquire_chunk_ref;
 use super::{Arena, ExpectAlloc};
 use crate::AllocError;
 use crate::arc::Arc;
@@ -419,7 +419,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// [`Self::impl_alloc_slice_smart_copy`].
     #[inline]
     fn alloc_slice_smart_copy_raw<S: Strong, T: Copy>(&self, src: &[T]) -> Result<NonNull<u8>, AllocError> {
-        check_slice_arc_layout::<T>()?;
+        check_slice_arc_layout::<T, _>(self)?;
         let len = src.len();
         // `src` is a live `&[T]`, so `size_of_val(src)` is a valid `usize`.
         let payload_bytes = mem::size_of_val(src);
@@ -488,7 +488,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// [`Self::impl_alloc_slice_smart_with`].
     #[inline]
     fn alloc_slice_smart_with_raw<S: Strong, T, F: FnMut(usize) -> T>(&self, len: usize, f: F) -> Result<NonNull<u8>, AllocError> {
-        check_slice_arc_layout::<T>()?;
+        check_slice_arc_layout::<T, _>(self)?;
         if let Some((uninit, chunk_ptr)) = self.try_reserve_arc_slice::<S, T>(len) {
             let chunk_ref = self.acquire_current_chunk_ref(chunk_ptr);
             let slice_ptr = uninit.init_with_ptr(f);
@@ -644,8 +644,8 @@ impl<A: Allocator + Clone> Arena<A> {
 /// Up-front check for the `Arc<[T]>` / `Rc<[T]>` slice family. Rejects
 /// over-aligned `T` (would break the smart-pointer header recovery).
 #[inline]
-fn check_slice_arc_layout<T>() -> Result<(), AllocError> {
-    if mem::align_of::<T>() >= MAX_SMART_PTR_ALIGN {
+fn check_slice_arc_layout<T, A: Allocator + Clone>(arena: &Arena<A>) -> Result<(), AllocError> {
+    if arena.rejects_smart_ptr_align(mem::align_of::<T>()) {
         return Err(AllocError::ALIGNMENT_TOO_LARGE);
     }
     Ok(())
