@@ -104,6 +104,8 @@ impl Driver for EchoDriver {
         DriverHandle::new(self)
     }
 
+    fn on_peer_registered(&mut self, _peer: DriverHandle<'_>) {}
+
     fn process_completions(&mut self, _max_wait: Duration, _cycle_start: Instant) {}
 
     fn waker(&self) -> Waker {
