@@ -317,102 +317,101 @@ zerocopy = { version = "0.8.26", default-features = false }
 zeroize = { version = "1.9.0", default-features = false }
 zstd-safe = { version = "8.0.0", default-features = false }
 
-# >>> anvil-managed: anvil-workspace-lints
-[workspace.lints]
-# Catalog of opinionated lints, in dotted-key form so users can extend the
-# same scope (`[workspace.lints]` or `[lints]`) outside the sentinels.
-# The host-specific table header (`[workspace.lints]` or `[lints]`) is
-# prepended by cargo-anvil based on whether the manifest is a workspace
-# root or a single-crate Cargo.toml.
-
-# --- rust ------------------------------------------------------------------
-rust.ambiguous_negative_literals = "warn"
-rust.missing_debug_implementations = "warn"
-rust.redundant_imports = "warn"
-rust.redundant_lifetimes = "warn"
-rust.trivial_numeric_casts = "warn"
-rust.unsafe_op_in_unsafe_fn = "warn"
-rust.unused_lifetimes = "warn"
+# >>> anvil-managed: anvil-workspace-rust-lints
+[workspace.lints.rust]
+# Rust compiler lint policy. Repository-specific Rust lints can follow this
+# region as bare keys in the same table.
+ambiguous_negative_literals = "warn"
+missing_debug_implementations = "warn"
+redundant_imports = "warn"
+redundant_lifetimes = "warn"
+trivial_numeric_casts = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+unused_lifetimes = "warn"
 # `unexpected_cfgs` is on-by-default at warn since Rust 1.80; combined
 # with the catalog's `-D warnings` cloud-workflow policy, any custom cfg name
 # becomes a hard build failure. Pre-declare the cfgs that
 # `cargo llvm-cov` sets so the recommended coverage-exclusion pattern
 # `#[cfg_attr(coverage_nightly, coverage(off))]` works out of the box.
 # Adopters who need additional cfg names take ownership of this one
-# line (edit the check-cfg array); anvil's drift detector will
+# assignment (edit the check-cfg array); anvil's drift detector will
 # emit a `.anvil-proposed` sibling on future catalog bumps so the
 # customization is preserved.
-rust.unexpected_cfgs = { level = "warn", check-cfg = [
+unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(coverage,coverage_nightly)',
     'cfg(loom)',
     'cfg(miri_race_coverage)',
     'cfg(miri_strict_provenance)',
     'cfg(miri_tree_borrows)',
 ] }
-# <<< anvil-managed: anvil-workspace-lints
+# <<< anvil-managed: anvil-workspace-rust-lints
 
-# --- oxidizer-github-specific lint deltas (outside anvil's managed region) ---
-# Preserved from the pre-anvil manual policy; these extend the same
-# `[workspace.lints]` table. Anvil does not manage them.
-rust.missing_docs = "warn"
-rust.unreachable_pub = "warn"
+# Repository-specific Rust lint policy beyond the Anvil catalog.
+missing_docs = "warn"
+unreachable_pub = "warn"
 
-# --- rustdoc ---------------------------------------------------------------
-rustdoc.broken_intra_doc_links = "warn"
-rustdoc.missing_crate_level_docs = "warn"
-rustdoc.unescaped_backticks = "warn"
+# >>> anvil-managed: anvil-workspace-rustdoc-lints
+[workspace.lints.rustdoc]
+# Rustdoc lint policy. Repository-specific rustdoc lints can follow this
+# region as bare keys in the same table.
+broken_intra_doc_links = "warn"
+missing_crate_level_docs = "warn"
+unescaped_backticks = "warn"
+# <<< anvil-managed: anvil-workspace-rustdoc-lints
 
-# --- clippy: category gates (priority -1 so per-lint allows can override) --
-clippy.cargo = { level = "warn", priority = -1 }
-clippy.complexity = { level = "warn", priority = -1 }
-clippy.correctness = { level = "warn", priority = -1 }
-clippy.nursery = { level = "warn", priority = -1 }
-clippy.pedantic = { level = "warn", priority = -1 }
-clippy.perf = { level = "warn", priority = -1 }
-clippy.style = { level = "warn", priority = -1 }
-clippy.suspicious = { level = "warn", priority = -1 }
-
-# --- clippy: opinionated additions -----------------------------------------
+# >>> anvil-managed: anvil-workspace-clippy-lints
+[workspace.lints.clippy]
+# Clippy category gates use priority -1 so per-lint allows can override them.
+cargo = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+correctness = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
 # Two-repo consensus (oxidizer + oxidizer-github). Restriction-group
 # lints that catch real code-smell cases. Adding a workspace-wide lint
 # means adopters can only opt out per-crate or by taking ownership of
 # this region; only enable when the consensus is strong enough to
 # justify that cost.
-clippy.allow_attributes = "warn"
-clippy.allow_attributes_without_reason = "warn"
-clippy.as_pointer_underscore = "warn"
-clippy.assertions_on_result_states = "warn"
-clippy.clone_on_ref_ptr = "warn"
-clippy.deref_by_slicing = "warn"
-clippy.disallowed_script_idents = "warn"
-clippy.empty_drop = "warn"
-clippy.empty_enum_variants_with_brackets = "warn"
-clippy.fn_to_numeric_cast_any = "warn"
-clippy.if_then_some_else_none = "warn"
-clippy.map_err_ignore = "warn"
-clippy.multiple_unsafe_ops_per_block = "warn"
-clippy.redundant_type_annotations = "warn"
-clippy.renamed_function_params = "warn"
-clippy.semicolon_outside_block = "warn"
-clippy.too_long_first_doc_paragraph = "warn"
-clippy.undocumented_unsafe_blocks = "warn"
-clippy.unnecessary_safety_comment = "warn"
-clippy.unnecessary_safety_doc = "warn"
-clippy.unneeded_field_pattern = "warn"
-clippy.unused_result_ok = "warn"
-clippy.unwrap_used = "warn"
-
-# --- clippy: opinionated suppressions of category-enabled lints ------------
-clippy.missing_const_for_fn = "allow"
-clippy.multiple_crate_versions = "allow"
-clippy.option_if_let_else = "allow"
-clippy.redundant_pub_crate = "allow"
-clippy.should_panic_without_expect = "allow"
-clippy.significant_drop_tightening = "allow"
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+as_pointer_underscore = "warn"
+assertions_on_result_states = "warn"
+clone_on_ref_ptr = "warn"
+deref_by_slicing = "warn"
+disallowed_script_idents = "warn"
+empty_drop = "warn"
+empty_enum_variants_with_brackets = "warn"
+empty_structs_with_brackets = "warn"
+fn_to_numeric_cast_any = "warn"
+if_then_some_else_none = "warn"
+map_err_ignore = "warn"
+multiple_unsafe_ops_per_block = "warn"
+redundant_type_annotations = "warn"
+renamed_function_params = "warn"
+semicolon_outside_block = "warn"
+undocumented_unsafe_blocks = "warn"
+unnecessary_safety_comment = "warn"
+unnecessary_safety_doc = "warn"
+unneeded_field_pattern = "warn"
+unused_result_ok = "warn"
+unwrap_used = "warn"
+# Literal braces are valid data in templates and structured-logging messages.
+literal_string_with_formatting_args = "allow"
+missing_const_for_fn = "allow"
+multiple_crate_versions = "allow"
+option_if_let_else = "allow"
+redundant_pub_crate = "allow"
+should_panic_without_expect = "allow"
+significant_drop_tightening = "allow"
 # Blocked by Clippy bug: https://github.com/rust-lang/rust-clippy/issues/15036
-clippy.wildcard_imports = "allow"
-clippy.empty_structs_with_brackets = "warn"
-clippy.panic = "warn"
+wildcard_imports = "allow"
+# <<< anvil-managed: anvil-workspace-clippy-lints
+
+# Repository-specific Clippy lint policy beyond the Anvil catalog.
+panic = "warn"
 
 [patch.crates-io]
 # `events_once` depends on the published crate. Reuse this workspace member so
