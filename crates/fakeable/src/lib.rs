@@ -178,17 +178,23 @@ use proc_macro::TokenStream;
 ///
 /// - Mockall generation rejects mutable methods and methods with restricted visibility because
 ///   it cannot generate a fake that matches the wrapper's delegated method set.
+/// - Mockall generation rejects consuming receivers and const methods; use a manual fake for those
+///   method shapes.
 /// - Mockall generation rejects generic impl blocks; use a manual fake for generic services.
 /// - Mockall generation rejects trait impl blocks; use a manual fake for trait implementations.
 /// - Unsafe impl blocks are rejected because the macro cannot establish their safety invariants for
 ///   the fake representation.
 /// - Receiver-less methods must return `Self`; other associated functions cannot select a real or
 ///   fake implementation to delegate to.
-/// - `mut self`, `Self` parameters, and nested `Self` return types such as `Option<Self>` are
-///   rejected because they cannot be translated across the wrapper boundary.
+/// - `mut self`, projected or nested `Self` types, `Self` parameters, and `Self` in method generic
+///   bounds or where predicates are rejected because they cannot be translated across the wrapper
+///   boundary.
 /// - Typed receivers such as `self: Box<Self>` are rejected; use `self`, `&self`, or `&mut self`.
 /// - Direct `#[cfg(...)]` attributes are supported on structs and impl blocks. A `cfg_attr` that
 ///   conditionally applies `cfg` is rejected because it cannot safely gate every generated item.
+/// - A `cfg_attr` that conditionally applies `derive` is rejected; apply derives directly.
+/// - Layout `repr` attributes are rejected because the generated wrapper has a different field
+///   layout and ABI.
 /// - Mockall generation rejects nested elided references beneath higher-ranked lifetime binders.
 /// - Struct derives are copied to the wrapper and internal enum. The fake type must satisfy their
 ///   bounds (for example, `Clone`), and derives that depend on struct shape or an enum default

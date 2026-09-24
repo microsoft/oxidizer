@@ -25,10 +25,22 @@ fn generate_method_call(
     target: &proc_macro2::Ident,
     method_name: &proc_macro2::Ident,
     param_names: &[proc_macro2::Ident],
+    generic_args: &[proc_macro2::TokenStream],
     is_async: bool,
 ) -> proc_macro2::TokenStream {
     let await_suffix = is_async.then(|| quote! { .await });
-    quote! { #target.#method_name(#(#param_names),*) #await_suffix }
+    let turbofish = generic_turbofish(generic_args);
+    quote! {
+        #target.#method_name #turbofish (#(#param_names),*) #await_suffix
+    }
+}
+
+fn generic_turbofish(generic_args: &[proc_macro2::TokenStream]) -> proc_macro2::TokenStream {
+    if generic_args.is_empty() {
+        TokenStream::new()
+    } else {
+        quote! { ::<#(#generic_args),*> }
+    }
 }
 
 #[must_use]
@@ -62,6 +74,18 @@ fn process_struct(args: &FakeableArgs, item_struct: &ItemStruct) -> proc_macro2:
     if let Some(attr) = struct_attrs.iter().find(|attr| cfg_attr_can_disable_item(attr)) {
         return syn::Error::new_spanned(attr, "cfg_attr applying cfg is not supported; use a direct #[cfg(...)] attribute")
             .into_compile_error();
+    }
+
+    if let Some(attr) = struct_attrs.iter().find(|attr| cfg_attr_applies_attribute(attr, "derive")) {
+        return syn::Error::new_spanned(attr, "cfg_attr applying derive is not supported; apply derives directly").into_compile_error();
+    }
+
+    if let Some(attr) = struct_attrs.iter().find(|attr| attr.path().is_ident("repr")) {
+        return syn::Error::new_spanned(
+            attr,
+            "repr attributes are not supported because the generated wrapper has a different layout",
+        )
+        .into_compile_error();
     }
 
     let cfg_attrs: Vec<_> = struct_attrs.iter().filter(|attr| attr.path().is_ident("cfg")).collect();
@@ -265,6 +289,10 @@ fn process_impl(args: &FakeableArgs, item_impl: &ItemImpl) -> proc_macro2::Token
 }
 
 fn cfg_attr_can_disable_item(attr: &syn::Attribute) -> bool {
+    cfg_attr_applies_attribute(attr, "cfg")
+}
+
+fn cfg_attr_applies_attribute(attr: &syn::Attribute, attribute_name: &str) -> bool {
     if !attr.path().is_ident("cfg_attr") {
         return false;
     }
@@ -273,26 +301,36 @@ fn cfg_attr_can_disable_item(attr: &syn::Attribute) -> bool {
         return false;
     };
 
-    cfg_attr_tokens_can_disable_item(list.tokens.clone())
+    cfg_attr_tokens_apply_attribute(list.tokens.clone(), attribute_name)
 }
 
+#[cfg(test)]
 fn cfg_attr_tokens_can_disable_item(tokens: TokenStream) -> bool {
+    cfg_attr_tokens_apply_attribute(tokens, "cfg")
+}
+
+fn cfg_attr_tokens_apply_attribute(tokens: TokenStream, attribute_name: &str) -> bool {
     let Ok(metas) = Punctuated::<Meta, Token![,]>::parse_terminated.parse2(tokens) else {
         return false;
     };
 
-    metas.iter().skip(1).any(meta_can_disable_item)
+    metas.iter().skip(1).any(|meta| meta_applies_attribute(meta, attribute_name))
 }
 
+#[cfg(test)]
 fn meta_can_disable_item(meta: &Meta) -> bool {
-    if meta.path().is_ident("cfg") {
+    meta_applies_attribute(meta, "cfg")
+}
+
+fn meta_applies_attribute(meta: &Meta, attribute_name: &str) -> bool {
+    if meta.path().is_ident(attribute_name) {
         return true;
     }
 
     if meta.path().is_ident("cfg_attr")
         && let Meta::List(list) = meta
     {
-        return cfg_attr_tokens_can_disable_item(list.tokens.clone());
+        return cfg_attr_tokens_apply_attribute(list.tokens.clone(), attribute_name);
     }
 
     false
@@ -382,7 +420,7 @@ fn generate_delegation_method(
             ));
         }
 
-        if receiver.mutability.is_some() && matches!(receiver.kind, syn::ReceiverKind::Value) {
+        if matches!(receiver.kind, syn::ReceiverKind::Value) && receiver.mutability.is_some() {
             return Err(syn::Error::new_spanned(
                 method_sig,
                 "mut self receivers are not supported; use self, &self, or &mut self",
@@ -429,6 +467,7 @@ fn generate_delegation_method(
             helper_module_name,
             method_name,
             &method_info.param_names,
+            &method_info.generic_args,
             is_async,
             trait_path,
         )
@@ -440,6 +479,7 @@ fn generate_delegation_method(
                 helper_module_name,
                 method_name,
                 &method_info.param_names,
+                &method_info.generic_args,
                 is_async,
                 &fakes_cfg,
                 receiver,
@@ -452,6 +492,7 @@ fn generate_delegation_method(
                 helper_module_name,
                 method_name,
                 &method_info.param_names,
+                &method_info.generic_args,
                 is_async,
                 &fakes_cfg,
                 receiver,
@@ -479,25 +520,28 @@ fn generate_delegation_method(
 }
 
 /// Generates the body for constructor methods
+#[expect(clippy::too_many_arguments, reason = "Code generation inputs mirror the delegated method context")]
 fn generate_constructor_body(
     enum_name: &proc_macro2::Ident,
     real_struct_segment: &syn::PathSegment,
     helper_module_name: &proc_macro2::Ident,
     method_name: &proc_macro2::Ident,
     param_names: &[proc_macro2::Ident],
+    generic_args: &[proc_macro2::TokenStream],
     is_async: bool,
     trait_path: Option<&syn::Path>,
 ) -> proc_macro2::TokenStream {
     let await_suffix = is_async.then(|| quote! { .await });
+    let turbofish = generic_turbofish(generic_args);
     let method_call = if let Some(trait_path) = trait_path {
         quote! {
-            <#helper_module_name::#real_struct_segment as #trait_path>::#method_name(
+            <#helper_module_name::#real_struct_segment as #trait_path>::#method_name #turbofish (
                 #(#param_names),*
             )#await_suffix
         }
     } else {
         quote! {
-            <#helper_module_name::#real_struct_segment>::#method_name(
+            <#helper_module_name::#real_struct_segment>::#method_name #turbofish (
                 #(#param_names),*
             )#await_suffix
         }
@@ -518,6 +562,7 @@ fn generate_method_body(
     helper_module_name: &proc_macro2::Ident,
     method_name: &proc_macro2::Ident,
     param_names: &[proc_macro2::Ident],
+    generic_args: &[proc_macro2::TokenStream],
     is_async: bool,
     fakes_cfg: &proc_macro2::TokenStream,
     receiver: &syn::Receiver,
@@ -525,20 +570,22 @@ fn generate_method_body(
 ) -> proc_macro2::TokenStream {
     let real = proc_macro2::Ident::new("real", proc_macro2::Span::call_site());
     let await_suffix = is_async.then(|| quote! { .await });
+    let turbofish = generic_turbofish(generic_args);
     let real_call = if let Some(trait_path) = trait_path {
         quote! {
-            <#helper_module_name::#real_struct_segment as #trait_path>::#method_name(
+            <#helper_module_name::#real_struct_segment as #trait_path>::#method_name #turbofish (
                 #real,
                 #(#param_names),*
             )#await_suffix
         }
     } else {
-        generate_method_call(&real, method_name, param_names, is_async)
+        generate_method_call(&real, method_name, param_names, generic_args, is_async)
     };
     let fake_call = generate_method_call(
         &proc_macro2::Ident::new("fake", proc_macro2::Span::call_site()),
         method_name,
         param_names,
+        generic_args,
         is_async,
     );
 
@@ -561,6 +608,7 @@ fn generate_method_with_self_return_body(
     helper_module_name: &proc_macro2::Ident,
     method_name: &proc_macro2::Ident,
     param_names: &[proc_macro2::Ident],
+    generic_args: &[proc_macro2::TokenStream],
     is_async: bool,
     fakes_cfg: &proc_macro2::TokenStream,
     receiver: &syn::Receiver,
@@ -568,20 +616,22 @@ fn generate_method_with_self_return_body(
 ) -> proc_macro2::TokenStream {
     let real = proc_macro2::Ident::new("real", proc_macro2::Span::call_site());
     let await_suffix = is_async.then(|| quote! { .await });
+    let turbofish = generic_turbofish(generic_args);
     let real_call = if let Some(trait_path) = trait_path {
         quote! {
-            <#helper_module_name::#real_struct_segment as #trait_path>::#method_name(
+            <#helper_module_name::#real_struct_segment as #trait_path>::#method_name #turbofish (
                 #real,
                 #(#param_names),*
             )#await_suffix
         }
     } else {
-        generate_method_call(&real, method_name, param_names, is_async)
+        generate_method_call(&real, method_name, param_names, generic_args, is_async)
     };
     let fake_call = generate_method_call(
         &proc_macro2::Ident::new("fake", proc_macro2::Span::call_site()),
         method_name,
         param_names,
+        generic_args,
         is_async,
     );
 
@@ -606,6 +656,8 @@ fn generate_method_with_self_return_body(
 struct MethodInfo {
     /// The names of the method's non-self parameters.
     param_names: Vec<proc_macro2::Ident>,
+    /// Type and const generic arguments forwarded by delegated calls.
+    generic_args: Vec<proc_macro2::TokenStream>,
     /// Whether this method is a constructor (no self receiver, returns Self).
     is_constructor: bool,
     /// Whether this method has a receiver and returns Self (needs wrapping).
@@ -634,6 +686,22 @@ fn extract_method_info(sig: &syn::Signature) -> Result<MethodInfo, syn::Error> {
     }
 
     let returns_self_flag = returns_self(&sig.output);
+    let generic_args = sig
+        .generics
+        .params
+        .iter()
+        .filter_map(|param| match param {
+            syn::GenericParam::Lifetime(_) => None,
+            syn::GenericParam::Type(param) => {
+                let ident = &param.ident;
+                Some(quote! { #ident })
+            }
+            syn::GenericParam::Const(param) => {
+                let ident = &param.ident;
+                Some(quote! { #ident })
+            }
+        })
+        .collect();
 
     // A method is considered a constructor if it doesn't have &self and returns Self
     let is_constructor = !has_self && returns_self_flag;
@@ -643,6 +711,7 @@ fn extract_method_info(sig: &syn::Signature) -> Result<MethodInfo, syn::Error> {
 
     Ok(MethodInfo {
         param_names,
+        generic_args,
         is_constructor,
         returns_self_with_receiver,
     })
@@ -674,7 +743,7 @@ struct BareSelfVisitor {
 
 impl<'ast> syn::visit::Visit<'ast> for BareSelfVisitor {
     fn visit_type_path(&mut self, i: &'ast syn::TypePath) {
-        if i.qself.is_none() && i.path.segments.len() == 1 && i.path.segments[0].ident == "Self" {
+        if i.qself.is_none() && i.path.segments.first().is_some_and(|segment| segment.ident == "Self") {
             self.found = true;
             return;
         }
@@ -849,6 +918,10 @@ fn add_lifetime_to_nested_references(ty: &mut syn::Type, lifetime: &syn::Lifetim
 }
 
 /// Generates a mockall mock! macro for the given impl block.
+#[expect(
+    clippy::too_many_lines,
+    reason = "Validation and signature conversion are kept together for one generated mock block"
+)]
 fn generate_mockall_fake(
     item_impl: &ItemImpl,
     fake_name: &str,
@@ -879,6 +952,18 @@ fn generate_mockall_fake(
                 )
             });
 
+            if is_delegated
+                && method
+                    .sig
+                    .receiver()
+                    .is_some_and(|receiver| matches!(receiver.kind, syn::ReceiverKind::Value))
+            {
+                return Err(syn::Error::new_spanned(
+                    &method.sig,
+                    "generate_mockall_fake does not support consuming self receivers; use a manual fake implementation",
+                ));
+            }
+
             if is_delegated && is_mut {
                 return Err(syn::Error::new_spanned(
                     &method.sig,
@@ -894,14 +979,28 @@ fn generate_mockall_fake(
             }
 
             if is_delegated {
-                if method.sig.inputs.iter().any(|input| {
+                if method.sig.constness.is_some() {
+                    return Err(syn::Error::new_spanned(
+                        &method.sig,
+                        "generate_mockall_fake does not support const methods; use a manual fake implementation",
+                    ));
+                }
+
+                let has_nested_elision = method.sig.inputs.iter().any(|input| {
                     matches!(
                         input,
                         syn::FnArg::Typed(syn::PatType { ty, .. })
                             if contains_reference_in_generic(ty)
-                                && type_contains_bound_lifetimes(ty)
                     )
-                }) {
+                });
+                let has_bound_lifetimes = method.sig.inputs.iter().any(|input| {
+                    matches!(
+                        input,
+                        syn::FnArg::Typed(syn::PatType { ty, .. })
+                            if type_contains_bound_lifetimes(ty)
+                    )
+                });
+                if has_nested_elision && has_bound_lifetimes {
                     return Err(syn::Error::new_spanned(
                         &method.sig,
                         "generate_mockall_fake does not support nested elided references beneath higher-ranked lifetime binders",

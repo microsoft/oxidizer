@@ -28,6 +28,21 @@ impl __fakeable__MyService::MyService {
     pub fn process(&self, prefix: impl AsRef<str>) -> String {
         format!("{} Value: {}, Other: {}", prefix.as_ref(), self.value, self.other_value)
     }
+    pub fn marker<T: Default>(&self) -> u32 {
+        42
+    }
+    pub fn lifetime<'a>(&self, value: &'a str) -> &'a str {
+        value
+    }
+    pub fn const_marker<const N: usize>(&self) -> usize {
+        N
+    }
+    pub fn generic_new<T: Default>() -> Self {
+        Self {
+            value: String::new(),
+            other_value: 0,
+        }
+    }
     fn private_method_ignored(&self) {}
     pub(super) fn pub_private_method_accepted(&self) {}
 }
@@ -93,6 +108,42 @@ impl MyService {
             __fakeable__MyService::Enum::Real(real) => real.process(prefix),
             #[cfg(any(feature = "test-util", test))]
             __fakeable__MyService::Enum::Fake(fake) => fake.process(prefix),
+        }
+    }
+    #[allow(unused_mut)]
+    #[allow(clippy::used_underscore_binding)]
+    pub fn marker<T: Default>(&self) -> u32 {
+        match &self.inner {
+            __fakeable__MyService::Enum::Real(real) => real.marker::<T>(),
+            #[cfg(any(feature = "test-util", test))]
+            __fakeable__MyService::Enum::Fake(fake) => fake.marker::<T>(),
+        }
+    }
+    #[allow(unused_mut)]
+    #[allow(clippy::used_underscore_binding)]
+    pub fn lifetime<'a>(&self, value: &'a str) -> &'a str {
+        match &self.inner {
+            __fakeable__MyService::Enum::Real(real) => real.lifetime(value),
+            #[cfg(any(feature = "test-util", test))]
+            __fakeable__MyService::Enum::Fake(fake) => fake.lifetime(value),
+        }
+    }
+    #[allow(unused_mut)]
+    #[allow(clippy::used_underscore_binding)]
+    pub fn const_marker<const N: usize>(&self) -> usize {
+        match &self.inner {
+            __fakeable__MyService::Enum::Real(real) => real.const_marker::<N>(),
+            #[cfg(any(feature = "test-util", test))]
+            __fakeable__MyService::Enum::Fake(fake) => fake.const_marker::<N>(),
+        }
+    }
+    #[allow(unused_mut)]
+    #[allow(clippy::used_underscore_binding)]
+    pub fn generic_new<T: Default>() -> Self {
+        Self {
+            inner: __fakeable__MyService::Enum::Real(
+                <__fakeable__MyService::MyService>::generic_new::<T>(),
+            ),
         }
     }
     #[allow(unused_mut)]

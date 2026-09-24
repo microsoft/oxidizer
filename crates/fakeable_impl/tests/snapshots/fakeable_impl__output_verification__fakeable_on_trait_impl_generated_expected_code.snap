@@ -8,7 +8,7 @@ impl Service for __fakeable__MyService::MyService {
     fn create(something: Something) -> Self {
         Self { something }
     }
-    fn output(&self) -> &Self::Output {
+    fn output(&self) -> &Something {
         &self.something
     }
     fn duplicate(&self) -> Self {
@@ -31,7 +31,7 @@ impl Service for MyService {
     }
     #[allow(unused_mut)]
     #[allow(clippy::used_underscore_binding)]
-    fn output(&self) -> &Self::Output {
+    fn output(&self) -> &Something {
         match &self.inner {
             __fakeable__MyService::Enum::Real(real) => {
                 <__fakeable__MyService::MyService as Service>::output(real)

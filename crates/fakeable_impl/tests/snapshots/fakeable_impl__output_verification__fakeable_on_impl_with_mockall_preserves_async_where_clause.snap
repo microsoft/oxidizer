@@ -18,9 +18,9 @@ impl MyService {
         T: Send + 'static,
     {
         match &self.inner {
-            __fakeable__MyService::Enum::Real(real) => real.process(value).await,
+            __fakeable__MyService::Enum::Real(real) => real.process::<T>(value).await,
             #[cfg(any(feature = "test-util", test))]
-            __fakeable__MyService::Enum::Fake(fake) => fake.process(value).await,
+            __fakeable__MyService::Enum::Fake(fake) => fake.process::<T>(value).await,
         }
     }
 }

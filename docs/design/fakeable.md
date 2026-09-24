@@ -39,8 +39,9 @@ functions have no active instance from which to select the real or fake
 implementation. Typed receivers such as `self: Box<Self>` are rejected; the
 supported receiver forms are `self`, `&self`, and `&mut self`. Parameters must
 use identifier patterns. `mut self`, parameters containing bare `Self`, and
-nested `Self` return types are rejected because their values cannot be
-translated across the wrapper boundary.
+projected or nested `Self` return types are rejected because their values cannot
+be translated across the wrapper boundary. Bare `Self` in method generic bounds
+or where predicates is rejected for the same reason.
 
 Trait delegation uses fully qualified calls on the hidden real type so an
 inherent method with the same name cannot intercept a trait method call.
@@ -52,6 +53,11 @@ fake constructor implementation together. Direct cfg attributes on impl blocks
 also gate generated Mockall output. A `cfg_attr` that conditionally applies
 `cfg` is rejected on either item because propagating it selectively could leave
 generated items referring to a disabled type.
+
+Conditional derives expressed through `cfg_attr` are rejected; derives must be
+applied directly so they can be copied consistently. Layout `repr` attributes
+are rejected because the wrapper's single enum field does not preserve the
+original struct layout or ABI.
 
 Derive attributes are copied to the wrapper and internal enum. This requires
 the fake type to satisfy the same derive bounds, such as `Clone`. Derives that
@@ -84,6 +90,8 @@ method visibility would otherwise produce an incomplete mock API. Async methods
 are represented as methods returning `Future` so tests can provide asynchronous
 expectations. Signatures with nested elided references beneath higher-ranked
 lifetime binders are rejected rather than rewritten across the binder boundary.
+Consuming receivers and const methods are also rejected for generated Mockall
+fakes; manual fakes remain available for those method shapes.
 
 Mockall remains optional because manually implemented fakes are the primary
 mechanism and should not add a production dependency. The integration must be

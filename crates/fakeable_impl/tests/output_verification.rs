@@ -101,6 +101,25 @@ fn fakeable_on_impl_generates_expected_code() {
                 )
             }
 
+            pub fn marker<T: Default>(&self) -> u32 {
+                42
+            }
+
+            pub fn lifetime<'a>(&self, value: &'a str) -> &'a str {
+                value
+            }
+
+            pub fn const_marker<const N: usize>(&self) -> usize {
+                N
+            }
+
+            pub fn generic_new<T: Default>() -> Self {
+                Self {
+                    value: String::new(),
+                    other_value: 0,
+                }
+            }
+
             fn private_method_ignored(&self) { }
 
             pub(super) fn pub_private_method_accepted(&self) { }
@@ -256,7 +275,7 @@ fn fakeable_on_trait_impl_generated_expected_code() {
                 Self { something }
             }
 
-            fn output(&self) -> &Self::Output {
+            fn output(&self) -> &Something {
                 &self.something
             }
 
@@ -515,11 +534,40 @@ fn fakeable_rejects_cfg_attr_that_can_disable_struct() {
         struct MyService {
             value: String,
         }
+
     };
 
     let result = fakeable_impl::fakeable_impl(quote! { fake_impl = FakeMyService }, input).to_string();
 
     assert!(result.contains("cfg_attr applying cfg is not supported"));
+}
+
+#[test]
+fn fakeable_rejects_conditional_derive() {
+    let input = quote! {
+        #[cfg_attr(feature = "clone", derive(Clone))]
+        struct MyService {
+            value: String,
+        }
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! { fake_impl = FakeMyService }, input).to_string();
+
+    assert!(result.contains("cfg_attr applying derive is not supported"));
+}
+
+#[test]
+fn fakeable_rejects_repr_attributes() {
+    let input = quote! {
+        #[repr(C)]
+        struct MyService {
+            value: String,
+        }
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! { fake_impl = FakeMyService }, input).to_string();
+
+    assert!(result.contains("repr attributes are not supported"));
 }
 
 #[test]
@@ -603,6 +651,22 @@ fn fakeable_rejects_nested_self_return() {
             pub fn maybe(&self) -> Option<Self> {
                 None
             }
+
+        }
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! {}, input).to_string();
+
+    assert!(result.contains("nested Self return types are not supported"));
+}
+
+#[test]
+fn fakeable_rejects_projected_self_type() {
+    let input = quote! {
+        impl MyService {
+            pub fn get(&self) -> Self::Assoc {
+                todo!()
+            }
         }
     };
 
@@ -635,12 +699,61 @@ fn fakeable_mockall_rejects_higher_ranked_nested_elision() {
             pub fn call(&self, callback: for<'mock> fn(Option<&str>)) {
                 callback(None);
             }
+
         }
     };
 
     let result = fakeable_impl::fakeable_impl(quote! { generate_mockall_fake = true }, input).to_string();
 
     assert!(result.contains("higher-ranked lifetime binders"));
+}
+
+#[test]
+fn fakeable_mockall_rejects_cross_parameter_higher_ranked_shadowing() {
+    let input = quote! {
+        impl MyService {
+            pub fn call(
+                &self,
+                value: Option<&str>,
+                callback: for<'mock> fn(&'mock str),
+            ) {
+                let _ = value;
+                callback("");
+            }
+        }
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! { generate_mockall_fake = true }, input).to_string();
+
+    assert!(result.contains("higher-ranked lifetime binders"));
+}
+
+#[test]
+fn fakeable_mockall_rejects_consuming_receiver() {
+    let input = quote! {
+        impl MyService {
+            pub fn consume(self) {}
+        }
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! { generate_mockall_fake = true }, input).to_string();
+
+    assert!(result.contains("does not support consuming self receivers"));
+}
+
+#[test]
+fn fakeable_mockall_rejects_const_method() {
+    let input = quote! {
+        impl MyService {
+            pub const fn value(&self) -> i32 {
+                42
+            }
+        }
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! { generate_mockall_fake = true }, input).to_string();
+
+    assert!(result.contains("does not support const methods"));
 }
 
 #[test]
