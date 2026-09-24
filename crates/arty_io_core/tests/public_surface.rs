@@ -41,7 +41,7 @@ fn public_options_expose_runtime_facilities() {
     assert!(options.drivers().is_empty());
     assert_eq!(accepted.load(Ordering::Relaxed), 1);
     assert!(format!("{options:?}").contains("DriverOptions"));
-    assert!(format!("{:?}", ProviderOptions::default()).contains("ProviderOptions"));
+    assert!(format!("{:?}", ProviderOptions::new()).contains("ProviderOptions"));
 }
 
 #[test]
