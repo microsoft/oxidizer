@@ -48,9 +48,26 @@ SSSE3 or SSE4.2. Their runtime scope is Linux, not Windows or other operating
 systems. These are ordinary correctness tests, not an additional coverage or
 mutation requirement for no_std-only code.
 
+Mutation testing uses complete native cargo-mutants configurations under
+`.cargo/`. Plain `cargo mutants` discovers `mutants.toml`; the generated Anvil
+recipes select `mutants.windows.toml` or `mutants.linux.toml` when running on
+that host. Cargo-mutants replaces rather than merges configurations selected
+with `--config`, so the shared policy is intentionally duplicated across all
+three files. Selection is by operating system, not architecture, so both Linux
+runner architectures share the Linux configuration.
+
+The host configurations exclude source compiled out on the active platform.
+Without those exclusions, cargo-mutants can mutate an inactive source file,
+produce an unchanged test binary, and report the surviving mutant as a false
+`MISSED` test gap. The Linux policy excludes the Windows-only `fetch_winhttp`
+and `fetch_winhttp_impl` crates wholesale because their platform gates are
+applied across many implementation modules. This temporarily also skips their
+small non-Windows coverage anchors rather than maintaining a brittle list of
+every Windows-only file.
+
 The `http_headers` and `http_headers_simd` crates are excluded from mutation
-testing through `.cargo/mutants.toml`. Their ordinary tests, coverage checks,
-and Miri checks remain enabled.
+testing through all three configurations. Their ordinary tests, coverage
+checks, and Miri checks remain enabled.
 
 Under Miri, `http_headers` samples repetitive generated inputs and byte
 substitutions while retaining fixed regressions and numeric and vector
