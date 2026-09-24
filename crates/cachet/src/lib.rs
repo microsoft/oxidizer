@@ -3,6 +3,7 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(not(test), forbid(unsafe_code))]
 
 //! A composable, multi-tier caching library with stampede protection, background
 //! refresh, and structured telemetry.
