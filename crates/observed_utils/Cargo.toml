@@ -4,7 +4,7 @@
 [package]
 name = "observed_utils"
 description = "Helper types and utilities shared by observed telemetry framework crates."
-version = "0.2.0"
+version = "0.3.0"
 readme = "README.md"
 keywords = ["observed", "telemetry", "helpers", "logging"]
 categories = ["development-tools::debugging"]
@@ -32,17 +32,17 @@ allowed_external_types = [
 all-features = true
 
 [dependencies]
-# oxidizer
-data_privacy = { workspace = true }
-observed = { workspace = true }
 
 # 3rd-party
 arrayvec = { workspace = true }
 const-hex = { workspace = true }
+# oxidizer
+data_privacy = { workspace = true }
+observed = { workspace = true }
 opentelemetry = { workspace = true, features = ["logs"] }
 
 [dev-dependencies]
-tick = { workspace = true }
+tick = { path = "../tick" }
 
 # >>> anvil-managed: anvil-lints
 [lints]

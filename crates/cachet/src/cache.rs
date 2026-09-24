@@ -517,6 +517,7 @@ where
             return Ok(entry);
         }
         let value = f().await;
+        self.telemetry.record_compute_succeeded(self.name);
         self.insert_computed_entry(key, CacheEntry::new(value)).await
     }
 
@@ -597,7 +598,9 @@ where
         if let Some(entry) = self.storage.get(key).await? {
             return Ok(entry);
         }
-        self.insert_computed_entry(key, f().await).await
+        let entry = f().await;
+        self.telemetry.record_compute_succeeded(self.name);
+        self.insert_computed_entry(key, entry).await
     }
 
     /// Retrieves a value from cache, or computes and caches a [`CacheEntry`] if missing.
@@ -675,7 +678,16 @@ where
         if let Some(entry) = self.storage.get(key).await? {
             return Ok(entry);
         }
-        let entry = f().await.map_err(Error::from_source)?;
+        let entry = match f().await {
+            Ok(entry) => {
+                self.telemetry.record_compute_succeeded(self.name);
+                entry
+            }
+            Err(error) => {
+                self.telemetry.record_compute_failed(self.name);
+                return Err(Error::from_source(error));
+            }
+        };
         self.insert_computed_entry(key, entry).await
     }
 
@@ -757,7 +769,16 @@ where
         if let Some(entry) = self.storage.get(key).await? {
             return Ok(entry);
         }
-        let value = f().await.map_err(Error::from_source)?;
+        let value = match f().await {
+            Ok(value) => {
+                self.telemetry.record_compute_succeeded(self.name);
+                value
+            }
+            Err(error) => {
+                self.telemetry.record_compute_failed(self.name);
+                return Err(Error::from_source(error));
+            }
+        };
         self.insert_computed_entry(key, CacheEntry::new(value)).await
     }
 
@@ -841,9 +862,12 @@ where
         if let Some(entry) = self.storage.get(key).await? {
             return Ok(Some(entry));
         }
-        match f().await {
-            Some(value) => self.insert_computed_entry(key, CacheEntry::new(value)).await.map(Some),
-            None => Ok(None),
+        if let Some(value) = f().await {
+            self.telemetry.record_compute_succeeded(self.name);
+            self.insert_computed_entry(key, CacheEntry::new(value)).await.map(Some)
+        } else {
+            self.telemetry.record_compute_returned_none(self.name);
+            Ok(None)
         }
     }
 }

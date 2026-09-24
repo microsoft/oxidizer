@@ -49,13 +49,24 @@ anvil-msrv-test-validate-prereqs:
     if ($resolverExit -ne 0) { exit $resolverExit }
     $toolchain = $toolchainOutput.Trim()
     if ([string]::IsNullOrWhiteSpace($toolchain)) { exit 0 }
-    & cargo "+$toolchain" --version
-    if ($LASTEXITCODE -ne 0) {
+    $previousAutoInstall = $env:RUSTUP_AUTO_INSTALL
+    try {
+        $env:RUSTUP_AUTO_INSTALL = '0'
+        & cargo "+$toolchain" --version
+        $cargoExit = $LASTEXITCODE
+    } finally {
+        if ($null -eq $previousAutoInstall) {
+            Remove-Item Env:RUSTUP_AUTO_INSTALL -ErrorAction SilentlyContinue
+        } else {
+            $env:RUSTUP_AUTO_INSTALL = $previousAutoInstall
+        }
+    }
+    if ($cargoExit -ne 0) {
         $hint = if ($env:ANVIL_MSRV_TOOLCHAIN) {
             'provision ANVIL_MSRV_TOOLCHAIN or unset it to let Anvil install the declared public MSRV'
         } else {
             'run: just anvil-msrv-test-setup'
         }
-        Write-Error "anvil: MSRV toolchain '$toolchain' is unavailable; $hint"
-        exit $LASTEXITCODE
+        [Console]::Error.WriteLine("anvil: MSRV toolchain '$toolchain' is unavailable; $hint")
+        exit $cargoExit
     }

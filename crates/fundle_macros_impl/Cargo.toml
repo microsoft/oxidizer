@@ -4,7 +4,7 @@
 [package]
 name = "fundle_macros_impl"
 description = "Macros for the fundle crate."
-version = "0.3.5"
+version = "0.4.0"
 readme = "README.md"
 keywords = ["oxidizer", "di", "proc-macro"]
 categories = ["rust-patterns"]
@@ -35,7 +35,7 @@ syn = { workspace = true, features = ["derive", "parsing", "proc-macro", "full",
 insta = { workspace = true }
 mutants = { workspace = true }
 syn = { workspace = true, features = ["derive", "parsing", "proc-macro", "full", "extra-traits", "printing", "clone-impls"] }
-testing_aids = { workspace = true }
+testing_aids = { path = "../testing_aids" }
 
 # >>> anvil-managed: anvil-lints
 [lints]

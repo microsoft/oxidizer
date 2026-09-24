@@ -1,0 +1,105 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "metabench-macro-compile-cases"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+renamed_metabench = { package = "metabench", path = "../../../crates/metabench" }
+
+[[bin]]
+name = "benchmark_contracts"
+path = "../../../crates/metabench_macros/tests/ui/pass/benchmark_contracts.rs"
+
+[[bin]]
+name = "generated_name_collisions"
+path = "../../../crates/metabench_macros/tests/ui/pass/generated_name_collisions.rs"
+
+[[bin]]
+name = "main_contracts"
+path = "../../../crates/metabench_macros/tests/ui/pass/main_contracts.rs"
+
+[[bin]]
+name = "async_function"
+path = "../../../crates/metabench_macros/tests/ui/fail/async_function.rs"
+
+[[bin]]
+name = "benchmark_duplicate_field"
+path = "../../../crates/metabench_macros/tests/ui/fail/benchmark_duplicate_field.rs"
+
+[[bin]]
+name = "benchmark_duplicate_group_name"
+path = "../../../crates/metabench_macros/tests/ui/fail/benchmark_duplicate_group_name.rs"
+
+[[bin]]
+name = "benchmark_duplicate_native_option"
+path = "../../../crates/metabench_macros/tests/ui/fail/benchmark_duplicate_native_option.rs"
+
+[[bin]]
+name = "benchmark_malformed_identity"
+path = "../../../crates/metabench_macros/tests/ui/fail/benchmark_malformed_identity.rs"
+
+[[bin]]
+name = "benchmark_malformed_name"
+path = "../../../crates/metabench_macros/tests/ui/fail/benchmark_malformed_name.rs"
+
+[[bin]]
+name = "benchmark_missing_field"
+path = "../../../crates/metabench_macros/tests/ui/fail/benchmark_missing_field.rs"
+
+[[bin]]
+name = "benchmark_mixed_forms"
+path = "../../../crates/metabench_macros/tests/ui/fail/benchmark_mixed_forms.rs"
+
+[[bin]]
+name = "benchmark_unsupported_field"
+path = "../../../crates/metabench_macros/tests/ui/fail/benchmark_unsupported_field.rs"
+
+[[bin]]
+name = "const_generic_function"
+path = "../../../crates/metabench_macros/tests/ui/fail/const_generic_function.rs"
+
+[[bin]]
+name = "receiver"
+path = "../../../crates/metabench_macros/tests/ui/fail/receiver.rs"
+
+[[bin]]
+name = "unsafe_function"
+path = "../../../crates/metabench_macros/tests/ui/fail/unsafe_function.rs"
+
+[[bin]]
+name = "variadic_function"
+path = "../../../crates/metabench_macros/tests/ui/fail/variadic_function.rs"
+
+[[bin]]
+name = "target_duplicate_benchmark"
+path = "../../../crates/metabench_macros/tests/ui/fail/target_duplicate_benchmark.rs"
+
+[[bin]]
+name = "target_duplicate_group"
+path = "../../../crates/metabench_macros/tests/ui/fail/target_duplicate_group.rs"
+
+[[bin]]
+name = "target_duplicate_option"
+path = "../../../crates/metabench_macros/tests/ui/fail/target_duplicate_option.rs"
+
+[[bin]]
+name = "target_malformed_field"
+path = "../../../crates/metabench_macros/tests/ui/fail/target_malformed_field.rs"
+
+[[bin]]
+name = "target_missing_benchmarks"
+path = "../../../crates/metabench_macros/tests/ui/fail/target_missing_benchmarks.rs"
+
+[[bin]]
+name = "target_mixed_forms"
+path = "../../../crates/metabench_macros/tests/ui/fail/target_mixed_forms.rs"
+
+[[bin]]
+name = "target_unsupported_option"
+path = "../../../crates/metabench_macros/tests/ui/fail/target_unsupported_option.rs"

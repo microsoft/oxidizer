@@ -86,9 +86,10 @@ mod tests {
     fn wraps_inner() {
         let provider = GlobalPool::new();
         let memory = OpaqueMemory::new(provider);
+        let cloned = memory.clone();
 
-        let builder = memory.reserve(1024);
-        assert!(builder.capacity() >= 1024);
+        assert!(memory.reserve(1024).capacity() >= 1024);
+        assert!(cloned.reserve(1024).capacity() >= 1024);
     }
 
     #[test]

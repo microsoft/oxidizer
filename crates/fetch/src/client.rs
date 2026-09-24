@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 use std::future::ready;
-use std::sync::Arc;
 use std::time::Duration;
 
 use bytesbuf::BytesBuf;
@@ -14,8 +13,9 @@ use http_extensions::routing::{BaseUriConflict, Router, RouterContext};
 use http_extensions::timeout::ResponseTimeout;
 use http_extensions::{HttpRequestBuilder, HttpRequestBuilderExt};
 use layered::Service;
+use performables::arc::{Arc as PerformableArc, PerThread};
 use templated_uri::{BaseUri, Uri};
-use thread_aware::{PerThread, ThreadAware};
+use thread_aware::ThreadAware;
 use tick::{Clock, FutureExt as TimeoutExt};
 
 use crate::pipeline::Pipeline;
@@ -74,7 +74,7 @@ impl HttpClient {
     ///
     /// ```
     /// # use http::header::USER_AGENT;
-    /// use fetch::HttpClient;
+    /// use fetch::{HttpClient, Uri};
     /// # async fn example(client: &HttpClient) -> Result<(), Box<dyn std::error::Error>> {
     /// // Using strings (convenient but with parsing overhead)
     /// let response = client
@@ -85,7 +85,7 @@ impl HttpClient {
     /// // Using pre-parsed values (more efficient) and additional customization
     /// // before fetching the response.
     /// let method = http::Method::GET;
-    /// let uri = "https://example.com/api".parse::<http::Uri>()?;
+    /// let uri = "https://example.com/api".parse::<Uri>()?;
     /// let response = client
     ///     .request(method, uri)
     ///     .header(USER_AGENT, "MyApp/1.0")
@@ -372,8 +372,8 @@ impl Service<HttpRequest> for HttpClient {
 
 #[derive(ThreadAware, Clone, Debug)]
 pub(super) enum HttpClientPipeline {
-    Shared(#[thread_aware(skip)] Arc<Pipeline>),
-    Isolated(thread_aware::Arc<Pipeline, PerThread>),
+    Shared(#[thread_aware(skip)] PerformableArc<Pipeline>),
+    Isolated(PerformableArc<Pipeline, PerThread>),
 }
 
 #[cfg(test)]

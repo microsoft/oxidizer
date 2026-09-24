@@ -89,6 +89,27 @@ version = "=0.39.4"
 name = "benchmarking"
 version = "=0.1.0"
 
+# all_the_time uses cpu-time to measure process CPU consumption. Version 1.0.0
+# is the current release and has no reported advisory or soundness failure; its
+# score is below the policy threshold because the finished crate is inactive.
+[[allow_list]]
+name = "cpu-time"
+version = "=1.0.0"
+
+# Criterion uses oorandom for deterministic benchmark sampling. Version 11.1.5
+# is the current release and has no reported advisory or soundness failure; its
+# score is below the policy threshold because the stable crate is inactive.
+[[allow_list]]
+name = "oorandom"
+version = "=11.1.5"
+
+# openssl-macros is an implementation detail of the current openssl/native-tls
+# stack. It has no reported advisory or soundness failure; its low score comes
+# from remaining pre-1.0 and sharing the parent crate's release cadence.
+[[allow_list]]
+name = "openssl-macros"
+version = "=0.1.1"
+
 # ----------------------------------------------------------------------------
 # Expressions
 #

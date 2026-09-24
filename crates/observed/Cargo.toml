@@ -4,7 +4,7 @@
 [package]
 name = "observed"
 description = "Structured telemetry events with enrichment, redaction, and per-field routing."
-version = "0.25.0"
+version = "0.26.0"
 readme = "README.md"
 keywords = ["observed", "telemetry", "tracing", "logging", "metrics"]
 categories = ["development-tools::debugging"]
@@ -32,6 +32,8 @@ allowed_external_types = [
 all-features = true
 
 [features]
+default = []
+seismograph = ["performables/seismograph", "tick/seismograph"]
 test-util = []
 
 [dependencies]
@@ -39,6 +41,7 @@ test-util = []
 data_privacy = { workspace = true }
 observed_macros = { workspace = true }
 ohno = { workspace = true }
+performables = { workspace = true }
 
 # 3rd-party
 pin-project = { workspace = true }
@@ -51,13 +54,13 @@ tick = { workspace = true }
 all_the_time = { workspace = true }
 alloc_tracker = { workspace = true }
 criterion = { workspace = true }
-ohno = { workspace = true, features = ["test-util"] }
+ohno = { path = "../ohno", features = ["test-util"] }
 opentelemetry = { workspace = true, features = ["logs"] }
 opentelemetry-stdout = { workspace = true, features = ["logs", "metrics"] }
 opentelemetry_sdk = { workspace = true, features = ["logs", "metrics", "testing"] }
 static_assertions = { workspace = true }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
-tick = { workspace = true, features = ["test-util", "tokio"] }
+tick = { path = "../tick", features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
 
 [[bench]]

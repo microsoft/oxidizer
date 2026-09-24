@@ -1,0 +1,10 @@
+{
+  "baselines":[null,null],"benchmark_exe":"bench","benchmark_file":"bench.rs",
+  "function_name":"metabench_adapter","id":"case_9","kind":"LibraryBenchmark",
+  "module_path":"bench","package_dir":".","project_root":".","version":"6",
+  "profiles":[{"flamegraphs":[],"log_paths":[],"out_paths":[],"tool":"Callgrind",
+    "summaries":{"parts":[],"total":{"regressions":[],"summary":{"Callgrind":{
+      "Ir":{"metrics":{"Left":{"Int":1}}},"L1hits":{"metrics":{"Left":{"Int":1}}},
+      "RamHits":{"metrics":{"Left":{"Int":1}}}
+    }}}}}]
+}

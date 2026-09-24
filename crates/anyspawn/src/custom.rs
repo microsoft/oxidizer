@@ -4,9 +4,10 @@
 use std::fmt::Debug;
 use std::pin::Pin;
 
-use futures_channel::oneshot;
+use performables::arc::{Arc, PerThread};
+use performables::sync::channel::{OneshotReceiver, OneshotSender, oneshot};
 use thread_aware::closure::ThreadAwareAsyncFnOnce;
-use thread_aware::{PerThread, Thread, ThreadAware};
+use thread_aware::{Thread, ThreadAware};
 
 /// Trait for implementing custom task spawners.
 ///
@@ -57,7 +58,7 @@ pub type BoxedBlockingTask = Box<dyn FnOnce() + Send + 'static>;
 struct SpawnAnywhereTask<T, D, F> {
     data: D,
     f: fn(D) -> F,
-    tx: oneshot::Sender<T>,
+    tx: OneshotSender<T>,
 }
 
 impl<T: Send, D: ThreadAware, F> ThreadAware for SpawnAnywhereTask<T, D, F> {
@@ -83,42 +84,42 @@ where
 /// Internal wrapper for custom spawn functions.
 #[derive(Clone, ThreadAware)]
 pub(crate) struct CustomSpawner {
-    spawn: thread_aware::Arc<dyn SpawnCustom, PerThread>,
+    spawn: Arc<dyn SpawnCustom, PerThread>,
     name: &'static str,
 }
 
 impl CustomSpawner {
     pub(crate) fn new<T: SpawnCustom + Clone>(name: &'static str, t: T) -> Self {
-        let spawn = thread_aware::Arc::with_clone_fn(t, |x| Box::new(x.clone()) as Box<dyn SpawnCustom>);
+        let spawn = Arc::with_clone_fn(t, |x| Box::new(x.clone()) as Box<dyn SpawnCustom>);
         Self { spawn, name }
     }
 
-    pub(crate) fn spawn<T: Send + 'static>(&self, work: impl Future<Output = T> + Send + 'static) -> oneshot::Receiver<T> {
-        let (tx, rx) = oneshot::channel();
+    pub(crate) fn spawn<T: Send + 'static>(&self, work: impl Future<Output = T> + Send + 'static) -> OneshotReceiver<T> {
+        let (tx, rx) = oneshot();
         self.spawn.spawn(Box::pin(async move {
             let _ = tx.send(work.await);
         }));
         rx
     }
 
-    pub(crate) fn spawn_anywhere<T, D, F>(&self, data: D, f: fn(D) -> F) -> oneshot::Receiver<T>
+    pub(crate) fn spawn_anywhere<T, D, F>(&self, data: D, f: fn(D) -> F) -> OneshotReceiver<T>
     where
         T: Send + 'static,
         D: ThreadAware + 'static,
         F: Future<Output = T> + Send + 'static,
     {
-        let (tx, rx) = oneshot::channel();
+        let (tx, rx) = oneshot();
         let task = Box::new(SpawnAnywhereTask { data, f, tx });
         self.spawn.spawn_anywhere(task);
         rx
     }
 
-    pub(crate) fn spawn_blocking<T, F>(&self, f: F) -> oneshot::Receiver<T>
+    pub(crate) fn spawn_blocking<T, F>(&self, f: F) -> OneshotReceiver<T>
     where
         T: Send + 'static,
         F: FnOnce() -> T + Send + 'static,
     {
-        let (tx, rx) = oneshot::channel();
+        let (tx, rx) = oneshot();
         self.spawn.spawn_blocking(Box::new(move || {
             let _ = tx.send(f());
         }));

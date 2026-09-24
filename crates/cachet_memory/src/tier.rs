@@ -17,7 +17,8 @@ use cachet_tier::{CacheEntry, CacheTier, Error, InsertOutcome, SizeError};
 use foldhash::fast::RandomState;
 use moka::Expiry;
 use moka::future::Cache;
-use thread_aware::{Arc, PerProcess, ThreadAware};
+use performables::arc::{Arc, PerProcess};
+use thread_aware::ThreadAware;
 
 use crate::builder::InMemoryCacheBuilder;
 

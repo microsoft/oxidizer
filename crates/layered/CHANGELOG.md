@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.7] - 2026-09-10
+
+### Bug Fixes
+
+- silence newly-firing clippy lints from Rust 1.98 ([#700](https://github.com/microsoft/oxidizer/pull/700))
+- declare optional dependencies as dev-dependencies ([#658](https://github.com/microsoft/oxidizer/pull/658))
+
 ## [0.3.6] - 2026-07-24
 
 - ✨ Features

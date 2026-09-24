@@ -185,7 +185,8 @@ _anvil-resolve-stable action="install":
         'install',
         'validate-workspace-msrv',
         'msrv',
-        'install-msrv'
+        'install-msrv',
+        'root-msrv'
     )
     if ($action -notin $validActions) {
         Write-Error "_anvil-resolve-stable: unknown action '$action'"
@@ -340,6 +341,19 @@ _anvil-resolve-stable action="install":
         exit 0
     }
 
+    # A version or `none`, never empty: the caller hashes this into the image
+    # tag, where an absent answer and an unasked question must not agree.
+    #
+    # The declared value, not `Get-MsrvSelection`'s. That mapping names a
+    # toolchain provisioned on the host; the image installs the declared version
+    # itself, so hashing the mapping would name a toolchain that need not exist
+    # there.
+    if ($action -eq 'root-msrv') {
+        $declared = Get-RootMsrv -AllowMissing
+        if ([string]::IsNullOrWhiteSpace($declared)) { 'none' } else { $declared }
+        exit 0
+    }
+
     if ($action -in @('msrv', 'install-msrv')) {
         $msrvSelection = Get-MsrvSelection
         if ($null -eq $msrvSelection) {
@@ -486,7 +500,9 @@ _check-tool name version:
     try {
         # Validation must not let the rustup proxy provision a missing selection.
         $env:RUSTUP_AUTO_INSTALL = '0'
-        foreach ($line in (& cargo {{_anvil_stable_toolchain_args}} install --list 2>$null)) {
+        $listOutput = @(& cargo {{_anvil_stable_toolchain_args}} install --list 2>&1)
+        $cargoExit = $LASTEXITCODE
+        foreach ($line in $listOutput) {
             if ($line -match $pattern) { $installed = $Matches[1]; break }
         }
     } finally {
@@ -495,6 +511,11 @@ _check-tool name version:
         } else {
             $env:RUSTUP_AUTO_INSTALL = $previousAutoInstall
         }
+    }
+    if ($cargoExit -ne 0) {
+        $diagnostic = [string]::Join([Environment]::NewLine, [string[]] $listOutput).Trim()
+        [Console]::Error.WriteLine("anvil: selected stable Cargo is unavailable while checking '$name' (exit $cargoExit). Run: just anvil-toolchain-stable-install`n$diagnostic")
+        exit $cargoExit
     }
     if (-not $installed) {
         Write-Error "anvil: required tool '$name' not found. Install: cargo install --locked --version =$version $name"
@@ -668,43 +689,80 @@ _check-component toolchain component:
         'miri'    { 'miri' }
         default   { $null }
     }
-    if ($null -ne $subcommand) {
+    $previousAutoInstall = $env:RUSTUP_AUTO_INSTALL
+    try {
+        $env:RUSTUP_AUTO_INSTALL = '0'
         if ($toolchain -eq 'default') {
             if ($null -ne $selectedStableToolchain) {
-                & cargo $stableArgs[0] $subcommand --version *> $null
+                & rustc $stableArgs[0] --version *> $null
             } else {
-                & cargo $subcommand --version *> $null
+                & rustc --version *> $null
             }
         } else {
-            & cargo "+$toolchain" $subcommand --version *> $null
+            & rustc "+$toolchain" --version *> $null
         }
-        $present = ($LASTEXITCODE -eq 0)
-    } else {
-        $sysroot = if ($toolchain -eq 'default') {
-            if ($null -ne $selectedStableToolchain) {
-                & rustc $stableArgs[0] --print sysroot 2>$null
+        $toolchainAvailable = ($LASTEXITCODE -eq 0)
+
+        if (-not $toolchainAvailable) {
+            $present = $false
+        } elseif ($null -ne $subcommand) {
+            if ($toolchain -eq 'default') {
+                if ($null -ne $selectedStableToolchain) {
+                    & cargo $stableArgs[0] $subcommand --version *> $null
+                } else {
+                    & cargo $subcommand --version *> $null
+                }
             } else {
-                & rustc --print sysroot 2>$null
+                & cargo "+$toolchain" $subcommand --version *> $null
             }
+            $present = ($LASTEXITCODE -eq 0)
         } else {
-            & rustc "+$toolchain" --print sysroot 2>$null
+            $sysroot = if ($toolchain -eq 'default') {
+                if ($null -ne $selectedStableToolchain) {
+                    & rustc $stableArgs[0] --print sysroot 2>$null
+                } else {
+                    & rustc --print sysroot 2>$null
+                }
+            } else {
+                & rustc "+$toolchain" --print sysroot 2>$null
+            }
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($sysroot)) {
+                $toolchainAvailable = $false
+                $present = $false
+            } else {
+                $sysroot = $sysroot.Trim()
+                $present = switch ($component) {
+                    # rust-src lands the standard-library sources under the sysroot.
+                    'rust-src'   { Test-Path (Join-Path $sysroot 'lib/rustlib/src/rust/library') }
+                    # llvm-tools ships llvm-profdata/llvm-cov under the per-target
+                    # bin directory. Probe with a shallow glob over
+                    # lib/rustlib/<target>/bin rather than a recursive scan of the
+                    # whole rustlib tree (which also holds rust-src's std sources),
+                    # keeping validate-prereqs fast on large sysroots.
+                    'llvm-tools' { @(Get-ChildItem -Path (Join-Path $sysroot 'lib/rustlib/*/bin/llvm-profdata*') -ErrorAction SilentlyContinue).Count -gt 0 }
+                    default      { $false }
+                }
+            }
         }
-        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($sysroot)) {
-            Write-Error "anvil: toolchain '$toolchain' not installed. Run: rustup toolchain install $toolchain"
-            exit 1
+    } finally {
+        if ($null -eq $previousAutoInstall) {
+            Remove-Item Env:RUSTUP_AUTO_INSTALL -ErrorAction SilentlyContinue
+        } else {
+            $env:RUSTUP_AUTO_INSTALL = $previousAutoInstall
         }
-        $sysroot = $sysroot.Trim()
-        $present = switch ($component) {
-            # rust-src lands the standard-library sources under the sysroot.
-            'rust-src'   { Test-Path (Join-Path $sysroot 'lib/rustlib/src/rust/library') }
-            # llvm-tools ships llvm-profdata/llvm-cov under the per-target
-            # bin directory. Probe with a shallow glob over
-            # lib/rustlib/<target>/bin rather than a recursive scan of the
-            # whole rustlib tree (which also holds rust-src's std sources),
-            # keeping validate-prereqs fast on large sysroots.
-            'llvm-tools' { @(Get-ChildItem -Path (Join-Path $sysroot 'lib/rustlib/*/bin/llvm-profdata*') -ErrorAction SilentlyContinue).Count -gt 0 }
-            default      { $false }
+    }
+    if (-not $toolchainAvailable) {
+        if ($toolchain -eq 'default') {
+            $selected = if ($null -ne $selectedStableToolchain) {
+                "'$selectedStableToolchain'"
+            } else {
+                '(from RUSTUP_TOOLCHAIN or the repository toolchain file)'
+            }
+            [Console]::Error.WriteLine("anvil: selected stable toolchain $selected is unavailable. Run: just anvil-toolchain-stable-install")
+        } else {
+            [Console]::Error.WriteLine("anvil: toolchain '$toolchain' not installed. Run: rustup toolchain install $toolchain")
         }
+        exit 1
     }
     if (-not $present) {
         $cmd = if ($null -ne $selectedStableToolchain) {
@@ -714,7 +772,7 @@ _check-component toolchain component:
         } else {
             "rustup component add --toolchain $toolchain $component"
         }
-        Write-Error "anvil: component '$component' not installed on toolchain '$toolchain'. Run: $cmd"
+        [Console]::Error.WriteLine("anvil: component '$component' not installed on toolchain '$toolchain'. Run: $cmd")
         exit 1
     }
 

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Callgrind benchmarks for `thread_aware::Arc<T, S>::relocate`.
+//! Callgrind benchmarks for `performables::arc::Arc<T, S>::relocate`.
 //!
 //! Paired with `thread_aware_relocate.rs`, which covers the same operations
 //! under wall-clock measurement. Only the uncontended `hit_path` and `miss_path`
@@ -42,7 +42,8 @@ mod linux {
     use std::hint::black_box;
 
     use gungraun::{library_benchmark, library_benchmark_group};
-    use thread_aware::{Arc, PerThread, Thread, ThreadAware, ThreadBuilder};
+    use performables::arc::{Arc, PerThread};
+    use thread_aware::{Thread, ThreadAware, ThreadBuilder};
     use thread_aware_benchmarking::{Payload, Tree};
 
     fn threads(count: usize) -> Vec<Thread> {
@@ -60,7 +61,7 @@ mod linux {
     // Destination thread already holds a value.
     fn materialized() -> (Arc<Payload, PerThread>, Thread, Thread) {
         let threads = threads(2);
-        let mut arc = Arc::<Payload, PerThread>::new(Payload::new);
+        let mut arc = Arc::<Payload, PerThread>::new_with(Payload::new);
 
         for thread in &threads {
             let mut probe = arc.clone();
@@ -84,7 +85,7 @@ mod linux {
     // and records the carried value under the empty source key.
     fn empty() -> (Arc<Payload, PerThread>, Thread, Thread) {
         let threads = threads(3);
-        let arc = Arc::<Payload, PerThread>::new(Payload::new);
+        let arc = Arc::<Payload, PerThread>::new_with(Payload::new);
 
         let mut seed = arc.clone();
         seed.relocate(None, &threads[0]);

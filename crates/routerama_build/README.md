@@ -6,7 +6,7 @@
 [![crate.io](https://img.shields.io/crates/v/routerama_build.svg)](https://crates.io/crates/routerama_build)
 [![docs.rs](https://docs.rs/routerama_build/badge.svg)](https://docs.rs/routerama_build)
 [![MSRV](https://img.shields.io/crates/msrv/routerama_build)](https://crates.io/crates/routerama_build)
-[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml/badge.svg)](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/microsoft/oxidizer/blob/main/LICENSE)
 <a href="https://github.com/microsoft/oxidizer"><img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
@@ -49,8 +49,8 @@ assert!(generated.contains("GetBook"));
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/routerama_build">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbhew8pv6r7HAblYEJpTRkXpAbADOjUkxD6robydXdnodrq0xhZIGCb3JvdXRlcmFtYV9idWlsZGUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbhew8pv6r7HAblYEJpTRkXpAbADOjUkxD6robydXdnodrq0xhZIGCb3JvdXRlcmFtYV9idWlsZGUwLjEuMQ
  [__link0]: https://docs.rs/routerama
- [__link1]: https://docs.rs/routerama_build/0.1.0/routerama_build/?search=Route
+ [__link1]: https://docs.rs/routerama_build/0.1.1/routerama_build/?search=Route
  [__link2]: https://docs.rs/routerama_build/latest/routerama_build/?search=Generator
  [__link3]: https://docs.rs/proc-macro2/latest/proc_macro2/struct.TokenStream.html

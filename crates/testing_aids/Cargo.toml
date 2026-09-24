@@ -16,8 +16,8 @@ homepage = { workspace = true }
 include = { workspace = true }
 
 [package.metadata.cargo_check_external_types]
-# Internal crate (publish = false; listed in automation::INTERNAL_CRATES). Not a
-# public-API surface, so allow all external types — this opts the crate into the
+# Internal crate (publish = false). It has no public compatibility contract, so
+# allow all external types — this opts the crate into the
 # external-types check permissively rather than denying its internal use of
 # opentelemetry/tracing/etc.
 allowed_external_types = ["*"]

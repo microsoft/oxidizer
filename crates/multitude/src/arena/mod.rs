@@ -461,7 +461,7 @@ impl<A: Allocator + Clone> Arena<A> {
         // and no owning pointers to detach.
         let _ = self.current.borrow().rewind();
         self.current_has_reference.set(false);
-        self.record_reset();
+        Self::record_reset(self);
     }
 
     #[cold]
@@ -486,18 +486,20 @@ impl<A: Allocator + Clone> Arena<A> {
             unsafe { displaced.release_with_refund(refund) };
         }
         self.current_has_reference.set(false);
-        self.record_reset();
+        Self::record_reset(self);
     }
 
+    #[cfg(feature = "stats")]
     #[inline]
-    fn record_reset(&self) {
-        #[cfg(feature = "stats")]
-        {
-            self.provider.reset_generation_stats();
-            self.relocations_since_reset.set(0);
-            self.resets.set(self.resets.get() + 1);
-        }
+    fn record_reset(arena: &Self) {
+        arena.provider.reset_generation_stats();
+        arena.relocations_since_reset.set(0);
+        arena.resets.set(arena.resets.get() + 1);
     }
+
+    #[cfg(not(feature = "stats"))]
+    #[inline]
+    const fn record_reset(_: &Self) {}
 
     /// Returns a [`ZerocopyView`](crate::zerocopy::ZerocopyView)
     /// providing safe zero-initialized allocation for types implementing

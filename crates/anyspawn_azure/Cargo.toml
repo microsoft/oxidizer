@@ -4,7 +4,7 @@
 [package]
 name = "anyspawn_azure"
 description = "Azure SDK async runtime and process executor backed by an anyspawn spawner and a tick clock."
-version = "0.3.0"
+version = "0.4.0"
 readme = "README.md"
 keywords = ["oxidizer", "azure", "async", "runtime", "spawner"]
 categories = ["asynchronous"]
@@ -40,22 +40,22 @@ azure-identity = ["dep:azure_identity", "dep:async-trait"]
 [dependencies]
 # internal
 anyspawn = { workspace = true }
-tick = { workspace = true }
 
 # external
 async-trait = { workspace = true, optional = true }
 azure_core = { workspace = true }
 azure_identity = { workspace = true, optional = true }
 futures = { workspace = true, features = ["std"] }
+tick = { workspace = true }
 
 [dev-dependencies]
 # internal
 anyspawn = { path = "../anyspawn", features = ["tokio"] }
-tick = { path = "../tick", features = ["tokio"] }
 
 # external
 async-trait = { workspace = true }
 azure_identity = { workspace = true }
+tick = { path = "../tick", features = ["tokio"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 
 # >>> anvil-managed: anvil-lints

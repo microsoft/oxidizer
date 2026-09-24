@@ -21,10 +21,11 @@ concurrency:
 jobs:
   validation:
     name: PR Job
-    if: github.event_name == 'pull_request'
     uses: ./.github/workflows/anvil-pr-impl.yml
-    # A called workflow cannot elevate beyond its caller. Grant only the
-    # capabilities required by same-repository pull-request presentation.
+    # A called workflow cannot elevate beyond its caller. The same caller handles
+    # pull requests and merge groups so GitHub emits only one PR Job check.
+    # Write operations remain guarded to same-repository pull_request events in
+    # the reusable workflow; merge-group runs receive but do not use these scopes.
     permissions:
       contents: read
       # Publish supplemental failure commit statuses so the PR checks rollup identifies the
@@ -35,19 +36,6 @@ jobs:
       # future advisory checks that emit target/anvil/comments/*).
       pull-requests: write
     with:
-      base_ref: ${{ github.event.pull_request.base.sha }}
-      publish_commit_statuses: true
-    secrets: inherit
-
-  merge-validation:
-    # Keep the called-job check contexts identical to pull-request runs so one
-    # branch-protection configuration works for PRs and the merge queue.
-    name: PR Job
-    if: github.event_name == 'merge_group'
-    uses: ./.github/workflows/anvil-pr-impl.yml
-    # Synthetic merge-group code needs validation but no presentation writes.
-    permissions:
-      contents: read
-    with:
-      base_ref: ${{ github.event.merge_group.base_sha }}
+      base_ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+      publish_commit_statuses: ${{ github.event_name == 'pull_request' }}
     secrets: inherit

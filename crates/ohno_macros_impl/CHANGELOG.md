@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.2] - 2026-09-10
+
+### Bug Fixes
+
+- correct the syntax context of a rewritten unit struct and the `#[automatically_derived]` placements ([#723](https://github.com/microsoft/oxidizer/pull/723))
+
+### Documentation
+
+- reconcile the design with the two-crate split ([#698](https://github.com/microsoft/oxidizer/pull/698))
+
 ## [0.5.1] - 2026-08-27
 
 - 🔧 Maintenance

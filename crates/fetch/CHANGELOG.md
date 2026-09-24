@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.17.1] - 2026-09-16
+
+- 🔧 Maintenance
+
+  - Now requires `0.1.1` of `compressors`
+  - Now requires `0.8.1` of `fetch_hyper`
+  - Now requires `0.1.1` of `http_compression`
+  - Now requires `0.11.1` of `http_extensions`
+  - Now requires `0.9.1` of `seatbelt_http`
+
+- ✨ Features
+
+  - add HTTP response decompression ([#746](https://github.com/microsoft/oxidizer/pull/746))
+
+## [0.17.0] - 2026-09-10
+
+### Breaking
+
+- adopt thread_aware_core across workspace ([#721](https://github.com/microsoft/oxidizer/pull/721))
+- Now requires `0.9.0` of `anyspawn`
+- Now requires `0.10.0` of `bytesbuf`
+- Now requires `0.13.0` of `data_privacy`
+- Now requires `0.8.0` of `fetch_hyper`
+- Now requires `0.4.1` of `fetch_tls`
+- Now requires `0.4.0` of `fundle`
+- Now requires `0.11.0` of `http_extensions`
+- Now requires `0.3.7` of `layered`
+- Now requires `0.5.2` of `ohno`
+- Now requires `0.9.0` of `seatbelt`
+- Now requires `0.9.0` of `seatbelt_http`
+- Now requires `0.6.0` of `templated_uri`
+- Now requires `0.12.0` of `thread_aware`
+- Now requires `0.7.0` of `tick`
+
 ## [0.16.1] - 2026-08-28
 
 - 🔧 Maintenance

@@ -9,8 +9,8 @@
 //!
 //! # Crate features
 //!
-//! * The **`std` Cargo feature** *(enabled by default)* enables the strategy-partitioned `Arc` and
-//!   the `ThreadBuilder` runtime integration API.
+//! * The **`std` Cargo feature** *(enabled by default)* enables the `ThreadBuilder` runtime
+//!   integration API.
 //! * **`derive`** *(default)* re-exports the `#[derive(ThreadAware)]` macro.
 //! * Disable default features for `#![no_std]` environments. The core thread vocabulary,
 //!   closures, and wrappers remain available.
@@ -20,7 +20,7 @@
 //!
 //! This crate re-exports every type from [`thread_aware_core`], which is the authoritative stable
 //! relocation contract. It adds derive support, closures, wrappers, runtime thread construction,
-//! and strategy-partitioned shared state.
+//! and runtime thread construction.
 //!
 //! # Theory of Operation
 //!
@@ -36,21 +36,12 @@
 //! and cross-NUMA memory access. Like `Clone`, the relocation itself should be mostly transparent and predictable
 //! to users.
 //!
-//! ## Implementing [`ThreadAware`], and `Arc<T, PerThread>`
+//! ## Implementing [`ThreadAware`]
 //!
 //! In most cases [`ThreadAware`] should be implemented via the provided derive macro.
 //! As thread-awareness of a type usually involves letting all contained fields know of an ongoing
 //! relocation, the derive macro does just that. A default impl is provided for many `std` types,
 //! so the macro should 'just work' on most compounds of built-ins.
-//!
-//! External crates might often not implement [`ThreadAware`]. In many of these cases using our
-//! [`thread_aware::Arc`](Arc) offers a convenient solution when the `std` feature is enabled: it
-//! combines an upstream [`alloc::sync::Arc`] with a relocation [`Strategy`](storage::Strategy), and
-//! implements [`ThreadAware`] for it. For
-//! example, while an `Arc<Foo, PerProcess>` effectively acts as vanilla `Arc`, an
-//! `Arc<Foo, PerThread>` ensures a separate `Foo` is available for every destination thread it is
-//! relocated to.
-//!
 //!
 //! ## Relation to [`Send`]
 //!
@@ -100,9 +91,9 @@
 //!
 //! # Features
 //!
-//! * The **`std` Cargo feature** *(enabled by default)* enables the strategy-partitioned `Arc` and
-//!   the `ThreadBuilder` runtime integration API. Disable it for `#![no_std]` environments; the
-//!   crate then requires `alloc` and pointer-width atomics.
+//! * The **`std` Cargo feature** *(enabled by default)* enables the `ThreadBuilder` runtime
+//!   integration API. Disable it for `#![no_std]` environments; the crate then requires `alloc`
+//!   and pointer-width atomics.
 #![cfg_attr(feature = "std", doc = "  See [`ThreadBuilder`] for coordinate construction.")]
 //! * **`derive`** *(default)*: Re-exports the `#[derive(ThreadAware)]` macro from the companion
 //!   `thread_aware_macros` crate. Disable to avoid pulling in proc-macro code in minimal
@@ -131,37 +122,6 @@
 //! # }
 //! ```
 //!
-//! ## Enabling [`ThreadAware`] via `Arc<T, S>`
-//!
-//! With the `std` feature, types containing fields not [`ThreadAware`] can use [`Arc`] to specify a
-//! strategy and wrap them in an [`Arc`] that implements the trait.
-//!
-//!
-//! ```rust
-//! # fn main() {
-//! # #[cfg(feature = "std")] {
-//! use thread_aware::{Arc, PerThread, ThreadAware};
-//! # #[derive(Debug, Default)]
-//! # struct Client;
-//!
-//! #[derive(Debug, Clone, ThreadAware)]
-//! struct Service {
-//!     name: String,
-//!     client: Arc<Client, PerThread>,
-//! }
-//!
-//! impl Service {
-//!     fn new() -> Self {
-//!         Self {
-//!             name: "MyService".to_string(),
-//!             client: Arc::new(|| Client::default()),
-//!         }
-//!     }
-//! }
-//! # }
-//! # }
-//! ```
-//!
 //! [`thread_aware_core`]: https://docs.rs/thread_aware_core
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/logo.png")]
@@ -171,9 +131,6 @@ extern crate alloc;
 #[cfg(all(feature = "std", not(test)))]
 extern crate std;
 
-#[cfg(any(test, feature = "std"))]
-#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-mod cell;
 mod wrappers;
 
 pub mod closure;
@@ -255,9 +212,6 @@ mod thread;
 /// ```
 #[cfg(any(test, feature = "derive"))]
 pub use ::thread_aware_macros::ThreadAware;
-#[cfg(any(test, feature = "std"))]
-#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-pub use cell::{Arc, FromStorageError, PerNumaNode, PerProcess, PerThread, storage};
 #[cfg(feature = "test-utils")]
 #[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
 pub use relocate::Relocator;

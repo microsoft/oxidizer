@@ -91,11 +91,25 @@ RUN curl -fsSLo /tmp/cargo-binstall.tgz \
 # volume over each, and an engine seeds a new volume from the image path it
 # covers; a path that does not exist seeds as root-owned 0755, which the
 # `--user` mapping cannot write, so the first cargo fetch fails with EACCES.
+# The root manifest is copied for the MSRV, the one version `anvil-setup`
+# installs that is declared in repository source rather than pinned in
+# `versions.just`. `/opt/anvil` is the root the recipes already resolve against,
+# so the resolver reads it there with no container-specific path. The workspace
+# members it names are not copied and are not needed: the toolchain file selects
+# the compiler, which is the branch that skips workspace MSRV validation.
+#
+# It is deleted once the setup has read it, so it does not survive into the
+# finished image. The tag hashes the declared MSRV rather than the file, so an
+# unrelated dependency edit computes the same tag; a manifest left in place
+# would make that tag name two different filesystems, and a reused or published
+# image would carry a manifest that does not match any checkout.
 WORKDIR /opt/anvil
 COPY justfiles ./justfiles
 COPY rust-toolchain.toml ./
+COPY Cargo.toml ./
 RUN printf "import 'justfiles/anvil/mod.just'\n" > Justfile \
     && just anvil-setup binstall \
+    && rm -f Cargo.toml \
     && rm -rf "${CARGO_HOME}/registry/cache" "${CARGO_HOME}/registry/src" \
     && rm -f "${CARGO_HOME}/credentials" "${CARGO_HOME}/credentials.toml" "${HOME:-/root}/.netrc" /root/.netrc \
     && mkdir -p "${CARGO_HOME}/registry" "${CARGO_HOME}/git" \

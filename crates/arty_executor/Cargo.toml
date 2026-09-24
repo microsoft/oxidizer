@@ -4,7 +4,7 @@
 [package]
 name = "arty_executor"
 description = "Single-threaded async task executor for the Arty runtime."
-version = "0.1.1"
+version = "0.1.2"
 edition = { workspace = true }
 rust-version = { workspace = true }
 authors = { workspace = true }
@@ -41,7 +41,7 @@ mockall = { workspace = true }
 mutants = { workspace = true }
 scopeguard = { workspace = true }
 static_assertions = { workspace = true }
-testing_aids = { workspace = true }
+testing_aids = { path = "../testing_aids" }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["fmt"] }
 

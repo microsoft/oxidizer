@@ -6,6 +6,7 @@
 use std::any::type_name;
 use std::sync::Arc;
 
+use performables::arc::{Arc as PerformableArc, PerProcess};
 use tick::SimpleClock;
 
 use crate::context::Transfer;
@@ -39,7 +40,7 @@ const COMPOSITE_ID: SinkId = SinkId::new("<composite>");
 /// for a usage example.
 #[derive(Clone, thread_aware::ThreadAware)]
 pub struct Sink {
-    inner: thread_aware::Arc<SinkInner, thread_aware::PerProcess>,
+    inner: PerformableArc<SinkInner, PerProcess>,
 }
 
 impl AsRef<Self> for Sink {
@@ -110,7 +111,7 @@ impl Sink {
         clock: impl AsRef<SimpleClock>,
     ) -> Self {
         Self {
-            inner: thread_aware::Arc::from_unaware(SinkInner::Single(SingleSinkState {
+            inner: PerformableArc::from_unaware(SinkInner::Single(SingleSinkState {
                 id,
                 processors: processors.into(),
                 isolated_enrichment,
@@ -186,7 +187,7 @@ impl Sink {
         // growth slack so the flattened child list doesn't over-retain.
         states.shrink_to_fit();
         Self {
-            inner: thread_aware::Arc::from_unaware(SinkInner::Composite { children: states }),
+            inner: PerformableArc::from_unaware(SinkInner::Composite { children: states }),
         }
     }
 
@@ -199,7 +200,7 @@ impl Sink {
     #[must_use]
     pub fn noop() -> Self {
         Self {
-            inner: thread_aware::Arc::from_unaware(SinkInner::Noop { enrichment: Slot::new() }),
+            inner: PerformableArc::from_unaware(SinkInner::Noop { enrichment: Slot::new() }),
         }
     }
 
@@ -233,7 +234,7 @@ impl Sink {
         };
 
         Self {
-            inner: thread_aware::Arc::from_unaware(inner),
+            inner: PerformableArc::from_unaware(inner),
         }
     }
 
@@ -441,7 +442,7 @@ impl Sink {
     }
 }
 
-/// Inner state held behind a [`thread_aware::Arc`]. Each variant carries
+/// Inner state held behind a [`performables::arc::Arc`]. Each variant carries
 /// only the fields that variant needs - Single carries one leaf's full
 /// state; Composite carries a flattened list of leaf states (built at
 /// construction time); Noop carries only an enrichment slot.

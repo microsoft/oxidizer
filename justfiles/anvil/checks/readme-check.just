@@ -110,6 +110,10 @@ _anvil-readme mode: anvil-readme-check-validate-prereqs
     }
     if ($hadFailure) { exit 1 }
 
+# Check README files, or regenerate them with `--fix`.
+[arg("fix", long, value="true")]
+anvil-readme fix="false": (_anvil-readme if fix == "true" { "generate" } else { "check" })
+
 # Check that crate README files are up to date.
 anvil-readme-check: (_anvil-readme "check")
 

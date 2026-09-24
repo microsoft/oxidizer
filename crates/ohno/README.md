@@ -6,7 +6,7 @@
 [![crate.io](https://img.shields.io/crates/v/ohno.svg)](https://crates.io/crates/ohno)
 [![docs.rs](https://docs.rs/ohno/badge.svg)](https://docs.rs/ohno)
 [![MSRV](https://img.shields.io/crates/msrv/ohno)](https://crates.io/crates/ohno)
-[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml/badge.svg)](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/microsoft/oxidizer/blob/main/LICENSE)
 <a href="https://github.com/microsoft/oxidizer"><img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
@@ -461,30 +461,30 @@ uniformly via [`Labeled::label`][__link26].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/ohno">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbPt0s3Sb8yJUbtV_MElvrqIMbHWX1B21g8MIbor0e9qvU6hVhZIKCZG9obm9lMC41LjCCa29obm9fbWFjcm9zZTAuNS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbPt0s3Sb8yJUbtV_MElvrqIMbHWX1B21g8MIbor0e9qvU6hVhZIKCZG9obm9lMC41LjKCa29obm9fbWFjcm9zZTAuNS4y
  [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
  [__link10]: https://doc.rust-lang.org/stable/std/macro.unreachable.html
  [__link11]: https://doc.rust-lang.org/stable/std/?search=error::Error::source
  [__link12]: https://doc.rust-lang.org/std/backtrace/index.html#environment-variables
- [__link13]: https://docs.rs/ohno/0.5.0/ohno/?search=ErrorExt::message
- [__link14]: https://docs.rs/ohno/0.5.0/ohno/?search=OhnoCore
+ [__link13]: https://docs.rs/ohno/0.5.2/ohno/?search=ErrorExt::message
+ [__link14]: https://docs.rs/ohno/0.5.2/ohno/?search=OhnoCore
  [__link15]: https://doc.rust-lang.org/stable/std/?search=error::Error::source
- [__link16]: https://docs.rs/ohno_macros/0.5.0/ohno_macros/?search=enrich_err
- [__link17]: https://docs.rs/ohno_macros/0.5.0/ohno_macros/?search=enrich_err
- [__link18]: https://docs.rs/ohno/0.5.0/ohno/?search=Enrichable
- [__link19]: https://docs.rs/ohno/0.5.0/ohno/?search=AppError
- [__link2]: https://docs.rs/ohno/0.5.0/ohno/?search=ErrorExt
- [__link20]: https://docs.rs/ohno/0.5.0/ohno/?search=AppError
- [__link21]: https://docs.rs/ohno/0.5.0/ohno/?search=ErrorLabel
- [__link22]: https://docs.rs/ohno/0.5.0/ohno/?search=ErrorLabel::from_error_chain
+ [__link16]: https://docs.rs/ohno_macros/0.5.2/ohno_macros/?search=enrich_err
+ [__link17]: https://docs.rs/ohno_macros/0.5.2/ohno_macros/?search=enrich_err
+ [__link18]: https://docs.rs/ohno/0.5.2/ohno/?search=Enrichable
+ [__link19]: https://docs.rs/ohno/0.5.2/ohno/?search=AppError
+ [__link2]: https://docs.rs/ohno/0.5.2/ohno/?search=ErrorExt
+ [__link20]: https://docs.rs/ohno/0.5.2/ohno/?search=AppError
+ [__link21]: https://docs.rs/ohno/0.5.2/ohno/?search=ErrorLabel
+ [__link22]: https://docs.rs/ohno/0.5.2/ohno/?search=ErrorLabel::from_error_chain
  [__link23]: https://doc.rust-lang.org/stable/std/?search=error::Error::source
- [__link24]: https://docs.rs/ohno/0.5.0/ohno/?search=ErrorLabel
- [__link25]: https://docs.rs/ohno/0.5.0/ohno/?search=Labeled
- [__link26]: https://docs.rs/ohno/0.5.0/ohno/?search=Labeled::label
- [__link3]: https://docs.rs/ohno/0.5.0/ohno/?search=OhnoCore
- [__link4]: https://docs.rs/ohno/0.5.0/ohno/?search=AppError
- [__link5]: https://docs.rs/ohno/0.5.0/ohno/?search=OhnoCore
+ [__link24]: https://docs.rs/ohno/0.5.2/ohno/?search=ErrorLabel
+ [__link25]: https://docs.rs/ohno/0.5.2/ohno/?search=Labeled
+ [__link26]: https://docs.rs/ohno/0.5.2/ohno/?search=Labeled::label
+ [__link3]: https://docs.rs/ohno/0.5.2/ohno/?search=OhnoCore
+ [__link4]: https://docs.rs/ohno/0.5.2/ohno/?search=AppError
+ [__link5]: https://docs.rs/ohno/0.5.2/ohno/?search=OhnoCore
  [__link6]: https://doc.rust-lang.org/stable/std/?search=error::Error
  [__link7]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link8]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug

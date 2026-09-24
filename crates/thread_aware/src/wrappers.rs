@@ -23,8 +23,7 @@ use crate::ThreadAware;
 /// name `Unaware`.
 ///
 /// In addition, if the wrapped value contains an [`alloc::sync::Arc`] with interior mutability
-/// somewhere inside, this wrapper should not be used. With the `std` feature, a thread-aware
-/// [`Arc`](crate::Arc) using [`PerThread`](crate::PerThread) or [`PerNumaNode`](crate::PerNumaNode) with
+/// somewhere inside, this wrapper should not be used. A thread-aware shared pointer with
 /// independent initialization per strategy partition is a better option.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Default)]
 #[repr(transparent)]
