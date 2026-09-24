@@ -26,14 +26,8 @@ allow = [
 confidence-threshold = 0.93
 # <<< anvil-managed: anvil-deny-licenses
 
-# Repository-specific policy extending the managed [licenses] table.
-unused-allowed-license = "allow"
-
-# CDLA-Permissive-2.0 covers the Mozilla CA certificate data bundled by
-# `webpki-root-certs` (pulled in transitively via `rustls-platform-verifier`).
-[[licenses.exceptions]]
-allow = ["CDLA-Permissive-2.0"]
-name = "webpki-root-certs"
+# `webpki-root-certs` packages Mozilla's CA data under this data license.
+exceptions = [{ crate = "webpki-root-certs", allow = ["CDLA-Permissive-2.0"] }]
 
 # >>> anvil-managed: anvil-deny-bans
 [bans]

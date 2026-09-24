@@ -241,7 +241,7 @@ route-recognizer = { version = "0.3.1", default-features = false }
 routerama = { path = "crates/routerama", default-features = false, version = "0.1.1" }
 routerama_build = { path = "crates/routerama_build", default-features = false, version = "=0.1.1" }
 routerama_macros = { path = "crates/routerama_macros", default-features = false, version = "=0.1.1" }
-rstest = { version = "0.26.0", default-features = false }
+rstest = { version = "0.27.0", default-features = false }
 rustc-hash = { version = "2.1.0", default-features = false }
 rustls = { version = "0.23.40", default-features = false }
 rustls-pki-types = { version = "1.14.1", default-features = false }
@@ -346,7 +346,7 @@ unexpected_cfgs = { level = "warn", check-cfg = [
 ] }
 # <<< anvil-managed: anvil-workspace-rust-lints
 
-# Oxidizer-specific Rust lint policy.
+# Repository-specific Rust lint policy beyond the Anvil catalog.
 missing_docs = "warn"
 unreachable_pub = "warn"
 
@@ -410,9 +410,8 @@ significant_drop_tightening = "allow"
 wildcard_imports = "allow"
 # <<< anvil-managed: anvil-workspace-clippy-lints
 
-# Oxidizer-specific Clippy lint policy.
+# Repository-specific Clippy lint policy beyond the Anvil catalog.
 panic = "warn"
-too_long_first_doc_paragraph = "warn"
 
 [patch.crates-io]
 # `events_once` depends on the published crate. Reuse this workspace member so

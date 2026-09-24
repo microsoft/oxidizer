@@ -35,5 +35,5 @@ allow-unwrap-in-tests = true
 warn-on-all-wildcard-imports = true
 # <<< anvil-managed: anvil-clippy
 
-# Oxidizer-specific identifiers accepted in documentation.
+# Product names used throughout this workspace.
 doc-valid-idents = ["OpenAPI", "WinHTTP", ".."]
