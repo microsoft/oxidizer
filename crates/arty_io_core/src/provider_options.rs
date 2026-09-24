@@ -9,6 +9,7 @@
 #[non_exhaustive]
 pub struct ProviderOptions;
 
+#[expect(clippy::new_without_default, reason = "provider options intentionally require explicit construction")]
 impl ProviderOptions {
     /// Creates an empty set of provider options.
     #[must_use]
