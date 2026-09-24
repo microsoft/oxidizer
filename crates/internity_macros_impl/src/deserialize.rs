@@ -216,7 +216,7 @@ pub(crate) fn expand_named(
         .collect();
     let index_lits: Vec<_> = (0..wire.len() as u64).map(proc_macro2::Literal::u64_unsuffixed).collect();
 
-    // (accepted name, variant) pairs, including aliases, for string/byte matching.
+    // (accepted name, variant) pairs, including aliases, for the shared byte matcher.
     let mut accepted_names: Vec<String> = Vec::new();
     let mut accepted_variants: Vec<syn::Ident> = Vec::new();
     for (plan, variant) in wire.iter().zip(&wire_variants) {
@@ -233,11 +233,6 @@ pub(crate) fn expand_named(
         .collect();
 
     let ignore_variant = (!deny).then(|| quote!(__ignore,));
-    let unknown_str = if deny {
-        quote!(_ => return ::core::result::Result::Err(<__E as #serde::de::Error>::unknown_field(__v, __FIELDS)))
-    } else {
-        quote!(_ => #field::__ignore)
-    };
     let unknown_bytes = if deny {
         quote! {
             _ => return match ::core::str::from_utf8(__v) {
@@ -368,10 +363,7 @@ pub(crate) fn expand_named(
                 })
             }
             fn visit_str<__E: #serde::de::Error>(self, __v: &str) -> ::core::result::Result<Self::Value, __E> {
-                ::core::result::Result::Ok(match __v {
-                    #(#accepted_names => #field::#accepted_variants,)*
-                    #unknown_str,
-                })
+                <Self as #serde::de::Visitor<'de>>::visit_bytes(self, __v.as_bytes())
             }
             fn visit_bytes<__E: #serde::de::Error>(self, __v: &[u8]) -> ::core::result::Result<Self::Value, __E> {
                 ::core::result::Result::Ok(match __v {

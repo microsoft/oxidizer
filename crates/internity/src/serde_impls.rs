@@ -21,8 +21,11 @@
 //!   not because it is impossible. Freeze it and serialize the resulting
 //!   [`Reader`](crate::Reader) with
 //!   [`SerializeReader`](crate::se::SerializeReader) instead. Re-interning the
-//!   serialized sequence reproduces identical [`Sym`] handles for the
-//!   default-hasher [`ThreadedLexicon`](crate::ThreadedLexicon); a custom hasher
+//!   serialized sequence reproduces identical [`Sym`] handles when the
+//!   default-constructed [`ThreadedLexicon`](crate::ThreadedLexicon) uses the
+//!   same Fx variant. On 32-bit targets the default emulates the 64-bit
+//!   widening-multiply variant, preserving handles from most 64-bit targets;
+//!   native `sparc64` and `wasm64` use a different variant. A custom hasher
 //!   could assign strings to different shards, so it cannot provide that
 //!   guarantee.
 

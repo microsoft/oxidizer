@@ -5,13 +5,15 @@
 //! interner, plus its shared inner state `ThreadedLexiconInner`.
 
 use alloc::boxed::Box;
-use alloc::sync::Arc;
+use alloc::sync::{Arc, Weak};
 use core::hash::{BuildHasher, Hasher};
 
+use parking_lot::Mutex;
 use rustc_hash::FxBuildHasher;
 
 use crate::reader::Reader;
 use crate::shard::{Shard, ShardReadGuard};
+use crate::shard_reader::ShardReader;
 use crate::sym::{NUM_SHARDS, SHARD_BITS, Sym};
 use crate::threaded_reader::ThreadedReader;
 
@@ -28,6 +30,9 @@ const MIX: u64 = 0x9E37_79B9_7F4A_7C15;
 /// small corpus.
 const MIN_PREALLOCATED_STRINGS_PER_SHARD: usize = 8;
 
+type SnapshotGenerations = [usize; NUM_SHARDS];
+type CachedSnapshot = (SnapshotGenerations, Weak<[ShardReader; NUM_SHARDS]>);
+
 /// A concurrent string interner.
 ///
 /// Maps each distinct string to a compact 4-byte [`Sym`] handle. Interning takes
@@ -39,10 +44,11 @@ const MIN_PREALLOCATED_STRINGS_PER_SHARD: usize = 8;
 /// [`freeze`](Self::freeze) to get a `Send + Sync` [`ThreadedReader`] for the read
 /// phase, whose lookups are lock-free. Handles stay valid across the freeze.
 ///
-/// Interning is optimized for concurrent fill. Deduplication hits in different
-/// shards proceed independently, but hits in the same shard serialize on its
-/// single upgradable-read slot. Freeze before a read-heavy phase rather than
-/// using repeated `intern` calls as lookups.
+/// Interning is optimized for concurrent fill across shards. Same-shard
+/// interners take an upgradable read guard, while ordinary `get` readers can
+/// still run concurrently; misses atomically upgrade to a write guard.
+/// Freeze before a read-heavy phase rather than using repeated `intern`
+/// calls as lookups.
 ///
 /// Handles encode a shard index alongside a per-shard position, so unlike
 /// [`LocalLexicon`](crate::LocalLexicon) they are **not** numbered consecutively.
@@ -106,7 +112,7 @@ impl ThreadedLexicon {
     /// Creates an empty interner with the default hasher ([`FxBuildHasher`]).
     #[must_use]
     pub fn new() -> Self {
-        Self(Arc::new(ThreadedLexiconInner::new()))
+        Self(Arc::new(ThreadedLexiconInner::with_default_hasher(0, 0)))
     }
 
     /// Creates an interner preallocated for `strings` strings and `bytes` bytes.
@@ -117,7 +123,7 @@ impl ThreadedLexicon {
     /// strings reaches the requested capacity.
     #[must_use]
     pub fn with_capacity(strings: usize, bytes: usize) -> Self {
-        Self::with_capacity_and_hasher(strings, bytes, FxBuildHasher)
+        Self(Arc::new(ThreadedLexiconInner::with_default_hasher(strings, bytes)))
     }
 
     pub(crate) fn with_capacity_for_size_hint(strings: usize) -> Self {
@@ -131,6 +137,11 @@ impl ThreadedLexicon {
 
 impl<S: BuildHasher> ThreadedLexicon<S> {
     /// Creates an empty interner using the given hasher.
+    ///
+    /// On 32-bit targets, the default constructors emulate the 64-bit
+    /// widening-multiply Fx variant to preserve handles from 64-bit targets
+    /// using that variant. Passing `FxBuildHasher` explicitly here instead
+    /// uses its native 32-bit output and does not preserve those handles.
     pub fn with_hasher(hasher: S) -> Self {
         Self(Arc::new(ThreadedLexiconInner::with_hasher(hasher)))
     }
@@ -138,7 +149,8 @@ impl<S: BuildHasher> ThreadedLexicon<S> {
     /// Like [`with_capacity`](ThreadedLexicon::with_capacity) but with the given hasher.
     ///
     /// See [`with_capacity`](ThreadedLexicon::with_capacity) for the meaning of
-    /// the capacity arguments.
+    /// the capacity arguments. On 32-bit targets, passing `FxBuildHasher`
+    /// explicitly uses its native output rather than the portable default.
     pub fn with_capacity_and_hasher(strings: usize, bytes: usize, hasher: S) -> Self {
         Self(Arc::new(ThreadedLexiconInner::with_capacity_and_hasher(strings, bytes, hasher)))
     }
@@ -189,10 +201,13 @@ impl<S: BuildHasher> ThreadedLexicon<S> {
     /// ```
     /// use internity::{Reader, ThreadedLexicon};
     ///
+    /// # fn main() -> Result<(), core::str::Utf8Error> {
     /// let lexicon = ThreadedLexicon::new();
-    /// let a = lexicon.intern_bytes(b"hello").unwrap();
+    /// let a = lexicon.intern_bytes(b"hello")?;
     /// assert!(lexicon.intern_bytes(&[0xff, 0xfe]).is_err()); // invalid UTF-8
     /// assert_eq!(lexicon.freeze().resolve(a), "hello");
+    /// # Ok(())
+    /// # }
     /// ```
     #[inline]
     pub fn intern_bytes(&self, bytes: &[u8]) -> Result<Sym, core::str::Utf8Error> {
@@ -223,14 +238,16 @@ impl<S: BuildHasher> ThreadedLexicon<S> {
     /// Trades interning for lock-free, atomic-free resolution. If this is the only
     /// handle to the interner, each shard's `(offsets, bytes)`
     /// blob is *moved* into the reader (no copy). If other clones are still alive,
-    /// the blobs are copied instead.
+    /// a retained, unchanged snapshot can be reused; otherwise the blobs are
+    /// copied.
     ///
     /// The result is a point-in-time snapshot even when other clones are still
-    /// interning: the shared path holds a read guard on every shard before copying
-    /// any of them, so the reader reflects a single consistent instant. Every
-    /// completed insertion observed up to that instant is present; insertions that
-    /// commit afterwards are not. `freeze` leaves the interner usable, so other
-    /// clones keep interning and may themselves freeze independently.
+    /// interning: a cached snapshot represents an instant before any later
+    /// insertion, and the copy path holds a read guard on every shard before
+    /// copying any of them. Every completed insertion observed up to that instant
+    /// is present; insertions that commit afterwards are not. `freeze` leaves
+    /// the interner usable, so other clones keep interning and may themselves
+    /// freeze independently.
     #[must_use]
     pub fn freeze(self) -> ThreadedReader {
         self.into_reader()
@@ -280,12 +297,21 @@ impl<T: AsRef<str>> FromIterator<T> for ThreadedLexicon {
 struct ThreadedLexiconInner<S = FxBuildHasher> {
     shards: [Shard; NUM_SHARDS],
     hasher: S,
+    cached_snapshot: Mutex<Option<CachedSnapshot>>,
+    #[cfg(target_pointer_width = "32")]
+    stable_default_hash: bool,
 }
 
 impl ThreadedLexiconInner {
-    /// Creates empty inner state with the default hasher ([`FxBuildHasher`]).
-    fn new() -> Self {
-        Self::with_hasher(FxBuildHasher)
+    fn with_default_hasher(strings: usize, bytes: usize) -> Self {
+        let inner = Self::with_capacity_and_hasher(strings, bytes, FxBuildHasher);
+        #[cfg(target_pointer_width = "32")]
+        let inner = {
+            let mut inner = inner;
+            inner.stable_default_hash = true;
+            inner
+        };
+        inner
     }
 }
 
@@ -301,6 +327,9 @@ impl<S: BuildHasher> ThreadedLexiconInner<S> {
         Self {
             shards: core::array::from_fn(|_| Shard::with_capacity(strings_per_shard, bytes_per_shard)),
             hasher,
+            cached_snapshot: Mutex::new(None),
+            #[cfg(target_pointer_width = "32")]
+            stable_default_hash: false,
         }
     }
 
@@ -321,6 +350,10 @@ impl<S: BuildHasher> ThreadedLexiconInner<S> {
     #[inline]
     #[cfg_attr(test, mutants::skip)] // Constant hashes remain correct under collision resolution, but are pathologically slow.
     fn hash_bytes(&self, b: &[u8]) -> u64 {
+        #[cfg(target_pointer_width = "32")]
+        if self.stable_default_hash {
+            return crate::stable_fx::hash_bytes_64(b);
+        }
         let mut hasher = self.hasher.build_hasher();
         hasher.write(b);
         hasher.finish()
@@ -337,7 +370,7 @@ impl<S: BuildHasher> ThreadedLexiconInner<S> {
     fn intern(&self, s: &str) -> Sym {
         let h = self.hash_str(s);
         let idx = Self::shard_of(h);
-        self.shards[idx].intern(idx, h, s, &|t: &[u8]| self.hash_bytes(t))
+        self.shards[idx].intern(idx, h, s)
     }
 
     /// Interns the UTF-8 string held in `bytes`, validating UTF-8 only on a miss.
@@ -345,7 +378,7 @@ impl<S: BuildHasher> ThreadedLexiconInner<S> {
     fn intern_bytes(&self, bytes: &[u8]) -> Result<Sym, core::str::Utf8Error> {
         let h = self.hash_bytes(bytes);
         let idx = Self::shard_of(h);
-        self.shards[idx].intern_bytes(idx, h, bytes, &|t: &[u8]| self.hash_bytes(t))
+        self.shards[idx].intern_bytes(idx, h, bytes)
     }
 
     /// Returns the handle for `s` if it has already been interned, without
@@ -364,24 +397,49 @@ impl<S: BuildHasher> ThreadedLexiconInner<S> {
     /// Consumes the inner state, moving each shard's `(offsets, bytes)` blob into a
     /// [`ShardReader`] with no copy or re-walk.
     fn into_reader(self) -> ThreadedReader {
-        ThreadedReader::new(Box::new(self.shards.map(Shard::freeze)))
+        ThreadedReader::new(self.shards.map(Shard::freeze))
     }
 
-    /// Builds a [`ThreadedReader`] without consuming, copying each shard's
-    /// `(offsets, bytes)` blob. Used when the interner is still shared (outstanding
-    /// `Arc` clones).
+    /// Reuses the previous immutable snapshot when no strings were inserted
+    /// since its creation; otherwise copies the shards into a new reader.
     ///
     /// Read guards on *all* shards are acquired up front, before any blob is
     /// copied. The instant every guard is held no `intern` can commit (a miss
-    /// cannot upgrade to the write lock while a reader is present), so the copied
+    /// cannot acquire the write lock while a reader is present), so the copied
     /// state is a single point-in-time snapshot rather than a per-shard-torn one.
     /// Guards are taken in index order and `intern` only ever locks one shard, so
     /// this cannot deadlock. Concurrent lookups keep running; only in-flight
-    /// insertions briefly stall for the copy.
+    /// insertions briefly stall for the copy. The cache lock remains held while
+    /// a snapshot is copied so simultaneous misses share one result instead of
+    /// copying every shard independently.
     fn build_reader(&self) -> ThreadedReader {
+        self.build_reader_with_hook(|| {})
+    }
+
+    fn build_reader_with_hook(&self, after_first_copy: impl FnOnce()) -> ThreadedReader {
+        let mut cache = self.cached_snapshot.lock();
+        let generations = core::array::from_fn(|i| self.shards[i].generation());
+        if let Some((cached_generations, shards)) = cache.as_ref()
+            && *cached_generations == generations
+            && let Some(shards) = shards.upgrade()
+        {
+            return ThreadedReader::from_shared(shards);
+        }
+
         let guards: [ShardReadGuard<'_>; NUM_SHARDS] = core::array::from_fn(|i| self.shards[i].read_guard());
-        let readers = core::array::from_fn(|i| Shard::snapshot_locked(&guards[i]));
-        ThreadedReader::new(Box::new(readers))
+        let generations = core::array::from_fn(|i| self.shards[i].generation());
+        let mut hook = Some(after_first_copy);
+        let readers = core::array::from_fn(|i| {
+            let reader = Shard::snapshot_locked(&guards[i]);
+            if i == 0 {
+                hook.take().expect("callback runs once after the first shard")();
+            }
+            reader
+        });
+        drop(guards);
+        let reader = ThreadedReader::new(readers);
+        *cache = Some((generations, reader.downgrade()));
+        reader
     }
 }
 
@@ -389,6 +447,52 @@ impl<S: BuildHasher> ThreadedLexiconInner<S> {
 #[cfg(test)]
 mod tests {
     use super::{NUM_SHARDS, ThreadedLexicon};
+    use crate::Reader;
+
+    #[test]
+    fn shared_snapshot_cache_reuses_unchanged_data_and_invalidates_on_insert() {
+        let lexicon = ThreadedLexicon::new();
+        let first_handle = lexicon.intern("first");
+        let first = lexicon.clone().freeze();
+        let second = lexicon.clone().freeze();
+        assert!(first.shares_storage_with(&second));
+        assert_eq!(first.resolve(first_handle), "first");
+        assert_eq!(lexicon.intern("first"), first_handle);
+        assert!(first.shares_storage_with(&lexicon.clone().freeze()));
+
+        let writer = lexicon.clone();
+        let inserted = std::thread::spawn(move || writer.intern_bytes(b"new").unwrap()).join().unwrap();
+        let third = lexicon.clone().freeze();
+        assert!(!first.shares_storage_with(&third));
+        assert_eq!(first.try_resolve(inserted), None);
+        assert_eq!(third.resolve(inserted), "new");
+        assert!(third.shares_storage_with(&lexicon.clone().freeze()));
+
+        let clone = third.clone();
+        assert!(clone.shares_storage_with(&third));
+        assert_eq!(clone.resolve(inserted), "new");
+        drop(clone);
+        drop(third);
+        assert!(lexicon.0.cached_snapshot.lock().as_ref().unwrap().1.upgrade().is_none());
+        assert_eq!(lexicon.freeze().resolve(inserted), "new");
+    }
+
+    #[test]
+    fn shared_freeze_holds_every_shard_during_copy() {
+        let first_word = "key-127";
+        let second_word = "key-51";
+        let lexicon = ThreadedLexicon::new();
+
+        let snapshot = lexicon.0.build_reader_with_hook(|| {
+            for shard in &lexicon.0.shards {
+                assert!(!shard.write_available(), "every shard must remain read-locked throughout the copy");
+            }
+        });
+        let first = lexicon.intern(first_word);
+        let second = lexicon.intern(second_word);
+        assert_eq!(snapshot.try_resolve(first), None);
+        assert_eq!(snapshot.try_resolve(second), None);
+    }
 
     #[test]
     #[cfg_attr(

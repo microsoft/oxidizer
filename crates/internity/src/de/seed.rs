@@ -18,12 +18,13 @@ use crate::Lexicon;
 /// use internity::de::DeserializeInSeed;
 /// use serde::de::DeserializeSeed as _;
 ///
+/// # fn main() -> Result<(), serde_json::Error> {
 /// let mut lexicon = LocalLexicon::new();
 /// let seed = DeserializeInSeed::<internity::Sym, _>::new(&mut lexicon);
-/// let sym = seed
-///     .deserialize(&mut serde_json::Deserializer::from_str("\"hello\""))
-///     .unwrap();
+/// let sym = seed.deserialize(&mut serde_json::Deserializer::from_str("\"hello\""))?;
 /// assert_eq!(lexicon.resolve(sym), "hello");
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Debug)]
 pub struct DeserializeInSeed<'a, T, I: Lexicon + ?Sized> {

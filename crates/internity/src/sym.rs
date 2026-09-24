@@ -128,8 +128,9 @@ impl Sym {
         self.0.get()
     }
 
-    /// Reconstructs a `Sym` from a raw `u32` (see [`as_u32`](Sym::as_u32)), or
-    /// `None` if `raw == 0`.
+    /// Reconstructs a `Sym` from a nonzero raw `u32`.
+    ///
+    /// See [`as_u32`](Sym::as_u32); returns `None` if `raw == 0`.
     ///
     /// This only checks the niche; it does not validate that the handle belongs to
     /// any particular interner. Resolving still range-checks, so a reconstructed

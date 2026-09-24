@@ -8,10 +8,11 @@ use std::collections::HashMap;
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, Weak, mpsc};
 #[cfg(not(all(miri, windows)))]
 use std::thread;
+use std::time::Duration;
 
 use internity::{Lexicon, LocalLexicon, Reader, Sym, SymBuildHasher, SymMap, SymSet, ThreadedLexicon};
 
@@ -155,7 +156,7 @@ fn lexicon_trait_supports_dynamic_dispatch() {
 }
 
 #[test]
-fn local_lexicon_implements_reader() {
+fn frozen_local_lexicon_implements_reader() {
     fn resolve_generic(reader: &impl Reader, sym: Sym) -> &str {
         reader.resolve(sym)
     }
@@ -163,9 +164,20 @@ fn local_lexicon_implements_reader() {
     let mut lexicon = LocalLexicon::new();
     let sym = lexicon.intern("readable");
     let other = lexicon.intern("other");
-    assert_eq!(resolve_generic(&lexicon, sym), "readable");
-    assert_eq!(Reader::len(&lexicon), 2);
-    assert_eq!(Reader::iter(&lexicon).collect::<Vec<_>>(), [(sym, "readable"), (other, "other")]);
+    let reader = lexicon.freeze();
+    assert_eq!(resolve_generic(&reader, sym), "readable");
+    assert_eq!(Reader::len(&reader), 2);
+    assert_eq!(Reader::iter(&reader).collect::<Vec<_>>(), [(sym, "readable"), (other, "other")]);
+}
+
+#[test]
+fn live_local_lexicon_implements_reader() {
+    let mut lexicon = LocalLexicon::new();
+    let sym = lexicon.intern("live");
+    let reader: &dyn Reader = &lexicon;
+    assert_eq!(reader.try_resolve(sym), Some("live"));
+    assert_eq!(reader.len(), 1);
+    assert_eq!(reader.iter().collect::<Vec<_>>(), [(sym, "live")]);
 }
 
 #[test]
@@ -194,6 +206,10 @@ fn threaded_default_with_hasher_get_and_is_empty() {
     assert!(!custom.is_empty());
     let reader = custom.freeze();
     assert_eq!(reader.resolve(k), "k");
+
+    let reserved = ThreadedLexicon::with_capacity_and_hasher(16, 256, RandomState::new());
+    let sym = reserved.intern("reserved");
+    assert_eq!(reserved.get("reserved"), Some(sym));
 }
 
 #[test]
@@ -267,32 +283,116 @@ fn local_rehash_panic_leaves_lexicon_consistent() {
 }
 
 #[test]
-#[cfg_attr(
-    miri,
-    ignore = "the injected panic exercises safe hash-table rollback; native tests retain it and Miri covers threaded storage recovery separately"
-)]
-fn threaded_rehash_panic_leaves_lexicon_consistent() {
+fn threaded_growth_uses_cached_hashes_and_preserves_handles() {
     let (hasher, armed) = panic_on_marker_hasher();
     let lexicon = ThreadedLexicon::with_hasher(hasher);
     let marker = lexicon.intern("marker");
 
     armed.store(true, Ordering::Relaxed);
-    let mut observed_panic = false;
+    let mut inserted = Vec::new();
     for index in 0..64 {
-        let before = lexicon.len();
         let candidate = format!("candidate-{index}");
-        if catch_unwind(AssertUnwindSafe(|| lexicon.intern(&candidate))).is_err() {
-            assert_eq!(lexicon.len(), before);
-            observed_panic = true;
-            break;
-        }
+        inserted.push((candidate.clone(), lexicon.intern(&candidate)));
     }
-    assert!(observed_panic, "the table must grow within the bounded insertion loop");
 
     armed.store(false, Ordering::Relaxed);
     assert_eq!(lexicon.get("marker"), Some(marker));
+    for (candidate, sym) in &inserted {
+        assert_eq!(lexicon.get(candidate), Some(*sym));
+    }
     let reader = lexicon.freeze();
     assert_eq!(reader.resolve(marker), "marker");
+    for (candidate, sym) in &inserted {
+        assert_eq!(reader.resolve(*sym), candidate);
+    }
+}
+
+type ReentryCallback = Arc<Mutex<Option<Box<dyn Fn() + Send + Sync>>>>;
+
+#[derive(Clone)]
+struct ReentrantBuildHasher {
+    callback: ReentryCallback,
+    armed: Arc<AtomicBool>,
+}
+
+struct ReentrantHasher(ReentrantBuildHasher);
+
+impl BuildHasher for ReentrantBuildHasher {
+    type Hasher = ReentrantHasher;
+
+    fn build_hasher(&self) -> Self::Hasher {
+        ReentrantHasher(self.clone())
+    }
+}
+
+impl Hasher for ReentrantHasher {
+    fn finish(&self) -> u64 {
+        0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        if self.0.armed.load(Ordering::Relaxed) {
+            self.0
+                .callback
+                .lock()
+                .expect("reentry callback mutex is not poisoned")
+                .as_ref()
+                .expect("callback installed before the hasher is armed")();
+            assert_ne!(bytes, b"marker", "growth must not invoke the supplied hasher under the shard lock");
+        }
+    }
+}
+
+#[test]
+fn threaded_hasher_can_reenter_during_growth() {
+    let growth_attempts = if cfg!(miri) { 8 } else { 64 };
+    for bytes_input in [false, true] {
+        let callback = Arc::new(Mutex::new(None::<Box<dyn Fn() + Send + Sync>>));
+        let armed = Arc::new(AtomicBool::new(false));
+        let lexicon = Arc::new(ThreadedLexicon::with_hasher(ReentrantBuildHasher {
+            callback: Arc::clone(&callback),
+            armed: Arc::clone(&armed),
+        }));
+        let marker = lexicon.intern("marker");
+        let weak: Weak<ThreadedLexicon<ReentrantBuildHasher>> = Arc::downgrade(&lexicon);
+        *callback.lock().unwrap() = Some(Box::new(move || {
+            assert!(!weak.upgrade().unwrap().is_empty());
+        }));
+        armed.store(true, Ordering::Relaxed);
+
+        let worker = Arc::clone(&lexicon);
+        let (send, receive) = mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            let inserted: Vec<_> = (0..growth_attempts)
+                .map(|i| {
+                    let value = format!("candidate-{i}");
+                    let sym = if bytes_input {
+                        worker.intern_bytes(value.as_bytes()).unwrap()
+                    } else {
+                        worker.intern(&value)
+                    };
+                    (value, sym)
+                })
+                .collect();
+            send.send(inserted).unwrap();
+        });
+        let timeout = if cfg!(miri) {
+            Duration::from_mins(3)
+        } else {
+            Duration::from_secs(5)
+        };
+        let inserted = receive
+            .recv_timeout(timeout)
+            .expect("a custom hasher must not block re-entering a shard during growth");
+        handle.join().unwrap();
+        armed.store(false, Ordering::Relaxed);
+        assert_eq!(lexicon.get("marker"), Some(marker));
+        let reader = lexicon.as_ref().clone().freeze();
+        assert_eq!(reader.resolve(marker), "marker");
+        for (value, sym) in inserted {
+            assert_eq!(reader.resolve(sym), value);
+        }
+    }
 }
 
 #[test]
@@ -492,6 +592,32 @@ fn lexicon_iter_yields_pairs_in_order() {
     let mut got: Vec<_> = reader.iter().collect();
     got.sort_by_key(|&(s, _)| s.as_u32());
     assert_eq!(got, vec![(a, "a"), (b, "bb"), (c, "ccc")]);
+}
+
+#[test]
+fn live_local_lexicon_remains_a_reader() {
+    let mut lexicon = LocalLexicon::new();
+    let sym = lexicon.intern("live");
+    let reader: &dyn Reader = &lexicon;
+    assert_eq!(reader.resolve(sym), "live");
+    assert_eq!(reader.iter().collect::<Vec<_>>(), [(sym, "live")]);
+    assert_eq!(lexicon.intern("next"), lexicon.get("next").unwrap());
+}
+
+#[test]
+fn local_iteration_bounds_include_empty_and_duplicate_cases() {
+    let lexicon = LocalLexicon::new();
+    assert_eq!(lexicon.iter().count(), 0);
+    assert_eq!(lexicon.freeze().iter().count(), 0);
+
+    let mut lexicon = LocalLexicon::new();
+    let first = lexicon.intern("");
+    let last = lexicon.intern("café");
+    assert_eq!(lexicon.intern(""), first);
+    assert_eq!(lexicon.intern("café"), last);
+    let expected = [(first, ""), (last, "café")];
+    assert_eq!(lexicon.iter().collect::<Vec<_>>(), expected);
+    assert_eq!(lexicon.freeze().iter().collect::<Vec<_>>(), expected);
 }
 
 #[test]

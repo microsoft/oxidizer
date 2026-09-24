@@ -29,8 +29,8 @@ use crate::Reader;
 /// [`SerializeInWith`](crate::se::SerializeInWith).
 ///
 /// ```
+/// use internity::LocalLexicon;
 /// use internity::se::{SerializeIn, SerializeInWith};
-/// use internity::{LocalLexicon, Reader};
 ///
 /// #[derive(SerializeIn)]
 /// struct Record {
@@ -38,14 +38,17 @@ use crate::Reader;
 ///     count: u64,
 /// }
 ///
+/// # fn main() -> Result<(), serde_json::Error> {
 /// let mut lexicon = LocalLexicon::new();
 /// let record = Record {
 ///     name: lexicon.intern("widget"),
 ///     count: 3,
 /// };
 /// let reader = lexicon.freeze();
-/// let json = serde_json::to_string(&SerializeInWith::new(&record, &reader)).unwrap();
+/// let json = serde_json::to_string(&SerializeInWith::new(&record, &reader))?;
 /// assert_eq!(json, r#"{"name":"widget","count":3}"#);
+/// # Ok(())
+/// # }
 /// ```
 pub trait SerializeIn<R: Reader + ?Sized> {
     /// Serialize `self`, resolving every [`Sym`](crate::Sym) against `reader`.

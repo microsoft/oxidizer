@@ -54,17 +54,20 @@ impl Hasher for SymHasher {
     }
 }
 
-/// A [`BuildHasher`](core::hash::BuildHasher) that produces [`SymHasher`]s, for
-/// fast [`Sym`](crate::Sym)-keyed maps and sets.
+/// A [`BuildHasher`](core::hash::BuildHasher) for fast [`Sym`](crate::Sym)-keyed collections.
+///
+/// Produces [`SymHasher`]s for maps and sets.
 pub type SymBuildHasher = BuildHasherDefault<SymHasher>;
 
-/// A [`HashMap`](std::collections::HashMap) keyed by [`Sym`](crate::Sym) using the fast
-/// [`SymBuildHasher`].
+/// A fast [`HashMap`](std::collections::HashMap) keyed by [`Sym`](crate::Sym).
+///
+/// Uses [`SymBuildHasher`].
 #[cfg(feature = "std")]
 pub type SymMap<V> = std::collections::HashMap<Sym, V, SymBuildHasher>;
 
-/// A [`HashSet`](std::collections::HashSet) of [`Sym`](crate::Sym) using the fast
-/// [`SymBuildHasher`].
+/// A fast [`HashSet`](std::collections::HashSet) of [`Sym`](crate::Sym).
+///
+/// Uses [`SymBuildHasher`].
 #[cfg(feature = "std")]
 pub type SymSet = std::collections::HashSet<Sym, SymBuildHasher>;
 

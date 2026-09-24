@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![forbid(unsafe_code)]
 #![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
@@ -29,8 +30,9 @@ use crate::serialize::expand_serialize;
 #[cfg(test)]
 use crate::shared::{field_seed, missing_value_expr, validate_transparent_container, with_seed_def};
 
-/// Generates an implementation of `DeserializeIn` using `root_path` as the
-/// `internity` crate root.
+/// Generates a `DeserializeIn` implementation.
+///
+/// Uses `root_path` as the `internity` crate root.
 #[must_use]
 pub fn derive_deserialize_in(input: TokenStream2, root_path: &Path) -> TokenStream2 {
     syn::parse2::<DeriveInput>(input)
@@ -38,8 +40,9 @@ pub fn derive_deserialize_in(input: TokenStream2, root_path: &Path) -> TokenStre
         .unwrap_or_else(Error::into_compile_error)
 }
 
-/// Generates an implementation of `SerializeIn` using `root_path` as the
-/// `internity` crate root.
+/// Generates a `SerializeIn` implementation.
+///
+/// Uses `root_path` as the `internity` crate root.
 #[must_use]
 pub fn derive_serialize_in(input: TokenStream2, root_path: &Path) -> TokenStream2 {
     syn::parse2::<DeriveInput>(input)

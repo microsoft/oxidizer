@@ -220,10 +220,7 @@ impl<S: BuildHasher> LocalLexicon<S> {
     fn insert_new(&mut self, h: u64, s: &str) -> Sym {
         let index = self.offsets.len() - 1;
         let buffer_len = self.buffer.len();
-        let end = buffer_len
-            .checked_add(s.len())
-            .and_then(|n| u32::try_from(n).ok())
-            .expect("internity: buffer exceeds u32");
+        let end = crate::storage::checked_end(buffer_len, s.len()).expect("internity: buffer exceeds u32");
 
         // HashTable completes any fallible growth and rehashing before placing
         // the new value. Roll storage back if that work or either append panics.
@@ -280,10 +277,14 @@ impl<S: BuildHasher> LocalLexicon<S> {
     /// ```
     /// use internity::LocalLexicon;
     ///
+    /// # fn main() -> Result<(), core::str::Utf8Error> {
     /// let mut lexicon = LocalLexicon::new();
-    /// let a = lexicon.intern_bytes(b"hello").unwrap();
+    /// let a = lexicon.intern_bytes(b"hello")?;
     /// assert_eq!(lexicon.resolve(a), "hello");
     /// assert!(lexicon.intern_bytes(&[0xff, 0xfe]).is_err()); // invalid UTF-8
+    ///
+    /// # Ok(())
+    /// # }
     /// ```
     #[inline]
     pub fn intern_bytes(&mut self, bytes: &[u8]) -> Result<Sym, core::str::Utf8Error> {
@@ -343,8 +344,7 @@ impl<S: BuildHasher> LocalLexicon<S> {
         self.offsets.len() - 1
     }
 
-    /// Returns the 0-based position of `sym` in insertion order, or `None` if it
-    /// is out of range for this lexicon.
+    /// Returns the 0-based insertion position of `sym`, or `None` if out of range.
     ///
     /// Positions are assigned consecutively from zero in insertion order, so this
     /// index is a *dense* key: per-symbol data can live in a `Vec<T>` indexed by
@@ -398,8 +398,7 @@ impl<S: BuildHasher> LocalLexicon<S> {
         dense_index_of(self.len(), sym)
     }
 
-    /// Returns the handle at 0-based position `index`, or `None` if fewer than
-    /// `index + 1` strings have been interned.
+    /// Returns the handle at `index`, or `None` if that position is empty.
     ///
     /// The inverse of [`index_of`](Self::index_of); see it for what the index
     /// means.

@@ -20,13 +20,18 @@ use crate::sym::{LOCAL_MASK, Sym};
 /// (string hash → handle), the CSR-style string boundaries, and the concatenated
 /// string bytes.
 pub(crate) struct ShardWrite {
-    dedup: HashTable<Sym>,
+    dedup: HashTable<Entry>,
     /// String boundaries into `buffer`, CSR-style: `offsets[i]` start,
     /// `offsets[i+1]` end of the `i`-th string. Always starts with a `0` sentinel
     /// (`len() + 1` entries), so resolve is branch-free.
     offsets: Vec<u32>,
     /// All of this shard's interned strings concatenated.
     buffer: Vec<u8>,
+}
+
+struct Entry {
+    hash: u64,
+    sym: Sym,
 }
 
 struct StorageRollback<'a> {
@@ -43,6 +48,10 @@ impl Drop for StorageRollback<'_> {
 }
 
 impl ShardWrite {
+    fn checked_local(local: usize) -> Option<u32> {
+        (local < LOCAL_MASK as usize).then(|| u32::try_from(local).expect("local is below LOCAL_MASK"))
+    }
+
     pub(crate) fn with_capacity(strings: usize, bytes: usize) -> Self {
         let mut offsets = Vec::with_capacity(strings.saturating_add(1));
         offsets.push(0);
@@ -70,24 +79,14 @@ impl ShardWrite {
     /// The caller must have already established that `s` is absent (e.g. via
     /// [`get`](Self::get) under a lock held continuously through the upgrade), so
     /// this skips the dedup re-probe. Calling it for a present string would create
-    /// a duplicate handle. `rehash` recomputes a handle's hash when the dedup table
-    /// grows.
-    pub(crate) fn insert_new(&mut self, idx: usize, h: u64, s: &str, rehash: impl Fn(&[u8]) -> u64) -> Sym {
+    /// a duplicate handle. Stored hashes let table growth avoid invoking a
+    /// user-supplied hasher while the shard's write lock is held.
+    pub(crate) fn insert_new(&mut self, idx: usize, h: u64, s: &str) -> Sym {
         let local0 = self.offsets.len() - 1;
-        assert!(local0 < LOCAL_MASK as usize, "internity: shard {idx} capacity exceeded");
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "local0 is asserted above to fit in LOCAL_MASK (< 2^26)"
-        )]
-        let local0_u32 = local0 as u32;
+        let local0_u32 = Self::checked_local(local0).expect("internity: caller cannot intern after this shard reaches LOCAL_MASK entries");
         let buffer_len = self.buffer.len();
-        let end = buffer_len
-            .checked_add(s.len())
-            .and_then(|n| u32::try_from(n).ok())
-            .expect("internity: shard bytes exceed u32");
+        let end = crate::storage::checked_end(buffer_len, s.len()).expect("internity: shard bytes exceed u32");
 
-        // HashTable rehashes before placing the new value, so an unwind guard
-        // can restore storage without leaving a table entry that refers to it.
         let storage = StorageRollback {
             offsets: &mut self.offsets,
             buffer: &mut self.buffer,
@@ -97,11 +96,8 @@ impl ShardWrite {
         storage.offsets.push(end);
         let sym = Sym::pack(idx, local0_u32 + 1);
 
-        let offsets = &*storage.offsets;
-        let buffer = &*storage.buffer;
-        self.dedup.insert_unique(h, sym, |&sym| {
-            rehash(Self::str_at(offsets, buffer, sym.local() as usize).as_bytes())
-        });
+        // Rehash uses stored hashes, so a user-supplied hasher cannot run under the lock.
+        self.dedup.insert_unique(h, Entry { hash: h, sym }, |entry| entry.hash);
         core::mem::forget(storage);
         sym
     }
@@ -112,8 +108,8 @@ impl ShardWrite {
         let offsets = &self.offsets;
         let buffer = &self.buffer;
         self.dedup
-            .find(h, |&sym| Self::str_at(offsets, buffer, sym.local() as usize) == s)
-            .copied()
+            .find(h, |entry| Self::str_at(offsets, buffer, entry.sym.local() as usize) == s)
+            .map(|entry| entry.sym)
     }
 
     /// Looks up the raw byte sequence `bytes` without interning it.
@@ -126,8 +122,10 @@ impl ShardWrite {
         let offsets = &self.offsets;
         let buffer = &self.buffer;
         self.dedup
-            .find(h, |&sym| Self::str_at(offsets, buffer, sym.local() as usize).as_bytes() == bytes)
-            .copied()
+            .find(h, |entry| {
+                Self::str_at(offsets, buffer, entry.sym.local() as usize).as_bytes() == bytes
+            })
+            .map(|entry| entry.sym)
     }
 
     /// Consumes the write state, yielding the flat `(offsets, bytes)` blob for a
@@ -144,5 +142,36 @@ impl ShardWrite {
     #[cfg(test)]
     pub(crate) fn capacities(&self) -> (usize, usize, usize) {
         (self.dedup.capacity(), self.offsets.capacity(), self.buffer.capacity())
+    }
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(test)]
+mod tests {
+    use super::{LOCAL_MASK, ShardWrite, StorageRollback};
+
+    #[test]
+    fn local_index_limit_requires_room_for_one_based_index() {
+        assert_eq!(ShardWrite::checked_local(LOCAL_MASK as usize - 1), Some(LOCAL_MASK - 1));
+        assert_eq!(ShardWrite::checked_local(LOCAL_MASK as usize), None);
+    }
+
+    #[test]
+    fn rollback_after_partial_insert_restores_shard_storage() {
+        let mut shard = ShardWrite::with_capacity(0, 0);
+        {
+            let storage = StorageRollback {
+                offsets: &mut shard.offsets,
+                buffer: &mut shard.buffer,
+                local: 0,
+            };
+            storage.buffer.extend_from_slice(b"orphan");
+            storage.offsets.push(6);
+        }
+        assert_eq!(shard.parts(), (&[0][..], &[][..]));
+
+        let sym = shard.insert_new(0, 0, "live");
+        assert_eq!(shard.get(0, "live"), Some(sym));
+        assert_eq!(shard.parts(), (&[0, 4][..], &b"live"[..]));
     }
 }
