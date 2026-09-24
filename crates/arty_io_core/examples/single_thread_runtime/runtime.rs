@@ -2,7 +2,8 @@
 // Licensed under the MIT License.
 
 use std::any::{Any, TypeId};
-use std::sync::mpsc;
+use std::collections::HashMap;
+use std::sync::{Mutex, mpsc};
 use std::thread::{self, JoinHandle};
 
 use arty_io_core::{Driver, DriverHandle, DriverOptions, DriverProvider, IoContext, ProviderOptions, ShutdownError, SystemTaskSpawner};
@@ -54,6 +55,7 @@ impl<D: Driver, C: IoContext> ErasedDriver for RegisteredDriver<D, C> {
 }
 
 pub(super) struct Runtime {
+    contexts: Mutex<HashMap<TypeId, ContextBox>>,
     commands: mpsc::Sender<Command>,
     thread: JoinHandle<()>,
 }
@@ -79,6 +81,7 @@ impl Runtime {
         ready_rx.recv().expect("runtime worker must report that startup completed");
 
         Self {
+            contexts: Mutex::new(HashMap::new()),
             commands: commands_tx,
             thread,
         }
@@ -88,18 +91,17 @@ impl Runtime {
     where
         C: IoContext,
     {
-        self.try_get_context::<C>().unwrap_or_else(|| self.initialize_context::<C>())
-    }
-
-    fn try_get_context<C>(&self) -> Option<C>
-    where
-        C: IoContext,
-    {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.run(move |_, _, drivers| {
-            let _ = reply_tx.send(find_context::<C>(drivers));
-        });
-        reply_rx.recv().expect("a worker replies before it stops serving commands")
+        let mut contexts = self
+            .contexts
+            .lock()
+            .expect("a previous context lookup panicked, leaving runtime state unusable");
+        // Keep the cache locked until registration completes so concurrent misses initialize once.
+        contexts
+            .entry(TypeId::of::<C>())
+            .or_insert_with(|| Box::new(self.initialize_context::<C>()))
+            .downcast_ref::<C>()
+            .expect("contexts are stored under their own TypeId")
+            .clone()
     }
 
     fn initialize_context<C>(&self) -> C
@@ -108,8 +110,6 @@ impl Runtime {
     {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.run(move |worker, spawner, drivers| {
-            // The lookup and initialization operations share this queue, so rechecking here
-            // serializes concurrent misses without a mutex.
             if let Some(context) = find_context::<C>(drivers) {
                 let _ = reply_tx.send(context);
                 return;
@@ -200,5 +200,68 @@ fn shutdown_drivers(drivers: DriverStore) -> ShutdownResult {
     match failure {
         Some(error) => Err(error),
         None => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Barrier, mpsc};
+    use std::thread;
+    use std::time::Duration;
+
+    use super::Runtime;
+    use crate::drivers::{EchoContext, SampleContext};
+
+    #[test]
+    fn cached_context_does_not_wait_for_the_worker() {
+        let runtime = Runtime::start();
+        let _ = runtime.get_context::<SampleContext>();
+        let (blocked_tx, blocked_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        runtime.run(move |_, _, _| {
+            blocked_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+        blocked_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+
+        thread::scope(|scope| {
+            let (done_tx, done_rx) = mpsc::channel();
+            let runtime = &runtime;
+            scope.spawn(move || {
+                let _ = runtime.get_context::<SampleContext>();
+                done_tx.send(()).unwrap();
+            });
+
+            let result = done_rx.recv_timeout(Duration::from_secs(10));
+            release_tx.send(()).unwrap();
+            result.unwrap();
+        });
+
+        runtime.shutdown().unwrap();
+    }
+
+    #[test]
+    fn concurrent_misses_register_each_context_once() {
+        let runtime = Runtime::start();
+        let ready = Barrier::new(4);
+
+        thread::scope(|scope| {
+            for _ in 0..4 {
+                scope.spawn(|| {
+                    ready.wait();
+                    let _ = runtime.get_context::<SampleContext>();
+                    let _ = runtime.get_context::<EchoContext>();
+                });
+            }
+        });
+
+        let (count_tx, count_rx) = mpsc::channel();
+        runtime.run(move |_, _, drivers| {
+            count_tx.send(drivers.len()).unwrap();
+        });
+        let count = count_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        runtime.shutdown().unwrap();
+
+        assert_eq!(count, 2);
     }
 }
