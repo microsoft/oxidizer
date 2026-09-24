@@ -858,11 +858,14 @@ mod tests {
 
     #[test]
     fn explicit_and_default_ports_support_bracketed_ipv6_authorities() {
-        for (uri, expected_host, expected_port) in [
-            ("https://example.com:8443/", "example.com", 8443),
-            ("https://[::1]:8443/", "[::1]", 8443),
-            ("https://[::1]/", "[::1]", 443),
+        for (miri_case, uri, expected_host, expected_port) in [
+            (false, "https://example.com:8443/", "example.com", 8443),
+            (true, "https://[::1]:8443/", "[::1]", 8443),
+            (true, "https://[::1]/", "[::1]", 443),
         ] {
+            if cfg!(miri) && !miri_case {
+                continue;
+            }
             let (response, record) = run_lifecycle(
                 request(Method::GET, uri),
                 TransportOptions::default(),
@@ -878,14 +881,17 @@ mod tests {
 
     #[test]
     fn invalid_explicit_ports_fail_before_native_io() {
-        for (uri, message) in [
-            ("https://example.com:/", "empty explicit port"),
-            ("https://example.com:12x/", "is not decimal"),
-            ("https://example.com:65536/", "outside the valid range"),
-            ("https://example.com:0/", "explicit port is zero"),
-            ("https://[::1]:/", "empty explicit port"),
-            ("https://[::1]:65536/", "outside the valid range"),
+        for (miri_case, uri, message) in [
+            (true, "https://example.com:/", "empty explicit port"),
+            (true, "https://example.com:12x/", "is not decimal"),
+            (true, "https://example.com:65536/", "outside the valid range"),
+            (true, "https://example.com:0/", "explicit port is zero"),
+            (false, "https://[::1]:/", "empty explicit port"),
+            (false, "https://[::1]:65536/", "outside the valid range"),
         ] {
+            if cfg!(miri) && !miri_case {
+                continue;
+            }
             let (result, record) = run_lifecycle(
                 request(Method::GET, uri),
                 TransportOptions::default(),
@@ -930,11 +936,14 @@ mod tests {
 
     #[test]
     fn advanced_protocol_combinations_apply_required_semantics_without_downgrade() {
-        for (versions, expected_mask, negotiated) in [
-            (vec![Version::HTTP_2], 1, Version::HTTP_2),
-            (vec![Version::HTTP_3], 2, Version::HTTP_3),
-            (vec![Version::HTTP_2, Version::HTTP_3], 3, Version::HTTP_3),
+        for (miri_case, versions, expected_mask, negotiated) in [
+            (false, vec![Version::HTTP_2], 1, Version::HTTP_2),
+            (false, vec![Version::HTTP_3], 2, Version::HTTP_3),
+            (true, vec![Version::HTTP_2, Version::HTTP_3], 3, Version::HTTP_3),
         ] {
+            if cfg!(miri) && !miri_case {
+                continue;
+            }
             let mut options = TransportOptions::default();
             options.supported_http_versions = versions;
             let config = LifecycleConfig {
@@ -963,11 +972,16 @@ mod tests {
 
     #[test]
     fn tls_relaxations_are_independent_request_masks() {
-        for (tls, expected) in [
-            (WinHttpTlsConfig::default(), None),
-            (WinHttpTlsConfig::builder().accept_invalid_certs(true).build(), Some(0x2300)),
-            (WinHttpTlsConfig::builder().accept_invalid_hostnames(true).build(), Some(0x1000)),
+        for (miri_case, tls, expected) in [
+            (true, WinHttpTlsConfig::default(), None),
+            (false, WinHttpTlsConfig::builder().accept_invalid_certs(true).build(), Some(0x2300)),
             (
+                false,
+                WinHttpTlsConfig::builder().accept_invalid_hostnames(true).build(),
+                Some(0x1000),
+            ),
+            (
+                true,
                 WinHttpTlsConfig::builder()
                     .accept_invalid_certs(true)
                     .accept_invalid_hostnames(true)
@@ -975,6 +989,9 @@ mod tests {
                 Some(0x3300),
             ),
         ] {
+            if cfg!(miri) && !miri_case {
+                continue;
+            }
             let (response, record) = run_lifecycle(
                 request(Method::GET, "https://example.com/"),
                 TransportOptions::default(),
@@ -1014,15 +1031,17 @@ mod tests {
 
     #[test]
     fn revocation_is_requested_unless_certificate_validation_is_relaxed() {
-        for (tls, expected) in [
-            (WinHttpTlsConfig::default(), Some(WINHTTP_ENABLE_SSL_REVOCATION)),
-            (WinHttpTlsConfig::builder().accept_invalid_certs(true).build(), None),
+        for (miri_case, tls, expected) in [
+            (true, WinHttpTlsConfig::default(), Some(WINHTTP_ENABLE_SSL_REVOCATION)),
+            (true, WinHttpTlsConfig::builder().accept_invalid_certs(true).build(), None),
             // Host-name relaxation is unrelated to revocation, so the check stays.
             (
+                false,
                 WinHttpTlsConfig::builder().accept_invalid_hostnames(true).build(),
                 Some(WINHTTP_ENABLE_SSL_REVOCATION),
             ),
             (
+                false,
                 WinHttpTlsConfig::builder()
                     .accept_invalid_certs(true)
                     .accept_invalid_hostnames(true)
@@ -1030,6 +1049,9 @@ mod tests {
                 None,
             ),
         ] {
+            if cfg!(miri) && !miri_case {
+                continue;
+            }
             let (response, record) = run_lifecycle(
                 request(Method::GET, "https://example.com/"),
                 TransportOptions::default(),
@@ -1314,7 +1336,14 @@ mod tests {
 
     #[test]
     fn unknown_length_uploads_use_automatic_chunking_for_every_supported_protocol() {
-        for (versions, protocol) in [(vec![Version::HTTP_11], 0), (vec![Version::HTTP_2], 1), (vec![Version::HTTP_3], 2)] {
+        for (miri_case, versions, protocol) in [
+            (true, vec![Version::HTTP_11], 0),
+            (false, vec![Version::HTTP_2], 1),
+            (true, vec![Version::HTTP_3], 2),
+        ] {
+            if cfg!(miri) && !miri_case {
+                continue;
+            }
             let memory = GlobalPool::new();
             let body_builder = HttpBodyBuilder::new(memory.clone(), &Clock::new_frozen());
             let completed_writes = Arc::new(AtomicUsize::new(0));

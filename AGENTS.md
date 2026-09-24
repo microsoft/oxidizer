@@ -164,3 +164,13 @@ patterns.
 **Open this when**: considering an `#[inline]` annotation; proposing or
 reviewing a performance optimization PR or issue; tempted to reach for a
 hand-rolled construct instead of an ecosystem default.
+
+# [Runtime analysis](docs/runtime-analysis.md)
+
+How Miri, `cargo careful`, Loom, and Bolero divide validation responsibility,
+including when package/test exclusions or reduced Miri stress cardinalities are
+appropriate.
+
+**Open this when**: changing runtime-analysis coverage; adding
+`package.metadata.anvil.miri`; ignoring a test under Miri; reducing a test's
+workload only under Miri.

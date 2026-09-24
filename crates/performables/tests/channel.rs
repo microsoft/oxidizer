@@ -29,6 +29,10 @@ const TEST_DEADLINE: Duration = Duration::from_secs(2);
 const THREAD_POLL_INTERVAL: Duration = Duration::from_millis(10);
 #[cfg(not(miri))]
 const THREAD_POLL_INTERVAL: Duration = Duration::from_millis(1);
+#[cfg(miri)]
+const CHANNEL_ITEMS_PER_PRODUCER: usize = 8;
+#[cfg(not(miri))]
+const CHANNEL_ITEMS_PER_PRODUCER: usize = 200;
 
 #[derive(Default)]
 struct WakeCounter(AtomicUsize);
@@ -216,12 +220,12 @@ fn unbounded_channel_supports_multiple_producers_and_consumers() {
         values
     });
     let first_producer = std::thread::spawn(move || {
-        for value in 0..200 {
+        for value in 0..CHANNEL_ITEMS_PER_PRODUCER {
             producer_a.send_sync(value).unwrap();
         }
     });
     let second_producer = std::thread::spawn(move || {
-        for value in 200..400 {
+        for value in CHANNEL_ITEMS_PER_PRODUCER..(2 * CHANNEL_ITEMS_PER_PRODUCER) {
             producer_b.send_sync(value).unwrap();
         }
     });
@@ -233,7 +237,9 @@ fn unbounded_channel_supports_multiple_producers_and_consumers() {
         .into_iter()
         .chain(join_with_timeout(second_consumer))
         .collect::<Vec<_>>();
-    assert_eq!((values.len(), values.into_iter().sum::<usize>()), (400, 79_800));
+    let expected_count = 2 * CHANNEL_ITEMS_PER_PRODUCER;
+    let expected_sum = CHANNEL_ITEMS_PER_PRODUCER * (expected_count - 1);
+    assert_eq!((values.len(), values.into_iter().sum::<usize>()), (expected_count, expected_sum));
 }
 
 #[test]
@@ -624,6 +630,11 @@ fn channel_operations_share_runtime_telemetry_identity() {
             enabled: true,
             capture_backtraces: true,
             ..Default::default()
+        },
+        event_capacity_per_thread: if cfg!(miri) {
+            seismograph::recorder::EventBufferCapacity::new(64).unwrap()
+        } else {
+            seismograph::recorder::EventBufferCapacity::default()
         },
         ..Default::default()
     });

@@ -17,6 +17,11 @@ homepage = { workspace = true }
 include = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/ohno"
 
+# Ohno and its generated API contain no runtime unsafe code. Native tests and
+# cargo-careful retain the full error-formatting and macro behavior coverage.
+[package.metadata.anvil.miri]
+exclude = true
+
 [package.metadata.cargo_check_external_types]
 allowed_external_types = ["ohno_macros::*"]
 

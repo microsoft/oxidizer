@@ -1224,7 +1224,7 @@ mod tests {
                 enabled: true,
                 ..Default::default()
             },
-            ..Default::default()
+            ..recorder::test_configuration()
         });
         recorder::record(recorder::event::EventClass::ArcDereference, || {
             recorder::event::Record::object(EventKind::ArcDeref, ObjectId::new(42))

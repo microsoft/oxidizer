@@ -198,7 +198,7 @@ impl Error for DescriptorError {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests {
     use http_path_template::{Grammar, PathTemplate};
 

@@ -391,6 +391,10 @@ mod tests {
     use super::{NUM_SHARDS, ThreadedLexicon};
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "preallocation capacity is a safe allocation policy covered by native tests; Miri retains threaded interning and resolution"
+    )]
     fn from_iter_preallocates_from_large_lower_size_hint() {
         let strings = NUM_SHARDS * 8;
         let lexicon: ThreadedLexicon = (0..strings).map(|_| "same").collect();
