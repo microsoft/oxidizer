@@ -77,3 +77,8 @@ Bolero's corpus replay requires filesystem access blocked by Miri isolation.
 Fixed regression seeds and deterministic scanner and parser checks still run
 under Miri. The in-memory Axum example tests use a runtime without an OS I/O
 driver, so they do not require Windows I/O completion port emulation.
+
+## Crate designs
+
+- [`fakeable`](fakeable.md) describes the generated real/fake wrapper model and
+  its optional Mockall integration.

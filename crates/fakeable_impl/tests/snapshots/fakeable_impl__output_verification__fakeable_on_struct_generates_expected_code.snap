@@ -1,0 +1,39 @@
+---
+source: crates/fakeable_impl/src/../tests/output_verification.rs
+expression: "prettyplease::unparse(&result_file)"
+---
+#[allow(non_snake_case)]
+mod __fakeable__MyService {
+    use super::*;
+    pub(super) enum Enum {
+        Real(MyService),
+        #[cfg(any(feature = "test-util", test))]
+        Fake(fakes::FakeMyService),
+    }
+    pub(super) struct MyService {
+        pub(super) value: String,
+        pub(super) other_value: i32,
+    }
+    #[cfg(any(feature = "test-util", test))]
+    const _: () = {
+        let fake_size = ::core::mem::size_of::<fakes::FakeMyService>();
+        let real_size = ::core::mem::size_of::<MyService>();
+        assert!(
+            ! (fake_size > 256 && fake_size >= real_size.saturating_mul(2)),
+            concat!("fakeable: the fake implementation for `", stringify!(MyService),
+            "` is larger than 256 bytes and at least 2x the real type, which bloats the wrapper. ",
+            "Wrap the fake behind a pointer instead, e.g. `fake_impl = std::sync::Arc<...>`.")
+        );
+    };
+}
+struct MyService {
+    inner: __fakeable__MyService::Enum,
+}
+impl MyService {
+    #[cfg(any(feature = "test-util", test))]
+    fn fake(fake_impl: fakes::FakeMyService) -> Self {
+        Self {
+            inner: __fakeable__MyService::Enum::Fake(fake_impl),
+        }
+    }
+}

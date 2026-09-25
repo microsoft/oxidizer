@@ -1,0 +1,50 @@
+---
+source: crates/fakeable_impl/src/../tests/output_verification.rs
+expression: "prettyplease::unparse(&result_file)"
+---
+impl<T> Service for __fakeable__MyService::MyService<T>
+where
+    T: Clone,
+{
+    fn value(&self) -> i32 {
+        42
+    }
+    fn duplicate(&self) -> Self {
+        Self { value: self.value.clone() }
+    }
+}
+impl<T> Service for MyService<T>
+where
+    T: Clone,
+{
+    #[allow(unused_mut)]
+    #[allow(clippy::used_underscore_binding)]
+    fn value(&self) -> i32 {
+        match &self.inner {
+            __fakeable__MyService::Enum::Real(real) => {
+                <__fakeable__MyService::MyService<T> as Service>::value(real)
+            }
+            #[cfg(any(feature = "test-util", test))]
+            __fakeable__MyService::Enum::Fake(fake) => fake.value(),
+        }
+    }
+    #[allow(unused_mut)]
+    #[allow(clippy::used_underscore_binding)]
+    fn duplicate(&self) -> Self {
+        match &self.inner {
+            __fakeable__MyService::Enum::Real(real) => {
+                Self {
+                    inner: __fakeable__MyService::Enum::Real(
+                        <__fakeable__MyService::MyService<T> as Service>::duplicate(real),
+                    ),
+                }
+            }
+            #[cfg(any(feature = "test-util", test))]
+            __fakeable__MyService::Enum::Fake(fake) => {
+                Self {
+                    inner: __fakeable__MyService::Enum::Fake(fake.duplicate()),
+                }
+            }
+        }
+    }
+}
