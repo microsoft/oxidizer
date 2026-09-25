@@ -3,6 +3,7 @@
 
 examine_globs = ["crates/**"]
 exclude_globs = [
+    # Shared exclusions copied from mutants.toml.
     # Fixture scaffolding for the `fetch_winhttp` tests, benchmarks and examples.
     "crates/fetch_winhttp_impl/src/testing/**",
     "crates/http_headers/**",
@@ -12,6 +13,7 @@ exclude_globs = [
     "crates/rest_over_grpc_tests/**",
     "crates/testing_aids/**",
 
+    # Windows host only.
     # Linux-only source is compiled out on Windows.
     "**/*linux.rs",
     "linux",
@@ -24,11 +26,7 @@ profile = "mutants"
 additional_cargo_test_args = [ "--locked", "--tests" ]
 
 exclude_re = [
-    # Linux perf is unavailable on Windows. `run_perf` exits before entering
-    # its Linux implementation, and the worker definitions share one name.
-    "\\brun_perf\\b",
-    "\\blaunch_perf_worker\\b",
-
+    # Shared exclusions copied from mutants.toml.
     # There are no API contracts for what these must return because they
     # are for human-readable stringification. No purpose mutating them.
     "impl Debug",
@@ -39,4 +37,10 @@ exclude_re = [
     "impl data_privacy::RedactedDebug",
     "impl data_privacy::RedactedDisplay",
     "impl data_privacy::RedactedToString",
+
+    # Windows host only.
+    # Linux perf is unavailable on Windows. `run_perf` exits before entering
+    # its Linux implementation, and the worker definitions share one name.
+    "\\brun_perf\\b",
+    "\\blaunch_perf_worker\\b",
 ]

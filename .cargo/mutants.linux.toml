@@ -3,6 +3,7 @@
 
 examine_globs = ["crates/**"]
 exclude_globs = [
+    # Shared exclusions copied from mutants.toml.
     # Fixture scaffolding for the `fetch_winhttp` tests, benchmarks and examples.
     "crates/fetch_winhttp_impl/src/testing/**",
     "crates/http_headers/**",
@@ -12,6 +13,7 @@ exclude_globs = [
     "crates/rest_over_grpc_tests/**",
     "crates/testing_aids/**",
 
+    # Linux host only.
     # Windows-only source is compiled out on Linux. The WinHTTP crates apply
     # their gates per module, so exclude them wholesale rather than duplicating
     # every gated source path here.
@@ -29,6 +31,7 @@ profile = "mutants"
 additional_cargo_test_args = [ "--locked", "--tests" ]
 
 exclude_re = [
+    # Shared exclusions copied from mutants.toml.
     # There are no API contracts for what these must return because they
     # are for human-readable stringification. No purpose mutating them.
     "impl Debug",
