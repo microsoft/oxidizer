@@ -282,6 +282,7 @@ dependencies = [
 name = "arty_io_core"
 version = "0.2.0"
 dependencies = [
+ "performables",
  "static_assertions",
  "thread_aware_core",
 ]

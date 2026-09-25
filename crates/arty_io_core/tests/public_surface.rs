@@ -348,7 +348,7 @@ impl Driver for LocalDriver {
 
     fn execute_cycle(&mut self, cycle: Cycle<'_>) -> Result<(), DriverError> {
         let token = cycle.start_work();
-        token.on_interrupted(self.completion_queue.waker());
+        token.on_interrupt(self.completion_queue.waker());
         self.completion_queue.process_completions(&cycle);
         Ok(())
     }
@@ -383,6 +383,8 @@ impl ThreadAware for TestProvider {
 }
 
 impl DriverProvider for TestProvider {
+    const CAN_BE_PRIMARY: bool = true;
+
     type Context = TestContext;
     type Driver = LocalDriver;
 
@@ -431,6 +433,8 @@ impl ThreadAware for LeaseProvider {
 }
 
 impl DriverProvider for LeaseProvider {
+    const CAN_BE_PRIMARY: bool = false;
+
     type Context = LeaseContext;
     type Driver = LeaseDriver;
 

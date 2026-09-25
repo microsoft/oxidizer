@@ -6,9 +6,10 @@
 pub enum DriverRole {
     /// The single driver whose cycle may block the runtime worker.
     ///
-    /// A worker that hosts drivers has exactly one primary. The runtime invokes it after every
-    /// secondary. It may apply [`Cycle::max_wait`](crate::Cycle::max_wait) directly to its
-    /// worker wait.
+    /// A worker has at most one primary. The runtime assigns this role only to a provider whose
+    /// [`DriverProvider::CAN_BE_PRIMARY`](crate::DriverProvider::CAN_BE_PRIMARY) flag is true,
+    /// invokes it after every secondary, and permits it to apply
+    /// [`Cycle::max_wait`](crate::Cycle::max_wait) directly to its worker wait.
     Primary,
     /// A driver whose worker-local cycle must remain non-blocking.
     ///
@@ -16,9 +17,9 @@ pub enum DriverRole {
     /// before the worker may block. It receives the same [`Cycle::max_wait`](crate::Cycle::max_wait)
     /// as the primary; that value is a timeout for an off-worker wait, not permission to block or
     /// join from [`Driver::execute_cycle`](crate::Driver::execute_cycle). It claims the cycle's
-    /// [`CoordinationToken`](crate::CoordinationToken) for background work and completes that
-    /// token before the runtime advances. If the observer publishes work, it calls
-    /// [`CoordinationToken::work_completed`](crate::CoordinationToken::work_completed); otherwise it
-    /// drops the token without interrupting the cycle.
+    /// [`PendingWork`](crate::PendingWork) value for background work and completes that
+    /// value before the runtime advances. If the observer publishes work, it calls
+    /// [`PendingWork::complete`](crate::PendingWork::complete); otherwise it
+    /// drops the value without interrupting the cycle.
     Secondary,
 }

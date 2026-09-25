@@ -65,6 +65,10 @@ drivers registered earlier on that worker. This lets a new driver discover and
 connect to compatible local drivers without moving thread-local driver state or
 exposing the runtime's registry.
 
+The runtime assigns the primary role only to a provider whose
+`CAN_BE_PRIMARY` flag is true. Roles remain fixed for each driver. When no
+primary exists, the runtime retains its own worker-parking path.
+
 ## Registration stays in the runtime
 
 Lazy registration requires a type-keyed registry and coordination between
@@ -109,7 +113,7 @@ lets drivers compare deadlines consistently without later drivers observing
 time advanced merely because they were scheduled later in the cycle. It is not
 a completion timestamp or a general runtime clock service.
 
-The runtime invokes secondary drivers first and the single primary last. Every
+The runtime invokes secondary drivers first and the optional primary last. Every
 driver receives the same maximum wait. A primary can apply it directly to the
 worker wait. A secondary may apply it only on a background thread; its
 worker-local cycle remains non-blocking. The secondary attaches the waker
@@ -120,11 +124,11 @@ The cycle coordinator follows a latched interruption contract. Drivers register
 native-wait wakers each cycle. Long-lived observers retain the cycle's stable
 interruption waker and wake it after publishing work.
 
-Each driver may create multiple non-cloneable coordination tokens for work that
-outlives `execute_cycle`. A secondary moves each token to the corresponding
-background work. It uses `work_completed` after publishing results; work ending
-without results drops the token. The runtime invokes the primary after all
-secondaries, interrupts remaining waits, then waits for every token before
+Each driver may create multiple non-cloneable `PendingWork` values for work that
+outlives `execute_cycle`. A secondary moves each value to the corresponding
+background work. It uses `complete` after publishing results; work ending
+without results drops the value. The runtime invokes the primary after all
+secondaries, interrupts remaining waits, then waits for every pending-work value before
 beginning the next cycle. This prevents a new cycle from starting while a
 secondary is still finalizing the previous one.
 

@@ -42,8 +42,10 @@ worker it serves.
 
 - A provider clone is relocated to the worker before creation.
 - `DriverOptions::thread` identifies that worker and its runtime owner.
-- A worker that hosts drivers has exactly one primary. Roles are fixed for the
-  lifetime of their drivers.
+- A worker has at most one primary. Roles are fixed for the lifetime of their
+  drivers.
+- The runtime assigns primary only to a provider whose `CAN_BE_PRIMARY` flag is
+  true. If no primary exists, the runtime owns the worker's parking path.
 - `DriverOptions::role` identifies the primary or a secondary before creation.
 - `DriverOptions::drivers` exposes type-erased handles for drivers whose
   registration previously completed on that worker.
@@ -98,13 +100,13 @@ The shared coordinator has the following semantics:
 - Registered wakers remain memory-safe after their driver is gone.
 - Only the runtime begins a new coordination cycle, before checking cycle work.
 - The runtime begins coordination exactly once per logical cycle, never between drivers.
-- A driver may create multiple non-cloneable tokens for work that outlives
+- A driver may create multiple non-cloneable `PendingWork` values for work that outlives
   `execute_cycle`.
-- Work that publishes results uses `work_completed` to interrupt the cycle and
+- Work that publishes results uses `complete` to interrupt the cycle and
   release the completion barrier together. Work ending without results drops its
-  token without interrupting the cycle.
+  value without interrupting the cycle.
 - After the primary returns, the runtime interrupts remaining waits and blocks
-  until every token is completed or dropped before beginning the next cycle.
+  until every pending-work value is completed or dropped before beginning the next cycle.
 - Once a driver is dropped or its shutdown returns, retained wakers stop
   interrupting runtime cycles.
 

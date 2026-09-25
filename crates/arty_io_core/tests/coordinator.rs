@@ -11,13 +11,13 @@ use std::task::{Wake, Waker};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use arty_io_core::{CoordinationToken, Coordinator, Cycle};
+use arty_io_core::{Coordinator, Cycle, PendingWork};
 use static_assertions::{assert_impl_all, assert_not_impl_any};
 
 assert_impl_all!(Coordinator: Send, Sync, std::fmt::Debug);
 assert_not_impl_any!(Coordinator: Clone);
-assert_impl_all!(CoordinationToken: Send, Sync, std::fmt::Debug);
-assert_not_impl_any!(CoordinationToken: Clone);
+assert_impl_all!(PendingWork: Send, Sync, std::fmt::Debug);
+assert_not_impl_any!(PendingWork: Clone);
 
 #[derive(Default)]
 struct Counter(AtomicUsize);
@@ -35,11 +35,11 @@ fn interrupt_is_one_shot_and_late_registration_is_not_lost() {
     let token = cycle.start_work();
     let first = Arc::new(Counter::default());
     let late = Arc::new(Counter::default());
-    token.on_interrupted(Waker::from(Arc::clone(&first)));
+    token.on_interrupt(Waker::from(Arc::clone(&first)));
 
     coordinator.interrupt();
     coordinator.interrupt();
-    token.on_interrupted(Waker::from(Arc::clone(&late)));
+    token.on_interrupt(Waker::from(Arc::clone(&late)));
 
     assert_eq!(first.0.load(Ordering::Relaxed), 1);
     assert_eq!(late.0.load(Ordering::Relaxed), 1);
@@ -91,14 +91,14 @@ fn dropping_multiple_tokens_releases_the_completion_barrier() {
 }
 
 #[test]
-fn work_completed_interrupts_waiters_and_releases_the_barrier() {
+fn complete_interrupts_waiters_and_releases_the_barrier() {
     let mut coordinator = Coordinator::new();
     coordinator.begin_cycle();
     let count = Arc::new(Counter::default());
     let cycle = Cycle::new(Instant::now(), Duration::ZERO, &coordinator);
     let token = cycle.start_work();
-    token.on_interrupted(Waker::from(Arc::clone(&count)));
-    token.work_completed();
+    token.on_interrupt(Waker::from(Arc::clone(&count)));
+    token.complete();
 
     coordinator.complete_cycle();
     assert_eq!(count.0.load(Ordering::Relaxed), 1);
@@ -124,8 +124,8 @@ fn old_broadcast_finishing_after_cycle_transition_preserves_new_registrations() 
     let (stable_waker, thread) = {
         let cycle = Cycle::new(Instant::now(), Duration::ZERO, &coordinator);
         let token = cycle.start_work();
-        let stable_waker = cycle.interrupt_waker();
-        token.on_interrupted(Waker::from(Arc::new(HeldWake {
+        let stable_waker = coordinator.interrupt_waker();
+        token.on_interrupt(Waker::from(Arc::new(HeldWake {
             entered: entered_tx,
             release: Mutex::new(release_rx),
         })));
@@ -140,7 +140,7 @@ fn old_broadcast_finishing_after_cycle_transition_preserves_new_registrations() 
     let next_cycle = Cycle::new(Instant::now(), Duration::ZERO, &coordinator);
     let next = Arc::new(Counter::default());
     let next_token = next_cycle.start_work();
-    next_token.on_interrupted(Waker::from(Arc::clone(&next)));
+    next_token.on_interrupt(Waker::from(Arc::clone(&next)));
     release_tx.send(()).unwrap();
     thread.join().unwrap();
 

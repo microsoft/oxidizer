@@ -3,13 +3,19 @@
 
 use thread_aware_core::ThreadAware;
 
-use crate::{Driver, DriverError, DriverOptions, IoContext};
+use crate::{Driver, DriverError, DriverOptions, DriverRole, IoContext};
 
 /// A factory for per-worker driver and context pairs.
 ///
 /// A runtime clones and relocates the provider for each worker, then consumes the relocated clone
 /// to create that worker's pair. State shared by driver instances remains private to the provider.
 pub trait DriverProvider: Clone + ThreadAware + Sized + 'static {
+    /// Whether drivers created by this provider may receive [`DriverRole::Primary`].
+    ///
+    /// A runtime assigns the primary role only when the worker has no primary and this flag is
+    /// true. The assigned role is still available through [`DriverOptions::role`].
+    const CAN_BE_PRIMARY: bool;
+
     /// The context type associated with this provider.
     type Context: IoContext<Provider = Self>;
 

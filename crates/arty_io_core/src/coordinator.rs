@@ -2,17 +2,22 @@
 // Licensed under the MIT License.
 
 use std::fmt;
-use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::task::{Wake, Waker};
+
+use performables::arc::Arc;
+use performables::sync::PoisonError;
+use performables::sync::condition::Condvar;
+use performables::sync::mutex::Mutex;
 
 /// Coordinates wait interruption and outstanding work for one runtime worker.
 ///
 /// The runtime owns one coordinator. Drivers interact with it only through
-/// [`Cycle`](crate::Cycle), which creates non-cloneable [`CoordinationToken`] values and a stable
+/// [`Cycle`](crate::Cycle), which creates non-cloneable [`PendingWork`] values and a stable
 /// interruption waker.
 ///
-/// A driver creates one token for each unit of work that can outlive `execute_cycle`. After the
-/// primary returns, the runtime interrupts remaining waits and blocks until all tokens are
+/// A driver creates one [`PendingWork`] value for each unit of work that can outlive
+/// `execute_cycle`. After the primary returns, the runtime interrupts remaining waits and blocks
+/// until all pending work is
 /// completed or dropped.
 ///
 /// The coordinator is intentionally not cloneable.
@@ -21,6 +26,8 @@ pub struct Coordinator {
 }
 
 struct Inner {
+    // Coordination is a hot, mostly uncontended path. The workspace performables primitives keep
+    // uncontended acquisition allocation-free and retain synchronization telemetry.
     state: Mutex<State>,
     completed: Condvar,
 }
@@ -59,15 +66,10 @@ impl Coordinator {
         reason = "only the runtime's exclusive coordinator owner may begin a cycle"
     )]
     pub fn begin_cycle(&mut self) {
-        let pending_work = self
-            .inner
-            .state
-            .lock()
-            .expect("coordinator bookkeeping must not be poisoned")
-            .pending_work;
-        assert_eq!(pending_work, 0, "all coordination tokens must complete before beginning a cycle");
+        let pending_work = self.inner.state.lock_sync().pending_work;
+        assert_eq!(pending_work, 0, "all pending work must complete before beginning a cycle");
         let mut wakers = {
-            let mut state = self.inner.state.lock().expect("coordinator bookkeeping must not be poisoned");
+            let mut state = self.inner.state.lock_sync();
             state.interrupted = false;
             std::mem::take(&mut state.wakers)
         };
@@ -97,7 +99,7 @@ impl Coordinator {
     /// Ends the current cycle.
     ///
     /// This first interrupts all registered waits, then blocks until every outstanding
-    /// [`CoordinationToken`] has completed or been dropped.
+    /// [`PendingWork`] has completed or been dropped.
     ///
     /// # Panics
     ///
@@ -107,7 +109,7 @@ impl Coordinator {
         self.wait_for_idle();
     }
 
-    /// Blocks until no coordination tokens remain.
+    /// Blocks until no pending work remains.
     ///
     /// This does not interrupt registered waits. The runtime uses it for a zero-wait
     /// initialization pass that must finish before a context is published.
@@ -116,22 +118,18 @@ impl Coordinator {
     ///
     /// Panics if bookkeeping was poisoned.
     pub fn wait_for_idle(&self) {
-        let mut state = self.inner.state.lock().expect("coordinator bookkeeping must not be poisoned");
+        let mut state = self.inner.state.lock_sync();
         while state.pending_work != 0 {
-            state = self
-                .inner
-                .completed
-                .wait(state)
-                .expect("coordinator bookkeeping must not be poisoned");
+            state = self.inner.completed.wait_sync(state);
         }
     }
 
-    pub(crate) fn start_work(&self) -> CoordinationToken {
+    pub(crate) fn start_work(&self) -> PendingWork {
         {
-            let mut state = self.inner.state.lock().expect("coordinator bookkeeping must not be poisoned");
+            let mut state = self.inner.state.lock_sync();
             state.pending_work = state.pending_work.checked_add(1).expect("coordinator work count must not overflow");
         }
-        CoordinationToken {
+        PendingWork {
             inner: Arc::clone(&self.inner),
             active: true,
         }
@@ -146,7 +144,7 @@ impl Default for Coordinator {
 
 impl fmt::Debug for Coordinator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let state = self.inner.state.lock().expect("coordinator bookkeeping must not be poisoned");
+        let state = self.inner.state.lock_sync();
         f.debug_struct("Coordinator")
             .field("interrupted", &state.interrupted)
             .field("pending_work", &state.pending_work)
@@ -155,8 +153,8 @@ impl fmt::Debug for Coordinator {
 }
 
 impl Inner {
-    fn on_interrupted(&self, waker: Waker) {
-        let mut state = self.state.lock().expect("coordinator bookkeeping must not be poisoned");
+    fn on_interrupt(&self, waker: Waker) {
+        let mut state = self.state.lock_sync();
         if state.interrupted {
             drop(state);
             waker.wake();
@@ -167,7 +165,7 @@ impl Inner {
 
     fn interrupt(&self) {
         let mut wakers = {
-            let mut state = self.state.lock().expect("coordinator bookkeeping must not be poisoned");
+            let mut state = self.state.lock_sync();
             if state.interrupted {
                 return;
             }
@@ -181,7 +179,7 @@ impl Inner {
     }
 
     fn recycle(&self, mut wakers: Vec<Waker>) {
-        let mut state = self.state.lock().expect("coordinator bookkeeping must not be poisoned");
+        let mut state = self.state.lock_sync();
         if state.wakers.is_empty() && state.wakers.capacity() < wakers.capacity() {
             std::mem::swap(&mut state.wakers, &mut wakers);
         }
@@ -189,23 +187,23 @@ impl Inner {
 }
 
 impl Wake for Inner {
-    fn wake(self: Arc<Self>) {
+    fn wake(self: std::sync::Arc<Self>) {
         self.interrupt();
     }
 }
 
 /// Completion ownership for one unit of work in one runtime cycle.
 ///
-/// The token is intentionally not cloneable. Move it to work that can outlive `execute_cycle`.
-/// After publishing work, call [`work_completed`](Self::work_completed) to interrupt other waits and
-/// release the completion barrier. If no work was published, drop the token; dropping releases
+/// The value is intentionally not cloneable. Move it to work that can outlive `execute_cycle`.
+/// After publishing work, call [`complete`](Self::complete) to interrupt other waits and
+/// release the completion barrier. If no work was published, drop the value; dropping releases
 /// the barrier without interrupting the cycle.
-pub struct CoordinationToken {
+pub struct PendingWork {
     inner: Arc<Inner>,
     active: bool,
 }
 
-impl CoordinationToken {
+impl PendingWork {
     /// Invokes `waker` when this cycle is interrupted.
     ///
     /// If interruption was already requested, `waker` is invoked before this method returns.
@@ -215,8 +213,8 @@ impl CoordinationToken {
     /// # Panics
     ///
     /// Panics if bookkeeping was poisoned or calling [`Waker::wake`] panics.
-    pub fn on_interrupted(&self, waker: Waker) {
-        self.inner.on_interrupted(waker);
+    pub fn on_interrupt(&self, waker: Waker) {
+        self.inner.on_interrupt(waker);
     }
 
     /// Returns whether this cycle was interrupted.
@@ -226,54 +224,45 @@ impl CoordinationToken {
     /// Panics if bookkeeping was poisoned.
     #[must_use]
     pub fn is_interrupted(&self) -> bool {
-        self.inner
-            .state
-            .lock()
-            .expect("coordinator bookkeeping must not be poisoned")
-            .interrupted
+        self.inner.state.lock_sync().interrupted
     }
 
     /// Reports that this work completed with work ready for the owning driver.
     ///
     /// Call this only after making the work visible. It interrupts other registered waits, then
-    /// releases the runtime's completion barrier. Drop the token instead when the work ends
+    /// releases the runtime's completion barrier. Drop the value instead when the work ends
     /// without publishing anything.
     ///
     /// # Panics
     ///
     /// Panics if bookkeeping was poisoned, calling a registered [`Waker::wake`] panics, or the
-    /// token was completed incorrectly.
-    pub fn work_completed(mut self) {
+    /// value was completed incorrectly.
+    pub fn complete(mut self) {
         self.inner.interrupt();
-        self.complete();
+        self.mark_completed();
     }
 
-    fn complete(&mut self) {
+    fn mark_completed(&mut self) {
         if !self.active {
             return;
         }
         self.active = false;
-        let mut state = self.inner.state.lock().unwrap_or_else(PoisonError::into_inner);
-        state.pending_work = state
-            .pending_work
-            .checked_sub(1)
-            .expect("coordination token must complete exactly once");
+        let mut state = self.inner.state.lock_sync_result().unwrap_or_else(PoisonError::into_inner);
+        state.pending_work = state.pending_work.checked_sub(1).expect("pending work must complete exactly once");
         if state.pending_work == 0 {
             self.inner.completed.notify_all();
         }
     }
 }
 
-impl Drop for CoordinationToken {
+impl Drop for PendingWork {
     fn drop(&mut self) {
-        self.complete();
+        self.mark_completed();
     }
 }
 
-impl fmt::Debug for CoordinationToken {
+impl fmt::Debug for PendingWork {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CoordinationToken")
-            .field("active", &self.active)
-            .finish_non_exhaustive()
+        f.debug_struct("PendingWork").field("active", &self.active).finish_non_exhaustive()
     }
 }

@@ -5,6 +5,10 @@
 explores an alternative completion boundary; its conceptual operations are not
 APIs implemented by `arty_io_core`.
 
+The existing role contract permits at most one primary, and only providers that
+opt in may receive that role. When no primary exists, the runtime retains its
+own worker-parking path.
+
 ## Recommendation
 
 Keep independently registered drivers, but separate servicing I/O from owning
@@ -57,10 +61,10 @@ drivers are compatible.
 
 The runtime begins coordination once per logical cycle, not between driver
 calls or for a registration initialization pass. Drivers create non-cloneable
-tokens for work that continues off-thread. A secondary attaches the waker for
-each current background wait, uses `work_completed` after publishing results, and
-drops a token when work ends without results. After the primary returns, the
-runtime interrupts remaining waits and waits for all tokens before advancing.
+`PendingWork` values for work that continues off-thread. A secondary attaches the waker for
+each current background wait, uses `complete` after publishing results, and
+drops the value when work ends without results. After the primary returns, the
+runtime interrupts remaining waits and waits for all pending work before advancing.
 
 Finite waits can bound this delay, but introduce polling and latency.
 Zero-duration scans avoid blocking on the wrong driver but consume CPU while

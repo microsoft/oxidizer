@@ -29,6 +29,8 @@ impl ThreadAware for SampleProvider {
 }
 
 impl DriverProvider for SampleProvider {
+    const CAN_BE_PRIMARY: bool = true;
+
     type Context = SampleContext;
     type Driver = SampleDriver;
 
@@ -87,6 +89,8 @@ impl ThreadAware for EchoProvider {
 }
 
 impl DriverProvider for EchoProvider {
+    const CAN_BE_PRIMARY: bool = false;
+
     type Context = EchoContext;
     type Driver = EchoDriver;
 

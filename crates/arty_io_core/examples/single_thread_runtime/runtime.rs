@@ -133,7 +133,7 @@ impl Runtime {
             }
 
             let mut provider = C::provider(ProviderOptions::new());
-            let options = driver_options(worker, spawner, drivers);
+            let options = driver_options(worker, spawner, drivers, <C::Provider as DriverProvider>::CAN_BE_PRIMARY);
             let role = options.role();
             provider.relocate(None, options.thread());
             let (mut driver, context) = provider.create(options).expect("sample driver initialization is infallible");
@@ -201,12 +201,12 @@ fn find_context<C: IoContext>(drivers: &DriverStore) -> Option<C> {
         })
 }
 
-fn driver_options<'a>(worker: &Thread, spawner: &SystemTaskSpawner, drivers: &'a DriverStore) -> DriverOptions<'a> {
+fn driver_options<'a>(worker: &Thread, spawner: &SystemTaskSpawner, drivers: &'a DriverStore, can_be_primary: bool) -> DriverOptions<'a> {
     let driver_handles = drivers.iter().map(|driver| driver.handle()).collect();
-    let role = if drivers.iter().any(|driver| driver.role() == DriverRole::Primary) {
-        DriverRole::Secondary
-    } else {
+    let role = if can_be_primary && !drivers.iter().any(|driver| driver.role() == DriverRole::Primary) {
         DriverRole::Primary
+    } else {
+        DriverRole::Secondary
     };
     DriverOptions::new(worker.clone(), spawner.clone(), driver_handles, role)
 }

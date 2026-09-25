@@ -22,7 +22,7 @@ provides neither a runtime nor an I/O implementation.
 
 * [`IoContext`][__link0] selects a [`DriverProvider`][__link1].
 * [`DriverProvider`][__link2] creates one [`Driver`][__link3] and context per runtime worker.
-* [`DriverRole`][__link4] identifies the worker-blocking primary and non-blocking secondaries.
+* [`DriverRole`][__link4] identifies an optional worker-blocking primary and non-blocking secondaries.
 * [`Cycle`][__link5] supplies a shared time snapshot, wait bound, and [`Coordinator`][__link6].
 * [`DriverOptions`][__link7] supplies per-worker construction facilities and peer handles.
 * [`SystemTaskSpawner`][__link8] runs blocking system work outside async workers.
@@ -42,10 +42,10 @@ A runtime invokes secondary drivers first and the primary last. Every driver rec
 [`Cycle::max_wait`][__link14]. A primary may block its worker for that duration. A secondary must return
 promptly and may use the duration only for a wait scheduled on a background thread.
 
-Drivers create non-cloneable [`CoordinationToken`][__link15] values with [`Cycle::start_work`][__link16] and attach
-native-wait callbacks with [`CoordinationToken::on_interrupted`][__link17]. The runtime waits for every
-token after the primary returns and before starting the next cycle. A driver calls
-[`CoordinationToken::work_completed`][__link18] after publishing work, or drops the token if its wait ended
+Drivers create non-cloneable [`PendingWork`][__link15] values with [`Cycle::start_work`][__link16] and attach
+native-wait callbacks with [`PendingWork::on_interrupt`][__link17]. The runtime waits for every
+pending-work value after the primary returns and before starting the next cycle. A driver calls
+[`PendingWork::complete`][__link18] after publishing work, or drops the value if its wait ended
 without work.
 
 ## Shutdown
@@ -66,7 +66,7 @@ run only after its shutdown returns.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbK21y-dM74M0buYfVzdtOBKMbukQLKfu_5GIbHplDZKUL_qphZIGCbGFydHlfaW9fY29yZWUwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb10jnabYsAFcbZZLBgDwAf7AbEOopJ96DUoUb86jXaARsaYphZIGCbGFydHlfaW9fY29yZWUwLjIuMA
  [__link0]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=IoContext
  [__link1]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverProvider
  [__link10]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=ShutdownError
@@ -74,10 +74,10 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link12]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverOptions::drivers
  [__link13]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::on_peer_registered
  [__link14]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Cycle::max_wait
- [__link15]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=CoordinationToken
+ [__link15]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=PendingWork
  [__link16]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Cycle::start_work
- [__link17]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=CoordinationToken::on_interrupted
- [__link18]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=CoordinationToken::work_completed
+ [__link17]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=PendingWork::on_interrupt
+ [__link18]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=PendingWork::complete
  [__link19]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::shutdown
  [__link2]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverProvider
  [__link20]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/REQUIREMENTS.md

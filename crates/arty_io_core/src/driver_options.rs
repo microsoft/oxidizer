@@ -53,10 +53,10 @@ impl<'a> DriverOptions<'a> {
 
     /// Returns this driver's runtime-assigned waiting role.
     ///
-    /// A worker that hosts drivers has exactly one [`DriverRole::Primary`]. The role is fixed for
-    /// the driver's lifetime. The runtime invokes secondaries first and the primary last. Every
-    /// role receives the same cycle wait bound, but a secondary may apply it only to an
-    /// off-worker wait.
+    /// A worker has at most one [`DriverRole::Primary`], assigned only to a provider that allows
+    /// it. The role is fixed for the driver's lifetime. The runtime invokes secondaries first and
+    /// the primary last. Every role receives the same cycle wait bound, but a secondary may apply
+    /// it only to an off-worker wait.
     #[must_use]
     pub const fn role(&self) -> DriverRole {
         self.role

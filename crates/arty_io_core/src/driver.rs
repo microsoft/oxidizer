@@ -30,12 +30,12 @@ pub trait Driver: 'static {
 
     /// Processes submissions and completions and optionally waits for native work.
     ///
-    /// The runtime invokes every secondary before the single primary, using the same
+    /// The runtime invokes every secondary before the optional primary, using the same
     /// [`Cycle::started_at`] and [`Cycle::max_wait`] for every call. A primary may apply that
     /// duration directly to its worker wait. A secondary may use the duration only to arm or
     /// replace an off-worker wait; its worker-local call must return without waiting for that
     /// background operation to finish. It starts coordination for that work; the runtime does not
-    /// begin the next cycle until every token calls `work_completed` after publishing work or is
+    /// begin the next cycle until every pending-work value calls `complete` after publishing work or is
     /// dropped after ending without work.
     ///
     /// Registration includes an initial zero-wait cycle before the context is published or peers
@@ -43,14 +43,14 @@ pub trait Driver: 'static {
     /// notification, and recheck work queued during construction. Failure aborts registration.
     ///
     /// Start coordination for each current native wait, attach that wait's waker with
-    /// [`CoordinationToken::on_interrupted`](crate::CoordinationToken::on_interrupted) before
-    /// checking [`CoordinationToken::is_interrupted`](crate::CoordinationToken::is_interrupted)
-    /// or entering the wait, and keep the token alive until the wait finishes. Native
+    /// [`PendingWork::on_interrupt`](crate::PendingWork::on_interrupt) before
+    /// checking [`PendingWork::is_interrupted`](crate::PendingWork::is_interrupted)
+    /// or entering the wait, and keep the pending-work value alive until the wait finishes. Native
     /// interruption must be latched across that transition. Waiting ends only the wait; pending
     /// completions still need processing.
     ///
     /// Process a bounded batch. If that bound is reached while immediately serviceable work
-    /// remains, call [`CoordinationToken::work_completed`](crate::CoordinationToken::work_completed)
+    /// remains, call [`PendingWork::complete`](crate::PendingWork::complete)
     /// before returning. Do not interrupt another cycle merely because operations remain in
     /// flight or because a wait was interrupted.
     ///
