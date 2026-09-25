@@ -55,7 +55,7 @@ worker it serves.
   the new driver's type-erased handle.
 - A relocated provider clone is consumed exactly once.
 - Before publication, the runtime invokes one zero-wait initialization cycle in
-  the current interruption round; it does not reset the interruptor again.
+  the current coordination round; it does not begin coordination again.
 - The provider decides whether instances share queues, memory, threads, or
   nothing.
 
@@ -77,29 +77,36 @@ The runtime does not dictate how an I/O subsystem distributes work.
   uses driver-private synchronization to arm or replace that wait.
 - The runtime captures one `Instant` when it starts a completion-processing
   cycle and passes that value unchanged to every driver visited in the cycle.
-- Drivers use the shared `Interruptor` to wake native waits and request another
+- Drivers use the shared `Coordinator` to wake native waits and interrupt the
   runtime cycle.
 - If an immediately serviceable batch remains after a bounded pass, the driver
-  requests another cycle. In-flight operations alone do not require a request.
+  interrupts the cycle. In-flight operations alone do not require interruption.
 - A driver may delegate work through the runtime-owned `SystemTaskSpawner` handle.
 - A driver or provider may create any number of private threads.
 - Thread pinning and native observer topology remain implementation details.
 
 ## R5: Reliable wake-ups
 
-The shared interruptor has the following semantics:
+The shared coordinator has the following semantics:
 
-- A request raised before a blocking wait is latched for that cycle.
+- An interruption raised before a blocking wait is latched for that cycle.
 - Secondary background observers can interrupt the primary worker wait.
 - A wake-up does not prevent pending completions from being processed.
 - A wake-up raised by the driver's own thread is honored.
 - Redundant wake-ups may be coalesced.
 - A wake-up is never dropped.
 - Registered wakers remain memory-safe after their driver is gone.
-- Only the runtime resets the request latch, before checking cycle work.
-- The runtime resets exactly once per logical cycle, never between drivers.
-- Once a driver is dropped or its shutdown returns, retained clones stop
-  requesting new runtime cycles.
+- Only the runtime begins a new coordination cycle, before checking cycle work.
+- The runtime begins coordination exactly once per logical cycle, never between drivers.
+- A driver may create multiple non-cloneable tokens for work that outlives
+  `execute_cycle`.
+- Work that publishes results uses `work_ready` to interrupt the cycle and
+  release the completion barrier together. Work ending without results drops its
+  token without interrupting the cycle.
+- After the primary returns, the runtime interrupts remaining waits and blocks
+  until every token is completed or dropped before beginning the next cycle.
+- Once a driver is dropped or its shutdown returns, retained wakers stop
+  interrupting runtime cycles.
 
 ## R6: Safe and blocking shutdown
 
@@ -121,7 +128,7 @@ Shutdown must not rely on an unsafe trait or a caller-checked inertness flag.
   message or an underlying source.
 - The driver bounds its own shutdown wait and returns `ShutdownError` rather
   than blocking indefinitely.
-- Normal cycle interruption is no longer driven during shutdown; drivers use
+- Normal cycle coordination is no longer driven during shutdown; drivers use
   their own synchronization for shutdown progress.
 - A driver does not wait for work that can run only after its shutdown returns,
   including another driver serialized on the same runtime thread.

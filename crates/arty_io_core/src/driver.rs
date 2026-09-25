@@ -34,27 +34,32 @@ pub trait Driver: 'static {
     /// [`Cycle::started_at`] and [`Cycle::max_wait`] for every call. A primary may apply that
     /// duration directly to its worker wait. A secondary may use the duration only to arm or
     /// replace an off-worker wait; its worker-local call must return without waiting for that
-    /// background operation to finish.
+    /// background operation to finish. It starts coordination for that work; the runtime does not
+    /// begin the next cycle until every token calls `work_ready` after publishing work or is
+    /// dropped after ending without work.
     ///
     /// Registration includes an initial zero-wait cycle before the context is published or peers
-    /// are notified. Retain the stable interruptor from this call, connect native notification,
-    /// and recheck work queued during construction. Failure aborts registration.
+    /// are notified. Obtain a stable interruption waker from the cycle, connect native
+    /// notification, and recheck work queued during construction. Failure aborts registration.
     ///
-    /// Register each current native wait's waker before checking
-    /// [`Interruptor::is_requested`](crate::Interruptor::is_requested) or entering the wait, and
-    /// register it again in each cycle. Native interruption must be latched across that
-    /// transition. Waiting ends only the wait; pending completions still need processing.
+    /// Start coordination for each current native wait, attach that wait's waker with
+    /// [`CoordinationToken::on_interrupted`](crate::CoordinationToken::on_interrupted) before
+    /// checking [`CoordinationToken::is_interrupted`](crate::CoordinationToken::is_interrupted)
+    /// or entering the wait, and keep the token alive until the wait finishes. Native
+    /// interruption must be latched across that transition. Waiting ends only the wait; pending
+    /// completions still need processing.
     ///
     /// Process a bounded batch. If that bound is reached while immediately serviceable work
-    /// remains, request the interruptor before returning. Do not request merely because
-    /// operations remain in flight or because a wait was interrupted.
+    /// remains, call [`CoordinationToken::work_ready`](crate::CoordinationToken::work_ready)
+    /// before returning. Do not interrupt another cycle merely because operations remain in
+    /// flight or because a wait was interrupted.
     ///
     /// # Errors
     ///
     /// Returns an infrastructure failure. During registration the runtime rolls back the
     /// unpublished driver/context pair. During normal operation it reports the error and shuts
     /// down the worker's drivers. Individual failed I/O operations retain their own results.
-    fn execute_cycle(&mut self, cycle: &Cycle) -> Result<(), DriverError>;
+    fn execute_cycle(&mut self, cycle: Cycle<'_>) -> Result<(), DriverError>;
 
     /// Gracefully shuts down the driver.
     ///
@@ -64,7 +69,7 @@ pub trait Driver: 'static {
     ///
     /// The driver must bound its shutdown wait and make all required progress itself or on
     /// independently running threads. It must not depend on another driver serialized on the
-    /// same runtime worker, regardless of shutdown order. The shared cycle interruptor is no
+    /// same runtime worker, regardless of shutdown order. The shared cycle coordinator is no
     /// longer driven after normal cycle processing stops and must not be the sole notification
     /// mechanism for shutdown progress.
     ///

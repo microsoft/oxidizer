@@ -83,8 +83,8 @@ but it can downcast a compatible handle and clone independently owned shared
 state. Because a handle may refer to a thread-local driver, `DriverOptions`
 remains on the worker that assembled it.
 
-After creation, the runtime runs one zero-wait cycle in the current interruption
-round, without resetting the interruptor again, before publishing the
+After creation, the runtime runs one zero-wait cycle in the current coordination
+round, without beginning coordination again, before publishing the
 context. It then stores the new driver and context and calls
 `Driver::on_peer_registered` on every earlier driver in registration order. Each
 callback receives the new driver's type-erased handle and runs on the owning
@@ -112,16 +112,21 @@ a completion timestamp or a general runtime clock service.
 The runtime invokes secondary drivers first and the single primary last. Every
 driver receives the same maximum wait. A primary can apply it directly to the
 worker wait. A secondary may apply it only on a background thread; its
-worker-local cycle remains non-blocking. The secondary re-registers the waker
+worker-local cycle remains non-blocking. The secondary attaches the waker
 for its current background wait each cycle and uses private synchronization to
 arm or replace that wait.
 
-The cycle interruptor follows a latched contract. Drivers register native-wait
-wakers each cycle. Background observers retain the shared handle and request it
-after publishing work. The runtime resets the latch before checking work in the
-next cycle, exactly once for the whole logical cycle and never between drivers.
-Request another cycle only for published or immediately serviceable work, not
-merely because I/O remains in flight.
+The cycle coordinator follows a latched interruption contract. Drivers register
+native-wait wakers each cycle. Long-lived observers retain the cycle's stable
+interruption waker and wake it after publishing work.
+
+Each driver may create multiple non-cloneable coordination tokens for work that
+outlives `execute_cycle`. A secondary moves each token to the corresponding
+background work. It uses `work_ready` after publishing results; work ending
+without results drops the token. The runtime invokes the primary after all
+secondaries, interrupts remaining waits, then waits for every token before
+beginning the next cycle. This prevents a new cycle from starting while a
+secondary is still finalizing the previous one.
 
 ## Shutdown
 
@@ -154,7 +159,7 @@ ownership into `shutdown`. The call performs whatever completion processing,
 waiting, cancellation, and cleanup the implementation requires. `SystemTaskSpawner`
 remains available until the call returns. The driver owns the liveness policy
 for this blocking phase and returns an error instead of waiting indefinitely.
-The normal cycle interruptor is no longer driven, so shutdown uses driver-owned
+The normal cycle coordinator is no longer driven, so shutdown uses driver-owned
 synchronization.
 It does not depend on work that can run only after its own shutdown returns,
 including another driver serialized on the same runtime thread. A returned

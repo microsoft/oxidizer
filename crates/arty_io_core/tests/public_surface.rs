@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use std::{fmt, io, thread};
 
 use arty_io_core::{
-    Cycle, Driver, DriverError, DriverHandle, DriverOptions, DriverProvider, DriverRole, Interruptor, IoContext, ProviderOptions,
+    Coordinator, Cycle, Driver, DriverError, DriverHandle, DriverOptions, DriverProvider, DriverRole, IoContext, ProviderOptions,
     ShutdownError, SystemTaskSpawner,
 };
 use static_assertions::{assert_impl_all, assert_not_impl_any};
@@ -21,6 +21,7 @@ use thread_aware_core::{Thread, ThreadAware};
 
 assert_impl_all!(DriverOptions<'static>: fmt::Debug);
 assert_not_impl_any!(DriverOptions<'static>: Send, Sync);
+assert_not_impl_any!(Cycle<'static>: Send, Sync);
 assert_impl_all!(DriverHandle<'static>: Copy, fmt::Debug);
 assert_not_impl_any!(DriverHandle<'static>: Send, Sync);
 assert_impl_all!(DriverRole: Copy, Send, Sync, fmt::Debug, Eq);
@@ -197,11 +198,11 @@ fn different_driver_types_have_distinct_identity() {
 #[test]
 fn completion_processing_supports_latched_interrupt() {
     let mut driver = LocalDriver::new(Rc::default());
-    let interruptor = Interruptor::new();
+    let coordinator = Coordinator::new();
 
-    interruptor.request();
+    coordinator.interrupt();
     driver
-        .execute_cycle(&Cycle::new(Instant::now(), Duration::MAX, interruptor))
+        .execute_cycle(Cycle::new(Instant::now(), Duration::MAX, &coordinator))
         .unwrap();
 
     assert_eq!(driver.completion_queue.waits.load(Ordering::Relaxed), 1);
@@ -212,13 +213,13 @@ fn completion_cycle_uses_one_time_snapshot() {
     let mut first_driver = LocalDriver::new(Rc::default());
     let mut second_driver = LocalDriver::new(Rc::default());
     let cycle_start = Instant::now();
-    let interruptor = Interruptor::new();
+    let coordinator = Coordinator::new();
 
     first_driver
-        .execute_cycle(&Cycle::new(cycle_start, Duration::ZERO, interruptor.clone()))
+        .execute_cycle(Cycle::new(cycle_start, Duration::ZERO, &coordinator))
         .unwrap();
     second_driver
-        .execute_cycle(&Cycle::new(cycle_start, Duration::ZERO, interruptor))
+        .execute_cycle(Cycle::new(cycle_start, Duration::ZERO, &coordinator))
         .unwrap();
 
     assert_eq!(*first_driver.completion_queue.cycle_start.lock().unwrap(), Some(cycle_start));
@@ -228,17 +229,17 @@ fn completion_cycle_uses_one_time_snapshot() {
 #[test]
 fn non_blocking_completion_processing_preserves_latched_interrupt() {
     let mut driver = LocalDriver::new(Rc::default());
-    let interruptor = Interruptor::new();
+    let coordinator = Coordinator::new();
 
-    interruptor.request();
+    coordinator.interrupt();
     driver
-        .execute_cycle(&Cycle::new(Instant::now(), Duration::ZERO, interruptor.clone()))
+        .execute_cycle(Cycle::new(Instant::now(), Duration::ZERO, &coordinator))
         .unwrap();
 
     assert!(*driver.completion_queue.latch.raised.lock().unwrap());
 
     driver
-        .execute_cycle(&Cycle::new(Instant::now(), Duration::MAX, interruptor))
+        .execute_cycle(Cycle::new(Instant::now(), Duration::MAX, &coordinator))
         .unwrap();
 
     assert!(!*driver.completion_queue.latch.raised.lock().unwrap());
@@ -345,9 +346,10 @@ impl Driver for LocalDriver {
         }
     }
 
-    fn execute_cycle(&mut self, cycle: &Cycle) -> Result<(), DriverError> {
-        cycle.interruptor().register(self.completion_queue.waker());
-        self.completion_queue.process_completions(cycle);
+    fn execute_cycle(&mut self, cycle: Cycle<'_>) -> Result<(), DriverError> {
+        let token = cycle.start_work();
+        token.on_interrupted(self.completion_queue.waker());
+        self.completion_queue.process_completions(&cycle);
         Ok(())
     }
 
@@ -494,7 +496,7 @@ impl Driver for LeaseDriver {
 
     fn on_peer_registered(&mut self, _peer: DriverHandle<'_>) {}
 
-    fn execute_cycle(&mut self, _cycle: &Cycle) -> Result<(), DriverError> {
+    fn execute_cycle(&mut self, _cycle: Cycle<'_>) -> Result<(), DriverError> {
         Ok(())
     }
 

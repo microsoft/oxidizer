@@ -26,7 +26,7 @@ provide interoperability between incompatible copies of the contract itself.
 ## Why the current boundary is insufficient
 
 The current [driver interface](../src/driver.rs) gives every driver the same
-maximum wait, invokes secondaries before the primary, and shares an interruptor.
+maximum wait, invokes secondaries before the primary, and shares a coordinator.
 Secondaries schedule blocking observation on background threads. This supplies:
 
 ```text
@@ -51,14 +51,16 @@ owner thread processes them:
 5. B cannot publish the task wake until the worker services B.
 ```
 
-B's background observer and the shared interruptor solve progress, but may add a
+B's background observer and the shared coordinator solve progress, but may add a
 thread and cross-thread delivery. Native sharing can avoid that overhead when
 drivers are compatible.
 
-The runtime resets the interruptor once per logical cycle, not between driver
-calls or for a registration initialization pass. A secondary re-registers the
-waker for its current background wait each cycle and privately arms or replaces
-that wait. It requests another cycle only after publishing work.
+The runtime begins coordination once per logical cycle, not between driver
+calls or for a registration initialization pass. Drivers create non-cloneable
+tokens for work that continues off-thread. A secondary attaches the waker for
+each current background wait, uses `work_ready` after publishing results, and
+drops a token when work ends without results. After the primary returns, the
+runtime interrupts remaining waits and waits for all tokens before advancing.
 
 Finite waits can bound this delay, but introduce polling and latency.
 Zero-duration scans avoid blocking on the wrong driver but consume CPU while
@@ -324,7 +326,7 @@ places to supply optional coordination facilities without exposing a concrete
 runtime type. Native adapters can provide platform-specific registration while
 the scheduling contract stays independent of operation representations.
 
-The current role and interruptor contract provides a compatibility baseline.
+The current role and coordinator contract provides a compatibility baseline.
 The rest of this proposal concerns optional native sharing, routing ownership,
 and retirement protocols beyond that baseline.
 

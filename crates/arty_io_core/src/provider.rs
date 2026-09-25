@@ -28,7 +28,7 @@ pub trait DriverProvider: Clone + ThreadAware + Sized + 'static {
     /// state from those handles.
     ///
     /// Prepare native resources without publishing the context. The runtime then invokes an
-    /// initial zero-wait [`Driver::execute_cycle`] to supply the stable interruptor, connect
+    /// initial zero-wait [`Driver::execute_cycle`] to supply cycle coordination, connect
     /// notification, and recheck early work before publishing the context or notifying peers.
     ///
     /// # Errors

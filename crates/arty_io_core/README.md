@@ -23,7 +23,7 @@ provides neither a runtime nor an I/O implementation.
 * [`IoContext`][__link0] selects a [`DriverProvider`][__link1].
 * [`DriverProvider`][__link2] creates one [`Driver`][__link3] and context per runtime worker.
 * [`DriverRole`][__link4] identifies the worker-blocking primary and non-blocking secondaries.
-* [`Cycle`][__link5] supplies a shared time snapshot, wait bound, and [`Interruptor`][__link6].
+* [`Cycle`][__link5] supplies a shared time snapshot, wait bound, and [`Coordinator`][__link6].
 * [`DriverOptions`][__link7] supplies per-worker construction facilities and peer handles.
 * [`SystemTaskSpawner`][__link8] runs blocking system work outside async workers.
 * [`DriverError`][__link9] and [`ShutdownError`][__link10] report infrastructure and cleanup failures.
@@ -42,21 +42,23 @@ A runtime invokes secondary drivers first and the primary last. Every driver rec
 [`Cycle::max_wait`][__link14]. A primary may block its worker for that duration. A secondary must return
 promptly and may use the duration only for a wait scheduled on a background thread.
 
-Drivers register native-wait callbacks with [`Cycle::interruptor`][__link15]. Background observers retain
-clones and request interruption after publishing work. The runtime resets the shared request
-latch before checking work in each cycle.
+Drivers create non-cloneable [`CoordinationToken`][__link15] values with [`Cycle::start_work`][__link16] and attach
+native-wait callbacks with [`CoordinationToken::on_interrupted`][__link17]. The runtime waits for every
+token after the primary returns and before starting the next cycle. A driver calls
+[`CoordinationToken::work_ready`][__link18] after publishing work, or drops the token if its wait ended
+without work.
 
 ## Shutdown
 
-[`Driver::shutdown`][__link16] consumes the driver, closes admission, and blocks until cleanup completes
+[`Driver::shutdown`][__link19] consumes the driver, closes admission, and blocks until cleanup completes
 or fails. Contexts remain valid as closed handles. A driver must not depend on work that can
 run only after its shutdown returns.
 
 ## Project documents
 
-* [Requirements][__link17]
-* [Design][__link18]
-* [Completion coordination (exploratory)][__link19]
+* [Requirements][__link20]
+* [Design][__link21]
+* [Completion coordination (exploratory)][__link22]
 
 
 <hr/>
@@ -64,7 +66,7 @@ run only after its shutdown returns.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb_TyUYsQ8-ZIbltrQ3sgzUg8bSE6zz_pDqsIb4vHG-uSbk-1hZIGCbGFydHlfaW9fY29yZWUwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbQ5X4JFNu3vgb9W8ulAUO5-obZdn7Fu-RLLQb-gEyVtz48A5hZIGCbGFydHlfaW9fY29yZWUwLjIuMA
  [__link0]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=IoContext
  [__link1]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverProvider
  [__link10]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=ShutdownError
@@ -72,16 +74,19 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link12]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverOptions::drivers
  [__link13]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::on_peer_registered
  [__link14]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Cycle::max_wait
- [__link15]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Cycle::interruptor
- [__link16]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::shutdown
- [__link17]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/REQUIREMENTS.md
- [__link18]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/DESIGN.md
- [__link19]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/COMPLETION_COORDINATION.md
+ [__link15]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=CoordinationToken
+ [__link16]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Cycle::start_work
+ [__link17]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=CoordinationToken::on_interrupted
+ [__link18]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=CoordinationToken::work_ready
+ [__link19]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::shutdown
  [__link2]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverProvider
+ [__link20]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/REQUIREMENTS.md
+ [__link21]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/DESIGN.md
+ [__link22]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/COMPLETION_COORDINATION.md
  [__link3]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver
  [__link4]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverRole
  [__link5]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Cycle
- [__link6]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Interruptor
+ [__link6]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Coordinator
  [__link7]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverOptions
  [__link8]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=SystemTaskSpawner
  [__link9]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverError

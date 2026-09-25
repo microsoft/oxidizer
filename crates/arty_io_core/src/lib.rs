@@ -17,7 +17,7 @@
 //! - [`IoContext`] selects a [`DriverProvider`].
 //! - [`DriverProvider`] creates one [`Driver`] and context per runtime worker.
 //! - [`DriverRole`] identifies the worker-blocking primary and non-blocking secondaries.
-//! - [`Cycle`] supplies a shared time snapshot, wait bound, and [`Interruptor`].
+//! - [`Cycle`] supplies a shared time snapshot, wait bound, and [`Coordinator`].
 //! - [`DriverOptions`] supplies per-worker construction facilities and peer handles.
 //! - [`SystemTaskSpawner`] runs blocking system work outside async workers.
 //! - [`DriverError`] and [`ShutdownError`] report infrastructure and cleanup failures.
@@ -36,9 +36,11 @@
 //! [`Cycle::max_wait`]. A primary may block its worker for that duration. A secondary must return
 //! promptly and may use the duration only for a wait scheduled on a background thread.
 //!
-//! Drivers register native-wait callbacks with [`Cycle::interruptor`]. Background observers retain
-//! clones and request interruption after publishing work. The runtime resets the shared request
-//! latch before checking work in each cycle.
+//! Drivers create non-cloneable [`CoordinationToken`] values with [`Cycle::start_work`] and attach
+//! native-wait callbacks with [`CoordinationToken::on_interrupted`]. The runtime waits for every
+//! token after the primary returns and before starting the next cycle. A driver calls
+//! [`CoordinationToken::work_ready`] after publishing work, or drops the token if its wait ended
+//! without work.
 //!
 //! # Shutdown
 //!
@@ -52,26 +54,26 @@
 //! - [Design](https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/DESIGN.md)
 //! - [Completion coordination (exploratory)](https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/COMPLETION_COORDINATION.md)
 
+mod coordinator;
 mod cycle;
 mod driver;
 mod driver_error;
 mod driver_handle;
 mod driver_options;
 mod driver_role;
-mod interruptor;
 mod io_context;
 mod provider;
 mod provider_options;
 mod shutdown_error;
 mod system_task_spawner;
 
+pub use coordinator::{CoordinationToken, Coordinator};
 pub use cycle::Cycle;
 pub use driver::Driver;
 pub use driver_error::DriverError;
 pub use driver_handle::DriverHandle;
 pub use driver_options::DriverOptions;
 pub use driver_role::DriverRole;
-pub use interruptor::Interruptor;
 pub use io_context::IoContext;
 pub use provider::DriverProvider;
 pub use provider_options::ProviderOptions;
