@@ -68,7 +68,6 @@ alloc_tracker = { version = "0.7.1", default-features = false }
 # local dependencies
 allocation_hints = { path = "crates/allocation_hints", default-features = false, version = "0.1.0" }
 allocator-api2 = { version = "0.4.0", default-features = false }
-anyhow = { version = "1.0.100", default-features = false }
 anyspawn = { path = "crates/anyspawn", default-features = false, version = "0.9.0" }
 anyspawn_azure = { path = "crates/anyspawn_azure", default-features = false, version = "0.4.0" }
 argh = { version = "0.1.13", default-features = false }
@@ -211,14 +210,11 @@ paste = { package = "pastey", version = "0.2.3", default-features = false }
 path-tree = { version = "0.8.3", default-features = false }
 pbjson = { version = "0.9.0", default-features = false }
 pbjson-build = { version = "0.9.0", default-features = false }
-pbjson-types = { version = "0.9.0", default-features = false }
-pct-str = { version = "3.0.1", default-features = false }
 performables = { path = "crates/performables", default-features = false, version = "0.1.0" }
 pin-project = { version = "1.1.8", default-features = false }
 pin-project-lite = { version = "0.2.13", default-features = false }
 plurality = { path = "crates/plurality", default-features = false, version = "0.2.2" }
 postcard = { version = "1.1.3", default-features = false, features = ["use-std"] }
-pretty_assertions = { version = "1.4.1", default-features = false }
 prettyplease = { version = "0.3.0", default-features = false }
 proc-macro-crate = { version = "3.5.0", default-features = false }
 proc-macro2 = { version = "1.0.103", default-features = false }
@@ -279,7 +275,6 @@ templated_uri_macros = { path = "crates/templated_uri_macros", default-features 
 templated_uri_macros_impl = { path = "crates/templated_uri_macros_impl", default-features = false, version = "=0.6.0" }
 terminal_size = { version = "0.4.4", default-features = false }
 testing_aids = { path = "crates/testing_aids", default-features = false }
-thiserror = { version = "2.0.17", default-features = false }
 thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.12.0" }
 thread_aware_core = { path = "crates/thread_aware_core", default-features = false, version = "0.1.1" }
 thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "=0.12.0" }
