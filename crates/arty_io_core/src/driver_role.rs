@@ -18,7 +18,7 @@ pub enum DriverRole {
     /// join from [`Driver::execute_cycle`](crate::Driver::execute_cycle). It claims the cycle's
     /// [`CoordinationToken`](crate::CoordinationToken) for background work and completes that
     /// token before the runtime advances. If the observer publishes work, it calls
-    /// [`CoordinationToken::work_ready`](crate::CoordinationToken::work_ready); otherwise it
+    /// [`CoordinationToken::work_completed`](crate::CoordinationToken::work_completed); otherwise it
     /// drops the token without interrupting the cycle.
     Secondary,
 }

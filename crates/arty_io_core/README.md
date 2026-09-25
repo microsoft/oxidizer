@@ -45,7 +45,7 @@ promptly and may use the duration only for a wait scheduled on a background thre
 Drivers create non-cloneable [`CoordinationToken`][__link15] values with [`Cycle::start_work`][__link16] and attach
 native-wait callbacks with [`CoordinationToken::on_interrupted`][__link17]. The runtime waits for every
 token after the primary returns and before starting the next cycle. A driver calls
-[`CoordinationToken::work_ready`][__link18] after publishing work, or drops the token if its wait ended
+[`CoordinationToken::work_completed`][__link18] after publishing work, or drops the token if its wait ended
 without work.
 
 ## Shutdown
@@ -66,7 +66,7 @@ run only after its shutdown returns.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbQ5X4JFNu3vgb9W8ulAUO5-obZdn7Fu-RLLQb-gEyVtz48A5hZIGCbGFydHlfaW9fY29yZWUwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbK21y-dM74M0buYfVzdtOBKMbukQLKfu_5GIbHplDZKUL_qphZIGCbGFydHlfaW9fY29yZWUwLjIuMA
  [__link0]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=IoContext
  [__link1]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverProvider
  [__link10]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=ShutdownError
@@ -77,7 +77,7 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link15]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=CoordinationToken
  [__link16]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Cycle::start_work
  [__link17]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=CoordinationToken::on_interrupted
- [__link18]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=CoordinationToken::work_ready
+ [__link18]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=CoordinationToken::work_completed
  [__link19]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::shutdown
  [__link2]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverProvider
  [__link20]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/REQUIREMENTS.md

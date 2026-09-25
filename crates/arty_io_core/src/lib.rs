@@ -39,7 +39,7 @@
 //! Drivers create non-cloneable [`CoordinationToken`] values with [`Cycle::start_work`] and attach
 //! native-wait callbacks with [`CoordinationToken::on_interrupted`]. The runtime waits for every
 //! token after the primary returns and before starting the next cycle. A driver calls
-//! [`CoordinationToken::work_ready`] after publishing work, or drops the token if its wait ended
+//! [`CoordinationToken::work_completed`] after publishing work, or drops the token if its wait ended
 //! without work.
 //!
 //! # Shutdown

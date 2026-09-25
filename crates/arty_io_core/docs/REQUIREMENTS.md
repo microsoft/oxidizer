@@ -100,7 +100,7 @@ The shared coordinator has the following semantics:
 - The runtime begins coordination exactly once per logical cycle, never between drivers.
 - A driver may create multiple non-cloneable tokens for work that outlives
   `execute_cycle`.
-- Work that publishes results uses `work_ready` to interrupt the cycle and
+- Work that publishes results uses `work_completed` to interrupt the cycle and
   release the completion barrier together. Work ending without results drops its
   token without interrupting the cycle.
 - After the primary returns, the runtime interrupts remaining waits and blocks

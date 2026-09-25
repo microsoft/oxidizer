@@ -91,14 +91,14 @@ fn dropping_multiple_tokens_releases_the_completion_barrier() {
 }
 
 #[test]
-fn work_ready_interrupts_waiters_and_releases_the_barrier() {
+fn work_completed_interrupts_waiters_and_releases_the_barrier() {
     let mut coordinator = Coordinator::new();
     coordinator.begin_cycle();
     let count = Arc::new(Counter::default());
     let cycle = Cycle::new(Instant::now(), Duration::ZERO, &coordinator);
     let token = cycle.start_work();
     token.on_interrupted(Waker::from(Arc::clone(&count)));
-    token.work_ready();
+    token.work_completed();
 
     coordinator.complete_cycle();
     assert_eq!(count.0.load(Ordering::Relaxed), 1);

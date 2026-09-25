@@ -197,7 +197,7 @@ impl Wake for Inner {
 /// Completion ownership for one unit of work in one runtime cycle.
 ///
 /// The token is intentionally not cloneable. Move it to work that can outlive `execute_cycle`.
-/// After publishing work, call [`work_ready`](Self::work_ready) to interrupt other waits and
+/// After publishing work, call [`work_completed`](Self::work_completed) to interrupt other waits and
 /// release the completion barrier. If no work was published, drop the token; dropping releases
 /// the barrier without interrupting the cycle.
 pub struct CoordinationToken {
@@ -243,7 +243,7 @@ impl CoordinationToken {
     ///
     /// Panics if bookkeeping was poisoned, calling a registered [`Waker::wake`] panics, or the
     /// token was completed incorrectly.
-    pub fn work_ready(mut self) {
+    pub fn work_completed(mut self) {
         self.inner.interrupt();
         self.complete();
     }

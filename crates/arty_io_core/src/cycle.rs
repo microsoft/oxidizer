@@ -58,7 +58,7 @@ impl<'a> Cycle<'a> {
     /// Creates a non-cloneable token for work that can outlive this call.
     ///
     /// Drivers may create multiple tokens. Use [`CoordinationToken::on_interrupted`] to attach a
-    /// native wait's waker. After publishing work, call [`CoordinationToken::work_ready`]. If the
+    /// native wait's waker. After publishing work, call [`CoordinationToken::work_completed`]. If the
     /// work ends without publishing anything, drop the token. The runtime does not begin the next
     /// cycle until all tokens are completed or dropped.
     #[must_use]

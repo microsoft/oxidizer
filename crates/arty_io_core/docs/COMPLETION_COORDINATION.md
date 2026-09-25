@@ -58,7 +58,7 @@ drivers are compatible.
 The runtime begins coordination once per logical cycle, not between driver
 calls or for a registration initialization pass. Drivers create non-cloneable
 tokens for work that continues off-thread. A secondary attaches the waker for
-each current background wait, uses `work_ready` after publishing results, and
+each current background wait, uses `work_completed` after publishing results, and
 drops a token when work ends without results. After the primary returns, the
 runtime interrupts remaining waits and waits for all tokens before advancing.
 

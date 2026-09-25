@@ -122,7 +122,7 @@ interruption waker and wake it after publishing work.
 
 Each driver may create multiple non-cloneable coordination tokens for work that
 outlives `execute_cycle`. A secondary moves each token to the corresponding
-background work. It uses `work_ready` after publishing results; work ending
+background work. It uses `work_completed` after publishing results; work ending
 without results drops the token. The runtime invokes the primary after all
 secondaries, interrupts remaining waits, then waits for every token before
 beginning the next cycle. This prevents a new cycle from starting while a

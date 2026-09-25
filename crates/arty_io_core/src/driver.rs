@@ -35,7 +35,7 @@ pub trait Driver: 'static {
     /// duration directly to its worker wait. A secondary may use the duration only to arm or
     /// replace an off-worker wait; its worker-local call must return without waiting for that
     /// background operation to finish. It starts coordination for that work; the runtime does not
-    /// begin the next cycle until every token calls `work_ready` after publishing work or is
+    /// begin the next cycle until every token calls `work_completed` after publishing work or is
     /// dropped after ending without work.
     ///
     /// Registration includes an initial zero-wait cycle before the context is published or peers
@@ -50,7 +50,7 @@ pub trait Driver: 'static {
     /// completions still need processing.
     ///
     /// Process a bounded batch. If that bound is reached while immediately serviceable work
-    /// remains, call [`CoordinationToken::work_ready`](crate::CoordinationToken::work_ready)
+    /// remains, call [`CoordinationToken::work_completed`](crate::CoordinationToken::work_completed)
     /// before returning. Do not interrupt another cycle merely because operations remain in
     /// flight or because a wait was interrupted.
     ///
