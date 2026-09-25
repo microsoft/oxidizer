@@ -17,6 +17,7 @@ exclude_globs = [
     # every gated source path here.
     "**/*windows.rs",
     "windows",
+    "crates/rallocator/src/hal/win64.rs",
     "crates/fetch_winhttp/**",
     "crates/fetch_winhttp_impl/**",
 ]

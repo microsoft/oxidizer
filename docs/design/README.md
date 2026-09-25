@@ -56,14 +56,17 @@ with `--config`, so the shared policy is intentionally duplicated across all
 three files. Selection is by operating system, not architecture, so both Linux
 runner architectures share the Linux configuration.
 
-The host configurations exclude source compiled out on the active platform.
-Without those exclusions, cargo-mutants can mutate an inactive source file,
-produce an unchanged test binary, and report the surviving mutant as a false
-`MISSED` test gap. The Linux policy excludes the Windows-only `fetch_winhttp`
-and `fetch_winhttp_impl` crates wholesale because their platform gates are
-applied across many implementation modules. This temporarily also skips their
-small non-Windows coverage anchors rather than maintaining a brittle list of
-every Windows-only file.
+The host configurations exclude known mutation candidates that are inactive on
+the active platform. Without those exclusions, cargo-mutants can mutate
+inactive source, produce an unchanged test binary, and report the surviving
+mutant as a false `MISSED` test gap. File and crate patterns cover most
+platform-specific source; function-level gates require explicit exclusions or
+source annotations because cargo-mutants does not evaluate Rust `cfg`
+expressions during candidate discovery. The Linux policy excludes the
+Windows-only `fetch_winhttp` and `fetch_winhttp_impl` crates wholesale because
+their platform gates are applied across many implementation modules. This
+temporarily also skips their small non-Windows coverage anchors rather than
+maintaining a brittle list of every Windows-only file.
 
 The `http_headers` and `http_headers_simd` crates are excluded from mutation
 testing through all three configurations. Their ordinary tests, coverage
