@@ -11,6 +11,11 @@ exclude_globs = [
     "crates/rest_over_grpc_examples/**",
     "crates/rest_over_grpc_tests/**",
     "crates/testing_aids/**",
+    # These process runtimes contain mutually exclusive OS backends and
+    # intentionally fatal child-side paths that package-local mutation tests
+    # cannot exercise portably.
+    "crates/zygote_control/src/**",
+    "crates/zygote_rt/src/**",
 ]
 all_features = true
 cap_lints = true
