@@ -11,6 +11,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use routerama_build::Generator;
 
+#[cfg(any(test, feature = "private-test-util"))]
 use super::http_rule::HttpRule;
 use super::route::Route;
 
@@ -33,7 +34,7 @@ fn route_to_routerama(route: &Route) -> routerama_build::Route {
 /// Generates a standalone static REST router for a set of
 /// [`HttpRule`](crate::build::HttpRule)s.
 ///
-/// This is an internal primitive (re-exported as `#[doc(hidden)]`): the
+/// This is an internal primitive (re-exported under `private-test-util`): the
 /// customer-facing codegen ([`Generator`](crate::build::Generator)) uses
 /// `generate_router_with_visibility` directly. It remains `pub` only so the
 /// workspace benchmark/coverage tooling (the `rest_over_grpc_tests` crate) can
@@ -64,6 +65,8 @@ fn route_to_routerama(route: &Route) -> routerama_build::Route {
 /// # Examples
 ///
 /// ```
+/// # #[cfg(feature = "private-test-util")]
+/// # fn main() {
 /// use http_path_template::{Grammar, PathTemplate};
 /// use rest_over_grpc::build::{HttpRule, generate_router};
 /// use routerama::HttpMethod;
@@ -77,8 +80,12 @@ fn route_to_routerama(route: &Route) -> routerama_build::Route {
 ///
 /// assert!(!code.is_empty());
 /// assert!(code.contains("ListBooks"));
+/// # }
+/// # #[cfg(not(feature = "private-test-util"))]
+/// # fn main() {}
 /// ```
 #[must_use]
+#[cfg(any(test, feature = "private-test-util"))]
 pub fn generate_router(rules: impl IntoIterator<Item = HttpRule>) -> TokenStream {
     let routes: Vec<Route> = rules.into_iter().flat_map(HttpRule::lower).collect();
     generate_router_with_visibility(&routes, true)

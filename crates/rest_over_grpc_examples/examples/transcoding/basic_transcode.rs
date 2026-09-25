@@ -4,11 +4,13 @@
 //! Transcoding REST/JSON requests to a `tonic`-bridged service.
 //!
 //! [`LibraryService`] implements only `tonic`'s generated server trait; the
-//! blanket `impl` emitted by `rest_over_grpc::build` makes it a `rest_over_grpc`
-//! service too, so wrapping it in the generated [`Transcoder`] is all it takes to
+//! guarded adapter emitted by `rest_over_grpc::build` makes it a `rest_over_grpc`
+//! service too. Wrapping that adapter in the generated [`Transcoder`] allows us to
 //! transcode REST requests — `(method, target, headers, body)` in, a
 //! [`TranscodeResponse`](rest_over_grpc::transcoding::TranscodeResponse) out
-//! (a buffered unary reply or a server-streaming frame stream).
+//! (a buffered unary reply or a server-streaming frame stream). This in-process
+//! demonstration explicitly acknowledges outer authentication; deployments must
+//! supply their actual REST authorization guard or enforce it before the adapter.
 //!
 //! Run with:
 //!
@@ -18,10 +20,10 @@
 
 use futures::StreamExt as _;
 use rest_over_grpc::transcoding::{Transcode, TranscodeResponse};
-use rest_over_grpc_examples::tonic_bridge::{LibraryService, Transcoder};
+use rest_over_grpc_examples::tonic_bridge::{LibraryRestBridge, LibraryService, Transcoder};
 
 fn main() {
-    let library = Transcoder::new(LibraryService);
+    let library = Transcoder::new(LibraryRestBridge::externally_authenticated(LibraryService));
 
     let requests = [("GET", "/v1/shelves/history"), ("GET", "/v1/shelves:stream"), ("GET", "/v1/nope")];
 

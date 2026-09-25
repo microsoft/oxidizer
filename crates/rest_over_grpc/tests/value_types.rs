@@ -91,6 +91,14 @@ fn status_accessors() {
 }
 
 #[test]
+fn status_details_and_display() {
+    let status = Status::invalid_argument("bad").with_detail(serde_json::json!({ "field": "shelf" }));
+    assert_eq!(status.details().len(), 1);
+    assert_eq!(status.details()[0]["field"], "shelf");
+    assert_eq!(Status::not_found("gone").to_string(), "NOT_FOUND: gone");
+}
+
+#[test]
 fn response_accessors() {
     let r = HttpResponse::ok_json(b"{}".to_vec());
     assert_eq!(r.status(), StatusCode::OK);

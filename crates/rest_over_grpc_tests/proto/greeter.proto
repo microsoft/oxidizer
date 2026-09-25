@@ -29,3 +29,8 @@ message HelloRequest {
 message HelloReply {
   string message = 1;
 }
+
+// A message name that would collide with a package-level generated bridge.
+message GreeterRestBridge {
+  string name = 1;
+}

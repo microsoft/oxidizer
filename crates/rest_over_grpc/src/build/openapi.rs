@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use http_path_template::{PathTemplate, Segment};
+use http_path_template::{PathTemplate, Segment, Variable};
 use prost_reflect::{EnumDescriptor, FieldDescriptor, Kind, MessageDescriptor};
 use serde::Serialize;
 
@@ -15,8 +15,12 @@ use super::{RequestBody, ResponseBody};
 ///
 /// Generation derives paths, parameters, request bodies, responses, and
 /// component schemas from descriptor-decoded services. It does not add
-/// deployment-specific security schemes, tags, or vendor extensions; post-process
-/// the emitted JSON when those are required.
+/// deployment-specific security schemes or tags; post-process the emitted JSON
+/// when those are required. Fixed-prefix captures such as `{name=items/*}`
+/// appear as `/items/{name}` with a capture-prefix extension on the parameter.
+/// Unrepresentable wildcard or multi-segment capture operations are excluded
+/// from `paths` and recorded in the
+/// `x-rest-over-grpc-omitted-operations` document extension.
 ///
 /// # Examples
 ///
@@ -77,6 +81,17 @@ impl OpenApiInfo {
 pub(crate) struct Builder {
     paths: BTreeMap<String, BTreeMap<String, Operation>>,
     schemas: BTreeMap<String, Schema>,
+    omitted_operations: Vec<OmittedOperation>,
+    conflicting_operation: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OmittedOperation {
+    operation_id: String,
+    method: String,
+    path: String,
+    reason: &'static str,
 }
 
 /// The loop-invariant filtering context threaded through
@@ -90,6 +105,19 @@ struct QueryFilter<'a> {
 impl Builder {
     /// Adds one route as an OpenAPI operation, collecting any referenced schemas.
     pub(crate) fn add_operation(&mut self, route: &Route, input: &MessageDescriptor, output: &MessageDescriptor, streaming: bool) {
+        if route.template().segments().iter().any(|segment| match segment {
+            Segment::Literal(_) => false,
+            Segment::Variable(variable) => !representable_capture(variable),
+            _ => true,
+        }) {
+            self.omitted_operations.push(OmittedOperation {
+                operation_id: route.rpc().to_owned(),
+                method: route.method().as_str().to_ascii_lowercase(),
+                path: route.pattern().to_owned(),
+                reason: "OpenAPI path parameters cannot capture multiple segments or unnamed wildcards",
+            });
+            return;
+        }
         let parameters = self.parameters(route, input);
         let request_body = self.request_body(route, input);
         let responses = self.responses(route, output, streaming);
@@ -103,23 +131,44 @@ impl Builder {
 
         let path = openapi_path(&route.template());
         let verb = route.method().as_str().to_ascii_lowercase();
-        self.paths.entry(path).or_default().insert(verb, operation);
+        if self
+            .paths
+            .entry(path.clone())
+            .or_default()
+            .insert(verb.clone(), operation)
+            .is_some()
+        {
+            self.conflicting_operation.get_or_insert_with(|| format!("{verb} {path}"));
+        }
     }
 
     /// Builds the path and query parameters for a route.
     fn parameters(&mut self, route: &Route, input: &MessageDescriptor) -> Vec<Parameter> {
-        let path_fields = template_field_paths(&route.template());
+        let template = route.template();
+        let path_fields = template_field_paths(&template);
         let mut parameters = Vec::new();
 
-        for field_path in &path_fields {
+        for variable in template.segments().iter().filter_map(|segment| match segment {
+            Segment::Variable(variable) => Some(variable),
+            _ => None,
+        }) {
+            let parts: Vec<_> = variable.segments().collect();
+            let Some(position) = parts.iter().position(|part| *part == Segment::Single) else {
+                continue;
+            };
+            let field_path: Vec<_> = variable.field_path().split('.').map(str::to_owned).collect();
             let schema = self
-                .resolve_field(input, field_path)
+                .resolve_field(input, &field_path)
                 .unwrap_or_else(|| Schema::scalar("string", None));
+            let prefix = parts[..position].iter().filter_map(capture_literal).collect::<Vec<_>>().join("/");
+            let suffix = parts[position..].iter().filter_map(capture_literal).collect::<Vec<_>>().join("/");
             parameters.push(Parameter {
                 name: field_path.join("."),
                 location: "path",
                 required: true,
                 schema,
+                capture_prefix: (!prefix.is_empty()).then(|| format!("{prefix}/")),
+                capture_suffix: (!suffix.is_empty()).then(|| format!("/{suffix}")),
             });
         }
 
@@ -202,6 +251,8 @@ impl Builder {
                 location: "query",
                 required: false,
                 schema: self.field_schema(&field),
+                capture_prefix: None,
+                capture_suffix: None,
             });
         }
     }
@@ -353,7 +404,7 @@ impl Builder {
             let mut properties = BTreeMap::new();
             properties.insert("code".to_owned(), Schema::scalar("integer", Some("int32")));
             properties.insert("message".to_owned(), Schema::scalar("string", None));
-            properties.insert("details".to_owned(), Schema::array(Schema::scalar("object", None)));
+            properties.insert("details".to_owned(), Schema::array(Schema::default()));
             self.schemas.insert(name.to_owned(), Schema::object(properties));
         }
         Schema::reference(name)
@@ -370,14 +421,26 @@ impl Builder {
             servers: info.servers().iter().map(|url| Server { url: url.clone() }).collect(),
             paths: self.paths,
             components: Components { schemas: self.schemas },
+            omitted_operations: self.omitted_operations,
         }
     }
 
     /// Renders the accumulated document to pretty-printed JSON, using `info` for
     /// the title, version, and servers. Borrows `self` so a stored builder can be
     /// rendered repeatedly (e.g. per generator configuration).
-    pub(crate) fn render(&self, info: &OpenApiInfo) -> String {
-        render(&self.clone().finish(info))
+    pub(crate) fn render(&self, info: &OpenApiInfo) -> std::io::Result<String> {
+        self.validate()?;
+        Ok(render(&self.clone().finish(info)))
+    }
+
+    pub(crate) fn validate(&self) -> std::io::Result<()> {
+        if let Some(operation) = &self.conflicting_operation {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("conflicting OpenAPI operation {operation}"),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -412,7 +475,29 @@ fn well_known_schema(full_name: &str) -> Option<Schema> {
     Some(schema)
 }
 
-/// Reconstructs the OpenAPI path string from a parsed path template.
+/// A single-segment capture surrounded by fixed literal segments (or an
+/// entirely literal expansion) can be represented by an OpenAPI path template.
+fn representable_capture(variable: &Variable<'_>) -> bool {
+    let mut seen_single = false;
+    for segment in variable.segments() {
+        match segment {
+            Segment::Literal(_) => {}
+            Segment::Single if !seen_single => seen_single = true,
+            _ => return false,
+        }
+    }
+    true
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))] // Non-literal affixes are rejected by representable_capture.
+fn capture_literal<'a>(part: &Segment<'a>) -> Option<&'a str> {
+    match part {
+        Segment::Literal(literal) => Some(*literal),
+        _ => None,
+    }
+}
+
+/// Reconstructs the OpenAPI path string from a representable path template.
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn openapi_path(template: &PathTemplate<'_>) -> String {
     let mut path = String::new();
@@ -420,15 +505,23 @@ fn openapi_path(template: &PathTemplate<'_>) -> String {
         path.push('/');
         match segment {
             Segment::Literal(literal) => path.push_str(literal),
-            Segment::Single => path.push('*'),
-            Segment::Rest => path.push_str("**"),
             Segment::Variable(variable) => {
-                path.push('{');
-                path.push_str(variable.field_path());
-                path.push('}');
+                for (index, part) in variable.segments().enumerate() {
+                    if index > 0 {
+                        path.push('/');
+                    }
+                    match part {
+                        Segment::Literal(literal) => path.push_str(literal),
+                        Segment::Single => {
+                            path.push('{');
+                            path.push_str(variable.field_path());
+                            path.push('}');
+                        }
+                        _ => unreachable!("unrepresentable captures are omitted before rendering"),
+                    }
+                }
             }
-            // `Segment` is `#[non_exhaustive]`; current variants are all handled.
-            _ => {}
+            _ => unreachable!("unnamed wildcards are omitted before rendering"),
         }
     }
     if let Some(verb) = template.verb() {
@@ -458,6 +551,8 @@ struct Document {
     servers: Vec<Server>,
     paths: BTreeMap<String, BTreeMap<String, Operation>>,
     components: Components,
+    #[serde(rename = "x-rest-over-grpc-omitted-operations", skip_serializing_if = "Vec::is_empty")]
+    omitted_operations: Vec<OmittedOperation>,
 }
 
 #[derive(Serialize)]
@@ -494,6 +589,10 @@ struct Parameter {
     location: &'static str,
     required: bool,
     schema: Schema,
+    #[serde(rename = "x-rest-over-grpc-capture-prefix", skip_serializing_if = "Option::is_none")]
+    capture_prefix: Option<String>,
+    #[serde(rename = "x-rest-over-grpc-capture-suffix", skip_serializing_if = "Option::is_none")]
+    capture_suffix: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -601,6 +700,22 @@ mod tests {
 
     static NEXT_DIR: AtomicUsize = AtomicUsize::new(0);
 
+    #[test]
+    fn capture_representation_requires_at_most_one_single_segment() {
+        for (pattern, representable) in [("/v1/{name=items/*}", true), ("/v1/{name=*/*}", false)] {
+            let template = PathTemplate::parse(pattern, http_path_template::Grammar::default()).unwrap();
+            let variable = template
+                .segments()
+                .iter()
+                .find_map(|segment| match segment {
+                    Segment::Variable(variable) => Some(variable),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(representable_capture(variable), representable, "{pattern}");
+        }
+    }
+
     fn compile(source: &str) -> Vec<u8> {
         compile_files(&[("test.proto", source)])
     }
@@ -631,11 +746,13 @@ mod tests {
     }
 
     /// The per-service OpenAPI documents for `bytes`, keyed by module name.
+    #[expect(clippy::unwrap_used, reason = "test helper renders a descriptor fixture that must be valid")]
     fn specs_with(bytes: &[u8], options: &DescriptorOptions, info: &OpenApiInfo) -> Vec<(String, Value)> {
         let mut generator = Generator::builder().emit_openapi_spec(Some(info.clone())).build();
         generator.add_all(ServiceDefinition::from_fds(bytes, options).expect("decode"));
         generator
             .generate()
+            .unwrap()
             .1
             .iter()
             .filter_map(|output| {
@@ -713,6 +830,56 @@ mod tests {
         assert!(op.get("parameters").is_none(), "no path/query params");
     }
 
+    #[cfg_attr(miri, ignore)] // proto compilation is unsupported under Miri.
+    #[test]
+    fn fixed_prefix_capture_is_represented_but_rest_capture_is_explicitly_omitted() {
+        let bytes = compile(
+            r#"
+            syntax = "proto3";
+            package test;
+            import "google/api/annotations.proto";
+            message Req { string name = 1; string path = 2; }
+            service S {
+                rpc Get(Req) returns (Req) {
+                    option (google.api.http) = { get: "/v1/{name=items/*}" };
+                }
+                rpc GetTree(Req) returns (Req) {
+                    option (google.api.http) = { get: "/v1/tree/{path=**}" };
+                }
+                rpc GetSuffix(Req) returns (Req) {
+                    option (google.api.http) = { get: "/v1/suffix/{name=*/detail}" };
+                }
+                rpc GetLiteral(Req) returns (Req) {
+                    option (google.api.http) = { get: "/v1/{name=items}" };
+                }
+            }
+        "#,
+        );
+        let mut specs = specs_with(&bytes, &DescriptorOptions::new(), &info());
+        let doc = specs.pop().unwrap().1;
+        let paths = doc["paths"].as_object().unwrap();
+        assert_eq!(paths["/v1/items/{name}"]["get"]["operationId"], "Get");
+        let parameter = &paths["/v1/items/{name}"]["get"]["parameters"][0];
+        assert_eq!(parameter["name"], "name");
+        assert_eq!(parameter["x-rest-over-grpc-capture-prefix"], "items/");
+        assert_eq!(
+            paths["/v1/suffix/{name}/detail"]["get"]["parameters"][0]["x-rest-over-grpc-capture-suffix"],
+            "/detail"
+        );
+        assert_eq!(paths["/v1/items"]["get"]["operationId"], "GetLiteral");
+        let parameters = paths["/v1/items"]["get"]["parameters"].as_array().unwrap();
+        assert!(parameters.iter().all(|parameter| parameter["name"] != "name"));
+        assert!(
+            !paths.contains_key("/v1/tree/{path}"),
+            "multi-segment wildcard must not masquerade as one segment"
+        );
+        let omitted = &doc["x-rest-over-grpc-omitted-operations"][0];
+        assert_eq!(omitted["path"], "/v1/tree/{path=**}");
+        assert_eq!(omitted["method"], "get");
+        assert_eq!(omitted["operationId"], "GetTree");
+        assert!(omitted["reason"].as_str().unwrap().contains("multiple segments"));
+    }
+
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
     #[test]
     fn multiple_methods_on_one_path_coexist_in_the_path_item() {
@@ -781,10 +948,7 @@ mod tests {
         );
         let pool = prost_reflect::DescriptorPool::decode(bytes.as_slice()).expect("pool decodes");
         let message = pool.get_message_by_name("test.Req").expect("Req exists");
-        let mut builder = Builder {
-            paths: BTreeMap::new(),
-            schemas: BTreeMap::new(),
-        };
+        let mut builder = Builder::default();
 
         // A non-leaf segment names a scalar, so the walk cannot descend.
         assert!(builder.resolve_field(&message, &["scalar".to_owned(), "leaf".to_owned()]).is_none());
@@ -983,7 +1147,7 @@ mod tests {
         assert_eq!(status["properties"]["code"]["format"], "int32");
         assert_eq!(status["properties"]["message"]["type"], "string");
         assert_eq!(status["properties"]["details"]["type"], "array");
-        assert_eq!(status["properties"]["details"]["items"]["type"], "object");
+        assert_eq!(status["properties"]["details"]["items"], serde_json::json!({}));
     }
 
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
@@ -1172,7 +1336,7 @@ mod tests {
 
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
     #[test]
-    fn path_renders_wildcards_and_verbs() {
+    fn path_explicitly_omits_wildcards_but_renders_verbs() {
         let doc = doc(r#"
                 syntax = "proto3";
                 package test;
@@ -1186,9 +1350,21 @@ mod tests {
                 message Res {}
             "#);
         let paths = doc["paths"].as_object().expect("paths");
-        assert!(paths.contains_key("/v1/*/books"), "single wildcard: {paths:?}");
-        assert!(paths.contains_key("/v1/files/**"), "rest wildcard");
+        assert!(!paths.contains_key("/v1/*/books"), "unnamed wildcard cannot be represented");
+        assert!(!paths.contains_key("/v1/files/**"), "rest wildcard cannot be represented");
         assert!(paths.contains_key("/v1/things:refresh"), "custom verb");
+        let omissions = doc["x-rest-over-grpc-omitted-operations"].as_array().unwrap();
+        assert_eq!(omissions.len(), 2);
+        assert!(
+            omissions
+                .iter()
+                .any(|op| op["path"] == "/v1/*/books" && op["operationId"] == "Single")
+        );
+        assert!(
+            omissions
+                .iter()
+                .any(|op| op["path"] == "/v1/files/**" && op["operationId"] == "Rest")
+        );
     }
 
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.

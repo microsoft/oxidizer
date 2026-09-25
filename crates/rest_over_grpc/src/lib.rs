@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![forbid(unsafe_code)]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/rest_over_grpc/logo.png")]
@@ -53,8 +54,8 @@
 //! The generated `<Service>` trait has one method per RPC, each taking the
 //! decoded request plus a mutable [`Context`](handling::Context).
 //!
-//! - `tonic`: the [`build`] module emits a blanket bridge so a `tonic`
-//!   implementation can serve REST too.
+//! - `tonic`: the [`build`] module emits a guarded bridge so a `tonic`
+//!   implementation can serve REST with an explicit authorization policy.
 //! - direct implementation: implement the generated trait yourself.
 //! - other gRPC stacks: write a small bridge that forwards into the generated
 //!   trait.
@@ -163,11 +164,17 @@
 //!     }
 //! }
 //!
-//! let transcoder = rest::Transcoder::new(LibraryService);
+//! let bridge = library::__rest_over_grpc_bridge_Library::LibraryRestBridge::with_guard(LibraryService, authorize_rest_metadata);
+//! let transcoder = rest::Transcoder::new(bridge);
 //! let service = rest_over_grpc::serving::RestService::new(transcoder)
 //!     .with_max_body_bytes(1 << 20);
 //! ```
 //!
+//! `authorize_rest_metadata` is an application-provided guard that checks the
+//! REST request's metadata before the tonic handler runs. Tonic transport
+//! interceptors do not execute on REST calls. If an upstream HTTP layer
+//! guarantees the same authorization, use the deliberately named
+//! `LibraryRestBridge::externally_authenticated` constructor on the namespaced bridge instead.
 //! The tonic bridge is emitted by default; call
 //! [`Generator::builder`](build::Generator::builder) with
 //! [`emit_tonic_bridge(false)`](build::GeneratorBuilder::emit_tonic_bridge) when
@@ -204,6 +211,7 @@
 //! bounds the recursion an untrusted request can drive, and a bound a caller
 //! could raise would not bound anything. It stays far above the nesting any
 //! real proto message uses.
+//! Query inputs also have a fixed aggregate pair and byte budget.
 //!
 //! # Cargo features
 //!
@@ -292,9 +300,10 @@ pub mod transcoding {
     //!
     //! # Request-size policy
     //!
-    //! Request JSON is buffered. [`serve_http`](crate::serving::serve_http) is
-    //! uncapped; [`RestService::with_max_body_bytes`](crate::serving::RestService::with_max_body_bytes)
-    //! rejects oversized bodies incrementally with `413 Payload Too Large`.
+    //! Request JSON is buffered. HTTP adapters default to a 1 MiB incremental
+    //! limit and reject oversized bodies with `413 Payload Too Large`. Use
+    //! [`RestService::with_max_body_bytes`](crate::serving::RestService::with_max_body_bytes)
+    //! or the direct helpers' `*_with_max_body_bytes` variants to override it.
     #[doc(inline)]
     pub use crate::http_response::HttpResponse;
     #[doc(inline)]
@@ -335,8 +344,10 @@ pub mod handling {
 /// and [`HttpResponse`](crate::transcoding::HttpResponse) types instead.
 #[doc(hidden)]
 pub mod codegen_helpers {
+    use base64::Engine as _;
     pub use http::{HeaderMap, HeaderName, HeaderValue};
     pub use routerama::codegen_helpers::{InvalidPath, RouteMatch, scan_segments, split_verb, with_scanned_path};
+    use serde_json::{Value, json};
 
     pub use crate::path::{QueryPairs, parse_query, split_query};
     pub use crate::stream::{Stream, StreamEncoding, encode_frames, map_stream_status};
@@ -344,4 +355,105 @@ pub mod codegen_helpers {
         RequestBodyKind, ResponseBodyKind, RestParse, TranscodeError, decode_request, encode_response, parse_path_enum_value,
         parse_path_field, parse_reserved_path_enum_value, parse_reserved_path_field,
     };
+
+    /// Wraps opaque `grpc-status-details-bin` bytes in a labeled JSON value.
+    #[must_use]
+    pub fn grpc_status_details(bytes: &[u8]) -> Value {
+        json!({
+            "kind": "grpc-status-details-bin",
+            "encoding": "base64",
+            "value": base64::engine::general_purpose::STANDARD.encode(bytes),
+        })
+    }
+
+    /// Wraps ordinary gRPC metadata in a labeled JSON value.
+    #[must_use]
+    pub fn grpc_ascii_metadata(name: &str, value: &str) -> Value {
+        json!({
+            "kind": "grpc-metadata",
+            "name": name,
+            "value": value,
+        })
+    }
+
+    /// Wraps binary gRPC metadata in a labeled, base64-encoded JSON value.
+    #[must_use]
+    pub fn grpc_binary_metadata(name: &str, value: &[u8]) -> Value {
+        json!({
+            "kind": "grpc-metadata",
+            "name": name,
+            "encoding": "base64",
+            "value": base64::engine::general_purpose::STANDARD.encode(value),
+        })
+    }
+
+    /// Wraps metadata whose text or binary encoding is invalid without losing
+    /// its encoded header bytes.
+    #[must_use]
+    pub fn grpc_opaque_metadata(name: &str, encoded_value: &[u8]) -> Value {
+        json!({
+            "kind": "grpc-metadata",
+            "name": name,
+            "encoding": "base64",
+            "representation": "encoded-header",
+            "value": base64::engine::general_purpose::STANDARD.encode(encoded_value),
+        })
+    }
+
+    #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn grpc_status_details_are_labeled_and_base64_encoded() {
+            assert_eq!(
+                grpc_status_details(b"\x00\xff"),
+                json!({
+                    "kind": "grpc-status-details-bin",
+                    "encoding": "base64",
+                    "value": "AP8=",
+                })
+            );
+        }
+
+        #[test]
+        fn grpc_ascii_metadata_is_labeled_text() {
+            assert_eq!(
+                grpc_ascii_metadata("x-reason", "invalid"),
+                json!({
+                    "kind": "grpc-metadata",
+                    "name": "x-reason",
+                    "value": "invalid",
+                })
+            );
+        }
+
+        #[test]
+        fn grpc_binary_metadata_is_labeled_and_base64_encoded() {
+            assert_eq!(
+                grpc_binary_metadata("trace-bin", b"\x01\xfe"),
+                json!({
+                    "kind": "grpc-metadata",
+                    "name": "trace-bin",
+                    "encoding": "base64",
+                    "value": "Af4=",
+                })
+            );
+        }
+
+        #[test]
+        fn grpc_opaque_metadata_preserves_encoded_header_bytes() {
+            assert_eq!(
+                grpc_opaque_metadata("broken-bin", b"{}.."),
+                json!({
+                    "kind": "grpc-metadata",
+                    "name": "broken-bin",
+                    "encoding": "base64",
+                    "representation": "encoded-header",
+                    "value": "e30uLg==",
+                })
+            );
+        }
+    }
 }

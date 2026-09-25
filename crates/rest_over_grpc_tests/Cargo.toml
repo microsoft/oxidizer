@@ -56,28 +56,39 @@ http_path_template = { workspace = true }
 pbjson-build = { workspace = true }
 prost-build = { workspace = true }
 protox = { workspace = true }
-rest_over_grpc = { workspace = true, features = ["build-openapi"] }
+rest_over_grpc = { workspace = true, features = ["build-openapi", "private-test-util"] }
 routerama = { workspace = true }
 tonic-prost-build = { workspace = true }
 
 [dev-dependencies]
 bytes = { workspace = true }
+criterion = { workspace = true }
 futures = { workspace = true, features = ["std", "executor"] }
 http-body = { workspace = true }
 http-body-util = { workspace = true }
-tokio = { workspace = true, features = ["rt", "macros"] }
+matchit = { workspace = true }
+metabench = { workspace = true }
+protox = { workspace = true }
+rest_over_grpc = { workspace = true, features = ["build-openapi"] }
+tokio = { workspace = true, features = ["rt", "macros", "net", "sync"] }
+tokio-stream = { workspace = true, features = ["net"] }
+tonic = { workspace = true, features = ["router", "transport"] }
 tower-service = { workspace = true }
 
-[target.'cfg(target_os = "linux")'.dev-dependencies]
-gungraun = { workspace = true, features = ["default"] }
-matchit = { workspace = true }
-
 [[bench]]
-name = "rog_router_cg"
+name = "rog_router"
 harness = false
 
 [[bench]]
-name = "rog_transcode_cg"
+name = "rog_transcode"
+harness = false
+
+[[bench]]
+name = "rog_workloads"
+harness = false
+
+[[bench]]
+name = "rog_generation"
 harness = false
 
 # >>> anvil-managed: anvil-lints

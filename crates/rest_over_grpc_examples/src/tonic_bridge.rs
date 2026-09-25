@@ -5,7 +5,7 @@
 //! REST API.
 //!
 //! This is the common case: you implement your service only against `tonic`'s
-//! generated server trait, and `rest_over_grpc::build` emits a blanket `impl`
+//! generated server trait, and `rest_over_grpc::build` emits a guarded wrapper
 //! that makes it a `rest_over_grpc` service too, so one implementation serves
 //! both gRPC and REST. (To hand-write the service trait instead, see the
 //! [`custom`](crate::custom) module — it serves the *same* `library.proto`
@@ -50,6 +50,7 @@ mod transcoder {
 use std::pin::Pin;
 
 use futures_util::stream::{self, Stream};
+pub use library::__rest_over_grpc_bridge_Library::LibraryRestBridge;
 use library::{
     CreateShelfRequest, Genre, GetShelfRequest, ListShelvesByGenreRequest, ListShelvesRequest, ListShelvesResponse, Shelf, library_server,
 };
@@ -58,9 +59,8 @@ pub use transcoder::Transcoder;
 /// A library implemented purely against `tonic`'s generated `library_server::Library`
 /// trait — it never mentions `rest_over_grpc`.
 ///
-/// The generated blanket `impl` bridges it to the REST service trait, so a
-/// [`Transcoder::new(LibraryService)`](Transcoder) transcodes REST/JSON requests
-/// without any extra code.
+/// The generated [`LibraryRestBridge`] bridges it to the REST service trait,
+/// with an explicit REST authorization guard or acknowledgment of an outer one.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct LibraryService;
 

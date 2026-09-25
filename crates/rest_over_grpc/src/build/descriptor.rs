@@ -662,9 +662,10 @@ mod tests {
     }
 
     /// Concatenates generated traits, bridges, and the top-level transcoder.
+    #[expect(clippy::unwrap_used, reason = "test helper renders a descriptor fixture that must be valid")]
     fn render(bytes: &[u8], options: &DescriptorOptions, mut generator: Generator) -> String {
         generator.add_all(definitions_from_descriptor(bytes, options).expect("definitions decode"));
-        let (transcoder, outputs) = generator.generate();
+        let (transcoder, outputs) = generator.generate().unwrap();
         let mut code: String = outputs
             .iter()
             .map(|service| {
@@ -893,7 +894,7 @@ mod tests {
         let defs = definitions_from_descriptor(&descriptor, &DescriptorOptions::new()).expect("valid annotations");
         let mut generator = Generator::new();
         generator.add_all(defs);
-        let transcoder = generator.generate().0.to_string();
+        let transcoder = generator.generate().unwrap().0.to_string();
 
         assert!(transcoder.contains("b :: Req"), "{transcoder}");
         assert!(transcoder.contains("a :: ASvc"), "{transcoder}");

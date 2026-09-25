@@ -23,9 +23,10 @@ use http::header::{ACCEPT, CONTENT_TYPE};
 use http::{Method, Request};
 use http_body_util::{BodyExt as _, Full};
 use rest_over_grpc::serving::serve_http;
-use rest_over_grpc_examples::tonic_bridge::{LibraryService, Transcoder};
+use rest_over_grpc::transcoding::Transcode;
+use rest_over_grpc_examples::tonic_bridge::{LibraryRestBridge, LibraryService, Transcoder};
 
-async fn run(library: &'static Transcoder<LibraryService>, method: Method, target: &str, accept: &str) {
+async fn run(library: &impl Transcode, method: Method, target: &str, accept: &str) {
     let request = Request::builder()
         .method(method.clone())
         .uri(target)
@@ -64,13 +65,13 @@ fn content_type(response: &http::Response<rest_over_grpc::serving::RestBody>) ->
 }
 
 fn main() {
-    let library: &'static Transcoder<LibraryService> = Box::leak(Box::new(Transcoder::new(LibraryService)));
+    let library = Transcoder::new(LibraryRestBridge::externally_authenticated(LibraryService));
 
     futures::executor::block_on(async {
-        run(library, Method::GET, "/v1/shelves:stream", "application/x-ndjson").await;
+        run(&library, Method::GET, "/v1/shelves:stream", "application/x-ndjson").await;
 
-        run(library, Method::GET, "/v1/shelves:stream", "application/json").await;
+        run(&library, Method::GET, "/v1/shelves:stream", "application/json").await;
 
-        run(library, Method::GET, "/v1/shelves/history", "application/json").await;
+        run(&library, Method::GET, "/v1/shelves/history", "application/json").await;
     });
 }

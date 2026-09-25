@@ -1,13 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![forbid(unsafe_code)]
+
 //! Generates the code for both example modalities into separate `OUT_DIR`
 //! subdirectories (each pipeline emits a top-level `transcoder.rest.rs`, so they
 //! must not share a directory):
 //!
 //! - `tonic_bridge/` — `library.proto` built with `tonic` (messages + server
 //!   trait) + pbjson serde + the `rest_over_grpc::build` REST trait, transcoder,
-//!   and the blanket `tonic` bridge. See `src/tonic_bridge.rs`.
+//!   and the guarded `tonic` bridge. See `src/tonic_bridge.rs`.
 //! - `custom/` — `library.proto` built with `prost` (messages only) + pbjson
 //!   serde + the `rest_over_grpc::build` REST trait and transcoder (no `tonic`
 //!   bridge), plus an OpenAPI 3.1 document. See `src/custom.rs`.
@@ -35,9 +37,9 @@ fn main() {
 ///
 /// `tonic` generates the messages and the `library_server::Library` server
 /// trait; `rest_over_grpc::build` then emits the REST trait + transcoder and —
-/// because the `tonic` bridge is on by default — the blanket bridge
-/// `impl <Library> for T where T: library_server::Library`, so a service written
-/// once against `tonic` also serves REST.
+/// because the `tonic` bridge is on by default — a `LibraryRestBridge` wrapper
+/// that requires an explicit REST authorization guard (or an acknowledgment
+/// that authorization precedes this adapter).
 fn build_tonic_bridge(proto_dir: &std::path::Path, out_dir: &std::path::Path) {
     std::fs::create_dir_all(out_dir).expect("the tonic_bridge output directory is created");
 

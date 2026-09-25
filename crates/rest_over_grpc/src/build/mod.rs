@@ -15,16 +15,13 @@
 //! This module consumes descriptors but does not generate protobuf message
 //! types or their serde implementations. Generate the messages separately and
 //! provide proto3-JSON-compatible serde implementations, normally with
-//! `pbjson-build`. [`compile_fds`] emits the `tonic` bridge by default; call
+//! `pbjson-build`. [`compile_fds`] emits the `tonic` bridge by default. The
+//! generated `__rest_over_grpc_bridge_{Service}::{Service}RestBridge`
+//! requires `with_guard(service, guard)` or an
+//! explicit `externally_authenticated(service)` acknowledgment; tonic
+//! interceptors do not run on REST requests. Call
 //! [`GeneratorBuilder::emit_tonic_bridge`] with `false` when implementing the
 //! generated REST trait directly or using another gRPC stack.
-//!
-//! Descriptor lowering belongs here because `google.api.http` annotations and
-//! protobuf type information are available only after the consuming build
-//! script has produced a descriptor set. A source-level procedural macro cannot
-//! consume that build output, while `routerama_build` intentionally remains
-//! independent of protobuf and gRPC semantics. This module translates those
-//! semantics into `routerama` routes after message generation.
 //!
 //! ```ignore
 //! use rest_over_grpc::build::{DescriptorOptions, Generator, ServiceDefinition};
@@ -59,8 +56,8 @@ pub use binding::Binding;
 pub use descriptor_error::DescriptorError;
 #[doc(inline)]
 pub use descriptor_options::DescriptorOptions;
-// Internal primitive, `pub` only so the `rest_over_grpc_tests` crate can build a
-// bare `Route::resolve`; not part of the documented public API.
+// Internal primitive exposed only for the workspace's routing tests and benchmarks.
+#[cfg(any(test, feature = "private-test-util"))]
 #[doc(hidden)]
 pub use emit::generate_router;
 #[doc(inline)]

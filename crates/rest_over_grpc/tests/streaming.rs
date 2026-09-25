@@ -105,6 +105,40 @@ fn from_accept_negotiates_the_encoding() {
     );
 }
 
+#[test]
+fn from_accept_values_considers_all_header_lines() {
+    let mut headers = http::HeaderMap::new();
+    headers.append(http::header::ACCEPT, "application/json;q=0.1".parse().unwrap());
+    headers.append(http::header::ACCEPT, "text/event-stream;q=1".parse().unwrap());
+    let encoding = StreamEncoding::from_accept_values(headers.get_all(http::header::ACCEPT).iter().filter_map(|value| value.to_str().ok()));
+    assert_eq!(encoding, StreamEncoding::Sse);
+}
+
+#[tokio::test]
+async fn frame_reservation_adapts_to_steady_and_spiky_messages() {
+    let payloads = [
+        "a".repeat(8192),
+        "b".repeat(8192),
+        "c".repeat(256 * 1024),
+        "d".repeat(8192),
+        "e".repeat(8192),
+    ];
+    let frames: Vec<Vec<u8>> = encode_frames(stream::iter(payloads.iter().map(Ok::<_, Status>)), StreamEncoding::NdJson)
+        .map(|frame| frame.unwrap())
+        .collect()
+        .await;
+
+    assert!(
+        frames[1].capacity() >= frames[0].len(),
+        "second steady frame reuses the measured size"
+    );
+    assert!(frames[3].capacity() < 128 * 1024, "spike does not retain its full reservation");
+    assert!(frames[4].capacity() >= frames[3].len(), "steady size is recovered after a spike");
+    for (frame, payload) in frames.iter().zip(&payloads) {
+        assert_eq!(serde_json::from_slice::<String>(frame.trim_ascii_end()).unwrap(), *payload);
+    }
+}
+
 #[tokio::test]
 async fn serialization_failure_is_reported_as_internal() {
     let items = stream::iter(vec![Ok(BadMsg)]);
