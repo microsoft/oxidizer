@@ -3830,6 +3830,9 @@ unsafe fn read_header(address: *mut u8) -> *mut ExtraHeader {
 }
 
 #[cfg(test)]
+mod hardening;
+
+#[cfg(test)]
 mod tests {
     #[cfg(not(miri))]
     use std::ptr::NonNull;
