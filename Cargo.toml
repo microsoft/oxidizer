@@ -68,9 +68,7 @@ alloc_tracker = { version = "0.7.1", default-features = false }
 # local dependencies
 allocation_hints = { path = "crates/allocation_hints", default-features = false, version = "0.1.0" }
 allocator-api2 = { version = "0.4.0", default-features = false }
-anyhow = { version = "1.0.100", default-features = false }
 anyspawn = { path = "crates/anyspawn", default-features = false, version = "0.9.0" }
-anyspawn_azure = { path = "crates/anyspawn_azure", default-features = false, version = "0.4.0" }
 argh = { version = "0.1.13", default-features = false }
 arrayvec = { version = "0.7.6", default-features = false }
 arty = { path = "crates/arty", default-features = false, version = "0.3.0" }
@@ -91,7 +89,6 @@ bytemuck = { version = "1.25.0", default-features = false }
 bytes = { version = "1.11.1", default-features = false }
 bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.10.0" }
 bytesbuf_io = { path = "crates/bytesbuf_io", default-features = false, version = "0.10.0" }
-cachet = { path = "crates/cachet", default-features = false, version = "0.14.0" }
 cachet_memory = { path = "crates/cachet_memory", default-features = false, version = "0.8.0" }
 cachet_service = { path = "crates/cachet_service", default-features = false, version = "0.5.1" }
 cachet_tier = { path = "crates/cachet_tier", default-features = false, version = "0.5.1" }
@@ -122,11 +119,9 @@ dynosaur = { version = "0.3.0", default-features = false }
 events_once = { version = "0.5.32", default-features = false }
 fastrand = { version = "2.3.0", default-features = false, features = ["std"] }
 fetch = { path = "crates/fetch", default-features = false, version = "0.17.1" }
-fetch_azure = { path = "crates/fetch_azure", default-features = false, version = "0.7.1" }
 fetch_hyper = { path = "crates/fetch_hyper", default-features = false, version = "0.8.1" }
 fetch_options = { path = "crates/fetch_options", default-features = false, version = "0.2.4" }
 fetch_tls = { path = "crates/fetch_tls", default-features = false, version = "0.4.1" }
-fetch_winhttp = { path = "crates/fetch_winhttp", default-features = false, version = "0.2.1" }
 fetch_winhttp_impl = { path = "crates/fetch_winhttp_impl", default-features = false, version = "0.2.1" }
 flate2 = { version = "1.1.10", default-features = false }
 fluent-uri = { version = "0.1.4", default-features = false }
@@ -164,7 +159,6 @@ hyper-util = { version = "0.1.20", default-features = false }
 idna = { version = "1.1.0", default-features = false }
 infinity_pool = { version = "0.8.1", default-features = false }
 insta = { version = "1.44.1", default-features = false }
-internity = { path = "crates/internity", default-features = false, version = "0.2.1" }
 internity_macros = { path = "crates/internity_macros", default-features = false, version = "=0.2.1" }
 internity_macros_impl = { path = "crates/internity_macros_impl", default-features = false, version = "=0.2.1" }
 itoa = { version = "1.0.17", default-features = false }
@@ -195,7 +189,6 @@ object-pool = { version = "0.6.0", default-features = false }
 observed = { path = "crates/observed", default-features = false, version = "0.26.0" }
 observed_macros = { path = "crates/observed_macros", default-features = false, version = "=0.26.0" }
 observed_macros_impl = { path = "crates/observed_macros_impl", default-features = false, version = "=0.26.0" }
-observed_testing = { path = "crates/observed_testing", default-features = false }
 observed_utils = { path = "crates/observed_utils", default-features = false, version = "0.3.0" }
 ohno = { path = "crates/ohno", default-features = false, version = "0.5.2" }
 ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "=0.5.2" }
@@ -211,14 +204,11 @@ paste = { package = "pastey", version = "0.2.3", default-features = false }
 path-tree = { version = "0.8.3", default-features = false }
 pbjson = { version = "0.9.0", default-features = false }
 pbjson-build = { version = "0.9.0", default-features = false }
-pbjson-types = { version = "0.9.0", default-features = false }
-pct-str = { version = "3.0.1", default-features = false }
 performables = { path = "crates/performables", default-features = false, version = "0.1.0" }
 pin-project = { version = "1.1.8", default-features = false }
 pin-project-lite = { version = "0.2.13", default-features = false }
 plurality = { path = "crates/plurality", default-features = false, version = "0.2.2" }
 postcard = { version = "1.1.3", default-features = false, features = ["use-std"] }
-pretty_assertions = { version = "1.4.1", default-features = false }
 prettyplease = { version = "0.3.0", default-features = false }
 proc-macro-crate = { version = "3.5.0", default-features = false }
 proc-macro2 = { version = "1.0.103", default-features = false }
@@ -230,7 +220,6 @@ protox = { version = "0.9.1", default-features = false }
 ptr_meta = { version = "0.3.1", default-features = false }
 quinn = { version = "0.11.11", default-features = false }
 quote = { version = "1.0.42", default-features = false }
-rallocator = { path = "crates/rallocator", default-features = false, version = "0.1.0" }
 rapidhash = { version = "4.1.1", default-features = false }
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }
 rcgen = { version = "0.14.5", default-features = false }
@@ -279,7 +268,6 @@ templated_uri_macros = { path = "crates/templated_uri_macros", default-features 
 templated_uri_macros_impl = { path = "crates/templated_uri_macros_impl", default-features = false, version = "=0.6.0" }
 terminal_size = { version = "0.4.4", default-features = false }
 testing_aids = { path = "crates/testing_aids", default-features = false }
-thiserror = { version = "2.0.17", default-features = false }
 thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.12.0" }
 thread_aware_core = { path = "crates/thread_aware_core", default-features = false, version = "0.1.1" }
 thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "=0.12.0" }
