@@ -11,7 +11,8 @@ pub type SystemTask = Box<dyn FnOnce() + Send + 'static>;
 ///
 /// Tasks run on runtime-owned system threads, not on async workers. A task may block.
 ///
-/// The runtime keeps the spawner available until every driver has completed shutdown.
+/// The runtime keeps the spawner available until every driver's
+/// [`shutdown`](crate::Driver::shutdown) call has returned, successfully or with an error.
 #[derive(Clone)]
 pub struct SystemTaskSpawner {
     spawn: Arc<dyn Fn(SystemTask) + Send + Sync + 'static>,
@@ -29,6 +30,10 @@ impl SystemTaskSpawner {
     /// Submits `task` for execution.
     ///
     /// This method returns after the task is accepted, without waiting for it to finish.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the submission callback supplied to [`from_fn`](Self::from_fn) panics.
     pub fn spawn(&self, task: impl FnOnce() + Send + 'static) {
         (self.spawn)(Box::new(task));
     }

@@ -14,7 +14,9 @@ use crate::{DriverProvider, ProviderOptions};
 /// ```
 ///
 /// On the first request, the runtime calls [`provider`](Self::provider) and creates the associated
-/// driver and context on every active worker. Later requests reuse that registration.
+/// driver and context on every active worker. Each driver receives an initial zero-wait
+/// [`execute_cycle`](crate::Driver::execute_cycle) before its context is published.
+/// Later requests reuse that registration.
 pub trait IoContext: Clone + ThreadAware + 'static {
     /// The provider used to create this context and its drivers.
     type Provider: DriverProvider<Context = Self>;

@@ -47,7 +47,8 @@ adding synchronization or dynamic borrow checks solely to satisfy the contract.
 
 `Driver` is dyn-compatible. Runtimes that erase unrelated context types use a
 private owning shim to store the context beside its driver, which is also where
-they adapt the by-value `shutdown` method to boxed storage.
+they adapt the by-value `shutdown` method to boxed storage; `shutdown` itself is
+not callable through `dyn Driver`.
 
 Every consumer context implements `IoContext`. Its associated `Provider` and
 `provider(ProviderOptions)` function form the registration recipe. A runtime
@@ -58,7 +59,8 @@ context on every active worker. Later requests reuse that registration.
 `ProviderOptions` is the runtime-to-provider extension point. It is empty in the
 initial contract. `DriverOptions` is the separate per-worker extension point
 passed to `DriverProvider::create`; it identifies the owning worker and exposes
-runtime facilities needed by the driver. It also carries type-erased handles for
+runtime facilities and the assigned primary or secondary role. It also carries
+type-erased handles for
 drivers registered earlier on that worker. This lets a new driver discover and
 connect to compatible local drivers without moving thread-local driver state or
 exposing the runtime's registry.
@@ -81,7 +83,9 @@ but it can downcast a compatible handle and clone independently owned shared
 state. Because a handle may refer to a thread-local driver, `DriverOptions`
 remains on the worker that assembled it.
 
-After creating and storing the new driver and context, the runtime calls
+After creation, the runtime runs one zero-wait cycle in the current interruption
+round, without resetting the interruptor again, before publishing the
+context. It then stores the new driver and context and calls
 `Driver::on_peer_registered` on every earlier driver in registration order. Each
 callback receives the new driver's type-erased handle and runs on the owning
 worker before registration is acknowledged. This makes discovery bidirectional
@@ -105,14 +109,19 @@ lets drivers compare deadlines consistently without later drivers observing
 time advanced merely because they were scheduled later in the cycle. It is not
 a completion timestamp or a general runtime clock service.
 
-Primary and satellite roles remain runtime placement choices rather than public
-driver roles.
+The runtime invokes secondary drivers first and the single primary last. Every
+driver receives the same maximum wait. A primary can apply it directly to the
+worker wait. A secondary may apply it only on a background thread; its
+worker-local cycle remains non-blocking. The secondary re-registers the waker
+for its current background wait each cycle and uses private synchronization to
+arm or replace that wait.
 
-The driver's waker follows a latched contract. Without latching, a wake-up
-between the runtime's final work check and the wait could be lost. A
-non-blocking completion pass does not consume the latch; the next call that may
-block observes it. A wake-up changes only the wait behavior, so pending
-completions are still processed.
+The cycle interruptor follows a latched contract. Drivers register native-wait
+wakers each cycle. Background observers retain the shared handle and request it
+after publishing work. The runtime resets the latch before checking work in the
+next cycle, exactly once for the whole logical cycle and never between drivers.
+Request another cycle only for published or immediately serviceable work, not
+merely because I/O remains in flight.
 
 ## Shutdown
 
@@ -145,6 +154,8 @@ ownership into `shutdown`. The call performs whatever completion processing,
 waiting, cancellation, and cleanup the implementation requires. `SystemTaskSpawner`
 remains available until the call returns. The driver owns the liveness policy
 for this blocking phase and returns an error instead of waiting indefinitely.
+The normal cycle interruptor is no longer driven, so shutdown uses driver-owned
+synchronization.
 It does not depend on work that can run only after its own shutdown returns,
 including another driver serialized on the same runtime thread. A returned
 error reports incomplete graceful cleanup but never changes whether dropping
@@ -156,10 +167,10 @@ standard error source chain.
 
 ## Creation failure
 
-Registration is infallible at the type level. A provider that cannot initialize
-its driver and context, or an existing driver that cannot integrate a newly
-registered driver, panics because the runtime cannot continue coherently with a
-driver registered or connected on only part of its worker set.
+Provider creation and the initial zero-wait cycle can return `DriverError`.
+The runtime rolls back the unpublished pair. An existing driver that cannot
+integrate a newly registered peer still panics because the runtime cannot
+continue coherently with a partially connected registration.
 
 A driver with conditional platform or permission requirements exposes a
 capability check. The consumer calls that check before
@@ -206,7 +217,6 @@ Future additions follow these rules:
 
 The initial API does not decide:
 
-- how a runtime selects the driver that provides its waiting point;
 - whether workers or drivers are pinned to processors;
 - whether registrations cover existing workers atomically;
 - how runtimes order independent driver shutdown calls;

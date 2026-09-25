@@ -1,10 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-/// Options for creating a driver provider.
+/// Options supplied by a runtime when creating a driver provider.
 ///
-/// This type is currently empty. Its private representation allows compatible versions to add
-/// optional runtime facilities.
+/// No runtime facilities are currently exposed.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct ProviderOptions;

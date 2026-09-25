@@ -3,7 +3,7 @@
 
 use thread_aware_core::ThreadAware;
 
-use crate::{Driver, DriverOptions, IoContext};
+use crate::{Driver, DriverError, DriverOptions, IoContext};
 
 /// A factory for per-worker driver and context pairs.
 ///
@@ -27,9 +27,14 @@ pub trait DriverProvider: Clone + ThreadAware + Sized + 'static {
     /// drivers registered earlier on the same worker. The new driver may clone independently owned
     /// state from those handles.
     ///
-    /// # Panics
+    /// Prepare native resources without publishing the context. The runtime then invokes an
+    /// initial zero-wait [`Driver::execute_cycle`] to supply the stable interruptor, connect
+    /// notification, and recheck early work before publishing the context or notifying peers.
     ///
-    /// Implementations must panic if the driver cannot be created. The runtime cannot continue
-    /// with a partially completed registration.
-    fn create(self, options: DriverOptions<'_>) -> (Self::Driver, Self::Context);
+    /// # Errors
+    ///
+    /// Returns an error if the driver and context cannot be initialized. On error, partially
+    /// initialized native state must be safe to drop and no usable context may have been
+    /// published. The runtime rolls back the unpublished pair.
+    fn create(self, options: DriverOptions<'_>) -> Result<(Self::Driver, Self::Context), DriverError>;
 }

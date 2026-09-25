@@ -1,10 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::task::Waker;
-use std::time::{Duration, Instant};
-
-use arty_io_core::{Driver, DriverHandle, DriverOptions, DriverProvider, IoContext, ProviderOptions, ShutdownError};
+use arty_io_core::{
+    Cycle, Driver, DriverError, DriverHandle, DriverOptions, DriverProvider, DriverRole, IoContext, ProviderOptions, ShutdownError,
+};
 use thread_aware_core::{Thread, ThreadAware};
 
 #[derive(Clone)]
@@ -33,13 +32,15 @@ impl DriverProvider for SampleProvider {
     type Context = SampleContext;
     type Driver = SampleDriver;
 
-    fn create(self, _options: DriverOptions<'_>) -> (Self::Driver, Self::Context) {
-        println!("initializing sample driver");
-        (SampleDriver, SampleContext)
+    fn create(self, options: DriverOptions<'_>) -> Result<(Self::Driver, Self::Context), DriverError> {
+        println!("initializing sample driver as {:?}", options.role());
+        Ok((SampleDriver { role: options.role() }, SampleContext))
     }
 }
 
-pub(super) struct SampleDriver;
+pub(super) struct SampleDriver {
+    role: DriverRole,
+}
 
 impl Driver for SampleDriver {
     fn handle(&self) -> DriverHandle<'_> {
@@ -52,10 +53,9 @@ impl Driver for SampleDriver {
         }
     }
 
-    fn process_completions(&mut self, _max_wait: Duration, _cycle_start: Instant) {}
-
-    fn waker(&self) -> Waker {
-        Waker::noop().clone()
+    fn execute_cycle(&mut self, _cycle: &Cycle) -> Result<(), DriverError> {
+        let _ = self.role;
+        Ok(())
     }
 
     fn shutdown(self) -> Result<(), ShutdownError> {
@@ -90,14 +90,19 @@ impl DriverProvider for EchoProvider {
     type Context = EchoContext;
     type Driver = EchoDriver;
 
-    fn create(self, options: DriverOptions<'_>) -> (Self::Driver, Self::Context) {
+    fn create(self, options: DriverOptions<'_>) -> Result<(Self::Driver, Self::Context), DriverError> {
         let sample_registered = options.drivers().iter().any(|driver| driver.handle().is::<SampleDriver>());
-        println!("initializing echo driver; sample driver registered: {sample_registered}");
-        (EchoDriver, EchoContext)
+        println!(
+            "initializing echo driver as {:?}; sample driver registered: {sample_registered}",
+            options.role()
+        );
+        Ok((EchoDriver { role: options.role() }, EchoContext))
     }
 }
 
-pub(super) struct EchoDriver;
+pub(super) struct EchoDriver {
+    role: DriverRole,
+}
 
 impl Driver for EchoDriver {
     fn handle(&self) -> DriverHandle<'_> {
@@ -106,10 +111,9 @@ impl Driver for EchoDriver {
 
     fn on_peer_registered(&mut self, _peer: DriverHandle<'_>) {}
 
-    fn process_completions(&mut self, _max_wait: Duration, _cycle_start: Instant) {}
-
-    fn waker(&self) -> Waker {
-        Waker::noop().clone()
+    fn execute_cycle(&mut self, _cycle: &Cycle) -> Result<(), DriverError> {
+        let _ = self.role;
+        Ok(())
     }
 
     fn shutdown(self) -> Result<(), ShutdownError> {

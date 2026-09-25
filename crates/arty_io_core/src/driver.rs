@@ -1,82 +1,85 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::task::Waker;
-use std::time::{Duration, Instant};
+use crate::{Cycle, DriverError, DriverHandle, ShutdownError};
 
-use crate::{DriverHandle, ShutdownError};
-
-/// A thread-local adapter between a runtime worker and an I/O subsystem.
+/// A worker-local integration point for an independently implemented I/O subsystem.
 ///
-/// A runtime creates a driver on its owning worker and invokes every method on that worker.
-/// Drivers are not required to implement [`Send`] or [`Sync`].
+/// The runtime creates the driver and invokes every method on its owning worker. Drivers need
+/// not implement `Send` or `Sync`. Native observers, queue sharing, routing, and cancellation
+/// belong to the implementation, not the runtime.
 ///
-/// State reachable from a context, waker, background thread, or operating-system callback must
-/// remain valid independently of the driver. State used only by the owning worker may remain
-/// directly in the driver and be accessed through
-/// [`process_completions`](Self::process_completions).
-///
-/// A driver must be safe to drop before, during, or after shutdown. Its associated contexts may
-/// outlive it and must reject new operations after admission is closed.
+/// State reachable from contexts, callbacks, observers, or wakers must remain valid independently
+/// of the driver. Dropping a driver at any lifecycle point is memory-safe.
 pub trait Driver: 'static {
-    /// Returns the handle exposed to drivers registered on the same worker.
+    /// Returns a borrowed handle for discovering compatible drivers on the same worker.
     ///
-    /// The handle may expose the driver itself or a smaller driver-owned value. The runtime
-    /// borrows it only while creating or notifying another driver.
+    /// A peer may inspect the handle and clone independently owned state, but cannot retain the
+    /// borrow. Driver-owned coordination can use these handles without a core wait registry.
     #[must_use]
     fn handle(&self) -> DriverHandle<'_>;
 
-    /// Notifies this driver that `peer` was registered on the same worker.
-    ///
-    /// The runtime calls this method after storing the new driver and before completing its
-    /// registration. The callback runs on the owning worker and cannot retain `peer`, but it may
-    /// clone independently owned state exposed by the handle.
+    /// Notifies this driver of a newly registered peer before its context is published.
     ///
     /// # Panics
     ///
-    /// Implementations must panic if the peer cannot be integrated. The runtime cannot continue
-    /// with a partially connected registration.
+    /// Panic if the peer cannot be integrated. The runtime cannot continue a partially connected
+    /// registration. Native initialization failures belong in provider creation or the initial
+    /// cycle instead.
     fn on_peer_registered(&mut self, peer: DriverHandle<'_>);
 
-    /// Processes completion events, waiting up to `max_wait` for more work.
+    /// Processes submissions and completions and optionally waits for native work.
     ///
-    /// [`Duration::ZERO`] performs a non-blocking poll and does not consume a pending wake-up.
-    /// [`Duration::MAX`] permits an unbounded wait. Implementations with coarser timing round a
-    /// finite duration up without treating it as unbounded.
+    /// The runtime invokes every secondary before the single primary, using the same
+    /// [`Cycle::started_at`] and [`Cycle::max_wait`] for every call. A primary may apply that
+    /// duration directly to its worker wait. A secondary may use the duration only to arm or
+    /// replace an off-worker wait; its worker-local call must return without waiting for that
+    /// background operation to finish.
     ///
-    /// The runtime captures `cycle_start` once and passes it unchanged to every driver visited in
-    /// the same completion cycle.
+    /// Registration includes an initial zero-wait cycle before the context is published or peers
+    /// are notified. Retain the stable interruptor from this call, connect native notification,
+    /// and recheck work queued during construction. Failure aborts registration.
     ///
-    /// This method must not hold a resource across the wait if another thread needs that resource
-    /// to submit work or make a completion available.
-    fn process_completions(&mut self, max_wait: Duration, cycle_start: Instant);
-
-    /// Returns a waker for interrupting completion waits.
+    /// Register each current native wait's waker before checking
+    /// [`Interruptor::is_requested`](crate::Interruptor::is_requested) or entering the wait, and
+    /// register it again in each cycle. Native interruption must be latched across that
+    /// transition. Waiting ends only the wait; pending completions still need processing.
     ///
-    /// Wake-ups are latched. Waking before a blocking wait makes the next blocking call to
-    /// [`process_completions`](Self::process_completions) behave like a non-blocking poll. A
-    /// wake-up ends only the wait; pending completions are still processed.
+    /// Process a bounded batch. If that bound is reached while immediately serviceable work
+    /// remains, request the interruptor before returning. Do not request merely because
+    /// operations remain in flight or because a wait was interrupted.
     ///
-    /// Wake-ups from the owning worker must be observed. Redundant wake-ups may be coalesced, but
-    /// no wake-up may be lost. The returned waker remains safe to invoke after the driver is
-    /// dropped.
-    #[must_use]
-    fn waker(&self) -> Waker;
+    /// # Errors
+    ///
+    /// Returns an infrastructure failure. During registration the runtime rolls back the
+    /// unpublished driver/context pair. During normal operation it reports the error and shuts
+    /// down the worker's drivers. Individual failed I/O operations retain their own results.
+    fn execute_cycle(&mut self, cycle: &Cycle) -> Result<(), DriverError>;
 
     /// Gracefully shuts down the driver.
     ///
-    /// This method closes admission to new operations and waits for active operations and
-    /// operating-system callbacks to drain. Context handles do not themselves delay shutdown.
+    /// This method consumes the driver, closes admission, and blocks until active operations,
+    /// callbacks, and driver-owned observers drain or cleanup fails. Context handles do not
+    /// themselves delay shutdown.
     ///
-    /// The implementation must continue making progress on its own completions, must not wait
-    /// indefinitely, and must not depend on work that can run only after this method returns.
+    /// The driver must bound its shutdown wait and make all required progress itself or on
+    /// independently running threads. It must not depend on another driver serialized on the
+    /// same runtime worker, regardless of shutdown order. The shared cycle interruptor is no
+    /// longer driven after normal cycle processing stops and must not be the sole notification
+    /// mechanism for shutdown progress.
     ///
-    /// [`Drop::drop`] runs after this method returns. Shared cleanup must therefore be idempotent
-    /// or otherwise guarded. Regardless of the result, the driver must remain safe to drop and its
-    /// contexts must reject new operations.
+    /// Dropping after success or failure remains memory-safe. Cancellation alone is not proof
+    /// that native code has stopped accessing operation storage.
+    ///
+    /// The runtime invokes shutdown on the owning worker, keeps
+    /// [`SystemTaskSpawner`](crate::SystemTaskSpawner) available until every shutdown call
+    /// returns, and attempts the remaining drivers after an error. It may shut down secondaries
+    /// before the primary to preserve primary-owned infrastructure longest.
     ///
     /// # Errors
     ///
     /// Returns an error if graceful cleanup cannot be completed.
-    fn shutdown(self) -> Result<(), ShutdownError>;
+    fn shutdown(self) -> Result<(), ShutdownError>
+    where
+        Self: Sized;
 }

@@ -1,6 +1,6 @@
 # Completion coordination across I/O drivers
 
-**Design proposal, not the current contract.** [DESIGN.md](DESIGN.md) and
+**Design exploration beyond the role contract.** [DESIGN.md](DESIGN.md) and
 [REQUIREMENTS.md](REQUIREMENTS.md) describe the existing API. This document
 explores an alternative completion boundary; its conceptual operations are not
 APIs implemented by `arty_io_core`.
@@ -25,18 +25,19 @@ provide interoperability between incompatible copies of the contract itself.
 
 ## Why the current boundary is insufficient
 
-The current [driver interface](../src/driver.rs) combines completion processing
-and waiting in `process_completions(max_wait, cycle_start)`. Its `waker` returns a
-handle for ending that driver's current or next wait. It supplies one direction:
+The current [driver interface](../src/driver.rs) gives every driver the same
+maximum wait, invokes secondaries before the primary, and shares an interruptor.
+Secondaries schedule blocking observation on background threads. This supplies:
 
 ```text
-runtime task, command, or shutdown activity -> interrupt the driver's wait
+runtime or secondary activity -> interrupt registered waits
 ```
 
-It does not establish the other direction needed for coordinated hosting:
+The remaining question is whether compatible drivers should additionally share
+native collection infrastructure:
 
 ```text
-native source needs service -> notify the coordinator -> service its driver
+native source needs service -> shared collector -> service its driver
 ```
 
 Consider two drivers whose completions are published to tasks only when their
@@ -50,10 +51,14 @@ owner thread processes them:
 5. B cannot publish the task wake until the worker services B.
 ```
 
-B's waker targets B, not A. Nothing in the contract connects B's native
-readiness to A's wait. Returning a future or combining wakers does not
-create that connection; some implementation still has to observe the native
-source.
+B's background observer and the shared interruptor solve progress, but may add a
+thread and cross-thread delivery. Native sharing can avoid that overhead when
+drivers are compatible.
+
+The runtime resets the interruptor once per logical cycle, not between driver
+calls or for a registration initialization pass. A secondary re-registers the
+waker for its current background wait each cycle and privately arms or replaces
+that wait. It requests another cycle only after publishing work.
 
 Finite waits can bound this delay, but introduce polling and latency.
 Zero-duration scans avoid blocking on the wrong driver but consume CPU while
@@ -228,7 +233,7 @@ Separate control packets from operation completions, retain native errors, and
 avoid allocating a new object for every completion merely to cross this
 boundary.
 
-An existing `process_completions(Duration::ZERO, cycle_start) -> ()` does not prove that its
+An existing `execute_cycle` call with `max_wait == Duration::ZERO` does not prove that its
 queue is drained. Legacy drivers remain on their declared hosting path until
 they implement the stronger progress and notification guarantees.
 
@@ -319,13 +324,9 @@ places to supply optional coordination facilities without exposing a concrete
 runtime type. Native adapters can provide platform-specific registration while
 the scheduling contract stays independent of operation representations.
 
-The proposal changes more than how a runtime picks a primary driver. Coordinated
-participation affects the [execution model](REQUIREMENTS.md#r4-driver-owned-execution-strategy),
-cooperative draining changes the [blocking shutdown model](REQUIREMENTS.md#r6-safe-and-blocking-shutdown),
-and recoverable attachment needs a failure policy different from the current
-[fatal registration policy](REQUIREMENTS.md#r7-registration-failure-is-fatal).
-These require an explicit contract decision;
-optional context accessors alone do not give existing drivers those guarantees.
+The current role and interruptor contract provides a compatibility baseline.
+The rest of this proposal concerns optional native sharing, routing ownership,
+and retirement protocols beyond that baseline.
 
 Open choices include the precise capability and drain interfaces, default
 fallback/thread budgets, and the Linux wait implementation. `epoll` provides a

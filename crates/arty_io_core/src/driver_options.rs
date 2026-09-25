@@ -5,7 +5,7 @@ use std::fmt;
 
 use thread_aware_core::Thread;
 
-use crate::{DriverHandle, SystemTaskSpawner};
+use crate::{DriverHandle, DriverRole, SystemTaskSpawner};
 
 /// Options for creating a driver on a runtime worker.
 ///
@@ -14,13 +14,19 @@ pub struct DriverOptions<'a> {
     thread: Thread,
     spawner: SystemTaskSpawner,
     drivers: Vec<DriverHandle<'a>>,
+    role: DriverRole,
 }
 
 impl<'a> DriverOptions<'a> {
     /// Creates options for `thread`.
     #[must_use]
-    pub fn new(thread: Thread, spawner: SystemTaskSpawner, drivers: Vec<DriverHandle<'a>>) -> Self {
-        Self { thread, spawner, drivers }
+    pub fn new(thread: Thread, spawner: SystemTaskSpawner, drivers: Vec<DriverHandle<'a>>, role: DriverRole) -> Self {
+        Self {
+            thread,
+            spawner,
+            drivers,
+            role,
+        }
     }
 
     /// Returns the worker that will own the driver.
@@ -44,6 +50,17 @@ impl<'a> DriverOptions<'a> {
     pub fn drivers(&self) -> &[DriverHandle<'a>] {
         &self.drivers
     }
+
+    /// Returns this driver's runtime-assigned waiting role.
+    ///
+    /// A worker that hosts drivers has exactly one [`DriverRole::Primary`]. The role is fixed for
+    /// the driver's lifetime. The runtime invokes secondaries first and the primary last. Every
+    /// role receives the same cycle wait bound, but a secondary may apply it only to an
+    /// off-worker wait.
+    #[must_use]
+    pub const fn role(&self) -> DriverRole {
+        self.role
+    }
 }
 
 impl fmt::Debug for DriverOptions<'_> {
@@ -51,6 +68,7 @@ impl fmt::Debug for DriverOptions<'_> {
         f.debug_struct("DriverOptions")
             .field("thread", &self.thread)
             .field("driver_count", &self.drivers.len())
+            .field("role", &self.role)
             .finish_non_exhaustive()
     }
 }
