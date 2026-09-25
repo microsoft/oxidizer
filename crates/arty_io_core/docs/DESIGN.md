@@ -87,9 +87,9 @@ but it can downcast a compatible handle and clone independently owned shared
 state. Because a handle may refer to a thread-local driver, `DriverOptions`
 remains on the worker that assembled it.
 
-After creation, the runtime runs one zero-wait cycle in the current coordination
-round, without beginning coordination again, before publishing the
-context. It then stores the new driver and context and calls
+After creation, the runtime runs and completes one separate zero-wait
+coordination cycle before publishing the context. It then begins the next
+cycle, stores the new driver and context, and calls
 `Driver::on_peer_registered` on every earlier driver in registration order. Each
 callback receives the new driver's type-erased handle and runs on the owning
 worker before registration is acknowledged. This makes discovery bidirectional

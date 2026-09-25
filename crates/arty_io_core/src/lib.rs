@@ -26,7 +26,7 @@
 //!
 //! The first request for an [`IoContext`] creates its provider and initializes a driver/context
 //! pair on every active worker. Before publishing a context, the runtime assigns the driver's
-//! role and runs an initial zero-wait cycle. The new driver sees earlier drivers through
+//! role and completes a separate zero-wait cycle. The new driver sees earlier drivers through
 //! [`DriverOptions::drivers`]; earlier drivers receive the new driver's handle through
 //! [`Driver::on_peer_registered`]. Later requests reuse the registration.
 //!

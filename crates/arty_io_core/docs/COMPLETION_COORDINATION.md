@@ -60,7 +60,8 @@ thread and cross-thread delivery. Native sharing can avoid that overhead when
 drivers are compatible.
 
 The runtime begins coordination once per logical cycle, not between driver
-calls or for a registration initialization pass. Drivers create non-cloneable
+calls. Registration initialization is a separate completed zero-wait cycle.
+Drivers create non-cloneable
 `PendingWork` values for work that continues off-thread. A secondary attaches the waker for
 each current background wait, uses `complete` after publishing results, and
 drops the value when work ends without results. After the primary returns, the

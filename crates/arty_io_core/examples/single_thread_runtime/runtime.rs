@@ -15,7 +15,7 @@ use thread_aware_core::{Thread, ThreadAware};
 
 type ContextBox = Box<dyn Any + Send>;
 type DriverStore = Vec<Box<dyn ErasedDriver>>;
-type Operation = Box<dyn FnOnce(&Thread, &SystemTaskSpawner, &Coordinator, &mut DriverStore) + Send>;
+type Operation = Box<dyn FnOnce(&Thread, &SystemTaskSpawner, &mut Coordinator, &mut DriverStore) + Send>;
 type ShutdownResult = Result<(), ShutdownError>;
 
 enum Command {
@@ -140,7 +140,8 @@ impl Runtime {
             driver
                 .execute_cycle(Cycle::new(Instant::now(), Duration::ZERO, coordinator))
                 .expect("sample driver initialization cycle is infallible");
-            coordinator.wait_for_idle();
+            coordinator.complete_cycle();
+            coordinator.begin_cycle();
             let reply_context = context.clone();
             register_driver(drivers, driver, context, role);
             let _ = reply_tx.send(reply_context);
@@ -150,7 +151,7 @@ impl Runtime {
             .expect("driver initialization failure must terminate context registration")
     }
 
-    fn run(&self, operation: impl FnOnce(&Thread, &SystemTaskSpawner, &Coordinator, &mut DriverStore) + Send + 'static) {
+    fn run(&self, operation: impl FnOnce(&Thread, &SystemTaskSpawner, &mut Coordinator, &mut DriverStore) + Send + 'static) {
         assert!(
             self.commands.send(Command::Run(Box::new(operation))).is_ok(),
             "runtime worker must remain alive while executing an operation"
@@ -177,7 +178,7 @@ fn run_worker(worker: &Thread, spawner: &SystemTaskSpawner, commands: &mpsc::Rec
         match command {
             Command::Run(operation) => {
                 coordinator.begin_cycle();
-                operation(worker, spawner, &coordinator, &mut drivers);
+                operation(worker, spawner, &mut coordinator, &mut drivers);
                 execute_driver_cycle(&mut drivers, &coordinator);
             }
             Command::Stop { reply } => {

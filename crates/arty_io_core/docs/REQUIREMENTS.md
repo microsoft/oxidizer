@@ -56,8 +56,8 @@ worker it serves.
 - Registration is acknowledged only after every earlier driver has received
   the new driver's type-erased handle.
 - A relocated provider clone is consumed exactly once.
-- Before publication, the runtime invokes one zero-wait initialization cycle in
-  the current coordination round; it does not begin coordination again.
+- Before publication, the runtime invokes and completes a separate zero-wait
+  initialization cycle.
 - The provider decides whether instances share queues, memory, threads, or
   nothing.
 

@@ -106,18 +106,6 @@ impl Coordinator {
     /// Panics if bookkeeping was poisoned or calling a registered [`Waker::wake`] panics.
     pub fn complete_cycle(&self) {
         self.interrupt();
-        self.wait_for_idle();
-    }
-
-    /// Blocks until no pending work remains.
-    ///
-    /// This does not interrupt registered waits. The runtime uses it for a zero-wait
-    /// initialization pass that must finish before a context is published.
-    ///
-    /// # Panics
-    ///
-    /// Panics if bookkeeping was poisoned.
-    pub fn wait_for_idle(&self) {
         let mut state = self.inner.state.lock_sync();
         while state.pending_work != 0 {
             state = self.inner.completed.wait_sync(state);

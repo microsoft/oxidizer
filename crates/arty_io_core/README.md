@@ -32,7 +32,7 @@ provides neither a runtime nor an I/O implementation.
 
 The first request for an [`IoContext`][__link11] creates its provider and initializes a driver/context
 pair on every active worker. Before publishing a context, the runtime assigns the driver’s
-role and runs an initial zero-wait cycle. The new driver sees earlier drivers through
+role and completes a separate zero-wait cycle. The new driver sees earlier drivers through
 [`DriverOptions::drivers`][__link12]; earlier drivers receive the new driver’s handle through
 [`Driver::on_peer_registered`][__link13]. Later requests reuse the registration.
 
@@ -66,7 +66,7 @@ run only after its shutdown returns.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb10jnabYsAFcbZZLBgDwAf7AbEOopJ96DUoUb86jXaARsaYphZIGCbGFydHlfaW9fY29yZWUwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbJkbjaOrMtWIbKjmpdkOQbwgbxq-3zUpics8bsxFlV09vjkxhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
  [__link0]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=IoContext
  [__link1]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverProvider
  [__link10]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=ShutdownError

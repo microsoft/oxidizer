@@ -3,14 +3,14 @@
 
 use thread_aware_core::ThreadAware;
 
-use crate::{Driver, DriverError, DriverOptions, DriverRole, IoContext};
+use crate::{Driver, DriverError, DriverOptions, IoContext};
 
 /// A factory for per-worker driver and context pairs.
 ///
 /// A runtime clones and relocates the provider for each worker, then consumes the relocated clone
 /// to create that worker's pair. State shared by driver instances remains private to the provider.
 pub trait DriverProvider: Clone + ThreadAware + Sized + 'static {
-    /// Whether drivers created by this provider may receive [`DriverRole::Primary`].
+    /// Whether drivers created by this provider may receive [`DriverRole::Primary`](crate::DriverRole::Primary).
     ///
     /// A runtime assigns the primary role only when the worker has no primary and this flag is
     /// true. The assigned role is still available through [`DriverOptions::role`].
@@ -33,9 +33,9 @@ pub trait DriverProvider: Clone + ThreadAware + Sized + 'static {
     /// drivers registered earlier on the same worker. The new driver may clone independently owned
     /// state from those handles.
     ///
-    /// Prepare native resources without publishing the context. The runtime then invokes an
-    /// initial zero-wait [`Driver::execute_cycle`] to supply cycle coordination, connect
-    /// notification, and recheck early work before publishing the context or notifying peers.
+    /// Prepare native resources without publishing the context. The runtime then invokes and
+    /// completes a separate zero-wait [`Driver::execute_cycle`] to connect notification and
+    /// finish initialization work before publishing the context or notifying peers.
     ///
     /// # Errors
     ///
