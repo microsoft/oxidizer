@@ -736,6 +736,34 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_wakes_keep_first_notification_order() {
+        let executor = new_guarded_executor(Waker::noop().clone());
+        let polls = Rc::new(RefCell::new(Vec::new()));
+        let mut wakers = Vec::new();
+        for index in 0..3 {
+            let future = TestSubjectFuture::new();
+            wakers.push(future.waker());
+            future.on_poll({
+                let polls = Rc::clone(&polls);
+                move |_| polls.borrow_mut().push(index)
+            });
+            executor.tasks().add(future);
+        }
+        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+
+        for _ in 0..3 {
+            polls.borrow_mut().clear();
+            for index in [2, 0, 2, 1] {
+                wakers[index].borrow().as_ref().unwrap().wake_by_ref();
+            }
+            assert_eq!(
+                (executor.execute_cycle(), polls.borrow().clone()),
+                (CycleOutcome::Suspend, vec![2, 0, 1])
+            );
+        }
+    }
+
+    #[test]
     fn cross_thread_waker_clone_wake_and_drop() {
         let executor = new_guarded_executor(Waker::noop().clone());
         let future = TestSubjectFuture::new();
