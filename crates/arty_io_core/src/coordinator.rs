@@ -34,6 +34,7 @@ struct Inner {
 #[derive(Default)]
 struct State {
     interrupted: bool,
+    waiting: bool,
     wakers: Vec<RegisteredWaker>,
     pending_work: usize,
     next_work_id: usize,
@@ -62,22 +63,23 @@ impl Coordinator {
     /// completes any previous cycle, then clears its interruption state and registrations.
     /// Wakers already being dispatched may finish after this call, but cannot replace
     /// registrations added for the new cycle.
+    #[expect(
+        clippy::needless_pass_by_ref_mut,
+        reason = "only the runtime's exclusive coordinator owner may begin a cycle"
+    )]
+    #[inline]
     pub fn begin_cycle(&mut self) {
-        self.complete_cycle();
-        let mut wakers = {
-            let mut state = self.inner.lock_state();
-            state.interrupted = false;
-            state.next_work_id = 0;
-            std::mem::take(&mut state.wakers)
-        };
-        wakers.clear();
-        self.inner.recycle(wakers);
+        let mut state = self.inner.complete_cycle();
+        // Interruption already drained the registrations. Keep the empty allocation for reuse.
+        state.interrupted = false;
+        state.next_work_id = 0;
     }
 
     /// Returns a stable waker that interrupts the current cycle.
     ///
     /// Runtime task wakers may retain this value across cycles.
     #[must_use]
+    #[inline]
     pub fn interrupt_waker(&self) -> Waker {
         Waker::from(Arc::clone(&self.inner))
     }
@@ -90,12 +92,9 @@ impl Coordinator {
         clippy::needless_pass_by_ref_mut,
         reason = "only the runtime's exclusive coordinator owner may complete a cycle"
     )]
+    #[inline]
     pub fn complete_cycle(&mut self) {
-        self.inner.interrupt();
-        let mut state = self.inner.lock_state();
-        while state.pending_work != 0 {
-            state = self.inner.completed.wait_sync(state);
-        }
+        drop(self.inner.complete_cycle());
     }
 
     pub(crate) fn start_work(&self) -> PendingWork {
@@ -158,56 +157,66 @@ impl Inner {
         }
     }
 
-    fn interrupt(&self) {
-        let mut wakers = {
-            let mut state = self.lock_state();
-            if state.interrupted {
-                return;
-            }
-            state.interrupted = true;
-            std::mem::take(&mut state.wakers)
-        };
+    #[inline]
+    fn complete_cycle(&self) -> MutexGuard<'_, State> {
+        let state = self.interrupt(self.lock_state());
+        if state.pending_work == 0 {
+            return state;
+        }
+        self.wait_for_work(state)
+    }
+
+    fn wait_for_work<'a>(&'a self, mut state: MutexGuard<'a, State>) -> MutexGuard<'a, State> {
+        // The exclusive coordinator owner is the only possible completion waiter.
+        state.waiting = true;
+        while state.pending_work != 0 {
+            state = self.completed.wait_sync(state);
+        }
+        state.waiting = false;
+        state
+    }
+
+    #[inline]
+    fn interrupt<'a>(&'a self, mut state: MutexGuard<'a, State>) -> MutexGuard<'a, State> {
+        if state.interrupted {
+            return state;
+        }
+        state.interrupted = true;
+        if state.wakers.is_empty() {
+            return state;
+        }
+        self.dispatch_interrupt(state)
+    }
+
+    fn dispatch_interrupt<'a>(&'a self, mut state: MutexGuard<'a, State>) -> MutexGuard<'a, State> {
+        let mut wakers = std::mem::take(&mut state.wakers);
+        drop(state);
+
         while let Some(registered) = wakers.pop() {
             if registered.work_id.is_some() {
                 registered.waker.wake();
             }
         }
-        self.recycle(wakers);
-    }
 
-    fn recycle(&self, mut wakers: Vec<RegisteredWaker>) {
         let mut state = self.lock_state();
         if state.wakers.is_empty() && state.wakers.capacity() < wakers.capacity() {
             std::mem::swap(&mut state.wakers, &mut wakers);
         }
+        state
     }
 
     fn complete_work(&self, work_id: usize, interrupt: bool) {
-        let mut wakers = {
-            let mut state = self.lock_state();
-            for registered in &mut state.wakers {
-                if registered.work_id == Some(work_id) {
-                    registered.work_id = None;
-                }
-            }
-            if interrupt && !state.interrupted {
-                state.interrupted = true;
-                std::mem::take(&mut state.wakers)
-            } else {
-                Vec::new()
-            }
-        };
-
-        while let Some(registered) = wakers.pop() {
-            if registered.work_id.is_some() {
-                registered.waker.wake();
+        let mut state = self.lock_state();
+        for registered in &mut state.wakers {
+            if registered.work_id == Some(work_id) {
+                registered.work_id = None;
             }
         }
-        self.recycle(wakers);
-
-        let mut state = self.lock_state();
+        if interrupt {
+            state = self.interrupt(state);
+        }
         state.pending_work = state.pending_work.saturating_sub(1);
-        if state.pending_work == 0 {
+        if state.pending_work == 0 && state.waiting {
             self.completed.notify_all();
         }
     }
@@ -215,7 +224,11 @@ impl Inner {
 
 impl Wake for Inner {
     fn wake(self: std::sync::Arc<Self>) {
-        self.interrupt();
+        drop(self.interrupt(self.lock_state()));
+    }
+
+    fn wake_by_ref(self: &std::sync::Arc<Self>) {
+        drop(self.interrupt(self.lock_state()));
     }
 }
 
@@ -245,12 +258,14 @@ impl PendingWork {
         clippy::needless_pass_by_ref_mut,
         reason = "registration is an exclusive operation on this pending-work capability"
     )]
+    #[inline]
     pub fn on_interrupt(&mut self, waker: Waker) {
         self.inner.on_interrupt(self.work_id, waker);
     }
 
     /// Returns whether this cycle was interrupted.
     #[must_use]
+    #[inline]
     pub fn is_interrupted(&self) -> bool {
         self.inner.lock_state().interrupted
     }
@@ -260,10 +275,12 @@ impl PendingWork {
     /// Call this only after making the work visible. It interrupts other registered waits, then
     /// releases the runtime's completion barrier. Drop the value instead when the work ends
     /// without publishing anything.
+    #[inline]
     pub fn complete(mut self) {
         self.mark_completed(true);
     }
 
+    #[inline]
     fn mark_completed(&mut self, interrupt: bool) {
         if !self.active {
             return;
@@ -292,6 +309,9 @@ impl fmt::Debug for PendingWork {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::{Duration, Instant};
 
     use super::*;
 
@@ -308,5 +328,50 @@ mod tests {
         coordinator.begin_cycle();
 
         assert!(!coordinator.inner.state.is_poisoned());
+    }
+
+    fn releases_waiting_owner(publish: bool) {
+        let mut coordinator = Coordinator::new();
+        coordinator.begin_cycle();
+        let first = coordinator.start_work();
+        let last = coordinator.start_work();
+        let inner = Arc::clone(&coordinator.inner);
+        let (done_tx, done_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            coordinator.complete_cycle();
+            done_tx.send(coordinator).unwrap();
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !inner.lock_state().waiting {
+            assert!(Instant::now() < deadline, "the owner must enter the completion wait");
+            thread::yield_now();
+        }
+        drop(first);
+        let waiting_for_last = inner.lock_state().waiting;
+        if publish {
+            last.complete();
+        } else {
+            drop(last);
+        }
+        let mut coordinator = done_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        worker.join().unwrap();
+        coordinator.begin_cycle();
+
+        let state = inner.lock_state();
+        assert_eq!(
+            (waiting_for_last, state.waiting, state.pending_work, state.interrupted),
+            (true, false, 0, false)
+        );
+    }
+
+    #[test]
+    fn last_drop_notifies_a_waiting_owner() {
+        releases_waiting_owner(false);
+    }
+
+    #[test]
+    fn last_completion_notifies_a_waiting_owner() {
+        releases_waiting_owner(true);
     }
 }

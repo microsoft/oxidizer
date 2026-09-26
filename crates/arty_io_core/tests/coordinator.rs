@@ -5,6 +5,7 @@
 
 #![allow(clippy::unwrap_used, reason = "test code")]
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::task::{Wake, Waker};
@@ -25,6 +26,14 @@ struct Counter(AtomicUsize);
 impl Wake for Counter {
     fn wake(self: Arc<Self>) {
         self.0.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+struct DropWork(Mutex<Option<PendingWork>>);
+
+impl Wake for DropWork {
+    fn wake(self: Arc<Self>) {
+        drop(self.0.lock().unwrap().take());
     }
 }
 
@@ -134,15 +143,108 @@ fn completed_work_interrupts_other_waiters_and_releases_the_barrier() {
 }
 
 #[test]
-fn interruption_callback_can_release_other_pending_work() {
-    struct DropWork(Mutex<Option<PendingWork>>);
+fn completion_retires_all_own_registrations_but_preserves_peers() {
+    let mut coordinator = Coordinator::new();
+    coordinator.begin_cycle();
+    let cycle = Cycle::new(Instant::now(), Duration::ZERO, &coordinator);
+    let mut completed = cycle.start_work();
+    let mut peer = cycle.start_work();
+    let own_count = Arc::new(Counter::default());
+    let peer_count = Arc::new(Counter::default());
+    completed.on_interrupt(Waker::from(Arc::clone(&own_count)));
+    peer.on_interrupt(Waker::from(Arc::clone(&peer_count)));
+    completed.on_interrupt(Waker::from(Arc::clone(&own_count)));
 
-    impl Wake for DropWork {
+    completed.complete();
+    drop(peer);
+    coordinator.complete_cycle();
+
+    assert_eq!((own_count.0.load(Ordering::Relaxed), peer_count.0.load(Ordering::Relaxed)), (0, 1));
+}
+
+#[test]
+fn retired_wakers_are_dropped_during_interruption_not_retirement() {
+    struct ObservedWake {
+        wakes: Arc<AtomicUsize>,
+        drops: Arc<AtomicUsize>,
+    }
+
+    impl Wake for ObservedWake {
         fn wake(self: Arc<Self>) {
-            drop(self.0.lock().unwrap().take());
+            self.wakes.fetch_add(1, Ordering::Relaxed);
         }
     }
 
+    impl Drop for ObservedWake {
+        fn drop(&mut self) {
+            self.drops.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    let mut coordinator = Coordinator::new();
+    let cycle = Cycle::new(Instant::now(), Duration::ZERO, &coordinator);
+    let mut work = cycle.start_work();
+    let wakes = Arc::new(AtomicUsize::new(0));
+    let drops = Arc::new(AtomicUsize::new(0));
+    work.on_interrupt(Waker::from(Arc::new(ObservedWake {
+        wakes: Arc::clone(&wakes),
+        drops: Arc::clone(&drops),
+    })));
+
+    drop(work);
+    let drops_before_interrupt = drops.load(Ordering::Relaxed);
+    coordinator.complete_cycle();
+
+    assert_eq!(
+        (drops_before_interrupt, drops.load(Ordering::Relaxed), wakes.load(Ordering::Relaxed)),
+        (0, 1, 0)
+    );
+}
+
+#[test]
+fn retirement_during_dispatch_does_not_change_the_captured_callbacks() {
+    let mut coordinator = Coordinator::new();
+    let cycle = Cycle::new(Instant::now(), Duration::ZERO, &coordinator);
+    let mut retired_during_dispatch = cycle.start_work();
+    let mut retiring = cycle.start_work();
+    let count = Arc::new(Counter::default());
+    retired_during_dispatch.on_interrupt(Waker::from(Arc::clone(&count)));
+    retiring.on_interrupt(Waker::from(Arc::new(DropWork(Mutex::new(Some(retired_during_dispatch))))));
+
+    coordinator.interrupt_waker().wake_by_ref();
+    drop(retiring);
+    coordinator.complete_cycle();
+
+    assert_eq!(count.0.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn panicking_external_callback_does_not_keep_the_state_locked() {
+    struct PanicWake;
+
+    impl Wake for PanicWake {
+        fn wake(self: Arc<Self>) {
+            panic!("callback panic");
+        }
+    }
+
+    let mut coordinator = Coordinator::new();
+    let cycle = Cycle::new(Instant::now(), Duration::ZERO, &coordinator);
+    let mut work = cycle.start_work();
+    work.on_interrupt(Waker::from(Arc::new(PanicWake)));
+    let interrupt = coordinator.interrupt_waker();
+
+    let result = catch_unwind(AssertUnwindSafe(|| interrupt.wake_by_ref()));
+    drop(work);
+    coordinator.begin_cycle();
+    let next_cycle = Cycle::new(Instant::now(), Duration::ZERO, &coordinator);
+    let next = next_cycle.start_work();
+
+    assert_eq!((result.is_err(), next.is_interrupted()), (true, false));
+}
+
+#[test]
+fn interruption_callback_can_release_other_pending_work() {
     let mut coordinator = Coordinator::new();
     coordinator.begin_cycle();
     let cycle = Cycle::new(Instant::now(), Duration::ZERO, &coordinator);

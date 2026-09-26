@@ -53,6 +53,7 @@ impl<'a> Cycle<'a> {
     /// without publishing anything, drop the value. The runtime does not begin the next cycle
     /// until all pending work is completed or dropped.
     #[must_use]
+    #[inline]
     pub fn start_work(&self) -> PendingWork {
         self.coordinator.start_work()
     }
