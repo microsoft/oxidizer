@@ -38,6 +38,66 @@ impl Wake for DropWork {
 }
 
 #[test]
+fn default_coordinator_debug_tracks_the_cycle_lifecycle() {
+    let mut coordinator = Coordinator::default();
+    let idle = format!("{coordinator:?}");
+    let cycle = Cycle::new(Instant::now(), Duration::ZERO, &coordinator);
+    let work = cycle.start_work();
+    let pending = format!("{coordinator:?}");
+    work.complete();
+    let completed = format!("{coordinator:?}");
+    coordinator.begin_cycle();
+    let restarted = format!("{coordinator:?}");
+
+    assert_eq!(
+        [idle, pending, completed, restarted],
+        [
+            "Coordinator { interrupted: false, pending_work: 0, .. }",
+            "Coordinator { interrupted: false, pending_work: 1, .. }",
+            "Coordinator { interrupted: true, pending_work: 0, .. }",
+            "Coordinator { interrupted: false, pending_work: 0, .. }",
+        ]
+    );
+}
+
+#[test]
+fn pending_work_debug_distinguishes_work_and_resets_ids_between_cycles() {
+    let mut coordinator = Coordinator::new();
+    let cycle = Cycle::new(Instant::now(), Duration::ZERO, &coordinator);
+    let first = cycle.start_work();
+    let second = cycle.start_work();
+    let current = [format!("{first:?}"), format!("{second:?}")];
+    drop((first, second));
+    coordinator.begin_cycle();
+    let cycle = Cycle::new(Instant::now(), Duration::ZERO, &coordinator);
+    let next = cycle.start_work();
+
+    assert_eq!(
+        (current, format!("{next:?}")),
+        (
+            [
+                "PendingWork { work_id: 0, active: true, .. }".to_owned(),
+                "PendingWork { work_id: 1, active: true, .. }".to_owned(),
+            ],
+            "PendingWork { work_id: 0, active: true, .. }".to_owned(),
+        )
+    );
+}
+
+#[test]
+fn cycle_debug_exposes_the_snapshot_and_wait_budget() {
+    let coordinator = Coordinator::new();
+    let started_at = Instant::now();
+    let max_wait = Duration::from_millis(125);
+    let cycle = Cycle::new(started_at, max_wait, &coordinator);
+
+    assert_eq!(
+        format!("{cycle:?}"),
+        format!("Cycle {{ started_at: {started_at:?}, max_wait: {max_wait:?}, .. }}")
+    );
+}
+
+#[test]
 fn interrupt_is_one_shot_and_late_registration_is_not_lost() {
     let mut coordinator = Coordinator::new();
     let cycle = Cycle::new(Instant::now(), Duration::ZERO, &coordinator);

@@ -309,11 +309,34 @@ impl fmt::Debug for PendingWork {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::panic::{AssertUnwindSafe, catch_unwind};
-    use std::sync::mpsc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc as StdArc, mpsc};
+    use std::task::Context;
     use std::thread;
     use std::time::{Duration, Instant};
 
     use super::*;
+
+    #[derive(Default)]
+    struct WakeCounter(AtomicUsize);
+
+    impl Wake for WakeCounter {
+        fn wake(self: StdArc<Self>) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    struct HeldWake {
+        entered: mpsc::Sender<()>,
+        release: Mutex<mpsc::Receiver<()>>,
+    }
+
+    impl Wake for HeldWake {
+        fn wake(self: StdArc<Self>) {
+            self.entered.send(()).unwrap();
+            self.release.lock_sync().recv_timeout(Duration::from_secs(10)).unwrap();
+        }
+    }
 
     #[test]
     fn poisoned_state_is_recovered_and_cleared() {
@@ -373,5 +396,92 @@ mod tests {
     #[test]
     fn last_completion_notifies_a_waiting_owner() {
         releases_waiting_owner(true);
+    }
+
+    #[test]
+    fn completion_without_a_runtime_waiter_does_not_notify() {
+        let coordinator = Coordinator::new();
+        let work = coordinator.start_work();
+        let count = StdArc::new(WakeCounter::default());
+        let waker = Waker::from(StdArc::clone(&count));
+        let mut context = Context::from_waker(&waker);
+        // Observe the condition variable without marking the runtime as waiting,
+        // so an unnecessary notification becomes observable.
+        let mut observer = Box::pin(coordinator.inner.completed.wait(coordinator.inner.lock_state()));
+        let registered = observer.as_mut().poll(&mut context).is_pending();
+
+        drop(work);
+
+        let notifications = count.0.load(Ordering::Relaxed);
+        drop(observer);
+        assert_eq!((registered, notifications), (true, 0));
+    }
+
+    fn check_recycled_buffer(previous_capacity: usize, next_capacity: usize, occupied: bool, reuse_previous: bool) {
+        let mut coordinator = Coordinator::new();
+        coordinator.inner.lock_state().wakers = Vec::with_capacity(previous_capacity);
+        let mut old_work = coordinator.start_work();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        old_work.on_interrupt(Waker::from(StdArc::new(HeldWake {
+            entered: entered_tx,
+            release: Mutex::new(release_rx),
+        })));
+        let previous_buffer = {
+            let state = coordinator.inner.lock_state();
+            (state.wakers.as_ptr(), state.wakers.capacity())
+        };
+        let interrupt = coordinator.interrupt_waker();
+        let broadcaster = thread::spawn(move || interrupt.wake());
+        entered_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        drop(old_work);
+        coordinator.begin_cycle();
+        coordinator.inner.lock_state().wakers = Vec::with_capacity(next_capacity);
+        let next_count = StdArc::new(WakeCounter::default());
+        let next_work = occupied.then(|| {
+            let mut work = coordinator.start_work();
+            work.on_interrupt(Waker::from(StdArc::clone(&next_count)));
+            work
+        });
+        let next_buffer = {
+            let state = coordinator.inner.lock_state();
+            (state.wakers.as_ptr(), state.wakers.capacity())
+        };
+
+        release_tx.send(()).unwrap();
+        broadcaster.join().unwrap();
+
+        let actual = {
+            let state = coordinator.inner.lock_state();
+            (state.wakers.as_ptr(), state.wakers.capacity(), state.wakers.len())
+        };
+        coordinator.interrupt_waker().wake_by_ref();
+        drop(next_work);
+        coordinator.complete_cycle();
+        let expected = if reuse_previous { previous_buffer } else { next_buffer };
+        assert_eq!(
+            (actual, next_count.0.load(Ordering::Relaxed)),
+            ((expected.0, expected.1, usize::from(occupied)), usize::from(occupied))
+        );
+    }
+
+    #[test]
+    fn recycling_reuses_a_larger_empty_buffer() {
+        check_recycled_buffer(4, 0, false, true);
+    }
+
+    #[test]
+    fn recycling_preserves_an_equally_sized_current_buffer() {
+        check_recycled_buffer(4, 4, false, false);
+    }
+
+    #[test]
+    fn recycling_preserves_a_larger_current_buffer() {
+        check_recycled_buffer(4, 8, false, false);
+    }
+
+    #[test]
+    fn recycling_preserves_current_registrations_in_a_smaller_buffer() {
+        check_recycled_buffer(8, 1, true, false);
     }
 }
