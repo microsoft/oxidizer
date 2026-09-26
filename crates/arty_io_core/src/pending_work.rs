@@ -37,7 +37,9 @@ impl PendingWork {
     ///
     /// Equivalent to dropping the handle; publish any results first.
     #[inline]
-    pub fn complete(self) {}
+    pub fn complete(self) {
+        drop(self);
+    }
 }
 
 impl Drop for PendingWork {
