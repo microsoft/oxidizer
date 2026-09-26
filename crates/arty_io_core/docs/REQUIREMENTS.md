@@ -109,6 +109,9 @@ The shared coordinator has the following semantics:
   until every pending-work value is completed or dropped before beginning the next cycle.
 - Once a driver is dropped or its shutdown returns, retained wakers stop
   interrupting runtime cycles.
+- Interruption wakers run inline on the interrupting thread and only signal;
+  they do not join tasks, drain the coordinator, or wait on locks held by the
+  completing work.
 
 ## R6: Safe and blocking shutdown
 

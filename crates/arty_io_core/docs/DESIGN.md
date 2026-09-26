@@ -120,9 +120,9 @@ worker-local cycle remains non-blocking. The secondary attaches the waker
 for its current background wait each cycle and uses private synchronization to
 arm or replace that wait.
 
-The cycle coordinator follows a latched interruption contract. Drivers register
-native-wait wakers each cycle. Long-lived observers retain the cycle's stable
-interruption waker and wake it after publishing work.
+The cycle coordinator follows a latched interruption contract. Drivers attach
+native-wait wakers to pending work each cycle. Background observers carry the
+corresponding `PendingWork` value and complete it after publishing results.
 
 Each driver may create multiple non-cloneable `PendingWork` values for work that
 outlives `execute_cycle`. A secondary moves each value to the corresponding

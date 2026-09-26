@@ -50,59 +50,139 @@ fn interrupt_is_one_shot_and_late_registration_is_not_lost() {
 }
 
 #[test]
+fn external_interrupt_waker_wakes_registered_work() {
+    let mut coordinator = Coordinator::new();
+    coordinator.begin_cycle();
+    let cycle = Cycle::new(Instant::now(), Duration::MAX, &coordinator);
+    let mut work = cycle.start_work();
+    let count = Arc::new(Counter::default());
+    work.on_interrupt(Waker::from(Arc::clone(&count)));
+    let external = coordinator.interrupt_waker();
+
+    thread::spawn(move || external.wake()).join().unwrap();
+
+    assert!(work.is_interrupted());
+    assert_eq!(count.0.load(Ordering::Relaxed), 1);
+    drop(work);
+    coordinator.complete_cycle();
+}
+
+#[test]
 fn outstanding_work_blocks_cycle_completion_until_the_token_is_dropped() {
     let mut coordinator = Coordinator::new();
     coordinator.begin_cycle();
-    let cycle = Cycle::new(Instant::now(), Duration::ZERO, &coordinator);
-    let token = cycle.start_work();
-    let (release_tx, release_rx) = mpsc::channel();
+    let (completed, outstanding) = {
+        let cycle = Cycle::new(Instant::now(), Duration::ZERO, &coordinator);
+        (cycle.start_work(), cycle.start_work())
+    };
+    completed.complete();
     let (waiting_tx, waiting_rx) = mpsc::channel();
     let (done_tx, done_rx) = mpsc::channel();
 
-    thread::scope(|scope| {
-        scope.spawn(move || {
-            release_rx.recv().unwrap();
-            drop(token);
-        });
-        scope.spawn(|| {
-            waiting_tx.send(()).unwrap();
-            coordinator.complete_cycle();
-            done_tx.send(()).unwrap();
-        });
-        waiting_rx.recv().unwrap();
-        assert!(matches!(done_rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
-        release_tx.send(()).unwrap();
-        done_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    let thread = thread::spawn(move || {
+        waiting_tx.send(()).unwrap();
+        coordinator.complete_cycle();
+        done_tx.send(()).unwrap();
     });
+    waiting_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    let completed_early = done_rx.try_recv().is_ok();
+    drop(outstanding);
+    done_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    thread.join().unwrap();
+
+    assert!(!completed_early, "one completed token must not release another");
 }
 
 #[test]
-fn dropping_multiple_tokens_releases_the_completion_barrier() {
+fn dropping_pending_work_releases_the_completion_barrier() {
     let mut coordinator = Coordinator::new();
     coordinator.begin_cycle();
-    {
-        let cycle = Cycle::new(Instant::now(), Duration::ZERO, &coordinator);
-        let first = cycle.start_work();
-        let second = cycle.start_work();
-        drop(first);
-        drop(second);
-    }
+    let cycle = Cycle::new(Instant::now(), Duration::ZERO, &coordinator);
+    let count = Arc::new(Counter::default());
+    let mut first = cycle.start_work();
+    first.on_interrupt(Waker::from(Arc::clone(&count)));
+    let mut second = cycle.start_work();
+    second.on_interrupt(Waker::from(Arc::clone(&count)));
+    drop(first);
+    drop(second);
+
     coordinator.complete_cycle();
+    assert_eq!(
+        count.0.load(Ordering::Relaxed),
+        0,
+        "wakers belonging to dropped work must be retired"
+    );
     coordinator.begin_cycle();
 }
 
 #[test]
-fn complete_interrupts_waiters_and_releases_the_barrier() {
+fn completed_work_interrupts_other_waiters_and_releases_the_barrier() {
     let mut coordinator = Coordinator::new();
     coordinator.begin_cycle();
     let count = Arc::new(Counter::default());
     let cycle = Cycle::new(Instant::now(), Duration::ZERO, &coordinator);
-    let mut token = cycle.start_work();
-    token.on_interrupt(Waker::from(Arc::clone(&count)));
-    token.complete();
+    let mut waiting = cycle.start_work();
+    waiting.on_interrupt(Waker::from(Arc::clone(&count)));
+    let completed = cycle.start_work();
 
+    completed.complete();
+
+    assert!(waiting.is_interrupted());
+    drop(waiting);
     coordinator.complete_cycle();
     assert_eq!(count.0.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn interruption_callback_can_release_other_pending_work() {
+    struct DropWork(Mutex<Option<PendingWork>>);
+
+    impl Wake for DropWork {
+        fn wake(self: Arc<Self>) {
+            drop(self.0.lock().unwrap().take());
+        }
+    }
+
+    let mut coordinator = Coordinator::new();
+    coordinator.begin_cycle();
+    let cycle = Cycle::new(Instant::now(), Duration::ZERO, &coordinator);
+    let released_by_callback = cycle.start_work();
+    let mut waiting = cycle.start_work();
+    waiting.on_interrupt(Waker::from(Arc::new(DropWork(Mutex::new(Some(released_by_callback))))));
+    let completed = cycle.start_work();
+
+    completed.complete();
+
+    drop(waiting);
+    coordinator.complete_cycle();
+}
+
+#[test]
+fn begin_cycle_waits_for_work_from_the_previous_cycle() {
+    let mut coordinator = Coordinator::new();
+    coordinator.begin_cycle();
+    let work = {
+        let cycle = Cycle::new(Instant::now(), Duration::ZERO, &coordinator);
+        cycle.start_work()
+    };
+    let (started_tx, started_rx) = mpsc::channel();
+    let (done_tx, done_rx) = mpsc::channel();
+
+    let thread = thread::spawn(move || {
+        started_tx.send(()).unwrap();
+        coordinator.begin_cycle();
+        done_tx.send(()).unwrap();
+        coordinator
+    });
+    started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    let completed_early = done_rx.try_recv().is_ok();
+    drop(work);
+
+    done_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    let mut coordinator = thread.join().unwrap();
+    coordinator.complete_cycle();
+
+    assert!(!completed_early, "begin_cycle must wait for work from the previous cycle");
 }
 
 #[test]
@@ -145,6 +225,11 @@ fn old_broadcast_finishing_after_cycle_transition_preserves_new_registrations() 
     release_tx.send(()).unwrap();
     thread.join().unwrap();
 
+    assert_eq!(
+        next.0.load(Ordering::Relaxed),
+        0,
+        "an old interrupt dispatch must not invoke new-cycle wakers"
+    );
     stable_waker.wake_by_ref();
     assert_eq!(next.0.load(Ordering::Relaxed), 1);
     drop(next_token);

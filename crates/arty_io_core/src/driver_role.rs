@@ -21,5 +21,9 @@ pub enum DriverRole {
     /// value before the runtime advances. If the observer publishes work, it calls
     /// [`PendingWork::complete`](crate::PendingWork::complete); otherwise it
     /// drops the value without interrupting the cycle.
+    ///
+    /// Potentially indefinite observation needs independent execution capacity. Do not occupy a
+    /// bounded shared system-task pool unless the runtime guarantees enough workers for every
+    /// simultaneously blocked observer.
     Secondary,
 }

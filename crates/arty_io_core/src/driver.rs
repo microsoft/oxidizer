@@ -39,8 +39,8 @@ pub trait Driver: 'static {
     /// dropped after ending without work.
     ///
     /// Registration includes an initial zero-wait cycle before the context is published or peers
-    /// are notified. Obtain a stable interruption waker from the cycle, connect native
-    /// notification, and recheck work queued during construction. Failure aborts registration.
+    /// are notified. Establish native notification, attach it to pending work, and recheck work
+    /// queued during construction. Failure aborts registration.
     ///
     /// Start coordination for each current native wait, attach that wait's waker with
     /// [`PendingWork::on_interrupt`](crate::PendingWork::on_interrupt) before
