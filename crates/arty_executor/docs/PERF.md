@@ -1,7 +1,7 @@
 # Executor instruction-count campaign
 
 Measured on 2026-09-26. The retained changes reduce instructions by **7.25% for
-one spawn/complete**, **8.72% for a 10,000-task ready burst**, **9.33% for a cycle
+one spawn/complete**, **8.72% for a 10,000-task ready burst**, **9.23% for a cycle
 with 32 awakened tasks**, and **13.31% for wake-queue overflow processing**.
 All 21 steady-state cases remain allocation-free.
 
@@ -11,7 +11,7 @@ Before: `e2dac7b800f77a33a741c4d28394828176b2795c`, containing the migrated
 metabench harness and the unchanged executor implementation from
 `ca3a3720afafb51d79b405aa08b3220f4a9c80c0`.
 
-After: `52dc76a53731208564b9b0654b5b199d58224d8a`.
+After: `b25b67da05095be29e220634170fb984c9f04c59`.
 
 Both revisions use the **same benchmark source, dependencies, compiler, and
 profile**. The improvements below do not include changes caused by replacing
@@ -50,8 +50,8 @@ instructions. [The CSV](instruction-counts.csv) retains all six raw counts.
 | `decomposed/cycle_pending/first_poll` | 1,194 | 1,077 | -9.80% |
 | `decomposed/cycle_pending/inactive` | 778 | 758 | -2.57% |
 | `decomposed/cycle_ready/tasks_1` | 1,321 | 1,205 | -8.78% |
-| `decomposed/cycle_ready/tasks_32` | 7,772 | 7,302 | -6.05% |
-| `decomposed/cycle_woken/all_32` | 9,696 | 8,791 | -9.33% |
+| `decomposed/cycle_ready/tasks_32` | 7,772 | 7,292 | -6.18% |
+| `decomposed/cycle_woken/all_32` | 9,696 | 8,801 | -9.23% |
 | `decomposed/cycle_woken/one_of_1` | 1,201 | 1,195 | -0.50% |
 | `decomposed/cycle_woken/one_of_32` | 1,224 | 1,208 | -1.31% |
 | `decomposed/cycle_woken/overflow` | 92,326 | 80,039 | -13.31% |
@@ -63,9 +63,9 @@ instructions. [The CSV](instruction-counts.csv) retains all six raw counts.
 | `decomposed/wake_by_ref/overflow` | 145 | 145 | 0.00% |
 | `decomposed/yield_cycle/completion` | 1,366 | 1,348 | -1.32% |
 | `decomposed/yield_cycle/self_wake` | 1,263 | 1,136 | -10.06% |
-| `slow/spawn_and_complete_10k/burst_10000` | 5,277,393 | 4,817,301 | -8.72% |
+| `slow/spawn_and_complete_10k/burst_10000` | 5,277,393 | 4,817,324 | -8.72% |
 | `slow/spawn_and_complete_one_times_many/sequential_1000` | 1,513,231 | 1,397,181 | -7.67% |
-| `slow/yield_10k/burst_10000` | 8,599,600 | 7,918,665 | -7.92% |
+| `slow/yield_10k/burst_10000` | 8,599,600 | 7,918,634 | -7.92% |
 
 The explicit cold registration case increases by 13 instructions; there is no
 claim of improving every path. Clock-dependent branches vary by tens of
@@ -84,12 +84,12 @@ used 30 samples, a 0.3-second warm-up and a 1-second measurement window:
 
 | Scenario | Before | After |
 | --- | ---: | ---: |
-| Warm idle cycle | 189.88 ns | 167.16 ns |
-| One spawn/complete | 307.72 ns | 254.56 ns |
-| One yield round trip | 688.95 ns | 571.44 ns |
-| 1,000 sequential spawn/completes | 317.21 us | 248.78 us |
-| 10,000-task ready burst | 1,194.99 us | 888.34 us |
-| 10,000-task yield burst | 1,913.14 us | 1,416.27 us |
+| Warm idle cycle | 189.88 ns | 171.63 ns |
+| One spawn/complete | 307.72 ns | 263.07 ns |
+| One yield round trip | 688.95 ns | 574.82 ns |
+| 1,000 sequential spawn/completes | 317.21 us | 251.06 us |
+| 10,000-task ready burst | 1,194.99 us | 894.46 us |
+| 10,000-task yield burst | 1,913.14 us | 1,394.30 us |
 
 The host is shared and these timing runs are not a controlled throughput study.
 They are supporting observations, not guaranteed application speedups.
