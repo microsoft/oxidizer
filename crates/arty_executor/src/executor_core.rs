@@ -9,7 +9,7 @@ use std::marker::PhantomData;
 use std::sync::atomic::{self, AtomicBool};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use std::{task, thread};
+use std::{mem, task, thread};
 
 use events_once::RawLocalEventLake;
 use infinity_pool::{DropPolicy, RawBlindPool};
@@ -316,10 +316,13 @@ impl ExecutorCore {
 
         TASKS_ACCEPTED.with(|x| x.observe(state_reentrant.new_tasks.len()));
 
-        // Accepting a task just means moving it to the active list. We cannot do this immediately
-        // when a task is queued because the active task list may be locked by `execute_cycle()`,
-        // as new tasks may be enqueued even during an active processing cycle.
-        state_exclusive.active.append(&mut state_reentrant.new_tasks);
+        // Every cycle drains the active queue. Swap its reusable buffer with the new-task queue
+        // instead of copying each task, leaving a separate queue for reentrant additions.
+        debug_assert!(
+            state_exclusive.active.is_empty(),
+            "active tasks are drained at the end of each cycle"
+        );
+        mem::swap(&mut state_exclusive.active, &mut state_reentrant.new_tasks);
     }
 
     fn activate_awakened_tasks(&self, state_exclusive: &mut ExclusiveState) {
@@ -337,18 +340,25 @@ impl ExecutorCore {
             // hopefully short and mostly uncontended.
             let mut awakened = self.shared.awakened.lock().expect(ERR_POISONED_LOCK);
 
-            awakened.drain(..).for_each(|task_ref| {
-                // It is theoretically possible for a completed task to be awakened, in which case
-                // we do nothing. We detect this by ensuring that the task was in the "inactive" set
-                // before we react to the wake notification. This also eliminates spurious wakes.
-                if state_exclusive.inactive.remove(&task_ref) {
-                    state_exclusive.active.push_back(task_ref);
+            if !awakened.is_empty() {
+                // Process each contiguous slice in FIFO order, avoiding per-task ring-buffer
+                // bookkeeping. TaskRef is Copy, so clearing once also avoids drain cleanup.
+                for slice in <[_; 2]>::from(awakened.as_slices()) {
+                    for &task_ref in slice {
+                        // It is theoretically possible for a completed task to be awakened, in which case
+                        // we do nothing. We detect this by ensuring that the task was in the "inactive" set
+                        // before we react to the wake notification. This also eliminates spurious wakes.
+                        if state_exclusive.inactive.remove(&task_ref) {
+                            state_exclusive.active.push_back(task_ref);
 
-                    TASKS_ACTIVATED_VIA_AWAKENED_SET.with(Event::observe_once);
-                } else {
-                    TASKS_ACTIVATED_SPURIOUS.with(Event::observe_once);
+                            TASKS_ACTIVATED_VIA_AWAKENED_SET.with(Event::observe_once);
+                        } else {
+                            TASKS_ACTIVATED_SPURIOUS.with(Event::observe_once);
+                        }
+                    }
                 }
-            });
+                awakened.clear();
+            }
         }
 
         // If we have been instructed to probe the embedded wake signals, we do so now.

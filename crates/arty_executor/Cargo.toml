@@ -33,10 +33,10 @@ scopeguard = { workspace = true, optional = true }
 tick = { workspace = true, features = ["fast-instant"] }
 
 [dev-dependencies]
-all_the_time = { workspace = true }
-alloc_tracker = { workspace = true }
 criterion = { workspace = true }
 derive_more = { workspace = true, features = ["debug"] }
+gungraun = { workspace = true, features = ["default"] }
+metabench = { workspace = true }
 mockall = { workspace = true }
 mutants = { workspace = true }
 scopeguard = { workspace = true }
@@ -45,12 +45,6 @@ testing_aids = { path = "../testing_aids" }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["fmt"] }
 
-# Workspace dep declares `default-features = false`; we re-enable `default` here
-# (which pulls in the `benchmark` feature with `library_benchmark`,
-# `library_benchmark_group!`, and `gungraun::main!`) only on Linux.
-[target.'cfg(target_os = "linux")'.dev-dependencies]
-gungraun = { workspace = true, features = ["default"] }
-
 # >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
@@ -58,13 +52,5 @@ workspace = true
 
 [[bench]]
 name = "ae_basic_operations"
-harness = false
-required-features = ["test-util"]
-
-# Callgrind benches require Linux (Valgrind). The bench file is gated to compile
-# to a no-op on non-Linux targets, but the [[bench]] entry itself cannot be
-# cfg-gated, so it is unconditional here.
-[[bench]]
-name = "ae_basic_operations_cg"
 harness = false
 required-features = ["test-util"]
