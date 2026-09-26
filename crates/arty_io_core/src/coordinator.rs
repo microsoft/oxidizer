@@ -435,6 +435,7 @@ mod tests {
         let broadcaster = thread::spawn(move || interrupt.wake());
         entered_rx.recv_timeout(Duration::from_secs(10)).unwrap();
         drop(old_work);
+        assert_eq!(coordinator.inner.lock_state().pending_work, 0);
         coordinator.begin_cycle();
         coordinator.inner.lock_state().wakers = Vec::with_capacity(next_capacity);
         let next_count = StdArc::new(WakeCounter::default());

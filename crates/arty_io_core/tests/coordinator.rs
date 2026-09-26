@@ -46,6 +46,7 @@ fn default_coordinator_debug_tracks_the_cycle_lifecycle() {
     let pending = format!("{coordinator:?}");
     work.complete();
     let completed = format!("{coordinator:?}");
+    assert_eq!(completed, "Coordinator { interrupted: true, pending_work: 0, .. }");
     coordinator.begin_cycle();
     let restarted = format!("{coordinator:?}");
 
@@ -68,6 +69,10 @@ fn pending_work_debug_distinguishes_work_and_resets_ids_between_cycles() {
     let second = cycle.start_work();
     let current = [format!("{first:?}"), format!("{second:?}")];
     drop((first, second));
+    assert_eq!(
+        format!("{coordinator:?}"),
+        "Coordinator { interrupted: false, pending_work: 0, .. }"
+    );
     coordinator.begin_cycle();
     let cycle = Cycle::new(Instant::now(), Duration::ZERO, &coordinator);
     let next = cycle.start_work();
