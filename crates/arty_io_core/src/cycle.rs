@@ -9,9 +9,9 @@ use std::time::{Duration, Instant};
 
 use crate::{PendingWork, PendingWorkTracker};
 
-/// Runtime inputs and work registration for one driver completion cycle.
+/// Timing, blocking permission, and work registration for one driver invocation.
 ///
-/// Borrows a runtime-owned [`PendingWorkTracker`] on the owning worker. For background work,
+/// A cycle borrows a runtime-owned [`PendingWorkTracker`] on the owning worker. For background work,
 /// move the [`PendingWork`] returned by [`start_work`](Self::start_work), not the cycle.
 pub struct Cycle<'a> {
     started_at: Instant,
@@ -22,10 +22,11 @@ pub struct Cycle<'a> {
 }
 
 impl<'a> Cycle<'a> {
-    /// Creates the inputs and registration handle for one driver invocation.
+    /// Creates the inputs for one driver invocation.
     ///
-    /// `tracker` belongs to the current logical cycle. Set `can_block` to `false` for
-    /// initialization and secondary drivers; only the primary may receive `true`.
+    /// The runtime must supply the current logical cycle's `tracker` and set `can_block` to
+    /// `false` for initialization and [secondary drivers](crate::DriverRole::Secondary).
+    /// Only the [primary](crate::DriverRole::Primary) may receive `true`.
     #[must_use]
     pub const fn new(started_at: Instant, max_wait: Duration, can_block: bool, tracker: &'a mut dyn PendingWorkTracker) -> Self {
         Self {
@@ -45,8 +46,8 @@ impl<'a> Cycle<'a> {
 
     /// Returns the maximum wait duration.
     ///
-    /// Applies to the worker only when [`can_block`](Self::can_block) is `true`; otherwise it
-    /// bounds background waits represented by [`PendingWork`].
+    /// This duration bounds waits on the worker only when [`can_block`](Self::can_block) is
+    /// `true`; otherwise it bounds background waits represented by [`PendingWork`].
     #[must_use]
     pub const fn max_wait(&self) -> Duration {
         self.max_wait
@@ -58,16 +59,17 @@ impl<'a> Cycle<'a> {
         self.can_block
     }
 
-    /// Registers pending work and its native interruption waker.
+    /// Synchronously registers pending work and its interruption waker.
     ///
-    /// Registration is synchronous. Call before entering or scheduling a native wait, using a
-    /// waker whose signal remains latched until the wait observes it. The waker may run inline
-    /// on any thread; it must return promptly without panicking, joining work, or acquiring
-    /// locks held by the completing work.
+    /// Before entering or scheduling a native wait, the driver must call this method with a
+    /// waker whose signal remains latched until the wait observes it. The runtime may invoke
+    /// the waker inline on any thread; it must return promptly without panicking, joining work,
+    /// or acquiring locks held by the completing work.
     ///
-    /// Keep the handle until the work ends, publishing any results before completing or
-    /// dropping it. Both notify the runtime. Each call registers a separate participant in
-    /// the completion barrier. Use a no-op waker for work that does not wait.
+    /// Keep the returned handle until the work ends, publishing any results before
+    /// [completing](PendingWork::complete) or dropping it. Both actions notify the runtime.
+    /// Each call registers a separate participant in the completion barrier.
+    /// Use a no-op waker for work that does not wait.
     #[inline]
     pub fn start_work(&mut self, interrupt: Waker) -> PendingWork {
         self.tracker.start_work(interrupt)

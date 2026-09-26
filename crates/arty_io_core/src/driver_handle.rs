@@ -6,8 +6,8 @@ use std::fmt;
 
 /// A borrowed, type-erased handle to a driver on the current worker.
 ///
-/// The underlying value can be inspected or downcast through [`Any`]. The handle cannot outlive
-/// the registration operation that receives it.
+/// Peers can inspect or downcast the value returned by [`handle`](Self::handle) through [`Any`].
+/// The handle cannot outlive the registration operation that receives it.
 #[derive(Clone, Copy)]
 pub struct DriverHandle<'a> {
     driver: &'a dyn Any,

@@ -27,7 +27,7 @@ impl DriverError {
         }
     }
 
-    /// Creates an error with the given source.
+    /// Creates an error that exposes `source` through [`Error::source`].
     #[must_use]
     pub fn from_source(source: impl Error + Send + Sync + 'static) -> Self {
         Self {

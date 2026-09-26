@@ -4,7 +4,7 @@
 use std::error::Error;
 use std::fmt;
 
-/// An error returned when a driver cannot complete graceful shutdown.
+/// An error returned when [`Driver::shutdown`](crate::Driver::shutdown) cannot complete graceful cleanup.
 #[derive(Debug)]
 pub struct ShutdownError {
     kind: ShutdownErrorKind,
@@ -25,7 +25,7 @@ impl ShutdownError {
         }
     }
 
-    /// Creates an error with the given source.
+    /// Creates an error that exposes `source` through [`Error::source`].
     #[must_use]
     pub fn from_source(source: impl Error + Send + Sync + 'static) -> Self {
         Self {

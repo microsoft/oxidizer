@@ -7,52 +7,62 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty_io_core/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty_io_core/favicon.ico")]
 
-//! Contracts for integrating I/O drivers with an async runtime.
+//! Stable contracts for integrating I/O drivers into thread-aware runtimes.
 //!
-//! Shared types for runtimes and independently versioned drivers. This crate provides neither
-//! a runtime nor an I/O implementation.
+//! Drivers provide I/O; runtimes provide scheduling and work coordination. This crate defines
+//! the interfaces between them, but provides neither a runtime nor an I/O implementation.
 //!
-//! # Core types
+//! # How drivers work
 //!
-//! - [`IoContext`] selects a [`DriverProvider`], which creates a [`Driver`] and context per worker.
-//! - [`DriverRole`] identifies an optional worker-blocking primary and non-blocking secondaries.
-//! - [`Cycle`] supplies timing, blocking permission, and work registration through [`PendingWorkTracker`].
-//! - [`PendingWork`] holds one participation in the runtime's completion barrier.
-//! - [`DriverOptions`] supplies per-worker construction facilities and peer handles.
-//! - [`SystemTaskSpawner`] runs blocking system work outside async workers.
-//! - [`DriverError`] and [`ShutdownError`] report infrastructure and cleanup failures.
+//! Applications access a driver's I/O operations through an [`IoContext`]. Its [`DriverProvider`]
+//! creates a context and a worker-local [`Driver`] for each runtime worker. The driver processes
+//! submissions and completions in bounded calls to [`Driver::execute_cycle`].
 //!
-//! # Registration
+//! Before entering or scheduling a native wait, the driver calls [`Cycle::start_work`] with an
+//! interruption waker whose signal remains latched until the wait observes it. It keeps the
+//! returned [`PendingWork`] until the work ends and publishes any results before completing or
+//! dropping the handle. Both actions notify the runtime.
 //!
-//! The runtime registers each context type once, initializing a driver/context pair on every
-//! active worker. It assigns a role and completes a zero-wait cycle before publishing the
-//! context. Peers discover each other through [`DriverOptions::drivers`] and
-//! [`Driver::on_peer_registered`].
+//! ## Primary and secondary drivers
 //!
-//! # Driving I/O
+//! A worker has at most one [`Primary`](DriverRole::Primary) driver, assigned only to a provider
+//! that opts in through [`DriverProvider::CAN_BE_PRIMARY`]. It may block the worker only when
+//! [`Cycle::can_block`] permits it.
 //!
-//! Secondaries run before the primary, with a shared time snapshot and wait bound. Only an
-//! invocation with [`Cycle::can_block`] set to `true` may block the worker.
+//! [`Secondary`](DriverRole::Secondary) drivers must not block the worker. They may schedule
+//! background waits represented by [`PendingWork`]; indefinite waits require independent
+//! execution capacity.
 //!
-//! Drivers register native waits through [`Cycle::start_work`]. They keep the handle until
-//! work ends and publish any results before completing or dropping it; both notify the runtime.
-//! After the primary returns, the runtime interrupts remaining waits and waits for all handles
-//! before advancing.
+//! # Runtime responsibilities
 //!
-//! The runtime implements [`PendingWorkTracker`], including interruption state, counters,
-//! and parking. The registration example uses a no-op tracker and performs no I/O.
+//! The runtime clones and relocates providers to their workers, assigns driver roles, and
+//! supplies [`DriverOptions`]. It completes a non-blocking, zero-wait initialization cycle
+//! before publishing a context or notifying peers through [`Driver::on_peer_registered`].
+//! It also supplies a [`SystemTaskSpawner`] for blocking system work.
+//!
+//! Each logical cycle uses a shared time snapshot and wait bound. The runtime invokes
+//! secondaries before the primary and implements [`PendingWorkTracker`] to register work,
+//! latch interruption, and track completion. After the primary returns, it interrupts remaining
+//! waits and waits for every pending-work handle before advancing. If there is no primary,
+//! the runtime retains responsibility for parking the worker.
 //!
 //! # Shutdown
 //!
-//! [`Driver::shutdown`] consumes the driver and drains its resources within a bounded wait.
-//! Contexts remain valid as closed handles. Shutdown must progress independently of other
-//! drivers on the same worker.
+//! The runtime stops normal cycles and calls [`Driver::shutdown`] for every driver, continuing
+//! after a [`ShutdownError`]. Each driver closes admission and drains its resources within a
+//! bounded wait, independently of other drivers on the same worker. Contexts remain valid as
+//! closed handles.
 //!
-//! # Project documents
+//! # Example and reference
+//!
+//! The [single-thread runtime example] demonstrates registration and peer discovery. Its sample
+//! drivers perform no I/O and use a no-op tracker; a runtime serving native I/O must implement
+//! the coordination described above.
 //!
 //! - [Requirements](https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/REQUIREMENTS.md)
 //! - [Design](https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/DESIGN.md)
-//! - [Completion coordination (exploratory)](https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/COMPLETION_COORDINATION.md)
+//!
+//! [single-thread runtime example]: https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_core/examples/single_thread_runtime
 
 mod cycle;
 mod driver;

@@ -1,8 +1,8 @@
 # Requirements
 
-`arty_io_core` specifies interoperability between runtimes and independently
-versioned I/O drivers. These are implementation obligations, not facilities
-provided by the no-op example tracker.
+These contracts govern independently versioned I/O drivers and thread-aware
+runtimes. `arty_io_core` provides neither implementation. [Design](DESIGN.md)
+describes the lifecycle; the no-op example tracker does not implement coordination.
 
 ## R1: Stable shared vocabulary
 
@@ -13,8 +13,8 @@ provided by the no-op example tracker.
 
 ## R2: Lazy and independent registration
 
-- Registration is keyed by the concrete `IoContext` type, which selects its
-  provider. The runtime supplies `ProviderOptions`.
+- The runtime keys registration by concrete `IoContext` type, which selects its
+  provider, and supplies `ProviderOptions`.
 - The first request returns only after every active worker has an initialized
   driver/context pair. Later requests clone existing contexts.
 - Different driver versions can coexist through distinct context types.
@@ -24,26 +24,26 @@ provided by the no-op example tracker.
 
 - The runtime clones and relocates each provider before consuming it on the
   owning worker. `DriverOptions` supplies that worker, its role, and earlier peers.
-- Roles are fixed. There is at most one primary, assigned only when
-  `CAN_BE_PRIMARY` is true. Without a primary, the runtime owns worker parking.
+- Roles are fixed. Each worker has at most one primary, assigned only when
+  `CAN_BE_PRIMARY` is true. Without one, the runtime owns worker parking.
 - Peer handles are borrowed and worker-local. Drivers may clone independently
   owned state from them, not retain the borrow.
 - Before publishing a context, the runtime completes a separate zero-wait cycle
   with `can_block = false`.
 - After storing the pair, it notifies earlier peers in registration order.
-  All notifications finish before registration is acknowledged.
+  Notifications finish before context publication and registration acknowledgment.
 - Providers choose whether instances share queues, memory, or threads.
 
 ## R4: Driver-owned execution strategy
 
 - Driver methods run on the owning worker. Completion processing takes
   `&mut self`; drivers need not be `Send` or `Sync`.
-- `Driver` remains dyn-compatible. A private owning shim may adapt consuming
-  shutdown for erased storage.
+- `Driver` remains dyn-compatible; consuming `shutdown` is not callable through
+  `dyn Driver`. A private owning shim may adapt it for erased storage.
 - Secondaries run before the primary. Every invocation receives the same
   `started_at` and `max_wait`.
-- Only `can_block = true` permits a worker wait. Secondaries register background
-  waits and return without joining them.
+- Only `can_block = true` permits a worker wait. Secondaries may register
+  background waits but return without joining them.
 - `Cycle` mutably borrows a runtime-provided `PendingWorkTracker`, which need
   not be `Send` or `Sync`.
 - `Cycle::start_work` synchronously registers the native interruption waker
@@ -58,29 +58,28 @@ provided by the no-op example tracker.
   wait or by its own thread. Redundant signals may coalesce but cannot be lost.
 - Registration enrolls work and installs its waker before returning. If already
   interrupted, it invokes the waker before returning.
-- Wakers remain memory-safe independently of the driver. They signal promptly
+- Wakers remain memory-safe independently of the driver, signaling promptly
   without panicking, joining work, or waiting on locks held by completing work.
-- A driver may hold multiple non-cloneable `PendingWork` handles. Each releases
-  only its own barrier participation and retires its own registration.
-- Completing and dropping are equivalent: both notify the runtime to retire the
-  registration, interrupt peers, then release the participation. Publish any
-  results before either action.
-- Each handle invokes one runtime notification once. Cloning or dropping the
-  underlying wakers does not complete work or affect a later cycle.
+- Drivers may hold multiple non-cloneable `PendingWork` handles.
+- Completing and dropping are equivalent: either notifies the runtime exactly
+  once to retire this registration, interrupt other waits, then release only
+  this barrier participation. Publish results before either action.
+- Notifications must not affect later cycles. Waker cloning and dropping neither
+  complete work nor affect later cycles.
 - After the primary returns, the runtime interrupts remaining waits and waits
   for every handle before advancing. Only the runtime begins a new logical
-  cycle, once, before checking work.
+  cycle, once, before checking work, never between driver calls.
 - Interrupted waits still process pending completions. After a driver is dropped
   or shut down, its retained wakers no longer interrupt runtime cycles.
 
 ## R6: Safe and blocking shutdown
 
 - Dropping a driver is always memory-safe and closes admission if necessary.
-  Contexts may outlive it as closed handles and do not themselves delay draining.
+  Contexts may outlive it as closed handles without delaying draining.
 - Operations and native callbacks retain their accessible state. Storage
   referenced by native raw pointers has an owner independent of the driver.
 - `shutdown` consumes the driver, closes admission, and drains within a bounded
-  wait. Failure returns `ShutdownError`, without relaxing drop safety.
+  wait, or returns `ShutdownError` without relaxing drop safety.
 - Shutdown uses driver-owned progress mechanisms: normal cycle coordination
   has stopped, and no other driver on the same worker may be required to run.
 - The runtime reports failures, attempts remaining drivers, and keeps the system
@@ -92,7 +91,7 @@ provided by the no-op example tracker.
 
 - Creation and the initial cycle may return `DriverError`; the runtime rolls
   back the unpublished pair.
-- A normal cycle error is reported and initiates driver shutdown.
+- The runtime reports normal cycle errors and shuts down the worker's drivers.
 - Peer integration failure panics; partially connected registration cannot
   continue.
 - Drivers with conditional availability expose a capability check before a

@@ -16,9 +16,9 @@ use crate::PendingWork;
 pub trait PendingWorkTracker {
     /// Registers one unit of pending work and its interruption waker.
     ///
-    /// Enroll the work in the current cycle's completion barrier and register `interrupt`
-    /// before returning. If the cycle is already interrupted, invoke the waker before
-    /// returning. Registration must not wait for the work to finish.
+    /// Implementations must enroll the work in the current cycle's completion barrier and
+    /// register `interrupt` before returning. If the cycle is already interrupted, they must
+    /// invoke the waker before returning. Registration must not wait for the work to finish.
     ///
     /// The returned handle must implement the notification contract in [`PendingWork::new`].
     /// See [`Cycle::start_work`](crate::Cycle::start_work) for native wait requirements.

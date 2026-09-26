@@ -6,9 +6,9 @@ use std::task::Waker;
 
 /// A completion handle for work registered with [`Cycle::start_work`](crate::Cycle::start_work).
 ///
-/// Keep the handle until the work ends, publishing any results before completing or dropping
-/// it. Both actions send the same notification, interrupting other waits and releasing one
-/// participant in the runtime's completion barrier.
+/// Keep the handle until the work ends, publishing any results before
+/// [completing](Self::complete) or dropping it. Both actions send the same notification,
+/// interrupting other waits and releasing one participant in the runtime's completion barrier.
 ///
 /// The handle is not cloneable and may move to background work. It adds no allocation or
 /// synchronization of its own; those belong to the runtime.
@@ -18,25 +18,24 @@ pub struct PendingWork {
 }
 
 impl PendingWork {
-    /// Creates a handle backed by a runtime completion notification.
+    /// Creates a completion handle for work already enrolled in the runtime's current cycle.
     ///
-    /// The runtime first enrolls the work in its current cycle. Completing or dropping this
-    /// handle wakes `on_complete` exactly once. Cloning or dropping the waker itself has no
-    /// completion meaning.
+    /// [Completing](Self::complete) or dropping this handle wakes `on_complete` exactly once.
+    /// Cloning or dropping the waker itself has no completion meaning.
     ///
-    /// The notification must retire this work's interruption registration, interrupt other
-    /// waits, then release only this work's barrier participation. It must not affect a later
-    /// cycle.
+    /// The notification must first retire this work's interruption registration, then
+    /// interrupt other waits, and finally release only this work's barrier participation.
+    /// It must not affect a later cycle.
     ///
-    /// It may run on any thread and must return promptly without panicking, remaining
-    /// memory-safe independently of the driver and runtime worker.
+    /// The runtime must ensure that the notification can run on any thread, returns promptly
+    /// without panicking, and remains memory-safe independently of the driver and runtime worker.
     pub const fn new(on_complete: Waker) -> Self {
         Self { on_complete }
     }
 
     /// Notifies the runtime that this work has ended.
     ///
-    /// Equivalent to dropping the handle.
+    /// Equivalent to dropping the handle; publish any results first.
     #[inline]
     pub fn complete(self) {
         drop(self);

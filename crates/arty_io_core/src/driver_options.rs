@@ -7,7 +7,7 @@ use thread_aware_core::Thread;
 
 use crate::{DriverHandle, DriverRole, SystemTaskSpawner};
 
-/// Options for creating a driver on a runtime worker.
+/// Per-worker inputs to [`DriverProvider::create`](crate::DriverProvider::create).
 ///
 /// These options may borrow thread-local drivers and are therefore neither [`Send`] nor [`Sync`].
 pub struct DriverOptions<'a> {
@@ -18,7 +18,7 @@ pub struct DriverOptions<'a> {
 }
 
 impl<'a> DriverOptions<'a> {
-    /// Creates options for `thread`.
+    /// Creates options for a driver on `thread`.
     #[must_use]
     pub fn new(thread: Thread, spawner: SystemTaskSpawner, drivers: Vec<DriverHandle<'a>>, role: DriverRole) -> Self {
         Self {

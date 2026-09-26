@@ -19,7 +19,8 @@ pub struct SystemTaskSpawner {
 impl SystemTaskSpawner {
     /// Creates a spawner that submits tasks through `spawn`.
     ///
-    /// The callback must return after accepting a task, without waiting for the task to finish.
+    /// The runtime-supplied callback must return after accepting a task, without waiting for
+    /// the task to finish.
     #[must_use]
     pub fn from_fn(spawn: impl Fn(SystemTask) + Send + Sync + 'static) -> Self {
         Self { spawn: Arc::new(spawn) }
