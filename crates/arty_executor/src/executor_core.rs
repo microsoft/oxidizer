@@ -343,8 +343,7 @@ impl ExecutorCore {
             if !awakened.is_empty() {
                 // Process each contiguous slice in FIFO order, avoiding per-task ring-buffer
                 // bookkeeping. TaskRef is Copy, so clearing once also avoids drain cleanup.
-                let (front, back) = awakened.as_slices();
-                for slice in [front, back] {
+                for slice in <[_; 2]>::from(awakened.as_slices()) {
                     for &task_ref in slice {
                         // It is theoretically possible for a completed task to be awakened, in which case
                         // we do nothing. We detect this by ensuring that the task was in the "inactive" set
