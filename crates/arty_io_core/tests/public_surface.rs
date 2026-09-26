@@ -200,7 +200,7 @@ fn completion_processing_supports_latched_interrupt() {
     let mut driver = LocalDriver::new(Rc::default());
     let coordinator = Coordinator::new();
 
-    coordinator.interrupt();
+    coordinator.interrupt_waker().wake_by_ref();
     driver
         .execute_cycle(Cycle::new(Instant::now(), Duration::MAX, &coordinator))
         .unwrap();
@@ -231,7 +231,7 @@ fn non_blocking_completion_processing_preserves_latched_interrupt() {
     let mut driver = LocalDriver::new(Rc::default());
     let coordinator = Coordinator::new();
 
-    coordinator.interrupt();
+    coordinator.interrupt_waker().wake_by_ref();
     driver
         .execute_cycle(Cycle::new(Instant::now(), Duration::ZERO, &coordinator))
         .unwrap();
@@ -347,7 +347,7 @@ impl Driver for LocalDriver {
     }
 
     fn execute_cycle(&mut self, cycle: Cycle<'_>) -> Result<(), DriverError> {
-        let token = cycle.start_work();
+        let mut token = cycle.start_work();
         token.on_interrupt(self.completion_queue.waker());
         self.completion_queue.process_completions(&cycle);
         Ok(())

@@ -179,7 +179,7 @@ fn run_worker(worker: &Thread, spawner: &SystemTaskSpawner, commands: &mpsc::Rec
             Command::Run(operation) => {
                 coordinator.begin_cycle();
                 operation(worker, spawner, &mut coordinator, &mut drivers);
-                execute_driver_cycle(&mut drivers, &coordinator);
+                execute_driver_cycle(&mut drivers, &mut coordinator);
             }
             Command::Stop { reply } => {
                 let result = shutdown_drivers(drivers);
@@ -221,7 +221,7 @@ fn register_driver<D: Driver, C: IoContext>(drivers: &mut DriverStore, driver: D
     }
 }
 
-fn execute_driver_cycle(drivers: &mut DriverStore, coordinator: &Coordinator) {
+fn execute_driver_cycle(drivers: &mut DriverStore, coordinator: &mut Coordinator) {
     let started_at = Instant::now();
     for driver in drivers.iter_mut().filter(|driver| driver.role() == DriverRole::Secondary) {
         driver

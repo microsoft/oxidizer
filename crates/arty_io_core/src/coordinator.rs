@@ -5,9 +5,8 @@ use std::fmt;
 use std::task::{Wake, Waker};
 
 use performables::arc::Arc;
-use performables::sync::PoisonError;
 use performables::sync::condition::Condvar;
-use performables::sync::mutex::Mutex;
+use performables::sync::mutex::{Mutex, MutexGuard};
 
 /// Coordinates wait interruption and outstanding work for one runtime worker.
 ///
@@ -53,39 +52,23 @@ impl Coordinator {
 
     /// Begins a new logical cycle, clearing interruption and prior waker registrations.
     ///
-    /// The runtime calls this exactly once before checking work for the next cycle and only after
-    /// [`complete_cycle`](Self::complete_cycle) returned for the previous one. Wakers already
-    /// being dispatched may finish after this call, but cannot replace registrations added for
-    /// the new cycle.
-    ///
-    /// # Panics
-    ///
-    /// Panics if work from the previous cycle is still pending or bookkeeping was poisoned.
+    /// The runtime calls this exactly once before checking work for the next cycle. It first
+    /// completes any previous cycle, then clears its interruption state and registrations.
+    /// Wakers already being dispatched may finish after this call, but cannot replace
+    /// registrations added for the new cycle.
     #[expect(
         clippy::needless_pass_by_ref_mut,
         reason = "only the runtime's exclusive coordinator owner may begin a cycle"
     )]
     pub fn begin_cycle(&mut self) {
-        let pending_work = self.inner.state.lock_sync().pending_work;
-        assert_eq!(pending_work, 0, "all pending work must complete before beginning a cycle");
+        self.complete_cycle();
         let mut wakers = {
-            let mut state = self.inner.state.lock_sync();
+            let mut state = self.inner.lock_state();
             state.interrupted = false;
             std::mem::take(&mut state.wakers)
         };
         wakers.clear();
         self.inner.recycle(wakers);
-    }
-
-    /// Interrupts every native wait registered for the current cycle.
-    ///
-    /// Repeated calls coalesce until the next [`begin_cycle`](Self::begin_cycle).
-    ///
-    /// # Panics
-    ///
-    /// Panics if bookkeeping was poisoned or calling a registered [`Waker::wake`] panics.
-    pub fn interrupt(&self) {
-        self.inner.interrupt();
     }
 
     /// Returns a stable waker that interrupts the current cycle.
@@ -100,13 +83,9 @@ impl Coordinator {
     ///
     /// This first interrupts all registered waits, then blocks until every outstanding
     /// [`PendingWork`] has completed or been dropped.
-    ///
-    /// # Panics
-    ///
-    /// Panics if bookkeeping was poisoned or calling a registered [`Waker::wake`] panics.
-    pub fn complete_cycle(&self) {
-        self.interrupt();
-        let mut state = self.inner.state.lock_sync();
+    pub fn complete_cycle(&mut self) {
+        self.inner.interrupt();
+        let mut state = self.inner.lock_state();
         while state.pending_work != 0 {
             state = self.inner.completed.wait_sync(state);
         }
@@ -114,8 +93,8 @@ impl Coordinator {
 
     pub(crate) fn start_work(&self) -> PendingWork {
         {
-            let mut state = self.inner.state.lock_sync();
-            state.pending_work = state.pending_work.checked_add(1).expect("coordinator work count must not overflow");
+            let mut state = self.inner.lock_state();
+            state.pending_work = state.pending_work.saturating_add(1);
         }
         PendingWork {
             inner: Arc::clone(&self.inner),
@@ -132,17 +111,31 @@ impl Default for Coordinator {
 
 impl fmt::Debug for Coordinator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let state = self.inner.state.lock_sync();
+        let (interrupted, pending_work) = {
+            let state = self.inner.lock_state();
+            (state.interrupted, state.pending_work)
+        };
         f.debug_struct("Coordinator")
-            .field("interrupted", &state.interrupted)
-            .field("pending_work", &state.pending_work)
+            .field("interrupted", &interrupted)
+            .field("pending_work", &pending_work)
             .finish_non_exhaustive()
     }
 }
 
 impl Inner {
+    fn lock_state(&self) -> MutexGuard<'_, State> {
+        match self.state.lock_sync_result() {
+            Ok(state) => state,
+            Err(error) => {
+                let state = error.into_inner();
+                self.state.clear_poison();
+                state
+            }
+        }
+    }
+
     fn on_interrupt(&self, waker: Waker) {
-        let mut state = self.state.lock_sync();
+        let mut state = self.lock_state();
         if state.interrupted {
             drop(state);
             waker.wake();
@@ -153,7 +146,7 @@ impl Inner {
 
     fn interrupt(&self) {
         let mut wakers = {
-            let mut state = self.state.lock_sync();
+            let mut state = self.lock_state();
             if state.interrupted {
                 return;
             }
@@ -167,7 +160,7 @@ impl Inner {
     }
 
     fn recycle(&self, mut wakers: Vec<Waker>) {
-        let mut state = self.state.lock_sync();
+        let mut state = self.lock_state();
         if state.wakers.is_empty() && state.wakers.capacity() < wakers.capacity() {
             std::mem::swap(&mut state.wakers, &mut wakers);
         }
@@ -197,22 +190,14 @@ impl PendingWork {
     /// If interruption was already requested, `waker` is invoked before this method returns.
     /// Calling this method repeatedly may cause redundant wake calls, which the native waker must
     /// safely coalesce.
-    ///
-    /// # Panics
-    ///
-    /// Panics if bookkeeping was poisoned or calling [`Waker::wake`] panics.
-    pub fn on_interrupt(&self, waker: Waker) {
+    pub fn on_interrupt(&mut self, waker: Waker) {
         self.inner.on_interrupt(waker);
     }
 
     /// Returns whether this cycle was interrupted.
-    ///
-    /// # Panics
-    ///
-    /// Panics if bookkeeping was poisoned.
     #[must_use]
     pub fn is_interrupted(&self) -> bool {
-        self.inner.state.lock_sync().interrupted
+        self.inner.lock_state().interrupted
     }
 
     /// Reports that this work completed with work ready for the owning driver.
@@ -220,11 +205,6 @@ impl PendingWork {
     /// Call this only after making the work visible. It interrupts other registered waits, then
     /// releases the runtime's completion barrier. Drop the value instead when the work ends
     /// without publishing anything.
-    ///
-    /// # Panics
-    ///
-    /// Panics if bookkeeping was poisoned, calling a registered [`Waker::wake`] panics, or the
-    /// value was completed incorrectly.
     pub fn complete(mut self) {
         self.inner.interrupt();
         self.mark_completed();
@@ -235,8 +215,8 @@ impl PendingWork {
             return;
         }
         self.active = false;
-        let mut state = self.inner.state.lock_sync_result().unwrap_or_else(PoisonError::into_inner);
-        state.pending_work = state.pending_work.checked_sub(1).expect("pending work must complete exactly once");
+        let mut state = self.inner.lock_state();
+        state.pending_work = state.pending_work.saturating_sub(1);
         if state.pending_work == 0 {
             self.inner.completed.notify_all();
         }
@@ -252,5 +232,28 @@ impl Drop for PendingWork {
 impl fmt::Debug for PendingWork {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PendingWork").field("active", &self.active).finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    use super::*;
+
+    #[test]
+    fn poisoned_state_is_recovered_and_cleared() {
+        let mut coordinator = Coordinator::new();
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            let _state = coordinator.inner.state.lock_sync();
+            panic!("poison coordinator state");
+        }));
+        assert!(result.is_err());
+        assert!(coordinator.inner.state.is_poisoned());
+
+        coordinator.begin_cycle();
+
+        assert!(!coordinator.inner.state.is_poisoned());
     }
 }

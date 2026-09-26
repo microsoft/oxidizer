@@ -35,7 +35,13 @@ performables = { workspace = true }
 thread_aware_core = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
+criterion = { workspace = true }
+metabench = { workspace = true }
 static_assertions = { workspace = true }
+
+[[bench]]
+name = "arty_io_core_coordination"
+harness = false
 
 # >>> anvil-managed: anvil-lints
 [lints]
