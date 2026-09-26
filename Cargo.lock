@@ -258,14 +258,13 @@ dependencies = [
 name = "arty_executor"
 version = "0.1.2"
 dependencies = [
- "all_the_time",
- "alloc_tracker",
  "criterion",
  "derive_more",
  "events_once",
  "foldhash 0.2.0",
  "gungraun",
  "infinity_pool",
+ "metabench",
  "mockall",
  "mutants",
  "nm",

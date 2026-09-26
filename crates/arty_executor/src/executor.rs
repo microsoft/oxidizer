@@ -643,6 +643,123 @@ mod tests {
     }
 
     #[test]
+    fn reentrant_tasks_wait_for_next_cycle_in_registration_order() {
+        let executor = new_guarded_executor(Waker::noop().clone());
+        let tasks = executor.tasks();
+        let polls = Rc::new(RefCell::new(Vec::new()));
+        let mut cycles = Vec::new();
+
+        for batch in 0..2 {
+            for index in 0..2 {
+                let tasks_for_child = tasks.clone();
+                let polls = Rc::clone(&polls);
+                tasks.add(async move {
+                    polls.borrow_mut().push(batch * 4 + index);
+                    tasks_for_child.add(async move {
+                        polls.borrow_mut().push(batch * 4 + index + 2);
+                    });
+                });
+            }
+
+            cycles.push((executor.execute_cycle(), polls.borrow().clone()));
+            cycles.push((executor.execute_cycle(), polls.borrow().clone()));
+        }
+
+        assert_eq!(
+            cycles,
+            [
+                (CycleOutcome::Continue, vec![0, 1]),
+                (CycleOutcome::Suspend, vec![0, 1, 2, 3]),
+                (CycleOutcome::Continue, vec![0, 1, 2, 3, 4, 5]),
+                (CycleOutcome::Suspend, vec![0, 1, 2, 3, 4, 5, 6, 7]),
+            ]
+        );
+    }
+
+    #[test]
+    fn new_tasks_precede_awakened_tasks() {
+        let executor = new_guarded_executor(Waker::noop().clone());
+        let tasks = executor.tasks();
+        let polls = Rc::new(RefCell::new(Vec::new()));
+
+        let future = TestSubjectFuture::new();
+        let future_waker = future.waker();
+        let completes = future.completes_on_next_poll();
+        future.on_poll({
+            let polls = Rc::clone(&polls);
+            move |_| polls.borrow_mut().push(2)
+        });
+        tasks.add(future);
+        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+        polls.borrow_mut().clear();
+
+        future_waker.borrow().as_ref().unwrap().wake_by_ref();
+        completes.set(true);
+        for index in 0..2 {
+            let polls = Rc::clone(&polls);
+            tasks.add(async move {
+                polls.borrow_mut().push(index);
+            });
+        }
+
+        assert_eq!(
+            (executor.execute_cycle(), polls.borrow().clone()),
+            (CycleOutcome::Suspend, vec![0, 1, 2])
+        );
+    }
+
+    #[test]
+    fn completed_task_waker_survives_until_released() {
+        // SAFETY: The retained waker is released before the final shutdown cycle.
+        let executor = unsafe { Executor::builder().build() };
+        let waker = Rc::new(RefCell::new(None));
+        let polls = Rc::new(Cell::new(0));
+        executor.tasks().add(poll_fn({
+            let waker = Rc::clone(&waker);
+            let polls = Rc::clone(&polls);
+            move |cx| {
+                polls.set(polls.get() + 1);
+                *waker.borrow_mut() = Some(cx.waker().clone());
+                Poll::Ready(())
+            }
+        }));
+
+        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+        executor.begin_shutdown();
+        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+
+        waker.borrow().as_ref().unwrap().wake_by_ref();
+        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+        drop(waker);
+
+        assert_eq!((executor.execute_cycle(), polls.get()), (CycleOutcome::Shutdown, 1));
+    }
+
+    #[test]
+    fn cross_thread_waker_clone_wake_and_drop() {
+        let executor = new_guarded_executor(Waker::noop().clone());
+        let future = TestSubjectFuture::new();
+        let future_waker = future.waker();
+        let completes = future.completes_on_next_poll();
+        let mut handle = executor.tasks().add(future);
+        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+
+        let waker = future_waker.borrow().as_ref().unwrap().clone();
+        std::thread::spawn(move || {
+            let clone = waker.clone();
+            drop(waker);
+            clone.wake();
+        })
+        .join()
+        .unwrap();
+        completes.set(true);
+
+        let outcome = executor.execute_cycle();
+        let result = Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop()));
+        assert_eq!((outcome, result), (CycleOutcome::Suspend, Poll::Ready(())));
+    }
+
+    #[test]
     // The difficulty here is that while we could easily assert_panic!() the timeout, this test
     // may also panic for other reasons after the timeout because the timeout is essentially a
     // declaration of failure to clean up - the dirty state is invalid and may result in further
