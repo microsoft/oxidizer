@@ -136,7 +136,7 @@ impl Filters {
                     snapshot,
                 };
                 // The receiver only closes on application shutdown.
-                let _receiver_closed = sender.send_sync(completion);
+                let _receiver_closed = sender.send(completion);
             })
             .map_err(|error| format!("Failed to start filter worker: {error}"))?;
         self.generation = generation;
@@ -690,7 +690,7 @@ mod tests {
         assert_eq!(app.filters.pending.as_ref(), Some(&latest));
         assert!(matches!(app.filters.receiver.as_ref().unwrap().try_recv(), Err(error) if error.is_empty()));
         sender
-            .send_sync(FilterCompletion {
+            .send(FilterCompletion {
                 generation: original_generation,
                 snapshot: index.render(&FilterSpec::default()),
                 index,
@@ -725,7 +725,7 @@ mod tests {
         let current_index = Arc::clone(app.filter_capture().unwrap().filter_index.as_ref().unwrap());
         app.start_filter(include_app()).unwrap();
         sender
-            .send_sync(FilterCompletion {
+            .send(FilterCompletion {
                 generation: original_generation,
                 snapshot: index.render(&FilterSpec::default()),
                 index,

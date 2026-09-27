@@ -72,6 +72,9 @@ type parameter. This controls how the internal state is partitioned across threa
 * [`PerThread`][__link6]: Separate state per runtime thread; the same key coalesces within one partition
   partition, with no sharing across thread partitions
 
+Only the [`PerThread`][__link7] and [`PerNuma`][__link8] strategies implement [`ThreadAware`][__link9].
+The process-wide strategy shares its state without relocation.
+
 ```rust
 use performables::arc::PerNuma;
 use uniflight::Merger;
@@ -85,11 +88,11 @@ let merger: Merger<String, String, PerNuma> = Merger::new_per_numa();
 `Merger` handles task cancellation and panics explicitly:
 
 * If the leader task is cancelled or dropped, a follower becomes the new leader
-* If the leader task panics, followers receive [`LeaderPanicked`][__link7] error with the panic message
+* If the leader task panics, followers receive [`LeaderPanicked`][__link10] error with the panic message
 * Followers that join before the leader completes receive the value the leader returns
 
 When a panic occurs, followers are notified via the error type rather than silently
-retrying. The panic message is captured and available via [`LeaderPanicked::message`][__link8]:
+retrying. The panic message is captured and available via [`LeaderPanicked::message`][__link11]:
 
 ```rust
 let merger: Merger<String, String> = Merger::new();
@@ -112,12 +115,12 @@ finishes. This ensures no stale entries accumulate over time.
 
 ## Type Requirements
 
-The value type `T` must implement [`Clone`][__link9] because followers receive a clone of the
-leader’s result. The key type `K` must implement [`Hash`][__link10] and [`Eq`][__link11].
+The value type `T` must implement [`Clone`][__link12] because followers receive a clone of the
+leader’s result. The key type `K` must implement [`Hash`][__link13] and [`Eq`][__link14].
 
 ## Thread Safety
 
-[`Merger`][__link12] is `Send` and `Sync`, and can be shared across threads. The returned futures
+[`Merger`][__link15] is `Send` and `Sync`, and can be shared across threads. The returned futures
 are `Send` when the closure, future, key, and value types are `Send`.
 
 ## Performance
@@ -136,17 +139,20 @@ Use `--save-baseline` and `--baseline` flags to track regressions over time.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/uniflight">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbU6WjHK_pePUb9nAUk6LDFxYbshcxUBqnlqkbwdYKqA0YNsRhZIKCbHBlcmZvcm1hYmxlc2UwLjEuMIJpdW5pZmxpZ2h0ZTAuNi4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb_4UF3EWQQjkbkYVYNK5rhqsbJxdEypQl1Y4bWzGNWNVA68hhZIOCbHBlcmZvcm1hYmxlc2UwLjEuMIJsdGhyZWFkX2F3YXJlZjAuMTIuMIJpdW5pZmxpZ2h0ZTAuNi4w
  [__link0]: https://docs.rs/uniflight/0.6.0/uniflight/struct.Merger.html
  [__link1]: https://docs.rs/uniflight/0.6.0/uniflight/?search=Merger::execute
- [__link10]: https://doc.rust-lang.org/stable/std/?search=hash::Hash
- [__link11]: https://doc.rust-lang.org/stable/std/cmp/trait.Eq.html
- [__link12]: https://docs.rs/uniflight/0.6.0/uniflight/struct.Merger.html
+ [__link10]: https://docs.rs/uniflight/0.6.0/uniflight/struct.LeaderPanicked.html
+ [__link11]: https://docs.rs/uniflight/0.6.0/uniflight/?search=LeaderPanicked::message
+ [__link12]: https://doc.rust-lang.org/stable/std/clone/trait.Clone.html
+ [__link13]: https://doc.rust-lang.org/stable/std/?search=hash::Hash
+ [__link14]: https://doc.rust-lang.org/stable/std/cmp/trait.Eq.html
+ [__link15]: https://docs.rs/uniflight/0.6.0/uniflight/struct.Merger.html
  [__link2]: https://doc.rust-lang.org/stable/std/?search=borrow::Borrow
  [__link3]: https://docs.rs/performables/0.1.0/performables/?search=arc::Strategy
  [__link4]: https://docs.rs/performables/0.1.0/performables/?search=arc::PerProcess
  [__link5]: https://docs.rs/performables/0.1.0/performables/?search=arc::PerNuma
  [__link6]: https://docs.rs/performables/0.1.0/performables/?search=arc::PerThread
- [__link7]: https://docs.rs/uniflight/0.6.0/uniflight/struct.LeaderPanicked.html
- [__link8]: https://docs.rs/uniflight/0.6.0/uniflight/?search=LeaderPanicked::message
- [__link9]: https://doc.rust-lang.org/stable/std/clone/trait.Clone.html
+ [__link7]: https://docs.rs/performables/0.1.0/performables/?search=arc::PerThread
+ [__link8]: https://docs.rs/performables/0.1.0/performables/?search=arc::PerNuma
+ [__link9]: https://docs.rs/thread_aware/0.12.0/thread_aware/?search=ThreadAware

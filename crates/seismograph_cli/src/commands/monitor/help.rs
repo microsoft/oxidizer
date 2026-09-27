@@ -9,7 +9,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
-use super::app::{App, CacheFocus, HeapFocus, IoFocus, MonitorTab, PrimitiveFocus, RuntimeDetailView, RuntimeFocus, Screen, ThreadFocus};
+use super::app::{App, CacheFocus, HeapFocus, IoFocus, MonitorTab, PrimitiveFocus, RuntimeFocus, Screen, ThreadFocus};
 use super::help_content::Section;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -28,8 +28,8 @@ pub(super) enum Context {
     ThreadObjects,
     RuntimeWorkers,
     RuntimeTasks,
-    RuntimeDetails,
-    RuntimeSpawnStack,
+    RuntimeActivity,
+    RuntimeEvents,
     IoResources,
     IoOperations,
     CacheTiers,
@@ -109,10 +109,8 @@ impl App {
             MonitorTab::Runtime => match self.runtime_view.focus {
                 RuntimeFocus::Workers => Context::RuntimeWorkers,
                 RuntimeFocus::Tasks => Context::RuntimeTasks,
-                RuntimeFocus::Details => match self.runtime_view.detail_view {
-                    RuntimeDetailView::Details => Context::RuntimeDetails,
-                    RuntimeDetailView::SpawnStack => Context::RuntimeSpawnStack,
-                },
+                RuntimeFocus::Activity => Context::RuntimeActivity,
+                RuntimeFocus::Events => Context::RuntimeEvents,
             },
             MonitorTab::Io => match self.io_view.focus {
                 IoFocus::Resources => Context::IoResources,
@@ -245,7 +243,7 @@ fn styled_lines(document: &[&Section], width: usize) -> Vec<Line<'static>> {
 }
 
 /// Wrap the static ASCII help once per draw, then page the actual visual lines.
-/// This avoids a u16 paragraph scroll limit and keeps End accurate after resize.
+/// This avoids a `u16` paragraph scroll limit and keeps End accurate after resize.
 fn wrap(text: &str, width: usize) -> Vec<String> {
     let width = width.max(1);
     let mut lines = Vec::new();
@@ -344,14 +342,13 @@ mod tests {
             app.thread_view.focus = focus;
             assert_eq!(app.panel_help_context(MonitorTab::Threads), expected);
         }
-        for (focus, detail, expected) in [
-            (RuntimeFocus::Workers, RuntimeDetailView::Details, Context::RuntimeWorkers),
-            (RuntimeFocus::Tasks, RuntimeDetailView::Details, Context::RuntimeTasks),
-            (RuntimeFocus::Details, RuntimeDetailView::Details, Context::RuntimeDetails),
-            (RuntimeFocus::Details, RuntimeDetailView::SpawnStack, Context::RuntimeSpawnStack),
+        for (focus, expected) in [
+            (RuntimeFocus::Workers, Context::RuntimeWorkers),
+            (RuntimeFocus::Tasks, Context::RuntimeTasks),
+            (RuntimeFocus::Activity, Context::RuntimeActivity),
+            (RuntimeFocus::Events, Context::RuntimeEvents),
         ] {
             app.runtime_view.focus = focus;
-            app.runtime_view.detail_view = detail;
             assert_eq!(app.panel_help_context(MonitorTab::Runtime), expected);
         }
         for (focus, expected) in [
@@ -496,8 +493,7 @@ mod tests {
         if let Screen::Offline { tab, .. } = &mut app.screen {
             *tab = MonitorTab::Runtime;
         }
-        app.runtime_view.focus = RuntimeFocus::Details;
-        app.runtime_view.detail_view = RuntimeDetailView::SpawnStack;
+        app.runtime_view.focus = RuntimeFocus::Activity;
         app.open_filter_popup();
         for character in "crate:example".chars() {
             app.handle_key(KeyCode::Char(character));
@@ -511,7 +507,7 @@ mod tests {
             app.poll_filter();
             std::thread::yield_now();
         }
-        assert_eq!(app.help.as_ref().unwrap().context, Context::RuntimeSpawnStack);
+        assert_eq!(app.help.as_ref().unwrap().context, Context::RuntimeActivity);
         assert_eq!(app.help.as_ref().unwrap().document, before);
     }
 
@@ -567,7 +563,7 @@ mod tests {
         assert_eq!(app.help.as_ref().unwrap().scroll.get(), app.help.as_ref().unwrap().maximum.get());
         render(&app, 110, 50);
         assert_eq!(app.help.as_ref().unwrap().scroll.get(), app.help.as_ref().unwrap().maximum.get());
-        assert!(render(&app, 110, 50).contains("offline file."));
+        assert!(render(&app, 110, 50).contains("does not switch this help topic."));
         app.handle_key(KeyCode::Home);
         assert_eq!(app.help.as_ref().unwrap().scroll.get(), 0);
     }
@@ -680,7 +676,7 @@ mod tests {
             assert_eq!(without_layout, expected);
         }
         let lines = styled_lines(&sections, 80);
-        let details_header = lines.iter().position(|line| line.to_string() == "TASK DETAILS").unwrap();
+        let details_header = lines.iter().position(|line| line.to_string() == "TASK STATE VALUES").unwrap();
         assert!(lines[details_header - 1].spans.is_empty());
         assert!(lines[details_header - 2].spans.is_empty());
     }

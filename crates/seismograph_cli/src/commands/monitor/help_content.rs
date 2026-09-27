@@ -38,10 +38,10 @@ pub(super) const fn title(context: Context) -> &'static str {
         Context::ThreadOperations => "Thread operations",
         Context::ThreadParticipants => "Related threads",
         Context::ThreadObjects => "Thread objects and stacks",
-        Context::RuntimeWorkers => "Runtime threads",
+        Context::RuntimeWorkers => "Runtime workers",
         Context::RuntimeTasks => "Runtime tasks",
-        Context::RuntimeDetails => "Runtime task details",
-        Context::RuntimeSpawnStack => "Runtime spawn stack",
+        Context::RuntimeActivity => "Runtime task details",
+        Context::RuntimeEvents => "Inferred task events",
         Context::IoResources => "I/O resources",
         Context::IoOperations => "I/O operations",
         Context::CacheTiers => "Cache tiers",
@@ -59,29 +59,29 @@ pub(super) fn document(context: Context, offline: bool) -> Vec<&'static Section>
         Context::Browser => &[BROWSER],
         Context::Info => {
             if offline {
-                &[OFFLINE_INFO]
+                &[OFFLINE_INFO, CAPTURE_SCOPE]
             } else {
-                &[INFO, ACTIVITY]
+                &[INFO, ACTIVITY, LIVE_THREADS, CAPTURE_SCOPE]
             }
         }
-        Context::HeapBuckets => &[HEAP_BUCKETS, HEAP_SUMMARY, HEAP_HOTSPOTS, STACK],
-        Context::HeapHotspots => &[HEAP_HOTSPOTS, STACK, HEAP_BUCKETS, HEAP_SUMMARY],
+        Context::HeapBuckets => &[HEAP_BUCKETS, HEAP_SUMMARY],
+        Context::HeapHotspots => &[HEAP_HOTSPOTS, STACK],
         Context::Allocations => &[ALLOCATIONS, STACK],
-        Context::PrimitiveTypes => &[PRIMITIVE_TYPES, PRIMITIVE_OPERATIONS, PRIMITIVE_HOTSPOTS, STACK],
-        Context::PrimitiveOperations => &[PRIMITIVE_OPERATIONS, PRIMITIVE_HOTSPOTS, STACK, PRIMITIVE_TYPES],
-        Context::PrimitiveHotspots => &[PRIMITIVE_HOTSPOTS, STACK, PRIMITIVE_OPERATIONS, PRIMITIVE_TYPES],
-        Context::Threads => &[THREADS, THREAD_OPERATIONS, THREAD_PARTICIPANTS, THREAD_OBJECTS, STACK],
-        Context::ThreadOperations => &[THREAD_OPERATIONS, THREAD_PARTICIPANTS, THREAD_OBJECTS, STACK, THREADS],
-        Context::ThreadParticipants => &[THREAD_PARTICIPANTS, THREAD_OBJECTS, STACK, THREAD_OPERATIONS, THREADS],
-        Context::ThreadObjects => &[THREAD_OBJECTS, STACK, THREAD_PARTICIPANTS, THREAD_OPERATIONS, THREADS],
-        Context::RuntimeWorkers => &[RUNTIME_WORKERS, RUNTIME_TASKS, RUNTIME_DETAILS, RUNTIME_STACK],
-        Context::RuntimeTasks => &[RUNTIME_TASKS, RUNTIME_DETAILS, RUNTIME_STACK, RUNTIME_WORKERS],
-        Context::RuntimeDetails => &[RUNTIME_DETAILS, RUNTIME_TASKS, RUNTIME_STACK, RUNTIME_WORKERS],
-        Context::RuntimeSpawnStack => &[RUNTIME_STACK, RUNTIME_DETAILS, RUNTIME_TASKS, RUNTIME_WORKERS],
-        Context::IoResources => &[IO_RESOURCES, IO_OPERATIONS],
-        Context::IoOperations => &[IO_OPERATIONS, IO_RESOURCES],
-        Context::CacheTiers => &[CACHE_TIERS, CACHE_OPERATIONS],
-        Context::CacheOperations => &[CACHE_OPERATIONS, CACHE_TIERS],
+        Context::PrimitiveTypes => &[PRIMITIVE_TYPES],
+        Context::PrimitiveOperations => &[PRIMITIVE_OPERATIONS],
+        Context::PrimitiveHotspots => &[PRIMITIVE_HOTSPOTS, STACK],
+        Context::Threads => &[THREADS],
+        Context::ThreadOperations => &[THREAD_OPERATIONS],
+        Context::ThreadParticipants => &[THREAD_PARTICIPANTS],
+        Context::ThreadObjects => &[THREAD_OBJECTS, STACK],
+        Context::RuntimeWorkers => &[RUNTIME_WORKERS],
+        Context::RuntimeTasks => &[RUNTIME_TASKS],
+        Context::RuntimeActivity => &[RUNTIME_ACTIVITY],
+        Context::RuntimeEvents => &[RUNTIME_EVENTS],
+        Context::IoResources => &[IO_RESOURCES],
+        Context::IoOperations => &[IO_OPERATIONS],
+        Context::CacheTiers => &[CACHE_TIERS],
+        Context::CacheOperations => &[CACHE_OPERATIONS],
         Context::Recording => &[RECORDING],
         Context::Filters => &[FILTERS],
         Context::Capture => &[CAPTURE],
@@ -89,27 +89,25 @@ pub(super) fn document(context: Context, offline: bool) -> Vec<&'static Section>
         Context::Error => &[ERROR],
     };
     let mut document = sections.to_vec();
-    if matches!(
-        context,
-        Context::PrimitiveTypes
-            | Context::PrimitiveOperations
-            | Context::PrimitiveHotspots
-            | Context::Threads
-            | Context::ThreadOperations
-            | Context::ThreadParticipants
-            | Context::ThreadObjects
-    ) {
+    if matches!(context, Context::PrimitiveOperations | Context::ThreadOperations) {
         document.push(PRIMITIVE_VALUES);
     }
-    if matches!(
-        context,
-        Context::RuntimeWorkers | Context::RuntimeTasks | Context::RuntimeDetails | Context::RuntimeSpawnStack
-    ) {
+    if matches!(context, Context::RuntimeTasks | Context::RuntimeActivity) {
         document.push(RUNTIME_STATES);
     }
-    document.extend([COMMON, HELP_CONTROLS, if offline { OFFLINE } else { LIVE }]);
+    if matches!(context, Context::Info) {
+        document.extend([VERSIONS, COMMON, if offline { OFFLINE } else { LIVE }]);
+    }
+    document.push(HELP_CONTROLS);
     document
 }
+
+const VERSIONS: &Section = section!("CRATE VERSIONS";
+    "Monitor (seismograph_cli)" => "Semantic version compiled into this local monitor executable. Shown in the Info view for live connections and saved snapshots.",
+    "Server (seismograph)" => "Semantic version of the seismograph crate in the connected application, queried during discovery after authentication, before any capture. Shown in the Info view. This is not the protocol crate version or the application's own version.",
+    "unknown (legacy server)" => "The server closed the version query without a response. Older servers do not report their version; no version is inferred from the local monitor.",
+    "unknown (not recorded in snapshot)" => "Saved snapshots do not contain the server crate version. The local monitor version is not the snapshot producer's version.",
+);
 
 const BROWSER: &Section = section!("APPLICATIONS";
     "Application / instance" => "Discovered application name, with an optional instance name in parentheses.",
@@ -142,9 +140,27 @@ const INFO: &Section = section!("INFO / SOURCE";
 const ACTIVITY: &Section = section!("LIVE ACTIVITY";
     "events/s" => "Change in accepted telemetry events divided by elapsed sample time; not requests/s or CPU utilization.",
     "total" => "Latest cumulative accepted-event counter.",
-    "Graph" => "Up to 120 approximately one-second samples. Horizontal axis: sample order. Vertical axis: events/second with an automatically scaled maximum.",
-    "First sample / zero" => "The first sample establishes a baseline. Zero can mean idle, disabled/sampled recording or a reset counter, not zero application work.",
+    "Colors / classes" => "Cyan: allocations and frees. Green: general primitive events. Magenta: Arc dereferences. Yellow: runtime tasks. Light blue: I/O. Light red: cache. Each legend value is that class's current accepted-event rate across recording threads.",
+    "Graph" => "Up to 120 approximately one-second samples. Horizontal axis: elapsed time in seconds. Vertical axis: events/second on one shared automatically scaled maximum. The legend keeps exact integer rates even when small series look flat beside larger ones.",
+    "First sample / zero" => "A first observation or changed recording session establishes a baseline and shows '-' rather than an invented rate. Later zero means no new accepted records in the measured interval, not zero application work. Counter resets never produce wraparound spikes.",
+    "Stale / unsupported" => "Failed polling marks graphics stale and hides current rate labels until counters arrive again. Older servers retain the aggregate rate graph but explicitly mark thread/class counters unavailable. Offline files never produce live rates.",
     "Live versus snapshot" => "Statistics refresh independently. A graph change does not refresh the manually captured analysis tables.",
+);
+
+const LIVE_THREADS: &Section = section!("LIVE THREAD ACTIVITY";
+    "Thread / name" => "Recorder thread ID and captured name, not an inferred task or an OS-wide thread census. All available threads from the recording session are browsable, including exited threads retained by the recorder.",
+    "Fill bar" => "Currently retained events / that thread's actual ring capacity, not the configured capacity for future rings. Red means the ring is full; subsequent records overwrite older records. A released ring is labeled explicitly, not shown as 0/0 percent.",
+    "events/s / sparkline" => "Per-thread accepted counter delta divided by elapsed observation time. Sparklines use up to 120 recent samples, independently scaled to each thread's visible maximum; their heights are not comparable between threads. Gray '_' means measured zero, not missing data.",
+    "Up/Down / PgUp/PgDn / Home/End" => "Move through all threads, page eight at a time, or go to the first/last thread. Each thread occupies one line: identity, fill bar, rate and sparkline. Mouse wheel scrolls over the thread pane; clicking a line selects that exact thread.",
+    "Scope / cost" => "Polling reads lightweight counters, not event payloads, backtraces, or snapshot sources. Disabled, suppressed, and sampled-out events are excluded. Counts and fill are live observations across independently running threads, not a globally atomic snapshot. Snapshot filters do not alter these counters.",
+);
+
+const CAPTURE_SCOPE: &Section = section!("CAPTURE METRIC SCOPE";
+    "Accepted / overwritten" => "Counts exclude suppressed, sampled-out, disabled and non-producing activity. Source accepted/overwritten counters span event classes; they are not allocation populations.",
+    "Unmatched allocations" => "Unmatched retained allocations are not proven live allocations or leaks, even with zero overwrites.",
+    "General counters" => "Availability/start epoch are unencoded; cumulative totals are not session/workload deltas.",
+    "Memory / classes" => "Region assignment is virtual; mapped/backing bytes are not portable committed memory or RSS. Published-class totals cover small classes only; class estimates are not per-segment occupancy.",
+    "Sampled maxima" => "Sampled live maxima use independent counter reads and are not guaranteed lifetime bounds.",
 );
 
 const OFFLINE_INFO: &Section = section!("SNAPSHOT FILE";
@@ -303,75 +319,77 @@ const THREAD_OBJECTS: &Section = section!("THREAD OBJECTS / STACKS";
     "f / PgUp/PgDn" => "Toggle application/all frames / scroll both stack sections.",
 );
 
-const RUNTIME_WORKERS: &Section = section!("RUNTIME THREADS";
-    "Runtime / thread" => "Runtime name and worker's recorder-thread ID.",
+const RUNTIME_WORKERS: &Section = section!("RUNTIME WORKERS";
+    "Runtime / thread" => "Runtime ID:worker ID / recorder-thread ID, followed by the runtime name. A '?' thread is unknown, not the notifier's OS thread.",
     "Role" => "Core executes general tasks; Blocking executes blocking work; Io drives runtime I/O.",
     "State" => "Running means available to execute, not necessarily polling now. Parked means parked; Stopped means stopped. Event-only workers can have blank metadata.",
-    "Tasks" => "Tasks associated with this worker, not just currently running tasks. A migrated task can appear under multiple workers.",
-    "Poll busy" => "Summed retained task-poll duration / time from worker's first to last retained runtime event, as a percentage. NOT process CPU utilization. Zero span yields zero; loss/filtering changes this incomplete window estimate.",
-    "Avg poll" => "Summed retained poll time / retained poll count.",
-    "Max poll" => "Largest retained poll duration. Worker metrics are retained-window values even when task counters are lifetime.",
+    "Tasks" => "Distinct tasks observed polling on this worker, not all source-associated tasks. A task can be listed below with zero observed polls. Migrated tasks can appear on multiple workers.",
+    "Polls" => "Retained completed polls on this worker, not a lifetime count. An ongoing poll contributes to the timeline, not this count.",
+    "Median poll" => "Median retained completed poll duration across this worker's tasks; '-' without samples and 0ns for measured zero.",
+    "Max poll" => "Longest retained completed poll duration on this worker; an ongoing poll is not a completed sample.",
+    "Observed %" => "Union of observed poll intervals, clipped to the displayed per-runtime window, divided by that same window's duration. A lower bound, never above 100%; NOT CPU utilization. No valid window or no observation is '-', not zero.",
+    "Poll timeline" => "Each row bins that worker's observed polls on its runtime's common time window. Eight rising bar heights show occupied fraction (0..100%). Every positive fraction rises above the zero baseline. Dim baseline bars are unobserved, not proof of idle. Different runtimes may have different windows.",
+    "Worker Activity" => "Selected worker's window axis, observed poll timeline and completed poll duration histogram. Duration runs horizontally across 12 fixed log10 buckets; count is vertical. Every nonempty bucket has at least a tiny visible sliver. The selected bucket's range and exact count appear above the bars. Open source polls contribute only to the timeline and observed fraction.",
     "unassigned / Unbound" => "Tasks with no worker association. '-' poll metrics are unavailable, not zero.",
     "runtime events / source retained" => "Retained runtime-class count / retained all-class source-event count.",
     "accepted / overwritten / loss %" => "All-class source totals. Loss percentage = overwritten / accepted; zero when accepted is zero.",
     "No runtime data" => "A recorder does not instrument executors automatically. Runtime source presence alone is not event history.",
-    "Up/Down / Enter" => "Select worker / enter Tasks.",
+    "Up/Down / Enter" => "Select worker / enter Tasks. Backspace returns from Tasks. On narrow terminals only the focused panel is shown.",
 );
 
 const RUNTIME_TASKS: &Section = section!("RUNTIME TASKS";
     "Task" => "Runtime task ID.",
-    "State" => "Reported/latest retained lifecycle state: Spawned, Materialized, Running, Pending, Completed, Canceled or Panicked. Pending means not polling, not proof the task is ready to run.",
-    "Scope" => "lifetime: runtime-published task counters. retained window: reconstructed from retained events. Do not compare these as equal observation periods.",
-    "Polls" => "Poll count in the row's Scope.",
-    "Avg resume" => "Total poll-finish-to-next-poll-start gap / Resume samples. Includes normal I/O, timer or producer waiting; NOT scheduler stall.",
-    "Max resume" => "Largest time from a poll finishing until the next poll starts.",
-    "Avg stall" => "Total ready-wait duration / Ready-wait samples. Measured from first wake until the next poll begins, not time inside poll.",
-    "Max stall" => "Largest wake-to-poll ready-wait duration.",
-    "Units / zero" => "ns/us/ms/s. Averages with no samples display zero; inspect Scope and sample counts before concluding there is no delay.",
-    "Up/Down / Enter / Backspace" => "Select task / enter Details / return to runtime threads.",
-    "[ / ] / r" => "Change sort / reverse. Poll-duration sorts refer to values shown in Details.",
+    "Future B" => "Inline size of the submitted future, in exact bytes; synchronous tasks use their closure size. Excludes executor bookkeeping, runtime wrappers and separately allocated buffers. Zero is a genuinely zero-sized body; '-' means unavailable in the producer or an older recording.",
+    "State(global)" => "Task-global coherently observed source activity, not execution on this historical worker; unknown for legacy or raced source state. Source-associated tasks remain visible without any completed retained polls.",
+    "Polls" => "Number of retained completed polls on THIS selected worker. Zero completed polls displays 0; not a lifetime counter.",
+    "Observed %" => "Union of this task's observed polls on THIS worker / the same displayed per-runtime window duration. Open coherent source polls can contribute. Lower bound, not CPU utilization; unavailable is '-'.",
+    "Median poll" => "Median completed poll duration on THIS worker. Even populations use the midpoint rounded down to nanoseconds. '-' means no samples, while 0ns is a genuine measured zero.",
+    "Max poll" => "Largest completed retained poll duration on THIS worker; '-' without samples. Open polls are not completed duration samples.",
+    "Units / zero" => "Durations use ns/us/ms/s; histogram ranges use inclusive nanoseconds. Zero completed polls is 0. Missing durations are '-', never an invented zero.",
+    "Up/Down / Enter / Backspace" => "Select task / focus Statistics / return to Workers. Press e to focus the task's operations below, or t to switch its Poll/Ready histogram.",
+    "[ / ] / r" => "Cycle Task, Future B, Polls, Observed %, Median poll and Max poll sorts / reverse direction. Unknown values stay last in either direction. Task selection and detail positions reset.",
 );
 
-const RUNTIME_DETAILS: &Section = section!("TASK DETAILS";
-    "Task / Runtime" => "Task ID and its runtime ID.",
-    "Parent" => "Parent task ID; '-' means absent.",
-    "Type descriptor" => "Recorded future/type descriptor ID; '-' means absent.",
-    "Workers" => "Associated worker IDs, not necessarily OS thread IDs.",
-    "Metric scope" => "Governs poll, resume and ready-wait samples, totals, averages and maxima. lifetime and retained window are different populations.",
-    "Polls" => "Number of polls in the metric scope.",
-    "Total poll time" => "Sum of execution time inside polls.",
-    "Average poll duration" => "Total poll time / Polls.",
-    "Maximum poll duration" => "Longest execution inside one poll.",
-    "Resume samples" => "Number of measured inter-poll gaps.",
-    "Average / Maximum time between polls" => "Average / largest gap from poll finish to next poll start. Includes normal task waiting.",
-    "Ready-wait samples" => "Number of measured wake-to-poll intervals.",
-    "Total scheduler stall" => "Sum of time from first wake until polling starts; not time inside poll.",
-    "Average / Maximum scheduler stall" => "Total scheduler stall / Ready-wait samples, and largest such interval.",
-    "Retained-window enqueues" => "Retained enqueue-event count, even when task metrics are lifetime.",
-    "Retained-window materializations" => "Retained task materialization-event count.",
-    "Retained-window transfer events" => "Recorded transfer/relocation phases, not necessarily complete migrations.",
-    "Lifetime" => "Completed/canceled/panicked timestamp minus spawn timestamp. '-' if an endpoint is missing. Elapsed lifetime, not CPU time.",
-    "Tab" => "While details are focused, toggle Details / Spawn Stack instead of changing main tab.",
-    "PgUp/PgDn / Backspace" => "Scroll details / return to Tasks.",
+const RUNTIME_ACTIVITY: &Section = section!("RUNTIME ACTIVITY";
+    "Running for / Ready for" => "Age at the coherent per-task source observation. Running is inside a poll; Ready is queued and eligible for a poll. Long ages are shown prominently even without a completed poll. '-' means unavailable, not zero.",
+    "Source observation" => "Per-task coherent observations, NOT a globally atomic snapshot of every worker/task. Open execution uses the coherent poll-worker ID, never last-worker metadata or a notifier thread. Older activity schemas without that ID need an exact retained runtime/task/poll-start timestamp match to assign worker occupancy; otherwise only the global running age is shown. Recording stop freezes observation time and ages; viewing or refreshing the stopped snapshot does not advance them. Legacy captures and raced observations have unknown activity rather than guessed ages.",
+    "repoll" => "A wake during a running poll requests another poll. This is not yet queue waiting: for a self-wake, ready wait starts at poll finish, not at the raw wake timestamp.",
+    "Poll (worker)" => "Observed execution intervals on this selected worker, including an open coherent source poll. The timeline shares the displayed per-runtime nanosecond window with worker charts.",
+    "Ready (global)" => "Task-global ready-to-next-poll intervals, possibly across workers. Ready wait is queue waiting, distinct from poll execution, ordinary pending time and raw wake latency. Do not add this task-global metric to worker execution.",
+    "Window / baseline" => "All charts for the same runtime use one displayed window, at most the latest 60 seconds of retained event/source observations, and clip interval unions to it. Filtering preserves this original axis. Eight rising bar heights show occupied fraction: zero stays on the baseline and every positive fraction rises above it. Dim baseline bars mean unobserved, not measured idle. Occupancy denominator is end minus start, not summed task lifetimes. Counts/histograms include all retained completed samples; open ages are not truncated to 60 seconds.",
+    "Duration (log10 buckets) / count" => "Duration runs left to right across 12 fixed decades: 0..<10ns, 10..<100ns, 100ns..<1us, and so on through milliseconds and seconds, ending in 100s+ (including overflow). Counts run vertically; one-character bars scale linearly to the largest bucket, with a minimum one-eighth-cell sliver for every nonempty bucket. Each bucket has a gray '_' zero baseline, including empty buckets. Numeric counts remain exact. All buckets fit at once; extremely narrow panels merge adjacent buckets. The selected bucket's lower-inclusive, upper-exclusive range and exact count appear above the bars. Axis endpoints use ns/us/ms/s.",
+    "Completed only" => "Poll histograms use completed worker-local polls; Ready wait histograms use completed task-global waits explicitly tagged as coherent queue duration. Open source intervals contribute to timelines/observed fractions but are excluded from BOTH duration histograms. No samples displays '-', never a synthetic zero-duration observation.",
+    "Wake-to-poll (raw)" => "When no coherent completed queue samples exist, the Ready histogram shows available legacy raw wake-to-poll latency instead. This task-global latency includes self-wake overlap with the preceding Running poll; it is NOT pure scheduler queue time. It never populates the Ready timeline or outstanding Ready age, which continue to use coherent queue evidence. Raw and pure-queue samples are never mixed.",
+    "Left/Right / PgUp/PgDn" => "In Statistics, select the previous/next bucket or move five buckets. Up/Down also move one bucket. Click a thin bar or its baseline to inspect its duration range and count. This changes presentation only, not the window or metrics.",
+    "Backspace / Enter" => "Enter drills Workers -> Tasks -> Statistics -> Operations -> Occurrences; Backspace reverses that path. Narrow terminals show the focused panel. Wide terminals keep worker activity and Statistics beside the task table, with operations, task-only occurrences and stack across the bottom.",
+    "t / Poll / Ready" => "Switch the task duration histogram between worker-local completed polls and task-global completed ready waits; click Poll/Ready for direct selection. F1 explains the metrics.",
+    "e" => "Focus the persistent lower task-operation browser without hiding the dashboard.",
+    "Tab / Shift-Tab" => "Always cycle main tabs, including from task events.",
+    "F filters" => "Event-stack or spawn-provenance filters change retained evidence. Spawn attribution is not evidence of execution at that site. Source-only association does not invent completed poll samples.",
 );
 
-const RUNTIME_STACK: &Section = section!("TASK SPAWN STACK";
-    "Spawn Stack" => "Selected task's spawn-site backtrace, not its current execution or sampled poll stack.",
-    "Frame number" => "Zero-based frame index.",
-    "Backtrace not captured" => "Enable Runtime tasks backtraces before spawning new tasks. Existing tasks cannot acquire a spawn stack retroactively.",
-    "Filters" => "Event stack or spawn provenance can select runtime records; spawn attribution does not imply execution at that site.",
-    "Tab / PgUp/PgDn / Backspace" => "Toggle detail view / scroll / return to Tasks.",
+const RUNTIME_EVENTS: &Section = section!("INFERRED TASK EVENTS";
+    "Inferred" => "Viewer-only correlation with retained runtime poll boundaries on the actual recorder thread. Counts aggregate this task across worker migrations. No task tags are added to event recording; inference is not proof of complete execution history.",
+    "Unassigned / ambiguous" => "Missing or inconsistent boundaries and overlapping execution cannot establish a unique actor. Such events are not counted as this task's activity. Captured task state or last-worker association alone is not attribution evidence.",
+    "Operations / Occurrences / Stack" => "Three persistent columns: select an operation on the left, one of this task's matching occurrences in the center, and inspect its stack on the right. Up/Down selects; Enter focuses occurrences. Backspace returns to operations, then Statistics. Other actors and other operation kinds are excluded, even when they share the same object.",
+    "Time / thread / sequence / object" => "Occurrences are ordered by original nanosecond timestamp, then recorder thread and sequence. Rows show when and where this task performed the selected operation, across all of its workers and matching objects. These row counts match the selected operation's event count.",
+    "Allocations" => "An allocation event identifies its inferred allocating task; its freeing actor can differ and is not included unless it is this task. An unmatched allocation is not proven live, and allocations minus frees is not task-owned memory.",
+    "Task-relative stack / f" => "Application frames are trimmed using retained poll stacks or a recognized instrumented future wrapper in the event stack. This also works when poll hooks omit backtraces. Without a known boundary the stack is explicitly untrimmed. Press f for the complete captured stack, including executor frames; PgUp/PgDn scrolls vertically and Left/Right pans long frames. Spawn provenance is not an execution stack.",
+    "Object identity" => "History notes distinguish stable allocation IDs from same-family address observations. Reused lock or channel addresses do not prove a single object lifetime. Retained creation/destruction boundaries separate Arc observations where available.",
+    "Filters" => "Filtering selects displayed records, but inference uses the original poll evidence so hiding a boundary cannot reassign another task's events. Missing captures cannot be recovered by filtering.",
+    "e / t" => "e focuses these events; t focuses Statistics and toggles Poll/Ready. Wide layouts keep both visible. Main-tab shortcuts remain available.",
 );
 
 const RUNTIME_STATES: &Section = section!("TASK STATE VALUES";
     "Spawned" => "A retained spawn event assigned the task identity.",
     "Materialized" => "A retained task-materialization event was observed.",
-    "Running" => "Task is assigned as current by the runtime source, or its latest retained transition begins a poll.",
-    "Pending" => "Not currently polling. This does not prove the task is ready to run; it may be waiting for a wake.",
+    "Running" => "A coherent source activity observation is inside a poll; Running for is its age.",
+    "Ready" => "A coherent source activity observation is queued and eligible to poll; Ready for is its queue age.",
+    "Waiting" => "An observed poll exit with no outstanding wake. This is not proof of Poll::Pending: the hook does not expose the poll result. Waiting or Ready can briefly appear before terminal retirement after completion or panic.",
     "Completed" => "A retained successful completion transition.",
     "Canceled" => "A retained cancellation transition.",
     "Panicked" => "A retained panic transition.",
-    "Blank / incomplete state" => "Insufficient retained lifecycle information. Missing transitions limit event-only reconstruction.",
+    "Unknown / incomplete state" => "No coherent source activity, legacy capture, or raced observation. Retained event gaps cannot prove current readiness or running age.",
 );
 
 const IO_RESOURCES: &Section = section!("I/O RESOURCES";
@@ -462,7 +480,9 @@ const CAPTURE: &Section = section!("CAPTURE PROGRESS";
     "Phase N of 3 / gauge" => "Capture stage, not measured byte progress or a completion-time estimate.",
     "Elapsed" => "Seconds since capture began.",
     "Background completion" => "Capture continues while help is open. This topic stays fixed; close help to inspect results and capture/save failures.",
-    "Snapshot buffers" => "retain keeps records; clear clears them; release releases recorder buffers. Windows may overlap or restart.",
+    "Record and continue" => "Default: capture and save a snapshot, preserving server buffers and the current recording policy. Enabled classes continue writing in the background; disabled classes stay disabled. Exited-thread buffers are released after capture.",
+    "Record and stop" => "Capture events, stop all six recording classes and deallocate server event rings. Recorder metadata remains. Later source/decode/save errors do not undo a completed stop; live policy is read back even on errors.",
+    "Clear (C)" => "Empty server buffers independently: no snapshot, symbolization or disk I/O. Keep active-thread allocations and prior recording policy. The displayed capture and saved files are unchanged.",
     "Snapshot scope" => "Capture is live-only. Analysis otherwise shows the last captured snapshot.",
 );
 
@@ -505,19 +525,20 @@ const HELP_CONTROLS: &Section = section!("HELP CONTROLS";
 );
 
 const LIVE: &Section = section!("LIVE NAVIGATION - AFTER CLOSING HELP";
-    "1-8 / Tab / Shift-Tab" => "Select/cycle main tabs. Runtime Details uses Tab to toggle its detail view instead.",
+    "1-8 / Tab / Shift-Tab" => "Select/cycle main tabs from every Runtime focus, including Activity.",
     "Click rows / drag borders" => "Select and enter a row's detail pane / resize panes.",
-    "s" => "Capture a snapshot. Analysis tables do not continuously refresh.",
+    "s" => "Run the selected Record and continue / Record and stop action. Analysis tables do not continuously refresh.",
     "c" => "Configure recording.",
-    "d" => "Cycle snapshot-buffer disposition.",
+    "d" => "Switch between Record and continue (default) and Record and stop.",
+    "C (uppercase)" => "Clear server event buffers without capturing; preserve recording policy, displayed snapshot and saved files. Stop and Clear require a supporting server; legacy servers report an explicit unsupported error.",
     "F" => "Edit whole-record stack filters.",
     "Esc / q" => "Disconnect to browser / quit.",
     "A/E/X/R/I/C" => "Footer indicators: Allocations, general Events, Arc dereferences, Runtime tasks, I/O, Cache. Letter = enabled; '-' = disabled. Sampling/backtrace settings are in Info or c.",
 );
 
 const OFFLINE: &Section = section!("OFFLINE NAVIGATION - AFTER CLOSING HELP";
-    "Read-only" => "Offline is read-only: no process connection, recording changes, capture or buffer disposition changes.",
-    "1-8 / Tab / Shift-Tab" => "Select/cycle tabs, except Runtime Details. Sorting, stack presentation and F filters change only the saved-data view.",
+    "Read-only" => "Offline is read-only: no process connection, recording changes, capture, capture-mode changes or clearing server buffers.",
+    "1-8 / Tab / Shift-Tab" => "Select/cycle tabs. Sorting, stack presentation and F filters change only the saved-data view.",
     "q / Esc" => "Quit the offline viewer. With help open these keys close help instead.",
     "Missing data" => "A live-only 'press s' placeholder cannot create missing data in an offline file.",
 );
@@ -541,8 +562,8 @@ mod tests {
         Context::ThreadObjects,
         Context::RuntimeWorkers,
         Context::RuntimeTasks,
-        Context::RuntimeDetails,
-        Context::RuntimeSpawnStack,
+        Context::RuntimeActivity,
+        Context::RuntimeEvents,
         Context::IoResources,
         Context::IoOperations,
         Context::CacheTiers,
@@ -565,7 +586,28 @@ mod tests {
     }
 
     #[test]
-    fn every_context_has_explicit_sections_entries_controls_and_scope() {
+    fn version_labels_are_explained_only_in_info_help() {
+        for (context, offline) in [(Context::Info, false), (Context::Info, true)] {
+            let help = text(context, offline);
+            for label in [
+                "Monitor (seismograph_cli)",
+                "Server (seismograph)",
+                "unknown (legacy server)",
+                "unknown (not recorded in snapshot)",
+            ] {
+                assert!(help.contains(label), "{context:?}: missing {label}");
+            }
+        }
+        for context in CONTEXTS {
+            if context != Context::Info {
+                assert!(!text(context, false).contains("CRATE VERSIONS"), "{context:?}");
+                assert!(!text(context, true).contains("CRATE VERSIONS"), "{context:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn every_context_has_explicit_sections_entries_and_help_controls() {
         for context in CONTEXTS {
             for offline in [false, true] {
                 assert!(!title(context).is_empty());
@@ -579,10 +621,46 @@ mod tests {
                     }
                 }
                 let help = text(context, offline);
-                for required in ["F1", "PgUp/PgDn", "Home/End", "denominator", "sampled-out", "remain unfiltered"] {
+                for required in ["F1", "PgUp/PgDn", "Home/End"] {
                     assert!(help.contains(required), "{context:?}: missing {required}");
                 }
-                assert!(help.contains(if offline { "Offline is read-only" } else { "LIVE NAVIGATION" }));
+                if context == Context::Info {
+                    assert!(help.contains(if offline { "Offline is read-only" } else { "LIVE NAVIGATION" }));
+                } else {
+                    assert!(!help.contains(COMMON.heading));
+                    assert!(!help.contains(LIVE.heading));
+                    assert!(!help.contains(OFFLINE.heading));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn focused_help_excludes_focusable_siblings_and_keeps_passive_children() {
+        for (context, sections) in [
+            (Context::HeapBuckets, vec![HEAP_BUCKETS, HEAP_SUMMARY]),
+            (Context::HeapHotspots, vec![HEAP_HOTSPOTS, STACK]),
+            (Context::Allocations, vec![ALLOCATIONS, STACK]),
+            (Context::PrimitiveTypes, vec![PRIMITIVE_TYPES]),
+            (Context::PrimitiveOperations, vec![PRIMITIVE_OPERATIONS, PRIMITIVE_VALUES]),
+            (Context::PrimitiveHotspots, vec![PRIMITIVE_HOTSPOTS, STACK]),
+            (Context::Threads, vec![THREADS]),
+            (Context::ThreadOperations, vec![THREAD_OPERATIONS, PRIMITIVE_VALUES]),
+            (Context::ThreadParticipants, vec![THREAD_PARTICIPANTS]),
+            (Context::ThreadObjects, vec![THREAD_OBJECTS, STACK]),
+            (Context::RuntimeWorkers, vec![RUNTIME_WORKERS]),
+            (Context::RuntimeTasks, vec![RUNTIME_TASKS, RUNTIME_STATES]),
+            (Context::RuntimeActivity, vec![RUNTIME_ACTIVITY, RUNTIME_STATES]),
+            (Context::RuntimeEvents, vec![RUNTIME_EVENTS]),
+            (Context::IoResources, vec![IO_RESOURCES]),
+            (Context::IoOperations, vec![IO_OPERATIONS]),
+            (Context::CacheTiers, vec![CACHE_TIERS]),
+            (Context::CacheOperations, vec![CACHE_OPERATIONS]),
+        ] {
+            let mut expected = sections;
+            expected.push(HELP_CONTROLS);
+            for offline in [false, true] {
+                assert_eq!(document(context, offline), expected, "{context:?} offline={offline}");
             }
         }
     }
@@ -645,38 +723,30 @@ mod tests {
         (Context::ThreadObjects, &["Object", "Own", "Related", "event(s)"]),
         (
             Context::RuntimeWorkers,
-            &["Runtime / thread", "Role", "State", "Tasks", "Poll busy", "Avg poll", "Max poll"],
-        ),
-        (
-            Context::RuntimeTasks,
             &[
-                "Task",
+                "Runtime / thread",
+                "Role",
                 "State",
-                "Scope",
+                "Tasks",
                 "Polls",
-                "Avg resume",
-                "Max resume",
-                "Avg stall",
-                "Max stall",
+                "Observed %",
+                "Median poll",
+                "Max poll",
+                "Poll timeline",
             ],
         ),
         (
-            Context::RuntimeDetails,
+            Context::RuntimeTasks,
+            &["Task", "State(global)", "Polls", "Observed %", "Median poll", "Max poll"],
+        ),
+        (
+            Context::RuntimeActivity,
             &[
-                "Parent",
-                "Type descriptor",
-                "Workers",
-                "Metric scope",
-                "Polls",
-                "Total poll time",
-                "Average poll duration",
-                "Maximum poll duration",
-                "Resume samples",
-                "Ready-wait samples",
-                "Retained-window enqueues",
-                "Retained-window materializations",
-                "Retained-window transfer events",
-                "Lifetime",
+                "Running for / Ready for",
+                "Poll (worker)",
+                "Ready (global)",
+                "Duration (log10 buckets) / count",
+                "Completed only",
             ],
         ),
         (
@@ -710,31 +780,35 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::too_many_lines, reason = "one table verifies each focused panel's metric semantics")]
     fn help_explains_noninterchangeable_scopes_and_operation_values() {
         for (context, distinctions) in [
             (
                 Context::RuntimeTasks,
                 &[
                     "lifetime",
-                    "retained window",
-                    "poll finishing",
-                    "first wake",
-                    "NOT scheduler stall",
-                    "not time inside poll",
+                    "THIS selected worker",
+                    "not CPU utilization",
                     "no samples",
                     "Spawned",
                     "Materialized",
-                    "Pending",
+                    "Waiting",
+                    "not proof of Poll::Pending",
+                    "terminal retirement",
                     "Completed",
                     "Canceled",
                     "Panicked",
                 ][..],
             ),
             (
+                Context::RuntimeActivity,
+                &["poll finish", "raw wake", "queue waiting", "12", "vertically", "Dim baseline"][..],
+            ),
+            (
                 Context::RuntimeWorkers,
                 &[
-                    "first to last retained",
-                    "NOT process CPU",
+                    "displayed per-runtime window",
+                    "NOT CPU",
                     "unassigned",
                     "Core",
                     "Blocking",
@@ -769,6 +843,11 @@ mod tests {
                     "Barrier",
                     "Condvar",
                     "OnceLock / LazyLock",
+                ][..],
+            ),
+            (
+                Context::PrimitiveOperations,
+                &[
                     "Create",
                     "Clone",
                     "Deref",

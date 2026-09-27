@@ -8,6 +8,15 @@
 //! Instrumented crates record bounded events while registered sources contribute
 //! point-in-time state to a portable [`snapshot()`].
 //!
+//! Snapshot capture defaults to retaining active-thread buffers and recording
+//! policy. [`snapshot::EventBufferDisposition::Stop`] captures the retained
+//! events, disables all six recording classes, and releases event-ring storage.
+//! Unlike legacy `Release`, it does not restart recording. Later source/encoding
+//! failures do not undo completed cleanup. [`recorder::clear_event_buffers()`]
+//! independently empties event rings without copying a snapshot or invoking
+//! sources, preserving recording policies and active-thread allocations.
+//! These operations leave process-lifetime recorder metadata registered.
+//!
 //! ```
 //! use seismograph::recorder::event::{EventClass, EventKind, ObjectId, Record};
 //! use seismograph::recorder::{Configuration, RecordingPolicy};

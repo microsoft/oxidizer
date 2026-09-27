@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use seismograph::recorder::event::{BacktraceCapture, EventKind, EventTimestamp};
+use seismograph::recorder::event::{BacktraceCapture, EventClass, EventKind, EventTimestamp};
 use seismograph::recorder::runtime::{TaskId, TransferId, WorkerId};
 
 use crate::snapshot::WorkerState;
@@ -172,6 +172,32 @@ impl WorkerHandle {
         TaskPoll { task_id, started_at }
     }
 
+    pub(crate) fn task_poll_started_recorded(
+        &self,
+        task_id: TaskId,
+        started_at: EventTimestamp,
+        queued_since: Option<EventTimestamp>,
+        session: Option<seismograph::recorder::RecordingSession>,
+    ) -> TaskPoll {
+        self.worker.current_task.store(task_id.get(), Ordering::Release);
+        if let Some(session) = session {
+            seismograph::recorder::record_in_session_classified(session, EventClass::RuntimeTask, || {
+                crate::runtime_record(
+                    started_at,
+                    self.runtime.id(),
+                    Some(self.id()),
+                    EventKind::TaskPollStarted,
+                    task_id.get(),
+                    0,
+                    queued_since.map_or(0, |queued| duration_nanos(started_at, queued)),
+                    if queued_since.is_some() { 2 } else { 0 },
+                    BacktraceCapture::Never,
+                )
+            });
+        }
+        TaskPoll { task_id, started_at }
+    }
+
     /// Finishes a task poll and updates aggregate poll duration.
     #[inline]
     #[expect(
@@ -196,6 +222,9 @@ impl WorkerHandle {
             task.poll_duration_nanos.fetch_add(duration_nanos, Ordering::Relaxed);
             task.max_poll_duration_nanos.fetch_max(duration_nanos, Ordering::Relaxed);
             task.last_poll_finished_at.store(finished_at.ticks().max(1), Ordering::Release);
+            if seismograph::recorder::recording_enabled_for(EventClass::RuntimeTask) {
+                task.activity.poll_finished(poll.started_at, finished_at);
+            }
         }
         self.worker.current_task.store(0, Ordering::Release);
         self.record_at(

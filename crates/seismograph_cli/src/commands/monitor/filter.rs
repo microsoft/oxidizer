@@ -175,7 +175,7 @@ fn identifier(segment: &str) -> bool {
 }
 
 /// Removes generic arguments, retaining the implementing owner of qualified impls.
-fn symbol_path(symbol: &str) -> Option<String> {
+pub(super) fn symbol_path(symbol: &str) -> Option<String> {
     let symbol = symbol.trim();
     if symbol.is_empty() {
         return None;

@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use performables::arc::Arc;
 use performables::sync::lock::RwLock;
+use performables::sync::mode;
 use performables::sync::mutex::Mutex;
 
 rallocator::rallocator!();
@@ -27,8 +28,8 @@ const COMPLETION_POLL_INTERVAL: Duration = Duration::from_millis(5);
 const REPORT_INTERVAL: Duration = Duration::from_secs(10);
 
 struct Service {
-    routes: RwLock<RouteTable>,
-    completions: Mutex<VecDeque<Completion>>,
+    routes: RwLock<RouteTable, mode::Async>,
+    completions: Mutex<VecDeque<Completion>, mode::Async>,
     configuration: Arc<ConfigurationSnapshot>,
     requests_completed: AtomicU64,
 }
@@ -184,7 +185,7 @@ fn request_worker(worker_id: usize, service: &Arc<Service>, start: &std::sync::B
 }
 
 fn route_request(service: &Arc<Service>, request: &Arc<Request>) -> (u32, u64, u64) {
-    let routes = block_on(service.routes.read());
+    let routes = block_on(service.routes.read_async());
     let checksum = request
         .payload
         .iter()
@@ -200,7 +201,7 @@ fn route_request(service: &Arc<Service>, request: &Arc<Request>) -> (u32, u64, u
 }
 
 fn publish_completion(service: &Arc<Service>, completion: Completion) {
-    let mut completions = block_on(service.completions.lock());
+    let mut completions = block_on(service.completions.lock_async());
     if completions.len() == MAX_PENDING_COMPLETIONS {
         completions.pop_front();
     }
@@ -227,7 +228,7 @@ fn routing_refresher(service: &Arc<Service>, start: &std::sync::Barrier) {
     let mut generation = 1_u64;
     loop {
         thread::sleep(ROUTE_REFRESH_INTERVAL);
-        let mut routes = block_on(service.routes.write());
+        let mut routes = block_on(service.routes.write_async());
         *routes = build_routes(generation);
         black_box(routes.routes.iter().map(|route| route.endpoint.len()).sum::<usize>());
         thread::sleep(Duration::from_millis(1));
@@ -239,7 +240,7 @@ fn completion_consumer(service: &Arc<Service>, start: &std::sync::Barrier) {
     start.wait();
     loop {
         let drained = {
-            let mut completions = block_on(service.completions.lock());
+            let mut completions = block_on(service.completions.lock_async());
             let drain_count = completions.len().min(128);
             completions.drain(..drain_count).collect::<Vec<_>>()
         };

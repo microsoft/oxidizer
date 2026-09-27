@@ -31,6 +31,15 @@ fn directory(name: &str) -> PathBuf {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "terminal detection and subprocess behavior are exercised by native tests")]
+fn monitor_rejects_redirected_output() {
+    let result = Command::new(env!("CARGO_BIN_EXE_seismograph")).arg("monitor").output().unwrap();
+    assert_eq!(result.status.code(), Some(2));
+    assert!(String::from_utf8(result.stderr).unwrap().contains("interactive terminal"));
+    assert!(result.stdout.is_empty());
+}
+
+#[test]
 #[cfg_attr(miri, ignore = "filesystem and subprocess behavior is exercised by native tests")]
 fn view_requires_a_path_and_reports_file_errors_without_html_output() {
     let binary = env!("CARGO_BIN_EXE_seismograph");

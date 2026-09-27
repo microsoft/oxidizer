@@ -1,12 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders};
 
-use super::app::{App, MonitorTab, Screen};
+use super::app::{App, MonitorTab, RuntimeFocus, Screen};
 
 pub(super) const TABS: [(MonitorTab, &str); 8] = [
     (MonitorTab::Info, "  Info  "),
@@ -38,6 +38,7 @@ fn tab_at(area: Rect, column: u16, row: u16) -> Option<MonitorTab> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Split {
     Info,
+    InfoColumns,
     HeapSummary,
     HeapColumns,
     HeapStack,
@@ -51,6 +52,8 @@ enum Split {
     ThreadStack,
     RuntimeRows,
     RuntimeColumns,
+    RuntimeActivityRows,
+    RuntimeStatistics,
     Io,
     Cache,
 }
@@ -58,7 +61,7 @@ enum Split {
 #[derive(Default)]
 pub(super) struct Panels {
     pub(super) rows: super::mouse::MouseRows,
-    sizes: [Option<Constraint>; 16],
+    sizes: [Option<Constraint>; 19],
     dragging: Option<(MonitorTab, Split)>,
 }
 
@@ -75,6 +78,28 @@ struct Divider {
 }
 
 impl Panels {
+    pub(super) fn runtime_compact(area: Rect) -> bool {
+        area.width < 110 || area.height < 32
+    }
+
+    /// The renderer and mouse routing use the same focus-dependent geometry.
+    pub(super) fn arrange_runtime(&self, area: Rect, focus: RuntimeFocus) -> Arrangement {
+        if !Self::runtime_compact(area) {
+            return self.arrange(MonitorTab::Runtime, area);
+        }
+        let mut areas = [Rect::default(); 5];
+        areas[match focus {
+            RuntimeFocus::Workers => 0,
+            RuntimeFocus::Tasks => 1,
+            RuntimeFocus::Activity => 3,
+            RuntimeFocus::Events => 4,
+        }] = area;
+        Arrangement {
+            areas,
+            dividers: Vec::new(),
+        }
+    }
+
     pub(super) fn cancel_drag(&mut self) {
         self.dragging = None;
     }
@@ -101,7 +126,9 @@ impl Panels {
         let mut areas = [Rect::default(); 5];
         match tab {
             MonitorTab::Info => {
-                [areas[0], areas[1]] = split(Split::Info, Direction::Vertical, area, Constraint::Percentage(45));
+                let [activity, bottom] = split(Split::Info, Direction::Vertical, area, Constraint::Percentage(45));
+                let [details, threads] = split(Split::InfoColumns, Direction::Horizontal, bottom, Constraint::Percentage(50));
+                areas[..3].copy_from_slice(&[activity, details, threads]);
             }
             MonitorTab::Heaps => {
                 let [summary, rest] = split(Split::HeapSummary, Direction::Vertical, area, Constraint::Length(6));
@@ -127,9 +154,12 @@ impl Panels {
                 areas = [threads, operations, participants, objects, stack];
             }
             MonitorTab::Runtime => {
-                let [workers, rest] = split(Split::RuntimeRows, Direction::Vertical, area, Constraint::Percentage(45));
-                let [tasks, details] = split(Split::RuntimeColumns, Direction::Horizontal, rest, Constraint::Percentage(45));
-                areas[..3].copy_from_slice(&[workers, tasks, details]);
+                let [workers, rest] = split(Split::RuntimeRows, Direction::Vertical, area, Constraint::Length(10));
+                let [middle, events] = split(Split::RuntimeActivityRows, Direction::Vertical, rest, Constraint::Percentage(45));
+                let [tasks, charts] = split(Split::RuntimeColumns, Direction::Horizontal, middle, Constraint::Percentage(55));
+                let [worker_activity, statistics] =
+                    split(Split::RuntimeStatistics, Direction::Horizontal, charts, Constraint::Percentage(50));
+                areas = [workers, tasks, worker_activity, statistics, events];
             }
             MonitorTab::Io => {
                 [areas[0], areas[1]] = split(Split::Io, Direction::Horizontal, area, Constraint::Percentage(48));
@@ -199,12 +229,7 @@ impl App {
             self.panels.rows.begin(area);
             return;
         };
-        let [body, _, _] = Layout::vertical([
-            Constraint::Min(4),
-            Constraint::Length(self.filter_banner_height()),
-            Constraint::Length(1),
-        ])
-        .areas(area);
+        let [body, ..] = self.screen_areas(area);
         let [tabs, content] = Layout::vertical([Constraint::Length(3), Constraint::Min(1)]).areas(body);
         if event.kind == MouseEventKind::Down(MouseButton::Left)
             && let Some(selected) = tab_at(tabs, event.column, event.row)
@@ -220,7 +245,22 @@ impl App {
             self.panels.dragging = None;
             return;
         }
-        self.panels.handle_mouse(event, tab, content);
+        if tab == MonitorTab::Info && self.panels.arrange(tab, content).areas[2].contains((event.column, event.row).into()) {
+            let key = match event.kind {
+                MouseEventKind::ScrollUp => Some(KeyCode::Up),
+                MouseEventKind::ScrollDown => Some(KeyCode::Down),
+                _ => None,
+            };
+            if let Some(key) = key {
+                self.handle_key(key);
+                return;
+            }
+        }
+        if tab == MonitorTab::Runtime && Panels::runtime_compact(content) {
+            self.panels.cancel_drag();
+        } else {
+            self.panels.handle_mouse(event, tab, content);
+        }
         if self.panels.dragging.is_none() {
             self.handle_row_click(event, area);
         }
@@ -351,8 +391,8 @@ mod tests {
         if let Screen::Offline { tab, .. } = &mut app.screen {
             *tab = MonitorTab::Runtime;
         }
-        let terminal = Rect::new(0, 0, 100, 44);
-        let content = Rect::new(0, 3, 100, 40);
+        let terminal = Rect::new(0, 0, 180, 44);
+        let content = Rect::new(0, 3, 180, 40);
         let before = app.panels.arrange(MonitorTab::Runtime, content).areas;
         app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 10, before[1].y), terminal);
         assert!(app.panels.dragging.is_some());
@@ -413,5 +453,112 @@ mod tests {
             ],
             [None, None, None, None, Some(MonitorTab::Info), Some(MonitorTab::Heaps), None, None],
         );
+    }
+
+    #[test]
+    fn runtime_narrow_focus_collapses_without_overlaps_or_drag_targets() {
+        let panels = Panels::default();
+        let area = Rect::new(3, 4, 80, 20);
+        for (focus, index) in [
+            (RuntimeFocus::Workers, 0),
+            (RuntimeFocus::Tasks, 1),
+            (RuntimeFocus::Activity, 3),
+            (RuntimeFocus::Events, 4),
+        ] {
+            let arrangement = panels.arrange_runtime(area, focus);
+            assert_eq!(arrangement.areas[index], area);
+            assert_eq!(arrangement.areas.iter().filter(|area| !area.is_empty()).count(), 1);
+            assert!(arrangement.dividers.is_empty());
+        }
+    }
+
+    #[test]
+    fn task_events_do_not_replace_the_dashboard_when_focused() {
+        let panels = Panels::default();
+        let area = Rect::new(0, 3, 180, 56);
+        assert_eq!(
+            panels.arrange_runtime(area, RuntimeFocus::Events).areas,
+            panels.arrange_runtime(area, RuntimeFocus::Tasks).areas,
+        );
+    }
+
+    #[test]
+    fn info_keeps_top_rates_and_lower_left_metrics_beside_thread_graphics() {
+        let mut panels = Panels::default();
+        let area = Rect::new(0, 3, 180, 56);
+        let before = panels.arrange(MonitorTab::Info, area).areas;
+        assert_eq!(before[0].width, area.width);
+        assert_eq!((before[1].y, before[2].y), (before[0].bottom(), before[0].bottom()));
+        assert_eq!((before[1].right(), before[2].right()), (before[2].x, area.right()));
+        assert_eq!(before[1].width, before[2].width);
+        panels.handle_mouse(
+            mouse(MouseEventKind::Down(MouseButton::Left), before[2].x, before[2].y + 2),
+            MonitorTab::Info,
+            area,
+        );
+        panels.handle_mouse(
+            mouse(MouseEventKind::Drag(MouseButton::Left), before[2].x - 10, before[2].y + 2),
+            MonitorTab::Info,
+            area,
+        );
+        let after = panels.arrange(MonitorTab::Info, area).areas;
+        assert_eq!(after[0], before[0]);
+        assert_eq!(after[2].width, before[2].width + 10);
+    }
+
+    #[test]
+    fn statistics_divider_resizes_only_the_two_compact_charts() {
+        let mut panels = Panels::default();
+        let area = Rect::new(0, 3, 180, 56);
+        let before = panels.arrange_runtime(area, RuntimeFocus::Events).areas;
+        let divider = (before[3].x, before[3].y + 2);
+        panels.handle_mouse(
+            mouse(MouseEventKind::Down(MouseButton::Left), divider.0, divider.1),
+            MonitorTab::Runtime,
+            area,
+        );
+        panels.handle_mouse(
+            mouse(MouseEventKind::Drag(MouseButton::Left), divider.0 + 8, divider.1),
+            MonitorTab::Runtime,
+            area,
+        );
+        panels.handle_mouse(
+            mouse(MouseEventKind::Up(MouseButton::Left), divider.0 + 8, divider.1),
+            MonitorTab::Runtime,
+            area,
+        );
+        let after = panels.arrange_runtime(area, RuntimeFocus::Events).areas;
+        assert_eq!((after[0], after[1], after[4]), (before[0], before[1], before[4]));
+        assert_eq!((after[2].width, after[3].width), (before[2].width + 8, before[3].width - 8));
+        assert_eq!(after[2].right(), after[3].x);
+    }
+
+    #[test]
+    fn runtime_dashboard_places_half_width_charts_above_events_and_retains_dragging() {
+        let mut panels = Panels::default();
+        let area = Rect::new(0, 3, 180, 56);
+        let before = panels.arrange_runtime(area, RuntimeFocus::Tasks).areas;
+        assert_eq!((before[0].height, before[4].width), (10, 180));
+        assert_eq!(before[2].right(), before[3].x);
+        assert!(before[2].width.abs_diff(before[3].width) <= 1);
+        assert!(before[2].width <= 41);
+        assert_eq!(
+            (before[1].bottom(), before[2].bottom(), before[3].bottom()),
+            (before[4].y, before[4].y, before[4].y)
+        );
+        panels.handle_mouse(
+            mouse(MouseEventKind::Down(MouseButton::Left), 5, before[4].y),
+            MonitorTab::Runtime,
+            area,
+        );
+        panels.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), 5, 35), MonitorTab::Runtime, area);
+        panels.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), 5, 35), MonitorTab::Runtime, area);
+        let after = panels.arrange_runtime(area, RuntimeFocus::Activity).areas;
+        assert_eq!(after[0], before[0]);
+        assert_eq!(
+            (after[1].bottom(), after[2].bottom(), after[3].bottom(), after[4].y),
+            (35, 35, 35, 35)
+        );
+        assert_eq!(after[4].right(), area.right());
     }
 }

@@ -95,7 +95,7 @@ fn bounded_channel_applies_async_backpressure() {
     let counter = Arc::new(WakeCounter::default());
     let waker = test_waker(&counter);
     let mut context = Context::from_waker(&waker);
-    let mut send = pin!(sender.send(2));
+    let mut send = pin!(sender.send_async(2));
 
     assert!(send.as_mut().poll(&mut context).is_pending());
     assert_eq!(receiver.try_recv(), Ok(1));
@@ -113,19 +113,19 @@ fn bounded_channel_rejects_zero_capacity() {
 #[test]
 fn bounded_channel_applies_blocking_backpressure() {
     let (sender, receiver) = bounded(1);
-    sender.send_sync(1).unwrap();
+    sender.send(1).unwrap();
     let (started_sender, started_receiver) = std::sync::mpsc::channel();
     let thread = std::thread::spawn(move || {
         started_sender.send(()).unwrap();
-        sender.send_sync(2)
+        sender.send(2)
     });
     started_receiver.recv().unwrap();
 
     std::thread::sleep(Duration::from_millis(10));
     assert!(!thread.is_finished());
-    assert_eq!(receiver.recv_sync(), Ok(1));
+    assert_eq!(receiver.recv(), Ok(1));
     assert_eq!(join_with_timeout(thread), Ok(()));
-    assert_eq!(receiver.recv_sync(), Ok(2));
+    assert_eq!(receiver.recv(), Ok(2));
 }
 
 #[test]
@@ -174,7 +174,7 @@ fn queue_endpoints_report_state_and_format_errors() {
     assert_eq!(receiver.try_recv(), Ok(1));
     assert_eq!(receiver.try_recv(), Ok(2));
     let empty = receiver.try_recv().unwrap_err();
-    let timeout = receiver.recv_timeout_sync(Duration::from_millis(1)).unwrap_err();
+    let timeout = receiver.recv_timeout(Duration::from_millis(1)).unwrap_err();
     drop(sender);
     let closed = receiver.try_recv().unwrap_err();
 
@@ -193,7 +193,7 @@ fn queue_receive_timeout_returns_buffered_values() {
     let (sender, receiver) = unbounded();
     sender.try_send(17).unwrap();
 
-    assert_eq!(receiver.recv_timeout_sync(Duration::MAX), Ok(17));
+    assert_eq!(receiver.recv_timeout(Duration::MAX), Ok(17));
 }
 
 #[test]
@@ -207,26 +207,26 @@ fn unbounded_channel_supports_multiple_producers_and_consumers() {
 
     let first_consumer = std::thread::spawn(move || {
         let mut values = Vec::new();
-        while let Ok(value) = consumer_a.recv_sync() {
+        while let Ok(value) = consumer_a.recv() {
             values.push(value);
         }
         values
     });
     let second_consumer = std::thread::spawn(move || {
         let mut values = Vec::new();
-        while let Ok(value) = consumer_b.recv_sync() {
+        while let Ok(value) = consumer_b.recv() {
             values.push(value);
         }
         values
     });
     let first_producer = std::thread::spawn(move || {
         for value in 0..CHANNEL_ITEMS_PER_PRODUCER {
-            producer_a.send_sync(value).unwrap();
+            producer_a.send(value).unwrap();
         }
     });
     let second_producer = std::thread::spawn(move || {
         for value in CHANNEL_ITEMS_PER_PRODUCER..(2 * CHANNEL_ITEMS_PER_PRODUCER) {
-            producer_b.send_sync(value).unwrap();
+            producer_b.send(value).unwrap();
         }
     });
     drop(sender);
@@ -250,7 +250,7 @@ fn cancelled_queue_operations_do_not_consume_values_or_capacity() {
     let waker = test_waker(&counter);
     let mut context = Context::from_waker(&waker);
     {
-        let mut cancelled_send = pin!(sender.send(2));
+        let mut cancelled_send = pin!(sender.send_async(2));
         assert!(cancelled_send.as_mut().poll(&mut context).is_pending());
     }
     assert_eq!(receiver.try_recv(), Ok(1));
@@ -259,7 +259,7 @@ fn cancelled_queue_operations_do_not_consume_values_or_capacity() {
     assert_eq!(receiver.try_recv(), Ok(3));
 
     {
-        let mut cancelled_receive = pin!(receiver.recv());
+        let mut cancelled_receive = pin!(receiver.recv_async());
         assert!(cancelled_receive.as_mut().poll(&mut context).is_pending());
     }
     sender.try_send(4).unwrap();
@@ -275,8 +275,8 @@ fn cancelling_a_selected_queue_waiter_hands_readiness_to_the_next_waiter() {
     let second_counter = Arc::new(WakeCounter::default());
     let second_waker = test_waker(&second_counter);
     let mut second_context = Context::from_waker(&second_waker);
-    let mut first = Box::pin(receiver.recv());
-    let mut second = Box::pin(receiver.recv());
+    let mut first = Box::pin(receiver.recv_async());
+    let mut second = Box::pin(receiver.recv_async());
     assert!(first.as_mut().poll(&mut first_context).is_pending());
     assert!(second.as_mut().poll(&mut second_context).is_pending());
 
@@ -287,8 +287,8 @@ fn cancelling_a_selected_queue_waiter_hands_readiness_to_the_next_waiter() {
     assert_eq!(second.as_mut().poll(&mut second_context), Poll::Ready(Ok(1)));
 
     sender.try_send(2).unwrap();
-    let mut first = Box::pin(sender.send(3));
-    let mut second = Box::pin(sender.send(4));
+    let mut first = Box::pin(sender.send_async(3));
+    let mut second = Box::pin(sender.send_async(4));
     assert!(first.as_mut().poll(&mut first_context).is_pending());
     assert!(second.as_mut().poll(&mut second_context).is_pending());
     assert_eq!(receiver.try_recv(), Ok(2));
@@ -305,7 +305,7 @@ fn cancelling_a_queue_wait_releases_its_registered_waker() {
     {
         let waker = test_waker(&counter);
         let mut context = Context::from_waker(&waker);
-        let mut receive = pin!(receiver.recv());
+        let mut receive = pin!(receiver.recv_async());
         assert!(receive.as_mut().poll(&mut context).is_pending());
     }
     drop(counter);
@@ -319,7 +319,7 @@ fn dropping_final_endpoints_wakes_blocked_queue_operations() {
     let counter = Arc::new(WakeCounter::default());
     let waker = test_waker(&counter);
     let mut context = Context::from_waker(&waker);
-    let mut receive = pin!(receiver.recv());
+    let mut receive = pin!(receiver.recv_async());
     assert!(receive.as_mut().poll(&mut context).is_pending());
     drop(sender);
     assert_eq!(counter.0.load(Ordering::Relaxed), 1);
@@ -333,7 +333,7 @@ fn dropping_final_endpoints_wakes_blocked_queue_operations() {
     let counter = Arc::new(WakeCounter::default());
     let waker = test_waker(&counter);
     let mut context = Context::from_waker(&waker);
-    let mut send = pin!(sender.send(2));
+    let mut send = pin!(sender.send_async(2));
     assert!(send.as_mut().poll(&mut context).is_pending());
     drop(receiver);
     assert_eq!(counter.0.load(Ordering::Relaxed), 1);
@@ -352,8 +352,8 @@ fn closing_queue_preserves_buffered_values_and_rejects_sends() {
     assert!(receiver.close());
     assert!(!receiver.close());
     assert_eq!(sender.try_send(2).unwrap_err().into_value(), Some(2));
-    assert_eq!(receiver.recv_sync(), Ok(1));
-    assert!(receiver.recv_sync().unwrap_err().is_closed());
+    assert_eq!(receiver.recv(), Ok(1));
+    assert!(receiver.recv().unwrap_err().is_closed());
 }
 
 #[test]
@@ -362,14 +362,14 @@ fn sender_close_wakes_receivers_and_preserves_buffered_values() {
     sender.try_send(1).unwrap();
     assert!(sender.close());
     assert!(!sender.close());
-    assert_eq!(receiver.recv_sync(), Ok(1));
-    assert!(receiver.recv_sync().unwrap_err().is_closed());
+    assert_eq!(receiver.recv(), Ok(1));
+    assert!(receiver.recv().unwrap_err().is_closed());
 
     let (sender, receiver) = unbounded::<usize>();
     let counter = Arc::new(WakeCounter::default());
     let waker = test_waker(&counter);
     let mut context = Context::from_waker(&waker);
-    let mut receive = pin!(receiver.recv());
+    let mut receive = pin!(receiver.recv_async());
     assert!(receive.as_mut().poll(&mut context).is_pending());
     assert!(sender.close());
     assert_eq!(counter.0.load(Ordering::Relaxed), 1);
@@ -382,9 +382,9 @@ fn sender_close_wakes_receivers_and_preserves_buffered_values() {
 #[test]
 fn queue_receive_timeout_distinguishes_timeout_and_close() {
     let (sender, receiver) = unbounded::<usize>();
-    assert!(receiver.recv_timeout_sync(Duration::from_millis(1)).unwrap_err().is_timeout());
+    assert!(receiver.recv_timeout(Duration::from_millis(1)).unwrap_err().is_timeout());
     drop(sender);
-    assert!(receiver.recv_timeout_sync(Duration::from_secs(1)).unwrap_err().is_closed());
+    assert!(receiver.recv_timeout(Duration::from_secs(1)).unwrap_err().is_closed());
 }
 
 #[test]
@@ -415,15 +415,15 @@ fn oneshot_sends_once_and_reports_sender_drop() {
 fn oneshot_supports_blocking_timeout_and_nonblocking_receives() {
     let (sender, receiver) = oneshot();
     sender.send(11).unwrap();
-    assert_eq!(receiver.recv_sync(), Ok(11));
+    assert_eq!(receiver.recv(), Ok(11));
 
     let (sender, receiver) = oneshot();
     sender.send(12).unwrap();
-    assert_eq!(receiver.recv_timeout_sync(Duration::MAX), Ok(12));
+    assert_eq!(receiver.recv_timeout(Duration::MAX), Ok(12));
 
     let (_sender, mut receiver) = oneshot::<usize>();
     assert!(receiver.try_recv().unwrap_err().is_empty());
-    assert!(receiver.recv_timeout_sync(Duration::from_millis(1)).unwrap_err().is_timeout());
+    assert!(receiver.recv_timeout(Duration::from_millis(1)).unwrap_err().is_timeout());
 
     let (sender, mut receiver) = oneshot::<usize>();
     drop(sender);
@@ -431,11 +431,11 @@ fn oneshot_supports_blocking_timeout_and_nonblocking_receives() {
 
     let (sender, receiver) = oneshot::<usize>();
     drop(sender);
-    assert!(receiver.recv_sync().unwrap_err().is_closed());
+    assert!(receiver.recv().unwrap_err().is_closed());
 
     let (sender, receiver) = oneshot::<usize>();
     drop(sender);
-    assert!(receiver.recv_timeout_sync(Duration::MAX).unwrap_err().is_closed());
+    assert!(receiver.recv_timeout(Duration::MAX).unwrap_err().is_closed());
 }
 
 #[test]
@@ -492,7 +492,7 @@ fn watch_tracks_versions_per_receiver() {
     assert_eq!(first.has_changed(), Ok(true));
     assert_eq!(second.has_changed(), Ok(true));
 
-    assert_eq!(block_on(first.changed()), Ok(()));
+    assert_eq!(block_on(first.changed_async()), Ok(()));
     assert_eq!(*first.borrow(), "updated");
     assert_eq!(first.has_changed(), Ok(false));
     assert_eq!(*second.borrow_and_update(), "updated");
@@ -501,7 +501,7 @@ fn watch_tracks_versions_per_receiver() {
     let subscribed = sender.subscribe();
     assert_eq!(subscribed.has_changed(), Ok(false));
     drop(sender);
-    assert!(subscribed.changed_sync().unwrap_err().is_closed());
+    assert!(subscribed.changed().unwrap_err().is_closed());
 }
 
 #[test]
@@ -514,7 +514,7 @@ fn watch_reports_closed_endpoints_and_final_unmatched_values() {
 
     assert!(receiver.is_closed());
     assert!(receiver.has_changed().unwrap_err().is_closed());
-    assert!(block_on(receiver.wait_for(|value| *value == 2)).unwrap_err().is_closed());
+    assert!(block_on(receiver.wait_for_async(|value| *value == 2)).unwrap_err().is_closed());
     assert_eq!(format!("{receiver:?}"), "WatchReceiver { closed: true, changed: false, .. }");
 
     let (sender, receiver) = watch(1);
@@ -550,7 +550,7 @@ fn watch_wait_for_observes_values_until_the_predicate_matches() {
     let counter = Arc::new(WakeCounter::default());
     let waker = test_waker(&counter);
     let mut context = Context::from_waker(&waker);
-    let mut wait = pin!(receiver.wait_for(|value| *value >= 3));
+    let mut wait = pin!(receiver.wait_for_async(|value| *value >= 3));
     assert!(wait.as_mut().poll(&mut context).is_pending());
 
     sender.send_replace(2);
@@ -569,7 +569,7 @@ fn dropping_final_watch_sender_wakes_changed() {
     let counter = Arc::new(WakeCounter::default());
     let waker = test_waker(&counter);
     let mut context = Context::from_waker(&waker);
-    let mut changed = pin!(receiver.changed());
+    let mut changed = pin!(receiver.changed_async());
     assert!(changed.as_mut().poll(&mut context).is_pending());
 
     drop(sender);
@@ -585,7 +585,7 @@ fn watch_observes_updates_sent_during_waiter_registration() {
     let (sender, receiver) = watch(1);
     let waker = clone_hook_waker(move || sender.send(2).unwrap());
     let mut context = Context::from_waker(&waker);
-    let mut changed = pin!(receiver.changed());
+    let mut changed = pin!(receiver.changed_async());
 
     assert_eq!(changed.as_mut().poll(&mut context), Poll::Ready(Ok(())));
     assert_eq!(*receiver.borrow(), 2);
@@ -595,7 +595,7 @@ fn watch_observes_updates_sent_during_waiter_registration() {
 fn watch_blocking_change_wakes_for_updates() {
     let (sender, receiver) = watch(1);
     let waiter = std::thread::spawn(move || {
-        receiver.changed_sync().unwrap();
+        receiver.changed().unwrap();
         *receiver.borrow()
     });
 
@@ -608,8 +608,8 @@ fn channel_futures_are_send_for_send_values() {
     fn assert_send<T: Send>(_: T) {}
 
     let (sender, receiver) = bounded(1);
-    assert_send(sender.send(1));
-    assert_send(receiver.recv());
+    assert_send(sender.send_async(1));
+    assert_send(receiver.recv_async());
 
     let (sender, receiver) = oneshot::<usize>();
     assert_send(sender);
@@ -617,8 +617,8 @@ fn channel_futures_are_send_for_send_values() {
 
     let (sender, receiver) = watch(1);
     assert_send(sender);
-    assert_send(receiver.changed());
-    assert_send(receiver.wait_for(|value| *value == 2));
+    assert_send(receiver.changed_async());
+    assert_send(receiver.wait_for_async(|value| *value == 2));
 }
 
 #[test]

@@ -255,12 +255,23 @@ pub enum EventKind {
     /// A runtime worker unparked.
     WorkerUnparked,
     /// A task was assigned its process identity.
+    ///
+    /// In the fixed runtime payload, `value_0` is the type descriptor and
+    /// `value_1` is the concrete future or synchronous task body's inline size
+    /// plus one. Zero means unknown (including older producers); one means a
+    /// known zero-byte body. Excludes runtime wrappers and separate allocations.
     TaskSpawned,
     /// A task was enqueued for execution.
     TaskEnqueued,
     /// A task instance was materialized.
     TaskMaterialized,
     /// A task poll began.
+    ///
+    /// In the fixed runtime payload, `value_1` identifies the nanosecond sample
+    /// in `value_0`: `0` means unavailable, `1` is legacy raw wake-to-poll
+    /// latency, and `2` is a coherent scheduler queue wait. Value `2` excludes
+    /// time spent in a preceding poll when that poll requested another wake.
+    /// These are discriminator values, not combinable flag bits.
     TaskPollStarted,
     /// A task poll finished.
     TaskPollFinished,
@@ -338,6 +349,13 @@ pub enum EventKind {
     CachePromotionFailed,
     /// A background refresh was already in progress.
     CacheRefreshSuppressed,
+    /// First outstanding wake notification for a task (coalesced until its next poll).
+    ///
+    /// Uses the fixed runtime payload: `subject_id` is the task, `worker_id` is
+    /// absent, and `related_id`, `value_0`, and `value_1` are zero. The timestamp
+    /// is the raw wake time, including notifications during a poll. The event's
+    /// thread is the notifier, not evidence of a polling worker. No stack is captured.
+    TaskReady,
 }
 
 impl EventKind {
@@ -423,6 +441,7 @@ impl EventKind {
             Self::CachePromotionRejected => 80,
             Self::CachePromotionFailed => 81,
             Self::CacheRefreshSuppressed => 82,
+            Self::TaskReady => 83,
         }
     }
 
@@ -508,6 +527,7 @@ impl EventKind {
             80 => Some(Self::CachePromotionRejected),
             81 => Some(Self::CachePromotionFailed),
             82 => Some(Self::CacheRefreshSuppressed),
+            83 => Some(Self::TaskReady),
             _ => None,
         }
     }
@@ -526,6 +546,7 @@ impl EventKind {
                 | Self::WorkerUnparked
                 | Self::TaskSpawned
                 | Self::TaskEnqueued
+                | Self::TaskReady
                 | Self::TaskMaterialized
                 | Self::TaskPollStarted
                 | Self::TaskPollFinished
@@ -656,6 +677,7 @@ impl EventKind {
             | Self::WorkerUnparked
             | Self::TaskSpawned
             | Self::TaskEnqueued
+            | Self::TaskReady
             | Self::TaskMaterialized
             | Self::TaskPollStarted
             | Self::TaskPollFinished
@@ -900,7 +922,7 @@ mod tests {
 
     #[test]
     fn every_event_kind_round_trips_its_stable_wire_value() {
-        for value in (1..=49).chain(54..=82) {
+        for value in (1..=49).chain(54..=83) {
             let kind = EventKind::from_wire_value(value).unwrap();
             assert_eq!(kind.wire_value(), value);
         }

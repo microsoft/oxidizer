@@ -18,6 +18,15 @@ High-performance process telemetry with extensible snapshot sources.
 Instrumented crates record bounded events while registered sources contribute
 point-in-time state to a portable [`snapshot()`][__link0].
 
+Snapshot capture defaults to retaining active-thread buffers and recording
+policy. [`snapshot::EventBufferDisposition::Stop`][__link1] captures the retained
+events, disables all six recording classes, and releases event-ring storage.
+Unlike legacy `Release`, it does not restart recording. Later source/encoding
+failures do not undo completed cleanup. [`recorder::clear_event_buffers()`][__link2]
+independently empties event rings without copying a snapshot or invoking
+sources, preserving recording policies and active-thread allocations.
+These operations leave process-lifetime recorder metadata registered.
+
 ```rust
 use seismograph::recorder::event::{EventClass, EventKind, ObjectId, Record};
 use seismograph::recorder::{Configuration, RecordingPolicy};
@@ -59,5 +68,7 @@ let _monitor = seismograph::monitor::Monitor::builder()
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seismograph">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbkYDFCZVeY4AbBtigWCD3tyobeIgAtngn3zwbZjmjbU76VD9hZIGCa3NlaXNtb2dyYXBoZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQba8vLwhLxDMIbGQgrEZssFxwbyNAiTQZeXIUbsjEoqApD3exhZIGCa3NlaXNtb2dyYXBoZTAuMS4w
  [__link0]: https://docs.rs/seismograph/0.1.0/seismograph/fn.snapshot.html
+ [__link1]: https://docs.rs/seismograph/0.1.0/seismograph/?search=snapshot::EventBufferDisposition::Stop
+ [__link2]: https://docs.rs/seismograph/0.1.0/seismograph/?search=recorder::clear_event_buffers

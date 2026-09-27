@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use seismograph::recorder::event::{Address, Event, EventKind, EventPayload, EventSequence, EventTimestamp};
@@ -11,8 +11,11 @@ use seismograph_rallocator::callers::{AddressLookup, Event as AllocationEvent, E
 use seismograph_rallocator::snapshot::Snapshot as AllocatorSource;
 use seismograph_runtime::snapshot::Snapshot as RuntimeSource;
 
-use super::data::{AllocationSnapshot, CapturedSnapshot, MemorySnapshot, RuntimeSnapshot, runtime_task_id};
+use super::data::{
+    AllocationSnapshot, CapturedSnapshot, MemorySnapshot, RuntimeSnapshot, RuntimeTaskSummary, RuntimeWorkerSummary, runtime_task_id,
+};
 use super::filter::{FilterSpec, Match, RuntimeStackMode, StackProvenance};
+use super::runtime_timeline::TimeWindow;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) struct FilterCounts {
@@ -102,19 +105,35 @@ pub(super) struct FilterIndex {
     retained_allocation_events: u64,
     deallocated: HashSet<(u64, u64)>,
     runtime: Option<RuntimeSource>,
+    runtime_windows: BTreeMap<u64, TimeWindow>,
     task_stacks: HashMap<(u64, u64), StackId>,
     source_task_stacks: HashMap<(u64, u64), StackId>,
     io_stacks: HashMap<u64, StackId>,
+    task_events: super::task_events::TaskEventsSnapshot,
 }
 
 impl FilterIndex {
+    #[cfg(test)]
     pub(super) fn new(
+        decoded: DecodedSnapshot,
+        allocator: Option<AllocatorSource>,
+        runtime: Option<RuntimeSource>,
+        addresses: Vec<AddressLookup>,
+        deallocated: HashSet<(u64, u64)>,
+    ) -> Self {
+        let task_events = super::task_events::TaskEventsSnapshot::from_events(&decoded.events, &addresses, runtime.as_ref());
+        Self::with_task_events(decoded, allocator, runtime, addresses, deallocated, task_events)
+    }
+
+    pub(super) fn with_task_events(
         mut decoded: DecodedSnapshot,
         mut allocator: Option<AllocatorSource>,
         mut runtime: Option<RuntimeSource>,
         addresses: Vec<AddressLookup>,
         deallocated: HashSet<(u64, u64)>,
+        task_events: super::task_events::TaskEventsSnapshot,
     ) -> Self {
+        let runtime_windows = super::runtime::display_windows(&decoded.events, runtime.as_ref());
         let lookups = addresses
             .iter()
             .map(|lookup| (lookup.address, lookup.symbol.as_deref()))
@@ -210,9 +229,11 @@ impl FilterIndex {
             retained_allocation_events,
             deallocated,
             runtime,
+            runtime_windows,
             task_stacks,
             source_task_stacks,
             io_stacks,
+            task_events,
         }
     }
 
@@ -259,13 +280,29 @@ impl FilterIndex {
                 Some(event.restore(&self.stacks))
             })
             .collect();
+        let task_events = if filter.is_active() {
+            self.task_events.filtered(
+                &decoded
+                    .events
+                    .events
+                    .iter()
+                    .map(|event| (event.thread_id.get(), event.sequence.get()))
+                    .collect(),
+            )
+        } else {
+            self.task_events.clone()
+        };
+        visible_tasks.extend(task_events.tasks.keys().copied());
         summary.tasks.shown = u64::try_from(visible_tasks.len()).unwrap_or(u64::MAX);
         if filter.is_active() {
             let visible_threads = decoded.events.events.iter().map(|event| event.thread_id).collect::<HashSet<_>>();
             decoded.events.threads.retain(|thread| visible_threads.contains(&thread.thread_id));
         }
         let source = self.runtime_source(filter, &visible_tasks, &decoded.events.events);
-        let runtime = RuntimeSnapshot::from_events_with_progress(&decoded, &self.addresses, source.as_ref(), &mut |_| {});
+        let mut runtime =
+            RuntimeSnapshot::from_events_with_attribution(&decoded, &self.addresses, source.as_ref(), task_events, &mut |_| {});
+        self.retain_inferred_task_rows(&mut runtime);
+        runtime.runtime.set_windows(&self.runtime_windows);
         super::snapshot::release_stacks(&mut decoded.events.events, |event| drop(std::mem::take(&mut event.call_stack)));
         drop(decoded);
         drop(source);
@@ -297,20 +334,66 @@ impl FilterIndex {
         Box::new(CapturedSnapshot {
             memory,
             allocations,
-            heap_error: self
-                .allocator
-                .is_none()
-                .then(|| format!("heap data unavailable: {}", super::Error::MissingMemorySource)),
+            heap_error: self.allocator.is_none().then(|| super::Error::MissingMemorySource.to_string()),
             primitives: runtime.primitives,
             runtime: runtime.runtime,
             io: runtime.io,
             cache: runtime.cache,
             threads: runtime.threads,
+            task_events: runtime.task_events,
             captured_at: None,
             captured_instant: None,
             filter_index: Some(Arc::clone(self)),
             filter_summary: summary,
         })
+    }
+
+    fn retain_inferred_task_rows(&self, snapshot: &mut RuntimeSnapshot) {
+        let present = snapshot
+            .runtime
+            .workers
+            .iter()
+            .flat_map(|worker| worker.tasks.iter().map(|task| (task.runtime_id, task.task_id)))
+            .collect::<HashSet<_>>();
+        let names = self
+            .runtime
+            .iter()
+            .flat_map(|source| &source.runtimes)
+            .map(|runtime| (runtime.id.get(), runtime.name.as_str()))
+            .collect::<HashMap<_, _>>();
+        let workers = &mut snapshot.runtime.workers;
+        let mut unbound = workers
+            .iter()
+            .enumerate()
+            .filter_map(|(index, worker)| worker.worker_id.is_none().then_some((worker.runtime_id, index)))
+            .collect::<BTreeMap<_, _>>();
+        for &(runtime_id, task_id) in snapshot.task_events.tasks.keys().filter(|task| !present.contains(*task)) {
+            let index = *unbound.entry(runtime_id).or_insert_with(|| {
+                workers.push(RuntimeWorkerSummary {
+                    runtime_id,
+                    runtime_name: names
+                        .get(&runtime_id)
+                        .map_or_else(|| format!("runtime #{runtime_id}"), |name| (*name).into()),
+                    role: "Unbound".into(),
+                    state: "Unknown".into(),
+                    ..RuntimeWorkerSummary::default()
+                });
+                workers.len() - 1
+            });
+            // The actor identity survives filtering, not its hidden poll samples,
+            // spawn stack, or worker associations. Keep it navigable without
+            // turning attribution context into visible runtime-event evidence.
+            workers[index].tasks.push(RuntimeTaskSummary {
+                task_id,
+                runtime_id,
+                state: "Unknown".into(),
+                ..RuntimeTaskSummary::default()
+            });
+        }
+        for index in unbound.into_values() {
+            workers[index].tasks.sort_unstable_by_key(|task| task.task_id);
+        }
+        workers.sort_unstable_by_key(|worker| (worker.runtime_id, worker.worker_id));
     }
 
     fn event_provenance(&self, event: IndexedEvent, runtime_stack: RuntimeStackMode) -> StackId {
@@ -342,6 +425,9 @@ impl FilterIndex {
                     .retain(|task| visible_tasks.contains(&(runtime.id.get(), task.id.get())));
                 for task in &runtime.tasks {
                     if let Some(worker) = task.last_worker_id {
+                        visible_workers.insert((runtime.id.get(), worker.get()));
+                    }
+                    if let Some(worker) = task.activity.and_then(|activity| activity.poll_worker_id) {
                         visible_workers.insert((runtime.id.get(), worker.get()));
                     }
                 }
@@ -496,36 +582,74 @@ mod tests {
 
     #[test]
     fn spawn_provenance_keeps_complete_task_lifecycle() {
-        let events = [EventKind::TaskSpawned, EventKind::TaskPollStarted, EventKind::TaskCompleted]
-            .into_iter()
-            .enumerate()
-            .map(|(sequence, kind)| Event {
-                kind,
-                payload: EventPayload::Runtime(RuntimeEvent {
-                    runtime_id: RuntimeId::from_raw(1).unwrap(),
-                    worker_id: (kind != EventKind::TaskSpawned).then(|| WorkerId::from_raw(1).unwrap()),
-                    subject_id: 42,
-                    related_id: 0,
-                    value_0: 0,
-                    value_1: 0,
-                }),
-                ..event(u64::try_from(sequence).unwrap(), (kind == EventKind::TaskSpawned).then_some(1))
-            })
-            .collect();
+        let events = [
+            EventKind::TaskSpawned,
+            EventKind::TaskReady,
+            EventKind::TaskPollStarted,
+            EventKind::TaskCompleted,
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(sequence, kind)| Event {
+            kind,
+            payload: EventPayload::Runtime(RuntimeEvent {
+                runtime_id: RuntimeId::from_raw(1).unwrap(),
+                worker_id: (kind != EventKind::TaskSpawned).then(|| WorkerId::from_raw(1).unwrap()),
+                subject_id: 42,
+                related_id: 0,
+                value_0: 0,
+                value_1: 0,
+            }),
+            ..event(u64::try_from(sequence).unwrap(), (kind == EventKind::TaskSpawned).then_some(1))
+        })
+        .collect();
         let index = index(events, vec![lookup(1, "app::spawn")]);
         let spawned = index.render(&FilterSpec::parse("crate:app", "", false, RuntimeStackMode::Spawn).unwrap());
-        assert_eq!(spawned.filter_summary.events.shown, 3);
+        assert_eq!(spawned.filter_summary.events.shown, 4);
         assert_eq!(spawned.runtime.workers[0].tasks[0].state, "Completed");
         let event_stack = index.render(&FilterSpec::parse("crate:app", "", false, RuntimeStackMode::Event).unwrap());
         assert_eq!(event_stack.filter_summary.events.shown, 1);
-        assert_eq!(event_stack.runtime.workers[0].tasks[0].state, "Spawned");
+        assert_eq!(event_stack.runtime.workers[0].tasks[0].state, "Unknown");
+    }
+
+    #[test]
+    fn filtered_runtime_execution_uses_the_original_capture_window() {
+        let events = [(100, 20, 1), (200, 10, 2)]
+            .into_iter()
+            .map(|(timestamp, duration, address)| Event {
+                kind: EventKind::TaskPollFinished,
+                payload: EventPayload::Runtime(RuntimeEvent {
+                    runtime_id: RuntimeId::from_raw(1).unwrap(),
+                    worker_id: Some(WorkerId::from_raw(1).unwrap()),
+                    subject_id: 42,
+                    related_id: 0,
+                    value_0: duration,
+                    value_1: 0,
+                }),
+                ..event(timestamp, Some(address))
+            })
+            .collect();
+        let index = index(events, vec![lookup(1, "app::poll"), lookup(2, "noise::poll")]);
+        let original = index.render(&FilterSpec::default());
+        let filtered = index.render(&FilterSpec::parse("crate:app", "", false, RuntimeStackMode::Event).unwrap());
+        let worker = &filtered.runtime.workers[0];
+        assert_eq!(
+            (worker.window, worker.metrics.poll_count, worker.tasks[0].metrics.poll_count),
+            (original.runtime.workers[0].window, 1, 1)
+        );
+        assert_eq!(worker.window, Some(TimeWindow { start: 80, end: 200 }));
+        for metrics in [&worker.metrics, &worker.tasks[0].metrics] {
+            assert!((metrics.executing_fraction.unwrap() - 1.0 / 6.0).abs() < f64::EPSILON);
+        }
     }
 
     #[test]
     fn runtime_metadata_cannot_reintroduce_an_excluded_current_task() {
         use seismograph::recorder::event::BacktraceCapture;
         use seismograph::recorder::runtime::{TaskId, TypeDescriptorId};
-        use seismograph_runtime::snapshot::{Counters, Runtime, RuntimeState, Task, TaskMetrics, Worker, WorkerState};
+        use seismograph_runtime::snapshot::{
+            Counters, Runtime, RuntimeState, Task, TaskActivity, TaskActivityState, TaskMetrics, Worker, WorkerState,
+        };
         use seismograph_runtime::worker::WorkerRole;
 
         let source = RuntimeSource {
@@ -552,8 +676,17 @@ mod tests {
                         id: TaskId::from_raw(id).unwrap(),
                         parent: None,
                         type_descriptor: TypeDescriptorId::from_raw(1).unwrap(),
+                        future_size_bytes: None,
                         spawned_at: EventTimestamp::from_ticks(1),
                         last_worker_id: Some(WorkerId::from_raw(1).unwrap()),
+                        activity: (id == 2).then_some(TaskActivity {
+                            poll_worker_id: None,
+                            observed_at: EventTimestamp::from_ticks(100),
+                            state: TaskActivityState::Unknown,
+                            ready_since: None,
+                            poll_started_at: None,
+                            queued_since: None,
+                        }),
                         metrics: TaskMetrics {
                             poll_count: 7,
                             ..TaskMetrics::default()
@@ -573,9 +706,13 @@ mod tests {
         assert_eq!(
             (
                 worker.current_task,
-                worker.tasks.iter().map(|task| (task.task_id, task.poll_count)).collect::<Vec<_>>()
+                worker
+                    .tasks
+                    .iter()
+                    .map(|task| (task.task_id, task.metrics.poll_count))
+                    .collect::<Vec<_>>()
             ),
-            (None, vec![(2, 7)])
+            (None, vec![(2, 0)])
         );
         assert_eq!(
             filtered.filter_summary.tasks,
@@ -584,6 +721,14 @@ mod tests {
                 shown: 1,
                 unknown: 0
             }
+        );
+        assert_eq!(
+            (
+                worker.tasks[0].activity.state.as_str(),
+                worker.tasks[0].activity.running_for,
+                worker.tasks[0].activity.ready_for
+            ),
+            ("Unknown", None, None)
         );
         assert_eq!(index.render(&FilterSpec::default()).runtime, original.runtime);
     }

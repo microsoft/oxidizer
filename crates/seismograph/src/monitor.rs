@@ -19,7 +19,10 @@ use std::{fmt, fs, io};
 
 #[cfg(test)]
 use seismograph_protocol::message::SnapshotOptions;
-use seismograph_protocol::message::{EventBufferDisposition, RecorderStatistics, RecordingConfiguration, Request, Response};
+use seismograph_protocol::message::{
+    EventBufferDisposition, EventClassCounts, RecorderActivity, RecorderStatistics, RecordingConfiguration, Request, Response,
+    ThreadRecorderStatistics,
+};
 use seismograph_protocol::monitor::{AuthenticationToken, InstanceId, MonitorDescriptor};
 
 use crate::recorder::SuppressionGuard;
@@ -466,6 +469,21 @@ fn handle_client_with_timeouts(
 
 fn authenticated_response(request: &Request) -> Response {
     match request {
+        Request::ReadServerVersion => Response::ServerVersion(env!("CARGO_PKG_VERSION").into()),
+        Request::CaptureSnapshotAndStop => {
+            let Ok(_snapshot) = SnapshotRequestGuard::acquire() else {
+                return Response::Error("a seismograph snapshot is already in progress".into());
+            };
+            snapshot_response(crate::snapshot(crate::snapshot::SnapshotOptions {
+                event_buffers: crate::snapshot::EventBufferDisposition::Stop,
+            }))
+        }
+        Request::ClearEventBuffers => {
+            let Ok(_snapshot) = SnapshotRequestGuard::acquire() else {
+                return Response::Error("a seismograph snapshot is already in progress".into());
+            };
+            crate::recorder::clear_event_buffers().map_or_else(|error| Response::Error(error.to_string()), |()| Response::Acknowledged)
+        }
         Request::Hello { .. } => Response::Error("already authenticated".into()),
         Request::SetRecording(configuration) => apply_recording_configuration(*configuration)
             .map_or_else(|error| Response::Error(error.to_string()), |()| Response::Acknowledged),
@@ -489,6 +507,7 @@ fn authenticated_response(request: &Request) -> Response {
             snapshot_response(crate::snapshot(crate::snapshot::SnapshotOptions { event_buffers }))
         }
         Request::ReadRecorderStatistics => recorder_statistics_response(),
+        Request::ReadRecorderActivity => recorder_activity_response(),
         Request::ReadCacheRecording => {
             let policy = protocol_recording_policy(crate::recorder::configuration().cache);
             Response::CacheRecording(policy)
@@ -518,7 +537,46 @@ fn recorder_statistics_response() -> Response {
         Ok(statistics) => statistics,
         Err(error) => return Response::Error(error.to_string()),
     };
-    Response::RecorderStatistics(RecorderStatistics {
+    Response::RecorderStatistics(protocol_recorder_statistics(statistics))
+}
+
+fn recorder_activity_response() -> Response {
+    let activity = match crate::recorder::try_activity() {
+        Ok(activity) => activity,
+        Err(error) => return Response::Error(error.to_string()),
+    };
+    let [allocations, general_events, arc_dereferences, runtime_tasks, io, cache] = activity.class_events;
+    let mut statistics = protocol_recorder_statistics(activity.statistics);
+    statistics.recording.cache = protocol_recording_policy(activity.statistics.recording.cache);
+    Response::RecorderActivity(RecorderActivity {
+        statistics,
+        session_id: activity.session_id,
+        class_events: EventClassCounts {
+            allocations,
+            general_events,
+            arc_dereferences,
+            runtime_tasks,
+            io,
+            cache,
+        },
+        threads: activity
+            .threads
+            .into_iter()
+            .map(|thread| ThreadRecorderStatistics {
+                thread_id: thread.thread_id.get(),
+                name: thread.name,
+                total_events: thread.total_events,
+                retained_events: thread.retained_events,
+                lost_events: thread.lost_events,
+                event_capacity: thread.event_capacity,
+                retired: thread.retired,
+            })
+            .collect(),
+    })
+}
+
+fn protocol_recorder_statistics(statistics: crate::recorder::Statistics) -> RecorderStatistics {
+    RecorderStatistics {
         thread_count: statistics.thread_count,
         total_events: statistics.total_events,
         retained_events: statistics.retained_events,
@@ -533,7 +591,7 @@ fn recorder_statistics_response() -> Response {
             statistics.recording.io,
             usize::try_from(statistics.event_capacity_per_thread).unwrap_or(usize::MAX),
         ),
-    })
+    }
 }
 
 struct SnapshotRequestGuard;
@@ -800,6 +858,76 @@ mod tests {
 
     use super::*;
 
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn authenticated_activity_reports_live_threads_without_snapshot_capture() {
+        use crate::recorder::event::{EventClass, EventKind, ObjectId, Record};
+        use crate::recorder::{Configuration, EventBufferCapacity, RecordingPolicy};
+
+        let _test = crate::recorder::TEST_LOCK.lock().unwrap();
+        crate::recorder::configure(Configuration {
+            general_events: RecordingPolicy::all(false),
+            cache: RecordingPolicy::all(false),
+            event_capacity_per_thread: EventBufferCapacity::new(64).unwrap(),
+            ..Default::default()
+        });
+        crate::recorder::clear_event_buffers().unwrap();
+        crate::record(EventClass::General, || Record::object(EventKind::MutexAccess, ObjectId::new(1)));
+        crate::record(EventClass::Cache, || Record::object(EventKind::CacheHit, ObjectId::new(1)));
+        let thread_id = crate::recorder::current_thread_id().get();
+        let before = crate::recorder::try_activity().unwrap();
+        let _snapshot = SnapshotRequestGuard::acquire().unwrap();
+        let (mut client, server) = connected_pair();
+        let descriptor = test_descriptor();
+        let authentication = descriptor.authentication;
+        let worker = thread::spawn(move || handle_client(server, &descriptor, &AtomicBool::new(false)));
+        seismograph_protocol::write_request(&mut client, 1, &Request::Hello { authentication }).unwrap();
+        assert!(matches!(
+            seismograph_protocol::read_response(&mut client).unwrap(),
+            (1, Response::Hello { .. })
+        ));
+        seismograph_protocol::write_request(&mut client, 2, &Request::ReadRecorderActivity).unwrap();
+        let (request_id, Response::RecorderActivity(activity)) = seismograph_protocol::read_response(&mut client).unwrap() else {
+            panic!("authenticated activity request must return live counters");
+        };
+        assert_eq!(
+            (
+                request_id,
+                activity.session_id,
+                activity.statistics.total_events,
+                activity.statistics.recording.cache.enabled,
+                activity.class_events,
+                activity.threads,
+            ),
+            (
+                2,
+                before.session_id,
+                2,
+                true,
+                EventClassCounts {
+                    general_events: 1,
+                    cache: 1,
+                    ..Default::default()
+                },
+                vec![ThreadRecorderStatistics {
+                    thread_id,
+                    name: before.threads[0].name.clone(),
+                    total_events: 2,
+                    retained_events: 2,
+                    lost_events: 0,
+                    event_capacity: 64,
+                    retired: false,
+                }],
+            )
+        );
+        let after = crate::recorder::try_activity().unwrap();
+        assert_eq!((after.statistics, after.threads), (before.statistics, before.threads));
+        client.shutdown(Shutdown::Both).unwrap();
+        worker.join().unwrap().unwrap();
+        crate::recorder::configure(Configuration::default());
+        crate::recorder::clear_event_buffers().unwrap();
+    }
+
     #[test]
     fn stopped_runtime_recording_retains_session_policies_and_events() {
         use crate::recorder::event::{BacktraceCapture, EventClass, EventKind, EventTimestamp, Record};
@@ -929,6 +1057,35 @@ mod tests {
         let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
         let (server, _) = listener.accept().unwrap();
         (client, server)
+    }
+
+    #[cfg_attr(miri, ignore = "requires real TCP sockets")]
+    #[test]
+    fn authenticated_connection_reports_the_seismograph_crate_version_before_capture() {
+        let descriptor = test_descriptor();
+        let (mut client, server) = connected_pair();
+        client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let worker_descriptor = descriptor.clone();
+        let worker = thread::spawn(move || handle_client(server, &worker_descriptor, &AtomicBool::new(false)));
+        seismograph_protocol::write_request(
+            &mut client,
+            1,
+            &Request::Hello {
+                authentication: descriptor.authentication,
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            seismograph_protocol::read_response(&mut client).unwrap(),
+            (1, Response::Hello { instance_id, .. }) if instance_id == descriptor.instance_id
+        ));
+        seismograph_protocol::write_request(&mut client, 2, &Request::ReadServerVersion).unwrap();
+        assert_eq!(
+            seismograph_protocol::read_response(&mut client).unwrap(),
+            (2, Response::ServerVersion(env!("CARGO_PKG_VERSION").into()))
+        );
+        client.shutdown(Shutdown::Both).unwrap();
+        worker.join().unwrap().unwrap();
     }
 
     fn test_descriptor() -> MonitorDescriptor {
@@ -1204,6 +1361,52 @@ mod tests {
             snapshot_response(Ok(snapshot)),
             Response::Snapshot(bytes) if std::ptr::eq(bytes.as_ptr(), address)
         ));
+    }
+
+    #[test]
+    fn lifecycle_commands_require_authentication() {
+        for request in [
+            Request::CaptureSnapshotAndStop,
+            Request::ClearEventBuffers,
+            Request::ReadRecorderActivity,
+        ] {
+            let (mut client, server) = connected_pair();
+            seismograph_protocol::write_request(&mut client, 1, &request).unwrap();
+            let descriptor = test_descriptor();
+            assert!(matches!(
+                handle_client(server, &descriptor, &AtomicBool::new(false)),
+                Err(ClientError::HandshakeRequired)
+            ));
+        }
+    }
+
+    #[test]
+    fn lifecycle_commands_preserve_capture_and_do_not_restart_recording() {
+        use crate::recorder::event::{EventKind, ObjectId, Record};
+        use crate::recorder::{Configuration, EventBufferCapacity, RecordingPolicy};
+        let _test = crate::recorder::TEST_LOCK.lock().unwrap();
+        let configuration = Configuration {
+            general_events: RecordingPolicy::all(false),
+            cache: RecordingPolicy::all(false),
+            event_capacity_per_thread: EventBufferCapacity::new(64).unwrap(),
+            ..Default::default()
+        };
+        crate::recorder::configure(configuration);
+        crate::record(crate::recorder::event::EventClass::General, || {
+            Record::object(EventKind::MutexAccess, ObjectId::new(1))
+        });
+        assert_eq!(authenticated_response(&Request::ClearEventBuffers), Response::Acknowledged);
+        assert_eq!(crate::recorder::configuration(), configuration);
+        crate::record(crate::recorder::event::EventClass::General, || {
+            Record::object(EventKind::MutexAccess, ObjectId::new(2))
+        });
+        let Response::Snapshot(bytes) = authenticated_response(&Request::CaptureSnapshotAndStop) else {
+            panic!("stop must return a snapshot");
+        };
+        let decoded = crate::snapshot::decode(&bytes).unwrap();
+        assert_eq!(decoded.events.events.len(), 1);
+        assert!(!crate::recorder::recording_enabled());
+        crate::recorder::configure(Configuration::default());
     }
 
     #[cfg_attr(miri, ignore)]

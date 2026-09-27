@@ -3,7 +3,9 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Instant, SystemTime};
+
+pub(super) use super::runtime::{RuntimeMonitorSnapshot, RuntimeTaskSort, RuntimeTaskSummary, RuntimeWorkerSummary, runtime_task_id};
 
 pub(super) struct CapturedSnapshot {
     pub(super) memory: Option<MemorySnapshot>,
@@ -14,6 +16,7 @@ pub(super) struct CapturedSnapshot {
     pub(super) io: IoMonitorSnapshot,
     pub(super) cache: CacheMonitorSnapshot,
     pub(super) threads: ThreadSnapshot,
+    pub(super) task_events: super::task_events::TaskEventsSnapshot,
     pub(super) captured_at: Option<SystemTime>,
     pub(super) captured_instant: Option<Instant>,
     pub(super) filter_index: Option<Arc<super::filter_index::FilterIndex>>,
@@ -26,6 +29,7 @@ pub(super) struct RuntimeSnapshot {
     pub(super) io: IoMonitorSnapshot,
     pub(super) cache: CacheMonitorSnapshot,
     pub(super) threads: ThreadSnapshot,
+    pub(super) task_events: super::task_events::TaskEventsSnapshot,
 }
 
 impl RuntimeSnapshot {
@@ -42,6 +46,17 @@ impl RuntimeSnapshot {
         decoded: &seismograph::snapshot::DecodedSnapshot,
         addresses: &[seismograph_rallocator::callers::AddressLookup],
         runtime_source: Option<&seismograph_runtime::snapshot::Snapshot>,
+        progress: &mut impl FnMut(super::snapshot::Phase),
+    ) -> Self {
+        let task_events = super::task_events::TaskEventsSnapshot::from_events(&decoded.events, addresses, runtime_source);
+        Self::from_events_with_attribution(decoded, addresses, runtime_source, task_events, progress)
+    }
+
+    pub(super) fn from_events_with_attribution(
+        decoded: &seismograph::snapshot::DecodedSnapshot,
+        addresses: &[seismograph_rallocator::callers::AddressLookup],
+        runtime_source: Option<&seismograph_runtime::snapshot::Snapshot>,
+        task_events: super::task_events::TaskEventsSnapshot,
         progress: &mut impl FnMut(super::snapshot::Phase),
     ) -> Self {
         use super::snapshot::Phase;
@@ -66,287 +81,9 @@ impl RuntimeSnapshot {
             io,
             cache,
             threads,
+            task_events,
         }
     }
-}
-
-#[derive(Clone, Debug, Default, PartialEq)]
-pub(super) struct RuntimeMonitorSnapshot {
-    pub(super) total_events: u64,
-    pub(super) retained_events: u64,
-    pub(super) lost_events: u64,
-    pub(super) runtime_events: u64,
-    pub(super) source_present: bool,
-    pub(super) workers: Vec<RuntimeWorkerSummary>,
-}
-
-impl RuntimeMonitorSnapshot {
-    #[expect(
-        clippy::too_many_lines,
-        reason = "runtime events are decoded in one ordered pass so cross-event timing state remains explicit"
-    )]
-    fn from_events(
-        events: &seismograph::recorder::event::Events,
-        source: Option<&seismograph_runtime::snapshot::Snapshot>,
-        addresses: &[seismograph_rallocator::callers::AddressLookup],
-    ) -> Self {
-        use seismograph::recorder::event::EventKind;
-
-        #[derive(Default)]
-        struct WorkerBuilder {
-            runtime_name: String,
-            role: String,
-            state: String,
-            thread_id: Option<u64>,
-            current_task: Option<u64>,
-            first_timestamp: Option<u64>,
-            last_timestamp: Option<u64>,
-            poll_count: u64,
-            poll_nanos: u64,
-            max_poll_nanos: u64,
-            task_ids: HashSet<u64>,
-        }
-
-        let lookups = addresses.iter().map(|lookup| (lookup.address, lookup)).collect::<HashMap<_, _>>();
-        let mut workers = BTreeMap::<(u64, u64), WorkerBuilder>::new();
-        let mut tasks = BTreeMap::<u64, RuntimeTaskBuilder>::new();
-        if let Some(source) = source {
-            for runtime in &source.runtimes {
-                for source_task in &runtime.tasks {
-                    let task = tasks.entry(source_task.id.get()).or_default();
-                    task.runtime_id = runtime.id.get();
-                    task.parent_id = source_task.parent.map(seismograph::recorder::runtime::TaskId::get);
-                    task.type_descriptor_id = Some(source_task.type_descriptor.get());
-                    task.state = "Pending".into();
-                    task.spawned_at = (source_task.spawned_at.ticks() != 0).then_some(source_task.spawned_at.ticks());
-                    task.metric_scope = RuntimeTaskMetricScope::Lifetime;
-                    task.poll_count = source_task.metrics.poll_count;
-                    task.poll_nanos = source_task.metrics.poll_duration_nanos;
-                    task.max_poll_nanos = source_task.metrics.max_poll_duration_nanos;
-                    task.resume_count = source_task.metrics.resume_count;
-                    task.resume_nanos = source_task.metrics.resume_duration_nanos;
-                    task.max_resume_nanos = source_task.metrics.max_resume_duration_nanos;
-                    task.ready_wait_count = source_task.metrics.ready_wait_count;
-                    task.ready_wait_nanos = source_task.metrics.ready_wait_duration_nanos;
-                    task.max_ready_wait_nanos = source_task.metrics.max_ready_wait_duration_nanos;
-                    let stack = source_task
-                        .spawn_backtrace
-                        .iter()
-                        .copied()
-                        .map(seismograph::recorder::event::Address::get)
-                        .collect::<Vec<_>>();
-                    task.spawn_stack = primitive_stack(&stack, &lookups, AllocationStackFilter::All);
-                }
-                for worker in &runtime.workers {
-                    let current_task = worker.current_task.map(seismograph::recorder::runtime::TaskId::get);
-                    let mut task_ids = HashSet::new();
-                    if let Some(task_id) = current_task {
-                        task_ids.insert(task_id);
-                        let task = tasks.entry(task_id).or_default();
-                        task.runtime_id = runtime.id.get();
-                        task.state = "Running".into();
-                        task.worker_ids.insert(worker.id.get());
-                    }
-                    workers.insert(
-                        (runtime.id.get(), worker.id.get()),
-                        WorkerBuilder {
-                            runtime_name: runtime.name.clone(),
-                            role: format!("{:?}", worker.role),
-                            state: format!("{:?}", worker.state),
-                            thread_id: worker.thread_id.map(seismograph::recorder::thread::ThreadId::get),
-                            current_task,
-                            task_ids,
-                            ..WorkerBuilder::default()
-                        },
-                    );
-                }
-
-                for source_task in &runtime.tasks {
-                    let Some(worker_id) = source_task.last_worker_id else {
-                        continue;
-                    };
-                    let worker_id = worker_id.get();
-                    if let Some(worker) = workers.get_mut(&(runtime.id.get(), worker_id)) {
-                        worker.task_ids.insert(source_task.id.get());
-                        tasks.entry(source_task.id.get()).or_default().worker_ids.insert(worker_id);
-                    }
-                }
-            }
-        }
-
-        for event in &events.events {
-            let Some(runtime) = event.runtime() else {
-                continue;
-            };
-            let runtime_id = runtime.runtime_id.get();
-            let timestamp = event.timestamp.ticks();
-            if let Some(worker_id) = runtime.worker_id.map(seismograph::recorder::runtime::WorkerId::get) {
-                let worker = workers.entry((runtime_id, worker_id)).or_default();
-                worker.first_timestamp = Some(worker.first_timestamp.map_or(timestamp, |first| first.min(timestamp)));
-                worker.last_timestamp = Some(worker.last_timestamp.map_or(timestamp, |last| last.max(timestamp)));
-                let task_id = runtime_task_id(event.kind, runtime.subject_id, runtime.related_id);
-                if let Some(task_id) = task_id {
-                    worker.task_ids.insert(task_id);
-                    tasks.entry(task_id).or_default().worker_ids.insert(worker_id);
-                }
-                if event.kind == EventKind::TaskPollFinished {
-                    worker.poll_count = worker.poll_count.saturating_add(1);
-                    worker.poll_nanos = worker.poll_nanos.saturating_add(runtime.value_0);
-                    worker.max_poll_nanos = worker.max_poll_nanos.max(runtime.value_0);
-                }
-            }
-
-            if event.kind == EventKind::TaskSpawned {
-                let task = tasks.entry(runtime.subject_id).or_default();
-                record_task_spawn(task, runtime_id, timestamp, event, &lookups);
-            }
-
-            let Some(task_id) = runtime_task_id(event.kind, runtime.subject_id, runtime.related_id) else {
-                continue;
-            };
-            let task = tasks.entry(task_id).or_default();
-            task.runtime_id = runtime_id;
-            match event.kind {
-                EventKind::TaskEnqueued => task.enqueue_count = task.enqueue_count.saturating_add(1),
-                EventKind::TaskMaterialized => {
-                    task.materialization_count = task.materialization_count.saturating_add(1);
-                    if task.metric_scope == RuntimeTaskMetricScope::RetainedWindow {
-                        task.state = "Materialized".into();
-                    }
-                }
-                EventKind::TaskPollStarted if task.metric_scope == RuntimeTaskMetricScope::RetainedWindow => {
-                    if let Some(previous_poll_finished) = task.last_poll_finished_at.take() {
-                        let resume_nanos = timestamp.saturating_sub(previous_poll_finished);
-                        task.resume_count = task.resume_count.saturating_add(1);
-                        task.resume_nanos = task.resume_nanos.saturating_add(resume_nanos);
-                        task.max_resume_nanos = task.max_resume_nanos.max(resume_nanos);
-                    }
-                    if runtime.value_1 != 0 {
-                        task.ready_wait_count = task.ready_wait_count.saturating_add(1);
-                        task.ready_wait_nanos = task.ready_wait_nanos.saturating_add(runtime.value_0);
-                        task.max_ready_wait_nanos = task.max_ready_wait_nanos.max(runtime.value_0);
-                    }
-                    task.state = "Running".into();
-                }
-                EventKind::TaskPollFinished if task.metric_scope == RuntimeTaskMetricScope::RetainedWindow => {
-                    task.poll_count = task.poll_count.saturating_add(1);
-                    task.poll_nanos = task.poll_nanos.saturating_add(runtime.value_0);
-                    task.max_poll_nanos = task.max_poll_nanos.max(runtime.value_0);
-                    task.last_poll_finished_at = Some(timestamp);
-                    task.state = "Pending".into();
-                }
-                EventKind::TaskCompleted if task.metric_scope == RuntimeTaskMetricScope::RetainedWindow => {
-                    task.state = "Completed".into();
-                    task.completed_at = Some(timestamp);
-                }
-                EventKind::TaskCanceled if task.metric_scope == RuntimeTaskMetricScope::RetainedWindow => {
-                    task.state = "Canceled".into();
-                    task.completed_at = Some(timestamp);
-                }
-                EventKind::TaskPanicked if task.metric_scope == RuntimeTaskMetricScope::RetainedWindow => {
-                    task.state = "Panicked".into();
-                    task.completed_at = Some(timestamp);
-                }
-                EventKind::TransferStarted | EventKind::InstanceRelocated | EventKind::TransferFinished => {
-                    task.transfer_count = task.transfer_count.saturating_add(1);
-                }
-                _ => {}
-            }
-        }
-
-        let mut summaries = workers
-            .into_iter()
-            .map(|((runtime_id, worker_id), worker)| {
-                let span_nanos = worker
-                    .first_timestamp
-                    .zip(worker.last_timestamp)
-                    .map_or(0, |(first, last)| last.saturating_sub(first));
-                let mut worker_tasks = worker
-                    .task_ids
-                    .iter()
-                    .filter_map(|task_id| tasks.get(task_id).map(|task| RuntimeTaskSummary::from_builder(*task_id, task)))
-                    .collect::<Vec<_>>();
-                worker_tasks.sort_unstable_by_key(|task| task.task_id);
-                RuntimeWorkerSummary {
-                    runtime_id,
-                    runtime_name: worker.runtime_name,
-                    worker_id: Some(worker_id),
-                    role: worker.role,
-                    state: worker.state,
-                    thread_id: worker.thread_id,
-                    current_task: worker.current_task,
-                    average_running_tasks: if span_nanos == 0 {
-                        0.0
-                    } else {
-                        Duration::from_nanos(worker.poll_nanos).as_secs_f64() / Duration::from_nanos(span_nanos).as_secs_f64()
-                    },
-                    poll_count: worker.poll_count,
-                    average_poll_nanos: worker.poll_nanos.checked_div(worker.poll_count).unwrap_or_default(),
-                    max_poll_nanos: worker.max_poll_nanos,
-                    tasks: worker_tasks,
-                }
-            })
-            .collect::<Vec<_>>();
-        let mut unassigned = BTreeMap::<u64, RuntimeWorkerSummary>::new();
-        for (task_id, task) in tasks.iter().filter(|(_, task)| task.worker_ids.is_empty()) {
-            let group = unassigned.entry(task.runtime_id).or_insert_with(|| RuntimeWorkerSummary {
-                runtime_id: task.runtime_id,
-                runtime_name: source
-                    .and_then(|source| source.runtimes.iter().find(|runtime| runtime.id.get() == task.runtime_id))
-                    .map_or_else(|| format!("runtime #{}", task.runtime_id), |runtime| runtime.name.clone()),
-                role: "Unbound".into(),
-                state: "-".into(),
-                ..RuntimeWorkerSummary::default()
-            });
-            group.tasks.push(RuntimeTaskSummary::from_builder(*task_id, task));
-        }
-        summaries.extend(unassigned.into_values());
-        summaries.sort_unstable_by_key(|worker| (worker.runtime_id, worker.worker_id.is_none(), worker.worker_id));
-        Self {
-            total_events: events.total_events,
-            retained_events: u64::try_from(events.events.len()).unwrap_or(u64::MAX),
-            lost_events: events.lost_events,
-            runtime_events: u64::try_from(events.events.iter().filter(|event| event.runtime().is_some()).count()).unwrap_or(u64::MAX),
-            source_present: source.is_some(),
-            workers: summaries,
-        }
-    }
-}
-
-pub(super) fn runtime_task_id(kind: seismograph::recorder::event::EventKind, subject_id: u64, related_id: u64) -> Option<u64> {
-    use seismograph::recorder::event::EventKind;
-    match kind {
-        EventKind::TaskSpawned
-        | EventKind::TaskEnqueued
-        | EventKind::TaskMaterialized
-        | EventKind::TaskPollStarted
-        | EventKind::TaskPollFinished
-        | EventKind::TaskCompleted
-        | EventKind::TaskCanceled
-        | EventKind::TaskPanicked => (subject_id != 0).then_some(subject_id),
-        EventKind::TransferStarted | EventKind::InstanceRelocated | EventKind::TransferFinished => (related_id != 0).then_some(related_id),
-        _ => None,
-    }
-}
-
-fn record_task_spawn(
-    task: &mut RuntimeTaskBuilder,
-    runtime_id: u64,
-    timestamp: u64,
-    event: &seismograph::recorder::event::Event,
-    lookups: &HashMap<u64, &seismograph_rallocator::callers::AddressLookup>,
-) {
-    if task.metric_scope != RuntimeTaskMetricScope::RetainedWindow {
-        return;
-    }
-    let runtime = event.runtime().expect("called only for task-spawn runtime events");
-    task.runtime_id = runtime_id;
-    task.parent_id = (runtime.related_id != 0).then_some(runtime.related_id);
-    task.type_descriptor_id = (runtime.value_0 != 0).then_some(runtime.value_0);
-    task.state = "Spawned".into();
-    task.spawned_at = Some(timestamp);
-    let stack = event.call_stack.iter().map(|address| address.get()).collect::<Vec<_>>();
-    task.spawn_stack = primitive_stack(&stack, lookups, AllocationStackFilter::All);
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -708,197 +445,6 @@ pub(super) const fn cache_event_label(kind: seismograph::recorder::event::EventK
         EventKind::CacheRefreshSuppressed => "Refresh suppressed",
         _ => "Unknown",
     }
-}
-
-#[derive(Clone, Debug, Default, PartialEq)]
-pub(super) struct RuntimeWorkerSummary {
-    pub(super) runtime_id: u64,
-    pub(super) runtime_name: String,
-    pub(super) worker_id: Option<u64>,
-    pub(super) role: String,
-    pub(super) state: String,
-    pub(super) thread_id: Option<u64>,
-    pub(super) current_task: Option<u64>,
-    pub(super) average_running_tasks: f64,
-    pub(super) poll_count: u64,
-    pub(super) average_poll_nanos: u64,
-    pub(super) max_poll_nanos: u64,
-    pub(super) tasks: Vec<RuntimeTaskSummary>,
-}
-
-impl RuntimeWorkerSummary {
-    pub(super) fn sorted_tasks(&self, sort: RuntimeTaskSort, descending: bool) -> Vec<&RuntimeTaskSummary> {
-        let mut tasks = self.tasks.iter().collect::<Vec<_>>();
-        tasks.sort_unstable_by(|left, right| {
-            let ordering = match sort {
-                RuntimeTaskSort::Task => left.task_id.cmp(&right.task_id),
-                RuntimeTaskSort::Polls => left.poll_count.cmp(&right.poll_count),
-                RuntimeTaskSort::AveragePoll => left.average_poll_nanos.cmp(&right.average_poll_nanos),
-                RuntimeTaskSort::MaximumPoll => left.max_poll_nanos.cmp(&right.max_poll_nanos),
-                RuntimeTaskSort::AverageResume => left.average_resume_nanos.cmp(&right.average_resume_nanos),
-                RuntimeTaskSort::MaximumResume => left.max_resume_nanos.cmp(&right.max_resume_nanos),
-                RuntimeTaskSort::AverageReadyWait => left.average_ready_wait_nanos.cmp(&right.average_ready_wait_nanos),
-                RuntimeTaskSort::MaximumReadyWait => left.max_ready_wait_nanos.cmp(&right.max_ready_wait_nanos),
-            };
-            let ordering = if descending { ordering.reverse() } else { ordering };
-            ordering.then_with(|| left.task_id.cmp(&right.task_id))
-        });
-        tasks
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum RuntimeTaskSort {
-    Task,
-    Polls,
-    AveragePoll,
-    MaximumPoll,
-    AverageResume,
-    MaximumResume,
-    AverageReadyWait,
-    MaximumReadyWait,
-}
-
-impl RuntimeTaskSort {
-    pub(super) const fn next(self) -> Self {
-        match self {
-            Self::Task => Self::Polls,
-            Self::Polls => Self::AveragePoll,
-            Self::AveragePoll => Self::MaximumPoll,
-            Self::MaximumPoll => Self::AverageResume,
-            Self::AverageResume => Self::MaximumResume,
-            Self::MaximumResume => Self::AverageReadyWait,
-            Self::AverageReadyWait => Self::MaximumReadyWait,
-            Self::MaximumReadyWait => Self::Task,
-        }
-    }
-
-    pub(super) const fn previous(self) -> Self {
-        match self {
-            Self::Task => Self::MaximumReadyWait,
-            Self::Polls => Self::Task,
-            Self::AveragePoll => Self::Polls,
-            Self::MaximumPoll => Self::AveragePoll,
-            Self::AverageResume => Self::MaximumPoll,
-            Self::MaximumResume => Self::AverageResume,
-            Self::AverageReadyWait => Self::MaximumResume,
-            Self::MaximumReadyWait => Self::AverageReadyWait,
-        }
-    }
-
-    pub(super) const fn label(self) -> &'static str {
-        match self {
-            Self::Task => "task",
-            Self::Polls => "polls",
-            Self::AveragePoll => "average poll",
-            Self::MaximumPoll => "maximum poll",
-            Self::AverageResume => "average resume",
-            Self::MaximumResume => "maximum resume",
-            Self::AverageReadyWait => "average stall",
-            Self::MaximumReadyWait => "maximum stall",
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(super) struct RuntimeTaskSummary {
-    pub(super) task_id: u64,
-    pub(super) runtime_id: u64,
-    pub(super) parent_id: Option<u64>,
-    pub(super) type_descriptor_id: Option<u64>,
-    pub(super) metric_scope: RuntimeTaskMetricScope,
-    pub(super) state: String,
-    pub(super) spawned_at: Option<u64>,
-    pub(super) completed_at: Option<u64>,
-    pub(super) poll_count: u64,
-    pub(super) poll_nanos: u64,
-    pub(super) average_poll_nanos: u64,
-    pub(super) max_poll_nanos: u64,
-    pub(super) resume_count: u64,
-    pub(super) average_resume_nanos: u64,
-    pub(super) max_resume_nanos: u64,
-    pub(super) ready_wait_count: u64,
-    pub(super) ready_wait_nanos: u64,
-    pub(super) average_ready_wait_nanos: u64,
-    pub(super) max_ready_wait_nanos: u64,
-    pub(super) enqueue_count: u64,
-    pub(super) materialization_count: u64,
-    pub(super) transfer_count: u64,
-    pub(super) worker_ids: Vec<u64>,
-    pub(super) spawn_stack: Vec<String>,
-}
-
-impl RuntimeTaskSummary {
-    fn from_builder(task_id: u64, task: &RuntimeTaskBuilder) -> Self {
-        Self {
-            task_id,
-            runtime_id: task.runtime_id,
-            parent_id: task.parent_id,
-            type_descriptor_id: task.type_descriptor_id,
-            metric_scope: task.metric_scope,
-            state: task.state.clone(),
-            spawned_at: task.spawned_at,
-            completed_at: task.completed_at,
-            poll_count: task.poll_count,
-            poll_nanos: task.poll_nanos,
-            average_poll_nanos: task.poll_nanos.checked_div(task.poll_count).unwrap_or_default(),
-            max_poll_nanos: task.max_poll_nanos,
-            resume_count: task.resume_count,
-            average_resume_nanos: task.resume_nanos.checked_div(task.resume_count).unwrap_or_default(),
-            max_resume_nanos: task.max_resume_nanos,
-            ready_wait_count: task.ready_wait_count,
-            ready_wait_nanos: task.ready_wait_nanos,
-            average_ready_wait_nanos: task.ready_wait_nanos.checked_div(task.ready_wait_count).unwrap_or_default(),
-            max_ready_wait_nanos: task.max_ready_wait_nanos,
-            enqueue_count: task.enqueue_count,
-            materialization_count: task.materialization_count,
-            transfer_count: task.transfer_count,
-            worker_ids: task.worker_ids.iter().copied().collect(),
-            spawn_stack: task.spawn_stack.clone(),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(super) enum RuntimeTaskMetricScope {
-    Lifetime,
-    #[default]
-    RetainedWindow,
-}
-
-impl RuntimeTaskMetricScope {
-    pub(super) const fn label(self) -> &'static str {
-        match self {
-            Self::Lifetime => "lifetime",
-            Self::RetainedWindow => "retained window",
-        }
-    }
-}
-
-#[derive(Default)]
-struct RuntimeTaskBuilder {
-    runtime_id: u64,
-    parent_id: Option<u64>,
-    type_descriptor_id: Option<u64>,
-    metric_scope: RuntimeTaskMetricScope,
-    state: String,
-    spawned_at: Option<u64>,
-    completed_at: Option<u64>,
-    poll_count: u64,
-    poll_nanos: u64,
-    max_poll_nanos: u64,
-    last_poll_finished_at: Option<u64>,
-    resume_count: u64,
-    resume_nanos: u64,
-    max_resume_nanos: u64,
-    ready_wait_count: u64,
-    ready_wait_nanos: u64,
-    max_ready_wait_nanos: u64,
-    enqueue_count: u64,
-    materialization_count: u64,
-    transfer_count: u64,
-    worker_ids: HashSet<u64>,
-    spawn_stack: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1849,7 +1395,7 @@ fn thread_stacks<'a>(
     stacks.into()
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(super) enum ThreadOperationKind {
     Allocation,
     Deallocation,
@@ -1888,7 +1434,7 @@ pub(super) enum ThreadOperationKind {
 }
 
 impl ThreadOperationKind {
-    const ALL: [Self; 34] = [
+    pub(super) const ALL: [Self; 34] = [
         Self::Allocation,
         Self::Deallocation,
         Self::ArcCreate,
@@ -2012,11 +1558,11 @@ impl ThreadOperationKind {
         )
     }
 
-    const fn is_allocation(self) -> bool {
+    pub(super) const fn is_allocation(self) -> bool {
         matches!(self, Self::Allocation | Self::Deallocation)
     }
 
-    const fn event_kind(self) -> seismograph::recorder::event::EventKind {
+    pub(super) const fn event_kind(self) -> seismograph::recorder::event::EventKind {
         use seismograph::recorder::event::EventKind;
         match self {
             Self::Allocation => EventKind::Allocation,
@@ -2719,7 +2265,7 @@ fn average_bytes(hotspot: &AllocationHotspot) -> u64 {
     hotspot.allocated_bytes.checked_div(hotspot.allocations).unwrap_or_default()
 }
 
-fn hotspot_stack(
+pub(super) fn hotspot_stack(
     stack: &[u64],
     lookups: &HashMap<u64, &seismograph_rallocator::callers::AddressLookup>,
     filter: AllocationStackFilter,
@@ -2738,7 +2284,7 @@ fn hotspot_stack(
     }
 }
 
-fn primitive_stack(
+pub(super) fn primitive_stack(
     stack: &[u64],
     lookups: &HashMap<u64, &seismograph_rallocator::callers::AddressLookup>,
     filter: AllocationStackFilter,
@@ -2837,6 +2383,7 @@ mod tests {
         AddressLookup, AddressLookupFields, Callers, CallersFields, Event, EventFields, EventKind, HeapKind,
     };
 
+    use super::super::runtime_timeline::{ExecutionMetrics, Interval, median_nanos};
     use super::*;
 
     #[test]
@@ -2901,32 +2448,21 @@ mod tests {
         assert_eq!(
             [
                 RuntimeTaskSort::Task,
+                RuntimeTaskSort::FutureSize,
                 RuntimeTaskSort::Polls,
-                RuntimeTaskSort::AveragePoll,
+                RuntimeTaskSort::Executing,
+                RuntimeTaskSort::MedianPoll,
                 RuntimeTaskSort::MaximumPoll,
-                RuntimeTaskSort::AverageResume,
-                RuntimeTaskSort::MaximumResume,
-                RuntimeTaskSort::AverageReadyWait,
-                RuntimeTaskSort::MaximumReadyWait,
             ]
             .map(|sort| (sort.next(), sort.previous(), sort.label())),
             [
-                (RuntimeTaskSort::Polls, RuntimeTaskSort::MaximumReadyWait, "task"),
-                (RuntimeTaskSort::AveragePoll, RuntimeTaskSort::Task, "polls"),
-                (RuntimeTaskSort::MaximumPoll, RuntimeTaskSort::Polls, "average poll"),
-                (RuntimeTaskSort::AverageResume, RuntimeTaskSort::AveragePoll, "maximum poll"),
-                (RuntimeTaskSort::MaximumResume, RuntimeTaskSort::MaximumPoll, "average resume"),
-                (RuntimeTaskSort::AverageReadyWait, RuntimeTaskSort::AverageResume, "maximum resume"),
-                (RuntimeTaskSort::MaximumReadyWait, RuntimeTaskSort::MaximumResume, "average stall"),
-                (RuntimeTaskSort::Task, RuntimeTaskSort::AverageReadyWait, "maximum stall"),
+                (RuntimeTaskSort::FutureSize, RuntimeTaskSort::MaximumPoll, "task"),
+                (RuntimeTaskSort::Polls, RuntimeTaskSort::Task, "future bytes"),
+                (RuntimeTaskSort::Executing, RuntimeTaskSort::FutureSize, "polls"),
+                (RuntimeTaskSort::MedianPoll, RuntimeTaskSort::Polls, "observed execution"),
+                (RuntimeTaskSort::MaximumPoll, RuntimeTaskSort::Executing, "median poll"),
+                (RuntimeTaskSort::Task, RuntimeTaskSort::MedianPoll, "maximum poll"),
             ]
-        );
-        assert_eq!(
-            [
-                RuntimeTaskMetricScope::Lifetime.label(),
-                RuntimeTaskMetricScope::RetainedWindow.label(),
-            ],
-            ["lifetime", "retained window"]
         );
         assert_eq!(
             (AllocationStackFilter::Application.toggle(), AllocationStackFilter::All.toggle()),
@@ -3362,28 +2898,15 @@ mod tests {
         RuntimeTaskSummary {
             task_id,
             runtime_id: 1,
-            parent_id: None,
-            type_descriptor_id: None,
-            metric_scope: RuntimeTaskMetricScope::RetainedWindow,
-            state: "Pending".into(),
-            spawned_at: None,
-            completed_at: None,
-            poll_count: task_id,
-            poll_nanos: task_id * 10,
-            average_poll_nanos: task_id * 2,
-            max_poll_nanos: task_id * 3,
-            resume_count: task_id,
-            average_resume_nanos: task_id * 4,
-            max_resume_nanos: task_id * 5,
-            ready_wait_count: task_id,
-            ready_wait_nanos: task_id * 6,
-            average_ready_wait_nanos: task_id * 7,
-            max_ready_wait_nanos: task_id * 8,
-            enqueue_count: 0,
-            materialization_count: 0,
-            transfer_count: 0,
-            worker_ids: Vec::new(),
-            spawn_stack: Vec::new(),
+            state: "Unknown".into(),
+            metrics: ExecutionMetrics {
+                poll_count: task_id,
+                median_poll_nanos: Some(task_id * 2),
+                max_poll_nanos: Some(task_id * 3),
+                executing_fraction: Some(if task_id == 1 { 0.25 } else { 0.5 }),
+                ..ExecutionMetrics::default()
+            },
+            ..RuntimeTaskSummary::default()
         }
     }
 
@@ -3398,21 +2921,15 @@ mod tests {
             state: String::new(),
             thread_id: None,
             current_task: None,
-            average_running_tasks: 0.0,
-            poll_count: 0,
-            average_poll_nanos: 0,
-            max_poll_nanos: 0,
             tasks: vec![runtime_task(1), runtime_task(2)],
+            ..RuntimeWorkerSummary::default()
         };
         for sort in [
             RuntimeTaskSort::Task,
             RuntimeTaskSort::Polls,
-            RuntimeTaskSort::AveragePoll,
+            RuntimeTaskSort::Executing,
+            RuntimeTaskSort::MedianPoll,
             RuntimeTaskSort::MaximumPoll,
-            RuntimeTaskSort::AverageResume,
-            RuntimeTaskSort::MaximumResume,
-            RuntimeTaskSort::AverageReadyWait,
-            RuntimeTaskSort::MaximumReadyWait,
         ] {
             assert_eq!(
                 worker
@@ -3601,57 +3118,104 @@ mod tests {
                 tier.retained_bytes(),
                 runtime_task_id(RuntimeEventKind::TaskSpawned, 1, 0),
                 runtime_task_id(RuntimeEventKind::TaskPollFinished, 2, 0),
+                runtime_task_id(RuntimeEventKind::TaskReady, 8, 9),
                 runtime_task_id(RuntimeEventKind::TransferStarted, 0, 3),
                 runtime_task_id(RuntimeEventKind::InstanceRelocated, 0, 4),
                 runtime_task_id(RuntimeEventKind::TransferFinished, 0, 5),
                 runtime_task_id(RuntimeEventKind::ArcClone, 6, 7),
                 runtime_task_id(RuntimeEventKind::TaskCanceled, 0, 0),
             ),
-            (5, 80, Some(1), Some(2), Some(3), Some(4), Some(5), None, None)
+            (5, 80, Some(1), Some(2), Some(8), Some(3), Some(4), Some(5), None, None)
         );
     }
 
     #[test]
-    fn runtime_task_builder_handles_zero_and_populated_metrics() {
-        let empty = RuntimeTaskSummary::from_builder(1, &RuntimeTaskBuilder::default());
-        let builder = RuntimeTaskBuilder {
-            runtime_id: 2,
-            parent_id: Some(3),
-            type_descriptor_id: Some(4),
-            metric_scope: RuntimeTaskMetricScope::Lifetime,
-            state: "Completed".into(),
-            spawned_at: Some(5),
-            completed_at: Some(6),
-            poll_count: 2,
-            poll_nanos: 20,
-            max_poll_nanos: 15,
-            last_poll_finished_at: None,
-            resume_count: 4,
-            resume_nanos: 40,
-            max_resume_nanos: 20,
-            ready_wait_count: 5,
-            ready_wait_nanos: 50,
-            max_ready_wait_nanos: 30,
-            enqueue_count: 6,
-            materialization_count: 7,
-            transfer_count: 8,
-            worker_ids: HashSet::from([9]),
-            spawn_stack: vec!["spawn".into()],
-        };
-        let populated = RuntimeTaskSummary::from_builder(10, &builder);
+    fn median_handles_skewed_odd_samples() {
+        assert_eq!(median_nanos(&mut [100, 1, 2]), Some(2));
+    }
 
+    #[test]
+    fn median_rounds_even_samples_down() {
+        assert_eq!(median_nanos(&mut [100, 4, 1, 3]), Some(3));
+    }
+
+    #[test]
+    fn median_distinguishes_absent_and_zero_samples() {
         assert_eq!(
-            (
-                empty.average_poll_nanos,
-                empty.average_resume_nanos,
-                empty.average_ready_wait_nanos,
-                populated.task_id,
-                populated.average_poll_nanos,
-                populated.average_resume_nanos,
-                populated.average_ready_wait_nanos,
-                populated.worker_ids,
-            ),
-            (0, 0, 0, 10, 10, 10, 10, vec![9])
+            [median_nanos(&mut []), median_nanos(&mut [0]), median_nanos(&mut [0, 0])],
+            [None, Some(0), Some(0)]
+        );
+    }
+
+    #[test]
+    fn median_handles_maximum_samples_without_overflow() {
+        assert_eq!(
+            [
+                median_nanos(&mut [u64::MAX]),
+                median_nanos(&mut [u64::MAX, u64::MAX]),
+                median_nanos(&mut [u64::MAX, u64::MAX - 1]),
+                median_nanos(&mut [u64::MAX, 0]),
+            ],
+            [Some(u64::MAX), Some(u64::MAX), Some(u64::MAX - 1), Some(u64::MAX / 2)]
+        );
+    }
+
+    #[test]
+    fn median_sorts_keep_missing_samples_last_and_break_ties_by_task_id() {
+        let worker = RuntimeWorkerSummary {
+            tasks: [(6, None), (5, Some(10)), (4, Some(10)), (3, None), (2, Some(0)), (1, Some(20))]
+                .into_iter()
+                .map(|(task_id, median)| RuntimeTaskSummary {
+                    metrics: ExecutionMetrics {
+                        median_poll_nanos: median,
+                        max_poll_nanos: median,
+                        ..ExecutionMetrics::default()
+                    },
+                    ..runtime_task(task_id)
+                })
+                .collect(),
+            ..RuntimeWorkerSummary::default()
+        };
+        assert_eq!(
+            [
+                (RuntimeTaskSort::MedianPoll, false),
+                (RuntimeTaskSort::MedianPoll, true),
+                (RuntimeTaskSort::MaximumPoll, false),
+                (RuntimeTaskSort::MaximumPoll, true),
+            ]
+            .map(|(sort, descending)| {
+                worker
+                    .sorted_tasks(sort, descending)
+                    .into_iter()
+                    .map(|task| task.task_id)
+                    .collect::<Vec<_>>()
+            }),
+            [
+                vec![2, 4, 5, 1, 3, 6],
+                vec![1, 4, 5, 2, 3, 6],
+                vec![2, 4, 5, 1, 3, 6],
+                vec![1, 4, 5, 2, 3, 6],
+            ]
+        );
+    }
+
+    #[test]
+    fn runtime_execution_metrics_handle_absent_zero_and_populated_samples() {
+        let mut empty = ExecutionMetrics::default();
+        let mut zero = ExecutionMetrics {
+            poll_samples: vec![0],
+            ..ExecutionMetrics::default()
+        };
+        let mut populated = ExecutionMetrics {
+            poll_samples: vec![3, 100, 5],
+            ..ExecutionMetrics::default()
+        };
+        for metrics in [&mut empty, &mut zero, &mut populated] {
+            metrics.finish(None);
+        }
+        assert_eq!(
+            [empty, zero, populated].map(|metrics| (metrics.poll_count, metrics.median_poll_nanos, metrics.max_poll_nanos)),
+            [(0, None, None), (1, Some(0), Some(0)), (3, Some(5), Some(100))]
         );
     }
 
@@ -3694,19 +3258,15 @@ mod tests {
                 group
                     .tasks
                     .iter()
-                    .map(|task| (task.task_id, task.state.as_str(), task.completed_at))
+                    .map(|task| (task.task_id, task.state.as_str(), task.activity.state.as_str()))
                     .collect::<Vec<_>>(),
             ),
-            (2, false, 1, None, vec![(10, "Canceled", Some(2))])
+            (2, false, 1, None, vec![(10, "Canceled", "Canceled")])
         );
     }
 
     #[test]
-    fn lifetime_task_ignores_retained_spawn_event() {
-        let mut task = RuntimeTaskBuilder {
-            metric_scope: RuntimeTaskMetricScope::Lifetime,
-            ..RuntimeTaskBuilder::default()
-        };
+    fn retained_spawn_metadata_does_not_infer_current_activity() {
         let event = RuntimeEvent {
             thread_id: ThreadId::new(1),
             sequence: EventSequence::new(1),
@@ -3723,9 +3283,24 @@ mod tests {
             call_stack: Vec::new(),
         };
 
-        record_task_spawn(&mut task, 1, 1, &event, &HashMap::new());
-
-        assert_eq!(task.state, "");
+        let snapshot = RuntimeMonitorSnapshot::from_events(
+            &Events {
+                events: vec![event],
+                ..Events::default()
+            },
+            None,
+            &[],
+        );
+        let task = &snapshot.workers[0].tasks[0];
+        assert_eq!(
+            (
+                task.task_id,
+                task.state.as_str(),
+                task.activity.state.as_str(),
+                task.metrics.poll_count
+            ),
+            (1, "Unknown", "Unknown", 0)
+        );
     }
 
     #[test]
@@ -3839,13 +3414,16 @@ mod tests {
                     (
                         task.task_id,
                         task.state.as_str(),
-                        task.enqueue_count,
-                        task.materialization_count,
-                        task.transfer_count,
+                        task.worker_ids.as_slice(),
+                        task.metrics.poll_count,
                     )
                 })
                 .collect::<Vec<_>>(),
-            vec![(1, "Canceled", 1, 1, 3), (2, "Panicked", 0, 0, 0), (3, "Completed", 0, 0, 0),]
+            vec![
+                (1, "Canceled", &[1][..], 0),
+                (2, "Panicked", &[1][..], 0),
+                (3, "Completed", &[1][..], 0)
+            ]
         );
     }
 
@@ -4706,7 +4284,157 @@ mod tests {
     }
 
     #[test]
-    fn runtime_monitor_summarizes_worker_and_task_yield_intervals() {
+    fn runtime_monitor_retains_only_coherent_ready_samples_across_workers() {
+        let events = [
+            (10, 1, 1_000, 0),
+            (10, 1, 100, 1),
+            (10, 2, 0, 2),
+            (10, 2, 2, 2),
+            (11, 1, 0, 0),
+            (12, 1, 0, 2),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, (task_id, worker_id, nanos, wake_flag))| RuntimeEvent {
+            thread_id: ThreadId::new(worker_id),
+            sequence: EventSequence::new(u64::try_from(index).unwrap()),
+            timestamp: EventTimestamp::from_ticks(u64::try_from(index).unwrap()),
+            kind: RuntimeEventKind::TaskPollStarted,
+            payload: EventPayload::Runtime(RuntimeEventPayload {
+                runtime_id: RuntimeId::from_raw(1).unwrap(),
+                worker_id: Some(WorkerId::from_raw(worker_id).unwrap()),
+                subject_id: task_id,
+                related_id: 0,
+                value_0: nanos,
+                value_1: wake_flag,
+            }),
+            call_stack: Vec::new(),
+        })
+        .collect();
+        let snapshot = RuntimeMonitorSnapshot::from_events(
+            &Events {
+                clock: EventClock::Unspecified,
+                total_events: 6,
+                lost_events: 0,
+                recording: RecordingPolicies::default(),
+                threads: Vec::new(),
+                events,
+            },
+            None,
+            &[],
+        );
+
+        assert_eq!(
+            snapshot
+                .workers
+                .iter()
+                .map(|worker| {
+                    (
+                        worker.worker_id,
+                        worker
+                            .tasks
+                            .iter()
+                            .map(|task| {
+                                (
+                                    task.task_id,
+                                    task.metrics.ready_samples.to_vec(),
+                                    task.metrics.poll_count,
+                                    task.state.as_str(),
+                                )
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    Some(1),
+                    vec![
+                        (10, vec![0, 2], 0, "Unknown"),
+                        (11, vec![], 0, "Unknown"),
+                        (12, vec![0], 0, "Unknown")
+                    ]
+                ),
+                (Some(2), vec![(10, vec![0, 2], 0, "Unknown")]),
+            ]
+        );
+    }
+
+    #[test]
+    fn runtime_monitor_poll_statistics_use_only_retained_finished_polls() {
+        let events = [
+            (10, 1, RuntimeEventKind::TaskPollStarted),
+            (10, 2, RuntimeEventKind::TaskPollStarted),
+            (10, 10, RuntimeEventKind::TaskPollFinished),
+            (10, 11, RuntimeEventKind::TaskPollStarted),
+            (10, 11, RuntimeEventKind::TaskPollFinished),
+            (10, 13, RuntimeEventKind::TaskPollStarted),
+            (10, 13, RuntimeEventKind::TaskPollFinished),
+            (10, 113, RuntimeEventKind::TaskPollStarted),
+            (10, 114, RuntimeEventKind::TaskPollStarted),
+            (11, 120, RuntimeEventKind::TaskPollStarted),
+            (12, 200, RuntimeEventKind::TaskPollFinished),
+            (12, 200, RuntimeEventKind::TaskPollStarted),
+            (13, 0, RuntimeEventKind::TaskPollFinished),
+            (13, u64::MAX, RuntimeEventKind::TaskPollStarted),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, (task_id, timestamp, kind))| RuntimeEvent {
+            thread_id: ThreadId::new(1),
+            sequence: EventSequence::new(u64::try_from(index).unwrap()),
+            timestamp: EventTimestamp::from_ticks(timestamp),
+            kind,
+            payload: EventPayload::Runtime(RuntimeEventPayload {
+                runtime_id: RuntimeId::from_raw(1).unwrap(),
+                worker_id: Some(WorkerId::from_raw(1).unwrap()),
+                subject_id: task_id,
+                related_id: 0,
+                value_0: if kind == RuntimeEventKind::TaskPollFinished && task_id == 10 {
+                    timestamp - 8
+                } else {
+                    0
+                },
+                value_1: 0,
+            }),
+            call_stack: Vec::new(),
+        })
+        .collect();
+        let snapshot = RuntimeMonitorSnapshot::from_events(
+            &Events {
+                clock: EventClock::Unspecified,
+                total_events: 14,
+                lost_events: 0,
+                recording: RecordingPolicies::default(),
+                threads: Vec::new(),
+                events,
+            },
+            None,
+            &[],
+        );
+
+        assert_eq!(
+            snapshot.workers[0]
+                .tasks
+                .iter()
+                .map(|task| (
+                    task.task_id,
+                    task.metrics.median_poll_nanos,
+                    task.metrics.poll_count,
+                    task.metrics.max_poll_nanos,
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (10, Some(3), 3, Some(5)),
+                (11, None, 0, None),
+                (12, Some(0), 1, Some(0)),
+                (13, Some(0), 1, Some(0)),
+            ]
+        );
+    }
+
+    #[test]
+    fn runtime_monitor_summarizes_worker_and_task_retained_execution() {
         let event = |sequence, timestamp, kind, subject_id, value_0, value_1| RuntimeEvent {
             thread_id: ThreadId::new(7),
             sequence: EventSequence::new(sequence),
@@ -4724,9 +4452,9 @@ mod tests {
         };
         let events = vec![
             event(1, 50, RuntimeEventKind::TaskSpawned, 10, 42, 0),
-            event(2, 100, RuntimeEventKind::TaskPollStarted, 10, 30, 1),
+            event(2, 100, RuntimeEventKind::TaskPollStarted, 10, 30, 2),
             event(3, 300, RuntimeEventKind::TaskPollFinished, 10, 200, 0),
-            event(4, 500, RuntimeEventKind::TaskPollStarted, 10, 80, 1),
+            event(4, 500, RuntimeEventKind::TaskPollStarted, 10, 80, 2),
             event(5, 900, RuntimeEventKind::TaskPollFinished, 10, 400, 0),
         ];
 
@@ -4750,48 +4478,49 @@ mod tests {
                 snapshot.total_events,
                 snapshot.retained_events,
                 snapshot.lost_events,
-                task.metric_scope,
                 task.state.as_str(),
             ),
-            (5, 5, 0, RuntimeTaskMetricScope::RetainedWindow, "Pending")
+            (5, 5, 0, "Unknown")
         );
         assert_eq!(
             (
                 worker.worker_id,
-                worker.poll_count,
-                worker.average_poll_nanos,
-                worker.max_poll_nanos,
-                worker.average_running_tasks,
+                worker.metrics.poll_count,
+                worker.metrics.median_poll_nanos,
+                worker.metrics.max_poll_nanos,
+                worker.observed_tasks,
                 task.task_id,
                 task.type_descriptor_id,
-                task.poll_count,
-                task.poll_nanos,
-                task.average_poll_nanos,
-                task.max_poll_nanos,
+                task.metrics.poll_count,
+                task.metrics.median_poll_nanos,
+                task.metrics.max_poll_nanos,
             ),
-            (Some(2), 2, 300, 400, 0.75, 10, Some(42), 2, 600, 300, 400)
+            (Some(2), 2, Some(300), Some(400), 1, 10, Some(42), 2, Some(300), Some(400))
         );
         assert_eq!(
             (
-                task.resume_count,
-                task.average_resume_nanos,
-                task.max_resume_nanos,
-                task.ready_wait_count,
-                task.ready_wait_nanos,
-                task.average_ready_wait_nanos,
-                task.max_ready_wait_nanos,
+                task.metrics.polls.as_slice(),
+                task.metrics.ready_samples.as_ref(),
+                task.activity.running_for,
+                task.activity.ready_for,
             ),
-            (1, 200, 200, 2, 110, 55, 80)
+            (
+                &[Interval { start: 100, end: 300 }, Interval { start: 500, end: 900 }][..],
+                &[30, 80][..],
+                None,
+                None
+            )
         );
+        assert!((worker.metrics.executing_fraction.unwrap() - 600.0 / 850.0).abs() < f64::EPSILON);
 
         let mut worker = worker.clone();
         let mut other = task.clone();
         other.task_id = 11;
-        other.max_ready_wait_nanos = 20;
+        other.metrics.max_poll_nanos = Some(20);
         worker.tasks.push(other);
         assert_eq!(
             worker
-                .sorted_tasks(RuntimeTaskSort::MaximumReadyWait, true)
+                .sorted_tasks(RuntimeTaskSort::MaximumPoll, true)
                 .into_iter()
                 .map(|task| task.task_id)
                 .collect::<Vec<_>>(),
@@ -4800,11 +4529,71 @@ mod tests {
     }
 
     #[test]
+    fn runtime_poll_metrics_stay_with_the_executing_worker_after_migration() {
+        let events = [
+            (1, 1, 100, RuntimeEventKind::TaskPollFinished, 20),
+            (1, 2, 200, RuntimeEventKind::TaskPollFinished, 80),
+            (1, 99, 210, RuntimeEventKind::TaskReady, 0),
+            (2, 1, 220, RuntimeEventKind::TaskPollFinished, 10),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(sequence, (runtime_id, worker_id, timestamp, kind, duration))| RuntimeEvent {
+            thread_id: ThreadId::new(worker_id),
+            sequence: EventSequence::new(u64::try_from(sequence).unwrap()),
+            timestamp: EventTimestamp::from_ticks(timestamp),
+            kind,
+            payload: EventPayload::Runtime(RuntimeEventPayload {
+                runtime_id: RuntimeId::from_raw(runtime_id).unwrap(),
+                worker_id: Some(WorkerId::from_raw(worker_id).unwrap()),
+                subject_id: 10,
+                related_id: 0,
+                value_0: duration,
+                value_1: 0,
+            }),
+            call_stack: Vec::new(),
+        })
+        .collect();
+        let snapshot = RuntimeMonitorSnapshot::from_events(
+            &Events {
+                events,
+                ..Events::default()
+            },
+            None,
+            &[],
+        );
+        assert_eq!(
+            snapshot
+                .workers
+                .iter()
+                .map(|worker| {
+                    let task = &worker.tasks[0];
+                    (
+                        worker.runtime_id,
+                        worker.worker_id,
+                        worker.observed_tasks,
+                        worker.metrics.poll_count,
+                        task.metrics.poll_count,
+                        task.metrics.median_poll_nanos,
+                        task.metrics.max_poll_nanos,
+                        task.worker_ids.clone(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+            [
+                (1, Some(1), 1, 1, 1, Some(20), Some(20), vec![1, 2]),
+                (1, Some(2), 1, 1, 1, Some(80), Some(80), vec![1, 2]),
+                (2, Some(1), 1, 1, 1, Some(10), Some(10), vec![1]),
+            ]
+        );
+    }
+
+    #[test]
     #[expect(
         clippy::too_many_lines,
         reason = "the lifetime-source fixture keeps worker, task, and retained-event metrics together"
     )]
-    fn runtime_source_lifetime_metrics_override_retained_event_counts() {
+    fn runtime_source_lifetime_metrics_do_not_override_retained_event_counts() {
         use seismograph_runtime::snapshot::{
             Counters, Runtime, RuntimeState, Snapshot as RuntimeSourceSnapshot, Task, TaskMetrics, Worker, WorkerState,
         };
@@ -4907,6 +4696,21 @@ mod tests {
                     }),
                     call_stack: Vec::new(),
                 },
+                RuntimeEvent {
+                    thread_id: ThreadId::new(7),
+                    sequence: EventSequence::new(7),
+                    timestamp: EventTimestamp::from_ticks(700),
+                    kind: RuntimeEventKind::TaskPollStarted,
+                    payload: EventPayload::Runtime(RuntimeEventPayload {
+                        runtime_id: RuntimeId::from_raw(1).unwrap(),
+                        worker_id: Some(WorkerId::from_raw(2).unwrap()),
+                        subject_id: 10,
+                        related_id: 0,
+                        value_0: 0,
+                        value_1: 0,
+                    }),
+                    call_stack: Vec::new(),
+                },
             ],
         };
         let source = RuntimeSourceSnapshot {
@@ -4942,8 +4746,10 @@ mod tests {
                         id: seismograph::recorder::runtime::TaskId::from_raw(10).unwrap(),
                         parent: None,
                         type_descriptor: seismograph::recorder::runtime::TypeDescriptorId::from_raw(42).unwrap(),
+                        future_size_bytes: None,
                         spawned_at: EventTimestamp::from_ticks(5),
                         last_worker_id: Some(WorkerId::from_raw(2).unwrap()),
+                        activity: None,
                         metrics: TaskMetrics {
                             poll_count: 500,
                             poll_duration_nanos: 10_000,
@@ -4961,8 +4767,10 @@ mod tests {
                         id: seismograph::recorder::runtime::TaskId::from_raw(11).unwrap(),
                         parent: None,
                         type_descriptor: seismograph::recorder::runtime::TypeDescriptorId::from_raw(43).unwrap(),
+                        future_size_bytes: None,
                         spawned_at: EventTimestamp::from_ticks(0),
                         last_worker_id: None,
+                        activity: None,
                         metrics: TaskMetrics::default(),
                         spawn_backtrace: Vec::new(),
                     },
@@ -4992,44 +4800,136 @@ mod tests {
                         )
                     })
                     .collect::<Vec<_>>(),
-                snapshot.workers[0].tasks[0].clone(),
             ),
             (
-                6,
+                7,
                 998,
                 vec![
+                    (1, "runtime", None, "Unbound", "Unknown", None, None, vec![11]),
                     (1, "runtime", Some(2), "Core", "Running", Some(7), Some(12), vec![10, 12]),
                     (1, "runtime", Some(3), "Blocking", "Parked", None, None, Vec::new()),
-                    (1, "runtime", None, "Unbound", "-", None, None, vec![11]),
                 ],
-                RuntimeTaskSummary {
-                    task_id: 10,
-                    runtime_id: 1,
-                    parent_id: None,
-                    type_descriptor_id: Some(42),
-                    metric_scope: RuntimeTaskMetricScope::Lifetime,
-                    state: "Pending".into(),
-                    spawned_at: Some(5),
-                    completed_at: None,
-                    poll_count: 500,
-                    poll_nanos: 10_000,
-                    average_poll_nanos: 20,
-                    max_poll_nanos: 300,
-                    resume_count: 499,
-                    average_resume_nanos: 40,
-                    max_resume_nanos: 400,
-                    ready_wait_count: 450,
-                    ready_wait_nanos: 9_000,
-                    average_ready_wait_nanos: 20,
-                    max_ready_wait_nanos: 200,
-                    enqueue_count: 0,
-                    materialization_count: 1,
-                    transfer_count: 0,
-                    worker_ids: vec![2],
-                    spawn_stack: Vec::new(),
-                },
             )
         );
+        let task = &snapshot.workers[1].tasks[0];
+        assert_eq!(
+            (
+                task.task_id,
+                task.state.as_str(),
+                task.metrics.poll_count,
+                task.metrics.median_poll_nanos,
+                task.metrics.max_poll_nanos
+            ),
+            (10, "Panicked", 1, Some(100), Some(100))
+        );
+        let source_only = RuntimeMonitorSnapshot::from_events(&Events::default(), Some(&source), &[]);
+        assert_eq!(
+            source_only
+                .workers
+                .iter()
+                .flat_map(|worker| &worker.tasks)
+                .map(|task| (
+                    task.task_id,
+                    task.state.as_str(),
+                    task.metrics.poll_count,
+                    task.metrics.median_poll_nanos,
+                    task.metrics.max_poll_nanos,
+                    task.activity.running_for,
+                    task.activity.ready_for,
+                ))
+                .collect::<Vec<_>>(),
+            [
+                (11, "Unknown", 0, None, None, None, None),
+                (10, "Unknown", 0, None, None, None, None),
+                (12, "Unknown", 0, None, None, None, None)
+            ]
+        );
+    }
+
+    #[test]
+    fn runtime_source_requires_coherent_activity_before_reporting_current_ages() {
+        use seismograph::recorder::runtime::{TaskId, TypeDescriptorId};
+        use seismograph_runtime::snapshot::{
+            Counters, Runtime, RuntimeState, Snapshot, Task, TaskActivity, TaskActivityState, TaskMetrics,
+        };
+
+        let activity = TaskActivity {
+            observed_at: EventTimestamp::from_ticks(100),
+            state: TaskActivityState::Running,
+            ready_since: Some(EventTimestamp::from_ticks(80)),
+            poll_started_at: Some(EventTimestamp::from_ticks(60)),
+            poll_worker_id: None,
+            queued_since: None,
+        };
+        let mut source = Snapshot {
+            runtimes: vec![Runtime {
+                id: RuntimeId::from_raw(1).unwrap(),
+                name: "executor".into(),
+                configured_workers: 1,
+                lifecycle_backtraces: seismograph::recorder::event::BacktraceCapture::Never,
+                state: RuntimeState::Running,
+                created_at: EventTimestamp::from_ticks(1),
+                retired_at: None,
+                counters: Counters::default(),
+                workers: Vec::new(),
+                tasks: vec![Task {
+                    id: TaskId::from_raw(1).unwrap(),
+                    parent: None,
+                    type_descriptor: TypeDescriptorId::from_raw(1).unwrap(),
+                    future_size_bytes: None,
+                    spawned_at: EventTimestamp::from_ticks(1),
+                    last_worker_id: None,
+                    metrics: TaskMetrics::default(),
+                    activity: None,
+                    spawn_backtrace: Vec::new(),
+                }],
+            }],
+            addresses: Vec::new(),
+        };
+        for (activity, expected) in [
+            (None, ("Unknown", None, None, false)),
+            (
+                Some(TaskActivity {
+                    state: TaskActivityState::Unknown,
+                    ..activity
+                }),
+                ("Unknown", None, None, false),
+            ),
+            (
+                Some(TaskActivity {
+                    poll_started_at: Some(EventTimestamp::from_ticks(101)),
+                    ..activity
+                }),
+                ("Unknown", None, None, false),
+            ),
+            (Some(activity), ("Running", Some(40), None, true)),
+            (
+                Some(TaskActivity {
+                    state: TaskActivityState::Ready,
+                    poll_started_at: None,
+                    queued_since: Some(EventTimestamp::from_ticks(90)),
+                    ..activity
+                }),
+                ("Ready", None, Some(10), false),
+            ),
+        ] {
+            source.runtimes[0].tasks[0].activity = activity;
+            let snapshot = RuntimeMonitorSnapshot::from_events(&Events::default(), Some(&source), &[]);
+            let task = &snapshot.workers[0].tasks[0];
+            assert_eq!(
+                (
+                    task.activity.state.as_str(),
+                    task.activity.running_for,
+                    task.activity.ready_for,
+                    task.activity.repoll_requested
+                ),
+                expected
+            );
+            assert_eq!(
+                (task.metrics.poll_count, task.metrics.median_poll_nanos, task.metrics.max_poll_nanos),
+                (0, None, None)
+            );
+        }
     }
 
     #[test]

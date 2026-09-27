@@ -27,9 +27,44 @@ the usual arrow/Enter/Backspace navigation within tabs, and `q` or `Esc` to quit
 Large files load on a worker thread while the terminal remains responsive.
 Loading still requires memory for the decoded events and their summaries.
 Snapshot files do not record a wall-clock capture time.
+The Info view identifies the local `seismograph_cli` crate version and the
+connected server’s `seismograph` crate version, even before capture.
+Legacy servers report an unknown version; offline snapshots do not store
+their producer’s version but still show the local monitor version in Info.
+Live Info charts accepted-event rates in separate colors for allocations,
+general events, Arc dereferences, runtime tasks, I/O, and cache events.
+The lower-right thread list shows each recorder on one line: identity, actual
+ring fill, current event rate and a recent-rate sparkline. Use Up/Down, PgUp/PgDn,
+Home/End, the mouse wheel, or click a thread to browse every recording thread.
+These lightweight counters refresh without a snapshot or stack symbolization;
+snapshot filters do not affect them. New recording sessions reset rate baselines.
+Threads that have never recorded an event are not enumerated OS threads.
+Older servers retain the total-rate chart and explicitly mark detailed counters
+unavailable; rebuild the application as well as the monitor for the new view.
+Metric caveats are in F1 help rather than below the Info metrics.
+Runtime task rows show completed worker-local poll counts, observed execution
+fraction, median poll duration, maximum poll duration and inline future bytes.
+Future size excludes executor bookkeeping and separately allocated buffers.
+A dash indicates unavailable metadata or observations, not a measured zero.
 
-Press `F1` for contextual help on the current panel or dialog, including
+In live mode, `s` captures using one of two actions selected with `d`:
+**Record and continue** (default) preserves server buffers and recording
+policy, so enabled classes continue writing and disabled classes stay off.
+**Record and stop** captures events, disables all six recording classes,
+and deallocates their ring buffers. Process-lifetime recorder metadata remains.
+Exited-thread buffers are released after either capture action.
+Uppercase `C` independently clears server buffers without a snapshot,
+symbolization or file I/O, keeping active-thread allocations and recording
+policy. Clear never removes the displayed capture or saved files.
+Lowercase `c` still configures each recorder’s off/on/custom policy.
+Capture, configuration and Clear are serialized by the UI. Stop and Clear
+require server support and never fall back to legacy release behavior.
+A source, decoding or save failure after Stop cannot restore discarded rings;
+the monitor reads back live recording policy even when the capture fails.
+
+Press `F1` for help scoped to the focused subpanel or dialog, including
 column meanings, units, metric scope, and keyboard and mouse controls.
+Non-focusable child charts and stacks are included; sibling panels are not.
 Help is scrollable and leaves the underlying selection and drafts unchanged.
 Press `F1` or `Esc` to close it.
 
@@ -79,6 +114,62 @@ An empty Runtime tab distinguishes absent instrumentation from absent activity:
 enabling recording does not install runtime instrumentation in the application.
 With active filters, an empty Runtime tab instead reports no matching runtime
 activity and points back to the filter controls.
+
+Runtime shows worker poll timelines above a task table, compact worker activity,
+and adjacent **Statistics**. Press `t` or click **Poll / Ready** to switch the
+task histogram; F1 explains its worker-local and task-global metrics.
+Left/Right (or Up/Down) and PgUp/PgDn select one/five histogram buckets.
+The bottom row keeps **Operations**, **Task occurrences**, and **Event stack**
+side by side; `e` focuses it without hiding the dashboard.
+Enter drills through `Workers -> Tasks -> Statistics -> Operations -> Occurrences`;
+Backspace reverses that path. At narrow sizes only the focused panel is shown.
+Events infers the task’s operations across workers from retained poll boundaries,
+without changing event recording. Occurrences show only that task’s selected
+operation, ordered by time with original thread, sequence and object identity.
+Other actors and other operation kinds never enter this list, even on shared
+objects. Unknown or ambiguous actors stay unassigned.
+Allocation origin and freeing actor are distinct, not task ownership or live memory.
+Task roots come from poll stacks or recognized instrumented future wrappers
+in event stacks; without either, stacks remain explicitly untrimmed.
+Lowercase `f` switches to the full captured stack, including executor frames.
+In the event browser, PgUp/PgDn scrolls the stack and Left/Right pans long frames.
+Tab and Shift-Tab always cycle main tabs; there is no text-details toggle.
+`[`/`]` change the task sort and `r` reverses it.
+
+Observed execution is the union of poll intervals clipped to the displayed
+per-runtime window, divided by that window’s duration: a lower bound, not CPU
+utilization. Timelines use eight rising bar heights with a visible baseline;
+dim baseline bars indicate unobserved data, not measured idle time.
+Every positive observed fraction rises above the zero baseline.
+Duration histograms show 12 fixed log10 buckets horizontally and sample counts vertically:
+`0..<10ns`, `10..<100ns`, and successive decades through milliseconds and seconds, ending in `100s+`.
+Extremely narrow panels merge adjacent buckets.
+Bars are one character wide, with a gray `_` baseline for every bucket.
+Nonempty buckets rise at least a one-eighth-cell sliver above it; numeric counts remain exact.
+The timeline shows at most the latest 60 seconds of event/source observations;
+filters preserve this common original axis. Counts and histograms still use all
+retained completed samples, and source ages are shown in full.
+Poll counts and duration statistics use retained completed polls on the selected
+worker. Ready wait is task-global queue time, not poll duration or raw wake
+latency; a wake during a poll starts ready wait only when that poll finishes.
+If coherent completed queue samples are absent, the right histogram instead
+shows available raw wake-to-poll latency, explicitly labeled as including
+self-wake overlap with Running. Raw and queue samples are never mixed.
+Missing duration samples show `-`, while a measured zero shows `0ns`.
+Histogram axes show inclusive duration ranges in logarithmic buckets, with
+rounded unit-labelled limits and linear sample counts. Open source intervals
+appear in timelines, not histograms.
+Running/Ready ages come from coherent per-task source observations, not a
+globally atomic snapshot; recording stop freezes those ages. Older captures
+and raced observations have unknown activity. F1 explains these boundaries,
+including incomplete, overwritten and filtered evidence, from every Runtime panel.
+Open polls use their coherent poll-worker identity, not separately sampled
+last-worker or worker-slot metadata. Older activity schemas without that
+identity require an exact retained task/runtime/poll-start timestamp match to
+assign worker occupancy; otherwise only the global running age is shown.
+Waiting records a poll exit without an outstanding wake, not proof of
+`Poll::Pending`. Waiting or Ready can briefly appear between the poll-exit
+hook and terminal retirement after completion or panic.
 
 
 <hr/>

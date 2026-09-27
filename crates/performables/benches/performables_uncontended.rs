@@ -11,6 +11,7 @@ use std::task::{Context, Poll, Waker};
 use criterion::{Criterion, criterion_group, criterion_main};
 use performables::arc::Arc;
 use performables::sync::lock::RwLock;
+use performables::sync::mode;
 use performables::sync::mutex::Mutex;
 
 fn arc_new_drop(criterion: &mut Criterion) {
@@ -52,7 +53,8 @@ fn arc_clone_drop(criterion: &mut Criterion) {
 fn mutex_lock(criterion: &mut Criterion) {
     let mut group = criterion.benchmark_group("performables_uncontended/mutex_lock");
     let standard = std::sync::Mutex::new(7_u64);
-    let performable = Mutex::new(7_u64);
+    let synchronous = Mutex::<u64>::new(7);
+    let performable = Mutex::<u64, mode::Async>::new(7);
     let mut context = Context::from_waker(Waker::noop());
 
     group.bench_function("std", |bencher| {
@@ -61,10 +63,22 @@ fn mutex_lock(criterion: &mut Criterion) {
             black_box(*guard)
         });
     });
-    group.bench_function("performables", |bencher| {
+    group.bench_function("performables_sync", |bencher| {
+        bencher.iter(|| {
+            let guard = synchronous.lock();
+            black_box(*guard)
+        });
+    });
+    group.bench_function("performables_async_blocking", |bencher| {
+        bencher.iter(|| {
+            let guard = performable.lock();
+            black_box(*guard)
+        });
+    });
+    group.bench_function("performables_async", |bencher| {
         bencher.iter(|| {
             // Stack-pin to avoid allocator noise on the measured path.
-            let mut lock = pin!(performable.lock());
+            let mut lock = pin!(performable.lock_async());
             let Poll::Ready(guard) = lock.as_mut().poll(&mut context) else {
                 unreachable!("the benchmark has no competing lock holder");
             };
@@ -77,7 +91,8 @@ fn mutex_lock(criterion: &mut Criterion) {
 fn rw_lock(criterion: &mut Criterion) {
     let mut read_group = criterion.benchmark_group("performables_uncontended/rw_lock_read");
     let standard = std::sync::RwLock::new(7_u64);
-    let performable = RwLock::new(7_u64);
+    let synchronous = RwLock::<u64>::new(7);
+    let performable = RwLock::<u64, mode::Async>::new(7);
     let mut context = Context::from_waker(Waker::noop());
 
     read_group.bench_function("std", |bencher| {
@@ -94,10 +109,16 @@ fn rw_lock(criterion: &mut Criterion) {
             black_box(*guard)
         });
     });
+    read_group.bench_function("performables_sync", |bencher| {
+        bencher.iter(|| {
+            let guard = synchronous.read();
+            black_box(*guard)
+        });
+    });
     read_group.bench_function("performables_async", |bencher| {
         bencher.iter(|| {
             // Stack-pin to avoid allocator noise on the measured path.
-            let mut lock = pin!(performable.read());
+            let mut lock = pin!(performable.read_async());
             let Poll::Ready(guard) = lock.as_mut().poll(&mut context) else {
                 unreachable!("the benchmark has no competing lock holder");
             };
@@ -114,10 +135,17 @@ fn rw_lock(criterion: &mut Criterion) {
             black_box(*guard)
         });
     });
-    write_group.bench_function("performables", |bencher| {
+    write_group.bench_function("performables_sync", |bencher| {
+        bencher.iter(|| {
+            let mut guard = synchronous.write();
+            *guard = black_box(*guard);
+            black_box(*guard)
+        });
+    });
+    write_group.bench_function("performables_async", |bencher| {
         bencher.iter(|| {
             // Stack-pin to avoid allocator noise on the measured path.
-            let mut lock = pin!(performable.write());
+            let mut lock = pin!(performable.write_async());
             let Poll::Ready(mut guard) = lock.as_mut().poll(&mut context) else {
                 unreachable!("the benchmark has no competing lock holder");
             };

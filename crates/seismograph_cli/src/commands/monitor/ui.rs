@@ -12,36 +12,62 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
     Axis, Block, Borders, Cell, Chart, Clear, Dataset, Gauge, GraphType, List, ListItem, ListState, Paragraph, Row, Table, TableState, Tabs,
 };
-use seismograph_protocol::message::{EventBufferDisposition, RecorderStatistics, RecordingConfiguration, RecordingPolicy};
+use seismograph_protocol::message::{RecorderStatistics, RecordingConfiguration, RecordingPolicy};
 use seismograph_protocol::monitor::MonitorDescriptor;
 
 use super::app::{
-    ActivitySample, AllocationViewState, App, CacheFocus, CacheViewState, CaptureStep, HeapFocus, HeapViewState, IoFocus, IoViewState,
-    MonitorTab, PrimitiveFocus, PrimitiveViewState, RecordingConfigurationPopup, RuntimeDetailView, RuntimeFocus, RuntimeViewState, Screen,
-    ThreadFocus, ThreadViewState, format_sampling_percentage, recording_policy_label,
+    ActivitySample, AllocationViewState, App, CacheFocus, CacheViewState, CaptureMode, CaptureStep, HeapFocus, HeapViewState, IoFocus,
+    IoViewState, MonitorTab, PrimitiveFocus, PrimitiveViewState, RecordingConfigurationPopup, RuntimeViewState, Screen, ThreadFocus,
+    ThreadViewState, format_sampling_percentage, recording_policy_label,
 };
 use super::data::{
     AllocationHotspot, AllocationSnapshot, AllocationSort, AllocationStackFilter, CapturedSnapshot, MemorySnapshot, MemoryTier,
     PrimitiveSnapshot, PrimitiveSort, ThreadSnapshot, cache_event_label,
 };
+use super::live_activity::LiveActivity;
 use super::mouse::{ListTarget, MouseRows};
+
+#[path = "info_ui.rs"]
+mod info_ui;
+#[path = "runtime_ui.rs"]
+mod runtime_ui;
+#[path = "task_events_ui.rs"]
+mod task_events_ui;
 
 const KEY_COLOR: Color = Color::Cyan;
 const CONTENTION_COLOR: Color = Color::Yellow;
 
 impl App {
+    pub(super) fn screen_areas(&self, area: Rect) -> [Rect; 3] {
+        Layout::vertical([
+            Constraint::Min(4),
+            Constraint::Length(self.filter_banner_height()),
+            Constraint::Length(1),
+        ])
+        .areas(area)
+    }
+
     pub(super) fn draw(&self, frame: &mut ratatui::Frame<'_>) {
         self.draw_with_snapshot_time(frame, snapshot_time);
     }
 
     fn draw_with_snapshot_time(&self, frame: &mut ratatui::Frame<'_>, format_snapshot_time: impl Fn(&CapturedSnapshot) -> String) {
+        self.draw_with_version(frame, format_snapshot_time, env!("CARGO_PKG_VERSION"));
+    }
+
+    fn draw_with_version(
+        &self,
+        frame: &mut ratatui::Frame<'_>,
+        format_snapshot_time: impl Fn(&CapturedSnapshot) -> String,
+        monitor_version: &str,
+    ) {
         self.panels.rows.begin(frame.area());
-        let [body, filter_banner, footer] = Layout::vertical([
-            Constraint::Min(4),
-            Constraint::Length(self.filter_banner_height()),
-            Constraint::Length(1),
-        ])
-        .areas(frame.area());
+        let [body, filter_banner, footer] = self.screen_areas(frame.area());
+        let server_version = match &self.screen {
+            Screen::Browse => "not connected",
+            Screen::Connected { .. } => self.server_version.as_deref().unwrap_or("unknown (legacy server)"),
+            Screen::Offline { .. } => "unknown (not recorded in snapshot)",
+        };
         let snapshot_view = match &self.screen {
             Screen::Browse => {
                 self.draw_browser(frame, body);
@@ -61,6 +87,9 @@ impl App {
                 body,
                 &ConnectedView {
                     origin,
+                    recording_unknown: self.recording_unknown,
+                    monitor_version,
+                    server_version,
                     tab: *tab,
                     snapshot: snapshot.as_deref(),
                     snapshot_error: self.snapshot_error.as_deref(),
@@ -74,6 +103,8 @@ impl App {
                     panels: &self.panels,
                     activity_samples: &self.activity_samples,
                     recorder_statistics: self.recorder_statistics.as_ref(),
+                    live_activity: &self.live_activity,
+                    info_thread_selected: self.info_thread_selected,
                 },
             );
         }
@@ -86,8 +117,8 @@ impl App {
             Screen::Connected { recording, snapshot, .. } => {
                 let snapshot_time = snapshot.as_deref().map(format_snapshot_time);
                 connected_footer(
-                    *recording,
-                    self.snapshot_options.event_buffers,
+                    (!self.recording_unknown).then_some(*recording),
+                    self.capture_mode,
                     snapshot_time.as_deref(),
                     &self.status,
                 )
@@ -195,6 +226,9 @@ impl App {
 #[derive(Clone, Copy)]
 struct ConnectedView<'a> {
     origin: ViewOrigin<'a>,
+    recording_unknown: bool,
+    monitor_version: &'a str,
+    server_version: &'a str,
     tab: MonitorTab,
     snapshot: Option<&'a CapturedSnapshot>,
     snapshot_error: Option<&'a str>,
@@ -208,6 +242,8 @@ struct ConnectedView<'a> {
     panels: &'a super::panels::Panels,
     activity_samples: &'a VecDeque<ActivitySample>,
     recorder_statistics: Option<&'a RecorderStatistics>,
+    live_activity: &'a LiveActivity,
+    info_thread_selected: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -249,6 +285,7 @@ fn draw_connected(frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect, v
     );
     if let ViewOrigin::Offline(path) = view.origin
         && view.snapshot.is_none()
+        && view.tab != MonitorTab::Info
     {
         frame.render_widget(
             Paragraph::new(format!(
@@ -302,14 +339,13 @@ fn draw_connected(frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect, v
             view.snapshot_error,
             view.thread_view,
         ),
-        MonitorTab::Runtime => draw_runtime(
+        MonitorTab::Runtime => runtime_ui::draw(
             frame,
             &view.panels.rows,
-            [panels[0], panels[1], panels[2]],
-            view.snapshot.map(|snapshot| &snapshot.runtime),
+            view.panels.arrange_runtime(content, view.runtime_view.focus).areas,
+            view.snapshot,
             view.snapshot_error,
             view.runtime_view,
-            view.snapshot.is_some_and(|snapshot| snapshot.filter_summary.active),
         ),
         MonitorTab::Io => draw_io(
             frame,
@@ -330,32 +366,22 @@ fn draw_connected(frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect, v
     }
 }
 
-const SNAPSHOT_SCOPE_NOTES: [&str; 7] = [
-    "Accepted/overwritten counts exclude suppressed, sampled-out, disabled and non-producing activity.",
-    "Source accepted/overwritten counters span event classes; they are not allocation populations.",
-    "Unmatched retained allocations are not proven live allocations or leaks, even with zero overwrites.",
-    "General-counter availability/start epoch are unencoded; cumulative totals are not session/workload deltas.",
-    "Region assignment is virtual; mapped/backing bytes are not portable committed memory or RSS.",
-    "Published-class totals cover small classes only; class estimates are not per-segment occupancy.",
-    "Sampled live maxima use independent counter reads and are not guaranteed lifetime bounds.",
-];
-
 fn draw_snapshot_info(frame: &mut ratatui::Frame<'_>, area: Rect, view: &ConnectedView<'_>) {
     match view.origin {
         ViewOrigin::Live(descriptor, recording) => draw_info(
             frame,
             {
                 let panels = view.panels.arrange(MonitorTab::Info, area).areas;
-                [panels[0], panels[1]]
+                [panels[0], panels[1], panels[2]]
             },
             descriptor,
             recording,
-            view.snapshot.and_then(|capture| capture.allocations.as_ref()),
-            view.activity_samples,
-            view.recorder_statistics,
+            view,
         ),
         ViewOrigin::Offline(path) => {
             let mut lines = vec![
+                Line::from(format!("Monitor (seismograph_cli): {}", view.monitor_version)),
+                Line::from(format!("Server (seismograph): {}", view.server_version)),
                 Line::from(path.display().to_string()),
                 Line::from("Offline snapshot · read-only"),
                 Line::from("Capture time: not recorded in the snapshot"),
@@ -371,8 +397,8 @@ fn draw_snapshot_info(frame: &mut ratatui::Frame<'_>, area: Rect, view: &Connect
                 if let Some(error) = &snapshot.heap_error {
                     lines.push(Line::from(error.as_str()));
                 }
-                lines.push(Line::from(""));
-                lines.extend(SNAPSHOT_SCOPE_NOTES.map(Line::from));
+            } else {
+                lines.push(Line::from(view.snapshot_error.unwrap_or("Loading and decoding snapshot…")));
             }
             frame.render_widget(
                 Paragraph::new(lines).block(Block::default().title(" Snapshot file ").borders(Borders::ALL)),
@@ -691,297 +717,6 @@ fn format_hit_rate(hits: u64, lookups: u64) -> String {
     format!("{}.{:01}%", tenths / 10, tenths % 10)
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "the three coordinated runtime panes share selection and layout state that is clearest in one renderer"
-)]
-fn draw_runtime(
-    frame: &mut ratatui::Frame<'_>,
-    mouse_rows: &MouseRows,
-    [workers_area, tasks_area, details_area]: [Rect; 3],
-    runtime: Option<&super::data::RuntimeMonitorSnapshot>,
-    unavailable: Option<&str>,
-    view: RuntimeViewState,
-    filter_active: bool,
-) {
-    let Some(runtime) = runtime else {
-        draw_empty_panel_with_message(frame, workers_area, " Runtime Threads ", unavailable);
-        draw_empty_panel_with_message(frame, tasks_area, " Tasks ", unavailable);
-        draw_empty_panel_with_message(frame, details_area, " Task Details ", unavailable);
-        return;
-    };
-
-    let worker_selected = view.worker_selected.min(runtime.workers.len().saturating_sub(1));
-    let worker = runtime.workers.get(worker_selected);
-    let visible_workers = usize::from(workers_area.height.saturating_sub(3));
-    let first_worker = worker_selected.saturating_sub(visible_workers.saturating_sub(1));
-    mouse_rows.register(workers_area, 1, first_worker, runtime.workers.len(), ListTarget::RuntimeWorkers);
-    let mut worker_lines = vec![Line::from(Span::styled(
-        format!(
-            "{:<18} {:<9} {:<9} {:>7} {:>10} {:>10} {:>10}",
-            "Runtime / thread", "Role", "State", "Tasks", "Poll busy", "Avg poll", "Max poll"
-        ),
-        Style::default().add_modifier(Modifier::BOLD),
-    ))];
-    worker_lines.extend(
-        runtime
-            .workers
-            .iter()
-            .skip(first_worker)
-            .take(visible_workers)
-            .enumerate()
-            .map(|(index, worker)| {
-                let thread = if worker.worker_id.is_none() {
-                    "unassigned".into()
-                } else {
-                    worker.thread_id.map_or_else(|| "-".into(), |id| format!("#{id}"))
-                };
-                let (busy, average_poll, max_poll) = if worker.worker_id.is_some() {
-                    (
-                        format!("{:.1}%", worker.average_running_tasks * 100.0),
-                        format_runtime_duration(worker.average_poll_nanos),
-                        format_runtime_duration(worker.max_poll_nanos),
-                    )
-                } else {
-                    ("-".into(), "-".into(), "-".into())
-                };
-                primitive_selection_line(
-                    Line::from(format!(
-                        "{:<18} {:<9} {:<9} {:>7} {:>10} {:>10} {:>10}",
-                        format!("{} / {thread}", worker.runtime_name),
-                        worker.role,
-                        worker.state,
-                        format_count(u64::try_from(worker.tasks.len()).unwrap_or(u64::MAX)),
-                        busy,
-                        average_poll,
-                        max_poll,
-                    )),
-                    row_is_selected(first_worker, index, worker_selected),
-                    view.focus == RuntimeFocus::Workers,
-                )
-            }),
-    );
-    if runtime.workers.is_empty() && filter_active {
-        worker_lines.push(Line::from("No matching runtime activity."));
-        worker_lines.push(Line::from(
-            "Press F to change or clear stack filters, including the unknown-stack and runtime provenance options.",
-        ));
-    } else if runtime.workers.is_empty() {
-        worker_lines.push(Line::from("No runtime workers or tasks were recorded."));
-        if !runtime.source_present && runtime.runtime_events == 0 {
-            worker_lines.push(Line::from("No runtime source or runtime events in this snapshot."));
-            worker_lines.push(Line::from(
-                "Use an instrumented runtime (e.g. oxidizer_rt); the recorder alone does not instrument executors.",
-            ));
-            worker_lines.push(Line::from(
-                "Check the application's runtime wiring and that it uses the same Seismograph dependency.",
-            ));
-        } else {
-            worker_lines.push(Line::from(
-                "Capture while instrumented workers/tasks are active; enable Runtime tasks for event history.",
-            ));
-        }
-    }
-    frame.render_widget(
-        Paragraph::new(worker_lines).block(
-            Block::default()
-                .title(Line::from(vec![
-                    Span::raw(format!(
-                        " Runtime Threads · {} runtime events · source retained {} / {} accepted · {} overwritten ({}) · Poll busy = retained-window task polls · ",
-                        format_count(runtime.runtime_events),
-                        format_count(runtime.retained_events),
-                        format_count(runtime.total_events),
-                        format_count(runtime.lost_events),
-                        format_event_loss(runtime.lost_events, runtime.total_events),
-                    )),
-                    key_span("Enter"),
-                    Span::raw(" tasks "),
-                ]))
-                .borders(Borders::ALL),
-        ),
-        workers_area,
-    );
-
-    let sorted_tasks = worker.map_or_else(Vec::new, |worker| worker.sorted_tasks(view.task_sort, view.task_sort_descending));
-    let task_selected = view.task_selected.min(sorted_tasks.len().saturating_sub(1));
-    let visible_tasks = usize::from(tasks_area.height.saturating_sub(3));
-    let first_task = task_selected.saturating_sub(visible_tasks.saturating_sub(1));
-    let task_rows = sorted_tasks.iter().skip(first_task).take(visible_tasks).map(|task| {
-        runtime_task_row([
-            format!("#{}", task.task_id),
-            task.state.clone(),
-            task.metric_scope.label().into(),
-            format_count(task.poll_count),
-            format_runtime_duration(task.average_resume_nanos),
-            format_runtime_duration(task.max_resume_nanos),
-            format_runtime_duration(task.average_ready_wait_nanos),
-            format_runtime_duration(task.max_ready_wait_nanos),
-        ])
-    });
-    let task_table = Table::new(task_rows, [10, 12, 15, 7, 10, 10, 10, 10].map(Constraint::Length))
-        .header(
-            runtime_task_row(
-                [
-                    "Task",
-                    "State",
-                    "Scope",
-                    "Polls",
-                    "Avg resume",
-                    "Max resume",
-                    "Avg stall",
-                    "Max stall",
-                ]
-                .map(String::from),
-            )
-            .style(Style::default().add_modifier(Modifier::BOLD)),
-        )
-        .column_spacing(1)
-        .row_highlight_style(if view.focus == RuntimeFocus::Tasks {
-            Style::default().fg(Color::Black).bg(Color::Cyan)
-        } else {
-            Style::default().bg(Color::DarkGray)
-        })
-        .block(
-            Block::default()
-                .title(Line::from(vec![
-                    Span::raw(format!(
-                        " Tasks · sort: {} {} · ",
-                        view.task_sort.label(),
-                        if view.task_sort_descending { "desc" } else { "asc" }
-                    )),
-                    key_span("[/]"),
-                    Span::raw(" sort · "),
-                    key_span("r"),
-                    Span::raw(" reverse · "),
-                    key_span("Enter"),
-                    Span::raw(" details · "),
-                    key_span("Backspace"),
-                    Span::raw(" threads "),
-                ]))
-                .borders(Borders::ALL),
-        );
-    let mut task_state =
-        TableState::default().with_selected((!sorted_tasks.is_empty()).then_some(task_selected.saturating_sub(first_task)));
-    frame.render_stateful_widget(task_table, tasks_area, &mut task_state);
-    mouse_rows.register(
-        tasks_area,
-        1,
-        first_task.saturating_add(task_state.offset()),
-        sorted_tasks.len(),
-        ListTarget::RuntimeTasks,
-    );
-
-    let task = sorted_tasks.get(task_selected).copied();
-    let mut detail_lines = Vec::new();
-    if let Some(task) = task {
-        match view.detail_view {
-            RuntimeDetailView::Details => {
-                detail_lines.extend([
-                    Line::from(format!("Task: #{}", task.task_id)),
-                    Line::from(format!("State: {}", task.state)),
-                    Line::from(format!("Metric scope: {}", task.metric_scope.label())),
-                    Line::from(match task.metric_scope {
-                        super::data::RuntimeTaskMetricScope::Lifetime => {
-                            "  Poll, resume, and scheduler-stall values are lifetime counters."
-                        }
-                        super::data::RuntimeTaskMetricScope::RetainedWindow => {
-                            "  Poll, resume, and scheduler-stall values cover retained events only."
-                        }
-                    }),
-                    Line::from(format!("Runtime: #{}", task.runtime_id)),
-                    Line::from(format!(
-                        "Parent: {}",
-                        task.parent_id.map_or_else(|| "-".into(), |id| format!("#{id}"))
-                    )),
-                    Line::from(format!(
-                        "Type descriptor: {}",
-                        task.type_descriptor_id.map_or_else(|| "-".into(), |id| format!("#{id}"))
-                    )),
-                    Line::from(format!("Workers: {:?}", task.worker_ids)),
-                    Line::from(format!("Polls: {}", format_count(task.poll_count))),
-                    Line::from(format!("Total poll time: {}", format_runtime_duration(task.poll_nanos))),
-                    Line::from(format!(
-                        "Average poll duration: {}",
-                        format_runtime_duration(task.average_poll_nanos)
-                    )),
-                    Line::from(format!("Maximum poll duration: {}", format_runtime_duration(task.max_poll_nanos))),
-                    Line::from(format!("Resume samples: {}", format_count(task.resume_count))),
-                    Line::from(format!(
-                        "Average time between polls: {}",
-                        format_runtime_duration(task.average_resume_nanos)
-                    )),
-                    Line::from(format!(
-                        "Maximum time between polls: {}",
-                        format_runtime_duration(task.max_resume_nanos)
-                    )),
-                    Line::from("  Time between polls is measured from a poll finishing until the next poll starts."),
-                    Line::from(format!("Ready-wait samples: {}", format_count(task.ready_wait_count))),
-                    Line::from(format!("Total scheduler stall: {}", format_runtime_duration(task.ready_wait_nanos))),
-                    Line::from(format!(
-                        "Average scheduler stall: {}",
-                        format_runtime_duration(task.average_ready_wait_nanos)
-                    )),
-                    Line::from(format!(
-                        "Maximum scheduler stall: {}",
-                        format_runtime_duration(task.max_ready_wait_nanos)
-                    )),
-                    Line::from("  Scheduler stall is measured from the first wake until the task is polled."),
-                    Line::from(format!("Retained-window enqueues: {}", format_count(task.enqueue_count))),
-                    Line::from(format!(
-                        "Retained-window materializations: {}",
-                        format_count(task.materialization_count)
-                    )),
-                    Line::from(format!("Retained-window transfer events: {}", format_count(task.transfer_count))),
-                    Line::from(format!(
-                        "Lifetime: {}",
-                        task.spawned_at
-                            .zip(task.completed_at)
-                            .map_or_else(|| "-".into(), |(start, end)| format_runtime_duration(end.saturating_sub(start)))
-                    )),
-                ]);
-            }
-            RuntimeDetailView::SpawnStack if task.spawn_stack.is_empty() => {
-                detail_lines.push(Line::from("Backtrace not captured."));
-                detail_lines.push(Line::from("Enable Runtime tasks backtraces before spawning new tasks."));
-                detail_lines.push(Line::from("Existing tasks cannot acquire a spawn stack retroactively."));
-            }
-            RuntimeDetailView::SpawnStack => {
-                detail_lines.extend(
-                    task.spawn_stack
-                        .iter()
-                        .enumerate()
-                        .map(|(index, frame)| Line::from(format!("{index:>3}  {frame}"))),
-                );
-            }
-        }
-    }
-    let visible_details = usize::from(details_area.height.saturating_sub(2));
-    let detail_scroll = view.detail_scroll.min(detail_lines.len().saturating_sub(visible_details));
-    frame.render_widget(
-        Paragraph::new(
-            detail_lines
-                .into_iter()
-                .skip(detail_scroll)
-                .take(visible_details)
-                .collect::<Vec<_>>(),
-        )
-        .block(
-            Block::default()
-                .title(Line::from(vec![
-                    Span::raw(format!(" Task {} · ", view.detail_view.label())),
-                    key_span("Tab"),
-                    Span::raw(" toggle view · "),
-                    key_span("PgUp/PgDn"),
-                    Span::raw(" scroll · "),
-                    key_span("Backspace"),
-                    Span::raw(" tasks "),
-                ]))
-                .borders(Borders::ALL),
-        ),
-        details_area,
-    );
-}
-
 fn format_runtime_duration(nanos: u64) -> String {
     if nanos >= 1_000_000_000 {
         format_decimal_duration(nanos, 1_000_000_000, "s")
@@ -1006,13 +741,6 @@ fn format_event_loss(lost_events: u64, total_events: u64) -> String {
     }
     let tenths = u128::from(lost_events) * 1_000 / u128::from(total_events);
     format!("{}.{:01}%", tenths / 10, tenths % 10)
-}
-
-fn runtime_task_row(values: [String; 8]) -> Row<'static> {
-    Row::new(values.into_iter().enumerate().map(|(column, value)| {
-        let line = Line::from(value);
-        Cell::from(if column >= 3 { line.right_aligned() } else { line })
-    }))
 }
 
 fn draw_allocations(
@@ -1160,14 +888,19 @@ fn draw_allocation_stack(
 
 fn draw_info(
     frame: &mut ratatui::Frame<'_>,
-    [activity_area, details_area]: [Rect; 2],
+    [activity_area, details_area, threads_area]: [Rect; 3],
     descriptor: &MonitorDescriptor,
     recording: RecordingConfiguration,
-    allocations: Option<&AllocationSnapshot>,
-    activity_samples: &VecDeque<ActivitySample>,
-    recorder_statistics: Option<&RecorderStatistics>,
+    view: &ConnectedView<'_>,
 ) {
-    draw_activity(frame, activity_area, activity_samples);
+    info_ui::draw_activity(frame, activity_area, view.live_activity, view.activity_samples);
+    info_ui::draw_threads(
+        frame,
+        &view.panels.rows,
+        threads_area,
+        view.live_activity,
+        view.info_thread_selected,
+    );
     let event_capacity = u64::from(recording.event_capacity_per_thread);
     let capacity = usize::try_from(recording.event_capacity_per_thread)
         .ok()
@@ -1177,6 +910,8 @@ fn draw_info(
         .and_then(|bytes| u64::try_from(bytes).ok())
         .unwrap_or(u64::MAX);
     let mut lines = vec![
+        Line::from(format!("Monitor (seismograph_cli): {}", view.monitor_version)),
+        Line::from(format!("Server (seismograph): {}", view.server_version)),
         metric_line("Name", descriptor.name.clone()),
         metric_line("Instance", descriptor.instance.clone().unwrap_or_else(|| "-".into())),
         metric_line("PID", descriptor.process_id.to_string()),
@@ -1191,7 +926,18 @@ fn draw_info(
         recording_policy_line("Cache", recording.cache),
         metric_line("Telemetry memory / thread", format_bytes(memory_per_thread)),
     ];
-    if let Some(statistics) = recorder_statistics {
+    if view.recording_unknown {
+        lines.truncate(7);
+        lines.push(Line::from(
+            "Recording state UNKNOWN; waiting for authoritative server configuration.",
+        ));
+        frame.render_widget(
+            Paragraph::new(Text::from(lines)).block(Block::default().title(" Info ").borders(Borders::ALL)),
+            details_area,
+        );
+        return;
+    }
+    if let Some(statistics) = view.recorder_statistics {
         lines.extend([
             metric_line("Telemetry threads", format_count(statistics.thread_count)),
             metric_line("Telemetry memory total", format_bytes(statistics.allocated_bytes)),
@@ -1199,7 +945,7 @@ fn draw_info(
             metric_line("Retained telemetry events", format_count(statistics.retained_events)),
             metric_line("Overwritten telemetry events", format_count(statistics.lost_events)),
         ]);
-    } else if let Some(allocations) = allocations {
+    } else if let Some(allocations) = view.snapshot.and_then(|capture| capture.allocations.as_ref()) {
         lines.extend([
             metric_line("Telemetry threads", format_count(allocations.thread_count)),
             metric_line(
@@ -1211,8 +957,6 @@ fn draw_info(
             metric_line("All-class source overwritten", format_count(allocations.lost_events)),
         ]);
     }
-    lines.push(Line::from(""));
-    lines.extend(SNAPSHOT_SCOPE_NOTES.map(Line::from));
     frame.render_widget(
         Paragraph::new(Text::from(lines)).block(Block::default().title(" Info ").borders(Borders::ALL)),
         details_area,
@@ -2374,16 +2118,13 @@ fn browse_footer(status: &str) -> Line<'static> {
 }
 
 fn connected_footer(
-    configuration: RecordingConfiguration,
-    event_buffers: EventBufferDisposition,
+    configuration: Option<RecordingConfiguration>,
+    capture_mode: CaptureMode,
     snapshot_time: Option<&str>,
     status: &str,
 ) -> Line<'static> {
-    let snapshot_buffers = match event_buffers {
-        EventBufferDisposition::Retain => "retain",
-        EventBufferDisposition::Clear => "clear",
-        EventBufferDisposition::Release => "release",
-    };
+    let unknown = configuration.is_none();
+    let configuration = configuration.unwrap_or_default();
     let state_style = |enabled| {
         Style::default()
             .fg(if enabled { Color::Green } else { Color::Red })
@@ -2392,7 +2133,7 @@ fn connected_footer(
     let mut spans = vec![
         key_span(" F1"),
         Span::raw(" help │"),
-        Span::raw(" A/E/X/R/I/C: "),
+        Span::raw(if unknown { " Recording UNKNOWN: " } else { " A/E/X/R/I/C: " }),
         Span::styled(
             if configuration.allocations.enabled { "A" } else { "-" },
             state_style(configuration.allocations.enabled),
@@ -2420,12 +2161,11 @@ fn connected_footer(
         Span::raw(" "),
         key_span("[c configure]"),
         key_span(" [F filters]"),
-        Span::raw(" │ Snapshot buffers: "),
-        Span::styled(snapshot_buffers, Style::default().fg(Color::Cyan)),
-        Span::raw(" "),
-        key_span("[d]"),
-        Span::raw(" │ Snapshot "),
-        key_span("[s]"),
+        Span::raw(" │ "),
+        Span::styled(capture_mode.label(), Style::default().fg(Color::Cyan)),
+        key_span(" [s]"),
+        key_span(" [d mode]"),
+        key_span(" [C clear]"),
         Span::raw(" │ "),
         key_span("Tab"),
         Span::raw(" tabs │ drag borders to resize │ "),
@@ -2434,11 +2174,15 @@ fn connected_footer(
         key_span("q"),
         Span::raw(" quit"),
     ];
+    if unknown {
+        // Do not render disabled indicators for a state we could not read back.
+        spans.drain(3..9);
+    }
     if let Some(snapshot_time) = snapshot_time {
         spans.push(Span::raw(format!(" {snapshot_time}")));
     }
     if !status.is_empty() {
-        spans.push(Span::raw(format!(" │ {status}")));
+        spans.insert(if unknown { 3 } else { 9 }, Span::raw(format!(" │ {status} │")));
     }
     Line::from(spans)
 }
@@ -2525,6 +2269,7 @@ mod tests {
     use seismograph_rallocator::snapshot::{Estimate, EstimateFields, Region, SizeClass, SizeClassFields, Snapshot, Version};
     use seismograph_rallocator::topology::{Segment, SegmentFields, Slice, SliceKind, TopologyRegion};
 
+    use super::super::app::{RuntimeFocus, TaskEventsFocus, TaskHistogram};
     use super::*;
 
     fn descriptor() -> MonitorDescriptor {
@@ -2832,6 +2577,7 @@ mod tests {
             heap_error: None,
             primitives: runtime.primitives,
             runtime: runtime.runtime,
+            task_events: runtime.task_events,
             io: runtime.io,
             cache: runtime.cache,
             threads: runtime.threads,
@@ -2855,6 +2601,60 @@ mod tests {
             .iter()
             .map(ratatui::buffer::Cell::symbol)
             .collect()
+    }
+
+    #[test]
+    fn versions_identify_monitor_and_server_before_capture_and_after_reconnect() {
+        use crossterm::event::KeyCode;
+
+        let mut app = App::new();
+        app.instances.push(super::super::app::Instance {
+            descriptor: descriptor(),
+            recording: RecordingConfiguration::default(),
+            server_version: Some("12.34.56-rc.7".into()),
+        });
+        let browser = render(&app);
+        assert!(!browser.contains("Monitor (seismograph_cli):"));
+        assert!(!browser.contains("Server (seismograph):"));
+        app.handle_key(KeyCode::Enter);
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| app.draw_with_version(frame, |_| "unused before capture".into(), "98.76.54"))
+            .unwrap();
+        let output = terminal
+            .backend()
+            .buffer()
+            .content()
+            .chunks(80)
+            .map(|row| row.iter().map(ratatui::buffer::Cell::symbol).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(output.contains("Monitor (seismograph_cli): 98.76.54"), "{output}");
+        assert!(output.contains("Server (seismograph): 12.34.56-rc.7"), "{output}");
+        assert!(!output.contains("Server (seismograph): 98.76.54"));
+        assert!(matches!(app.screen, Screen::Connected { snapshot: None, .. }));
+
+        // Selecting another (legacy) instance must not retain the previous server version.
+        app.screen = Screen::Browse;
+        app.instances[0].server_version = None;
+        app.handle_key(KeyCode::Enter);
+        let legacy = render(&app);
+        assert!(legacy.contains("Server (seismograph): unknown (legacy server)"));
+        assert!(!legacy.contains("12.34.56-rc.7"));
+    }
+
+    #[test]
+    fn offline_version_is_local_and_does_not_claim_to_identify_the_snapshot_producer() {
+        let mut app = App::offline("capture.seismograph".into());
+        for loaded in [false, true] {
+            if loaded {
+                app.finish_offline_load(representative_capture());
+            }
+            let output = render(&app);
+            assert!(output.contains(&format!("Monitor (seismograph_cli): {}", env!("CARGO_PKG_VERSION"))));
+            assert!(output.contains("Server (seismograph): unknown (not recorded in snapshot)"));
+            assert!(!output.contains("unknown (legacy server)"));
+        }
     }
 
     fn mouse_event(kind: crossterm::event::MouseEventKind, column: u16, row: u16) -> crossterm::event::MouseEvent {
@@ -2896,8 +2696,8 @@ mod tests {
         app.runtime_view.task_selected = 55;
         app.filters.applied =
             super::super::filter::FilterSpec::parse("crate:worker", "", true, super::super::filter::RuntimeStackMode::Event).unwrap();
-        let area = Rect::new(0, 0, 120, 35);
-        let content = Rect::new(0, 3, 120, 27);
+        let area = Rect::new(0, 0, 180, 60);
+        let content = Rect::new(0, 3, 180, 52);
         let panels = app.panels.arrange(MonitorTab::Runtime, content).areas;
         for (kind, column, row) in [
             (MouseEventKind::Down(MouseButton::Left), 5, panels[1].y),
@@ -2940,7 +2740,7 @@ mod tests {
             }
             assert!(visible > 0);
         }
-        for row in 30..35 {
+        for row in 55..60 {
             assert_eq!(app.panels.rows.at(area, 1, row), None);
         }
         let (_, index) = app.panels.rows.at(area, panels[1].x + 1, panels[1].y + 2).unwrap();
@@ -2950,7 +2750,7 @@ mod tests {
         );
         assert_eq!(
             (app.runtime_view.task_selected, app.runtime_view.focus),
-            (index, RuntimeFocus::Details)
+            (index, RuntimeFocus::Activity)
         );
     }
 
@@ -3104,6 +2904,7 @@ mod tests {
                 super::super::app::Instance {
                     descriptor,
                     recording: RecordingConfiguration::default(),
+                    server_version: None,
                 }
             })
             .collect();
@@ -3223,7 +3024,11 @@ mod tests {
                 snapshot,
             };
             let offline = render(&app);
-            // Only the tab border (filename) and footer differ; compare every content cell.
+            assert!(!live.contains("Monitor (seismograph_cli):"), "{tab:?}");
+            assert!(!live.contains("Server (seismograph):"), "{tab:?}");
+            assert!(!offline.contains("Monitor (seismograph_cli):"), "{tab:?}");
+            assert!(!offline.contains("Server (seismograph):"), "{tab:?}");
+            // Only the tab border and footer differ; compare every content cell.
             let content = |text: &str| text.chars().skip(180 * 3).take(180 * 56).collect::<String>();
             assert_eq!(content(&offline), content(&live), "{tab:?}");
         }
@@ -3268,6 +3073,9 @@ mod tests {
         let app = App::offline("pending.seismograph".into());
         let view = ConnectedView {
             origin: ViewOrigin::Offline(std::path::Path::new("pending.seismograph")),
+            recording_unknown: false,
+            monitor_version: env!("CARGO_PKG_VERSION"),
+            server_version: "unknown (not recorded in snapshot)",
             tab: MonitorTab::Info,
             snapshot: None,
             snapshot_error: None,
@@ -3281,6 +3089,8 @@ mod tests {
             panels: &app.panels,
             activity_samples: &app.activity_samples,
             recorder_statistics: None,
+            live_activity: &app.live_activity,
+            info_thread_selected: app.info_thread_selected,
         };
         let output = render_frame(|frame| draw_snapshot_info(frame, frame.area(), &view));
         assert_eq!(
@@ -3329,7 +3139,79 @@ mod tests {
     }
 
     #[test]
-    fn info_explains_counter_and_memory_scope_in_both_modes() {
+    fn live_info_shows_class_rates_and_graphical_threads_without_capturing_events() {
+        use crossterm::event::{MouseButton, MouseEventKind};
+        use seismograph_protocol::message::{EventClassCounts, RecorderActivity, ThreadRecorderStatistics};
+
+        for (width, height) in [(180, 60), (80, 24)] {
+            let mut app = App::new();
+            app.screen = Screen::Connected {
+                descriptor: descriptor(),
+                recording: RecordingConfiguration::default(),
+                tab: MonitorTab::Info,
+                snapshot: None,
+            };
+            let start = Instant::now();
+            for step in [1, 2] {
+                app.live_activity.record(
+                    RecorderActivity {
+                        session_id: 1,
+                        class_events: EventClassCounts {
+                            allocations: step * 5,
+                            runtime_tasks: step * 9,
+                            ..EventClassCounts::default()
+                        },
+                        threads: (1..=3)
+                            .map(|thread_id| ThreadRecorderStatistics {
+                                thread_id,
+                                name: format!("live-worker-{thread_id}"),
+                                total_events: step * 16,
+                                retained_events: step * 16,
+                                event_capacity: 64,
+                                ..ThreadRecorderStatistics::default()
+                            })
+                            .collect(),
+                        ..RecorderActivity::default()
+                    },
+                    start + Duration::from_secs(step),
+                );
+            }
+            let area = Rect::new(0, 0, width, height);
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| app.draw(frame)).unwrap();
+            let buffer = terminal.backend().buffer();
+            let text = (0..height)
+                .map(|y| (0..width).map(|x| buffer[(x, y)].symbol()).collect::<String>())
+                .collect::<Vec<_>>()
+                .join("\n");
+            for expected in [
+                "Live event-class rates",
+                "Allocations 5/s",
+                "Runtime 9/s",
+                "Thread activity",
+                "32/64",
+                "50%",
+                "16/s",
+            ] {
+                assert!(text.contains(expected), "{width}x{height}: missing {expected}\n{text}");
+            }
+            assert!(text.contains(if width >= 180 { "live-worker-1" } else { "#1 live" }));
+            assert!(!text.contains("Source accepted/overwritten counters span"));
+            let target = (0..height)
+                .find_map(|y| {
+                    (0..width).find_map(|x| (app.panels.rows.at(area, x, y) == Some((ListTarget::InfoThreads, 1))).then_some((x, y)))
+                })
+                .unwrap();
+            app.handle_mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), target.0, target.1), area);
+            assert_eq!(app.info_thread_selected, 1);
+            app.handle_mouse(mouse_event(MouseEventKind::ScrollDown, target.0, target.1), area);
+            assert_eq!(app.info_thread_selected, 2);
+            assert!(matches!(app.screen, Screen::Connected { snapshot: None, .. }));
+        }
+    }
+
+    #[test]
+    fn info_keeps_metrics_without_explanatory_scope_notes_in_both_modes() {
         let mut app = App::offline("scope.seismograph".into());
         app.finish_offline_load(representative_capture());
         let offline = render(&app);
@@ -3340,9 +3222,14 @@ mod tests {
             snapshot: Some(representative_capture()),
         };
         let live = render(&app);
-        for note in SNAPSHOT_SCOPE_NOTES {
-            assert!(offline.contains(note), "offline: {note}");
-            assert!(live.contains(note), "live: {note}");
+        for note in [
+            "Accepted/overwritten counts exclude",
+            "not allocation populations",
+            "not session/workload deltas",
+            "not per-segment occupancy",
+        ] {
+            assert!(!offline.contains(note), "offline: {note}");
+            assert!(!live.contains(note), "live: {note}");
         }
         assert!(live.contains("All-class source accepted"));
         assert!(live.contains("All-class source overwritten"));
@@ -3427,7 +3314,7 @@ mod tests {
             for (width, height) in [(100, 40), (35, 12), (12, 5)] {
                 let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
                 let terminal_area = Rect::new(0, 0, width, height);
-                let [body, _] = Layout::vertical([Constraint::Min(4), Constraint::Length(1)]).areas(terminal_area);
+                let [body, ..] = app.screen_areas(terminal_area);
                 let [_, content] = Layout::vertical([Constraint::Length(3), Constraint::Min(1)]).areas(body);
                 let second = app.panels.arrange(tab, content).areas[1];
                 let (column, row) = if matches!(tab, MonitorTab::Threads | MonitorTab::Io | MonitorTab::Cache) {
@@ -3461,30 +3348,60 @@ mod tests {
     }
 
     #[test]
-    fn runtime_task_columns_align_across_scopes_states_and_large_values() {
-        use super::super::data::{RuntimeTaskMetricScope, RuntimeTaskSort};
+    fn runtime_medians_distinguish_missing_samples_from_measured_zero() {
+        for (median, expected, samples) in [(None, "-", Vec::new()), (Some(0), "0ns", vec![0]), (Some(7), "7ns", vec![7; 3])] {
+            let mut capture = representative_capture();
+            let runtime = &mut capture.runtime;
+            runtime.workers.truncate(1);
+            runtime.workers[0].tasks.truncate(1);
+            let task = &mut runtime.workers[0].tasks[0];
+            task.metrics.poll_count = u64::try_from(samples.len()).unwrap();
+            task.metrics.median_poll_nanos = median;
+            task.metrics.max_poll_nanos = median;
+            task.metrics.poll_samples = samples;
+            let output = render_frame(|frame| {
+                runtime_ui::draw(
+                    frame,
+                    &MouseRows::default(),
+                    [
+                        Rect::new(0, 0, 180, 4),
+                        Rect::new(0, 4, 180, 6),
+                        Rect::default(),
+                        Rect::new(0, 10, 180, 50),
+                        Rect::default(),
+                    ],
+                    Some(&capture),
+                    None,
+                    App::new().runtime_view,
+                );
+            });
+            assert!(output.contains("Median poll"));
+            assert!(output.contains(expected));
+            assert!(!output.contains("Median resume"));
+            assert!(!output.contains("Median stall"));
+        }
+    }
 
-        let mut runtime = representative_capture().runtime;
+    #[test]
+    fn runtime_task_columns_align_across_states_and_large_values() {
+        use super::super::data::RuntimeTaskSort;
+
+        let mut capture = representative_capture();
+        let runtime = &mut capture.runtime;
         runtime.workers.truncate(1);
         let template = runtime.workers[0].tasks[0].clone();
-        runtime.workers[0].tasks = [
-            (1, "Pending", RuntimeTaskMetricScope::Lifetime, 12),
-            (2, "Materialized", RuntimeTaskMetricScope::RetainedWindow, 345),
-            (u64::MAX, "Completed", RuntimeTaskMetricScope::Lifetime, u64::MAX),
-        ]
-        .map(|(task_id, state, metric_scope, poll_count)| {
-            let mut task = template.clone();
-            task.task_id = task_id;
-            task.state = state.into();
-            task.metric_scope = metric_scope;
-            task.poll_count = poll_count;
-            task.average_resume_nanos = 11;
-            task.max_resume_nanos = 22;
-            task.average_ready_wait_nanos = 33;
-            task.max_ready_wait_nanos = 44;
-            task
-        })
-        .to_vec();
+        runtime.workers[0].tasks = [(1, "Pending", 12), (2, "Materialized", 345), (u64::MAX, "Completed", u64::MAX)]
+            .map(|(task_id, state, poll_count)| {
+                let mut task = template.clone();
+                task.task_id = task_id;
+                task.state = state.into();
+                task.activity.state = state.into();
+                task.metrics.poll_count = poll_count;
+                task.metrics.median_poll_nanos = Some(11);
+                task.metrics.max_poll_nanos = Some(22);
+                task
+            })
+            .to_vec();
         let mut view = App::new().runtime_view;
         view.focus = RuntimeFocus::Tasks;
         view.task_sort = RuntimeTaskSort::Task;
@@ -3494,14 +3411,19 @@ mod tests {
         terminal
             .draw(|frame| {
                 mouse_rows.begin(frame.area());
-                draw_runtime(
+                runtime_ui::draw(
                     frame,
                     &mouse_rows,
-                    [Rect::new(0, 0, 120, 3), Rect::new(0, 3, 120, 8), Rect::default()],
-                    Some(&runtime),
+                    [
+                        Rect::new(0, 0, 120, 3),
+                        Rect::new(0, 3, 120, 8),
+                        Rect::default(),
+                        Rect::default(),
+                        Rect::default(),
+                    ],
+                    Some(&capture),
                     None,
                     view,
-                    false,
                 );
             })
             .unwrap();
@@ -3510,22 +3432,16 @@ mod tests {
         let rows = [line(5), line(6), line(7)];
         let expected = (
             header.find("State").unwrap(),
-            header.find("Scope").unwrap(),
-            header.find("Avg resume").unwrap() + "Avg resume".len(),
-            header.find("Max resume").unwrap() + "Max resume".len(),
-            header.find("Avg stall").unwrap() + "Avg stall".len(),
-            header.find("Max stall").unwrap() + "Max stall".len(),
+            header.find("Median poll").unwrap() + "Median poll".len(),
+            header.find("Max poll").unwrap() + "Max poll".len(),
         );
         assert_eq!(
             std::array::from_fn::<_, 3, _>(|index| {
                 let row = &rows[index];
                 (
                     row.find(["Pending", "Materialized", "Completed"][index]).unwrap(),
-                    row.find(["lifetime", "retained window", "lifetime"][index]).unwrap(),
-                    row.find("11ns").unwrap() + 4,
-                    row.find("22ns").unwrap() + 4,
-                    row.find("33ns").unwrap() + 4,
-                    row.find("44ns").unwrap() + 4,
+                    row.find("11ns").unwrap() + "11ns".len(),
+                    row.find("22ns").unwrap() + "22ns".len(),
                 )
             }),
             [expected; 3],
@@ -3534,6 +3450,231 @@ mod tests {
             [5, 6, 7].map(|y| mouse_rows.at(Rect::new(0, 0, 120, 12), 2, y)),
             [0, 1, 2].map(|index| Some((ListTarget::RuntimeTasks, index))),
         );
+    }
+
+    #[test]
+    fn future_size_column_shows_exact_bytes_and_unknown() {
+        let mut capture = representative_capture();
+        let template = capture.runtime.workers[0].tasks[0].clone();
+        capture.runtime.workers.truncate(1);
+        capture.runtime.workers[0].tasks = [Some(0), Some(16384), None]
+            .into_iter()
+            .enumerate()
+            .map(|(index, future_size_bytes)| super::super::data::RuntimeTaskSummary {
+                task_id: u64::try_from(index).unwrap() + 1,
+                future_size_bytes,
+                ..template.clone()
+            })
+            .collect();
+        let mut app = App::offline("sizes.seismograph".into());
+        app.screen = Screen::Offline {
+            path: "sizes.seismograph".into(),
+            tab: MonitorTab::Runtime,
+            snapshot: Some(capture),
+        };
+        app.runtime_view.focus = RuntimeFocus::Tasks;
+        app.runtime_view.task_sort = super::super::data::RuntimeTaskSort::FutureSize;
+        app.runtime_view.task_sort_descending = false;
+        let text = render(&app);
+        assert!(text.contains("Future B"));
+        let lines = text.chars().collect::<Vec<_>>();
+        let rows = lines
+            .chunks(180)
+            .map(|line| line.iter().collect::<String>())
+            .filter(|line| line.contains("Completed") && line.contains('#'))
+            .collect::<Vec<_>>();
+        assert_eq!(rows.len(), 3);
+        assert!(rows[0].contains("#1") && rows[0].contains(" 0 "));
+        assert!(rows[1].contains("#2") && rows[1].contains("16384"));
+        assert!(rows[2].contains("#3") && rows[2].contains(" - "));
+    }
+
+    fn task_event_capture() -> Box<CapturedSnapshot> {
+        let poll = |sequence, kind, task, duration| {
+            runtime_event(
+                1,
+                sequence,
+                kind,
+                EventPayload::Runtime(RuntimeEvent {
+                    runtime_id: RuntimeId::from_raw(1).unwrap(),
+                    worker_id: WorkerId::from_raw(1),
+                    subject_id: task,
+                    related_id: 0,
+                    value_0: duration,
+                    value_1: 0,
+                }),
+                &[0x7770, 0x9000, 0x9001],
+            )
+        };
+        let operation = |sequence, kind| {
+            let frame = if kind == EventKind::MutexContention { 0x1001 } else { 0x1000 };
+            runtime_event(
+                1,
+                sequence,
+                kind,
+                EventPayload::Object(ObjectId::new(8)),
+                &[frame, 0x2000, 0x9000, 0x9001],
+            )
+        };
+        let decoded = seismograph::snapshot::DecodedSnapshot {
+            events: Events {
+                clock: EventClock::ProcessMonotonic,
+                total_events: 8,
+                recording: RecordingPolicies {
+                    runtime_tasks: seismograph::recorder::RecordingPolicy::all(true),
+                    general_events: seismograph::recorder::RecordingPolicy::all(true),
+                    ..RecordingPolicies::default()
+                },
+                threads: vec![ThreadLog {
+                    thread_id: ThreadId::new(1),
+                    total_events: 8,
+                    lost_events: 0,
+                    name: "worker".into(),
+                }],
+                events: vec![
+                    poll(1, EventKind::TaskPollStarted, 1, 0),
+                    operation(2, EventKind::MutexAccess),
+                    operation(3, EventKind::MutexContention),
+                    poll(4, EventKind::TaskPollFinished, 1, 300),
+                    poll(5, EventKind::TaskPollStarted, 2, 0),
+                    operation(6, EventKind::MutexAccess),
+                    operation(7, EventKind::MutexRelease),
+                    poll(8, EventKind::TaskPollFinished, 2, 300),
+                ],
+                ..Events::default()
+            },
+            ..seismograph::snapshot::DecodedSnapshot::default()
+        };
+        let addresses = [
+            (0x1000, "app::operation"),
+            (0x1001, "app::contended_operation"),
+            (0x2000, "app::task_future::poll"),
+            (0x7770, "seismograph_runtime::worker::poll_started"),
+            (0x9000, "oxidizer_executor::ExecutorCore::poll"),
+            (0x9001, "oxidizer_executor::ExecutorCore::run"),
+        ]
+        .map(|(address, symbol)| {
+            AddressLookup::from_fields(AddressLookupFields {
+                address,
+                symbol: Some(symbol.into()),
+                filename: None,
+                line: None,
+                column: None,
+            })
+        });
+        let runtime = super::super::data::RuntimeSnapshot::from_events(&decoded, &addresses, None);
+        assert_eq!(runtime.task_events.tasks.get(&(1, 1)).map(|task| task.inferred_events), Some(2),);
+        let mut capture = representative_capture();
+        capture.runtime = runtime.runtime;
+        capture.task_events = runtime.task_events;
+        capture
+    }
+
+    #[test]
+    fn dashboard_occurrences_and_stacks_include_only_this_task_and_operation() {
+        use crossterm::event::KeyCode;
+
+        let mut app = App::offline("tasks.seismograph".into());
+        app.screen = Screen::Offline {
+            path: "tasks.seismograph".into(),
+            tab: MonitorTab::Runtime,
+            snapshot: Some(task_event_capture()),
+        };
+        app.runtime_view.focus = RuntimeFocus::Tasks;
+        app.handle_key(KeyCode::Char('e'));
+        let text = render(&app);
+        assert!(text.contains("2 inferred events across workers"));
+        assert!(text.contains("Mutex"));
+        app.handle_key(KeyCode::Enter);
+        assert_eq!(app.runtime_view.events.focus, TaskEventsFocus::Occurrences);
+        let text = render(&app);
+        assert!(text.contains("app::task_future::poll"));
+        assert!(text.contains("Task-relative application stack"));
+        assert!(!text.contains("oxidizer_executor::ExecutorCore::run"));
+        app.handle_key(KeyCode::Char('f'));
+        assert!(render(&app).contains("oxidizer_executor::ExecutorCore::run"));
+        app.handle_key(KeyCode::Down);
+        app.handle_key(KeyCode::Down);
+        let text = render(&app);
+        assert_eq!(app.runtime_view.events.event_selected, 0);
+        assert!(text.contains("MutexAccess"));
+        assert!(!text.contains("MutexRelease"));
+        assert!(text.contains("Worker Activity"));
+        assert!(text.contains("Statistics"));
+        assert!(!text.contains("Object history"));
+        let rows = text.chars().collect::<Vec<_>>();
+        let lines = rows.chunks(180).map(|row| row.iter().collect::<String>()).collect::<Vec<_>>();
+        let header = lines.iter().find(|line| line.contains("Task occurrences")).unwrap();
+        assert!(header.find("Operations").unwrap() < header.find("Task occurrences").unwrap());
+        assert!(header.find("Task occurrences").unwrap() < header.find("Event stack").unwrap());
+        let area = Rect::new(0, 0, 180, 60);
+        let occurrences = (0..60)
+            .filter_map(|y| {
+                (0..180).find_map(|x| match app.panels.rows.at(area, x, y) {
+                    Some((ListTarget::TaskOccurrences, index)) => Some(index),
+                    _ => None,
+                })
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(occurrences, [0]);
+        app.handle_key(KeyCode::Backspace);
+        app.handle_key(KeyCode::Down);
+        app.handle_key(KeyCode::Enter);
+        let text = render(&app);
+        assert!(text.contains("MutexContention") && text.contains("app::contended_operation"));
+        assert!(!text.contains("app::operation"));
+        assert_eq!(
+            (app.runtime_view.events.event_selected, app.runtime_view.events.stack_scroll),
+            (0, 0)
+        );
+    }
+
+    #[test]
+    fn dashboard_mouse_targets_toggle_histograms_and_select_task_occurrences_at_all_sizes() {
+        use crossterm::event::{MouseButton, MouseEventKind};
+        let mut app = App::offline("tasks.seismograph".into());
+        app.screen = Screen::Offline {
+            path: "tasks.seismograph".into(),
+            tab: MonitorTab::Runtime,
+            snapshot: Some(task_event_capture()),
+        };
+        for (width, height) in [(180, 60), (80, 24)] {
+            app.runtime_view.focus = RuntimeFocus::Activity;
+            app.runtime_view.task_histogram = TaskHistogram::Poll;
+            app.runtime_view.events.focus = TaskEventsFocus::Operations;
+            let area = Rect::new(0, 0, width, height);
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| app.draw(frame)).unwrap();
+            let target = (0..height)
+                .find_map(|y| {
+                    (0..width).find_map(|x| {
+                        (app.panels.rows.at(area, x, y) == Some((ListTarget::RuntimeHistogram(TaskHistogram::Ready), 0))).then_some((x, y))
+                    })
+                })
+                .unwrap();
+            app.handle_mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), target.0, target.1), area);
+            assert_eq!(app.runtime_view.task_histogram, TaskHistogram::Ready);
+            app.handle_key(crossterm::event::KeyCode::Char('e'));
+            terminal.draw(|frame| app.draw(frame)).unwrap();
+            let target = (0..height)
+                .find_map(|y| {
+                    (0..width).find_map(|x| (app.panels.rows.at(area, x, y) == Some((ListTarget::TaskOperations, 0))).then_some((x, y)))
+                })
+                .unwrap();
+            app.handle_mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), target.0, target.1), area);
+            assert_eq!(app.runtime_view.events.focus, TaskEventsFocus::Occurrences);
+            terminal.draw(|frame| app.draw(frame)).unwrap();
+            let target = (0..height)
+                .find_map(|y| {
+                    (0..width).find_map(|x| (app.panels.rows.at(area, x, y) == Some((ListTarget::TaskOccurrences, 0))).then_some((x, y)))
+                })
+                .unwrap();
+            app.handle_mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), target.0, target.1), area);
+            assert_eq!(
+                (app.runtime_view.events.focus, app.runtime_view.events.event_selected),
+                (TaskEventsFocus::Occurrences, 0)
+            );
+        }
     }
 
     #[test]
@@ -3558,7 +3699,7 @@ mod tests {
             snapshot.runtime.source_present = true;
         }
         let text = render(&app);
-        assert!(text.contains("Capture while instrumented workers/tasks are active"));
+        assert!(text.contains("capture instrumented activity"));
         assert!(!text.contains("No runtime source or runtime events"));
     }
 
@@ -3593,6 +3734,14 @@ mod tests {
         worker.worker_id = None;
         worker.thread_id = None;
         worker.role = "Unbound".into();
+        worker.observed_tasks = 0;
+        worker.window = None;
+        worker.metrics.executing_fraction = None;
+        worker.metrics.poll_count = 0;
+        worker.metrics.median_poll_nanos = None;
+        worker.metrics.max_poll_nanos = None;
+        worker.metrics.polls.clear();
+        worker.metrics.poll_samples.clear();
         let mut app = App::new();
         app.screen = Screen::Offline {
             path: "capture.seismograph".into(),
@@ -3602,7 +3751,129 @@ mod tests {
         let text = render(&app);
         assert!(text.contains("unassigned"));
         assert!(text.contains("Unbound"));
-        assert!(text.contains("Task: #"));
+        assert!(text.contains("Task Statistics"));
+        assert!(text.contains("Window unobserved"));
+        assert!(text.contains("No completed samples"));
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one render fixture exercises wide and compact geometry with matching mouse navigation"
+    )]
+    fn runtime_layouts_render_observed_execution_and_preserve_mouse_navigation() {
+        use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
+
+        use super::super::runtime_timeline::{Interval, TimeWindow};
+
+        for (width, height) in [(80, 24), (180, 60)] {
+            let mut capture = representative_capture();
+            capture.runtime.workers.truncate(1);
+            let worker = &mut capture.runtime.workers[0];
+            worker.window = Some(TimeWindow {
+                start: 100,
+                end: 12_000_000_200,
+            });
+            worker.observed_tasks = 1;
+            worker.metrics.polls = vec![Interval {
+                start: 200,
+                end: 12_000_000_200,
+            }];
+            worker.metrics.executing_fraction = Some(12_000_000_000.0 / 12_000_000_100.0);
+            worker.metrics.poll_count = 0;
+            worker.metrics.median_poll_nanos = None;
+            worker.metrics.max_poll_nanos = None;
+            worker.metrics.poll_samples.clear();
+            worker.tasks.truncate(1);
+            let task = &mut worker.tasks[0];
+            task.state = "Running".into();
+            task.metrics.polls = worker.metrics.polls.clone();
+            task.metrics.ready = vec![Interval { start: 100, end: 200 }].into();
+            task.metrics.poll_count = 0;
+            task.metrics.median_poll_nanos = None;
+            task.metrics.max_poll_nanos = None;
+            task.metrics.executing_fraction = worker.metrics.executing_fraction;
+            task.metrics.poll_samples.clear();
+            task.metrics.ready_samples = vec![0, 3, 7, 63].into();
+            task.activity.state = "Running".into();
+            task.activity.running_for = Some(12_000_000_000);
+            task.activity.ready_for = None;
+            task.activity.repoll_requested = true;
+            let mut app = App::offline("runtime-ui.seismograph".into());
+            app.screen = Screen::Offline {
+                path: "runtime-ui.seismograph".into(),
+                tab: MonitorTab::Runtime,
+                snapshot: Some(capture),
+            };
+            let area = Rect::new(0, 0, width, height);
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            for (focus, target, next) in [
+                (RuntimeFocus::Workers, ListTarget::RuntimeWorkers, RuntimeFocus::Tasks),
+                (RuntimeFocus::Tasks, ListTarget::RuntimeTasks, RuntimeFocus::Activity),
+            ] {
+                terminal.draw(|frame| app.draw(frame)).unwrap();
+                assert_eq!(app.runtime_view.focus, focus);
+                let (column, row) = (0..height)
+                    .find_map(|row| {
+                        (0..width).find_map(|column| (app.panels.rows.at(area, column, row) == Some((target, 0))).then_some((column, row)))
+                    })
+                    .unwrap();
+                app.handle_mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), column, row), area);
+                assert_eq!(app.runtime_view.focus, next);
+            }
+            terminal.draw(|frame| app.draw(frame)).unwrap();
+            let text = (0..height)
+                .map(|row| {
+                    (0..width)
+                        .map(|column| terminal.backend().buffer()[(column, row)].symbol())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            println!("{width}x{height} Runtime Activity:\n{text}");
+            for expected in [
+                "Running for 12s",
+                "State global · repoll",
+                "Window 12.00s · lower bound",
+                "Ready global",
+                "No completed samples",
+                "log10 100s+",
+            ] {
+                assert!(text.contains(expected), "{width}x{height}: missing {expected}\n{text}");
+            }
+            assert!(!text.contains("Spawn Stack"));
+            let (column, row, index) = (0..height)
+                .rev()
+                .find_map(|row| {
+                    (0..width).find_map(|column| {
+                        app.panels
+                            .rows
+                            .at(area, column, row)
+                            .and_then(|(target, index)| (target == ListTarget::RuntimeActivity).then_some((column, row, index)))
+                    })
+                })
+                .unwrap();
+            app.handle_mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), column, row), area);
+            assert_eq!(app.runtime_view.activity_scroll, index);
+            let before = app.runtime_view;
+            app.handle_key(KeyCode::F(1));
+            terminal.draw(|frame| app.draw(frame)).unwrap();
+            assert!(app.help.is_some());
+            let help_text = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(ratatui::buffer::Cell::symbol)
+                .collect::<String>();
+            assert!(help_text.contains("F1 Help: Runtime task details"));
+            app.handle_key(KeyCode::F(1));
+            assert_eq!(app.runtime_view, before);
+            app.handle_key(KeyCode::Backspace);
+            assert_eq!(app.runtime_view.focus, RuntimeFocus::Tasks);
+            app.handle_key(KeyCode::Backspace);
+            assert_eq!(app.runtime_view.focus, RuntimeFocus::Workers);
+        }
     }
 
     #[test]
@@ -3802,6 +4073,7 @@ mod tests {
         app.instances.push(super::super::app::Instance {
             descriptor: descriptor(),
             recording: RecordingConfiguration::default(),
+            server_version: None,
         });
         app.status = "ready".into();
         app.capture_started_at = Some(Instant::now().checked_sub(Duration::from_millis(500)).unwrap());
@@ -3881,6 +4153,7 @@ mod tests {
                 ..descriptor()
             },
             recording: RecordingConfiguration::default(),
+            server_version: None,
         });
         assert!(render(&app).contains("worker"));
 
@@ -3999,20 +4272,19 @@ mod tests {
         assert!(stack_lines.len() >= 4);
 
         let mut capture = representative_capture();
-        capture.runtime.workers[0].tasks[0].metric_scope = super::super::data::RuntimeTaskMetricScope::Lifetime;
-        app.runtime_view.focus = RuntimeFocus::Details;
-        app.runtime_view.detail_view = RuntimeDetailView::Details;
+        capture.runtime.workers[0].tasks[0].activity.state = "Running".into();
+        capture.runtime.workers[0].tasks[0].activity.running_for = Some(5_000_000_000);
+        app.runtime_view.focus = RuntimeFocus::Activity;
         app.screen = Screen::Connected {
             descriptor: descriptor(),
             recording: RecordingConfiguration::default(),
             tab: MonitorTab::Runtime,
             snapshot: Some(capture),
         };
-        assert!(render(&app).contains("lifetime counters"));
+        assert!(render(&app).contains("Running for 5s"));
 
         let mut capture = representative_capture();
         capture.runtime.workers[0].tasks[0].spawn_stack = vec!["app::spawn".into()];
-        app.runtime_view.detail_view = RuntimeDetailView::SpawnStack;
         app.screen = Screen::Connected {
             descriptor: descriptor(),
             recording: RecordingConfiguration::default(),
@@ -4020,7 +4292,8 @@ mod tests {
             snapshot: Some(capture),
         };
         let rendered = render(&app);
-        assert!(rendered.contains("0  app::spawn"));
+        assert!(rendered.contains("Task Statistics"));
+        assert!(!rendered.contains("app::spawn"));
         assert!(!rendered.contains("Backtrace not captured"));
 
         let mut capture = representative_capture();
@@ -4031,7 +4304,8 @@ mod tests {
             tab: MonitorTab::Runtime,
             snapshot: Some(capture),
         };
-        assert!(render(&app).contains("Backtrace not captured"));
+        app.runtime_view.task_histogram = TaskHistogram::Ready;
+        assert!(render(&app).contains("Wake-to-poll (raw)"));
 
         let mut capture = representative_capture();
         capture.runtime.workers[0].tasks.clear();
@@ -4103,13 +4377,13 @@ mod tests {
             .contains("Press")
         );
 
-        let clear = connected_footer(RecordingConfiguration::default(), EventBufferDisposition::Clear, None, "ready");
-        let release = connected_footer(RecordingConfiguration::default(), EventBufferDisposition::Release, None, "");
+        let clear = connected_footer(Some(RecordingConfiguration::default()), CaptureMode::Continue, None, "ready");
+        let release = connected_footer(Some(RecordingConfiguration::default()), CaptureMode::Stop, None, "");
         assert_eq!(
             (
                 line_text(&clear).contains("clear"),
                 line_text(&clear).contains("ready"),
-                line_text(&release).contains("release"),
+                line_text(&release).contains("Record and stop"),
             ),
             (true, true, true)
         );
@@ -4247,15 +4521,14 @@ mod tests {
             assert!(render(&app).contains("Threads"));
         }
 
-        for (focus, detail_view) in [
-            (RuntimeFocus::Workers, RuntimeDetailView::Details),
-            (RuntimeFocus::Tasks, RuntimeDetailView::Details),
-            (RuntimeFocus::Details, RuntimeDetailView::Details),
-            (RuntimeFocus::Details, RuntimeDetailView::SpawnStack),
+        for focus in [
+            RuntimeFocus::Workers,
+            RuntimeFocus::Tasks,
+            RuntimeFocus::Activity,
+            RuntimeFocus::Events,
         ] {
             app.runtime_view.focus = focus;
-            app.runtime_view.detail_view = detail_view;
-            app.runtime_view.detail_scroll = usize::MAX;
+            app.runtime_view.activity_scroll = usize::MAX;
             app.screen = Screen::Connected {
                 descriptor: descriptor(),
                 recording: RecordingConfiguration::default(),
@@ -4285,9 +4558,10 @@ mod tests {
         app.instances.push(super::super::app::Instance {
             descriptor: descriptor(),
             recording: RecordingConfiguration::default(),
+            server_version: None,
         });
         output.push_str(&render_debug(|frame| {
-            app.draw_with_snapshot_time(frame, |_| "12:34:56 (now)".into());
+            app.draw_with_version(frame, |_| "12:34:56 (now)".into(), "98.76.54");
         }));
         output.push_str(&render_debug(|frame| {
             App::draw_capture_popup(frame, Duration::from_millis(450), CaptureStep::Decode);
@@ -4324,7 +4598,7 @@ mod tests {
                 snapshot: Some(representative_capture()),
             };
             output.push_str(&render_debug(|frame| {
-                app.draw_with_snapshot_time(frame, |_| "12:34:56 (now)".into());
+                app.draw_with_version(frame, |_| "12:34:56 (now)".into(), "98.76.54");
             }));
         }
 
@@ -4337,7 +4611,7 @@ mod tests {
                 snapshot: Some(representative_capture()),
             };
             output.push_str(&render_debug(|frame| {
-                app.draw_with_snapshot_time(frame, |_| "12:34:56 (now)".into());
+                app.draw_with_version(frame, |_| "12:34:56 (now)".into(), "98.76.54");
             }));
         }
         for focus in [
@@ -4354,10 +4628,15 @@ mod tests {
                 snapshot: Some(representative_capture()),
             };
             output.push_str(&render_debug(|frame| {
-                app.draw_with_snapshot_time(frame, |_| "12:34:56 (now)".into());
+                app.draw_with_version(frame, |_| "12:34:56 (now)".into(), "98.76.54");
             }));
         }
-        for focus in [RuntimeFocus::Workers, RuntimeFocus::Tasks, RuntimeFocus::Details] {
+        for focus in [
+            RuntimeFocus::Workers,
+            RuntimeFocus::Tasks,
+            RuntimeFocus::Activity,
+            RuntimeFocus::Events,
+        ] {
             app.runtime_view.focus = focus;
             app.screen = Screen::Connected {
                 descriptor: descriptor(),
@@ -4366,7 +4645,7 @@ mod tests {
                 snapshot: Some(representative_capture()),
             };
             output.push_str(&render_debug(|frame| {
-                app.draw_with_snapshot_time(frame, |_| "12:34:56 (now)".into());
+                app.draw_with_version(frame, |_| "12:34:56 (now)".into(), "98.76.54");
             }));
         }
         for focus in [IoFocus::Resources, IoFocus::Operations] {
@@ -4378,7 +4657,7 @@ mod tests {
                 snapshot: Some(representative_capture()),
             };
             output.push_str(&render_debug(|frame| {
-                app.draw_with_snapshot_time(frame, |_| "12:34:56 (now)".into());
+                app.draw_with_version(frame, |_| "12:34:56 (now)".into(), "98.76.54");
             }));
         }
         for focus in [CacheFocus::Tiers, CacheFocus::Operations] {
@@ -4390,10 +4669,10 @@ mod tests {
                 snapshot: Some(representative_capture()),
             };
             output.push_str(&render_debug(|frame| {
-                app.draw_with_snapshot_time(frame, |_| "12:34:56 (now)".into());
+                app.draw_with_version(frame, |_| "12:34:56 (now)".into(), "98.76.54");
             }));
         }
 
-        assert_eq!(stable_digest(&output), (431_316, 6_265_721_439_553_236_588));
+        assert_eq!(stable_digest(&output), (665_581, 17_551_044_085_115_674_945));
     }
 }

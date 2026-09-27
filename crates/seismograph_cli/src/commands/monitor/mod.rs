@@ -9,15 +9,19 @@ mod filter_index;
 mod filter_ui;
 mod help;
 mod help_content;
+mod live_activity;
 mod mouse;
 mod offline;
 mod panels;
 #[cfg(test)]
 mod profile;
+mod runtime;
+mod runtime_timeline;
 mod snapshot;
+mod task_events;
 mod ui;
 
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use std::{fmt, io};
@@ -140,6 +144,12 @@ struct TerminalGuard<W: Write, D: FnMut() -> io::Result<()>> {
 impl TerminalGuard<io::Stdout, fn() -> io::Result<()>> {
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn enter() -> Result<Self, Error> {
+        if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+            return Err(Error::Io(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "an interactive terminal is required",
+            )));
+        }
         enable_raw_mode().map_err(Error::Io)?;
         if let Err(error) = execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture) {
             let _ = execute!(io::stdout(), DisableMouseCapture);
@@ -193,7 +203,7 @@ impl fmt::Display for Error {
             Self::MemorySnapshot(error) => write!(formatter, "invalid rallocator snapshot: {error}"),
             Self::Remote(message) => write!(formatter, "monitor rejected the request: {message}"),
             Self::Clock(message) => write!(formatter, "system clock failed: {message}"),
-            Self::MissingMemorySource => formatter.write_str("snapshot does not contain rallocator memory telemetry"),
+            Self::MissingMemorySource => formatter.write_str("Heap telemetry not provided by this application."),
             Self::UnexpectedResponse => formatter.write_str("monitor returned an unexpected response"),
             Self::SnapshotFile { path, message } => write!(formatter, "failed to open snapshot '{}': {message}", path.display()),
         }
@@ -246,7 +256,7 @@ mod tests {
                 "permission denied",
                 "monitor rejected the request: denied",
                 "system clock failed: before epoch",
-                "snapshot does not contain rallocator memory telemetry",
+                "Heap telemetry not provided by this application.",
                 "monitor returned an unexpected response",
             ]
         );

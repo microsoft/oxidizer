@@ -61,9 +61,7 @@ pub(super) fn prepare_with_progress(
     let allocations = allocator
         .as_ref()
         .map(|snapshot| AllocationSnapshot::from_snapshot_with_deallocated(snapshot, &deallocated));
-    let heap_error = allocator
-        .is_none()
-        .then(|| format!("heap data unavailable: {}", super::Error::MissingMemorySource));
+    let heap_error = allocator.is_none().then(|| super::Error::MissingMemorySource.to_string());
     progress(Phase::Symbols);
     let mut addresses = allocator
         .iter()
@@ -87,7 +85,14 @@ pub(super) fn prepare_with_progress(
     let addresses = addresses.into_values().collect::<Vec<_>>();
     let runtime = RuntimeSnapshot::from_events_with_progress(&decoded, &addresses, runtime_source.as_ref(), progress);
     progress(Phase::IndexStacks);
-    let filter_index = std::sync::Arc::new(FilterIndex::new(decoded, allocator, runtime_source, addresses, deallocated));
+    let filter_index = std::sync::Arc::new(FilterIndex::with_task_events(
+        decoded,
+        allocator,
+        runtime_source,
+        addresses,
+        deallocated,
+        runtime.task_events.clone(),
+    ));
     let filter_summary = filter_index.unfiltered_summary();
     progress(Phase::Ready);
     Ok(Box::new(CapturedSnapshot {
@@ -99,6 +104,7 @@ pub(super) fn prepare_with_progress(
         io: runtime.io,
         cache: runtime.cache,
         threads: runtime.threads,
+        task_events: runtime.task_events,
         captured_at: None,
         captured_instant: None,
         filter_index: Some(filter_index),
@@ -243,11 +249,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             (snapshot.memory.is_none(), snapshot.allocations.is_none(), snapshot.heap_error),
-            (
-                true,
-                true,
-                Some(format!("heap data unavailable: {}", super::super::Error::MissingMemorySource)),
-            ),
+            (true, true, Some(super::super::Error::MissingMemorySource.to_string()),),
         );
     }
 

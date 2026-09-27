@@ -7,12 +7,15 @@ use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use seismograph_protocol::message::{RecorderStatistics, RecordingConfiguration, RecordingPolicy, Request, Response, SnapshotOptions};
+use seismograph_protocol::message::{
+    RecorderActivity, RecorderStatistics, RecordingConfiguration, RecordingPolicy, Request, Response, SnapshotOptions,
+};
 use seismograph_protocol::monitor::MonitorDescriptor;
 use seismograph_protocol::{read_response, write_request};
 
 use super::Error;
 use super::app::Instance;
+use super::live_activity::RecorderUpdate;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(300);
 const IO_TIMEOUT: Duration = Duration::from_secs(10);
@@ -47,7 +50,12 @@ fn discover_in(directory: &std::path::Path) -> Result<Vec<Instance>, Error> {
             continue;
         };
         if let Ok(recording) = handshake(&descriptor) {
-            instances.push(Instance { descriptor, recording });
+            let server_version = server_version(&descriptor)?;
+            instances.push(Instance {
+                descriptor,
+                recording,
+                server_version,
+            });
         }
     }
     instances.sort_by(|left, right| {
@@ -94,6 +102,20 @@ pub(super) fn capture_snapshot(descriptor: &MonitorDescriptor, options: Snapshot
     }
 }
 
+pub(super) fn capture_snapshot_and_stop(descriptor: &MonitorDescriptor) -> Result<Vec<u8>, Error> {
+    match command(descriptor, &Request::CaptureSnapshotAndStop)? {
+        Response::Snapshot(bytes) => Ok(bytes),
+        _ => Err(Error::UnexpectedResponse),
+    }
+}
+
+pub(super) fn clear_event_buffers(descriptor: &MonitorDescriptor) -> Result<(), Error> {
+    match command(descriptor, &Request::ClearEventBuffers)? {
+        Response::Acknowledged => Ok(()),
+        _ => Err(Error::UnexpectedResponse),
+    }
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn recorder_statistics(descriptor: &MonitorDescriptor) -> Result<RecorderStatistics, Error> {
     match command(descriptor, &Request::ReadRecorderStatistics)? {
@@ -103,6 +125,30 @@ pub(super) fn recorder_statistics(descriptor: &MonitorDescriptor) -> Result<Reco
             statistics.recording = handshake(descriptor)?;
             Ok(statistics)
         }
+        _ => Err(Error::UnexpectedResponse),
+    }
+}
+
+pub(super) fn recorder_activity(descriptor: &MonitorDescriptor) -> Result<RecorderUpdate, Error> {
+    let mut stream = authenticated_stream(descriptor)?;
+    write_request(&mut stream, 2, &Request::ReadRecorderActivity).map_err(Error::Protocol)?;
+    let Some(mut activity) = read_recorder_activity(&mut stream)? else {
+        drop(stream);
+        return recorder_statistics(descriptor).map(RecorderUpdate::Legacy);
+    };
+    drop(stream);
+    activity.statistics.recording = handshake(descriptor)?;
+    Ok(RecorderUpdate::Detailed(activity))
+}
+
+fn read_recorder_activity(stream: &mut TcpStream) -> Result<Option<RecorderActivity>, Error> {
+    // Only a clean close before response bytes is the established legacy capability signal.
+    if stream.peek(&mut [0]).map_err(Error::Io)? == 0 {
+        return Ok(None);
+    }
+    match read_response(stream).map_err(Error::Protocol)? {
+        (2, Response::RecorderActivity(activity)) => Ok(Some(activity)),
+        (2, Response::Error(message)) => Err(Error::Remote(message)),
         _ => Err(Error::UnexpectedResponse),
     }
 }
@@ -126,7 +172,7 @@ fn save_snapshot_to(directory: &std::path::Path, descriptor: &MonitorDescriptor,
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
-fn handshake(descriptor: &MonitorDescriptor) -> Result<RecordingConfiguration, Error> {
+pub(super) fn handshake(descriptor: &MonitorDescriptor) -> Result<RecordingConfiguration, Error> {
     recording_configuration(descriptor, false)
 }
 
@@ -196,6 +242,25 @@ fn read_cache_recording(stream: &mut TcpStream) -> Result<Option<RecordingPolicy
     }
 }
 
+fn server_version(descriptor: &MonitorDescriptor) -> Result<Option<String>, Error> {
+    let mut stream = authenticated_stream(descriptor)?;
+    write_request(&mut stream, 2, &Request::ReadServerVersion).map_err(Error::Protocol)?;
+    read_server_version(&mut stream)
+}
+
+fn read_server_version(stream: &mut TcpStream) -> Result<Option<String>, Error> {
+    // Only a clean close before any response bytes means a legacy server. Timeouts,
+    // resets, malformed frames and partial responses must remain visible errors.
+    if stream.peek(&mut [0]).map_err(Error::Io)? == 0 {
+        return Ok(None);
+    }
+    match read_response(stream).map_err(Error::Protocol)? {
+        (2, Response::ServerVersion(version)) => Ok(Some(version)),
+        (2, Response::Error(message)) => Err(Error::Remote(message)),
+        _ => Err(Error::UnexpectedResponse),
+    }
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn connect(descriptor: &MonitorDescriptor) -> Result<TcpStream, Error> {
     let address = SocketAddr::V4(descriptor.socket_address());
@@ -207,6 +272,28 @@ fn connect(descriptor: &MonitorDescriptor) -> Result<TcpStream, Error> {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn command(descriptor: &MonitorDescriptor, request: &Request) -> Result<Response, Error> {
+    let mut stream = authenticated_stream(descriptor)?;
+    write_request(&mut stream, 2, request).map_err(Error::Protocol)?;
+    if matches!(request, Request::CaptureSnapshot(_) | Request::CaptureSnapshotAndStop) {
+        stream.set_read_timeout(None).map_err(Error::Io)?;
+    }
+    if matches!(request, Request::CaptureSnapshotAndStop | Request::ClearEventBuffers) && stream.peek(&mut [0]).map_err(Error::Io)? == 0 {
+        return Err(Error::Remote(
+            "Record and stop / Clear unsupported or completion unknown: monitor closed without a response; no fallback was attempted"
+                .into(),
+        ));
+    }
+    let (request_id, response) = read_response(&mut stream).map_err(Error::Protocol)?;
+    if request_id != 2 {
+        return Err(Error::UnexpectedResponse);
+    }
+    match response {
+        Response::Error(message) => Err(Error::Remote(message)),
+        response => Ok(response),
+    }
+}
+
+fn authenticated_stream(descriptor: &MonitorDescriptor) -> Result<TcpStream, Error> {
     let mut stream = connect(descriptor)?;
     write_request(
         &mut stream,
@@ -221,18 +308,7 @@ fn command(descriptor: &MonitorDescriptor, request: &Request) -> Result<Response
         (_, Response::Error(message)) => return Err(Error::Remote(message)),
         _ => return Err(Error::UnexpectedResponse),
     }
-    write_request(&mut stream, 2, request).map_err(Error::Protocol)?;
-    if matches!(request, Request::CaptureSnapshot(_)) {
-        stream.set_read_timeout(None).map_err(Error::Io)?;
-    }
-    let (request_id, response) = read_response(&mut stream).map_err(Error::Protocol)?;
-    if request_id != 2 {
-        return Err(Error::UnexpectedResponse);
-    }
-    match response {
-        Response::Error(message) => Err(Error::Remote(message)),
-        response => Ok(response),
-    }
+    Ok(stream)
 }
 
 fn sanitize(value: &str) -> String {
@@ -304,7 +380,7 @@ mod tests {
         let worker = thread::spawn(move || {
             let mut requests = Vec::new();
             for conversation in conversations {
-                let closes_on_cache_request = !cache_supported
+                let closes_on_extension_request = !cache_supported
                     && conversation
                         .last()
                         .is_some_and(|(_, response)| matches!(response, Response::Hello { .. }));
@@ -331,9 +407,19 @@ mod tests {
                     requests.push(request);
                     write_response(&mut stream, response_id, &response).unwrap();
                 }
-                if closes_on_cache_request {
+                if closes_on_extension_request {
                     let request = read_request(&mut stream).unwrap();
-                    assert_eq!(request, (2, Request::ReadCacheRecording));
+                    assert!(matches!(
+                        request,
+                        (
+                            2,
+                            Request::ReadCacheRecording
+                                | Request::ReadServerVersion
+                                | Request::ReadRecorderActivity
+                                | Request::CaptureSnapshotAndStop
+                                | Request::ClearEventBuffers
+                        )
+                    ));
                     requests.push(request);
                 }
                 stream.shutdown(Shutdown::Write).unwrap();
@@ -347,6 +433,60 @@ mod tests {
     }
 
     struct TestMonitorDirectory(PathBuf);
+
+    #[test]
+    fn lifecycle_commands_use_distinct_authenticated_requests() {
+        let hello = Response::Hello {
+            instance_id: InstanceId::from_bytes([1; 16]),
+            recording: RecordingConfiguration::default(),
+        };
+        let (descriptor, requests, worker) = serve(vec![
+            vec![(1, hello.clone()), (2, Response::Snapshot(vec![42]))],
+            vec![(1, hello), (2, Response::Acknowledged)],
+        ]);
+        assert_eq!(capture_snapshot_and_stop(&descriptor).unwrap(), vec![42]);
+        clear_event_buffers(&descriptor).unwrap();
+        let requests = requests.recv_timeout(Duration::from_secs(3)).unwrap();
+        worker.join().unwrap();
+        assert_eq!(requests[1], (2, Request::CaptureSnapshotAndStop));
+        assert_eq!(requests[3], (2, Request::ClearEventBuffers));
+    }
+
+    #[test]
+    fn legacy_server_rejects_stop_and_clear_without_fallback() {
+        let hello = Response::Hello {
+            instance_id: InstanceId::from_bytes([1; 16]),
+            recording: RecordingConfiguration::default(),
+        };
+        let (descriptor, requests, worker) = serve_legacy(vec![vec![(1, hello.clone())], vec![(1, hello)]]);
+        let stop = capture_snapshot_and_stop(&descriptor).unwrap_err().to_string();
+        let clear = clear_event_buffers(&descriptor).unwrap_err().to_string();
+        let requests = requests.recv_timeout(Duration::from_secs(3)).unwrap();
+        worker.join().unwrap();
+        assert!(stop.contains("unsupported"));
+        assert!(clear.contains("unsupported"));
+        assert_eq!(requests.len(), 4);
+        assert_eq!(requests[1], (2, Request::CaptureSnapshotAndStop));
+        assert_eq!(requests[3], (2, Request::ClearEventBuffers));
+    }
+
+    #[test]
+    fn continue_uses_the_legacy_retain_request() {
+        let (descriptor, requests, worker) = serve_legacy(vec![vec![
+            (
+                1,
+                Response::Hello {
+                    instance_id: InstanceId::from_bytes([1; 16]),
+                    recording: RecordingConfiguration::default(),
+                },
+            ),
+            (2, Response::Snapshot(vec![7])),
+        ]]);
+        assert_eq!(capture_snapshot(&descriptor, SnapshotOptions::default()).unwrap(), vec![7]);
+        let requests = requests.recv_timeout(Duration::from_secs(3)).unwrap();
+        worker.join().unwrap();
+        assert_eq!(requests[1], (2, Request::CaptureSnapshot(SnapshotOptions::default())));
+    }
 
     impl TestMonitorDirectory {
         fn new(path: PathBuf) -> Self {
@@ -370,6 +510,176 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "requires real TCP sockets")]
+    fn version_query_distinguishes_legacy_from_remote_and_unexpected_responses() {
+        let (descriptor, requests, worker) = serve_legacy(vec![vec![(1, hello(&test_descriptor(0), RecordingConfiguration::default()))]]);
+        assert_eq!(server_version(&descriptor).unwrap(), None);
+        assert_eq!(requests.recv().unwrap()[1], (2, Request::ReadServerVersion));
+        worker.join().unwrap();
+
+        for (id, response, expected) in [
+            (
+                2,
+                Response::Error("version unavailable".into()),
+                "monitor rejected the request: version unavailable",
+            ),
+            (
+                3,
+                Response::ServerVersion("9.8.7".into()),
+                "monitor returned an unexpected response",
+            ),
+            (2, Response::Acknowledged, "monitor returned an unexpected response"),
+        ] {
+            let (descriptor, requests, worker) = serve(vec![vec![
+                (1, hello(&test_descriptor(0), RecordingConfiguration::default())),
+                (id, response),
+            ]]);
+            assert_eq!(server_version(&descriptor).unwrap_err().to_string(), expected);
+            requests.recv().unwrap();
+            worker.join().unwrap();
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "requires real TCP sockets")]
+    fn version_query_does_not_hide_partial_frames_malformed_payloads_or_timeouts() {
+        for bytes in [b"SGMP".to_vec(), {
+            let mut bytes = Vec::new();
+            write_response(&mut bytes, 2, &Response::ServerVersion("1.2.3".into())).unwrap();
+            // The frame remains complete, but its string claims more bytes than exist.
+            bytes[20] = 0xff;
+            bytes
+        }] {
+            let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+            let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+            client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+            let (mut server, _) = listener.accept().unwrap();
+            server.write_all(&bytes).unwrap();
+            server.shutdown(Shutdown::Write).unwrap();
+            assert!(matches!(read_server_version(&mut client), Err(Error::Protocol(_))));
+        }
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        client.set_read_timeout(Some(Duration::from_millis(20))).unwrap();
+        let (_server, _) = listener.accept().unwrap();
+        assert!(matches!(
+            read_server_version(&mut client),
+            Err(Error::Io(error)) if matches!(error.kind(), io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock)
+        ));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "requires real TCP sockets")]
+    fn live_activity_uses_detailed_counts_and_authoritative_configuration() {
+        use seismograph_protocol::message::{EventClassCounts, ThreadRecorderStatistics};
+        let activity = RecorderActivity {
+            session_id: 7,
+            statistics: RecorderStatistics {
+                thread_count: 1,
+                total_events: 100,
+                retained_events: 64,
+                lost_events: 36,
+                event_capacity_per_thread: 64,
+                ..RecorderStatistics::default()
+            },
+            class_events: EventClassCounts {
+                general_events: 100,
+                ..EventClassCounts::default()
+            },
+            threads: vec![ThreadRecorderStatistics {
+                thread_id: 9,
+                name: "worker".into(),
+                total_events: 100,
+                retained_events: 64,
+                lost_events: 36,
+                event_capacity: 64,
+                ..ThreadRecorderStatistics::default()
+            }],
+        };
+        let mut recording = RecordingConfiguration::default();
+        recording.runtime_tasks.enabled = true;
+        let (descriptor, requests, worker) = serve(vec![
+            vec![
+                (1, hello(&test_descriptor(0), recording)),
+                (2, Response::RecorderActivity(activity.clone())),
+            ],
+            vec![
+                (1, hello(&test_descriptor(0), recording)),
+                (2, Response::CacheRecording(recording.cache)),
+            ],
+        ]);
+        let actual = recorder_activity(&descriptor).unwrap();
+        let observed = requests.recv().unwrap();
+        worker.join().unwrap();
+        let mut expected = activity;
+        expected.statistics.recording = recording;
+        assert_eq!(actual, RecorderUpdate::Detailed(expected));
+        assert_eq!(observed[1], (2, Request::ReadRecorderActivity));
+        assert!(!observed.iter().any(|(_, request)| matches!(request, Request::CaptureSnapshot(_))));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "requires real TCP sockets")]
+    fn live_activity_falls_back_only_for_clean_legacy_closure() {
+        let recording = RecordingConfiguration::default();
+        let statistics = RecorderStatistics {
+            total_events: 123,
+            ..RecorderStatistics::default()
+        };
+        let (descriptor, requests, worker) = serve_legacy(vec![
+            vec![(1, hello(&test_descriptor(0), recording))],
+            vec![
+                (1, hello(&test_descriptor(0), recording)),
+                (2, Response::RecorderStatistics(statistics)),
+            ],
+            vec![(1, hello(&test_descriptor(0), recording))],
+        ]);
+        assert_eq!(recorder_activity(&descriptor).unwrap(), RecorderUpdate::Legacy(statistics));
+        let observed = requests.recv().unwrap();
+        worker.join().unwrap();
+        assert_eq!(
+            observed
+                .iter()
+                .filter(|(_, request)| matches!(request, Request::ReadRecorderActivity))
+                .count(),
+            1
+        );
+        assert_eq!(
+            observed
+                .iter()
+                .filter(|(_, request)| matches!(request, Request::ReadRecorderStatistics))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "requires real TCP sockets")]
+    fn live_activity_does_not_hide_truncated_responses_timeouts_or_remote_errors() {
+        for bytes in [b"SGMP".to_vec(), {
+            let mut bytes = Vec::new();
+            write_response(&mut bytes, 2, &Response::RecorderActivity(RecorderActivity::default())).unwrap();
+            bytes.pop();
+            bytes
+        }] {
+            let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+            let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+            client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+            let (mut server, _) = listener.accept().unwrap();
+            server.write_all(&bytes).unwrap();
+            server.shutdown(Shutdown::Write).unwrap();
+            assert!(matches!(read_recorder_activity(&mut client), Err(Error::Protocol(_))));
+        }
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        client.set_read_timeout(Some(Duration::from_millis(20))).unwrap();
+        let (mut server, _) = listener.accept().unwrap();
+        assert!(matches!(read_recorder_activity(&mut client), Err(Error::Io(_))));
+        write_response(&mut server, 2, &Response::Error("busy".into())).unwrap();
+        assert!(matches!(read_recorder_activity(&mut client), Err(Error::Remote(message)) if message == "busy"));
+    }
+
+    #[test]
     fn snapshot_file_names_replace_unsupported_characters() {
         assert_eq!(sanitize("worker west/europe"), "worker-west-europe");
     }
@@ -390,17 +700,29 @@ mod tests {
         let directory = directory("discovery");
         fs::create_dir_all(&directory).unwrap();
         let _directory = TestMonitorDirectory::new(directory.clone());
-        let (mut descriptor, requests, worker) = serve(vec![vec![
-            (1, hello(&test_descriptor(0), RecordingConfiguration::default())),
-            (2, Response::CacheRecording(RecordingPolicy::default())),
-        ]]);
+        let (mut descriptor, requests, worker) = serve(vec![
+            vec![
+                (1, hello(&test_descriptor(0), RecordingConfiguration::default())),
+                (2, Response::CacheRecording(RecordingPolicy::default())),
+            ],
+            vec![
+                (1, hello(&test_descriptor(0), RecordingConfiguration::default())),
+                (2, Response::ServerVersion("12.34.56-rc.7".into())),
+            ],
+        ]);
         descriptor.name.clone_from(&name);
         let descriptor_path = directory.join(descriptor.file_name());
         descriptor.write_file(&descriptor_path).unwrap();
 
         let instances = discover().unwrap();
 
-        assert!(instances.iter().any(|instance| instance.descriptor.name == name));
+        assert_eq!(
+            instances
+                .iter()
+                .map(|instance| (instance.descriptor.name.as_str(), instance.server_version.as_deref()))
+                .collect::<Vec<_>>(),
+            [(name.as_str(), Some("12.34.56-rc.7"))]
+        );
         requests.recv().unwrap();
         worker.join().unwrap();
     }
@@ -886,11 +1208,11 @@ mod tests {
         fs::write(directory.join("invalid.monitor"), b"invalid").unwrap();
 
         let (mut second, second_requests, second_worker) =
-            serve_legacy(vec![vec![(1, hello(&test_descriptor(0), RecordingConfiguration::default()))]]);
+            serve_legacy(vec![vec![(1, hello(&test_descriptor(0), RecordingConfiguration::default()))]; 2]);
         second.name = "zeta".into();
         second.write_file(directory.join("second.monitor")).unwrap();
         let (mut first, first_requests, first_worker) =
-            serve_legacy(vec![vec![(1, hello(&test_descriptor(0), RecordingConfiguration::default()))]]);
+            serve_legacy(vec![vec![(1, hello(&test_descriptor(0), RecordingConfiguration::default()))]; 2]);
         first.name = "alpha".into();
         first.write_file(directory.join("first.monitor")).unwrap();
 
@@ -904,11 +1226,15 @@ mod tests {
         assert_eq!(
             instances
                 .iter()
-                .map(|instance| (instance.descriptor.name.as_str(), instance.recording))
+                .map(|instance| (
+                    instance.descriptor.name.as_str(),
+                    instance.recording,
+                    instance.server_version.as_deref()
+                ))
                 .collect::<Vec<_>>(),
             vec![
-                ("alpha", RecordingConfiguration::default()),
-                ("zeta", RecordingConfiguration::default()),
+                ("alpha", RecordingConfiguration::default(), None),
+                ("zeta", RecordingConfiguration::default(), None),
             ]
         );
     }

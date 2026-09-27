@@ -16,12 +16,15 @@ use crate::worker::WorkerRole;
 
 const MAGIC: [u8; 8] = *b"SEISRUNT";
 const WIRE_VERSION: u16 = 1;
-const SCHEMA_VERSION: u16 = 3;
+const SCHEMA_VERSION: u16 = 6;
 const HEADER_LEN: usize = 20;
 const RUNTIME_FIXED_LEN: usize = 128;
 const WORKER_FIXED_LEN: usize = 32;
 const TASK_V2_FIXED_LEN: usize = 32;
-const TASK_FIXED_LEN: usize = 120;
+const TASK_V3_FIXED_LEN: usize = 120;
+const TASK_V4_FIXED_LEN: usize = 160;
+const TASK_V5_FIXED_LEN: usize = 168;
+const TASK_FIXED_LEN: usize = 176;
 const ADDRESS_LOOKUP_FIXED_LEN: usize = 24;
 
 /// Stable identity and schema metadata for the process-wide runtime source.
@@ -141,14 +144,66 @@ pub struct Task {
     pub parent: Option<TaskId>,
     /// Runtime-provided descriptor for the task's concrete type.
     pub type_descriptor: TypeDescriptorId,
+    /// Inline bytes in the concrete future or synchronous task body before runtime wrapping.
+    ///
+    /// Excludes separately allocated buffers and executor bookkeeping. `Some(0)`
+    /// is a known zero-byte body; `None` denotes an unknown size, including source
+    /// schemas before version 6. The wire format supports sizes below `u64::MAX`.
+    pub future_size_bytes: Option<u64>,
     /// Timestamp captured when this task was registered.
     pub spawned_at: EventTimestamp,
     /// Worker that most recently polled this task, when it has run.
     pub last_worker_id: Option<WorkerId>,
     /// Lifetime counters retained independently of the bounded event ring.
     pub metrics: TaskMetrics,
+    /// Coherent recording-only activity; absent in source schemas before version 4.
+    pub activity: Option<TaskActivity>,
     /// Call stack captured where the task was spawned.
     pub spawn_backtrace: Vec<Address>,
+}
+
+/// Coherent activity observed within one recording generation.
+///
+/// Ages must be measured against `observed_at`, not the reader's wall clock.
+/// After Stop this boundary is frozen. Missing evidence, a generation change,
+/// or concurrent mutation produces `Unknown` rather than an invented age.
+/// Contended updates are dropped and invalidate the evidence; poisoned tracking
+/// locks remain `Unknown`. Neither condition waits for the task-state lock.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TaskActivity {
+    /// Observation boundary in the same clock as runtime events.
+    pub observed_at: EventTimestamp,
+    /// Execution state justified by observations in this generation.
+    pub state: TaskActivityState,
+    /// First outstanding raw wake, including a request to poll again while running.
+    pub ready_since: Option<EventTimestamp>,
+    /// Start of the current poll, present only for `Running`.
+    pub poll_started_at: Option<EventTimestamp>,
+    /// Worker executing this exact poll, coherent with `state` and `poll_started_at`.
+    ///
+    /// Present only for `Running`. Schema 4 lacks this field and decodes it as
+    /// `None`; neither the notifier thread nor independently read worker slots
+    /// should be used to invent missing poll-worker identity.
+    pub poll_worker_id: Option<WorkerId>,
+    /// Start of scheduler queue waiting, present only for `Ready`.
+    ///
+    /// For a wake during a poll, this starts when that poll finishes, not at
+    /// the wake. `ready_since` separately preserves the raw wake-to-poll latency.
+    pub queued_since: Option<EventTimestamp>,
+}
+
+/// Recording-only execution state; this is independent of task lifetime counters.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum TaskActivityState {
+    /// No coherent evidence is available for this recording generation.
+    Unknown,
+    /// The task is not polling and no outstanding wake was observed.
+    Waiting,
+    /// An outstanding wake is waiting for a worker to begin polling.
+    Ready,
+    /// A worker is polling; an additional outstanding wake may request another poll.
+    Running,
 }
 
 /// Lifetime execution metrics retained for one live task.
@@ -168,9 +223,13 @@ pub struct TaskMetrics {
     pub max_resume_duration_nanos: u64,
     /// Poll starts that consumed a recorded wake timestamp.
     pub ready_wait_count: u64,
-    /// Total nanoseconds spent runnable before a poll started.
+    /// Total raw wake-to-poll nanoseconds, including wakes during the preceding poll.
+    ///
+    /// This lifetime counter predates recording-only activity. It is not a pure
+    /// scheduler queue measurement; use `TaskActivity::queued_since` for an
+    /// outstanding scheduler wait.
     pub ready_wait_duration_nanos: u64,
-    /// Longest interval spent runnable before a poll started.
+    /// Longest raw wake-to-poll interval, including time in a preceding poll.
     pub max_ready_wait_duration_nanos: u64,
 }
 
@@ -285,7 +344,7 @@ pub fn decode(bytes: &[u8]) -> Result<Snapshot, Error> {
         return Err(Error::new(ErrorKind::UnsupportedWireVersion(wire_version)));
     }
     let schema_version = reader.u16()?;
-    if !matches!(schema_version, 2 | SCHEMA_VERSION) {
+    if !matches!(schema_version, 2 | 3 | 4 | 5 | SCHEMA_VERSION) {
         return Err(Error::new(ErrorKind::UnsupportedSchemaVersion(schema_version)));
     }
     let runtime_count = reader.u32()? as usize;
@@ -401,6 +460,9 @@ fn read_runtime(reader: &mut Reader<'_>, schema_version: u16) -> Result<Runtime,
     let workers = (0..worker_count).map(|_| read_worker(reader)).collect::<Result<Vec<_>, _>>()?;
     let task_fixed_len = match schema_version {
         2 => TASK_V2_FIXED_LEN,
+        3 => TASK_V3_FIXED_LEN,
+        4 => TASK_V4_FIXED_LEN,
+        5 => TASK_V5_FIXED_LEN,
         _ => TASK_FIXED_LEN,
     };
     if !count_fits(task_count, task_fixed_len, reader.remaining().len()) {
@@ -486,6 +548,13 @@ fn write_task(writer: &mut Writer<'_>, task: &Task) -> Result<(), ()> {
     writer.u64(task.metrics.ready_wait_count)?;
     writer.u64(task.metrics.ready_wait_duration_nanos)?;
     writer.u64(task.metrics.max_ready_wait_duration_nanos)?;
+    write_activity(writer, task.activity)?;
+    // Zero remains unknown; adding one preserves known zero-byte futures.
+    let encoded_size = match task.future_size_bytes {
+        None => 0,
+        Some(size) => size.checked_add(1).ok_or(())?,
+    };
+    writer.u64(encoded_size)?;
     for address in &task.spawn_backtrace {
         writer.u64(address.get())?;
     }
@@ -527,6 +596,15 @@ fn read_task(reader: &mut Reader<'_>, schema_version: u16) -> Result<Task, Error
     } else {
         (EventTimestamp::from_ticks(0), None, TaskMetrics::default())
     };
+    let activity = if schema_version >= 4 {
+        read_activity(reader, schema_version)?
+    } else {
+        None
+    };
+    let future_size_bytes = if schema_version >= 6 { reader.u64()?.checked_sub(1) } else { None };
+    if !count_fits(frame_count, std::mem::size_of::<u64>(), reader.remaining().len()) {
+        return Err(malformed());
+    }
     let spawn_backtrace = (0..frame_count)
         .map(|_| reader.u64().map(Address::new))
         .collect::<Result<Vec<_>, _>>()?;
@@ -534,11 +612,94 @@ fn read_task(reader: &mut Reader<'_>, schema_version: u16) -> Result<Task, Error
         id,
         parent,
         type_descriptor,
+        future_size_bytes,
         spawned_at,
         last_worker_id,
         metrics,
+        activity,
         spawn_backtrace,
     })
+}
+
+fn write_activity(writer: &mut Writer<'_>, activity: Option<TaskActivity>) -> Result<(), ()> {
+    if activity.is_some_and(|activity| !valid_activity(activity)) {
+        return Err(());
+    }
+    let (tag, observed, ready, poll, queued) = match activity {
+        None => (0, 0, 0, 0, 0),
+        Some(activity) => {
+            let tag = match activity.state {
+                TaskActivityState::Unknown => 1,
+                TaskActivityState::Waiting => 2,
+                TaskActivityState::Ready => 3,
+                TaskActivityState::Running => 4,
+            };
+            (
+                tag,
+                activity.observed_at.ticks(),
+                activity.ready_since.map_or(0, EventTimestamp::ticks),
+                activity.poll_started_at.map_or(0, EventTimestamp::ticks),
+                activity.queued_since.map_or(0, EventTimestamp::ticks),
+            )
+        }
+    };
+    writer.u64(tag)?;
+    writer.u64(observed)?;
+    writer.u64(ready)?;
+    writer.u64(poll)?;
+    writer.u64(queued)?;
+    writer.u64(activity.and_then(|activity| activity.poll_worker_id).map_or(0, WorkerId::get))
+}
+
+fn valid_activity(activity: TaskActivity) -> bool {
+    let times_valid = [activity.ready_since, activity.poll_started_at, activity.queued_since]
+        .into_iter()
+        .flatten()
+        .all(|at| at.ticks() != 0 && at <= activity.observed_at);
+    times_valid
+        && (activity.state == TaskActivityState::Running || activity.poll_worker_id.is_none())
+        && match activity.state {
+            TaskActivityState::Unknown | TaskActivityState::Waiting => {
+                activity.ready_since.is_none() && activity.poll_started_at.is_none() && activity.queued_since.is_none()
+            }
+            TaskActivityState::Ready => {
+                activity.ready_since.is_some() && activity.queued_since >= activity.ready_since && activity.poll_started_at.is_none()
+            }
+            TaskActivityState::Running => {
+                activity.poll_started_at.is_some()
+                    && activity.queued_since.is_none()
+                    && activity.ready_since.is_none_or(|ready| Some(ready) >= activity.poll_started_at)
+            }
+        }
+}
+
+fn read_activity(reader: &mut Reader<'_>, schema_version: u16) -> Result<Option<TaskActivity>, Error> {
+    let tag = reader.u64()?;
+    let observed = reader.u64()?;
+    let ready = reader.u64()?;
+    let poll = reader.u64()?;
+    let queued = reader.u64()?;
+    let worker = if schema_version >= 5 { reader.u64()? } else { 0 };
+    let state = match tag {
+        0 if observed == 0 && ready == 0 && poll == 0 && queued == 0 && worker == 0 => return Ok(None),
+        1 if ready == 0 && poll == 0 && queued == 0 => TaskActivityState::Unknown,
+        2 if ready == 0 && poll == 0 && queued == 0 => TaskActivityState::Waiting,
+        3 if ready != 0 && queued >= ready && poll == 0 => TaskActivityState::Ready,
+        4 if poll != 0 && queued == 0 && (ready == 0 || ready >= poll) => TaskActivityState::Running,
+        _ => return Err(malformed()),
+    };
+    if ready > observed || poll > observed || queued > observed || (state != TaskActivityState::Running && worker != 0) {
+        return Err(malformed());
+    }
+    let timestamp = |ticks| (ticks != 0).then_some(EventTimestamp::from_ticks(ticks));
+    Ok(Some(TaskActivity {
+        observed_at: EventTimestamp::from_ticks(observed),
+        state,
+        ready_since: timestamp(ready),
+        poll_started_at: timestamp(poll),
+        poll_worker_id: WorkerId::from_raw(worker),
+        queued_since: timestamp(queued),
+    }))
 }
 
 fn write_address_lookup(writer: &mut Writer<'_>, lookup: &AddressLookup) -> Result<(), ()> {
@@ -751,7 +912,9 @@ mod tests {
                     id: TaskId::from_raw(4).unwrap(),
                     parent: Some(TaskId::from_raw(3).unwrap()),
                     type_descriptor: TypeDescriptorId::from_raw(5).unwrap(),
+                    future_size_bytes: None,
                     spawned_at: EventTimestamp::from_ticks(11),
+                    activity: None,
                     last_worker_id: Some(WorkerId::from_raw(2).unwrap()),
                     metrics: TaskMetrics {
                         poll_count: 12,
@@ -783,7 +946,40 @@ mod tests {
         let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
         encode(&snapshot, &mut bytes).unwrap();
 
-        assert_eq!(bytes.len(), 371);
+        assert_eq!(bytes.len(), 427);
+        assert_eq!(decode(&bytes).unwrap(), snapshot);
+    }
+
+    #[test]
+    fn future_sizes_round_trip_without_confusing_zero_and_unknown() {
+        for size in [None, Some(0), Some(1), Some(4096), Some(u64::MAX - 1)] {
+            let mut snapshot = fixture();
+            snapshot.runtimes[0].tasks[0].future_size_bytes = size;
+            let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
+            encode(&snapshot, &mut bytes).unwrap();
+            assert_eq!(decode(&bytes).unwrap(), snapshot);
+            assert_eq!(&bytes[10..12], &6_u16.to_le_bytes());
+        }
+    }
+
+    #[test]
+    fn unrepresentable_future_size_is_rejected() {
+        let mut snapshot = fixture();
+        snapshot.runtimes[0].tasks[0].future_size_bytes = Some(u64::MAX);
+        let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
+        assert_eq!(encode(&snapshot, &mut bytes), Err(()));
+    }
+
+    #[test]
+    fn version_five_task_metadata_has_unknown_future_size() {
+        let mut snapshot = fixture();
+        snapshot.runtimes[0].tasks[0].future_size_bytes = Some(0);
+        let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
+        encode(&snapshot, &mut bytes).unwrap();
+        bytes[10..12].copy_from_slice(&5_u16.to_le_bytes());
+        let task_start = HEADER_LEN + RUNTIME_FIXED_LEN + snapshot.runtimes[0].name.len() + WORKER_FIXED_LEN;
+        bytes.drain(task_start + TASK_V5_FIXED_LEN..task_start + TASK_FIXED_LEN);
+        snapshot.runtimes[0].tasks[0].future_size_bytes = None;
         assert_eq!(decode(&bytes).unwrap(), snapshot);
     }
 
@@ -1022,7 +1218,7 @@ mod tests {
             bytes
         }
 
-        for offset in [52, 331, 335] {
+        for offset in [52, 387, 391] {
             let mut bytes = encoded_fixture();
             bytes[offset..offset + 4].copy_from_slice(&u32::MAX.to_le_bytes());
             assert_eq!(decode(&bytes).unwrap_err().kind(), ErrorKind::Malformed);
@@ -1033,8 +1229,171 @@ mod tests {
         assert_eq!(decode(&invalid_runtime_name).unwrap_err().kind(), ErrorKind::Malformed);
 
         let mut invalid_symbol = encoded_fixture();
-        invalid_symbol[347] = 0xff;
+        invalid_symbol[403] = 0xff;
         assert_eq!(decode(&invalid_symbol).unwrap_err().kind(), ErrorKind::Malformed);
+    }
+
+    #[test]
+    fn version_three_task_metadata_decodes_without_activity() {
+        let snapshot = fixture();
+        let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
+        encode(&snapshot, &mut bytes).unwrap();
+        bytes[10..12].copy_from_slice(&3_u16.to_le_bytes());
+        let task_start = HEADER_LEN + RUNTIME_FIXED_LEN + snapshot.runtimes[0].name.len() + WORKER_FIXED_LEN;
+        bytes.drain(task_start + TASK_V3_FIXED_LEN..task_start + TASK_FIXED_LEN);
+        assert_eq!(decode(&bytes).unwrap(), snapshot);
+    }
+
+    #[test]
+    fn version_four_activity_decodes_without_poll_worker_identity() {
+        for activity in [
+            None,
+            Some(TaskActivity {
+                observed_at: EventTimestamp::from_ticks(50),
+                state: TaskActivityState::Running,
+                ready_since: Some(EventTimestamp::from_ticks(20)),
+                poll_started_at: Some(EventTimestamp::from_ticks(10)),
+                poll_worker_id: WorkerId::from_raw(7),
+                queued_since: None,
+            }),
+        ] {
+            let mut snapshot = fixture();
+            snapshot.runtimes[0].tasks[0].activity = activity;
+            let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
+            encode(&snapshot, &mut bytes).unwrap();
+            bytes[10..12].copy_from_slice(&4_u16.to_le_bytes());
+            let task_start = HEADER_LEN + RUNTIME_FIXED_LEN + snapshot.runtimes[0].name.len() + WORKER_FIXED_LEN;
+            bytes.drain(task_start + TASK_V4_FIXED_LEN..task_start + TASK_FIXED_LEN);
+            if let Some(activity) = &mut snapshot.runtimes[0].tasks[0].activity {
+                activity.poll_worker_id = None;
+            }
+            assert_eq!(decode(&bytes).unwrap(), snapshot);
+        }
+    }
+
+    #[test]
+    fn poll_worker_identity_is_rejected_outside_running_state() {
+        for words in [
+            [0_u64, 0, 0, 0, 0, 7],
+            [1, 10, 0, 0, 0, 7],
+            [2, 10, 0, 0, 0, 7],
+            [3, 10, 1, 0, 2, 7],
+        ] {
+            let bytes = words.into_iter().flat_map(u64::to_le_bytes).collect::<Vec<_>>();
+            assert_eq!(
+                read_activity(&mut Reader::new(&bytes), SCHEMA_VERSION).unwrap_err().kind(),
+                ErrorKind::Malformed
+            );
+        }
+        let invalid = TaskActivity {
+            observed_at: EventTimestamp::from_ticks(10),
+            state: TaskActivityState::Waiting,
+            ready_since: None,
+            poll_started_at: None,
+            poll_worker_id: WorkerId::from_raw(7),
+            queued_since: None,
+        };
+        assert_eq!(write_activity(&mut Writer::new(&mut [0; 48]), Some(invalid)), Err(()));
+    }
+
+    #[test]
+    fn activity_states_round_trip_with_exact_size_and_truncation_checks() {
+        let at = EventTimestamp::from_ticks;
+        for activity in [
+            None,
+            Some(TaskActivity {
+                observed_at: at(50),
+                state: TaskActivityState::Unknown,
+                ready_since: None,
+                poll_started_at: None,
+                poll_worker_id: None,
+                queued_since: None,
+            }),
+            Some(TaskActivity {
+                observed_at: at(50),
+                state: TaskActivityState::Waiting,
+                ready_since: None,
+                poll_started_at: None,
+                poll_worker_id: None,
+                queued_since: None,
+            }),
+            Some(TaskActivity {
+                observed_at: at(50),
+                state: TaskActivityState::Ready,
+                ready_since: Some(at(10)),
+                poll_started_at: None,
+                poll_worker_id: None,
+                queued_since: Some(at(20)),
+            }),
+            Some(TaskActivity {
+                observed_at: at(50),
+                state: TaskActivityState::Running,
+                ready_since: None,
+                poll_started_at: Some(at(10)),
+                poll_worker_id: None,
+                queued_since: None,
+            }),
+            Some(TaskActivity {
+                observed_at: at(50),
+                state: TaskActivityState::Running,
+                ready_since: Some(at(20)),
+                poll_started_at: Some(at(10)),
+                poll_worker_id: WorkerId::from_raw(7),
+                queued_since: None,
+            }),
+        ] {
+            let mut bytes = [0; TASK_V5_FIXED_LEN - TASK_V3_FIXED_LEN];
+            write_activity(&mut Writer::new(&mut bytes), activity).unwrap();
+            assert_eq!(read_activity(&mut Reader::new(&bytes), SCHEMA_VERSION).unwrap(), activity);
+            for len in 0..bytes.len() {
+                assert_eq!(
+                    read_activity(&mut Reader::new(&bytes[..len]), SCHEMA_VERSION).unwrap_err().kind(),
+                    ErrorKind::Malformed
+                );
+            }
+            let mut snapshot = fixture();
+            snapshot.runtimes[0].tasks[0].activity = activity;
+            let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
+            encode(&snapshot, &mut bytes).unwrap();
+            assert_eq!(decode(&bytes).unwrap(), snapshot);
+            bytes.push(1);
+            assert_eq!(decode(&bytes).unwrap_err().kind(), ErrorKind::Malformed);
+        }
+    }
+
+    #[test]
+    fn malformed_activity_tags_and_inconsistent_times_are_rejected() {
+        for words in [
+            [0_u64, 1, 0, 0, 0],
+            [5, 10, 0, 0, 0],
+            [1, 10, 1, 0, 0],
+            [2, 10, 0, 1, 0],
+            [3, 10, 0, 0, 1],
+            [3, 10, 2, 0, 1],
+            [3, 10, 1, 1, 2],
+            [3, 10, 11, 0, 11],
+            [4, 10, 0, 0, 0],
+            [4, 10, 1, 2, 0],
+            [4, 10, 0, 1, 1],
+            [4, 10, 0, 11, 0],
+        ] {
+            let mut bytes = words.into_iter().flat_map(u64::to_le_bytes).collect::<Vec<_>>();
+            assert_eq!(read_activity(&mut Reader::new(&bytes), 4).unwrap_err().kind(), ErrorKind::Malformed);
+            bytes.extend_from_slice(&0_u64.to_le_bytes());
+            assert_eq!(
+                read_activity(&mut Reader::new(&bytes), SCHEMA_VERSION).unwrap_err().kind(),
+                ErrorKind::Malformed
+            );
+        }
+        let invalid = TaskActivity {
+            observed_at: EventTimestamp::from_ticks(10),
+            state: TaskActivityState::Running,
+            ready_since: None,
+            poll_started_at: Some(EventTimestamp::from_ticks(0)),
+            poll_worker_id: None,
+            queued_since: None,
+        };
+        assert_eq!(write_activity(&mut Writer::new(&mut [0; 48]), Some(invalid)), Err(()));
     }
 
     #[test]
@@ -1047,8 +1406,8 @@ mod tests {
         task.extend_from_slice(&0_u32.to_le_bytes());
         let decoded = read_task(&mut Reader::new(&task), 2).unwrap();
         assert_eq!(
-            (decoded.spawned_at, decoded.last_worker_id, decoded.metrics),
-            (EventTimestamp::from_ticks(0), None, TaskMetrics::default())
+            (decoded.spawned_at, decoded.last_worker_id, decoded.metrics, decoded.activity),
+            (EventTimestamp::from_ticks(0), None, TaskMetrics::default(), None)
         );
 
         let snapshot = fixture();

@@ -58,8 +58,16 @@ pub enum EventBufferDisposition {
     Retain,
     /// Discards retained events after capture while keeping active-thread buffers for reuse.
     Clear,
-    /// Discards retained events after capture and releases active-thread buffers.
+    /// Discards retained events after capture and releases active-thread buffers,
+    /// then restores the previous recording policies (including enabled classes).
     Release,
+    /// Captures events, disables all six recording classes, and releases their buffers.
+    ///
+    /// Unlike `Release`, recording is not resumed. Source or encoding failures
+    /// after recorder cleanup do not undo the stop.
+    /// A timeout before cleanup restores prior policies; a timeout during release
+    /// leaves recording disabled and may leave some buffers allocated.
+    Stop,
 }
 
 /// Options controlling snapshot capture and recorder cleanup.
@@ -141,6 +149,7 @@ impl Source {
 #[derive(Clone, Copy, Debug)]
 pub struct SnapshotContext<'a> {
     events: &'a Events,
+    observation: Option<recorder::RecordingObservation>,
 }
 
 impl<'a> SnapshotContext<'a> {
@@ -148,6 +157,15 @@ impl<'a> SnapshotContext<'a> {
     #[must_use]
     pub const fn events(self) -> &'a Events {
         self.events
+    }
+
+    /// Recording generation and observation boundary associated with this capture.
+    ///
+    /// Destructive captures retain the pre-reset generation. A stopped capture
+    /// retains its stop-time boundary rather than advancing frozen task ages.
+    #[must_use]
+    pub const fn recording_observation(self) -> Option<recorder::RecordingObservation> {
+        self.observation
     }
 }
 
@@ -305,9 +323,13 @@ pub(crate) fn snapshot(options: SnapshotOptions) -> Result<Snapshot, Error> {
     with_snapshot_arena(|| {
         let _suppression = SuppressionGuard::enter();
         let started_at = Instant::now();
-        let mut events = recorder::try_snapshot(options.event_buffers)?.unwrap_or_default();
+        let (events, observation) = recorder::try_snapshot_with_observation(options.event_buffers)?;
+        let mut events = events.unwrap_or_default();
         events.clock = EventClock::CURRENT;
-        let sources = capture_sources(SnapshotContext { events: &events })?;
+        let sources = capture_sources(SnapshotContext {
+            events: &events,
+            observation,
+        })?;
         encode_snapshot(&DecodedSnapshot {
             capture_duration_nanos: u64::try_from(started_at.elapsed().as_nanos()).unwrap_or(u64::MAX),
             events,
@@ -1449,26 +1471,40 @@ mod tests {
             }),
             call_stack: vec![Address::new(0x1234)],
         };
+        let ready = Event {
+            sequence: EventSequence::new(10),
+            kind: EventKind::TaskReady,
+            payload: EventPayload::Runtime(RuntimeEvent {
+                runtime_id: RuntimeId::from_raw(1).unwrap(),
+                worker_id: None,
+                subject_id: 3,
+                related_id: 0,
+                value_0: 0,
+                value_1: 0,
+            }),
+            call_stack: Vec::new(),
+            ..event
+        };
         let snapshot = encode_snapshot(&DecodedSnapshot {
             capture_duration_nanos: 1,
             events: Events {
                 clock: EventClock::CURRENT,
-                total_events: 1,
+                total_events: 2,
                 lost_events: 0,
                 recording: RecordingPolicies::default(),
                 threads: vec![ThreadLog {
                     thread_id: ThreadId::new(7),
-                    total_events: 1,
+                    total_events: 2,
                     lost_events: 0,
                     name: "worker".to_owned(),
                 }],
-                events: vec![event.clone()],
+                events: vec![event.clone(), ready.clone()],
             },
             sources: Vec::new(),
         })
         .unwrap();
 
-        assert_eq!(decode(snapshot.as_bytes()).unwrap().events.events, vec![event]);
+        assert_eq!(decode(snapshot.as_bytes()).unwrap().events.events, vec![event, ready]);
     }
 
     #[test]
@@ -1738,7 +1774,8 @@ mod tests {
         assert!(format!("{source:?}").contains("Source"));
         assert_eq!(
             (source.capture)(SnapshotContext {
-                events: &Events::default()
+                events: &Events::default(),
+                observation: None,
             })
             .unwrap()
             .as_bytes(),
@@ -2388,7 +2425,8 @@ mod tests {
             capture_sources_from(
                 ptr::from_ref(&first).cast_mut(),
                 SnapshotContext {
-                    events: &Events::default()
+                    events: &Events::default(),
+                    observation: None,
                 }
             )
             .is_err()
@@ -2399,7 +2437,8 @@ mod tests {
             capture_sources_from(
                 ptr::from_ref(&panicked).cast_mut(),
                 SnapshotContext {
-                    events: &Events::default()
+                    events: &Events::default(),
+                    observation: None,
                 }
             )
             .is_err()
@@ -2410,7 +2449,8 @@ mod tests {
             capture_sources_from(
                 ptr::from_ref(&failed).cast_mut(),
                 SnapshotContext {
-                    events: &Events::default()
+                    events: &Events::default(),
+                    observation: None,
                 }
             )
             .is_err()
@@ -2423,6 +2463,7 @@ mod tests {
             ptr::from_ref(&first).cast_mut(),
             SnapshotContext {
                 events: &Events::default(),
+                observation: None,
             },
         )
         .unwrap();
