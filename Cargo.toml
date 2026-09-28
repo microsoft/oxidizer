@@ -201,7 +201,7 @@ ohno_macros = { path = "crates/ohno_macros", default-features = false, version =
 ohno_macros_impl = { path = "crates/ohno_macros_impl", default-features = false, version = "=0.5.2" }
 once_cell = { version = "1.21.3", default-features = false }
 opentelemetry = { version = "0.32.0", default-features = false }
-opentelemetry-semantic-conventions = { version = "0.32.0", default-features = false }
+opentelemetry-semantic-conventions = { version = "0.33.0", default-features = false }
 opentelemetry-stdout = { version = "0.32.0", default-features = false }
 opentelemetry_sdk = { version = "0.32.0", default-features = false }
 opool = { version = "0.2.0", default-features = false }
