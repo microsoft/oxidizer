@@ -181,7 +181,7 @@ version = "0.9.0"
 dependencies = [
  "criterion",
  "futures",
- "opentelemetry",
+ "opentelemetry 0.32.0",
  "performables",
  "smol",
  "static_assertions",
@@ -1858,10 +1858,10 @@ dependencies = [
  "mutants",
  "native-tls",
  "ohno 0.5.2",
- "opentelemetry",
+ "opentelemetry 0.32.0",
  "opentelemetry-semantic-conventions",
  "opentelemetry-stdout",
- "opentelemetry_sdk",
+ "opentelemetry_sdk 0.33.0",
  "performables",
  "rustls",
  "rustls-platform-verifier",
@@ -1926,9 +1926,9 @@ dependencies = [
  "mutants",
  "native-tls",
  "ohno 0.5.2",
- "opentelemetry",
+ "opentelemetry 0.32.0",
  "opentelemetry-semantic-conventions",
- "opentelemetry_sdk",
+ "opentelemetry_sdk 0.33.0",
  "pin-project",
  "rustls",
  "seatbelt",
@@ -3844,9 +3844,9 @@ dependencies = [
  "data_privacy",
  "observed_macros",
  "ohno 0.5.2",
- "opentelemetry",
+ "opentelemetry 0.32.0",
  "opentelemetry-stdout",
- "opentelemetry_sdk",
+ "opentelemetry_sdk 0.33.0",
  "performables",
  "pin-project",
  "smallvec",
@@ -3896,7 +3896,7 @@ dependencies = [
  "const-hex",
  "data_privacy",
  "observed",
- "opentelemetry",
+ "opentelemetry 0.32.0",
  "tick",
 ]
 
@@ -4044,6 +4044,18 @@ dependencies = [
  "futures-sink",
  "js-sys",
  "pin-project-lite",
+]
+
+[[package]]
+name = "opentelemetry"
+version = "0.33.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6cdb0b1b267eb9db3331b434ed9ddab10d50e280a9adf9d13e5233e2002b61b5"
+dependencies = [
+ "futures-core",
+ "futures-sink",
+ "js-sys",
+ "pin-project-lite",
  "thiserror",
 ]
 
@@ -4060,8 +4072,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1b1c6a247d79091f0062a5f4bd058589525cf987a8d4c169440d9c1be72f0ad"
 dependencies = [
  "chrono",
- "opentelemetry",
- "opentelemetry_sdk",
+ "opentelemetry 0.32.0",
+ "opentelemetry_sdk 0.32.1",
 ]
 
 [[package]]
@@ -4073,7 +4085,21 @@ dependencies = [
  "futures-channel",
  "futures-executor",
  "futures-util",
- "opentelemetry",
+ "opentelemetry 0.32.0",
+ "portable-atomic",
+ "thiserror",
+]
+
+[[package]]
+name = "opentelemetry_sdk"
+version = "0.33.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb39533d9d1c912123efd7d41d7e0c29d16917b60ce15b4c8d87cb1af7f67520"
+dependencies = [
+ "futures-channel",
+ "futures-executor",
+ "futures-util",
+ "opentelemetry 0.33.0",
  "percent-encoding",
  "portable-atomic",
  "rand 0.9.5",
@@ -5281,9 +5307,9 @@ dependencies = [
  "layered",
  "mutants",
  "ohno 0.5.2",
- "opentelemetry",
+ "opentelemetry 0.32.0",
  "opentelemetry-stdout",
- "opentelemetry_sdk",
+ "opentelemetry_sdk 0.33.0",
  "recoverable",
  "rstest",
  "serde",
@@ -5864,8 +5890,8 @@ version = "0.0.0"
 dependencies = [
  "ctor",
  "futures",
- "opentelemetry",
- "opentelemetry_sdk",
+ "opentelemetry 0.32.0",
+ "opentelemetry_sdk 0.33.0",
  "prettyplease 0.3.0",
  "proc-macro2",
  "serial_test",
