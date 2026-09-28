@@ -181,7 +181,7 @@ version = "0.9.0"
 dependencies = [
  "criterion",
  "futures",
- "opentelemetry",
+ "opentelemetry 0.33.0",
  "performables",
  "smol",
  "static_assertions",
@@ -1858,7 +1858,7 @@ dependencies = [
  "mutants",
  "native-tls",
  "ohno 0.5.2",
- "opentelemetry",
+ "opentelemetry 0.33.0",
  "opentelemetry-semantic-conventions",
  "opentelemetry-stdout",
  "opentelemetry_sdk",
@@ -1926,7 +1926,7 @@ dependencies = [
  "mutants",
  "native-tls",
  "ohno 0.5.2",
- "opentelemetry",
+ "opentelemetry 0.33.0",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
  "pin-project",
@@ -3844,7 +3844,7 @@ dependencies = [
  "data_privacy",
  "observed_macros",
  "ohno 0.5.2",
- "opentelemetry",
+ "opentelemetry 0.33.0",
  "opentelemetry-stdout",
  "opentelemetry_sdk",
  "performables",
@@ -3896,7 +3896,7 @@ dependencies = [
  "const-hex",
  "data_privacy",
  "observed",
- "opentelemetry",
+ "opentelemetry 0.33.0",
  "tick",
 ]
 
@@ -4048,6 +4048,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "opentelemetry"
+version = "0.33.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6cdb0b1b267eb9db3331b434ed9ddab10d50e280a9adf9d13e5233e2002b61b5"
+dependencies = [
+ "futures-core",
+ "futures-sink",
+ "js-sys",
+ "pin-project-lite",
+]
+
+[[package]]
 name = "opentelemetry-semantic-conventions"
 version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4060,7 +4072,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1b1c6a247d79091f0062a5f4bd058589525cf987a8d4c169440d9c1be72f0ad"
 dependencies = [
  "chrono",
- "opentelemetry",
+ "opentelemetry 0.32.0",
  "opentelemetry_sdk",
 ]
 
@@ -4073,7 +4085,7 @@ dependencies = [
  "futures-channel",
  "futures-executor",
  "futures-util",
- "opentelemetry",
+ "opentelemetry 0.32.0",
  "percent-encoding",
  "portable-atomic",
  "rand 0.9.5",
@@ -5281,7 +5293,7 @@ dependencies = [
  "layered",
  "mutants",
  "ohno 0.5.2",
- "opentelemetry",
+ "opentelemetry 0.33.0",
  "opentelemetry-stdout",
  "opentelemetry_sdk",
  "recoverable",
@@ -5864,7 +5876,7 @@ version = "0.0.0"
 dependencies = [
  "ctor",
  "futures",
- "opentelemetry",
+ "opentelemetry 0.33.0",
  "opentelemetry_sdk",
  "prettyplease 0.3.0",
  "proc-macro2",
