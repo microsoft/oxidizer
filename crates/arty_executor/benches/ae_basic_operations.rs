@@ -397,16 +397,16 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     prepared!(DECOMPOSED_CYCLE_PENDING, "first_poll", pending_state(), decomposed_cycle_pending);
     prepared!(DECOMPOSED_CYCLE_PENDING, "inactive", inactive_state(), decomposed_cycle_pending);
     prepared!(DECOMPOSED_YIELD_CYCLE, "self_wake", yield_state(), decomposed_yield_cycle);
-    prepared!(
-        DECOMPOSED_YIELD_CYCLE,
-        "completion",
-        self_awakened_state(),
-        decomposed_yield_cycle
-    );
+    prepared!(DECOMPOSED_YIELD_CYCLE, "completion", self_awakened_state(), decomposed_yield_cycle);
     prepared!(DECOMPOSED_WAKE_BY_REF, "delivered", waiting_state(1), decomposed_wake_by_ref);
     prepared!(DECOMPOSED_WAKE_BY_REF, "duplicate", awakened_state(1, 1), decomposed_wake_by_ref);
     prepared!(DECOMPOSED_WAKE_BY_REF, "overflow", overflow_wake_state(), decomposed_wake_by_ref);
-    prepared!(DECOMPOSED_CYCLE_AWAKENED, "one_of_1", awakened_state(1, 1), decomposed_cycle_awakened);
+    prepared!(
+        DECOMPOSED_CYCLE_AWAKENED,
+        "one_of_1",
+        awakened_state(1, 1),
+        decomposed_cycle_awakened
+    );
     prepared!(
         DECOMPOSED_CYCLE_AWAKENED,
         "one_of_32",
