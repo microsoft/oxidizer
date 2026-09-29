@@ -240,10 +240,12 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
-    use arty_io_core::{DriverError, DriverOptions, DriverProvider, IoContext, ProviderOptions};
+    use arty_io_core::{
+        Cycle, Driver, DriverError, DriverHandle, DriverOptions, DriverProvider, DriverRole, IoContext, ProviderOptions, ShutdownError,
+    };
     use thread_aware_core::{Thread, ThreadAware};
 
-    use super::Runtime;
+    use super::{Runtime, register_driver};
     use crate::drivers::{EchoContext, SampleContext, SampleDriver};
 
     struct BlockingCloneContext {
@@ -290,6 +292,54 @@ mod tests {
         fn create(self, _options: DriverOptions<'_>) -> Result<(Self::Driver, Self::Context), DriverError> {
             panic!("the fixture context is inserted directly into the cache");
         }
+    }
+
+    struct ShutdownProbe {
+        name: &'static str,
+        shutdowns: Arc<Mutex<Vec<&'static str>>>,
+    }
+
+    impl Driver for ShutdownProbe {
+        fn handle(&self) -> DriverHandle<'_> {
+            DriverHandle::new(self)
+        }
+
+        fn on_peer_registered(&mut self, _peer: DriverHandle<'_>) {}
+
+        fn execute_cycle(&mut self, _cycle: &mut Cycle<'_>) -> Result<(), DriverError> {
+            Ok(())
+        }
+
+        fn shutdown(self) -> Result<(), ShutdownError> {
+            self.shutdowns.lock().unwrap().push(self.name);
+            Err(ShutdownError::from_message(self.name))
+        }
+    }
+
+    #[test]
+    fn shutdown_attempts_remaining_drivers_and_returns_the_first_error() {
+        let runtime = Runtime::start();
+        let shutdowns = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&shutdowns);
+        runtime.run(move |_, _, _, drivers| {
+            for (name, role) in [("primary", DriverRole::Primary), ("secondary", DriverRole::Secondary)] {
+                register_driver(
+                    drivers,
+                    ShutdownProbe {
+                        name,
+                        shutdowns: Arc::clone(&recorded),
+                    },
+                    role,
+                );
+            }
+        });
+
+        let error = runtime.shutdown().unwrap_err();
+
+        assert_eq!(
+            (shutdowns.lock().unwrap().clone(), error.to_string()),
+            (vec!["secondary", "primary"], "secondary".to_string())
+        );
     }
 
     #[test]
