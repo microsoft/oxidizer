@@ -29,34 +29,23 @@ enum Command {
 trait ErasedDriver {
     fn handle(&self) -> DriverHandle<'_>;
     fn on_peer_registered(&mut self, peer: DriverHandle<'_>);
-    fn context_type(&self) -> TypeId;
-    fn context(&self) -> ContextBox;
     fn role(&self) -> DriverRole;
     fn execute_cycle(&mut self, cycle: &mut Cycle<'_>) -> Result<(), DriverError>;
     fn shutdown(self: Box<Self>) -> Result<(), ShutdownError>;
 }
 
-struct RegisteredDriver<D, C> {
+struct RegisteredDriver<D> {
     driver: D,
-    context: C,
     role: DriverRole,
 }
 
-impl<D: Driver, C: IoContext> ErasedDriver for RegisteredDriver<D, C> {
+impl<D: Driver> ErasedDriver for RegisteredDriver<D> {
     fn handle(&self) -> DriverHandle<'_> {
         Driver::handle(&self.driver)
     }
 
     fn on_peer_registered(&mut self, peer: DriverHandle<'_>) {
         Driver::on_peer_registered(&mut self.driver, peer);
-    }
-
-    fn context_type(&self) -> TypeId {
-        TypeId::of::<C>()
-    }
-
-    fn context(&self) -> ContextBox {
-        Box::new(self.context.clone())
     }
 
     fn role(&self) -> DriverRole {
@@ -133,13 +122,6 @@ impl Runtime {
     {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.run(move |worker, spawner, coordinator, drivers| {
-            // The lookup and initialization operations share this queue, so rechecking here
-            // serializes concurrent misses without a mutex.
-            if let Some(context) = find_context::<C>(drivers) {
-                let _ = reply_tx.send(context);
-                return;
-            }
-
             let mut provider = C::provider(ProviderOptions::new());
             let options = driver_options(worker, spawner, drivers, <C::Provider as DriverProvider>::CAN_BE_PRIMARY);
             let role = options.role();
@@ -148,9 +130,8 @@ impl Runtime {
             driver
                 .execute_cycle(&mut Cycle::new(Instant::now(), Duration::ZERO, false, coordinator))
                 .expect("sample driver initialization cycle is infallible");
-            let reply_context = context.clone();
-            register_driver(drivers, driver, context, role);
-            let _ = reply_tx.send(reply_context);
+            register_driver(drivers, driver, role);
+            let _ = reply_tx.send(context);
         });
         reply_rx
             .recv()
@@ -195,18 +176,6 @@ fn run_worker(worker: &Thread, spawner: &SystemTaskSpawner, commands: &mpsc::Rec
     }
 }
 
-fn find_context<C: IoContext>(drivers: &DriverStore) -> Option<C> {
-    drivers
-        .iter()
-        .find(|driver| driver.context_type() == TypeId::of::<C>())
-        .map(|driver| {
-            *driver
-                .context()
-                .downcast::<C>()
-                .expect("context type matched by TypeId immediately above")
-        })
-}
-
 fn driver_options<'a>(worker: &Thread, spawner: &SystemTaskSpawner, drivers: &'a DriverStore, can_be_primary: bool) -> DriverOptions<'a> {
     let driver_handles = drivers.iter().map(|driver| driver.handle()).collect();
     let role = if can_be_primary && !drivers.iter().any(|driver| driver.role() == DriverRole::Primary) {
@@ -217,8 +186,8 @@ fn driver_options<'a>(worker: &Thread, spawner: &SystemTaskSpawner, drivers: &'a
     DriverOptions::new(worker.clone(), spawner.clone(), driver_handles, role)
 }
 
-fn register_driver<D: Driver, C: IoContext>(drivers: &mut DriverStore, driver: D, context: C, role: DriverRole) {
-    drivers.push(Box::new(RegisteredDriver { driver, context, role }));
+fn register_driver<D: Driver>(drivers: &mut DriverStore, driver: D, role: DriverRole) {
+    drivers.push(Box::new(RegisteredDriver { driver, role }));
     let (driver, existing_drivers) = drivers.split_last_mut().expect("the new driver was pushed immediately above");
     let driver = driver.handle();
     for existing_driver in existing_drivers {
