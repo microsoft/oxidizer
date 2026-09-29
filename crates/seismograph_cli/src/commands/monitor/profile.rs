@@ -4,6 +4,10 @@
 //! Allocation and CPU measurements for the opt-in large-file regression test.
 
 #![cfg_attr(coverage_nightly, coverage(off))] // Manual profiling support, not product behavior.
+#![expect(
+    unsafe_code,
+    reason = "the test-only profiler wraps the system allocator and reads process CPU time"
+)]
 
 #[cfg(not(miri))]
 use std::alloc::{GlobalAlloc, Layout, System};
