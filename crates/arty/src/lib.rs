@@ -2,18 +2,44 @@
 // Licensed under the MIT License.
 
 #![deny(missing_docs)]
-#![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty/favicon.ico")]
 
-//! Single-threaded, thread-aware application runtime.
+//! Thread-aware, thread-per-core application runtime.
 //!
-//! Arty is being developed as a small runtime. Stable contracts for integrating external I/O
-//! drivers live in [`arty_io_core`].
+//! Each worker has a single-threaded executor: a task remains on its original worker for its
+//! entire lifetime. An `arty::rt::Runtime` owns worker startup and shutdown. Its
+//! `task_scheduler()` distributes work round-robin, while a task's
+//! `Builtins::scheduler` preserves worker affinity. Futures are constructed on the destination
+//! worker and need not be [`Send`].
+//!
+//! ```rust
+//! # fn main() {
+//! # #[cfg(feature = "rt")] {
+//! use arty::rt::Runtime;
+//!
+//! let runtime = Runtime::new().unwrap();
+//! let scheduler = runtime.task_scheduler();
+//! let answer = scheduler
+//!     .spawn(async |cx| cx.scheduler().spawn(async |_| 42).await)
+//!     .wait();
+//! assert_eq!(answer, 42);
+//! # }
+//! # }
+//! ```
+//!
+//! Arty provides scheduling, blocking system tasks, clocks, and structured telemetry. It does
+//! not provide asynchronous I/O drivers or memory pools. External I/O integration through
+//! [`arty_io_core`] is planned separately.
 //!
 //! # Features
 //!
+//! No features are enabled by default.
+//!
+//! - **`rt`** - Enables the runtime and implies `time`.
+//! - **`macros`** - Enables `#[arty::rt::main]` and `#[arty::rt::test]` and implies `rt`.
 //! - **`time`** - Exposes time primitives through `arty::time`.
 //! - **`test-util`** - Enables test-only runtime utilities. With `time`, this includes
 //!   `arty::time::ClockControl`.
@@ -26,6 +52,9 @@
 //! - [Stabilization](https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/STABILIZATION.md)
 
 use arty_io_core as _;
+
+#[cfg(any(test, feature = "rt"))]
+pub mod rt;
 
 /// Foundational runtime and thread-awareness types.
 pub mod core {
@@ -42,3 +71,6 @@ pub mod time {
     #[doc(inline)]
     pub use tick::{Clock, Delay, FutureExt, PeriodicTimer, SimpleClock, Stopwatch, Timeout};
 }
+
+#[cfg(test)]
+testing_aids::init_tracing!();

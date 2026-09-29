@@ -1,5 +1,21 @@
 # Panics
 
-Arty types must be unwind-safe unless documented otherwise. The runtime catches task panics and
-re-raises them when the task result is awaited. Unobserved task panics are reported to a runtime
-panic handler. Foundational I/O contracts in `arty_io_core` must also be panic-safe.
+Remote and local task polling catches panics and transports the original payload
+to the join handle. Awaiting a join, or calling `JoinHandle::wait`, resumes
+that panic. Remote future-factory invocation is inside the same boundary.
+
+A local future factory runs synchronously on its calling worker. A panic while
+creating that future propagates to the calling task. System-task panics are also
+transported to their joins.
+
+Dropping a join does not rethrow its task's panic elsewhere. Remote/local task
+panics emit an `observed` event when a sink is configured, even if their result is
+not observed. There is no separate configurable runtime panic-handler API.
+
+Runtime capabilities are not universally `UnwindSafe` or `RefUnwindSafe`.
+Catching a task panic does not repair application state or poisoned locks.
+Applications remain responsible for deciding whether to stop after a panic.
+
+Blocking runtime methods, including owner destruction, must not run on an
+asynchronous worker. Scoped execution retains borrowed storage until destruction,
+including when propagating a panic.

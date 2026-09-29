@@ -13,23 +13,45 @@
 
 </div>
 
-Single-threaded, thread-aware application runtime.
+Thread-aware, thread-per-core application runtime.
 
-Arty is being developed as a small runtime. Stable contracts for integrating external I/O
-drivers live in [`arty_io_core`][__link0].
+Each worker has a single-threaded executor: a task remains on its original worker for its
+entire lifetime. An `arty::rt::Runtime` owns worker startup and shutdown. Its
+`task_scheduler()` distributes work round-robin, while a task’s
+`Builtins::scheduler` preserves worker affinity. Futures are constructed on the destination
+worker and need not be [`Send`][__link0].
+
+```rust
+use arty::rt::Runtime;
+
+let runtime = Runtime::new().unwrap();
+let scheduler = runtime.task_scheduler();
+let answer = scheduler
+    .spawn(async |cx| cx.scheduler().spawn(async |_| 42).await)
+    .wait();
+assert_eq!(answer, 42);
+```
+
+Arty provides scheduling, blocking system tasks, clocks, and structured telemetry. It does
+not provide asynchronous I/O drivers or memory pools. External I/O integration through
+[`arty_io_core`][__link1] is planned separately.
 
 ## Features
 
+No features are enabled by default.
+
+* **`rt`** - Enables the runtime and implies `time`.
+* **`macros`** - Enables `#[arty::rt::main]` and `#[arty::rt::test]` and implies `rt`.
 * **`time`** - Exposes time primitives through `arty::time`.
 * **`test-util`** - Enables test-only runtime utilities. With `time`, this includes
   `arty::time::ClockControl`.
 
 ## Project policies
 
-* [Design][__link1]
-* [I/O][__link2]
-* [Panics][__link3]
-* [Stabilization][__link4]
+* [Design][__link2]
+* [I/O][__link3]
+* [Panics][__link4]
+* [Stabilization][__link5]
 
 
 <hr/>
@@ -37,9 +59,10 @@ drivers live in [`arty_io_core`][__link0].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbvQUsvsxw3aMb3ltq8ELONs8bDOGus7kuoVYbr5grKcqlQcVhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
- [__link0]: https://crates.io/crates/arty_io_core/0.2.0
- [__link1]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/DESIGN.md
- [__link2]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/IO.md
- [__link3]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/PANICS.md
- [__link4]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/STABILIZATION.md
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbHWTsDZa9e_YbegJQjwQaHsob8nbbqcA3G20bq5dcQAEvBKVhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
+ [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
+ [__link1]: https://crates.io/crates/arty_io_core/0.2.0
+ [__link2]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/DESIGN.md
+ [__link3]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/IO.md
+ [__link4]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/PANICS.md
+ [__link5]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/STABILIZATION.md
