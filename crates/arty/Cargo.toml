@@ -18,6 +18,8 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/arty"
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
+    "arty_macros::main",
+    "arty_macros::test",
     "observed::sink::core::Sink",
     "thread_aware_core::thread::NumaNode",
     "thread_aware_core::thread::Owner",
@@ -31,7 +33,6 @@ allowed_external_types = [
     "tick::runtime::inactive_clock::InactiveClock",
     "tick::simple_clock::SimpleClock",
     "tick::stopwatch::Stopwatch",
-    "tick::runtime::inactive_clock::Isolated",
     "tick::timeout::Timeout",
 ]
 
