@@ -9,14 +9,13 @@ use std::time::{Duration, Instant};
 
 use crate::{PendingWork, PendingWorkTracker};
 
-/// Timing, blocking permission, and work registration for one driver invocation.
+/// Timing and work registration for one driver invocation.
 ///
 /// A cycle borrows a runtime-owned [`PendingWorkTracker`] on the owning worker. For background work,
 /// move the [`PendingWork`] returned by [`start_work`](Self::start_work), not the cycle.
 pub struct Cycle<'a> {
     started_at: Instant,
     max_wait: Duration,
-    can_block: bool,
     tracker: &'a mut dyn PendingWorkTracker,
     _not_send: PhantomData<Rc<()>>,
 }
@@ -24,15 +23,13 @@ pub struct Cycle<'a> {
 impl<'a> Cycle<'a> {
     /// Creates the inputs for one driver invocation.
     ///
-    /// The runtime must supply the current logical cycle's `tracker` and set `can_block` to
-    /// `false` for initialization and [secondary drivers](crate::DriverRole::Secondary).
-    /// Only the [primary](crate::DriverRole::Primary) may receive `true`.
+    /// The runtime must supply the current logical cycle's `tracker` and use [`Duration::ZERO`]
+    /// for `max_wait` when no waiting is allowed, including during initialization.
     #[must_use]
-    pub const fn new(started_at: Instant, max_wait: Duration, can_block: bool, tracker: &'a mut dyn PendingWorkTracker) -> Self {
+    pub const fn new(started_at: Instant, max_wait: Duration, tracker: &'a mut dyn PendingWorkTracker) -> Self {
         Self {
             started_at,
             max_wait,
-            can_block,
             tracker,
             _not_send: PhantomData,
         }
@@ -46,17 +43,12 @@ impl<'a> Cycle<'a> {
 
     /// Returns the maximum wait duration.
     ///
-    /// This duration bounds waits on the worker only when [`can_block`](Self::can_block) is
-    /// `true`; otherwise it bounds background waits represented by [`PendingWork`].
+    /// A [primary driver](crate::DriverRole::Primary) may wait on its worker for up to this
+    /// duration. A [secondary driver](crate::DriverRole::Secondary) may apply it only to
+    /// background waits represented by [`PendingWork`]. [`Duration::ZERO`] means no waiting.
     #[must_use]
     pub const fn max_wait(&self) -> Duration {
         self.max_wait
-    }
-
-    /// Returns whether this invocation may block its runtime worker.
-    #[must_use]
-    pub const fn can_block(&self) -> bool {
-        self.can_block
     }
 
     /// Synchronously registers pending work and its interruption waker.
@@ -81,7 +73,6 @@ impl fmt::Debug for Cycle<'_> {
         f.debug_struct("Cycle")
             .field("started_at", &self.started_at)
             .field("max_wait", &self.max_wait)
-            .field("can_block", &self.can_block)
             .finish_non_exhaustive()
     }
 }

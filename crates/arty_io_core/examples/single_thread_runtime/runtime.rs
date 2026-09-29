@@ -116,7 +116,7 @@ impl Runtime {
             let role = options.role();
             provider.relocate(None, options.thread());
             let result = provider.create(options).and_then(|(mut driver, context)| {
-                driver.execute_cycle(&mut Cycle::new(Instant::now(), Duration::ZERO, false, coordinator))?;
+                driver.execute_cycle(&mut Cycle::new(Instant::now(), Duration::ZERO, coordinator))?;
                 register_driver(drivers, driver, role);
                 Ok(context)
             });
@@ -182,10 +182,10 @@ fn register_driver<D: Driver>(drivers: &mut DriverStore, driver: D, role: Driver
 fn execute_driver_cycle(drivers: &mut DriverStore, coordinator: &mut Coordinator) -> Result<(), DriverError> {
     let started_at = Instant::now();
     for driver in drivers.iter_mut().filter(|driver| driver.role() == DriverRole::Secondary) {
-        driver.execute_cycle(&mut Cycle::new(started_at, Duration::ZERO, false, coordinator))?;
+        driver.execute_cycle(&mut Cycle::new(started_at, Duration::ZERO, coordinator))?;
     }
     if let Some(primary) = drivers.iter_mut().find(|driver| driver.role() == DriverRole::Primary) {
-        primary.execute_cycle(&mut Cycle::new(started_at, Duration::ZERO, true, coordinator))?;
+        primary.execute_cycle(&mut Cycle::new(started_at, Duration::ZERO, coordinator))?;
     }
     Ok(())
 }

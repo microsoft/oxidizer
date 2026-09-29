@@ -32,12 +32,12 @@ dropping the handle. Both actions notify the runtime.
 ### Primary and secondary drivers
 
 A worker has at most one [`Primary`][__link6] driver, assigned only to a provider
-that opts in through [`DriverProvider::CAN_BE_PRIMARY`][__link7]. It may block the worker only when
-[`Cycle::can_block`][__link8] permits it.
+that opts in through [`DriverProvider::CAN_BE_PRIMARY`][__link7]. It may wait on the worker for up to
+[`Cycle::max_wait`][__link8]; a zero wait bound means no waiting.
 
 [`Secondary`][__link9] drivers must not block the worker. They may schedule
-background waits represented by [`PendingWork`][__link10]; indefinite waits require independent
-execution capacity.
+background waits represented by [`PendingWork`][__link10] within the same wait bound; indefinite waits
+require independent execution capacity.
 
 ## Runtime responsibilities
 
@@ -74,7 +74,7 @@ the coordination described above.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb5viiVI_j09gbb6UesvjQD9MbXh0LWV6g6eEbT7gGiIVwmg5hZIGCbGFydHlfaW9fY29yZWUwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb16FzaGuTFqMbKDHs0dtskKEbL-Yrl8EB6lUb6O3qNzWxpZdhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
  [__link0]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=IoContext
  [__link1]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverProvider
  [__link10]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=PendingWork
@@ -92,5 +92,5 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link5]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=PendingWork
  [__link6]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverRole::Primary
  [__link7]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverProvider::CAN_BE_PRIMARY
- [__link8]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Cycle::can_block
+ [__link8]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Cycle::max_wait
  [__link9]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverRole::Secondary

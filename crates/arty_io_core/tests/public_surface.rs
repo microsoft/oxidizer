@@ -47,7 +47,7 @@ fn example_tracker_does_not_signal_interrupts() {
     let mut tracker = Coordinator;
     let count = Arc::new(WakeCounter::default());
     let interrupt = Waker::from(Arc::clone(&count));
-    let mut cycle = Cycle::new(Instant::now(), Duration::ZERO, false, &mut tracker);
+    let mut cycle = Cycle::new(Instant::now(), Duration::ZERO, &mut tracker);
 
     cycle.start_work(interrupt.clone()).complete();
     drop(cycle.start_work(interrupt));
@@ -97,7 +97,7 @@ fn driver_is_boxable() {
     let mut coordinator = Coordinator;
 
     driver
-        .execute_cycle(&mut Cycle::new(Instant::now(), Duration::ZERO, false, &mut coordinator))
+        .execute_cycle(&mut Cycle::new(Instant::now(), Duration::ZERO, &mut coordinator))
         .unwrap();
 
     assert_eq!(state.drop_calls.get(), 0);
@@ -119,7 +119,7 @@ fn cycle_passes_the_native_waker_to_its_tracker() {
     }
 
     let mut tracker = RecordingTracker { interrupt: None };
-    let mut cycle = Cycle::new(Instant::now(), Duration::from_millis(17), false, &mut tracker);
+    let mut cycle = Cycle::new(Instant::now(), Duration::from_millis(17), &mut tracker);
     let mut driver = LocalDriver::new(Rc::default());
     driver.interrupt = Waker::from(Arc::new(WakeCounter::default()));
     let expected = driver.interrupt.clone();
@@ -230,10 +230,10 @@ fn completion_cycle_uses_one_time_snapshot() {
     let mut coordinator = Coordinator;
 
     first_driver
-        .execute_cycle(&mut Cycle::new(cycle_start, Duration::ZERO, false, &mut coordinator))
+        .execute_cycle(&mut Cycle::new(cycle_start, Duration::ZERO, &mut coordinator))
         .unwrap();
     second_driver
-        .execute_cycle(&mut Cycle::new(cycle_start, Duration::ZERO, false, &mut coordinator))
+        .execute_cycle(&mut Cycle::new(cycle_start, Duration::ZERO, &mut coordinator))
         .unwrap();
 
     assert_eq!(first_driver.cycle_start, Some(cycle_start));

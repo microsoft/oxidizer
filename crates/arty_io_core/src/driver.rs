@@ -14,12 +14,12 @@ pub trait Driver: 'static {
     /// Processes submissions and completions, optionally waiting for I/O.
     ///
     /// The runtime invokes secondaries before the primary, sharing [`Cycle::started_at`] and
-    /// [`Cycle::max_wait`]. Only an invocation with [`Cycle::can_block`] set to `true` may block
-    /// the worker. Secondaries may arm background waits but must not wait for them to finish.
+    /// [`Cycle::max_wait`]. Only the primary may wait on the worker, for up to that duration;
+    /// a zero wait bound means no waiting. Secondaries may arm background waits within the same
+    /// bound but must not wait for them to finish.
     ///
-    /// Before publishing a context, the runtime runs a zero-wait cycle with `can_block` set to
-    /// `false`. In this initial call, the driver must establish native notification and recheck
-    /// work queued during construction.
+    /// Before publishing a context, the runtime runs a zero-wait cycle. In this initial call,
+    /// the driver must establish native notification and recheck work queued during construction.
     ///
     /// Register each native wait with [`Cycle::start_work`] before entering or scheduling it.
     /// Keep its [`PendingWork`](crate::PendingWork) alive until the work ends. The runtime

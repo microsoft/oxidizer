@@ -157,7 +157,7 @@ fn cycle_supports_a_tracker_with_borrowed_worker_local_state() {
         registrations: &registrations,
         completed: Waker::from(Arc::clone(&completed)),
     };
-    let mut cycle = Cycle::new(Instant::now(), Duration::ZERO, false, &mut tracker);
+    let mut cycle = Cycle::new(Instant::now(), Duration::ZERO, &mut tracker);
 
     let first = cycle.start_work(Waker::from(Arc::clone(&interrupted)));
     assert_eq!(interrupted.0.load(Ordering::Relaxed), 1);
@@ -184,17 +184,15 @@ fn cycle_preserves_its_runtime_inputs_without_registering_work() {
     }
 
     let started_at = Instant::now();
-    let max_wait = Duration::from_millis(17);
     let mut tracker = UnexpectedWork;
-    for can_block in [false, true] {
-        let cycle = Cycle::new(started_at, max_wait, can_block, &mut tracker);
+    for max_wait in [Duration::ZERO, Duration::from_millis(17)] {
+        let cycle = Cycle::new(started_at, max_wait, &mut tracker);
 
         assert_eq!(cycle.started_at(), started_at);
         assert_eq!(cycle.max_wait(), max_wait);
-        assert_eq!(cycle.can_block(), can_block);
         assert_eq!(
             format!("{cycle:?}"),
-            format!("Cycle {{ started_at: {started_at:?}, max_wait: {max_wait:?}, can_block: {can_block}, .. }}")
+            format!("Cycle {{ started_at: {started_at:?}, max_wait: {max_wait:?}, .. }}")
         );
     }
 }

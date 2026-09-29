@@ -27,8 +27,8 @@ describes the lifecycle; the no-op example tracker does not implement coordinati
   task spawner.
 - Roles are fixed. Each worker has at most one primary, assigned only when
   `CAN_BE_PRIMARY` is true. Without one, the runtime owns worker parking.
-- Before publishing a context, the runtime completes a separate zero-wait cycle
-  with `can_block = false`.
+- Before publishing a context, the runtime completes a separate cycle with
+  `max_wait = Duration::ZERO`.
 - Providers choose whether instances share queues, memory, or threads.
 
 ## R4: Driver-owned execution strategy
@@ -39,8 +39,9 @@ describes the lifecycle; the no-op example tracker does not implement coordinati
   `dyn Driver`. A private owning shim may adapt it for erased storage.
 - Secondaries run before the primary. Every invocation receives the same
   `started_at` and `max_wait`.
-- Only `can_block = true` permits a worker wait. Secondaries may register
-  background waits but return without joining them.
+- Only the primary may wait on the worker, for up to `max_wait`. A zero wait
+  bound means no waiting. Secondaries may register background waits within the
+  same bound but return without joining them.
 - `Cycle` mutably borrows a runtime-provided `PendingWorkTracker`, which need
   not be `Send` or `Sync`.
 - `Cycle::start_work` synchronously registers the native interruption waker

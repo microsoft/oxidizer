@@ -48,8 +48,8 @@ registrations, allowing different driver versions to coexist.
 A logical cycle is one coordinated pass across the drivers, with a shared time
 snapshot and wait bound. At registration, the runtime may select one eligible
 driver as **primary**. **Secondaries** run first without blocking the worker;
-the primary runs last and may wait only when the runtime permits it. Without a
-primary, parking remains the runtime's responsibility.
+the primary runs last and may wait up to the runtime's wait bound. A zero bound
+means no waiting. Without a primary, parking remains the runtime's responsibility.
 
 Bounded batches keep one driver from monopolizing the worker. Immediately
 serviceable work requests another cycle; unfinished I/O alone does not, avoiding

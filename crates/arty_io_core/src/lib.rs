@@ -26,12 +26,12 @@
 //! ## Primary and secondary drivers
 //!
 //! A worker has at most one [`Primary`](DriverRole::Primary) driver, assigned only to a provider
-//! that opts in through [`DriverProvider::CAN_BE_PRIMARY`]. It may block the worker only when
-//! [`Cycle::can_block`] permits it.
+//! that opts in through [`DriverProvider::CAN_BE_PRIMARY`]. It may wait on the worker for up to
+//! [`Cycle::max_wait`]; a zero wait bound means no waiting.
 //!
 //! [`Secondary`](DriverRole::Secondary) drivers must not block the worker. They may schedule
-//! background waits represented by [`PendingWork`]; indefinite waits require independent
-//! execution capacity.
+//! background waits represented by [`PendingWork`] within the same wait bound; indefinite waits
+//! require independent execution capacity.
 //!
 //! # Runtime responsibilities
 //!
