@@ -3,6 +3,7 @@
 
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
+use std::error::Error;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -19,11 +20,7 @@ type ContextEntry = Arc<Mutex<Option<ContextBox>>>;
 type DriverStore = Vec<Box<dyn ErasedDriver>>;
 type Operation = Box<dyn FnOnce(&Thread, &SystemTaskSpawner, &mut Coordinator, &mut DriverStore) + Send>;
 type ShutdownResult = Result<(), ShutdownError>;
-
-enum Command {
-    Run(Operation),
-    Stop { reply: mpsc::Sender<ShutdownResult> },
-}
+type RuntimeResult = Result<(), Box<dyn Error + Send + Sync>>;
 
 trait ErasedDriver {
     fn role(&self) -> DriverRole;
@@ -52,8 +49,8 @@ impl<D: Driver> ErasedDriver for RegisteredDriver<D> {
 
 pub(super) struct Runtime {
     contexts: Mutex<HashMap<TypeId, ContextEntry>>,
-    commands: mpsc::Sender<Command>,
-    thread: JoinHandle<()>,
+    commands: mpsc::Sender<Operation>,
+    thread: JoinHandle<RuntimeResult>,
 }
 
 impl Runtime {
@@ -68,10 +65,10 @@ impl Runtime {
             let worker = thread_aware_core::__private::v1::new_thread(owner, thread::current().id(), numa_node);
 
             if ready_tx.send(()).is_err() {
-                return;
+                return Ok(());
             }
 
-            run_worker(&worker, &spawner, &commands_rx);
+            run_worker(&worker, &spawner, &commands_rx)
         });
 
         ready_rx.recv().expect("runtime worker must report that startup completed");
@@ -83,7 +80,7 @@ impl Runtime {
         }
     }
 
-    pub(super) fn get_context<C>(&self) -> C
+    pub(super) fn get_context<C>(&self) -> Result<C, DriverError>
     where
         C: IoContext,
     {
@@ -98,14 +95,17 @@ impl Runtime {
             .lock()
             .expect("a previous context lookup panicked, leaving runtime state unusable");
         // Serialize registration and cloning for this context without holding the cache-map lock.
-        context
-            .get_or_insert_with(|| Box::new(self.initialize_context::<C>()))
+        let context = match &mut *context {
+            Some(context) => context,
+            empty @ None => empty.insert(Box::new(self.initialize_context::<C>()?)),
+        };
+        Ok(context
             .downcast_ref::<C>()
             .expect("contexts are stored under their own TypeId")
-            .clone()
+            .clone())
     }
 
-    fn initialize_context<C>(&self) -> C
+    fn initialize_context<C>(&self) -> Result<C, DriverError>
     where
         C: IoContext,
     {
@@ -115,54 +115,55 @@ impl Runtime {
             let options = driver_options(worker, spawner, drivers, <C::Provider as DriverProvider>::CAN_BE_PRIMARY);
             let role = options.role();
             provider.relocate(None, options.thread());
-            let (mut driver, context) = provider.create(options).expect("sample driver initialization is infallible");
-            driver
-                .execute_cycle(&mut Cycle::new(Instant::now(), Duration::ZERO, false, coordinator))
-                .expect("sample driver initialization cycle is infallible");
-            register_driver(drivers, driver, role);
-            let _ = reply_tx.send(context);
-        });
+            let result = provider.create(options).and_then(|(mut driver, context)| {
+                driver.execute_cycle(&mut Cycle::new(Instant::now(), Duration::ZERO, false, coordinator))?;
+                register_driver(drivers, driver, role);
+                Ok(context)
+            });
+            let _ = reply_tx.send(result);
+        })?;
         reply_rx
             .recv()
-            .expect("driver initialization failure must terminate context registration")
+            .map_err(|_| DriverError::from_message("runtime worker stopped before completing context registration"))?
     }
 
-    fn run(&self, operation: impl FnOnce(&Thread, &SystemTaskSpawner, &mut Coordinator, &mut DriverStore) + Send + 'static) {
-        assert!(
-            self.commands.send(Command::Run(Box::new(operation))).is_ok(),
-            "runtime worker must remain alive while executing an operation"
-        );
+    fn run(
+        &self,
+        operation: impl FnOnce(&Thread, &SystemTaskSpawner, &mut Coordinator, &mut DriverStore) + Send + 'static,
+    ) -> Result<(), DriverError> {
+        self.commands
+            .send(Box::new(operation))
+            .map_err(|_| DriverError::from_message("runtime worker has stopped"))
     }
 
-    pub(super) fn shutdown(self) -> ShutdownResult {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        assert!(
-            self.commands.send(Command::Stop { reply: reply_tx }).is_ok(),
-            "runtime worker must remain alive during shutdown"
-        );
-        let result = reply_rx.recv().expect("runtime worker must report driver shutdown");
-        assert!(self.thread.join().is_ok(), "runtime worker must not panic");
-        result
+    pub(super) fn shutdown(self) -> RuntimeResult {
+        drop(self.commands);
+        self.thread.join().expect("runtime operations and driver callbacks must not panic")
     }
 }
 
-fn run_worker(worker: &Thread, spawner: &SystemTaskSpawner, commands: &mpsc::Receiver<Command>) {
+fn run_worker(worker: &Thread, spawner: &SystemTaskSpawner, commands: &mpsc::Receiver<Operation>) -> RuntimeResult {
     let mut drivers = DriverStore::new();
     let mut coordinator = Coordinator;
 
-    while let Ok(command) = commands.recv() {
-        match command {
-            Command::Run(operation) => {
-                operation(worker, spawner, &mut coordinator, &mut drivers);
-                execute_driver_cycle(&mut drivers, &mut coordinator);
-            }
-            Command::Stop { reply } => {
-                let result = shutdown_drivers(drivers);
-                let _ = reply.send(result);
-                return;
-            }
+    let cycle_result = loop {
+        let Ok(operation) = commands.recv() else {
+            break Ok(());
+        };
+        operation(worker, spawner, &mut coordinator, &mut drivers);
+        if let Err(error) = execute_driver_cycle(&mut drivers, &mut coordinator) {
+            eprintln!("driver cycle failed: {error}");
+            break Err(error);
         }
+    };
+
+    let shutdown_result = shutdown_drivers(drivers);
+    if let Err(error) = &shutdown_result {
+        eprintln!("driver shutdown failed: {error}");
     }
+    cycle_result?;
+    shutdown_result?;
+    Ok(())
 }
 
 fn driver_options(worker: &Thread, spawner: &SystemTaskSpawner, drivers: &DriverStore, can_be_primary: bool) -> DriverOptions {
@@ -178,18 +179,15 @@ fn register_driver<D: Driver>(drivers: &mut DriverStore, driver: D, role: Driver
     drivers.push(Box::new(RegisteredDriver { driver, role }));
 }
 
-fn execute_driver_cycle(drivers: &mut DriverStore, coordinator: &mut Coordinator) {
+fn execute_driver_cycle(drivers: &mut DriverStore, coordinator: &mut Coordinator) -> Result<(), DriverError> {
     let started_at = Instant::now();
     for driver in drivers.iter_mut().filter(|driver| driver.role() == DriverRole::Secondary) {
-        driver
-            .execute_cycle(&mut Cycle::new(started_at, Duration::ZERO, false, coordinator))
-            .expect("sample driver cycle is infallible");
+        driver.execute_cycle(&mut Cycle::new(started_at, Duration::ZERO, false, coordinator))?;
     }
     if let Some(primary) = drivers.iter_mut().find(|driver| driver.role() == DriverRole::Primary) {
-        primary
-            .execute_cycle(&mut Cycle::new(started_at, Duration::ZERO, true, coordinator))
-            .expect("sample driver cycle is infallible");
+        primary.execute_cycle(&mut Cycle::new(started_at, Duration::ZERO, true, coordinator))?;
     }
+    Ok(())
 }
 
 fn shutdown_drivers(drivers: DriverStore) -> ShutdownResult {
@@ -278,16 +276,26 @@ mod tests {
     struct ShutdownProbe {
         name: &'static str,
         shutdowns: Arc<Mutex<Vec<&'static str>>>,
+        fail_cycle: bool,
+        fail_shutdown: bool,
     }
 
     impl Driver for ShutdownProbe {
         fn execute_cycle(&mut self, _cycle: &mut Cycle<'_>) -> Result<(), DriverError> {
-            Ok(())
+            if self.fail_cycle {
+                Err(DriverError::from_message(format!("{} cycle failed", self.name)))
+            } else {
+                Ok(())
+            }
         }
 
         fn shutdown(self) -> Result<(), ShutdownError> {
             self.shutdowns.lock().unwrap().push(self.name);
-            Err(ShutdownError::from_message(self.name))
+            if self.fail_shutdown {
+                Err(ShutdownError::from_message(self.name))
+            } else {
+                Ok(())
+            }
         }
     }
 
@@ -296,18 +304,22 @@ mod tests {
         let runtime = Runtime::start();
         let shutdowns = Arc::new(Mutex::new(Vec::new()));
         let recorded = Arc::clone(&shutdowns);
-        runtime.run(move |_, _, _, drivers| {
-            for (name, role) in [("primary", DriverRole::Primary), ("secondary", DriverRole::Secondary)] {
-                register_driver(
-                    drivers,
-                    ShutdownProbe {
-                        name,
-                        shutdowns: Arc::clone(&recorded),
-                    },
-                    role,
-                );
-            }
-        });
+        runtime
+            .run(move |_, _, _, drivers| {
+                for (name, role) in [("primary", DriverRole::Primary), ("secondary", DriverRole::Secondary)] {
+                    register_driver(
+                        drivers,
+                        ShutdownProbe {
+                            name,
+                            shutdowns: Arc::clone(&recorded),
+                            fail_cycle: false,
+                            fail_shutdown: true,
+                        },
+                        role,
+                    );
+                }
+            })
+            .unwrap();
 
         let error = runtime.shutdown().unwrap_err();
 
@@ -318,9 +330,98 @@ mod tests {
     }
 
     #[test]
+    fn cycle_errors_shut_down_all_drivers_and_preserve_the_cause() {
+        for failing_role in [DriverRole::Primary, DriverRole::Secondary] {
+            for fail_shutdown in [false, true] {
+                let runtime = Runtime::start();
+                let shutdowns = Arc::new(Mutex::new(Vec::new()));
+                let recorded = Arc::clone(&shutdowns);
+                runtime
+                    .run(move |_, _, _, drivers| {
+                        for (name, role) in [
+                            ("primary", DriverRole::Primary),
+                            ("secondary", DriverRole::Secondary),
+                            ("remaining", DriverRole::Secondary),
+                        ] {
+                            register_driver(
+                                drivers,
+                                ShutdownProbe {
+                                    name,
+                                    shutdowns: Arc::clone(&recorded),
+                                    fail_cycle: role == failing_role && name != "remaining",
+                                    fail_shutdown,
+                                },
+                                role,
+                            );
+                        }
+                    })
+                    .unwrap();
+
+                let error = runtime.shutdown().unwrap_err();
+                let expected_error = match failing_role {
+                    DriverRole::Primary => "primary cycle failed",
+                    DriverRole::Secondary => "secondary cycle failed",
+                };
+
+                assert_eq!(error.downcast_ref::<DriverError>().unwrap().to_string(), expected_error);
+                assert_eq!(*shutdowns.lock().unwrap(), ["secondary", "remaining", "primary"]);
+            }
+        }
+    }
+
+    #[test]
+    fn cycle_error_discards_queued_work_and_rejects_new_registration() {
+        let runtime = Runtime::start();
+        let shutdowns = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&shutdowns);
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        runtime
+            .run(move |_, _, _, drivers| {
+                register_driver(
+                    drivers,
+                    ShutdownProbe {
+                        name: "primary",
+                        shutdowns: recorded,
+                        fail_cycle: true,
+                        fail_shutdown: false,
+                    },
+                    DriverRole::Primary,
+                );
+                ready_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            })
+            .unwrap();
+        ready_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+
+        let (queued_tx, queued_rx) = mpsc::channel();
+        runtime.run(move |_, _, _, _| queued_tx.send(()).unwrap()).unwrap();
+        release_tx.send(()).unwrap();
+        assert_eq!(
+            queued_rx.recv_timeout(Duration::from_secs(10)),
+            Err(mpsc::RecvTimeoutError::Disconnected)
+        );
+        assert_eq!(
+            runtime.get_context::<SampleContext>().err().unwrap().to_string(),
+            "runtime worker has stopped"
+        );
+        assert!(
+            runtime.contexts.lock().unwrap()[&TypeId::of::<SampleContext>()]
+                .lock()
+                .unwrap()
+                .is_none()
+        );
+
+        let error = runtime.shutdown().unwrap_err();
+
+        assert_eq!(error.downcast_ref::<DriverError>().unwrap().to_string(), "primary cycle failed");
+        assert_eq!(*shutdowns.lock().unwrap(), ["primary"]);
+    }
+
+    #[test]
     fn blocked_clone_does_not_block_another_cached_context() {
         let runtime = Runtime::start();
-        let _ = runtime.get_context::<EchoContext>();
+        let _ = runtime.get_context::<EchoContext>().unwrap();
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let context = BlockingCloneContext {
@@ -336,13 +437,13 @@ mod tests {
         thread::scope(|scope| {
             let runtime = &runtime;
             scope.spawn(move || {
-                let _ = runtime.get_context::<BlockingCloneContext>();
+                let _ = runtime.get_context::<BlockingCloneContext>().unwrap();
             });
             started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
 
             let (done_tx, done_rx) = mpsc::channel();
             scope.spawn(move || {
-                let _ = runtime.get_context::<EchoContext>();
+                let _ = runtime.get_context::<EchoContext>().unwrap();
                 done_tx.send(()).unwrap();
             });
 
@@ -357,20 +458,22 @@ mod tests {
     #[test]
     fn cached_context_does_not_wait_for_the_worker() {
         let runtime = Runtime::start();
-        let _ = runtime.get_context::<SampleContext>();
+        let _ = runtime.get_context::<SampleContext>().unwrap();
         let (blocked_tx, blocked_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
-        runtime.run(move |_, _, _, _| {
-            blocked_tx.send(()).unwrap();
-            release_rx.recv().unwrap();
-        });
+        runtime
+            .run(move |_, _, _, _| {
+                blocked_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            })
+            .unwrap();
         blocked_rx.recv_timeout(Duration::from_secs(10)).unwrap();
 
         thread::scope(|scope| {
             let (done_tx, done_rx) = mpsc::channel();
             let runtime = &runtime;
             scope.spawn(move || {
-                let _ = runtime.get_context::<SampleContext>();
+                let _ = runtime.get_context::<SampleContext>().unwrap();
                 done_tx.send(()).unwrap();
             });
 
@@ -391,16 +494,18 @@ mod tests {
             for _ in 0..4 {
                 scope.spawn(|| {
                     ready.wait();
-                    let _ = runtime.get_context::<SampleContext>();
-                    let _ = runtime.get_context::<EchoContext>();
+                    let _ = runtime.get_context::<SampleContext>().unwrap();
+                    let _ = runtime.get_context::<EchoContext>().unwrap();
                 });
             }
         });
 
         let (count_tx, count_rx) = mpsc::channel();
-        runtime.run(move |_, _, _, drivers| {
-            count_tx.send(drivers.len()).unwrap();
-        });
+        runtime
+            .run(move |_, _, _, drivers| {
+                count_tx.send(drivers.len()).unwrap();
+            })
+            .unwrap();
         let count = count_rx.recv_timeout(Duration::from_secs(10)).unwrap();
         runtime.shutdown().unwrap();
 
