@@ -2,8 +2,8 @@
 // Licensed under the MIT License.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::pin::Pin;
 
+use arty_executor::TaskSet;
 use events_once::{Event, LocalEvent};
 use observed::Sink;
 
@@ -15,11 +15,16 @@ use crate::rt::telemetry::enrichment::CapturedContext;
 
 /// A future factory for a remote future scheduled from a different thread. The future factory
 /// itself must be `Send` to deliver it to the thread where the task is to be scheduled but this
-/// does not set any constraints on the future returned by the factory - it may be single-threaded.
+/// does not set any constraints on the future it creates - it may be single-threaded.
 ///
 /// The future factory is boxed up for transit between threads and has 'static to signal that it has
 /// no dependency on the stack of any specific thread.
-pub(crate) type BoxedRemoteFutureFactory<FgArg> = Box<dyn (FnOnce(FgArg) -> Pin<Box<dyn Future<Output = ()>>>) + Send + 'static>;
+///
+/// The factory registers the future it creates with the provided task set instead of returning it.
+/// This keeps the concrete future type visible at the point of registration, so the executor can
+/// store the future inline in its task storage pool. Returning the future would require erasing its
+/// type behind a `Pin<Box<dyn Future>>`, adding a heap allocation to every remote spawn.
+pub(crate) type BoxedRemoteFutureFactory<FgArg> = Box<dyn FnOnce(FgArg, &TaskSet) + Send + 'static>;
 
 pub(in crate::rt::task) fn prepare_local<F, R>(
     future: F,
@@ -47,10 +52,13 @@ where
     R: Send + 'static,
 {
     let (result_tx, result_rx) = Event::<TaskResult<R>>::boxed();
-    let future_factory: BoxedRemoteFutureFactory<C> = Box::new(move |cx| {
+    let future_factory: BoxedRemoteFutureFactory<C> = Box::new(move |cx, tasks| {
         // Factory invocation belongs inside the same panic boundary as polling.
         let inner = async move { future_factory(cx).await };
-        Box::pin(RemoteTaskFuture::new(inner, result_tx, parent_task_enrichment, sink))
+
+        // The executor join handle is not used - the task delivers its result through the
+        // `Event` above, which unlike the executor's join handle can cross thread boundaries.
+        drop(tasks.add(RemoteTaskFuture::new(inner, result_tx, parent_task_enrichment, sink)));
     });
     (future_factory, JoinHandle::new(result_rx))
 }
@@ -89,6 +97,8 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::task::{Context, Poll, Waker};
 
+    use arty_executor::testing::new_guarded_executor;
+    use arty_executor::{CycleOutcome, Executor};
     use futures::executor::block_on;
     use futures::future::join;
 
@@ -114,11 +124,18 @@ mod tests {
             sink,
         );
 
-        let task = factory(());
+        let executor = new_guarded_executor(Waker::noop().clone());
+        factory((), &executor.tasks());
         let before_poll = invoked.load(Ordering::Relaxed);
-        let ((), result) = block_on(join(task, handle));
+        run_to_completion(&executor);
+        let result = block_on(handle);
 
         assert_eq!((before_poll, invoked.load(Ordering::Relaxed), result), (false, true, 42),);
+    }
+
+    /// Drives the executor until it reports that no further progress can be made.
+    fn run_to_completion(executor: &Executor) {
+        while executor.execute_cycle() == CycleOutcome::Continue {}
     }
 
     #[test]
@@ -187,7 +204,9 @@ mod tests {
             CapturedContext::capture(&sink),
             sink,
         );
-        block_on(factory(()));
+        let executor = new_guarded_executor(Waker::noop().clone());
+        factory((), &executor.tasks());
+        run_to_completion(&executor);
         let panic = catch_unwind(AssertUnwindSafe(|| block_on(handle))).unwrap_err();
         assert_eq!(panic.downcast_ref::<Payload>(), Some(&Payload(42)));
     }
