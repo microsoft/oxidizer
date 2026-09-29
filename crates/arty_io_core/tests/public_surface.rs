@@ -5,7 +5,7 @@
 
 #![allow(clippy::unwrap_used, reason = "test code")]
 
-#[path = "../examples/single_thread_runtime/coordinator.rs"]
+#[path = "support/coordinator.rs"]
 mod coordinator;
 
 use std::cell::Cell;

@@ -5,6 +5,7 @@
 //!
 //! The sample drivers do not perform I/O; their work tracker is a no-op.
 
+#[path = "../../tests/support/coordinator.rs"]
 mod coordinator;
 mod drivers;
 mod runtime;
