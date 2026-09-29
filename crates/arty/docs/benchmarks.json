@@ -1,0 +1,467 @@
+{
+  "source_revision": "ddfcde60ed48ac63073ab1f7541aa0a82aabc120",
+  "environment": {
+    "timestamp_utc": "2026-09-29T17:07:47.8474566Z",
+    "target_triple": "x86_64-pc-windows-msvc",
+    "rustc_version": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: x86_64-pc-windows-msvc\nrelease: 1.95.0\nLLVM version: 22.1.2",
+    "host_cpu": "Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz",
+    "profile": "release",
+    "compiler_flags": "-C target-cpu=x86-64-v3",
+    "measured_backends": [
+      "criterion",
+      "allocations"
+    ],
+    "os": "Windows 11 Enterprise 10.0.26200",
+    "logical_processors": 16,
+    "physical_cores": 8,
+    "cargo_profile": "bench (inherits release), fat LTO, codegen-units=1"
+  },
+  "packages": {
+    "arty": "0.3.1",
+    "tokio": "1.53.1",
+    "metabench": "0.1.1"
+  },
+  "sampling": {
+    "criterion_samples": 50,
+    "warmup_seconds": 0.5,
+    "measurement_seconds": 2
+  },
+  "scheduling": {
+    "arty_scheduling/tasks/Arty/local_w1_n1": {
+      "median_ns": 668.3431074557483,
+      "median_ci_lower_ns": 663.418439716312,
+      "median_ci_upper_ns": 674.7588583892341,
+      "allocations": 7,
+      "allocated_bytes": 1408
+    },
+    "arty_scheduling/tasks/Arty/local_w1_n100": {
+      "median_ns": 25262.444821731748,
+      "median_ci_lower_ns": 24985.62412342216,
+      "median_ci_upper_ns": 25707.038123167156,
+      "allocations": 104,
+      "allocated_bytes": 6808
+    },
+    "arty_scheduling/tasks/Arty/local_w4_n1": {
+      "median_ns": 669.0125979994593,
+      "median_ci_lower_ns": 664.2582194771976,
+      "median_ci_upper_ns": 673.3885229363243,
+      "allocations": 5,
+      "allocated_bytes": 1264
+    },
+    "arty_scheduling/tasks/Arty/local_w4_n100": {
+      "median_ns": 25724.594339622643,
+      "median_ci_lower_ns": 25235.309973045823,
+      "median_ci_upper_ns": 26018.012333578372,
+      "allocations": 104,
+      "allocated_bytes": 6808
+    },
+    "arty_scheduling/tasks/Arty/nested_w1_n1": {
+      "median_ns": 1086.5646193348896,
+      "median_ci_lower_ns": 1083.3837333837334,
+      "median_ci_upper_ns": 1098.6347886347887,
+      "allocations": 9,
+      "allocated_bytes": 2128
+    },
+    "arty_scheduling/tasks/Arty/nested_w1_n100": {
+      "median_ns": 64310.20876645877,
+      "median_ci_lower_ns": 63736.947391688765,
+      "median_ci_upper_ns": 64634.02430902431,
+      "allocations": 307,
+      "allocated_bytes": 82648
+    },
+    "arty_scheduling/tasks/Arty/nested_w4_n1": {
+      "median_ns": 1122.1812822402358,
+      "median_ci_lower_ns": 1099.2630803242446,
+      "median_ci_upper_ns": 1135.846857808778,
+      "allocations": 7,
+      "allocated_bytes": 1984
+    },
+    "arty_scheduling/tasks/Arty/nested_w4_n100": {
+      "median_ns": 64778.47222222222,
+      "median_ci_lower_ns": 63974.34210526316,
+      "median_ci_upper_ns": 65392.80753968254,
+      "allocations": 307,
+      "allocated_bytes": 82648
+    },
+    "arty_scheduling/tasks/Arty/spawn_w1_n1": {
+      "median_ns": 2087.0462427745665,
+      "median_ci_lower_ns": 2013.3959537572257,
+      "median_ci_upper_ns": 2143.5764431338853,
+      "allocations": 5,
+      "allocated_bytes": 920
+    },
+    "arty_scheduling/tasks/Arty/spawn_w1_n100": {
+      "median_ns": 84291.21643631626,
+      "median_ci_lower_ns": 83477.80320366133,
+      "median_ci_upper_ns": 86394.48235974551,
+      "allocations": 303,
+      "allocated_bytes": 79856
+    },
+    "arty_scheduling/tasks/Arty/spawn_w4_n1": {
+      "median_ns": 34551.04181184669,
+      "median_ci_lower_ns": 31852.0,
+      "median_ci_upper_ns": 35704.0,
+      "allocations": 3,
+      "allocated_bytes": 776
+    },
+    "arty_scheduling/tasks/Arty/spawn_w4_n100": {
+      "median_ns": 258982.54772876893,
+      "median_ci_lower_ns": 200260.5,
+      "median_ci_upper_ns": 321129.0238095238,
+      "allocations": 304,
+      "allocated_bytes": 80608
+    },
+    "arty_scheduling/tasks/Arty/system_w1_n1": {
+      "median_ns": 1486.7021541010772,
+      "median_ci_lower_ns": 1422.8422844760871,
+      "median_ci_upper_ns": 1534.8591549295777,
+      "allocations": 2,
+      "allocated_bytes": 48
+    },
+    "arty_scheduling/tasks/Arty/system_w1_n100": {
+      "median_ns": 69348.54209799862,
+      "median_ci_lower_ns": 67622.12140306659,
+      "median_ci_upper_ns": 70811.05072463768,
+      "allocations": 209,
+      "allocated_bytes": 7227
+    },
+    "arty_scheduling/tasks/Arty/system_w4_n1": {
+      "median_ns": 1477.0787923090554,
+      "median_ci_lower_ns": 1408.376319186596,
+      "median_ci_upper_ns": 1527.0976430976432,
+      "allocations": 2,
+      "allocated_bytes": 48
+    },
+    "arty_scheduling/tasks/Arty/system_w4_n100": {
+      "median_ns": 66773.42391304349,
+      "median_ci_lower_ns": 65831.47321428571,
+      "median_ci_upper_ns": 68244.12393162394,
+      "allocations": 204,
+      "allocated_bytes": 7808
+    },
+    "arty_scheduling/tasks/Arty/timer_w1_n1": {
+      "median_ns": 13230062.5,
+      "median_ci_lower_ns": 11973025.0,
+      "median_ci_upper_ns": 13868637.5,
+      "allocations": 4,
+      "allocated_bytes": 1600
+    },
+    "arty_scheduling/tasks/Arty/timer_w1_n100": {
+      "median_ns": 12407550.0,
+      "median_ci_lower_ns": 11893337.5,
+      "median_ci_upper_ns": 13244025.0,
+      "allocations": 322,
+      "allocated_bytes": 125800
+    },
+    "arty_scheduling/tasks/Arty/timer_w4_n1": {
+      "median_ns": 12856850.0,
+      "median_ci_lower_ns": 11830950.0,
+      "median_ci_upper_ns": 13439562.5,
+      "allocations": 4,
+      "allocated_bytes": 1600
+    },
+    "arty_scheduling/tasks/Arty/timer_w4_n100": {
+      "median_ns": 13016283.333333332,
+      "median_ci_lower_ns": 11723600.0,
+      "median_ci_upper_ns": 13926100.0,
+      "allocations": 324,
+      "allocated_bytes": 127296
+    },
+    "arty_scheduling/tasks/Arty/wake_w1_n1": {
+      "median_ns": 52752.604866397975,
+      "median_ci_lower_ns": 52219.90592334495,
+      "median_ci_upper_ns": 53372.21532091097,
+      "allocations": 4,
+      "allocated_bytes": 1152
+    },
+    "arty_scheduling/tasks/Arty/wake_w1_n100": {
+      "median_ns": 144387.3803827751,
+      "median_ci_lower_ns": 139826.92307692306,
+      "median_ci_upper_ns": 147954.18258212376,
+      "allocations": 406,
+      "allocated_bytes": 120456
+    },
+    "arty_scheduling/tasks/Arty/wake_w4_n1": {
+      "median_ns": 58053.87730553328,
+      "median_ci_lower_ns": 56633.820346320346,
+      "median_ci_upper_ns": 61467.5,
+      "allocations": 4,
+      "allocated_bytes": 1152
+    },
+    "arty_scheduling/tasks/Arty/wake_w4_n100": {
+      "median_ns": 134831.36574074073,
+      "median_ci_lower_ns": 127827.36983588005,
+      "median_ci_upper_ns": 140786.66666666666,
+      "allocations": 408,
+      "allocated_bytes": 122208
+    },
+    "arty_scheduling/tasks/Arty/yield_w1_n1": {
+      "median_ns": 2666.0943606923506,
+      "median_ci_lower_ns": 2553.4596057209124,
+      "median_ci_upper_ns": 2777.331565233575,
+      "allocations": 3,
+      "allocated_bytes": 1056
+    },
+    "arty_scheduling/tasks/Arty/yield_w1_n100": {
+      "median_ns": 105726.68571428572,
+      "median_ci_lower_ns": 104661.0692431562,
+      "median_ci_upper_ns": 107460.8865248227,
+      "allocations": 303,
+      "allocated_bytes": 107856
+    },
+    "arty_scheduling/tasks/Arty/yield_w4_n1": {
+      "median_ns": 34204.47214076246,
+      "median_ci_lower_ns": 33446.28555537899,
+      "median_ci_upper_ns": 36163.33867823681,
+      "allocations": 3,
+      "allocated_bytes": 1056
+    },
+    "arty_scheduling/tasks/Arty/yield_w4_n100": {
+      "median_ns": 125727.9411764706,
+      "median_ci_lower_ns": 110688.98050974512,
+      "median_ci_upper_ns": 145513.00044984254,
+      "allocations": 304,
+      "allocated_bytes": 108608
+    },
+    "arty_scheduling/tasks/Tokio/local_w1_n1": {
+      "median_ns": 260.82631551541317,
+      "median_ci_lower_ns": 260.0017853085338,
+      "median_ci_upper_ns": 262.3336203494421,
+      "allocations": 6,
+      "allocated_bytes": 1344
+    },
+    "arty_scheduling/tasks/Tokio/local_w1_n100": {
+      "median_ns": 17816.117424242424,
+      "median_ci_lower_ns": 17753.219696969696,
+      "median_ci_upper_ns": 17897.17093317017,
+      "allocations": 106,
+      "allocated_bytes": 15832
+    },
+    "arty_scheduling/tasks/Tokio/local_w4_n1": {
+      "median_ns": 261.4067962276446,
+      "median_ci_lower_ns": 260.3444740787397,
+      "median_ci_upper_ns": 263.90595155329055,
+      "allocations": 6,
+      "allocated_bytes": 1344
+    },
+    "arty_scheduling/tasks/Tokio/local_w4_n100": {
+      "median_ns": 18007.41983796171,
+      "median_ci_lower_ns": 17945.077461269364,
+      "median_ci_upper_ns": 18131.15547489413,
+      "allocations": 107,
+      "allocated_bytes": 15864
+    },
+    "arty_scheduling/tasks/Tokio/nested_w1_n1": {
+      "median_ns": 284.2787722931,
+      "median_ci_lower_ns": 282.888857232827,
+      "median_ci_upper_ns": 285.50632413141597,
+      "allocations": 5,
+      "allocated_bytes": 536
+    },
+    "arty_scheduling/tasks/Tokio/nested_w1_n100": {
+      "median_ns": 31450.14424951267,
+      "median_ci_lower_ns": 31206.29020979021,
+      "median_ci_upper_ns": 31663.636363636364,
+      "allocations": 102,
+      "allocated_bytes": 13856
+    },
+    "arty_scheduling/tasks/Tokio/nested_w4_n1": {
+      "median_ns": 572.3721703601841,
+      "median_ci_lower_ns": 559.4516835579315,
+      "median_ci_upper_ns": 589.1396845163969,
+      "allocations": 3,
+      "allocated_bytes": 392
+    },
+    "arty_scheduling/tasks/Tokio/nested_w4_n100": {
+      "median_ns": 44401.8804664723,
+      "median_ci_lower_ns": 43935.634920634926,
+      "median_ci_upper_ns": 45011.07142857143,
+      "allocations": 102,
+      "allocated_bytes": 13856
+    },
+    "arty_scheduling/tasks/Tokio/spawn_w1_n1": {
+      "median_ns": 1903.0898590113811,
+      "median_ci_lower_ns": 1845.6427533359756,
+      "median_ci_upper_ns": 1964.6110951658536,
+      "allocations": 3,
+      "allocated_bytes": 272
+    },
+    "arty_scheduling/tasks/Tokio/spawn_w1_n100": {
+      "median_ns": 52235.12544802867,
+      "median_ci_lower_ns": 51506.91241066846,
+      "median_ci_upper_ns": 52719.88060682404,
+      "allocations": 102,
+      "allocated_bytes": 12944
+    },
+    "arty_scheduling/tasks/Tokio/spawn_w4_n1": {
+      "median_ns": 19058.14133548156,
+      "median_ci_lower_ns": 15226.0989010989,
+      "median_ci_upper_ns": 21336.185515873018,
+      "allocations": 1,
+      "allocated_bytes": 128
+    },
+    "arty_scheduling/tasks/Tokio/spawn_w4_n100": {
+      "median_ns": 59802.54941457887,
+      "median_ci_lower_ns": 59463.22115384616,
+      "median_ci_upper_ns": 60399.05792587979,
+      "allocations": 102,
+      "allocated_bytes": 12944
+    },
+    "arty_scheduling/tasks/Tokio/system_w1_n1": {
+      "median_ns": 5922.050466497031,
+      "median_ci_lower_ns": 1779.2776019363248,
+      "median_ci_upper_ns": 10233.040931824164,
+      "allocations": 1,
+      "allocated_bytes": 256
+    },
+    "arty_scheduling/tasks/Tokio/system_w1_n100": {
+      "median_ns": 172660.55555555556,
+      "median_ci_lower_ns": 168651.0592742844,
+      "median_ci_upper_ns": 177978.33333333334,
+      "allocations": 100,
+      "allocated_bytes": 25600
+    },
+    "arty_scheduling/tasks/Tokio/system_w4_n1": {
+      "median_ns": 8457.252043010752,
+      "median_ci_lower_ns": 4906.222222222223,
+      "median_ci_upper_ns": 9759.993277310925,
+      "allocations": 1,
+      "allocated_bytes": 256
+    },
+    "arty_scheduling/tasks/Tokio/system_w4_n100": {
+      "median_ns": 162151.63385002094,
+      "median_ci_lower_ns": 154893.27036599765,
+      "median_ci_upper_ns": 166481.81818181818,
+      "allocations": 100,
+      "allocated_bytes": 25600
+    },
+    "arty_scheduling/tasks/Tokio/timer_w1_n1": {
+      "median_ns": 13144012.5,
+      "median_ci_lower_ns": 12711300.0,
+      "median_ci_upper_ns": 13539862.5,
+      "allocations": 1,
+      "allocated_bytes": 256
+    },
+    "arty_scheduling/tasks/Tokio/timer_w1_n100": {
+      "median_ns": 12855812.5,
+      "median_ci_lower_ns": 12433112.5,
+      "median_ci_upper_ns": 13223912.5,
+      "allocations": 100,
+      "allocated_bytes": 25600
+    },
+    "arty_scheduling/tasks/Tokio/timer_w4_n1": {
+      "median_ns": 13017087.5,
+      "median_ci_lower_ns": 12546062.5,
+      "median_ci_upper_ns": 13501025.0,
+      "allocations": 1,
+      "allocated_bytes": 256
+    },
+    "arty_scheduling/tasks/Tokio/timer_w4_n100": {
+      "median_ns": 12931012.5,
+      "median_ci_lower_ns": 11648700.0,
+      "median_ci_upper_ns": 13149425.0,
+      "allocations": 100,
+      "allocated_bytes": 25600
+    },
+    "arty_scheduling/tasks/Tokio/wake_w1_n1": {
+      "median_ns": 55596.67487684729,
+      "median_ci_lower_ns": 55062.943007662834,
+      "median_ci_upper_ns": 56087.013939838595,
+      "allocations": 2,
+      "allocated_bytes": 280
+    },
+    "arty_scheduling/tasks/Tokio/wake_w1_n100": {
+      "median_ns": 122089.70725630644,
+      "median_ci_lower_ns": 121411.72161172162,
+      "median_ci_upper_ns": 122852.27272727274,
+      "allocations": 203,
+      "allocated_bytes": 31000
+    },
+    "arty_scheduling/tasks/Tokio/wake_w4_n1": {
+      "median_ns": 64501.10526315789,
+      "median_ci_lower_ns": 63786.41935483871,
+      "median_ci_upper_ns": 65220.137931034486,
+      "allocations": 2,
+      "allocated_bytes": 280
+    },
+    "arty_scheduling/tasks/Tokio/wake_w4_n100": {
+      "median_ns": 96467.91666666666,
+      "median_ci_lower_ns": 95451.2634569378,
+      "median_ci_upper_ns": 112076.1634199134,
+      "allocations": 204,
+      "allocated_bytes": 32000
+    },
+    "arty_scheduling/tasks/Tokio/yield_w1_n1": {
+      "median_ns": 2014.5423780371875,
+      "median_ci_lower_ns": 1990.1218800175157,
+      "median_ci_upper_ns": 2085.235221957162,
+      "allocations": 3,
+      "allocated_bytes": 272
+    },
+    "arty_scheduling/tasks/Tokio/yield_w1_n100": {
+      "median_ns": 68270.53426734278,
+      "median_ci_lower_ns": 67534.22459893048,
+      "median_ci_upper_ns": 69013.43320560253,
+      "allocations": 101,
+      "allocated_bytes": 12896
+    },
+    "arty_scheduling/tasks/Tokio/yield_w4_n1": {
+      "median_ns": 26503.33540823737,
+      "median_ci_lower_ns": 24701.939660024764,
+      "median_ci_upper_ns": 27833.90022675737,
+      "allocations": 2,
+      "allocated_bytes": 160
+    },
+    "arty_scheduling/tasks/Tokio/yield_w4_n100": {
+      "median_ns": 60434.14201183432,
+      "median_ci_lower_ns": 59973.97137745975,
+      "median_ci_upper_ns": 61850.69033530572,
+      "allocations": 102,
+      "allocated_bytes": 12944
+    }
+  },
+  "telemetry": {
+    "arty_telemetry/lifecycle/active/one": {
+      "median_ns": 1138379.3650793652,
+      "median_ci_lower_ns": 1036590.4761904762,
+      "median_ci_upper_ns": 1601161.111111111,
+      "allocations": 1386,
+      "allocated_bytes": 217921
+    },
+    "arty_telemetry/lifecycle/noop": {
+      "median_ns": 1210032.7956989247,
+      "median_ci_lower_ns": 1059100.0,
+      "median_ci_upper_ns": 1718628.5714285714,
+      "allocations": 1362,
+      "allocated_bytes": 218020
+    },
+    "arty_telemetry/spawn/active/hundred": {
+      "median_ns": 93994.9513809295,
+      "median_ci_lower_ns": 92038.67373036173,
+      "median_ci_upper_ns": 95548.03921568628,
+      "allocations": 404,
+      "allocated_bytes": 83856
+    },
+    "arty_telemetry/spawn/active/one": {
+      "median_ns": 5939.959558409373,
+      "median_ci_lower_ns": 5494.598048327138,
+      "median_ci_upper_ns": 6665.5419359880325,
+      "allocations": 5,
+      "allocated_bytes": 816
+    },
+    "arty_telemetry/spawn/noop/hundred": {
+      "median_ns": 84930.28656126483,
+      "median_ci_lower_ns": 83823.0,
+      "median_ci_upper_ns": 86329.16666666667,
+      "allocations": 304,
+      "allocated_bytes": 81456
+    },
+    "arty_telemetry/spawn/noop/one": {
+      "median_ns": 2251.4232727114513,
+      "median_ci_lower_ns": 2164.364548494983,
+      "median_ci_upper_ns": 2366.790234338311,
+      "allocations": 4,
+      "allocated_bytes": 792
+    }
+  }
+}
