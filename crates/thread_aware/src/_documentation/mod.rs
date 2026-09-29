@@ -216,7 +216,8 @@
 //! // Build two worker coordinates and relocate the value between them.
 //! let builder = ThreadBuilder::default();
 //! let from = builder.build(thread::current().id());
-//! let to = builder.build(thread::spawn(|| thread::current().id()).join().unwrap());
+//! let other = thread::spawn(|| thread::current().id()).join().unwrap();
+//! let to = builder.build(other);
 //!
 //! let mut value = UnderTest {
 //!     tracked: Tracker::default(),
@@ -224,8 +225,14 @@
 //! };
 //! value.relocate(Some(&from), &to);
 //!
-//! assert_eq!(value.tracked.relocations, 1, "non-skipped fields must be relocated");
-//! assert_eq!(value.skipped.relocations, 0, "skipped fields must not be relocated");
+//! assert_eq!(
+//!     value.tracked.relocations, 1,
+//!     "non-skipped fields must be relocated"
+//! );
+//! assert_eq!(
+//!     value.skipped.relocations, 0,
+//!     "skipped fields must not be relocated"
+//! );
 //! ```
 //!
 //! The example runs its own assertions, so removing the `relocate` call or changing either count
