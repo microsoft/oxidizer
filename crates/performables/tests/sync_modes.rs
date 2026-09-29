@@ -59,7 +59,7 @@ fn synchronous_mutex_blocks_until_release() {
         finished_tx.send(()).unwrap();
     });
     started_rx.recv_timeout(DEADLINE).unwrap();
-    assert!(finished_rx.try_recv().is_err());
+    finished_rx.try_recv().unwrap_err();
     drop(held);
     finished_rx.recv_timeout(DEADLINE).unwrap();
     worker.join().unwrap();
@@ -163,12 +163,32 @@ fn synchronous_rwlock_writer_waits_for_readers() {
         finished_tx.send(()).unwrap();
     });
     started_rx.recv_timeout(DEADLINE).unwrap();
-    assert!(finished_rx.try_recv().is_err());
+    finished_rx.try_recv().unwrap_err();
     drop(reader);
     finished_rx.recv_timeout(DEADLINE).unwrap();
     worker.join().unwrap();
 
     assert_eq!(*lock.read(), 11);
+}
+
+#[test]
+fn synchronous_rwlock_reader_waits_for_writer() {
+    let lock = Arc::new(RwLock::<u64>::new(7));
+    let writer = lock.write();
+    let contender = Arc::clone(&lock);
+    let (started_tx, started_rx) = mpsc::channel();
+    let (finished_tx, finished_rx) = mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        started_tx.send(()).unwrap();
+        finished_tx.send(*contender.read_result().unwrap()).unwrap();
+    });
+    started_rx.recv_timeout(DEADLINE).unwrap();
+    finished_rx.try_recv().unwrap_err();
+    drop(writer);
+    let value = finished_rx.recv_timeout(DEADLINE).unwrap();
+    worker.join().unwrap();
+
+    assert_eq!(value, 7);
 }
 
 #[test]
@@ -233,6 +253,24 @@ fn synchronous_condition_timeout_returns_the_guard() {
 }
 
 #[test]
+fn synchronous_condition_timeout_reports_notification() {
+    let pair = Arc::new((Mutex::<u64>::new(0), Condvar::<mode::Sync>::new()));
+    let other = Arc::clone(&pair);
+    let (started_tx, started_rx) = mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let guard = other.0.lock();
+        started_tx.send(()).unwrap();
+        other.1.wait_timeout(guard, DEADLINE).1.timed_out()
+    });
+    started_rx.recv_timeout(DEADLINE).unwrap();
+    let guard = pair.0.lock();
+    pair.1.notify_one();
+    drop(guard);
+
+    assert!(!worker.join().unwrap());
+}
+
+#[test]
 fn synchronous_condition_wait_preserves_poisoning_on_reacquisition() {
     let pair = Arc::new((Mutex::<u64>::new(0), Condvar::<mode::Sync>::new()));
     let other = Arc::clone(&pair);
@@ -254,6 +292,34 @@ fn synchronous_condition_wait_preserves_poisoning_on_reacquisition() {
     }))
     .unwrap_err();
     pair.1.notify_all();
+    let poisoned = finished_rx.recv_timeout(DEADLINE).unwrap();
+    worker.join().unwrap();
+
+    assert!(poisoned);
+}
+
+#[test]
+fn synchronous_condition_timeout_preserves_poisoning_after_notification() {
+    let pair = Arc::new((Mutex::<u64>::new(0), Condvar::<mode::Sync>::new()));
+    let other = Arc::clone(&pair);
+    let (started_tx, started_rx) = mpsc::channel();
+    let (finished_tx, finished_rx) = mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            let guard = other.0.lock();
+            started_tx.send(()).unwrap();
+            drop(other.1.wait_timeout(guard, DEADLINE));
+        }));
+        finished_tx.send(result.is_err()).unwrap();
+    });
+    started_rx.recv_timeout(DEADLINE).unwrap();
+    catch_unwind(AssertUnwindSafe(|| {
+        let mut guard = pair.0.lock();
+        *guard = 1;
+        panic!("poison while the timed waiter has released ownership");
+    }))
+    .unwrap_err();
+    pair.1.notify_one();
     let poisoned = finished_rx.recv_timeout(DEADLINE).unwrap();
     worker.join().unwrap();
 

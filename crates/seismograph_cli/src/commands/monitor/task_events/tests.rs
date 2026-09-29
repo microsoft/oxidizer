@@ -109,6 +109,33 @@ fn allocation(thread: u64, sequence: u64, timestamp: u64, kind: EventKind, id: u
 }
 
 #[test]
+fn unsupported_events_are_skipped_and_released_heap_allocations_are_labeled() {
+    let freed = Event {
+        payload: EventPayload::Allocation(Allocation {
+            allocation_id: AllocationId::new(9),
+            event_thread_id: EventThreadId::new(1_001),
+            heap_id: HeapId::new(8),
+            heap_kind: HeapKind::General,
+            freed_after_heap_release: true,
+            address: Address::new(0x8000),
+            size: 64,
+            alignment: 16,
+        }),
+        ..operation(1, 3, 200, EventKind::Deallocation, 9)
+    };
+    let snapshot = summarize(vec![
+        start(1, 1, 100, (1, 10)),
+        poll(1, 2, 150, (1, 10), EventKind::TaskReady, 0),
+        freed,
+        finish(1, 4, 250, (1, 10), 150),
+        poll(1, 5, 300, (1, 10), EventKind::MutexAccess, 0),
+    ]);
+
+    assert_eq!(snapshot.histories.len(), 1);
+    assert!(snapshot.histories[0].events[0].detail.contains("after heap release"));
+}
+
+#[test]
 fn occurrence_index_is_actor_and_operation_specific_chronological_and_filterable() {
     let snapshot = summarize(vec![
         start(1, 1, 100, (1, 10)),

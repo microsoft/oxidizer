@@ -644,6 +644,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::too_many_lines, reason = "the fixture must keep one coherent runtime metadata graph")]
     fn runtime_metadata_cannot_reintroduce_an_excluded_current_task() {
         use seismograph::recorder::event::BacktraceCapture;
         use seismograph::recorder::runtime::{TaskId, TypeDescriptorId};
@@ -680,7 +681,7 @@ mod tests {
                         spawned_at: EventTimestamp::from_ticks(1),
                         last_worker_id: Some(WorkerId::from_raw(1).unwrap()),
                         activity: (id == 2).then_some(TaskActivity {
-                            poll_worker_id: None,
+                            poll_worker_id: Some(WorkerId::from_raw(1).unwrap()),
                             observed_at: EventTimestamp::from_ticks(100),
                             state: TaskActivityState::Unknown,
                             ready_since: None,
@@ -698,7 +699,24 @@ mod tests {
             addresses: Vec::new(),
         };
         let addresses = vec![lookup(1, "noise::spawn"), lookup(2, "app::spawn")];
-        let decoded = DecodedSnapshot::default();
+        let mut runtime_without_worker = event(2, Some(2));
+        runtime_without_worker.kind = EventKind::TaskReady;
+        runtime_without_worker.payload = EventPayload::Runtime(RuntimeEvent {
+            runtime_id: RuntimeId::from_raw(1).unwrap(),
+            worker_id: None,
+            subject_id: 2,
+            related_id: 0,
+            value_0: 0,
+            value_1: 0,
+        });
+        let decoded = DecodedSnapshot {
+            events: Events {
+                total_events: 2,
+                events: vec![event(1, Some(1)), runtime_without_worker],
+                ..Events::default()
+            },
+            ..DecodedSnapshot::default()
+        };
         let original = RuntimeSnapshot::from_events(&decoded, &addresses, Some(&source));
         let index = Arc::new(FilterIndex::new(decoded, None, Some(source), addresses, HashSet::new()));
         let filtered = index.render(&FilterSpec::parse("crate:app", "crate:noise", false, RuntimeStackMode::Spawn).unwrap());

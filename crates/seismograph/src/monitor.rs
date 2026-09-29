@@ -533,7 +533,11 @@ fn apply_recording_configuration(configuration: RecordingConfiguration) -> Resul
 }
 
 fn recorder_statistics_response() -> Response {
-    let statistics = match crate::recorder::try_statistics() {
+    recorder_statistics_response_from(crate::recorder::try_statistics())
+}
+
+fn recorder_statistics_response_from(result: Result<crate::recorder::Statistics, crate::Error>) -> Response {
+    let statistics = match result {
         Ok(statistics) => statistics,
         Err(error) => return Response::Error(error.to_string()),
     };
@@ -858,6 +862,30 @@ mod tests {
 
     use super::*;
 
+    #[cfg_attr(coverage_nightly, coverage(off))] // Test assertion adapter; callers exercise only the expected protocol variant.
+    fn recorder_activity(response: Response) -> RecorderActivity {
+        let Response::RecorderActivity(activity) = response else {
+            panic!("authenticated activity request must return live counters");
+        };
+        activity
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))] // Test assertion adapter; callers exercise only the expected protocol variant.
+    fn recorder_statistics(response: &Response) -> seismograph_protocol::message::RecorderStatistics {
+        let Response::RecorderStatistics(statistics) = response else {
+            panic!("expected recorder statistics");
+        };
+        *statistics
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))] // Test assertion adapter; callers exercise only the expected protocol variant.
+    fn snapshot_bytes(response: Response) -> Vec<u8> {
+        let Response::Snapshot(bytes) = response else {
+            panic!("stop must return a snapshot");
+        };
+        bytes
+    }
+
     #[cfg_attr(miri, ignore)]
     #[test]
     fn authenticated_activity_reports_live_threads_without_snapshot_capture() {
@@ -887,9 +915,8 @@ mod tests {
             (1, Response::Hello { .. })
         ));
         seismograph_protocol::write_request(&mut client, 2, &Request::ReadRecorderActivity).unwrap();
-        let (request_id, Response::RecorderActivity(activity)) = seismograph_protocol::read_response(&mut client).unwrap() else {
-            panic!("authenticated activity request must return live counters");
-        };
+        let (request_id, response) = seismograph_protocol::read_response(&mut client).unwrap();
+        let activity = recorder_activity(response);
         assert_eq!(
             (
                 request_id,
@@ -964,9 +991,7 @@ mod tests {
             authenticated_response(&Request::SetRecording(RecordingConfiguration::default())),
             Response::Acknowledged
         );
-        let Response::RecorderStatistics(statistics) = authenticated_response(&Request::ReadRecorderStatistics) else {
-            panic!("expected recorder statistics");
-        };
+        let statistics = recorder_statistics(&authenticated_response(&Request::ReadRecorderStatistics));
         let snapshot = crate::snapshot(crate::snapshot::SnapshotOptions::default()).unwrap();
         let decoded = crate::snapshot::decode(snapshot.as_bytes()).unwrap();
         assert_eq!(
@@ -985,14 +1010,31 @@ mod tests {
     fn concurrent_snapshot_is_rejected_until_the_current_request_finishes() {
         let _test = crate::recorder::TEST_LOCK.lock().unwrap();
         let guard = SnapshotRequestGuard::acquire().unwrap();
-        let request = Request::CaptureSnapshot(SnapshotOptions::default());
-        let rejected = authenticated_response(&request);
+        let rejected = [
+            authenticated_response(&Request::CaptureSnapshot(SnapshotOptions::default())),
+            authenticated_response(&Request::CaptureSnapshotAndStop),
+            authenticated_response(&Request::ClearEventBuffers),
+        ];
         drop(guard);
-        let resumed = authenticated_response(&request);
+        let resumed = authenticated_response(&Request::CaptureSnapshot(SnapshotOptions::default()));
         assert_eq!(
             (rejected, matches!(resumed, Response::Snapshot(_))),
-            (Response::Error("a seismograph snapshot is already in progress".into()), true)
+            (
+                [
+                    Response::Error("a seismograph snapshot is already in progress".into()),
+                    Response::Error("a seismograph snapshot is already in progress".into()),
+                    Response::Error("a seismograph snapshot is already in progress".into()),
+                ],
+                true,
+            )
         );
+    }
+
+    #[test]
+    fn recorder_statistics_failures_are_returned_to_the_client() {
+        let response = recorder_statistics_response_from(Err(crate::Error::new("statistics unavailable")));
+
+        assert_eq!(response, Response::Error("statistics unavailable".into()));
     }
 
     #[cfg_attr(miri, ignore)]
@@ -1363,6 +1405,10 @@ mod tests {
         ));
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "native tests cover the TCP authentication path; Miri retains the socket-free lifecycle tests"
+    )]
     #[test]
     fn lifecycle_commands_require_authentication() {
         for request in [
@@ -1400,9 +1446,7 @@ mod tests {
         crate::record(crate::recorder::event::EventClass::General, || {
             Record::object(EventKind::MutexAccess, ObjectId::new(2))
         });
-        let Response::Snapshot(bytes) = authenticated_response(&Request::CaptureSnapshotAndStop) else {
-            panic!("stop must return a snapshot");
-        };
+        let bytes = snapshot_bytes(authenticated_response(&Request::CaptureSnapshotAndStop));
         let decoded = crate::snapshot::decode(&bytes).unwrap();
         assert_eq!(decoded.events.events.len(), 1);
         assert!(!crate::recorder::recording_enabled());

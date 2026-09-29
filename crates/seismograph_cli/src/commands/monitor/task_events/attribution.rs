@@ -307,6 +307,7 @@ fn reject_concurrent_task_polls(polls: &mut [Poll]) {
     for (index, poll) in polls.iter().enumerate() {
         tasks.entry(poll.task).or_default().push(index);
     }
+
     for mut indices in tasks.into_values() {
         indices.sort_unstable_by_key(|index| polls[*index].started_at);
         let mut first = 0;
@@ -340,6 +341,7 @@ fn assign(thread: &Thread<'_>, polls: &[Poll], candidates: &[usize], evidence: &
             if end > position {
                 break;
             }
+
             endings.remove(&(end, candidate));
             active.remove(&candidate);
         }
@@ -370,5 +372,82 @@ fn assign(thread: &Thread<'_>, polls: &[Poll], candidates: &[usize], evidence: &
                 ..Evidence::default()
             }
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use seismograph::recorder::event::{EventPayload, EventSequence, EventTimestamp};
+    use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, WorkerId};
+    use seismograph::recorder::thread::ThreadId;
+
+    use super::*;
+
+    fn runtime_event(kind: EventKind, timestamp: u64, duration: u64) -> Event {
+        Event {
+            thread_id: ThreadId::new(1),
+            sequence: EventSequence::new(1),
+            timestamp: EventTimestamp::from_ticks(timestamp),
+            kind,
+            payload: EventPayload::Runtime(RuntimeEvent {
+                runtime_id: RuntimeId::from_raw(1).unwrap(),
+                worker_id: WorkerId::from_raw(1),
+                subject_id: 1,
+                related_id: 0,
+                value_0: duration,
+                value_1: 0,
+            }),
+            call_stack: Vec::new(),
+        }
+    }
+
+    fn poll(first: usize, end: usize) -> Poll {
+        Poll {
+            task: (1, 1),
+            thread: 1,
+            first,
+            end,
+            started_at: u64::try_from(first).unwrap(),
+            finished_at: u64::try_from(end).unwrap(),
+            valid: true,
+            boundary: Boundary { start: None, finish: None },
+        }
+    }
+
+    #[test]
+    fn empty_boundaries_and_completed_nested_polls_are_handled() {
+        assert!(Boundary { start: None, finish: None }.stack(&[]).is_empty());
+        let mut polls = [poll(0, 10), poll(1, 2), poll(3, 4)];
+
+        reject_crossing_polls(&mut polls);
+
+        assert!(polls.iter().all(|poll| poll.valid));
+    }
+
+    #[test]
+    fn recovered_and_open_polls_require_monotonic_observation_time() {
+        let finish = runtime_event(EventKind::TaskPollFinished, 100, 50);
+        let events = [finish];
+        let reversed = Thread {
+            id: 1,
+            events: &events,
+            indices: vec![0],
+            breaks: vec![0],
+            ordered_time: false,
+        };
+        assert!(closed_poll(&reversed, (1, 1), None, 0, true).is_none());
+
+        let start = runtime_event(EventKind::TaskPollStarted, 100, 0);
+        let events = [start];
+        let thread = Thread {
+            id: 1,
+            events: &events,
+            indices: vec![0],
+            breaks: vec![0],
+            ordered_time: true,
+        };
+        let observations = HashMap::from([(((1, 1), 100, 1), 99)]);
+        let totals = HashMap::from([(1, 1)]);
+        assert!(open_poll(&thread, 0, true, &observations, &totals).is_none());
     }
 }

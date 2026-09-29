@@ -120,6 +120,14 @@ impl WaitQueue {
             return operation(Some(state));
         }
         let initialization = self.initialization.lock().unwrap_or_else(PoisonError::into_inner);
+        self.with_existing_state_after_initialization(initialization, operation)
+    }
+
+    fn with_existing_state_after_initialization<R>(
+        &self,
+        initialization: std::sync::MutexGuard<'_, ()>,
+        operation: impl FnOnce(Option<&EagerWaitQueue>) -> R,
+    ) -> R {
         if let Some(state) = self.state.get() {
             drop(initialization);
             operation(Some(state))
@@ -482,6 +490,15 @@ mod tests {
 
         assert_eq!(clears.load(Ordering::Relaxed), 3);
         assert!(queue.state.get().is_none());
+    }
+
+    #[test]
+    fn publication_after_an_empty_operation_starts_is_observed() {
+        let queue = WaitQueue::new();
+        let initialization = queue.initialization.lock().unwrap();
+        queue.state.set(Box::new(super::EagerWaitQueue::new())).unwrap();
+
+        assert!(queue.with_existing_state_after_initialization(initialization, |state| state.is_some()));
     }
 
     #[test]

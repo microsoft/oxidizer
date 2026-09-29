@@ -3038,6 +3038,13 @@ mod tests {
     fn offline_loading_errors_and_info_are_not_live_process_data() {
         let mut app = App::offline("blob capture.seismograph".into());
         assert!(render(&app).contains("Loading and decoding snapshot"));
+        if let Screen::Offline { tab, .. } = &mut app.screen {
+            *tab = MonitorTab::Heaps;
+        }
+        assert!(render(&app).contains("Loading and decoding snapshot"));
+        if let Screen::Offline { tab, .. } = &mut app.screen {
+            *tab = MonitorTab::Info;
+        }
         app.snapshot_error = Some("invalid snapshot test error".into());
         assert!(render(&app).contains("invalid snapshot test error"));
         app.snapshot_error = None;
@@ -4379,14 +4386,76 @@ mod tests {
 
         let clear = connected_footer(Some(RecordingConfiguration::default()), CaptureMode::Continue, None, "ready");
         let release = connected_footer(Some(RecordingConfiguration::default()), CaptureMode::Stop, None, "");
+        let unknown = connected_footer(None, CaptureMode::Continue, None, "");
         assert_eq!(
             (
                 line_text(&clear).contains("clear"),
                 line_text(&clear).contains("ready"),
                 line_text(&release).contains("Record and stop"),
+                line_text(&unknown).contains("configure"),
             ),
-            (true, true, true)
+            (true, true, true, true)
         );
+
+        let operation = super::super::data::ThreadOperation {
+            kind: super::super::data::ThreadOperationKind::MutexAccess,
+            events: 1,
+            objects: 0,
+            participants: vec![super::super::data::ThreadParticipant {
+                thread_id: 7,
+                name: "worker".into(),
+                events: 1,
+                objects: Vec::new(),
+            }],
+        };
+        let mut terminal = Terminal::new(TestBackend::new(60, 8)).unwrap();
+        let mouse = MouseRows::default();
+        terminal
+            .draw(|frame| {
+                mouse.begin(frame.area());
+                draw_thread_participants(
+                    frame,
+                    &mouse,
+                    frame.area(),
+                    Some(&operation),
+                    Some(7),
+                    ThreadViewState {
+                        focus: ThreadFocus::Threads,
+                        thread_selected: 0,
+                        operation_selected: 0,
+                        participant_selected: 0,
+                        object_selected: 0,
+                        stack_scroll: 0,
+                        stack_filter: AllocationStackFilter::Application,
+                    },
+                );
+            })
+            .unwrap();
+        let text = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect::<String>();
+        assert!(text.contains("7 (self)"));
+    }
+
+    #[test]
+    fn unknown_recording_state_hides_stale_configuration() {
+        let mut app = App::new();
+        app.screen = Screen::Connected {
+            descriptor: descriptor(),
+            recording: RecordingConfiguration::default(),
+            tab: MonitorTab::Info,
+            snapshot: None,
+        };
+        app.recording_unknown = true;
+
+        let output = render(&app);
+
+        assert!(output.contains("Recording state UNKNOWN"));
+        assert!(!output.contains("Allocations:"));
     }
 
     #[cfg_attr(miri, ignore)]

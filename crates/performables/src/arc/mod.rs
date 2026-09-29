@@ -1181,6 +1181,17 @@ mod tests {
     }
 
     #[test]
+    fn per_process_relocation_keeps_the_same_value() {
+        let mut value = Arc::<_, PerProcess>::new(42);
+        let (source, destination) = Relocator::between_threads().relocate(&mut ());
+        let before = StdArc::clone(&value.state);
+
+        <PerProcess as Strategy<i32>>::relocate(&mut value.state, source.as_ref(), &destination);
+
+        assert!(StdArc::ptr_eq(&before, &value.state));
+    }
+
+    #[test]
     fn per_process_new_with_uses_the_constructor() {
         let value = Arc::<_, PerProcess>::new_with(|| 42);
 

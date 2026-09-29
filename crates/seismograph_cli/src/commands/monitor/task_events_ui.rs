@@ -236,7 +236,42 @@ fn draw_stack(frame: &mut ratatui::Frame<'_>, area: Rect, occurrence: Option<(&T
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use seismograph::recorder::event::{Event, EventClock, EventKind, EventPayload, EventSequence, EventTimestamp, Events, ObjectId};
+    use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, WorkerId};
+    use seismograph::recorder::thread::{ThreadId, ThreadLog};
+    use seismograph::recorder::{RecordingPolicies, RecordingPolicy};
+
     use super::*;
+
+    fn event(sequence: u64, kind: EventKind, payload: EventPayload) -> Event {
+        Event {
+            thread_id: ThreadId::new(1),
+            sequence: EventSequence::new(sequence),
+            timestamp: EventTimestamp::from_ticks(sequence * 10),
+            kind,
+            payload,
+            call_stack: Vec::new(),
+        }
+    }
+
+    fn task_event(sequence: u64, kind: EventKind, duration: u64) -> Event {
+        event(
+            sequence,
+            kind,
+            EventPayload::Runtime(RuntimeEvent {
+                runtime_id: RuntimeId::from_raw(1).unwrap(),
+                worker_id: WorkerId::from_raw(1),
+                subject_id: 1,
+                related_id: 0,
+                value_0: duration,
+                value_1: 0,
+            }),
+        )
+    }
 
     #[test]
     fn wide_event_columns_stay_side_by_side_even_in_short_rows() {
@@ -262,5 +297,49 @@ mod tests {
             assert_eq!((occurrences.width, stack.width), (area.width, area.width));
             assert_eq!((occurrences.bottom(), stack.bottom()), (stack.y, area.bottom()));
         }
+    }
+
+    #[test]
+    fn stack_panel_explains_unknown_boundaries_and_missing_backtraces() {
+        let events = Events {
+            clock: EventClock::ProcessMonotonic,
+            total_events: 3,
+            recording: RecordingPolicies {
+                runtime_tasks: RecordingPolicy::all(true),
+                general_events: RecordingPolicy::all(true),
+                ..RecordingPolicies::default()
+            },
+            threads: vec![ThreadLog {
+                thread_id: ThreadId::new(1),
+                total_events: 3,
+                ..ThreadLog::default()
+            }],
+            events: vec![
+                task_event(1, EventKind::TaskPollStarted, 0),
+                event(2, EventKind::MutexAccess, EventPayload::Object(ObjectId::new(7))),
+                task_event(3, EventKind::TaskPollFinished, 20),
+            ],
+            ..Events::default()
+        };
+        let mut snapshot = TaskEventsSnapshot::from_events(&events, &[], None);
+        let operation = &mut snapshot.tasks.get_mut(&(1, 1)).unwrap().operations[0];
+        let object = &mut operation.objects[0];
+        Arc::make_mut(&mut object.history)[0].relative_stack_known = false;
+        let occurrence = Some((&*object, &object.history[0]));
+        let mut view = super::super::super::app::App::new().runtime_view.events;
+        view.stack_filter = AllocationStackFilter::Application;
+        let mut terminal = Terminal::new(TestBackend::new(100, 12)).unwrap();
+
+        terminal.draw(|frame| draw_stack(frame, frame.area(), occurrence, view)).unwrap();
+
+        let text = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect::<String>();
+        assert!(text.contains("boundary unknown"));
+        assert!(text.contains("Backtrace unavailable"));
     }
 }

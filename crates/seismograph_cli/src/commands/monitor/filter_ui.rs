@@ -253,18 +253,19 @@ impl App {
     }
 
     fn finish_filter(&mut self, completion: FilterCompletion) {
+        let snapshot = match &mut self.screen {
+            Screen::Connected { snapshot, .. } | Screen::Offline { snapshot, .. } => snapshot,
+            Screen::Browse => return,
+        };
         if completion.generation != self.filters.generation
-            || !self
-                .filter_capture()
+            || !snapshot
+                .as_ref()
                 .and_then(|capture| capture.filter_index.as_ref())
                 .is_some_and(|index| Arc::ptr_eq(index, &completion.index))
         {
             return;
         }
-        match &mut self.screen {
-            Screen::Connected { snapshot, .. } | Screen::Offline { snapshot, .. } => *snapshot = Some(completion.snapshot),
-            Screen::Browse => return,
-        }
+        *snapshot = Some(completion.snapshot);
         self.filters.applied = completion.spec;
         self.reset_filtered_views();
         self.status = if self.filters.applied.is_active() {
@@ -495,6 +496,20 @@ mod tests {
         FilterSpec::parse("crate:app", "", false, RuntimeStackMode::Event).unwrap()
     }
 
+    fn offline_snapshot_mut(app: &mut App) -> &mut Option<Box<CapturedSnapshot>> {
+        match &mut app.screen {
+            Screen::Offline { snapshot, .. } => snapshot,
+            _ => panic!("test app must remain offline"),
+        }
+    }
+
+    fn offline_tab_mut(app: &mut App) -> &mut MonitorTab {
+        match &mut app.screen {
+            Screen::Offline { tab, .. } => tab,
+            _ => panic!("test app must remain offline"),
+        }
+    }
+
     #[test]
     fn editing_preserves_drafts_and_navigates_options() {
         let mut popup = FilterPopup::new(&FilterSpec::default());
@@ -515,6 +530,25 @@ mod tests {
     }
 
     #[test]
+    fn editing_covers_reverse_navigation_excludes_and_ignored_keys() {
+        let mut popup = FilterPopup::new(&FilterSpec::default());
+        popup.edit(KeyCode::BackTab);
+        popup.edit(KeyCode::Left);
+        popup.edit(KeyCode::Up);
+        popup.edit(KeyCode::Up);
+        popup.edit(KeyCode::Char('x'));
+        popup.edit(KeyCode::Esc);
+
+        assert_eq!(popup.selected, 1);
+        assert_eq!(popup.excludes, "x");
+        assert!(!popup.show_unknown);
+        assert_eq!(popup.runtime_stack, RuntimeStackMode::Spawn);
+        popup.selected = 3;
+        popup.edit(KeyCode::Left);
+        assert_eq!(popup.runtime_stack, RuntimeStackMode::Event);
+    }
+
+    #[test]
     fn visible_input_tail_keeps_the_end_cursor() {
         assert_eq!(visible_tail("crate:long_name|", 5), "name|");
         assert_eq!(visible_tail("anything|", 0), "");
@@ -526,6 +560,69 @@ mod tests {
         app.open_filter_popup();
         assert!(app.filters.popup.is_none());
         assert!(app.status.contains("No snapshot"));
+
+        let mut browser = App::new();
+        browser.open_filter_popup();
+        assert!(browser.status.contains("Connect to an application"));
+        browser.handle_filter_key(KeyCode::Enter);
+        assert!(browser.filters.popup.is_none());
+        assert!(browser.start_filter(FilterSpec::default()).is_err());
+    }
+
+    #[test]
+    fn stopped_filter_workers_report_errors_and_clear_busy_state() {
+        let mut filters = Filters::default();
+        let (sender, receiver) = unbounded::<FilterCompletion>();
+        drop(sender);
+        filters.receiver = Some(receiver);
+        filters.started_at = Some(Instant::now());
+
+        assert!(matches!(
+            filters.poll(),
+            Some(Err(message)) if message == "Filter worker stopped unexpectedly; press F to retry."
+        ));
+        assert!(filters.receiver.is_none());
+        assert!(filters.started_at.is_none());
+    }
+
+    #[test]
+    fn missing_index_errors_propagate_through_popup_snapshot_and_queue_paths() {
+        let mut app = offline();
+        offline_snapshot_mut(&mut app).as_mut().unwrap().filter_index = None;
+        app.filters.popup = Some(FilterPopup::new(&include_app()));
+        app.handle_filter_key(KeyCode::Enter);
+        assert!(app.filters.popup.as_ref().unwrap().error.is_some());
+
+        app.filters.applied = include_app();
+        app.filter_snapshot_arrived();
+        assert!(app.status.contains("no filter index"));
+
+        let (sender, receiver) = unbounded::<FilterCompletion>();
+        drop(sender);
+        app.filters.receiver = Some(receiver);
+        app.filters.started_at = Some(Instant::now());
+        app.filters.queued = true;
+        app.filters.pending = Some(include_app());
+        app.poll_filter();
+        assert!(app.status.contains("no filter index"));
+    }
+
+    #[test]
+    fn current_filter_completion_is_ignored_after_switching_to_browse() {
+        let mut app = offline();
+        let index = Arc::clone(app.filter_capture().unwrap().filter_index.as_ref().unwrap());
+        let completion = FilterCompletion {
+            generation: app.filters.generation,
+            snapshot: index.render(&include_app()),
+            index,
+            spec: include_app(),
+        };
+        app.screen = Screen::Browse;
+
+        app.finish_filter(completion);
+
+        assert!(matches!(app.screen, Screen::Browse));
+        assert_eq!(app.filter_banner_height(), 0);
     }
 
     #[test]
@@ -743,10 +840,7 @@ mod tests {
     #[test]
     fn missing_index_cannot_silently_apply() {
         let mut app = offline();
-        let Screen::Offline { snapshot, .. } = &mut app.screen else {
-            unreachable!()
-        };
-        snapshot.as_mut().unwrap().filter_index = None;
+        offline_snapshot_mut(&mut app).as_mut().unwrap().filter_index = None;
         app.handle_key(KeyCode::Char('F'));
         assert!(app.filters.popup.is_none());
         assert!(app.status.contains("no filter index"));
@@ -758,10 +852,7 @@ mod tests {
         use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
         let mut app = offline();
-        let Screen::Offline { tab, .. } = &mut app.screen else {
-            unreachable!()
-        };
-        *tab = MonitorTab::Runtime;
+        *offline_tab_mut(&mut app) = MonitorTab::Runtime;
         let area = Rect::new(0, 0, 120, 40);
         let content = Rect::new(0, 3, 120, 36);
         let before = app.panels.arrange(MonitorTab::Runtime, content).areas;
@@ -799,6 +890,7 @@ mod tests {
         assert!(rendered.contains("Events 1/2 (unknown 0)"));
         assert!(rendered.contains("Unfiltered: source accepted/overwritten counters, whole-process counters and heap topology."));
         app.handle_key(KeyCode::Char('F'));
+        app.filters.popup.as_mut().unwrap().runtime_stack = RuntimeStackMode::Spawn;
         terminal.draw(|frame| app.draw(frame)).unwrap();
         let rendered = terminal
             .backend()
@@ -808,6 +900,41 @@ mod tests {
             .map(ratatui::buffer::Cell::symbol)
             .collect::<String>();
         assert!(rendered.contains("Include: crate:app|"));
-        assert!(rendered.contains("Esc cancel"));
+        assert!(rendered.contains("spawn provenance"));
+
+        let mut no_capture = offline();
+        *offline_snapshot_mut(&mut no_capture) = None;
+        no_capture.filters.started_at = Some(Instant::now());
+        no_capture.filters.queued = true;
+        terminal
+            .draw(|frame| no_capture.draw_filter_banner(frame, Rect::new(0, 0, 100, 4)))
+            .unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect::<String>();
+        assert!(rendered.contains("Latest filter queued"));
+        assert!(rendered.contains("Waiting for an indexed snapshot."));
+    }
+
+    #[test]
+    fn offline_test_helpers_reject_non_offline_apps() {
+        assert!(
+            std::panic::catch_unwind(|| {
+                let mut app = App::new();
+                let _ = offline_snapshot_mut(&mut app);
+            })
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                let mut app = App::new();
+                let _ = offline_tab_mut(&mut app);
+            })
+            .is_err()
+        );
     }
 }

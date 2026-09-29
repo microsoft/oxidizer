@@ -42,6 +42,17 @@ impl CaptureMode {
         }
     }
 }
+
+#[cfg(test)]
+fn connected_snapshot_ptr(screen: &Screen) -> Option<*const CapturedSnapshot> {
+    match screen {
+        Screen::Connected {
+            snapshot: Some(snapshot), ..
+        } => Some(std::ptr::from_ref(snapshot.as_ref())),
+        Screen::Browse | Screen::Offline { .. } | Screen::Connected { snapshot: None, .. } => None,
+    }
+}
+
 pub(super) const EVENT_BUFFER_CAPACITIES: [u32; 15] = [
     64, 128, 256, 512, 1_024, 2_048, 4_096, 8_192, 16_384, 32_768, 65_536, 131_072, 262_144, 524_288, 1_048_576,
 ];
@@ -715,6 +726,24 @@ pub(super) enum RuntimeFocus {
     Tasks,
     Activity,
     Events,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RuntimeDashboardFocus {
+    Workers,
+    Tasks,
+    Activity,
+}
+
+impl RuntimeFocus {
+    const fn dashboard(self) -> Option<RuntimeDashboardFocus> {
+        match self {
+            Self::Workers => Some(RuntimeDashboardFocus::Workers),
+            Self::Tasks => Some(RuntimeDashboardFocus::Tasks),
+            Self::Activity => Some(RuntimeDashboardFocus::Activity),
+            Self::Events => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1872,54 +1901,54 @@ fn handle_runtime_key(code: KeyCode, view: &mut RuntimeViewState, snapshot: Opti
         }
         return handle_task_events_key(code, &mut view.events, events);
     }
+    let focus = view.focus.dashboard().expect("event focus returns above");
     match code {
-        KeyCode::Left if view.focus == RuntimeFocus::Activity => view.activity_scroll = view.activity_scroll.saturating_sub(1),
-        KeyCode::Right if view.focus == RuntimeFocus::Activity => {
+        KeyCode::Left if focus == RuntimeDashboardFocus::Activity => view.activity_scroll = view.activity_scroll.saturating_sub(1),
+        KeyCode::Right if focus == RuntimeDashboardFocus::Activity => {
             view.activity_scroll = view.activity_scroll.saturating_add(1).min(RUNTIME_HISTOGRAM_BINS - 1);
         }
-        KeyCode::Up => match view.focus {
-            RuntimeFocus::Workers => {
+        KeyCode::Up => match focus {
+            RuntimeDashboardFocus::Workers => {
                 view.worker_selected = view.worker_selected.saturating_sub(1);
                 view.reset_task();
             }
-            RuntimeFocus::Tasks => {
+            RuntimeDashboardFocus::Tasks => {
                 view.task_selected = view.task_selected.saturating_sub(1);
                 view.reset_details();
             }
-            RuntimeFocus::Activity => view.activity_scroll = view.activity_scroll.saturating_sub(1),
-            RuntimeFocus::Events => unreachable!("event focus is handled above"),
+            RuntimeDashboardFocus::Activity => view.activity_scroll = view.activity_scroll.saturating_sub(1),
         },
-        KeyCode::Down => match view.focus {
-            RuntimeFocus::Workers => {
+        KeyCode::Down => match focus {
+            RuntimeDashboardFocus::Workers => {
                 let count = runtime.map_or(0, |runtime| runtime.workers.len());
                 view.worker_selected = advance_selection(view.worker_selected, count);
                 view.reset_task();
             }
-            RuntimeFocus::Tasks => {
+            RuntimeDashboardFocus::Tasks => {
                 let count = worker.map_or(0, |worker| worker.tasks.len());
                 view.task_selected = advance_selection(view.task_selected, count);
                 view.reset_details();
             }
-            RuntimeFocus::Activity => view.activity_scroll = view.activity_scroll.saturating_add(1).min(RUNTIME_HISTOGRAM_BINS - 1),
-            RuntimeFocus::Events => unreachable!("event focus is handled above"),
+            RuntimeDashboardFocus::Activity => {
+                view.activity_scroll = view.activity_scroll.saturating_add(1).min(RUNTIME_HISTOGRAM_BINS - 1);
+            }
         },
         KeyCode::Enter => {
-            view.focus = match view.focus {
-                RuntimeFocus::Workers => RuntimeFocus::Tasks,
-                RuntimeFocus::Tasks => RuntimeFocus::Activity,
-                RuntimeFocus::Activity | RuntimeFocus::Events => RuntimeFocus::Events,
+            view.focus = match focus {
+                RuntimeDashboardFocus::Workers => RuntimeFocus::Tasks,
+                RuntimeDashboardFocus::Tasks => RuntimeFocus::Activity,
+                RuntimeDashboardFocus::Activity => RuntimeFocus::Events,
             };
         }
         KeyCode::Backspace => {
-            view.focus = match view.focus {
-                RuntimeFocus::Workers => return false,
-                RuntimeFocus::Tasks => RuntimeFocus::Workers,
-                RuntimeFocus::Activity => RuntimeFocus::Tasks,
-                RuntimeFocus::Events => unreachable!("event focus is handled above"),
+            view.focus = match focus {
+                RuntimeDashboardFocus::Workers => return false,
+                RuntimeDashboardFocus::Tasks => RuntimeFocus::Workers,
+                RuntimeDashboardFocus::Activity => RuntimeFocus::Tasks,
             };
         }
-        KeyCode::PageUp if view.focus == RuntimeFocus::Activity => view.activity_scroll = view.activity_scroll.saturating_sub(5),
-        KeyCode::PageDown if view.focus == RuntimeFocus::Activity => {
+        KeyCode::PageUp if focus == RuntimeDashboardFocus::Activity => view.activity_scroll = view.activity_scroll.saturating_sub(5),
+        KeyCode::PageDown if focus == RuntimeDashboardFocus::Activity => {
             view.activity_scroll = view.activity_scroll.saturating_add(5).min(RUNTIME_HISTOGRAM_BINS - 1);
         }
         KeyCode::Char('[') => {
@@ -2200,6 +2229,7 @@ mod tests {
         configuration.event_capacity_per_thread = 1_024;
 
         let popup = RecordingConfigurationPopup::new(configuration);
+        assert_eq!(RecordingConfigurationField::RuntimeTaskBacktraces.value(popup), "on");
         assert_eq!(
             popup
                 .fields()
@@ -2777,8 +2807,13 @@ mod tests {
     #[test]
     fn capture_mode_has_two_actions_and_defaults_to_continue() {
         assert_eq!(
-            (CaptureMode::default(), CaptureMode::Continue.next(), CaptureMode::Stop.next()),
-            (CaptureMode::Continue, CaptureMode::Stop, CaptureMode::Continue)
+            (
+                CaptureMode::default(),
+                CaptureMode::Continue.next(),
+                CaptureMode::Stop.next(),
+                TaskHistogram::Ready.toggle(),
+            ),
+            (CaptureMode::Continue, CaptureMode::Stop, CaptureMode::Continue, TaskHistogram::Poll,)
         );
     }
 
@@ -3200,10 +3235,8 @@ mod tests {
     #[test]
     fn clear_preserves_the_captured_view_and_resets_activity_baselines() {
         let mut app = connected_app(MonitorTab::Info);
-        let snapshot_before = match &app.screen {
-            Screen::Connected { snapshot, .. } => std::ptr::from_ref(snapshot.as_ref().unwrap().as_ref()),
-            _ => unreachable!(),
-        };
+        assert!(connected_snapshot_ptr(&Screen::Browse).is_none());
+        let snapshot_before = connected_snapshot_ptr(&app.screen).unwrap();
         app.capture_instance_id = connected_fields(&app.screen).map(|fields| fields.0);
         app.record_activity(RecorderStatistics {
             total_events: 100,
@@ -3220,10 +3253,7 @@ mod tests {
             .unwrap();
         sender.send(CaptureMessage::Cleared(Ok(()))).unwrap();
         app.poll_snapshot_capture();
-        let snapshot_after = match &app.screen {
-            Screen::Connected { snapshot, .. } => std::ptr::from_ref(snapshot.as_ref().unwrap().as_ref()),
-            _ => unreachable!(),
-        };
+        let snapshot_after = connected_snapshot_ptr(&app.screen).unwrap();
         assert_eq!(snapshot_before, snapshot_after);
         assert!(app.status.contains("Server buffers cleared"));
         assert!(app.activity_samples.is_empty());
@@ -3564,8 +3594,10 @@ mod tests {
     fn recording_configuration_messages_update_the_connected_instance() {
         let mut app = connected_app(MonitorTab::Info);
         app.poll_recording_configuration();
+        app.recorder_statistics = Some(recorder_statistics_with_total(1));
         let mut configuration = RecordingConfiguration::default();
         configuration.io.enabled = true;
+        configuration.event_capacity_per_thread = 128;
         let (sender, receiver) = unbounded();
         sender
             .send(Ok(RecordingUpdate {
@@ -3578,9 +3610,23 @@ mod tests {
         app.poll_recording_configuration();
 
         assert_eq!(
-            connected_fields(&app.screen).map(|(_, recording, _, _)| recording.io.enabled),
-            Some(true)
+            (
+                connected_fields(&app.screen).map(|(_, recording, _, _)| recording.io.enabled),
+                app.recorder_statistics.map(|statistics| statistics.event_capacity_per_thread),
+            ),
+            (Some(true), Some(128))
         );
+
+        let (sender, receiver) = unbounded();
+        sender
+            .send(Ok(RecordingUpdate {
+                descriptor: descriptor(2),
+                configuration: RecordingConfiguration::default(),
+            }))
+            .unwrap();
+        app.recording_receiver = Some(receiver);
+        app.poll_recording_configuration();
+        assert!(connected_fields(&app.screen).unwrap().1.io.enabled);
 
         let (sender, receiver) = unbounded();
         sender.send(Err("configuration failed".into())).unwrap();
@@ -3602,6 +3648,17 @@ mod tests {
             (app.recording_configuration_popup, result.is_ok(), app.status.as_str(),),
             (None, true, "Applying recording configuration...")
         );
+    }
+
+    #[test]
+    fn recording_configuration_apply_is_ignored_while_another_operation_is_active() {
+        let mut app = connected_app(MonitorTab::Info);
+        let (_sender, receiver) = unbounded::<CaptureMessage>();
+        app.capture_receiver = Some(receiver);
+
+        app.apply_recording_configuration_with(RecordingConfiguration::default(), |_, _| panic!("overlapping recording write"));
+
+        assert!(app.recording_receiver.is_none());
     }
 
     #[test]
@@ -3973,6 +4030,15 @@ mod tests {
 
     #[test]
     fn runtime_keys_cover_navigation_sorting_and_scroll() {
+        assert_eq!(RuntimeFocus::Events.dashboard(), None);
+        let mut selected = 2;
+        assert!(handle_info_key(KeyCode::Up, &mut selected, 3));
+        assert_eq!(selected, 1);
+        let mut activity = RuntimeViewState::new();
+        activity.focus = RuntimeFocus::Activity;
+        assert!(handle_runtime_key(KeyCode::Enter, &mut activity, None));
+        assert_eq!(activity.focus, RuntimeFocus::Events);
+
         let mut view = RuntimeViewState::new();
         view.worker_selected = 2;
         view.task_selected = 2;
@@ -4006,6 +4072,54 @@ mod tests {
         let mut unchanged = original;
         assert!(!handle_runtime_key(KeyCode::Tab, &mut unchanged, None));
         assert_eq!(unchanged, original);
+
+        let mut events = TaskEventsViewState::new();
+        assert!(!handle_task_events_key(KeyCode::Backspace, &mut events, None));
+        events.focus = TaskEventsFocus::Occurrences;
+        events.stack_scroll = 6;
+        events.stack_horizontal_scroll = 9;
+        assert!(handle_task_events_key(KeyCode::PageUp, &mut events, None));
+        assert!(handle_task_events_key(KeyCode::Left, &mut events, None));
+        assert_eq!((events.stack_scroll, events.stack_horizontal_scroll), (1, 1));
+    }
+
+    #[test]
+    fn stale_and_failed_background_messages_are_discarded_or_reported() {
+        let mut app = connected_app(MonitorTab::Info);
+        let (sender, receiver) = unbounded();
+        sender.send(Ok(recorder_statistics_with_total(1).into())).unwrap();
+        app.statistics_receiver = Some(receiver);
+        app.screen = Screen::Browse;
+        app.poll_recorder_statistics();
+        assert!(app.recorder_statistics.is_none());
+
+        app = connected_app(MonitorTab::Info);
+        app.capture_instance_id = connected_fields(&app.screen).map(|fields| fields.0);
+        app.capture_generation = app.connection_generation;
+        app.clear_in_progress = true;
+        let (sender, receiver) = unbounded::<CaptureMessage>();
+        drop(sender);
+        app.capture_receiver = Some(receiver);
+        app.poll_snapshot_capture();
+        assert!(app.status.contains("Clear failed"));
+
+        app = connected_app(MonitorTab::Info);
+        app.capture_instance_id = connected_fields(&app.screen).map(|fields| fields.0);
+        app.capture_generation = app.connection_generation.wrapping_add(1);
+        app.finish_snapshot_capture(Ok(CaptureOutcome {
+            snapshot: empty_capture(),
+            status: "stale".into(),
+        }));
+        assert_ne!(app.status, "stale");
+    }
+
+    #[test]
+    fn clear_key_starts_the_connected_clear_worker() {
+        let mut app = connected_app(MonitorTab::Info);
+
+        app.handle_key(KeyCode::Char('C'));
+
+        assert!(app.clear_in_progress);
     }
 
     #[test]

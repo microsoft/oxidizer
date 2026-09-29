@@ -127,10 +127,6 @@ impl MouseRows {
 }
 
 impl App {
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one dispatch maps rendered lists to selections and shares keyboard activation"
-    )]
     pub(super) fn activate_mouse_row(&mut self, target: ListTarget, index: usize) {
         let tab = match self.screen {
             Screen::Browse => None,
@@ -168,6 +164,10 @@ impl App {
             self.runtime_view.task_histogram = histogram;
             return;
         }
+        self.activate_selectable_mouse_row(target, index);
+    }
+
+    fn activate_selectable_mouse_row(&mut self, target: ListTarget, index: usize) {
         let selected = match target {
             ListTarget::HeapBuckets => {
                 self.heap_view.focus = HeapFocus::Buckets;
@@ -318,5 +318,22 @@ mod tests {
             rows.register(area, 1, 0, 30, ListTarget::Threads);
         }
         assert_eq!(rows.rows.borrow().len(), 0);
+    }
+
+    #[test]
+    fn passive_mouse_targets_do_not_change_selection() {
+        let mut app = App::new();
+        app.activate_mouse_row(ListTarget::Applications, 7);
+        for target in [
+            ListTarget::Applications,
+            ListTarget::InfoThreads,
+            ListTarget::HeapTier(MemoryTier::Small),
+            ListTarget::RuntimeActivity,
+            ListTarget::RuntimeHistogram(TaskHistogram::Poll),
+        ] {
+            app.activate_selectable_mouse_row(target, 9);
+        }
+
+        assert_eq!(app.selected, 7);
     }
 }

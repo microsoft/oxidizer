@@ -735,6 +735,41 @@ mod tests {
     }
 
     #[test]
+    fn asynchronous_state_starts_unlocked_and_unpoisoned() {
+        let state = StateAsync::new();
+
+        assert_eq!(
+            (state.state.load(Ordering::Relaxed), state.poisoned.load(Ordering::Relaxed)),
+            (0, false),
+        );
+        drop(state.waiters);
+    }
+
+    #[test]
+    fn native_try_acquisitions_report_success_and_poison() {
+        let lock = RwLock::<_, Sync>::new(0);
+        drop(lock.try_write_result_native().unwrap().unwrap());
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = lock.write();
+            panic!("poison native writer");
+        }));
+
+        drop(lock.try_read_result_native().unwrap_err().into_inner());
+        drop(lock.try_write_result_native().unwrap_err().into_inner());
+    }
+
+    #[test]
+    fn native_guard_release_is_idempotent() {
+        let lock = RwLock::<_, Sync>::new(0);
+        let mut guard = lock.write();
+
+        guard.release_native();
+        guard.release_native();
+
+        assert!(lock.try_write().is_some());
+    }
+
+    #[test]
     fn writer_acquires_state_with_registered_waiters() {
         let lock = RwLock::<_, Async>::new(());
         lock.raw.state.store(WAITERS, Ordering::Relaxed);

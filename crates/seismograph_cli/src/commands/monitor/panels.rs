@@ -195,12 +195,10 @@ impl Panels {
                     Direction::Horizontal => (event.column, divider.parent.x, divider.parent.width, 12),
                     Direction::Vertical => (event.row, divider.parent.y, divider.parent.height, 3),
                 };
-                if length == 0 {
+                let Some(constraint) = dragged_constraint(position, start, length, minimum) else {
                     return;
-                }
-                let minimum = minimum.min(length / 2);
-                let offset = position.saturating_sub(start).clamp(minimum, length - minimum);
-                self.sizes[id as usize] = Some(Constraint::Ratio(u32::from(offset), u32::from(length)));
+                };
+                self.sizes[id as usize] = Some(constraint);
             }
             MouseEventKind::Up(MouseButton::Left) => self.dragging = None,
             _ => {}
@@ -219,15 +217,13 @@ impl App {
             self.panels.dragging = None;
             return;
         }
-        if matches!(self.screen, Screen::Browse) {
-            self.panels.dragging = None;
-            self.handle_row_click(event, area);
-            return;
-        }
-        let (Screen::Connected { tab, .. } | Screen::Offline { tab, .. }) = self.screen else {
-            self.panels.dragging = None;
-            self.panels.rows.begin(area);
-            return;
+        let tab = match self.screen {
+            Screen::Browse => {
+                self.panels.dragging = None;
+                self.handle_row_click(event, area);
+                return;
+            }
+            Screen::Connected { tab, .. } | Screen::Offline { tab, .. } => tab,
         };
         let [body, ..] = self.screen_areas(area);
         let [tabs, content] = Layout::vertical([Constraint::Length(3), Constraint::Min(1)]).areas(body);
@@ -246,11 +242,7 @@ impl App {
             return;
         }
         if tab == MonitorTab::Info && self.panels.arrange(tab, content).areas[2].contains((event.column, event.row).into()) {
-            let key = match event.kind {
-                MouseEventKind::ScrollUp => Some(KeyCode::Up),
-                MouseEventKind::ScrollDown => Some(KeyCode::Down),
-                _ => None,
-            };
+            let key = info_scroll_key(event.kind);
             if let Some(key) = key {
                 self.handle_key(key);
                 return;
@@ -276,6 +268,23 @@ impl App {
     }
 }
 
+fn dragged_constraint(position: u16, start: u16, length: u16, minimum: u16) -> Option<Constraint> {
+    if length == 0 {
+        return None;
+    }
+    let minimum = minimum.min(length / 2);
+    let offset = position.saturating_sub(start).clamp(minimum, length - minimum);
+    Some(Constraint::Ratio(u32::from(offset), u32::from(length)))
+}
+
+const fn info_scroll_key(kind: MouseEventKind) -> Option<KeyCode> {
+    match kind {
+        MouseEventKind::ScrollUp => Some(KeyCode::Up),
+        MouseEventKind::ScrollDown => Some(KeyCode::Down),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crossterm::event::KeyModifiers;
@@ -288,6 +297,13 @@ mod tests {
             column,
             row,
             modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    fn offline_tab(app: &App) -> MonitorTab {
+        match app.screen {
+            Screen::Offline { tab, .. } => tab,
+            _ => panic!("viewer must remain offline"),
         }
     }
 
@@ -335,6 +351,9 @@ mod tests {
 
     #[test]
     fn small_terminals_and_non_divider_clicks_are_safe() {
+        assert_eq!(dragged_constraint(1, 0, 0, 3), None);
+        assert_eq!(info_scroll_key(MouseEventKind::ScrollUp), Some(KeyCode::Up));
+        assert_eq!(info_scroll_key(MouseEventKind::ScrollDown), Some(KeyCode::Down));
         let mut panels = Panels::default();
         for size in 0..8 {
             let area = Rect::new(0, 0, size, size);
@@ -363,6 +382,13 @@ mod tests {
             Rect::new(0, 0, 100, 40),
         );
         assert!(panels.dragging.is_none());
+
+        panels.dragging = Some((MonitorTab::Runtime, Split::RuntimeRows));
+        panels.handle_mouse(
+            mouse(MouseEventKind::Drag(MouseButton::Left), 0, 0),
+            MonitorTab::Runtime,
+            Rect::new(0, 0, 0, 0),
+        );
     }
 
     #[test]
@@ -417,10 +443,7 @@ mod tests {
         let mut x = terminal.x + 1;
         for (expected, title) in TABS {
             app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x + 2, terminal.y + 1), terminal);
-            let Screen::Offline { tab, .. } = app.screen else {
-                panic!("viewer remains offline")
-            };
-            assert_eq!(tab, expected);
+            assert_eq!(offline_tab(&app), expected);
             assert!(app.panels.dragging.is_none());
             x += u16::try_from(title.len()).unwrap() + 1;
         }
@@ -431,10 +454,21 @@ mod tests {
             mouse(MouseEventKind::Down(MouseButton::Left), terminal.x + 3, terminal.y + 1),
             terminal,
         );
-        let Screen::Offline { tab, .. } = app.screen else {
-            panic!("viewer remains offline")
-        };
-        assert_eq!(tab, MonitorTab::Cache);
+        assert_eq!(offline_tab(&app), MonitorTab::Cache);
+
+        std::panic::catch_unwind(|| offline_tab(&App::new())).unwrap_err();
+    }
+
+    #[test]
+    fn info_thread_panel_accepts_both_wheel_directions() {
+        let mut app = App::offline("capture.seismograph".into());
+        let area = Rect::new(0, 0, 100, 40);
+        app.info_thread_selected = 1;
+
+        app.handle_mouse(mouse(MouseEventKind::ScrollUp, 75, 25), area);
+        app.handle_mouse(mouse(MouseEventKind::ScrollDown, 75, 25), area);
+
+        assert!(app.info_thread_selected <= 1);
     }
 
     #[test]

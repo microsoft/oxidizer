@@ -288,6 +288,19 @@ mod tests {
     }
 
     #[test]
+    fn malformed_symbols_are_rejected_without_guessing_owners() {
+        assert_eq!(
+            [
+                symbol_path(" "),
+                symbol_path("<foo::Type as other::Trait>method"),
+                symbol_path("<föö::Type>::method"),
+                symbol_path("foo::run<bar"),
+            ],
+            [None, None, Some("föö::Type::method".into()), None],
+        );
+    }
+
+    #[test]
     fn type_arguments_and_trait_names_are_not_owners() {
         assert_eq!(
             [

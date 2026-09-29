@@ -531,7 +531,7 @@ pub(super) fn runtime_task_id(kind: EventKind, subject_id: u64, related_id: u64)
 
 #[cfg(test)]
 mod tests {
-    use seismograph::recorder::event::{BacktraceCapture, Event, EventPayload, EventSequence, EventTimestamp};
+    use seismograph::recorder::event::{Address, BacktraceCapture, Event, EventPayload, EventSequence, EventTimestamp};
     use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, TypeDescriptorId, WorkerId};
     use seismograph::recorder::thread::ThreadId;
     use seismograph_runtime::snapshot::{Counters, Runtime, RuntimeState, Task, TaskMetrics, Worker, WorkerState};
@@ -608,6 +608,91 @@ mod tests {
             RuntimeMonitorSnapshot::from_events(&events, None, &[]).workers[0].tasks[0].future_size_bytes
         });
         assert_eq!(sizes, [None, Some(0), Some(16_384)]);
+    }
+
+    #[test]
+    fn repeated_spawn_events_preserve_the_first_backtrace() {
+        let mut first = event(EventKind::TaskSpawned, None, 10, 1, 1);
+        first.call_stack = vec![Address::new(0x1000)];
+        let mut repeated = event(EventKind::TaskSpawned, None, 11, 1, 1);
+        repeated.call_stack = vec![Address::new(0x2000)];
+
+        let snapshot = RuntimeMonitorSnapshot::from_events(
+            &Events {
+                events: vec![first, repeated],
+                ..Events::default()
+            },
+            None,
+            &[],
+        );
+
+        assert!(snapshot.workers[0].tasks[0].spawn_stack.iter().any(|frame| frame.contains("1000")));
+    }
+
+    #[test]
+    fn activity_validation_rejects_incoherent_states_and_accepts_waiting() {
+        let mut task = TaskBuilder::default();
+        apply_activity(&mut task, None);
+        assert_eq!(task.row.activity, TaskActivitySummary::default());
+
+        for activity in [
+            TaskActivity {
+                observed_at: EventTimestamp::from_ticks(0),
+                state: TaskActivityState::Unknown,
+                ready_since: None,
+                poll_started_at: None,
+                poll_worker_id: None,
+                queued_since: None,
+            },
+            TaskActivity {
+                observed_at: EventTimestamp::from_ticks(100),
+                state: TaskActivityState::Ready,
+                ready_since: Some(EventTimestamp::from_ticks(101)),
+                poll_started_at: None,
+                poll_worker_id: None,
+                queued_since: Some(EventTimestamp::from_ticks(101)),
+            },
+            TaskActivity {
+                observed_at: EventTimestamp::from_ticks(100),
+                state: TaskActivityState::Running,
+                ready_since: None,
+                poll_started_at: None,
+                poll_worker_id: WorkerId::from_raw(1),
+                queued_since: None,
+            },
+            TaskActivity {
+                observed_at: EventTimestamp::from_ticks(100),
+                state: TaskActivityState::Ready,
+                ready_since: Some(EventTimestamp::from_ticks(90)),
+                poll_started_at: None,
+                poll_worker_id: None,
+                queued_since: Some(EventTimestamp::from_ticks(80)),
+            },
+            TaskActivity {
+                observed_at: EventTimestamp::from_ticks(100),
+                state: TaskActivityState::Running,
+                ready_since: Some(EventTimestamp::from_ticks(80)),
+                poll_started_at: Some(EventTimestamp::from_ticks(90)),
+                poll_worker_id: WorkerId::from_raw(1),
+                queued_since: None,
+            },
+        ] {
+            apply_activity(&mut task, Some(activity));
+            assert_eq!(task.row.activity, TaskActivitySummary::default());
+        }
+
+        apply_activity(
+            &mut task,
+            Some(TaskActivity {
+                observed_at: EventTimestamp::from_ticks(100),
+                state: TaskActivityState::Waiting,
+                ready_since: None,
+                poll_started_at: None,
+                poll_worker_id: None,
+                queued_since: None,
+            }),
+        );
+        assert_eq!(task.row.activity.state, "Waiting");
     }
 
     #[test]

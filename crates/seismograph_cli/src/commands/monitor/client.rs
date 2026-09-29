@@ -471,6 +471,23 @@ mod tests {
     }
 
     #[test]
+    fn lifecycle_commands_reject_wrong_response_variants() {
+        let hello = Response::Hello {
+            instance_id: InstanceId::from_bytes([1; 16]),
+            recording: RecordingConfiguration::default(),
+        };
+        let (descriptor, requests, worker) = serve(vec![
+            vec![(1, hello.clone()), (2, Response::Acknowledged)],
+            vec![(1, hello), (2, Response::Snapshot(Vec::new()))],
+        ]);
+
+        assert!(matches!(capture_snapshot_and_stop(&descriptor), Err(Error::UnexpectedResponse)));
+        assert!(matches!(clear_event_buffers(&descriptor), Err(Error::UnexpectedResponse)));
+        requests.recv_timeout(Duration::from_secs(3)).unwrap();
+        worker.join().unwrap();
+    }
+
+    #[test]
     fn continue_uses_the_legacy_retain_request() {
         let (descriptor, requests, worker) = serve_legacy(vec![vec![
             (
@@ -677,6 +694,12 @@ mod tests {
         assert!(matches!(read_recorder_activity(&mut client), Err(Error::Io(_))));
         write_response(&mut server, 2, &Response::Error("busy".into())).unwrap();
         assert!(matches!(read_recorder_activity(&mut client), Err(Error::Remote(message)) if message == "busy"));
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut server, _) = listener.accept().unwrap();
+        write_response(&mut server, 3, &Response::Acknowledged).unwrap();
+        assert!(matches!(read_recorder_activity(&mut client), Err(Error::UnexpectedResponse)));
     }
 
     #[test]
@@ -713,6 +736,11 @@ mod tests {
         descriptor.name.clone_from(&name);
         let descriptor_path = directory.join(descriptor.file_name());
         descriptor.write_file(&descriptor_path).unwrap();
+        let mut unavailable = test_descriptor(0);
+        unavailable.name = format!("{name}-unavailable");
+        unavailable.process_id = 43;
+        unavailable.instance_id = InstanceId::from_bytes([3; 16]);
+        unavailable.write_file(directory.join(unavailable.file_name())).unwrap();
 
         let instances = discover().unwrap();
 

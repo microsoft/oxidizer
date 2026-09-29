@@ -545,6 +545,16 @@ mod tests {
             area,
         );
         assert_eq!(app.help.as_ref().unwrap().scroll.get(), 1);
+        app.handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::ScrollUp,
+                column: 60,
+                row: 1,
+                modifiers: KeyModifiers::NONE,
+            },
+            area,
+        );
+        assert_eq!(app.help.as_ref().unwrap().scroll.get(), 0);
     }
 
     #[test]

@@ -333,6 +333,14 @@ mod tests {
     }
 
     #[test]
+    fn asynchronous_state_starts_without_notifications_or_waiters() {
+        let state = StateAsync::new();
+
+        assert_eq!(state.generation.load(Ordering::Relaxed), 0);
+        drop(state.waiters);
+    }
+
+    #[test]
     fn notify_one_advances_generation_and_wakes_a_waiter() {
         let mutex = Mutex::<_, Async>::new(());
         let condition = Condvar::<Async>::new();

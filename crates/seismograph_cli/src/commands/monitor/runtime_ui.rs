@@ -829,6 +829,15 @@ mod tests {
             for x in [0, 5, 6, 7, 13, 14, 15] {
                 assert_eq!(mouse.at(buffer.area, x, 1), None);
             }
+
+            let (compact, _) = render(40, 11, |frame, mouse, area| {
+                draw_task_details(frame, mouse, area, Some(&task), None, view);
+            });
+            assert!(text(&compact).contains(if selected == TaskHistogram::Poll {
+                "Poll worker"
+            } else {
+                "Ready global"
+            }));
         }
     }
 

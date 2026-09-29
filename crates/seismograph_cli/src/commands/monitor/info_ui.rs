@@ -329,6 +329,8 @@ mod tests {
             let contrast = (luminance(color) + 0.05) / (luminance(THREAD_BAR_TRACK) + 0.05);
             assert!(contrast >= 7.0, "bar and text contrast is only {contrast:.2}:1");
         }
+        assert!(luminance(Color::Rgb(0, 0, 0)).abs() < f64::EPSILON);
+        std::panic::catch_unwind(|| luminance(Color::Black)).unwrap_err();
         for retained in [0, 32, 64] {
             let mut thread = live().threads.remove(0);
             thread.statistics.retained_events = retained;
@@ -354,21 +356,67 @@ mod tests {
 
     #[test]
     fn unavailable_stale_and_small_layouts_do_not_invent_rates() {
-        let mut live = live();
-        live.stale = true;
-        assert!(legend(&live, 180).iter().all(|line| !line.to_string().contains("3/s")));
+        let mut stale = live();
+        stale.stale = true;
+        assert!(legend(&stale, 180).iter().all(|line| !line.to_string().contains("3/s")));
         for (width, height) in [(0, 0), (1, 1), (20, 8), (80, 24)] {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             terminal
-                .draw(|frame| draw_activity(frame, frame.area(), &live, &VecDeque::new()))
+                .draw(|frame| draw_activity(frame, frame.area(), &stale, &VecDeque::new()))
                 .unwrap();
             let mouse = MouseRows::default();
             terminal
                 .draw(|frame| {
                     mouse.begin(frame.area());
-                    draw_threads(frame, &mouse, frame.area(), &live, usize::MAX);
+                    draw_threads(frame, &mouse, frame.area(), &stale, usize::MAX);
                 })
                 .unwrap();
         }
+
+        let mut baseline = LiveActivity::default();
+        baseline.availability = Availability::Supported;
+        let mut terminal = Terminal::new(TestBackend::new(80, 12)).unwrap();
+        terminal
+            .draw(|frame| draw_activity(frame, frame.area(), &baseline, &VecDeque::new()))
+            .unwrap();
+        let text = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect::<String>();
+        assert!(text.contains("Collecting rate baseline"));
+
+        baseline.availability = Availability::Unsupported;
+        terminal
+            .draw(|frame| {
+                let mouse = MouseRows::default();
+                mouse.begin(frame.area());
+                draw_threads(frame, &mouse, frame.area(), &baseline, 0);
+            })
+            .unwrap();
+        let text = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect::<String>();
+        assert!(text.contains("unavailable"));
+
+        let mut released = live();
+        released.threads[0].statistics.event_capacity = 0;
+        terminal
+            .draw(|frame| draw_thread(frame, frame.area(), &released.threads[0], false, false))
+            .unwrap();
+        let text = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect::<String>();
+        assert!(text.contains("ring released"));
     }
 }

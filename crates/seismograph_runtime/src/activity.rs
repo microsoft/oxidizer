@@ -220,7 +220,7 @@ impl Activity {
 
 #[cfg(test)]
 mod tests {
-    use seismograph::recorder::runtime::TypeDescriptorId;
+    use seismograph::recorder::runtime::{TaskId, TypeDescriptorId};
     use seismograph::recorder::{Configuration, EventBufferCapacity, RecordingPolicy, recording_observation};
     use seismograph::snapshot::{EventBufferDisposition, SnapshotOptions};
 
@@ -259,6 +259,37 @@ mod tests {
             .into_iter()
             .filter(|event| event.kind == EventKind::TaskReady && event.runtime().unwrap().subject_id == task.id().get())
             .collect()
+    }
+
+    #[test]
+    fn stale_sessions_invalidate_begin_and_validation() {
+        let _test = crate::tests::test_lock();
+        configure(true);
+        let current = active_recording_session().unwrap();
+        let stale = RecordingSession::from_raw(current.get().wrapping_add(1).max(1)).unwrap();
+        let activity = Activity::new(Some(stale), EventTimestamp::from_ticks(1));
+
+        assert!(activity.begin(Some(stale)).is_none());
+        let data = activity.data.lock().unwrap();
+        assert!(!activity.validate(&data));
+        assert_eq!(activity.missed.load(Ordering::Acquire), 2);
+        drop(data);
+        configure(false);
+    }
+
+    #[test]
+    fn unrecorded_poll_start_still_tracks_current_task() {
+        let _test = crate::tests::test_lock();
+        configure(false);
+        let runtime = register_runtime(RuntimeMetadata::new("unrecorded-poll", 1));
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let task_id = TaskId::from_raw(7).unwrap();
+
+        let poll = worker
+            .handle()
+            .task_poll_started_recorded(task_id, EventTimestamp::from_ticks(11), None, None);
+
+        assert_eq!((poll.task_id, poll.started_at), (task_id, EventTimestamp::from_ticks(11)));
     }
 
     #[test]
@@ -633,18 +664,18 @@ mod tests {
     #[test]
     fn retirement_while_disabled_prevents_phantom_wakes_after_reenable() {
         let _test = crate::tests::test_lock();
-        for terminal in [EventKind::TaskCompleted, EventKind::TaskCanceled, EventKind::TaskPanicked] {
+        let finishers: [fn(&crate::RuntimeHandle, TaskId, Option<WorkerId>); 3] = [
+            crate::RuntimeHandle::task_completed,
+            crate::RuntimeHandle::task_canceled,
+            crate::RuntimeHandle::task_panicked,
+        ];
+        for finish in finishers {
             configure(true);
             let runtime = register_runtime(RuntimeMetadata::new("off-retirement", 1));
             let task = runtime.handle().register_task(TypeDescriptorId::from_raw(1).unwrap(), None);
             task.woken();
             configure(false);
-            match terminal {
-                EventKind::TaskCompleted => runtime.handle().task_completed(task.id(), None),
-                EventKind::TaskCanceled => runtime.handle().task_canceled(task.id(), None),
-                EventKind::TaskPanicked => runtime.handle().task_panicked(task.id(), None),
-                _ => unreachable!("the fixture enumerates only terminal callbacks"),
-            }
+            finish(&runtime.handle(), task.id(), None);
             assert!(task.task.activity.terminal.load(Ordering::Acquire));
             configure(true);
             task.woken();
@@ -677,6 +708,18 @@ mod tests {
 
     #[test]
     fn concurrent_snapshots_never_mix_ready_and_running_fields() {
+        let at = EventTimestamp::from_ticks(1);
+        assert_snapshot_consistent(
+            TaskActivity {
+                observed_at: at,
+                state: TaskActivityState::Ready,
+                ready_since: Some(at),
+                poll_started_at: None,
+                poll_worker_id: None,
+                queued_since: Some(at),
+            },
+            WorkerId::from_raw(1).unwrap(),
+        );
         let _test = crate::tests::test_lock();
         configure(true);
         let runtime = register_runtime(RuntimeMetadata::new("concurrent-state", 1));
@@ -695,27 +738,30 @@ mod tests {
                 }
             });
             for _ in 0..400 {
-                let value = state(&task);
-                match value.state {
-                    TaskActivityState::Unknown | TaskActivityState::Waiting => {
-                        assert_eq!((value.ready_since, value.poll_started_at, value.queued_since), (None, None, None));
-                        assert_eq!(value.poll_worker_id, None);
-                    }
-                    TaskActivityState::Ready => {
-                        assert!(value.ready_since.is_some() && value.queued_since >= value.ready_since);
-                        assert_eq!(value.poll_started_at, None);
-                        assert_eq!(value.poll_worker_id, None);
-                    }
-                    TaskActivityState::Running => {
-                        assert!(value.poll_started_at.is_some());
-                        assert_eq!(value.poll_worker_id, Some(worker.id()));
-                        assert_eq!(value.queued_since, None);
-                    }
-                }
-                assert!(value.ready_since.is_none_or(|at| at <= value.observed_at));
-                assert!(value.poll_started_at.is_none_or(|at| at <= value.observed_at));
+                assert_snapshot_consistent(state(&task), worker.id());
             }
         });
         configure(false);
+    }
+
+    fn assert_snapshot_consistent(value: TaskActivity, worker_id: WorkerId) {
+        match value.state {
+            TaskActivityState::Unknown | TaskActivityState::Waiting => {
+                assert_eq!((value.ready_since, value.poll_started_at, value.queued_since), (None, None, None));
+                assert_eq!(value.poll_worker_id, None);
+            }
+            TaskActivityState::Ready => {
+                assert!(value.ready_since.is_some() && value.queued_since >= value.ready_since);
+                assert_eq!(value.poll_started_at, None);
+                assert_eq!(value.poll_worker_id, None);
+            }
+            TaskActivityState::Running => {
+                assert!(value.poll_started_at.is_some());
+                assert_eq!(value.poll_worker_id, Some(worker_id));
+                assert_eq!(value.queued_since, None);
+            }
+        }
+        assert!(value.ready_since.is_none_or(|at| at <= value.observed_at));
+        assert!(value.poll_started_at.is_none_or(|at| at <= value.observed_at));
     }
 }
