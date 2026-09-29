@@ -90,8 +90,10 @@ impl ArtyCase {
             count,
             workload,
         };
-        // Prime this exact workload without entering an annotated measurement.
-        black_box(case.run(1));
+        // Cover every round-robin worker before measuring a single task.
+        for _ in 0..workers {
+            black_box(case.run(1));
+        }
         case
     }
 
@@ -192,7 +194,10 @@ impl TokioCase {
             count,
             workload,
         };
-        black_box(case.run(1));
+        // Match the Arty preparation count; Tokio still chooses its own task placement.
+        for _ in 0..workers {
+            black_box(case.run(1));
+        }
         case
     }
 
