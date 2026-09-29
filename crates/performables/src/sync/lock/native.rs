@@ -10,11 +10,13 @@ impl<T: ?Sized> RwLock<T, Sync> {
         match self.raw.try_read() {
             Ok(raw) => self.acquired_read_native(Ok(raw)),
             Err(TryLockError::Poisoned(error)) => self.acquired_read_native(Err(error)),
-            Err(TryLockError::WouldBlock) => {
-                self.record(EventKind::RwLockReadContention);
-                self.acquired_read_native(self.raw.read())
-            }
+            Err(TryLockError::WouldBlock) => self.wait_for_read_native(),
         }
+    }
+
+    pub(in crate::sync) fn wait_for_read_native(&self) -> Result<RwLockReadGuard<'_, T>, PoisonError<RwLockReadGuard<'_, T>>> {
+        self.record(EventKind::RwLockReadContention);
+        self.acquired_read_native(self.raw.read())
     }
 
     pub(in crate::sync) fn try_read_result_native(&self) -> Result<Option<RwLockReadGuard<'_, T>>, PoisonError<RwLockReadGuard<'_, T>>> {

@@ -770,6 +770,15 @@ mod tests {
     }
 
     #[test]
+    fn native_contended_read_path_acquires_the_released_lock() {
+        let lock = RwLock::<_, Sync>::new(0);
+
+        drop(lock.wait_for_read_native().unwrap());
+
+        assert!(lock.try_write().is_some());
+    }
+
+    #[test]
     fn writer_acquires_state_with_registered_waiters() {
         let lock = RwLock::<_, Async>::new(());
         lock.raw.state.store(WAITERS, Ordering::Relaxed);
