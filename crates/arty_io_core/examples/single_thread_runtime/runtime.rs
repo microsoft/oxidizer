@@ -3,7 +3,7 @@
 
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
-use std::sync::{Mutex, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -16,6 +16,7 @@ use thread_aware_core::{Thread, ThreadAware};
 use super::coordinator::Coordinator;
 
 type ContextBox = Box<dyn Any + Send>;
+type ContextEntry = Arc<Mutex<Option<ContextBox>>>;
 type DriverStore = Vec<Box<dyn ErasedDriver>>;
 type Operation = Box<dyn FnOnce(&Thread, &SystemTaskSpawner, &mut Coordinator, &mut DriverStore) + Send>;
 type ShutdownResult = Result<(), ShutdownError>;
@@ -72,7 +73,7 @@ impl<D: Driver, C: IoContext> ErasedDriver for RegisteredDriver<D, C> {
 }
 
 pub(super) struct Runtime {
-    contexts: Mutex<HashMap<TypeId, ContextBox>>,
+    contexts: Mutex<HashMap<TypeId, ContextEntry>>,
     commands: mpsc::Sender<Command>,
     thread: JoinHandle<()>,
 }
@@ -108,14 +109,19 @@ impl Runtime {
     where
         C: IoContext,
     {
-        let mut contexts = self
-            .contexts
+        let entry = {
+            let mut contexts = self
+                .contexts
+                .lock()
+                .expect("a previous cache-map update panicked, leaving runtime state unusable");
+            Arc::clone(contexts.entry(TypeId::of::<C>()).or_default())
+        };
+        let mut context = entry
             .lock()
             .expect("a previous context lookup panicked, leaving runtime state unusable");
-        // Keep the cache locked until registration completes so concurrent misses initialize once.
-        contexts
-            .entry(TypeId::of::<C>())
-            .or_insert_with(|| Box::new(self.initialize_context::<C>()))
+        // Serialize registration and cloning for this context without holding the cache-map lock.
+        context
+            .get_or_insert_with(|| Box::new(self.initialize_context::<C>()))
             .downcast_ref::<C>()
             .expect("contexts are stored under their own TypeId")
             .clone()
@@ -260,12 +266,99 @@ fn shutdown_drivers(drivers: DriverStore) -> ShutdownResult {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Barrier, mpsc};
+    use std::any::TypeId;
+    use std::sync::{Arc, Barrier, Mutex, mpsc};
     use std::thread;
     use std::time::Duration;
 
+    use arty_io_core::{DriverError, DriverOptions, DriverProvider, IoContext, ProviderOptions};
+    use thread_aware_core::{Thread, ThreadAware};
+
     use super::Runtime;
-    use crate::drivers::{EchoContext, SampleContext};
+    use crate::drivers::{EchoContext, SampleContext, SampleDriver};
+
+    struct BlockingCloneContext {
+        started: mpsc::Sender<()>,
+        release: Arc<Mutex<mpsc::Receiver<()>>>,
+    }
+
+    impl Clone for BlockingCloneContext {
+        fn clone(&self) -> Self {
+            self.started.send(()).unwrap();
+            self.release.lock().unwrap().recv().unwrap();
+            Self {
+                started: self.started.clone(),
+                release: Arc::clone(&self.release),
+            }
+        }
+    }
+
+    impl ThreadAware for BlockingCloneContext {
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+    }
+
+    impl IoContext for BlockingCloneContext {
+        type Provider = BlockingCloneProvider;
+
+        fn provider(_options: ProviderOptions) -> Self::Provider {
+            panic!("the fixture context is inserted directly into the cache");
+        }
+    }
+
+    #[derive(Clone)]
+    struct BlockingCloneProvider;
+
+    impl ThreadAware for BlockingCloneProvider {
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+    }
+
+    impl DriverProvider for BlockingCloneProvider {
+        const CAN_BE_PRIMARY: bool = false;
+
+        type Context = BlockingCloneContext;
+        type Driver = SampleDriver;
+
+        fn create(self, _options: DriverOptions<'_>) -> Result<(Self::Driver, Self::Context), DriverError> {
+            panic!("the fixture context is inserted directly into the cache");
+        }
+    }
+
+    #[test]
+    fn blocked_clone_does_not_block_another_cached_context() {
+        let runtime = Runtime::start();
+        let _ = runtime.get_context::<EchoContext>();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let context = BlockingCloneContext {
+            started: started_tx,
+            release: Arc::new(Mutex::new(release_rx)),
+        };
+        runtime
+            .contexts
+            .lock()
+            .unwrap()
+            .insert(TypeId::of::<BlockingCloneContext>(), Arc::new(Mutex::new(Some(Box::new(context)))));
+
+        thread::scope(|scope| {
+            let runtime = &runtime;
+            scope.spawn(move || {
+                let _ = runtime.get_context::<BlockingCloneContext>();
+            });
+            started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+
+            let (done_tx, done_rx) = mpsc::channel();
+            scope.spawn(move || {
+                let _ = runtime.get_context::<EchoContext>();
+                done_tx.send(()).unwrap();
+            });
+
+            let result = done_rx.recv_timeout(Duration::from_secs(10));
+            release_tx.send(()).unwrap();
+            result.unwrap();
+        });
+
+        runtime.shutdown().unwrap();
+    }
 
     #[test]
     fn cached_context_does_not_wait_for_the_worker() {
