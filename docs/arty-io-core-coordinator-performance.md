@@ -48,8 +48,8 @@ benchmark formatting and diagnostic-message changes. Independent repeat runs
 reproduced **every instruction count on both sides**.
 
 The measured [benchmark source](https://github.com/microsoft/oxidizer/blob/51dbb9aa2cbe0a325f86fe3141c9e1b8381f21de/crates/arty_io_core/benches/arty_io_core_coordination.rs)
-is `crates/arty_io_core/benches/arty_io_core_coordination.rs` at `51dbb9aa`,
-not the file at the current branch head. Metabench runs the
+is `crates/arty_io_core/benches/arty_io_core_coordination.rs` at `51dbb9aa`.
+The current crate no longer includes this benchmark. Metabench runs the
 same operations under Gungraun, Criterion, and allocation tracking. The original
 two composite workloads are retained; additional cases isolate cycle boundaries,
 token creation and completion, callback retirement, registration, and interruption
