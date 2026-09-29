@@ -106,13 +106,18 @@
 //! ## Per-worker state with `Arc`
 //!
 //! When several workers share a value but each should keep its *own* instance - a per-core cache, a
-//! pool you do not want contended across cores - wrap it in the strategy-partitioned `Arc<T, S>`
-//! ([`thread_aware::Arc`](https://docs.rs/thread_aware/latest/thread_aware/struct.Arc.html), with
-//! the crate's `std` feature). With the `PerThread` strategy,
-//! relocation materializes a separate `T` for the destination worker (lazily, on first use there),
-//! so the sharing is per-worker instead of process-wide. Use `PerProcess`, which behaves as a
-//! vanilla `Arc`, when one shared instance is what you want, and `PerNumaNode` for one instance per
-//! NUMA node. This is also the usual bridge to a type that does not implement `ThreadAware` itself.
+//! pool you do not want contended across cores - reach for the strategy-partitioned `Arc<T, S>` from
+//! the separate [`performables`](https://docs.rs/performables) crate
+//! ([`performables::arc::Arc`](https://docs.rs/performables/latest/performables/arc/struct.Arc.html);
+//! add it as a dependency). With the
+//! [`PerThread`](https://docs.rs/performables/latest/performables/arc/struct.PerThread.html)
+//! strategy, relocation materializes a separate `T` for the destination worker (lazily, on first use
+//! there), so the sharing is per-worker instead of process-wide. Use
+//! [`PerProcess`](https://docs.rs/performables/latest/performables/arc/struct.PerProcess.html), which
+//! behaves as a vanilla `Arc`, when one shared instance is what you want, and
+//! [`PerNuma`](https://docs.rs/performables/latest/performables/arc/struct.PerNuma.html) for one
+//! instance per NUMA node. This is also the usual bridge to a type that does not implement
+//! `ThreadAware` itself.
 //!
 //! # Choosing an implementation
 //!
@@ -121,8 +126,8 @@
 //! | A compound of thread-aware fields | `#[derive(ThreadAware)]` | Forwards relocation to each field. |
 //! | A field with genuine per-core behavior | a hand-written impl | Only you know what "rebind" means. |
 //! | A foreign type that carries no affinity | [`Unaware<T>`](https://docs.rs/thread_aware/latest/thread_aware/struct.Unaware.html) | A `MoveAsIs<T>`: implements the trait as a no-op. |
-//! | Shared state that should differ per worker | `Arc<T, PerThread>` (`std`) | Materializes a separate `T` per destination. |
-//! | Shared state that is the same everywhere | `Arc<T, PerProcess>` (`std`) | Behaves as a vanilla `Arc`. |
+//! | Shared state that should differ per worker | [`performables::arc::Arc<T, PerThread>`](https://docs.rs/performables/latest/performables/arc/struct.Arc.html) | Materializes a separate `T` per destination. |
+//! | Shared state that is the same everywhere | [`performables::arc::Arc<T, PerProcess>`](https://docs.rs/performables/latest/performables/arc/struct.Arc.html) | Behaves as a vanilla `Arc`. |
 //!
 //! [`Unaware`](https://docs.rs/thread_aware/latest/thread_aware/struct.Unaware.html) wraps a value
 //! and satisfies `ThreadAware` without reacting to
@@ -185,7 +190,9 @@
 //! non-skipped field was reached and every skipped one was not:
 //!
 //! ```rust
-//! use thread_aware::{Thread, ThreadAware};
+//! use std::thread;
+//!
+//! use thread_aware::{Thread, ThreadAware, ThreadBuilder};
 //!
 //! /// Counts relocations so a test can prove which fields the derive reaches.
 //! #[derive(Default)]
@@ -206,27 +213,25 @@
 //!     skipped: Tracker,
 //! }
 //!
-//! fn assert_reaches_the_right_fields(from: Option<&Thread>, to: &Thread) {
-//!     let mut value = UnderTest {
-//!         tracked: Tracker::default(),
-//!         skipped: Tracker::default(),
-//!     };
-//!     value.relocate(from, to);
-//!     assert_eq!(
-//!         value.tracked.relocations, 1,
-//!         "non-skipped fields must be relocated"
-//!     );
-//!     assert_eq!(
-//!         value.skipped.relocations, 0,
-//!         "skipped fields must not be relocated"
-//!     );
-//! }
+//! // Build two worker coordinates and relocate the value between them.
+//! let builder = ThreadBuilder::default();
+//! let from = builder.build(thread::current().id());
+//! let to = builder.build(thread::spawn(|| thread::current().id()).join().unwrap());
+//!
+//! let mut value = UnderTest {
+//!     tracked: Tracker::default(),
+//!     skipped: Tracker::default(),
+//! };
+//! value.relocate(Some(&from), &to);
+//!
+//! assert_eq!(value.tracked.relocations, 1, "non-skipped fields must be relocated");
+//! assert_eq!(value.skipped.relocations, 0, "skipped fields must not be relocated");
 //! ```
 //!
-//! The `test-utils` feature adds a
-//! [`Relocator`](https://docs.rs/thread_aware/latest/thread_aware/struct.Relocator.html) that drives
-//! relocations without hand-built [`Thread`](crate::Thread) values, which is usually what a real
-//! test wants.
+//! The example runs its own assertions, so removing the `relocate` call or changing either count
+//! makes it fail. For a real test suite the `test-utils` feature's
+//! [`Relocator`](https://docs.rs/thread_aware/latest/thread_aware/struct.Relocator.html) drives
+//! relocations without hand-built [`Thread`](crate::Thread) values.
 //!
 //! # Validating correctness
 //!
