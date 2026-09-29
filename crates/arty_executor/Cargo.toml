@@ -36,7 +36,7 @@ tick = { workspace = true, features = ["fast-instant"] }
 criterion = { workspace = true }
 derive_more = { workspace = true, features = ["debug"] }
 gungraun = { workspace = true, features = ["default"] }
-metabench = { workspace = true }
+metabench = { path = "../metabench", default-features = false }
 mockall = { workspace = true }
 mutants = { workspace = true }
 scopeguard = { workspace = true }
