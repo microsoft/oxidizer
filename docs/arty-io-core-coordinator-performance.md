@@ -42,7 +42,7 @@ benchmark formatting and diagnostic-message changes. Independent repeat runs
 reproduced **every instruction count on both sides**.
 
 The benchmark target is
-`crates\arty_io_core\benches\arty_io_core_coordination.rs`. Metabench runs the
+`crates/arty_io_core/benches/arty_io_core_coordination.rs`. Metabench runs the
 same operations under Gungraun, Criterion, and allocation tracking. The original
 two composite workloads are retained; additional cases isolate cycle boundaries,
 token creation and completion, callback retirement, registration, and interruption
@@ -207,7 +207,7 @@ cargo bench --locked --package arty_io_core \
   --output target/coordinator-after --no-baseline --timeout 10m
 ```
 
-The campaign installed that runner into `target\coordinator-tools` using
+The campaign installed that runner into `target/coordinator-tools` using
 `cargo install --locked --version 0.19.4 --root target/coordinator-tools gungraun-runner`,
 without replacing the machine's older global runner. If the matching runner is
 already on `PATH`, the `GUNGRAUN_RUNNER` assignment is unnecessary.
@@ -220,12 +220,12 @@ benchmark binary with the expanded benchmark binary.
 Cargo runs this benchmark from its package directory. The local machine-readable
 reports are therefore:
 
-- `crates\arty_io_core\target\coordinator-before.json`
-- `crates\arty_io_core\target\coordinator-after.json`
-- `crates\arty_io_core\target\coordinator-before-repeat.json`
-- `crates\arty_io_core\target\coordinator-after-repeat.json`
+- `crates/arty_io_core/target/coordinator-before.json`
+- `crates/arty_io_core/target/coordinator-after.json`
+- `crates/arty_io_core/target/coordinator-before-repeat.json`
+- `crates/arty_io_core/target/coordinator-after-repeat.json`
 
 Each JSON report links its native Criterion and Callgrind artifacts under
-`target\metabench\arty_io_core_coordination`. Copies of the final reports,
+`target/metabench/arty_io_core_coordination`. Copies of the final reports,
 comparison data, and raw before/after profiles were also preserved with the
 campaign's session artifacts.
