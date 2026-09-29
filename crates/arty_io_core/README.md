@@ -43,30 +43,30 @@ execution capacity.
 
 The runtime clones and relocates providers to their workers, assigns driver roles, and
 supplies [`DriverOptions`][__link11]. It completes a non-blocking, zero-wait initialization cycle
-before publishing a context or notifying peers through [`Driver::on_peer_registered`][__link12].
-It also supplies a [`SystemTaskSpawner`][__link13] for blocking system work.
+before publishing a context.
+It also supplies a [`SystemTaskSpawner`][__link12] for blocking system work.
 
 Each logical cycle uses a shared time snapshot and wait bound. The runtime invokes
-secondaries before the primary and implements [`PendingWorkTracker`][__link14] to register work,
+secondaries before the primary and implements [`PendingWorkTracker`][__link13] to register work,
 latch interruption, and track completion. After the primary returns, it interrupts remaining
 waits and waits for every pending-work handle before advancing. If there is no primary,
 the runtime retains responsibility for parking the worker.
 
 ## Shutdown
 
-The runtime stops normal cycles and calls [`Driver::shutdown`][__link15] for every driver, continuing
-after a [`ShutdownError`][__link16]. Each driver closes admission and drains its resources within a
+The runtime stops normal cycles and calls [`Driver::shutdown`][__link14] for every driver, continuing
+after a [`ShutdownError`][__link15]. Each driver closes admission and drains its resources within a
 bounded wait, independently of other drivers on the same worker. Contexts remain valid as
 closed handles.
 
 ## Example and reference
 
-The [single-thread runtime example][__link17] demonstrates registration and peer discovery. Its sample
+The [single-thread runtime example][__link16] demonstrates registration and driver roles. Its sample
 drivers perform no I/O and use a no-op tracker; a runtime serving native I/O must implement
 the coordination described above.
 
-* [Requirements][__link18]
-* [Design][__link19]
+* [Requirements][__link17]
+* [Design][__link18]
 
 
 <hr/>
@@ -74,19 +74,18 @@ the coordination described above.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbTWJa0jsmSLUb7_QjFAEvSIQbqVebss-5QPob6NgIFm48fNxhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb5viiVI_j09gbb6UesvjQD9MbXh0LWV6g6eEbT7gGiIVwmg5hZIGCbGFydHlfaW9fY29yZWUwLjIuMA
  [__link0]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=IoContext
  [__link1]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverProvider
  [__link10]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=PendingWork
  [__link11]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverOptions
- [__link12]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::on_peer_registered
- [__link13]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=SystemTaskSpawner
- [__link14]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=PendingWorkTracker
- [__link15]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::shutdown
- [__link16]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=ShutdownError
- [__link17]: https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_core/examples/single_thread_runtime
- [__link18]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/REQUIREMENTS.md
- [__link19]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/DESIGN.md
+ [__link12]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=SystemTaskSpawner
+ [__link13]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=PendingWorkTracker
+ [__link14]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::shutdown
+ [__link15]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=ShutdownError
+ [__link16]: https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_core/examples/single_thread_runtime
+ [__link17]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/REQUIREMENTS.md
+ [__link18]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/DESIGN.md
  [__link2]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver
  [__link3]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::execute_cycle
  [__link4]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Cycle::start_work

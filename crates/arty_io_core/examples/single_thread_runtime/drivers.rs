@@ -1,9 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use arty_io_core::{
-    Cycle, Driver, DriverError, DriverHandle, DriverOptions, DriverProvider, DriverRole, IoContext, ProviderOptions, ShutdownError,
-};
+use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, DriverProvider, DriverRole, IoContext, ProviderOptions, ShutdownError};
 use thread_aware_core::{Thread, ThreadAware};
 
 #[derive(Clone)]
@@ -34,7 +32,7 @@ impl DriverProvider for SampleProvider {
     type Context = SampleContext;
     type Driver = SampleDriver;
 
-    fn create(self, options: DriverOptions<'_>) -> Result<(Self::Driver, Self::Context), DriverError> {
+    fn create(self, options: DriverOptions) -> Result<(Self::Driver, Self::Context), DriverError> {
         println!("initializing sample driver as {:?}", options.role());
         Ok((SampleDriver { role: options.role() }, SampleContext))
     }
@@ -45,16 +43,6 @@ pub(super) struct SampleDriver {
 }
 
 impl Driver for SampleDriver {
-    fn handle(&self) -> DriverHandle<'_> {
-        DriverHandle::new(self)
-    }
-
-    fn on_peer_registered(&mut self, peer: DriverHandle<'_>) {
-        if peer.handle().is::<EchoDriver>() {
-            println!("sample driver discovered echo driver");
-        }
-    }
-
     fn execute_cycle(&mut self, _cycle: &mut Cycle<'_>) -> Result<(), DriverError> {
         let _ = self.role;
         Ok(())
@@ -94,12 +82,8 @@ impl DriverProvider for EchoProvider {
     type Context = EchoContext;
     type Driver = EchoDriver;
 
-    fn create(self, options: DriverOptions<'_>) -> Result<(Self::Driver, Self::Context), DriverError> {
-        let sample_registered = options.drivers().iter().any(|driver| driver.handle().is::<SampleDriver>());
-        println!(
-            "initializing echo driver as {:?}; sample driver registered: {sample_registered}",
-            options.role()
-        );
+    fn create(self, options: DriverOptions) -> Result<(Self::Driver, Self::Context), DriverError> {
+        println!("initializing echo driver as {:?}", options.role());
         Ok((EchoDriver { role: options.role() }, EchoContext))
     }
 }
@@ -109,12 +93,6 @@ pub(super) struct EchoDriver {
 }
 
 impl Driver for EchoDriver {
-    fn handle(&self) -> DriverHandle<'_> {
-        DriverHandle::new(self)
-    }
-
-    fn on_peer_registered(&mut self, _peer: DriverHandle<'_>) {}
-
     fn execute_cycle(&mut self, _cycle: &mut Cycle<'_>) -> Result<(), DriverError> {
         let _ = self.role;
         Ok(())

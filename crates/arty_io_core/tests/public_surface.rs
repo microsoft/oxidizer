@@ -18,18 +18,15 @@ use std::time::{Duration, Instant};
 use std::{fmt, io, thread};
 
 use arty_io_core::{
-    Cycle, Driver, DriverError, DriverHandle, DriverOptions, DriverProvider, DriverRole, IoContext, PendingWork, PendingWorkTracker,
-    ProviderOptions, ShutdownError, SystemTaskSpawner,
+    Cycle, Driver, DriverError, DriverOptions, DriverProvider, DriverRole, IoContext, PendingWork, PendingWorkTracker, ProviderOptions,
+    ShutdownError, SystemTaskSpawner,
 };
 use coordinator::Coordinator;
 use static_assertions::{assert_impl_all, assert_not_impl_any};
 use thread_aware_core::{Thread, ThreadAware};
 
-assert_impl_all!(DriverOptions<'static>: fmt::Debug);
-assert_not_impl_any!(DriverOptions<'static>: Send, Sync);
+assert_impl_all!(DriverOptions: Send, Sync, fmt::Debug);
 assert_not_impl_any!(Cycle<'static>: Send, Sync);
-assert_impl_all!(DriverHandle<'static>: Copy, fmt::Debug);
-assert_not_impl_any!(DriverHandle<'static>: Send, Sync);
 assert_impl_all!(DriverRole: Copy, Send, Sync, fmt::Debug, Eq);
 assert_impl_all!(ProviderOptions: Send, Sync, fmt::Debug);
 assert_impl_all!(DriverError: Send, Sync, fmt::Debug, fmt::Display, Error);
@@ -74,45 +71,15 @@ fn public_options_expose_runtime_facilities() {
         task();
     });
     let worker = worker_thread();
-    let options = DriverOptions::new(worker.clone(), spawner, Vec::new(), DriverRole::Primary);
+    let options = DriverOptions::new(worker.clone(), spawner, DriverRole::Primary);
 
     options.spawner().spawn(|| {});
 
     assert_eq!(options.thread(), &worker);
     assert_eq!(options.role(), DriverRole::Primary);
-    assert!(options.drivers().is_empty());
     assert_eq!(accepted.load(Ordering::Relaxed), 1);
     assert!(format!("{options:?}").contains("DriverOptions"));
     assert!(format!("{:?}", ProviderOptions::new()).contains("ProviderOptions"));
-}
-
-#[test]
-fn driver_options_expose_drivers_registered_on_the_thread() {
-    let existing_driver = LocalDriver::new(Rc::default());
-    let handles = vec![existing_driver.handle()];
-    let options = DriverOptions::new(
-        worker_thread(),
-        SystemTaskSpawner::from_fn(|task| task()),
-        handles,
-        DriverRole::Secondary,
-    );
-
-    let drivers = options.drivers();
-
-    assert_eq!(drivers.len(), 1);
-    assert!(drivers[0].handle().is::<LocalDriver>());
-    assert!(format!("{options:?}").contains("driver_count"));
-    assert!(format!("{:?}", drivers[0]).contains("DriverHandle"));
-}
-
-#[test]
-fn driver_is_notified_when_another_driver_is_registered() {
-    let mut driver = LocalDriver::new(Rc::default());
-    let registered_driver = LeaseDriver::new(Arc::default());
-
-    driver.on_peer_registered(registered_driver.handle());
-
-    assert_eq!(driver.registered_driver_count, 1);
 }
 
 #[test]
@@ -125,14 +92,17 @@ fn driver_can_remain_thread_local() {
 
 #[test]
 fn driver_is_boxable() {
-    let mut driver: Box<dyn Driver> = Box::new(LocalDriver::new(Rc::default()));
+    let state = Rc::new(ShutdownState::default());
+    let mut driver: Box<dyn Driver> = Box::new(LocalDriver::new(Rc::clone(&state)));
     let mut coordinator = Coordinator;
 
     driver
         .execute_cycle(&mut Cycle::new(Instant::now(), Duration::ZERO, false, &mut coordinator))
         .unwrap();
 
-    assert!(driver.handle().handle().is::<LocalDriver>());
+    assert_eq!(state.drop_calls.get(), 0);
+    drop(driver);
+    assert_eq!(state.drop_calls.get(), 1);
 }
 
 #[test]
@@ -166,10 +136,10 @@ fn provider_creation_uses_both_options() {
     }
 
     let provider: TestProvider = provider_for::<TestContext>(ProviderOptions::new());
-    let (driver, context) = provider.create(driver_options()).unwrap();
+    let (driver, context): (LocalDriver, TestContext) = provider.create(driver_options()).unwrap();
 
-    assert!(driver.handle().handle().is::<LocalDriver>());
     assert_eq!(context, TestContext(7));
+    driver.shutdown().unwrap();
 }
 
 #[test]
@@ -282,7 +252,6 @@ struct LocalDriver {
     cycle_start: Option<Instant>,
     interrupt: Waker,
     owned_resource: Option<Box<()>>,
-    registered_driver_count: usize,
 }
 
 impl LocalDriver {
@@ -292,7 +261,6 @@ impl LocalDriver {
             cycle_start: None,
             interrupt: Waker::noop().clone(),
             owned_resource: Some(Box::new(())),
-            registered_driver_count: 0,
         }
     }
 }
@@ -305,16 +273,6 @@ impl Drop for LocalDriver {
 }
 
 impl Driver for LocalDriver {
-    fn handle(&self) -> DriverHandle<'_> {
-        DriverHandle::new(self)
-    }
-
-    fn on_peer_registered(&mut self, peer: DriverHandle<'_>) {
-        if peer.handle().is::<LeaseDriver>() {
-            self.registered_driver_count += 1;
-        }
-    }
-
     fn execute_cycle(&mut self, cycle: &mut Cycle<'_>) -> Result<(), DriverError> {
         let _work = cycle.start_work(self.interrupt.clone());
         self.cycle_start = Some(cycle.started_at());
@@ -356,7 +314,7 @@ impl DriverProvider for TestProvider {
     type Context = TestContext;
     type Driver = LocalDriver;
 
-    fn create(self, _options: DriverOptions<'_>) -> Result<(Self::Driver, Self::Context), DriverError> {
+    fn create(self, _options: DriverOptions) -> Result<(Self::Driver, Self::Context), DriverError> {
         Ok((LocalDriver::new(Rc::default()), TestContext(7)))
     }
 }
@@ -406,7 +364,7 @@ impl DriverProvider for LeaseProvider {
     type Context = LeaseContext;
     type Driver = LeaseDriver;
 
-    fn create(self, _options: DriverOptions<'_>) -> Result<(Self::Driver, Self::Context), DriverError> {
+    fn create(self, _options: DriverOptions) -> Result<(Self::Driver, Self::Context), DriverError> {
         let state = Arc::default();
         Ok((LeaseDriver::new(Arc::clone(&state)), LeaseContext { state }))
     }
@@ -462,12 +420,6 @@ impl Drop for LeaseDriver {
 }
 
 impl Driver for LeaseDriver {
-    fn handle(&self) -> DriverHandle<'_> {
-        DriverHandle::new(self)
-    }
-
-    fn on_peer_registered(&mut self, _peer: DriverHandle<'_>) {}
-
     fn execute_cycle(&mut self, _cycle: &mut Cycle<'_>) -> Result<(), DriverError> {
         Ok(())
     }
@@ -506,13 +458,8 @@ impl Driver for LeaseDriver {
     }
 }
 
-fn driver_options() -> DriverOptions<'static> {
-    DriverOptions::new(
-        worker_thread(),
-        SystemTaskSpawner::from_fn(|task| task()),
-        Vec::new(),
-        DriverRole::Secondary,
-    )
+fn driver_options() -> DriverOptions {
+    DriverOptions::new(worker_thread(), SystemTaskSpawner::from_fn(|task| task()), DriverRole::Secondary)
 }
 
 fn worker_thread() -> Thread {

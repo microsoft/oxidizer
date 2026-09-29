@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Demonstrates lazy driver registration and peer discovery on one runtime worker.
+//! Demonstrates lazy driver registration and waiting roles on one runtime worker.
 //!
 //! The sample drivers do not perform I/O; their work tracker is a no-op.
 

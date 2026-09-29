@@ -23,15 +23,12 @@ describes the lifecycle; the no-op example tracker does not implement coordinati
 ## R3: Per-worker initialization
 
 - The runtime clones and relocates each provider before consuming it on the
-  owning worker. `DriverOptions` supplies that worker, its role, and earlier peers.
+  owning worker. `DriverOptions` supplies that worker, its role, and the system
+  task spawner.
 - Roles are fixed. Each worker has at most one primary, assigned only when
   `CAN_BE_PRIMARY` is true. Without one, the runtime owns worker parking.
-- Peer handles are borrowed and worker-local. Drivers may clone independently
-  owned state from them, not retain the borrow.
 - Before publishing a context, the runtime completes a separate zero-wait cycle
   with `can_block = false`.
-- After storing the pair, it notifies earlier peers in registration order.
-  Notifications finish before context publication and registration acknowledgment.
 - Providers choose whether instances share queues, memory, or threads.
 
 ## R4: Driver-owned execution strategy
@@ -92,8 +89,6 @@ describes the lifecycle; the no-op example tracker does not implement coordinati
 - Creation and the initial cycle may return `DriverError`; the runtime rolls
   back the unpublished pair.
 - The runtime reports normal cycle errors and shuts down the worker's drivers.
-- Peer integration failure panics; partially connected registration cannot
-  continue.
 - Drivers with conditional availability expose a capability check before a
   consumer requests the context.
 
@@ -106,6 +101,6 @@ describes the lifecycle; the no-op example tracker does not implement coordinati
 
 ## R9: Scope of the initial API
 
-Core does not provide a driver registry, native observer placement, memory
-pools, configurable clocks, telemetry, ecosystem-specific errors, batching
-optimizations, `no_std` support, or a default I/O implementation.
+Core does not provide peer-driver discovery, a driver registry, native observer
+placement, memory pools, configurable clocks, telemetry, ecosystem-specific
+errors, batching optimizations, `no_std` support, or a default I/O implementation.

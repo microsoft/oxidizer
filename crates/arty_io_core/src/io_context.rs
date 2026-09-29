@@ -11,8 +11,7 @@ use crate::{DriverProvider, ProviderOptions};
 /// driver/context pair on every active worker and completes each driver's zero-wait
 /// initialization cycle before publishing the contexts. Later requests reuse the registration.
 ///
-/// See the [single-worker runtime example] for registration and peer discovery with drivers
-/// that perform no I/O.
+/// See the [single-worker runtime example] for registration with drivers that perform no I/O.
 ///
 /// [single-worker runtime example]: https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_core/examples/single_thread_runtime
 pub trait IoContext: Clone + ThreadAware + 'static {

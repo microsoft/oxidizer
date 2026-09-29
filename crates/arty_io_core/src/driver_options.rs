@@ -5,28 +5,20 @@ use std::fmt;
 
 use thread_aware_core::Thread;
 
-use crate::{DriverHandle, DriverRole, SystemTaskSpawner};
+use crate::{DriverRole, SystemTaskSpawner};
 
 /// Per-worker inputs to [`DriverProvider::create`](crate::DriverProvider::create).
-///
-/// These options may borrow thread-local drivers and are therefore neither [`Send`] nor [`Sync`].
-pub struct DriverOptions<'a> {
+pub struct DriverOptions {
     thread: Thread,
     spawner: SystemTaskSpawner,
-    drivers: Vec<DriverHandle<'a>>,
     role: DriverRole,
 }
 
-impl<'a> DriverOptions<'a> {
+impl DriverOptions {
     /// Creates options for a driver on `thread`.
     #[must_use]
-    pub fn new(thread: Thread, spawner: SystemTaskSpawner, drivers: Vec<DriverHandle<'a>>, role: DriverRole) -> Self {
-        Self {
-            thread,
-            spawner,
-            drivers,
-            role,
-        }
+    pub fn new(thread: Thread, spawner: SystemTaskSpawner, role: DriverRole) -> Self {
+        Self { thread, spawner, role }
     }
 
     /// Returns the worker that will own the driver.
@@ -41,16 +33,6 @@ impl<'a> DriverOptions<'a> {
         &self.spawner
     }
 
-    /// Returns handles to drivers registered earlier on this worker.
-    ///
-    /// The handles appear in runtime-defined order and are valid only for the current call to
-    /// [`DriverProvider::create`](crate::DriverProvider::create). A driver may downcast a handle
-    /// and clone independently owned state from it.
-    #[must_use]
-    pub fn drivers(&self) -> &[DriverHandle<'a>] {
-        &self.drivers
-    }
-
     /// Returns this driver's runtime-assigned waiting role.
     ///
     /// The role is fixed for the driver's lifetime. See [`DriverRole`] for waiting rules.
@@ -60,11 +42,10 @@ impl<'a> DriverOptions<'a> {
     }
 }
 
-impl fmt::Debug for DriverOptions<'_> {
+impl fmt::Debug for DriverOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DriverOptions")
             .field("thread", &self.thread)
-            .field("driver_count", &self.drivers.len())
             .field("role", &self.role)
             .finish_non_exhaustive()
     }

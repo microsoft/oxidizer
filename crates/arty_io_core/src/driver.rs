@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::{Cycle, DriverError, DriverHandle, ShutdownError};
+use crate::{Cycle, DriverError, ShutdownError};
 
 /// A worker-local I/O driver.
 ///
@@ -11,31 +11,15 @@ use crate::{Cycle, DriverError, DriverHandle, ShutdownError};
 /// Dropping a driver must always be memory-safe. State reachable through contexts, callbacks,
 /// observers, or wakers must remain valid independently of the driver.
 pub trait Driver: 'static {
-    /// Returns a borrowed handle for peer discovery.
-    ///
-    /// Peers may clone independently owned state from the handle, but cannot retain its borrow.
-    #[must_use]
-    fn handle(&self) -> DriverHandle<'_>;
-
-    /// Notifies this driver of a newly registered peer before the peer's context is published.
-    ///
-    /// # Panics
-    ///
-    /// Implementations must panic if the peer cannot be integrated: the runtime cannot
-    /// continue a partially connected registration. Report native initialization failures
-    /// during [creation](crate::DriverProvider::create) or the
-    /// [initial cycle](Self::execute_cycle) instead.
-    fn on_peer_registered(&mut self, peer: DriverHandle<'_>);
-
     /// Processes submissions and completions, optionally waiting for I/O.
     ///
     /// The runtime invokes secondaries before the primary, sharing [`Cycle::started_at`] and
     /// [`Cycle::max_wait`]. Only an invocation with [`Cycle::can_block`] set to `true` may block
     /// the worker. Secondaries may arm background waits but must not wait for them to finish.
     ///
-    /// Before publishing a context or notifying peers, the runtime runs a zero-wait cycle with
-    /// `can_block` set to `false`. In this initial call, the driver must establish native
-    /// notification and recheck work queued during construction.
+    /// Before publishing a context, the runtime runs a zero-wait cycle with `can_block` set to
+    /// `false`. In this initial call, the driver must establish native notification and recheck
+    /// work queued during construction.
     ///
     /// Register each native wait with [`Cycle::start_work`] before entering or scheduling it.
     /// Keep its [`PendingWork`](crate::PendingWork) alive until the work ends. The runtime

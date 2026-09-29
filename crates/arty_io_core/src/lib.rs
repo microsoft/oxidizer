@@ -37,7 +37,7 @@
 //!
 //! The runtime clones and relocates providers to their workers, assigns driver roles, and
 //! supplies [`DriverOptions`]. It completes a non-blocking, zero-wait initialization cycle
-//! before publishing a context or notifying peers through [`Driver::on_peer_registered`].
+//! before publishing a context.
 //! It also supplies a [`SystemTaskSpawner`] for blocking system work.
 //!
 //! Each logical cycle uses a shared time snapshot and wait bound. The runtime invokes
@@ -55,7 +55,7 @@
 //!
 //! # Example and reference
 //!
-//! The [single-thread runtime example] demonstrates registration and peer discovery. Its sample
+//! The [single-thread runtime example] demonstrates registration and driver roles. Its sample
 //! drivers perform no I/O and use a no-op tracker; a runtime serving native I/O must implement
 //! the coordination described above.
 //!
@@ -67,7 +67,6 @@
 mod cycle;
 mod driver;
 mod driver_error;
-mod driver_handle;
 mod driver_options;
 mod driver_role;
 mod io_context;
@@ -81,7 +80,6 @@ mod system_task_spawner;
 pub use cycle::Cycle;
 pub use driver::Driver;
 pub use driver_error::DriverError;
-pub use driver_handle::DriverHandle;
 pub use driver_options::DriverOptions;
 pub use driver_role::DriverRole;
 pub use io_context::IoContext;

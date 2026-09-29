@@ -36,14 +36,12 @@ Imagine a network driver and a file driver sharing a worker.
 ### Make each library ready before handing it to the application
 
 The first context request creates a driver/context pair on every active worker.
-Before publishing it, the runtime runs a non-blocking initialization cycle and
-finishes peer notifications. The request returns only when all workers are
-ready, so application code cannot see a half-initialized driver.
+Before publishing it, the runtime runs a non-blocking initialization cycle.
+The request returns only when all workers are ready, so application code cannot
+see a half-initialized driver.
 
 Later requests reuse the registration. Concrete context types distinguish
-registrations, allowing different driver versions to coexist. Peer discovery
-lets compatible drivers share independently owned native resources without
-requiring the runtime to understand them.
+registrations, allowing different driver versions to coexist.
 
 ### Give every driver a turn before sleeping
 
@@ -104,9 +102,8 @@ calls return and continues cleanup after an error.
 ## Make failures explicit
 
 Initialization errors roll back the unpublished pair. Infrastructure errors
-during normal cycles shut down the worker's drivers. Peer integration failure
-panics because partially connected registration cannot continue. Shutdown
-failure returns `ShutdownError` without relaxing memory safety.
+during normal cycles shut down the worker's drivers. Shutdown failure returns
+`ShutdownError` without relaxing memory safety.
 
 These are infrastructure failures, distinct from individual I/O errors.
 
@@ -125,8 +122,18 @@ Registries, type erasure, thread placement, cross-worker registration atomicity,
 shutdown ordering, memory pools, clocks, and telemetry remain outside this
 initial agreement.
 
+## Potential improvement: driver awareness
+
+A future extension could let drivers discover peers on the same worker and
+negotiate shared native resources, such as a completion port. Borrowed peer
+handles during creation and notifications after registration could reduce
+duplicate resources or observer threads without putting native details in the
+runtime. This would need clear lifetime, publication, and failure rules.
+Peer discovery, peer handles, and registration callbacks are not part of the
+current API.
+
 ## What the example demonstrates
 
 The [single-thread example](../examples/single_thread_runtime/main.rs) demonstrates
-registration and peer discovery only. Its drivers perform no I/O and its tracker
+registration and driver roles only. Its drivers perform no I/O and its tracker
 is a no-op, not a reference implementation of completion coordination.

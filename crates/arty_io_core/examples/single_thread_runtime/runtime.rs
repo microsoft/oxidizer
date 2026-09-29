@@ -8,8 +8,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use arty_io_core::{
-    Cycle, Driver, DriverError, DriverHandle, DriverOptions, DriverProvider, DriverRole, IoContext, ProviderOptions, ShutdownError,
-    SystemTaskSpawner,
+    Cycle, Driver, DriverError, DriverOptions, DriverProvider, DriverRole, IoContext, ProviderOptions, ShutdownError, SystemTaskSpawner,
 };
 use thread_aware_core::{Thread, ThreadAware};
 
@@ -27,8 +26,6 @@ enum Command {
 }
 
 trait ErasedDriver {
-    fn handle(&self) -> DriverHandle<'_>;
-    fn on_peer_registered(&mut self, peer: DriverHandle<'_>);
     fn role(&self) -> DriverRole;
     fn execute_cycle(&mut self, cycle: &mut Cycle<'_>) -> Result<(), DriverError>;
     fn shutdown(self: Box<Self>) -> Result<(), ShutdownError>;
@@ -40,14 +37,6 @@ struct RegisteredDriver<D> {
 }
 
 impl<D: Driver> ErasedDriver for RegisteredDriver<D> {
-    fn handle(&self) -> DriverHandle<'_> {
-        Driver::handle(&self.driver)
-    }
-
-    fn on_peer_registered(&mut self, peer: DriverHandle<'_>) {
-        Driver::on_peer_registered(&mut self.driver, peer);
-    }
-
     fn role(&self) -> DriverRole {
         self.role
     }
@@ -176,23 +165,17 @@ fn run_worker(worker: &Thread, spawner: &SystemTaskSpawner, commands: &mpsc::Rec
     }
 }
 
-fn driver_options<'a>(worker: &Thread, spawner: &SystemTaskSpawner, drivers: &'a DriverStore, can_be_primary: bool) -> DriverOptions<'a> {
-    let driver_handles = drivers.iter().map(|driver| driver.handle()).collect();
+fn driver_options(worker: &Thread, spawner: &SystemTaskSpawner, drivers: &DriverStore, can_be_primary: bool) -> DriverOptions {
     let role = if can_be_primary && !drivers.iter().any(|driver| driver.role() == DriverRole::Primary) {
         DriverRole::Primary
     } else {
         DriverRole::Secondary
     };
-    DriverOptions::new(worker.clone(), spawner.clone(), driver_handles, role)
+    DriverOptions::new(worker.clone(), spawner.clone(), role)
 }
 
 fn register_driver<D: Driver>(drivers: &mut DriverStore, driver: D, role: DriverRole) {
     drivers.push(Box::new(RegisteredDriver { driver, role }));
-    let (driver, existing_drivers) = drivers.split_last_mut().expect("the new driver was pushed immediately above");
-    let driver = driver.handle();
-    for existing_driver in existing_drivers {
-        existing_driver.on_peer_registered(driver);
-    }
 }
 
 fn execute_driver_cycle(drivers: &mut DriverStore, coordinator: &mut Coordinator) {
@@ -240,9 +223,7 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
-    use arty_io_core::{
-        Cycle, Driver, DriverError, DriverHandle, DriverOptions, DriverProvider, DriverRole, IoContext, ProviderOptions, ShutdownError,
-    };
+    use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, DriverProvider, DriverRole, IoContext, ProviderOptions, ShutdownError};
     use thread_aware_core::{Thread, ThreadAware};
 
     use super::{Runtime, register_driver};
@@ -289,7 +270,7 @@ mod tests {
         type Context = BlockingCloneContext;
         type Driver = SampleDriver;
 
-        fn create(self, _options: DriverOptions<'_>) -> Result<(Self::Driver, Self::Context), DriverError> {
+        fn create(self, _options: DriverOptions) -> Result<(Self::Driver, Self::Context), DriverError> {
             panic!("the fixture context is inserted directly into the cache");
         }
     }
@@ -300,12 +281,6 @@ mod tests {
     }
 
     impl Driver for ShutdownProbe {
-        fn handle(&self) -> DriverHandle<'_> {
-            DriverHandle::new(self)
-        }
-
-        fn on_peer_registered(&mut self, _peer: DriverHandle<'_>) {}
-
         fn execute_cycle(&mut self, _cycle: &mut Cycle<'_>) -> Result<(), DriverError> {
             Ok(())
         }

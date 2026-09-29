@@ -28,9 +28,6 @@ pub trait DriverProvider: Clone + ThreadAware + Sized + 'static {
     /// without waiting for another runtime worker. The context may outlive the driver and must
     /// reject operations after admission closes.
     ///
-    /// Earlier peers are available through [`DriverOptions::drivers`]. Their borrowed handles
-    /// may be used to clone independently owned state.
-    ///
     /// The provider must not publish the context. The runtime first completes a zero-wait
     /// [`Driver::execute_cycle`] to establish notification and finish initialization.
     ///
@@ -38,5 +35,5 @@ pub trait DriverProvider: Clone + ThreadAware + Sized + 'static {
     ///
     /// Returns an error if initialization fails. Partial state must be safe to drop, with no context
     /// published; the runtime rolls back the pair.
-    fn create(self, options: DriverOptions<'_>) -> Result<(Self::Driver, Self::Context), DriverError>;
+    fn create(self, options: DriverOptions) -> Result<(Self::Driver, Self::Context), DriverError>;
 }
