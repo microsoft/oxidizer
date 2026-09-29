@@ -124,7 +124,7 @@ impl Runtime {
         })?;
         reply_rx
             .recv()
-            .map_err(|_| DriverError::from_message("runtime worker stopped before completing context registration"))?
+            .map_err(|error| DriverError::from_message(format!("runtime worker stopped before completing context registration: {error}")))?
     }
 
     fn run(
@@ -133,7 +133,7 @@ impl Runtime {
     ) -> Result<(), DriverError> {
         self.commands
             .send(Box::new(operation))
-            .map_err(|_| DriverError::from_message("runtime worker has stopped"))
+            .map_err(|error| DriverError::from_message(format!("runtime worker has stopped: {error}")))
     }
 
     pub(super) fn shutdown(self) -> RuntimeResult {
@@ -403,7 +403,7 @@ mod tests {
         );
         assert_eq!(
             runtime.get_context::<SampleContext>().err().unwrap().to_string(),
-            "runtime worker has stopped"
+            "runtime worker has stopped: sending on a closed channel"
         );
         assert!(
             runtime.contexts.lock().unwrap()[&TypeId::of::<SampleContext>()]
