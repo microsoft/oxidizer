@@ -2,6 +2,12 @@
 
 Measured on 2026-09-26.
 
+This is a historical report for the coordinator implementation at
+[`51dbb9aa`](https://github.com/microsoft/oxidizer/commit/51dbb9aa2cbe0a325f86fe3141c9e1b8381f21de).
+The later runtime-owned work-tracking refactor removed that coordinator and
+replaced its benchmark. These results do not describe the current contracts-only
+API. The measured source remains available at the pinned revision below.
+
 ## Result
 
 The primary-only cycle uses **47.3% fewer instructions**, and the
@@ -14,7 +20,7 @@ The baseline is **e06608ce39c058f7cf2c28c3a4bf87813519bc0e**
 (`fix(arty_io_core): retire completed work callbacks`). This includes the
 behavioral changes and tests fetched during the campaign. Earlier measurements
 against `300898f4` were superseded, not mixed into the final comparison.
-The optimized implementation is the coordinator change accompanying this report.
+The optimized implementation is **51dbb9aa2cbe0a325f86fe3141c9e1b8381f21de**.
 
 Across the 27 measured cases, instruction counts improve in **21**, remain
 unchanged in **5**, and increase by **one instruction** in `start_work`
@@ -41,8 +47,9 @@ file, compiler, profile, and machine. The baseline was rebuilt after the final
 benchmark formatting and diagnostic-message changes. Independent repeat runs
 reproduced **every instruction count on both sides**.
 
-The benchmark target is
-`crates/arty_io_core/benches/arty_io_core_coordination.rs`. Metabench runs the
+The measured [benchmark source](https://github.com/microsoft/oxidizer/blob/51dbb9aa2cbe0a325f86fe3141c9e1b8381f21de/crates/arty_io_core/benches/arty_io_core_coordination.rs)
+is `crates/arty_io_core/benches/arty_io_core_coordination.rs` at `51dbb9aa`,
+not the file at the current branch head. Metabench runs the
 same operations under Gungraun, Criterion, and allocation tracking. The original
 two composite workloads are retained; additional cases isolate cycle boundaries,
 token creation and completion, callback retirement, registration, and interruption
@@ -194,9 +201,24 @@ were not run.
 
 ## Reproduction and artifacts
 
-From a Linux checkout with Gungraun runner 0.19.4 and Valgrind installed:
+From the repository root on Linux, prepare separate checkouts of the measured
+revisions. Copy only the expanded benchmark into the baseline checkout; the
+manifests and dependency lock file are identical at these two revisions.
 
 ```sh
+before=e06608ce39c058f7cf2c28c3a4bf87813519bc0e
+after=51dbb9aa2cbe0a325f86fe3141c9e1b8381f21de
+git worktree add --detach ../coordinator-before "$before"
+git worktree add --detach ../coordinator-after "$after"
+git show "$after:crates/arty_io_core/benches/arty_io_core_coordination.rs" \
+  > ../coordinator-before/crates/arty_io_core/benches/arty_io_core_coordination.rs
+```
+
+Use the compiler and target settings listed above. With Gungraun runner 0.19.4
+and Valgrind installed, run the following from the optimized checkout's root:
+
+```sh
+cd ../coordinator-after
 GUNGRAUN_RUNNER="$PWD/target/coordinator-tools/bin/gungraun-runner" \
 cargo bench --locked --package arty_io_core \
   --bench arty_io_core_coordination -- \
@@ -212,13 +234,14 @@ The campaign installed that runner into `target/coordinator-tools` using
 without replacing the machine's older global runner. If the matching runner is
 already on `PATH`, the `GUNGRAUN_RUNNER` assignment is unnecessary.
 
-For the before run, use `e06608ce` with the same expanded benchmark file, without
-the coordinator/cycle implementation changes, and select
+For the before run, execute the same command from the prepared
+`coordinator-before` checkout, using the same runner executable and selecting
 `target/coordinator-before` as the output. Do not compare the old two-case
 benchmark binary with the expanded benchmark binary.
 
 Cargo runs this benchmark from its package directory. The local machine-readable
-reports are therefore:
+reports are therefore at these paths within their respective checkouts
+(use the `-repeat` output names for repeat runs):
 
 - `crates/arty_io_core/target/coordinator-before.json`
 - `crates/arty_io_core/target/coordinator-after.json`
