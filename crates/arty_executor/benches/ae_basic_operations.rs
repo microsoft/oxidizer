@@ -31,7 +31,7 @@ use std::pin::{Pin, pin};
 use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
-use arty_executor::testing::new_guarded_executor;
+use arty_executor::testing::{AWAKENED_CAPACITY, new_guarded_executor};
 use arty_executor::{CycleOutcome, Executor, JoinHandle, TaskSet};
 use criterion::{BatchSize, BenchmarkId, Criterion};
 use gungraun::{Callgrind, CallgrindMetrics, LibraryBenchmarkConfig};
@@ -46,8 +46,8 @@ const BURST_COUNT: usize = 10_000;
 const MODERATE_OCCUPANCY: usize = 32;
 // Prime both sides of double-buffer reuse before measuring steady-state work.
 const WARM_UP_OPERATIONS: usize = 2;
-// Exceed the current 1024-entry wake queue without requiring thousands of tasks.
-const OVERFLOW_WAKE_COUNT: usize = 1_025;
+// Exceed the wake queue's capacity without requiring a separate task for every notification.
+const OVERFLOW_WAKE_COUNT: usize = AWAKENED_CAPACITY + 1;
 
 // Bound live executors independently of Criterion's sample size, while
 // amortizing the timer overhead across several elementary operations.
