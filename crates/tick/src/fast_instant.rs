@@ -122,7 +122,10 @@ mod tests {
     }
 
     #[test]
-    fn platform_time_can_be_read() {
-        _ = platform_time();
+    fn platform_time_advances() {
+        let start = platform_time();
+        // Allow the coarse platform clock to advance by at least one tick.
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(platform_time() > start);
     }
 }
