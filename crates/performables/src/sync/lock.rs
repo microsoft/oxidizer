@@ -720,7 +720,7 @@ impl<T: ?Sized + fmt::Display, M: Mode> fmt::Display for RwLockWriteGuard<'_, T,
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc as StdArc;
+    use std::sync::{Arc as StdArc, TryLockError};
     use std::task::{Wake, Waker};
 
     use super::*;
@@ -770,10 +770,11 @@ mod tests {
     }
 
     #[test]
-    fn native_contended_read_path_acquires_the_released_lock() {
+    fn native_contended_paths_acquire_the_released_lock() {
         let lock = RwLock::<_, Sync>::new(0);
 
-        drop(lock.wait_for_read_native().unwrap());
+        drop(lock.read_result_from_native(Err(TryLockError::WouldBlock)).unwrap());
+        drop(lock.write_result_from_native(Err(TryLockError::WouldBlock)).unwrap());
 
         assert!(lock.try_write().is_some());
     }

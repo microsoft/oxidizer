@@ -1,13 +1,20 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::sync::{LockResult, RwLockReadGuard as NativeReadGuard, RwLockWriteGuard as NativeWriteGuard, TryLockError};
+use std::sync::{LockResult, RwLockReadGuard as NativeReadGuard, RwLockWriteGuard as NativeWriteGuard, TryLockError, TryLockResult};
 
 use super::*;
 
 impl<T: ?Sized> RwLock<T, Sync> {
     pub(in crate::sync) fn read_result_native(&self) -> Result<RwLockReadGuard<'_, T>, PoisonError<RwLockReadGuard<'_, T>>> {
-        match self.raw.try_read() {
+        self.read_result_from_native(self.raw.try_read())
+    }
+
+    pub(in crate::sync) fn read_result_from_native<'a>(
+        &'a self,
+        result: TryLockResult<NativeReadGuard<'a, ()>>,
+    ) -> Result<RwLockReadGuard<'a, T>, PoisonError<RwLockReadGuard<'a, T>>> {
+        match result {
             Ok(raw) => self.acquired_read_native(Ok(raw)),
             Err(TryLockError::Poisoned(error)) => self.acquired_read_native(Err(error)),
             Err(TryLockError::WouldBlock) => self.wait_for_read_native(),
@@ -31,7 +38,14 @@ impl<T: ?Sized> RwLock<T, Sync> {
     }
 
     pub(in crate::sync) fn write_result_native(&self) -> Result<RwLockWriteGuard<'_, T>, PoisonError<RwLockWriteGuard<'_, T>>> {
-        match self.raw.try_write() {
+        self.write_result_from_native(self.raw.try_write())
+    }
+
+    pub(in crate::sync) fn write_result_from_native<'a>(
+        &'a self,
+        result: TryLockResult<NativeWriteGuard<'a, ()>>,
+    ) -> Result<RwLockWriteGuard<'a, T>, PoisonError<RwLockWriteGuard<'a, T>>> {
+        match result {
             Ok(raw) => self.acquired_write_native(Ok(raw)),
             Err(TryLockError::Poisoned(error)) => self.acquired_write_native(Err(error)),
             Err(TryLockError::WouldBlock) => {
