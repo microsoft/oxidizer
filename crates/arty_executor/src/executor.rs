@@ -649,6 +649,7 @@ mod tests {
         let polls = Rc::new(RefCell::new(Vec::new()));
         let mut cycles = Vec::new();
 
+        // Recheck registration order after the active and new-task buffers have been swapped and reused.
         for batch in 0..2 {
             for index in 0..2 {
                 let tasks_for_child = tasks.clone();
@@ -751,6 +752,7 @@ mod tests {
         }
         assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
 
+        // Recheck first-notification order after each cycle clears and reuses the awakened queue.
         for _ in 0..3 {
             polls.borrow_mut().clear();
             for index in [2, 0, 2, 1] {

@@ -32,6 +32,11 @@ use crate::TaskRef;
 /// borrowing rules at minimum. The entire API surface of this type is designed to be used via
 /// shared references.
 ///
+/// The borrowed polling waker is scoped to a shared borrow of the pinned signal and does not
+/// contribute to `waker_count`. Cloning it creates an independently owned, counted waker that may
+/// outlive the poll. The signal must remain pinned until the borrow and all owned wakers are
+/// released; `is_inert()` only reports the absence of owned wakers.
+///
 /// # Thread safety
 ///
 /// The type itself is single-threaded, although the `std::task::Waker` instances obtained
@@ -294,6 +299,30 @@ mod tests {
             fake_task_ref
         ));
 
+        assert!(signal.is_inert());
+    }
+
+    #[test]
+    fn borrowed_waker_reference_count() {
+        let signal = pin!(WakeSignal::fake());
+        let signal = signal.as_ref();
+
+        {
+            // SAFETY: The signal stays pinned until the borrowed waker and its clone are dropped.
+            let waker = unsafe { signal.waker_ref() };
+            assert_eq!(signal.waker_count.load(atomic::Ordering::Relaxed), 0);
+
+            waker.wake_by_ref();
+            assert!(signal.consume_awakened());
+            assert_eq!(signal.waker_count.load(atomic::Ordering::Relaxed), 0);
+
+            let clone = waker.clone();
+            assert_eq!(signal.waker_count.load(atomic::Ordering::Relaxed), 1);
+            drop(clone);
+            assert_eq!(signal.waker_count.load(atomic::Ordering::Relaxed), 0);
+        }
+
+        assert_eq!(signal.waker_count.load(atomic::Ordering::Relaxed), 0);
         assert!(signal.is_inert());
     }
 

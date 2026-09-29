@@ -53,6 +53,8 @@ const OVERFLOW_WAKE_COUNT: usize = 1_025;
 // amortizing the timer overhead across several elementary operations.
 const BATCH_SIZE: BatchSize = BatchSize::NumIterations(32);
 
+/// Prepared fixture shared by all benchmark engines and scenarios, owning the executor,
+/// task registration handle, retained wakers, and join handles.
 // Fields drop in declaration order: all external wakers and join handles must
 // disappear before the guarded executor starts its shutdown loop.
 struct State {
@@ -142,7 +144,7 @@ fn yield_state() -> State {
     state
 }
 
-fn self_woken_state() -> State {
+fn self_awakened_state() -> State {
     let state = yield_state();
     assert_eq!(state.executor.execute_cycle(), CycleOutcome::Continue);
     state
@@ -182,7 +184,7 @@ fn waiting_state(count: usize) -> State {
     state
 }
 
-fn woken_state(occupancy: usize, wake_count: usize) -> State {
+fn awakened_state(occupancy: usize, wake_count: usize) -> State {
     let state = waiting_state(occupancy);
     for waker in &state.wakers[..wake_count] {
         waker.wake_by_ref();
@@ -251,25 +253,25 @@ fn decomposed_cycle_pending(state: &State) -> CycleOutcome {
 
 #[metabench::benchmark(DECOMPOSED_YIELD_CYCLE, DECOMPOSED, "yield_cycle")]
 #[bench::self_wake(&yield_state())]
-#[bench::completion(&self_woken_state())]
+#[bench::completion(&self_awakened_state())]
 fn decomposed_yield_cycle(state: &State) -> CycleOutcome {
     state.executor.execute_cycle()
 }
 
 #[metabench::benchmark(DECOMPOSED_WAKE_BY_REF, DECOMPOSED, "wake_by_ref")]
 #[bench::delivered(&waiting_state(1))]
-#[bench::duplicate(&woken_state(1, 1))]
+#[bench::duplicate(&awakened_state(1, 1))]
 #[bench::overflow(&overflow_wake_state())]
 fn decomposed_wake_by_ref(state: &State) {
     black_box(&state.wakers[0]).wake_by_ref();
 }
 
-#[metabench::benchmark(DECOMPOSED_CYCLE_WOKEN, DECOMPOSED, "cycle_woken")]
-#[bench::one_of_1(&woken_state(1, 1))]
-#[bench::one_of_32(&woken_state(MODERATE_OCCUPANCY, 1))]
-#[bench::all_32(&woken_state(MODERATE_OCCUPANCY, MODERATE_OCCUPANCY))]
+#[metabench::benchmark(DECOMPOSED_CYCLE_AWAKENED, DECOMPOSED, "cycle_awakened")]
+#[bench::one_of_1(&awakened_state(1, 1))]
+#[bench::one_of_32(&awakened_state(MODERATE_OCCUPANCY, 1))]
+#[bench::all_32(&awakened_state(MODERATE_OCCUPANCY, MODERATE_OCCUPANCY))]
 #[bench::overflow(&overflow_cycle_state())]
-fn decomposed_cycle_woken(state: &State) -> CycleOutcome {
+fn decomposed_cycle_awakened(state: &State) -> CycleOutcome {
     state.executor.execute_cycle()
 }
 
@@ -395,24 +397,34 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     prepared!(DECOMPOSED_CYCLE_PENDING, "first_poll", pending_state(), decomposed_cycle_pending);
     prepared!(DECOMPOSED_CYCLE_PENDING, "inactive", inactive_state(), decomposed_cycle_pending);
     prepared!(DECOMPOSED_YIELD_CYCLE, "self_wake", yield_state(), decomposed_yield_cycle);
-    prepared!(DECOMPOSED_YIELD_CYCLE, "completion", self_woken_state(), decomposed_yield_cycle);
+    prepared!(
+        DECOMPOSED_YIELD_CYCLE,
+        "completion",
+        self_awakened_state(),
+        decomposed_yield_cycle
+    );
     prepared!(DECOMPOSED_WAKE_BY_REF, "delivered", waiting_state(1), decomposed_wake_by_ref);
-    prepared!(DECOMPOSED_WAKE_BY_REF, "duplicate", woken_state(1, 1), decomposed_wake_by_ref);
+    prepared!(DECOMPOSED_WAKE_BY_REF, "duplicate", awakened_state(1, 1), decomposed_wake_by_ref);
     prepared!(DECOMPOSED_WAKE_BY_REF, "overflow", overflow_wake_state(), decomposed_wake_by_ref);
-    prepared!(DECOMPOSED_CYCLE_WOKEN, "one_of_1", woken_state(1, 1), decomposed_cycle_woken);
+    prepared!(DECOMPOSED_CYCLE_AWAKENED, "one_of_1", awakened_state(1, 1), decomposed_cycle_awakened);
     prepared!(
-        DECOMPOSED_CYCLE_WOKEN,
+        DECOMPOSED_CYCLE_AWAKENED,
         "one_of_32",
-        woken_state(MODERATE_OCCUPANCY, 1),
-        decomposed_cycle_woken
+        awakened_state(MODERATE_OCCUPANCY, 1),
+        decomposed_cycle_awakened
     );
     prepared!(
-        DECOMPOSED_CYCLE_WOKEN,
+        DECOMPOSED_CYCLE_AWAKENED,
         "all_32",
-        woken_state(MODERATE_OCCUPANCY, MODERATE_OCCUPANCY),
-        decomposed_cycle_woken
+        awakened_state(MODERATE_OCCUPANCY, MODERATE_OCCUPANCY),
+        decomposed_cycle_awakened
     );
-    prepared!(DECOMPOSED_CYCLE_WOKEN, "overflow", overflow_cycle_state(), decomposed_cycle_woken);
+    prepared!(
+        DECOMPOSED_CYCLE_AWAKENED,
+        "overflow",
+        overflow_cycle_state(),
+        decomposed_cycle_awakened
+    );
     decomposed.finish();
 
     let mut slow = criterion.benchmark_group(SLOW);
@@ -451,7 +463,7 @@ metabench::main!(
         DECOMPOSED_CYCLE_PENDING,
         DECOMPOSED_YIELD_CYCLE,
         DECOMPOSED_WAKE_BY_REF,
-        DECOMPOSED_CYCLE_WOKEN,
+        DECOMPOSED_CYCLE_AWAKENED,
         BASIC_SPAWN_AND_COMPLETE_ONE,
         BASIC_YIELD_ONE,
         SLOW_SPAWN_AND_COMPLETE_ONE_TIMES_MANY,
