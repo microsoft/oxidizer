@@ -1,48 +1,14 @@
 # Completion coordination across I/O drivers
 
-**Design exploration beyond the role contract.** [DESIGN.md](DESIGN.md) and
-[REQUIREMENTS.md](REQUIREMENTS.md) describe the existing API. This document
-explores an alternative completion boundary; its conceptual operations are not
-APIs implemented by `arty_io_core`.
+An overview of technologies for coordinating completion notifications from
+independent I/O sources on Windows and Linux. This is a technology survey,
+not a crate API or implementation proposal.
 
-The existing role contract permits at most one primary, and only providers that
-opt in may receive that role. When no primary exists, the runtime retains its
-own worker-parking path.
+## The coordination problem
 
-## Recommendation
-
-Keep independently registered drivers, but separate servicing I/O from owning
-the runtime worker's blocking wait. Introduce a runtime-owned **completion
-coordinator** that connects native notifications to the drivers that need
-service.
-
-Compatible Windows drivers can participate in a shared I/O completion port
-(IOCP). Linux drivers can retain independent `io_uring` instances while their
-notification sources participate in one wait. Dedicated completion threads
-remain an explicit fallback for incompatible blocking sources, rather than an
-automatic consequence of registering another driver.
-
-Unify notification, scheduling, and lifetime rules, not drivers' operation
-types, buffer layouts, or private completion queues. Sharing the coordination
-contract still requires compatible versions of `arty_io_core`; it does not
-provide interoperability between incompatible copies of the contract itself.
-
-## Why the current boundary is insufficient
-
-The current [driver interface](../src/driver.rs) gives every driver the same
-maximum wait, invokes secondaries before the primary, and uses runtime-owned coordination.
-Secondaries schedule blocking observation on background threads. This supplies:
-
-```text
-runtime or secondary activity -> interrupt registered waits
-```
-
-The remaining question is whether compatible drivers should additionally share
-native collection infrastructure:
-
-```text
-native source needs service -> shared collector -> service its driver
-```
+Independent drivers can own their operation formats, buffers, and completion
+queues while sharing a thread that waits for work. The challenge is connecting
+every source's notification to that waiting thread.
 
 Consider two drivers whose completions are published to tasks only when their
 owner thread processes them:
@@ -55,29 +21,12 @@ owner thread processes them:
 5. B cannot publish the task wake until the worker services B.
 ```
 
-B's background observer and runtime coordination solve progress, but may add a
-thread and cross-thread delivery. Native sharing can avoid that overhead when
-drivers are compatible.
-
-The runtime begins coordination once per logical cycle, not between driver
-calls. Registration initialization is a separate completed zero-wait cycle.
-Drivers synchronously register each native interruption waker through
-`Cycle::start_work`, which forwards the waker to the runtime's `PendingWorkTracker`
-and returns a non-cloneable `PendingWork` value.
-A secondary moves the handle to off-thread work and completes or drops it when
-that work ends, after publishing any results. Both actions notify the runtime.
-After the primary returns, the runtime interrupts remaining waits and waits for
-all registered work before advancing. The shared crate supplies the ownership
-handle, not the runtime's synchronization or interruption implementation.
-
-Finite waits can bound this delay, but introduce polling and latency.
+Without a notification path from B to the waiting thread, B cannot make
+progress. Finite waits can bound this delay, but introduce polling and latency.
 Zero-duration scans avoid blocking on the wrong driver but consume CPU while
 idle. A dedicated observer solves progress at the cost of threads and possible
-cross-thread completion delivery.
-
-The [single-thread example](../examples/single_thread_runtime/runtime.rs) demonstrates
-registration and peer discovery with a no-op tracker. It performs no I/O and
-does not implement the completion protocol described above.
+cross-thread completion delivery. Native sharing can avoid that handoff when
+the sources are compatible.
 
 ## Native constraints
 
@@ -163,72 +112,22 @@ dispatch, and its [waker][mio-waker] posts through the same port. This is useful
 structural precedent for shared native collection. It is not a reason to replace
 completion-based I/O with a readiness-only API.
 
-## Proposed division of responsibilities
+## Coordination patterns and trade-offs
 
-| Participant | Owns |
-| --- | --- |
-| Consumer context | Typed operations and driver-specific resource access. |
-| Driver | Submission policy, private completion state, operation decoding, and task completion. |
-| Completion coordinator | Source attachment, native collection or readiness, routing, service scheduling, and the worker's blocking wait. |
+| Pattern | Benefit | Limitation |
+| --- | --- | --- |
+| Shared IOCP | Multiple compatible producers feed one collection point. | Requires coordinated handle association and routing before private pointer decoding. |
+| Pollable rings or completion `eventfd`s | Independent Linux rings share a waiting point. | Readiness is a hint; ring-specific progress, draining, and rearming still matter. |
+| Existing callback or completion service | Connects an already observed source to a waiting thread. | Requires a real notification path; wrapping a blocking API in a future does not create one. |
+| Dedicated observer threads | Accommodates incompatible or opaque blocking sources. | Adds thread, synchronization, and possible cross-thread delivery costs. |
+| Round-robin finite waits | Avoids requiring a shared native notification mechanism. | Adds polling and service latency; sequential waits accumulate delay. |
+| One I/O implementation | Centralizes native ownership. | Couples consumers to common operation formats, queue configuration, and resource choices. |
 
-Runtime ownership means ownership of lifetime and scheduling. The native wait
-implementation can live in a platform-specific component; the runtime need not
-depend on a particular transport or concrete I/O driver.
+These patterns can be combined. Native compatibility, thread budgets, locality,
+and active-polling requirements determine which arrangements are practical.
+Sharing a waiting point does not require sharing operation representations.
 
-Per-worker coordination preserves locality, but a provider can still share an
-engine or native sources across instances. A driver registration, a per-worker
-adapter, and a physical completion source are distinct identities. The contract
-must describe source ownership and service affinity rather than require one
-native queue per worker or per driver type.
-
-### Negotiate participation before construction
-
-The provider describes the completion facilities it can use. Runtime policy
-selects a supported arrangement before constructing the thread-local driver.
-The existing absence of a `Send` requirement is preserved.
-
-| Participation | Coordination |
-| --- | --- |
-| Shared completion domain | Supply a native endpoint lease and routing registrations; deliver collected records to their owner. |
-| Pollable source | Wait for readiness, then let the driver drain its private queue. |
-| Externally driven source | Connect an existing callback or completion service to runtime notification. |
-| Exclusive blocking source | Use an explicit dedicated host or reject the arrangement under the runtime's policy. |
-
-Active polling and required service deadlines are additional requirements, not
-capabilities that can be silently approximated by a passive wait.
-
-An existing private IOCP cannot be converted into externally driven I/O merely
-by wrapping it in a future. That mode requires a real notification mechanism.
-Similarly, a failed cooperative attachment must not silently allocate arbitrary
-threads. Thread budgets and fallback policy belong to the runtime.
-
-### Source registration is not context registration
-
-Keep context type identity for lazy acquisition and caching. A separate source
-registration carries an opaque routing identity, service affinity, notification
-connection, and lifetime lease. One driver may attach several sources, and a
-provider-shared source must not acquire competing consumers accidentally.
-
-Windows adapters use these registrations to route native packets before private
-pointer decoding. Linux adapters can instead mark a source ready while leaving
-completion queue ownership with its driver. Native record delivery and readiness
-delivery are different inputs to the same service policy.
-
-Attach routing and establish reliable notification before publishing a usable
-context or acknowledging initialization. Native creation and attachment failures need an
-explicit error and partial-registration cleanup policy. A preliminary capability
-check cannot eliminate resource exhaustion or a later permission failure.
-
-### Service and parking are separate operations
-
-The following describes protocol concepts, not final Rust signatures:
-
-| Operation | Required result or guarantee |
-| --- | --- |
-| Service with a budget | Nonblocking progress, explicit failures, whether immediate work remains, and any required service deadline. |
-| Prepare to wait | Notifications armed and work rechecked, or an indication that the source still needs service. |
-| Collect and route | Deliver readiness or preserved native records to the correct source owner. |
-| Interrupt coordinator | Latch task, control, submission, or lifecycle activity across the transition into a wait. |
+## Progress and parking
 
 Service includes the backend's required submission progress, completion
 processing, and task wakes. Deferred work must have an identified owner
@@ -240,12 +139,6 @@ the source runnable even when no further kernel notification will arrive.
 Separate control packets from operation completions, retain native errors, and
 avoid allocating a new object for every completion merely to cross this
 boundary.
-
-An existing `execute_cycle` call with `max_wait == Duration::ZERO` does not prove that its
-queue is drained. Legacy drivers remain on their declared hosting path until
-they implement the stronger progress and notification guarantees.
-
-### The parking invariant
 
 Before blocking, the coordinator must establish all of the following:
 
@@ -265,32 +158,20 @@ driver service on its supported owner thread, not directly from an arbitrary
 notification callback. A runtime with no attached native sources retains a
 native-I/O-free parking path.
 
-## Cooperative shutdown without a safety protocol
+## Lifetime and shutdown constraints
 
-The current consuming, blocking `shutdown` makes each driver responsible for its
-own progress. A coordinator cannot generally keep servicing other drivers while
-one opaque shutdown call owns its thread. The current contract explicitly
-forbids depending on work that can run only after that call returns.
-
-For coordinated participants, use an owned transition into a runtime-drivable
-draining state. Consuming the running state preserves exactly-once initiation;
-it does not require restoring borrowed shutdown futures that can be initiated
-independently.
-The coordinator closes admission across participants, continues service and
-required system work, and finalizes each participant after draining or an
-explicit failure policy.
-
-Preserve the existing safety requirements:
+Shared collection introduces ownership beyond individual operations. Queued
+notifications, executing callbacks, and registrations can outlive the source
+that initiated them. An implementation needs to account for these lifetimes:
 
 - Admission closure synchronizes with acquiring active-operation ownership.
   A flag check followed by work without active-operation ownership is not a drain
   barrier.
-- Retained contexts remain valid but closed; merely keeping a context alive does
-  not keep graceful shutdown pending.
+- Retained user handles must not access resources already released by shutdown.
 - Operations, callbacks, and operating-system-visible storage retain independent
   ownership. Cancellation is a request, not permission to free native storage.
 - Source leases cover queued and executing dispatches as well as active I/O.
-  Stale wake packets and retained wakers cannot target freed or reused
+  Stale wake packets and retained notification handles cannot target freed or reused
   registrations.
 - Routing generations or tombstones prevent stale dispatch, but do not replace
   ownership of buffers still accessible to the operating system.
@@ -308,50 +189,17 @@ driver-controlled hooks must not expose partially published state or release
 native resources still in use. [Windows cancellation guidance][windows-cancel]
 illustrates why requesting cancellation alone is insufficient.
 
-## Alternatives and trade-offs
-
-| Alternative | Benefit | Limitation |
-| --- | --- | --- |
-| One primary and dedicated hosts for later drivers | Accommodates opaque blocking implementations. | Thread count and completion delivery costs depend on registration count and order. |
-| Round-robin finite waits | Works with the existing combined method. | Adds idle polling and service latency; several sequential waits accumulate delay. |
-| A common raw wait-handle interface | Simple for suitable pollable sources. | Does not compose arbitrary IOCPs or define ownership of already-dequeued records. |
-| One universal I/O implementation | Centralizes native ownership. | Couples unrelated drivers to operation formats, ring configuration, and resource choices. |
-| Capability-based coordinator with explicit fallback | Preserves private driver state while sharing compatible waiting points. | Requires a stronger attachment, progress, and retirement protocol. |
-
-Prefer the final option. Preserve the fused single-driver fast path where
-possible. Sharing a completion domain should remove unnecessary thread handoff,
-not introduce a new thread or per-operation allocation. Its actual performance
-remains a question for concrete implementations, not a property proven by the
-abstract interface.
-
-## Relationship to the existing contract
-
-Keep context-selected providers, lazy acquisition, context caching, and
-thread-local driver ownership. `ProviderOptions` and `DriverOptions` are natural
-places to supply optional coordination facilities without exposing a concrete
-runtime type. Native adapters can provide platform-specific registration while
-the scheduling contract stays independent of operation representations.
-
-The current role and coordinator contract provides a compatibility baseline.
-The rest of this proposal concerns optional native sharing, routing ownership,
-and retirement protocols beyond that baseline.
-
-Open choices include the precise capability and drain interfaces, default
-fallback/thread budgets, and the Linux wait implementation. `epoll` provides a
-straightforward composition point; a coordinating ring is an alternative with
-different submission, cancellation, and registration-lifetime costs.
-
-## Evidence needed before adoption
+## Comparing implementations
 
 A concrete implementation should demonstrate independent native sources making
-progress on one worker, not only two context types being registered. Important
+progress on one worker, not only successful registration. Important
 cases include a hot source beside a sparse source, a completion arriving during
 parking, same-thread and remote interruption, registration during operation,
 budget exhaustion without another notification, and failed partial attachment.
 
-Shutdown scenarios must retain contexts and wakers, race admission with
+Shutdown scenarios must retain user and notification handles, race admission with
 shutdown, include pending native operations, and account for late control
-packets. Thread-local and provider-shared source arrangements both matter.
+packets. Thread-local and shared source arrangements both matter.
 
 Compare zero, one, and several driver configurations for CPU use, thread count,
 allocations, wake frequency, context switches, throughput, and tail latency.

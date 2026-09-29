@@ -140,5 +140,5 @@ is a no-op, not a reference implementation of completion coordination.
 
 The contract does not choose thread pinning, cross-worker registration
 atomicity, shutdown ordering, memory pools, clocks, or telemetry.
-[Completion coordination](COMPLETION_COORDINATION.md) explores native wait
-sharing and routing beyond this contract.
+[Completion coordination](COMPLETION_COORDINATION.md) surveys native notification,
+shared waits, and lifetime constraints independently of this contract.
