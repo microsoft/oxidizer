@@ -2,8 +2,7 @@
 
 Arty catches panics from task factories and task bodies and returns a
 `JoinError`. Awaiting or waiting on the join returns that error rather than
-unwinding the caller. `JoinError::resume_unwind` resumes the original panic
-payload when the caller wants panic propagation.
+unwinding the caller.
 
 Dropping a join neither resumes a panic nor cancels the task. Runtime shutdown
 cancels pending tasks; their joins return a shutdown error, not a task panic.
