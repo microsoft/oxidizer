@@ -582,6 +582,30 @@ mod tests {
     }
 
     #[test]
+    fn contended_poll_start_invalidates_unrecorded_activity() {
+        let _test = crate::tests::test_lock();
+        configure(true);
+        let runtime = register_runtime(RuntimeMetadata::new("poll-contention", 1));
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let task = runtime.handle().register_task(TypeDescriptorId::from_raw(1).unwrap(), None);
+        task.woken();
+        let guard = task.task.activity.data.lock().unwrap();
+
+        let (_, _, queued_since, session) = std::thread::scope(|scope| {
+            scope
+                .spawn(|| task.task.activity.poll_started(&task.task, worker.id()))
+                .join()
+                .unwrap()
+        });
+
+        assert_eq!((queued_since, session), (None, active_recording_session()));
+        assert_eq!(task.task.activity.missed.load(Ordering::Acquire), 2);
+        drop(guard);
+        assert_eq!(state(&task).state, TaskActivityState::Unknown);
+        configure(false);
+    }
+
+    #[test]
     fn repeated_disable_keeps_the_first_observation_boundary_and_terminal_wakes_stay_silent() {
         let _test = crate::tests::test_lock();
         configure(true);
