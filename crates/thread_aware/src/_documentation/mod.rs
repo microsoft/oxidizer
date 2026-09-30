@@ -158,11 +158,11 @@
 //! ## `Clone` does not relocate
 //!
 //! This is the one to internalize first. A thread-aware type typically stores its affinity in a
-//! field that only [`relocate`](crate::ThreadAware::relocate) mutates - and a derived (or otherwise
-//! fieldwise) `Clone` then **copies that stored affinity verbatim**. A hand-written `Clone` could
-//! rebind instead, but the trait neither requires nor guarantees that. Cloning such a value built
-//! on worker A and using the clone on worker B does not move it to B - it stays bound to A,
-//! quietly, until something calls `relocate`.
+//! field that only [`relocate`](crate::ThreadAware::relocate) mutates - and a derived `Clone` then
+//! **copies that stored affinity verbatim**. A hand-written `Clone` could rebind instead, but the
+//! trait neither requires nor guarantees that. Cloning such a value built on worker A and using the
+//! clone on worker B does not move it to B - it stays bound to A, quietly, until something calls
+//! `relocate`.
 //!
 //! ```text
 //! let services = build_on_startup_worker();     // affinity = startup worker
@@ -262,8 +262,9 @@
 //!
 //! `UnderTest` here only exercises the derive's field-forwarding mechanics. Point the same
 //! observe-relocation technique at your *real* type: instantiate it with a recording leaf where it
-//! is generic or injectable, otherwise capture its actual affinity-bearing state before and after
-//! `relocate`. A green test on a stand-in proxy does not prove your production graph relocates.
+//! is generic or dependency-injected, otherwise capture its real affinity-bearing state before and
+//! after `relocate`. A green test on a stand-in proxy does not prove your production graph
+//! relocates.
 //!
 //! # Validating correctness
 //!
