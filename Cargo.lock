@@ -4210,8 +4210,8 @@ name = "performables"
 version = "0.1.0"
 dependencies = [
  "criterion",
- "gungraun",
  "loom",
+ "metabench",
  "mutants",
  "seismograph",
  "serde",

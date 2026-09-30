@@ -1,6 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Criterion-only allocator benchmarks with topology-dependent cases and custom sample timing.
+//!
+//! Metabench intentionally does not own this target: its allocation engine wraps the global
+//! allocator, which would add tracking work to every operation being compared. These workloads
+//! also use `iter_custom` to exclude persistent-worker setup and discover pinned cases from the
+//! host affinity mask at runtime, neither of which maps to Metabench's static benchmark cases.
+
 #![expect(
     clippy::cast_possible_truncation,
     clippy::multiple_unsafe_ops_per_block,
