@@ -1101,10 +1101,8 @@ impl RemoteFreeAvailability {
         Self(available, std::marker::PhantomData)
     }
 
-    fn available_at_finish(self, available: &AtomicBool) -> bool {
-        // Same-thread read-read coherence preserves a positive begin observation.
-        // A missing observation still requires the original finish load.
-        self.0 || available.load(Ordering::Relaxed)
+    const fn recorded_at_begin(self) -> bool {
+        self.0
     }
 }
 
@@ -1118,7 +1116,7 @@ pub(crate) fn begin_remote_free() -> RemoteFreeAvailability {
 }
 
 pub(crate) fn finish_remote_free(availability: RemoteFreeAvailability) {
-    if availability.available_at_finish(&AGGREGATES_AVAILABLE) {
+    if availability.recorded_at_begin() {
         super::remote_counts::record_finished_free();
     }
 }

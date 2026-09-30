@@ -23,10 +23,7 @@ fn positive_witness_survives_another_true_publication() {
     let witness = RemoteFreeAvailability::new(available.load(Ordering::Relaxed));
     available.store(true, Ordering::Release);
 
-    assert_eq!(
-        (available.load(Ordering::Relaxed), witness.available_at_finish(&available)),
-        (true, true)
-    );
+    assert_eq!((available.load(Ordering::Relaxed), witness.recorded_at_begin()), (true, true));
 }
 
 #[test]
@@ -34,23 +31,23 @@ fn missing_witness_keeps_an_unavailable_finish_unrecorded() {
     let available = AtomicBool::new(false);
     let witness = RemoteFreeAvailability::new(available.load(Ordering::Relaxed));
 
-    assert_eq!(
-        (available.load(Ordering::Relaxed), witness.available_at_finish(&available)),
-        (false, false)
-    );
+    assert_eq!((available.load(Ordering::Relaxed), witness.recorded_at_begin()), (false, false));
 }
 
 #[test]
-fn false_to_true_fallback_rejects_a_negative_cache() {
+fn false_to_true_publication_does_not_invent_a_started_free() {
     let available = AtomicBool::new(false);
-    let observed = available.load(Ordering::Relaxed);
-    let witness = RemoteFreeAvailability::new(observed);
+    let witness = RemoteFreeAvailability::new(available.load(Ordering::Relaxed));
+    let pushes_in_progress = AtomicUsize::new(0);
     available.store(true, Ordering::Release);
 
-    // `observed` alone is the deliberately wrong negative-cache control.
+    if witness.recorded_at_begin() {
+        pushes_in_progress.fetch_sub(1, Ordering::Relaxed);
+    }
+
     assert_eq!(
-        (witness.available_at_finish(&available), available.load(Ordering::Relaxed), observed,),
-        (true, true, false)
+        (available.load(Ordering::Relaxed), pushes_in_progress.load(Ordering::Relaxed)),
+        (true, 0)
     );
 }
 
@@ -61,10 +58,7 @@ fn false_reset_is_a_counterexample_to_the_positive_witness_premise() {
     // This reset is confined to this isolated fixture; production never resets.
     available.store(false, Ordering::Release);
 
-    assert_eq!(
-        (witness.available_at_finish(&available), available.load(Ordering::Relaxed)),
-        (true, false)
-    );
+    assert_eq!((witness.recorded_at_begin(), available.load(Ordering::Relaxed)), (true, false));
 }
 
 #[test]
@@ -81,7 +75,7 @@ fn isolated_modulo_sequence_keeps_the_six_event_positions() {
     p.fetch_add(1, Ordering::Relaxed);
     let witness = RemoteFreeAvailability::new(observed);
     let begun = reports();
-    if witness.available_at_finish(&available) {
+    if witness.recorded_at_begin() {
         i.fetch_sub(1, Ordering::Relaxed);
     }
     let finished = reports();
