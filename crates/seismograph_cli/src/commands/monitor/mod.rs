@@ -52,10 +52,11 @@ pub(crate) struct ViewArgs {
 /// Opens the offline snapshot TUI.
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn view(args: ViewArgs) -> Result<(), Error> {
+    let ViewArgs { snapshot_file } = args;
     // Open before entering raw mode so missing files also fail in redirected shells.
-    let file = std::fs::File::open(&args.snapshot_file).map_err(|error| Error::snapshot_file(&args.snapshot_file, error))?;
-    let app = app::App::offline(args.snapshot_file.clone());
-    let loader = offline::Loader::start(args.snapshot_file.clone(), file)?;
+    let file = std::fs::File::open(&snapshot_file).map_err(|error| Error::snapshot_file(&snapshot_file, error))?;
+    let app = app::App::offline(snapshot_file.clone());
+    let loader = offline::Loader::start(snapshot_file, file)?;
     run_terminal(app, Some(loader))
 }
 
@@ -201,7 +202,7 @@ impl fmt::Display for Error {
             Self::Clock(message) => write!(formatter, "system clock failed: {message}"),
             Self::MissingMemorySource => formatter.write_str("Heap telemetry not provided by this application."),
             Self::UnexpectedResponse => formatter.write_str("monitor returned an unexpected response"),
-            Self::SnapshotFile { path, message } => write!(formatter, "failed to open snapshot '{}': {message}", path.display()),
+            Self::SnapshotFile { path, message } => write!(formatter, "failed to load snapshot '{}': {message}", path.display()),
         }
     }
 }
