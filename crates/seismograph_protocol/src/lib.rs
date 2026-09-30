@@ -77,7 +77,7 @@ pub fn write_request(writer: &mut impl Write, request_id: u64, request: &Request
 /// # Errors
 ///
 /// Returns an error when reading fails or the request is malformed.
-/// After an I/O error, the reader may be positioned within a frame and must be
+/// After any error, frame alignment is not guaranteed and the reader must be
 /// discarded rather than reused for another frame.
 pub fn read_request(reader: &mut impl Read) -> Result<(u64, Request), Error> {
     let frame = read_frame(reader, MAX_CONTROL_BYTES)?;
@@ -101,7 +101,7 @@ pub fn write_response(writer: &mut impl Write, request_id: u64, response: &Respo
 /// # Errors
 ///
 /// Returns an error when reading fails or the response is malformed.
-/// After an I/O error, the reader may be positioned within a frame and must be
+/// After any error, frame alignment is not guaranteed and the reader must be
 /// discarded rather than reused for another frame.
 pub fn read_response(reader: &mut impl Read) -> Result<(u64, Response), Error> {
     let frame = read_frame(reader, MAX_SNAPSHOT_BYTES)?;

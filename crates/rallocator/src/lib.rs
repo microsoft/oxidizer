@@ -162,16 +162,17 @@
 //! require Seismograph recording, which can be enabled only around the interval
 //! of interest to limit its overhead.
 //!
-//! Cumulative remote-free and remote-drain counts are updated immediately in
-//! 64 fixed atomic shards, not buffered for 64 events. Reading both counts folds
-//! 128 relaxed loads over an observation interval: concurrent values can be
-//! stale or combine shard histories, rather than describe one common instant.
-//! After writers synchronize and stop, totals are exact modulo `usize`.
-//! Pending and in-progress remote gauges remain scalar atomics. Normal slab
-//! drains logically claim the entire detached list before recycling any node;
-//! retirement still claims nodes individually. A drain count or zero pending
-//! count therefore does not prove physical recycling, reclamation or quiescence.
-//! These lifetime counters are independent of opt-in recording sessions.
+//! Cumulative remote-free and remote-drain counts and the in-progress remote
+//! gauge are updated immediately in 64 fixed atomic shards, not buffered for 64
+//! events. Reading all three folds 192 relaxed loads over an observation
+//! interval: concurrent values can be stale or combine shard histories, rather
+//! than describe one common instant. After writers synchronize and stop, totals
+//! are exact modulo `usize`. The pending remote gauge remains a scalar atomic.
+//! Normal slab drains logically claim the entire detached list before recycling
+//! any node; retirement still claims nodes individually. A drain count or zero
+//! pending count therefore does not prove physical recycling, reclamation or
+//! quiescence. These lifetime counters are independent of opt-in recording
+//! sessions.
 //! The default `caller-symbolization` feature resolves captured instruction
 //! pointers through the optional `backtrace` dependency. Disabling default
 //! features retains caller tracking and raw addresses without in-process symbol
