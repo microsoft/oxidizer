@@ -42,7 +42,7 @@ impl LocalTaskScope {
         Self { _not_send: PhantomData }
     }
 
-    pub(crate) fn close(&self) {
+    pub(crate) fn close() {
         let tasks =
             LOCAL_TASKS.with_borrow_mut(|registered| registered.as_mut().expect("local task scope is installed until drop").tasks.take());
         drop(tasks);

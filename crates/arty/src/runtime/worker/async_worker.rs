@@ -247,7 +247,7 @@ where
     fn begin_shutdown(&mut self) {
         // Destructors of cancelled tasks may try to submit local cleanup work.
         // Close admission before executor cancellation borrows its task storage.
-        self._local_scope.close();
+        LocalTaskScope::close();
         // Drop the thread state, as it may hold references to resources that
         // block executor shutdown (via various futures, waiters, etc).
         self.thread_state = None;

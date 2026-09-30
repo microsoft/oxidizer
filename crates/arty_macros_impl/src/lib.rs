@@ -62,6 +62,7 @@ fn worker_count(mut value: &Expr) -> syn::Result<&syn::LitInt> {
         value = &group.expr;
     }
     if let Expr::Lit(syn::ExprLit { lit: Lit::Int(count), .. }) = value
+        && !count.base10_digits().starts_with('-')
         && !count.base10_digits().chars().all(|digit| digit == '0')
         && matches!(count.suffix(), "" | "usize")
     {
@@ -359,7 +360,10 @@ mod tests {
         for workers in [
             quote!(0),
             quote!(0x0usize),
+            quote!(-0),
             quote!(-1),
+            quote!(-1usize),
+            quote!(-0x10),
             quote!(1u32),
             quote!(1.5),
             quote!("2"),
@@ -376,7 +380,7 @@ mod tests {
                     },
                 )
                 .to_string();
-                assert!(expansion.contains("compile_error"));
+                assert!(expansion.contains("compile_error"), "workers = {workers}: {expansion}");
                 assert!(expansion.contains("nonzero integer literal"), "{expansion}");
             }
         }
