@@ -79,7 +79,6 @@ threadpool = { workspace = true, optional = true }
 tick = { workspace = true, optional = true }
 
 [dev-dependencies]
-all_the_time = { workspace = true }
 arty_executor = { path = "../arty_executor", features = ["test-util"] }
 arty_macros = { path = "../arty_macros" }
 criterion = { workspace = true }

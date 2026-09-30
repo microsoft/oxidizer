@@ -249,7 +249,6 @@ checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 name = "arty"
 version = "0.3.1"
 dependencies = [
- "all_the_time",
  "arty_executor",
  "arty_io_core",
  "arty_macros",
@@ -322,7 +321,6 @@ version = "0.3.1"
 dependencies = [
  "darling",
  "insta",
- "mutants",
  "proc-macro2",
  "quote",
  "syn 3.0.5",
