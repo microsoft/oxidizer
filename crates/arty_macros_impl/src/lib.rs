@@ -10,13 +10,67 @@
 
 use darling::FromMeta;
 use darling::ast::NestedMeta;
-use proc_macro2::TokenStream;
+use proc_macro2::{Span, TokenStream};
 use quote::quote;
-use syn::{ItemFn, Path, parse_quote, parse2};
+use syn::ext::IdentExt;
+use syn::{Expr, Ident, ItemFn, Lit, Path, parse_quote, parse2};
 
 #[derive(Debug, FromMeta)]
 struct Args {
     runtime_path: Option<Path>,
+    #[darling(default, with = "darling::util::parse_expr::preserve_str_literal", map = "Some")]
+    workers: Option<Expr>,
+    #[darling(default, with = "darling::util::parse_expr::preserve_str_literal", map = "Some")]
+    builder: Option<Expr>,
+}
+
+impl Args {
+    fn runtime(&self, runtime_path: &Path, clock: Option<&Ident>) -> syn::Result<TokenStream> {
+        if let Some(builder) = &self.builder {
+            if self.workers.is_some() {
+                return Err(syn::Error::new_spanned(builder, "`builder` cannot be combined with `workers`"));
+            }
+            if clock.is_some() {
+                return Err(syn::Error::new_spanned(
+                    builder,
+                    "`builder` cannot be combined with a ClockControl argument; configure the clock explicitly with RuntimeBuilder",
+                ));
+            }
+            return Ok(quote!(#runtime_path::RuntimeBuilder::build(#builder)));
+        }
+        if self.workers.is_none() && clock.is_none() {
+            return Ok(quote!(#runtime_path::Runtime::new()));
+        }
+        let workers = self.workers.as_ref().map(worker_count).transpose()?;
+        let workers = workers.map(|count| {
+            quote! {
+                .processor_count(#runtime_path::ProcessorCount::at_most(
+                    const {
+                        ::core::num::NonZero::new(#count)
+                            .expect("workers was validated as a nonzero literal by the macro")
+                    }
+                ))
+            }
+        });
+        let clock = clock.map(|binding| quote!(.clock(::core::clone::Clone::clone(&#binding))));
+        Ok(quote!(#runtime_path::Runtime::builder() #workers #clock .build()))
+    }
+}
+
+fn worker_count(mut value: &Expr) -> syn::Result<&syn::LitInt> {
+    while let Expr::Group(group) = value {
+        value = &group.expr;
+    }
+    if let Expr::Lit(syn::ExprLit { lit: Lit::Int(count), .. }) = value
+        && !count.base10_digits().chars().all(|digit| digit == '0')
+        && matches!(count.suffix(), "" | "usize")
+    {
+        return Ok(count);
+    }
+    Err(syn::Error::new_spanned(
+        value,
+        "`workers` must be a nonzero integer literal, optionally suffixed with `usize`; use `builder` for expressions or processor policies",
+    ))
 }
 
 /// Expands the asynchronous runtime entry-point attribute.
@@ -44,7 +98,8 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
         Ok(args) => args,
         Err(error) => return error.write_errors(),
     };
-    let runtime_path = args.runtime_path.unwrap_or_else(|| parse_quote!(::arty::runtime));
+    let default_path = parse_quote!(::arty::runtime);
+    let runtime_path = args.runtime_path.as_ref().unwrap_or(&default_path);
     let sig = &mut input.sig;
     let mut inputs = sig.inputs.iter();
     let fail = move |error: syn::Error| {
@@ -63,11 +118,29 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
     let syn::Type::Path(state_type) = state.ty.as_ref() else {
         return fail(syn::Error::new_spanned(&state.ty, "argument type must be Type::Path"));
     };
+    let state_ident = state_ident.clone();
+    let state_type = state_type.clone();
+    let clock = match inputs.next() {
+        Some(syn::FnArg::Typed(clock)) if test && matches!(clock.ty.as_ref(), syn::Type::Path(_)) => {
+            let syn::Pat::Ident(ident) = clock.pat.as_ref() else {
+                return fail(syn::Error::new_spanned(&clock.pat, "argument must have an identifier"));
+            };
+            if ident.ident.unraw() == state_ident.ident.unraw() {
+                return fail(syn::Error::new_spanned(ident, "arguments must have distinct identifiers"));
+            }
+            Some((ident.clone(), clock.ty.clone()))
+        }
+        Some(extra) => return fail(syn::Error::new_spanned(extra, "unexpected arguments")),
+        None => None,
+    };
     if let Some(extra) = inputs.next() {
         return fail(syn::Error::new_spanned(extra, "unexpected arguments"));
     }
-    let state_ident = state_ident.clone();
-    let state_type = state_type.clone();
+    let clock_binding = Ident::new("__arty_clock_control", Span::mixed_site());
+    let runtime = match args.runtime(runtime_path, clock.as_ref().map(|_| &clock_binding)) {
+        Ok(runtime) => runtime,
+        Err(error) => return fail(error),
+    };
     sig.asyncness = None;
     sig.inputs.clear();
     let mut attrs = input.attrs;
@@ -76,10 +149,22 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
     }
     let visibility = input.vis;
     let body = input.block;
+    let (setup, body) = if let Some((ident, ty)) = clock {
+        (
+            quote!(let #clock_binding = #runtime_path::__private::ClockControl::new();),
+            quote!({
+                let #ident: #ty = #clock_binding;
+                #body
+            }),
+        )
+    } else {
+        (TokenStream::new(), quote!(#body))
+    };
     quote! {
         #(#attrs)*
         #visibility #sig {
-            #runtime_path::Runtime::new()
+            #setup
+            #runtime
                 .expect("failed to create the runtime for the entry point")
                 .run(async move |#state_ident: #state_type| #body)
         }
@@ -135,6 +220,228 @@ mod tests {
                 })
         }
         "#);
+    }
+
+    #[test]
+    fn workers_selects_at_most_the_literal_count() {
+        let expansion = main(
+            quote!(workers = 4usize, runtime_path = ::renamed),
+            quote! {
+                pub async fn run(cx: <App as Types>::Context) -> AppResult {
+                    run(cx).await
+                }
+            },
+        );
+        let expected = quote! {
+            pub fn run() -> AppResult {
+                ::renamed::Runtime::builder()
+                    .processor_count(::renamed::ProcessorCount::at_most(
+                        const {
+                            ::core::num::NonZero::new(4usize)
+                                .expect("workers was validated as a nonzero literal by the macro")
+                        }
+                    ))
+                    .build()
+                    .expect("failed to create the runtime for the entry point")
+                    .run(async move |cx: <App as Types>::Context| { run(cx).await })
+            }
+        };
+        assert_eq!(expansion.to_string(), expected.to_string());
+    }
+
+    #[test]
+    fn builder_expression_preserves_explicit_question_mark_and_result_alias() {
+        let expansion = main(
+            quote!(builder = app_builder()?, runtime_path = ::renamed),
+            quote! {
+                async fn run(cx: Context) -> AppResult {
+                    run(cx).await
+                }
+            },
+        );
+        let expected = quote! {
+            fn run() -> AppResult {
+                ::renamed::RuntimeBuilder::build(app_builder()?)
+                    .expect("failed to create the runtime for the entry point")
+                    .run(async move |cx: Context| { run(cx).await })
+            }
+        };
+        assert_eq!(expansion.to_string(), expected.to_string());
+    }
+
+    #[test]
+    fn controlled_test_shares_one_clock_and_preserves_qualified_types() {
+        let expansion = test(
+            quote!(workers = 1, runtime_path = crate::renamed),
+            quote! {
+                #[ignore = "manual test"]
+                #[should_panic(expected = "original payload")]
+                async fn run(cx: <App as Types>::Context, mut time: <App as Types>::Control) {
+                    run(cx, &mut time).await;
+                }
+            },
+        );
+        let expected = quote! {
+            #[ignore = "manual test"]
+            #[should_panic(expected = "original payload")]
+            #[::core::prelude::v1::test]
+            fn run() {
+                let __arty_clock_control = crate::renamed::__private::ClockControl::new();
+                crate::renamed::Runtime::builder()
+                    .processor_count(crate::renamed::ProcessorCount::at_most(
+                        const {
+                            ::core::num::NonZero::new(1)
+                                .expect("workers was validated as a nonzero literal by the macro")
+                        }
+                    ))
+                    .clock(::core::clone::Clone::clone(&__arty_clock_control))
+                    .build()
+                    .expect("failed to create the runtime for the entry point")
+                    .run(async move |cx: <App as Types>::Context| {
+                        let mut time: <App as Types>::Control = __arty_clock_control;
+                        {
+                            run(cx, &mut time).await;
+                        }
+                    })
+            }
+        };
+        assert_eq!(expansion.to_string(), expected.to_string());
+    }
+
+    #[test]
+    fn controlled_test_without_workers_keeps_default_processor_selection() {
+        let expansion = test(
+            TokenStream::new(),
+            quote! {
+                async fn run(cx: Builtins, time: ClockControl) {
+                    run(cx, time).await;
+                }
+            },
+        );
+        let expansion = expansion.to_string();
+        assert!(expansion.contains(":: arty :: runtime :: Runtime :: builder"));
+        assert!(expansion.contains(":: arty :: runtime :: __private :: ClockControl :: new"));
+        assert!(!expansion.contains("processor_count"));
+    }
+
+    #[test]
+    fn worker_literals_are_not_limited_to_the_macro_hosts_pointer_width() {
+        let forwarded = proc_macro2::TokenTree::Group(proc_macro2::Group::new(proc_macro2::Delimiter::None, quote!(2)));
+        for workers in [
+            quote!(1),
+            quote!(0x10usize),
+            quote!(340282366920938463463374607431768211456),
+            TokenStream::from(forwarded),
+        ] {
+            let expansion = main(
+                quote!(workers = #workers),
+                quote! {
+                    async fn run(cx: Builtins) {}
+                },
+            );
+            assert!(!expansion.to_string().contains("compile_error"));
+        }
+    }
+
+    #[test]
+    fn builder_strings_remain_literals_for_type_checking() {
+        let expansion = main(
+            quote!(builder = "app_builder()"),
+            quote! {
+                async fn run(cx: Builtins) {}
+            },
+        );
+        assert!(expansion.to_string().contains("RuntimeBuilder :: build (\"app_builder()\")"));
+    }
+
+    #[test]
+    fn invalid_worker_counts_report_errors() {
+        for workers in [
+            quote!(0),
+            quote!(0x0usize),
+            quote!(-1),
+            quote!(1u32),
+            quote!(1.5),
+            quote!("2"),
+            quote!(true),
+            quote!(COUNT),
+            quote!(1 + 1),
+            quote!(ProcessorCount::all()),
+        ] {
+            for expand in [main, test] {
+                let expansion = expand(
+                    quote!(workers = #workers),
+                    quote! {
+                        async fn run(cx: Builtins) {}
+                    },
+                )
+                .to_string();
+                assert!(expansion.contains("compile_error"));
+                assert!(expansion.contains("nonzero integer literal"), "{expansion}");
+            }
+        }
+    }
+
+    #[test]
+    fn conflicting_configuration_is_rejected_in_either_order() {
+        for args in [
+            quote!(builder = configure(), workers = 1),
+            quote!(workers = 1, builder = configure()),
+        ] {
+            for expand in [main, test] {
+                let expansion = expand(
+                    args.clone(),
+                    quote! {
+                        async fn run(cx: Builtins) {}
+                    },
+                )
+                .to_string();
+                assert!(expansion.contains("`builder` cannot be combined with `workers`"));
+            }
+        }
+        let expansion = test(
+            quote!(builder = configure()),
+            quote! {
+                async fn run(cx: Builtins, control: ClockControl) {}
+            },
+        )
+        .to_string();
+        assert!(expansion.contains("`builder` cannot be combined with a ClockControl argument"));
+    }
+
+    #[test]
+    fn injected_clock_requires_a_named_owned_second_test_parameter() {
+        for input in [
+            quote!(
+                async fn run(cx: Builtins, _: ClockControl) {}
+            ),
+            quote!(
+                async fn run(cx: Builtins, control: &ClockControl) {}
+            ),
+            quote!(
+                async fn run(cx: Builtins, control: ClockControl, extra: ClockControl) {}
+            ),
+            quote!(
+                async fn run(cx: Builtins, cx: ClockControl) {}
+            ),
+            quote!(
+                async fn run(cx: Builtins, r#cx: ClockControl) {}
+            ),
+        ] {
+            for expand in [main, test] {
+                let expansion = expand(TokenStream::new(), input.clone()).to_string();
+                assert!(expansion.starts_with(&input.to_string()));
+                assert!(expansion.contains("compile_error"), "{expansion}");
+            }
+        }
+        let expansion = main(
+            TokenStream::new(),
+            quote!(
+                async fn run(cx: Builtins, control: ClockControl) {}
+            ),
+        )
+        .to_string();
+        assert!(expansion.contains("unexpected arguments"));
     }
 
     #[test]
@@ -205,6 +512,24 @@ mod tests {
             ),
             (
                 quote!(runtime_path = ::a, runtime_path = ::b),
+                quote!(
+                    async fn run(cx: Builtins) {}
+                ),
+            ),
+            (
+                quote!(workers = 1, workers = 2),
+                quote!(
+                    async fn run(cx: Builtins) {}
+                ),
+            ),
+            (
+                quote!(builder = configure(), builder = configure()),
+                quote!(
+                    async fn run(cx: Builtins) {}
+                ),
+            ),
+            (
+                quote!(builder =),
                 quote!(
                     async fn run(cx: Builtins) {}
                 ),

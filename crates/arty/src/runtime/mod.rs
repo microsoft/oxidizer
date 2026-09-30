@@ -47,3 +47,11 @@ pub use error::Error;
 pub use handle::Runtime;
 #[cfg(feature = "macros")]
 pub use macros::{main, test};
+
+/// Implementation details for the runtime entry-point macros.
+#[cfg(feature = "macros")]
+#[doc(hidden)]
+pub mod __private {
+    #[cfg(any(test, feature = "test-util"))]
+    pub use crate::time::ClockControl;
+}

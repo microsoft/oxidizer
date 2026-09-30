@@ -32,6 +32,7 @@ arty_macros_impl = { workspace = true }
 
 [dev-dependencies]
 futures = { workspace = true, features = ["executor"] }
+tick = { path = "../tick", features = ["test-util"] }
 
 [lints]
 workspace = true

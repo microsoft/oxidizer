@@ -312,6 +312,7 @@ version = "0.3.1"
 dependencies = [
  "arty_macros_impl",
  "futures",
+ "tick",
 ]
 
 [[package]]
