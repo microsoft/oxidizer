@@ -4,5 +4,4 @@ Panic propagation, cancellation, blocking restrictions, and construction failure
 are documented in `arty::documentation::lifecycle`
 ([rustdoc source](../src/documentation/lifecycle.rs)).
 
-Individual runtime and join APIs retain their own panic conditions. This page is
-retained for existing links, not as a separate panic policy.
+Each runtime and join method's **Panics** section lists its caller restrictions.

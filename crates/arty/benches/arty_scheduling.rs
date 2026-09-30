@@ -15,7 +15,6 @@
 
 use std::future::poll_fn;
 use std::hint::black_box;
-use std::num::NonZeroUsize;
 use std::pin::{Pin, pin};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
@@ -36,7 +35,7 @@ const WORKERS: [usize; 2] = [1, 4];
 // Neither deadline is reached during a benchmark. The background timer keeps every request
 // timeout from being the earliest deadline, as in a server that always has a shorter timer armed.
 const BACKGROUND_TIMEOUT: Duration = Duration::from_secs(30);
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+const REQUEST_TIMEOUT: Duration = Duration::from_mins(1);
 
 #[derive(Clone, Copy, Debug)]
 enum Workload {
@@ -90,9 +89,7 @@ struct ArtyCase {
 impl ArtyCase {
     fn new(workers: usize, count: usize, workload: Workload) -> Self {
         let runtime = Runtime::builder()
-            .processor_count(ProcessorCount::exactly(
-                NonZeroUsize::new(workers).expect("benchmark worker counts are nonzero"),
-            ))
+            .processor_count(ProcessorCount::exactly(workers))
             .blocking_pool_policy(BlockingPoolPolicy::shared(BLOCKING_THREADS))
             .build()
             .expect("benchmark requires the selected number of available processors");

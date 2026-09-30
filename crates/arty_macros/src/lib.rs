@@ -5,32 +5,34 @@
 
 //! Entry-point macros for [`arty`](https://docs.rs/arty).
 //!
-//! Enable the `macros` feature in Arty and use `#[arty::main]` or `#[arty::test]`.
-//! Each annotated asynchronous function takes one owned `arty::runtime::Builtins` argument.
-//! Use `runtime_path = ::renamed_arty::runtime` for a renamed or re-exported runtime.
+//! Enable Arty's `macros` feature and use `#[arty::main]` or `#[arty::test]`.
+//! You do not need to depend on this companion crate directly.
 //!
-//! - `workers = N` limits asynchronous workers to at most the nonzero integer literal `N`.
-//!   This does not limit blocking-task pools or change the runtime's default when omitted.
-//! - `builder = expression` uses an existing `arty::runtime::RuntimeBuilder`, evaluated once
-//!   on the calling thread. It cannot be combined with `workers`.
-//! - Tests may opt into simulated time by adding an owned `arty::time::ClockControl` as
-//!   their second parameter. This requires Arty's `test-util` feature, starts with manual
-//!   advancement, and cannot be combined with `builder`.
+//! Both attributes start a runtime, pass its worker capabilities to an
+//! asynchronous function, and shut down when that function returns. Options
+//! select a worker limit, a custom runtime builder, or a renamed runtime module.
 //!
-//! See the [`main`](https://docs.rs/arty/latest/arty/attr.main.html) and
-//! [`test`](https://docs.rs/arty/latest/arty/attr.test.html) documentation in Arty
-//! for examples, clock semantics, and construction-error behavior.
+//! The application-facing references are
+//! [`arty::main`](https://docs.rs/arty/latest/arty/attr.main.html) and
+//! [`arty::test`](https://docs.rs/arty/latest/arty/attr.test.html). They contain
+//! runnable examples, configuration syntax, and failure conditions.
 
 use proc_macro::TokenStream;
 
 /// Runs an asynchronous entry point on an Arty runtime.
+///
+/// See [`arty::main`](https://docs.rs/arty/latest/arty/attr.main.html) for the
+/// required signature, configuration, examples, and panic behavior.
 #[proc_macro_attribute]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub fn main(args: TokenStream, item: TokenStream) -> TokenStream {
     arty_macros_impl::main(args.into(), item.into()).into()
 }
 
-/// Runs an asynchronous test on an Arty runtime, preserving test attributes.
+/// Runs an asynchronous test on an Arty runtime.
+///
+/// See [`arty::test`](https://docs.rs/arty/latest/arty/attr.test.html) for the
+/// required signature, configuration, controlled-time examples, and panic behavior.
 #[proc_macro_attribute]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub fn test(args: TokenStream, item: TokenStream) -> TokenStream {

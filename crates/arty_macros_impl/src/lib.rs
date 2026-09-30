@@ -4,9 +4,15 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
-//! Implementation of [`arty_macros`](https://docs.rs/arty_macros).
+//! Token expansion for Arty's entry-point attributes.
 //!
-//! Applications should use the entry-point macros re-exported by `arty`.
+//! This companion crate provides the expansion functions used by
+//! [`arty_macros`](https://docs.rs/arty_macros). Application code should enable
+//! Arty's `macros` feature and use its `main` and `test` attributes instead.
+//!
+//! [`main()`] expands an asynchronous entry point; [`test()`] additionally registers
+//! the function with Rust's test harness. Invalid input produces compiler
+//! diagnostic tokens rather than a runtime error.
 
 use darling::FromMeta;
 use darling::ast::NestedMeta;
@@ -44,12 +50,7 @@ impl Args {
         let workers = self.workers.as_ref().map(worker_count).transpose()?;
         let workers = workers.map(|count| {
             quote! {
-                .processor_count(#runtime_path::ProcessorCount::at_most(
-                    const {
-                        ::core::num::NonZero::new(#count)
-                            .expect("workers was validated as a nonzero literal by the macro")
-                    }
-                ))
+                .processor_count(#runtime_path::ProcessorCount::at_most(#count))
             }
         });
         let clock = clock.map(|binding| quote!(.clock(::core::clone::Clone::clone(&#binding))));
@@ -63,24 +64,69 @@ fn worker_count(mut value: &Expr) -> syn::Result<&syn::LitInt> {
     }
     if let Expr::Lit(syn::ExprLit { lit: Lit::Int(count), .. }) = value
         && !count.base10_digits().starts_with('-')
-        && !count.base10_digits().chars().all(|digit| digit == '0')
         && matches!(count.suffix(), "" | "usize")
     {
         return Ok(count);
     }
     Err(syn::Error::new_spanned(
         value,
-        "`workers` must be a nonzero integer literal, optionally suffixed with `usize`; use `builder` for expressions or processor policies",
+        "`workers` must be a nonnegative integer literal, optionally suffixed with `usize`; use `builder` for expressions or processor policies",
     ))
 }
 
-/// Expands the asynchronous runtime entry-point attribute.
+/// Expands an asynchronous entry-point function into synchronous runtime setup.
+///
+/// `args` contains the attribute's configuration tokens, and `item` contains the
+/// annotated asynchronous function. The returned tokens define the entry point
+/// or report invalid syntax with compiler diagnostics.
+///
+/// This is the implementation hook for `arty_macros::main`, not an application
+/// entry point. See [`arty::main`](https://docs.rs/arty/latest/arty/attr.main.html)
+/// for the supported configuration and generated function's behavior.
+///
+/// # Examples
+///
+/// ```
+/// use quote::quote;
+///
+/// let expanded = arty_macros_impl::main(
+///     quote!(),
+///     quote!(
+///         async fn main(cx: arty::runtime::Builtins) {}
+///     ),
+/// );
+/// assert!(!expanded.is_empty());
+/// ```
 #[must_use]
 pub fn main(args: TokenStream, item: TokenStream) -> TokenStream {
     entrypoint(args, item, false)
 }
 
-/// Expands the asynchronous runtime test attribute.
+/// Expands an asynchronous function into a runtime-backed synchronous test.
+///
+/// `args` contains the attribute's configuration tokens, and `item` contains the
+/// annotated asynchronous function. The returned tokens register a test with
+/// Rust's test harness or report invalid syntax with compiler diagnostics.
+///
+/// This is the implementation hook for `arty_macros::test`. See
+/// [`arty::test`](https://docs.rs/arty/latest/arty/attr.test.html) for application
+/// examples and the optional controlled-time argument.
+///
+/// # Examples
+///
+/// ```
+/// use quote::quote;
+///
+/// let expanded = arty_macros_impl::test(
+///     quote!(),
+///     quote!(
+///         async fn checks_answer(cx: arty::runtime::Builtins) {
+///             assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
+///         }
+///     ),
+/// );
+/// assert!(!expanded.is_empty());
+/// ```
 #[must_use]
 pub fn test(args: TokenStream, item: TokenStream) -> TokenStream {
     entrypoint(args, item, true)
@@ -239,12 +285,7 @@ mod tests {
         let expected = quote! {
             pub fn run() -> AppResult {
                 ::renamed::Runtime::builder()
-                    .processor_count(::renamed::ProcessorCount::at_most(
-                        const {
-                            ::core::num::NonZero::new(4usize)
-                                .expect("workers was validated as a nonzero literal by the macro")
-                        }
-                    ))
+                    .processor_count(::renamed::ProcessorCount::at_most(4usize))
                     .build()
                     .expect("failed to create the runtime for the entry point")
                     .run(async move |cx: <App as Types>::Context| { run(cx).await })
@@ -294,12 +335,7 @@ mod tests {
             fn run() {
                 let __arty_clock_control = crate::renamed::__private::ClockControl::new();
                 crate::renamed::Runtime::builder()
-                    .processor_count(crate::renamed::ProcessorCount::at_most(
-                        const {
-                            ::core::num::NonZero::new(1)
-                                .expect("workers was validated as a nonzero literal by the macro")
-                        }
-                    ))
+                    .processor_count(crate::renamed::ProcessorCount::at_most(1))
                     .clock(::core::clone::Clone::clone(&__arty_clock_control))
                     .build()
                     .expect("failed to create the runtime for the entry point")
@@ -335,6 +371,8 @@ mod tests {
     fn worker_literals_are_not_limited_to_the_macro_hosts_pointer_width() {
         let forwarded = proc_macro2::TokenTree::Group(proc_macro2::Group::new(proc_macro2::Delimiter::None, quote!(2)));
         for workers in [
+            quote!(0),
+            quote!(0x0usize),
             quote!(1),
             quote!(0x10usize),
             quote!(340282366920938463463374607431768211456),
@@ -351,6 +389,22 @@ mod tests {
     }
 
     #[test]
+    fn worker_count_unwraps_nested_expression_groups() {
+        let mut value: Expr = parse_quote!(4usize);
+        for _ in 0..2 {
+            value = Expr::Group(syn::ExprGroup {
+                attrs: Vec::new(),
+                group_token: syn::token::Group::default(),
+                expr: Box::new(value),
+            });
+        }
+
+        let count = worker_count(&value).unwrap();
+        assert_eq!(count.base10_digits(), "4");
+        assert_eq!(count.suffix(), "usize");
+    }
+
+    #[test]
     fn builder_strings_remain_literals_for_type_checking() {
         let expansion = main(
             quote!(builder = "app_builder()"),
@@ -364,8 +418,6 @@ mod tests {
     #[test]
     fn invalid_worker_counts_report_errors() {
         for workers in [
-            quote!(0),
-            quote!(0x0usize),
             quote!(-0),
             quote!(-1),
             quote!(-1usize),
@@ -387,7 +439,7 @@ mod tests {
                 )
                 .to_string();
                 assert!(expansion.contains("compile_error"), "workers = {workers}: {expansion}");
-                assert!(expansion.contains("nonzero integer literal"), "{expansion}");
+                assert!(expansion.contains("nonnegative integer literal"), "{expansion}");
             }
         }
     }

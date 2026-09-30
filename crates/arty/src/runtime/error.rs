@@ -4,11 +4,16 @@
 use std::error::Error as StdError;
 use std::fmt::{self, Display};
 
-/// An opaque error originating in the Arty runtime.
+/// An error constructing a runtime.
 ///
-/// Runtime construction returns this type when the requested resources cannot be
-/// provided. Use [`Display`] and [`StdError::source`] for diagnostics; error text
-/// and representations are not recovery classifications.
+/// [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build) returns this
+/// error when a processor count is zero or a policy cannot be satisfied, such
+/// as an exact count exceeding the available processors.
+///
+/// Format the error with [`Display`] and inspect [`StdError::source`] for
+/// diagnostics. Its message and concrete source type are not stable error
+/// classifications. Task failures are reported separately as
+/// [`JoinError`](crate::task::JoinError).
 #[derive(Debug)]
 pub struct Error {
     source: Box<dyn StdError + Send + Sync>,

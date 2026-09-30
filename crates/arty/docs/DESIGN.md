@@ -1,12 +1,11 @@
 # Design
 
-The user-facing design is documented in `arty::documentation`. Its rustdoc
-sources are:
+For task submission, worker placement, and runtime ownership, see
+`arty::documentation`. The guide sources are:
 
-- [Scheduling and ownership](../src/documentation/scheduling.rs)
+- [Scheduling and task results](../src/documentation/scheduling.rs)
 - [Thread awareness and relocation](../src/documentation/thread_awareness.rs)
 - [Lifecycle and failure](../src/documentation/lifecycle.rs)
 - [Configuration and support boundaries](../src/documentation/configuration.rs)
 
-These guides and the API items they link to are the canonical explanations.
-This page is retained for existing links, not as a second specification.
+Each guide links to the relevant API reference.

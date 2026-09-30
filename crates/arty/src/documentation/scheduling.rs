@@ -41,7 +41,7 @@
 //! use arty::runtime::Builtins;
 //!
 //! #[arty::main]
-//! async fn main(cx: Builtins) {
+//! async fn main(cx: Builtins) -> Result<(), arty::task::JoinError> {
 //!     let answer = cx
 //!         .scheduler()
 //!         .spawn(|child| {
@@ -51,9 +51,9 @@
 //!                 *value
 //!             }
 //!         })
-//!         .await
-//!         .expect("the child task completes before the entry point returns");
+//!         .await?;
 //!     assert_eq!(answer, 42);
+//!     Ok(())
 //! }
 //! ```
 //!
@@ -76,17 +76,15 @@
 //! use arty::runtime::Builtins;
 //!
 //! #[arty::main]
-//! async fn main(cx: Builtins) {
+//! async fn main(cx: Builtins) -> Result<(), arty::task::JoinError> {
 //!     let value = Rc::new(String::from("worker-local"));
 //!     let captured = Rc::clone(&value);
 //!     let local = cx
 //!         .local_scheduler()
 //!         .expect("the task runs on its associated worker");
-//!     let returned = local
-//!         .spawn(async move || captured)
-//!         .await
-//!         .expect("the local task completes before the entry point returns");
+//!     let returned = local.spawn(async move || captured).await?;
 //!     assert!(Rc::ptr_eq(&value, &returned));
+//!     Ok(())
 //! }
 //! ```
 //!
@@ -117,19 +115,21 @@
 //! ```
 //!
 //! The first `?` handles task failure (`JoinError`); the second handles the file
-//! operation's `io::Error`. This is blocking file I/O on another thread, not an asynchronous I/O driver.
-//! The pools are intended for blocking calls, not as a general CPU-parallelism
-//! engine. Their [configuration](super::configuration#blocking-pools) is separate
-//! from the number of asynchronous workers.
+//! operation's `io::Error`. This runs blocking file I/O on another thread; it
+//! does not add an asynchronous I/O driver. The pools are intended for blocking
+//! calls, not general CPU-parallel workloads. Their
+//! [configuration](super::configuration#blocking-pools) is separate from the
+//! number of asynchronous workers.
 //!
 //! # Observe completion before shutdown
 //!
 //! A [`JoinHandle`](crate::task::JoinHandle) yields `Result<T, JoinError>`.
 //! Use [`JoinError::is_panic`](crate::task::JoinError::is_panic) to identify a task
 //! panic and [`is_shutdown`](crate::task::JoinError::is_shutdown) to identify
-//! cancellation or rejection. Use `.await` inside asynchronous tasks and `wait()` only
-//! from a blocking-safe thread. Dropping the handle does not cancel the task.
+//! cancellation or rejection. Use `.await` inside asynchronous tasks and
+//! `wait()` only from a blocking-safe thread. Dropping the handle does not cancel
+//! the task.
 //!
 //! Shutdown cancels pending tasks and rejects new submissions without invoking
-//! their factories. Finish required work before shutting down; see [lifecycle](super::lifecycle) for
-//! the difference between observing results and stopping workers.
+//! their factories. See [lifecycle](super::lifecycle) for the difference between
+//! receiving task results and stopping workers.

@@ -15,7 +15,7 @@
 //!
 //! | Operation | Ownership and completion |
 //! | --- | --- |
-//! | [`Runtime::run`](crate::runtime::Runtime::run) | Consumes the runtime, returns the root task's `Result<T, JoinError>`, then shuts down |
+//! | [`Runtime::run`](crate::runtime::Runtime::run) | Consumes the runtime; shuts down after the root finishes and returns its `Result<T, JoinError>` |
 //! | [`Runtime::block_on`](crate::runtime::Runtime::block_on) | Borrows the runtime and returns `Result<T, JoinError>` from a task that may borrow the caller's stack |
 //! | [`Runtime::stop`](crate::runtime::Runtime::stop) | Requests shutdown without blocking; repeated calls are allowed |
 //! | [`Runtime::wait`](crate::runtime::Runtime::wait) | Waits for shutdown; does not request it |
@@ -40,12 +40,12 @@
 //!
 //! # Cancellation and shutdown
 //!
-//! Shutdown is **not a drain of asynchronous tasks**. It cancels asynchronous
-//! work, closes admission, and cancels queued blocking callbacks before invocation. Await
-//! the joins you require before requesting shutdown or allowing `run`'s root
-//! task to return. A blocking callback that never returns can prevent shutdown
-//! from completing. Already-running blocking callbacks cannot be forcibly interrupted;
-//! the runtime waits for them to finish.
+//! Await the joins whose results you need before requesting shutdown or letting
+//! `run`'s root return. Shutdown cancels asynchronous tasks and queued blocking
+//! callbacks; it does not wait for them to complete successfully.
+//!
+//! Already-running blocking callbacks finish before shutdown completes. They
+//! cannot be interrupted, so a callback that never returns can prevent shutdown.
 //!
 //! Cancellation and rejection return [`JoinError`](crate::task::JoinError) with
 //! `is_shutdown() == true`. Once shutdown starts, new submissions return an
@@ -54,8 +54,7 @@
 //! callback starts. A running callback may still return a successful result.
 //!
 //! `Runtime::wait()` observes worker shutdown and running blocking work, rather
-//! than replacing task joins. A stopped runtime cannot supply an independent
-//! timer for waiting on its own shutdown.
+//! than replacing task joins.
 //!
 //! A rejected submission can be handled immediately:
 //!
@@ -65,7 +64,10 @@
 //! let runtime = Runtime::new()?;
 //! let scheduler = runtime.task_scheduler();
 //! runtime.stop();
-//! let error = scheduler.spawn(async |_| 42).wait().unwrap_err();
+//! let error = scheduler
+//!     .spawn(async |_| 42)
+//!     .wait()
+//!     .expect_err("submission follows shutdown");
 //! assert!(error.is_shutdown());
 //! runtime.wait();
 //! # Ok::<(), arty::runtime::Error>(())
@@ -104,19 +106,16 @@
 //!
 //! # Panics
 //!
-//! This is not an application-state recovery mechanism. Runtime capabilities
-//! are not universally `UnwindSafe` or `RefUnwindSafe`, and catching a panic
-//! does not repair state or poisoned locks. With `panic = "abort"`, a panic
-//! aborts the process instead of being transported. There is no configurable
-//! runtime panic-handler API.
+//! Receiving a panic error does not repair application state or poisoned locks.
+//! Runtime capabilities are not universally `UnwindSafe` or `RefUnwindSafe`.
+//! With `panic = "abort"`, a panic aborts the process instead of being transported.
 //!
 //! # Construction errors
 //!
 //! [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build) returns
-//! [`runtime::Error`](crate::runtime::Error) when processor selection cannot be
-//! satisfied. Use its display text and error source for diagnostics, not as a
-//! stable recovery classification.
+//! [`runtime::Error`](crate::runtime::Error) for a zero processor count or a
+//! selection that cannot be satisfied. Use its display text and error source
+//! for diagnostics, not as a stable recovery classification.
 //!
 //! Not every startup failure is a returned error. Worker initialization and
-//! OS thread creation can panic; the blocking-pool implementation still uses
-//! infallible construction. A worker limit does not eliminate these failures.
+//! OS thread creation can panic. A worker limit does not eliminate these failures.

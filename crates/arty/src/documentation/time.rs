@@ -47,7 +47,8 @@
 //! A second owned `ClockControl` parameter to [`arty::test`](crate::test)
 //! creates a fresh control and connects it to the runtime's clocks. It starts
 //! at the UNIX epoch with automatic advancement disabled. Clones share one
-//! time domain.
+//! time domain. Enabling `test-util` alone does not change the clock used by
+//! a test taking only `Builtins`.
 //!
 //! A delay registers its timer when first polled, not when constructed.
 //! Poll it before advancing time manually:
@@ -61,7 +62,7 @@
 //! use arty::runtime::Builtins;
 //! use arty::time::ClockControl;
 //!
-//! #[arty::test(workers = 1)]
+//! #[arty::test]
 //! async fn controlled_delay(cx: Builtins, control: ClockControl) {
 //!     let watch = cx.clock().stopwatch();
 //!     let mut delay = pin!(cx.clock().delay(Duration::from_secs(30)));

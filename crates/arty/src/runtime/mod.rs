@@ -1,25 +1,38 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Runtime construction, worker ownership, and thread-aware capabilities.
+//! Runtime construction, configuration, and task capabilities.
 //!
-//! A [`Runtime`] owns worker startup and shutdown. Its [`task_scheduler`](Runtime::task_scheduler)
-//! returns a detached [`TaskScheduler`](crate::task::TaskScheduler), while a task's
-//! [`Builtins::scheduler`] preserves worker affinity. Task submission and join handles
-//! live in [`crate::task`].
+//! Use [`Runtime`] to run asynchronous work from synchronous code and control
+//! when workers stop. [`Runtime::new`] starts the default configuration;
+//! [`Runtime::builder`] lets you choose processors, blocking pools, clocks, and
+//! a telemetry sink before starting workers.
 //!
-//! Use [`Runtime::new`] for the default configuration or [`Runtime::builder`] to
-//! select processors, blocking pools, a clock, and a telemetry sink. Configuration
-//! types are available directly in this module.
+//! Each task receives [`Builtins`] containing its worker's scheduler, clock,
+//! and runtime operations. [`Runtime::task_scheduler`] distributes submissions
+//! across workers, while [`Builtins::scheduler`] keeps children on their parent's
+//! worker. Submission and result handles are documented in [`crate::task`].
 //!
-//! Shutdown cancels pending work and waits for already-running blocking calls.
-//! Cancelled joins return [`JoinError`](crate::task::JoinError). Retaining a
-//! scheduler does not keep the runtime running. Read [`Runtime`]'s destruction
-//! rules before transferring the owner to another thread.
+//! Keep the runtime owner alive until required work completes. Shutdown cancels
+//! pending tasks and waits for blocking callbacks that have already started;
+//! keeping a scheduler does not keep the runtime running.
 //!
-//! Configuration, lifecycle, telemetry, and thread-awareness guides are available
-//! through the crate's [documentation section](crate#documentation).
-//! For the capabilities passed to tasks, start with [`Builtins`].
+//! # Examples
+//!
+//! Let the entry-point attribute manage the runtime's lifetime:
+//!
+//! ```
+//! # #[cfg(feature = "macros")]
+//! #[arty::main]
+//! async fn main(cx: arty::runtime::Builtins) -> Result<(), arty::task::JoinError> {
+//!     assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
+//!     Ok(())
+//! }
+//! # #[cfg(not(feature = "macros"))] fn main() {}
+//! ```
+//!
+//! See the crate's [guides](crate#documentation) for configuration and shutdown
+//! patterns, or use its entry-point attributes to manage ownership automatically.
 
 pub(crate) mod blocking_worker;
 mod bootstrap;
@@ -33,11 +46,17 @@ pub(crate) mod telemetry;
 pub(crate) mod thread;
 mod worker;
 
+#[doc(inline)]
 pub use builder::RuntimeBuilder;
+#[doc(inline)]
 pub use config::{BlockingPoolPolicy, ProcessorCount};
+#[doc(inline)]
 pub use context::Builtins;
+#[doc(inline)]
 pub use context::operations::RuntimeOperations;
+#[doc(inline)]
 pub use error::Error;
+#[doc(inline)]
 pub use handle::Runtime;
 
 /// Implementation details for the runtime entry-point macros.

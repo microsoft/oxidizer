@@ -3,25 +3,33 @@
 
 use crate::runtime::bootstrap::pools::BlockingPools;
 
-/// Controls the thread pools used for blocking tasks.
+/// A sharing policy for blocking-task thread pools.
 ///
-/// The **isolated** policy (the default) gives each async worker its own
-/// blocking-task pool.
-///
-/// The **shared** policy uses one runtime-wide blocking-task pool.
+/// Pass a policy to
+/// [`RuntimeBuilder::blocking_pool_policy`](crate::runtime::RuntimeBuilder::blocking_pool_policy).
+/// These pools run [`spawn_blocking`](crate::task::TaskScheduler::spawn_blocking)
+/// callbacks separately from asynchronous workers.
 ///
 /// # Choosing between isolated and shared
 ///
-/// Isolated mode separates blocking-task contention between async workers.
-/// The number of blocking-task pools, and their
-/// potential thread and stack overhead, scales with the number of async
-/// workers.
+/// [`isolated`](Self::isolated), the default, gives each asynchronous worker its
+/// own pool. It separates blocking-task contention between workers, but the
+/// number of pools and their thread and stack costs grow with the worker count.
 ///
-/// Shared mode keeps one pool-wide thread limit regardless of the number of
-/// async workers, but combines their blocking tasks in that pool.
+/// [`shared`](Self::shared) gives all workers one pool with a common thread
+/// limit. It bounds that pool's threads independently of the asynchronous worker
+/// count, but all blocking tasks compete for those threads.
 ///
-/// Choose using measured contention and thread-memory costs for the workload.
-/// Neither policy guarantees higher throughput for every workload.
+/// Choose using the workload's contention and thread-memory costs. Neither
+/// policy is faster for every workload.
+///
+/// # Examples
+///
+/// ```
+/// use arty::runtime::{BlockingPoolPolicy, Runtime};
+///
+/// let builder = Runtime::builder().blocking_pool_policy(BlockingPoolPolicy::shared(4));
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlockingPoolPolicy {
     mode: Mode,
@@ -35,9 +43,18 @@ enum Mode {
 }
 
 impl BlockingPoolPolicy {
-    /// Uses per-async-worker blocking-task pools (the default).
+    /// Creates the default policy with one pool per asynchronous worker.
     ///
-    /// Blocking-task thread resources scale with the number of async workers.
+    /// Each pool uses the runtime's default blocking-thread limit. The total
+    /// blocking-thread resources therefore grow with the asynchronous worker count.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use arty::runtime::{BlockingPoolPolicy, Runtime};
+    ///
+    /// let builder = Runtime::builder().blocking_pool_policy(BlockingPoolPolicy::isolated());
+    /// ```
     #[must_use]
     pub const fn isolated() -> Self {
         Self {
@@ -46,18 +63,23 @@ impl BlockingPoolPolicy {
         }
     }
 
-    /// Uses one runtime-wide blocking-task pool shared by all async workers.
+    /// Creates a policy sharing one blocking pool across all asynchronous workers.
     ///
-    /// See [the type-level
-    /// docs](Self#choosing-between-isolated-and-shared) for the resource and
-    /// contention trade-offs.
-    ///
-    /// `max_workers` sets the upper bound on the number of threads in the pool.
-    /// Pass `None` to use the runtime's default limit.
+    /// `max_workers` limits the pool's threads. Pass a positive count, or `None`
+    /// to use the runtime's default limit. This limit is separate from the
+    /// asynchronous worker count.
     ///
     /// # Panics
     ///
-    /// Panics if `max_workers` is `Some(0)`.
+    /// Panics if `max_workers` is zero, including `Some(0)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use arty::runtime::{BlockingPoolPolicy, Runtime};
+    ///
+    /// let builder = Runtime::builder().blocking_pool_policy(BlockingPoolPolicy::shared(4));
+    /// ```
     #[must_use]
     pub fn shared(max_workers: impl Into<Option<usize>>) -> Self {
         let max_workers = max_workers.into();

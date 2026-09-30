@@ -3,7 +3,7 @@
 
 //! Runtime events, task enrichment, and data classification.
 //!
-//! Arty uses [`observed`] for runtime events. The default sink is a noop.
+//! Arty uses [`observed`] for runtime events. The default sink is a no-op.
 //! Pass an application's configured [`observed::Sink`] to
 //! [`RuntimeBuilder::sink`](crate::runtime::RuntimeBuilder::sink) before
 //! construction. The task's [`Builtins::sink`](crate::runtime::Builtins::sink)
@@ -19,6 +19,23 @@
 //!     arty::runtime::Runtime::builder().sink(sink)
 //! }
 //! ```
+//!
+//! # Emit application events
+//!
+//! Use the task's sink to emit application events alongside runtime events:
+//!
+//! ```
+//! #[observed::event("app.task.started")]
+//! #[info("task started")]
+//! struct TaskStarted;
+//!
+//! #[arty::main]
+//! async fn main(cx: arty::runtime::Builtins) {
+//!     observed::emit!(cx.sink(), TaskStarted);
+//! }
+//! ```
+//!
+//! Configure a sink to observe the event; the default no-op sink discards it.
 //!
 //! # Enrichment and task outcomes
 //!
@@ -38,9 +55,8 @@
 //!
 //! Runtime-classified fields use
 //! `data_privacy::DataClass::new("arty", "SystemMetadata")`. Configure a
-//! processor's redaction policy using that identifier; Arty does not expose a
-//! public `SYSTEM_METADATA` constant. Applications configuring that policy
-//! also need `data_privacy`.
+//! processor's redaction policy using that identifier. Applications configuring
+//! that policy also need a direct dependency on `data_privacy`.
 //!
 //! Event names use the `arty.rt` prefix. Blocking-pool saturation is
 //! reported by the `arty.rt.blocking_worker.pool_saturated` event and

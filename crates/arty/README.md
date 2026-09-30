@@ -13,33 +13,22 @@
 
 </div>
 
-A runtime for worker-local asynchronous tasks.
+A runtime for asynchronous tasks with stable thread placement.
 
-Arty makes worker-local execution and explicit relocation of runtime capabilities
-the core programming model. It is intended for applications that organize work
-around state owned by individual workers, rather than treating locality as an
-addition to a general-purpose scheduler.
+Use Arty when tasks need to retain thread-local state across asynchronous waits.
+Each task runs on one worker thread until it completes or is cancelled, so its
+future can hold non-[`Send`][__link0] values such as [`Rc`][__link1].
 
-Unlike [Tokio’s multithreaded scheduler][__link0],
-Arty does not move started tasks between workers to balance their load. Each task
-stays on its worker, where it can create and retain non-[`Send`][__link1] state.
-Tokio also supports [local tasks][__link2];
-the distinction is Arty’s worker-local model, not exclusive support for non-`Send` futures.
-The trade-off is that a busy worker’s tasks are not redistributed. Arty provides
-scheduling, blocking tasks, clocks, and telemetry, but no asynchronous I/O drivers
-or built-in memory pools. It is not a drop-in replacement for Tokio.
-
-**Thread awareness** means that runtime capabilities have an explicit worker
-association. Each task receives an owned `Builtins` value containing its worker’s
-scheduler and clock. Cloning preserves that association; explicit relocation can
-rebind capabilities to another worker in the same runtime. Relocation does not
-migrate a running task or automatically relocate ordinary task results.
+Arty provides task scheduling, blocking-task pools, clocks, and telemetry.
+It does not provide asynchronous I/O drivers or built-in memory pools, and it
+does not move started tasks between workers to balance their load. Libraries
+that require another runtime’s I/O drivers need that runtime’s integration.
 
 ## Quickstart
 
-Enable `macros` to use the runtime entry points; it also enables `rt` and
-`time`. To try the runtime from this repository, use a Git revision that
-contains these APIs:
+Enable `macros` to use `#[arty::main]`; it also enables `rt` and `time`.
+These runtime APIs are not yet published. The following dependency selects a
+revision that provides them:
 
 ```toml
 [dependencies]
@@ -50,41 +39,52 @@ arty = { git = "https://github.com/microsoft/oxidizer", rev = "27c6370ea051ece01
 use arty::runtime::Builtins;
 
 #[arty::main]
-async fn main(cx: Builtins) {
-    let answer = cx
-        .scheduler()
-        .spawn(async |_| 6 * 7)
-        .await
-        .expect("the child task completes before the entry point returns");
+async fn main(cx: Builtins) -> Result<(), arty::task::JoinError> {
+    let answer = cx.scheduler().spawn(async |_| 6 * 7).await?;
     println!("{answer}");
+    Ok(())
 }
 ```
 
-This prints `42`. The attribute creates the runtime and runs the entry point
-on a worker, passing owned `Builtins`. Its scheduler creates the child task
-on that worker; `.await` observes a `Result` without blocking the worker.
-Task panics and shutdown cancellation are reported as `arty::task::JoinError`.
-The runtime shuts down when the entry point finishes, so await any required
-child work before returning. Use `arty::runtime::Runtime` directly when
-integrating with synchronous code or controlling ownership and shutdown.
+This prints `42`. The attribute starts a runtime, runs the asynchronous body
+on a worker, and shuts down when the body returns. `cx` provides that worker’s
+scheduler and clock. Awaiting the child task receives its result without
+blocking the worker; `?` propagates a task panic or shutdown cancellation.
+
+Await any child work that must finish before returning from the entry point.
+Shutdown cancels pending asynchronous tasks rather than draining them.
+Use `runtime::Runtime` directly to integrate with synchronous code, borrow
+caller-owned data, or control when the runtime stops.
+
+## Task placement
+
+A task’s `Builtins::scheduler()` creates child tasks on the same worker.
+`Runtime::task_scheduler()` distributes submissions across workers.
+`Builtins::local_scheduler()` also accepts non-`Send` captures and results
+when called on the associated worker.
+
+Cloning a scheduler or `Builtins` preserves its worker association.
+`TaskScheduler::spawn_anywhere()` can distribute new work and explicitly
+relocate its payload’s capabilities. It does not migrate an existing task
+or relocate a task’s returned value.
+
+Keep synchronous blocking calls off asynchronous workers: use
+`TaskScheduler::spawn_blocking()` so other tasks and timers can make progress.
 
 ## Documentation
 
-`arty::documentation` contains longer guides to scheduling,
-thread awareness, lifecycle, configuration, time, and telemetry. It is included
-in documentation and test builds only when all Arty features are enabled.
-The dependency revision above includes the typed task-failure API and these
-guides. From a source checkout containing the documentation module, run:
+The `documentation` module contains guides to scheduling, thread awareness,
+shutdown, configuration, time, and telemetry. To include all the guides when
+building documentation from a source checkout, enable all features:
 
 ```text
 cargo doc -p arty --all-features --no-deps --open
 ```
 
-Select `documentation` in the generated API reference’s module index.
-Hosted docs describe published releases and may not yet include guides from
-unreleased source. Application dependencies need only the features they use;
-building all-feature documentation does not require a production `test-util`
-dependency.
+Application dependencies need only the features they use. Enabling all
+features for documentation does not require using `test-util` in production.
+Hosted documentation describes published releases, which may not yet contain
+these runtime APIs.
 
 ## Features
 
@@ -102,6 +102,5 @@ No features are enabled by default.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__link0]: https://docs.rs/tokio/latest/tokio/runtime/#multi-thread-scheduler
- [__link1]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
- [__link2]: https://docs.rs/tokio/latest/tokio/task/struct.LocalSet.html
+ [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
+ [__link1]: https://doc.rust-lang.org/stable/std/?search=rc::Rc

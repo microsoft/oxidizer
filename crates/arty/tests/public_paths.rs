@@ -10,7 +10,6 @@ testing_aids::init_tracing!();
 use std::error::Error as StdError;
 use std::fmt::Debug;
 use std::io;
-use std::num::NonZeroUsize;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 
 use arty::runtime::{BlockingPoolPolicy, Builtins, Error, ProcessorCount, Runtime, RuntimeBuilder, RuntimeOperations};
@@ -35,8 +34,8 @@ assert_impl_all!(ProcessorCount: Clone, Copy, Debug, Default);
 assert_impl_all!(Error: StdError, Send, Sync);
 assert_not_impl_any!(Error: From<io::Error>, From<Box<dyn StdError + Send + Sync>>);
 
-const _: fn(NonZeroUsize) -> ProcessorCount = ProcessorCount::exactly;
-const _: fn(NonZeroUsize) -> ProcessorCount = ProcessorCount::at_most;
+const _: fn(usize) -> ProcessorCount = ProcessorCount::exactly;
+const _: fn(usize) -> ProcessorCount = ProcessorCount::at_most;
 
 const _: fn(&Runtime) -> TaskScheduler = Runtime::task_scheduler;
 const _: fn(JoinHandle<u32>) -> Result<u32, JoinError> = JoinHandle::wait;

@@ -8,7 +8,6 @@
 //! These are Arty-only overhead measurements, not an equivalently instrumented Tokio comparison.
 
 use std::hint::black_box;
-use std::num::NonZeroUsize;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::Duration;
@@ -53,7 +52,7 @@ fn active_sink() -> Sink {
 
 fn runtime(sink: Sink) -> Runtime {
     Runtime::builder()
-        .processor_count(ProcessorCount::exactly(NonZeroUsize::MIN))
+        .processor_count(ProcessorCount::exactly(1))
         .blocking_pool_policy(BlockingPoolPolicy::shared(1))
         .sink(sink)
         .build()

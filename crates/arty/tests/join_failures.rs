@@ -6,7 +6,6 @@
 //! Task failure and shutdown are results, not unwinds or permanently pending joins.
 
 use std::future::{pending, ready};
-use std::num::NonZeroUsize;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::pin;
 use std::rc::Rc;
@@ -23,7 +22,7 @@ testing_aids::init_tracing!();
 #[cfg(test)]
 fn runtime() -> Runtime {
     Runtime::builder()
-        .processor_count(ProcessorCount::exactly(NonZeroUsize::MIN))
+        .processor_count(ProcessorCount::exactly(1))
         .blocking_pool_policy(BlockingPoolPolicy::shared(1))
         .build()
         .unwrap()

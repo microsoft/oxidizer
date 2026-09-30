@@ -1,18 +1,15 @@
 # Runtime benchmark report
 
 **Historical baseline:** these measurements belong to the pinned revision below.
-The later direct task-registration optimization, timeout workload, telemetry
-handle-storage change, and lifecycle fixes are not measured by this report.
-The later `JoinError` and shutdown-cancellation contract is not measured either.
-No replacement numbers are claimed; rerun the documented command on the desired
-revision for a current comparison.
+They do not describe the current runtime's performance. Rerun the documented
+command on the desired revision for a current comparison.
 The historical `system` cases below measure blocking tasks. Current benchmark
 identifiers use `blocking` instead; the recorded historical identifiers are unchanged.
 
 On this Windows host, Tokio was faster for ordinary, local, and nested task
 scheduling. Arty was faster for the blocking-pool cases. Timer results were
-dominated by host timer granularity. These are measurements of the initial
-port, not a performance guarantee or a claim that either runtime is universally faster.
+dominated by host timer granularity. These are measurements of one revision
+on one host, not a guarantee that either runtime is universally faster.
 
 ## Snapshot and reproduction
 
@@ -131,13 +128,11 @@ and allocation timing. Compare confidence bounds and repeat on the target host.
 
 ## Limits
 
-No performance acceptance threshold was specified. This report records both
-wins and regressions, without treating metabench's default historical-regression
-threshold as a requirement. Reproduce on the intended deployment hardware
-before choosing worker counts or making optimization claims.
+Reproduce on the intended deployment hardware before choosing worker counts
+or making optimization claims. These results are not performance acceptance
+thresholds.
 
-The earlier diagnostic run warmed only one batch. It showed first-use allocations
-on subsequent round-robin workers and was superseded by the preparation fix in
-the measured revision. Neither run measures async I/O, metadata, fan-out,
-work stealing equivalence, or an isolated single-threaded instruction cost.
+The measured revision prepares every Arty worker before timing. These cases
+do not measure async I/O, metadata, fan-out, work stealing equivalence, or an
+isolated single-threaded instruction cost.
 Linux perf, Gungraun, and VTune were not run.

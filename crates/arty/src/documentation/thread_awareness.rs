@@ -3,8 +3,7 @@
 
 //! Understanding worker associations, cloning, and explicit relocation.
 //!
-//! A worker is an OS thread that runs a single-threaded executor. Once a task
-//! starts, its future stays on that worker. The owned
+//! Once a task starts, its future stays on the same worker thread. The owned
 //! [`Builtins`](crate::runtime::Builtins) passed to the task contains capabilities
 //! associated with that worker: its scheduler, clock, telemetry sink, and runtime
 //! operations.
@@ -33,20 +32,15 @@
 //! use arty::runtime::Builtins;
 //!
 //! #[arty::main]
-//! async fn main(cx: Builtins) {
+//! async fn main(cx: Builtins) -> Result<(), arty::task::JoinError> {
 //!     let home = cx.thread().id();
 //!     let cloned = cx.scheduler().clone();
 //!     let executed_on = cx
 //!         .scheduler()
-//!         .spawn_blocking(move || {
-//!             cloned
-//!                 .spawn(async |child| child.thread().id())
-//!                 .wait()
-//!                 .unwrap()
-//!         })
-//!         .await
-//!         .expect("both tasks complete before the entry point returns");
+//!         .spawn_blocking(move || cloned.spawn(async |child| child.thread().id()).wait())
+//!         .await??;
 //!     assert_eq!(executed_on, home);
+//!     Ok(())
 //! }
 //! ```
 //!
@@ -62,11 +56,16 @@
 //! there, before calling the factory. The factory is a function pointer, so its
 //! input must be supplied explicitly rather than hidden in captures.
 //!
+//! Prefer the `Builtins` supplied to a new task's factory when you only need
+//! that task's services. Relocation is useful when carrying an existing value
+//! that must adapt to its destination.
+//!
 //! ```
 //! use arty::runtime::Builtins;
+//! use arty::task::JoinError;
 //!
 //! #[arty::main]
-//! async fn main(cx: Builtins) {
+//! async fn main(cx: Builtins) -> Result<(), JoinError> {
 //!     cx.scheduler()
 //!         .spawn_anywhere(cx.clone(), |moved| async move {
 //!             assert_eq!(moved.thread().id(), std::thread::current().id());
@@ -74,12 +73,12 @@
 //!             let child = moved
 //!                 .scheduler()
 //!                 .spawn(async |child| child.thread().id())
-//!                 .await
-//!                 .expect("the child completes before its parent");
+//!                 .await?;
 //!             assert_eq!(child, moved.thread().id());
+//!             Ok::<(), JoinError>(())
 //!         })
-//!         .await
-//!         .expect("the relocated task completes before the entry point returns");
+//!         .await??;
+//!     Ok(())
 //! }
 //! ```
 //!
@@ -95,10 +94,9 @@
 //! | An initialized, registered worker of the same runtime | Capabilities rebind coherently to that worker |
 //! | Another runtime, or a coordinate with no initialized worker services in the owner | The original association is retained |
 //!
-//! A portable `Builtins` value does not own its worker's non-`Send` executor
-//! state. [`local_scheduler()`](crate::runtime::Builtins::local_scheduler)
-//! returns a thread-confined token only when called on the associated worker;
-//! merely carrying `Builtins` elsewhere does not grant local access there.
+//! [`local_scheduler()`](crate::runtime::Builtins::local_scheduler) returns a
+//! local scheduler only when called on the value's associated worker. Merely
+//! carrying `Builtins` to another thread does not grant local scheduling access.
 //!
 //! # Relocation is not automatic task migration
 //!

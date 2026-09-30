@@ -10,19 +10,36 @@ use pin_project::pin_project;
 use super::JoinError;
 use crate::task::execution::TaskResult;
 
-/// The result of a task on its originating worker.
+/// A worker-local handle for receiving a task's result.
 ///
-/// Await this handle on the worker that created it. Results need not be [`Send`],
-/// and the handle cannot be sent to another thread.
+/// Returned by [`LocalTaskScheduler::spawn`](crate::task::LocalTaskScheduler::spawn).
+/// Await it on the worker that created it. Both the handle and its result may
+/// be non-[`Send`]; the handle cannot be sent to another thread.
 ///
-/// Task panics and shutdown cancellation/rejection return [`JoinError`]. Dropping
-/// the handle does not cancel the task. See the
-/// [documentation guides](crate#documentation) for shutdown coordination.
+/// Completion produces `Ok(result)`. A task panic, shutdown cancellation, or
+/// rejection produces [`JoinError`]. Dropping the handle does not cancel its task.
 ///
 /// # Panics
 ///
-/// The result may be obtained at most once, by awaiting the future.
-/// Attempting to obtain the result multiple times will panic.
+/// Panics if polled again after its result has been received.
+///
+/// # Examples
+///
+/// ```
+/// # #[cfg(feature = "macros")]
+/// #[arty::main]
+/// async fn main(cx: arty::runtime::Builtins) -> Result<(), arty::task::JoinError> {
+///     use std::rc::Rc;
+///
+///     let scheduler = cx
+///         .local_scheduler()
+///         .expect("the task runs on its associated worker");
+///     let task = scheduler.spawn(async || Rc::new(42));
+///     assert_eq!(*task.await?, 42);
+///     Ok(())
+/// }
+/// # #[cfg(not(feature = "macros"))] fn main() {}
+/// ```
 #[derive(derive_more::Debug)]
 #[pin_project]
 pub struct LocalJoinHandle<R: 'static> {

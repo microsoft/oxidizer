@@ -20,20 +20,22 @@
 //! | `at_most(n)` | Use no more than `n`, clamping to available processors |
 //! | `exactly(n)` | Require `n`; return `runtime::Error` if fewer are available |
 //!
-//! ```
-//! use std::num::NonZeroUsize;
+//! `n` is a `usize`. Both count-based policies reject zero when the runtime
+//! is built; creating a policy or setting it on the builder does not validate it.
 //!
+//! ```
 //! use arty::runtime::{BlockingPoolPolicy, Builtins, ProcessorCount, Runtime, RuntimeBuilder};
 //!
 //! fn app_builder() -> RuntimeBuilder {
 //!     Runtime::builder()
-//!         .processor_count(ProcessorCount::at_most(NonZeroUsize::new(2).unwrap()))
+//!         .processor_count(ProcessorCount::at_most(2))
 //!         .blocking_pool_policy(BlockingPoolPolicy::shared(4))
 //! }
 //!
 //! #[arty::main(builder = app_builder())]
-//! async fn main(cx: Builtins) {
-//!     assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
+//! async fn main(cx: Builtins) -> Result<(), arty::task::JoinError> {
+//!     assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
+//!     Ok(())
 //! }
 //! ```
 //!
@@ -81,40 +83,23 @@
 //! worker clocks and advances their timers. The [time guide](super::time)
 //! explains controlled time without changing task scheduling semantics.
 //!
-//! Telemetry uses a noop sink by default. Configure
+//! Telemetry uses a no-op sink by default. Configure
 //! [`RuntimeBuilder::sink`](crate::runtime::RuntimeBuilder::sink) to receive
 //! runtime events and propagate enrichment; see [telemetry](super::telemetry).
 //!
-//! # Testing environment
-//!
-//! Enable `test-util` in dev-dependencies for testing utilities. Under Miri,
-//! Arty uses simulated six-processor data instead of native processor discovery
-//! and pinning. This lets tests use the scheduling model without claiming to
-//! exercise OS affinity or real hardware discovery. Native tests remain
-//! necessary for those platform operations.
-//!
 //! # Asynchronous I/O
 //!
-//! Arty currently has no asynchronous I/O driver, driver-injection API, or
-//! built-in memory pool. Workers can process wakeups, timers, and shutdown
-//! without an I/O driver. `spawn_blocking` can run synchronous I/O on a pool,
-//! but that does not add asynchronous I/O integration.
+//! Arty drives task wakeups and timers, but does not provide an asynchronous
+//! I/O driver. Use [`spawn_blocking`](crate::task::TaskScheduler::spawn_blocking)
+//! for synchronous I/O, or a library that supplies its own compatible driver.
+//! Submitting a future does not supply another runtime's services: libraries
+//! requiring Tokio's I/O or timer drivers still need those drivers.
 //!
-//! [`arty_io_core`] describes separate I/O contracts; its presence does not
-//! supply drivers to this runtime. A library that requires Tokio's I/O or timer
-//! drivers does not become compatible merely by submitting its future to Arty.
-//! Task metadata, advanced spawn builders, fanout, explicit worker-placement
-//! APIs, and a runtime yield operation are not provided either.
+//! # Worker placement
 //!
-//! # Performance evidence
-//!
-//! Worker affinity trades automatic load balancing for stable placement.
-//! Measure the application's actual workload before choosing its worker and
-//! blocking-pool configuration.
-//!
-//! The [historical benchmark report](https://github.com/microsoft/oxidizer/blob/d4dd28c31dd2bd45238dff4c92c440561dc71581/crates/arty/docs/benchmarks.md)
-//! found Tokio faster for ordinary, local, and nested scheduling on its Windows
-//! host, and Arty faster for the measured blocking-pool cases. It measures an
-//! older implementation, not the current runtime. Placement differences,
-//! blocking-pool policies, host timer granularity, and batch-level timing limit
-//! what those results can establish; they are not universal speed claims.
+//! A future stays on its worker once started. Stable placement supports local
+//! state and processor locality, but does not automatically balance running
+//! tasks across workers. Distribute independent tasks with
+//! [`Runtime::task_scheduler`](crate::runtime::Runtime::task_scheduler) or
+//! [`spawn_anywhere`](crate::task::TaskScheduler::spawn_anywhere), and measure the
+//! application's workload before choosing worker and pool limits.

@@ -7,11 +7,17 @@ use thread_aware::{Thread, ThreadAware};
 use crate::runtime::context::init::SharedState;
 use crate::runtime::dispatch::DispatcherClient;
 
-/// Thread-aware runtime operations and worker processor snapshots.
+/// A handle for requesting shutdown and pinning external threads.
 ///
-/// This handle can be used from any thread. Relocation to an initialized worker of its
-/// owning runtime changes the associated worker. An unfamiliar destination retains its binding.
-/// Cloning or retaining it does not prevent the runtime owner from shutting down.
+/// Obtain a handle through
+/// [`Builtins::runtime_operations`](crate::runtime::Builtins::runtime_operations).
+/// It can be cloned and used from any thread without keeping the runtime alive.
+///
+/// [`stop`](Self::stop) requests shutdown.
+/// [`pin_current_thread`](Self::pin_current_thread) sets the calling thread's
+/// processor affinity using the associated worker's processor set. Cloning
+/// preserves that set; relocation to an initialized worker of the same runtime
+/// updates it. Foreign or unregistered destinations leave it unchanged.
 #[derive(Debug, Clone)]
 pub struct RuntimeOperations {
     dispatcher: DispatcherClient,
@@ -35,30 +41,25 @@ impl RuntimeOperations {
         }
     }
 
-    /// Pins the current thread to the processors assigned to this handle's worker.
+    /// Pins the calling thread to the associated worker's processors.
     ///
-    /// This uses a captured processor snapshot and remains usable after the runtime stops.
-    /// Clone the handle before capturing it in a thread-start callback to keep that
-    /// callback's processor selection independent of subsequent relocation.
+    /// Use this when starting an external thread that should share a worker's
+    /// processor locality. The handle retains a processor snapshot, so pinning
+    /// remains available after the runtime stops. Clone it before moving it into
+    /// a thread-start callback to preserve that callback's processor selection.
     ///
-    /// Pinning does not make the calling thread a runtime worker or change the
-    /// binding of its capabilities. See the
-    /// [documentation guides](crate#documentation).
+    /// Pinning does not make the thread an Arty worker or relocate its capabilities.
+    ///
+    /// # Examples
     ///
     /// ```
-    /// use std::num::NonZeroUsize;
+    /// use arty::runtime::Runtime;
     ///
-    /// use arty::runtime::{ProcessorCount, Runtime};
-    ///
-    /// let operations = Runtime::builder()
-    ///     .processor_count(ProcessorCount::at_most(NonZeroUsize::MIN))
-    ///     .build()
-    ///     .unwrap()
-    ///     .run(async |cx| cx.runtime_operations().clone())
-    ///     .expect("the root task completes normally");
-    /// std::thread::spawn(move || operations.pin_current_thread())
-    ///     .join()
-    ///     .unwrap();
+    /// let operations = Runtime::new()?.run(async |cx| cx.runtime_operations().clone())?;
+    /// std::thread::scope(|scope| {
+    ///     scope.spawn(move || operations.pin_current_thread());
+    /// });
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     #[inline]
     pub fn pin_current_thread(&self) {
@@ -67,9 +68,25 @@ impl RuntimeOperations {
 
     /// Requests shutdown without blocking the calling thread.
     ///
-    /// Pending tasks are cancelled and new submissions are rejected with a
-    /// [`JoinError`](crate::task::JoinError). See [`Runtime::stop`](crate::runtime::Runtime::stop)
-    /// for the shutdown and already-running blocking-work contract.
+    /// May be called repeatedly from any thread. Pending tasks are cancelled,
+    /// and new submissions receive [`JoinError`](crate::task::JoinError).
+    /// Running blocking callbacks are allowed to finish. See
+    /// [`Runtime::stop`](crate::runtime::Runtime::stop) for the full shutdown contract.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use arty::runtime::Runtime;
+    ///
+    /// let runtime = Runtime::new()?;
+    /// let operations = runtime
+    ///     .task_scheduler()
+    ///     .spawn(async |cx| cx.runtime_operations().clone())
+    ///     .wait()?;
+    /// operations.stop();
+    /// runtime.wait();
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     #[cfg_attr(test, mutants::skip)] // It is impractical to test for "stuff not happening", so mutating this easily leads to timeouts.
     pub fn stop(&self) {
         self.dispatcher.stop();
@@ -107,7 +124,6 @@ impl ThreadAware for RuntimeOperations {
 #[cfg(not(miri))]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
-    use std::num::NonZeroUsize;
     use std::sync::{Arc, OnceLock};
     use std::thread;
 
@@ -122,7 +138,7 @@ mod tests {
     use crate::runtime::handle::Runtime;
 
     #[cfg_attr(test, mutants::skip)]
-    fn runtime_with_coordinates(processors: NonZeroUsize) -> (Runtime, ThreadBuilder) {
+    fn runtime_with_coordinates(processors: usize) -> (Runtime, ThreadBuilder) {
         let coordinates = ThreadBuilder::default();
         let config = RuntimeConfig {
             num_processors: ProcessorCount::exactly(processors),
@@ -135,7 +151,7 @@ mod tests {
 
     #[test]
     fn repeated_and_unfamiliar_relocation_preserves_all_handle_bindings() {
-        let (runtime, coordinates) = runtime_with_coordinates(NonZeroUsize::MIN);
+        let (runtime, coordinates) = runtime_with_coordinates(1);
         let (source, mut scheduler, mut operations, processor, mut builtins) = runtime
             .task_scheduler()
             .spawn(async |cx| {
@@ -190,7 +206,7 @@ mod tests {
             eprintln!("requires two processors to exercise an unpublished destination worker");
             return;
         }
-        let (runtime, _) = runtime_with_coordinates(NonZeroUsize::new(2).unwrap());
+        let (runtime, _) = runtime_with_coordinates(2);
         let workers: Vec<_> = (0..2)
             .map(|_| runtime.task_scheduler().spawn(async |cx| (cx.thread().clone(), cx)))
             .map(|handle| handle.wait().unwrap())

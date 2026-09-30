@@ -118,6 +118,29 @@ mod tests {
     use crate::task::scheduler::TaskScheduler;
 
     #[test]
+    fn clients_observe_the_shared_shutdown_state() {
+        let (command_tx, _commands) = mpsc::channel();
+        let worker = WorkerEndpoint {
+            command_tx,
+            waker: Waker::noop().clone(),
+            thread: test_threads(1).pop().unwrap(),
+            blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+        };
+        let client = DispatcherClient::new(Arc::new(DispatcherCore::new(
+            ThreadWaiter::new(vec![]),
+            nonempty::NonEmpty::new(worker),
+            Sink::noop(),
+        )));
+        let clone = client.clone();
+        assert!(!client.is_shutting_down());
+        assert!(!clone.is_shutting_down());
+
+        client.stop();
+        assert!(client.is_shutting_down());
+        assert!(clone.is_shutting_down());
+    }
+
+    #[test]
     fn relocate_updates_task_placement() {
         // Create a dispatcher with 2 workers so we can verify which one receives tasks.
         let (worker0_tx, worker0_rx) = mpsc::channel();

@@ -209,11 +209,34 @@ pub(super) mod blocking_worker_tests {
     use observed_testing::{CapturedEvent, TEST_ID, test_emitter};
     use testing_aids::execute_or_abandon;
 
-    use crate::runtime::blocking_worker::{BlockingPool, BlockingWorker};
+    use crate::runtime::blocking_worker::{BlockingPool, BlockingTaskScope, BlockingWorker, CURRENT_POOL};
 
     #[cfg_attr(test, mutants::skip)]
     pub(in crate::runtime) fn is_blocking_worker_shutting_down(worker: &BlockingWorker) -> bool {
         worker.is_shutting_down.load(Ordering::Acquire)
+    }
+
+    #[test]
+    fn blocking_task_scopes_restore_the_previous_pool_identity() {
+        assert!(CURRENT_POOL.with_borrow(Option::is_none));
+        let outer_identity = Arc::new(());
+        let inner_identity = Arc::new(());
+        {
+            let _outer = BlockingTaskScope::enter(Arc::clone(&outer_identity));
+            CURRENT_POOL.with_borrow(|current| {
+                assert!(Arc::ptr_eq(current.as_ref().unwrap(), &outer_identity));
+            });
+            {
+                let _inner = BlockingTaskScope::enter(Arc::clone(&inner_identity));
+                CURRENT_POOL.with_borrow(|current| {
+                    assert!(Arc::ptr_eq(current.as_ref().unwrap(), &inner_identity));
+                });
+            }
+            CURRENT_POOL.with_borrow(|current| {
+                assert!(Arc::ptr_eq(current.as_ref().unwrap(), &outer_identity));
+            });
+        }
+        assert!(CURRENT_POOL.with_borrow(Option::is_none));
     }
 
     #[test]
@@ -347,7 +370,7 @@ pub(super) mod blocking_worker_tests {
     fn runtime_releases_pool_even_when_a_scheduler_is_retained() {
         execute_or_abandon(|| {
             let runtime = crate::runtime::Runtime::builder()
-                .processor_count(crate::runtime::ProcessorCount::exactly(std::num::NonZeroUsize::MIN))
+                .processor_count(crate::runtime::ProcessorCount::exactly(1))
                 .build()
                 .unwrap();
             let scheduler = runtime.task_scheduler().spawn(async |cx| cx.scheduler().clone()).wait().unwrap();

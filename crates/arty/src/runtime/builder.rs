@@ -12,26 +12,24 @@ use crate::runtime::handle::Runtime;
 
 /// Configures workers, clocks, and telemetry before starting a runtime.
 ///
-/// By default, the runtime uses [`ProcessorCount::auto`], 2 MiB worker stacks,
-/// isolated blocking worker pools, and a noop telemetry sink.
+/// Obtain a builder from [`Runtime::builder`], change the settings you need,
+/// then call [`build`](Self::build) to start the workers. Setters replace earlier
+/// values for the same setting; configuring a builder does not start threads.
 ///
-/// See the [documentation guides](crate#documentation) for the
-/// resource trade-offs between processor and blocking-pool policies.
+/// The defaults are [`ProcessorCount::auto`], 2 MiB asynchronous-worker stacks,
+/// isolated blocking pools, a real-time clock, and a no-op telemetry sink.
 ///
 /// # Examples
 ///
 /// ```
-/// use std::num::NonZeroUsize;
-///
-/// use arty::runtime::{Error, ProcessorCount, Runtime};
+/// use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime};
 ///
 /// let runtime = Runtime::builder()
-///     .processor_count(ProcessorCount::at_most(NonZeroUsize::new(4).unwrap()))
+///     .processor_count(ProcessorCount::at_most(4))
+///     .blocking_pool_policy(BlockingPoolPolicy::shared(4))
 ///     .build()?;
-/// runtime
-///     .run(async |_| {})
-///     .expect("the root task completes normally");
-/// # Ok::<(), Error>(())
+/// assert_eq!(runtime.run(async |_| 42)?, 42);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Debug)]
 pub struct RuntimeBuilder {
@@ -41,10 +39,20 @@ pub struct RuntimeBuilder {
 }
 
 impl RuntimeBuilder {
-    /// Selects how many processors the runtime uses, with one asynchronous worker per processor.
+    /// Sets the processor policy for asynchronous workers.
     ///
-    /// This replaces any earlier processor-count setting.
-    /// The default is [`ProcessorCount::auto`].
+    /// The runtime starts one asynchronous worker per selected processor.
+    /// The default is [`ProcessorCount::auto`]. This does not set blocking-pool
+    /// limits; use [`blocking_pool_policy`](Self::blocking_pool_policy) for those.
+    /// A zero count is rejected by [`build`](Self::build), not by this setter.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use arty::runtime::{ProcessorCount, Runtime};
+    ///
+    /// let builder = Runtime::builder().processor_count(ProcessorCount::at_most(4));
+    /// ```
     #[must_use]
     pub const fn processor_count(mut self, count: ProcessorCount) -> Self {
         self.processor_config.num_processors = count;
@@ -53,14 +61,21 @@ impl RuntimeBuilder {
 
     /// Sets each asynchronous worker thread's stack size in bytes.
     ///
-    /// This does not configure blocking-task pools.
-    ///
-    /// A larger value of the `RUST_MIN_STACK` environment variable takes precedence.
-    /// The default is 2 MiB.
+    /// The default is 2 MiB. A larger value of the `RUST_MIN_STACK` environment
+    /// variable takes precedence. This setting does not change blocking-pool
+    /// thread stacks.
     ///
     /// # Panics
     ///
     /// Panics if `size` is zero.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use arty::runtime::Runtime;
+    ///
+    /// let builder = Runtime::builder().stack_size(4 * 1024 * 1024);
+    /// ```
     #[must_use]
     pub const fn stack_size(mut self, size: usize) -> Self {
         assert!(size > 0, "stack size must be greater than zero");
@@ -68,9 +83,19 @@ impl RuntimeBuilder {
         self
     }
 
-    /// Selects how blocking tasks share worker pools.
+    /// Sets whether asynchronous workers share their blocking-task pool.
     ///
-    /// The default is [`BlockingPoolPolicy::isolated`].
+    /// The default is [`BlockingPoolPolicy::isolated`], which gives each
+    /// asynchronous worker its own pool. A shared pool bounds blocking threads
+    /// across all workers independently of the asynchronous worker count.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use arty::runtime::{BlockingPoolPolicy, Runtime};
+    ///
+    /// let builder = Runtime::builder().blocking_pool_policy(BlockingPoolPolicy::shared(4));
+    /// ```
     #[must_use]
     pub const fn blocking_pool_policy(mut self, policy: BlockingPoolPolicy) -> Self {
         self.processor_config.blocking_pool_policy = policy;
@@ -79,66 +104,84 @@ impl RuntimeBuilder {
 
     /// Sets the clock used by runtime workers.
     ///
-    /// An [`InactiveClock`] is cloned to each asynchronous worker and activated
-    /// there. The runtime drives the resulting worker clocks.
+    /// The default follows real time. Pass an [`InactiveClock`] or, with
+    /// `test-util` enabled, a `ClockControl` to choose a different time source.
+    /// Workers activate their own clocks and drive their timers.
     ///
     /// # Examples
     ///
-    /// Enable `test-util` in dev-dependencies to use `arty::time::ClockControl`.
-    /// Automatic timer advancement is useful for sequential delays; it is not
-    /// idle-runtime advancement or a simulation of concurrent deadline ordering.
-    /// See the [documentation guides](crate#documentation) for manual time control.
+    /// Enable `test-util` in dev-dependencies to test sequential delays without
+    /// waiting for real time:
     ///
+    /// ```test_harness
+    /// # #[cfg(all(feature = "macros", feature = "test-util"))]
+    /// #[arty::test(builder = arty::runtime::Runtime::builder().clock(
+    ///     arty::time::ClockControl::new().auto_advance_timers(true)
+    /// ))]
+    /// async fn sequential_delay(cx: arty::runtime::Builtins) {
+    ///     let duration = std::time::Duration::from_secs(30);
+    ///     let watch = cx.clock().stopwatch();
+    ///     cx.clock().delay(duration).await;
+    ///     assert_eq!(watch.elapsed(), duration);
+    /// }
     /// ```
-    /// # fn main() {
-    /// # #[cfg(all(feature = "rt", feature = "test-util"))] {
-    /// # (|| {
-    /// use std::time::Duration;
     ///
-    /// use arty::runtime::Runtime;
-    /// use arty::time::ClockControl;
-    ///
-    /// let control = ClockControl::new().auto_advance_timers(true);
-    /// let runtime = Runtime::builder().clock(control).build()?;
-    /// runtime
-    ///     .run(async |cx| {
-    ///         let watch = cx.clock().stopwatch();
-    ///         cx.clock().delay(Duration::from_secs(30)).await;
-    ///         assert_eq!(watch.elapsed(), Duration::from_secs(30));
-    ///     })
-    ///     .expect("the controlled task completes normally");
-    ///
-    /// # Ok::<(), arty::runtime::Error>(())
-    /// # })().unwrap();
-    /// # }
-    /// # }
-    /// ```
+    /// Automatic timer advancement occurs eagerly on timer registration or time
+    /// reads. Use manual advancement when concurrent timers' relative order
+    /// matters; see the crate's [time guide](crate#documentation).
     #[must_use]
     pub fn clock(mut self, clock: impl Into<InactiveClock>) -> Self {
         self.clock = clock.into();
         self
     }
 
-    /// Sets the [`Sink`] for automatic enrichment propagation.
+    /// Sets the telemetry sink for runtime events and task enrichment.
     ///
-    /// When a sink is configured, every asynchronous task spawned via the runtime automatically
-    /// inherits the enrichment context that was active at the spawn site. This removes the
-    /// need for manual [`Sink::transfer_context`] / `.attach()` calls.
+    /// The default is [`Sink::noop`]. Asynchronous tasks inherit enrichment
+    /// active on the configured sink at submission, including their completion
+    /// events. Retrieve the sink inside a task with
+    /// [`Builtins::sink`](crate::runtime::Builtins::sink).
+    ///
+    /// # Examples
+    ///
+    /// Pass a sink configured by the application:
+    ///
+    /// ```
+    /// use arty::runtime::{Runtime, RuntimeBuilder};
+    ///
+    /// fn app_builder(sink: observed::Sink) -> RuntimeBuilder {
+    ///     Runtime::builder().sink(sink)
+    /// }
+    /// ```
     #[must_use]
     pub fn sink(mut self, sink: Sink) -> Self {
         self.sink = sink;
         self
     }
 
-    /// Builds and starts a new instance of the Arty runtime.
+    /// Starts the configured workers and returns their runtime owner.
+    ///
+    /// Workers are ready to receive tasks when this method returns.
     ///
     /// # Errors
     ///
-    /// Returns an opaque [`Error`] when the processor selection cannot be satisfied.
+    /// Returns [`Error`] if the processor count is zero or the policy cannot be
+    /// satisfied, such as an [`exactly`](ProcessorCount::exactly) request exceeding
+    /// available processors.
     ///
     /// # Panics
     ///
     /// Panics if worker-thread creation or worker initialization fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use arty::runtime::Runtime;
+    ///
+    /// let runtime = Runtime::builder().build()?;
+    /// assert_eq!(runtime.run(async |_| 42)?, 42);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn build(self) -> Result<Runtime, Error> {
         bootstrap::build(self.processor_config, &self.clock, self.sink, &ThreadBuilder::default())
     }
@@ -158,7 +201,6 @@ impl RuntimeBuilder {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
-    use std::num::NonZeroUsize;
     #[cfg(not(miri))]
     use std::sync::Arc;
     use std::time::Duration;
@@ -185,13 +227,13 @@ mod tests {
     #[test]
     fn resource_limits_preserve_independent_settings() {
         let builder = Runtime::builder()
-            .processor_count(ProcessorCount::exactly(NonZeroUsize::new(2).unwrap()))
+            .processor_count(ProcessorCount::exactly(2))
             .stack_size(1024 * 1024)
             .blocking_pool_policy(BlockingPoolPolicy::shared(1));
         assert_eq!(
             builder.processor_config,
             RuntimeConfig {
-                num_processors: ProcessorCount::exactly(NonZeroUsize::new(2).unwrap()),
+                num_processors: ProcessorCount::exactly(2),
                 stack_size: 1024 * 1024,
                 blocking_pool_policy: BlockingPoolPolicy::shared(1),
             }
@@ -201,15 +243,26 @@ mod tests {
     #[test]
     fn maximum_processor_selection_replaces_exact_count() {
         let builder = Runtime::builder()
-            .processor_count(ProcessorCount::exactly(NonZeroUsize::new(2).unwrap()))
-            .processor_count(ProcessorCount::at_most(NonZeroUsize::MIN));
-        assert_eq!(builder.processor_config.num_processors, ProcessorCount::at_most(NonZeroUsize::MIN),);
+            .processor_count(ProcessorCount::exactly(2))
+            .processor_count(ProcessorCount::at_most(1));
+        assert_eq!(builder.processor_config.num_processors, ProcessorCount::at_most(1),);
+    }
+
+    #[test]
+    fn zero_processor_counts_can_be_replaced_before_building() {
+        for policy in [ProcessorCount::exactly(0), ProcessorCount::at_most(0)] {
+            let builder = Runtime::builder().processor_count(policy);
+            assert_eq!(builder.processor_config.num_processors, policy);
+
+            let builder = builder.processor_count(ProcessorCount::at_most(1));
+            assert_eq!(builder.processor_config.num_processors, ProcessorCount::at_most(1));
+        }
     }
 
     #[test]
     fn all_processors_selection_replaces_maximum_count() {
         let builder = Runtime::builder()
-            .processor_count(ProcessorCount::at_most(NonZeroUsize::MIN))
+            .processor_count(ProcessorCount::at_most(1))
             .processor_count(ProcessorCount::all());
         assert_eq!(builder.processor_config.num_processors, ProcessorCount::all(),);
     }
@@ -217,7 +270,7 @@ mod tests {
     #[test]
     fn automatic_processor_selection_replaces_exact_count() {
         let builder = Runtime::builder()
-            .processor_count(ProcessorCount::exactly(NonZeroUsize::new(2).unwrap()))
+            .processor_count(ProcessorCount::exactly(2))
             .processor_count(ProcessorCount::auto());
         assert_eq!(builder.processor_config.num_processors, ProcessorCount::auto(),);
     }
@@ -227,12 +280,12 @@ mod tests {
         let builder = Runtime::builder()
             .stack_size(1024 * 1024)
             .blocking_pool_policy(BlockingPoolPolicy::shared(1))
-            .processor_count(ProcessorCount::at_most(NonZeroUsize::MIN))
-            .processor_count(ProcessorCount::exactly(NonZeroUsize::new(2).unwrap()));
+            .processor_count(ProcessorCount::at_most(1))
+            .processor_count(ProcessorCount::exactly(2));
         assert_eq!(
             builder.processor_config,
             RuntimeConfig {
-                num_processors: ProcessorCount::exactly(NonZeroUsize::new(2).unwrap()),
+                num_processors: ProcessorCount::exactly(2),
                 stack_size: 1024 * 1024,
                 blocking_pool_policy: BlockingPoolPolicy::shared(1),
             }

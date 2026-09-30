@@ -5,13 +5,13 @@
 
 mod fixture {
     use std::cell::Cell;
-    use std::num::NonZero;
 
     use tick::{Clock, ClockControl};
 
     thread_local! {
         pub(super) static FAIL_CONSTRUCTION: Cell<bool> = const { Cell::new(false) };
         pub(super) static BUILDER_CALLS: Cell<usize> = const { Cell::new(0) };
+        pub(super) static ENTRYPOINT_BODY_RAN: Cell<bool> = const { Cell::new(false) };
     }
 
     pub(super) mod __private {
@@ -25,11 +25,11 @@ mod fixture {
     #[derive(Debug)]
     pub(super) struct Builtins(pub(super) usize, pub(super) usize, pub(super) Option<Clock>);
 
-    #[derive(Debug)]
-    pub(super) struct ProcessorCount(NonZero<usize>);
+    #[derive(Debug, Clone, Copy)]
+    pub(super) struct ProcessorCount(usize);
 
     impl ProcessorCount {
-        pub(super) const fn at_most(count: NonZero<usize>) -> Self {
+        pub(super) const fn at_most(count: usize) -> Self {
             Self(count)
         }
     }
@@ -79,18 +79,20 @@ mod fixture {
         }
 
         pub(super) fn processor_count(mut self, count: ProcessorCount) -> Self {
-            self.workers = count.0.get().min(2);
+            self.workers = count.0.min(2);
             self
         }
 
         pub(super) fn clock(mut self, control: ClockControl) -> Self {
-            self.clock = Some(control.to_clock());
+            self.clock = Some(control.into());
             self
         }
 
         pub(super) fn build(self) -> Result<Runtime, &'static str> {
             if FAIL_CONSTRUCTION.replace(false) {
                 Err("forced construction failure")
+            } else if self.workers == 0 {
+                Err("processor count must be greater than zero")
             } else {
                 Ok(Runtime {
                     value: self.value,
@@ -160,6 +162,20 @@ async fn limited_workers(cx: fixture::Builtins) -> usize {
 #[arty_macros::test(workers = 1, runtime_path = crate::renamed)]
 async fn one_worker(cx: fixture::Builtins) {
     assert_eq!(cx.1, 1);
+}
+
+#[arty_macros::main(workers = 0, runtime_path = crate::renamed)]
+async fn zero_worker_entrypoint(_cx: fixture::Builtins) {
+    fixture::ENTRYPOINT_BODY_RAN.set(true);
+}
+
+#[test]
+#[should_panic(expected = "processor count must be greater than zero")]
+fn zero_worker_count_is_validated_by_runtime_construction() {
+    fixture::ENTRYPOINT_BODY_RAN.set(false);
+    let error = std::panic::catch_unwind(zero_worker_entrypoint).unwrap_err();
+    assert!(!fixture::ENTRYPOINT_BODY_RAN.get());
+    std::panic::resume_unwind(error);
 }
 
 type AppResult = Result<usize, &'static str>;

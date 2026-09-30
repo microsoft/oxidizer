@@ -87,36 +87,38 @@ impl LocalTaskBinding {
     }
 }
 
-/// Scheduler for local, potentially non-`Send` tasks and results.
+/// A scheduler for tasks sharing worker-local state.
 ///
-/// Obtain an owned scheduler through [`Builtins::local_scheduler`](crate::runtime::Builtins::local_scheduler)
-/// on the associated worker. The scheduler is neither [`Send`] nor [`Sync`].
-/// Cloning it does not keep the worker running.
+/// Use this when tasks need to share non-[`Send`] values such as [`Rc`] or
+/// [`RefCell`](std::cell::RefCell). Obtain it through
+/// [`Builtins::local_scheduler`](crate::runtime::Builtins::local_scheduler) on
+/// the associated worker. The scheduler is neither `Send` nor [`Sync`]; cloning
+/// it does not keep the worker running.
 ///
-/// A cancelled or rejected local task returns [`JoinError`](crate::task::JoinError)
-/// with `is_shutdown() == true`.
-/// See the [documentation guides](crate#documentation) for choosing
-/// between local and cross-thread submission.
+/// Local factories and their futures run on that worker, and their results may
+/// be non-`Send`. They still cannot borrow caller-stack data; use
+/// [`Runtime::block_on`](crate::runtime::Runtime::block_on) for scoped borrowing.
 ///
-/// With the `macros` feature:
+/// Await required joins before shutdown. Cancelled and rejected tasks return
+/// [`JoinError`](crate::task::JoinError); dropping a join does not cancel its task.
+///
+/// # Examples
 ///
 /// ```
-/// use std::rc::Rc;
-///
-/// # #[cfg(feature = "macros")]
-/// use arty::runtime::Builtins;
-///
 /// # #[cfg(feature = "macros")]
 /// #[arty::main]
-/// async fn main(cx: Builtins) {
+/// async fn main(cx: arty::runtime::Builtins) -> Result<(), arty::task::JoinError> {
+///     use std::rc::Rc;
+///
 ///     let value = Rc::new(42);
-///     let result = cx
+///     let captured = Rc::clone(&value);
+///     let returned = cx
 ///         .local_scheduler()
 ///         .expect("the task runs on its associated worker")
-///         .spawn(async move || value)
-///         .await
-///         .expect("the local task completes before the entry point returns");
-///     assert_eq!(*result, 42);
+///         .spawn(async move || captured)
+///         .await?;
+///     assert!(Rc::ptr_eq(&value, &returned));
+///     Ok(())
 /// }
 /// # #[cfg(not(feature = "macros"))] fn main() {}
 /// ```
@@ -138,18 +140,40 @@ impl LocalTaskScheduler {
         })
     }
 
-    /// Starts a local task, creating its future immediately on the current worker.
+    /// Submits a local task, creating its future on the calling worker.
     ///
-    /// The factory takes no arguments. Captures and results may be non-`Send`,
-    /// but still need to be `'static`; local spawning does not borrow the caller's stack.
+    /// Invokes `future_factory` immediately with no arguments. Captures, futures,
+    /// and results may be non-[`Send`], but must be `'static`. Await the
+    /// [`LocalJoinHandle`] on the same worker to receive the result.
     ///
     /// After shutdown starts, returns a join that is immediately ready with a
-    /// shutdown error, without invoking the factory.
+    /// shutdown error without invoking the factory. A factory or future panic
+    /// is reported through the join, rather than unwinding the joining task.
     ///
     /// # Panics
     ///
-    /// Panics outside the token's own worker-local context while the runtime is
-    /// running. Factory and future panics are returned through the join.
+    /// Panics if used outside its original worker's local context while the
+    /// runtime is running.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "macros")]
+    /// #[arty::main]
+    /// async fn main(cx: arty::runtime::Builtins) -> Result<(), arty::task::JoinError> {
+    ///     use std::rc::Rc;
+    ///
+    ///     let value = Rc::new(String::from("worker-local"));
+    ///     let captured = Rc::clone(&value);
+    ///     let scheduler = cx
+    ///         .local_scheduler()
+    ///         .expect("the task runs on its associated worker");
+    ///     let returned = scheduler.spawn(async move || captured).await?;
+    ///     assert!(Rc::ptr_eq(&value, &returned));
+    ///     Ok(())
+    /// }
+    /// # #[cfg(not(feature = "macros"))] fn main() {}
+    /// ```
     pub fn spawn<FF, F, R>(&self, future_factory: FF) -> LocalJoinHandle<R>
     where
         FF: FnOnce() -> F + 'static,
@@ -187,7 +211,10 @@ impl LocalTaskScheduler {
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
     use std::cell::Cell;
+    use std::task::Waker;
     use std::thread;
+
+    use arty_executor::testing::new_guarded_executor;
 
     use super::*;
 
@@ -212,6 +239,27 @@ mod tests {
         let scope = LocalTaskScope::new();
         drop(scope);
         let _replacement = LocalTaskScope::new();
+    }
+
+    #[test]
+    fn closing_a_local_scope_rejects_work_before_invoking_its_factory() {
+        let executor = new_guarded_executor(Waker::noop().clone());
+        let _scope = LocalTaskScope::new();
+        let binding = LocalTaskBinding::new(executor.tasks(), Sink::noop(), Arc::new(AtomicBool::new(false)));
+        let scheduler = binding.local_scheduler().unwrap();
+        assert!(scheduler.tasks().is_some());
+
+        LocalTaskScope::close();
+
+        let invoked = Rc::new(Cell::new(false));
+        let captured = Rc::clone(&invoked);
+        let join = scheduler.spawn(move || {
+            captured.set(true);
+            async { 42 }
+        });
+        assert!(!invoked.get());
+        assert!(futures::executor::block_on(join).unwrap_err().is_shutdown());
+        assert!(scheduler.tasks().is_none());
     }
 
     #[test]

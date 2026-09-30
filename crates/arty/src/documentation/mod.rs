@@ -1,14 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Longer guides for building applications with Arty.
+//! Guides for running applications with Arty.
 //!
 //! Start with the [quickstart](crate#quickstart), then choose a topic below.
-//! These guides are compiled with all Arty features enabled. Ordinary examples
-//! use [`arty::main`](crate::main) or [`arty::test`](crate::test); explicit runtime
-//! construction is reserved for ownership, borrowing, and lifecycle examples.
-//! API items retain their exact bounds, errors, and panic conditions; the guides
-//! explain how those contracts fit together.
+//!
+//! - [Scheduling](scheduling): create tasks, share local state, and receive results.
+//! - [Configuration](configuration): choose workers, blocking pools, and services.
+//! - [Lifecycle](lifecycle): manage ownership, borrowing, shutdown, and failure.
+//! - [Thread awareness](thread_awareness): preserve or change a worker association.
+//! - [Time](time): use delays and timeouts, and control time in tests.
+//! - [Telemetry](telemetry): configure events, enrichment, and data classification.
 
 pub mod configuration;
 pub mod lifecycle;

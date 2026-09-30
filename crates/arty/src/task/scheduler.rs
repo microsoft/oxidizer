@@ -10,25 +10,42 @@ use crate::runtime::context::Builtins;
 use crate::runtime::dispatch::{DispatcherClient, WorkerIndex};
 use crate::task::join::JoinHandle;
 
-/// Submits asynchronous and blocking tasks to an Arty runtime.
+/// A handle for submitting asynchronous and blocking tasks.
 ///
-/// [`Runtime::task_scheduler`](crate::runtime::Runtime::task_scheduler) returns a detached
-/// scheduler. Its submissions select workers round-robin, sharing the selection
-/// sequence with other detached handles of the same runtime.
+/// Obtain a scheduler from
+/// [`Runtime::task_scheduler`](crate::runtime::Runtime::task_scheduler) to
+/// distribute work across workers, or from [`Builtins::scheduler`] to keep child
+/// tasks on the same worker. Clones preserve the association and do not keep the
+/// runtime running.
 ///
-/// A scheduler obtained from [`Builtins::scheduler`] is bound to that worker.
-/// Ordinary spawning preserves its affinity. Use [`spawn_anywhere`](Self::spawn_anywhere)
-/// to distribute an independent unit of work and relocate its explicit payload.
+/// [`spawn`](Self::spawn) sends a factory to a worker and creates its future
+/// there. The future can retain non-[`Send`] state, but captures sent to the worker
+/// and results returned from it must be `Send`. Use
+/// [`LocalTaskScheduler`](crate::task::LocalTaskScheduler) for non-`Send` captures
+/// or results already on a worker.
 ///
-/// Cloning does not change the binding or keep the runtime running.
-/// [`ThreadAware`] relocation binds this handle to a registered worker of its original
-/// runtime. Foreign or unregistered destinations leave the binding unchanged.
+/// [`spawn_anywhere`](Self::spawn_anywhere) distributes new work and explicitly
+/// relocates its payload. [`ThreadAware`] relocation can rebind this scheduler
+/// to an initialized worker of its own runtime; foreign or unregistered
+/// destinations leave its association unchanged.
 ///
-/// Shutdown cancels pending tasks. Their join handles return
-/// [`JoinError`](crate::task::JoinError) with `is_shutdown() == true`.
-/// New submissions are rejected immediately without invoking their factories.
-/// See the [documentation guides](crate#documentation) for factory,
-/// future, and result examples.
+/// Once shutdown starts, submissions return an immediately ready
+/// [`JoinError`](crate::task::JoinError) without invoking the factory. Await
+/// required results before shutdown; dropping a join does not cancel its task.
+///
+/// # Examples
+///
+/// ```
+/// # #[cfg(feature = "macros")]
+/// #[arty::main]
+/// async fn main(cx: arty::runtime::Builtins) -> Result<(), arty::task::JoinError> {
+///     let scheduler = cx.scheduler().clone();
+///     let task = scheduler.spawn(async |_| 42);
+///     assert_eq!(task.await?, 42);
+///     Ok(())
+/// }
+/// # #[cfg(not(feature = "macros"))] fn main() {}
+/// ```
 #[derive(Debug, Clone)]
 pub struct TaskScheduler {
     dispatcher: DispatcherClient,
@@ -84,15 +101,46 @@ impl TaskScheduler {
         });
     }
 
-    /// Starts a task on the associated worker, or round-robin when detached.
+    /// Submits an asynchronous task to this scheduler's worker.
     ///
-    /// The factory receives owned [`Builtins`] on the worker before its future is
-    /// constructed. The future itself need not be [`Send`]. Ordinary captures and
-    /// results are not automatically relocated; use [`spawn_anywhere`](Self::spawn_anywhere)
-    /// for explicit payload relocation.
+    /// A detached scheduler selects workers round-robin. The factory runs on
+    /// the selected worker with owned [`Builtins`] and creates the future there,
+    /// so the future itself need not be [`Send`]. Pass a factory, not an
+    /// already-created future.
+    ///
+    /// Captured values and returned results are not automatically relocated.
+    /// Use [`spawn_anywhere`](Self::spawn_anywhere) to relocate an explicit payload.
+    /// Factory and future panics are reported through the [`JoinHandle`].
     ///
     /// Tasks must not block their asynchronous worker. Use
     /// [`spawn_blocking`](Self::spawn_blocking) for synchronous blocking calls.
+    ///
+    /// # Examples
+    ///
+    /// Create non-`Send` state on the worker and retain it across a delay:
+    ///
+    /// ```
+    /// # #[cfg(feature = "macros")]
+    /// #[arty::main]
+    /// async fn main(cx: arty::runtime::Builtins) -> Result<(), arty::task::JoinError> {
+    ///     use std::rc::Rc;
+    ///     use std::time::Duration;
+    ///
+    ///     let answer = cx
+    ///         .scheduler()
+    ///         .spawn(|child| {
+    ///             let value = Rc::new(42);
+    ///             async move {
+    ///                 child.clock().delay(Duration::from_millis(1)).await;
+    ///                 *value
+    ///             }
+    ///         })
+    ///         .await?;
+    ///     assert_eq!(answer, 42);
+    ///     Ok(())
+    /// }
+    /// # #[cfg(not(feature = "macros"))] fn main() {}
+    /// ```
     pub fn spawn<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
     where
         FF: FnOnce(Builtins) -> F + Send + 'static,
@@ -105,11 +153,37 @@ impl TaskScheduler {
         }
     }
 
-    /// Distributes a task round-robin and relocates its payload on the destination worker.
+    /// Distributes a task across workers and relocates its payload.
     ///
-    /// The factory is a function pointer so thread-affine captures must be supplied
-    /// explicitly as `data`. The source coordinate is the binding of this scheduler, or
-    /// unknown for a detached scheduler. The completed result is not relocated.
+    /// Selects a destination round-robin, even when this scheduler is worker-bound.
+    /// On that worker, calls [`ThreadAware::relocate`] on `data` before invoking
+    /// `f`. The source coordinate is this scheduler's association, or `None` for
+    /// a detached scheduler. The destination may be the source worker.
+    ///
+    /// The factory is a function pointer: pass its input as `data`, rather than
+    /// capturing it in a closure. The returned result is not relocated.
+    ///
+    /// # Examples
+    ///
+    /// Relocate an existing set of capabilities to the selected worker:
+    ///
+    /// ```
+    /// # #[cfg(feature = "macros")]
+    /// #[arty::main]
+    /// async fn main(cx: arty::runtime::Builtins) -> Result<(), arty::task::JoinError> {
+    ///     let answer = cx
+    ///         .scheduler()
+    ///         .spawn_anywhere(cx.clone(), |moved| async move {
+    ///             assert_eq!(moved.thread().id(), std::thread::current().id());
+    ///             assert!(moved.local_scheduler().is_some());
+    ///             42
+    ///         })
+    ///         .await?;
+    ///     assert_eq!(answer, 42);
+    ///     Ok(())
+    /// }
+    /// # #[cfg(not(feature = "macros"))] fn main() {}
+    /// ```
     pub fn spawn_anywhere<D, F, R>(&self, data: D, f: fn(D) -> F) -> JoinHandle<R>
     where
         D: ThreadAware + Send + 'static,
@@ -124,15 +198,41 @@ impl TaskScheduler {
         })
     }
 
-    /// Starts blocking work without blocking an asynchronous worker.
+    /// Submits a synchronous callback to a blocking-task pool.
     ///
-    /// Bound schedulers use their worker's blocking pool; detached schedulers select a
-    /// worker's pool round-robin. Shutdown rejects new work and cancels queued
-    /// callbacks before invocation. An already-running blocking closure cannot
-    /// be forcibly interrupted and is allowed to finish.
+    /// Use this for synchronous I/O or library calls that would otherwise prevent
+    /// an asynchronous worker from polling tasks and advancing timers. The callback
+    /// runs on a separate pool thread; its panic is reported through the join.
     ///
-    /// Blocking work uses a separate thread pool so asynchronous workers remain
-    /// responsive. Pool sizing targets blocking calls rather than sustained CPU work.
+    /// A bound scheduler uses its worker's pool; a detached scheduler selects a
+    /// worker's pool round-robin. Configure sharing and limits with
+    /// [`BlockingPoolPolicy`](crate::runtime::BlockingPoolPolicy).
+    ///
+    /// Shutdown rejects new callbacks and cancels queued ones before invocation.
+    /// Already-running callbacks cannot be interrupted and are allowed to finish.
+    /// Pool sizing targets blocking calls, not sustained CPU-parallel workloads.
+    ///
+    /// # Examples
+    ///
+    /// Read a file without blocking the asynchronous worker:
+    ///
+    /// ```no_run
+    /// # #[cfg(feature = "macros")]
+    /// #[arty::main]
+    /// async fn main(
+    ///     cx: arty::runtime::Builtins,
+    /// ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    ///     let contents = cx
+    ///         .scheduler()
+    ///         .spawn_blocking(|| std::fs::read_to_string("settings.toml"))
+    ///         .await??;
+    ///     println!("{contents}");
+    ///     Ok(())
+    /// }
+    /// # #[cfg(not(feature = "macros"))] fn main() {}
+    /// ```
+    ///
+    /// The first `?` handles task failure; the second handles the file's I/O error.
     pub fn spawn_blocking<B, R>(&self, body: B) -> JoinHandle<R>
     where
         B: FnOnce() -> R + Send + 'static,
@@ -192,7 +292,7 @@ mod tests {
         }
 
         let runtime = crate::runtime::Runtime::builder()
-            .processor_count(crate::runtime::ProcessorCount::exactly(std::num::NonZeroUsize::MIN))
+            .processor_count(crate::runtime::ProcessorCount::exactly(1))
             .build()
             .unwrap();
         let (source, mut scheduler) = runtime

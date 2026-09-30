@@ -47,13 +47,17 @@ async fn worker_limit_clamps_instead_of_failing_construction(cx: Builtins) {
     assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
 }
 
-fn custom_builder() -> arty::runtime::RuntimeBuilder {
-    use std::num::NonZero;
+#[test(workers = 0)]
+#[should_panic(expected = "failed to create the runtime for the entry point")]
+async fn zero_workers_fail_during_construction(_cx: Builtins) {
+    panic!("the test body must not run");
+}
 
+fn custom_builder() -> arty::runtime::RuntimeBuilder {
     use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime};
 
     Runtime::builder()
-        .processor_count(ProcessorCount::at_most(NonZero::<usize>::MIN))
+        .processor_count(ProcessorCount::at_most(1))
         .blocking_pool_policy(BlockingPoolPolicy::shared(1))
 }
 

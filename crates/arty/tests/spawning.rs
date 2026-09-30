@@ -5,8 +5,6 @@
 
 #![cfg(feature = "rt")]
 
-#[cfg(not(miri))]
-use std::num::NonZeroUsize;
 use std::rc::Rc;
 use std::thread;
 
@@ -86,10 +84,7 @@ fn test_worker_affinity() {
         eprintln!("requires six processors; two-worker affinity is covered by runtime_contracts");
         return;
     }
-    let runtime = Runtime::builder()
-        .processor_count(ProcessorCount::exactly(NonZeroUsize::new(6).unwrap()))
-        .build()
-        .unwrap();
+    let runtime = Runtime::builder().processor_count(ProcessorCount::exactly(6)).build().unwrap();
     let (thread1, scheduler1) = runtime
         .task_scheduler()
         .spawn(async |cx| (thread::current().id(), cx.scheduler().clone()))

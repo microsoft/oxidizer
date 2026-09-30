@@ -8,7 +8,6 @@
 
 testing_aids::init_tracing!();
 
-use std::num::NonZeroUsize;
 use std::thread;
 
 use arty::runtime::{ProcessorCount, Runtime, RuntimeOperations};
@@ -29,10 +28,7 @@ fn pinned_processor(operations: RuntimeOperations) -> ProcessorId {
 
 #[test]
 fn runtime_operations_are_available_off_worker() {
-    let runtime = Runtime::builder()
-        .processor_count(ProcessorCount::at_most(NonZeroUsize::MIN))
-        .build()
-        .unwrap();
+    let runtime = Runtime::builder().processor_count(ProcessorCount::at_most(1)).build().unwrap();
     let (builtins, expected) = runtime
         .task_scheduler()
         .spawn(async |cx| (cx, SystemHardware::current().current_processor_id()))
@@ -58,10 +54,7 @@ fn operations_and_builtins_follow_owner_relocation() {
         eprintln!("requires two processors to exercise cross-worker relocation");
         return;
     }
-    let runtime = Runtime::builder()
-        .processor_count(ProcessorCount::exactly(NonZeroUsize::new(2).unwrap()))
-        .build()
-        .unwrap();
+    let runtime = Runtime::builder().processor_count(ProcessorCount::exactly(2)).build().unwrap();
     let workers: Vec<_> = (0..2)
         .map(|_| {
             runtime
@@ -93,14 +86,8 @@ fn operations_and_builtins_follow_owner_relocation() {
 
 #[test]
 fn operations_preserve_foreign_owner() {
-    let source_runtime = Runtime::builder()
-        .processor_count(ProcessorCount::at_most(NonZeroUsize::MIN))
-        .build()
-        .unwrap();
-    let other_runtime = Runtime::builder()
-        .processor_count(ProcessorCount::at_most(NonZeroUsize::MIN))
-        .build()
-        .unwrap();
+    let source_runtime = Runtime::builder().processor_count(ProcessorCount::at_most(1)).build().unwrap();
+    let other_runtime = Runtime::builder().processor_count(ProcessorCount::at_most(1)).build().unwrap();
     let (mut operations, source, processor) = source_runtime
         .task_scheduler()
         .spawn(async |cx| {
@@ -122,7 +109,7 @@ fn operations_preserve_foreign_owner() {
 #[test]
 fn captured_processor_snapshot_pins_after_runtime_shutdown() {
     let (operations, processor) = Runtime::builder()
-        .processor_count(ProcessorCount::at_most(NonZeroUsize::MIN))
+        .processor_count(ProcessorCount::at_most(1))
         .build()
         .unwrap()
         .run(async |cx| (cx.runtime_operations().clone(), SystemHardware::current().current_processor_id()))
@@ -138,7 +125,7 @@ fn captured_processor_snapshot_pins_after_runtime_shutdown() {
 fn maximum_processors_clamps_to_available_processors() {
     let available = SystemHardware::current().processors().len();
     let runtime = Runtime::builder()
-        .processor_count(ProcessorCount::at_most(NonZeroUsize::MAX))
+        .processor_count(ProcessorCount::at_most(usize::MAX))
         .build()
         .unwrap();
     let workers: std::collections::HashSet<_> = (0..available)

@@ -58,22 +58,45 @@ impl<F: Future> Future for ScopedStorage<F> {
 
 /// Owns an Arty runtime's workers and their shutdown.
 ///
-/// There is one asynchronous worker per selected processor. Each task stays on
-/// its initial worker until completion or cancellation. Use [`task_scheduler`](Self::task_scheduler)
-/// to obtain a cheap, cloneable submission handle; retaining that handle does not
-/// prevent the runtime from stopping when this owner is dropped.
+/// Use this type to run asynchronous work from synchronous code. Construction
+/// starts one asynchronous worker per selected processor. A task stays on its
+/// worker until it finishes or is cancelled.
 ///
-/// Dropping the runtime stops it and blocks until shutdown completes. Do not drop
-/// the owner on an asynchronous runtime worker. Methods that block also reject
-/// calls from asynchronous runtime workers.
-/// Dropping the owner from one of its blocking tasks requests shutdown without
-/// waiting for that task to join itself.
+/// [`run`](Self::run) consumes the runtime and stops it after a root task finishes.
+/// [`block_on`](Self::block_on) borrows it, allowing several calls and tasks that
+/// borrow caller-owned data. For independently submitted tasks, obtain a
+/// [`TaskScheduler`] with [`task_scheduler`](Self::task_scheduler).
 ///
-/// This type is [`Send`] and [`Sync`], but is not a relocatable [`ThreadAware`](thread_aware::ThreadAware)
-/// capability. Task capabilities are available through [`Builtins`].
+/// # Shutdown
 ///
-/// See the [documentation guides](crate#documentation) for entry-point
-/// choices, cancellation, and the distinction between a task result and shutdown.
+/// Dropping the owner requests shutdown and waits for workers to stop. Pending
+/// asynchronous tasks and queued blocking callbacks are cancelled; blocking
+/// callbacks already running are allowed to finish. A blocking callback that
+/// never returns can therefore prevent shutdown from completing.
+///
+/// Dropping the owner from one of its own blocking callbacks requests shutdown
+/// without waiting for that callback to finish. Scheduler and [`Builtins`]
+/// handles do not keep the runtime running after its owner is dropped.
+///
+/// # Panics
+///
+/// Dropping the owner on an asynchronous Arty worker panics. Keep ownership on
+/// a thread where blocking is allowed.
+///
+/// # Examples
+///
+/// Submit work from synchronous code and stop after receiving its result:
+///
+/// ```
+/// use arty::runtime::Runtime;
+///
+/// let runtime = Runtime::new()?;
+/// let task = runtime.task_scheduler().spawn(async |_| 42);
+/// assert_eq!(task.wait()?, 42);
+/// runtime.stop();
+/// runtime.wait();
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[derive(Debug)]
 pub struct Runtime {
     dispatcher: DispatcherClient,
@@ -91,11 +114,31 @@ impl Runtime {
     /// # Panics
     ///
     /// Panics if worker creation or initialization fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use arty::runtime::Runtime;
+    ///
+    /// let runtime = Runtime::new()?;
+    /// assert_eq!(runtime.run(async |_| 42)?, 42);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn new() -> Result<Self, Error> {
         RuntimeBuilder::new().build()
     }
 
-    /// Starts configuring a runtime before its workers are created.
+    /// Returns a builder for configuring a runtime before starting its workers.
+    ///
+    /// See [`RuntimeBuilder`] for the defaults and available settings.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use arty::runtime::{BlockingPoolPolicy, Runtime};
+    ///
+    /// let builder = Runtime::builder().blocking_pool_policy(BlockingPoolPolicy::shared(4));
+    /// ```
     #[must_use]
     pub fn builder() -> RuntimeBuilder {
         RuntimeBuilder::new()
@@ -103,29 +146,63 @@ impl Runtime {
 
     /// Returns a detached scheduler that selects workers round-robin.
     ///
+    /// Use it to submit work from outside the runtime or distribute independent
+    /// tasks across workers. In contrast, [`Builtins::scheduler`] keeps child
+    /// tasks on their parent's worker.
+    ///
     /// Clones and separately obtained schedulers share the runtime's selection
     /// sequence. Selection does not imply execution or completion order.
+    /// Retaining a scheduler does not keep the runtime running.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use arty::runtime::Runtime;
+    ///
+    /// let runtime = Runtime::new()?;
+    /// let scheduler = runtime.task_scheduler();
+    /// let first = scheduler.spawn(async |_| 20);
+    /// let second = scheduler.spawn(async |_| 22);
+    /// assert_eq!(first.wait()? + second.wait()?, 42);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn task_scheduler(&self) -> TaskScheduler {
         TaskScheduler::detached(self.dispatcher.clone())
     }
 
-    /// Runs a root task, waits for its result, then shuts down the runtime.
+    /// Runs a root task and shuts down this runtime.
     ///
-    /// The callback receives owned [`Builtins`] on a worker, not the calling thread.
-    /// Await any asynchronous children that must finish before the root returns;
-    /// returning from the root does not drain other asynchronous tasks.
+    /// Invokes `future_factory` on a worker with its owned [`Builtins`], then
+    /// blocks the calling thread until the task finishes. The future stays on
+    /// that worker and need not be [`Send`].
     ///
-    /// Captures and results are not automatically relocated.
+    /// The runtime is dropped after receiving the result, following its
+    /// [shutdown rules](Self#shutdown). Await any child tasks that must finish
+    /// before the root returns; other pending asynchronous work is cancelled.
+    /// Captured values and returned results are not automatically relocated.
     ///
     /// # Errors
     ///
-    /// Returns [`JoinError`] if the root task panics or shutdown cancels it.
+    /// Returns [`JoinError`] if the factory or future panics, or if shutdown
+    /// cancels or rejects the root task. A `Result` returned by the task is
+    /// preserved inside the outer task result.
     ///
     /// # Panics
     ///
-    /// Panics if called from an asynchronous runtime worker.
+    /// Panics if called from an asynchronous Arty worker.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use arty::runtime::Runtime;
+    ///
+    /// let runtime = Runtime::new()?;
+    /// let answer = runtime.run(async |cx| cx.scheduler().spawn(async |_| 6 * 7).await)??;
+    /// assert_eq!(answer, 42);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn run<FF, F, R>(self, future_factory: FF) -> Result<R, JoinError>
     where
         FF: FnOnce(Builtins) -> F + Send + 'static,
@@ -136,29 +213,63 @@ impl Runtime {
         self.task_scheduler().spawn(future_factory).wait()
     }
 
-    /// Requests shutdown without blocking the calling thread. May be called repeatedly.
+    /// Requests shutdown without blocking the calling thread.
     ///
-    /// Closes admission immediately, cancels pending asynchronous/local tasks,
-    /// and prevents queued blocking callbacks from starting. Already-running
-    /// blocking calls cannot be forcibly interrupted.
+    /// May be called repeatedly, including from a task. Immediately rejects new
+    /// submissions, cancels pending asynchronous and local tasks, and prevents
+    /// queued blocking callbacks from starting. Already-running blocking
+    /// callbacks cannot be forcibly interrupted.
     ///
     /// Cancelled or rejected joins return [`JoinError`] with `is_shutdown() == true`.
-    /// Use [`wait`](Self::wait) from an allowed blocking context to wait for worker
-    /// shutdown and running blocking work to finish.
+    /// Use [`wait`](Self::wait) from synchronous code to wait for workers and
+    /// running blocking callbacks to finish.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use arty::runtime::Runtime;
+    ///
+    /// let runtime = Runtime::new()?;
+    /// let scheduler = runtime.task_scheduler();
+    /// runtime.stop();
+    /// let error = scheduler
+    ///     .spawn(async |_| 42)
+    ///     .wait()
+    ///     .expect_err("submission follows shutdown");
+    /// assert!(error.is_shutdown());
+    /// runtime.wait();
+    /// # Ok::<(), arty::runtime::Error>(())
+    /// ```
     pub fn stop(&self) {
         self.dispatcher.stop();
     }
 
-    /// Waits for shutdown to finish. May be called more than once.
+    /// Blocks until this runtime's workers have stopped.
     ///
-    /// This does not request shutdown; call [`stop`](Self::stop) first unless
-    /// another task will request it. Cancelled joins report shutdown errors.
+    /// This does not request shutdown. Call [`stop`](Self::stop) first unless
+    /// another task will request it. Repeated calls are allowed, and the method
+    /// returns immediately after shutdown has completed.
+    ///
+    /// The wait includes blocking callbacks that have already started, not
+    /// successful completion of cancelled asynchronous tasks. Use task joins to
+    /// receive results before requesting shutdown.
     ///
     /// # Panics
     ///
-    /// Panics if called from an asynchronous runtime worker.
+    /// Panics if called from an asynchronous Arty worker.
     /// Also panics when called from a blocking task of this runtime, which cannot
     /// complete while waiting for its own shutdown.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use arty::runtime::Runtime;
+    ///
+    /// let runtime = Runtime::new()?;
+    /// runtime.stop();
+    /// runtime.wait();
+    /// # Ok::<(), arty::runtime::Error>(())
+    /// ```
     pub fn wait(&self) {
         assert_not_flagged();
         assert!(
@@ -168,32 +279,37 @@ impl Runtime {
         self.dispatcher.wait();
     }
 
-    /// Runs a task that may borrow the caller's stack, blocking until it completes.
+    /// Runs a borrowing task and blocks until it finishes.
     ///
-    /// The borrowing factory and future are destroyed before this method returns
-    /// either success or failure. Captures and results are not automatically relocated.
-    /// Shutdown cancels pending work and rejects new work without invoking its factory.
+    /// Unlike [`run`](Self::run), this borrows the runtime and allows
+    /// `future_factory` and its future to borrow caller-owned data. The factory
+    /// runs on a worker, not on the calling thread. Both the factory and future
+    /// are destroyed before the method returns, on success or failure.
     ///
-    /// Results must be owned, `Send`, and `'static`; returning a reference into the
-    /// caller's stack is not supported. Mutate borrowed caller-owned data or return
-    /// an owned result instead.
-    ///
-    /// ```
-    /// let runtime = arty::runtime::Runtime::new().unwrap();
-    /// let mut message = String::from("Hello");
-    /// runtime
-    ///     .block_on(async |_| message.push_str(", Arty"))
-    ///     .expect("the runtime remains running until this task completes");
-    /// assert_eq!(message, "Hello, Arty");
-    /// ```
+    /// Return owned data or modify borrowed data in place; results cannot borrow
+    /// the caller's stack. Captures and results are not automatically relocated.
+    /// The runtime remains available for further work until stopped or dropped.
     ///
     /// # Errors
     ///
-    /// Returns [`JoinError`] if the task panics or shutdown cancels/rejects it.
+    /// Returns [`JoinError`] if the factory or future panics, or if shutdown
+    /// cancels or rejects the task. Rejection does not invoke the factory.
     ///
     /// # Panics
     ///
-    /// Panics if called from an asynchronous runtime worker.
+    /// Panics if called from an asynchronous Arty worker.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use arty::runtime::Runtime;
+    ///
+    /// let runtime = Runtime::new()?;
+    /// let mut message = String::from("Hello");
+    /// runtime.block_on(async |_| message.push_str(", Arty"))?;
+    /// assert_eq!(message, "Hello, Arty");
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn block_on<'a, FF, F, R>(&self, future_factory: FF) -> Result<R, JoinError>
     where
         FF: FnOnce(Builtins) -> F + Send + 'a,
@@ -407,7 +523,7 @@ mod tests {
     fn check_borrowed_future_completion(panics: bool) {
         execute_or_terminate_process(|| {
             let runtime = Runtime::builder()
-                .processor_count(crate::runtime::ProcessorCount::exactly(std::num::NonZeroUsize::MIN))
+                .processor_count(crate::runtime::ProcessorCount::exactly(1))
                 .build()
                 .unwrap();
             let worker = runtime.block_on(async |_| thread::current().id()).unwrap();

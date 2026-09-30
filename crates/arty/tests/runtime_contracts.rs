@@ -7,7 +7,6 @@
 
 use std::cell::Cell;
 use std::future::{pending, poll_fn};
-use std::num::NonZeroUsize;
 use std::panic::{AssertUnwindSafe, catch_unwind, panic_any};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -26,7 +25,7 @@ testing_aids::init_tracing!();
 #[cfg(test)]
 fn runtime(workers: usize) -> Runtime {
     Runtime::builder()
-        .processor_count(ProcessorCount::exactly(NonZeroUsize::new(workers).unwrap()))
+        .processor_count(ProcessorCount::exactly(workers))
         .blocking_pool_policy(BlockingPoolPolicy::shared(1))
         .build()
         .unwrap()
@@ -171,7 +170,7 @@ fn worker_can_drive_a_controlled_clock_without_io() {
     execute_or_terminate_process(|| {
         let control = ClockControl::new().auto_advance_timers(true);
         let runtime = Runtime::builder()
-            .processor_count(ProcessorCount::exactly(NonZeroUsize::MIN))
+            .processor_count(ProcessorCount::exactly(1))
             .clock(control)
             .build()
             .unwrap();
@@ -323,7 +322,7 @@ fn a_blocking_task_can_drop_its_runtime_without_joining_itself() {
     execute_or_terminate_process(|| {
         for policy in [BlockingPoolPolicy::isolated(), BlockingPoolPolicy::shared(1)] {
             let runtime = Runtime::builder()
-                .processor_count(ProcessorCount::exactly(NonZeroUsize::MIN))
+                .processor_count(ProcessorCount::exactly(1))
                 .blocking_pool_policy(policy)
                 .build()
                 .unwrap();
@@ -343,7 +342,7 @@ fn a_blocking_task_can_drop_its_runtime_without_joining_itself() {
 fn repeated_waits_report_one_completed_shutdown() {
     let (sink, processor) = observed_testing::test_emitter(observed_testing::TEST_ID);
     let runtime = Runtime::builder()
-        .processor_count(ProcessorCount::exactly(NonZeroUsize::MIN))
+        .processor_count(ProcessorCount::exactly(1))
         .sink(sink)
         .build()
         .unwrap();

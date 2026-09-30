@@ -3,15 +3,12 @@
 
 //! Explicit runtime ownership, worker limits, and worker-affine child tasks.
 
-use std::num::NonZeroUsize;
 use std::time::Duration;
 
 use arty::runtime::{ProcessorCount, Runtime};
 
 fn main() -> Result<(), arty::runtime::Error> {
-    let runtime = Runtime::builder()
-        .processor_count(ProcessorCount::at_most(NonZeroUsize::new(2).expect("two is nonzero")))
-        .build()?;
+    let runtime = Runtime::builder().processor_count(ProcessorCount::at_most(2)).build()?;
     let answer = runtime
         .task_scheduler()
         .spawn(async |cx| {

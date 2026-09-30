@@ -11,22 +11,33 @@ use super::JoinError;
 use crate::runtime::thread::assert_not_flagged;
 use crate::task::execution::TaskResult;
 
-/// The result of an asynchronous or blocking task.
+/// A handle for receiving an asynchronous or blocking task's result.
 ///
-/// Await the handle from asynchronous code, or use [`wait`](Self::wait) from a
-/// blocking-safe thread. Completion returns `Ok(result)`; a task panic or shutdown
-/// returns [`JoinError`] without unwinding the joining caller.
+/// Await the handle inside asynchronous code, or call [`wait`](Self::wait) from
+/// synchronous code. Completion produces `Ok(result)`. A task panic or shutdown
+/// cancellation produces [`JoinError`] without unwinding the joining caller.
 ///
-/// Cancellation, including runtime shutdown before an asynchronous task completes,
-/// returns an error for which [`JoinError::is_shutdown`] is `true`.
-/// Dropping the handle does not cancel the task.
-/// See the [documentation guides](crate#documentation) before coordinating
-/// joins with shutdown.
+/// Dropping the handle does not cancel its task or rethrow a task panic.
+/// The runtime must remain running for pending asynchronous work to complete.
+/// If the task returns its own `Result<T, E>`, joining it produces
+/// `Result<Result<T, E>, JoinError>`.
 ///
 /// # Panics
 ///
-/// The result may be obtained at most once, either by awaiting the future or by calling `wait()`.
-/// Attempting to obtain the result multiple times will panic.
+/// Panics if polled again after its result has been received.
+///
+/// # Examples
+///
+/// ```
+/// # #[cfg(feature = "macros")]
+/// #[arty::main]
+/// async fn main(cx: arty::runtime::Builtins) -> Result<(), arty::task::JoinError> {
+///     let task = cx.scheduler().spawn(async |_| 42);
+///     assert_eq!(task.await?, 42);
+///     Ok(())
+/// }
+/// # #[cfg(not(feature = "macros"))] fn main() {}
+/// ```
 #[derive(derive_more::Debug)]
 #[pin_project]
 pub struct JoinHandle<R>
@@ -52,22 +63,33 @@ where
         Self::new(receiver)
     }
 
-    /// Synchronously waits for the task to complete, returning the result.
+    /// Blocks until the task's result is available.
     ///
-    /// A cancelled or rejected task returns [`JoinError`].
-    /// This is not a shutdown wait; use [`Runtime::wait`](crate::runtime::Runtime::wait)
-    /// to wait for workers to stop.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the result has already been obtained either via `wait()` or by awaiting.
-    ///
-    /// Panics if called from an asynchronous Arty worker. This function is only intended
-    /// to be called from a blocking-safe context such as `fn main()` or a `#[test]` entry point.
+    /// Use `.await` inside asynchronous code instead. This waits for one task,
+    /// not for runtime shutdown; [`Runtime::wait`](crate::runtime::Runtime::wait)
+    /// waits for workers to stop.
     ///
     /// # Errors
     ///
-    /// Returns an error if the task panicked or was cancelled/rejected during shutdown.
+    /// Returns [`JoinError`] if the task panicked or shutdown cancelled or
+    /// rejected it. An error returned by the task itself remains its result.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the result has already been received by polling the handle.
+    /// Also panics if called from an asynchronous Arty worker, even if the
+    /// result is already ready.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use arty::runtime::Runtime;
+    ///
+    /// let runtime = Runtime::new()?;
+    /// let task = runtime.task_scheduler().spawn(async |_| 42);
+    /// assert_eq!(task.wait()?, 42);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn wait(self) -> Result<R, JoinError> {
         assert_not_flagged();
 
@@ -98,7 +120,6 @@ where
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
-    use std::num::NonZeroUsize;
 
     use crate::runtime::Runtime;
     use crate::runtime::config::ProcessorCount;
@@ -108,7 +129,7 @@ mod tests {
     #[test]
     fn spawned_task_delivers_its_result() {
         let runtime = Runtime::builder()
-            .processor_count(ProcessorCount::exactly(NonZeroUsize::MIN))
+            .processor_count(ProcessorCount::exactly(1))
             .build()
             .expect("runtime");
 

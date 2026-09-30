@@ -7,7 +7,6 @@
 
 testing_aids::init_tracing!();
 
-use std::num::NonZeroUsize;
 use std::thread::{self, ThreadId};
 
 use arty::runtime::{BlockingPoolPolicy, Builtins, ProcessorCount, Runtime};
@@ -46,7 +45,7 @@ struct RelocationObservation {
 #[cfg(test)]
 fn relocate_and_observe(policy: BlockingPoolPolicy, target: RelocationTarget) -> RelocationObservation {
     let runtime = Runtime::builder()
-        .processor_count(ProcessorCount::exactly(NonZeroUsize::new(2).unwrap()))
+        .processor_count(ProcessorCount::exactly(2))
         .blocking_pool_policy(policy)
         .build()
         .expect("failed to build runtime");
@@ -184,14 +183,8 @@ fn relocating_builtins_uses_same_pool_when_shared() {
 
 #[test]
 fn foreign_owner_relocation_preserves_runtime_binding() {
-    let source_runtime = Runtime::builder()
-        .processor_count(ProcessorCount::exactly(NonZeroUsize::MIN))
-        .build()
-        .unwrap();
-    let destination_runtime = Runtime::builder()
-        .processor_count(ProcessorCount::exactly(NonZeroUsize::MIN))
-        .build()
-        .unwrap();
+    let source_runtime = Runtime::builder().processor_count(ProcessorCount::exactly(1)).build().unwrap();
+    let destination_runtime = Runtime::builder().processor_count(ProcessorCount::exactly(1)).build().unwrap();
     let mut builtins = source_runtime.task_scheduler().spawn(async |cx| cx).wait().unwrap();
     let source = builtins.thread().clone();
     let destination = destination_runtime
@@ -218,10 +211,7 @@ fn repeated_spawn_after_relocation_uses_destination() {
     // Exercise the cached route repeatedly without turning this regression test into a load test.
     const SPAWN_COUNT: usize = 100;
 
-    let runtime = Runtime::builder()
-        .processor_count(ProcessorCount::exactly(NonZeroUsize::new(2).unwrap()))
-        .build()
-        .unwrap();
+    let runtime = Runtime::builder().processor_count(ProcessorCount::exactly(2)).build().unwrap();
     let workers: Vec<_> = (0..2)
         .map(|_| runtime.task_scheduler().spawn(async |cx| cx))
         .map(|handle| handle.wait().unwrap())
@@ -241,14 +231,8 @@ fn repeated_spawn_after_relocation_uses_destination() {
 
 #[test]
 fn foreign_owner_relocation_preserves_bare_scheduler_binding() {
-    let source_runtime = Runtime::builder()
-        .processor_count(ProcessorCount::exactly(NonZeroUsize::MIN))
-        .build()
-        .unwrap();
-    let destination_runtime = Runtime::builder()
-        .processor_count(ProcessorCount::exactly(NonZeroUsize::MIN))
-        .build()
-        .unwrap();
+    let source_runtime = Runtime::builder().processor_count(ProcessorCount::exactly(1)).build().unwrap();
+    let destination_runtime = Runtime::builder().processor_count(ProcessorCount::exactly(1)).build().unwrap();
     let builtins = source_runtime.task_scheduler().spawn(async |cx| cx).wait().unwrap();
     let mut scheduler = builtins.scheduler().clone();
     let destination = destination_runtime

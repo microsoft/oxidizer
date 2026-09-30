@@ -6,11 +6,37 @@ use std::error::Error;
 use std::fmt::{self, Debug, Display};
 use std::sync::Mutex;
 
-/// A task failed to complete because it panicked or the runtime shut down.
+/// A task failed to return its result.
 ///
-/// Returned by [`JoinHandle`](super::JoinHandle) and
-/// [`LocalJoinHandle`](super::LocalJoinHandle), rather than unwinding the joining
-/// task or leaving a cancelled join pending.
+/// Returned by [`JoinHandle`](super::JoinHandle),
+/// [`LocalJoinHandle`](super::LocalJoinHandle), and the runtime's `run` and
+/// `block_on` methods. Use [`is_panic`](Self::is_panic) to identify a task panic
+/// or [`is_shutdown`](Self::is_shutdown) to identify cancellation or rejection.
+///
+/// This is separate from an error returned by the task's own code. Joining a
+/// task that returns `Result<T, E>` produces `Result<Result<T, E>, JoinError>`.
+/// Receiving a panic error does not resume unwinding or repair application state.
+/// With `panic = "abort"`, a task panic aborts the process instead.
+///
+/// # Examples
+///
+/// A submission after shutdown reports a task error without invoking its factory:
+///
+/// ```
+/// use arty::runtime::Runtime;
+///
+/// let runtime = Runtime::new()?;
+/// let scheduler = runtime.task_scheduler();
+/// runtime.stop();
+/// let error = scheduler
+///     .spawn(async |_| 42)
+///     .wait()
+///     .expect_err("submission follows shutdown");
+/// assert!(error.is_shutdown());
+/// assert!(!error.is_panic());
+/// runtime.wait();
+/// # Ok::<(), arty::runtime::Error>(())
+/// ```
 pub struct JoinError {
     // The payload can be Send without being Sync. It is only consumed, never borrowed.
     panic: Option<Mutex<Box<dyn Any + Send + 'static>>>,
@@ -18,12 +44,47 @@ pub struct JoinError {
 
 impl JoinError {
     /// Returns `true` if the task panicked.
+    ///
+    /// This includes panics in a factory, an asynchronous future, or a blocking
+    /// callback when unwinding is enabled.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "macros")]
+    /// #[arty::main]
+    /// async fn main(cx: arty::runtime::Builtins) -> Result<(), arty::task::JoinError> {
+    ///     let result: Result<(), arty::task::JoinError> =
+    ///         cx.scheduler().spawn(async |_| panic!("task failed")).await;
+    ///     let error = result.expect_err("the task deliberately panics");
+    ///     assert!(error.is_panic());
+    ///     Ok(())
+    /// }
+    /// # #[cfg(not(feature = "macros"))] fn main() {}
+    /// ```
     #[must_use]
     pub const fn is_panic(&self) -> bool {
         self.panic.is_some()
     }
 
     /// Returns `true` if shutdown cancelled the task or rejected its submission.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use arty::runtime::Runtime;
+    ///
+    /// let runtime = Runtime::new()?;
+    /// let scheduler = runtime.task_scheduler();
+    /// runtime.stop();
+    /// let error = scheduler
+    ///     .spawn(async |_| 42)
+    ///     .wait()
+    ///     .expect_err("submission follows shutdown");
+    /// assert!(error.is_shutdown());
+    /// runtime.wait();
+    /// # Ok::<(), arty::runtime::Error>(())
+    /// ```
     #[must_use]
     pub const fn is_shutdown(&self) -> bool {
         self.panic.is_none()
