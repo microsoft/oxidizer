@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
 
 #[cfg_attr(test, mockall::automock)]
@@ -28,12 +28,9 @@ impl ThreadWaiter {
             shared: Arc::new((Mutex::new(State::Ready(threads)), Condvar::new())),
         }
     }
-}
 
-impl WaitForShutdown for ThreadWaiter {
-    fn wait(&self) {
+    fn wait_locked<'a>(&'a self, mut state_guard: MutexGuard<'a, State>) {
         let (state, completed) = &*self.shared;
-        let mut state_guard = state.lock().expect("shutdown state is never held while executing user code");
         loop {
             match &mut *state_guard {
                 State::Ready(threads) => {
@@ -59,6 +56,14 @@ impl WaitForShutdown for ThreadWaiter {
     }
 }
 
+impl WaitForShutdown for ThreadWaiter {
+    fn wait(&self) {
+        let (state, _) = &*self.shared;
+        let state_guard = state.lock().expect("shutdown state is never held while executing user code");
+        self.wait_locked(state_guard);
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -72,6 +77,29 @@ mod tests {
     fn empty_and_repeated_waits_complete() {
         let waiter = ThreadWaiter::new(Vec::new());
         waiter.wait();
+        waiter.wait();
+    }
+
+    #[test]
+    fn joining_waits_for_completion_notification() {
+        let waiter = ThreadWaiter::new(Vec::new());
+        let (state, _) = &*waiter.shared;
+        let mut state_guard = state.lock().unwrap();
+        *state_guard = State::Joining;
+
+        let shared = Arc::clone(&waiter.shared);
+        let completing = thread::spawn(move || {
+            let (state, completed) = &*shared;
+            let mut state_guard = state.lock().unwrap();
+            assert!(matches!(*state_guard, State::Joining));
+            *state_guard = State::Completed;
+            completed.notify_all();
+        });
+
+        // Completion cannot acquire the mutex until the condition-variable wait releases it.
+        waiter.wait_locked(state_guard);
+        completing.join().unwrap();
+        assert!(matches!(*state.lock().unwrap(), State::Completed));
         waiter.wait();
     }
 
