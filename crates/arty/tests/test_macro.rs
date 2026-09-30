@@ -8,7 +8,8 @@
 
 testing_aids::init_tracing!();
 
-use arty::runtime::{Builtins, test};
+use arty::runtime::Builtins;
+use arty::test;
 
 #[test]
 async fn simple_main(cx: Builtins) {
@@ -83,7 +84,7 @@ mod controlled_time {
         type Control = ClockControl;
     }
 
-    #[arty::runtime::test(workers = 1)]
+    #[arty::test(workers = 1)]
     async fn clock_starts_frozen(cx: Builtins, control: ClockControl) {
         assert_eq!(cx.clock().system_time(), UNIX_EPOCH);
         let before = cx.clock().instant();
@@ -92,7 +93,7 @@ mod controlled_time {
         assert_eq!(cx.clock().system_time(), UNIX_EPOCH + Duration::from_secs(42));
     }
 
-    #[arty::runtime::test(workers = 1)]
+    #[arty::test(workers = 1)]
     async fn manual_advance_wakes_only_due_timers(cx: Builtins, control: ClockControl) {
         assert_eq!(cx.clock().system_time(), UNIX_EPOCH);
         let mut delay = std::pin::pin!(cx.clock().delay(Duration::from_secs(10)));
@@ -104,7 +105,7 @@ mod controlled_time {
         assert!(delay.as_mut().now_or_never().is_some());
     }
 
-    #[renamed_arty::runtime::test(workers = 1, runtime_path = renamed_arty::runtime)]
+    #[renamed_arty::test(workers = 1, runtime_path = renamed_arty::runtime)]
     async fn aliases_and_eager_advancement(cx: <Types as TestTypes>::Context, control: <Types as TestTypes>::Control) {
         let control = control.auto_advance_timers(true);
         let watch = cx.clock().stopwatch();
@@ -115,7 +116,7 @@ mod controlled_time {
         assert_eq!(watch.elapsed(), Duration::from_secs(35));
     }
 
-    #[arty::runtime::test(workers = 1)]
+    #[arty::test(workers = 1)]
     async fn child_uses_the_same_control(cx: Builtins, control: ClockControl) {
         let child_control = control.clone();
         let now = cx
@@ -136,7 +137,7 @@ mod controlled_time {
         manual_advance_wakes_only_due_timers();
     }
 
-    #[arty::runtime::test(workers = 1)]
+    #[arty::test(workers = 1)]
     #[should_panic(expected = "controlled test panic")]
     async fn controlled_test_preserves_panic_payload(cx: Builtins, control: ClockControl) {
         control.advance(Duration::from_secs(1));
@@ -144,7 +145,7 @@ mod controlled_time {
         panic!("controlled test panic");
     }
 
-    #[arty::runtime::test(
+    #[arty::test(
         builder = super::custom_builder()
             .clock(ClockControl::new_at(UNIX_EPOCH + Duration::from_secs(123)))
     )]

@@ -8,7 +8,8 @@
 
 testing_aids::init_tracing!();
 
-use arty::runtime::{Builtins, test};
+use arty::runtime::Builtins;
+use arty::test;
 
 // Validate that when the runtime encounters a panic, it is visible as the test output.
 #[test]

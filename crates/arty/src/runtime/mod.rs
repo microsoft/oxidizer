@@ -33,8 +33,6 @@ pub(crate) mod context;
 pub(crate) mod dispatch;
 mod error;
 mod handle;
-#[cfg(feature = "macros")]
-mod macros;
 pub(crate) mod telemetry;
 pub(crate) mod thread;
 mod worker;
@@ -45,8 +43,6 @@ pub use context::Builtins;
 pub use context::operations::RuntimeOperations;
 pub use error::Error;
 pub use handle::Runtime;
-#[cfg(feature = "macros")]
-pub use macros::{main, test};
 
 /// Implementation details for the runtime entry-point macros.
 #[cfg(feature = "macros")]

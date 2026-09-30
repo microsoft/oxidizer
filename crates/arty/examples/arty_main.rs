@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use arty::runtime::Builtins;
 
-#[arty::runtime::main]
+#[arty::main]
 async fn main(cx: Builtins) {
     let answer = cx
         .local_scheduler()

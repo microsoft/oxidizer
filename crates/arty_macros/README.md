@@ -15,7 +15,7 @@
 
 Entry-point macros for [`arty`][__link0].
 
-Enable the `macros` feature in Arty and use `#[arty::runtime::main]` or `#[arty::runtime::test]`.
+Enable the `macros` feature in Arty and use `#[arty::main]` or `#[arty::test]`.
 Each annotated asynchronous function takes one owned `arty::runtime::Builtins` argument.
 Use `runtime_path = ::renamed_arty::runtime` for a renamed or re-exported runtime.
 
@@ -38,5 +38,5 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
 </sub>
 
  [__link0]: https://docs.rs/arty
- [__link1]: https://docs.rs/arty/latest/arty/runtime/attr.main.html
- [__link2]: https://docs.rs/arty/latest/arty/runtime/attr.test.html
+ [__link1]: https://docs.rs/arty/latest/arty/attr.main.html
+ [__link2]: https://docs.rs/arty/latest/arty/attr.test.html

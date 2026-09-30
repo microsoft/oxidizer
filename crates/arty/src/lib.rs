@@ -39,7 +39,7 @@
 //! No features are enabled by default.
 //!
 //! - **`rt`** - Enables `arty::runtime` and `arty::task`, and implies `time`.
-//! - **`macros`** - Enables `#[arty::runtime::main]` and `#[arty::runtime::test]` and implies `rt`.
+//! - **`macros`** - Enables `#[arty::main]` and `#[arty::test]` and implies `rt`.
 //! - **`time`** - Exposes time primitives through `arty::time`.
 //! - **`test-util`** - Enables test-only runtime utilities. With `time`, this includes
 //!   `arty::time::ClockControl`. Under Miri, runtime tests use a simulated
@@ -53,6 +53,11 @@
 //! - [Stabilization](https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/STABILIZATION.md)
 
 use arty_io_core as _;
+
+#[cfg(feature = "macros")]
+mod macros;
+#[cfg(feature = "macros")]
+pub use macros::{main, test};
 
 #[cfg(any(test, feature = "rt"))]
 pub mod runtime;

@@ -10,7 +10,7 @@
 ///
 /// ```
 /// # #[cfg(feature = "macros")]
-/// #[arty::runtime::main]
+/// #[arty::main]
 /// async fn main(cx: arty::runtime::Builtins) {
 ///     cx.scheduler().spawn(async |_| {}).await;
 /// }
@@ -27,7 +27,7 @@
 ///
 /// ```
 /// # #[cfg(feature = "macros")]
-/// #[arty::runtime::main(workers = 4)]
+/// #[arty::main(workers = 4)]
 /// async fn main(cx: arty::runtime::Builtins) {
 ///     assert_eq!(cx.scheduler().spawn(async |_| 42).await, 42);
 /// }
@@ -60,7 +60,7 @@
 /// }
 ///
 /// # #[cfg(feature = "macros")]
-/// #[arty::runtime::main(builder = app_builder())]
+/// #[arty::main(builder = app_builder())]
 /// async fn main(cx: arty::runtime::Builtins) {
 ///     cx.scheduler().spawn(async |_| {}).await;
 /// }
@@ -94,7 +94,7 @@ pub use arty_macros::main;
 ///
 /// ```
 /// # #[cfg(feature = "macros")]
-/// #[arty::runtime::test]
+/// #[arty::test]
 /// async fn answer(cx: arty::runtime::Builtins) {
 ///     assert_eq!(cx.scheduler().spawn(async |_| 42).await, 42);
 /// }
@@ -121,7 +121,7 @@ pub use arty_macros::main;
 ///
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "test-util"))]
-/// #[arty::runtime::test(workers = 1)]
+/// #[arty::test(workers = 1)]
 /// async fn simulated_delay(cx: arty::runtime::Builtins, control: arty::time::ClockControl) {
 ///     use std::time::Duration;
 ///

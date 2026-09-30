@@ -5,7 +5,7 @@
 
 //! Entry-point macros for [`arty`](https://docs.rs/arty).
 //!
-//! Enable the `macros` feature in Arty and use `#[arty::runtime::main]` or `#[arty::runtime::test]`.
+//! Enable the `macros` feature in Arty and use `#[arty::main]` or `#[arty::test]`.
 //! Each annotated asynchronous function takes one owned `arty::runtime::Builtins` argument.
 //! Use `runtime_path = ::renamed_arty::runtime` for a renamed or re-exported runtime.
 //!
@@ -17,8 +17,8 @@
 //!   their second parameter. This requires Arty's `test-util` feature, starts with manual
 //!   advancement, and cannot be combined with `builder`.
 //!
-//! See the [`main`](https://docs.rs/arty/latest/arty/runtime/attr.main.html) and
-//! [`test`](https://docs.rs/arty/latest/arty/runtime/attr.test.html) documentation in Arty
+//! See the [`main`](https://docs.rs/arty/latest/arty/attr.main.html) and
+//! [`test`](https://docs.rs/arty/latest/arty/attr.test.html) documentation in Arty
 //! for examples, clock semantics, and construction-error behavior.
 
 use proc_macro::TokenStream;
