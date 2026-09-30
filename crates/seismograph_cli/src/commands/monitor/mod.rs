@@ -56,13 +56,7 @@ pub(crate) fn view(args: ViewArgs) -> Result<(), Error> {
     let file = std::fs::File::open(&args.snapshot_file).map_err(|error| Error::snapshot_file(&args.snapshot_file, error))?;
     let app = app::App::offline(args.snapshot_file.clone());
     let loader = offline::Loader::start(args.snapshot_file.clone(), file)?;
-    run_terminal(app, Some(loader)).map_err(|error| match error {
-        Error::SnapshotFile { .. } => error,
-        error => Error::SnapshotFile {
-            path: args.snapshot_file,
-            message: error.to_string(),
-        },
-    })
+    run_terminal(app, Some(loader))
 }
 
 /// Runs the live monitor TUI.
