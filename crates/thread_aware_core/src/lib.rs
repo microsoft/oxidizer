@@ -40,11 +40,13 @@
 //! - **[`thread_aware`]** — the utilities that make relocation convenient: a
 //!   [`#[derive(ThreadAware)]`][derive] macro, closure adapters, wrappers for foreign types,
 //!   runtime coordinate construction, and strategy-partitioned [`Arc`][arc] storage. Free to
-//!   evolve, and not meant to appear in a public API.
+//!   evolve, and not meant to appear in a public API. Its [authoring guide] is the how-to for
+//!   making your own types thread-aware.
 //!
 //! [`thread_aware`]: https://docs.rs/thread_aware
 //! [derive]: https://docs.rs/thread_aware/latest/thread_aware/derive.ThreadAware.html
 //! [arc]: https://docs.rs/thread_aware/latest/thread_aware/struct.Arc.html
+//! [authoring guide]: https://docs.rs/thread_aware/latest/thread_aware/_documentation/index.html
 //!
 //! Depend on this crate directly when all you need is the trait. It has no normal dependencies
 //! and works without `std`: with default features turned off, [`Thread`] loses its thread id
