@@ -3,7 +3,7 @@
 
 //! Longer-form documentation for [`fetch`](crate).
 //!
-//! See also the [`http_extensions` recipes](https://docs.rs/http_extensions/latest/http_extensions/_documentation/recipes/).
+//! See also the [`http_extensions` recipes](https://docs.rs/http_extensions/latest/http_extensions/documentation/recipes/).
 
 pub mod examples;
 pub mod telemetry;

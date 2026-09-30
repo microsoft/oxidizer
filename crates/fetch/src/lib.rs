@@ -938,7 +938,7 @@ pub mod pipeline;
 
 /// Longer-form documentation for [`fetch`](crate).
 #[cfg(any(doc, test))]
-pub mod _documentation;
+pub mod documentation;
 
 // Installs a silent, always-interested global `tracing` subscriber before any
 // unit test in this crate runs. This keeps `tracing` emission paths executing
