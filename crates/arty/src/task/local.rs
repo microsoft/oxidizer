@@ -139,7 +139,9 @@ impl LocalTaskScheduler {
     }
 
     /// Starts a local task, creating its future immediately on the current worker.
-    #[doc = include_str!("../../docs/snippets/local_task.md")]
+    ///
+    /// The factory takes no arguments. Captures and results may be non-`Send`,
+    /// but still need to be `'static`; local spawning does not borrow the caller's stack.
     ///
     /// After shutdown starts, returns a join that is immediately ready with a
     /// shutdown error, without invoking the factory.

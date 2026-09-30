@@ -90,7 +90,9 @@ impl TaskScheduler {
     /// constructed. The future itself need not be [`Send`]. Ordinary captures and
     /// results are not automatically relocated; use [`spawn_anywhere`](Self::spawn_anywhere)
     /// for explicit payload relocation.
-    #[doc = include_str!("../../docs/snippets/async_task.md")]
+    ///
+    /// Tasks must not block their asynchronous worker. Use
+    /// [`spawn_blocking`](Self::spawn_blocking) for synchronous blocking calls.
     pub fn spawn<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
     where
         FF: FnOnce(Builtins) -> F + Send + 'static,
@@ -128,7 +130,9 @@ impl TaskScheduler {
     /// worker's pool round-robin. Shutdown rejects new work and cancels queued
     /// callbacks before invocation. An already-running blocking closure cannot
     /// be forcibly interrupted and is allowed to finish.
-    #[doc = include_str!("../../docs/snippets/blocking_task.md")]
+    ///
+    /// Blocking work uses a separate thread pool so asynchronous workers remain
+    /// responsive. Pool sizing targets blocking calls rather than sustained CPU work.
     pub fn spawn_blocking<B, R>(&self, body: B) -> JoinHandle<R>
     where
         B: FnOnce() -> R + Send + 'static,

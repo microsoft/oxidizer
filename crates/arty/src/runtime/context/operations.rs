@@ -65,7 +65,11 @@ impl RuntimeOperations {
         self.processors.pin_current_thread_to();
     }
 
-    #[doc = include_str!("../../../docs/snippets/fn_runtime_stop.md")]
+    /// Requests shutdown without blocking the calling thread.
+    ///
+    /// Pending tasks are cancelled and new submissions are rejected with a
+    /// [`JoinError`](crate::task::JoinError). See [`Runtime::stop`](crate::runtime::Runtime::stop)
+    /// for the shutdown and already-running blocking-work contract.
     #[cfg_attr(test, mutants::skip)] // It is impractical to test for "stuff not happening", so mutating this easily leads to timeouts.
     pub fn stop(&self) {
         self.dispatcher.stop();

@@ -116,11 +116,11 @@ harness = false
 required-features = ["rt"]
 
 [[example]]
-name = "arty_basic"
+name = "arty_advanced"
 required-features = ["rt"]
 
 [[example]]
-name = "arty_main"
+name = "arty_basic"
 required-features = ["macros"]
 
 # >>> anvil-managed: anvil-lints

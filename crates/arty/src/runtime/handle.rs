@@ -136,7 +136,15 @@ impl Runtime {
         self.task_scheduler().spawn(future_factory).wait()
     }
 
-    #[doc = include_str!("../../docs/snippets/fn_runtime_stop.md")]
+    /// Requests shutdown without blocking the calling thread. May be called repeatedly.
+    ///
+    /// Closes admission immediately, cancels pending asynchronous/local tasks,
+    /// and prevents queued blocking callbacks from starting. Already-running
+    /// blocking calls cannot be forcibly interrupted.
+    ///
+    /// Cancelled or rejected joins return [`JoinError`] with `is_shutdown() == true`.
+    /// Use [`wait`](Self::wait) from an allowed blocking context to wait for worker
+    /// shutdown and running blocking work to finish.
     pub fn stop(&self) {
         self.dispatcher.stop();
     }
