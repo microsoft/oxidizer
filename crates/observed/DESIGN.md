@@ -215,7 +215,7 @@ whether the event must be constructed and which processors are eligible to recei
 per-processor routing. Leaves in a composite decide independently. See `EventSampler::sample` and
 [Sinks and Keys](#sinks-and-keys) for the two contracts.
 
-External event sources can query `Sink::is_interested_in` with an `EventDescription` before collecting fields or constructing an event.
+External event sources can query `Sink::is_interested` with an `EventDescription` before collecting fields or constructing an event.
 The query reports current processor interest only; it does not predict delivery or perform sampling.
 
 ### Signal Routing: How Events Become Logs and Metrics
@@ -323,12 +323,13 @@ rather than silently repairing it. A composite has no identity of its own
 (`id()` reports the `<composite>` sentinel) and holds no enrichment: records travel through each leaf's own processors and carry that leaf's
 `SinkId`, redaction, and enrichment. `.enrich(&composite, …)` broadcasts to every leaf's slot.
 
-#### Metadata-only interest
+#### Sink interest
 
-`Sink::is_interested_in(&EventDescription)` returns true when any processor accepts the metadata, or any child of a composite is interested.
+`Sink::is_interested(&EventDescription)` aggregates `EventProcessor::is_interested`, returning true when any processor is interested, or any child of a composite is interested.
+Both checks use the event description rather than inspecting event fields.
 No-op sinks and sinks without processors are uninterested. The query does not construct or dispatch events, flush processors, invoke event or log sampling, or read clocks or enrichments.
 
-Processor interest depends only on metadata and state that changes at most once, such as initialization through a `OnceLock`.
+Processor interest depends only on the event description and state that changes at most once, such as initialization through a `OnceLock`.
 Initialization may change the answer in either direction. Callers query each candidate event rather than treating an answer as a lifetime cache entry.
 Interest is not a delivery guarantee: emission checks interest independently and remains subject to sampling and other delivery filters.
 

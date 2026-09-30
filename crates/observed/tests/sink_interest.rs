@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Public metadata-only sink interest contracts.
+//! Public sink interest contracts.
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(coverage_nightly, coverage(off))]
@@ -15,7 +15,7 @@ use observed::processing::{EventProcessor, EventView};
 use observed::{Event, EventSampler, EventSamplingContext, EventSamplingDecision, FlushError, Sink, emit, event};
 use tick::SimpleClock;
 
-/// Event used to compare metadata queries with actual construction and delivery.
+/// Event used to compare interest queries with actual construction and delivery.
 #[event("interest.accepted")]
 struct AcceptedEvent;
 
@@ -93,7 +93,7 @@ fn noop_and_empty_sinks_are_uninterested() {
     ];
 
     for sink in sinks {
-        assert!(!sink.is_interested_in(&AcceptedEvent::DESCRIPTION));
+        assert!(!sink.is_interested(&AcceptedEvent::DESCRIPTION));
     }
 }
 
@@ -111,8 +111,8 @@ fn leaf_interest_accepts_any_processor_and_preserves_metadata() {
             SimpleClock::new_frozen(),
         );
 
-        assert_eq!(sink.is_interested_in(&AcceptedEvent::DESCRIPTION), expected);
-        assert!(!sink.is_interested_in(&EventDescription::new("interest.rejected", None, None, None, false, false)));
+        assert_eq!(sink.is_interested(&AcceptedEvent::DESCRIPTION), expected);
+        assert!(!sink.is_interested(&EventDescription::new("interest.rejected", None, None, None, false, false)));
         first.assert_untouched();
         second.assert_untouched();
     }
@@ -126,8 +126,8 @@ fn composite_interest_accepts_any_child() {
         // Independent leaves may share an id but must have distinct enrichment slots.
         let sink = Sink::composite([leaf(&first), Sink::composite([Sink::noop(), leaf(&second)])]);
 
-        assert_eq!(sink.is_interested_in(&AcceptedEvent::DESCRIPTION), expected);
-        assert!(!sink.is_interested_in(&EventDescription::new("interest.rejected", None, None, None, false, false)));
+        assert_eq!(sink.is_interested(&AcceptedEvent::DESCRIPTION), expected);
+        assert!(!sink.is_interested(&EventDescription::new("interest.rejected", None, None, None, false, false)));
         first.assert_untouched();
         second.assert_untouched();
     }
@@ -141,13 +141,13 @@ fn initialization_updates_interest_in_both_directions() {
         let uninterested = Arc::new(ProbeProcessor::new(false));
         let composite = Sink::composite([leaf(&uninterested), sink.clone()]);
 
-        assert_eq!(sink.is_interested_in(&AcceptedEvent::DESCRIPTION), before);
-        assert_eq!(composite.is_interested_in(&AcceptedEvent::DESCRIPTION), before);
+        assert_eq!(sink.is_interested(&AcceptedEvent::DESCRIPTION), before);
+        assert_eq!(composite.is_interested(&AcceptedEvent::DESCRIPTION), before);
 
         processor.initialized_interest.set(after).unwrap();
 
-        assert_eq!(sink.is_interested_in(&AcceptedEvent::DESCRIPTION), after);
-        assert_eq!(composite.is_interested_in(&AcceptedEvent::DESCRIPTION), after);
+        assert_eq!(sink.is_interested(&AcceptedEvent::DESCRIPTION), after);
+        assert_eq!(composite.is_interested(&AcceptedEvent::DESCRIPTION), after);
         processor.assert_untouched();
         uninterested.assert_untouched();
     }
@@ -162,7 +162,7 @@ fn uninterested_emissions_do_not_construct_or_sample() {
     let constructed = Cell::new(0);
 
     for sink in [sink, composite] {
-        assert!(!sink.is_interested_in(&AcceptedEvent::DESCRIPTION));
+        assert!(!sink.is_interested(&AcceptedEvent::DESCRIPTION));
         emit!(&sink, {
             constructed.set(constructed.get() + 1);
             AcceptedEvent
@@ -181,8 +181,8 @@ fn queries_do_not_sample_and_interest_does_not_guarantee_delivery() {
     let sink = leaf(&processor).with_event_sampler(Arc::clone(&sampler) as Arc<dyn EventSampler>);
     let composite = Sink::composite([Sink::noop(), sink.clone()]);
 
-    assert!(sink.is_interested_in(&AcceptedEvent::DESCRIPTION));
-    assert!(composite.is_interested_in(&AcceptedEvent::DESCRIPTION));
+    assert!(sink.is_interested(&AcceptedEvent::DESCRIPTION));
+    assert!(composite.is_interested(&AcceptedEvent::DESCRIPTION));
     assert_eq!(sampler.sampled.load(Ordering::Relaxed), 0);
     processor.assert_untouched();
 
@@ -195,6 +195,6 @@ fn queries_do_not_sample_and_interest_does_not_guarantee_delivery() {
     assert_eq!(constructed.get(), 1);
     assert_eq!(sampler.sampled.load(Ordering::Relaxed), 1);
     processor.assert_untouched();
-    assert!(sink.is_interested_in(&AcceptedEvent::DESCRIPTION));
+    assert!(sink.is_interested(&AcceptedEvent::DESCRIPTION));
     assert_eq!(sampler.sampled.load(Ordering::Relaxed), 1);
 }

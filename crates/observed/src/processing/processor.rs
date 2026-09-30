@@ -28,7 +28,9 @@ use crate::metadata::EventDescription;
 /// metrics-only) select them through
 /// [`is_interested()`](EventProcessor::is_interested).
 pub trait EventProcessor: Send + Sync {
-    /// Decides whether this processor wants the event.
+    /// Returns whether this processor is interested in the described event.
+    ///
+    /// Uses the event description rather than inspecting event fields.
     ///
     /// Called **before** the event is constructed, and again while routing it,
     /// so it may run more than once per emission - and once per child for a
@@ -38,8 +40,8 @@ pub trait EventProcessor: Send + Sync {
     /// filter whose answer varies per call belongs in
     /// [`process()`](Self::process), which runs exactly once per delivery.
     ///
-    /// Also called by [`Sink::is_interested_in`](crate::Sink::is_interested_in)
-    /// independently of emission.
+    /// Also called by [`Sink::is_interested`](crate::Sink::is_interested),
+    /// which aggregates processor interest independently of emission.
     ///
     /// It is both the lazy-construction gate and the per-processor routing
     /// decision: if **all** processors return `false` the event closure is

@@ -357,7 +357,7 @@ impl Sink {
         }
 
         let description = state.description();
-        if !self.is_interested_in(&description) {
+        if !self.is_interested(&description) {
             return;
         }
 
@@ -375,15 +375,17 @@ impl Sink {
         self.dispatch_to_processors(&event, &description);
     }
 
-    /// Queries whether any processor currently wants the event's metadata.
+    /// Returns whether any processor is interested in the described event.
     ///
-    /// Returns `true` if any [`EventProcessor::is_interested`] call accepts
-    /// `description`. A composite is interested if any child is interested;
-    /// no-op sinks and sinks without processors return `false`.
+    /// Aggregates [`EventProcessor::is_interested`] for `description`, returning
+    /// `true` if any processor is interested. A composite is interested if any
+    /// child is interested; no-op sinks and sinks without processors return `false`.
     ///
     /// External event sources can use this query before collecting fields or
-    /// constructing an event. It does not construct or dispatch events, flush
-    /// processors, invoke samplers, or read timestamps or enrichments.
+    /// constructing an event. Like the processor check, it uses the event
+    /// description rather than inspecting event fields. It does not construct
+    /// or dispatch events, flush processors, invoke samplers, or read timestamps
+    /// or enrichments.
     ///
     /// This is current interest, not a delivery guarantee or a lifetime
     /// filtering decision. Processor initialization may change the answer in
@@ -402,13 +404,13 @@ impl Sink {
     /// let description = EventDescription::new("request.completed", None, None, None, false, false);
     /// let sink = Sink::noop();
     ///
-    /// assert!(!sink.is_interested_in(&description));
+    /// assert!(!sink.is_interested(&description));
     /// ```
     #[must_use]
-    // Early metadata filters call this on each candidate event; permit cross-crate
+    // Interest checks run for each candidate event; permit cross-crate
     // inlining on this hot path (docs/performance.md, "#[inline] annotations").
     #[inline]
-    pub fn is_interested_in(&self, description: &EventDescription) -> bool {
+    pub fn is_interested(&self, description: &EventDescription) -> bool {
         match &*self.inner {
             SinkInner::Single(state) => state.is_interested(description),
             SinkInner::Composite { children } => children.iter().any(|c| c.is_interested(description)),
@@ -606,7 +608,7 @@ mod tests {
         let noop = Sink::noop();
         let description = EventDescription::new("dummy", None, None, None, false, false);
 
-        assert!(!noop.is_interested_in(&description));
+        assert!(!noop.is_interested(&description));
         noop.dispatch_to_processors(&DummyDyn, &description);
         noop.flush().expect("noop flush should succeed");
     }
@@ -762,7 +764,7 @@ mod tests {
         );
 
         let description = dummy_description();
-        assert!(sink.is_interested_in(&description));
+        assert!(sink.is_interested(&description));
         sink.dispatch_to_processors(&DummyDyn, &description);
 
         assert_eq!(uninterested.processed.load(Ordering::Relaxed), 0);
@@ -779,7 +781,7 @@ mod tests {
             SimpleClock::new_frozen(),
         );
 
-        assert!(!sink.is_interested_in(&dummy_description()));
+        assert!(!sink.is_interested(&dummy_description()));
     }
 
     #[test]
