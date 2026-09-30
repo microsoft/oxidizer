@@ -225,7 +225,7 @@ where
                 Ok(AsyncWorkerCommand::EnqueueTask { future_factory }) => {
                     // This will never be reached during shutdown because as soon as shutdown
                     // starts, we close the command channel.
-                    self.tasks.add(future_factory(thread_state.clone()));
+                    future_factory(thread_state.clone(), &self.tasks);
                 }
                 Ok(AsyncWorkerCommand::Shutdown) => {
                     self.begin_shutdown();
@@ -357,8 +357,8 @@ mod tests {
             command_tx
                 .send(AsyncWorkerCommand::EnqueueTask {
                     future_factory: Box::new({
-                        move |cx| {
-                            Box::pin(async move {
+                        move |cx: TestTaskContext, tasks: &TaskSet| {
+                            drop(tasks.add(async move {
                                 cx.local_task_scheduler
                                     .spawn(async move || {
                                         inner_completed_tx.send(());
@@ -366,7 +366,7 @@ mod tests {
                                     .await;
 
                                 outer_completed_tx.send(());
-                            })
+                            }));
                         }
                     }),
                 })
@@ -424,10 +424,10 @@ mod tests {
             command_tx
                 .send(AsyncWorkerCommand::EnqueueTask {
                     future_factory: Box::new({
-                        move |_| {
-                            Box::pin(async move {
+                        move |_: TestTaskContext, tasks: &TaskSet| {
+                            drop(tasks.add(async move {
                                 spawned_completed_tx.send(());
-                            })
+                            }));
                         }
                     }),
                 })
@@ -483,10 +483,10 @@ mod tests {
         // We ignore the result because the worker is shutting down and the channel might be closed already.
         let _ = command_tx.send(AsyncWorkerCommand::EnqueueTask {
             future_factory: Box::new({
-                move |_| {
-                    Box::pin(async move {
+                move |_: TestTaskContext, tasks: &TaskSet| {
+                    drop(tasks.add(async move {
                         completed_tx.send(14);
-                    })
+                    }));
                 }
             }),
         });

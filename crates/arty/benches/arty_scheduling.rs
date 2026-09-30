@@ -7,10 +7,16 @@
 //! Runtimes, reusable vectors, and the external waking thread are prepared before measurement.
 //! Both runtimes use the same external join driver. From-task/local wall-clock samples measure
 //! inside the async entry; allocation measurement also includes that entry and its setup.
+//!
+//! The `timeout` workload runs one task per worker, concurrently. Each task arms and cancels
+//! `count` request timeouts per iteration, the common pattern of a deadline that almost never
+//! fires. It measures how timer registration scales when every worker uses timers at once.
+//! Tokio places its tasks itself, so one task per Tokio worker is likely but not guaranteed.
 
+use std::future::poll_fn;
 use std::hint::black_box;
 use std::num::NonZeroUsize;
-use std::pin::Pin;
+use std::pin::{Pin, pin};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll, Waker};
@@ -27,23 +33,30 @@ const BLOCKING_THREADS: usize = 4;
 const COUNTS: [usize; 2] = [1, 100];
 const WORKERS: [usize; 2] = [1, 4];
 
+// Neither deadline is reached during a benchmark. The background timer keeps every request
+// timeout from being the earliest deadline, as in a server that always has a shorter timer armed.
+const BACKGROUND_TIMEOUT: Duration = Duration::from_secs(30);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+
 #[derive(Clone, Copy, Debug)]
 enum Workload {
     Spawn,
     Yield,
     RemoteWake,
     Timer,
+    Timeout,
     FromTask,
     Local,
     System,
 }
 
 impl Workload {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
         Self::Spawn,
         Self::Yield,
         Self::RemoteWake,
         Self::Timer,
+        Self::Timeout,
         Self::FromTask,
         Self::Local,
         Self::System,
@@ -55,6 +68,7 @@ impl Workload {
             Self::Yield => "yield",
             Self::RemoteWake => "wake",
             Self::Timer => "timer",
+            Self::Timeout => "timeout",
             Self::FromTask => "nested",
             Self::Local => "local",
             Self::System => "system",
@@ -68,6 +82,7 @@ struct ArtyCase {
     scheduler: TaskScheduler,
     handles: Vec<JoinHandle<()>>,
     peer: WakePeer,
+    workers: usize,
     count: usize,
     workload: Workload,
 }
@@ -85,8 +100,9 @@ impl ArtyCase {
         let mut case = Self {
             _runtime: runtime,
             scheduler,
-            handles: Vec::with_capacity(count),
+            handles: Vec::with_capacity(count.max(workers)),
             peer: WakePeer::new(),
+            workers,
             count,
             workload,
         };
@@ -119,6 +135,22 @@ impl ArtyCase {
             Workload::Spawn => self.remote(iterations, async |_| black_box(())),
             Workload::Yield => self.remote(iterations, async |_| YieldOnce::default().await),
             Workload::Timer => self.remote(iterations, async |cx| cx.clock().delay(Duration::from_millis(1)).await),
+            Workload::Timeout => {
+                let operations = iterations * u64::try_from(count).expect("benchmark counts fit in u64");
+                let start = Instant::now();
+                self.handles.clear();
+                // The detached scheduler round-robins, so consecutive spawns land one per worker.
+                self.handles.extend((0..self.workers).map(|_| {
+                    self.scheduler.spawn(async move |cx| {
+                        let clock = cx.clock().clone();
+                        timeout_churn(operations, |timeout| clock.delay(timeout)).await;
+                    })
+                }));
+                for handle in &mut self.handles {
+                    futures::executor::block_on(black_box(handle));
+                }
+                start.elapsed()
+            }
             Workload::RemoteWake => {
                 let sender = self.peer.sender();
                 self.remote(iterations, async move |_| RemoteWake::new(sender.clone()).await)
@@ -175,6 +207,7 @@ struct TokioCase {
     runtime: tokio::runtime::Runtime,
     handles: Vec<TokioJoinHandle<()>>,
     peer: WakePeer,
+    workers: usize,
     count: usize,
     workload: Workload,
 }
@@ -189,8 +222,9 @@ impl TokioCase {
             .expect("benchmark runtime initialization must succeed");
         let mut case = Self {
             runtime,
-            handles: Vec::with_capacity(count),
+            handles: Vec::with_capacity(count.max(workers)),
             peer: WakePeer::new(),
+            workers,
             count,
             workload,
         };
@@ -223,6 +257,19 @@ impl TokioCase {
             Workload::Spawn => self.remote(iterations, async || black_box(())),
             Workload::Yield => self.remote(iterations, async || YieldOnce::default().await),
             Workload::Timer => self.remote(iterations, async || tokio::time::sleep(Duration::from_millis(1)).await),
+            Workload::Timeout => {
+                let operations = iterations * u64::try_from(count).expect("benchmark counts fit in u64");
+                let start = Instant::now();
+                self.handles.clear();
+                self.handles.extend((0..self.workers).map(|_| {
+                    self.runtime
+                        .spawn(async move { timeout_churn(operations, tokio::time::sleep).await })
+                }));
+                for handle in &mut self.handles {
+                    futures::executor::block_on(black_box(handle)).expect("benchmark tasks do not panic");
+                }
+                start.elapsed()
+            }
             Workload::RemoteWake => {
                 let sender = self.peer.sender();
                 self.remote(iterations, async move || RemoteWake::new(sender.clone()).await)
@@ -266,6 +313,32 @@ impl TokioCase {
             }
         }
     }
+}
+
+/// Arms and cancels `operations` request timeouts on the current worker while a background
+/// timer stays armed. Each timeout is polled once, which registers it, then dropped, which
+/// unregisters it.
+async fn timeout_churn<T, F>(operations: u64, mut timer: F)
+where
+    T: Future<Output = ()>,
+    F: FnMut(Duration) -> T,
+{
+    let mut background = pin!(timer(BACKGROUND_TIMEOUT));
+    arm(background.as_mut()).await;
+    for _ in 0..operations {
+        arm(pin!(timer(REQUEST_TIMEOUT))).await;
+    }
+}
+
+async fn arm<T: Future<Output = ()>>(mut timer: Pin<&mut T>) {
+    poll_fn(|cx| {
+        assert!(
+            timer.as_mut().poll(cx).is_pending(),
+            "benchmark timeouts are far longer than any benchmark run"
+        );
+        Poll::Ready(())
+    })
+    .await;
 }
 
 // A single self-wake, independent of either runtime's convenience APIs.
@@ -409,6 +482,10 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
 #[bench::timer_w1_n100(&mut ArtyCase::new(1, 100, Workload::Timer), 1)]
 #[bench::timer_w4_n1(&mut ArtyCase::new(4, 1, Workload::Timer), 1)]
 #[bench::timer_w4_n100(&mut ArtyCase::new(4, 100, Workload::Timer), 1)]
+#[bench::timeout_w1_n1(&mut ArtyCase::new(1, 1, Workload::Timeout), 1)]
+#[bench::timeout_w1_n100(&mut ArtyCase::new(1, 100, Workload::Timeout), 1)]
+#[bench::timeout_w4_n1(&mut ArtyCase::new(4, 1, Workload::Timeout), 1)]
+#[bench::timeout_w4_n100(&mut ArtyCase::new(4, 100, Workload::Timeout), 1)]
 #[bench::nested_w1_n1(&mut ArtyCase::new(1, 1, Workload::FromTask), 1)]
 #[bench::nested_w1_n100(&mut ArtyCase::new(1, 100, Workload::FromTask), 1)]
 #[bench::nested_w4_n1(&mut ArtyCase::new(4, 1, Workload::FromTask), 1)]
@@ -442,6 +519,10 @@ fn arty_workload(state: &mut ArtyCase, iterations: u64) -> Duration {
 #[bench::timer_w1_n100(&mut TokioCase::new(1, 100, Workload::Timer), 1)]
 #[bench::timer_w4_n1(&mut TokioCase::new(4, 1, Workload::Timer), 1)]
 #[bench::timer_w4_n100(&mut TokioCase::new(4, 100, Workload::Timer), 1)]
+#[bench::timeout_w1_n1(&mut TokioCase::new(1, 1, Workload::Timeout), 1)]
+#[bench::timeout_w1_n100(&mut TokioCase::new(1, 100, Workload::Timeout), 1)]
+#[bench::timeout_w4_n1(&mut TokioCase::new(4, 1, Workload::Timeout), 1)]
+#[bench::timeout_w4_n100(&mut TokioCase::new(4, 100, Workload::Timeout), 1)]
 #[bench::nested_w1_n1(&mut TokioCase::new(1, 1, Workload::FromTask), 1)]
 #[bench::nested_w1_n100(&mut TokioCase::new(1, 100, Workload::FromTask), 1)]
 #[bench::nested_w4_n1(&mut TokioCase::new(4, 1, Workload::FromTask), 1)]

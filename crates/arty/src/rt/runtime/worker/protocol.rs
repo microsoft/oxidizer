@@ -8,7 +8,9 @@ use crate::rt::task::execution::BoxedRemoteFutureFactory;
 
 pub(in crate::rt::runtime) enum AsyncWorkerCommand<TS = Builtins> {
     /// Schedules a new task for execution on this worker, providing the factory function that will
-    /// be used to create the future that becomes the body of the task.
+    /// be used to create the future that becomes the body of the task. The factory registers the
+    /// future it creates with the worker's task set, which lets the executor store the future
+    /// inline instead of behind an extra box.
     ///
     /// Note that these remotely enqueued tasks do not have an output type - it is the
     /// responsibility of the task itself to deliver any outputs to some waiting thread. In
