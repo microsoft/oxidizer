@@ -3,6 +3,7 @@
 **Historical baseline:** these measurements belong to the pinned revision below.
 The later direct task-registration optimization, timeout workload, telemetry
 handle-storage change, and lifecycle fixes are not measured by this report.
+The later `JoinError` and shutdown-cancellation contract is not measured either.
 No replacement numbers are claimed; rerun the documented command on the desired
 revision for a current comparison.
 The historical `system` cases below measure blocking tasks. Current benchmark

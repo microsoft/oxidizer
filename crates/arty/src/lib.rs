@@ -37,7 +37,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! arty = { git = "https://github.com/microsoft/oxidizer", rev = "65f7f337b14b59259ad500484439a77f1f7f4f23", features = ["macros"] }
+//! arty = { git = "https://github.com/microsoft/oxidizer", rev = "27c6370ea051ece01c519b9a3174413d41b14d64", features = ["macros"] }
 //! ```
 //!
 //! ```rust
@@ -71,7 +71,7 @@
 //! `arty::documentation` contains longer guides to scheduling,
 //! thread awareness, lifecycle, configuration, time, and telemetry. It is included
 //! in documentation and test builds only when all Arty features are enabled.
-//! The dependency revision above selects the runtime API and predates these
+//! The dependency revision above includes the typed task-failure API and these
 //! guides. From a source checkout containing the documentation module, run:
 //!
 //! ```text
