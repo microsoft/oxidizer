@@ -103,11 +103,12 @@ impl<T: Copy> Estimate<T> {
 /// Cheap lifetime aggregate statistics collected by the allocator.
 ///
 /// Fields are independent observations, not a transactional process-wide snapshot.
-/// Pending and in-progress remote gauges remain single-atomic observations.
-/// Cumulative remote frees and drains fold 64 fixed slots with relaxed loads:
-/// they can be stale and need not equal a common-instant scalar total during the
-/// query. Synchronized quiescent totals are exact modulo `usize`; causally ordered
-/// folds do not regress without overflow. These two fields require 128 loads.
+/// Remote frees, drains, and the in-progress gauge each fold 64 fixed slots with
+/// relaxed loads: they can be stale and need not equal a common-instant scalar
+/// total during the query. Synchronized quiescent totals are exact modulo
+/// `usize`; causally ordered folds do not regress without overflow. These three
+/// fields require 192 loads. The pending remote gauge remains a single-atomic
+/// observation.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct Stats {
     pub allocated_bytes: usize,
