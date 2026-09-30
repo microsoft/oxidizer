@@ -369,6 +369,14 @@ mod tests {
         }
     }
 
+    #[test]
+    #[should_panic(expected = "scoped storage signals destruction by disconnecting")]
+    fn scoped_join_rejects_a_completion_message() {
+        let (completion, destroyed) = mpsc::channel();
+        completion.send(()).unwrap();
+        drop(ScopedJoin(destroyed));
+    }
+
     fn check_storage_drop_order(panic_in_drop: bool) {
         let (completion, destroyed) = mpsc::channel();
         let observations = RefCell::new(Vec::new());
