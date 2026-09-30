@@ -15,7 +15,7 @@ use thread_aware::{Thread, ThreadAware, ThreadBuilder};
 use tick::runtime::InactiveClock;
 
 use crate::runtime::blocking_worker::BlockingWorker;
-use crate::runtime::bootstrap::pools::WorkerPools;
+use crate::runtime::bootstrap::pools::BlockingPools;
 use crate::runtime::config::RuntimeConfig;
 use crate::runtime::context::Builtins;
 use crate::runtime::context::init::{CoreRuntimeBuiltins, RuntimeBuiltins, SharedState};
@@ -37,7 +37,7 @@ pub(in crate::runtime) fn build(
     sink: Sink,
     thread_builder: &ThreadBuilder,
 ) -> Result<Runtime, Error> {
-    let pool_mode = processor_config.worker_pool_policy.mode_label();
+    let pool_mode = processor_config.blocking_pool_policy.mode_label();
     let available = available_processors();
     let processors = processor_config.num_processors.select(&available).inspect_err(|_| {
         emit!(
@@ -65,7 +65,7 @@ pub(in crate::runtime) fn build(
 
     let worker_count = processors.len();
     let shared_state: SharedState = (0..worker_count).map(|_| OnceLock::new()).collect();
-    let worker_pools = processor_config.worker_pool_policy.into_pools();
+    let blocking_pools = processor_config.blocking_pool_policy.into_pools();
 
     for (worker_index, processor) in processors.into_iter().enumerate() {
         let (command_tx, command_rx) = mpsc::channel();
@@ -87,7 +87,7 @@ pub(in crate::runtime) fn build(
                 worker_index,
                 worker_endpoint_tx,
                 thread_builder: thread_builder.clone(),
-                worker_pools: worker_pools.clone(),
+                blocking_pools: blocking_pools.clone(),
                 sink: sink.clone(),
             }
             .start(),
@@ -154,7 +154,7 @@ struct AsyncWorkerStartInfo {
     worker_index: usize,
     worker_endpoint_tx: Sender<(Waker, Thread, Arc<BlockingWorker>)>,
     thread_builder: ThreadBuilder,
-    worker_pools: WorkerPools,
+    blocking_pools: BlockingPools,
     sink: Sink,
 }
 
@@ -181,7 +181,7 @@ impl AsyncWorkerStartInfo {
             worker_index,
             worker_endpoint_tx,
             thread_builder,
-            worker_pools,
+            blocking_pools,
             sink,
         } = self;
 
@@ -198,7 +198,7 @@ impl AsyncWorkerStartInfo {
         clock.relocate(None, &current);
 
         // Use shared blocking worker pool if shared, otherwise use a new one
-        let blocking_worker = BlockingWorker::new(worker_pools.build_worker(), worker_sink.clone());
+        let blocking_worker = BlockingWorker::new(blocking_pools.build_worker(), worker_sink.clone());
 
         let signal = Arc::new(WorkerSignal::default());
 

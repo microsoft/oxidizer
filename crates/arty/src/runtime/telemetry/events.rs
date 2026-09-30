@@ -98,7 +98,7 @@ pub(crate) struct RuntimeStarted {
     /// Processors actually used (one async worker each).
     #[dimension(log = "processors.used", metric = "processors.used")]
     pub processors_used: SystemMetricCount,
-    #[dimension(log = "system_worker_pool.mode", metric = "system_worker_pool.mode")]
+    #[dimension(log = "blocking_worker_pool.mode", metric = "blocking_worker_pool.mode")]
     pub blocking_worker_pool_mode: BlockingWorkerPoolMode,
     pub stack_size_bytes: SystemMetricCount,
 }
@@ -108,7 +108,7 @@ pub(crate) struct RuntimeStarted {
 #[error("runtime failed to start")]
 #[counter(name = "oxidizer.rt.start_failed")]
 pub(crate) struct RuntimeStartFailed {
-    #[dimension(log = "system_worker_pool.mode", metric = "system_worker_pool.mode")]
+    #[dimension(log = "blocking_worker_pool.mode", metric = "blocking_worker_pool.mode")]
     pub blocking_worker_pool_mode: BlockingWorkerPoolMode,
 }
 
@@ -228,11 +228,11 @@ pub(crate) struct BuiltinsThreadMismatch {
 
 /// Emitted when the blocking worker pool is already at its maximum size
 /// and cannot grow to absorb a fresh overload.
-#[event("oxidizer.rt.system_worker.pool_saturated")]
+#[event("oxidizer.rt.blocking_worker.pool_saturated")]
 #[warning("blocking worker pool is saturated and cannot grow")]
-#[counter(name = "oxidizer.rt.system_worker.pool_saturated")]
+#[counter(name = "oxidizer.rt.blocking_worker.pool_saturated")]
 pub(crate) struct BlockingWorkerPoolSaturated {
-    #[dimension(log = "system_worker_pool.max_threads", metric = "system_worker_pool.max_threads")]
+    #[dimension(log = "blocking_worker_pool.max_threads", metric = "blocking_worker_pool.max_threads")]
     pub max_threads: SystemMetricCount,
 }
 
@@ -264,7 +264,7 @@ mod tests {
                 .body("runtime started")
                 .dimension("processors.available", "8")
                 .dimension("processors.used", "2")
-                .dimension("system_worker_pool.mode", "isolated")
+                .dimension("blocking_worker_pool.mode", "isolated")
                 .dimension("stack_size_bytes", "1024")
                 .metric()
         );
@@ -285,7 +285,7 @@ mod tests {
             processor.single_event(),
             ExpectedEvent::new("oxidizer.rt.start_failed", Severity::Error)
                 .body("runtime failed to start")
-                .dimension("system_worker_pool.mode", "shared")
+                .dimension("blocking_worker_pool.mode", "shared")
                 .metric()
         );
     }
@@ -541,9 +541,9 @@ mod tests {
 
         assert_eq!(
             processor.single_event(),
-            ExpectedEvent::new("oxidizer.rt.system_worker.pool_saturated", Severity::Warn)
+            ExpectedEvent::new("oxidizer.rt.blocking_worker.pool_saturated", Severity::Warn)
                 .body("blocking worker pool is saturated and cannot grow")
-                .dimension("system_worker_pool.max_threads", "64")
+                .dimension("blocking_worker_pool.max_threads", "64")
                 .metric()
         );
     }

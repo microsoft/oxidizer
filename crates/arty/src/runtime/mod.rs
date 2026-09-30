@@ -23,7 +23,8 @@
 //! Numeric metric values remain unredacted numbers.
 //! Opaque Rust thread identifiers are logged as `arty.thread.id`, not the
 //! integer-valued OpenTelemetry `thread.id` attribute.
-//! Blocking-pool telemetry retains its existing `system_worker` wire names for compatibility.
+//! Blocking-pool events use `oxidizer.rt.blocking_worker.pool_saturated`; pool
+//! dimensions use `blocking_worker_pool.mode` and `blocking_worker_pool.max_threads`.
 
 pub(crate) mod blocking_worker;
 mod bootstrap;
@@ -38,7 +39,7 @@ pub(crate) mod thread;
 mod worker;
 
 pub use builder::RuntimeBuilder;
-pub use config::{ProcessorCount, WorkerPoolPolicy};
+pub use config::{BlockingPoolPolicy, ProcessorCount};
 pub use context::Builtins;
 pub use context::operations::RuntimeOperations;
 pub use error::Error;

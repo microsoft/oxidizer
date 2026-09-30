@@ -48,11 +48,11 @@ async fn worker_limit_clamps_instead_of_failing_construction(cx: Builtins) {
 fn custom_builder() -> arty::runtime::RuntimeBuilder {
     use std::num::NonZero;
 
-    use arty::runtime::{ProcessorCount, Runtime, WorkerPoolPolicy};
+    use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime};
 
     Runtime::builder()
         .processor_count(ProcessorCount::at_most(NonZero::<usize>::MIN))
-        .worker_pool_policy(WorkerPoolPolicy::shared(1))
+        .blocking_pool_policy(BlockingPoolPolicy::shared(1))
 }
 
 #[test(builder = custom_builder())]

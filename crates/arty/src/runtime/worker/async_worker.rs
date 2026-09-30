@@ -292,7 +292,7 @@ mod tests {
     use testing_aids::{async_test, execute_or_terminate_process};
 
     use super::*;
-    use crate::runtime::blocking_worker::WorkerPool;
+    use crate::runtime::blocking_worker::BlockingPool;
     use crate::runtime::blocking_worker::blocking_worker_tests::is_blocking_worker_shutting_down;
     use crate::task::local::{LocalTaskBinding, LocalTaskScheduler};
 
@@ -317,7 +317,7 @@ mod tests {
             let (command_tx, command_rx) = mpsc::channel();
 
             let async_worker_thread = thread::spawn(move || {
-                let blocking_worker = BlockingWorker::new(WorkerPool::new(None), Sink::noop());
+                let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
 
                 let signal = Arc::new(WorkerSignal::default());
 
@@ -401,7 +401,7 @@ mod tests {
                             drop(tasks.add(async move { initial_completed_tx.send(()) }));
                             TestTaskContext::new(tasks)
                         },
-                        BlockingWorker::new(WorkerPool::new(None), Sink::noop()),
+                        BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
                         InactiveClock::default(),
                         signal,
                         constructed_tx,
@@ -457,7 +457,7 @@ mod tests {
                 AsyncWorker::new(
                     command_rx,
                     async move |tasks, _| TestTaskContext::new(tasks),
-                    BlockingWorker::new(WorkerPool::new(None), Sink::noop()),
+                    BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
                     InactiveClock::default(),
                     signal,
                     Event::boxed().0,
@@ -495,7 +495,7 @@ mod tests {
         let initialized = Arc::new(AtomicBool::new(false));
         let observed = Arc::clone(&initialized);
         let (_commands, receiver) = mpsc::channel();
-        let blocking_worker = BlockingWorker::new(WorkerPool::new(None), Sink::noop());
+        let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
         // SAFETY: run completes the executor's shutdown before the worker is dropped.
         let mut worker = unsafe {
             AsyncWorker::new(

@@ -46,13 +46,13 @@ impl Drop for BlockingTaskScope {
 #[derive(Debug)]
 pub(crate) struct BlockingWorker {
     // Naive implementation using a per-async-worker thread pool
-    pool: WorkerPool,
+    pool: BlockingPool,
     is_shutting_down: AtomicBool,
     sink: Sink,
 }
 
 impl BlockingWorker {
-    pub(in crate::runtime) fn new(pool: WorkerPool, sink: Sink) -> Arc<Self> {
+    pub(in crate::runtime) fn new(pool: BlockingPool, sink: Sink) -> Arc<Self> {
         Arc::new(Self {
             pool,
             is_shutting_down: AtomicBool::new(false),
@@ -102,13 +102,13 @@ impl BlockingWorker {
 }
 
 #[derive(Debug, Clone)]
-pub(in crate::runtime) struct WorkerPool {
+pub(in crate::runtime) struct BlockingPool {
     pool: Arc<Mutex<Option<ThreadPool>>>,
     identity: Arc<()>,
     max_thread_count: usize,
 }
 
-impl WorkerPool {
+impl BlockingPool {
     #[cfg(test)]
     #[cfg_attr(test, mutants::skip)]
     pub(in crate::runtime) fn shares_pool_with(&self, other: &Self) -> bool {
@@ -127,8 +127,7 @@ impl WorkerPool {
 
     pub(in crate::runtime) fn new(max_thread_count: Option<usize>) -> Self {
         // Start with one thread and let the pool grow as needed.
-        // Retain the OS thread name for compatibility with existing diagnostics.
-        let thread_pool = ThreadPool::with_name("oxidizer-sys".to_string(), Self::INITIAL_THREAD_COUNT);
+        let thread_pool = ThreadPool::with_name("arty-blocking".to_string(), Self::INITIAL_THREAD_COUNT);
 
         Self {
             pool: Arc::new(Mutex::new(Some(thread_pool))),
@@ -202,7 +201,7 @@ pub(super) mod blocking_worker_tests {
     use observed_testing::{CapturedEvent, TEST_ID, test_emitter};
     use testing_aids::execute_or_abandon;
 
-    use crate::runtime::blocking_worker::{BlockingWorker, WorkerPool};
+    use crate::runtime::blocking_worker::{BlockingPool, BlockingWorker};
 
     #[cfg_attr(test, mutants::skip)]
     pub(in crate::runtime) fn is_blocking_worker_shutting_down(worker: &BlockingWorker) -> bool {
@@ -216,7 +215,7 @@ pub(super) mod blocking_worker_tests {
 
         let events_clone = Arc::clone(&events);
         let thread_join_handle = thread::spawn(move || {
-            let worker = BlockingWorker::new(WorkerPool::new(None), Sink::noop());
+            let worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
 
             let events_clone2 = Arc::clone(&events_clone);
             drop(worker.spawn_blocking(move || {
@@ -269,7 +268,7 @@ pub(super) mod blocking_worker_tests {
         let dropped = Arc::new(AtomicBool::new(false));
         let work_done = Arc::new(AtomicBool::new(false));
 
-        let worker = BlockingWorker::new(WorkerPool::new(None), Sink::noop());
+        let worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
 
         worker.shutdown();
 
@@ -288,44 +287,44 @@ pub(super) mod blocking_worker_tests {
     }
 
     #[test]
-    fn worker_pool_grow_increases_thread_count() {
-        let worker_pool = WorkerPool::new(None);
-        assert!(worker_pool.grow());
+    fn blocking_pool_grow_increases_thread_count() {
+        let blocking_pool = BlockingPool::new(None);
+        assert!(blocking_pool.grow());
         assert_eq!(
-            worker_pool.pool.lock().unwrap().as_ref().unwrap().max_count(),
-            WorkerPool::INITIAL_THREAD_COUNT + 1,
+            blocking_pool.pool.lock().unwrap().as_ref().unwrap().max_count(),
+            BlockingPool::INITIAL_THREAD_COUNT + 1,
             "Number of worker threads should be increased by 1"
         );
     }
 
     #[test]
-    fn worker_pool_grow_to_maximum() {
-        let worker_pool = WorkerPool::new(Some(5));
+    fn blocking_pool_grow_to_maximum() {
+        let blocking_pool = BlockingPool::new(Some(5));
 
         // It says "max" but it is effectively the "current" count because it grows asynchronously.
-        assert_eq!(worker_pool.pool.lock().unwrap().as_ref().unwrap().max_count(), 1);
-        assert!(worker_pool.grow()); // 2
-        assert!(worker_pool.grow()); // 3
-        assert!(worker_pool.grow()); // 4
-        assert!(worker_pool.grow()); // 5
-        assert!(!worker_pool.grow()); // 5 - should not grow further
+        assert_eq!(blocking_pool.pool.lock().unwrap().as_ref().unwrap().max_count(), 1);
+        assert!(blocking_pool.grow()); // 2
+        assert!(blocking_pool.grow()); // 3
+        assert!(blocking_pool.grow()); // 4
+        assert!(blocking_pool.grow()); // 5
+        assert!(!blocking_pool.grow()); // 5 - should not grow further
 
         // It says "max" but it is effectively the "current" count because it grows asynchronously.
-        assert_eq!(worker_pool.pool.lock().unwrap().as_ref().unwrap().max_count(), 5);
+        assert_eq!(blocking_pool.pool.lock().unwrap().as_ref().unwrap().max_count(), 5);
     }
 
     #[test]
-    fn worker_pool_reports_configured_max_thread_count() {
+    fn blocking_pool_reports_configured_max_thread_count() {
         // A configured value distinct from both 1 and the initial thread count keeps
         // this assertion honest: the getter must return the exact maximum it was
         // built with, and the default path must fall back to the crate default.
-        assert_eq!(WorkerPool::new(Some(7)).max_thread_count(), 7);
-        assert_eq!(WorkerPool::new(None).max_thread_count(), WorkerPool::MAX_THREAD_COUNT_DEFAULT);
+        assert_eq!(BlockingPool::new(Some(7)).max_thread_count(), 7);
+        assert_eq!(BlockingPool::new(None).max_thread_count(), BlockingPool::MAX_THREAD_COUNT_DEFAULT);
     }
 
     #[test]
     fn closed_pool_rejects_work_and_cannot_grow() {
-        let pool = WorkerPool::new(Some(2));
+        let pool = BlockingPool::new(Some(2));
         pool.join();
         let invoked = Arc::new(AtomicBool::new(false));
         let captured = Arc::clone(&invoked);
@@ -353,9 +352,9 @@ pub(super) mod blocking_worker_tests {
 
     #[test]
     fn spawn_on_worker() {
-        let worker_pool = WorkerPool::new(None);
+        let blocking_pool = BlockingPool::new(None);
         let (sender, receiver) = channel();
-        worker_pool.execute(move || {
+        blocking_pool.execute(move || {
             sender.send("joined").unwrap();
         });
 
@@ -370,7 +369,7 @@ pub(super) mod blocking_worker_tests {
     #[test]
     fn overload_worker() {
         execute_or_abandon(move || {
-            let worker_pool = WorkerPool::new(None);
+            let blocking_pool = BlockingPool::new(None);
             let (worker_thread_started_tx, worker_thread_started_rx) = channel();
             let (worker_thread_finished_tx, worker_thread_finished_rx) = Event::<()>::boxed();
 
@@ -378,8 +377,8 @@ pub(super) mod blocking_worker_tests {
             // wrap them in Arc + Mutex + Option to make it safe.
             let worker_thread_finished_rx = Arc::new(Mutex::new(Some(worker_thread_finished_rx)));
 
-            for i in 0..WorkerPool::MAX_TASKS_PER_THREAD {
-                worker_pool.execute({
+            for i in 0..BlockingPool::MAX_TASKS_PER_THREAD {
+                blocking_pool.execute({
                     let worker_thread_started_tx = worker_thread_started_tx.clone();
                     let worker_thread_finished_rx = Arc::clone(&worker_thread_finished_rx);
                     move || {
@@ -409,18 +408,18 @@ pub(super) mod blocking_worker_tests {
             worker_thread_started_rx.recv().expect("the worker pool must start the first task");
 
             assert!(
-                !worker_pool.is_overloaded(),
+                !blocking_pool.is_overloaded(),
                 "Worker pool should be at the task limit but not overloaded"
             );
 
             // This task can be empty, the blocked thread pool won't have a chance to start it anyway
-            worker_pool.execute(move || {});
+            blocking_pool.execute(move || {});
 
-            assert!(worker_pool.is_overloaded(), "Worker pool should be overloaded");
+            assert!(blocking_pool.is_overloaded(), "Worker pool should be overloaded");
 
             // Now we can release the second barrier and clean up
             worker_thread_finished_tx.send(());
-            worker_pool.join();
+            blocking_pool.join();
         })
         .unwrap();
     }
@@ -436,7 +435,7 @@ pub(super) mod blocking_worker_tests {
     #[cfg_attr(test, mutants::skip)] // Test-only helper.
     fn spawn_blocking_telemetry(max_thread_count: Option<usize>, queued_task_count: usize) -> Vec<CapturedEvent> {
         let (sink, processor) = test_emitter(TEST_ID);
-        let worker = BlockingWorker::new(WorkerPool::new(max_thread_count), sink);
+        let worker = BlockingWorker::new(BlockingPool::new(max_thread_count), sink);
 
         // Occupy the pool's single initial thread with a task that blocks until released,
         // so every task spawned afterwards stays queued and counts towards the overload
@@ -480,15 +479,15 @@ pub(super) mod blocking_worker_tests {
     #[test]
     fn spawn_blocking_reports_saturation_when_overloaded_pool_cannot_grow() {
         // A pool capped at one thread cannot grow, so overloading it must surface saturation.
-        let events = spawn_blocking_telemetry(Some(1), WorkerPool::MAX_TASKS_PER_THREAD + 1);
+        let events = spawn_blocking_telemetry(Some(1), BlockingPool::MAX_TASKS_PER_THREAD + 1);
 
         let saturated: Vec<_> = events
             .iter()
-            .filter(|event| event.name() == "oxidizer.rt.system_worker.pool_saturated")
+            .filter(|event| event.name() == "oxidizer.rt.blocking_worker.pool_saturated")
             .collect();
         assert!(!saturated.is_empty(), "an overloaded pool that cannot grow must report saturation");
         assert_eq!(
-            dimension(saturated[0], "system_worker_pool.max_threads"),
+            dimension(saturated[0], "blocking_worker_pool.max_threads"),
             Some("1".into()),
             "the saturation event reports the pool's maximum thread count"
         );
@@ -504,7 +503,7 @@ pub(super) mod blocking_worker_tests {
         assert!(
             events
                 .iter()
-                .all(|event| event.name() != "oxidizer.rt.system_worker.pool_saturated"),
+                .all(|event| event.name() != "oxidizer.rt.blocking_worker.pool_saturated"),
             "a pool that is merely at its size limit, without being overloaded, must stay quiet"
         );
     }

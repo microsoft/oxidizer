@@ -31,7 +31,8 @@ storage is destroyed.
 
 There are no task metadata, fan-out, explicit placement, or runtime yield APIs.
 Blocking tasks use per-worker pools by default, or one shared pool when
-configured. Time primitives remain available independently under `arty::time`.
+configured through `RuntimeBuilder::blocking_pool_policy` with `BlockingPoolPolicy`.
+Time primitives remain available independently under `arty::time`.
 
 With `test-util`, Miri exercises scheduling, owned capabilities, macros, timers,
 and cleanup against simulated processor data. This does not claim to test OS

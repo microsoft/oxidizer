@@ -5,7 +5,7 @@ use std::num::NonZero;
 
 use many_cpus::ProcessorSet;
 
-use crate::runtime::config::WorkerPoolPolicy;
+use crate::runtime::config::BlockingPoolPolicy;
 use crate::runtime::error::Error;
 
 /// Selects how many processors the runtime uses, with one asynchronous worker per processor.
@@ -78,7 +78,7 @@ enum ProcessorCountKind {
 pub(crate) struct RuntimeConfig {
     pub(crate) num_processors: ProcessorCount,
     pub(crate) stack_size: usize,
-    pub(crate) worker_pool_policy: WorkerPoolPolicy,
+    pub(crate) blocking_pool_policy: BlockingPoolPolicy,
 }
 
 impl Default for RuntimeConfig {
@@ -88,7 +88,7 @@ impl Default for RuntimeConfig {
             // Match Rust's Tier-1 thread-stack baseline instead of platform-native defaults.
             // The builder can override it; bootstrap also honors a larger RUST_MIN_STACK.
             stack_size: 2 * 1024 * 1024,
-            worker_pool_policy: WorkerPoolPolicy::isolated(),
+            blocking_pool_policy: BlockingPoolPolicy::isolated(),
         }
     }
 }

@@ -13,7 +13,7 @@ use std::io;
 use std::num::NonZeroUsize;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 
-use arty::runtime::{Builtins, Error, ProcessorCount, Runtime, RuntimeBuilder, RuntimeOperations, WorkerPoolPolicy};
+use arty::runtime::{BlockingPoolPolicy, Builtins, Error, ProcessorCount, Runtime, RuntimeBuilder, RuntimeOperations};
 use arty::task::{JoinHandle, LocalJoinHandle, LocalTaskScheduler, TaskScheduler};
 use static_assertions::{assert_impl_all, assert_not_impl_any};
 use thread_aware::ThreadAware;
@@ -29,7 +29,7 @@ assert_impl_all!(LocalJoinHandle<()>: Future);
 assert_not_impl_any!(LocalJoinHandle<()>: Send, Sync);
 assert_not_impl_any!(LocalTaskScheduler: Send, Sync);
 assert_impl_all!(RuntimeOperations: Send, Sync, Clone, Debug, ThreadAware);
-assert_impl_all!(WorkerPoolPolicy: Clone, Debug);
+assert_impl_all!(BlockingPoolPolicy: Clone, Debug);
 assert_impl_all!(ProcessorCount: Clone, Copy, Debug, Default);
 assert_impl_all!(Error: StdError, Send, Sync);
 assert_not_impl_any!(Error: From<io::Error>, From<Box<dyn StdError + Send + Sync>>);

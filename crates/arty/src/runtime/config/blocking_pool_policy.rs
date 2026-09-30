@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::runtime::bootstrap::pools::WorkerPools;
+use crate::runtime::bootstrap::pools::BlockingPools;
 
 /// Controls the thread pools used for blocking tasks.
 ///
@@ -23,7 +23,7 @@ use crate::runtime::bootstrap::pools::WorkerPools;
 /// Choose using measured contention and thread-memory costs for the workload.
 /// Neither policy guarantees higher throughput for every workload.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct WorkerPoolPolicy {
+pub struct BlockingPoolPolicy {
     mode: Mode,
     max_workers: Option<usize>,
 }
@@ -34,7 +34,7 @@ enum Mode {
     Shared,
 }
 
-impl WorkerPoolPolicy {
+impl BlockingPoolPolicy {
     /// Uses per-async-worker blocking-task pools (the default).
     ///
     /// Blocking-task thread resources scale with the number of async workers.
@@ -80,15 +80,15 @@ impl WorkerPoolPolicy {
 
     /// Resolves this configuration into the concrete pool resources used by
     /// workers at runtime.
-    pub(in crate::runtime) fn into_pools(self) -> WorkerPools {
+    pub(in crate::runtime) fn into_pools(self) -> BlockingPools {
         match self.mode {
-            Mode::Isolated => WorkerPools::isolated(),
-            Mode::Shared => WorkerPools::shared(self.max_workers),
+            Mode::Isolated => BlockingPools::isolated(),
+            Mode::Shared => BlockingPools::shared(self.max_workers),
         }
     }
 }
 
-impl Default for WorkerPoolPolicy {
+impl Default for BlockingPoolPolicy {
     fn default() -> Self {
         Self::isolated()
     }
@@ -101,13 +101,13 @@ mod tests {
 
     #[test]
     fn isolated_is_default() {
-        assert_eq!(WorkerPoolPolicy::default(), WorkerPoolPolicy::isolated());
+        assert_eq!(BlockingPoolPolicy::default(), BlockingPoolPolicy::isolated());
     }
 
     #[test]
     fn isolated_into_pools_is_isolated() {
         assert!(
-            matches!(WorkerPoolPolicy::isolated().into_pools(), WorkerPools::Isolated),
+            matches!(BlockingPoolPolicy::isolated().into_pools(), BlockingPools::Isolated),
             "expected Isolated variant"
         );
     }
@@ -115,7 +115,7 @@ mod tests {
     #[test]
     fn shared_into_pools_is_shared() {
         assert!(
-            matches!(WorkerPoolPolicy::shared(None).into_pools(), WorkerPools::Shared(_)),
+            matches!(BlockingPoolPolicy::shared(None).into_pools(), BlockingPools::Shared(_)),
             "expected Shared variant"
         );
     }
@@ -123,6 +123,6 @@ mod tests {
     #[test]
     #[should_panic(expected = "non-zero")]
     fn shared_zero_panics() {
-        let _ = WorkerPoolPolicy::shared(0);
+        let _ = BlockingPoolPolicy::shared(0);
     }
 }

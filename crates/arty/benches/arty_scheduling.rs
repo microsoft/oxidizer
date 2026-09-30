@@ -23,7 +23,7 @@ use std::task::{Context, Poll, Waker};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use arty::runtime::{Builtins, ProcessorCount, Runtime, WorkerPoolPolicy};
+use arty::runtime::{BlockingPoolPolicy, Builtins, ProcessorCount, Runtime};
 use arty::task::{JoinHandle, TaskScheduler};
 use criterion::{BenchmarkId, Criterion, Throughput};
 use metabench::benchmark;
@@ -93,7 +93,7 @@ impl ArtyCase {
             .processor_count(ProcessorCount::exactly(
                 NonZeroUsize::new(workers).expect("benchmark worker counts are nonzero"),
             ))
-            .worker_pool_policy(WorkerPoolPolicy::shared(BLOCKING_THREADS))
+            .blocking_pool_policy(BlockingPoolPolicy::shared(BLOCKING_THREADS))
             .build()
             .expect("benchmark requires the selected number of available processors");
         let scheduler = runtime.task_scheduler();

@@ -6,7 +6,7 @@ use thread_aware::ThreadBuilder;
 use tick::runtime::InactiveClock;
 
 use crate::runtime::bootstrap;
-use crate::runtime::config::{ProcessorCount, RuntimeConfig, WorkerPoolPolicy};
+use crate::runtime::config::{BlockingPoolPolicy, ProcessorCount, RuntimeConfig};
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
 
@@ -63,10 +63,10 @@ impl RuntimeBuilder {
 
     /// Selects how blocking tasks share worker pools.
     ///
-    /// The default is [`WorkerPoolPolicy::isolated`].
+    /// The default is [`BlockingPoolPolicy::isolated`].
     #[must_use]
-    pub const fn worker_pool_policy(mut self, policy: WorkerPoolPolicy) -> Self {
-        self.processor_config.worker_pool_policy = policy;
+    pub const fn blocking_pool_policy(mut self, policy: BlockingPoolPolicy) -> Self {
+        self.processor_config.blocking_pool_policy = policy;
         self
     }
 
@@ -181,13 +181,13 @@ mod tests {
         let builder = Runtime::builder()
             .processor_count(ProcessorCount::exactly(NonZeroUsize::new(2).unwrap()))
             .stack_size(1024 * 1024)
-            .worker_pool_policy(WorkerPoolPolicy::shared(1));
+            .blocking_pool_policy(BlockingPoolPolicy::shared(1));
         assert_eq!(
             builder.processor_config,
             RuntimeConfig {
                 num_processors: ProcessorCount::exactly(NonZeroUsize::new(2).unwrap()),
                 stack_size: 1024 * 1024,
-                worker_pool_policy: WorkerPoolPolicy::shared(1),
+                blocking_pool_policy: BlockingPoolPolicy::shared(1),
             }
         );
     }
@@ -220,7 +220,7 @@ mod tests {
     fn exact_processor_selection_preserves_other_resource_settings() {
         let builder = Runtime::builder()
             .stack_size(1024 * 1024)
-            .worker_pool_policy(WorkerPoolPolicy::shared(1))
+            .blocking_pool_policy(BlockingPoolPolicy::shared(1))
             .processor_count(ProcessorCount::at_most(NonZeroUsize::MIN))
             .processor_count(ProcessorCount::exactly(NonZeroUsize::new(2).unwrap()));
         assert_eq!(
@@ -228,7 +228,7 @@ mod tests {
             RuntimeConfig {
                 num_processors: ProcessorCount::exactly(NonZeroUsize::new(2).unwrap()),
                 stack_size: 1024 * 1024,
-                worker_pool_policy: WorkerPoolPolicy::shared(1),
+                blocking_pool_policy: BlockingPoolPolicy::shared(1),
             }
         );
     }

@@ -109,7 +109,7 @@ mod tests {
 
     use super::*;
     use crate::runtime::bootstrap;
-    use crate::runtime::config::{ProcessorCount, RuntimeConfig, WorkerPoolPolicy};
+    use crate::runtime::config::{BlockingPoolPolicy, ProcessorCount, RuntimeConfig};
     use crate::runtime::handle::Runtime;
     use crate::task::join::JoinHandle;
 
@@ -118,7 +118,7 @@ mod tests {
         let coordinates = ThreadBuilder::default();
         let config = RuntimeConfig {
             num_processors: ProcessorCount::exactly(processors),
-            worker_pool_policy: WorkerPoolPolicy::shared(1),
+            blocking_pool_policy: BlockingPoolPolicy::shared(1),
             ..RuntimeConfig::default()
         };
         let runtime = bootstrap::build(config, &InactiveClock::default(), Sink::noop(), &coordinates).unwrap();

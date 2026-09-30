@@ -10,7 +10,7 @@ testing_aids::init_tracing!();
 use std::num::NonZeroUsize;
 use std::thread::{self, ThreadId};
 
-use arty::runtime::{Builtins, ProcessorCount, Runtime, WorkerPoolPolicy};
+use arty::runtime::{BlockingPoolPolicy, Builtins, ProcessorCount, Runtime};
 use arty::task::JoinHandle;
 use futures::future::join_all;
 use testing_aids::execute_or_terminate_process;
@@ -45,10 +45,10 @@ struct RelocationObservation {
 /// requested thread-aware handle from the current worker to a different worker, and
 /// records the threads that ran a blocking task and an async task before and after.
 #[cfg(test)]
-fn relocate_and_observe(policy: WorkerPoolPolicy, target: RelocationTarget) -> RelocationObservation {
+fn relocate_and_observe(policy: BlockingPoolPolicy, target: RelocationTarget) -> RelocationObservation {
     let runtime = Runtime::builder()
         .processor_count(ProcessorCount::exactly(NonZeroUsize::new(2).unwrap()))
-        .worker_pool_policy(policy)
+        .blocking_pool_policy(policy)
         .build()
         .expect("failed to build runtime");
     let scheduler = runtime.task_scheduler();
@@ -137,7 +137,7 @@ fn assert_async_follows_relocation(observation: &RelocationObservation) {
 
 #[test]
 fn relocating_scheduler_uses_destination_pool_when_isolated() {
-    let observation = relocate_and_observe(WorkerPoolPolicy::isolated(), RelocationTarget::Scheduler);
+    let observation = relocate_and_observe(BlockingPoolPolicy::isolated(), RelocationTarget::Scheduler);
 
     assert_ne!(
         observation.blocking_task.before, observation.blocking_task.after,
@@ -148,7 +148,7 @@ fn relocating_scheduler_uses_destination_pool_when_isolated() {
 
 #[test]
 fn relocating_scheduler_uses_same_pool_when_shared() {
-    let observation = relocate_and_observe(WorkerPoolPolicy::shared(1), RelocationTarget::Scheduler);
+    let observation = relocate_and_observe(BlockingPoolPolicy::shared(1), RelocationTarget::Scheduler);
 
     assert_eq!(
         observation.blocking_task.before, observation.blocking_task.after,
@@ -159,7 +159,7 @@ fn relocating_scheduler_uses_same_pool_when_shared() {
 
 #[test]
 fn relocating_builtins_uses_destination_pool_when_isolated() {
-    let observation = relocate_and_observe(WorkerPoolPolicy::isolated(), RelocationTarget::Builtins);
+    let observation = relocate_and_observe(BlockingPoolPolicy::isolated(), RelocationTarget::Builtins);
 
     assert_ne!(
         observation.blocking_task.before, observation.blocking_task.after,
@@ -170,7 +170,7 @@ fn relocating_builtins_uses_destination_pool_when_isolated() {
 
 #[test]
 fn relocating_builtins_uses_same_pool_when_shared() {
-    let observation = relocate_and_observe(WorkerPoolPolicy::shared(1), RelocationTarget::Builtins);
+    let observation = relocate_and_observe(BlockingPoolPolicy::shared(1), RelocationTarget::Builtins);
 
     assert_eq!(
         observation.blocking_task.before, observation.blocking_task.after,

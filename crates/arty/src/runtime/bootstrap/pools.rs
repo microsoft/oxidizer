@@ -1,28 +1,28 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::runtime::blocking_worker::WorkerPool;
+use crate::runtime::blocking_worker::BlockingPool;
 
 /// Resolves whether workers share their blocking-task pool.
 #[derive(Debug, Clone)]
-pub(in crate::runtime) enum WorkerPools {
-    Shared(WorkerPool),
+pub(in crate::runtime) enum BlockingPools {
+    Shared(BlockingPool),
     Isolated,
 }
 
-impl WorkerPools {
+impl BlockingPools {
     pub(in crate::runtime) const fn isolated() -> Self {
         Self::Isolated
     }
 
     pub(in crate::runtime) fn shared(max_workers: Option<usize>) -> Self {
-        Self::Shared(WorkerPool::new(max_workers))
+        Self::Shared(BlockingPool::new(max_workers))
     }
 
-    pub(super) fn build_worker(&self) -> WorkerPool {
+    pub(super) fn build_worker(&self) -> BlockingPool {
         match self {
             Self::Shared(pool) => pool.clone(),
-            Self::Isolated => WorkerPool::new(None),
+            Self::Isolated => BlockingPool::new(None),
         }
     }
 }
@@ -34,13 +34,13 @@ mod tests {
 
     #[test]
     fn shared_policy_reuses_the_same_blocking_pool() {
-        let pools = WorkerPools::shared(Some(1));
+        let pools = BlockingPools::shared(Some(1));
         assert!(pools.build_worker().shares_pool_with(&pools.build_worker()));
     }
 
     #[test]
     fn isolated_policy_creates_independent_blocking_pools() {
-        let pools = WorkerPools::isolated();
+        let pools = BlockingPools::isolated();
         assert!(!pools.build_worker().shares_pool_with(&pools.build_worker()));
     }
 }

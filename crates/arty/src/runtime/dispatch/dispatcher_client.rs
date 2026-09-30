@@ -104,7 +104,7 @@ mod tests {
     use thread_aware::ThreadAware;
 
     use super::*;
-    use crate::runtime::blocking_worker::WorkerPool;
+    use crate::runtime::blocking_worker::BlockingPool;
     use crate::runtime::dispatch::{WorkerEndpoint, test_threads};
     use crate::task::scheduler::TaskScheduler;
 
@@ -115,7 +115,7 @@ mod tests {
         let (worker1_tx, worker1_rx) = mpsc::channel();
         let wfs = ThreadWaiter::new(vec![]);
         let threads = test_threads(2);
-        let blocking_worker = BlockingWorker::new(WorkerPool::new(None), Sink::noop());
+        let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
 
         let dispatcher = Arc::new(DispatcherCore::new(
             wfs,
@@ -158,8 +158,8 @@ mod tests {
     fn relocate_switches_blocking_worker() {
         let threads = test_threads(2);
 
-        let source_worker = BlockingWorker::new(WorkerPool::new(None), Sink::noop());
-        let destination_worker = BlockingWorker::new(WorkerPool::new(None), Sink::noop());
+        let source_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
+        let destination_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
         destination_worker.shutdown();
 
         let dispatcher = Arc::new(DispatcherCore::new(

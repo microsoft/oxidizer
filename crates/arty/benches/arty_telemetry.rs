@@ -13,7 +13,7 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::Duration;
 
-use arty::runtime::{ProcessorCount, Runtime, WorkerPoolPolicy};
+use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime};
 use arty::task::{JoinHandle, TaskScheduler};
 use criterion::{BenchmarkId, Criterion, Throughput};
 use data_privacy::RedactionEngine;
@@ -54,7 +54,7 @@ fn active_sink() -> Sink {
 fn runtime(sink: Sink) -> Runtime {
     Runtime::builder()
         .processor_count(ProcessorCount::exactly(NonZeroUsize::MIN))
-        .worker_pool_policy(WorkerPoolPolicy::shared(1))
+        .blocking_pool_policy(BlockingPoolPolicy::shared(1))
         .sink(sink)
         .build()
         .expect("benchmark requires one available processor")

@@ -37,7 +37,7 @@
 /// Without a worker limit, [`ProcessorCount::auto`](crate::runtime::ProcessorCount::auto)
 /// remains the default; it currently selects all available processors. This option does
 /// not configure blocking-task pools. Configure those separately through
-/// [`RuntimeBuilder::worker_pool_policy`](crate::runtime::RuntimeBuilder::worker_pool_policy).
+/// [`RuntimeBuilder::blocking_pool_policy`](crate::runtime::RuntimeBuilder::blocking_pool_policy).
 ///
 /// # Custom builder
 ///
@@ -52,11 +52,11 @@
 /// fn app_builder() -> arty::runtime::RuntimeBuilder {
 ///     use std::num::NonZero;
 ///
-///     use arty::runtime::{ProcessorCount, Runtime, WorkerPoolPolicy};
+///     use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime};
 ///
 ///     Runtime::builder()
 ///         .processor_count(ProcessorCount::at_most(NonZero::new(4).unwrap()))
-///         .worker_pool_policy(WorkerPoolPolicy::shared(8))
+///         .blocking_pool_policy(BlockingPoolPolicy::shared(8))
 /// }
 ///
 /// # #[cfg(feature = "macros")]

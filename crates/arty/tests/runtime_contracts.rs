@@ -16,7 +16,7 @@ use std::task::{Context, Poll, Waker};
 use std::thread;
 use std::time::Duration;
 
-use arty::runtime::{ProcessorCount, Runtime, WorkerPoolPolicy};
+use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime};
 use testing_aids::{TEST_TIMEOUT, execute_or_terminate_process};
 use thread_aware::ThreadAware;
 use tick::{ClockControl, FutureExt};
@@ -27,7 +27,7 @@ testing_aids::init_tracing!();
 fn runtime(workers: usize) -> Runtime {
     Runtime::builder()
         .processor_count(ProcessorCount::exactly(NonZeroUsize::new(workers).unwrap()))
-        .worker_pool_policy(WorkerPoolPolicy::shared(1))
+        .blocking_pool_policy(BlockingPoolPolicy::shared(1))
         .build()
         .unwrap()
 }
@@ -312,10 +312,10 @@ fn cancellation_cleanup_cannot_reenter_the_local_executor() {
 #[test]
 fn a_blocking_task_can_drop_its_runtime_without_joining_itself() {
     execute_or_terminate_process(|| {
-        for policy in [WorkerPoolPolicy::isolated(), WorkerPoolPolicy::shared(1)] {
+        for policy in [BlockingPoolPolicy::isolated(), BlockingPoolPolicy::shared(1)] {
             let runtime = Runtime::builder()
                 .processor_count(ProcessorCount::exactly(NonZeroUsize::MIN))
-                .worker_pool_policy(policy)
+                .blocking_pool_policy(policy)
                 .build()
                 .unwrap();
             let scheduler = runtime.task_scheduler();
