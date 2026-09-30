@@ -15,6 +15,8 @@ use pin_project::{pin_project, pinned_drop};
 
 use crate::TaskRef;
 
+const MAX_WAKER_COUNT: usize = usize::MAX / 2;
+
 /// A wake signal intended to be allocated inline as part of the task to be woken up.
 ///
 /// The wake signal supplies the waker that can be used to set the signal and enables the owner
@@ -60,6 +62,7 @@ pub(crate) struct WakeSignal {
 
     /// Counts owned wakers cloned from the borrowed polling waker. The instance cannot be dropped
     /// until the clones are all gone because each clone holds a reference to the signal.
+    /// Cloning aborts at a conservative limit rather than allowing this count to wrap.
     waker_count: AtomicUsize,
 
     /// Whether the waker has been awakened in signal-probing mode. If the wake signal can be sent
@@ -225,10 +228,20 @@ fn waker_clone_waker(ptr: *const ()) -> RawWaker {
     let signal = resurrect_signal_ref(ptr);
 
     // Cloning just increments the ref count, that's all. There is no "object" for the waker.
-    // Reference count increment is independent of state transitions, so Relaxed is enough.
-    signal.waker_count.fetch_add(1, atomic::Ordering::Relaxed);
+    increment_waker_count(&signal.waker_count, std::process::abort);
 
     RawWaker::new(ptr, &WAKER_VTABLE)
+}
+
+fn increment_waker_count(waker_count: &AtomicUsize, on_overflow: fn() -> !) {
+    // Reference count increment is independent of state transitions, so Relaxed is enough.
+    let previous = waker_count.fetch_add(1, atomic::Ordering::Relaxed);
+
+    // Like Arc, leave half the range for concurrent increments before aborting.
+    // Unwinding instead would let repeated clone attempts keep growing the count.
+    if previous >= MAX_WAKER_COUNT {
+        on_overflow();
+    }
 }
 
 #[cfg_attr(test, mutants::skip)] // If tasks do not wake up, tests tend to infinite loop.
@@ -324,6 +337,26 @@ mod tests {
 
         assert_eq!(signal.waker_count.load(atomic::Ordering::Relaxed), 0);
         assert!(signal.is_inert());
+    }
+
+    #[test]
+    fn waker_count_reaches_limit() {
+        let count = AtomicUsize::new(MAX_WAKER_COUNT - 1);
+
+        increment_waker_count(&count, || panic!("unexpected waker count overflow"));
+
+        assert_eq!(count.load(atomic::Ordering::Relaxed), MAX_WAKER_COUNT);
+    }
+
+    #[test]
+    fn waker_count_overflow_is_rejected() {
+        for initial in [MAX_WAKER_COUNT, MAX_WAKER_COUNT + 1] {
+            let count = AtomicUsize::new(initial);
+
+            testing_aids::assert_panic!(increment_waker_count(&count, || panic!("waker count overflow")));
+
+            assert_eq!(count.load(atomic::Ordering::Relaxed), initial + 1);
+        }
     }
 
     #[test]
