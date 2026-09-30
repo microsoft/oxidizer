@@ -3,6 +3,9 @@
 
 use thread_aware::ThreadAware;
 
+#[allow(dead_code, reason = "Verifies generated `::mockall` paths cannot be shadowed")]
+mod mockall {}
+
 #[fakeable::fakeable(
     fake_impl = thread_aware::Unaware<std::sync::Arc<fakes::MockMyService>>
 )]

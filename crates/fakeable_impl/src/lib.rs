@@ -64,6 +64,7 @@ pub fn fakeable_impl(args: TokenStream, input: TokenStream) -> TokenStream {
 }
 
 /// Process struct definitions
+#[expect(clippy::too_many_lines, reason = "Struct validation and expansion must remain visibly coupled")]
 fn process_struct(args: &FakeableArgs, item_struct: &ItemStruct) -> proc_macro2::TokenStream {
     let struct_name = &item_struct.ident;
     let struct_vis = &item_struct.vis;
@@ -88,6 +89,27 @@ fn process_struct(args: &FakeableArgs, item_struct: &ItemStruct) -> proc_macro2:
         .into_compile_error();
     }
 
+    if let Some(attr) = struct_attrs.iter().find(|attr| cfg_attr_applies_attribute(attr, "repr")) {
+        return syn::Error::new_spanned(
+            attr,
+            "cfg_attr applying repr is not supported because the generated wrapper has a different layout",
+        )
+        .into_compile_error();
+    }
+
+    let non_private_field = match &item_struct.fields {
+        syn::Fields::Named(fields) => fields.named.iter().find(|field| !matches!(field.vis, syn::Visibility::Inherited)),
+        syn::Fields::Unnamed(fields) => fields.unnamed.iter().find(|field| !matches!(field.vis, syn::Visibility::Inherited)),
+        syn::Fields::Unit => None,
+    };
+    if let Some(field) = non_private_field {
+        return syn::Error::new_spanned(
+            &field.vis,
+            "fakeable structs cannot expose fields because the generated wrapper stores only an internal enum",
+        )
+        .into_compile_error();
+    }
+
     let cfg_attrs: Vec<_> = struct_attrs.iter().filter(|attr| attr.path().is_ident("cfg")).collect();
 
     // Generate internal type names without prefix, to be placed in dedicated module
@@ -101,6 +123,17 @@ fn process_struct(args: &FakeableArgs, item_struct: &ItemStruct) -> proc_macro2:
             return syn::Error::new_spanned(struct_name, "fake_impl must be specified for struct definitions").into_compile_error();
         }
     };
+    if fake_impl_path
+        .segments
+        .first()
+        .is_some_and(|segment| segment.ident == "self" || segment.ident == "super")
+    {
+        return syn::Error::new_spanned(
+            &fake_impl_path,
+            "fake_impl paths starting with self or super are not supported; use a module-relative, crate, or absolute path",
+        )
+        .into_compile_error();
+    }
 
     // Extract the fake constructor name (default to "fake" if not provided)
     let fake_constructor_name = args.fake_constructor.as_deref().unwrap_or("fake").to_string();
@@ -339,12 +372,15 @@ fn meta_applies_attribute(meta: &Meta, attribute_name: &str) -> bool {
 /// Extracts the final type path segment from an impl block.
 fn extract_struct_segment(item_impl: &ItemImpl) -> Result<syn::PathSegment, syn::Error> {
     match &*item_impl.self_ty {
-        syn::Type::Path(type_path) => Ok(type_path
-            .path
-            .segments
-            .last()
-            .expect("syn type paths always contain at least one segment")
-            .clone()),
+        syn::Type::Path(type_path)
+            if type_path.qself.is_none() && type_path.path.leading_colon.is_none() && type_path.path.segments.len() == 1 =>
+        {
+            Ok(type_path.path.segments[0].clone())
+        }
+        syn::Type::Path(_) => Err(syn::Error::new_spanned(
+            &item_impl.self_ty,
+            "qualified impl targets are not supported; apply the impl in the service's declaration module",
+        )),
         _ => Err(syn::Error::new_spanned(&item_impl.self_ty, "impl target must be a simple path")),
     }
 }
@@ -388,6 +424,18 @@ fn generate_wrapper_impl(
                 delegation_methods.push(syn::ImplItem::Fn(delegation_method));
             }
             _ if is_trait_impl => delegation_methods.push(item.clone()),
+            syn::ImplItem::Const(item_const) if matches!(item_const.vis, syn::Visibility::Public(_) | syn::Visibility::Restricted(_)) => {
+                return Err(syn::Error::new_spanned(
+                    item_const,
+                    "public associated constants in inherent impls are not supported on the generated wrapper",
+                ));
+            }
+            syn::ImplItem::Type(item_type) if matches!(item_type.vis, syn::Visibility::Public(_) | syn::Visibility::Restricted(_)) => {
+                return Err(syn::Error::new_spanned(
+                    item_type,
+                    "public associated types in inherent impls are not supported on the generated wrapper",
+                ));
+            }
             _ => {}
         }
     }
@@ -398,6 +446,10 @@ fn generate_wrapper_impl(
 }
 
 /// Generates a delegation method that matches on the internal enum and calls the appropriate implementation.
+#[expect(
+    clippy::too_many_lines,
+    reason = "Signature validation and body selection form one compatibility contract"
+)]
 fn generate_delegation_method(
     original_method: &syn::ImplItemFn,
     fakes_attribute: &str,
@@ -429,20 +481,54 @@ fn generate_delegation_method(
     }
 
     for input in &method_sig.inputs {
-        if let syn::FnArg::Typed(syn::PatType { ty, .. }) = input
-            && type_contains_bare_self(ty)
-        {
-            return Err(syn::Error::new_spanned(
-                ty,
-                "Self in method parameters is not supported across the wrapper boundary",
-            ));
+        if let syn::FnArg::Typed(pat_type) = input {
+            if !pat_type.attrs.is_empty() {
+                return Err(syn::Error::new_spanned(
+                    &pat_type.attrs[0],
+                    "attributes on method parameters are not supported",
+                ));
+            }
+            if let syn::Pat::Ident(pat_ident) = &*pat_type.pat
+                && (pat_ident.by_ref.is_some() || pat_ident.subpat.is_some())
+            {
+                return Err(syn::Error::new_spanned(
+                    &pat_type.pat,
+                    "ref, ref mut, and subpatterns are not supported in method parameters",
+                ));
+            }
+            if type_contains_bare_self(&pat_type.ty) {
+                return Err(syn::Error::new_spanned(
+                    &pat_type.ty,
+                    "Self in method parameters is not supported across the wrapper boundary",
+                ));
+            }
         }
+    }
+
+    if let Some(param) = method_sig.generics.params.iter().find(|param| match param {
+        syn::GenericParam::Lifetime(param) => !param.attrs.is_empty(),
+        syn::GenericParam::Type(param) => !param.attrs.is_empty(),
+        syn::GenericParam::Const(param) => !param.attrs.is_empty(),
+    }) {
+        return Err(syn::Error::new_spanned(
+            param,
+            "attributes on method generic parameters are not supported",
+        ));
     }
 
     if generics_contain_bare_self(&method_sig.generics) {
         return Err(syn::Error::new_spanned(
             &method_sig.generics,
             "Self in method generic bounds or where predicates is not supported",
+        ));
+    }
+
+    if let syn::ReturnType::Type(_, ty) = &method_sig.output
+        && matches!(&**ty, syn::Type::ImplTrait(_))
+    {
+        return Err(syn::Error::new_spanned(
+            ty,
+            "impl Trait return types are not supported across real and fake implementations",
         ));
     }
 
@@ -568,32 +654,27 @@ fn generate_method_body(
     receiver: &syn::Receiver,
     trait_path: Option<&syn::Path>,
 ) -> proc_macro2::TokenStream {
-    let real = proc_macro2::Ident::new("real", proc_macro2::Span::call_site());
-    let await_suffix = is_async.then(|| quote! { .await });
-    let turbofish = generic_turbofish(generic_args);
-    let real_call = if let Some(trait_path) = trait_path {
-        quote! {
-            <#helper_module_name::#real_struct_segment as #trait_path>::#method_name #turbofish (
-                #real,
-                #(#param_names),*
-            )#await_suffix
-        }
-    } else {
-        generate_method_call(&real, method_name, param_names, generic_args, is_async)
-    };
-    let fake_call = generate_method_call(
-        &proc_macro2::Ident::new("fake", proc_macro2::Span::call_site()),
+    let calls = generate_delegation_calls(
+        real_struct_segment,
+        helper_module_name,
         method_name,
         param_names,
         generic_args,
         is_async,
+        receiver,
+        trait_path,
     );
+    let real = &calls.real;
+    let fake = &calls.fake;
+    let inner = &calls.inner;
+    let real_call = &calls.real_call;
+    let fake_call = &calls.fake_call;
 
     quote! {
-        match #receiver .inner {
-            #helper_module_name::#enum_name::Real(real) => #real_call,
+        match #inner {
+            #helper_module_name::#enum_name::Real(#real) => #real_call,
             #fakes_cfg
-            #helper_module_name::#enum_name::Fake(fake) => #fake_call,
+            #helper_module_name::#enum_name::Fake(#fake) => #fake_call,
         }
     }
 }
@@ -614,7 +695,61 @@ fn generate_method_with_self_return_body(
     receiver: &syn::Receiver,
     trait_path: Option<&syn::Path>,
 ) -> proc_macro2::TokenStream {
-    let real = proc_macro2::Ident::new("real", proc_macro2::Span::call_site());
+    let calls = generate_delegation_calls(
+        real_struct_segment,
+        helper_module_name,
+        method_name,
+        param_names,
+        generic_args,
+        is_async,
+        receiver,
+        trait_path,
+    );
+    let real = &calls.real;
+    let fake = &calls.fake;
+    let inner = &calls.inner;
+    let real_call = &calls.real_call;
+    let fake_call = &calls.fake_call;
+
+    quote! {
+        match #inner {
+            #helper_module_name::#enum_name::Real(#real) => {
+                Self {
+                    inner: #helper_module_name::#enum_name::Real(#real_call),
+                }
+            }
+            #fakes_cfg
+            #helper_module_name::#enum_name::Fake(#fake) => {
+                Self {
+                    inner: #helper_module_name::#enum_name::Fake(#fake_call),
+                }
+            }
+        }
+    }
+}
+
+struct DelegationCalls {
+    real: proc_macro2::Ident,
+    fake: proc_macro2::Ident,
+    inner: proc_macro2::TokenStream,
+    real_call: proc_macro2::TokenStream,
+    fake_call: proc_macro2::TokenStream,
+}
+
+#[expect(clippy::too_many_arguments, reason = "Code generation inputs mirror the delegated method context")]
+fn generate_delegation_calls(
+    real_struct_segment: &syn::PathSegment,
+    helper_module_name: &proc_macro2::Ident,
+    method_name: &proc_macro2::Ident,
+    param_names: &[proc_macro2::Ident],
+    generic_args: &[proc_macro2::TokenStream],
+    is_async: bool,
+    receiver: &syn::Receiver,
+    trait_path: Option<&syn::Path>,
+) -> DelegationCalls {
+    let real = fresh_binding("__fakeable_real", param_names);
+    let fake = fresh_binding("__fakeable_fake", param_names);
+    let inner = receiver_inner(receiver);
     let await_suffix = is_async.then(|| quote! { .await });
     let turbofish = generic_turbofish(generic_args);
     let real_call = if let Some(trait_path) = trait_path {
@@ -627,29 +762,49 @@ fn generate_method_with_self_return_body(
     } else {
         generate_method_call(&real, method_name, param_names, generic_args, is_async)
     };
-    let fake_call = generate_method_call(
-        &proc_macro2::Ident::new("fake", proc_macro2::Span::call_site()),
-        method_name,
-        param_names,
-        generic_args,
-        is_async,
-    );
+    let fake_call = generate_method_call(&fake, method_name, param_names, generic_args, is_async);
 
-    quote! {
-        match #receiver .inner {
-            #helper_module_name::#enum_name::Real(real) => {
-                Self {
-                    inner: #helper_module_name::#enum_name::Real(#real_call),
-                }
-            }
-            #fakes_cfg
-            #helper_module_name::#enum_name::Fake(fake) => {
-                Self {
-                    inner: #helper_module_name::#enum_name::Fake(#fake_call),
-                }
-            }
-        }
+    DelegationCalls {
+        real,
+        fake,
+        inner,
+        real_call,
+        fake_call,
     }
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn receiver_inner(receiver: &syn::Receiver) -> proc_macro2::TokenStream {
+    match receiver.kind {
+        syn::ReceiverKind::Value => quote! { self.inner },
+        syn::ReceiverKind::Reference(_, _, Some(_)) => {
+            quote! { &mut self.inner }
+        }
+        syn::ReceiverKind::Reference(_, _, None) => quote! { &self.inner },
+        syn::ReceiverKind::Typed(_, _) => {
+            unreachable!("typed receivers are rejected before code generation")
+        }
+        _ => unknown_receiver_kind(),
+    }
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn unknown_receiver_kind() -> ! {
+    unreachable!("unknown receiver kinds are rejected before code generation")
+}
+
+fn fresh_binding(base: &str, param_names: &[proc_macro2::Ident]) -> proc_macro2::Ident {
+    (0..=param_names.len())
+        .map(|suffix| {
+            let candidate = if suffix == 0 {
+                base.to_string()
+            } else {
+                format!("{base}_{suffix}")
+            };
+            quote::format_ident!("{candidate}")
+        })
+        .find(|candidate| !param_names.iter().any(|param| param == candidate))
+        .expect("one more candidate than parameters guarantees a free binding")
 }
 
 /// Information extracted from a method signature for code generation.
@@ -1027,7 +1182,7 @@ fn generate_mockall_fake(
         // Generate in current module
         Ok(quote! {
             #fakes_cfg
-            mockall::mock! {
+            ::mockall::mock! {
                 #[derive(Debug)]
                 pub #fake_ident {
                     #(#mock_methods)*
@@ -1044,7 +1199,7 @@ fn generate_mockall_fake(
             #[allow(clippy::style)]
             pub mod #module_ident {
                 use super::*;
-                mockall::mock! {
+                ::mockall::mock! {
                     #[derive(Debug)]
                     pub #fake_ident {
                         #(#mock_methods)*
@@ -1138,11 +1293,30 @@ mod tests {
 
     use super::{
         add_explicit_lifetimes, add_lifetime_to_references, cfg_attr_can_disable_item, cfg_attr_tokens_can_disable_item,
-        contains_reference_in_generic, fakeable_impl, meta_can_disable_item, rewrite_expect_in_tokens, transform_expect_to_allow,
+        contains_reference_in_generic, fakeable_impl, fresh_binding, generate_delegation_calls, meta_can_disable_item,
+        rewrite_expect_in_tokens, transform_expect_to_allow,
     };
 
     fn expansion(args: TokenStream, input: TokenStream) -> String {
         fakeable_impl(args, input).to_string()
+    }
+
+    #[test]
+    #[should_panic(expected = "typed receivers are rejected")]
+    fn typed_receiver_inner_generation_is_unreachable_but_defined() {
+        let signature: syn::Signature = parse_quote!(fn take(self: Box<Self>));
+        let receiver = signature.receiver().unwrap();
+        let real_segment: syn::PathSegment = parse_quote!(Service);
+        let helper: proc_macro2::Ident = parse_quote!(__fakeable__Service);
+        let method: proc_macro2::Ident = parse_quote!(take);
+
+        generate_delegation_calls(&real_segment, &helper, &method, &[], &[], false, receiver, None);
+    }
+
+    #[test]
+    fn fresh_binding_avoids_parameter_collisions() {
+        let names = vec![parse_quote!(__fakeable_real), parse_quote!(__fakeable_real_1)];
+        assert_eq!(fresh_binding("__fakeable_real", &names).to_string(), "__fakeable_real_2");
     }
 
     #[test]

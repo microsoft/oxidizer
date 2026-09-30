@@ -54,6 +54,12 @@ also gate generated Mockall output. A `cfg_attr` that conditionally applies
 `cfg` is rejected on either item because propagating it selectively could leave
 generated items referring to a disabled type.
 
+Struct fields must be private because the wrapper replaces the original field
+layout with one internal enum. Layout `repr` attributes, including conditional
+`repr` through `cfg_attr`, are rejected for the same reason. Fake paths beginning
+with `self` or `super` and qualified impl targets are rejected because helper
+items live in a generated module.
+
 Conditional derives expressed through `cfg_attr` are rejected; derives must be
 applied directly so they can be copied consistently. Layout `repr` attributes
 are rejected because the wrapper's single enum field does not preserve the
@@ -92,6 +98,10 @@ expectations. Signatures with nested elided references beneath higher-ranked
 lifetime binders are rejected rather than rewritten across the binder boundary.
 Consuming receivers and const methods are also rejected for generated Mockall
 fakes; manual fakes remain available for those method shapes.
+
+Method forwarding rejects parameter/generic attributes, by-reference bindings,
+subpatterns, and `impl Trait` returns. Public inherent associated constants and
+types are also rejected because they cannot be represented on the wrapper.
 
 Mockall remains optional because manually implemented fakes are the primary
 mechanism and should not add a production dependency. The integration must be

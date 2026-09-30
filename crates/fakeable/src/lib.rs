@@ -1,10 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![allow(
-    clippy::test_attr_in_doctest,
-    reason = "doc examples show realistic test usage with #[test] attributes"
-)]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 //! Proc macros for streamlining the creation of fakeable structures.
@@ -129,6 +125,13 @@ use proc_macro::TokenStream;
 /// ## For Impl Blocks
 ///
 /// - **`fakes_feature`** (optional): Feature flag name for enabling fakes (default: "test-util")
+/// - **`generate_mockall_fake = true`** (optional): Generate a Mockall fake; requires the
+///   `mockall` feature and a direct consumer dependency on `mockall`
+/// - **`mockall_fake_module`** (optional): Module for the generated mock (default: `"fakes"`);
+///   use `"."` to emit it in the current module
+///
+/// `fakes_attribute` is accepted as a deprecated alias for `fakes_feature` for compatibility with
+/// the imported experimental API.
 ///
 /// # Optional mockall Mock Generation
 ///
@@ -195,6 +198,16 @@ use proc_macro::TokenStream;
 /// - A `cfg_attr` that conditionally applies `derive` is rejected; apply derives directly.
 /// - Layout `repr` attributes are rejected because the generated wrapper has a different field
 ///   layout and ABI.
+/// - Fake implementation paths beginning with `self` or `super`, and qualified impl targets, are
+///   rejected because generated helper items live in a different module.
+/// - Struct fields must be private because the visible wrapper does not preserve direct field
+///   access or struct-literal construction.
+/// - Public associated constants and types in inherent impls are rejected because the generated
+///   wrapper cannot preserve them.
+/// - Attributes on method parameters or generic parameters, `ref`/`ref mut` bindings, and
+///   sub-patterns are rejected because forwarding could change under cfg or binding semantics.
+/// - `impl Trait` return types are rejected because real and fake implementations may choose
+///   different opaque concrete types.
 /// - Mockall generation rejects nested elided references beneath higher-ranked lifetime binders.
 /// - Struct derives are copied to the wrapper and internal enum. The fake type must satisfy their
 ///   bounds (for example, `Clone`), and derives that depend on struct shape or an enum default

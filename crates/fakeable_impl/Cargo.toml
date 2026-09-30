@@ -38,7 +38,7 @@ syn = { workspace = true, features = ["clone-impls", "extra-traits", "full", "pa
 
 [dev-dependencies]
 insta = { workspace = true }
-prettyplease = { workspace = true }
+testing_aids = { path = "../testing_aids" }
 
 # >>> anvil-managed: anvil-lints
 [lints]

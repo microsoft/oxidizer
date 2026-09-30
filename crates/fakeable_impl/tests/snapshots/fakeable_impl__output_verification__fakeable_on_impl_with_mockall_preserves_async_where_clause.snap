@@ -1,6 +1,6 @@
 ---
 source: crates/fakeable_impl/src/../tests/output_verification.rs
-expression: "prettyplease::unparse(&result_file)"
+expression: "testing_aids :: render_expansion(&result)"
 ---
 impl __fakeable__MyService::MyService {
     pub async fn process<T>(&self, value: T) -> T
@@ -18,9 +18,13 @@ impl MyService {
         T: Send + 'static,
     {
         match &self.inner {
-            __fakeable__MyService::Enum::Real(real) => real.process::<T>(value).await,
+            __fakeable__MyService::Enum::Real(__fakeable_real) => {
+                __fakeable_real.process::<T>(value).await
+            }
             #[cfg(any(feature = "test-util", test))]
-            __fakeable__MyService::Enum::Fake(fake) => fake.process::<T>(value).await,
+            __fakeable__MyService::Enum::Fake(__fakeable_fake) => {
+                __fakeable_fake.process::<T>(value).await
+            }
         }
     }
 }
@@ -30,7 +34,7 @@ impl MyService {
 #[allow(clippy::style)]
 pub mod fakes {
     use super::*;
-    mockall::mock! {
+    ::mockall::mock! {
         #[derive(Debug)] pub MyService { pub fn process < T > (& self, value : T) -> impl
         ::std::future::Future < Output = T > + Send where T : Send + 'static,; }
     }

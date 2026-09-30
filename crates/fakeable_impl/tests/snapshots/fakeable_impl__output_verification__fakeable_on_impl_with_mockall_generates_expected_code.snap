@@ -1,6 +1,6 @@
 ---
 source: crates/fakeable_impl/src/../tests/output_verification.rs
-expression: "prettyplease::unparse(&result_file)"
+expression: "testing_aids :: render_expansion(&result)"
 ---
 impl __fakeable__MyService::MyService {
     fn new(value: String, other_value: i32) -> Self {
@@ -33,30 +33,38 @@ impl MyService {
     #[allow(clippy::used_underscore_binding)]
     pub fn get_value(&self) -> &str {
         match &self.inner {
-            __fakeable__MyService::Enum::Real(real) => real.get_value(),
+            __fakeable__MyService::Enum::Real(__fakeable_real) => {
+                __fakeable_real.get_value()
+            }
             #[cfg(any(feature = "test-util", test))]
-            __fakeable__MyService::Enum::Fake(fake) => fake.get_value(),
+            __fakeable__MyService::Enum::Fake(__fakeable_fake) => {
+                __fakeable_fake.get_value()
+            }
         }
     }
     #[allow(unused_mut)]
     #[allow(clippy::used_underscore_binding)]
     pub fn get_other_value(&self) -> i32 {
         match &self.inner {
-            __fakeable__MyService::Enum::Real(real) => real.get_other_value(),
+            __fakeable__MyService::Enum::Real(__fakeable_real) => {
+                __fakeable_real.get_other_value()
+            }
             #[cfg(any(feature = "test-util", test))]
-            __fakeable__MyService::Enum::Fake(fake) => fake.get_other_value(),
+            __fakeable__MyService::Enum::Fake(__fakeable_fake) => {
+                __fakeable_fake.get_other_value()
+            }
         }
     }
     #[allow(unused_mut)]
     #[allow(clippy::used_underscore_binding)]
     pub fn get_value_with_ref_arg(&self, prefix: &str, suffix: Option<&str>) -> String {
         match &self.inner {
-            __fakeable__MyService::Enum::Real(real) => {
-                real.get_value_with_ref_arg(prefix, suffix)
+            __fakeable__MyService::Enum::Real(__fakeable_real) => {
+                __fakeable_real.get_value_with_ref_arg(prefix, suffix)
             }
             #[cfg(any(feature = "test-util", test))]
-            __fakeable__MyService::Enum::Fake(fake) => {
-                fake.get_value_with_ref_arg(prefix, suffix)
+            __fakeable__MyService::Enum::Fake(__fakeable_fake) => {
+                __fakeable_fake.get_value_with_ref_arg(prefix, suffix)
             }
         }
     }
@@ -67,7 +75,7 @@ impl MyService {
 #[allow(clippy::style)]
 pub mod fakes {
     use super::*;
-    mockall::mock! {
+    ::mockall::mock! {
         #[derive(Debug)] pub MyService { pub fn get_value(& self) -> & str; pub fn
         get_other_value(& self) -> i32; pub fn get_value_with_ref_arg < 'mock > (& self,
         prefix : & str, suffix : Option < & 'mock str >) -> String; }

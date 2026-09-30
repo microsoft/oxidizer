@@ -1,6 +1,6 @@
 ---
 source: crates/fakeable_impl/src/../tests/output_verification.rs
-expression: "prettyplease::unparse(&result_file)"
+expression: "testing_aids :: render_expansion(&result)"
 ---
 impl Service for __fakeable__MyService::MyService {
     type Output = Something;
@@ -33,28 +33,32 @@ impl Service for MyService {
     #[allow(clippy::used_underscore_binding)]
     fn output(&self) -> &Something {
         match &self.inner {
-            __fakeable__MyService::Enum::Real(real) => {
-                <__fakeable__MyService::MyService as Service>::output(real)
+            __fakeable__MyService::Enum::Real(__fakeable_real) => {
+                <__fakeable__MyService::MyService as Service>::output(__fakeable_real)
             }
             #[cfg(any(feature = "test-util", test))]
-            __fakeable__MyService::Enum::Fake(fake) => fake.output(),
+            __fakeable__MyService::Enum::Fake(__fakeable_fake) => {
+                __fakeable_fake.output()
+            }
         }
     }
     #[allow(unused_mut)]
     #[allow(clippy::used_underscore_binding)]
     fn duplicate(&self) -> Self {
         match &self.inner {
-            __fakeable__MyService::Enum::Real(real) => {
+            __fakeable__MyService::Enum::Real(__fakeable_real) => {
                 Self {
                     inner: __fakeable__MyService::Enum::Real(
-                        <__fakeable__MyService::MyService as Service>::duplicate(real),
+                        <__fakeable__MyService::MyService as Service>::duplicate(
+                            __fakeable_real,
+                        ),
                     ),
                 }
             }
             #[cfg(any(feature = "test-util", test))]
-            __fakeable__MyService::Enum::Fake(fake) => {
+            __fakeable__MyService::Enum::Fake(__fakeable_fake) => {
                 Self {
-                    inner: __fakeable__MyService::Enum::Fake(fake.duplicate()),
+                    inner: __fakeable__MyService::Enum::Fake(__fakeable_fake.duplicate()),
                 }
             }
         }

@@ -6,6 +6,12 @@ use quote::quote;
 
 use crate as fakeable_impl;
 
+macro_rules! assert_expansion {
+    ($tokens:expr) => {
+        assert_snapshot!(testing_aids::render_expansion($tokens));
+    };
+}
+
 #[test]
 fn fakeable_on_struct_generates_expected_code() {
     let input = quote! {
@@ -20,8 +26,7 @@ fn fakeable_on_struct_generates_expected_code() {
     };
 
     let result = fakeable_impl::fakeable_impl(args, input);
-    let result_file = syn::parse_file(&result.to_string()).unwrap();
-    assert_snapshot!(prettyplease::unparse(&result_file));
+    assert_expansion!(&result);
 }
 
 #[test]
@@ -38,8 +43,7 @@ fn fakeable_on_struct_generates_expected_code_with_accessibility() {
     };
 
     let result = fakeable_impl::fakeable_impl(args, input);
-    let result_file = syn::parse_file(&result.to_string()).unwrap();
-    assert_snapshot!(prettyplease::unparse(&result_file));
+    assert_expansion!(&result);
 }
 
 #[test]
@@ -59,8 +63,7 @@ fn fakeable_on_struct_generates_expected_code_with_derive() {
     };
 
     let result = fakeable_impl::fakeable_impl(args, input);
-    let result_file = syn::parse_file(&result.to_string()).unwrap();
-    assert_snapshot!(prettyplease::unparse(&result_file));
+    assert_expansion!(&result);
 }
 
 #[test]
@@ -129,8 +132,7 @@ fn fakeable_on_impl_generates_expected_code() {
     let args = quote! {};
 
     let result = fakeable_impl::fakeable_impl(args, input);
-    let result_file = syn::parse_file(&result.to_string()).unwrap();
-    assert_snapshot!(prettyplease::unparse(&result_file));
+    assert_expansion!(&result);
 }
 
 #[test]
@@ -164,8 +166,7 @@ fn fakeable_on_impl_with_mockall_generates_expected_code() {
     };
 
     let result = fakeable_impl::fakeable_impl(args, input);
-    let result_file = syn::parse_file(&result.to_string()).unwrap();
-    assert_snapshot!(prettyplease::unparse(&result_file));
+    assert_expansion!(&result);
 }
 
 #[test]
@@ -196,8 +197,7 @@ fn fakeable_on_impl_with_mockall_current_module_generates_expected_code() {
     };
 
     let result = fakeable_impl::fakeable_impl(args, input);
-    let result_file = syn::parse_file(&result.to_string()).unwrap();
-    assert_snapshot!(prettyplease::unparse(&result_file));
+    assert_expansion!(&result);
 }
 
 #[test]
@@ -221,8 +221,7 @@ fn fakeable_on_impl_with_async_generates_expected_code() {
     let args = quote! {};
 
     let result = fakeable_impl::fakeable_impl(args, input);
-    let result_file = syn::parse_file(&result.to_string()).unwrap();
-    assert_snapshot!(prettyplease::unparse(&result_file));
+    assert_expansion!(&result);
 }
 
 #[test]
@@ -236,8 +235,7 @@ fn fakeable_on_impl_with_async_constructor_generates_expected_code() {
     };
 
     let result = fakeable_impl::fakeable_impl(quote! {}, input);
-    let result_file = syn::parse_file(&result.to_string()).unwrap();
-    assert_snapshot!(prettyplease::unparse(&result_file));
+    assert_expansion!(&result);
 }
 
 #[test]
@@ -259,8 +257,7 @@ fn fakeable_on_impl_with_mockall_and_async_unit_function_generates_expected_code
     };
 
     let result = fakeable_impl::fakeable_impl(args, input);
-    let result_file = syn::parse_file(&result.to_string()).unwrap();
-    assert_snapshot!(prettyplease::unparse(&result_file));
+    assert_expansion!(&result);
 }
 
 #[test]
@@ -290,8 +287,7 @@ fn fakeable_on_trait_impl_generated_expected_code() {
     let args = quote! {};
 
     let result = fakeable_impl::fakeable_impl(args, input);
-    let result_file = syn::parse_file(&result.to_string()).unwrap();
-    assert_snapshot!(prettyplease::unparse(&result_file));
+    assert_expansion!(&result);
 }
 
 #[test]
@@ -316,8 +312,7 @@ fn fakeable_struct_with_expect() {
     };
 
     let result = fakeable_impl::fakeable_impl(args, input);
-    let result_file = syn::parse_file(&result.to_string()).unwrap();
-    assert_snapshot!(prettyplease::unparse(&result_file));
+    assert_expansion!(&result);
 }
 
 #[test]
@@ -345,8 +340,7 @@ fn fakeable_impl_with_expect() {
 
     let args = quote! {};
     let result = fakeable_impl::fakeable_impl(args, input);
-    let result_file = syn::parse_file(&result.to_string()).unwrap();
-    assert_snapshot!(prettyplease::unparse(&result_file));
+    assert_expansion!(&result);
 }
 
 #[test]
@@ -378,8 +372,7 @@ fn fakeable_on_impl_with_ref_receiver_returning_self_generates_expected_code() {
     let args = quote! {};
 
     let result = fakeable_impl::fakeable_impl(args, input);
-    let result_file = syn::parse_file(&result.to_string()).unwrap();
-    assert_snapshot!(prettyplease::unparse(&result_file));
+    assert_expansion!(&result);
 }
 
 #[test]
@@ -400,8 +393,7 @@ fn fakeable_on_generic_impl_preserves_type_arguments() {
     };
 
     let result = fakeable_impl::fakeable_impl(quote! {}, input);
-    let result_file = syn::parse_file(&result.to_string()).unwrap();
-    assert_snapshot!(prettyplease::unparse(&result_file));
+    assert_expansion!(&result);
 }
 
 #[test]
@@ -416,8 +408,7 @@ fn fakeable_on_bounded_generic_struct_preserves_generic_forms() {
     };
 
     let result = fakeable_impl::fakeable_impl(quote! { fake_impl = FakeMyService<T> }, input);
-    let result_file = syn::parse_file(&result.to_string()).unwrap();
-    assert_snapshot!(prettyplease::unparse(&result_file));
+    assert_expansion!(&result);
 }
 
 #[test]
@@ -438,8 +429,7 @@ fn fakeable_on_impl_with_mockall_preserves_async_where_clause() {
     };
 
     let result = fakeable_impl::fakeable_impl(args, input);
-    let result_file = syn::parse_file(&result.to_string()).unwrap();
-    assert_snapshot!(prettyplease::unparse(&result_file));
+    assert_expansion!(&result);
 }
 
 #[test]
@@ -523,8 +513,7 @@ fn fakeable_on_cfg_struct_gates_generated_items() {
     };
 
     let result = fakeable_impl::fakeable_impl(quote! { fake_impl = FakeMyService }, input);
-    let result_file = syn::parse_file(&result.to_string()).unwrap();
-    assert_snapshot!(prettyplease::unparse(&result_file));
+    assert_expansion!(&result);
 }
 
 #[test]
@@ -568,6 +557,79 @@ fn fakeable_rejects_repr_attributes() {
     let result = fakeable_impl::fakeable_impl(quote! { fake_impl = FakeMyService }, input).to_string();
 
     assert!(result.contains("repr attributes are not supported"));
+}
+
+#[test]
+fn fakeable_rejects_conditional_repr() {
+    let input = quote! {
+        #[cfg_attr(feature = "ffi", repr(C))]
+        struct MyService {
+            value: String,
+        }
+
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! { fake_impl = FakeMyService }, input).to_string();
+
+    assert!(result.contains("cfg_attr applying repr is not supported"));
+}
+
+#[test]
+fn fakeable_accepts_non_repr_cfg_attr() {
+    let input = quote! {
+        #[cfg_attr(feature = "docs", doc = "service")]
+        struct MyService {
+            value: String,
+        }
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! { fake_impl = FakeMyService }, input);
+
+    assert_expansion!(&result);
+}
+
+#[test]
+fn fakeable_rejects_public_fields() {
+    let input = quote! {
+        struct MyService {
+            pub value: String,
+        }
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! { fake_impl = FakeMyService }, input).to_string();
+
+    assert!(result.contains("fakeable structs cannot expose fields"));
+
+    let tuple = fakeable_impl::fakeable_impl(
+        quote! { fake_impl = FakeMyService },
+        quote!(
+            struct MyService(pub String);
+        ),
+    )
+    .to_string();
+    assert!(tuple.contains("fakeable structs cannot expose fields"));
+}
+
+#[test]
+fn fakeable_rejects_relative_fake_paths() {
+    for path in [quote!(self::fakes::Fake), quote!(super::fakes::Fake)] {
+        let result = fakeable_impl::fakeable_impl(
+            quote! { fake_impl = #path },
+            quote!(
+                struct MyService;
+            ),
+        )
+        .to_string();
+
+        assert!(result.contains("paths starting with self or super"));
+    }
+}
+
+#[test]
+fn fakeable_rejects_qualified_impl_targets() {
+    let result = fakeable_impl::fakeable_impl(quote! {}, quote!(impl services::MyService {})).to_string();
+
+    assert!(result.contains("qualified impl targets are not supported"));
 }
 
 #[test]
@@ -676,6 +738,66 @@ fn fakeable_rejects_projected_self_type() {
 }
 
 #[test]
+fn fakeable_rejects_impl_trait_return() {
+    let input = quote! {
+        impl MyService {
+            pub fn value(&self) -> impl core::fmt::Display {
+                42
+            }
+        }
+    };
+
+    let result = fakeable_impl::fakeable_impl(quote! {}, input).to_string();
+    assert!(result.contains("impl Trait return types are not supported"));
+}
+
+#[test]
+fn fakeable_rejects_parameter_binding_modifiers() {
+    for input in [
+        quote! { impl MyService { pub fn set(&self, ref value: String) {} } },
+        quote! { impl MyService { pub fn set(&self, ref mut value: String) {} } },
+        quote! { impl MyService { pub fn set(&self, value @ Some(_): Option<String>) {} } },
+    ] {
+        let result = fakeable_impl::fakeable_impl(quote! {}, input).to_string();
+        assert!(result.contains("ref, ref mut, and subpatterns are not supported"));
+    }
+}
+
+#[test]
+fn fakeable_rejects_parameter_and_generic_attributes() {
+    let parameter = fakeable_impl::fakeable_impl(
+        quote! {},
+        quote! { impl MyService { pub fn set(&self, #[cfg(test)] value: String) {} } },
+    )
+    .to_string();
+    assert!(parameter.contains("attributes on method parameters are not supported"));
+
+    let generic = fakeable_impl::fakeable_impl(
+        quote! {},
+        quote! { impl MyService { pub fn set<#[cfg(test)] T>(&self, value: T) {} } },
+    )
+    .to_string();
+    assert!(generic.contains("attributes on method generic parameters are not supported"));
+}
+
+#[test]
+fn fakeable_rejects_public_inherent_associated_items() {
+    let associated_const = fakeable_impl::fakeable_impl(quote! {}, quote! { impl MyService { pub const VERSION: u32 = 1; } }).to_string();
+    assert!(associated_const.contains("public associated constants"));
+
+    let associated_type = fakeable_impl::fakeable_impl(quote! {}, quote! { impl MyService { pub type Output = u32; } }).to_string();
+    assert!(associated_type.contains("public associated types"));
+}
+
+#[test]
+fn fakeable_keeps_private_inherent_associated_items_hidden() {
+    let result = fakeable_impl::fakeable_impl(quote! {}, quote! { impl MyService { const VERSION: u32 = 1; type Output = u32; } });
+    let rendered = testing_aids::render_expansion(&result);
+    assert_eq!(rendered.matches("VERSION").count(), 1);
+    assert_eq!(rendered.matches("type Output").count(), 1);
+}
+
+#[test]
 fn fakeable_on_cfg_impl_gates_generated_mockall_module() {
     let input = quote! {
         #[cfg(feature = "enabled")]
@@ -688,8 +810,7 @@ fn fakeable_on_cfg_impl_gates_generated_mockall_module() {
     };
 
     let result = fakeable_impl::fakeable_impl(quote! { generate_mockall_fake = true }, input);
-    let result_file = syn::parse_file(&result.to_string()).unwrap();
-    assert_snapshot!(prettyplease::unparse(&result_file));
+    assert_expansion!(&result);
 }
 
 #[test]
@@ -776,8 +897,7 @@ fn fakeable_on_generic_trait_impl_preserves_hidden_type_arguments() {
     };
 
     let result = fakeable_impl::fakeable_impl(quote! {}, input);
-    let result_file = syn::parse_file(&result.to_string()).unwrap();
-    assert_snapshot!(prettyplease::unparse(&result_file));
+    assert_expansion!(&result);
 }
 
 #[test]

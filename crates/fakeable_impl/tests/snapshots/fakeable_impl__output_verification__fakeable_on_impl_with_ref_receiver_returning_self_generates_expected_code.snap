@@ -1,6 +1,6 @@
 ---
 source: crates/fakeable_impl/src/../tests/output_verification.rs
-expression: "prettyplease::unparse(&result_file)"
+expression: "testing_aids :: render_expansion(&result)"
 ---
 impl __fakeable__MyService::MyService {
     pub fn new(value: String) -> Self {
@@ -33,15 +33,19 @@ impl MyService {
     #[allow(clippy::used_underscore_binding)]
     pub fn special_clone(&self) -> Self {
         match &self.inner {
-            __fakeable__MyService::Enum::Real(real) => {
+            __fakeable__MyService::Enum::Real(__fakeable_real) => {
                 Self {
-                    inner: __fakeable__MyService::Enum::Real(real.special_clone()),
+                    inner: __fakeable__MyService::Enum::Real(
+                        __fakeable_real.special_clone(),
+                    ),
                 }
             }
             #[cfg(any(feature = "test-util", test))]
-            __fakeable__MyService::Enum::Fake(fake) => {
+            __fakeable__MyService::Enum::Fake(__fakeable_fake) => {
                 Self {
-                    inner: __fakeable__MyService::Enum::Fake(fake.special_clone()),
+                    inner: __fakeable__MyService::Enum::Fake(
+                        __fakeable_fake.special_clone(),
+                    ),
                 }
             }
         }
@@ -50,15 +54,19 @@ impl MyService {
     #[allow(clippy::used_underscore_binding)]
     pub async fn async_clone(&self) -> Self {
         match &self.inner {
-            __fakeable__MyService::Enum::Real(real) => {
+            __fakeable__MyService::Enum::Real(__fakeable_real) => {
                 Self {
-                    inner: __fakeable__MyService::Enum::Real(real.async_clone().await),
+                    inner: __fakeable__MyService::Enum::Real(
+                        __fakeable_real.async_clone().await,
+                    ),
                 }
             }
             #[cfg(any(feature = "test-util", test))]
-            __fakeable__MyService::Enum::Fake(fake) => {
+            __fakeable__MyService::Enum::Fake(__fakeable_fake) => {
                 Self {
-                    inner: __fakeable__MyService::Enum::Fake(fake.async_clone().await),
+                    inner: __fakeable__MyService::Enum::Fake(
+                        __fakeable_fake.async_clone().await,
+                    ),
                 }
             }
         }
@@ -67,15 +75,19 @@ impl MyService {
     #[allow(clippy::used_underscore_binding)]
     pub fn mut_transform(&mut self) -> Self {
         match &mut self.inner {
-            __fakeable__MyService::Enum::Real(real) => {
+            __fakeable__MyService::Enum::Real(__fakeable_real) => {
                 Self {
-                    inner: __fakeable__MyService::Enum::Real(real.mut_transform()),
+                    inner: __fakeable__MyService::Enum::Real(
+                        __fakeable_real.mut_transform(),
+                    ),
                 }
             }
             #[cfg(any(feature = "test-util", test))]
-            __fakeable__MyService::Enum::Fake(fake) => {
+            __fakeable__MyService::Enum::Fake(__fakeable_fake) => {
                 Self {
-                    inner: __fakeable__MyService::Enum::Fake(fake.mut_transform()),
+                    inner: __fakeable__MyService::Enum::Fake(
+                        __fakeable_fake.mut_transform(),
+                    ),
                 }
             }
         }
@@ -84,9 +96,13 @@ impl MyService {
     #[allow(clippy::used_underscore_binding)]
     pub fn get_value(&self) -> &str {
         match &self.inner {
-            __fakeable__MyService::Enum::Real(real) => real.get_value(),
+            __fakeable__MyService::Enum::Real(__fakeable_real) => {
+                __fakeable_real.get_value()
+            }
             #[cfg(any(feature = "test-util", test))]
-            __fakeable__MyService::Enum::Fake(fake) => fake.get_value(),
+            __fakeable__MyService::Enum::Fake(__fakeable_fake) => {
+                __fakeable_fake.get_value()
+            }
         }
     }
 }

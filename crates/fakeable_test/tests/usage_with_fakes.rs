@@ -17,6 +17,9 @@ use thread_aware::ThreadAware;
 fn test_real_implementation() {
     let mut service = MyService::new("real".to_string(), 10);
     assert_eq!(service.get_value(), "real");
+    assert_eq!(service.get_value_explicit(), "real");
+    assert_eq!(service.named_arguments(2, 3), 5);
+    assert_eq!(service.generic_marker::<u8>(), 7);
     assert_eq!(service.get_other_value(), 10);
     assert_eq!(service.process("Prefix"), "Prefix Value: real, Other: 10");
     assert_eq!(block_on(service.async_function(5)).unwrap(), 5);
@@ -29,6 +32,9 @@ fn test_real_implementation() {
 fn test_fake_implementation() {
     let mut fake_service = MyService::fake(FakeMyService);
     assert_eq!(fake_service.get_value(), "fake");
+    assert_eq!(fake_service.get_value_explicit(), "fake");
+    assert_eq!(fake_service.named_arguments(2, 3), 6);
+    assert_eq!(fake_service.generic_marker::<u8>(), 8);
     assert_eq!(fake_service.get_other_value(), 42);
     assert_eq!(fake_service.process("Prefix"), "processed Prefix");
     assert_eq!(block_on(fake_service.async_function(5)).unwrap(), 47);

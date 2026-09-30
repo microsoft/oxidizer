@@ -1,6 +1,6 @@
 ---
 source: crates/fakeable_impl/src/../tests/output_verification.rs
-expression: "prettyplease::unparse(&result_file)"
+expression: "testing_aids :: render_expansion(&result)"
 ---
 #[cfg(feature = "enabled")]
 impl __fakeable__MyService::MyService {
@@ -14,9 +14,9 @@ impl MyService {
     #[allow(clippy::used_underscore_binding)]
     pub fn value(&self) -> i32 {
         match &self.inner {
-            __fakeable__MyService::Enum::Real(real) => real.value(),
+            __fakeable__MyService::Enum::Real(__fakeable_real) => __fakeable_real.value(),
             #[cfg(any(feature = "test-util", test))]
-            __fakeable__MyService::Enum::Fake(fake) => fake.value(),
+            __fakeable__MyService::Enum::Fake(__fakeable_fake) => __fakeable_fake.value(),
         }
     }
 }
@@ -27,7 +27,7 @@ impl MyService {
 #[allow(clippy::style)]
 pub mod fakes {
     use super::*;
-    mockall::mock! {
+    ::mockall::mock! {
         #[derive(Debug)] pub MyService { pub fn value(& self) -> i32; }
     }
 }

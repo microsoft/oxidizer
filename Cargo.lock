@@ -1827,10 +1827,10 @@ name = "fakeable_impl"
 version = "0.2.0"
 dependencies = [
  "insta",
- "prettyplease 0.3.0",
  "proc-macro2",
  "quote",
  "syn 3.0.5",
+ "testing_aids",
 ]
 
 [[package]]

@@ -27,6 +27,20 @@ impl MyService {
         &self.value
     }
 
+    #[allow(clippy::needless_lifetimes, reason = "Fixture verifies explicit receiver lifetime code generation")]
+    pub fn get_value_explicit<'a>(&'a self) -> &'a str {
+        &self.value
+    }
+
+    pub const fn named_arguments(&self, real: i32, fake: i32) -> i32 {
+        real + fake
+    }
+
+    pub fn generic_marker<T: Default>(&self) -> u32 {
+        let _ = T::default();
+        7
+    }
+
     pub fn special_clone(&self, x: i32) -> Self {
         Self {
             value: self.value.clone(),
@@ -101,6 +115,23 @@ pub mod fakes {
         #[must_use]
         pub const fn get_value(&self) -> &'static str {
             "fake"
+        }
+
+        #[must_use]
+        #[allow(clippy::needless_lifetimes, reason = "Fixture verifies explicit receiver lifetime code generation")]
+        pub fn get_value_explicit<'a>(&'a self) -> &'a str {
+            "fake"
+        }
+
+        #[must_use]
+        pub const fn named_arguments(&self, real: i32, fake: i32) -> i32 {
+            real + fake + 1
+        }
+
+        #[must_use]
+        pub fn generic_marker<T: Default>(&self) -> u32 {
+            let _ = T::default();
+            8
         }
 
         #[must_use]

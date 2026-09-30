@@ -1,6 +1,6 @@
 ---
 source: crates/fakeable_impl/src/../tests/output_verification.rs
-expression: "prettyplease::unparse(&result_file)"
+expression: "testing_aids :: render_expansion(&result)"
 ---
 impl __fakeable__MyService::MyService {
     pub async fn async_method_unit(&self) {
@@ -15,21 +15,25 @@ impl MyService {
     #[allow(clippy::used_underscore_binding)]
     pub async fn async_method_unit(&self) {
         match &self.inner {
-            __fakeable__MyService::Enum::Real(real) => real.async_method_unit().await,
+            __fakeable__MyService::Enum::Real(__fakeable_real) => {
+                __fakeable_real.async_method_unit().await
+            }
             #[cfg(any(feature = "test-util", test))]
-            __fakeable__MyService::Enum::Fake(fake) => fake.async_method_unit().await,
+            __fakeable__MyService::Enum::Fake(__fakeable_fake) => {
+                __fakeable_fake.async_method_unit().await
+            }
         }
     }
     #[allow(unused_mut)]
     #[allow(clippy::used_underscore_binding)]
     pub async fn async_method_return_value(&self) -> Result<(), SomeError> {
         match &self.inner {
-            __fakeable__MyService::Enum::Real(real) => {
-                real.async_method_return_value().await
+            __fakeable__MyService::Enum::Real(__fakeable_real) => {
+                __fakeable_real.async_method_return_value().await
             }
             #[cfg(any(feature = "test-util", test))]
-            __fakeable__MyService::Enum::Fake(fake) => {
-                fake.async_method_return_value().await
+            __fakeable__MyService::Enum::Fake(__fakeable_fake) => {
+                __fakeable_fake.async_method_return_value().await
             }
         }
     }
@@ -40,7 +44,7 @@ impl MyService {
 #[allow(clippy::style)]
 pub mod fakes {
     use super::*;
-    mockall::mock! {
+    ::mockall::mock! {
         #[derive(Debug)] pub MyService { pub fn async_method_unit(& self) -> impl
         ::std::future::Future < Output = () > + Send; pub fn async_method_return_value(&
         self) -> impl ::std::future::Future < Output = Result < (), SomeError > > + Send;
