@@ -4,6 +4,7 @@
 //! Core sink type and lifecycle.
 
 use std::any::type_name;
+use std::slice;
 use std::sync::Arc;
 
 use performables::arc::{Arc as PerformableArc, PerProcess};
@@ -347,16 +348,13 @@ impl Sink {
         self.emit_impl(state);
     }
 
-    /// Dispatches an event through the sink.
-    ///
-    /// It's automatically called by the `emit!` macro expansion, and can be called directly for
-    /// [`DynEvent`s](DynEvent)
-    pub(crate) fn emit_impl<'a, T: Event, F: FnOnce() -> T + 'a>(&self, state: IntermediateEvent<'a, F>) {
+    /// Evaluates a lazy typed event when interested, then dispatches it.
+    fn emit_impl<T: Event, F: FnOnce() -> T>(&self, state: IntermediateEvent<F>) {
         if self.is_noop() {
             return;
         }
 
-        let description = state.description();
+        let description = T::DESCRIPTION;
         if !self.is_interested(&description) {
             return;
         }
@@ -373,6 +371,38 @@ impl Sink {
         };
 
         self.dispatch_to_processors(&event, &description);
+    }
+
+    /// Routes an already-built event without a lazy-construction interest pass.
+    pub(crate) fn emit_dynamic(&self, event: &dyn DynEvent) {
+        let children = match &*self.inner {
+            SinkInner::Single(state) => slice::from_ref(state),
+            SinkInner::Composite { children } => children.as_slice(),
+            SinkInner::Noop { .. } => return,
+        };
+        if children.iter().all(|child| child.processors.is_empty()) {
+            return;
+        }
+
+        let description = event.description();
+        let mut children = children.iter();
+        let Some(dispatch) = children.find_map(|child| child.prepare_dynamic_dispatch(event, &description)) else {
+            return;
+        };
+        let Some(_guard) = super::try_acquire_reentrancy_guard() else {
+            return;
+        };
+
+        // Admission remains outside the guard so one-time initialization can
+        // emit telemetry. The borrowed continuation retains the selected
+        // recipient without caching a decision for another emission.
+        // See docs/implementation.md, "Constructed dynamic events".
+        dispatch();
+        for child in children {
+            if let Some(dispatch) = child.prepare_dynamic_dispatch(event, &description) {
+                dispatch();
+            }
+        }
     }
 
     /// Returns whether any processor is interested in the described event.
@@ -527,6 +557,30 @@ impl SingleSinkState {
     /// Returns `true` if any of this leaf's processors is interested in the event.
     fn is_interested(&self, description: &EventDescription) -> bool {
         self.processors.iter().any(|p| p.is_interested(description))
+    }
+
+    /// Selects the first recipient and returns allocation-free deferred dispatch.
+    fn prepare_dynamic_dispatch<'a>(&'a self, event: &'a dyn DynEvent, description: &'a EventDescription) -> Option<impl FnOnce() + 'a> {
+        let mut interested = self.processors.iter().filter(move |processor| processor.is_interested(description));
+        let first = interested.next()?;
+
+        Some(move || {
+            if self.sampler.is_some() {
+                // Sampling can initialize processors in either direction. Keep
+                // the fresh post-sampling checks for all recipients in `dispatch`.
+                self.dispatch(event, description);
+                return;
+            }
+
+            let timestamp = self.clock.system_time();
+            let view = EventView::new(event, self.enrichment.current(), self.isolated_enrichment, self.id, timestamp);
+            first.process(&view);
+            // Evaluate each remaining recipient after earlier processors have run,
+            // so their initialization effects are visible without caching interest.
+            for processor in interested {
+                processor.process(&view);
+            }
+        })
     }
 
     /// Offers the event context to this leaf's [`EventSampler`], then builds an

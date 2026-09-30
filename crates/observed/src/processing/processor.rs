@@ -32,9 +32,9 @@ pub trait EventProcessor: Send + Sync {
     ///
     /// Uses the event description rather than inspecting event fields.
     ///
-    /// Called **before** the event is constructed, and again while routing it,
-    /// so it may run more than once per emission - and once per child for a
-    /// composite sink. Keep it cheap, and let the answer depend only on
+    /// Called while routing events and, for lazy typed events, **before**
+    /// construction. It may run more than once per emission, including through
+    /// composite sinks. Keep it cheap, and let the answer depend only on
     /// `description` and on state that changes at most once, such as a
     /// `OnceLock` filled during initialization. A sampler, rate limiter, or any
     /// filter whose answer varies per call belongs in

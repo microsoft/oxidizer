@@ -218,6 +218,10 @@ per-processor routing. Leaves in a composite decide independently. See `EventSam
 External event sources can query `Sink::is_interested` with an `EventDescription` before collecting fields or constructing an event.
 The query reports current processor interest only; it does not predict delivery or perform sampling.
 
+Already-constructed dynamic events are routed directly to interested processors.
+Each leaf retains its own timestamp and enrichment context, and sampling remains separate from processor interest.
+Processor initialization completed during sampling is reflected in the recipients selected afterward.
+
 ### Signal Routing: How Events Become Logs and Metrics
 
 An event can produce any combination of signals defined by its schema. The trace signal is [planned](#planned-not-implemented).
