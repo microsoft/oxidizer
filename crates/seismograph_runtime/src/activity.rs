@@ -738,6 +738,19 @@ mod tests {
     }
 
     #[test]
+    fn terminal_activity_snapshot_is_unknown() {
+        let session = RecordingSession::from_raw(123).unwrap();
+        let observed_at = EventTimestamp::from_ticks(10);
+        let activity = Activity::new(Some(session), observed_at);
+        activity.terminal.store(true, Ordering::Release);
+
+        assert_eq!(
+            activity.snapshot(Some(RecordingObservation { session, observed_at })).state,
+            TaskActivityState::Unknown
+        );
+    }
+
+    #[test]
     fn concurrent_snapshots_never_mix_ready_and_running_fields() {
         let at = EventTimestamp::from_ticks(1);
         assert_snapshot_consistent(

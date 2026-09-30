@@ -1468,11 +1468,20 @@ mod tests {
             queued_since: Some(at(4)),
             ..base
         }));
+        assert!(!valid_activity(TaskActivity {
+            state: TaskActivityState::Ready,
+            ready_since: Some(at(4)),
+            ..base
+        }));
         assert!(valid_activity(TaskActivity {
             state: TaskActivityState::Running,
             ready_since: Some(at(4)),
             poll_started_at: Some(at(4)),
             poll_worker_id: WorkerId::from_raw(1),
+            ..base
+        }));
+        assert!(!valid_activity(TaskActivity {
+            state: TaskActivityState::Running,
             ..base
         }));
     }
