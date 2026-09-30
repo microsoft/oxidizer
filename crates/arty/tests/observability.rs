@@ -46,7 +46,7 @@ fn started_event_reports_processor_counts() {
     runtime.wait();
 
     let events = processor.events();
-    let started = events_named(&events, "oxidizer.rt.started");
+    let started = events_named(&events, "arty.rt.started");
     assert_eq!(started.len(), 1, "exactly one runtime should start");
 
     assert_eq!(dimension(started[0], "processors.used"), Some("2".into()));
@@ -72,10 +72,10 @@ fn each_async_worker_starts_and_stops() {
     runtime.wait();
 
     let events = processor.events();
-    assert_eq!(events_named(&events, "oxidizer.rt.async_worker.started").len(), PROCESSORS);
-    assert_eq!(events_named(&events, "oxidizer.rt.async_worker.stopped").len(), PROCESSORS);
-    assert_eq!(events_named(&events, "oxidizer.rt.stopping").len(), 1);
-    assert_eq!(events_named(&events, "oxidizer.rt.stopped").len(), 1);
+    assert_eq!(events_named(&events, "arty.rt.async_worker.started").len(), PROCESSORS);
+    assert_eq!(events_named(&events, "arty.rt.async_worker.stopped").len(), PROCESSORS);
+    assert_eq!(events_named(&events, "arty.rt.stopping").len(), 1);
+    assert_eq!(events_named(&events, "arty.rt.stopped").len(), 1);
 }
 
 #[test]
@@ -94,22 +94,22 @@ fn async_worker_os_threads_report_lifecycle() {
 
     let events = processor.events();
     assert_eq!(
-        events_named(&events, "oxidizer.rt.thread.spawn").len(),
+        events_named(&events, "arty.rt.thread.spawn").len(),
         PROCESSORS,
         "each async worker OS thread is announced before spawning"
     );
     assert_eq!(
-        events_named(&events, "oxidizer.rt.thread.started").len(),
+        events_named(&events, "arty.rt.thread.started").len(),
         PROCESSORS,
         "each async worker OS thread reports that it began running"
     );
     assert_eq!(
-        events_named(&events, "oxidizer.rt.thread.exiting").len(),
+        events_named(&events, "arty.rt.thread.exiting").len(),
         PROCESSORS,
         "each async worker OS thread reports that it exited cleanly"
     );
 
-    for event in events_named(&events, "oxidizer.rt.thread.started") {
+    for event in events_named(&events, "arty.rt.thread.started") {
         assert!(dimension(event, "thread.name").is_some(), "a started thread carries its name");
         assert!(dimension(event, "arty.thread.id").is_some(), "a started thread carries its id");
     }
@@ -133,12 +133,12 @@ fn spawned_task_emits_spawned_and_completed() {
     runtime.wait();
 
     let events = processor.events();
-    let spawned = events_named(&events, "oxidizer.rt.task.spawned");
+    let spawned = events_named(&events, "arty.rt.task.spawned");
     assert!(spawned.len() >= TASKS);
     for event in &spawned {
         assert_eq!(dimension(event, "placement"), Some("any".into()));
     }
-    assert!(events_named(&events, "oxidizer.rt.task.succeeded").len() >= TASKS);
+    assert!(events_named(&events, "arty.rt.task.succeeded").len() >= TASKS);
 }
 
 #[test]
@@ -160,7 +160,7 @@ fn panicking_task_emits_panicked_event() {
     runtime.wait();
 
     let events = processor.events();
-    let panicked = events_named(&events, "oxidizer.rt.task.panicked");
+    let panicked = events_named(&events, "arty.rt.task.panicked");
     assert_eq!(panicked.len(), 1);
 }
 
@@ -182,7 +182,7 @@ fn round_robin_submissions_emit_one_spawn_event_per_worker() {
     runtime.wait();
 
     let events = processor.events();
-    assert!(events_named(&events, "oxidizer.rt.task.spawned").len() >= PROCESSORS);
+    assert!(events_named(&events, "arty.rt.task.spawned").len() >= PROCESSORS);
 }
 
 #[test]
@@ -208,13 +208,13 @@ fn local_task_emits_spawned_and_completed_with_local_placement() {
     runtime.wait();
 
     let events = processor.events();
-    let spawned = events_named(&events, "oxidizer.rt.task.spawned");
+    let spawned = events_named(&events, "arty.rt.task.spawned");
     assert!(
         spawned.iter().any(|e| dimension(e, "placement") == Some("local".into())),
         "a local task should report placement=local"
     );
     // The remote outer task plus the local inner task both succeed.
-    assert!(events_named(&events, "oxidizer.rt.task.succeeded").len() >= 2);
+    assert!(events_named(&events, "arty.rt.task.succeeded").len() >= 2);
 }
 
 #[test]
@@ -236,9 +236,9 @@ fn tasks_discarded_on_shutdown_do_not_emit_terminal_events() {
     runtime.wait();
 
     let events = processor.events();
-    let spawned = events_named(&events, "oxidizer.rt.task.spawned").len();
-    let completed = events_named(&events, "oxidizer.rt.task.succeeded").len();
-    let panicked = events_named(&events, "oxidizer.rt.task.panicked").len();
+    let spawned = events_named(&events, "arty.rt.task.spawned").len();
+    let completed = events_named(&events, "arty.rt.task.succeeded").len();
+    let panicked = events_named(&events, "arty.rt.task.panicked").len();
     assert_eq!(completed + panicked, 0, "pending tasks never reach a terminal state");
     assert!(spawned <= TASKS);
 }

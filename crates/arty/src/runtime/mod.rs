@@ -16,14 +16,14 @@
 //!
 //! Configure [`RuntimeBuilder::sink`] to receive `observed` events. The default
 //! sink is a noop. Tasks capture enrichment at submission and restore it while
-//! polling. Runtime event names retain the `oxidizer.rt` prefix.
+//! polling. Runtime event names use the `arty.rt` prefix.
 //!
 //! Classified fields use the `arty/SystemMetadata` data class. Configure a
 //! processor's redaction policy with `data_privacy::DataClass::new("arty", "SystemMetadata")`.
 //! Numeric metric values remain unredacted numbers.
 //! Opaque Rust thread identifiers are logged as `arty.thread.id`, not the
 //! integer-valued OpenTelemetry `thread.id` attribute.
-//! Blocking-pool events use `oxidizer.rt.blocking_worker.pool_saturated`; pool
+//! Blocking-pool events use `arty.rt.blocking_worker.pool_saturated`; pool
 //! dimensions use `blocking_worker_pool.mode` and `blocking_worker_pool.max_threads`.
 
 pub(crate) mod blocking_worker;

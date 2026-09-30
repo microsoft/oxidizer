@@ -230,9 +230,9 @@ fn task_outcomes_keep_the_submission_context() {
             assert_eq!(outcome.is_err(), panics);
             drop(runtime);
             let expected_name = if panics {
-                "oxidizer.rt.task.panicked"
+                "arty.rt.task.panicked"
             } else {
-                "oxidizer.rt.task.succeeded"
+                "arty.rt.task.succeeded"
             };
             let correlated = processor
                 .events()

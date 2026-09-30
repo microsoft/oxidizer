@@ -483,7 +483,7 @@ pub(super) mod blocking_worker_tests {
 
         let saturated: Vec<_> = events
             .iter()
-            .filter(|event| event.name() == "oxidizer.rt.blocking_worker.pool_saturated")
+            .filter(|event| event.name() == "arty.rt.blocking_worker.pool_saturated")
             .collect();
         assert!(!saturated.is_empty(), "an overloaded pool that cannot grow must report saturation");
         assert_eq!(
@@ -501,9 +501,7 @@ pub(super) mod blocking_worker_tests {
         let events = spawn_blocking_telemetry(Some(1), 1);
 
         assert!(
-            events
-                .iter()
-                .all(|event| event.name() != "oxidizer.rt.blocking_worker.pool_saturated"),
+            events.iter().all(|event| event.name() != "arty.rt.blocking_worker.pool_saturated"),
             "a pool that is merely at its size limit, without being overloaded, must stay quiet"
         );
     }

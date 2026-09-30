@@ -36,7 +36,7 @@ fn processor_selection_failure_reports_failure_without_starting_threads() {
 
     let events = processor.events();
     let names: Vec<_> = events.iter().map(CapturedEvent::name).collect();
-    assert_eq!(names, vec!["oxidizer.rt.start_failed"]);
+    assert_eq!(names, vec!["arty.rt.start_failed"]);
 }
 
 #[test]

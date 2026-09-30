@@ -343,11 +343,7 @@ fn repeated_waits_report_one_completed_shutdown() {
     runtime.wait();
     drop(runtime);
     assert_eq!(
-        processor
-            .events()
-            .iter()
-            .filter(|event| event.name() == "oxidizer.rt.stopped")
-            .count(),
+        processor.events().iter().filter(|event| event.name() == "arty.rt.stopped").count(),
         1
     );
 }

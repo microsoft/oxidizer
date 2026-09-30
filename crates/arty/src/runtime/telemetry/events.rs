@@ -88,9 +88,9 @@ pub(crate) struct PanicMessage(pub String);
 pub(crate) struct BacktraceText(pub String);
 
 /// Emitted once when a runtime has started and all async workers are live.
-#[event("oxidizer.rt.started")]
+#[event("arty.rt.started")]
 #[info("runtime started")]
-#[counter(name = "oxidizer.rt.started")]
+#[counter(name = "arty.rt.started")]
 pub(crate) struct RuntimeStarted {
     /// Processors available on the system.
     #[dimension(log = "processors.available", metric = "processors.available")]
@@ -104,26 +104,26 @@ pub(crate) struct RuntimeStarted {
 }
 
 /// Emitted once when a runtime fails to start.
-#[event("oxidizer.rt.start_failed")]
+#[event("arty.rt.start_failed")]
 #[error("runtime failed to start")]
-#[counter(name = "oxidizer.rt.start_failed")]
+#[counter(name = "arty.rt.start_failed")]
 pub(crate) struct RuntimeStartFailed {
     #[dimension(log = "blocking_worker_pool.mode", metric = "blocking_worker_pool.mode")]
     pub blocking_worker_pool_mode: BlockingWorkerPoolMode,
 }
 
 /// Emitted when runtime shutdown begins.
-#[event("oxidizer.rt.stopping")]
+#[event("arty.rt.stopping")]
 #[debug("runtime stopping")]
 pub(crate) struct RuntimeStopping;
 
 /// Emitted when the runtime has fully stopped (pairs with `stopping`).
-#[event("oxidizer.rt.stopped")]
+#[event("arty.rt.stopped")]
 #[info("runtime stopped")]
 pub(crate) struct RuntimeStopped;
 
 /// Emitted when an async worker thread starts.
-#[event("oxidizer.rt.async_worker.started")]
+#[event("arty.rt.async_worker.started")]
 #[debug("async worker started")]
 pub(crate) struct AsyncWorkerStarted {
     #[dimension(log = "processor.index")]
@@ -131,7 +131,7 @@ pub(crate) struct AsyncWorkerStarted {
 }
 
 /// Emitted when an async worker thread begins shutting down.
-#[event("oxidizer.rt.async_worker.stopped")]
+#[event("arty.rt.async_worker.stopped")]
 #[debug("async worker stopped")]
 pub(crate) struct AsyncWorkerStopped {
     #[dimension(log = "processor.index")]
@@ -139,34 +139,34 @@ pub(crate) struct AsyncWorkerStopped {
 }
 
 /// Running total of live async workers (`+1` start, `-1` stop).
-#[event("oxidizer.rt.async_worker.active")]
-#[updown_counter(delta, name = "oxidizer.rt.async_worker.active")]
+#[event("arty.rt.async_worker.active")]
+#[updown_counter(delta, name = "arty.rt.async_worker.active")]
 pub(crate) struct AsyncWorkerActive {
     #[unredacted]
     pub delta: i64,
 }
 
 /// Emitted when a task is spawned.
-#[event("oxidizer.rt.task.spawned")]
-#[counter(name = "oxidizer.rt.task.spawned")]
+#[event("arty.rt.task.spawned")]
+#[counter(name = "arty.rt.task.spawned")]
 pub(crate) struct TaskSpawned {
     #[dimension(metric = "placement")]
     pub placement: PlacementLabel,
 }
 
 /// Emitted when a task completes successfully.
-#[event("oxidizer.rt.task.succeeded")]
-#[counter(name = "oxidizer.rt.task.succeeded")]
+#[event("arty.rt.task.succeeded")]
+#[counter(name = "arty.rt.task.succeeded")]
 pub(crate) struct TaskSucceeded;
 
 /// Emitted when a task panics.
-#[event("oxidizer.rt.task.panicked")]
+#[event("arty.rt.task.panicked")]
 #[error("task panicked")]
-#[counter(name = "oxidizer.rt.task.panicked")]
+#[counter(name = "arty.rt.task.panicked")]
 pub(crate) struct TaskPanicked;
 
 /// Emitted on the owner thread just before a runtime-owned OS thread is spawned.
-#[event("oxidizer.rt.thread.spawn")]
+#[event("arty.rt.thread.spawn")]
 #[debug("spawning thread")]
 pub(crate) struct ThreadSpawn {
     #[dimension(log = "thread.name")]
@@ -180,7 +180,7 @@ pub(crate) struct ThreadSpawn {
 }
 
 /// Emitted on a runtime-owned OS thread once it begins running.
-#[event("oxidizer.rt.thread.started")]
+#[event("arty.rt.thread.started")]
 #[debug("thread started")]
 pub(crate) struct ThreadStarted {
     #[dimension(log = "thread.name")]
@@ -191,7 +191,7 @@ pub(crate) struct ThreadStarted {
 
 /// Emitted on a runtime-owned OS thread when its work panics, before the panic
 /// is resumed.
-#[event("oxidizer.rt.thread.panic")]
+#[event("arty.rt.thread.panic")]
 #[error("thread panicked")]
 pub(crate) struct ThreadPanicked {
     #[dimension(log = "thread.name")]
@@ -203,7 +203,7 @@ pub(crate) struct ThreadPanicked {
 }
 
 /// Emitted on a runtime-owned OS thread as it exits normally.
-#[event("oxidizer.rt.thread.exiting")]
+#[event("arty.rt.thread.exiting")]
 #[debug("thread exiting")]
 pub(crate) struct ThreadExiting {
     #[dimension(log = "thread.name")]
@@ -215,7 +215,7 @@ pub(crate) struct ThreadExiting {
 /// Emitted (debug builds only) when `Builtins` is accessed from a thread other
 /// than the one it was created on.
 #[cfg(any(debug_assertions, test))] // Emitted only by the debug-only `Builtins` thread check.
-#[event("oxidizer.rt.builtins.thread_mismatch")]
+#[event("arty.rt.builtins.thread_mismatch")]
 #[warning("Builtins accessed from a different thread than it was created on")]
 pub(crate) struct BuiltinsThreadMismatch {
     #[dimension(log = "thread.name")]
@@ -228,9 +228,9 @@ pub(crate) struct BuiltinsThreadMismatch {
 
 /// Emitted when the blocking worker pool is already at its maximum size
 /// and cannot grow to absorb a fresh overload.
-#[event("oxidizer.rt.blocking_worker.pool_saturated")]
+#[event("arty.rt.blocking_worker.pool_saturated")]
 #[warning("blocking worker pool is saturated and cannot grow")]
-#[counter(name = "oxidizer.rt.blocking_worker.pool_saturated")]
+#[counter(name = "arty.rt.blocking_worker.pool_saturated")]
 pub(crate) struct BlockingWorkerPoolSaturated {
     #[dimension(log = "blocking_worker_pool.max_threads", metric = "blocking_worker_pool.max_threads")]
     pub max_threads: SystemMetricCount,
@@ -260,7 +260,7 @@ mod tests {
 
         assert_eq!(
             processor.single_event(),
-            ExpectedEvent::new("oxidizer.rt.started", Severity::Info)
+            ExpectedEvent::new("arty.rt.started", Severity::Info)
                 .body("runtime started")
                 .dimension("processors.available", "8")
                 .dimension("processors.used", "2")
@@ -283,7 +283,7 @@ mod tests {
 
         assert_eq!(
             processor.single_event(),
-            ExpectedEvent::new("oxidizer.rt.start_failed", Severity::Error)
+            ExpectedEvent::new("arty.rt.start_failed", Severity::Error)
                 .body("runtime failed to start")
                 .dimension("blocking_worker_pool.mode", "shared")
                 .metric()
@@ -300,11 +300,11 @@ mod tests {
         let events = processor.events();
         assert_eq!(
             events[0],
-            ExpectedEvent::new("oxidizer.rt.stopping", Severity::Debug).body("runtime stopping")
+            ExpectedEvent::new("arty.rt.stopping", Severity::Debug).body("runtime stopping")
         );
         assert_eq!(
             events[1],
-            ExpectedEvent::new("oxidizer.rt.stopped", Severity::Info).body("runtime stopped")
+            ExpectedEvent::new("arty.rt.stopped", Severity::Info).body("runtime stopped")
         );
     }
 
@@ -328,13 +328,13 @@ mod tests {
         let events = processor.events();
         assert_eq!(
             events[0],
-            ExpectedEvent::new("oxidizer.rt.async_worker.started", Severity::Debug)
+            ExpectedEvent::new("arty.rt.async_worker.started", Severity::Debug)
                 .body("async worker started")
                 .dimension("processor.index", "3")
         );
         assert_eq!(
             events[1],
-            ExpectedEvent::new("oxidizer.rt.async_worker.stopped", Severity::Debug)
+            ExpectedEvent::new("arty.rt.async_worker.stopped", Severity::Debug)
                 .body("async worker stopped")
                 .dimension("processor.index", "3")
         );
@@ -348,7 +348,7 @@ mod tests {
 
         assert_eq!(
             processor.single_event(),
-            ExpectedEvent::without_severity("oxidizer.rt.async_worker.active")
+            ExpectedEvent::without_severity("arty.rt.async_worker.active")
                 .dimension("delta", 1i64)
                 .metric()
         );
@@ -367,7 +367,7 @@ mod tests {
 
         assert_eq!(
             processor.single_event(),
-            ExpectedEvent::without_severity("oxidizer.rt.task.spawned")
+            ExpectedEvent::without_severity("arty.rt.task.spawned")
                 .dimension("placement", "any")
                 .metric()
         );
@@ -381,10 +381,10 @@ mod tests {
         emit!(sink, TaskPanicked);
 
         let events = processor.events();
-        assert_eq!(events[0], ExpectedEvent::without_severity("oxidizer.rt.task.succeeded").metric());
+        assert_eq!(events[0], ExpectedEvent::without_severity("arty.rt.task.succeeded").metric());
         assert_eq!(
             events[1],
-            ExpectedEvent::new("oxidizer.rt.task.panicked", Severity::Error)
+            ExpectedEvent::new("arty.rt.task.panicked", Severity::Error)
                 .body("task panicked")
                 .metric()
         );
@@ -406,7 +406,7 @@ mod tests {
 
         assert_eq!(
             processor.single_event(),
-            ExpectedEvent::new("oxidizer.rt.thread.spawn", Severity::Debug)
+            ExpectedEvent::new("arty.rt.thread.spawn", Severity::Debug)
                 .body("spawning thread")
                 .dimension("thread.name", "oxidizer-async-1")
                 .dimension("thread.stack_size_bytes", "2097152")
@@ -431,7 +431,7 @@ mod tests {
 
         assert_eq!(
             processor.single_event(),
-            ExpectedEvent::new("oxidizer.rt.thread.spawn", Severity::Debug)
+            ExpectedEvent::new("arty.rt.thread.spawn", Severity::Debug)
                 .body("spawning thread")
                 .dimension("thread.name", "oxidizer-async-1")
                 .dimension("thread.stack_size_bytes", "n/a")
@@ -454,7 +454,7 @@ mod tests {
 
         assert_eq!(
             processor.single_event(),
-            ExpectedEvent::new("oxidizer.rt.thread.started", Severity::Debug)
+            ExpectedEvent::new("arty.rt.thread.started", Severity::Debug)
                 .body("thread started")
                 .dimension("thread.name", "oxidizer-async-1")
                 .dimension("arty.thread.id", "ThreadId(7)")
@@ -476,7 +476,7 @@ mod tests {
 
         assert_eq!(
             processor.single_event(),
-            ExpectedEvent::new("oxidizer.rt.thread.panic", Severity::Error)
+            ExpectedEvent::new("arty.rt.thread.panic", Severity::Error)
                 .body("thread panicked")
                 .dimension("thread.name", "oxidizer-async-1")
                 .dimension("arty.thread.id", "ThreadId(7)")
@@ -498,7 +498,7 @@ mod tests {
 
         assert_eq!(
             processor.single_event(),
-            ExpectedEvent::new("oxidizer.rt.thread.exiting", Severity::Debug)
+            ExpectedEvent::new("arty.rt.thread.exiting", Severity::Debug)
                 .body("thread exiting")
                 .dimension("thread.name", "oxidizer-async-1")
                 .dimension("arty.thread.id", "ThreadId(7)")
@@ -520,7 +520,7 @@ mod tests {
 
         assert_eq!(
             processor.single_event(),
-            ExpectedEvent::new("oxidizer.rt.builtins.thread_mismatch", Severity::Warn)
+            ExpectedEvent::new("arty.rt.builtins.thread_mismatch", Severity::Warn)
                 .body("Builtins accessed from a different thread than it was created on")
                 .dimension("thread.name", "oxidizer-async-1")
                 .dimension("arty.thread.id", "ThreadId(7)")
@@ -541,7 +541,7 @@ mod tests {
 
         assert_eq!(
             processor.single_event(),
-            ExpectedEvent::new("oxidizer.rt.blocking_worker.pool_saturated", Severity::Warn)
+            ExpectedEvent::new("arty.rt.blocking_worker.pool_saturated", Severity::Warn)
                 .body("blocking worker pool is saturated and cannot grow")
                 .dimension("blocking_worker_pool.max_threads", "64")
                 .metric()

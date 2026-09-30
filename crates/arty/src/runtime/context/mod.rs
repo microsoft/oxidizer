@@ -320,7 +320,7 @@ mod tests {
             processor
                 .events()
                 .iter()
-                .filter(|event| { event.name() == "oxidizer.rt.builtins.thread_mismatch" })
+                .filter(|event| { event.name() == "arty.rt.builtins.thread_mismatch" })
                 .count(),
             0,
         );
@@ -377,7 +377,7 @@ mod tests {
             processor
                 .events()
                 .iter()
-                .filter(|event| { event.name() == "oxidizer.rt.builtins.thread_mismatch" })
+                .filter(|event| { event.name() == "arty.rt.builtins.thread_mismatch" })
                 .count(),
             1,
         );

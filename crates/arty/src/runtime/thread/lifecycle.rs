@@ -137,8 +137,8 @@ mod tests {
             let events = processor.events();
             let panic_event = events
                 .iter()
-                .find(|event| event.name() == "oxidizer.rt.thread.panic")
-                .expect("a panicking thread emits oxidizer.rt.thread.panic");
+                .find(|event| event.name() == "arty.rt.thread.panic")
+                .expect("a panicking thread emits arty.rt.thread.panic");
 
             let attribute = |key: &str| -> Option<String> {
                 panic_event
