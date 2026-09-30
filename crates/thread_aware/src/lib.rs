@@ -133,13 +133,14 @@ extern crate std;
 
 mod wrappers;
 
-/// A guide to authoring thread-aware types: how to implement, test, and debug them, and the
-/// anti-patterns to avoid. See [the guide](_documentation).
+/// A guide to authoring thread-aware types: how to implement and test them, and the anti-patterns
+/// to avoid. See [the guide](_documentation).
 ///
 /// Gated on `derive` because every example is built around `#[derive(ThreadAware)]`, which is only
 /// available with that feature; this keeps the guide's examples valid in a build without it (they
 /// are simply absent) per `docs/feature-gated-doctests.md`.
 #[cfg(all(any(doc, test), feature = "derive"))]
+#[cfg_attr(docsrs, doc(cfg(feature = "derive")))]
 pub mod _documentation;
 
 pub mod closure;

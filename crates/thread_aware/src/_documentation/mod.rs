@@ -5,8 +5,8 @@
 //!
 //! The crate-level docs explain *what* [`ThreadAware`](crate::ThreadAware) is and the relocation
 //! contract it expresses. This guide is the companion *how-to*: how to make your own types
-//! thread-aware correctly, which implementation to reach for, how to test and debug the result,
-//! and the mistakes that compile cleanly yet quietly do nothing.
+//! thread-aware correctly, which implementation to reach for, how to test the result, and the
+//! mistakes that compile cleanly yet quietly do nothing.
 //!
 //! It is written for authors who see `T: ThreadAware` in an API and need to satisfy it, and for
 //! reviewers deciding whether a `#[derive(ThreadAware)]` or a `#[thread_aware(skip)]` is the right
@@ -50,28 +50,35 @@
 //!
 //! ## Skipping a field
 //!
-//! Annotate a field with `#[thread_aware(skip)]` when it carries no affinity and should be moved
-//! as-is: a plain identifier, a length, a foreign handle that does no thread-local work. A skipped
-//! field is never relocated, and the derive adds a `where Self: Send` bound to keep the
-//! `ThreadAware: Send` supertrait satisfied.
+//! Reach for `#[thread_aware(skip)]` when a field's type does not implement `ThreadAware` and has
+//! no affinity to rebind - a foreign handle, an FFI resource that does no thread-local work. The
+//! field is never relocated, and the derive drops the `ThreadAware` bound it would otherwise place
+//! on it (adding `where Self: Send` to keep the supertrait satisfied).
 //!
 //! ```rust
 //! use thread_aware::ThreadAware;
 //!
+//! // A handle from a C library: it does not implement `ThreadAware`, and it carries no
+//! // thread affinity of its own.
+//! struct ForeignHandle {
+//!     raw: usize,
+//! }
+//!
 //! #[derive(ThreadAware)]
 //! struct Request {
 //!     body: Vec<u8>,
-//!     // A request id has no thread affinity; moving it verbatim is correct.
 //!     #[thread_aware(skip)]
-//!     id: u64,
+//!     handle: ForeignHandle,
 //! }
 //! ```
 //!
-//! `skip` is a claim that a field genuinely has nothing to rebind. It is not an escape hatch for
-//! "this field does not implement `ThreadAware` yet" - reach for
-//! [`Unaware`](https://docs.rs/thread_aware/latest/thread_aware/struct.Unaware.html) or the
-//! strategy-partitioned `Arc` (with the `std` feature) for that, so the intent is visible in the
-//! type.
+//! Do not skip a field whose type already implements `ThreadAware` - even a primitive like `u64`,
+//! whose impl is a harmless no-op. Forwarding is free and stays correct if the field later gains
+//! affinity-bearing state; `skip` removes that safety net, so revisit each `skip` whenever the
+//! field type changes. When you instead want a non-`ThreadAware` value to read as explicitly inert
+//! in the type, wrap it in
+//! [`Unaware`](https://docs.rs/thread_aware/latest/thread_aware/struct.Unaware.html) rather than
+//! skipping.
 //!
 //! ## What the generated bounds mean
 //!
@@ -103,6 +110,12 @@
 //! }
 //! ```
 //!
+//! [`relocate`](crate::ThreadAware::relocate) has no error channel and must not panic or block - it
+//! runs on the runtime's placement path. If the ideal adaptation is unavailable (a reconnect
+//! fails, a resource can't be rebuilt), keep the existing usable state, defer the work, or fall
+//! back to a slower path rather than unwinding; see the
+//! [trait contract](crate::ThreadAware::relocate) for the full requirements.
+//!
 //! ## Per-worker state with `Arc`
 //!
 //! When several workers share a value but each should keep its *own* instance - a per-core cache, a
@@ -111,8 +124,9 @@
 //! ([`performables::arc::Arc`](https://docs.rs/performables/latest/performables/arc/struct.Arc.html);
 //! add it as a dependency). With the
 //! [`PerThread`](https://docs.rs/performables/latest/performables/arc/struct.PerThread.html)
-//! strategy, relocation materializes a separate `T` for the destination worker (lazily, on first use
-//! there), so the sharing is per-worker instead of process-wide. Use
+//! strategy, relocating to a destination worker that has no instance yet materializes a separate
+//! `T` for it *during* the `relocate` call; relocating back to a worker that already has one reuses
+//! it. Either way the sharing is per-worker instead of process-wide. Use
 //! [`PerProcess`](https://docs.rs/performables/latest/performables/arc/struct.PerProcess.html), which
 //! behaves as a vanilla `Arc`, when one shared instance is what you want, and
 //! [`PerNuma`](https://docs.rs/performables/latest/performables/arc/struct.PerNuma.html) for one
@@ -125,7 +139,7 @@
 //! |---|---|---|
 //! | A compound of thread-aware fields | `#[derive(ThreadAware)]` | Forwards relocation to each field. |
 //! | A field with genuine per-core behavior | a hand-written impl | Only you know what "rebind" means. |
-//! | A foreign type that carries no affinity | [`Unaware<T>`](https://docs.rs/thread_aware/latest/thread_aware/struct.Unaware.html) | A `MoveAsIs<T>`: implements the trait as a no-op. |
+//! | A foreign type that carries no affinity | [`Unaware<T>`](https://docs.rs/thread_aware/latest/thread_aware/struct.Unaware.html) | Implements relocation as a no-op; moves the wrapped value unchanged. |
 //! | Shared state that should differ per worker | [`performables::arc::Arc<T, PerThread>`](https://docs.rs/performables/latest/performables/arc/struct.Arc.html) | Materializes a separate `T` per destination. |
 //! | Shared state that is the same everywhere | [`performables::arc::Arc<T, PerProcess>`](https://docs.rs/performables/latest/performables/arc/struct.Arc.html) | Behaves as a vanilla `Arc`. |
 //!
@@ -143,10 +157,12 @@
 //!
 //! ## `Clone` does not relocate
 //!
-//! This is the one to internalize first. A thread-aware type stores its affinity in a field that
-//! only [`relocate`](crate::ThreadAware::relocate) mutates. **`Clone` copies that stored affinity
-//! verbatim.** Cloning a value that was built on worker A and using the clone on worker B does not
-//! move it to B - it is still bound to A, quietly, until something calls `relocate`.
+//! This is the one to internalize first. A thread-aware type typically stores its affinity in a
+//! field that only [`relocate`](crate::ThreadAware::relocate) mutates - and a derived (or otherwise
+//! fieldwise) `Clone` then **copies that stored affinity verbatim**. A hand-written `Clone` could
+//! rebind instead, but the trait neither requires nor guarantees that. Cloning such a value built
+//! on worker A and using the clone on worker B does not move it to B - it stays bound to A,
+//! quietly, until something calls `relocate`.
 //!
 //! ```text
 //! let services = build_on_startup_worker();     // affinity = startup worker
@@ -168,10 +184,9 @@
 //! ## Do not trust inherited markings
 //!
 //! An existing `#[derive(ThreadAware)]` or `#[thread_aware(skip)]` is a decision someone made under
-//! their constraints, and at least one such marking per audit tends to be a compile-shortcut that
-//! reduces to a silent no-op. When you take a dependency on a type being thread-aware, verify that
-//! its relocation actually reaches the state you care about rather than inheriting the annotation as
-//! fact.
+//! their constraints, and a marking can reduce to a silent no-op. When you take a dependency on a
+//! type being thread-aware, verify that its relocation actually reaches the state you care about
+//! rather than inheriting the annotation as fact.
 //!
 //! ## Relocate the whole graph once, at the boundary
 //!
@@ -190,6 +205,8 @@
 //! non-skipped field was reached and every skipped one was not:
 //!
 //! ```rust
+//! # fn main() {
+//! # #[cfg(feature = "std")] {
 //! use std::thread;
 //!
 //! use thread_aware::{Thread, ThreadAware, ThreadBuilder};
@@ -233,12 +250,20 @@
 //!     value.skipped.relocations, 0,
 //!     "skipped fields must not be relocated"
 //! );
+//! # }
+//! # }
 //! ```
 //!
 //! The example runs its own assertions, so removing the `relocate` call or changing either count
-//! makes it fail. For a real test suite the `test-utils` feature's
-//! [`Relocator`](https://docs.rs/thread_aware/latest/thread_aware/struct.Relocator.html) drives
-//! relocations without hand-built [`Thread`](crate::Thread) values.
+//! makes it fail. Building [`Thread`](crate::Thread) coordinates this way needs the `std` feature;
+//! for a real test suite the `test-utils` feature's
+//! [`Relocator`](https://docs.rs/thread_aware/latest/thread_aware/struct.Relocator.html) (which
+//! implies `std`) drives relocations without hand-built coordinates.
+//!
+//! `UnderTest` here only exercises the derive's field-forwarding mechanics. Point the same
+//! observe-relocation technique at your *real* type: instantiate it with a recording leaf where it
+//! is generic or injectable, otherwise capture its actual affinity-bearing state before and after
+//! `relocate`. A green test on a stand-in proxy does not prove your production graph relocates.
 //!
 //! # Validating correctness
 //!
