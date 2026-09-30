@@ -267,6 +267,7 @@ dependencies = [
  "nonempty",
  "observed",
  "observed_testing",
+ "ohno",
  "pin-project",
  "scopeguard",
  "static_assertions",

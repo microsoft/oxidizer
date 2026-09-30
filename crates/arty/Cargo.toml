@@ -96,6 +96,7 @@ mutants = { workspace = true }
 nonempty = { workspace = true }
 observed = { path = "../observed", features = ["test-util"] }
 observed_testing = { path = "../observed_testing" }
+ohno = { workspace = true, features = ["app-err"] }
 pin-project = { workspace = true }
 scopeguard = { workspace = true }
 static_assertions = { workspace = true }

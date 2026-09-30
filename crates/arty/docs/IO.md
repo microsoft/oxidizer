@@ -1,8 +1,12 @@
 # I/O
 
-The current I/O support boundary is documented in the **Asynchronous I/O**
-section of `arty::documentation::configuration`
-([rustdoc source](../src/documentation/configuration.rs)).
+Arty provides task scheduling and timers, but no asynchronous network or file
+I/O driver. Libraries that depend on another runtime's I/O driver still need
+that runtime; awaiting their futures on Arty does not supply the missing driver.
 
-For synchronous I/O on the blocking pool, see `arty::documentation::scheduling`
-([rustdoc source](../src/documentation/scheduling.rs)).
+Use `TaskScheduler::spawn_blocking` for synchronous I/O. It runs the callback in
+a blocking pool and returns a join that can be awaited without blocking an
+asynchronous worker.
+
+`arty_io_core` defines foundations for future I/O integrations. Those contracts
+are not an I/O driver supplied by the Arty runtime.

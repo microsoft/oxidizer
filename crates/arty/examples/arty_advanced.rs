@@ -7,20 +7,16 @@ use std::time::Duration;
 
 use arty::runtime::{ProcessorCount, Runtime};
 
-fn main() -> Result<(), arty::runtime::Error> {
+fn main() -> Result<(), ohno::AppError> {
     let runtime = Runtime::builder().processor_count(ProcessorCount::at_most(2)).build()?;
     let answer = runtime
         .task_scheduler()
         .spawn(async |cx| {
             cx.clock().delay(Duration::from_millis(1)).await;
             // This scheduler keeps the child on the parent's worker.
-            cx.scheduler()
-                .spawn(async |_| 42)
-                .await
-                .expect("the child task completes before its parent returns")
+            cx.scheduler().spawn(async |_| 42).await
         })
-        .wait()
-        .expect("the task completes before runtime shutdown");
+        .wait()??;
     println!("{answer}");
     Ok(())
 }

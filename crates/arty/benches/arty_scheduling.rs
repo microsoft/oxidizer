@@ -29,7 +29,7 @@ use metabench::benchmark;
 use tokio::task::{JoinHandle as TokioJoinHandle, LocalSet};
 
 const BLOCKING_THREADS: usize = 4;
-const COUNTS: [usize; 2] = [1, 100];
+const COUNTS: [usize; 2] = [1, 20];
 const WORKERS: [usize; 2] = [1, 4];
 
 // Neither deadline is reached during a benchmark. The background timer keeps every request
