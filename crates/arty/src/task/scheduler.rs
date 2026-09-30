@@ -5,12 +5,12 @@ use std::sync::Arc;
 
 use thread_aware::{Thread, ThreadAware};
 
+use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::context::Builtins;
 use crate::runtime::dispatch::{DispatcherClient, WorkerIndex};
-use crate::runtime::system_worker::SystemWorker;
 use crate::task::join::JoinHandle;
 
-/// Submits asynchronous and blocking system tasks to an Arty runtime.
+/// Submits asynchronous and blocking tasks to an Arty runtime.
 ///
 /// [`Runtime::task_scheduler`](crate::runtime::Runtime::task_scheduler) returns a detached
 /// scheduler. Its submissions select workers round-robin, sharing the selection
@@ -36,7 +36,7 @@ pub struct TaskScheduler {
 struct Binding {
     thread: Thread,
     worker_index: WorkerIndex,
-    system_worker: Arc<SystemWorker>,
+    blocking_worker: Arc<BlockingWorker>,
 }
 
 impl TaskScheduler {
@@ -44,13 +44,13 @@ impl TaskScheduler {
         let worker_index = dispatcher
             .worker_index(current.id())
             .expect("scheduler thread must be registered with its dispatcher");
-        let system_worker = dispatcher.system_worker(worker_index);
+        let blocking_worker = dispatcher.blocking_worker(worker_index);
         Self {
             dispatcher,
             binding: Some(Binding {
                 thread: current,
                 worker_index,
-                system_worker,
+                blocking_worker,
             }),
         }
     }
@@ -77,7 +77,7 @@ impl TaskScheduler {
         self.binding = Some(Binding {
             thread: destination.clone(),
             worker_index,
-            system_worker: self.dispatcher.system_worker(worker_index),
+            blocking_worker: self.dispatcher.blocking_worker(worker_index),
         });
     }
 
@@ -118,26 +118,26 @@ impl TaskScheduler {
         })
     }
 
-    /// Starts blocking system work without blocking an asynchronous worker.
+    /// Starts blocking work without blocking an asynchronous worker.
     ///
-    /// Bound schedulers use their worker's system pool; detached schedulers select a
-    /// worker's pool round-robin. Shutdown prevents new system work from starting,
-    /// but waits for previously accepted system work to finish.
-    #[doc = include_str!("../../docs/snippets/system_task.md")]
-    pub fn spawn_system<B, R>(&self, body: B) -> JoinHandle<R>
+    /// Bound schedulers use their worker's blocking pool; detached schedulers select a
+    /// worker's pool round-robin. Shutdown prevents new blocking work from starting,
+    /// but waits for previously accepted blocking work to finish.
+    #[doc = include_str!("../../docs/snippets/blocking_task.md")]
+    pub fn spawn_blocking<B, R>(&self, body: B) -> JoinHandle<R>
     where
         B: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
         match &self.binding {
-            Some(binding) => binding.system_worker.spawn_system(body),
-            None => self.dispatcher.next_system_worker().spawn_system(body),
+            Some(binding) => binding.blocking_worker.spawn_blocking(body),
+            None => self.dispatcher.next_blocking_worker().spawn_blocking(body),
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn system_worker(&self) -> &Arc<SystemWorker> {
-        &self.binding.as_ref().unwrap().system_worker
+    pub(crate) fn blocking_worker(&self) -> &Arc<BlockingWorker> {
+        &self.binding.as_ref().unwrap().blocking_worker
     }
 }
 

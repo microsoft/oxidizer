@@ -5,7 +5,7 @@ to the join handle. Awaiting a join, or calling `JoinHandle::wait`, resumes
 that panic. Remote future-factory invocation is inside the same boundary.
 
 A local future factory runs synchronously on its calling worker. A panic while
-creating that future propagates to the calling task. System-task panics are also
+creating that future propagates to the calling task. Blocking-task panics are also
 transported to their joins.
 
 Dropping a join does not rethrow its task's panic elsewhere. Remote/local task
@@ -17,8 +17,8 @@ Catching a task panic does not repair application state or poisoned locks.
 Applications remain responsible for deciding whether to stop after a panic.
 
 Blocking runtime methods, including owner destruction, must not run on an
-asynchronous worker. A system task may wait for asynchronous work, but cannot
-wait for shutdown of its own runtime. Owner destruction from a system task
+asynchronous worker. A blocking task may wait for asynchronous work, but cannot
+wait for shutdown of its own runtime. Owner destruction from a blocking task
 initiates shutdown without self-joining.
 
 Worker startup can still panic when OS thread creation fails. The current

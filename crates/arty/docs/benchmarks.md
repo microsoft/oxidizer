@@ -5,6 +5,8 @@ The later direct task-registration optimization, timeout workload, telemetry
 handle-storage change, and lifecycle fixes are not measured by this report.
 No replacement numbers are claimed; rerun the documented command on the desired
 revision for a current comparison.
+The historical `system` cases below measure blocking tasks. Current benchmark
+identifiers use `blocking` instead; the recorded historical identifiers are unchanged.
 
 On this Windows host, Tokio was faster for ordinary, local, and nested task
 scheduling. Arty was faster for the blocking-pool cases. Timer results were
@@ -45,7 +47,7 @@ the measured invocation, covering every round-robin Arty worker. Tokio keeps
 its own task-placement policy; equivalent preparation does not promise that
 each Tokio worker sees the same tasks.
 
-External spawn, yield, wake, timer, and system cases end after all task results
+External spawn, yield, wake, timer, and blocking cases end after all task results
 are observed. Both runtimes use the same external `futures::executor::block_on`
 join driver. Nested/local wall-clock measurements start inside the parent
 async entry; process-wide allocation measurements also include that entry
@@ -58,8 +60,8 @@ Tokio `LocalSet` runs on the benchmark controller. Nested Arty spawning is
 worker-affine, unlike Tokio's general spawning. These API-level comparisons
 include those architectural differences and are not isolated executor-cost comparisons.
 
-Both system-work configurations cap their shared blocking pool at four threads,
-but retain different pool growth policies. The system workload is intentionally
+Both blocking-work configurations cap their shared blocking pool at four threads,
+but retain different pool growth policies. The blocking workload is intentionally
 a minimal completed task, measuring submission and completion rather than I/O.
 Yield uses the same benchmark-local self-waking future; there is no runtime yield API.
 Remote wake uses a reusable external thread, not thread creation per task.

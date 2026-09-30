@@ -12,5 +12,5 @@ mod remote;
 mod result;
 
 pub(super) use preparation::prepare_local;
-pub(crate) use preparation::{BoxedRemoteFutureFactory, prepare_remote, prepare_system};
+pub(crate) use preparation::{BoxedRemoteFutureFactory, prepare_blocking, prepare_remote};
 pub(super) use result::TaskResult;

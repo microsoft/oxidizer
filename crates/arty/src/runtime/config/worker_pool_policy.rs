@@ -3,22 +3,22 @@
 
 use crate::runtime::bootstrap::pools::WorkerPools;
 
-/// Controls the thread pools used for blocking system tasks.
+/// Controls the thread pools used for blocking tasks.
 ///
 /// The **isolated** policy (the default) gives each async worker its own
-/// system-task pool.
+/// blocking-task pool.
 ///
-/// The **shared** policy uses one runtime-wide system-task pool.
+/// The **shared** policy uses one runtime-wide blocking-task pool.
 ///
 /// # Choosing between isolated and shared
 ///
-/// Isolated mode separates system-task contention between async workers.
-/// The number of system-task pools, and their
+/// Isolated mode separates blocking-task contention between async workers.
+/// The number of blocking-task pools, and their
 /// potential thread and stack overhead, scales with the number of async
 /// workers.
 ///
 /// Shared mode keeps one pool-wide thread limit regardless of the number of
-/// async workers, but combines their system tasks in that pool.
+/// async workers, but combines their blocking tasks in that pool.
 ///
 /// Choose using measured contention and thread-memory costs for the workload.
 /// Neither policy guarantees higher throughput for every workload.
@@ -35,9 +35,9 @@ enum Mode {
 }
 
 impl WorkerPoolPolicy {
-    /// Uses per-async-worker system-task pools (the default).
+    /// Uses per-async-worker blocking-task pools (the default).
     ///
-    /// System-task thread resources scale with the number of async workers.
+    /// Blocking-task thread resources scale with the number of async workers.
     #[must_use]
     pub const fn isolated() -> Self {
         Self {
@@ -46,7 +46,7 @@ impl WorkerPoolPolicy {
         }
     }
 
-    /// Uses one runtime-wide system-task pool shared by all async workers.
+    /// Uses one runtime-wide blocking-task pool shared by all async workers.
     ///
     /// See [the type-level
     /// docs](Self#choosing-between-isolated-and-shared) for the resource and

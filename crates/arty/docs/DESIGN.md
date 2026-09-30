@@ -21,16 +21,16 @@ need not be `Send`. Ordinary remote results require `Send`, not `ThreadAware`, a
 are not automatically relocated. Local scheduler tokens accept non-`Send` work and
 keep executor state confined to its worker, including during destruction.
 
-Shutdown cancels asynchronous work and waits for accepted system work. A cancelled
+Shutdown cancels asynchronous work and waits for accepted blocking work. A cancelled
 join stays pending; callers must not rely on it completing after cancellation.
 Local admission closes before cancellation runs destructors. Dropping the owner
-inside its own system task requests shutdown without waiting for that task to join
-itself; explicitly waiting for its own runtime shutdown from a system task is rejected.
+inside its own blocking task requests shutdown without waiting for that task to join
+itself; explicitly waiting for its own runtime shutdown from a blocking task is rejected.
 `block_on` supports borrowed captures and does not return or unwind before their
 storage is destroyed.
 
 There are no task metadata, fan-out, explicit placement, or runtime yield APIs.
-Blocking system tasks use per-worker pools by default, or one shared pool when
+Blocking tasks use per-worker pools by default, or one shared pool when
 configured. Time primitives remain available independently under `arty::time`.
 
 With `test-util`, Miri exercises scheduling, owned capabilities, macros, timers,

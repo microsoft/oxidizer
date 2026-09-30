@@ -47,7 +47,7 @@ enum Workload {
     Timeout,
     FromTask,
     Local,
-    System,
+    Blocking,
 }
 
 impl Workload {
@@ -59,7 +59,7 @@ impl Workload {
         Self::Timeout,
         Self::FromTask,
         Self::Local,
-        Self::System,
+        Self::Blocking,
     ];
 
     const fn name(self) -> &'static str {
@@ -71,7 +71,7 @@ impl Workload {
             Self::Timeout => "timeout",
             Self::FromTask => "nested",
             Self::Local => "local",
-            Self::System => "system",
+            Self::Blocking => "blocking",
         }
     }
 }
@@ -188,12 +188,12 @@ impl ArtyCase {
                     start.elapsed()
                 })
                 .wait(),
-            Workload::System => {
+            Workload::Blocking => {
                 let start = Instant::now();
                 for _ in 0..iterations {
                     self.handles.clear();
                     self.handles
-                        .extend((0..count).map(|_| self.scheduler.spawn_system(|| black_box(()))));
+                        .extend((0..count).map(|_| self.scheduler.spawn_blocking(|| black_box(()))));
                     for handle in &mut self.handles {
                         futures::executor::block_on(black_box(handle));
                     }
@@ -303,7 +303,7 @@ impl TokioCase {
                 }
                 start.elapsed()
             })),
-            Workload::System => {
+            Workload::Blocking => {
                 let start = Instant::now();
                 for _ in 0..iterations {
                     self.handles.clear();
@@ -504,10 +504,10 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
 #[bench::local_w1_n100(&mut ArtyCase::new(1, 100, Workload::Local), 1)]
 #[bench::local_w4_n1(&mut ArtyCase::new(4, 1, Workload::Local), 1)]
 #[bench::local_w4_n100(&mut ArtyCase::new(4, 100, Workload::Local), 1)]
-#[bench::system_w1_n1(&mut ArtyCase::new(1, 1, Workload::System), 1)]
-#[bench::system_w1_n100(&mut ArtyCase::new(1, 100, Workload::System), 1)]
-#[bench::system_w4_n1(&mut ArtyCase::new(4, 1, Workload::System), 1)]
-#[bench::system_w4_n100(&mut ArtyCase::new(4, 100, Workload::System), 1)]
+#[bench::blocking_w1_n1(&mut ArtyCase::new(1, 1, Workload::Blocking), 1)]
+#[bench::blocking_w1_n100(&mut ArtyCase::new(1, 100, Workload::Blocking), 1)]
+#[bench::blocking_w4_n1(&mut ArtyCase::new(4, 1, Workload::Blocking), 1)]
+#[bench::blocking_w4_n100(&mut ArtyCase::new(4, 100, Workload::Blocking), 1)]
 fn arty_workload(state: &mut ArtyCase, iterations: u64) -> Duration {
     state.run(iterations)
 }
@@ -541,10 +541,10 @@ fn arty_workload(state: &mut ArtyCase, iterations: u64) -> Duration {
 #[bench::local_w1_n100(&mut TokioCase::new(1, 100, Workload::Local), 1)]
 #[bench::local_w4_n1(&mut TokioCase::new(4, 1, Workload::Local), 1)]
 #[bench::local_w4_n100(&mut TokioCase::new(4, 100, Workload::Local), 1)]
-#[bench::system_w1_n1(&mut TokioCase::new(1, 1, Workload::System), 1)]
-#[bench::system_w1_n100(&mut TokioCase::new(1, 100, Workload::System), 1)]
-#[bench::system_w4_n1(&mut TokioCase::new(4, 1, Workload::System), 1)]
-#[bench::system_w4_n100(&mut TokioCase::new(4, 100, Workload::System), 1)]
+#[bench::blocking_w1_n1(&mut TokioCase::new(1, 1, Workload::Blocking), 1)]
+#[bench::blocking_w1_n100(&mut TokioCase::new(1, 100, Workload::Blocking), 1)]
+#[bench::blocking_w4_n1(&mut TokioCase::new(4, 1, Workload::Blocking), 1)]
+#[bench::blocking_w4_n100(&mut TokioCase::new(4, 100, Workload::Blocking), 1)]
 fn tokio_workload(state: &mut TokioCase, iterations: u64) -> Duration {
     state.run(iterations)
 }

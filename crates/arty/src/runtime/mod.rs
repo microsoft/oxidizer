@@ -8,7 +8,7 @@
 //! [`Builtins::scheduler`] preserves worker affinity. Task submission and join handles
 //! live in [`crate::task`].
 //!
-//! Dropping the runtime cancels asynchronous work and waits for accepted system work.
+//! Dropping the runtime cancels asynchronous work and waits for accepted blocking work.
 //! Cancelled joins remain pending. Retaining a scheduler does not keep the runtime
 //! running. There is no asynchronous I/O or memory-pool subsystem.
 //!
@@ -23,7 +23,9 @@
 //! Numeric metric values remain unredacted numbers.
 //! Opaque Rust thread identifiers are logged as `arty.thread.id`, not the
 //! integer-valued OpenTelemetry `thread.id` attribute.
+//! Blocking-pool telemetry retains its existing `system_worker` wire names for compatibility.
 
+pub(crate) mod blocking_worker;
 mod bootstrap;
 mod builder;
 pub(crate) mod config;
@@ -33,7 +35,6 @@ mod error;
 mod handle;
 #[cfg(feature = "macros")]
 mod macros;
-pub(crate) mod system_worker;
 pub(crate) mod telemetry;
 pub(crate) mod thread;
 mod worker;

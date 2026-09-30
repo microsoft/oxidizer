@@ -35,15 +35,15 @@ struct BeforeAfter {
 struct RelocationObservation {
     /// The thread executing the scenario's outermost task (the source worker).
     origin: ThreadId,
-    /// Thread that ran a system task (`spawn_system`) before/after relocation.
-    system_task: BeforeAfter,
+    /// Thread that ran a blocking task (`spawn_blocking`) before/after relocation.
+    blocking_task: BeforeAfter,
     /// Thread that ran an async task (`spawn`) before/after relocation.
     async_task: BeforeAfter,
 }
 
 /// Builds a two-processor runtime with the given worker-pool policy, relocates the
 /// requested thread-aware handle from the current worker to a different worker, and
-/// records the threads that ran a system task and an async task before and after.
+/// records the threads that ran a blocking task and an async task before and after.
 #[cfg(test)]
 fn relocate_and_observe(policy: WorkerPoolPolicy, target: RelocationTarget) -> RelocationObservation {
     let runtime = Runtime::builder()
@@ -72,19 +72,19 @@ fn relocate_and_observe(policy: WorkerPoolPolicy, target: RelocationTarget) -> R
                 RelocationTarget::Scheduler => {
                     let mut scheduler = cx.scheduler().clone();
 
-                    let system_before = scheduler.spawn_system(|| thread::current().id()).await;
+                    let blocking_before = scheduler.spawn_blocking(|| thread::current().id()).await;
                     let async_before = scheduler.spawn(async move |_| thread::current().id()).await;
 
                     scheduler.relocate(Some(&here), &there);
 
-                    let system_after = scheduler.spawn_system(|| thread::current().id()).await;
+                    let blocking_after = scheduler.spawn_blocking(|| thread::current().id()).await;
                     let async_after = scheduler.spawn(async move |_| thread::current().id()).await;
 
                     RelocationObservation {
                         origin,
-                        system_task: BeforeAfter {
-                            before: system_before,
-                            after: system_after,
+                        blocking_task: BeforeAfter {
+                            before: blocking_before,
+                            after: blocking_after,
                         },
                         async_task: BeforeAfter {
                             before: async_before,
@@ -95,19 +95,19 @@ fn relocate_and_observe(policy: WorkerPoolPolicy, target: RelocationTarget) -> R
                 RelocationTarget::Builtins => {
                     let mut builtins = cx.clone();
 
-                    let system_before = builtins.scheduler().spawn_system(|| thread::current().id()).await;
+                    let blocking_before = builtins.scheduler().spawn_blocking(|| thread::current().id()).await;
                     let async_before = builtins.scheduler().spawn(async move |_| thread::current().id()).await;
 
                     builtins.relocate(Some(&here), &there);
 
-                    let system_after = builtins.scheduler().spawn_system(|| thread::current().id()).await;
+                    let blocking_after = builtins.scheduler().spawn_blocking(|| thread::current().id()).await;
                     let async_after = builtins.scheduler().spawn(async move |_| thread::current().id()).await;
 
                     RelocationObservation {
                         origin,
-                        system_task: BeforeAfter {
-                            before: system_before,
-                            after: system_after,
+                        blocking_task: BeforeAfter {
+                            before: blocking_before,
+                            after: blocking_after,
                         },
                         async_task: BeforeAfter {
                             before: async_before,
@@ -140,8 +140,8 @@ fn relocating_scheduler_uses_destination_pool_when_isolated() {
     let observation = relocate_and_observe(WorkerPoolPolicy::isolated(), RelocationTarget::Scheduler);
 
     assert_ne!(
-        observation.system_task.before, observation.system_task.after,
-        "an isolated pool must dispatch system tasks to the destination worker's pool after relocating the scheduler"
+        observation.blocking_task.before, observation.blocking_task.after,
+        "an isolated pool must dispatch blocking tasks to the destination worker's pool after relocating the scheduler"
     );
     assert_async_follows_relocation(&observation);
 }
@@ -151,8 +151,8 @@ fn relocating_scheduler_uses_same_pool_when_shared() {
     let observation = relocate_and_observe(WorkerPoolPolicy::shared(1), RelocationTarget::Scheduler);
 
     assert_eq!(
-        observation.system_task.before, observation.system_task.after,
-        "a shared single-threaded pool must keep dispatching system tasks to the same thread after relocating the scheduler"
+        observation.blocking_task.before, observation.blocking_task.after,
+        "a shared single-threaded pool must keep dispatching blocking tasks to the same thread after relocating the scheduler"
     );
     assert_async_follows_relocation(&observation);
 }
@@ -162,8 +162,8 @@ fn relocating_builtins_uses_destination_pool_when_isolated() {
     let observation = relocate_and_observe(WorkerPoolPolicy::isolated(), RelocationTarget::Builtins);
 
     assert_ne!(
-        observation.system_task.before, observation.system_task.after,
-        "an isolated pool must dispatch system tasks to the destination worker's pool after relocating Builtins"
+        observation.blocking_task.before, observation.blocking_task.after,
+        "an isolated pool must dispatch blocking tasks to the destination worker's pool after relocating Builtins"
     );
     assert_async_follows_relocation(&observation);
 }
@@ -173,8 +173,8 @@ fn relocating_builtins_uses_same_pool_when_shared() {
     let observation = relocate_and_observe(WorkerPoolPolicy::shared(1), RelocationTarget::Builtins);
 
     assert_eq!(
-        observation.system_task.before, observation.system_task.after,
-        "a shared single-threaded pool must keep dispatching system tasks to the same thread after relocating Builtins"
+        observation.blocking_task.before, observation.blocking_task.after,
+        "a shared single-threaded pool must keep dispatching blocking tasks to the same thread after relocating Builtins"
     );
     assert_async_follows_relocation(&observation);
 }
@@ -192,7 +192,7 @@ fn foreign_owner_relocation_preserves_runtime_binding() {
     let mut builtins = source_runtime.task_scheduler().spawn(async |cx| cx).wait();
     let source = builtins.thread().clone();
     let destination = destination_runtime.task_scheduler().spawn(async |cx| cx.thread().clone()).wait();
-    let system_thread = builtins.scheduler().spawn_system(|| thread::current().id()).wait();
+    let blocking_thread = builtins.scheduler().spawn_blocking(|| thread::current().id()).wait();
 
     builtins.relocate(Some(&source), &destination);
 
@@ -200,9 +200,9 @@ fn foreign_owner_relocation_preserves_runtime_binding() {
         (
             builtins.thread(),
             builtins.scheduler().spawn(async |_| thread::current().id()).wait(),
-            builtins.scheduler().spawn_system(|| thread::current().id()).wait(),
+            builtins.scheduler().spawn_blocking(|| thread::current().id()).wait(),
         ),
-        (&source, source.id(), system_thread),
+        (&source, source.id(), blocking_thread),
     );
 }
 
@@ -245,15 +245,15 @@ fn foreign_owner_relocation_preserves_bare_scheduler_binding() {
     let builtins = source_runtime.task_scheduler().spawn(async |cx| cx).wait();
     let mut scheduler = builtins.scheduler().clone();
     let destination = destination_runtime.task_scheduler().spawn(async |cx| cx.thread().clone()).wait();
-    let system_thread = scheduler.spawn_system(|| thread::current().id()).wait();
+    let blocking_thread = scheduler.spawn_blocking(|| thread::current().id()).wait();
 
     scheduler.relocate(Some(builtins.thread()), &destination);
 
     assert_eq!(
         (
             scheduler.spawn(async |_| thread::current().id()).wait(),
-            scheduler.spawn_system(|| thread::current().id()).wait(),
+            scheduler.spawn_blocking(|| thread::current().id()).wait(),
         ),
-        (builtins.thread().id(), system_thread),
+        (builtins.thread().id(), blocking_thread),
     );
 }

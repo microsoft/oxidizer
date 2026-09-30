@@ -46,7 +46,7 @@ impl RuntimeBuilder {
 
     /// Sets each asynchronous worker thread's stack size in bytes.
     ///
-    /// This does not configure blocking system-task pools.
+    /// This does not configure blocking-task pools.
     ///
     /// A larger value of the `RUST_MIN_STACK` environment variable takes precedence.
     /// The default is 2 MiB.
@@ -61,7 +61,7 @@ impl RuntimeBuilder {
         self
     }
 
-    /// Selects how blocking system tasks share worker pools.
+    /// Selects how blocking tasks share worker pools.
     ///
     /// The default is [`WorkerPoolPolicy::isolated`].
     #[must_use]

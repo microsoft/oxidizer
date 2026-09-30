@@ -63,7 +63,7 @@ where
     (future_factory, JoinHandle::new(result_rx))
 }
 
-pub(crate) fn prepare_system<F, R>(body: F) -> (impl FnOnce() + Send + 'static, JoinHandle<R>)
+pub(crate) fn prepare_blocking<F, R>(body: F) -> (impl FnOnce() + Send + 'static, JoinHandle<R>)
 where
     F: FnOnce() -> R + Send + 'static,
     R: Send + 'static,
@@ -179,16 +179,16 @@ mod tests {
     }
 
     #[test]
-    fn system_task_delivers_its_result() {
-        let (task, handle) = prepare_system(|| 42);
+    fn blocking_task_delivers_its_result() {
+        let (task, handle) = prepare_blocking(|| 42);
         task();
 
         assert_eq!(block_on(handle), 42);
     }
 
     #[test]
-    fn system_panic_is_delivered_to_joiner() {
-        let (task, handle) = prepare_system(|| panic!("system task"));
+    fn blocking_panic_is_delivered_to_joiner() {
+        let (task, handle) = prepare_blocking(|| panic!("blocking task"));
         task();
 
         assert!(catch_unwind(AssertUnwindSafe(|| block_on(handle))).is_err());
@@ -214,7 +214,7 @@ mod tests {
 
     #[test]
     fn discarded_preparation_disconnects_without_completing() {
-        let (task, handle) = prepare_system(|| 42);
+        let (task, handle) = prepare_blocking(|| 42);
         drop(task);
         let mut handle = pin!(handle);
         let mut context = Context::from_waker(Waker::noop());

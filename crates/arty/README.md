@@ -32,7 +32,7 @@ let answer = scheduler
 assert_eq!(answer, 42);
 ```
 
-Arty provides scheduling, blocking system tasks, clocks, and structured telemetry. It does
+Arty provides scheduling, blocking tasks, clocks, and structured telemetry. It does
 not provide asynchronous I/O drivers or memory pools. External I/O integration through
 [`arty_io_core`][__link1] is planned separately.
 
@@ -60,7 +60,7 @@ No features are enabled by default.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbP_9JwABjSKsbOl-xqQMZl1Ybp-dlf7SSmOcb_9cVDnBOfyFhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbao2hXXJ9VGIb2eF0ckEo7aIbrlteKMtNQQYbgtzXPfd1t4FhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link1]: https://crates.io/crates/arty_io_core/0.2.0
  [__link2]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/DESIGN.md

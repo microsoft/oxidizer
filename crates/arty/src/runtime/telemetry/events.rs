@@ -42,10 +42,10 @@ impl From<usize> for ProcessorIndex {
     }
 }
 
-/// System worker pool mode label (`isolated` / `shared`).
+/// Blocking worker pool mode label (`isolated` / `shared`).
 #[classified(SYSTEM_METADATA)]
 #[derive(Clone, Copy)]
-pub(crate) struct SystemWorkerPoolMode(pub &'static str);
+pub(crate) struct BlockingWorkerPoolMode(pub &'static str);
 
 /// Scheduling route (`any`, `same_thread`, or `local`).
 #[classified(SYSTEM_METADATA)]
@@ -99,7 +99,7 @@ pub(crate) struct RuntimeStarted {
     #[dimension(log = "processors.used", metric = "processors.used")]
     pub processors_used: SystemMetricCount,
     #[dimension(log = "system_worker_pool.mode", metric = "system_worker_pool.mode")]
-    pub system_worker_pool_mode: SystemWorkerPoolMode,
+    pub blocking_worker_pool_mode: BlockingWorkerPoolMode,
     pub stack_size_bytes: SystemMetricCount,
 }
 
@@ -109,7 +109,7 @@ pub(crate) struct RuntimeStarted {
 #[counter(name = "oxidizer.rt.start_failed")]
 pub(crate) struct RuntimeStartFailed {
     #[dimension(log = "system_worker_pool.mode", metric = "system_worker_pool.mode")]
-    pub system_worker_pool_mode: SystemWorkerPoolMode,
+    pub blocking_worker_pool_mode: BlockingWorkerPoolMode,
 }
 
 /// Emitted when runtime shutdown begins.
@@ -226,12 +226,12 @@ pub(crate) struct BuiltinsThreadMismatch {
     pub backtrace: BacktraceText,
 }
 
-/// Emitted when the system (blocking) worker pool is already at its maximum size
+/// Emitted when the blocking worker pool is already at its maximum size
 /// and cannot grow to absorb a fresh overload.
 #[event("oxidizer.rt.system_worker.pool_saturated")]
-#[warning("system worker pool is saturated and cannot grow")]
+#[warning("blocking worker pool is saturated and cannot grow")]
 #[counter(name = "oxidizer.rt.system_worker.pool_saturated")]
-pub(crate) struct SystemWorkerPoolSaturated {
+pub(crate) struct BlockingWorkerPoolSaturated {
     #[dimension(log = "system_worker_pool.max_threads", metric = "system_worker_pool.max_threads")]
     pub max_threads: SystemMetricCount,
 }
@@ -253,7 +253,7 @@ mod tests {
             RuntimeStarted {
                 processors_available: SystemMetricCount(8),
                 processors_used: SystemMetricCount(2),
-                system_worker_pool_mode: SystemWorkerPoolMode("isolated"),
+                blocking_worker_pool_mode: BlockingWorkerPoolMode("isolated"),
                 stack_size_bytes: SystemMetricCount(1024),
             }
         );
@@ -277,7 +277,7 @@ mod tests {
         emit!(
             sink,
             RuntimeStartFailed {
-                system_worker_pool_mode: SystemWorkerPoolMode("shared"),
+                blocking_worker_pool_mode: BlockingWorkerPoolMode("shared"),
             }
         );
 
@@ -529,12 +529,12 @@ mod tests {
     }
 
     #[test]
-    fn system_worker_pool_saturated_logs_and_counts() {
+    fn blocking_worker_pool_saturated_logs_and_counts() {
         let (sink, processor) = test_emitter(TEST_ID);
 
         emit!(
             sink,
-            SystemWorkerPoolSaturated {
+            BlockingWorkerPoolSaturated {
                 max_threads: SystemMetricCount(64),
             }
         );
@@ -542,7 +542,7 @@ mod tests {
         assert_eq!(
             processor.single_event(),
             ExpectedEvent::new("oxidizer.rt.system_worker.pool_saturated", Severity::Warn)
-                .body("system worker pool is saturated and cannot grow")
+                .body("blocking worker pool is saturated and cannot grow")
                 .dimension("system_worker_pool.max_threads", "64")
                 .metric()
         );

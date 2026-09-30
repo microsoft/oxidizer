@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::runtime::system_worker::WorkerPool;
+use crate::runtime::blocking_worker::WorkerPool;
 
-/// Resolves whether workers share their blocking system-task pool.
+/// Resolves whether workers share their blocking-task pool.
 #[derive(Debug, Clone)]
 pub(in crate::runtime) enum WorkerPools {
     Shared(WorkerPool),
@@ -33,13 +33,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn shared_policy_reuses_the_same_system_pool() {
+    fn shared_policy_reuses_the_same_blocking_pool() {
         let pools = WorkerPools::shared(Some(1));
         assert!(pools.build_worker().shares_pool_with(&pools.build_worker()));
     }
 
     #[test]
-    fn isolated_policy_creates_independent_system_pools() {
+    fn isolated_policy_creates_independent_blocking_pools() {
         let pools = WorkerPools::isolated();
         assert!(!pools.build_worker().shares_pool_with(&pools.build_worker()));
     }

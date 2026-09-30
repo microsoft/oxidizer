@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Retained asynchronous, local, and system task submission behavior.
+//! Retained asynchronous, local, and blocking task submission behavior.
 
 #![cfg(feature = "rt")]
 
@@ -27,7 +27,7 @@ fn spawn_some_tasks() {
             YieldFuture::default().await;
             let child1 = cx.scheduler().spawn(async |_| 1111);
             let child2 = cx.scheduler().spawn_anywhere((), |()| async { 2222 });
-            let child5 = cx.scheduler().spawn_system(|| 5555);
+            let child5 = cx.scheduler().spawn_blocking(|| 5555);
             let child6 = cx.local_scheduler().unwrap().spawn(async || 6666);
             let results = futures::join!(child1, child2, child5, child6);
             assert_eq!(results, (1111, 2222, 5555, 6666));

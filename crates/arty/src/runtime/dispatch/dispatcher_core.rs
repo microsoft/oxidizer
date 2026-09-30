@@ -11,8 +11,8 @@ use nonempty::NonEmpty;
 use observed::emit;
 use thread_aware::Thread;
 
+use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::context::Builtins;
-use crate::runtime::system_worker::SystemWorker;
 use crate::runtime::telemetry::events::{PlacementLabel, RuntimeStopped, RuntimeStopping, TaskSpawned};
 use crate::runtime::thread::waiter::WaitForShutdown;
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
@@ -24,7 +24,7 @@ pub(in crate::runtime) struct WorkerEndpoint {
     pub(in crate::runtime) command_tx: mpsc::Sender<AsyncWorkerCommand>,
     pub(in crate::runtime) waker: Waker,
     pub(in crate::runtime) thread: Thread,
-    pub(in crate::runtime) system_worker: Arc<SystemWorker>,
+    pub(in crate::runtime) blocking_worker: Arc<BlockingWorker>,
 }
 
 /// Index resolved against a dispatcher's registered workers, not a hardware processor ID.
@@ -110,7 +110,7 @@ impl<WFS> DispatcherCore<WFS> {
         emit!(&self.sink, RuntimeStopping);
 
         for endpoint in &self.worker_endpoints {
-            endpoint.system_worker.shutdown();
+            endpoint.blocking_worker.shutdown();
             // We ignore the result here because we do not care if the channel is already closed for
             // whatever reason (after all, that is relatively compatible with the "shut down" idea).
             _ = endpoint.command_tx.send(AsyncWorkerCommand::Shutdown);
@@ -141,23 +141,23 @@ impl<WFS> DispatcherCore<WFS> {
         self.worker_endpoints.first().thread.owner() == thread.owner()
     }
 
-    pub(in crate::runtime) fn is_current_system_task(&self) -> bool {
+    pub(in crate::runtime) fn is_current_blocking_task(&self) -> bool {
         self.worker_endpoints
             .iter()
-            .any(|endpoint| endpoint.system_worker.is_current_task())
+            .any(|endpoint| endpoint.blocking_worker.is_current_task())
     }
 
-    pub(in crate::runtime) fn next_system_worker(&self) -> Arc<SystemWorker> {
-        self.system_worker(self.next_worker_index())
+    pub(in crate::runtime) fn next_blocking_worker(&self) -> Arc<BlockingWorker> {
+        self.blocking_worker(self.next_worker_index())
     }
 
-    pub(in crate::runtime) fn system_worker(&self, worker_index: WorkerIndex) -> Arc<SystemWorker> {
+    pub(in crate::runtime) fn blocking_worker(&self, worker_index: WorkerIndex) -> Arc<BlockingWorker> {
         Arc::clone(
             &self
                 .worker_endpoints
                 .get(usize::from(worker_index))
                 .expect("scheduler worker index must be registered")
-                .system_worker,
+                .blocking_worker,
         )
     }
 
@@ -228,8 +228,8 @@ mod tests {
     use testing_aids::TEST_TIMEOUT;
 
     use super::*;
+    use crate::runtime::blocking_worker::WorkerPool;
     use crate::runtime::dispatch::test_threads;
-    use crate::runtime::system_worker::WorkerPool;
     use crate::runtime::thread::waiter::MockWaitForShutdown;
 
     #[cfg_attr(test, mutants::skip)]
@@ -238,7 +238,7 @@ mod tests {
             command_tx: tx,
             waker: Waker::noop().clone(),
             thread: thread.clone(),
-            system_worker: SystemWorker::new(WorkerPool::new(None), observed::Sink::noop()),
+            blocking_worker: BlockingWorker::new(WorkerPool::new(None), observed::Sink::noop()),
         }
     }
 

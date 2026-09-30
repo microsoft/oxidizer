@@ -30,7 +30,7 @@
 //! # }
 //! ```
 //!
-//! Arty provides scheduling, blocking system tasks, clocks, and structured telemetry. It does
+//! Arty provides scheduling, blocking tasks, clocks, and structured telemetry. It does
 //! not provide asynchronous I/O drivers or memory pools. External I/O integration through
 //! [`arty_io_core`] is planned separately.
 //!

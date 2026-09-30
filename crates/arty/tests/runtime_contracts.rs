@@ -112,12 +112,12 @@ fn closed_runtime_does_not_invoke_factories_or_complete_cancelled_joins() {
 }
 
 #[test]
-fn system_tasks_leave_the_async_worker_responsive() {
+fn blocking_tasks_leave_the_async_worker_responsive() {
     execute_or_terminate_process(|| {
         let runtime = runtime(1);
         let (started, ready) = mpsc::channel();
         let (release, wait) = mpsc::channel();
-        let system = runtime.task_scheduler().spawn_system(move || {
+        let blocking = runtime.task_scheduler().spawn_blocking(move || {
             started.send(()).unwrap();
             wait.recv().unwrap();
             42
@@ -125,7 +125,7 @@ fn system_tasks_leave_the_async_worker_responsive() {
         ready.recv_timeout(TEST_TIMEOUT).unwrap();
         assert_eq!(runtime.task_scheduler().spawn(async |_| 17).wait(), 17);
         release.send(()).unwrap();
-        assert_eq!(system.wait(), 42);
+        assert_eq!(blocking.wait(), 42);
     });
 }
 
@@ -310,7 +310,7 @@ fn cancellation_cleanup_cannot_reenter_the_local_executor() {
 }
 
 #[test]
-fn a_system_task_can_drop_its_runtime_without_joining_itself() {
+fn a_blocking_task_can_drop_its_runtime_without_joining_itself() {
     execute_or_terminate_process(|| {
         for policy in [WorkerPoolPolicy::isolated(), WorkerPoolPolicy::shared(1)] {
             let runtime = Runtime::builder()
@@ -320,7 +320,7 @@ fn a_system_task_can_drop_its_runtime_without_joining_itself() {
                 .unwrap();
             let scheduler = runtime.task_scheduler();
             let (finished, receive) = mpsc::channel();
-            let task = scheduler.spawn_system(move || {
+            let task = scheduler.spawn_blocking(move || {
                 drop(runtime);
                 finished.send(()).unwrap();
             });

@@ -14,6 +14,7 @@ use observed::{Sink, emit};
 use thread_aware::{Thread, ThreadAware, ThreadBuilder};
 use tick::runtime::InactiveClock;
 
+use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::bootstrap::pools::WorkerPools;
 use crate::runtime::config::RuntimeConfig;
 use crate::runtime::context::Builtins;
@@ -21,9 +22,8 @@ use crate::runtime::context::init::{CoreRuntimeBuiltins, RuntimeBuiltins, Shared
 use crate::runtime::dispatch::{DispatcherClient, DispatcherCore, WorkerEndpoint};
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
-use crate::runtime::system_worker::SystemWorker;
 use crate::runtime::telemetry::events::{
-    AsyncWorkerActive, AsyncWorkerStarted, AsyncWorkerStopped, RuntimeStartFailed, RuntimeStarted, SystemWorkerPoolMode,
+    AsyncWorkerActive, AsyncWorkerStarted, AsyncWorkerStopped, BlockingWorkerPoolMode, RuntimeStartFailed, RuntimeStarted,
 };
 use crate::runtime::thread::waiter::ThreadWaiter;
 use crate::runtime::thread::{flag_current_thread, spawn};
@@ -43,7 +43,7 @@ pub(in crate::runtime) fn build(
         emit!(
             &sink,
             RuntimeStartFailed {
-                system_worker_pool_mode: SystemWorkerPoolMode(pool_mode),
+                blocking_worker_pool_mode: BlockingWorkerPoolMode(pool_mode),
             }
         );
     })?;
@@ -93,14 +93,14 @@ pub(in crate::runtime) fn build(
             .start(),
         );
 
-        let (waker, thread, system_worker) = worker_endpoint_rx
+        let (waker, thread, blocking_worker) = worker_endpoint_rx
             .recv()
             .expect("failed to receive the worker endpoint from the starting worker");
         async_worker_command_txs.push(WorkerEndpoint {
             command_tx,
             waker,
             thread,
-            system_worker,
+            blocking_worker,
         });
         async_worker_success_rxs.push(success_rx);
     }
@@ -132,7 +132,7 @@ pub(in crate::runtime) fn build(
         RuntimeStarted {
             processors_available: available.len().into(),
             processors_used: worker_count.into(),
-            system_worker_pool_mode: SystemWorkerPoolMode(pool_mode),
+            blocking_worker_pool_mode: BlockingWorkerPoolMode(pool_mode),
             stack_size_bytes: stack_size.into(),
         }
     );
@@ -152,7 +152,7 @@ struct AsyncWorkerStartInfo {
     inactive_clock: InactiveClock,
     processor: ProcessorSet,
     worker_index: usize,
-    worker_endpoint_tx: Sender<(Waker, Thread, Arc<SystemWorker>)>,
+    worker_endpoint_tx: Sender<(Waker, Thread, Arc<BlockingWorker>)>,
     thread_builder: ThreadBuilder,
     worker_pools: WorkerPools,
     sink: Sink,
@@ -197,13 +197,13 @@ impl AsyncWorkerStartInfo {
         let mut clock = inactive_clock;
         clock.relocate(None, &current);
 
-        // Use shared system worker pool if shared, otherwise use a new one
-        let system_worker = SystemWorker::new(worker_pools.build_worker(), worker_sink.clone());
+        // Use shared blocking worker pool if shared, otherwise use a new one
+        let blocking_worker = BlockingWorker::new(worker_pools.build_worker(), worker_sink.clone());
 
         let signal = Arc::new(WorkerSignal::default());
 
         worker_endpoint_tx
-            .send((Waker::from(Arc::clone(&signal)), current.clone(), Arc::clone(&system_worker)))
+            .send((Waker::from(Arc::clone(&signal)), current.clone(), Arc::clone(&blocking_worker)))
             .expect("failed to send the worker endpoint to the runtime builder");
 
         // The start command is sent to all threads by bootstrap when all the threads have
@@ -231,7 +231,7 @@ impl AsyncWorkerStartInfo {
             AsyncWorker::new(
                 command_rx,
                 thread_state_constructor,
-                Arc::clone(&system_worker),
+                Arc::clone(&blocking_worker),
                 clock,
                 signal,
                 success_tx,
@@ -256,7 +256,7 @@ impl AsyncWorkerStartInfo {
         );
         emit!(worker_sink, AsyncWorkerActive { delta: -1 });
 
-        system_worker.join();
+        blocking_worker.join();
     }
 }
 

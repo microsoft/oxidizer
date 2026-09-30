@@ -145,7 +145,7 @@ mod tests {
         assert_eq!(source.owner(), unfamiliar.owner());
         assert_ne!(source.id(), unfamiliar.id());
         assert_ne!(source.owner(), foreign.owner());
-        let system_thread = scheduler.spawn_system(|| thread::current().id()).wait();
+        let blocking_thread = scheduler.spawn_blocking(|| thread::current().id()).wait();
 
         for destination in [&source, &unfamiliar, &foreign, &unfamiliar, &source] {
             operations.relocate(None, destination);
@@ -159,7 +159,7 @@ mod tests {
             for scheduler in [&scheduler, builtins.scheduler()] {
                 let task = scheduler.spawn(async |_| thread::current().id());
                 assert_eq!(task.wait(), source.id());
-                assert_eq!(scheduler.spawn_system(|| thread::current().id()).wait(), system_thread);
+                assert_eq!(scheduler.spawn_blocking(|| thread::current().id()).wait(), blocking_thread);
             }
 
             for operations in [operations.clone(), builtins.runtime_operations().clone()] {

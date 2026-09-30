@@ -65,7 +65,7 @@ impl<F: Future> Future for ScopedStorage<F> {
 /// Dropping the runtime stops it and blocks until shutdown completes. Do not drop
 /// the owner on an asynchronous runtime worker. Methods that block also reject
 /// calls from asynchronous runtime workers.
-/// Dropping the owner from one of its system tasks requests shutdown without
+/// Dropping the owner from one of its blocking tasks requests shutdown without
 /// waiting for that task to join itself.
 ///
 /// This type is [`Send`] and [`Sync`], but is not a relocatable [`ThreadAware`](thread_aware::ThreadAware)
@@ -136,13 +136,13 @@ impl Runtime {
     /// # Panics
     ///
     /// Panics if called from an asynchronous runtime worker.
-    /// Also panics when called from a system task of this runtime, which cannot
+    /// Also panics when called from a blocking task of this runtime, which cannot
     /// complete while waiting for its own shutdown.
     pub fn wait(&self) {
         assert_not_flagged();
         assert!(
-            !self.dispatcher.is_current_system_task(),
-            "a runtime system task cannot wait for its own shutdown"
+            !self.dispatcher.is_current_blocking_task(),
+            "a runtime blocking task cannot wait for its own shutdown"
         );
         self.dispatcher.wait();
     }
@@ -196,7 +196,7 @@ impl Runtime {
 impl Drop for Runtime {
     fn drop(&mut self) {
         self.stop();
-        if !self.dispatcher.is_current_system_task() {
+        if !self.dispatcher.is_current_blocking_task() {
             self.wait();
         }
     }

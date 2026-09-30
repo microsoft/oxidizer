@@ -3,7 +3,7 @@
 
 //! Task submission and completion.
 //!
-//! [`TaskScheduler`] submits asynchronous and blocking system tasks. A detached
+//! [`TaskScheduler`] submits asynchronous and blocking tasks. A detached
 //! scheduler distributes work round-robin; a worker-bound scheduler preserves
 //! affinity. [`LocalTaskScheduler`] accepts non-`Send` captures and results on
 //! the associated worker.

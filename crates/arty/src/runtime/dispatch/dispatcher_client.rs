@@ -6,9 +6,9 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::thread::ThreadId;
 
+use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::context::Builtins;
 use crate::runtime::dispatch::{DispatcherCore, WorkerIndex};
-use crate::runtime::system_worker::SystemWorker;
 use crate::runtime::thread::waiter::ThreadWaiter;
 use crate::task::join::JoinHandle;
 
@@ -26,20 +26,20 @@ impl DispatcherClient {
         self.core.worker_index(thread_id)
     }
 
-    pub(crate) fn system_worker(&self, worker_index: WorkerIndex) -> Arc<SystemWorker> {
-        self.core.system_worker(worker_index)
+    pub(crate) fn blocking_worker(&self, worker_index: WorkerIndex) -> Arc<BlockingWorker> {
+        self.core.blocking_worker(worker_index)
     }
 
-    pub(crate) fn next_system_worker(&self) -> Arc<SystemWorker> {
-        self.core.next_system_worker()
+    pub(crate) fn next_blocking_worker(&self) -> Arc<BlockingWorker> {
+        self.core.next_blocking_worker()
     }
 
     pub(crate) fn owns(&self, thread: &thread_aware::Thread) -> bool {
         self.core.owns(thread)
     }
 
-    pub(crate) fn is_current_system_task(&self) -> bool {
-        self.core.is_current_system_task()
+    pub(crate) fn is_current_blocking_task(&self) -> bool {
+        self.core.is_current_blocking_task()
     }
 
     /// Submits to a previously resolved worker without discarding destination affinity.
@@ -104,8 +104,8 @@ mod tests {
     use thread_aware::ThreadAware;
 
     use super::*;
+    use crate::runtime::blocking_worker::WorkerPool;
     use crate::runtime::dispatch::{WorkerEndpoint, test_threads};
-    use crate::runtime::system_worker::WorkerPool;
     use crate::task::scheduler::TaskScheduler;
 
     #[test]
@@ -115,7 +115,7 @@ mod tests {
         let (worker1_tx, worker1_rx) = mpsc::channel();
         let wfs = ThreadWaiter::new(vec![]);
         let threads = test_threads(2);
-        let system_worker = SystemWorker::new(WorkerPool::new(None), Sink::noop());
+        let blocking_worker = BlockingWorker::new(WorkerPool::new(None), Sink::noop());
 
         let dispatcher = Arc::new(DispatcherCore::new(
             wfs,
@@ -124,13 +124,13 @@ mod tests {
                     command_tx: worker0_tx,
                     waker: Waker::noop().clone(),
                     thread: threads[0].clone(),
-                    system_worker: Arc::clone(&system_worker),
+                    blocking_worker: Arc::clone(&blocking_worker),
                 },
                 WorkerEndpoint {
                     command_tx: worker1_tx,
                     waker: Waker::noop().clone(),
                     thread: threads[1].clone(),
-                    system_worker: Arc::clone(&system_worker),
+                    blocking_worker: Arc::clone(&blocking_worker),
                 },
             ])
             .unwrap(),
@@ -155,11 +155,11 @@ mod tests {
     }
 
     #[test]
-    fn relocate_switches_system_worker() {
+    fn relocate_switches_blocking_worker() {
         let threads = test_threads(2);
 
-        let source_worker = SystemWorker::new(WorkerPool::new(None), Sink::noop());
-        let destination_worker = SystemWorker::new(WorkerPool::new(None), Sink::noop());
+        let source_worker = BlockingWorker::new(WorkerPool::new(None), Sink::noop());
+        let destination_worker = BlockingWorker::new(WorkerPool::new(None), Sink::noop());
         destination_worker.shutdown();
 
         let dispatcher = Arc::new(DispatcherCore::new(
@@ -169,13 +169,13 @@ mod tests {
                     command_tx: mpsc::channel().0,
                     waker: Waker::noop().clone(),
                     thread: threads[0].clone(),
-                    system_worker: Arc::clone(&source_worker),
+                    blocking_worker: Arc::clone(&source_worker),
                 },
                 WorkerEndpoint {
                     command_tx: mpsc::channel().0,
                     waker: Waker::noop().clone(),
                     thread: threads[1].clone(),
-                    system_worker: Arc::clone(&destination_worker),
+                    blocking_worker: Arc::clone(&destination_worker),
                 },
             ])
             .unwrap(),
@@ -185,15 +185,15 @@ mod tests {
         let mut scheduler = TaskScheduler::new(DispatcherClient::new(dispatcher), threads[0].clone());
 
         let before = (
-            Arc::ptr_eq(scheduler.system_worker(), &source_worker),
-            Arc::ptr_eq(scheduler.system_worker(), &destination_worker),
+            Arc::ptr_eq(scheduler.blocking_worker(), &source_worker),
+            Arc::ptr_eq(scheduler.blocking_worker(), &destination_worker),
         );
 
         scheduler.relocate(Some(&threads[0]), &threads[1]);
 
         let after = (
-            Arc::ptr_eq(scheduler.system_worker(), &source_worker),
-            Arc::ptr_eq(scheduler.system_worker(), &destination_worker),
+            Arc::ptr_eq(scheduler.blocking_worker(), &source_worker),
+            Arc::ptr_eq(scheduler.blocking_worker(), &destination_worker),
         );
 
         assert_eq!((before, after), ((true, false), (false, true)));

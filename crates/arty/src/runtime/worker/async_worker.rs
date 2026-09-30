@@ -17,8 +17,8 @@ use events_once::BoxedSender;
 use tick::Clock;
 use tick::runtime::{ClockDriver, InactiveClock};
 
+use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::context::Builtins;
-use crate::runtime::system_worker::SystemWorker;
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
 use crate::runtime::worker::signal::WorkerSignal;
 use crate::task::local::LocalTaskScope;
@@ -86,8 +86,8 @@ where
     // to panic if an attempt to use it is made after executor shutdown starts).
     tasks: TaskSet,
 
-    // We keep a reference to the system worker so that we can send it a shutdown signal.
-    system_worker: Arc<SystemWorker>,
+    // We keep a reference to the blocking worker so that we can send it a shutdown signal.
+    blocking_worker: Arc<BlockingWorker>,
 
     // This drives moves the timers registered with the clock forward.
     clock_driver: ClockDriver,
@@ -110,7 +110,7 @@ where
     pub(in crate::runtime) unsafe fn new<TSFF, TSF>(
         command_rx: mpsc::Receiver<AsyncWorkerCommand<TS>>,
         thread_state_constructor: TSFF,
-        system_worker: Arc<SystemWorker>,
+        blocking_worker: Arc<BlockingWorker>,
         clock: InactiveClock,
         signal: Arc<WorkerSignal>,
         thread_state_constructed_tx: BoxedSender<()>,
@@ -151,7 +151,7 @@ where
             executor: Some(executor),
             tasks,
             clock_driver,
-            system_worker,
+            blocking_worker,
             signal,
             _local_scope: local_scope,
             _single_threaded: PhantomData,
@@ -255,7 +255,7 @@ where
         // The command channel is henceforth closed. We will not receive any more commands.
         self.command_rx = None;
 
-        self.system_worker.shutdown();
+        self.blocking_worker.shutdown();
 
         // The executor can now start its own shutdown process. For us this does not change
         // anything - we are still required to keep executing executor cycles until it decides to
@@ -292,8 +292,8 @@ mod tests {
     use testing_aids::{async_test, execute_or_terminate_process};
 
     use super::*;
-    use crate::runtime::system_worker::WorkerPool;
-    use crate::runtime::system_worker::system_worker_tests::is_system_worker_shutting_down;
+    use crate::runtime::blocking_worker::WorkerPool;
+    use crate::runtime::blocking_worker::blocking_worker_tests::is_blocking_worker_shutting_down;
     use crate::task::local::{LocalTaskBinding, LocalTaskScheduler};
 
     #[derive(Clone, Debug)]
@@ -317,7 +317,7 @@ mod tests {
             let (command_tx, command_rx) = mpsc::channel();
 
             let async_worker_thread = thread::spawn(move || {
-                let system_worker = SystemWorker::new(WorkerPool::new(None), Sink::noop());
+                let blocking_worker = BlockingWorker::new(WorkerPool::new(None), Sink::noop());
 
                 let signal = Arc::new(WorkerSignal::default());
 
@@ -327,7 +327,7 @@ mod tests {
                     AsyncWorker::new(
                         command_rx,
                         async move |tasks, _| TestTaskContext::new(tasks),
-                        Arc::clone(&system_worker),
+                        Arc::clone(&blocking_worker),
                         InactiveClock::default(),
                         signal,
                         Event::boxed().0,
@@ -335,9 +335,9 @@ mod tests {
                 };
                 execute_or_terminate_process(move || worker.run());
 
-                // The async worker owns the system worker in our current implementation,
+                // The async worker owns the blocking worker in our current implementation,
                 // so we verify that we properly terminated it together with the async worker.
-                assert!(is_system_worker_shutting_down(&system_worker));
+                assert!(is_blocking_worker_shutting_down(&blocking_worker));
             });
 
             // We set this to signal that the outer task (the remote one) has successfully completed.
@@ -401,7 +401,7 @@ mod tests {
                             drop(tasks.add(async move { initial_completed_tx.send(()) }));
                             TestTaskContext::new(tasks)
                         },
-                        SystemWorker::new(WorkerPool::new(None), Sink::noop()),
+                        BlockingWorker::new(WorkerPool::new(None), Sink::noop()),
                         InactiveClock::default(),
                         signal,
                         constructed_tx,
@@ -457,7 +457,7 @@ mod tests {
                 AsyncWorker::new(
                     command_rx,
                     async move |tasks, _| TestTaskContext::new(tasks),
-                    SystemWorker::new(WorkerPool::new(None), Sink::noop()),
+                    BlockingWorker::new(WorkerPool::new(None), Sink::noop()),
                     InactiveClock::default(),
                     signal,
                     Event::boxed().0,
@@ -495,7 +495,7 @@ mod tests {
         let initialized = Arc::new(AtomicBool::new(false));
         let observed = Arc::clone(&initialized);
         let (_commands, receiver) = mpsc::channel();
-        let system_worker = SystemWorker::new(WorkerPool::new(None), Sink::noop());
+        let blocking_worker = BlockingWorker::new(WorkerPool::new(None), Sink::noop());
         // SAFETY: run completes the executor's shutdown before the worker is dropped.
         let mut worker = unsafe {
             AsyncWorker::new(
@@ -504,7 +504,7 @@ mod tests {
                     observed.store(true, Ordering::Relaxed);
                     TestTaskContext::new(tasks)
                 },
-                Arc::clone(&system_worker),
+                Arc::clone(&blocking_worker),
                 InactiveClock::default(),
                 Arc::new(WorkerSignal::default()),
                 Event::boxed().0,
@@ -517,6 +517,6 @@ mod tests {
         worker.run();
 
         assert!(!initialized.load(Ordering::Relaxed));
-        assert!(is_system_worker_shutting_down(&system_worker));
+        assert!(is_blocking_worker_shutting_down(&blocking_worker));
     }
 }

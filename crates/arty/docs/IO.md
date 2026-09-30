@@ -5,7 +5,7 @@ or built-in memory pool. Neither worker execution nor `Builtins` uses `oxidizer_
 or `bytesbuf`.
 
 Task wakeups, incoming commands, timer advancement, and shutdown operate without an
-I/O driver. Blocking system tasks remain available for synchronous operating-system
+I/O driver. Blocking tasks remain available for synchronous operating-system
 calls; they are not an asynchronous I/O integration.
 
 External I/O integration through `arty_io_core` is planned separately. The existence

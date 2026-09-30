@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! System-task admission and blocking-pool execution.
+//! Blocking-task admission and blocking-pool execution.
 
 use std::cell::RefCell;
 use std::marker::PhantomData;
@@ -12,8 +12,8 @@ use std::sync::{Arc, Mutex};
 use observed::{Sink, emit};
 use threadpool::ThreadPool;
 
-use crate::runtime::telemetry::events::{SystemMetricCount, SystemWorkerPoolSaturated};
-use crate::task::execution::prepare_system;
+use crate::runtime::telemetry::events::{BlockingWorkerPoolSaturated, SystemMetricCount};
+use crate::task::execution::prepare_blocking;
 use crate::task::join::JoinHandle;
 
 const ERR_POISONED_LOCK: &str = "poisoned lock - cannot continue execution because security and privacy guarantees can no longer be upheld";
@@ -22,12 +22,12 @@ thread_local! {
     static CURRENT_POOL: RefCell<Option<Arc<()>>> = const { RefCell::new(None) };
 }
 
-struct SystemTaskScope {
+struct BlockingTaskScope {
     previous: Option<Arc<()>>,
     _not_send: PhantomData<Rc<()>>,
 }
 
-impl SystemTaskScope {
+impl BlockingTaskScope {
     fn enter(identity: Arc<()>) -> Self {
         Self {
             previous: CURRENT_POOL.replace(Some(identity)),
@@ -36,22 +36,22 @@ impl SystemTaskScope {
     }
 }
 
-impl Drop for SystemTaskScope {
+impl Drop for BlockingTaskScope {
     fn drop(&mut self) {
         CURRENT_POOL.set(self.previous.take());
     }
 }
 
-/// Worker for system tasks. Meant to be created for each async worker thread to allow for scheduling of system tasks.
+/// Worker for blocking tasks. Meant to be created for each async worker thread to allow for scheduling of blocking tasks.
 #[derive(Debug)]
-pub(crate) struct SystemWorker {
+pub(crate) struct BlockingWorker {
     // Naive implementation using a per-async-worker thread pool
     pool: WorkerPool,
     is_shutting_down: AtomicBool,
     sink: Sink,
 }
 
-impl SystemWorker {
+impl BlockingWorker {
     pub(in crate::runtime) fn new(pool: WorkerPool, sink: Sink) -> Arc<Self> {
         Arc::new(Self {
             pool,
@@ -60,23 +60,23 @@ impl SystemWorker {
         })
     }
 
-    /// Submits a system task to the worker. If the worker is shutting down, the task will be ignored.
-    pub(crate) fn spawn_system<F, R>(&self, body: F) -> JoinHandle<R>
+    /// Submits a blocking task to the worker. If the worker is shutting down, the task will be ignored.
+    pub(crate) fn spawn_blocking<F, R>(&self, body: F) -> JoinHandle<R>
     where
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
         let identity = Arc::clone(&self.pool.identity);
-        let (task, join_handle) = prepare_system(body);
+        let (task, join_handle) = prepare_blocking(body);
         let task = move || {
-            let _scope = SystemTaskScope::enter(identity);
+            let _scope = BlockingTaskScope::enter(identity);
             task();
         };
 
         if !self.is_shutting_down.load(Ordering::Acquire) && self.pool.execute(task) && self.pool.is_overloaded() && !self.pool.grow() {
             emit!(
                 &self.sink,
-                SystemWorkerPoolSaturated {
+                BlockingWorkerPoolSaturated {
                     max_threads: SystemMetricCount::from(self.pool.max_thread_count()),
                 }
             );
@@ -94,7 +94,7 @@ impl SystemWorker {
         CURRENT_POOL.with_borrow(|current| current.as_ref().is_some_and(|current| Arc::ptr_eq(current, &self.pool.identity)))
     }
 
-    /// Waits for the currently running system tasks to complete.
+    /// Waits for the currently running blocking tasks to complete.
     #[cfg_attr(test, mutants::skip)] // Impractical to test without overly-expensive timeout logic.
     pub(in crate::runtime) fn join(&self) {
         self.pool.join();
@@ -122,11 +122,12 @@ impl WorkerPool {
     /// Queue-growth heuristic following the [`blocking`](https://github.com/smol-rs/blocking/blob/master/src/lib.rs) pool.
     const MAX_TASKS_PER_THREAD: usize = 5;
 
-    /// Default per-pool thread limit for blocking system tasks.
+    /// Default per-pool thread limit for blocking tasks.
     const MAX_THREAD_COUNT_DEFAULT: usize = 64;
 
     pub(in crate::runtime) fn new(max_thread_count: Option<usize>) -> Self {
         // Start with one thread and let the pool grow as needed.
+        // Retain the OS thread name for compatibility with existing diagnostics.
         let thread_pool = ThreadPool::with_name("oxidizer-sys".to_string(), Self::INITIAL_THREAD_COUNT);
 
         Self {
@@ -190,7 +191,7 @@ impl WorkerPool {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
-pub(super) mod system_worker_tests {
+pub(super) mod blocking_worker_tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc::channel;
     use std::sync::{Arc, Mutex};
@@ -201,34 +202,34 @@ pub(super) mod system_worker_tests {
     use observed_testing::{CapturedEvent, TEST_ID, test_emitter};
     use testing_aids::execute_or_abandon;
 
-    use crate::runtime::system_worker::{SystemWorker, WorkerPool};
+    use crate::runtime::blocking_worker::{BlockingWorker, WorkerPool};
 
     #[cfg_attr(test, mutants::skip)]
-    pub(in crate::runtime) fn is_system_worker_shutting_down(worker: &SystemWorker) -> bool {
+    pub(in crate::runtime) fn is_blocking_worker_shutting_down(worker: &BlockingWorker) -> bool {
         worker.is_shutting_down.load(Ordering::Acquire)
     }
 
     #[test]
-    fn system_worker_join_waits_for_tasks_to_complete() {
+    fn blocking_worker_join_waits_for_tasks_to_complete() {
         let events = Arc::new(Mutex::new(Vec::new()));
         let (task_start_tx, task_start_rx) = channel();
 
         let events_clone = Arc::clone(&events);
         let thread_join_handle = thread::spawn(move || {
-            let worker = SystemWorker::new(WorkerPool::new(None), Sink::noop());
+            let worker = BlockingWorker::new(WorkerPool::new(None), Sink::noop());
 
             let events_clone2 = Arc::clone(&events_clone);
-            drop(worker.spawn_system(move || {
+            drop(worker.spawn_blocking(move || {
                 events_clone2.lock().unwrap().push("task started");
                 task_start_tx.send(()).unwrap();
                 events_clone2.lock().unwrap().push("task finished");
             }));
 
-            // The sender lives only inside the system task. A worker that never runs
+            // The sender lives only inside the blocking task. A worker that never runs
             // the task drops it (and its sender) instead, so `recv` observes an
             // immediate disconnect and this test fails deterministically rather than
             // hanging.
-            task_start_rx.recv().expect("the worker must run the system task");
+            task_start_rx.recv().expect("the worker must run the blocking task");
 
             worker.shutdown();
             worker.join();
@@ -247,7 +248,7 @@ pub(super) mod system_worker_tests {
     }
 
     #[test]
-    fn system_worker_shutdown_prevents_new_tasks() {
+    fn blocking_worker_shutdown_prevents_new_tasks() {
         struct WorkItem {
             dropped: Arc<AtomicBool>,
             work_done: Arc<AtomicBool>,
@@ -268,7 +269,7 @@ pub(super) mod system_worker_tests {
         let dropped = Arc::new(AtomicBool::new(false));
         let work_done = Arc::new(AtomicBool::new(false));
 
-        let worker = SystemWorker::new(WorkerPool::new(None), Sink::noop());
+        let worker = BlockingWorker::new(WorkerPool::new(None), Sink::noop());
 
         worker.shutdown();
 
@@ -277,7 +278,7 @@ pub(super) mod system_worker_tests {
             work_done: Arc::clone(&work_done),
         };
 
-        let task = worker.spawn_system(move || {
+        let task = worker.spawn_blocking(move || {
             work_item.do_work();
         });
 
@@ -343,7 +344,7 @@ pub(super) mod system_worker_tests {
                 .build()
                 .unwrap();
             let scheduler = runtime.task_scheduler().spawn(async |cx| cx.scheduler().clone()).wait();
-            let worker = Arc::clone(scheduler.system_worker());
+            let worker = Arc::clone(scheduler.blocking_worker());
             drop(runtime);
             assert!(worker.pool.pool.lock().unwrap().is_none());
         })
@@ -429,13 +430,13 @@ pub(super) mod system_worker_tests {
         event.dimensions().into_iter().find(|(k, _)| k == key).map(|(_, v)| v)
     }
 
-    /// Runs `spawn_system` against a pool of the given size, holding one worker
+    /// Runs `spawn_blocking` against a pool of the given size, holding one worker
     /// thread busy while `queued_task_count` further tasks are spawned, and returns
     /// the telemetry captured while the saturation guard was evaluated on each spawn.
     #[cfg_attr(test, mutants::skip)] // Test-only helper.
-    fn spawn_system_telemetry(max_thread_count: Option<usize>, queued_task_count: usize) -> Vec<CapturedEvent> {
+    fn spawn_blocking_telemetry(max_thread_count: Option<usize>, queued_task_count: usize) -> Vec<CapturedEvent> {
         let (sink, processor) = test_emitter(TEST_ID);
-        let worker = SystemWorker::new(WorkerPool::new(max_thread_count), sink);
+        let worker = BlockingWorker::new(WorkerPool::new(max_thread_count), sink);
 
         // Occupy the pool's single initial thread with a task that blocks until released,
         // so every task spawned afterwards stays queued and counts towards the overload
@@ -444,7 +445,7 @@ pub(super) mod system_worker_tests {
         let (release_tx, release_rx) = Event::<()>::boxed();
         let release_rx = Arc::new(Mutex::new(Some(release_rx)));
 
-        drop(worker.spawn_system({
+        drop(worker.spawn_blocking({
             let release_rx = Arc::clone(&release_rx);
             move || {
                 blocker_started_tx.send(()).unwrap();
@@ -463,7 +464,7 @@ pub(super) mod system_worker_tests {
 
         // Each spawn re-evaluates the saturation guard; capture whatever it emits.
         for _ in 0..queued_task_count {
-            drop(worker.spawn_system(|| {}));
+            drop(worker.spawn_blocking(|| {}));
         }
 
         let events = processor.events();
@@ -477,9 +478,9 @@ pub(super) mod system_worker_tests {
     }
 
     #[test]
-    fn spawn_system_reports_saturation_when_overloaded_pool_cannot_grow() {
+    fn spawn_blocking_reports_saturation_when_overloaded_pool_cannot_grow() {
         // A pool capped at one thread cannot grow, so overloading it must surface saturation.
-        let events = spawn_system_telemetry(Some(1), WorkerPool::MAX_TASKS_PER_THREAD + 1);
+        let events = spawn_blocking_telemetry(Some(1), WorkerPool::MAX_TASKS_PER_THREAD + 1);
 
         let saturated: Vec<_> = events
             .iter()
@@ -494,11 +495,11 @@ pub(super) mod system_worker_tests {
     }
 
     #[test]
-    fn spawn_system_stays_quiet_when_maxed_out_pool_is_not_overloaded() {
+    fn spawn_blocking_stays_quiet_when_maxed_out_pool_is_not_overloaded() {
         // A pool at its maximum size that is not overloaded must stay quiet: saturation is
         // only reported when an overload coincides with an inability to grow, never on the
         // inability to grow alone.
-        let events = spawn_system_telemetry(Some(1), 1);
+        let events = spawn_blocking_telemetry(Some(1), 1);
 
         assert!(
             events
