@@ -1,5 +1,11 @@
 # Runtime benchmark report
 
+**Historical baseline:** these measurements belong to the pinned revision below.
+The later direct task-registration optimization, timeout workload, telemetry
+handle-storage change, and lifecycle fixes are not measured by this report.
+No replacement numbers are claimed; rerun the documented command on the desired
+revision for a current comparison.
+
 On this Windows host, Tokio was faster for ordinary, local, and nested task
 scheduling. Arty was faster for the blocking-pool cases. Timer results were
 dominated by host timer granularity. These are measurements of the initial
@@ -25,7 +31,7 @@ cargo +1.95 bench -p arty --features rt --bench arty_scheduling --bench arty_tel
 Both targets use `#[metabench::benchmark]` and `metabench::main!`.
 Metabench writes `report.json`, `report.md`, and raw engine artifacts under
 `target\metabench\arty_scheduling` and `target\metabench\arty_telemetry`.
-[benchmarks.json](benchmarks.json) retains the measured values and confidence
+[benchmarks.json](https://github.com/microsoft/oxidizer/blob/590799f4be8eba435cd0e1ddcd9ba31d58a6c4b5/crates/arty/docs/benchmarks.json) retains the measured values and confidence
 bounds used for this report without machine-specific artifact paths.
 Metabench's `UNCOMPARED` status refers to the absence of a historical baseline;
 the Arty/Tokio ratios below are calculated from the paired cases in this run.

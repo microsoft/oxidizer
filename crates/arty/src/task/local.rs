@@ -1,0 +1,261 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+use std::cell::RefCell;
+use std::marker::PhantomData;
+use std::rc::Rc;
+use std::sync::Arc;
+
+use arty_executor::TaskSet;
+use observed::{Sink, emit};
+
+use crate::runtime::telemetry::events::{PlacementLabel, TaskSpawned};
+use crate::task::execution::prepare_local;
+use crate::task::join::LocalJoinHandle;
+
+thread_local! {
+    // TaskSet contains a non-atomic weak reference and must also be dropped on its owner.
+    static LOCAL_TASKS: RefCell<Option<RegisteredLocalTasks>> = const { RefCell::new(None) };
+}
+
+#[derive(Debug)]
+struct RegisteredLocalTasks {
+    identity: Arc<()>,
+    tasks: Option<TaskSet>,
+}
+
+/// Keeps executor ownership local even when every `Builtins` handle leaves the worker.
+#[derive(Debug)]
+pub(crate) struct LocalTaskScope {
+    _not_send: PhantomData<Rc<()>>,
+}
+
+impl LocalTaskScope {
+    pub(crate) fn new() -> Self {
+        LOCAL_TASKS.with_borrow_mut(|registered| {
+            assert!(registered.is_none(), "a worker already owns this thread's local executor");
+            *registered = Some(RegisteredLocalTasks {
+                identity: Arc::new(()),
+                tasks: None,
+            });
+        });
+        Self { _not_send: PhantomData }
+    }
+
+    pub(crate) fn close(&self) {
+        let tasks =
+            LOCAL_TASKS.with_borrow_mut(|registered| registered.as_mut().expect("local task scope is installed until drop").tasks.take());
+        drop(tasks);
+    }
+}
+
+impl Drop for LocalTaskScope {
+    fn drop(&mut self) {
+        drop(LOCAL_TASKS.with_borrow_mut(Option::take));
+    }
+}
+
+/// Portable identity, with no thread-local executor state in its ownership graph.
+#[derive(Debug, Clone)]
+pub(crate) struct LocalTaskBinding {
+    identity: Arc<()>,
+    sink: Sink,
+}
+
+impl LocalTaskBinding {
+    pub(crate) fn new(tasks: TaskSet, sink: Sink) -> Self {
+        let identity = LOCAL_TASKS.with_borrow_mut(|registered| {
+            let registered = registered.as_mut().expect("the worker owns a local executor scope");
+            assert!(registered.tasks.is_none(), "local scheduler initialized more than once");
+            registered.tasks = Some(tasks);
+            Arc::clone(&registered.identity)
+        });
+        Self { identity, sink }
+    }
+
+    pub(crate) fn local_scheduler(&self) -> Option<LocalTaskScheduler> {
+        LOCAL_TASKS.with_borrow(|registered| {
+            let registered = registered.as_ref()?;
+            Arc::ptr_eq(&self.identity, &registered.identity).then(|| LocalTaskScheduler {
+                binding: self.clone(),
+                _not_send_sync: PhantomData,
+            })
+        })
+    }
+}
+
+/// Scheduler for local, potentially non-`Send` tasks and results.
+///
+/// Obtain an owned scheduler through [`Builtins::local_scheduler`](crate::runtime::Builtins::local_scheduler)
+/// on the associated worker. The scheduler is neither [`Send`] nor [`Sync`].
+/// Cloning it does not keep the worker running.
+///
+/// ```
+/// use std::rc::Rc;
+///
+/// arty::runtime::Runtime::new().unwrap().run(async |cx| {
+///     let value = Rc::new(42);
+///     let result = cx
+///         .local_scheduler()
+///         .unwrap()
+///         .spawn(async move || value)
+///         .await;
+///     assert_eq!(*result, 42);
+/// });
+/// ```
+#[derive(Debug, Clone)]
+pub struct LocalTaskScheduler {
+    binding: LocalTaskBinding,
+    _not_send_sync: PhantomData<Rc<()>>,
+}
+
+impl LocalTaskScheduler {
+    fn tasks(&self) -> Option<TaskSet> {
+        LOCAL_TASKS.with_borrow(|registered| {
+            let registered = registered.as_ref().expect("local scheduler's worker is not running on this thread");
+            assert!(
+                Arc::ptr_eq(&self.binding.identity, &registered.identity),
+                "local scheduler belongs to a different worker"
+            );
+            registered.tasks.clone()
+        })
+    }
+
+    /// Starts a local task, creating its future immediately on the current worker.
+    #[doc = include_str!("../../docs/snippets/local_task.md")]
+    ///
+    /// # Panics
+    ///
+    /// Panics before invoking the factory if its worker is no longer running.
+    /// During shutdown, a still-valid token returns a pending, disconnected join
+    /// without invoking the factory.
+    pub fn spawn<FF, F, R>(&self, future_factory: FF) -> LocalJoinHandle<R>
+    where
+        FF: FnOnce() -> F + 'static,
+        F: Future<Output = R> + 'static,
+        R: 'static,
+    {
+        // Release the TLS borrow before invoking user code, which may spawn recursively.
+        let Some(tasks) = self.tasks() else {
+            let (sender, receiver) = events_once::LocalEvent::boxed();
+            drop(sender);
+            return LocalJoinHandle::new(receiver);
+        };
+        let future = future_factory();
+        let parent = self.binding.sink.transfer_context();
+        let (future, handle) = prepare_local(future, parent, self.binding.sink.clone());
+        emit!(
+            &self.binding.sink,
+            TaskSpawned {
+                placement: PlacementLabel("local")
+            }
+        );
+        drop(tasks.add(future));
+        handle
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+mod tests {
+    use std::cell::Cell;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::thread;
+
+    use super::*;
+
+    #[test]
+    fn local_scheduler_tokens_are_thread_confined_but_bindings_are_portable() {
+        static_assertions::assert_not_impl_any!(LocalTaskScheduler: Send, Sync);
+        static_assertions::assert_impl_all!(LocalTaskScheduler: Clone);
+        static_assertions::assert_not_impl_any!(LocalTaskScope: Send, Sync);
+        static_assertions::assert_impl_all!(LocalTaskBinding: Send, Sync, Clone);
+    }
+
+    fn scope_binding() -> LocalTaskBinding {
+        LOCAL_TASKS.with_borrow(|registered| LocalTaskBinding {
+            identity: Arc::clone(&registered.as_ref().unwrap().identity),
+            sink: Sink::noop(),
+        })
+    }
+
+    #[test]
+    fn local_scope_can_be_recreated_on_the_same_thread() {
+        let scope = LocalTaskScope::new();
+        drop(scope);
+        let _replacement = LocalTaskScope::new();
+    }
+
+    #[test]
+    fn portable_binding_can_leave_and_reenter_its_scope() {
+        let _scope = LocalTaskScope::new();
+        let binding = scope_binding();
+        let binding = thread::spawn(move || {
+            assert!(binding.local_scheduler().is_none());
+            drop(binding.clone());
+            binding
+        })
+        .join()
+        .unwrap();
+        assert!(binding.local_scheduler().is_some());
+    }
+
+    #[test]
+    fn portable_binding_cannot_acquire_a_token_from_another_scope() {
+        let _scope = LocalTaskScope::new();
+        let binding = scope_binding();
+        thread::spawn(move || {
+            let _other_scope = LocalTaskScope::new();
+            assert!(binding.local_scheduler().is_none());
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn portable_bindings_can_be_dropped_during_and_after_scope_shutdown() {
+        let scope = LocalTaskScope::new();
+        let binding = scope_binding();
+        let retained = binding.clone();
+        thread::scope(|threads| {
+            threads.spawn(move || drop(binding));
+            drop(scope);
+        });
+        thread::spawn(move || assert!(retained.local_scheduler().is_none())).join().unwrap();
+    }
+
+    fn assert_rejected_before_factory(scheduler: &LocalTaskScheduler) {
+        let invoked = Rc::new(Cell::new(false));
+        let captured = Rc::clone(&invoked);
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            scheduler.spawn(move || {
+                captured.set(true);
+                async {}
+            })
+        }));
+        result.unwrap_err();
+        assert!(!invoked.get());
+    }
+
+    #[test]
+    fn retained_local_tokens_do_not_keep_the_scope_alive() {
+        let scope = LocalTaskScope::new();
+        let binding = scope_binding();
+        let scheduler = binding.local_scheduler().unwrap();
+        drop(scope);
+        assert!(binding.local_scheduler().is_none());
+        assert_rejected_before_factory(&scheduler);
+    }
+
+    #[test]
+    fn retained_local_tokens_cannot_submit_to_a_replacement_scope() {
+        let scope = LocalTaskScope::new();
+        let binding = scope_binding();
+        let scheduler = binding.local_scheduler().unwrap();
+        drop(scope);
+        let _replacement = LocalTaskScope::new();
+        assert!(binding.local_scheduler().is_none());
+        assert!(scope_binding().local_scheduler().is_some());
+        assert_rejected_before_factory(&scheduler);
+    }
+}

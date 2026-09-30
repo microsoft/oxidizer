@@ -6,10 +6,9 @@
 use std::num::NonZeroUsize;
 use std::time::Duration;
 
-use arty::rt::Runtime;
-use arty::rt::config::ProcessorCount;
+use arty::runtime::{ProcessorCount, Runtime};
 
-fn main() -> arty::rt::Result<()> {
+fn main() -> Result<(), arty::runtime::Error> {
     let runtime = Runtime::builder()
         .processor_count(ProcessorCount::at_most(NonZeroUsize::new(2).expect("two is nonzero")))
         .build()?;

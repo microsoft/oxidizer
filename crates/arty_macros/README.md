@@ -15,9 +15,9 @@
 
 Entry-point macros for [`arty`][__link0].
 
-Enable the `macros` feature in Arty and use `#[arty::rt::main]` or `#[arty::rt::test]`.
-Each annotated asynchronous function takes one `arty::rt::Builtins` argument.
-Use `runtime_path = ::renamed_arty::rt` for a renamed or re-exported runtime.
+Enable the `macros` feature in Arty and use `#[arty::runtime::main]` or `#[arty::runtime::test]`.
+Each annotated asynchronous function takes one `arty::runtime::Builtins` argument.
+Use `runtime_path = ::renamed_arty::runtime` for a renamed or re-exported runtime.
 
 
 <hr/>

@@ -13,8 +13,8 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::Duration;
 
-use arty::rt::config::{ProcessorCount, WorkerPoolPolicy};
-use arty::rt::{Runtime, TaskScheduler};
+use arty::runtime::{ProcessorCount, Runtime, WorkerPoolPolicy};
+use arty::task::{JoinHandle, TaskScheduler};
 use criterion::{BenchmarkId, Criterion, Throughput};
 use data_privacy::RedactionEngine;
 use observed::metadata::{EventDescription, FieldDescriptor};
@@ -64,6 +64,7 @@ fn runtime(sink: Sink) -> Runtime {
 struct Case {
     _runtime: Runtime,
     scheduler: TaskScheduler,
+    handles: Vec<JoinHandle<()>>,
     count: usize,
 }
 
@@ -71,34 +72,37 @@ impl Case {
     fn new(count: usize, active: bool) -> Self {
         let runtime = runtime(if active { active_sink() } else { Sink::noop() });
         let scheduler = runtime.task_scheduler();
-        let case = Self {
+        let mut case = Self {
             _runtime: runtime,
             scheduler,
+            handles: Vec::with_capacity(count),
             count,
         };
         case.spawn();
         case
     }
 
-    fn spawn(&self) {
-        let handles: Vec<_> = (0..self.count).map(|_| self.scheduler.spawn(async |_| black_box(()))).collect();
-        for handle in handles {
-            handle.wait();
+    fn spawn(&mut self) {
+        self.handles.clear();
+        self.handles
+            .extend((0..self.count).map(|_| self.scheduler.spawn(async |_| black_box(()))));
+        for handle in &mut self.handles {
+            futures::executor::block_on(black_box(handle));
         }
     }
 }
 
 #[metabench::benchmark(NOOP, "arty_telemetry/spawn", "noop")]
-#[bench::one(&Case::new(1, false))]
-#[bench::hundred(&Case::new(100, false))]
-fn noop(case: &Case) {
+#[bench::one(&mut Case::new(1, false))]
+#[bench::hundred(&mut Case::new(100, false))]
+fn noop(case: &mut Case) {
     case.spawn();
 }
 
 #[metabench::benchmark(ACTIVE, "arty_telemetry/spawn", "active")]
-#[bench::one(&Case::new(1, true))]
-#[bench::hundred(&Case::new(100, true))]
-fn active(case: &Case) {
+#[bench::one(&mut Case::new(1, true))]
+#[bench::hundred(&mut Case::new(100, true))]
+fn active(case: &mut Case) {
     case.spawn();
 }
 
@@ -125,12 +129,12 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     for (count, name) in [(1, "one"), (100, "hundred")] {
         group.throughput(Throughput::Elements(u64::try_from(count).expect("benchmark counts fit in u64")));
         group.bench_function(BenchmarkId::new(NOOP.benchmark_name(), name), |bencher| {
-            let case = Case::new(count, false);
-            bencher.iter(|| noop(&case));
+            let mut case = Case::new(count, false);
+            bencher.iter(|| noop(&mut case));
         });
         group.bench_function(BenchmarkId::new(ACTIVE.benchmark_name(), name), |bencher| {
-            let case = Case::new(count, true);
-            bencher.iter(|| active(&case));
+            let mut case = Case::new(count, true);
+            bencher.iter(|| active(&mut case));
         });
     }
     group.finish();

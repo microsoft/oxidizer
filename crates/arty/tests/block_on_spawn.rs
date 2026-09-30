@@ -4,11 +4,10 @@
 //! Scoped execution preserves owned and borrowed captures.
 
 #![cfg(feature = "rt")]
-#![cfg(not(miri))] // The runtime talks to the real OS, which Miri cannot do.
 
 testing_aids::init_tracing!();
 
-use arty::rt::Runtime;
+use arty::runtime::Runtime;
 
 #[test]
 fn capture_by_value() {

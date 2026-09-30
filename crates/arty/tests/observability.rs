@@ -10,18 +10,13 @@
 //! our metadata is wired correctly through a real runtime, not that `observed`
 //! itself works.
 
-// These tests build a real runtime, which pins its async workers to real
-// processors via `thread_aware`, which Miri cannot
-// provide (it reports "Not enough processors available" under isolation). The
-// runtime, not `observed`'s timestamping, is what keeps them off Miri.
-#![cfg(not(miri))]
+// Native runs use real processors; Miri uses the test-util processor model.
 
 testing_aids::init_tracing!();
 
 use std::num::NonZeroUsize;
 
-use arty::rt::Runtime;
-use arty::rt::config::ProcessorCount;
+use arty::runtime::{ProcessorCount, Runtime};
 use observed::Value;
 use observed_testing::{CapturedEvent, TEST_ID, test_emitter};
 
@@ -116,7 +111,7 @@ fn async_worker_os_threads_report_lifecycle() {
 
     for event in events_named(&events, "oxidizer.rt.thread.started") {
         assert!(dimension(event, "thread.name").is_some(), "a started thread carries its name");
-        assert!(dimension(event, "thread.id").is_some(), "a started thread carries its id");
+        assert!(dimension(event, "arty.thread.id").is_some(), "a started thread carries its id");
     }
 }
 

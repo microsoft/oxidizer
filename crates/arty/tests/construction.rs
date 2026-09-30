@@ -4,27 +4,24 @@
 //! Runtime construction errors and startup telemetry.
 
 #![cfg(feature = "rt")]
-// Processor discovery uses native hardware APIs that Miri cannot provide.
-#![cfg(not(miri))]
+// Under Miri, test-util supplies a processor model for the same selection logic.
 
 testing_aids::init_tracing!();
 
 use std::error::Error as StdError;
 use std::num::NonZeroUsize;
 
-use arty::rt::config::{BuildError, ProcessorCount};
-use arty::rt::{Error, Runtime};
+use arty::runtime::{Error, ProcessorCount, Runtime};
 use observed_testing::{CapturedEvent, TEST_ID, test_emitter};
 
 #[test]
 fn unavailable_processors_return_a_typed_construction_error() {
-    let error: BuildError = Runtime::builder()
+    let error: Error = Runtime::builder()
         .processor_count(ProcessorCount::exactly(NonZeroUsize::MAX))
         .build()
         .unwrap_err();
-    let error = Error::from(error);
-
-    assert!(error.source().unwrap().is::<BuildError>());
+    assert!(error.to_string().contains(&usize::MAX.to_string()));
+    assert!(error.source().is_some());
 }
 
 #[test]

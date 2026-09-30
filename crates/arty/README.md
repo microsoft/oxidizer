@@ -16,13 +16,13 @@
 Thread-aware, thread-per-core application runtime.
 
 Each worker has a single-threaded executor: a task remains on its original worker for its
-entire lifetime. An `arty::rt::Runtime` owns worker startup and shutdown. Its
+entire lifetime. An `arty::runtime::Runtime` owns worker startup and shutdown. Its
 `task_scheduler()` distributes work round-robin, while a task’s
 `Builtins::scheduler` preserves worker affinity. Futures are constructed on the destination
 worker and need not be [`Send`][__link0].
 
 ```rust
-use arty::rt::Runtime;
+use arty::runtime::Runtime;
 
 let runtime = Runtime::new().unwrap();
 let scheduler = runtime.task_scheduler();
@@ -40,11 +40,12 @@ not provide asynchronous I/O drivers or memory pools. External I/O integration t
 
 No features are enabled by default.
 
-* **`rt`** - Enables the runtime and implies `time`.
-* **`macros`** - Enables `#[arty::rt::main]` and `#[arty::rt::test]` and implies `rt`.
+* **`rt`** - Enables `arty::runtime` and `arty::task`, and implies `time`.
+* **`macros`** - Enables `#[arty::runtime::main]` and `#[arty::runtime::test]` and implies `rt`.
 * **`time`** - Exposes time primitives through `arty::time`.
 * **`test-util`** - Enables test-only runtime utilities. With `time`, this includes
-  `arty::time::ClockControl`.
+  `arty::time::ClockControl`. Under Miri, runtime tests use a simulated
+  six-processor topology instead of native processor discovery and pinning.
 
 ## Project policies
 
@@ -59,7 +60,7 @@ No features are enabled by default.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbHWTsDZa9e_YbegJQjwQaHsob8nbbqcA3G20bq5dcQAEvBKVhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbP_9JwABjSKsbOl-xqQMZl1Ybp-dlf7SSmOcb_9cVDnBOfyFhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link1]: https://crates.io/crates/arty_io_core/0.2.0
  [__link2]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/DESIGN.md

@@ -4,13 +4,13 @@
 //! Schedulers remain usable when stored in application and thread-local state.
 
 #![cfg(feature = "rt")]
-#![cfg(not(miri))] // The runtime talks to the real OS, which Miri cannot do.
 
 testing_aids::init_tracing!();
 
 use std::cell::RefCell;
 
-use arty::rt::{Runtime, TaskScheduler};
+use arty::runtime::Runtime;
+use arty::task::TaskScheduler;
 use testing_aids::execute_or_terminate_process;
 
 #[test]
@@ -64,26 +64,29 @@ fn stash_scheduler() {
             })
             .wait();
 
-        runtime.task_scheduler().spawn(async move |cx| {
-            // We store the scheduler in a thread-local variable.
-            THREAD_LOCAL_STASH.with_borrow_mut(|stash| {
-                *stash = Some(cx.scheduler().clone());
-            });
+        runtime
+            .task_scheduler()
+            .spawn(async move |cx| {
+                // We store the scheduler in a thread-local variable.
+                THREAD_LOCAL_STASH.with_borrow_mut(|stash| {
+                    *stash = Some(cx.scheduler().clone());
+                });
 
-            // And we try to use it from another task on the same thread.
-            let result = cx
-                .local_scheduler()
-                .expect("On the same thread as cx")
-                .spawn(async move || {
-                    let scheduler = THREAD_LOCAL_STASH.with_borrow(|stash| stash.clone().unwrap());
+                // And we try to use it from another task on the same thread.
+                let result = cx
+                    .local_scheduler()
+                    .expect("On the same thread as cx")
+                    .spawn(async move || {
+                        let scheduler = THREAD_LOCAL_STASH.with_borrow(|stash| stash.clone().unwrap());
 
-                    // It works, right? Right.
-                    scheduler.spawn(async move |_| 49).await
-                })
-                .await;
+                        // It works, right? Right.
+                        scheduler.spawn(async move |_| 49).await
+                    })
+                    .await;
 
-            assert_eq!(result, 49);
-        });
+                assert_eq!(result, 49);
+            })
+            .wait();
     });
 }
 

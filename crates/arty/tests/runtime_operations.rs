@@ -11,8 +11,8 @@ testing_aids::init_tracing!();
 use std::num::NonZeroUsize;
 use std::thread;
 
-use arty::rt::config::ProcessorCount;
-use arty::rt::{JoinHandle, Runtime, RuntimeOperations};
+use arty::runtime::{ProcessorCount, Runtime, RuntimeOperations};
+use arty::task::JoinHandle;
 use many_cpus::{ProcessorId, SystemHardware};
 use thread_aware::ThreadAware;
 

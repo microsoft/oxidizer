@@ -4,15 +4,14 @@
 //! Runtime-bound services retain coherent worker and pool associations.
 
 #![cfg(feature = "rt")]
-#![cfg(not(miri))] // The runtime talks to the real OS, which Miri cannot do.
 
 testing_aids::init_tracing!();
 
 use std::num::NonZeroUsize;
 use std::thread::{self, ThreadId};
 
-use arty::rt::config::{ProcessorCount, WorkerPoolPolicy};
-use arty::rt::{Builtins, JoinHandle, Runtime};
+use arty::runtime::{Builtins, ProcessorCount, Runtime, WorkerPoolPolicy};
+use arty::task::JoinHandle;
 use futures::future::join_all;
 use testing_aids::execute_or_terminate_process;
 use thread_aware::ThreadAware;

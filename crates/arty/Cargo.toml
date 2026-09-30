@@ -45,7 +45,6 @@ macros = ["rt", "dep:arty_macros"]
 rt = [
     "time",
     "dep:arty_executor",
-    "dep:async-lock",
     "dep:data_privacy",
     "dep:derive_more",
     "dep:events_once",
@@ -59,13 +58,12 @@ rt = [
     "dep:threadpool",
 ]
 time = ["dep:tick"]
-test-util = ["tick?/test-util"]
+test-util = ["tick?/test-util", "many_cpus?/test-util"]
 
 [dependencies]
 arty_executor = { workspace = true, optional = true }
 arty_io_core = { workspace = true }
 arty_macros = { workspace = true, optional = true }
-async-lock = { workspace = true, features = ["std"], optional = true }
 data_privacy = { workspace = true, optional = true }
 derive_more = { workspace = true, features = ["debug"], optional = true }
 events_once = { workspace = true, optional = true }
@@ -84,7 +82,6 @@ tick = { workspace = true, optional = true }
 all_the_time = { workspace = true }
 arty_executor = { path = "../arty_executor", features = ["test-util"] }
 arty_macros = { path = "../arty_macros" }
-async-lock = { workspace = true, features = ["std"] }
 criterion = { workspace = true }
 ctor = { workspace = true }
 data_privacy = { path = "../data_privacy" }
@@ -92,7 +89,7 @@ derive_more = { workspace = true, features = ["debug"] }
 events_once = { workspace = true }
 foldhash = { workspace = true, features = ["std"] }
 futures = { workspace = true, features = ["executor", "async-await"] }
-many_cpus = { workspace = true }
+many_cpus = { workspace = true, features = ["test-util"] }
 metabench = { path = "../metabench" }
 mockall = { workspace = true }
 mutants = { workspace = true }

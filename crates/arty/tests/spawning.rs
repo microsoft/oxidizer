@@ -4,14 +4,16 @@
 //! Retained asynchronous, local, and system task submission behavior.
 
 #![cfg(feature = "rt")]
-#![cfg(not(miri))] // Native processor discovery is exercised by integration tests.
 
+#[cfg(not(miri))]
 use std::num::NonZeroUsize;
 use std::rc::Rc;
 use std::thread;
 
-use arty::rt::Runtime;
-use arty::rt::config::ProcessorCount;
+#[cfg(not(miri))]
+use arty::runtime::ProcessorCount;
+use arty::runtime::Runtime;
+#[cfg(not(miri))]
 use many_cpus::SystemHardware;
 use testing_aids::{YieldFuture, execute_or_terminate_process};
 
@@ -71,6 +73,7 @@ fn spawn_some_tasks() {
 }
 
 #[test]
+#[cfg(not(miri))]
 fn test_worker_affinity() {
     if SystemHardware::current().processors().len() < 6 {
         eprintln!("requires six processors; two-worker affinity is covered by runtime_contracts");
@@ -101,7 +104,7 @@ fn remote_factories_create_non_send_futures_on_the_worker() {
     let runtime = Runtime::new().unwrap();
     let (created, polled, associated) = runtime
         .task_scheduler()
-        .spawn(|cx: arty::rt::Builtins| {
+        .spawn(|cx: arty::runtime::Builtins| {
             let value = Rc::new(thread::current().id());
             let associated = cx.thread().id();
             async move {

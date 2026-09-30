@@ -4,12 +4,11 @@
 //! Runtime test attributes preserve asynchronous bodies and return values.
 
 #![cfg(feature = "rt")]
-#![cfg(not(miri))] // The runtime talks to the real OS, which Miri cannot do.
 #![cfg(feature = "macros")]
 
 testing_aids::init_tracing!();
 
-use arty::rt::{Builtins, test};
+use arty::runtime::{Builtins, test};
 
 #[test]
 async fn simple_main(cx: Builtins) {

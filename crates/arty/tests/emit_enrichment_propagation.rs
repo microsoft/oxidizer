@@ -6,11 +6,9 @@
 //! Integration tests verifying that enrichment context propagates automatically
 //! through all spawn paths when the runtime is built with `.sink()`.
 
-#![cfg(not(miri))] // The runtime talks to the real OS, which Miri cannot do.
-
 testing_aids::init_tracing!();
 
-use arty::rt::{Builtins, Runtime};
+use arty::runtime::{Builtins, Runtime};
 use observed::enrichment::EnrichFutureExt;
 use observed::{Enrichment, Sink};
 
@@ -196,4 +194,58 @@ fn nested_spawn_preserves_enrichment_chain() {
     // Level-2 should see both outer and inner enrichments.
     result.sort();
     assert_eq!(result, ["inner", "outer"]);
+}
+
+#[test]
+fn task_outcomes_keep_the_submission_context() {
+    use std::panic::AssertUnwindSafe;
+
+    for local in [false, true] {
+        for panics in [false, true] {
+            let (sink, processor) = observed_testing::test_emitter(observed_testing::TEST_ID);
+            let runtime = runtime_with_emitter(&sink);
+            let outcome = runtime
+                .task_scheduler()
+                .spawn({
+                    let sink = sink.clone();
+                    async move |cx| {
+                        async {
+                            if local {
+                                let task = cx.local_scheduler().unwrap().spawn(async move || {
+                                    assert!(!panics, "local task panic");
+                                });
+                                futures::FutureExt::catch_unwind(AssertUnwindSafe(task)).await
+                            } else {
+                                let task = cx.scheduler().spawn(async move |_| {
+                                    assert!(!panics, "remote task panic");
+                                });
+                                futures::FutureExt::catch_unwind(AssertUnwindSafe(task)).await
+                            }
+                        }
+                        .enrich(&sink, RequestCtx::new(42))
+                        .await
+                    }
+                })
+                .wait();
+            assert_eq!(outcome.is_err(), panics);
+            drop(runtime);
+            let expected_name = if panics {
+                "oxidizer.rt.task.panicked"
+            } else {
+                "oxidizer.rt.task.succeeded"
+            };
+            let correlated = processor
+                .events()
+                .into_iter()
+                .filter(|event| {
+                    event.name() == expected_name
+                        && event
+                            .dimensions()
+                            .iter()
+                            .any(|(key, value)| key == "request.id" && value == &observed::Value::from("42"))
+                })
+                .count();
+            assert_eq!(correlated, 1);
+        }
+    }
 }

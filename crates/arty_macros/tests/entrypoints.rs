@@ -47,10 +47,32 @@ async fn runtime_test(cx: fixture::Builtins) {
     assert_eq!(cx.0, 41);
 }
 
+trait HasContext {
+    type Context;
+}
+
+struct App;
+
+impl HasContext for App {
+    type Context = fixture::Builtins;
+}
+
+#[arty_macros::main(runtime_path = crate::fixture)]
+async fn qualified_main(cx: <App as HasContext>::Context) -> usize {
+    cx.0
+}
+
+#[arty_macros::test(runtime_path = crate::fixture)]
+async fn qualified_test(cx: <App as HasContext>::Context) {
+    assert_eq!(cx.0, 41);
+}
+
 #[test]
 fn expanded_entry_points_exist_and_execute() {
     assert_eq!(entrypoint(), 42);
     runtime_test();
+    assert_eq!(qualified_main(), 41);
+    qualified_test();
 }
 
 #[test]

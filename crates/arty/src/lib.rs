@@ -10,7 +10,7 @@
 //! Thread-aware, thread-per-core application runtime.
 //!
 //! Each worker has a single-threaded executor: a task remains on its original worker for its
-//! entire lifetime. An `arty::rt::Runtime` owns worker startup and shutdown. Its
+//! entire lifetime. An `arty::runtime::Runtime` owns worker startup and shutdown. Its
 //! `task_scheduler()` distributes work round-robin, while a task's
 //! `Builtins::scheduler` preserves worker affinity. Futures are constructed on the destination
 //! worker and need not be [`Send`].
@@ -18,7 +18,7 @@
 //! ```rust
 //! # fn main() {
 //! # #[cfg(feature = "rt")] {
-//! use arty::rt::Runtime;
+//! use arty::runtime::Runtime;
 //!
 //! let runtime = Runtime::new().unwrap();
 //! let scheduler = runtime.task_scheduler();
@@ -38,11 +38,12 @@
 //!
 //! No features are enabled by default.
 //!
-//! - **`rt`** - Enables the runtime and implies `time`.
-//! - **`macros`** - Enables `#[arty::rt::main]` and `#[arty::rt::test]` and implies `rt`.
+//! - **`rt`** - Enables `arty::runtime` and `arty::task`, and implies `time`.
+//! - **`macros`** - Enables `#[arty::runtime::main]` and `#[arty::runtime::test]` and implies `rt`.
 //! - **`time`** - Exposes time primitives through `arty::time`.
 //! - **`test-util`** - Enables test-only runtime utilities. With `time`, this includes
-//!   `arty::time::ClockControl`.
+//!   `arty::time::ClockControl`. Under Miri, runtime tests use a simulated
+//!   six-processor topology instead of native processor discovery and pinning.
 //!
 //! # Project policies
 //!
@@ -54,7 +55,9 @@
 use arty_io_core as _;
 
 #[cfg(any(test, feature = "rt"))]
-pub mod rt;
+pub mod runtime;
+#[cfg(any(test, feature = "rt"))]
+pub mod task;
 
 /// Foundational runtime and thread-awareness types.
 pub mod core {

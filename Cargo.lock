@@ -253,7 +253,6 @@ dependencies = [
  "arty_executor",
  "arty_io_core",
  "arty_macros",
- "async-lock",
  "criterion",
  "ctor",
  "data_privacy",

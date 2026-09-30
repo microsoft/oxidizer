@@ -44,7 +44,7 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
         Ok(args) => args,
         Err(error) => return error.write_errors(),
     };
-    let runtime_path = args.runtime_path.unwrap_or_else(|| parse_quote!(::arty::rt));
+    let runtime_path = args.runtime_path.unwrap_or_else(|| parse_quote!(::arty::runtime));
     let sig = &mut input.sig;
     let mut inputs = sig.inputs.iter();
     let fail = move |error: syn::Error| {
@@ -60,7 +60,7 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
     let syn::Pat::Ident(state_ident) = state.pat.as_ref() else {
         return fail(syn::Error::new_spanned(&state.pat, "argument must have an identifier"));
     };
-    let syn::Type::Path(syn::TypePath { path: state_type, .. }) = state.ty.as_ref() else {
+    let syn::Type::Path(state_type) = state.ty.as_ref() else {
         return fail(syn::Error::new_spanned(&state.ty, "argument type must be Type::Path"));
     };
     if let Some(extra) = inputs.next() {
@@ -99,16 +99,16 @@ mod tests {
         let expansion = main(
             TokenStream::new(),
             quote! {
-                pub async fn main(cx: arty::rt::Builtins) -> Result<(), Error> {
+                pub async fn main(cx: arty::runtime::Builtins) -> Result<(), Error> {
                     run(cx).await
                 }
             },
         );
         assert_snapshot!(render_expansion(&expansion), @r#"
         pub fn main() -> Result<(), Error> {
-            ::arty::rt::Runtime::new()
+            ::arty::runtime::Runtime::new()
                 .expect("failed to create the runtime for the entry point")
-                .run(async move |cx: arty::rt::Builtins| { run(cx).await })
+                .run(async move |cx: arty::runtime::Builtins| { run(cx).await })
         }
         "#);
     }
@@ -185,7 +185,12 @@ mod tests {
     fn malformed_items_and_arguments_report_errors() {
         for (args, input) in [
             (TokenStream::new(), quote!(not a function)),
-            (quote!(@), quote!(async fn run(cx: Builtins) {})),
+            (
+                quote!(@),
+                quote!(
+                    async fn run(cx: Builtins) {}
+                ),
+            ),
             (
                 quote!(runtime_path =),
                 quote!(

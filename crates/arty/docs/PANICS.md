@@ -17,5 +17,11 @@ Catching a task panic does not repair application state or poisoned locks.
 Applications remain responsible for deciding whether to stop after a panic.
 
 Blocking runtime methods, including owner destruction, must not run on an
-asynchronous worker. Scoped execution retains borrowed storage until destruction,
-including when propagating a panic.
+asynchronous worker. A system task may wait for asynchronous work, but cannot
+wait for shutdown of its own runtime. Owner destruction from a system task
+initiates shutdown without self-joining.
+
+Worker startup can still panic when OS thread creation fails. The current
+blocking-pool dependency does not provide fallible construction.
+Scoped execution retains borrowed storage until destruction, including when
+propagating a panic.

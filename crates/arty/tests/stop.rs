@@ -4,14 +4,13 @@
 //! Shutdown cancels pending work and releases its captured resources.
 
 #![cfg(feature = "rt")]
-#![cfg(not(miri))] // The runtime talks to the real OS, which Miri cannot do.
 
 testing_aids::init_tracing!();
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use arty::rt::Runtime;
+use arty::runtime::Runtime;
 use events_once::{BoxedReceiver, Event};
 use testing_aids::execute_or_abandon;
 

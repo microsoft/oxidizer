@@ -23,8 +23,8 @@ use std::task::{Context, Poll, Waker};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use arty::rt::config::{ProcessorCount, WorkerPoolPolicy};
-use arty::rt::{Builtins, JoinHandle, Runtime, TaskScheduler};
+use arty::runtime::{Builtins, ProcessorCount, Runtime, WorkerPoolPolicy};
+use arty::task::{JoinHandle, TaskScheduler};
 use criterion::{BenchmarkId, Criterion, Throughput};
 use metabench::benchmark;
 use tokio::task::{JoinHandle as TokioJoinHandle, LocalSet};
@@ -136,7 +136,9 @@ impl ArtyCase {
             Workload::Yield => self.remote(iterations, async |_| YieldOnce::default().await),
             Workload::Timer => self.remote(iterations, async |cx| cx.clock().delay(Duration::from_millis(1)).await),
             Workload::Timeout => {
-                let operations = iterations * u64::try_from(count).expect("benchmark counts fit in u64");
+                let operations = iterations
+                    .checked_mul(u64::try_from(count).expect("benchmark counts fit in u64"))
+                    .expect("requested benchmark operation count must fit in u64");
                 let start = Instant::now();
                 self.handles.clear();
                 // The detached scheduler round-robins, so consecutive spawns land one per worker.
@@ -258,7 +260,9 @@ impl TokioCase {
             Workload::Yield => self.remote(iterations, async || YieldOnce::default().await),
             Workload::Timer => self.remote(iterations, async || tokio::time::sleep(Duration::from_millis(1)).await),
             Workload::Timeout => {
-                let operations = iterations * u64::try_from(count).expect("benchmark counts fit in u64");
+                let operations = iterations
+                    .checked_mul(u64::try_from(count).expect("benchmark counts fit in u64"))
+                    .expect("requested benchmark operation count must fit in u64");
                 let start = Instant::now();
                 self.handles.clear();
                 self.handles.extend((0..self.workers).map(|_| {
@@ -323,6 +327,7 @@ where
     T: Future<Output = ()>,
     F: FnMut(Duration) -> T,
 {
+    // Stack-pin to keep allocation measurements about timer registration, not boxing.
     let mut background = pin!(timer(BACKGROUND_TIMEOUT));
     arm(background.as_mut()).await;
     for _ in 0..operations {
@@ -450,7 +455,12 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
         for workers in WORKERS {
             for count in COUNTS {
                 let name = format!("{}_w{workers}_n{count}", workload.name());
-                group.throughput(Throughput::Elements(u64::try_from(count).expect("benchmark counts fit in u64")));
+                let elements = if matches!(workload, Workload::Timeout) {
+                    count.checked_mul(workers).expect("benchmark counts fit in usize")
+                } else {
+                    count
+                };
+                group.throughput(Throughput::Elements(u64::try_from(elements).expect("benchmark counts fit in u64")));
                 group.bench_function(BenchmarkId::new(ARTY.benchmark_name(), &name), |bencher| {
                     let mut state = ArtyCase::new(workers, count, workload);
                     bencher.iter_custom(|iterations| arty_workload(&mut state, iterations));

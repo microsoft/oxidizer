@@ -5,11 +5,10 @@
 
 #![cfg(feature = "rt")]
 #![cfg(feature = "macros")]
-#![cfg(not(miri))]
 
 testing_aids::init_tracing!();
 
-use arty::rt::{Builtins, test};
+use arty::runtime::{Builtins, test};
 
 // Validate that when the runtime encounters a panic, it is visible as the test output.
 #[test]

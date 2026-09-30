@@ -4,7 +4,6 @@
 //! Scheduling, wake, lifetime, clock, and shutdown compatibility contracts.
 
 #![cfg(feature = "rt")]
-#![cfg(not(miri))] // Native integration; scoped storage and wake primitives also have isolated coverage.
 
 use std::cell::Cell;
 use std::future::{pending, poll_fn};
@@ -17,8 +16,7 @@ use std::task::{Context, Poll, Waker};
 use std::thread;
 use std::time::Duration;
 
-use arty::rt::Runtime;
-use arty::rt::config::{ProcessorCount, WorkerPoolPolicy};
+use arty::runtime::{ProcessorCount, Runtime, WorkerPoolPolicy};
 use testing_aids::{TEST_TIMEOUT, execute_or_terminate_process};
 use thread_aware::ThreadAware;
 use tick::{ClockControl, FutureExt};
@@ -72,13 +70,14 @@ fn detached_relocation_binds_only_the_notified_clone() {
 #[test]
 fn concurrent_schedulers_share_selection_without_losing_submissions() {
     execute_or_terminate_process(|| {
+        let tasks_per_producer = if cfg!(miri) { 2 } else { 25 };
         let runtime = runtime(2);
         let scheduler = runtime.task_scheduler();
         let results = thread::scope(|scope| {
             let producers = std::array::from_fn::<_, 4, _>(|_| {
                 let scheduler = scheduler.clone();
                 scope.spawn(move || {
-                    (0..25)
+                    (0..tasks_per_producer)
                         .map(|_| scheduler.spawn(async |_| thread::current().id()).wait())
                         .collect::<Vec<_>>()
                 })
@@ -89,8 +88,8 @@ fn concurrent_schedulers_share_selection_without_losing_submissions() {
                 .collect::<Vec<_>>()
         });
         let first = results[0];
-        assert_eq!(results.len(), 100);
-        assert_eq!(results.iter().filter(|id| **id == first).count(), 50);
+        assert_eq!(results.len(), 4 * tasks_per_producer);
+        assert_eq!(results.iter().filter(|id| **id == first).count(), 2 * tasks_per_producer);
         assert_eq!(results.into_iter().collect::<std::collections::HashSet<_>>().len(), 2);
     });
 }
@@ -102,7 +101,7 @@ fn closed_runtime_does_not_invoke_factories_or_complete_cancelled_joins() {
     drop(runtime);
     let invoked = Arc::new(AtomicBool::new(false));
     let captured = Arc::clone(&invoked);
-    let mut join = Box::pin(scheduler.spawn(move |_: arty::rt::Builtins| {
+    let mut join = Box::pin(scheduler.spawn(move |_: arty::runtime::Builtins| {
         captured.store(true, Ordering::Relaxed);
         async {}
     }));
@@ -185,7 +184,7 @@ fn factory_and_poll_panics_preserve_payloads_and_runtime_usability() {
     #[derive(Debug, PartialEq)]
     struct Payload(u32);
 
-    fn panic_factory(_: arty::rt::Builtins) -> std::future::Ready<()> {
+    fn panic_factory(_: arty::runtime::Builtins) -> std::future::Ready<()> {
         panic_any(Payload(1))
     }
     let runtime = runtime(1);
@@ -267,4 +266,88 @@ fn local_non_send_state_is_destroyed_on_its_worker() {
     .unwrap();
     drop(runtime);
     thread::spawn(move || drop(portable)).join().unwrap();
+}
+
+#[test]
+fn cancellation_cleanup_cannot_reenter_the_local_executor() {
+    struct Cleanup {
+        scheduler: arty::task::LocalTaskScheduler,
+        dropped: mpsc::Sender<bool>,
+    }
+
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let invoked = Rc::new(Cell::new(false));
+            let captured = Rc::clone(&invoked);
+            let handle = self.scheduler.spawn(move || {
+                captured.set(true);
+                async {}
+            });
+            drop(handle);
+            self.dropped.send(invoked.get()).unwrap();
+        }
+    }
+
+    execute_or_terminate_process(|| {
+        let runtime = runtime(1);
+        let (started, start) = mpsc::channel();
+        let (dropped, drop_result) = mpsc::channel();
+        let handle = runtime.task_scheduler().spawn(async move |cx| {
+            let cleanup = Cleanup {
+                scheduler: cx.local_scheduler().unwrap(),
+                dropped,
+            };
+            started.send(()).unwrap();
+            pending::<()>().await;
+            drop(cleanup);
+        });
+        start.recv_timeout(TEST_TIMEOUT).unwrap();
+        runtime.stop();
+        runtime.wait();
+        assert!(!drop_result.recv_timeout(TEST_TIMEOUT).unwrap());
+        drop(handle);
+    });
+}
+
+#[test]
+fn a_system_task_can_drop_its_runtime_without_joining_itself() {
+    execute_or_terminate_process(|| {
+        for policy in [WorkerPoolPolicy::isolated(), WorkerPoolPolicy::shared(1)] {
+            let runtime = Runtime::builder()
+                .processor_count(ProcessorCount::exactly(NonZeroUsize::MIN))
+                .worker_pool_policy(policy)
+                .build()
+                .unwrap();
+            let scheduler = runtime.task_scheduler();
+            let (finished, receive) = mpsc::channel();
+            let task = scheduler.spawn_system(move || {
+                drop(runtime);
+                finished.send(()).unwrap();
+            });
+            receive.recv_timeout(TEST_TIMEOUT).unwrap();
+            task.wait();
+        }
+    });
+}
+
+#[test]
+fn repeated_waits_report_one_completed_shutdown() {
+    let (sink, processor) = observed_testing::test_emitter(observed_testing::TEST_ID);
+    let runtime = Runtime::builder()
+        .processor_count(ProcessorCount::exactly(NonZeroUsize::MIN))
+        .sink(sink)
+        .build()
+        .unwrap();
+    runtime.stop();
+    runtime.wait();
+    runtime.wait();
+    drop(runtime);
+    assert_eq!(
+        processor
+            .events()
+            .iter()
+            .filter(|event| event.name() == "oxidizer.rt.stopped")
+            .count(),
+        1
+    );
 }

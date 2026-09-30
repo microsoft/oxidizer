@@ -13,9 +13,9 @@ use std::io;
 use std::num::NonZeroUsize;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 
-use arty::rt::config::{BuildError, ProcessorCount, RuntimeBuilder, WorkerPoolPolicy};
-use arty::rt::{Builtins, Error, JoinHandle, LocalJoinHandle, LocalTaskScheduler, Runtime, RuntimeOperations, TaskScheduler};
-use static_assertions::{assert_impl_all, assert_not_impl_any, assert_type_eq_all};
+use arty::runtime::{Builtins, Error, ProcessorCount, Runtime, RuntimeBuilder, RuntimeOperations, WorkerPoolPolicy};
+use arty::task::{JoinHandle, LocalJoinHandle, LocalTaskScheduler, TaskScheduler};
+use static_assertions::{assert_impl_all, assert_not_impl_any};
 use thread_aware::ThreadAware;
 
 assert_impl_all!(Runtime: Send, Sync, Debug);
@@ -32,10 +32,7 @@ assert_impl_all!(RuntimeOperations: Send, Sync, Clone, Debug, ThreadAware);
 assert_impl_all!(WorkerPoolPolicy: Clone, Debug);
 assert_impl_all!(ProcessorCount: Clone, Copy, Debug, Default);
 assert_impl_all!(Error: StdError, Send, Sync);
-assert_impl_all!(BuildError: StdError, Send, Sync);
-assert_impl_all!(Error: From<BuildError>);
 assert_not_impl_any!(Error: From<io::Error>, From<Box<dyn StdError + Send + Sync>>);
-assert_type_eq_all!(arty::rt::Result<()>, std::result::Result<(), Error>);
 
 const _: fn(NonZeroUsize) -> ProcessorCount = ProcessorCount::exactly;
 const _: fn(NonZeroUsize) -> ProcessorCount = ProcessorCount::at_most;
