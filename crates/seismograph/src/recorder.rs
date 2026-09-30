@@ -2770,7 +2770,7 @@ mod tests {
         configure(enabled);
         let active = recording_observation().unwrap();
         assert_eq!(SESSION_STOPPED_AT.load(Ordering::Acquire), 0);
-        assert_ne!(active.observed_at.ticks(), 0);
+        assert_eq!(Some(active.session), active_recording_session());
 
         configure(Configuration::default());
         let configured_stop = SESSION_STOPPED_AT.load(Ordering::Acquire);
