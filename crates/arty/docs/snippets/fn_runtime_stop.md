@@ -1,5 +1,9 @@
-Signals the runtime that it is time to shut down. The runtime may still operate for a short
-time as it shuts down and cleans up resources. During shutdown, existing and new tasks may
-be ignored by the runtime and silently dropped.
+Requests shutdown without blocking the calling thread.
 
-It is safe to call this function multiple times.
+Repeated requests are allowed. Shutdown cancels asynchronous work, closes admission
+to new tasks, and waits for already accepted blocking work.
+
+Cancelled or rejected tasks leave their joins pending indefinitely. Observe any
+required asynchronous results before requesting shutdown. Use
+[`Runtime::wait`](crate::runtime::Runtime::wait) from an allowed blocking context
+to wait for worker shutdown; that does not complete cancelled joins.

@@ -22,19 +22,20 @@ use crate::runtime::telemetry::events::{BacktraceText, BuiltinsThreadMismatch, T
 use crate::task::local::{LocalTaskBinding, LocalTaskScheduler};
 use crate::task::scheduler::TaskScheduler;
 
-/// Bag of services provided by the runtime.
+/// Owned runtime capabilities associated with one worker.
 ///
-/// This type provides access to services provided by runtime. It implements the [`ThreadAware`] trait,
-/// meaning it can be passed between threads using the [`TaskScheduler::spawn_anywhere`]
-/// function and each worker in the owning runtime will get its own value with corresponding services
-/// (e.g. the scheduler will schedule tasks on the destination worker).
+/// Runtime callbacks receive this value by ownership. It provides a worker-bound
+/// scheduler, clock, telemetry sink, and runtime operations. Cloning preserves
+/// that association and does not keep the runtime running.
 ///
-/// This means that each value of this type is associated with a specific Arty worker - the one
-/// that the value was last transferred to within its owning runtime.
+/// [`TaskScheduler::spawn_anywhere`] can explicitly relocate this value as its
+/// payload. Relocation to an initialized worker of the owning runtime rebinds
+/// its capabilities together. A foreign or unregistered destination preserves
+/// the original association; it does not move services into another runtime.
 ///
-/// Relocation to a destination without initialized services in the owning runtime preserves
-/// all services and the original worker association. It does not move scheduling or other
-/// services into another runtime.
+/// The value is portable, but its local scheduler is available only on its
+/// associated worker. See the [documentation guides](crate#documentation)
+/// for examples and the distinction between cloning, relocation, and execution.
 #[derive(Debug, Clone)]
 pub struct Builtins {
     scheduler: TaskScheduler,
@@ -47,7 +48,7 @@ pub struct Builtins {
 }
 
 impl Builtins {
-    /// Access to the scheduler, used to schedule tasks.
+    /// Returns a scheduler bound to this capability's worker.
     #[must_use]
     #[inline]
     pub fn scheduler(&self) -> &TaskScheduler {
@@ -56,7 +57,9 @@ impl Builtins {
         &self.scheduler
     }
 
-    /// Access to the coordinate of the Arty worker and its NUMA locality.
+    /// Returns the associated worker's coordinate, including its NUMA locality.
+    ///
+    /// This describes the association, not necessarily the thread executing the caller.
     #[must_use]
     #[inline]
     pub fn thread(&self) -> &Thread {
@@ -65,7 +68,7 @@ impl Builtins {
         &self.thread
     }
 
-    /// Access to the clock, allowing for time queries and delays type.
+    /// Returns the worker's clock for time queries, delays, and timeouts.
     #[must_use]
     #[inline]
     pub fn clock(&self) -> &Clock {
@@ -74,7 +77,7 @@ impl Builtins {
         &self.clock
     }
 
-    /// Access to the [`Sink`] associated with this runtime.
+    /// Returns the [`Sink`] associated with this runtime.
     ///
     /// If no sink is configured in [`crate::runtime::RuntimeBuilder`], this returns a noop sink.
     #[must_use]
@@ -85,35 +88,39 @@ impl Builtins {
         &self.sink
     }
 
-    /// Access to the specialized scheduler allowing for scheduling of `!Send` tasks.
+    /// Returns a local scheduler when called on the associated worker.
     ///
     /// Returns an owned, thread-confined token. Portable `Builtins` values do not
     /// own the executor's non-`Send` state, including when dropped on another thread.
     ///
-    /// This will return `None` if the current thread is not the thread this object is associated
-    /// with. For example:
+    /// Returns `None` outside that worker's local context. A scheduler already
+    /// obtained there remains thread-confined; it cannot be sent to another thread.
+    ///
+    /// With the `macros` feature:
     ///
     /// ```rust
-    /// # use arty::runtime::{Builtins, Runtime};
-    /// # Runtime::new().unwrap().run(async |cx: Builtins| {
-    /// let cx_to_capture = cx.clone();
-    /// cx.scheduler().spawn(async move |_| {
-    ///     // Returns some as cx is accessed from its "home" thread
-    ///     assert!(cx_to_capture.local_scheduler().is_some());
-    /// });
+    /// use std::rc::Rc;
     ///
-    /// let cx_to_transfer = cx.clone();
-    /// cx.scheduler()
-    ///     .spawn_anywhere(cx_to_transfer, |cx_to_transfer| async move {
-    ///         // Returns some as cx_to_transfer is accessed from its "home" thread
-    ///         assert!(cx_to_transfer.local_scheduler().is_some());
-    ///     });
+    /// # #[cfg(feature = "macros")]
+    /// use arty::runtime::Builtins;
     ///
-    /// std::thread::spawn(move || {
-    ///     // Returns none as cx is accessed from a different thread
-    ///     assert!(cx.local_scheduler().is_none());
-    /// });
-    /// # });
+    /// # #[cfg(feature = "macros")]
+    /// #[arty::main]
+    /// async fn main(cx: Builtins) {
+    ///     let local = cx
+    ///         .local_scheduler()
+    ///         .expect("the task runs on its associated worker");
+    ///     let result = local.spawn(async || Rc::new(42)).await;
+    ///     assert_eq!(*result, 42);
+    ///
+    ///     let portable = cx.clone();
+    ///     let unavailable = cx
+    ///         .scheduler()
+    ///         .spawn_blocking(move || portable.local_scheduler().is_none())
+    ///         .await;
+    ///     assert!(unavailable);
+    /// }
+    /// # #[cfg(not(feature = "macros"))] fn main() {}
     /// ```
     #[must_use]
     #[inline]
@@ -121,7 +128,7 @@ impl Builtins {
         self.inner.local_task_binding.local_scheduler()
     }
 
-    /// Access to runtime shutdown and processor-pinning operations.
+    /// Returns runtime shutdown and processor-pinning operations.
     ///
     /// These operations are available from any thread. Relocation within the owning
     /// runtime rebinds them to the destination worker.

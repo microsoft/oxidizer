@@ -70,6 +70,9 @@ impl<F: Future> Future for ScopedStorage<F> {
 ///
 /// This type is [`Send`] and [`Sync`], but is not a relocatable [`ThreadAware`](thread_aware::ThreadAware)
 /// capability. Task capabilities are available through [`Builtins`].
+///
+/// See the [documentation guides](crate#documentation) for entry-point
+/// choices, cancellation, and the distinction between a task result and shutdown.
 #[derive(Debug)]
 pub struct Runtime {
     dispatcher: DispatcherClient,
@@ -82,7 +85,7 @@ impl Runtime {
     ///
     /// # Errors
     ///
-    /// Returns a [`Error`] if the processor selection cannot be satisfied.
+    /// Returns an [`Error`] if the processor selection cannot be satisfied.
     ///
     /// # Panics
     ///
@@ -109,8 +112,13 @@ impl Runtime {
 
     /// Runs a root task, waits for its result, then shuts down the runtime.
     ///
+    /// The callback receives owned [`Builtins`] on a worker, not the calling thread.
+    /// Await any asynchronous children that must finish before the root returns;
+    /// returning from the root does not drain other asynchronous tasks.
+    ///
     /// Captures and results are not automatically relocated. If shutdown cancels
-    /// the root task before it completes, its join remains pending.
+    /// the root task before it completes, its join remains pending and this method
+    /// remains blocked.
     ///
     /// # Panics
     ///
@@ -125,13 +133,15 @@ impl Runtime {
         self.task_scheduler().spawn(future_factory).wait()
     }
 
-    /// Requests shutdown without blocking the calling thread.
     #[doc = include_str!("../../docs/snippets/fn_runtime_stop.md")]
     pub fn stop(&self) {
         self.dispatcher.stop();
     }
 
     /// Waits for shutdown to finish. May be called more than once.
+    ///
+    /// This does not request shutdown; call [`stop`](Self::stop) first unless
+    /// another task will request it. Completion does not make cancelled joins ready.
     ///
     /// # Panics
     ///

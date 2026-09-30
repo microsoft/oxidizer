@@ -41,6 +41,10 @@ impl RuntimeOperations {
     /// Clone the handle before capturing it in a thread-start callback to keep that
     /// callback's processor selection independent of subsequent relocation.
     ///
+    /// Pinning does not make the calling thread a runtime worker or change the
+    /// binding of its capabilities. See the
+    /// [documentation guides](crate#documentation).
+    ///
     /// ```
     /// use std::num::NonZeroUsize;
     ///

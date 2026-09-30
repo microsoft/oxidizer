@@ -1,0 +1,106 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+//! Understanding worker associations, cloning, and explicit relocation.
+//!
+//! A worker is an OS thread that runs a single-threaded executor. Once a task
+//! starts, its future stays on that worker. The owned
+//! [`Builtins`](crate::runtime::Builtins) passed to the task contains capabilities
+//! associated with that worker: its scheduler, clock, telemetry sink, and runtime
+//! operations.
+//!
+//! # A coordinate is not a thread handle
+//!
+//! [`core::Thread`](crate::core::Thread) records a runtime
+//! [`Owner`](crate::core::Owner), an OS thread identifier, and a
+//! [`NumaNode`](crate::core::NumaNode). It neither owns the thread nor keeps a
+//! runtime running. Reading or cloning a coordinate does not change which OS
+//! thread is executing your code.
+//!
+//! [`RuntimeOperations::pin_current_thread`](crate::runtime::RuntimeOperations::pin_current_thread)
+//! changes the current OS thread's processor affinity using a captured processor
+//! set. It does not turn that thread into an Arty worker or rebind a scheduler.
+//! The processor snapshot remains usable after the runtime stops; retaining it
+//! does not keep task execution or worker timer drivers running.
+//!
+//! # Cloning preserves the association
+//!
+//! A cloned scheduler targets the same worker as its source, even when used
+//! elsewhere. This example sends a clone to a blocking thread, which submits
+//! work back to the original asynchronous worker:
+//!
+//! ```
+//! use arty::runtime::Builtins;
+//!
+//! #[arty::main]
+//! async fn main(cx: Builtins) {
+//!     let home = cx.thread().id();
+//!     let cloned = cx.scheduler().clone();
+//!     let executed_on = cx
+//!         .scheduler()
+//!         .spawn_blocking(move || cloned.spawn(async |child| child.thread().id()).wait())
+//!         .await;
+//!     assert_eq!(executed_on, home);
+//! }
+//! ```
+//!
+//! Keeping scheduler handles does not keep the runtime alive. Cloning
+//! `Builtins` also preserves its association; moving the clone with ordinary
+//! Rust moves does not notify it of a new destination.
+//!
+//! # Relocate an explicit payload
+//!
+//! [`TaskScheduler::spawn_anywhere`](crate::task::TaskScheduler::spawn_anywhere)
+//! selects a worker round-robin and invokes
+//! [`ThreadAware::relocate`](crate::core::ThreadAware::relocate) on the payload
+//! there, before calling the factory. The factory is a function pointer, so its
+//! input must be supplied explicitly rather than hidden in captures.
+//!
+//! ```
+//! use arty::runtime::Builtins;
+//!
+//! #[arty::main]
+//! async fn main(cx: Builtins) {
+//!     cx.scheduler()
+//!         .spawn_anywhere(cx.clone(), |moved| async move {
+//!             assert_eq!(moved.thread().id(), std::thread::current().id());
+//!             assert!(moved.local_scheduler().is_some());
+//!             let child = moved
+//!                 .scheduler()
+//!                 .spawn(async |child| child.thread().id())
+//!                 .await;
+//!             assert_eq!(child, moved.thread().id());
+//!         })
+//!         .await;
+//! }
+//! ```
+//!
+//! The selected worker can be the source worker, especially in a one-worker
+//! runtime. This example checks that capabilities match the selected worker,
+//! not that a different worker was chosen.
+//!
+//! For runtime capabilities, relocation has these boundaries:
+//!
+//! | Destination | Effect |
+//! | --- | --- |
+//! | The existing associated worker | The association is unchanged |
+//! | An initialized, registered worker of the same runtime | Capabilities rebind coherently to that worker |
+//! | Another runtime, or a coordinate with no initialized worker services in the owner | The original association is retained |
+//!
+//! A portable `Builtins` value does not own its worker's non-`Send` executor
+//! state. [`local_scheduler()`](crate::runtime::Builtins::local_scheduler)
+//! returns a thread-confined token only when called on the associated worker;
+//! merely carrying `Builtins` elsewhere does not grant local access there.
+//!
+//! # Relocation is not automatic task migration
+//!
+//! `spawn_anywhere` places a new task; it does not move an existing task.
+//! Ordinary `spawn`, `run`, and `block_on` do not relocate captured values or
+//! results. Receiving a `Builtins` value as a result does not rebind it to the
+//! receiver.
+//!
+//! `Send` permits a value to cross threads. `ThreadAware` describes how a
+//! transferable value adapts after an explicit move; it does not make a
+//! non-`Send` value transferable. Implementations must preserve their real data
+//! and remain correct even without a relocation notification. Read the
+//! [`ThreadAware` contract](crate::core::ThreadAware) before implementing it.

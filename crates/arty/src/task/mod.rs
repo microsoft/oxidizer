@@ -13,6 +13,14 @@
 //! [`JoinHandle`] and [`LocalJoinHandle`] receive the result or propagate a task
 //! panic. A cancelled task leaves its join pending rather than returning a
 //! cancellation error.
+//!
+//! Pass a factory, such as `async |cx| { /* work */ }`, to
+//! [`TaskScheduler::spawn`], rather than an already-created future. The factory
+//! receives owned [`Builtins`](crate::runtime::Builtins) on the destination worker.
+//! Local factories take no arguments and run on their calling worker.
+//!
+//! See the [documentation guides](crate#documentation) for scheduling examples
+//! and lifecycle rules before coordinating task completion with shutdown.
 
 pub(crate) mod execution;
 pub(crate) mod join;

@@ -90,18 +90,30 @@ impl LocalTaskBinding {
 /// on the associated worker. The scheduler is neither [`Send`] nor [`Sync`].
 /// Cloning it does not keep the worker running.
 ///
+/// A cancelled or rejected local task leaves its join pending indefinitely.
+/// See the [documentation guides](crate#documentation) for choosing
+/// between local and cross-thread submission.
+///
+/// With the `macros` feature:
+///
 /// ```
 /// use std::rc::Rc;
 ///
-/// arty::runtime::Runtime::new().unwrap().run(async |cx| {
+/// # #[cfg(feature = "macros")]
+/// use arty::runtime::Builtins;
+///
+/// # #[cfg(feature = "macros")]
+/// #[arty::main]
+/// async fn main(cx: Builtins) {
 ///     let value = Rc::new(42);
 ///     let result = cx
 ///         .local_scheduler()
-///         .unwrap()
+///         .expect("the task runs on its associated worker")
 ///         .spawn(async move || value)
 ///         .await;
 ///     assert_eq!(*result, 42);
-/// });
+/// }
+/// # #[cfg(not(feature = "macros"))] fn main() {}
 /// ```
 #[derive(Debug, Clone)]
 pub struct LocalTaskScheduler {
@@ -124,11 +136,14 @@ impl LocalTaskScheduler {
     /// Starts a local task, creating its future immediately on the current worker.
     #[doc = include_str!("../../docs/snippets/local_task.md")]
     ///
+    /// During shutdown, a still-valid token returns a pending, disconnected join
+    /// without invoking the factory. It does not return a cancellation error.
+    ///
     /// # Panics
     ///
-    /// Panics before invoking the factory if its worker is no longer running.
-    /// During shutdown, a still-valid token returns a pending, disconnected join
-    /// without invoking the factory.
+    /// Panics outside the token's own worker-local context. A panic in the
+    /// factory propagates immediately; a panic while polling its future is
+    /// transported to the join.
     pub fn spawn<FF, F, R>(&self, future_factory: FF) -> LocalJoinHandle<R>
     where
         FF: FnOnce() -> F + 'static,

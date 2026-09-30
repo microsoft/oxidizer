@@ -26,6 +26,8 @@ use crate::task::join::JoinHandle;
 ///
 /// Accepted tasks may be discarded during shutdown. Their join handles then remain
 /// pending. Submitting to an already closed worker also returns a pending join handle.
+/// See the [documentation guides](crate#documentation) for factory,
+/// future, and result examples.
 #[derive(Debug, Clone)]
 pub struct TaskScheduler {
     dispatcher: DispatcherClient,
@@ -83,9 +85,10 @@ impl TaskScheduler {
 
     /// Starts a task on the associated worker, or round-robin when detached.
     ///
-    /// The factory is sent to the worker before its future is constructed. The future
-    /// itself need not be [`Send`]. Ordinary captures and results are not automatically
-    /// relocated; use [`spawn_anywhere`](Self::spawn_anywhere) for explicit payload relocation.
+    /// The factory receives owned [`Builtins`] on the worker before its future is
+    /// constructed. The future itself need not be [`Send`]. Ordinary captures and
+    /// results are not automatically relocated; use [`spawn_anywhere`](Self::spawn_anywhere)
+    /// for explicit payload relocation.
     #[doc = include_str!("../../docs/snippets/async_task.md")]
     pub fn spawn<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
     where
@@ -121,8 +124,9 @@ impl TaskScheduler {
     /// Starts blocking work without blocking an asynchronous worker.
     ///
     /// Bound schedulers use their worker's blocking pool; detached schedulers select a
-    /// worker's pool round-robin. Shutdown prevents new blocking work from starting,
-    /// but waits for previously accepted blocking work to finish.
+    /// worker's pool round-robin. Shutdown closes admission to new blocking work,
+    /// but previously accepted work, including queued callbacks, runs to completion.
+    /// Rejected submissions return a join that remains pending.
     #[doc = include_str!("../../docs/snippets/blocking_task.md")]
     pub fn spawn_blocking<B, R>(&self, body: B) -> JoinHandle<R>
     where

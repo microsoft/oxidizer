@@ -1,6 +1,6 @@
 # Local tasks
 
-The term "local" in this context means it is executed on the same thread as an existing
-foreground task (the one that schedules the local task), and can therefore access single-
-threaded objects shared between the two tasks. In all other aspects, a local task is a
-regular foreground task.
+A local task runs on the calling worker and can share non-`Send` values with
+other tasks there. Its factory takes no arguments. Captures and results may be
+non-`Send`, but still need to be `'static`; local spawning does not borrow the
+caller's stack.

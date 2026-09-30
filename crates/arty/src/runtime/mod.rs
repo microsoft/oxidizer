@@ -8,23 +8,18 @@
 //! [`Builtins::scheduler`] preserves worker affinity. Task submission and join handles
 //! live in [`crate::task`].
 //!
-//! Dropping the runtime cancels asynchronous work and waits for accepted blocking work.
-//! Cancelled joins remain pending. Retaining a scheduler does not keep the runtime
-//! running. There is no asynchronous I/O or memory-pool subsystem.
+//! Use [`Runtime::new`] for the default configuration or [`Runtime::builder`] to
+//! select processors, blocking pools, a clock, and a telemetry sink. Configuration
+//! types are available directly in this module.
 //!
-//! # Telemetry
+//! Shutdown cancels asynchronous work and waits for accepted blocking work.
+//! Cancelled joins remain pending rather than returning an error. Retaining a
+//! scheduler does not keep the runtime running. Read [`Runtime`]'s destruction
+//! rules before transferring the owner to another thread.
 //!
-//! Configure [`RuntimeBuilder::sink`] to receive `observed` events. The default
-//! sink is a noop. Tasks capture enrichment at submission and restore it while
-//! polling. Runtime event names use the `arty.rt` prefix.
-//!
-//! Classified fields use the `arty/SystemMetadata` data class. Configure a
-//! processor's redaction policy with `data_privacy::DataClass::new("arty", "SystemMetadata")`.
-//! Numeric metric values remain unredacted numbers.
-//! Opaque Rust thread identifiers are logged as `arty.thread.id`, not the
-//! integer-valued OpenTelemetry `thread.id` attribute.
-//! Blocking-pool events use `arty.rt.blocking_worker.pool_saturated`; pool
-//! dimensions use `blocking_worker_pool.mode` and `blocking_worker_pool.max_threads`.
+//! Configuration, lifecycle, telemetry, and thread-awareness guides are available
+//! through the crate's [documentation section](crate#documentation).
+//! For the capabilities passed to tasks, start with [`Builtins`].
 
 pub(crate) mod blocking_worker;
 mod bootstrap;

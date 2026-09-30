@@ -11,18 +11,24 @@ use pin_project::pin_project;
 use crate::runtime::thread::assert_not_flagged;
 use crate::task::execution::TaskResult;
 
-/// Enables the caller to obtain a result from a task running on an unspecified worker thread.
+/// The result of an asynchronous or blocking task.
 ///
-/// Spawning a task supplies the caller a join handle for the task.
-/// Cancellation, including runtime shutdown before completion, leaves the handle
-/// pending. It does not return a cancellation error.
+/// Await the handle from asynchronous code, or use [`wait`](Self::wait) from a
+/// blocking-safe thread. The result is returned directly, not wrapped in a
+/// task-status `Result`.
+///
+/// Cancellation, including runtime shutdown before an asynchronous task completes,
+/// leaves the handle pending indefinitely. It does not return a cancellation error.
+/// Dropping the handle does not cancel the task or rethrow its panic elsewhere.
+/// See the [documentation guides](crate#documentation) before coordinating
+/// joins with shutdown.
 ///
 /// # Panics
 ///
 /// The result may be obtained at most once, either by awaiting the future or by calling `wait()`.
 /// Attempting to obtain the result multiple times will panic.
 ///
-/// Re-throws any panic from the associated task if the task ended with a panic.
+/// Resumes the original panic payload if the task panicked while unwinding was enabled.
 #[derive(derive_more::Debug)]
 #[pin_project]
 pub struct JoinHandle<R>
@@ -49,12 +55,17 @@ where
 
     /// Synchronously waits for the task to complete, returning the result.
     ///
+    /// A cancelled or rejected task leaves this method blocked indefinitely.
+    /// This is not a shutdown wait; use [`Runtime::wait`](crate::runtime::Runtime::wait)
+    /// to wait for workers to stop.
+    ///
     /// # Panics
     ///
     /// Panics if the result has already been obtained either via `wait()` or by awaiting.
     ///
     /// Panics if called from an asynchronous Arty worker. This function is only intended
     /// to be called from a blocking-safe context such as `fn main()` or a `#[test]` entry point.
+    /// Also resumes a panic transported from the task.
     #[expect(
         clippy::must_use_candidate,
         reason = "caller might not care about result - this is a generic wrapper"

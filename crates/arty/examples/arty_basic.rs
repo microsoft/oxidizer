@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Explicit runtime ownership, detached submission, and worker-affine continuations.
+//! Explicit runtime ownership with a worker limit and a worker-affine child.
 
 use std::num::NonZeroUsize;
 use std::time::Duration;
@@ -16,6 +16,7 @@ fn main() -> Result<(), arty::runtime::Error> {
         .task_scheduler()
         .spawn(async |cx| {
             cx.clock().delay(Duration::from_millis(1)).await;
+            // This scheduler keeps the child on the parent's worker.
             cx.scheduler().spawn(async |_| 42).await
         })
         .wait();

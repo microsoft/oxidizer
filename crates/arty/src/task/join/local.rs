@@ -10,16 +10,22 @@ use pin_project::pin_project;
 
 use crate::task::execution::TaskResult;
 
-/// Enables the caller to obtain a result from a task running on the current worker thread.
+/// The result of a task on its originating worker.
 ///
-/// Spawning a task supplies the caller a join handle for the task.
+/// Await this handle on the worker that created it. Results need not be [`Send`],
+/// and the handle cannot be sent to another thread.
+///
+/// Cancellation or rejection during shutdown leaves the handle pending indefinitely,
+/// rather than returning a cancellation error. Dropping it does not cancel the
+/// task or rethrow its panic elsewhere. See the
+/// [documentation guides](crate#documentation) for shutdown coordination.
 ///
 /// # Panics
 ///
 /// The result may be obtained at most once, by awaiting the future.
 /// Attempting to obtain the result multiple times will panic.
 ///
-/// Re-throws any panic from the associated task if the task ended with a panic.
+/// Resumes the original panic payload if the task panicked while unwinding was enabled.
 #[derive(derive_more::Debug)]
 #[pin_project]
 pub struct LocalJoinHandle<R: 'static> {

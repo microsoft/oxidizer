@@ -10,10 +10,15 @@ use crate::runtime::config::{BlockingPoolPolicy, ProcessorCount, RuntimeConfig};
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
 
-/// Builder for the [`Runtime`] type.
+/// Configures workers, clocks, and telemetry before starting a runtime.
 ///
 /// By default, the runtime uses [`ProcessorCount::auto`], 2 MiB worker stacks,
 /// isolated blocking worker pools, and a noop telemetry sink.
+///
+/// See the [documentation guides](crate#documentation) for the
+/// resource trade-offs between processor and blocking-pool policies.
+///
+/// # Examples
 ///
 /// ```
 /// use std::num::NonZeroUsize;
@@ -70,40 +75,37 @@ impl RuntimeBuilder {
         self
     }
 
-    /// Sets the clock to be used by the runtime.
+    /// Sets the clock used by runtime workers.
     ///
-    /// The [`InactiveClock`] represents a handle to a clock that's not yet active.
-    /// It will be cloned to each async worker thread and activated on that thread.
+    /// An [`InactiveClock`] is cloned to each asynchronous worker and activated
+    /// there. The runtime drives the resulting worker clocks.
     ///
     /// # Examples
     ///
-    /// ### Explicitly setting the clock
-    ///
-    /// ```
-    /// use arty::runtime::Runtime;
-    /// use tick::runtime::InactiveClock;
-    ///
-    /// let clock = InactiveClock::default();
-    /// let runtime = Runtime::builder().clock(clock).build();
-    /// ```
-    ///
-    /// ### Using the fake clock
-    ///
-    /// The [`tick`] exposes the `ClockControl` type that allows you to
-    /// control the flow of time in test scenarios. The `ClockControl` can be used in this method too.
+    /// Enable `test-util` in dev-dependencies to use `arty::time::ClockControl`.
+    /// Automatic timer advancement is useful for sequential delays; it is not
+    /// idle-runtime advancement or a simulation of concurrent deadline ordering.
+    /// See the [documentation guides](crate#documentation) for manual time control.
     ///
     /// ```
     /// # fn main() {
-    /// # #[cfg(feature = "test-util")] {
+    /// # #[cfg(all(feature = "rt", feature = "test-util"))] {
+    /// # (|| {
+    /// use std::time::Duration;
+    ///
     /// use arty::runtime::Runtime;
-    /// use tick::ClockControl;
-    /// use tick::runtime::InactiveClock;
+    /// use arty::time::ClockControl;
     ///
-    /// // Automatically advance all timers without waiting.
-    /// let clock_control = ClockControl::new().auto_advance_timers(true);
+    /// let control = ClockControl::new().auto_advance_timers(true);
+    /// let runtime = Runtime::builder().clock(control).build()?;
+    /// runtime.run(async |cx| {
+    ///     let watch = cx.clock().stopwatch();
+    ///     cx.clock().delay(Duration::from_secs(30)).await;
+    ///     assert_eq!(watch.elapsed(), Duration::from_secs(30));
+    /// });
     ///
-    /// // Use the clock control in the runtime.
-    /// let runtime = Runtime::builder().clock(clock_control).build();
+    /// # Ok::<(), arty::runtime::Error>(())
+    /// # })().unwrap();
     /// # }
     /// # }
     /// ```

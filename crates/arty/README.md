@@ -13,28 +13,73 @@
 
 </div>
 
-Thread-aware, thread-per-core application runtime.
+A runtime for worker-local asynchronous tasks.
 
-Each worker has a single-threaded executor: a task remains on its original worker for its
-entire lifetime. An `arty::runtime::Runtime` owns worker startup and shutdown. Its
-`task_scheduler()` distributes work round-robin, while a task’s
-`Builtins::scheduler` preserves worker affinity. Futures are constructed on the destination
-worker and need not be [`Send`][__link0].
+Arty makes worker-local execution and explicit relocation of runtime capabilities
+the core programming model. It is intended for applications that organize work
+around state owned by individual workers, rather than treating locality as an
+addition to a general-purpose scheduler.
 
-```rust
-use arty::runtime::Runtime;
+Unlike [Tokio’s multithreaded scheduler][__link0],
+Arty does not move started tasks between workers to balance their load. Each task
+stays on its worker, where it can create and retain non-[`Send`][__link1] state.
+Tokio also supports [local tasks][__link2];
+the distinction is Arty’s worker-local model, not exclusive support for non-`Send` futures.
+The trade-off is that a busy worker’s tasks are not redistributed. Arty provides
+scheduling, blocking tasks, clocks, and telemetry, but no asynchronous I/O drivers
+or built-in memory pools. It is not a drop-in replacement for Tokio.
 
-let runtime = Runtime::new().unwrap();
-let scheduler = runtime.task_scheduler();
-let answer = scheduler
-    .spawn(async |cx| cx.scheduler().spawn(async |_| 42).await)
-    .wait();
-assert_eq!(answer, 42);
+**Thread awareness** means that runtime capabilities have an explicit worker
+association. Each task receives an owned `Builtins` value containing its worker’s
+scheduler and clock. Cloning preserves that association; explicit relocation can
+rebind capabilities to another worker in the same runtime. Relocation does not
+migrate a running task or automatically relocate ordinary task results.
+
+## Quickstart
+
+Enable `macros` to use the runtime entry points; it also enables `rt` and
+`time`. To try the runtime from this repository, use a Git revision that
+contains these APIs:
+
+```toml
+[dependencies]
+arty = { git = "https://github.com/microsoft/oxidizer", rev = "65f7f337b14b59259ad500484439a77f1f7f4f23", features = ["macros"] }
 ```
 
-Arty provides scheduling, blocking tasks, clocks, and structured telemetry. It does
-not provide asynchronous I/O drivers or memory pools. External I/O integration through
-[`arty_io_core`][__link1] is planned separately.
+```rust
+use arty::runtime::Builtins;
+
+#[arty::main]
+async fn main(cx: Builtins) {
+    let answer = cx.scheduler().spawn(async |_| 6 * 7).await;
+    println!("{answer}");
+}
+```
+
+This prints `42`. The attribute creates the runtime and runs the entry point
+on a worker, passing owned `Builtins`. Its scheduler creates the child task
+on that worker; `.await` observes the result without blocking the worker.
+The runtime shuts down when the entry point finishes, so await any required
+child work before returning. Use `arty::runtime::Runtime` directly when
+integrating with synchronous code or controlling ownership and shutdown.
+
+## Documentation
+
+`arty::documentation` contains longer guides to scheduling,
+thread awareness, lifecycle, configuration, time, and telemetry. It is included
+in documentation and test builds only when all Arty features are enabled.
+The dependency revision above selects the runtime API and predates these
+guides. From a source checkout containing the documentation module, run:
+
+```text
+cargo doc -p arty --all-features --no-deps --open
+```
+
+Select `documentation` in the generated API reference’s module index.
+Hosted docs describe published releases and may not yet include guides from
+unreleased source. Application dependencies need only the features they use;
+building all-feature documentation does not require a production `test-util`
+dependency.
 
 ## Features
 
@@ -43,16 +88,8 @@ No features are enabled by default.
 * **`rt`** - Enables `arty::runtime` and `arty::task`, and implies `time`.
 * **`macros`** - Enables `#[arty::main]` and `#[arty::test]` and implies `rt`.
 * **`time`** - Exposes time primitives through `arty::time`.
-* **`test-util`** - Enables test-only runtime utilities. With `time`, this includes
-  `arty::time::ClockControl`. Under Miri, runtime tests use a simulated
-  six-processor topology instead of native processor discovery and pinning.
-
-## Project policies
-
-* [Design][__link2]
-* [I/O][__link3]
-* [Panics][__link4]
-* [Stabilization][__link5]
+* **`test-util`** - Enables testing utilities, including `arty::time::ClockControl`
+  when `time` is enabled. Enable it in dev-dependencies, not production dependencies.
 
 
 <hr/>
@@ -60,10 +97,6 @@ No features are enabled by default.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbQtbu7K4PchsbOaL3fiio7zMbNOPIbE4I8VEb-HDBMMKNY6phZIGCbGFydHlfaW9fY29yZWUwLjIuMA
- [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
- [__link1]: https://crates.io/crates/arty_io_core/0.2.0
- [__link2]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/DESIGN.md
- [__link3]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/IO.md
- [__link4]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/PANICS.md
- [__link5]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/STABILIZATION.md
+ [__link0]: https://docs.rs/tokio/latest/tokio/runtime/#multi-thread-scheduler
+ [__link1]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
+ [__link2]: https://docs.rs/tokio/latest/tokio/task/struct.LocalSet.html
