@@ -98,6 +98,7 @@ impl Condvar<Sync> {
     /// # Panics
     ///
     /// Has the same panic conditions as [`wait`](Self::wait).
+    #[cfg_attr(test, mutants::skip)] // Timeout-result mutations require scheduler timing and can strand a waiting test.
     pub fn wait_timeout<'mutex, T: ?Sized>(
         &self,
         guard: MutexGuard<'mutex, T>,

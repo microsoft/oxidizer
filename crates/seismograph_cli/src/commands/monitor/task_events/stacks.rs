@@ -94,3 +94,16 @@ pub(super) fn common_suffix<'a>(left: &'a [Address], right: &[Address]) -> &'a [
         .count();
     &left[left.len() - common..]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn complete_boundary_match_never_removes_the_entire_operation_stack() {
+        let raw = [Address::new(1), Address::new(2)];
+        let mut cache = Cache::new(&[]);
+        let frames = cache.get(&raw, &raw, ThreadOperationKind::MutexAccess, true);
+        assert!(!frames.relative_known);
+    }
+}

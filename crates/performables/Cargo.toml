@@ -47,6 +47,7 @@ gungraun = { workspace = true, features = ["default"] }
 
 [dev-dependencies]
 criterion.workspace = true
+mutants.workspace = true
 serde = { workspace = true, features = ["std"] }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
 

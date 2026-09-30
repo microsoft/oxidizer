@@ -455,8 +455,10 @@ impl FilterIndex {
 
 #[cfg(test)]
 mod tests {
-    use seismograph::recorder::event::{Events, ObjectId};
+    use seismograph::recorder::event::{EventClock, Events, ObjectId};
     use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, WorkerId};
+    use seismograph::recorder::thread::ThreadLog;
+    use seismograph::recorder::{RecordingPolicies, RecordingPolicy};
     use seismograph_rallocator::callers::{AddressLookupFields, Callers};
     use seismograph_rallocator::snapshot::Version;
 
@@ -508,11 +510,16 @@ mod tests {
         );
         let filtered = index.render(&FilterSpec::parse("crate:app", "", false, RuntimeStackMode::Event).unwrap());
         assert_eq!(
-            filtered.filter_summary.events,
-            FilterCounts {
-                total: 3,
-                shown: 1,
-                unknown: 1
+            filtered.filter_summary,
+            FilterSummary {
+                active: true,
+                events: FilterCounts {
+                    total: 3,
+                    shown: 1,
+                    unknown: 1
+                },
+                allocations: FilterCounts::default(),
+                tasks: FilterCounts::default(),
             }
         );
         assert_eq!(filtered.primitives.groups[0].events, 1);
@@ -558,6 +565,19 @@ mod tests {
             source.addresses.clone(),
             deallocated,
         ));
+        assert_eq!(
+            index.unfiltered_summary(),
+            FilterSummary {
+                active: false,
+                events: FilterCounts::default(),
+                allocations: FilterCounts {
+                    total: 2,
+                    shown: 2,
+                    unknown: 0,
+                },
+                tasks: FilterCounts::default(),
+            }
+        );
         let filtered = index.render(&FilterSpec::parse("crate:app", "crate:noise", false, RuntimeStackMode::Event).unwrap());
         assert_eq!(
             filtered
@@ -610,6 +630,178 @@ mod tests {
         let event_stack = index.render(&FilterSpec::parse("crate:app", "", false, RuntimeStackMode::Event).unwrap());
         assert_eq!(event_stack.filter_summary.events.shown, 1);
         assert_eq!(event_stack.runtime.workers[0].tasks[0].state, "Unknown");
+    }
+
+    #[test]
+    fn repeated_spawn_events_keep_the_first_spawn_provenance() {
+        let events = [(1, 1), (2, 2)]
+            .into_iter()
+            .map(|(sequence, address)| Event {
+                kind: EventKind::TaskSpawned,
+                payload: EventPayload::Runtime(RuntimeEvent {
+                    runtime_id: RuntimeId::from_raw(1).unwrap(),
+                    worker_id: None,
+                    subject_id: 42,
+                    related_id: 0,
+                    value_0: 0,
+                    value_1: 0,
+                }),
+                ..event(sequence, Some(address))
+            })
+            .collect();
+        let index = index(events, vec![lookup(1, "app::spawn"), lookup(2, "noise::spawn")]);
+        let filtered = index.render(&FilterSpec::parse("crate:app", "", false, RuntimeStackMode::Spawn).unwrap());
+        assert_eq!((filtered.filter_summary.events.shown, filtered.filter_summary.tasks.shown), (2, 1));
+    }
+
+    #[test]
+    fn filtered_runtime_keeps_workers_with_either_task_or_event_evidence() {
+        use seismograph::recorder::event::BacktraceCapture;
+        use seismograph::recorder::runtime::{TaskId, TypeDescriptorId};
+        use seismograph_runtime::snapshot::{Counters, Runtime, RuntimeState, Task, TaskMetrics, Worker, WorkerState};
+        use seismograph_runtime::worker::WorkerRole;
+
+        let source = RuntimeSource {
+            runtimes: vec![Runtime {
+                id: RuntimeId::from_raw(1).unwrap(),
+                name: "executor".into(),
+                configured_workers: 2,
+                lifecycle_backtraces: BacktraceCapture::Never,
+                state: RuntimeState::Running,
+                created_at: EventTimestamp::from_ticks(1),
+                retired_at: None,
+                counters: Counters::default(),
+                workers: [Some(TaskId::from_raw(1).unwrap()), None]
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, current_task)| Worker {
+                        id: WorkerId::from_raw(u64::try_from(index).unwrap() + 1).unwrap(),
+                        role: WorkerRole::Core,
+                        state: WorkerState::Running,
+                        processor_index: None,
+                        thread_id: None,
+                        current_task,
+                    })
+                    .collect(),
+                tasks: vec![Task {
+                    id: TaskId::from_raw(1).unwrap(),
+                    parent: None,
+                    type_descriptor: TypeDescriptorId::from_raw(1).unwrap(),
+                    future_size_bytes: None,
+                    spawned_at: EventTimestamp::from_ticks(1),
+                    last_worker_id: None,
+                    activity: None,
+                    metrics: TaskMetrics::default(),
+                    spawn_backtrace: Vec::new(),
+                }],
+            }],
+            addresses: Vec::new(),
+        };
+        let index = FilterIndex::new(DecodedSnapshot::default(), None, Some(source), Vec::new(), HashSet::new());
+        let worker_event = Event {
+            kind: EventKind::WorkerParked,
+            payload: EventPayload::Runtime(RuntimeEvent {
+                runtime_id: RuntimeId::from_raw(1).unwrap(),
+                worker_id: Some(WorkerId::from_raw(2).unwrap()),
+                subject_id: 0,
+                related_id: 0,
+                value_0: 0,
+                value_1: 0,
+            }),
+            ..event(1, None)
+        };
+        let filtered = index
+            .runtime_source(
+                &FilterSpec::parse("crate:app", "", false, RuntimeStackMode::Event).unwrap(),
+                &HashSet::from([(1, 1)]),
+                &[worker_event],
+            )
+            .unwrap();
+        assert_eq!(
+            filtered.runtimes[0]
+                .workers
+                .iter()
+                .map(|worker| (worker.id.get(), worker.current_task.map(TaskId::get)))
+                .collect::<Vec<_>>(),
+            [(1, Some(1)), (2, None)]
+        );
+    }
+
+    #[test]
+    fn inferred_task_rows_preserve_identity_when_runtime_boundaries_are_filtered() {
+        let runtime = |sequence, timestamp, kind, duration| Event {
+            thread_id: ThreadId::new(1),
+            sequence: EventSequence::new(sequence),
+            timestamp: EventTimestamp::from_ticks(timestamp),
+            kind,
+            payload: EventPayload::Runtime(RuntimeEvent {
+                runtime_id: RuntimeId::from_raw(7).unwrap(),
+                worker_id: Some(WorkerId::from_raw(3).unwrap()),
+                subject_id: 42,
+                related_id: 0,
+                value_0: duration,
+                value_1: 0,
+            }),
+            call_stack: vec![Address::new(2)],
+        };
+        let operation = Event {
+            thread_id: ThreadId::new(1),
+            sequence: EventSequence::new(2),
+            timestamp: EventTimestamp::from_ticks(20),
+            kind: EventKind::MutexAccess,
+            payload: EventPayload::Object(ObjectId::new(9)),
+            call_stack: vec![Address::new(1)],
+        };
+        let events = Events {
+            clock: EventClock::ProcessMonotonic,
+            total_events: 3,
+            recording: RecordingPolicies {
+                runtime_tasks: RecordingPolicy::all(true),
+                general_events: RecordingPolicy::all(true),
+                ..RecordingPolicies::default()
+            },
+            threads: vec![ThreadLog {
+                thread_id: ThreadId::new(1),
+                total_events: 3,
+                ..ThreadLog::default()
+            }],
+            events: vec![
+                runtime(1, 10, EventKind::TaskPollStarted, 0),
+                operation,
+                runtime(3, 30, EventKind::TaskPollFinished, 20),
+            ],
+            ..Events::default()
+        };
+        let index = index(events.events.clone(), vec![lookup(1, "app::work"), lookup(2, "noise::poll")]);
+        let mut decoded = index.header.clone();
+        decoded.events = events;
+        let index = Arc::new(FilterIndex::new(
+            decoded,
+            None,
+            None,
+            vec![lookup(1, "app::work"), lookup(2, "noise::poll")],
+            HashSet::new(),
+        ));
+        let filtered = index.render(&FilterSpec::parse("crate:app", "", false, RuntimeStackMode::Event).unwrap());
+        assert_eq!(
+            filtered
+                .runtime
+                .workers
+                .iter()
+                .map(|worker| {
+                    (
+                        worker.runtime_id,
+                        worker.runtime_name.as_str(),
+                        worker.role.as_str(),
+                        worker.state.as_str(),
+                        worker.tasks[0].runtime_id,
+                        worker.tasks[0].task_id,
+                        worker.tasks[0].state.as_str(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+            [(7, "runtime #7", "Unbound", "Unknown", 7, 42, "Unknown")]
+        );
     }
 
     #[test]

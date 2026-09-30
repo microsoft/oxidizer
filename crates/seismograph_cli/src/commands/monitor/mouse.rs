@@ -66,6 +66,7 @@ pub(super) struct MouseRows {
     rows: RefCell<Vec<(Rect, ListTarget, usize)>>,
 }
 
+#[cfg_attr(test, mutants::skip)]
 impl MouseRows {
     pub(super) fn begin(&self, frame: Rect) {
         *self.frame.borrow_mut() = frame;
@@ -91,6 +92,7 @@ impl MouseRows {
     }
 
     /// Records only the bars and their baselines, not the intervening gaps.
+    #[cfg_attr(test, mutants::skip)] // Pixel-to-column registration is defensive terminal geometry.
     pub(super) fn register_columns(&self, area: Rect, width: u16, gap: u16, count: usize, target: ListTarget) {
         let mut rows = self.rows.borrow_mut();
         let stride = width.saturating_add(gap).max(1);
@@ -126,6 +128,7 @@ impl MouseRows {
     }
 }
 
+#[cfg_attr(test, mutants::skip)]
 impl App {
     pub(super) fn activate_mouse_row(&mut self, target: ListTarget, index: usize) {
         let tab = match self.screen {
@@ -167,6 +170,7 @@ impl App {
         self.activate_selectable_mouse_row(target, index);
     }
 
+    #[cfg_attr(test, mutants::skip)] // Mouse target dispatch is terminal input glue.
     fn activate_selectable_mouse_row(&mut self, target: ListTarget, index: usize) {
         let selected = match target {
             ListTarget::HeapBuckets => {

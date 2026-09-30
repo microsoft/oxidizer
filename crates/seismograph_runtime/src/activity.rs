@@ -78,7 +78,7 @@ impl Activity {
             data.revision = revision;
             data.value = unknown(data.updated_at);
         }
-        if active_recording_session() != Some(session) {
+        if active_recording_session() != Some(session) || !seismograph::recorder::recording_enabled_for(EventClass::RuntimeTask) {
             self.missed.fetch_add(1, Ordering::AcqRel);
             return None;
         }
@@ -86,7 +86,10 @@ impl Activity {
     }
 
     fn validate(&self, data: &Data) -> bool {
-        if active_recording_session() == data.session && !self.terminal.load(Ordering::Acquire) {
+        if active_recording_session() == data.session
+            && seismograph::recorder::recording_enabled_for(EventClass::RuntimeTask)
+            && !self.terminal.load(Ordering::Acquire)
+        {
             true
         } else {
             self.missed.fetch_add(1, Ordering::AcqRel);
@@ -166,16 +169,17 @@ impl Activity {
                 queued_since: None,
             };
             data.updated_at = at;
-            if !self.validate(data) || data.revision != self.missed.load(Ordering::Acquire) {
-                queued_since = None;
+            match (self.validate(data), data.revision == self.missed.load(Ordering::Acquire)) {
+                (true, true) => {}
+                _ => queued_since = None,
             }
         }
         (at, ready, queued_since, session)
     }
 
     #[cold]
-    pub(crate) fn poll_finished(&self, started_at: EventTimestamp, finished_at: EventTimestamp) {
-        if let Some(mut data) = self.begin(active_recording_session()) {
+    pub(crate) fn poll_finished(&self, session: Option<RecordingSession>, started_at: EventTimestamp, finished_at: EventTimestamp) {
+        if let Some(mut data) = self.begin(session) {
             if data.value.poll_started_at == Some(started_at) {
                 data.value.poll_started_at = None;
                 data.value.poll_worker_id = None;
@@ -203,12 +207,19 @@ impl Activity {
         let Ok(data) = self.data.try_lock() else {
             return fallback;
         };
-        if data.session != Some(observation.session)
-            || data.revision != self.missed.load(Ordering::Acquire)
-            || data.updated_at.ticks() > observation.observed_at.ticks()
-            || self.terminal.load(Ordering::Acquire)
-            || data.value.state == TaskActivityState::Unknown
-        {
+        if data.session != Some(observation.session) {
+            return fallback;
+        }
+        if data.revision != self.missed.load(Ordering::Acquire) {
+            return fallback;
+        }
+        if data.updated_at.ticks() > observation.observed_at.ticks() {
+            return fallback;
+        }
+        if self.terminal.load(Ordering::Acquire) {
+            return fallback;
+        }
+        if data.value.state == TaskActivityState::Unknown {
             return fallback;
         }
         TaskActivity {
@@ -595,7 +606,7 @@ mod tests {
     }
 
     #[test]
-    fn stop_freezes_an_inflight_poll_and_its_repoll_request() {
+    fn poll_finish_after_stop_invalidates_the_frozen_running_state() {
         let _test = crate::tests::test_lock();
         configure(true);
         let runtime = register_runtime(RuntimeMetadata::new("stop-running", 1));
@@ -607,7 +618,7 @@ mod tests {
         let frozen = state(&task);
         task.poll_finished(&worker.handle(), poll);
         task.woken();
-        assert_eq!(state(&task), frozen);
+        assert_eq!(state(&task).state, TaskActivityState::Unknown);
         assert_eq!(frozen.state, TaskActivityState::Running);
         assert!(frozen.ready_since.is_some() && frozen.poll_started_at.is_some());
         assert_eq!(frozen.queued_since, None);
@@ -704,6 +715,26 @@ mod tests {
             let since = snapshot.queued_since.or(snapshot.poll_started_at).unwrap();
             assert_eq!(snapshot.observed_at.duration_since(since), std::time::Duration::from_mins(10));
         }
+    }
+
+    #[test]
+    fn snapshot_accepts_an_observation_at_the_exact_update_boundary() {
+        let session = RecordingSession::from_raw(123).unwrap();
+        let at = EventTimestamp::from_ticks(10);
+        let activity = Activity::new(Some(session), at);
+        assert_eq!(
+            activity.snapshot(Some(RecordingObservation { session, observed_at: at })).state,
+            TaskActivityState::Waiting
+        );
+        assert_eq!(
+            activity
+                .snapshot(Some(RecordingObservation {
+                    session,
+                    observed_at: EventTimestamp::from_ticks(9),
+                }))
+                .state,
+            TaskActivityState::Unknown
+        );
     }
 
     #[test]

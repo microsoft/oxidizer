@@ -210,7 +210,8 @@ impl RuntimeMonitorSnapshot {
             let runtime_id = runtime.runtime_id.get();
             let worker_id = runtime.worker_id.map(seismograph::recorder::runtime::WorkerId::get);
             // TaskReady is emitted on the notifier's OS thread, not an executor worker.
-            if let Some(worker_id) = worker_id.filter(|_| event.kind != EventKind::TaskReady) {
+            let executor_worker_id = worker_id.filter(|_| event.kind != EventKind::TaskReady);
+            if let Some(worker_id) = executor_worker_id {
                 workers
                     .entry((runtime_id, Some(worker_id)))
                     .or_insert_with(|| worker_row(runtime_id, Some(worker_id)));
@@ -224,7 +225,7 @@ impl RuntimeMonitorSnapshot {
             if task.row.state.is_empty() {
                 task.row.state = "Unknown".into();
             }
-            if let Some(worker_id) = worker_id.filter(|_| event.kind != EventKind::TaskReady) {
+            if let Some(worker_id) = executor_worker_id {
                 task.workers.insert(worker_id);
             }
             let timestamp = event.timestamp.ticks();
@@ -362,7 +363,6 @@ fn import_source(
                 (runtime_id, Some(worker.id.get())),
                 RuntimeWorkerSummary {
                     runtime_id,
-                    runtime_name: runtime.name.clone(),
                     worker_id: Some(worker.id.get()),
                     role: format!("{:?}", worker.role),
                     state: format!("{:?}", worker.state),
@@ -408,16 +408,29 @@ fn apply_activity(task: &mut TaskBuilder, activity: Option<TaskActivity>) {
     task.row.state = "Unknown".into();
     let Some(activity) = activity else { return };
     let observed = activity.observed_at.ticks();
-    let age = |start: Option<seismograph::recorder::event::EventTimestamp>| start.and_then(|start| observed.checked_sub(start.ticks()));
-    if observed == 0 || activity.ready_since.is_some_and(|ready| ready.ticks() > observed) {
+    if observed == 0 {
         return;
     }
     match activity.state {
-        TaskActivityState::Running if activity.queued_since.is_none() => {
-            let Some(running_for) = age(activity.poll_started_at) else { return };
-            if activity.ready_since.is_some_and(|ready| ready.ticks() < observed - running_for) {
+        TaskActivityState::Running => {
+            let Some(started_at) = activity.poll_started_at.map(seismograph::recorder::event::EventTimestamp::ticks) else {
+                return;
+            };
+            if activity.queued_since.is_some() {
                 return;
             }
+            if started_at > observed {
+                return;
+            }
+            if let Some(ready_at) = activity.ready_since.map(seismograph::recorder::event::EventTimestamp::ticks) {
+                if ready_at < started_at {
+                    return;
+                }
+                if ready_at > observed {
+                    return;
+                }
+            }
+            let running_for = observed - started_at;
             task.row.activity = TaskActivitySummary {
                 state: "Running".into(),
                 running_for: Some(running_for),
@@ -431,38 +444,58 @@ fn apply_activity(task: &mut TaskBuilder, activity: Option<TaskActivity>) {
                 task.workers.insert(worker_id);
                 task.executed.insert(Some(worker_id));
                 task.metrics.entry(Some(worker_id)).or_default().polls.push(Interval {
-                    start: observed - running_for,
+                    start: started_at,
                     end: observed,
                 });
             } else {
                 task.unassigned_poll = Some(Interval {
-                    start: observed - running_for,
+                    start: started_at,
                     end: observed,
                 });
             }
         }
-        TaskActivityState::Ready if activity.poll_started_at.is_none() && activity.poll_worker_id.is_none() => {
-            let Some(ready_for) = age(activity.queued_since) else { return };
-            if activity.ready_since.is_none_or(|ready| ready.ticks() > observed - ready_for) {
+        TaskActivityState::Ready => {
+            let (Some(ready_at), Some(queued_at)) = (
+                activity.ready_since.map(seismograph::recorder::event::EventTimestamp::ticks),
+                activity.queued_since.map(seismograph::recorder::event::EventTimestamp::ticks),
+            ) else {
+                return;
+            };
+            if activity.poll_started_at.is_some() {
                 return;
             }
+            if activity.poll_worker_id.is_some() {
+                return;
+            }
+            if ready_at > queued_at {
+                return;
+            }
+            if queued_at > observed {
+                return;
+            }
+            let ready_for = observed - queued_at;
             task.row.activity = TaskActivitySummary {
                 state: "Ready".into(),
                 ready_for: Some(ready_for),
                 ..TaskActivitySummary::default()
             };
             task.ready.push(Interval {
-                start: observed - ready_for,
+                start: queued_at,
                 end: observed,
             });
         }
-        TaskActivityState::Waiting
-            if activity.poll_started_at.is_none()
-                && activity.ready_since.is_none()
-                && activity.queued_since.is_none()
-                && activity.poll_worker_id.is_none() =>
-        {
-            task.row.activity.state = "Waiting".into();
+        TaskActivityState::Waiting => {
+            if matches!(
+                (
+                    activity.poll_started_at,
+                    activity.ready_since,
+                    activity.queued_since,
+                    activity.poll_worker_id,
+                ),
+                (None, None, None, None)
+            ) {
+                task.row.activity.state = "Waiting".into();
+            }
         }
         _ => {}
     }
@@ -471,8 +504,11 @@ fn apply_activity(task: &mut TaskBuilder, activity: Option<TaskActivity>) {
 
 pub(super) fn display_windows(events: &Events, source: Option<&Snapshot>) -> BTreeMap<u64, TimeWindow> {
     let mut bounds = BTreeMap::<u64, TimeWindow>::new();
-    let mut observe = |runtime, start, end| {
-        if end == 0 || start > end {
+    let mut observe = |runtime: u64, start: u64, end: u64| {
+        if end == 0 {
+            return;
+        }
+        if end.checked_sub(start).is_none() {
             return;
         }
         let window = bounds.entry(runtime).or_insert(TimeWindow { start, end });
@@ -611,6 +647,24 @@ mod tests {
     }
 
     #[test]
+    fn spawned_task_preserves_nonzero_parent_identity() {
+        let mut spawned = event(EventKind::TaskSpawned, None, 10, 1, 1);
+        let EventPayload::Runtime(runtime) = &mut spawned.payload else {
+            unreachable!();
+        };
+        runtime.related_id = 7;
+        let snapshot = RuntimeMonitorSnapshot::from_events(
+            &Events {
+                events: vec![spawned],
+                ..Events::default()
+            },
+            None,
+            &[],
+        );
+        assert_eq!(snapshot.workers[0].tasks[0].parent_id, Some(7));
+    }
+
+    #[test]
     fn repeated_spawn_events_preserve_the_first_backtrace() {
         let mut first = event(EventKind::TaskSpawned, None, 10, 1, 1);
         first.call_stack = vec![Address::new(0x1000)];
@@ -630,6 +684,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one state matrix verifies every coherent and rejected activity shape"
+    )]
     fn activity_validation_rejects_incoherent_states_and_accepts_waiting() {
         let mut task = TaskBuilder::default();
         apply_activity(&mut task, None);
@@ -676,10 +734,141 @@ mod tests {
                 poll_worker_id: WorkerId::from_raw(1),
                 queued_since: None,
             },
+            TaskActivity {
+                observed_at: EventTimestamp::from_ticks(100),
+                state: TaskActivityState::Running,
+                ready_since: None,
+                poll_started_at: Some(EventTimestamp::from_ticks(90)),
+                poll_worker_id: WorkerId::from_raw(1),
+                queued_since: Some(EventTimestamp::from_ticks(90)),
+            },
+            TaskActivity {
+                observed_at: EventTimestamp::from_ticks(100),
+                state: TaskActivityState::Running,
+                ready_since: None,
+                poll_started_at: Some(EventTimestamp::from_ticks(101)),
+                poll_worker_id: WorkerId::from_raw(1),
+                queued_since: None,
+            },
+            TaskActivity {
+                observed_at: EventTimestamp::from_ticks(100),
+                state: TaskActivityState::Running,
+                ready_since: Some(EventTimestamp::from_ticks(101)),
+                poll_started_at: Some(EventTimestamp::from_ticks(90)),
+                poll_worker_id: WorkerId::from_raw(1),
+                queued_since: None,
+            },
+            TaskActivity {
+                observed_at: EventTimestamp::from_ticks(100),
+                state: TaskActivityState::Ready,
+                ready_since: Some(EventTimestamp::from_ticks(90)),
+                poll_started_at: Some(EventTimestamp::from_ticks(90)),
+                poll_worker_id: None,
+                queued_since: Some(EventTimestamp::from_ticks(90)),
+            },
+            TaskActivity {
+                observed_at: EventTimestamp::from_ticks(100),
+                state: TaskActivityState::Ready,
+                ready_since: Some(EventTimestamp::from_ticks(90)),
+                poll_started_at: None,
+                poll_worker_id: WorkerId::from_raw(1),
+                queued_since: Some(EventTimestamp::from_ticks(90)),
+            },
+            TaskActivity {
+                observed_at: EventTimestamp::from_ticks(100),
+                state: TaskActivityState::Waiting,
+                ready_since: Some(EventTimestamp::from_ticks(90)),
+                poll_started_at: None,
+                poll_worker_id: None,
+                queued_since: None,
+            },
         ] {
             apply_activity(&mut task, Some(activity));
             assert_eq!(task.row.activity, TaskActivitySummary::default());
         }
+
+        let mut running = TaskBuilder::default();
+        apply_activity(
+            &mut running,
+            Some(TaskActivity {
+                observed_at: EventTimestamp::from_ticks(100),
+                state: TaskActivityState::Running,
+                ready_since: Some(EventTimestamp::from_ticks(90)),
+                poll_started_at: Some(EventTimestamp::from_ticks(90)),
+                poll_worker_id: WorkerId::from_raw(1),
+                queued_since: None,
+            }),
+        );
+        assert_eq!(
+            (running.row.activity.state.as_str(), running.row.activity.running_for),
+            ("Running", Some(10))
+        );
+
+        let mut ready = TaskBuilder::default();
+        apply_activity(
+            &mut ready,
+            Some(TaskActivity {
+                observed_at: EventTimestamp::from_ticks(100),
+                state: TaskActivityState::Ready,
+                ready_since: Some(EventTimestamp::from_ticks(90)),
+                poll_started_at: None,
+                poll_worker_id: None,
+                queued_since: Some(EventTimestamp::from_ticks(90)),
+            }),
+        );
+        assert_eq!(
+            (ready.row.activity.state.as_str(), ready.row.activity.ready_for),
+            ("Ready", Some(10))
+        );
+
+        for (activity, expected) in [
+            (
+                TaskActivity {
+                    observed_at: EventTimestamp::from_ticks(100),
+                    state: TaskActivityState::Running,
+                    ready_since: None,
+                    poll_started_at: Some(EventTimestamp::from_ticks(100)),
+                    poll_worker_id: WorkerId::from_raw(1),
+                    queued_since: None,
+                },
+                ("Running", Some(0), false),
+            ),
+            (
+                TaskActivity {
+                    observed_at: EventTimestamp::from_ticks(100),
+                    state: TaskActivityState::Running,
+                    ready_since: Some(EventTimestamp::from_ticks(100)),
+                    poll_started_at: Some(EventTimestamp::from_ticks(90)),
+                    poll_worker_id: WorkerId::from_raw(1),
+                    queued_since: None,
+                },
+                ("Running", Some(10), true),
+            ),
+        ] {
+            let mut task = TaskBuilder::default();
+            apply_activity(&mut task, Some(activity));
+            assert_eq!(
+                (
+                    task.row.activity.state.as_str(),
+                    task.row.activity.running_for,
+                    task.row.activity.repoll_requested,
+                ),
+                expected
+            );
+        }
+        let mut ready_at_observation = TaskBuilder::default();
+        apply_activity(
+            &mut ready_at_observation,
+            Some(TaskActivity {
+                observed_at: EventTimestamp::from_ticks(100),
+                state: TaskActivityState::Ready,
+                ready_since: Some(EventTimestamp::from_ticks(90)),
+                poll_started_at: None,
+                poll_worker_id: None,
+                queued_since: Some(EventTimestamp::from_ticks(100)),
+            }),
+        );
+        assert_eq!(ready_at_observation.row.activity.ready_for, Some(0));
 
         apply_activity(
             &mut task,
@@ -727,6 +916,100 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!((ids(false), ids(true)), (vec![3, 1, 2], vec![1, 3, 2]));
+    }
+
+    #[test]
+    fn executing_sort_uses_fraction_and_keeps_unknown_last() {
+        let worker = RuntimeWorkerSummary {
+            tasks: [(1, Some(0.75)), (2, None), (3, Some(0.25))]
+                .map(|(task_id, executing_fraction)| RuntimeTaskSummary {
+                    task_id,
+                    metrics: ExecutionMetrics {
+                        executing_fraction,
+                        ..ExecutionMetrics::default()
+                    },
+                    ..RuntimeTaskSummary::default()
+                })
+                .to_vec(),
+            ..RuntimeWorkerSummary::default()
+        };
+        let ids = |descending| {
+            worker
+                .sorted_tasks(RuntimeTaskSort::Executing, descending)
+                .iter()
+                .map(|task| task.task_id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!((ids(false), ids(true)), (vec![3, 1, 2], vec![1, 3, 2]));
+    }
+
+    #[test]
+    fn task_ready_worker_identity_is_not_executor_placement() {
+        let events = Events {
+            events: vec![event(EventKind::TaskReady, Some(99), 10, 0, 0)],
+            ..Events::default()
+        };
+        let snapshot = RuntimeMonitorSnapshot::from_events(&events, None, &[]);
+        assert_eq!(
+            snapshot
+                .workers
+                .iter()
+                .map(|worker| (worker.worker_id, worker.tasks[0].worker_ids.clone()))
+                .collect::<Vec<_>>(),
+            [(None, Vec::new())]
+        );
+    }
+
+    #[test]
+    fn unbound_assignment_retains_metrics_or_execution_without_worker_identity() {
+        let mut with_metrics = TaskBuilder::default();
+        with_metrics.row.task_id = 1;
+        with_metrics.row.runtime_id = 1;
+        with_metrics.workers.insert(7);
+        with_metrics.metrics.insert(None, ExecutionMetrics::default());
+        let mut with_execution = TaskBuilder::default();
+        with_execution.row.task_id = 2;
+        with_execution.row.runtime_id = 1;
+        with_execution.workers.insert(7);
+        with_execution.executed.insert(None);
+        let mut workers = Workers::new();
+        distribute_tasks(&mut workers, BTreeMap::from([((1, 1), with_metrics), ((1, 2), with_execution)]));
+        assert_eq!(
+            workers
+                .get(&(1, None))
+                .unwrap()
+                .tasks
+                .iter()
+                .map(|task| task.task_id)
+                .collect::<Vec<_>>(),
+            [1, 2]
+        );
+    }
+
+    #[test]
+    fn source_import_preserves_runtime_and_task_identity_metadata() {
+        let mut source = source(None);
+        source.runtimes[0].name = "named-runtime".into();
+        source.runtimes[0].workers[0].current_task = None;
+        source.runtimes[0].tasks[0].parent = TaskId::from_raw(7);
+        source.runtimes[0].tasks[0].type_descriptor = TypeDescriptorId::from_raw(9).unwrap();
+        source.runtimes[0].tasks[0].last_worker_id = None;
+        source.runtimes[0].tasks[0].spawn_backtrace = vec![Address::new(0x1234)];
+        let snapshot = RuntimeMonitorSnapshot::from_events(&Events::default(), Some(&source), &[]);
+        let worker = &snapshot.workers[0];
+        let task = &worker.tasks[0];
+        assert_eq!(
+            (
+                worker.runtime_id,
+                worker.runtime_name.as_str(),
+                task.runtime_id,
+                task.task_id,
+                task.parent_id,
+                task.type_descriptor_id,
+                task.spawn_stack.len(),
+            ),
+            (1, "named-runtime", 1, 1, Some(7), Some(9), 1)
+        );
     }
 
     #[test]
@@ -904,5 +1187,27 @@ mod tests {
         let snapshot = RuntimeMonitorSnapshot::from_events(&Events::default(), Some(&source), &[]);
         assert_eq!(snapshot.workers[0].metrics.executing_fraction, Some(1.0));
         assert_eq!(snapshot.workers[0].tasks[0].activity.running_for, Some(90));
+    }
+
+    #[test]
+    fn display_window_rejects_zero_and_reversed_activity_ranges() {
+        let mut source = source(Some(TaskActivity {
+            observed_at: EventTimestamp::from_ticks(100),
+            state: TaskActivityState::Running,
+            ready_since: None,
+            poll_started_at: Some(EventTimestamp::from_ticks(101)),
+            poll_worker_id: WorkerId::from_raw(1),
+            queued_since: None,
+        }));
+        assert!(display_windows(&Events::default(), Some(&source)).is_empty());
+        source.runtimes[0].tasks[0].activity = Some(TaskActivity {
+            observed_at: EventTimestamp::from_ticks(100),
+            state: TaskActivityState::Running,
+            ready_since: None,
+            poll_started_at: Some(EventTimestamp::from_ticks(100)),
+            poll_worker_id: WorkerId::from_raw(1),
+            queued_since: None,
+        });
+        assert!(display_windows(&Events::default(), Some(&source)).is_empty());
     }
 }

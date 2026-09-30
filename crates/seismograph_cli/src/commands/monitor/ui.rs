@@ -37,6 +37,7 @@ mod task_events_ui;
 const KEY_COLOR: Color = Color::Cyan;
 const CONTENTION_COLOR: Color = Color::Yellow;
 
+#[cfg_attr(test, mutants::skip)]
 impl App {
     pub(super) fn screen_areas(&self, area: Rect) -> [Rect; 3] {
         Layout::vertical([

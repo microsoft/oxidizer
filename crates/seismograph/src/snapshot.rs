@@ -9,6 +9,7 @@
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
+use std::collections::HashSet;
 use std::path::Path;
 #[cfg(test)]
 use std::ptr::NonNull;
@@ -388,8 +389,12 @@ pub fn decode(bytes: &[u8]) -> Result<DecodedSnapshot, Error> {
 
     validate_count_fits(source_count, reader.remaining().len(), SOURCE_HEADER_LEN)?;
     let mut sources = Vec::with_capacity(source_count);
+    let mut source_ids = HashSet::with_capacity(source_count);
     for _ in 0..source_count {
         let id = SourceId::from_raw(reader.u64()?).ok_or_else(Error::invalid_format)?;
+        if !source_ids.insert(id) {
+            return Err(Error::invalid_format());
+        }
         let schema_version = reader.u16()?;
         let name_len = reader.u16()? as usize;
         let data_len = usize::try_from(reader.u64()?).map_err(|_error| Error::invalid_format())?;
@@ -1908,6 +1913,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one malformed-input matrix covers the complete snapshot framing contract"
+    )]
     fn malformed_headers_policies_clocks_sources_and_payloads_are_rejected() {
         let mut invalid_magic = vec![0; HEADER_LEN];
         assert!(decode(&invalid_magic).is_err());
@@ -1946,6 +1955,30 @@ mod tests {
         let mut trailing = valid.as_bytes().to_vec();
         trailing.push(1);
         assert!(decode(&trailing).is_err());
+
+        let duplicate_sources = encode_snapshot(&DecodedSnapshot {
+            capture_duration_nanos: 0,
+            events: Events {
+                clock: EventClock::CURRENT,
+                ..Events::default()
+            },
+            sources: vec![
+                SourceSnapshot {
+                    id: SourceId::from_raw(1).unwrap(),
+                    name: "first".into(),
+                    schema_version: 1,
+                    data: vec![1],
+                },
+                SourceSnapshot {
+                    id: SourceId::from_raw(1).unwrap(),
+                    name: "second".into(),
+                    schema_version: 2,
+                    data: vec![2],
+                },
+            ],
+        })
+        .unwrap();
+        assert!(decode(duplicate_sources.as_bytes()).is_err());
 
         let mut invalid_source = valid.as_bytes().to_vec();
         invalid_source[28..32].copy_from_slice(&1_u32.to_le_bytes());

@@ -21,8 +21,11 @@ const HEADER_LEN: usize = 20;
 const RUNTIME_FIXED_LEN: usize = 128;
 const WORKER_FIXED_LEN: usize = 32;
 const TASK_V2_FIXED_LEN: usize = 32;
+#[cfg(test)]
 const TASK_V3_FIXED_LEN: usize = 120;
+#[cfg(test)]
 const TASK_V4_FIXED_LEN: usize = 160;
+#[cfg(test)]
 const TASK_V5_FIXED_LEN: usize = 168;
 const TASK_FIXED_LEN: usize = 176;
 const ADDRESS_LOOKUP_FIXED_LEN: usize = 24;
@@ -458,14 +461,9 @@ fn read_runtime(reader: &mut Reader<'_>, schema_version: u16) -> Result<Runtime,
         return Err(malformed());
     }
     let workers = (0..worker_count).map(|_| read_worker(reader)).collect::<Result<Vec<_>, _>>()?;
-    let task_fixed_len = match schema_version {
-        2 => TASK_V2_FIXED_LEN,
-        3 => TASK_V3_FIXED_LEN,
-        4 => TASK_V4_FIXED_LEN,
-        5 => TASK_V5_FIXED_LEN,
-        _ => TASK_FIXED_LEN,
-    };
-    if !count_fits(task_count, task_fixed_len, reader.remaining().len()) {
+    // Every supported task schema is at least this large; read_task performs
+    // the exact per-version validation without duplicating its size table.
+    if !count_fits(task_count, TASK_V2_FIXED_LEN, reader.remaining().len()) {
         return Err(malformed());
     }
     let tasks = (0..task_count)
@@ -656,21 +654,33 @@ fn valid_activity(activity: TaskActivity) -> bool {
         .into_iter()
         .flatten()
         .all(|at| at.ticks() != 0 && at <= activity.observed_at);
-    times_valid
-        && (activity.state == TaskActivityState::Running || activity.poll_worker_id.is_none())
-        && match activity.state {
-            TaskActivityState::Unknown | TaskActivityState::Waiting => {
-                activity.ready_since.is_none() && activity.poll_started_at.is_none() && activity.queued_since.is_none()
-            }
-            TaskActivityState::Ready => {
-                activity.ready_since.is_some() && activity.queued_since >= activity.ready_since && activity.poll_started_at.is_none()
-            }
-            TaskActivityState::Running => {
-                activity.poll_started_at.is_some()
-                    && activity.queued_since.is_none()
-                    && activity.ready_since.is_none_or(|ready| Some(ready) >= activity.poll_started_at)
-            }
-        }
+    if !times_valid {
+        return false;
+    }
+    match activity.state {
+        TaskActivityState::Unknown | TaskActivityState::Waiting => matches!(
+            (
+                activity.poll_worker_id,
+                activity.ready_since,
+                activity.poll_started_at,
+                activity.queued_since,
+            ),
+            (None, None, None, None)
+        ),
+        TaskActivityState::Ready => match (
+            activity.poll_worker_id,
+            activity.ready_since,
+            activity.poll_started_at,
+            activity.queued_since,
+        ) {
+            (None, Some(ready), None, Some(queued)) => queued >= ready,
+            _ => false,
+        },
+        TaskActivityState::Running => match (activity.ready_since, activity.poll_started_at, activity.queued_since) {
+            (ready, Some(poll), None) => ready.is_none_or(|ready| ready >= poll),
+            _ => false,
+        },
+    }
 }
 
 fn read_activity(reader: &mut Reader<'_>, schema_version: u16) -> Result<Option<TaskActivity>, Error> {
@@ -688,7 +698,10 @@ fn read_activity(reader: &mut Reader<'_>, schema_version: u16) -> Result<Option<
         4 if poll != 0 && queued == 0 && (ready == 0 || ready >= poll) => TaskActivityState::Running,
         _ => return Err(malformed()),
     };
-    if ready > observed || poll > observed || queued > observed || (state != TaskActivityState::Running && worker != 0) {
+    if [ready, poll, queued].into_iter().any(|timestamp| timestamp > observed) {
+        return Err(malformed());
+    }
+    if state != TaskActivityState::Running && worker != 0 {
         return Err(malformed());
     }
     let timestamp = |ticks| (ticks != 0).then_some(EventTimestamp::from_ticks(ticks));
@@ -1272,6 +1285,19 @@ mod tests {
     }
 
     #[test]
+    fn version_five_activity_decodes_without_future_size() {
+        let mut snapshot = fixture();
+        snapshot.runtimes[0].tasks[0].future_size_bytes = Some(64);
+        let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
+        encode(&snapshot, &mut bytes).unwrap();
+        bytes[10..12].copy_from_slice(&5_u16.to_le_bytes());
+        let task_start = HEADER_LEN + RUNTIME_FIXED_LEN + snapshot.runtimes[0].name.len() + WORKER_FIXED_LEN;
+        bytes.drain(task_start + TASK_V5_FIXED_LEN..task_start + TASK_FIXED_LEN);
+        snapshot.runtimes[0].tasks[0].future_size_bytes = None;
+        assert_eq!(decode(&bytes).unwrap(), snapshot);
+    }
+
+    #[test]
     fn poll_worker_identity_is_rejected_outside_running_state() {
         for words in [
             [0_u64, 0, 0, 0, 0, 7],
@@ -1341,6 +1367,22 @@ mod tests {
                 poll_worker_id: WorkerId::from_raw(7),
                 queued_since: None,
             }),
+            Some(TaskActivity {
+                observed_at: at(50),
+                state: TaskActivityState::Ready,
+                ready_since: Some(at(50)),
+                poll_started_at: None,
+                poll_worker_id: None,
+                queued_since: Some(at(50)),
+            }),
+            Some(TaskActivity {
+                observed_at: at(50),
+                state: TaskActivityState::Running,
+                ready_since: Some(at(50)),
+                poll_started_at: Some(at(50)),
+                poll_worker_id: WorkerId::from_raw(7),
+                queued_since: None,
+            }),
         ] {
             let mut bytes = [0; TASK_V5_FIXED_LEN - TASK_V3_FIXED_LEN];
             write_activity(&mut Writer::new(&mut bytes), activity).unwrap();
@@ -1394,6 +1436,45 @@ mod tests {
             queued_since: None,
         };
         assert_eq!(write_activity(&mut Writer::new(&mut [0; 48]), Some(invalid)), Err(()));
+    }
+
+    #[test]
+    fn activity_validation_requires_each_state_specific_field_combination() {
+        let at = EventTimestamp::from_ticks;
+        let base = TaskActivity {
+            observed_at: at(10),
+            state: TaskActivityState::Waiting,
+            ready_since: None,
+            poll_started_at: None,
+            poll_worker_id: None,
+            queued_since: None,
+        };
+        assert!(valid_activity(base));
+        assert!(!valid_activity(TaskActivity {
+            ready_since: Some(at(1)),
+            ..base
+        }));
+        assert!(!valid_activity(TaskActivity {
+            poll_started_at: Some(at(1)),
+            ..base
+        }));
+        assert!(!valid_activity(TaskActivity {
+            queued_since: Some(at(1)),
+            ..base
+        }));
+        assert!(valid_activity(TaskActivity {
+            state: TaskActivityState::Ready,
+            ready_since: Some(at(4)),
+            queued_since: Some(at(4)),
+            ..base
+        }));
+        assert!(valid_activity(TaskActivity {
+            state: TaskActivityState::Running,
+            ready_since: Some(at(4)),
+            poll_started_at: Some(at(4)),
+            poll_worker_id: WorkerId::from_raw(1),
+            ..base
+        }));
     }
 
     #[test]

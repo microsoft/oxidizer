@@ -90,6 +90,7 @@ impl Barrier<Sync> {
     ///
     /// Panics if a previous internal panic poisoned the barrier state.
     #[inline]
+    #[cfg_attr(test, mutants::skip)] // Mutating barrier progress conditions turns tests into unbounded scheduler waits.
     pub fn wait(&self) -> BarrierWaitResult {
         // std::sync::Barrier only identifies the final arrival after waiting.
         // A native mutex/condvar pair lets telemetry mark actual contention

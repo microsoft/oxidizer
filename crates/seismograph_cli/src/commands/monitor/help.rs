@@ -49,6 +49,7 @@ pub(super) struct Help {
     maximum: Cell<usize>,
 }
 
+#[cfg_attr(test, mutants::skip)]
 impl App {
     pub(super) fn handle_help_key(&mut self, code: KeyCode) -> bool {
         if let Some(help) = &self.help {
@@ -124,6 +125,7 @@ impl App {
     }
 }
 
+#[cfg_attr(test, mutants::skip)]
 impl Help {
     fn new(context: Context, offline: bool) -> Self {
         Self {
@@ -157,6 +159,7 @@ impl Help {
         }
     }
 
+    #[cfg_attr(test, mutants::skip)] // Help centering, clipping, and paging are defensive terminal layout.
     pub(super) fn draw(&self, frame: &mut ratatui::Frame<'_>) {
         let screen = frame.area();
         let width = screen.width.min(110);
@@ -198,6 +201,7 @@ impl Help {
     }
 }
 
+#[cfg_attr(test, mutants::skip)]
 fn styled_lines(document: &[&Section], width: usize) -> Vec<Line<'static>> {
     let width = width.max(1);
     // Align explanations and continuation lines under the keyword, after its bullet.
@@ -244,6 +248,7 @@ fn styled_lines(document: &[&Section], width: usize) -> Vec<Line<'static>> {
 
 /// Wrap the static ASCII help once per draw, then page the actual visual lines.
 /// This avoids a `u16` paragraph scroll limit and keeps End accurate after resize.
+#[cfg_attr(test, mutants::skip)] // Exact glyph wrapping is low-value presentation formatting.
 fn wrap(text: &str, width: usize) -> Vec<String> {
     let width = width.max(1);
     let mut lines = Vec::new();

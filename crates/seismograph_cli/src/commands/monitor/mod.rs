@@ -79,6 +79,7 @@ pub(crate) fn verb(args: VerbArgs) -> Result<(), Error> {
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(test, mutants::skip)] // The event loop requires a real terminal and nondeterministic input timing.
 fn run_terminal(mut app: app::App, mut loader: Option<offline::Loader>) -> Result<(), Error> {
     let _terminal_guard = TerminalGuard::enter()?;
     let backend = CrosstermBackend::new(io::stdout());
@@ -143,6 +144,7 @@ struct TerminalGuard<W: Write, D: FnMut() -> io::Result<()>> {
 
 impl TerminalGuard<io::Stdout, fn() -> io::Result<()>> {
     #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(test, mutants::skip)] // TTY detection and raw-mode setup require a real interactive terminal.
     fn enter() -> Result<Self, Error> {
         if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
             return Err(Error::Io(io::Error::new(

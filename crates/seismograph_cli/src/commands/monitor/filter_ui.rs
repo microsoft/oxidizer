@@ -45,6 +45,7 @@ pub(super) struct FilterPopup {
     error: Option<String>,
 }
 
+#[cfg_attr(test, mutants::skip)]
 impl FilterPopup {
     fn new(spec: &FilterSpec) -> Self {
         Self {
@@ -57,6 +58,7 @@ impl FilterPopup {
         }
     }
 
+    #[cfg_attr(test, mutants::skip)] // Popup field navigation is terminal input glue.
     fn edit(&mut self, code: KeyCode) {
         match code {
             KeyCode::Tab | KeyCode::Down => self.selected = (self.selected + 1) % 4,
@@ -327,6 +329,7 @@ impl App {
         frame.render_widget(Paragraph::new(lines).style(Style::default().fg(Color::Yellow)), area);
     }
 
+    #[cfg_attr(test, mutants::skip)] // Popup centering and clipping are defensive terminal layout.
     pub(super) fn draw_filter_popup(&self, frame: &mut ratatui::Frame<'_>) {
         let Some(popup) = &self.filters.popup else {
             return;

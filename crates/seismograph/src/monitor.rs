@@ -453,64 +453,142 @@ fn handle_client_with_timeouts(
             Err(ClientError::Stopped | ClientError::Disconnected | ClientError::IdleTimedOut) => return Ok(()),
             Err(error) => return Err(error),
         };
-        let response = authenticated_response(&request);
-        let snapshot_response = matches!(response, Response::Snapshot(_));
-        if snapshot_response {
-            stream.set_write_timeout(None).map_err(ClientError::Io)?;
-        }
-        let write_result = seismograph_protocol::write_response(&mut stream, request_id, &response);
-        if snapshot_response {
-            stream.set_write_timeout(Some(CLIENT_WRITE_TIMEOUT)).map_err(ClientError::Io)?;
-        }
-        write_result.map_err(ClientError::Protocol)?;
+        let response = authenticated_response_with_guard(&request);
+        let mut writer = DeadlineWriter::new(&mut stream, CLIENT_WRITE_TIMEOUT);
+        seismograph_protocol::write_response(&mut writer, request_id, &response.response).map_err(ClientError::Protocol)?;
     }
     Ok(())
 }
 
+struct DeadlineWriter<'a> {
+    stream: &'a mut TcpStream,
+    deadline: Instant,
+}
+
+impl<'a> DeadlineWriter<'a> {
+    fn new(stream: &'a mut TcpStream, timeout: Duration) -> Self {
+        Self {
+            stream,
+            deadline: Instant::now() + timeout,
+        }
+    }
+
+    fn apply_remaining_timeout(&self) -> io::Result<()> {
+        let remaining = self
+            .deadline
+            .checked_duration_since(Instant::now())
+            .filter(|remaining| !remaining.is_zero())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "Seismograph monitor response write timed out"))?;
+        self.stream.set_write_timeout(Some(remaining))
+    }
+}
+
+impl io::Write for DeadlineWriter<'_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.apply_remaining_timeout()?;
+        io::Write::write(self.stream, buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.apply_remaining_timeout()?;
+        io::Write::flush(self.stream)
+    }
+}
+
+#[cfg(test)]
 fn authenticated_response(request: &Request) -> Response {
+    authenticated_response_with_guard(request).response
+}
+
+struct AuthenticatedResponse {
+    response: Response,
+    _snapshot_guard: Option<SnapshotRequestGuard>,
+}
+
+fn authenticated_response_with_guard(request: &Request) -> AuthenticatedResponse {
     match request {
-        Request::ReadServerVersion => Response::ServerVersion(env!("CARGO_PKG_VERSION").into()),
+        Request::ReadServerVersion => AuthenticatedResponse {
+            response: Response::ServerVersion(env!("CARGO_PKG_VERSION").into()),
+            _snapshot_guard: None,
+        },
         Request::CaptureSnapshotAndStop => {
-            let Ok(_snapshot) = SnapshotRequestGuard::acquire() else {
-                return Response::Error("a seismograph snapshot is already in progress".into());
+            let Ok(guard) = SnapshotRequestGuard::acquire() else {
+                return AuthenticatedResponse {
+                    response: Response::Error("a seismograph snapshot is already in progress".into()),
+                    _snapshot_guard: None,
+                };
             };
-            snapshot_response(crate::snapshot(crate::snapshot::SnapshotOptions {
-                event_buffers: crate::snapshot::EventBufferDisposition::Stop,
-            }))
+            AuthenticatedResponse {
+                response: snapshot_response(crate::snapshot(crate::snapshot::SnapshotOptions {
+                    event_buffers: crate::snapshot::EventBufferDisposition::Stop,
+                })),
+                _snapshot_guard: Some(guard),
+            }
         }
         Request::ClearEventBuffers => {
             let Ok(_snapshot) = SnapshotRequestGuard::acquire() else {
-                return Response::Error("a seismograph snapshot is already in progress".into());
+                return AuthenticatedResponse {
+                    response: Response::Error("a seismograph snapshot is already in progress".into()),
+                    _snapshot_guard: None,
+                };
             };
-            crate::recorder::clear_event_buffers().map_or_else(|error| Response::Error(error.to_string()), |()| Response::Acknowledged)
+            AuthenticatedResponse {
+                response: crate::recorder::clear_event_buffers()
+                    .map_or_else(|error| Response::Error(error.to_string()), |()| Response::Acknowledged),
+                _snapshot_guard: None,
+            }
         }
-        Request::Hello { .. } => Response::Error("already authenticated".into()),
-        Request::SetRecording(configuration) => apply_recording_configuration(*configuration)
-            .map_or_else(|error| Response::Error(error.to_string()), |()| Response::Acknowledged),
+        Request::Hello { .. } => AuthenticatedResponse {
+            response: Response::Error("already authenticated".into()),
+            _snapshot_guard: None,
+        },
+        Request::SetRecording(configuration) => AuthenticatedResponse {
+            response: apply_recording_configuration(*configuration)
+                .map_or_else(|error| Response::Error(error.to_string()), |()| Response::Acknowledged),
+            _snapshot_guard: None,
+        },
         Request::SetCacheRecording(policy) => {
             let configuration = crate::recorder::configuration();
-            crate::recorder::try_configure(crate::recorder::Configuration {
-                cache: recorder_policy(*policy),
-                ..configuration
-            })
-            .map_or_else(|error| Response::Error(error.to_string()), |()| Response::Acknowledged)
+            AuthenticatedResponse {
+                response: crate::recorder::try_configure(crate::recorder::Configuration {
+                    cache: recorder_policy(*policy),
+                    ..configuration
+                })
+                .map_or_else(|error| Response::Error(error.to_string()), |()| Response::Acknowledged),
+                _snapshot_guard: None,
+            }
         }
         Request::CaptureSnapshot(options) => {
-            let Ok(_snapshot) = SnapshotRequestGuard::acquire() else {
-                return Response::Error("a seismograph snapshot is already in progress".into());
+            let Ok(guard) = SnapshotRequestGuard::acquire() else {
+                return AuthenticatedResponse {
+                    response: Response::Error("a seismograph snapshot is already in progress".into()),
+                    _snapshot_guard: None,
+                };
             };
             let event_buffers = match options.event_buffers {
                 EventBufferDisposition::Retain => crate::snapshot::EventBufferDisposition::Retain,
                 EventBufferDisposition::Clear => crate::snapshot::EventBufferDisposition::Clear,
                 EventBufferDisposition::Release => crate::snapshot::EventBufferDisposition::Release,
             };
-            snapshot_response(crate::snapshot(crate::snapshot::SnapshotOptions { event_buffers }))
+            AuthenticatedResponse {
+                response: snapshot_response(crate::snapshot(crate::snapshot::SnapshotOptions { event_buffers })),
+                _snapshot_guard: Some(guard),
+            }
         }
-        Request::ReadRecorderStatistics => recorder_statistics_response(),
-        Request::ReadRecorderActivity => recorder_activity_response(),
+        Request::ReadRecorderStatistics => AuthenticatedResponse {
+            response: recorder_statistics_response(),
+            _snapshot_guard: None,
+        },
+        Request::ReadRecorderActivity => AuthenticatedResponse {
+            response: recorder_activity_response(),
+            _snapshot_guard: None,
+        },
         Request::ReadCacheRecording => {
             let policy = protocol_recording_policy(crate::recorder::configuration().cache);
-            Response::CacheRecording(policy)
+            AuthenticatedResponse {
+                response: Response::CacheRecording(policy),
+                _snapshot_guard: None,
+            }
         }
     }
 }
@@ -1009,13 +1087,14 @@ mod tests {
     #[test]
     fn concurrent_snapshot_is_rejected_until_the_current_request_finishes() {
         let _test = crate::recorder::TEST_LOCK.lock().unwrap();
-        let guard = SnapshotRequestGuard::acquire().unwrap();
+        let active = authenticated_response_with_guard(&Request::CaptureSnapshot(SnapshotOptions::default()));
+        assert!(matches!(active.response, Response::Snapshot(_)));
         let rejected = [
             authenticated_response(&Request::CaptureSnapshot(SnapshotOptions::default())),
             authenticated_response(&Request::CaptureSnapshotAndStop),
             authenticated_response(&Request::ClearEventBuffers),
         ];
-        drop(guard);
+        drop(active);
         let resumed = authenticated_response(&Request::CaptureSnapshot(SnapshotOptions::default()));
         assert_eq!(
             (rejected, matches!(resumed, Response::Snapshot(_))),
@@ -1468,6 +1547,17 @@ mod tests {
             read_request_with_timeout(&mut server, &AtomicBool::new(false), Duration::from_secs(1), ReadTimeout::Idle),
             Err(ClientError::Protocol(_))
         ));
+    }
+
+    #[test]
+    fn response_write_deadline_is_absolute() {
+        let (_client, mut server) = connected_pair();
+        let writer = DeadlineWriter {
+            stream: &mut server,
+            deadline: Instant::now(),
+        };
+
+        assert_eq!(writer.apply_remaining_timeout().unwrap_err().kind(), io::ErrorKind::TimedOut);
 
         let (client, mut server) = connected_pair();
         drop(client);

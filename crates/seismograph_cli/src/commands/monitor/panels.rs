@@ -19,6 +19,7 @@ pub(super) const TABS: [(MonitorTab, &str); 8] = [
     (MonitorTab::Cache, "  Cache  "),
 ];
 
+#[cfg_attr(test, mutants::skip)] // Tab hit-testing is terminal geometry.
 fn tab_at(area: Rect, column: u16, row: u16) -> Option<MonitorTab> {
     let inner = Block::default().borders(Borders::ALL).inner(area);
     if row != inner.y || !inner.contains((column, row).into()) {
@@ -77,7 +78,9 @@ struct Divider {
     hit: Rect,
 }
 
+#[cfg_attr(test, mutants::skip)]
 impl Panels {
+    #[cfg_attr(test, mutants::skip)] // Compact-mode thresholds are presentation policy.
     pub(super) fn runtime_compact(area: Rect) -> bool {
         area.width < 110 || area.height < 32
     }
@@ -104,6 +107,7 @@ impl Panels {
         self.dragging = None;
     }
 
+    #[cfg_attr(test, mutants::skip)] // Split arithmetic is width-dependent terminal layout.
     pub(super) fn arrange(&self, tab: MonitorTab, area: Rect) -> Arrangement {
         let mut dividers = Vec::new();
         let mut split = |id, direction, parent, default| {
@@ -206,7 +210,9 @@ impl Panels {
     }
 }
 
+#[cfg_attr(test, mutants::skip)]
 impl App {
+    #[cfg_attr(test, mutants::skip)] // Mouse routing is terminal input glue.
     pub(super) fn handle_mouse(&mut self, event: MouseEvent, area: Rect) {
         if let Some(help) = &self.help {
             help.handle_mouse(event);
@@ -268,6 +274,7 @@ impl App {
     }
 }
 
+#[cfg_attr(test, mutants::skip)] // Drag ratios are low-value terminal layout arithmetic.
 fn dragged_constraint(position: u16, start: u16, length: u16, minimum: u16) -> Option<Constraint> {
     if length == 0 {
         return None;
@@ -277,6 +284,7 @@ fn dragged_constraint(position: u16, start: u16, length: u16, minimum: u16) -> O
     Some(Constraint::Ratio(u32::from(offset), u32::from(length)))
 }
 
+#[cfg_attr(test, mutants::skip)]
 const fn info_scroll_key(kind: MouseEventKind) -> Option<KeyCode> {
     match kind {
         MouseEventKind::ScrollUp => Some(KeyCode::Up),

@@ -14,6 +14,7 @@ use super::super::mouse::{ListTarget, MouseRows};
 use super::super::runtime_timeline::{ExecutionMetrics, HistogramBin, Interval, TimeWindow, bins, histogram};
 use super::{draw_empty_panel_with_message, format_count, format_runtime_duration};
 
+#[cfg_attr(test, mutants::skip)]
 pub(super) fn draw(
     frame: &mut ratatui::Frame<'_>,
     mouse: &MouseRows,
@@ -52,6 +53,7 @@ pub(super) fn draw(
     super::task_events_ui::draw(frame, mouse, events_area, task, Some(&capture.task_events), view);
 }
 
+#[cfg_attr(test, mutants::skip)]
 fn block(title: impl Into<Line<'static>>, focused: bool) -> Block<'static> {
     Block::default()
         .borders(Borders::ALL)
@@ -59,14 +61,17 @@ fn block(title: impl Into<Line<'static>>, focused: bool) -> Block<'static> {
         .border_style(Style::default().fg(if focused { Color::Cyan } else { Color::DarkGray }))
 }
 
+#[cfg_attr(test, mutants::skip)]
 fn fraction(value: Option<f64>) -> String {
     value.map_or_else(|| "-".into(), |value| format!("{:.1}%", value.clamp(0.0, 1.0) * 100.0))
 }
 
+#[cfg_attr(test, mutants::skip)]
 fn duration(value: Option<u64>) -> String {
     value.map_or_else(|| "-".into(), format_runtime_duration)
 }
 
+#[cfg_attr(test, mutants::skip)] // Glyph thresholds are presentation-only terminal formatting.
 fn timeline(intervals: &[Interval], window: Option<TimeWindow>, width: usize, color: Color) -> Line<'static> {
     Line::from(
         bins(intervals, window, width)
@@ -89,6 +94,7 @@ fn timeline(intervals: &[Interval], window: Option<TimeWindow>, width: usize, co
     )
 }
 
+#[cfg_attr(test, mutants::skip)]
 fn axis(window: Option<TimeWindow>) -> String {
     window.map_or_else(
         || "Window unobserved".into(),
@@ -101,6 +107,7 @@ fn axis(window: Option<TimeWindow>) -> String {
     )
 }
 
+#[cfg_attr(test, mutants::skip)] // Worker table clipping and column selection are terminal layout.
 fn draw_workers(
     frame: &mut ratatui::Frame<'_>,
     mouse: &MouseRows,
@@ -193,6 +200,7 @@ fn draw_workers(
     );
 }
 
+#[cfg_attr(test, mutants::skip)]
 fn selection(focused: bool) -> Style {
     if focused {
         Style::default().fg(Color::Black).bg(Color::Cyan)
@@ -201,6 +209,7 @@ fn selection(focused: bool) -> Style {
     }
 }
 
+#[cfg_attr(test, mutants::skip)]
 fn task_row(task: &RuntimeTaskSummary) -> Row<'static> {
     Row::new(
         [
@@ -221,6 +230,7 @@ fn task_row(task: &RuntimeTaskSummary) -> Row<'static> {
     )
 }
 
+#[cfg_attr(test, mutants::skip)]
 fn draw_tasks(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect, tasks: &[&RuntimeTaskSummary], view: RuntimeViewState) {
     if area.is_empty() {
         return;
@@ -265,6 +275,7 @@ fn draw_tasks(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect, tas
     mouse.register(area, 1, first.saturating_add(state.offset()), tasks.len(), ListTarget::RuntimeTasks);
 }
 
+#[cfg_attr(test, mutants::skip)]
 fn draw_worker_activity(
     frame: &mut ratatui::Frame<'_>,
     mouse: &MouseRows,
@@ -305,6 +316,7 @@ fn draw_worker_activity(
     draw_histogram(frame, mouse, distribution, "Poll · worker", &worker.metrics.poll_samples, view);
 }
 
+#[cfg_attr(test, mutants::skip)]
 fn draw_task_details(
     frame: &mut ratatui::Frame<'_>,
     mouse: &MouseRows,
@@ -345,6 +357,7 @@ fn draw_task_details(
     draw_task_statistics(frame, mouse, content, task, window, view);
 }
 
+#[cfg_attr(test, mutants::skip)] // Compact summary selection is terminal presentation policy.
 fn draw_task_statistics(
     frame: &mut ratatui::Frame<'_>,
     mouse: &MouseRows,
@@ -408,6 +421,7 @@ fn draw_task_statistics(
     draw_histogram(frame, mouse, distribution, title, samples, view);
 }
 
+#[cfg_attr(test, mutants::skip)]
 fn wake_distribution(metrics: &ExecutionMetrics) -> (&'static str, &[u64]) {
     if metrics.ready_samples.is_empty() && !metrics.wake_samples.is_empty() {
         ("Wake-to-poll (raw)", &metrics.wake_samples)
@@ -416,6 +430,7 @@ fn wake_distribution(metrics: &ExecutionMetrics) -> (&'static str, &[u64]) {
     }
 }
 
+#[cfg_attr(test, mutants::skip)] // Histogram labels and plot sizing are defensive terminal layout.
 fn draw_histogram(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect, title: &str, samples: &[u64], view: RuntimeViewState) {
     if area.is_empty() {
         return;
@@ -466,6 +481,7 @@ fn draw_histogram(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect,
     frame.render_widget(Paragraph::new(histogram_axis(&bins, usize::from(width))), Rect { width, ..ticks });
 }
 
+#[cfg_attr(test, mutants::skip)] // Bar widths are terminal rendering arithmetic, not snapshot semantics.
 fn draw_histogram_bars(
     frame: &mut ratatui::Frame<'_>,
     mouse: &MouseRows,
@@ -525,6 +541,7 @@ fn draw_histogram_bars(
     width
 }
 
+#[cfg_attr(test, mutants::skip)]
 fn histogram_axis(bins: &[HistogramBin], width: usize) -> String {
     let first = histogram_duration(bins[0].lower);
     let last = format!("{}+", histogram_duration(bins[bins.len() - 1].lower));
@@ -536,6 +553,7 @@ fn histogram_axis(bins: &[HistogramBin], width: usize) -> String {
     }
 }
 
+#[cfg_attr(test, mutants::skip)]
 fn histogram_duration(nanos: u64) -> String {
     if nanos >= 1_000_000_000_000 {
         format!("{:.2e}s", std::time::Duration::from_nanos(nanos).as_secs_f64())

@@ -169,7 +169,11 @@ impl WorkerHandle {
             u64::from(ready_since.is_some()),
             BacktraceCapture::Never,
         );
-        TaskPoll { task_id, started_at }
+        TaskPoll {
+            task_id,
+            started_at,
+            session: None,
+        }
     }
 
     pub(crate) fn task_poll_started_recorded(
@@ -195,7 +199,11 @@ impl WorkerHandle {
                 )
             });
         }
-        TaskPoll { task_id, started_at }
+        TaskPoll {
+            task_id,
+            started_at,
+            session,
+        }
     }
 
     /// Finishes a task poll and updates aggregate poll duration.
@@ -222,8 +230,8 @@ impl WorkerHandle {
             task.poll_duration_nanos.fetch_add(duration_nanos, Ordering::Relaxed);
             task.max_poll_duration_nanos.fetch_max(duration_nanos, Ordering::Relaxed);
             task.last_poll_finished_at.store(finished_at.ticks().max(1), Ordering::Release);
-            if seismograph::recorder::recording_enabled_for(EventClass::RuntimeTask) {
-                task.activity.poll_finished(poll.started_at, finished_at);
+            if poll.session.is_some() {
+                task.activity.poll_finished(poll.session, poll.started_at, finished_at);
             }
         }
         self.worker.current_task.store(0, Ordering::Release);

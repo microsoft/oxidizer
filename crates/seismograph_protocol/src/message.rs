@@ -408,21 +408,24 @@ const ACTIVITY_HEADER_BYTES: usize = 82 + 6 + 8 + 6 * 8 + 4;
 // Five counters, the retired flag, and the length prefix of an empty name.
 const ACTIVITY_THREAD_MIN_BYTES: usize = 5 * 8 + 1 + 2;
 
-fn encode_activity(activity: &RecorderActivity) -> Result<Vec<u8>, Error> {
-    let thread_count = u32::try_from(activity.threads.len()).map_err(|_error| Error::MessageTooLarge)?;
+#[cfg_attr(test, mutants::skip)] // The only observable boundary requires constructing a payload larger than u32::MAX.
+fn activity_size(activity: &RecorderActivity) -> Result<usize, Error> {
     let size = activity.threads.iter().try_fold(ACTIVITY_HEADER_BYTES, |size, thread| {
         u16::try_from(thread.name.len()).map_err(|_error| Error::MessageTooLarge)?;
         size.checked_add(ACTIVITY_THREAD_MIN_BYTES + thread.name.len())
             .ok_or(Error::MessageTooLarge)
     })?;
     u32::try_from(size).map_err(|_error| Error::MessageTooLarge)?;
+    Ok(size)
+}
+
+fn encode_activity(activity: &RecorderActivity) -> Result<Vec<u8>, Error> {
+    let thread_count = u32::try_from(activity.threads.len()).map_err(|_error| Error::MessageTooLarge)?;
+    activity_size(activity)?;
     let mut payload = encode_statistics(activity.statistics);
     decode_statistics(&payload)?;
     encode_recording_policy(&mut payload, activity.statistics.recording.cache);
     decode_recording_policy(&payload[82..88])?;
-    payload
-        .try_reserve_exact(size - payload.len())
-        .map_err(|_error| Error::MessageTooLarge)?;
     push_u64(&mut payload, activity.session_id);
     for count in [
         activity.class_events.allocations,
@@ -461,7 +464,8 @@ fn decode_activity(payload: &[u8]) -> Result<RecorderActivity, Error> {
         cache: reader.u64()?,
     };
     let thread_count = usize::try_from(reader.u32()?).map_err(|_error| Error::MessageTooLarge)?;
-    if thread_count > payload.len().saturating_sub(ACTIVITY_HEADER_BYTES) / ACTIVITY_THREAD_MIN_BYTES {
+    let minimum_thread_bytes = thread_count.checked_mul(ACTIVITY_THREAD_MIN_BYTES).ok_or(Error::InvalidMessage)?;
+    if minimum_thread_bytes > payload.len().saturating_sub(ACTIVITY_HEADER_BYTES) {
         return Err(Error::InvalidMessage);
     }
     let mut threads = Vec::new();

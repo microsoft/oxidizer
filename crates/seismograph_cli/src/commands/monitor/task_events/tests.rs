@@ -539,6 +539,17 @@ fn coherent_activity_bounds_an_open_poll_using_the_retained_start_thread() {
 }
 
 #[test]
+fn open_poll_accepts_repolls_at_or_before_observation_but_not_after_it() {
+    let raw = events(vec![start(1, 1, 1, (1, 1)), operation(1, 2, 2, EventKind::MutexAccess, 7)]);
+    for (ready_at, expected) in [(5, Some((1, 1))), (10, Some((1, 1))), (11, None)] {
+        let mut source = active_source();
+        source.runtimes[0].tasks[0].activity.as_mut().unwrap().ready_since = Some(EventTimestamp::from_ticks(ready_at));
+        let snapshot = TaskEventsSnapshot::from_events(&raw, &[], Some(&source));
+        assert_eq!(actors(&snapshot)[0].2, expected);
+    }
+}
+
+#[test]
 fn activity_without_a_retained_start_never_invents_the_recorder_thread() {
     let snapshot = TaskEventsSnapshot::from_events(
         &events(vec![operation(1, 2, 2, EventKind::MutexAccess, 7)]),
@@ -685,6 +696,20 @@ fn reused_allocation_addresses_with_distinct_ids_are_separate_histories() {
             .map(|history| (history.object_id, history.events.len()))
             .collect::<Vec<_>>(),
         vec![(7, 2), (8, 2)],
+    );
+}
+
+#[test]
+fn repeated_lifetimes_of_one_allocation_id_are_split_at_allocate_and_free() {
+    let snapshot = summarize(vec![
+        allocation(1, 1, 1, EventKind::Allocation, 7),
+        allocation(1, 2, 2, EventKind::Deallocation, 7),
+        allocation(1, 3, 3, EventKind::Allocation, 7),
+        allocation(1, 4, 4, EventKind::Deallocation, 7),
+    ]);
+    assert_eq!(
+        snapshot.histories.iter().map(|history| history.events.len()).collect::<Vec<_>>(),
+        [2, 2]
     );
 }
 

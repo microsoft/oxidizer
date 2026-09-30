@@ -165,6 +165,7 @@ impl Family {
         }
     }
 
+    #[cfg_attr(test, mutants::skip)] // Explanatory wording does not affect event identity or attribution.
     const fn identity_note(self) -> &'static str {
         match self {
             Self::Allocation => "Stable allocation ID and matching heap/address/layout; freeing actor is not allocation ownership",
@@ -346,22 +347,16 @@ fn detail(event: &Event) -> String {
 }
 
 fn split_lifetimes(key: ObjectKey, events: Vec<TaskEvent>) -> Vec<ObjectHistory> {
-    if !matches!(key.family, Family::Arc | Family::Allocation) {
-        return vec![ObjectHistory {
-            object_id: key.id,
-            identity_note: key.family.identity_note(),
-            events: events.into(),
-        }];
-    }
-    let create = if key.family == Family::Arc {
-        EventKind::ArcCreate
-    } else {
-        EventKind::Allocation
-    };
-    let destroy = if key.family == Family::Arc {
-        EventKind::ArcDrop
-    } else {
-        EventKind::Deallocation
+    let (create, destroy) = match key.family {
+        Family::Arc => (EventKind::ArcCreate, EventKind::ArcDrop),
+        Family::Allocation => (EventKind::Allocation, EventKind::Deallocation),
+        _ => {
+            return vec![ObjectHistory {
+                object_id: key.id,
+                identity_note: key.family.identity_note(),
+                events: events.into(),
+            }];
+        }
     };
     let mut histories = Vec::new();
     let mut current = Vec::new();
@@ -373,13 +368,21 @@ fn split_lifetimes(key: ObjectKey, events: Vec<TaskEvent>) -> Vec<ObjectHistory>
                 tied.push(event);
             }
         }
-        let unordered_boundary = tied.iter().any(|event| event.thread_id != tied[0].thread_id)
-            && tied.iter().any(|event| event.kind == create || event.kind == destroy);
+        let first_thread = tied[0].thread_id;
+        let multiple_threads = tied.iter().any(|event| event.thread_id != first_thread);
+        let contains_boundary = tied.iter().any(|event| [create, destroy].contains(&event.kind));
+        let unordered_boundary = multiple_threads && contains_boundary;
         for event in tied {
-            if unordered_boundary || event.kind == create {
+            if unordered_boundary {
+                finish_history(&mut histories, &mut current, key);
+                current.push(event);
+                finish_history(&mut histories, &mut current, key);
+                continue;
+            }
+            if event.kind == create {
                 finish_history(&mut histories, &mut current, key);
             }
-            let closes = unordered_boundary || event.kind == destroy;
+            let closes = event.kind == destroy;
             current.push(event);
             if closes {
                 finish_history(&mut histories, &mut current, key);

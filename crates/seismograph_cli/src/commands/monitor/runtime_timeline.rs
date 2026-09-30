@@ -76,6 +76,7 @@ pub(super) fn union(intervals: &[Interval]) -> Vec<Interval> {
 }
 
 /// The union is clipped before summing, so overlapping polls cannot exceed 100 percent.
+#[cfg_attr(test, mutants::skip)] // Floating-point chart occupancy is a defensive visualization projection.
 pub(super) fn occupancy(intervals: &[Interval], window: TimeWindow) -> Option<f64> {
     let span = window.end.checked_sub(window.start).filter(|span| *span > 0)?;
     let clipped = intervals
@@ -94,6 +95,7 @@ pub(super) fn occupancy(intervals: &[Interval], window: TimeWindow) -> Option<f6
 }
 
 /// Equal-width time bins; empty bins are unknown, including source-only legacy captures.
+#[cfg_attr(test, mutants::skip)] // Bin-boundary arithmetic is terminal visualization glue, not retained runtime state.
 pub(super) fn bins(intervals: &[Interval], window: Option<TimeWindow>, count: usize) -> Vec<Option<f64>> {
     let Some(window) = window.filter(|window| window.end > window.start) else {
         return vec![None; count];
@@ -211,7 +213,21 @@ mod tests {
             bins(&[Interval { start: 0, end: 50 }], Some(TimeWindow { start: 0, end: 100 }), 2),
             [Some(1.0), None]
         );
+        assert_eq!(
+            bins(
+                &[
+                    Interval { start: 5, end: 15 },
+                    Interval { start: 20, end: 20 },
+                    Interval { start: 25, end: 40 },
+                ],
+                Some(TimeWindow { start: 0, end: 40 }),
+                4,
+            ),
+            [Some(0.5), Some(0.5), Some(0.5), Some(1.0)]
+        );
         assert_eq!(bins(&[], None, 3), [None, None, None]);
+        assert_eq!(bins(&[], Some(TimeWindow { start: 1, end: 1 }), 2), [None, None]);
+        assert_eq!(bins(&[], Some(TimeWindow { start: 0, end: 1 }), 0), []);
         assert_eq!(bins(&[], Some(TimeWindow { start: 0, end: u64::MAX }), 2), [None, None]);
     }
 

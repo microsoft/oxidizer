@@ -156,13 +156,13 @@ fn parse_rules(text: &str) -> Result<Vec<Rule>, FilterParseError> {
             if !segments.iter().all(|segment| identifier(segment)) {
                 return Err(invalid("target must contain nonempty Rust identifiers separated by ::"));
             }
-            match kind {
-                "crate" if segments.len() == 1 => Ok(Rule::Crate(target.to_owned())),
-                "module" if segments.len() >= 2 => Ok(Rule::Module(target.to_owned())),
-                "function" if segments.len() >= 2 => Ok(Rule::Function(target.to_owned())),
-                "crate" => Err(invalid("crate target must be a single crate name")),
-                "module" | "function" => Err(invalid("target must include its crate, for example my_crate::name")),
-                _ => Err(invalid("use crate:, module:, or function:")),
+            match (kind, segments.len()) {
+                ("crate", 1) => Ok(Rule::Crate(target.to_owned())),
+                ("crate", _) => Err(invalid("crate target must be a single crate name")),
+                ("module", 2..) => Ok(Rule::Module(target.to_owned())),
+                ("function", 2..) => Ok(Rule::Function(target.to_owned())),
+                ("module" | "function", _) => Err(invalid("target must include its crate, for example my_crate::name")),
+                (_, _) => Err(invalid("use crate:, module:, or function:")),
             }
         })
         .collect()
@@ -206,21 +206,13 @@ pub(super) fn symbol_path(symbol: &str) -> Option<String> {
 }
 
 fn qualified_owner_end(qualified: &str) -> usize {
-    let mut position = 0;
-    while position < qualified.len() {
-        if qualified[position..].starts_with(" as ") {
-            return position;
-        }
-        if qualified.as_bytes()[position] == b'<'
-            && let Some(end) = angle_end(qualified, position)
-        {
-            position = end + 1;
-        } else {
-            // Only ASCII syntax is inspected; byte offsets need not be char boundaries.
-            position += 1;
-            while !qualified.is_char_boundary(position) {
-                position += 1;
-            }
+    let mut depth = 0_usize;
+    for (position, character) in qualified.char_indices() {
+        match character {
+            '<' => depth = depth.saturating_add(1),
+            '>' => depth = depth.saturating_sub(1),
+            ' ' if depth == 0 && qualified[position..].starts_with(" as ") => return position,
+            _ => {}
         }
     }
     qualified.len()
@@ -261,7 +253,7 @@ fn strip_generics(text: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{FilterSpec, Match, RuntimeStackMode, StackProvenance, symbol_path};
+    use super::{FilterSpec, Match, Rule, RuntimeStackMode, StackProvenance, symbol_path};
 
     fn classify(includes: &str, excludes: &str, symbols: &[Option<&str>]) -> Match {
         FilterSpec::parse(includes, excludes, false, RuntimeStackMode::Event)
@@ -387,6 +379,28 @@ mod tests {
         ] {
             let error = FilterSpec::parse(text, "", false, RuntimeStackMode::Event).unwrap_err();
             assert!(error.to_string().contains(text), "{error}");
+        }
+    }
+
+    #[test]
+    fn every_rule_kind_accepts_rust_identifiers_and_rejects_numeric_segments() {
+        let parsed = FilterSpec::parse(
+            "crate:r#type module:app::_internal function:app::run_2",
+            "",
+            false,
+            RuntimeStackMode::Event,
+        )
+        .unwrap();
+        assert_eq!(
+            parsed.includes,
+            [
+                Rule::Crate("r#type".into()),
+                Rule::Module("app::_internal".into()),
+                Rule::Function("app::run_2".into()),
+            ]
+        );
+        for text in ["crate:1app", "crate:r#1app", "module:app::2nd", "function:app::"] {
+            FilterSpec::parse(text, "", false, RuntimeStackMode::Event).unwrap_err();
         }
     }
 }

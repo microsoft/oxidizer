@@ -6,6 +6,7 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
+use seismograph::recorder::RecordingSession;
 use seismograph::recorder::event::{EventClass, EventTimestamp};
 use seismograph::recorder::runtime::TaskId;
 
@@ -115,4 +116,5 @@ impl TaskControl {
 pub struct TaskPoll {
     pub(crate) task_id: TaskId,
     pub(crate) started_at: EventTimestamp,
+    pub(crate) session: Option<RecordingSession>,
 }

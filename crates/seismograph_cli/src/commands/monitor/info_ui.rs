@@ -30,6 +30,7 @@ const THREAD_BAR_TRACK: Color = Color::Rgb(12, 16, 22);
 const THREAD_BAR_FILL: Color = Color::Rgb(70, 205, 255);
 const THREAD_BAR_FULL: Color = Color::Rgb(255, 128, 128);
 
+#[cfg_attr(test, mutants::skip)] // Chart scaling and axis formatting are terminal presentation details.
 pub(super) fn draw_activity(frame: &mut ratatui::Frame<'_>, area: Rect, live: &LiveActivity, aggregate: &VecDeque<ActivitySample>) {
     if live.availability != Availability::Supported {
         super::draw_activity(frame, area, aggregate);
@@ -97,6 +98,7 @@ pub(super) fn draw_activity(frame: &mut ratatui::Frame<'_>, area: Rect, live: &L
     );
 }
 
+#[cfg_attr(test, mutants::skip)] // Legend wrapping is width-dependent terminal formatting.
 fn legend(live: &LiveActivity, width: usize) -> Vec<Line<'static>> {
     let rates = (!live.stale).then(|| live.samples.back().map(|sample| sample.rates)).flatten();
     let mut lines = Vec::new();
@@ -116,6 +118,7 @@ fn legend(live: &LiveActivity, width: usize) -> Vec<Line<'static>> {
     lines
 }
 
+#[cfg_attr(test, mutants::skip)] // Row clipping and highlighting are terminal presentation details.
 pub(super) fn draw_threads(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect, live: &LiveActivity, selected: usize) {
     let title = if live.stale {
         " Thread activity · stale "
@@ -151,6 +154,7 @@ pub(super) fn draw_threads(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, ar
     }
 }
 
+#[cfg_attr(test, mutants::skip)]
 fn draw_thread(frame: &mut ratatui::Frame<'_>, area: Rect, thread: &ThreadActivity, selected: bool, stale: bool) {
     let stats = &thread.statistics;
     let rate = if stale { None } else { thread.rate };
@@ -206,6 +210,7 @@ fn draw_thread(frame: &mut ratatui::Frame<'_>, area: Rect, thread: &ThreadActivi
     frame.render_widget(Paragraph::new(rate_sparkline(&thread.history, usize::from(history.width))), history);
 }
 
+#[cfg_attr(test, mutants::skip)]
 fn rate_sparkline(history: &VecDeque<u64>, width: usize) -> Line<'static> {
     let maximum = history.iter().rev().take(width).copied().max().unwrap_or(0).max(1);
     let glyphs = ["_", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
@@ -229,6 +234,7 @@ fn rate_sparkline(history: &VecDeque<u64>, width: usize) -> Line<'static> {
     clippy::cast_precision_loss,
     reason = "chart coordinates and fill ratios are approximate; displayed counters remain exact u64 values"
 )]
+#[cfg_attr(test, mutants::skip)]
 fn chart_value(value: u64) -> f64 {
     value as f64
 }

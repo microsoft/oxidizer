@@ -78,7 +78,9 @@ pub(super) fn infer(events: &Events, source: Option<&Snapshot>) -> Vec<Evidence>
                 let previous = &events.events[indices[position - 1]];
                 let current = &events.events[indices[position]];
                 let reversed = previous.timestamp > current.timestamp;
-                ordered_time &= !reversed;
+                if reversed {
+                    ordered_time = false;
+                }
                 breaks[position] =
                     breaks[position - 1] + usize::from(previous.sequence.get().checked_add(1) != Some(current.sequence.get()) || reversed);
             }
@@ -131,10 +133,13 @@ fn open_observations(source: Option<&Snapshot>) -> HashMap<ObservationKey, u64> 
         .flat_map(|runtime| {
             runtime.tasks.iter().filter_map(|task| {
                 let activity = task.activity?;
-                if activity.state != TaskActivityState::Running
-                    || activity.queued_since.is_some()
-                    || activity.ready_since.is_some_and(|ready| ready > activity.observed_at)
-                {
+                if activity.state != TaskActivityState::Running {
+                    return None;
+                }
+                if activity.queued_since.is_some() {
+                    return None;
+                }
+                if activity.ready_since.is_some_and(|ready| ready > activity.observed_at) {
                     return None;
                 }
                 Some((
@@ -191,7 +196,7 @@ fn collect_polls(
     for poll in &mut polls[first_poll..] {
         // An unmatched nested start is not permission to treat its later work as
         // work by the enclosing task, even if that outer poll has both boundaries.
-        if unmatched.partition_point(|start| *start < poll.first) < unmatched.partition_point(|start| *start < poll.end) {
+        if unmatched.iter().any(|start| (poll.first..poll.end).contains(start)) {
             poll.valid = false;
         }
     }
@@ -233,7 +238,7 @@ fn closed_poll(thread: &Thread<'_>, task: TaskKey, start: Option<usize>, finish:
     let (first, started_at, valid) = if let Some(start) = start {
         let start_event = thread.event(start);
         (
-            start + 1,
+            start.saturating_add(1),
             start_event.timestamp.ticks(),
             recovered_start == Some(start_event.timestamp.ticks())
                 && start_event.runtime()?.worker_id == runtime.worker_id
@@ -277,24 +282,34 @@ fn open_poll(
     let observed = *observations.get(&(task, event.timestamp.ticks(), runtime.worker_id?.get()))?;
     // Independently sampled worker.thread_id/current_task slots are never used:
     // only the retained start establishes the actual recorder thread.
-    if !thread.ordered_time || observed < event.timestamp.ticks() {
+    if !thread.ordered_time {
+        return None;
+    }
+    if observed <= event.timestamp.ticks() {
         return None;
     }
     let end = thread
         .indices
         .partition_point(|index| thread.events[*index].timestamp.ticks() < observed);
     let last = thread.indices.last().map(|index| thread.events[*index].sequence.get())?;
-    if end <= start || totals.get(&thread.id) != Some(&last) {
+    if end <= start {
+        return None;
+    }
+    if totals.get(&thread.id) != Some(&last) {
         return None;
     }
     Some(Poll {
         task,
         thread: thread.id,
-        first: start + 1,
+        first: start.saturating_add(1),
         end,
         started_at: event.timestamp.ticks(),
         finished_at: observed,
-        valid: complete_policy && thread.continuous(start, end - 1),
+        valid: if complete_policy {
+            thread.continuous(start, end - 1)
+        } else {
+            false
+        },
         boundary: Boundary {
             start: Some(thread.indices[start]),
             finish: None,

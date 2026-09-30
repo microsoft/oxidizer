@@ -2764,6 +2764,34 @@ mod tests {
     }
 
     #[test]
+    fn recording_observations_freeze_at_configuration_and_snapshot_stops() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let enabled = timeout_configuration();
+        configure(enabled);
+        let active = recording_observation().unwrap();
+        assert_eq!(SESSION_STOPPED_AT.load(Ordering::Acquire), 0);
+        assert_ne!(active.observed_at.ticks(), 0);
+
+        configure(Configuration::default());
+        let configured_stop = SESSION_STOPPED_AT.load(Ordering::Acquire);
+        let first = recording_observation().unwrap();
+        std::thread::sleep(Duration::from_millis(1));
+        let second = recording_observation().unwrap();
+        assert_eq!(
+            (configured_stop, first.observed_at.ticks(), second.observed_at.ticks()),
+            (configured_stop, configured_stop, configured_stop)
+        );
+        assert_ne!(configured_stop, 0);
+
+        configure(enabled);
+        let (_, observation) = reset_event_buffers(crate::snapshot::EventBufferDisposition::Stop, false).unwrap();
+        let snapshot_stop = SESSION_STOPPED_AT.load(Ordering::Acquire);
+        assert_eq!(observation.unwrap().observed_at.ticks(), snapshot_stop);
+        assert_ne!(snapshot_stop, 0);
+        configure(Configuration::default());
+    }
+
+    #[test]
     fn every_recording_class_controls_global_and_class_enablement() {
         let _test = TEST_LOCK.lock().unwrap();
         let cases = [

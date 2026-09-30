@@ -134,6 +134,7 @@ impl<T: ?Sized> RwLockReadGuard<'_, T, Sync> {
 }
 
 impl<T: ?Sized> RwLockWriteGuard<'_, T, Sync> {
+    #[cfg_attr(test, mutants::skip)] // Panic-state transitions are process-global and cannot be injected deterministically.
     pub(in crate::sync) fn release_native(&mut self) {
         if let Some(raw) = self.raw.take() {
             if !self.panicking_at_acquisition && std::thread::panicking() && !self.lock.raw.is_poisoned() {
