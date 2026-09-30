@@ -375,10 +375,40 @@ impl Sink {
         self.dispatch_to_processors(&event, &description);
     }
 
-    /// Returns `true` if at least one processor is interested in the event.
+    /// Queries whether any processor currently wants the event's metadata.
     ///
-    /// For Composite, returns `true` if any child is interested.
-    fn is_interested_in(&self, description: &EventDescription) -> bool {
+    /// Returns `true` if any [`EventProcessor::is_interested`] call accepts
+    /// `description`. A composite is interested if any child is interested;
+    /// no-op sinks and sinks without processors return `false`.
+    ///
+    /// External event sources can use this query before collecting fields or
+    /// constructing an event. It does not construct or dispatch events, flush
+    /// processors, invoke samplers, or read timestamps or enrichments.
+    ///
+    /// This is current interest, not a delivery guarantee or a lifetime
+    /// filtering decision. Processor initialization may change the answer in
+    /// either direction, as permitted by [`EventProcessor::is_interested`].
+    /// Query again for each candidate event rather than caching the result for
+    /// the sink's lifetime. Emission checks interest independently and remains
+    /// subject to sampling and other delivery filters.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use observed::Sink;
+    /// use observed::metadata::EventDescription;
+    ///
+    /// // An external source can describe an event without collecting its fields.
+    /// let description = EventDescription::new("request.completed", None, None, None, false, false);
+    /// let sink = Sink::noop();
+    ///
+    /// assert!(!sink.is_interested_in(&description));
+    /// ```
+    #[must_use]
+    // Early metadata filters call this on each candidate event; permit cross-crate
+    // inlining on this hot path (docs/performance.md, "#[inline] annotations").
+    #[inline]
+    pub fn is_interested_in(&self, description: &EventDescription) -> bool {
         match &*self.inner {
             SinkInner::Single(state) => state.is_interested(description),
             SinkInner::Composite { children } => children.iter().any(|c| c.is_interested(description)),

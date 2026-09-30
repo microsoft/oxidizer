@@ -38,6 +38,9 @@ pub trait EventProcessor: Send + Sync {
     /// filter whose answer varies per call belongs in
     /// [`process()`](Self::process), which runs exactly once per delivery.
     ///
+    /// Also called by [`Sink::is_interested_in`](crate::Sink::is_interested_in)
+    /// independently of emission.
+    ///
     /// It is both the lazy-construction gate and the per-processor routing
     /// decision: if **all** processors return `false` the event closure is
     /// never invoked, and a processor that returns `false` never receives the
