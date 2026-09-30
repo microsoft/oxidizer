@@ -51,7 +51,8 @@
 //!                 *value
 //!             }
 //!         })
-//!         .await;
+//!         .await
+//!         .expect("the child task completes before the entry point returns");
 //!     assert_eq!(answer, 42);
 //! }
 //! ```
@@ -81,7 +82,10 @@
 //!     let local = cx
 //!         .local_scheduler()
 //!         .expect("the task runs on its associated worker");
-//!     let returned = local.spawn(async move || captured).await;
+//!     let returned = local
+//!         .spawn(async move || captured)
+//!         .await
+//!         .expect("the local task completes before the entry point returns");
 //!     assert!(Rc::ptr_eq(&value, &returned));
 //! }
 //! ```
@@ -102,27 +106,30 @@
 //! use arty::runtime::Builtins;
 //!
 //! #[arty::main]
-//! async fn main(cx: Builtins) -> std::io::Result<()> {
+//! async fn main(cx: Builtins) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 //!     let contents = cx
 //!         .scheduler()
 //!         .spawn_blocking(|| std::fs::read_to_string("settings.toml"))
-//!         .await?;
+//!         .await??;
 //!     println!("{contents}");
 //!     Ok(())
 //! }
 //! ```
 //!
-//! This is blocking file I/O on another thread, not an asynchronous I/O driver.
+//! The first `?` handles task failure (`JoinError`); the second handles the file
+//! operation's `io::Error`. This is blocking file I/O on another thread, not an asynchronous I/O driver.
 //! The pools are intended for blocking calls, not as a general CPU-parallelism
 //! engine. Their [configuration](super::configuration#blocking-pools) is separate
 //! from the number of asynchronous workers.
 //!
 //! # Observe completion before shutdown
 //!
-//! A [`JoinHandle`](crate::task::JoinHandle) yields the task's result directly,
-//! or resumes its panic. Use `.await` inside asynchronous tasks and `wait()` only
+//! A [`JoinHandle`](crate::task::JoinHandle) yields `Result<T, JoinError>`.
+//! Use [`JoinError::is_panic`](crate::task::JoinError::is_panic) to identify a task
+//! panic and [`is_shutdown`](crate::task::JoinError::is_shutdown) to identify
+//! cancellation or rejection. Use `.await` inside asynchronous tasks and `wait()` only
 //! from a blocking-safe thread. Dropping the handle does not cancel the task.
 //!
-//! A cancelled or rejected task leaves its join pending indefinitely. Finish
-//! required work before shutting down; see [lifecycle](super::lifecycle) for
+//! Shutdown cancels pending tasks and rejects new submissions without invoking
+//! their factories. Finish required work before shutting down; see [lifecycle](super::lifecycle) for
 //! the difference between observing results and stopping workers.

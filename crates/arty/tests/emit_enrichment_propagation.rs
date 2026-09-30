@@ -86,17 +86,19 @@ fn enrichment_propagates_via_scheduler_spawn() {
     let sink = Sink::noop();
     let runtime = runtime_with_emitter(&sink);
 
-    let result = runtime.run(async move |cx: Builtins| {
-        async {
-            let handle = cx.scheduler().spawn({
-                let e = sink.clone();
-                async move |_cx: Builtins| collect_enrichment_keys(&e)
-            });
-            handle.await
-        }
-        .enrich(&sink, RequestCtx::new(42))
-        .await
-    });
+    let result = runtime
+        .run(async move |cx: Builtins| {
+            async {
+                let handle = cx.scheduler().spawn({
+                    let e = sink.clone();
+                    async move |_cx: Builtins| collect_enrichment_keys(&e)
+                });
+                handle.await.unwrap()
+            }
+            .enrich(&sink, RequestCtx::new(42))
+            .await
+        })
+        .unwrap();
 
     assert_eq!(result, ["request.id"]);
 }
@@ -107,16 +109,18 @@ fn enrichment_propagates_via_spawn_anywhere() {
     let sink = Sink::noop();
     let runtime = runtime_with_emitter(&sink);
 
-    let result = runtime.run(async move |cx: Builtins| {
-        async {
-            let handle = cx
-                .scheduler()
-                .spawn_anywhere(sink.clone(), |e: Sink| async move { collect_enrichment_keys(&e) });
-            handle.await
-        }
-        .enrich(&sink, RequestCtx::new(99))
-        .await
-    });
+    let result = runtime
+        .run(async move |cx: Builtins| {
+            async {
+                let handle = cx
+                    .scheduler()
+                    .spawn_anywhere(sink.clone(), |e: Sink| async move { collect_enrichment_keys(&e) });
+                handle.await.unwrap()
+            }
+            .enrich(&sink, RequestCtx::new(99))
+            .await
+        })
+        .unwrap();
 
     assert_eq!(result, ["request.id"]);
 }
@@ -127,18 +131,20 @@ fn enrichment_propagates_via_local_scheduler_spawn() {
     let sink = Sink::noop();
     let runtime = runtime_with_emitter(&sink);
 
-    let result = runtime.run(async move |cx: Builtins| {
-        async {
-            let local = cx.local_scheduler().expect("should be on the correct thread");
-            let handle = local.spawn({
-                let e = sink.clone();
-                async move || collect_enrichment_keys(&e)
-            });
-            handle.await
-        }
-        .enrich(&sink, RequestCtx::new(1))
-        .await
-    });
+    let result = runtime
+        .run(async move |cx: Builtins| {
+            async {
+                let local = cx.local_scheduler().expect("should be on the correct thread");
+                let handle = local.spawn({
+                    let e = sink.clone();
+                    async move || collect_enrichment_keys(&e)
+                });
+                handle.await.unwrap()
+            }
+            .enrich(&sink, RequestCtx::new(1))
+            .await
+        })
+        .unwrap();
 
     assert_eq!(result, ["request.id"]);
 }
@@ -149,14 +155,16 @@ fn no_enrichment_leak_without_context() {
     let sink = Sink::noop();
     let runtime = runtime_with_emitter(&sink);
 
-    let result = runtime.run(async move |cx: Builtins| {
-        // No .enrich() here — spawn directly.
-        let handle = cx.scheduler().spawn({
-            let e = sink.clone();
-            async move |_cx: Builtins| collect_enrichment_keys(&e)
-        });
-        handle.await
-    });
+    let result = runtime
+        .run(async move |cx: Builtins| {
+            // No .enrich() here — spawn directly.
+            let handle = cx.scheduler().spawn({
+                let e = sink.clone();
+                async move |_cx: Builtins| collect_enrichment_keys(&e)
+            });
+            handle.await.unwrap()
+        })
+        .unwrap();
 
     assert!(result.is_empty());
 }
@@ -167,29 +175,31 @@ fn nested_spawn_preserves_enrichment_chain() {
     let sink = Sink::noop();
     let runtime = runtime_with_emitter(&sink);
 
-    let mut result = runtime.run(async move |cx: Builtins| {
-        async {
-            // Spawn level-1 task.
-            let handle = cx.scheduler().spawn({
-                let e1 = sink.clone();
-                async move |cx2: Builtins| {
-                    // Level-1 adds its own enrichment and spawns level-2.
-                    async {
-                        let handle = cx2.scheduler().spawn({
-                            let e2 = e1.clone();
-                            async move |_cx3: Builtins| collect_enrichment_keys(&e2)
-                        });
-                        handle.await
+    let mut result = runtime
+        .run(async move |cx: Builtins| {
+            async {
+                // Spawn level-1 task.
+                let handle = cx.scheduler().spawn({
+                    let e1 = sink.clone();
+                    async move |cx2: Builtins| {
+                        // Level-1 adds its own enrichment and spawns level-2.
+                        async {
+                            let handle = cx2.scheduler().spawn({
+                                let e2 = e1.clone();
+                                async move |_cx3: Builtins| collect_enrichment_keys(&e2)
+                            });
+                            handle.await.unwrap()
+                        }
+                        .enrich(&e1, InnerCtx::new(2))
+                        .await
                     }
-                    .enrich(&e1, InnerCtx::new(2))
-                    .await
-                }
-            });
-            handle.await
-        }
-        .enrich(&sink, OuterCtx::new(1))
-        .await
-    });
+                });
+                handle.await.unwrap()
+            }
+            .enrich(&sink, OuterCtx::new(1))
+            .await
+        })
+        .unwrap();
 
     // Level-2 should see both outer and inner enrichments.
     result.sort();
@@ -198,8 +208,6 @@ fn nested_spawn_preserves_enrichment_chain() {
 
 #[test]
 fn task_outcomes_keep_the_submission_context() {
-    use std::panic::AssertUnwindSafe;
-
     for local in [false, true] {
         for panics in [false, true] {
             let (sink, processor) = observed_testing::test_emitter(observed_testing::TEST_ID);
@@ -214,20 +222,24 @@ fn task_outcomes_keep_the_submission_context() {
                                 let task = cx.local_scheduler().unwrap().spawn(async move || {
                                     assert!(!panics, "local task panic");
                                 });
-                                futures::FutureExt::catch_unwind(AssertUnwindSafe(task)).await
+                                task.await
                             } else {
                                 let task = cx.scheduler().spawn(async move |_| {
                                     assert!(!panics, "remote task panic");
                                 });
-                                futures::FutureExt::catch_unwind(AssertUnwindSafe(task)).await
+                                task.await
                             }
                         }
                         .enrich(&sink, RequestCtx::new(42))
                         .await
                     }
                 })
-                .wait();
+                .wait()
+                .unwrap();
             assert_eq!(outcome.is_err(), panics);
+            if let Err(error) = outcome {
+                assert!(error.is_panic());
+            }
             drop(runtime);
             let expected_name = if panics {
                 "arty.rt.task.panicked"

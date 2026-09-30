@@ -24,7 +24,7 @@ fn stash_scheduler() {
 
     impl Thingy {
         async fn calculate_pi(&self) -> f64 {
-            self.scheduler.spawn(async move |_| 3.0).await
+            self.scheduler.spawn(async move |_| 3.0).await.unwrap()
         }
     }
 
@@ -60,9 +60,11 @@ fn stash_scheduler() {
 
                         assert_eq!(pi, 3.0);
                     })
-                    .await;
+                    .await
+                    .unwrap();
             })
-            .wait();
+            .wait()
+            .unwrap();
 
         runtime
             .task_scheduler()
@@ -80,13 +82,15 @@ fn stash_scheduler() {
                         let scheduler = THREAD_LOCAL_STASH.with_borrow(|stash| stash.clone().unwrap());
 
                         // It works, right? Right.
-                        scheduler.spawn(async move |_| 49).await
+                        scheduler.spawn(async move |_| 49).await.unwrap()
                     })
-                    .await;
+                    .await
+                    .unwrap();
 
                 assert_eq!(result, 49);
             })
-            .wait();
+            .wait()
+            .unwrap();
     });
 }
 

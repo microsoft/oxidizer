@@ -305,7 +305,9 @@ mod tests {
         #[cfg_attr(test, mutants::skip)]
         fn new(tasks: TaskSet) -> Self {
             Self {
-                local_task_scheduler: LocalTaskBinding::new(tasks, Sink::noop()).local_scheduler().unwrap(),
+                local_task_scheduler: LocalTaskBinding::new(tasks, Sink::noop(), Arc::new(std::sync::atomic::AtomicBool::new(false)))
+                    .local_scheduler()
+                    .unwrap(),
             }
         }
     }
@@ -355,7 +357,8 @@ mod tests {
                                     .spawn(async move || {
                                         inner_completed_tx.send(());
                                     })
-                                    .await;
+                                    .await
+                                    .unwrap();
 
                                 outer_completed_tx.send(());
                             }));
@@ -444,7 +447,7 @@ mod tests {
         //
         // While we cannot honor these commands, we must still do something and ensure that all
         // resources are properly managed. What we do is simply drop the tasks on the floor and
-        // make it so any remote join handles they rely on will either never complete or panic.
+        // make their remote join handles report shutdown.
 
         let (command_tx, command_rx) = mpsc::channel();
 

@@ -13,6 +13,7 @@ use crate::runtime::context::Builtins;
 use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::error::Error;
 use crate::runtime::thread::assert_not_flagged;
+use crate::task::JoinError;
 use crate::task::scheduler::TaskScheduler;
 
 type BoxedFutureFactory<'a, R> = Box<dyn (FnOnce(Builtins) -> LocalBoxFuture<'a, R>) + 'a + Send>;
@@ -116,14 +117,16 @@ impl Runtime {
     /// Await any asynchronous children that must finish before the root returns;
     /// returning from the root does not drain other asynchronous tasks.
     ///
-    /// Captures and results are not automatically relocated. If shutdown cancels
-    /// the root task before it completes, its join remains pending and this method
-    /// remains blocked.
+    /// Captures and results are not automatically relocated.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`JoinError`] if the root task panics or shutdown cancels it.
     ///
     /// # Panics
     ///
-    /// Panics if called from an asynchronous runtime worker, or if the root task panics.
-    pub fn run<FF, F, R>(self, future_factory: FF) -> R
+    /// Panics if called from an asynchronous runtime worker.
+    pub fn run<FF, F, R>(self, future_factory: FF) -> Result<R, JoinError>
     where
         FF: FnOnce(Builtins) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
@@ -141,7 +144,7 @@ impl Runtime {
     /// Waits for shutdown to finish. May be called more than once.
     ///
     /// This does not request shutdown; call [`stop`](Self::stop) first unless
-    /// another task will request it. Completion does not make cancelled joins ready.
+    /// another task will request it. Cancelled joins report shutdown errors.
     ///
     /// # Panics
     ///
@@ -160,8 +163,8 @@ impl Runtime {
     /// Runs a task that may borrow the caller's stack, blocking until it completes.
     ///
     /// The borrowing factory and future are destroyed before this method returns
-    /// or propagates a task panic. Captures and results are not automatically relocated.
-    /// If shutdown cancels the task, its join remains pending and this method remains blocked.
+    /// either success or failure. Captures and results are not automatically relocated.
+    /// Shutdown cancels pending work and rejects new work without invoking its factory.
     ///
     /// Results must be owned, `Send`, and `'static`; returning a reference into the
     /// caller's stack is not supported. Mutate borrowed caller-owned data or return
@@ -170,14 +173,20 @@ impl Runtime {
     /// ```
     /// let runtime = arty::runtime::Runtime::new().unwrap();
     /// let mut message = String::from("Hello");
-    /// runtime.block_on(async |_| message.push_str(", Arty"));
+    /// runtime
+    ///     .block_on(async |_| message.push_str(", Arty"))
+    ///     .expect("the runtime remains running until this task completes");
     /// assert_eq!(message, "Hello, Arty");
     /// ```
     ///
+    /// # Errors
+    ///
+    /// Returns [`JoinError`] if the task panics or shutdown cancels/rejects it.
+    ///
     /// # Panics
     ///
-    /// Panics if called from an asynchronous runtime worker, or if the task panics.
-    pub fn block_on<'a, FF, F, R>(&self, future_factory: FF) -> R
+    /// Panics if called from an asynchronous runtime worker.
+    pub fn block_on<'a, FF, F, R>(&self, future_factory: FF) -> Result<R, JoinError>
     where
         FF: FnOnce(Builtins) -> F + Send + 'a,
         F: Future<Output = R> + 'a,
@@ -393,7 +402,7 @@ mod tests {
                 .processor_count(crate::runtime::ProcessorCount::exactly(std::num::NonZeroUsize::MIN))
                 .build()
                 .unwrap();
-            let worker = runtime.block_on(async |_| thread::current().id());
+            let worker = runtime.block_on(async |_| thread::current().id()).unwrap();
             let expected = Arc::new(());
             let payload = panics.then(|| Arc::clone(&expected));
             let mut record = DropRecord::default();
@@ -406,19 +415,25 @@ mod tests {
                     }
                     .await
                 })
-            }));
+            }))
+            .unwrap();
             match outcome {
                 Ok(value) => {
                     assert!(!panics);
                     assert_eq!(value, SendOnlyResult);
                 }
-                Err(payload) => {
+                Err(error) => {
                     assert!(panics);
-                    assert!(Arc::ptr_eq(&payload.downcast::<Arc<()>>().unwrap(), &expected));
+                    assert!(error.is_panic());
+                    #[cfg(feature = "macros")]
+                    {
+                        let payload = catch_unwind(AssertUnwindSafe(|| -> () { error.resume() })).unwrap_err();
+                        assert!(Arc::ptr_eq(&payload.downcast::<Arc<()>>().unwrap(), &expected));
+                    }
                 }
             }
             assert_eq!(
-                (record, runtime.block_on(async |_| 23)),
+                (record, runtime.block_on(async |_| 23).unwrap()),
                 (
                     DropRecord {
                         text: "dropped".to_owned(),

@@ -12,7 +12,10 @@
 /// # #[cfg(feature = "macros")]
 /// #[arty::main]
 /// async fn main(cx: arty::runtime::Builtins) {
-///     cx.scheduler().spawn(async |_| {}).await;
+///     cx.scheduler()
+///         .spawn(async |_| {})
+///         .await
+///         .expect("the child task completes before the entry point returns");
 /// }
 /// # #[cfg(not(feature = "macros"))] fn main() {}
 /// ```
@@ -29,7 +32,7 @@
 /// # #[cfg(feature = "macros")]
 /// #[arty::main(workers = 4)]
 /// async fn main(cx: arty::runtime::Builtins) {
-///     assert_eq!(cx.scheduler().spawn(async |_| 42).await, 42);
+///     assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
 /// }
 /// # #[cfg(not(feature = "macros"))] fn main() {}
 /// ```
@@ -62,7 +65,10 @@
 /// # #[cfg(feature = "macros")]
 /// #[arty::main(builder = app_builder())]
 /// async fn main(cx: arty::runtime::Builtins) {
-///     cx.scheduler().spawn(async |_| {}).await;
+///     cx.scheduler()
+///         .spawn(async |_| {})
+///         .await
+///         .expect("the child task completes before the entry point returns");
 /// }
 /// # #[cfg(not(feature = "macros"))] fn main() {}
 /// ```
@@ -79,7 +85,10 @@
 ///
 /// # Panics
 ///
-/// Panics if runtime construction fails or the root task panics. Limiting workers does
+/// Panics if runtime construction fails, the root task panics, or shutdown cancels
+/// the root task. The macro translates the outer `JoinError` to a panic to preserve
+/// the annotated function's return type; direct `Runtime::run` callers receive the error.
+/// Limiting workers does
 /// not prevent other startup failures, such as worker-thread creation failures.
 /// Use [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build) directly when
 /// construction errors need to be returned instead.
@@ -96,7 +105,7 @@ pub use arty_macros::main;
 /// # #[cfg(feature = "macros")]
 /// #[arty::test]
 /// async fn answer(cx: arty::runtime::Builtins) {
-///     assert_eq!(cx.scheduler().spawn(async |_| 42).await, 42);
+///     assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
 /// }
 /// ```
 ///
@@ -151,6 +160,7 @@ pub use arty_macros::main;
 ///
 /// # Panics
 ///
-/// Panics if runtime construction fails or the test body panics. The original task
+/// Panics if runtime construction fails, the test body panics, or shutdown cancels
+/// the test body. The original task
 /// panic payload is preserved for `#[should_panic(expected = "...")]`.
 pub use arty_macros::test;

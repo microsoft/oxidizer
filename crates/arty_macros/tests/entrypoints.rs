@@ -16,6 +16,10 @@ mod fixture {
 
     pub(super) mod __private {
         pub(crate) use tick::ClockControl;
+
+        pub(crate) fn resume_join_error(payload: Box<dyn std::any::Any + Send + 'static>) -> ! {
+            std::panic::resume_unwind(payload)
+        }
     }
 
     #[derive(Debug)]
@@ -50,12 +54,14 @@ mod fixture {
             }
         }
 
-        pub(super) fn run<F, Fut, R>(self, factory: F) -> R
+        pub(super) fn run<F, Fut, R>(self, factory: F) -> std::thread::Result<R>
         where
             F: FnOnce(Builtins) -> Fut,
             Fut: Future<Output = R>,
         {
-            futures::executor::block_on(factory(Builtins(self.value, self.workers, self.clock)))
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                futures::executor::block_on(factory(Builtins(self.value, self.workers, self.clock)))
+            }))
         }
     }
 

@@ -13,6 +13,7 @@ async fn main(cx: Builtins) {
         .local_scheduler()
         .expect("the entry point runs on its associated worker")
         .spawn(async || Rc::new(42))
-        .await;
+        .await
+        .expect("the local task completes before the entry point returns");
     println!("{answer}");
 }

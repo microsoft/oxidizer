@@ -18,7 +18,8 @@ async fn simple_main(cx: Builtins) {
         .spawn(async move |_| {
             println!("Hello again!");
         })
-        .await;
+        .await
+        .unwrap();
 }
 
 #[test]
@@ -28,7 +29,8 @@ async fn simple_main_returning(cx: Builtins) -> Result<(), Box<dyn std::error::E
         .spawn(async move |_| {
             println!("Hello again!");
         })
-        .await;
+        .await
+        .unwrap();
     Ok(())
 }
 
@@ -36,13 +38,13 @@ async fn simple_main_returning(cx: Builtins) -> Result<(), Box<dyn std::error::E
 async fn root_and_children_keep_their_worker_affinity(cx: Builtins) {
     let worker = std::thread::current().id();
     assert_eq!(cx.thread().id(), worker);
-    let child = cx.scheduler().spawn(async |child| child.thread().id()).await;
+    let child = cx.scheduler().spawn(async |child| child.thread().id()).await.unwrap();
     assert_eq!(child, worker);
 }
 
 #[test(workers = 4_294_967_295usize)]
 async fn worker_limit_clamps_instead_of_failing_construction(cx: Builtins) {
-    assert_eq!(cx.scheduler().spawn(async |_| 42).await, 42);
+    assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
 }
 
 fn custom_builder() -> arty::runtime::RuntimeBuilder {
@@ -58,7 +60,12 @@ fn custom_builder() -> arty::runtime::RuntimeBuilder {
 #[test(builder = custom_builder())]
 async fn custom_runtime_keeps_owned_builtins(cx: Builtins) {
     assert_eq!(
-        cx.local_scheduler().unwrap().spawn(async || std::rc::Rc::new(42)).await.as_ref(),
+        cx.local_scheduler()
+            .unwrap()
+            .spawn(async || std::rc::Rc::new(42))
+            .await
+            .unwrap()
+            .as_ref(),
         &42,
     );
 }
@@ -125,7 +132,8 @@ mod controlled_time {
                 child_control.advance(Duration::from_secs(7));
                 child.clock().system_time()
             })
-            .await;
+            .await
+            .unwrap();
         assert_eq!(now, UNIX_EPOCH + Duration::from_secs(7));
         assert_eq!(cx.clock().system_time(), now);
         assert_eq!(control.to_clock().system_time(), now);

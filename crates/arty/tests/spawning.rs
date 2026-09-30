@@ -30,7 +30,10 @@ fn spawn_some_tasks() {
             let child5 = cx.scheduler().spawn_blocking(|| 5555);
             let child6 = cx.local_scheduler().unwrap().spawn(async || 6666);
             let results = futures::join!(child1, child2, child5, child6);
-            assert_eq!(results, (1111, 2222, 5555, 6666));
+            assert_eq!(
+                (results.0.unwrap(), results.1.unwrap(), results.2.unwrap(), results.3.unwrap()),
+                (1111, 2222, 5555, 6666)
+            );
         });
 
         let single_threaded_actions = runtime.task_scheduler().spawn(async |cx| {
@@ -45,7 +48,8 @@ fn spawn_some_tasks() {
                         canary.len()
                     }
                 })
-                .await;
+                .await
+                .unwrap();
             assert_eq!(length, canary.len());
         });
 
@@ -58,17 +62,20 @@ fn spawn_some_tasks() {
                     .spawn(async || {
                         YieldFuture::default().await;
                     })
-                    .await;
+                    .await
+                    .unwrap();
             })
-            .wait();
+            .wait()
+            .unwrap();
 
         runtime
             .task_scheduler()
             .spawn(async move |_| {
-                async_task.await;
-                single_threaded_actions.await;
+                async_task.await.unwrap();
+                single_threaded_actions.await.unwrap();
             })
-            .wait();
+            .wait()
+            .unwrap();
     });
 }
 
@@ -86,13 +93,15 @@ fn test_worker_affinity() {
     let (thread1, scheduler1) = runtime
         .task_scheduler()
         .spawn(async |cx| (thread::current().id(), cx.scheduler().clone()))
-        .wait();
+        .wait()
+        .unwrap();
     let (thread2, scheduler2) = runtime
         .task_scheduler()
         .spawn(async |cx| (thread::current().id(), cx.scheduler().clone()))
-        .wait();
-    let thread3 = scheduler1.spawn(async |_| thread::current().id()).wait();
-    let thread4 = scheduler2.spawn(async |_| thread::current().id()).wait();
+        .wait()
+        .unwrap();
+    let thread3 = scheduler1.spawn(async |_| thread::current().id()).wait().unwrap();
+    let thread4 = scheduler2.spawn(async |_| thread::current().id()).wait().unwrap();
 
     assert_ne!(thread1, thread2, "round-robin submissions select different workers");
     assert_eq!(thread1, thread3, "bound submission preserves the first worker");
@@ -112,7 +121,8 @@ fn remote_factories_create_non_send_futures_on_the_worker() {
                 (*value, thread::current().id(), associated)
             }
         })
-        .wait();
+        .wait()
+        .unwrap();
     assert_eq!((created, polled), (associated, associated));
 }
 
@@ -122,6 +132,6 @@ fn remote_results_do_not_require_thread_awareness() {
 
     static_assertions::assert_not_impl_any!(ResultValue: thread_aware::ThreadAware);
     let runtime = Runtime::new().unwrap();
-    assert_eq!(runtime.task_scheduler().spawn(async |_| ResultValue(42)).wait().0, 42);
-    assert_eq!(runtime.task_scheduler().spawn(async |_| ResultValue(43)).wait().0, 43);
+    assert_eq!(runtime.task_scheduler().spawn(async |_| ResultValue(42)).wait().unwrap().0, 42);
+    assert_eq!(runtime.task_scheduler().spawn(async |_| ResultValue(43)).wait().unwrap().0, 43);
 }

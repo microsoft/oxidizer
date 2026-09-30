@@ -123,7 +123,7 @@ impl ArtyCase {
             self.handles.clear();
             self.handles.extend((0..self.count).map(|_| self.scheduler.spawn(factory.clone())));
             for handle in &mut self.handles {
-                futures::executor::block_on(black_box(handle));
+                futures::executor::block_on(black_box(handle)).expect("benchmark tasks finish before shutdown");
             }
         }
         start.elapsed()
@@ -149,7 +149,7 @@ impl ArtyCase {
                     })
                 }));
                 for handle in &mut self.handles {
-                    futures::executor::block_on(black_box(handle));
+                    futures::executor::block_on(black_box(handle)).expect("benchmark tasks finish before shutdown");
                 }
                 start.elapsed()
             }
@@ -166,12 +166,13 @@ impl ArtyCase {
                         handles.clear();
                         handles.extend((0..count).map(|_| cx.scheduler().spawn(async |_| black_box(()))));
                         for handle in &mut handles {
-                            black_box(handle).await;
+                            black_box(handle).await.expect("benchmark tasks finish before shutdown");
                         }
                     }
                     start.elapsed()
                 })
-                .wait(),
+                .wait()
+                .expect("benchmark parent finishes before shutdown"),
             Workload::Local => self
                 .scheduler
                 .spawn(async move |cx| {
@@ -182,12 +183,13 @@ impl ArtyCase {
                         handles.clear();
                         handles.extend((0..count).map(|_| scheduler.spawn(async || black_box(()))));
                         for handle in &mut handles {
-                            black_box(handle).await;
+                            black_box(handle).await.expect("benchmark tasks finish before shutdown");
                         }
                     }
                     start.elapsed()
                 })
-                .wait(),
+                .wait()
+                .expect("benchmark parent finishes before shutdown"),
             Workload::Blocking => {
                 let start = Instant::now();
                 for _ in 0..iterations {
@@ -195,7 +197,7 @@ impl ArtyCase {
                     self.handles
                         .extend((0..count).map(|_| self.scheduler.spawn_blocking(|| black_box(()))));
                     for handle in &mut self.handles {
-                        futures::executor::block_on(black_box(handle));
+                        futures::executor::block_on(black_box(handle)).expect("benchmark tasks finish before shutdown");
                     }
                 }
                 start.elapsed()

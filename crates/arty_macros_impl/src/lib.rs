@@ -168,6 +168,7 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
             #runtime
                 .expect("failed to create the runtime for the entry point")
                 .run(async move |#state_ident: #state_type| #body)
+                .unwrap_or_else(|error| #runtime_path::__private::resume_join_error(error))
         }
     }
 }
@@ -195,6 +196,7 @@ mod tests {
             ::arty::runtime::Runtime::new()
                 .expect("failed to create the runtime for the entry point")
                 .run(async move |cx: arty::runtime::Builtins| { run(cx).await })
+                .unwrap_or_else(|error| ::arty::runtime::__private::resume_join_error(error))
         }
         "#);
     }
@@ -219,6 +221,7 @@ mod tests {
                 .run(async move |mut cx: renamed::Builtins| {
                     fail(&mut cx).await;
                 })
+                .unwrap_or_else(|error| ::renamed::__private::resume_join_error(error))
         }
         "#);
     }
@@ -245,6 +248,7 @@ mod tests {
                     .build()
                     .expect("failed to create the runtime for the entry point")
                     .run(async move |cx: <App as Types>::Context| { run(cx).await })
+                    .unwrap_or_else(|error| ::renamed::__private::resume_join_error(error))
             }
         };
         assert_eq!(expansion.to_string(), expected.to_string());
@@ -265,6 +269,7 @@ mod tests {
                 ::renamed::RuntimeBuilder::build(app_builder()?)
                     .expect("failed to create the runtime for the entry point")
                     .run(async move |cx: Context| { run(cx).await })
+                    .unwrap_or_else(|error| ::renamed::__private::resume_join_error(error))
             }
         };
         assert_eq!(expansion.to_string(), expected.to_string());
@@ -304,6 +309,7 @@ mod tests {
                             run(cx, &mut time).await;
                         }
                     })
+                    .unwrap_or_else(|error| crate::renamed::__private::resume_join_error(error))
             }
         };
         assert_eq!(expansion.to_string(), expected.to_string());

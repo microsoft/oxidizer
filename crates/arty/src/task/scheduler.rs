@@ -24,8 +24,9 @@ use crate::task::join::JoinHandle;
 /// [`ThreadAware`] relocation binds this handle to a registered worker of its original
 /// runtime. Foreign or unregistered destinations leave the binding unchanged.
 ///
-/// Accepted tasks may be discarded during shutdown. Their join handles then remain
-/// pending. Submitting to an already closed worker also returns a pending join handle.
+/// Shutdown cancels pending tasks. Their join handles return
+/// [`JoinError`](crate::task::JoinError) with `is_shutdown() == true`.
+/// New submissions are rejected immediately without invoking their factories.
 /// See the [documentation guides](crate#documentation) for factory,
 /// future, and result examples.
 #[derive(Debug, Clone)]
@@ -124,15 +125,18 @@ impl TaskScheduler {
     /// Starts blocking work without blocking an asynchronous worker.
     ///
     /// Bound schedulers use their worker's blocking pool; detached schedulers select a
-    /// worker's pool round-robin. Shutdown closes admission to new blocking work,
-    /// but previously accepted work, including queued callbacks, runs to completion.
-    /// Rejected submissions return a join that remains pending.
+    /// worker's pool round-robin. Shutdown rejects new work and cancels queued
+    /// callbacks before invocation. An already-running blocking closure cannot
+    /// be forcibly interrupted and is allowed to finish.
     #[doc = include_str!("../../docs/snippets/blocking_task.md")]
     pub fn spawn_blocking<B, R>(&self, body: B) -> JoinHandle<R>
     where
         B: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
+        if self.dispatcher.is_shutting_down() {
+            return JoinHandle::shutdown();
+        }
         match &self.binding {
             Some(binding) => binding.blocking_worker.spawn_blocking(body),
             None => self.dispatcher.next_blocking_worker().spawn_blocking(body),
@@ -190,7 +194,8 @@ mod tests {
         let (source, mut scheduler) = runtime
             .task_scheduler()
             .spawn(async |cx| (cx.thread().clone(), cx.scheduler().clone()))
-            .wait();
+            .wait()
+            .unwrap();
         let foreign = thread_aware::ThreadBuilder::default().build(source.id());
         assert_ne!(source.owner(), foreign.owner());
 
@@ -198,7 +203,8 @@ mod tests {
         let scheduler: &TaskScheduler = scheduler.as_ref();
         let actual = scheduler
             .spawn_anywhere(RelocationSource(None), |probe| async move { probe.0 })
-            .wait();
+            .wait()
+            .unwrap();
         assert_eq!(actual, Some(source));
     }
 }

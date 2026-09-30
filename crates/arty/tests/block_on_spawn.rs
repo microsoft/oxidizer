@@ -15,7 +15,8 @@ fn capture_by_value() {
     let vec = vec![10, 11];
     let result = Runtime::new()
         .expect("Failed to create runtime")
-        .block_on(async move |_ctx| vec.len() + 10);
+        .block_on(async move |_ctx| vec.len() + 10)
+        .unwrap();
     assert_eq!(result, 12);
 }
 
@@ -23,32 +24,41 @@ fn capture_by_value() {
 fn move_and_spawn() {
     #[expect(clippy::useless_vec, reason = "using a vec to test with a type using pointers on the inside")]
     let vec = vec![10, 11];
-    let result = Runtime::new().expect("Failed to create runtime").block_on(async move |ctx| {
-        let res = vec.len() + 10;
-        ctx.scheduler().spawn(async move |_ctx| vec.len() + 10);
-        res
-    });
+    let result = Runtime::new()
+        .expect("Failed to create runtime")
+        .block_on(async move |ctx| {
+            let res = vec.len() + 10;
+            ctx.scheduler().spawn(async move |_ctx| vec.len() + 10);
+            res
+        })
+        .unwrap();
     assert_eq!(result, 12);
 }
 
 #[test]
 fn capture_reference() {
     let vec = vec![10, 11];
-    let result = Runtime::new().expect("Failed to create runtime").block_on(async |_ctx| {
-        let vec_ref = &vec;
-        vec_ref.len() + 10
-    });
+    let result = Runtime::new()
+        .expect("Failed to create runtime")
+        .block_on(async |_ctx| {
+            let vec_ref = &vec;
+            vec_ref.len() + 10
+        })
+        .unwrap();
     assert_eq!(vec.len() + 10, result);
 }
 
 #[test]
 fn capture_mut_reference() {
     let mut vec = vec![10, 11];
-    let result = Runtime::new().expect("Failed to create runtime").block_on(async |_ctx| {
-        let vec_ref = &mut vec;
-        vec_ref.push(15);
-        vec_ref.len() + 10
-    });
+    let result = Runtime::new()
+        .expect("Failed to create runtime")
+        .block_on(async |_ctx| {
+            let vec_ref = &mut vec;
+            vec_ref.push(15);
+            vec_ref.len() + 10
+        })
+        .unwrap();
     assert_eq!(vec.len() + 10, result);
     assert_eq!(vec.len(), 3);
 }

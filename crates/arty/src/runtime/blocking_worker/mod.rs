@@ -47,7 +47,7 @@ impl Drop for BlockingTaskScope {
 pub(crate) struct BlockingWorker {
     // Naive implementation using a per-async-worker thread pool
     pool: BlockingPool,
-    is_shutting_down: AtomicBool,
+    is_shutting_down: Arc<AtomicBool>,
     sink: Sink,
 }
 
@@ -55,7 +55,7 @@ impl BlockingWorker {
     pub(in crate::runtime) fn new(pool: BlockingPool, sink: Sink) -> Arc<Self> {
         Arc::new(Self {
             pool,
-            is_shutting_down: AtomicBool::new(false),
+            is_shutting_down: Arc::new(AtomicBool::new(false)),
             sink,
         })
     }
@@ -66,10 +66,18 @@ impl BlockingWorker {
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
+        if self.is_shutting_down.load(Ordering::Acquire) {
+            return JoinHandle::shutdown();
+        }
         let identity = Arc::clone(&self.pool.identity);
+        let shutdown = Arc::clone(&self.is_shutting_down);
         let (task, join_handle) = prepare_blocking(body);
         let task = move || {
             let _scope = BlockingTaskScope::enter(identity);
+            if shutdown.load(Ordering::Acquire) {
+                drop(task);
+                return;
+            }
             task();
         };
 
@@ -85,7 +93,7 @@ impl BlockingWorker {
         join_handle
     }
 
-    /// After shutting down, no new tasks will be accepted, but existing tasks will continue to run.
+    /// Rejects new work and cancels queued work; already-running blocking calls finish.
     pub(in crate::runtime) fn shutdown(&self) {
         self.is_shutting_down.store(true, Ordering::Release);
     }
@@ -342,7 +350,7 @@ pub(super) mod blocking_worker_tests {
                 .processor_count(crate::runtime::ProcessorCount::exactly(std::num::NonZeroUsize::MIN))
                 .build()
                 .unwrap();
-            let scheduler = runtime.task_scheduler().spawn(async |cx| cx.scheduler().clone()).wait();
+            let scheduler = runtime.task_scheduler().spawn(async |cx| cx.scheduler().clone()).wait().unwrap();
             let worker = Arc::clone(scheduler.blocking_worker());
             drop(runtime);
             assert!(worker.pool.pool.lock().unwrap().is_none());

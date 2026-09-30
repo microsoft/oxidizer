@@ -51,5 +51,5 @@ fn runtime_can_be_constructed_after_a_rejected_processor_request() {
         .build()
         .unwrap();
 
-    assert_eq!(runtime.run(async |_| 42), 42);
+    assert_eq!(runtime.run(async |_| 42).unwrap(), 42);
 }

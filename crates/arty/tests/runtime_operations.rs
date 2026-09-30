@@ -12,7 +12,6 @@ use std::num::NonZeroUsize;
 use std::thread;
 
 use arty::runtime::{ProcessorCount, Runtime, RuntimeOperations};
-use arty::task::JoinHandle;
 use many_cpus::{ProcessorId, SystemHardware};
 use thread_aware::ThreadAware;
 
@@ -37,7 +36,8 @@ fn runtime_operations_are_available_off_worker() {
     let (builtins, expected) = runtime
         .task_scheduler()
         .spawn(async |cx| (cx, SystemHardware::current().current_processor_id()))
-        .wait();
+        .wait()
+        .unwrap();
 
     let actual = thread::spawn(move || {
         let operations = builtins.runtime_operations();
@@ -68,7 +68,7 @@ fn operations_and_builtins_follow_owner_relocation() {
                 .task_scheduler()
                 .spawn(async |cx| (cx, SystemHardware::current().current_processor_id()))
         })
-        .map(JoinHandle::wait)
+        .map(|handle| handle.wait().unwrap())
         .collect();
     let source = workers[0].0.thread().clone();
     let destination = workers[1].0.thread().clone();
@@ -110,8 +110,9 @@ fn operations_preserve_foreign_owner() {
                 SystemHardware::current().current_processor_id(),
             )
         })
-        .wait();
-    let destination = other_runtime.task_scheduler().spawn(async |cx| cx.thread().clone()).wait();
+        .wait()
+        .unwrap();
+    let destination = other_runtime.task_scheduler().spawn(async |cx| cx.thread().clone()).wait().unwrap();
 
     operations.relocate(Some(&source), &destination);
 
@@ -124,7 +125,8 @@ fn captured_processor_snapshot_pins_after_runtime_shutdown() {
         .processor_count(ProcessorCount::at_most(NonZeroUsize::MIN))
         .build()
         .unwrap()
-        .run(async |cx| (cx.runtime_operations().clone(), SystemHardware::current().current_processor_id()));
+        .run(async |cx| (cx.runtime_operations().clone(), SystemHardware::current().current_processor_id()))
+        .unwrap();
 
     assert_eq!(
         (pinned_processor(operations.clone()), pinned_processor(operations)),
@@ -141,7 +143,7 @@ fn maximum_processors_clamps_to_available_processors() {
         .unwrap();
     let workers: std::collections::HashSet<_> = (0..available)
         .map(|_| runtime.task_scheduler().spawn(async |_| thread::current().id()))
-        .map(JoinHandle::wait)
+        .map(|handle| handle.wait().unwrap())
         .collect();
 
     assert_eq!(workers.len(), available);

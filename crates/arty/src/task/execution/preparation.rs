@@ -129,7 +129,7 @@ mod tests {
         factory((), &executor.tasks());
         let before_poll = invoked.load(Ordering::Relaxed);
         run_to_completion(&executor);
-        let result = block_on(handle);
+        let result = block_on(handle).unwrap();
 
         assert_eq!((before_poll, invoked.load(Ordering::Relaxed), result), (false, true, 42),);
     }
@@ -147,11 +147,11 @@ mod tests {
         let (task, handle) = prepare_local(async move { value }, sink.transfer_context(), sink);
         let ((), actual) = block_on(join(task, handle));
 
-        assert!(Rc::ptr_eq(&actual, &expected));
+        assert!(Rc::ptr_eq(&actual.unwrap(), &expected));
     }
 
     #[test]
-    fn local_preparation_forwards_original_panic_to_joiner() {
+    fn local_preparation_reports_a_panic_without_unwinding_the_joiner() {
         #[derive(Debug, Eq, PartialEq)]
         struct PanicPayload(u32);
 
@@ -159,23 +159,22 @@ mod tests {
         let (task, handle) = prepare_local::<_, ()>(async { panic_any(PanicPayload(42)) }, sink.transfer_context(), sink);
         block_on(task);
 
-        let panic = catch_unwind(AssertUnwindSafe(|| block_on(handle))).unwrap_err();
-
-        assert_eq!(panic.downcast_ref::<PanicPayload>(), Some(&PanicPayload(42)));
+        let outcome = catch_unwind(AssertUnwindSafe(|| block_on(handle))).unwrap();
+        assert!(outcome.unwrap_err().is_panic());
     }
 
     #[test]
-    fn discarded_local_preparation_stays_pending() {
+    fn discarded_local_preparation_reports_shutdown() {
         let sink = Sink::noop();
         let (task, handle) = prepare_local(pending::<()>(), sink.transfer_context(), sink);
         drop(task);
         let mut handle = pin!(handle);
         let mut context = Context::from_waker(Waker::noop());
 
-        assert_eq!(
-            (handle.as_mut().poll(&mut context), handle.as_mut().poll(&mut context),),
-            (Poll::Pending, Poll::Pending),
-        );
+        let Poll::Ready(Err(error)) = handle.as_mut().poll(&mut context) else {
+            panic!("discarded local work must report shutdown");
+        };
+        assert!(error.is_shutdown());
     }
 
     #[test]
@@ -183,7 +182,7 @@ mod tests {
         let (task, handle) = prepare_blocking(|| 42);
         task();
 
-        assert_eq!(block_on(handle), 42);
+        assert_eq!(block_on(handle).unwrap(), 42);
     }
 
     #[test]
@@ -191,7 +190,7 @@ mod tests {
         let (task, handle) = prepare_blocking(|| panic!("blocking task"));
         task();
 
-        assert!(catch_unwind(AssertUnwindSafe(|| block_on(handle))).is_err());
+        assert!(block_on(handle).unwrap_err().is_panic());
     }
 
     #[test]
@@ -208,20 +207,19 @@ mod tests {
         let executor = new_guarded_executor(Waker::noop().clone());
         factory((), &executor.tasks());
         run_to_completion(&executor);
-        let panic = catch_unwind(AssertUnwindSafe(|| block_on(handle))).unwrap_err();
-        assert_eq!(panic.downcast_ref::<Payload>(), Some(&Payload(42)));
+        assert!(block_on(handle).unwrap_err().is_panic());
     }
 
     #[test]
-    fn discarded_preparation_disconnects_without_completing() {
+    fn discarded_preparation_reports_shutdown() {
         let (task, handle) = prepare_blocking(|| 42);
         drop(task);
         let mut handle = pin!(handle);
         let mut context = Context::from_waker(Waker::noop());
 
-        assert_eq!(
-            (handle.as_mut().poll(&mut context), handle.as_mut().poll(&mut context),),
-            (Poll::Pending, Poll::Pending),
-        );
+        let Poll::Ready(Err(error)) = handle.as_mut().poll(&mut context) else {
+            panic!("discarded work must report shutdown");
+        };
+        assert!(error.is_shutdown());
     }
 }

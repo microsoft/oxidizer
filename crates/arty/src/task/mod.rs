@@ -11,8 +11,8 @@
 //! Futures are created on their destination worker and need not be `Send`.
 //! Remote results must be `Send` and are not automatically relocated.
 //! [`JoinHandle`] and [`LocalJoinHandle`] receive the result or propagate a task
-//! panic. A cancelled task leaves its join pending rather than returning a
-//! cancellation error.
+//! failure as a [`JoinError`]. Task panics are returned as errors instead of being
+//! resumed by the joiner. Shutdown cancels pending tasks and rejects new work.
 //!
 //! Pass a factory, such as `async |cx| { /* work */ }`, to
 //! [`TaskScheduler::spawn`], rather than an already-created future. The factory
@@ -27,6 +27,6 @@ pub(crate) mod join;
 pub(crate) mod local;
 pub(crate) mod scheduler;
 
-pub use join::{JoinHandle, LocalJoinHandle};
+pub use join::{JoinError, JoinHandle, LocalJoinHandle};
 pub use local::LocalTaskScheduler;
 pub use scheduler::TaskScheduler;

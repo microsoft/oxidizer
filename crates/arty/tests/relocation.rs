@@ -11,7 +11,6 @@ use std::num::NonZeroUsize;
 use std::thread::{self, ThreadId};
 
 use arty::runtime::{BlockingPoolPolicy, Builtins, ProcessorCount, Runtime};
-use arty::task::JoinHandle;
 use futures::future::join_all;
 use testing_aids::execute_or_terminate_process;
 use thread_aware::ThreadAware;
@@ -54,69 +53,73 @@ fn relocate_and_observe(policy: BlockingPoolPolicy, target: RelocationTarget) ->
     let scheduler = runtime.task_scheduler();
 
     execute_or_terminate_process(move || {
-        runtime.run(async move |cx: Builtins| {
-            let origin = thread::current().id();
-            let here = cx.thread().clone();
+        runtime
+            .run(async move |cx: Builtins| {
+                let origin = thread::current().id();
+                let here = cx.thread().clone();
 
-            // Discover a different worker by relocating a Builtins clone onto every worker.
-            let threads =
-                join_all((0..2).map(|_| scheduler.spawn_anywhere(cx.clone(), |worker: Builtins| async move { worker.thread().clone() })))
-                    .await;
+                // Discover a different worker by relocating a Builtins clone onto every worker.
+                let threads = join_all(
+                    (0..2).map(|_| scheduler.spawn_anywhere(cx.clone(), |worker: Builtins| async move { worker.thread().clone() })),
+                )
+                .await;
 
-            let there = threads
-                .into_iter()
-                .find(|thread| thread != &here)
-                .expect("a two-processor runtime must expose a second worker");
+                let there = threads
+                    .into_iter()
+                    .map(Result::unwrap)
+                    .find(|thread| thread != &here)
+                    .expect("a two-processor runtime must expose a second worker");
 
-            match target {
-                RelocationTarget::Scheduler => {
-                    let mut scheduler = cx.scheduler().clone();
+                match target {
+                    RelocationTarget::Scheduler => {
+                        let mut scheduler = cx.scheduler().clone();
 
-                    let blocking_before = scheduler.spawn_blocking(|| thread::current().id()).await;
-                    let async_before = scheduler.spawn(async move |_| thread::current().id()).await;
+                        let blocking_before = scheduler.spawn_blocking(|| thread::current().id()).await.unwrap();
+                        let async_before = scheduler.spawn(async move |_| thread::current().id()).await.unwrap();
 
-                    scheduler.relocate(Some(&here), &there);
+                        scheduler.relocate(Some(&here), &there);
 
-                    let blocking_after = scheduler.spawn_blocking(|| thread::current().id()).await;
-                    let async_after = scheduler.spawn(async move |_| thread::current().id()).await;
+                        let blocking_after = scheduler.spawn_blocking(|| thread::current().id()).await.unwrap();
+                        let async_after = scheduler.spawn(async move |_| thread::current().id()).await.unwrap();
 
-                    RelocationObservation {
-                        origin,
-                        blocking_task: BeforeAfter {
-                            before: blocking_before,
-                            after: blocking_after,
-                        },
-                        async_task: BeforeAfter {
-                            before: async_before,
-                            after: async_after,
-                        },
+                        RelocationObservation {
+                            origin,
+                            blocking_task: BeforeAfter {
+                                before: blocking_before,
+                                after: blocking_after,
+                            },
+                            async_task: BeforeAfter {
+                                before: async_before,
+                                after: async_after,
+                            },
+                        }
+                    }
+                    RelocationTarget::Builtins => {
+                        let mut builtins = cx.clone();
+
+                        let blocking_before = builtins.scheduler().spawn_blocking(|| thread::current().id()).await.unwrap();
+                        let async_before = builtins.scheduler().spawn(async move |_| thread::current().id()).await.unwrap();
+
+                        builtins.relocate(Some(&here), &there);
+
+                        let blocking_after = builtins.scheduler().spawn_blocking(|| thread::current().id()).await.unwrap();
+                        let async_after = builtins.scheduler().spawn(async move |_| thread::current().id()).await.unwrap();
+
+                        RelocationObservation {
+                            origin,
+                            blocking_task: BeforeAfter {
+                                before: blocking_before,
+                                after: blocking_after,
+                            },
+                            async_task: BeforeAfter {
+                                before: async_before,
+                                after: async_after,
+                            },
+                        }
                     }
                 }
-                RelocationTarget::Builtins => {
-                    let mut builtins = cx.clone();
-
-                    let blocking_before = builtins.scheduler().spawn_blocking(|| thread::current().id()).await;
-                    let async_before = builtins.scheduler().spawn(async move |_| thread::current().id()).await;
-
-                    builtins.relocate(Some(&here), &there);
-
-                    let blocking_after = builtins.scheduler().spawn_blocking(|| thread::current().id()).await;
-                    let async_after = builtins.scheduler().spawn(async move |_| thread::current().id()).await;
-
-                    RelocationObservation {
-                        origin,
-                        blocking_task: BeforeAfter {
-                            before: blocking_before,
-                            after: blocking_after,
-                        },
-                        async_task: BeforeAfter {
-                            before: async_before,
-                            after: async_after,
-                        },
-                    }
-                }
-            }
-        })
+            })
+            .unwrap()
     })
 }
 
@@ -189,18 +192,22 @@ fn foreign_owner_relocation_preserves_runtime_binding() {
         .processor_count(ProcessorCount::exactly(NonZeroUsize::MIN))
         .build()
         .unwrap();
-    let mut builtins = source_runtime.task_scheduler().spawn(async |cx| cx).wait();
+    let mut builtins = source_runtime.task_scheduler().spawn(async |cx| cx).wait().unwrap();
     let source = builtins.thread().clone();
-    let destination = destination_runtime.task_scheduler().spawn(async |cx| cx.thread().clone()).wait();
-    let blocking_thread = builtins.scheduler().spawn_blocking(|| thread::current().id()).wait();
+    let destination = destination_runtime
+        .task_scheduler()
+        .spawn(async |cx| cx.thread().clone())
+        .wait()
+        .unwrap();
+    let blocking_thread = builtins.scheduler().spawn_blocking(|| thread::current().id()).wait().unwrap();
 
     builtins.relocate(Some(&source), &destination);
 
     assert_eq!(
         (
             builtins.thread(),
-            builtins.scheduler().spawn(async |_| thread::current().id()).wait(),
-            builtins.scheduler().spawn_blocking(|| thread::current().id()).wait(),
+            builtins.scheduler().spawn(async |_| thread::current().id()).wait().unwrap(),
+            builtins.scheduler().spawn_blocking(|| thread::current().id()).wait().unwrap(),
         ),
         (&source, source.id(), blocking_thread),
     );
@@ -217,7 +224,7 @@ fn repeated_spawn_after_relocation_uses_destination() {
         .unwrap();
     let workers: Vec<_> = (0..2)
         .map(|_| runtime.task_scheduler().spawn(async |cx| cx))
-        .map(JoinHandle::wait)
+        .map(|handle| handle.wait().unwrap())
         .collect();
     let mut scheduler = workers[0].scheduler().clone();
     scheduler.relocate(Some(workers[0].thread()), workers[1].thread());
@@ -226,7 +233,7 @@ fn repeated_spawn_after_relocation_uses_destination() {
 
     let actual: Vec<_> = (0..SPAWN_COUNT)
         .map(|_| scheduler.spawn(async |_| thread::current().id()))
-        .map(JoinHandle::wait)
+        .map(|handle| handle.wait().unwrap())
         .collect();
 
     assert_eq!(actual, vec![workers[1].thread().id(); SPAWN_COUNT]);
@@ -242,17 +249,21 @@ fn foreign_owner_relocation_preserves_bare_scheduler_binding() {
         .processor_count(ProcessorCount::exactly(NonZeroUsize::MIN))
         .build()
         .unwrap();
-    let builtins = source_runtime.task_scheduler().spawn(async |cx| cx).wait();
+    let builtins = source_runtime.task_scheduler().spawn(async |cx| cx).wait().unwrap();
     let mut scheduler = builtins.scheduler().clone();
-    let destination = destination_runtime.task_scheduler().spawn(async |cx| cx.thread().clone()).wait();
-    let blocking_thread = scheduler.spawn_blocking(|| thread::current().id()).wait();
+    let destination = destination_runtime
+        .task_scheduler()
+        .spawn(async |cx| cx.thread().clone())
+        .wait()
+        .unwrap();
+    let blocking_thread = scheduler.spawn_blocking(|| thread::current().id()).wait().unwrap();
 
     scheduler.relocate(Some(builtins.thread()), &destination);
 
     assert_eq!(
         (
-            scheduler.spawn(async |_| thread::current().id()).wait(),
-            scheduler.spawn_blocking(|| thread::current().id()).wait(),
+            scheduler.spawn(async |_| thread::current().id()).wait().unwrap(),
+            scheduler.spawn_blocking(|| thread::current().id()).wait().unwrap(),
         ),
         (builtins.thread().id(), blocking_thread),
     );

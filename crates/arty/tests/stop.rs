@@ -84,9 +84,12 @@ fn stop_in_run() {
         let task_was_executed = Arc::clone(&task_was_executed);
 
         move || {
-            Runtime::new().unwrap().run(async move |_| {
-                task_was_executed.store(true, Ordering::Relaxed);
-            });
+            Runtime::new()
+                .unwrap()
+                .run(async move |_| {
+                    task_was_executed.store(true, Ordering::Relaxed);
+                })
+                .unwrap();
         }
     })
     .unwrap();

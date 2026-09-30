@@ -54,7 +54,8 @@ impl RuntimeOperations {
     ///     .processor_count(ProcessorCount::at_most(NonZeroUsize::MIN))
     ///     .build()
     ///     .unwrap()
-    ///     .run(async |cx| cx.runtime_operations().clone());
+    ///     .run(async |cx| cx.runtime_operations().clone())
+    ///     .expect("the root task completes normally");
     /// std::thread::spawn(move || operations.pin_current_thread())
     ///     .join()
     ///     .unwrap();
@@ -115,7 +116,6 @@ mod tests {
     use crate::runtime::bootstrap;
     use crate::runtime::config::{BlockingPoolPolicy, ProcessorCount, RuntimeConfig};
     use crate::runtime::handle::Runtime;
-    use crate::task::join::JoinHandle;
 
     #[cfg_attr(test, mutants::skip)]
     fn runtime_with_coordinates(processors: NonZeroUsize) -> (Runtime, ThreadBuilder) {
@@ -143,13 +143,14 @@ mod tests {
                     cx.clone(),
                 )
             })
-            .wait();
+            .wait()
+            .unwrap();
         let unfamiliar = coordinates.build(thread::current().id());
         let foreign = ThreadBuilder::default().build(source.id());
         assert_eq!(source.owner(), unfamiliar.owner());
         assert_ne!(source.id(), unfamiliar.id());
         assert_ne!(source.owner(), foreign.owner());
-        let blocking_thread = scheduler.spawn_blocking(|| thread::current().id()).wait();
+        let blocking_thread = scheduler.spawn_blocking(|| thread::current().id()).wait().unwrap();
 
         for destination in [&source, &unfamiliar, &foreign, &unfamiliar, &source] {
             operations.relocate(None, destination);
@@ -162,8 +163,8 @@ mod tests {
 
             for scheduler in [&scheduler, builtins.scheduler()] {
                 let task = scheduler.spawn(async |_| thread::current().id());
-                assert_eq!(task.wait(), source.id());
-                assert_eq!(scheduler.spawn_blocking(|| thread::current().id()).wait(), blocking_thread);
+                assert_eq!(task.wait().unwrap(), source.id());
+                assert_eq!(scheduler.spawn_blocking(|| thread::current().id()).wait().unwrap(), blocking_thread);
             }
 
             for operations in [operations.clone(), builtins.runtime_operations().clone()] {
@@ -188,7 +189,7 @@ mod tests {
         let (runtime, _) = runtime_with_coordinates(NonZeroUsize::new(2).unwrap());
         let workers: Vec<_> = (0..2)
             .map(|_| runtime.task_scheduler().spawn(async |cx| (cx.thread().clone(), cx)))
-            .map(JoinHandle::wait)
+            .map(|handle| handle.wait().unwrap())
             .collect();
         let source = &workers[0].0;
         let destination = &workers[1].0;
@@ -207,6 +208,6 @@ mod tests {
         assert_eq!(&builtins.runtime_operations().thread, source);
         assert_eq!(builtins.thread(), source);
         let task = builtins.scheduler().spawn(async |_| thread::current().id());
-        assert_eq!(task.wait(), source.id());
+        assert_eq!(task.wait().unwrap(), source.id());
     }
 }

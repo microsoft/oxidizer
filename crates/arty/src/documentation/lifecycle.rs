@@ -15,15 +15,15 @@
 //!
 //! | Operation | Ownership and completion |
 //! | --- | --- |
-//! | [`Runtime::run`](crate::runtime::Runtime::run) | Consumes the runtime, waits for a root task's result, then shuts down |
-//! | [`Runtime::block_on`](crate::runtime::Runtime::block_on) | Borrows the runtime and runs a task that may borrow the caller's stack |
+//! | [`Runtime::run`](crate::runtime::Runtime::run) | Consumes the runtime, returns the root task's `Result<T, JoinError>`, then shuts down |
+//! | [`Runtime::block_on`](crate::runtime::Runtime::block_on) | Borrows the runtime and returns `Result<T, JoinError>` from a task that may borrow the caller's stack |
 //! | [`Runtime::stop`](crate::runtime::Runtime::stop) | Requests shutdown without blocking; repeated calls are allowed |
 //! | [`Runtime::wait`](crate::runtime::Runtime::wait) | Waits for shutdown; does not request it |
 //! | Dropping `Runtime` | Requests shutdown and normally waits for it, with the blocking-task exception below |
 //!
 //! Both `run` and `block_on` execute their callbacks on an Arty worker, not on
 //! the calling thread. `block_on` destroys its borrowing factory and future
-//! before returning or propagating a task panic. Its result must still be
+//! before returning success or failure. Its result must still be
 //! `Send + 'static`; return owned data or mutate the borrowed caller-owned data.
 //!
 //! ```
@@ -31,49 +31,43 @@
 //!
 //! let runtime = Runtime::new()?;
 //! let mut message = String::from("Hello");
-//! runtime.block_on(async |_| message.push_str(", Arty"));
+//! runtime.block_on(async |_| message.push_str(", Arty"))?;
 //! assert_eq!(message, "Hello, Arty");
 //! runtime.stop();
 //! runtime.wait();
-//! # Ok::<(), arty::runtime::Error>(())
+//! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
 //! # Cancellation and shutdown
 //!
 //! Shutdown is **not a drain of asynchronous tasks**. It cancels asynchronous
-//! work, closes admission, and waits for already accepted blocking work. Await
+//! work, closes admission, and cancels queued blocking callbacks before invocation. Await
 //! the joins you require before requesting shutdown or allowing `run`'s root
 //! task to return. A blocking callback that never returns can prevent shutdown
-//! from completing.
+//! from completing. Already-running blocking callbacks cannot be forcibly interrupted;
+//! the runtime waits for them to finish.
 //!
-//! A task cancelled before producing a result leaves its join pending
-//! indefinitely. Submission after admission closes also returns a pending join
-//! rather than an error. This includes local submission from a still-valid token
-//! during cancellation: its factory is not invoked.
+//! Cancellation and rejection return [`JoinError`](crate::task::JoinError) with
+//! `is_shutdown() == true`. Once shutdown starts, new submissions return an
+//! immediately ready error without invoking their factories. Pending asynchronous
+//! work is cancelled on its worker; queued blocking work is discarded before its
+//! callback starts. A running callback may still return a successful result.
 //!
-//! Consequently, `JoinHandle::wait()` can remain blocked forever, as can `run`
-//! or `block_on` if their task is cancelled. `Runtime::wait()` observes worker
-//! shutdown, not completion of outstanding join handles. Do not try to finish a
-//! cancelled join after `wait()` returns, or rely on a stopped runtime's timers
-//! to provide an independent shutdown deadline.
+//! `Runtime::wait()` observes worker shutdown and running blocking work, rather
+//! than replacing task joins. A stopped runtime cannot supply an independent
+//! timer for waiting on its own shutdown.
 //!
-//! This example polls a rejected join once instead of waiting for an outcome
-//! that will never arrive:
+//! A rejected submission can be handled immediately:
 //!
 //! ```
-//! use std::future::Future;
-//! use std::pin::pin;
-//! use std::task::{Context, Waker};
-//!
 //! use arty::runtime::Runtime;
 //!
 //! let runtime = Runtime::new()?;
 //! let scheduler = runtime.task_scheduler();
 //! runtime.stop();
+//! let error = scheduler.spawn(async |_| 42).wait().unwrap_err();
+//! assert!(error.is_shutdown());
 //! runtime.wait();
-//! let mut rejected = pin!(scheduler.spawn(async |_| 42));
-//! let mut context = Context::from_waker(Waker::noop());
-//! assert!(rejected.as_mut().poll(&mut context).is_pending());
 //! # Ok::<(), arty::runtime::Error>(())
 //! ```
 //!
@@ -94,13 +88,21 @@
 //! instead requests shutdown without waiting for itself. This exception does
 //! not make destruction an unconditional shutdown-completion barrier.
 //!
-//! # Panics
+//! # Task failures
 //!
-//! When unwinding is enabled, a panic in remote factory invocation or remote/local
-//! future polling is transported to the join. Awaiting the join or calling its
-//! `wait()` resumes the original payload. Blocking-task panics are transported
-//! to their joins too. A local factory runs immediately, so a panic while
-//! constructing its future propagates directly to its caller.
+//! Joins return `Result<T, JoinError>`. When unwinding is enabled, factory, future,
+//! and blocking-callback panics become an error with `is_panic() == true`; joining
+//! does not resume that panic. The failure is distinct from an application error
+//! returned by the task: a task returning `Result<T, E>` produces
+//! `Result<Result<T, E>, JoinError>` when joined.
+//!
+//! `Runtime::run` and `block_on` return the same outer failure result. Entry-point
+//! macros preserve the annotated function's declared return type: they return a
+//! successful root's value, resume its original panic payload on panic, and panic
+//! if shutdown cancels the root. Handle a join's `Result` in the task body when
+//! failure should be recoverable instead.
+//!
+//! # Panics
 //!
 //! This is not an application-state recovery mechanism. Runtime capabilities
 //! are not universally `UnwindSafe` or `RefUnwindSafe`, and catching a panic

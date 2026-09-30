@@ -41,7 +41,7 @@ fn started_event_reports_processor_counts() {
         .build()
         .unwrap();
 
-    runtime.task_scheduler().spawn(async move |_| ()).wait();
+    runtime.task_scheduler().spawn(async move |_| ()).wait().unwrap();
     runtime.stop();
     runtime.wait();
 
@@ -67,7 +67,7 @@ fn each_async_worker_starts_and_stops() {
         .build()
         .unwrap();
 
-    runtime.task_scheduler().spawn(async move |_| ()).wait();
+    runtime.task_scheduler().spawn(async move |_| ()).wait().unwrap();
     runtime.stop();
     runtime.wait();
 
@@ -88,7 +88,7 @@ fn async_worker_os_threads_report_lifecycle() {
         .build()
         .unwrap();
 
-    runtime.task_scheduler().spawn(async move |_| ()).wait();
+    runtime.task_scheduler().spawn(async move |_| ()).wait().unwrap();
     runtime.stop();
     runtime.wait();
 
@@ -127,7 +127,7 @@ fn spawned_task_emits_spawned_and_completed() {
 
     let handles: Vec<_> = (0..TASKS).map(|_| runtime.task_scheduler().spawn(async move |_| ())).collect();
     for handle in handles {
-        handle.wait();
+        handle.wait().unwrap();
     }
     runtime.stop();
     runtime.wait();
@@ -155,7 +155,7 @@ fn panicking_task_emits_panicked_event() {
         .task_scheduler()
         .spawn(async move |_| panic!("intentional panic for telemetry test"));
     // The panic propagates through `wait()`; swallow it so the test thread survives.
-    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handle.wait()));
+    assert!(handle.wait().unwrap_err().is_panic());
     runtime.stop();
     runtime.wait();
 
@@ -176,7 +176,7 @@ fn round_robin_submissions_emit_one_spawn_event_per_worker() {
 
     let handles: Vec<_> = (0..PROCESSORS).map(|_| runtime.task_scheduler().spawn(async |_| ())).collect();
     for handle in handles {
-        handle.wait();
+        handle.wait().unwrap();
     }
     runtime.stop();
     runtime.wait();
@@ -201,9 +201,11 @@ fn local_task_emits_spawned_and_completed_with_local_placement() {
             cx.local_scheduler()
                 .expect("on the same thread as cx")
                 .spawn(async move || ())
-                .await;
+                .await
+                .unwrap();
         })
-        .wait();
+        .wait()
+        .unwrap();
     runtime.stop();
     runtime.wait();
 

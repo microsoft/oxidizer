@@ -33,7 +33,7 @@
 //!
 //! #[arty::main(builder = app_builder())]
 //! async fn main(cx: Builtins) {
-//!     assert_eq!(cx.scheduler().spawn(async |_| 42).await, 42);
+//!     assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
 //! }
 //! ```
 //!

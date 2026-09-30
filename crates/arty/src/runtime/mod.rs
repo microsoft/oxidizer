@@ -12,8 +12,8 @@
 //! select processors, blocking pools, a clock, and a telemetry sink. Configuration
 //! types are available directly in this module.
 //!
-//! Shutdown cancels asynchronous work and waits for accepted blocking work.
-//! Cancelled joins remain pending rather than returning an error. Retaining a
+//! Shutdown cancels pending work and waits for already-running blocking calls.
+//! Cancelled joins return [`JoinError`](crate::task::JoinError). Retaining a
 //! scheduler does not keep the runtime running. Read [`Runtime`]'s destruction
 //! rules before transferring the owner to another thread.
 //!
@@ -46,4 +46,9 @@ pub use handle::Runtime;
 pub mod __private {
     #[cfg(any(test, feature = "test-util"))]
     pub use crate::time::ClockControl;
+
+    /// Preserves an entry point's return type while reporting root-task failure.
+    pub fn resume_join_error(error: crate::task::JoinError) -> ! {
+        error.resume()
+    }
 }

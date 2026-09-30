@@ -14,7 +14,7 @@ use std::num::NonZeroUsize;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 
 use arty::runtime::{BlockingPoolPolicy, Builtins, Error, ProcessorCount, Runtime, RuntimeBuilder, RuntimeOperations};
-use arty::task::{JoinHandle, LocalJoinHandle, LocalTaskScheduler, TaskScheduler};
+use arty::task::{JoinError, JoinHandle, LocalJoinHandle, LocalTaskScheduler, TaskScheduler};
 use static_assertions::{assert_impl_all, assert_not_impl_any};
 use thread_aware::ThreadAware;
 
@@ -26,6 +26,7 @@ assert_impl_all!(TaskScheduler: Send, Sync, Clone, Debug);
 assert_not_impl_any!(TaskScheduler: UnwindSafe, RefUnwindSafe);
 assert_impl_all!(JoinHandle<()>: Future, Send);
 assert_impl_all!(LocalJoinHandle<()>: Future);
+assert_impl_all!(JoinError: StdError, Send, Sync, Debug);
 assert_not_impl_any!(LocalJoinHandle<()>: Send, Sync);
 assert_not_impl_any!(LocalTaskScheduler: Send, Sync);
 assert_impl_all!(RuntimeOperations: Send, Sync, Clone, Debug, ThreadAware);
@@ -38,3 +39,8 @@ const _: fn(NonZeroUsize) -> ProcessorCount = ProcessorCount::exactly;
 const _: fn(NonZeroUsize) -> ProcessorCount = ProcessorCount::at_most;
 
 const _: fn(&Runtime) -> TaskScheduler = Runtime::task_scheduler;
+const _: fn(JoinHandle<u32>) -> Result<u32, JoinError> = JoinHandle::wait;
+
+fn assert_join_output<F: Future<Output = Result<u32, JoinError>>>() {}
+const _: fn() = assert_join_output::<JoinHandle<u32>>;
+const _: fn() = assert_join_output::<LocalJoinHandle<u32>>;

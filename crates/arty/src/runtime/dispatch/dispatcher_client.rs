@@ -4,6 +4,7 @@
 use std::any::type_name;
 use std::fmt::Debug;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::thread::ThreadId;
 
 use crate::runtime::blocking_worker::BlockingWorker;
@@ -36,6 +37,14 @@ impl DispatcherClient {
 
     pub(crate) fn owns(&self, thread: &thread_aware::Thread) -> bool {
         self.core.owns(thread)
+    }
+
+    pub(crate) fn shutdown_signal(&self) -> Arc<AtomicBool> {
+        self.core.shutdown_signal()
+    }
+
+    pub(crate) fn is_shutting_down(&self) -> bool {
+        self.core.is_shutting_down()
     }
 
     pub(crate) fn is_current_blocking_task(&self) -> bool {

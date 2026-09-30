@@ -30,30 +30,32 @@ fn many_timers_with_relocation_ensure_advanced() {
         let runtime = Runtime::new().unwrap();
         let scheduler = runtime.task_scheduler();
         let count = workers();
-        runtime.block_on(async move |builtins: Builtins| {
-            // ensure clock works across all threads
-            let handles: Vec<_> = (0..count)
-                .map(|_| {
-                    scheduler.spawn_anywhere(builtins.clone(), move |b| {
-                        let builtins = b;
-                        async move {
-                            println!("delay(pending) - clock: {:?}, thread: {:?}", builtins.clock(), builtins.thread());
+        runtime
+            .block_on(async move |builtins: Builtins| {
+                // ensure clock works across all threads
+                let handles: Vec<_> = (0..count)
+                    .map(|_| {
+                        scheduler.spawn_anywhere(builtins.clone(), move |b| {
+                            let builtins = b;
+                            async move {
+                                println!("delay(pending) - clock: {:?}, thread: {:?}", builtins.clock(), builtins.thread());
 
-                            let watch = builtins.clock().stopwatch();
-                            builtins.clock().delay(std::time::Duration::from_millis(50)).await;
+                                let watch = builtins.clock().stopwatch();
+                                builtins.clock().delay(std::time::Duration::from_millis(50)).await;
 
-                            println!("delay(done) - clock: {:?}, thread: {:?}", builtins.clock(), builtins.thread());
+                                println!("delay(done) - clock: {:?}, thread: {:?}", builtins.clock(), builtins.thread());
 
-                            assert!(watch.elapsed().as_millis() >= 50);
-                        }
+                                assert!(watch.elapsed().as_millis() >= 50);
+                            }
+                        })
                     })
-                })
-                .collect();
+                    .collect();
 
-            for handle in handles {
-                handle.timeout(builtins.clock(), Duration::from_secs(10)).await.unwrap();
-            }
-        });
+                for handle in handles {
+                    handle.timeout(builtins.clock(), Duration::from_secs(10)).await.unwrap().unwrap();
+                }
+            })
+            .unwrap();
     });
 }
 
@@ -71,7 +73,7 @@ fn many_timers_ensure_advanced() {
         .collect();
 
     for handle in handles {
-        handle.wait();
+        handle.wait().unwrap();
     }
 }
 
@@ -79,11 +81,14 @@ fn many_timers_ensure_advanced() {
 fn timer_with_relocated_builtins() {
     execute_or_terminate_process(|| {
         let runtime = Runtime::new().unwrap();
-        runtime.block_on(async |builtins: Builtins| {
-            builtins
-                .scheduler()
-                .spawn_anywhere(builtins.clone(), |c| c.clock().delay(Duration::from_millis(10)))
-                .await;
-        });
+        runtime
+            .block_on(async |builtins: Builtins| {
+                builtins
+                    .scheduler()
+                    .spawn_anywhere(builtins.clone(), |c| c.clock().delay(Duration::from_millis(10)))
+                    .await
+                    .unwrap();
+            })
+            .unwrap();
     });
 }

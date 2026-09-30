@@ -54,7 +54,7 @@ pub(in crate::runtime) struct DispatcherCore<WFS> {
 
     /// We record whether shutdown has started, both to avoid double-shutdown and to execute
     /// special-case logic in some situations that need special handling during shutdown.
-    shutdown_started: AtomicBool,
+    shutdown_started: Arc<AtomicBool>,
     stopped_reported: AtomicBool,
 
     worker_endpoints: NonEmpty<WorkerEndpoint>,
@@ -90,7 +90,7 @@ impl<WFS> DispatcherCore<WFS> {
         );
         Self {
             wait_for_shutdown,
-            shutdown_started: AtomicBool::new(false),
+            shutdown_started: Arc::new(AtomicBool::new(false)),
             stopped_reported: AtomicBool::new(false),
             worker_endpoints,
             worker_indices,
@@ -103,7 +103,7 @@ impl<WFS> DispatcherCore<WFS> {
     #[cfg_attr(test, mutants::skip)] // Tests will hang if we mutate away the stop signal.
     pub(in crate::runtime) fn stop(&self) {
         // If we've already started shutting down, don't do it again.
-        if self.shutdown_started.fetch_or(true, Ordering::Relaxed) {
+        if self.shutdown_started.swap(true, Ordering::AcqRel) {
             return;
         }
 
@@ -141,6 +141,14 @@ impl<WFS> DispatcherCore<WFS> {
         self.worker_endpoints.first().thread.owner() == thread.owner()
     }
 
+    pub(in crate::runtime) fn shutdown_signal(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.shutdown_started)
+    }
+
+    pub(in crate::runtime) fn is_shutting_down(&self) -> bool {
+        self.shutdown_started.load(Ordering::Acquire)
+    }
+
     pub(in crate::runtime) fn is_current_blocking_task(&self) -> bool {
         self.worker_endpoints
             .iter()
@@ -176,6 +184,9 @@ impl<WFS> DispatcherCore<WFS> {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
+        if self.is_shutting_down() {
+            return JoinHandle::shutdown();
+        }
         let endpoint = self
             .worker_endpoints
             .get(usize::from(worker_index))
@@ -411,8 +422,10 @@ mod tests {
         let join_handle = pin!(join_handle);
 
         let mut cx = task::Context::from_waker(Waker::noop());
-        // Polling a disconnected join handle will just return Pending forever.
-        assert!(matches!(join_handle.poll(&mut cx), Poll::Pending));
+        let Poll::Ready(Err(error)) = join_handle.poll(&mut cx) else {
+            panic!("a disconnected join must report shutdown");
+        };
+        assert!(error.is_shutdown());
     }
 
     #[cfg_attr(test, mutants::skip)]

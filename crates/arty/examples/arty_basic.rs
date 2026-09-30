@@ -17,9 +17,13 @@ fn main() -> Result<(), arty::runtime::Error> {
         .spawn(async |cx| {
             cx.clock().delay(Duration::from_millis(1)).await;
             // This scheduler keeps the child on the parent's worker.
-            cx.scheduler().spawn(async |_| 42).await
+            cx.scheduler()
+                .spawn(async |_| 42)
+                .await
+                .expect("the child task completes before its parent returns")
         })
-        .wait();
+        .wait()
+        .expect("the task completes before runtime shutdown");
     println!("{answer}");
     Ok(())
 }

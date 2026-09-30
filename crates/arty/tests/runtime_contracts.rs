@@ -39,18 +39,21 @@ fn detached_handles_share_round_robin_but_bound_handles_retain_affinity() {
         let first = runtime.task_scheduler();
         let clone = first.clone();
         let another = runtime.task_scheduler();
-        let (a, bound) = first.spawn(async |cx| (thread::current().id(), cx.scheduler().clone())).wait();
-        let b = clone.spawn(async |_| thread::current().id()).wait();
-        let a_again = another.spawn(async |_| thread::current().id()).wait();
+        let (a, bound) = first
+            .spawn(async |cx| (thread::current().id(), cx.scheduler().clone()))
+            .wait()
+            .unwrap();
+        let b = clone.spawn(async |_| thread::current().id()).wait().unwrap();
+        let a_again = another.spawn(async |_| thread::current().id()).wait().unwrap();
         assert_ne!(a, b);
         assert_eq!(a, a_again);
         let bound_clone = bound.clone();
-        let cloned_result = thread::spawn(move || bound_clone.spawn(async |_| thread::current().id()).wait())
+        let cloned_result = thread::spawn(move || bound_clone.spawn(async |_| thread::current().id()).wait().unwrap())
             .join()
             .unwrap();
         assert_eq!(cloned_result, a);
-        assert_eq!(bound.spawn(async |_| thread::current().id()).wait(), a);
-        assert_eq!(first.spawn(async |_| thread::current().id()).wait(), b);
+        assert_eq!(bound.spawn(async |_| thread::current().id()).wait().unwrap(), a);
+        assert_eq!(first.spawn(async |_| thread::current().id()).wait().unwrap(), b);
     });
 }
 
@@ -58,13 +61,13 @@ fn detached_handles_share_round_robin_but_bound_handles_retain_affinity() {
 fn detached_relocation_binds_only_the_notified_clone() {
     let runtime = runtime(2);
     let detached = runtime.task_scheduler();
-    let home = detached.spawn(async |cx| cx.thread().clone()).wait();
+    let home = detached.spawn(async |cx| cx.thread().clone()).wait().unwrap();
     let mut bound = detached.clone();
     bound.relocate(None, &home);
     for _ in 0..4 {
-        assert_eq!(bound.spawn(async |_| thread::current().id()).wait(), home.id());
+        assert_eq!(bound.spawn(async |_| thread::current().id()).wait().unwrap(), home.id());
     }
-    assert_ne!(detached.spawn(async |_| thread::current().id()).wait(), home.id());
+    assert_ne!(detached.spawn(async |_| thread::current().id()).wait().unwrap(), home.id());
 }
 
 #[test]
@@ -78,7 +81,7 @@ fn concurrent_schedulers_share_selection_without_losing_submissions() {
                 let scheduler = scheduler.clone();
                 scope.spawn(move || {
                     (0..tasks_per_producer)
-                        .map(|_| scheduler.spawn(async |_| thread::current().id()).wait())
+                        .map(|_| scheduler.spawn(async |_| thread::current().id()).wait().unwrap())
                         .collect::<Vec<_>>()
                 })
             });
@@ -95,7 +98,7 @@ fn concurrent_schedulers_share_selection_without_losing_submissions() {
 }
 
 #[test]
-fn closed_runtime_does_not_invoke_factories_or_complete_cancelled_joins() {
+fn closed_runtime_rejects_factories_with_an_immediate_shutdown_error() {
     let runtime = runtime(1);
     let scheduler = runtime.task_scheduler();
     drop(runtime);
@@ -106,8 +109,10 @@ fn closed_runtime_does_not_invoke_factories_or_complete_cancelled_joins() {
         async {}
     }));
     let mut cx = Context::from_waker(Waker::noop());
-    assert_eq!(join.as_mut().poll(&mut cx), Poll::Pending);
-    assert_eq!(join.as_mut().poll(&mut cx), Poll::Pending);
+    let Poll::Ready(Err(error)) = join.as_mut().poll(&mut cx) else {
+        panic!("a rejected join must be ready with a shutdown error");
+    };
+    assert!(error.is_shutdown());
     assert!(!invoked.load(Ordering::Relaxed));
 }
 
@@ -123,9 +128,9 @@ fn blocking_tasks_leave_the_async_worker_responsive() {
             42
         });
         ready.recv_timeout(TEST_TIMEOUT).unwrap();
-        assert_eq!(runtime.task_scheduler().spawn(async |_| 17).wait(), 17);
+        assert_eq!(runtime.task_scheduler().spawn(async |_| 17).wait().unwrap(), 17);
         release.send(()).unwrap();
-        assert_eq!(blocking.wait(), 42);
+        assert_eq!(blocking.wait().unwrap(), 42);
     });
 }
 
@@ -157,7 +162,7 @@ fn pending_future_is_woken_from_an_unrelated_thread() {
         })
         .join()
         .unwrap();
-        assert_eq!(task.wait(), 42);
+        assert_eq!(task.wait().unwrap(), 42);
     });
 }
 
@@ -170,17 +175,19 @@ fn worker_can_drive_a_controlled_clock_without_io() {
             .clock(control)
             .build()
             .unwrap();
-        runtime.run(async |cx| {
-            let watch = cx.clock().stopwatch();
-            cx.clock().delay(Duration::from_secs(5)).await;
-            assert!(watch.elapsed() >= Duration::from_secs(5));
-            assert!(pending::<()>().timeout(cx.clock(), Duration::from_secs(1)).await.is_err());
-        });
+        runtime
+            .run(async |cx| {
+                let watch = cx.clock().stopwatch();
+                cx.clock().delay(Duration::from_secs(5)).await;
+                assert!(watch.elapsed() >= Duration::from_secs(5));
+                assert!(pending::<()>().timeout(cx.clock(), Duration::from_secs(1)).await.is_err());
+            })
+            .unwrap();
     });
 }
 
 #[test]
-fn factory_and_poll_panics_preserve_payloads_and_runtime_usability() {
+fn factory_and_poll_panics_return_errors_and_preserve_runtime_usability() {
     #[derive(Debug, PartialEq)]
     struct Payload(u32);
 
@@ -190,15 +197,15 @@ fn factory_and_poll_panics_preserve_payloads_and_runtime_usability() {
     let runtime = runtime(1);
     let factory = runtime.task_scheduler().spawn(panic_factory);
     let polling = runtime.task_scheduler().spawn(async |_| panic_any(Payload(2)));
-    for (task, value) in [(factory, 1), (polling, 2)] {
-        let panic = catch_unwind(AssertUnwindSafe(|| task.wait())).unwrap_err();
-        assert_eq!(panic.downcast_ref::<Payload>(), Some(&Payload(value)));
+    for task in [factory, polling] {
+        let outcome = catch_unwind(AssertUnwindSafe(|| task.wait())).unwrap();
+        assert!(outcome.unwrap_err().is_panic());
     }
-    assert_eq!(runtime.task_scheduler().spawn(async |_| 42).wait(), 42);
+    assert_eq!(runtime.task_scheduler().spawn(async |_| 42).wait().unwrap(), 42);
 }
 
 #[test]
-fn scoped_borrowed_storage_is_destroyed_before_return_or_panic() {
+fn scoped_borrowed_storage_is_destroyed_before_success_or_error() {
     struct Borrowed<'a>(&'a AtomicBool);
     impl Drop for Borrowed<'_> {
         fn drop(&mut self) {
@@ -218,11 +225,12 @@ fn scoped_borrowed_storage_is_destroyed_before_return_or_panic() {
                 }
                 42
             })
-        }));
+        }))
+        .unwrap();
         assert!(destroyed.load(Ordering::Acquire));
         match result {
             Ok(value) => assert_eq!((should_panic, value), (false, 42)),
-            Err(panic) => assert_eq!((should_panic, panic.downcast_ref::<u32>()), (true, Some(&17))),
+            Err(error) => assert!(should_panic && error.is_panic()),
         }
     }
 }
@@ -250,11 +258,12 @@ fn local_non_send_state_is_destroyed_on_its_worker() {
                 owner: thread::current().id(),
                 dropped: Rc::clone(&dropped),
             };
-            cx.local_scheduler().unwrap().spawn(async move || drop(value)).await;
+            cx.local_scheduler().unwrap().spawn(async move || drop(value)).await.unwrap();
             assert!(dropped.get());
             cx.clone()
         })
-        .wait();
+        .wait()
+        .unwrap();
     thread::spawn({
         let portable = portable.clone();
         move || {
@@ -325,7 +334,7 @@ fn a_blocking_task_can_drop_its_runtime_without_joining_itself() {
                 finished.send(()).unwrap();
             });
             receive.recv_timeout(TEST_TIMEOUT).unwrap();
-            task.wait();
+            task.wait().unwrap();
         }
     });
 }

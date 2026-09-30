@@ -51,14 +51,19 @@ use arty::runtime::Builtins;
 
 #[arty::main]
 async fn main(cx: Builtins) {
-    let answer = cx.scheduler().spawn(async |_| 6 * 7).await;
+    let answer = cx
+        .scheduler()
+        .spawn(async |_| 6 * 7)
+        .await
+        .expect("the child task completes before the entry point returns");
     println!("{answer}");
 }
 ```
 
 This prints `42`. The attribute creates the runtime and runs the entry point
 on a worker, passing owned `Builtins`. Its scheduler creates the child task
-on that worker; `.await` observes the result without blocking the worker.
+on that worker; `.await` observes a `Result` without blocking the worker.
+Task panics and shutdown cancellation are reported as `arty::task::JoinError`.
 The runtime shuts down when the entry point finishes, so await any required
 child work before returning. Use `arty::runtime::Runtime` directly when
 integrating with synchronous code or controlling ownership and shutdown.

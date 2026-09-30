@@ -110,14 +110,18 @@ impl Builtins {
     ///     let local = cx
     ///         .local_scheduler()
     ///         .expect("the task runs on its associated worker");
-    ///     let result = local.spawn(async || Rc::new(42)).await;
+    ///     let result = local
+    ///         .spawn(async || Rc::new(42))
+    ///         .await
+    ///         .expect("the local task completes before its parent returns");
     ///     assert_eq!(*result, 42);
     ///
     ///     let portable = cx.clone();
     ///     let unavailable = cx
     ///         .scheduler()
     ///         .spawn_blocking(move || portable.local_scheduler().is_none())
-    ///         .await;
+    ///         .await
+    ///         .expect("the blocking task completes before its parent returns");
     ///     assert!(unavailable);
     /// }
     /// # #[cfg(not(feature = "macros"))] fn main() {}
@@ -282,8 +286,6 @@ mod tests {
     use crate::runtime::config::ProcessorCount;
     #[cfg(not(miri))]
     use crate::runtime::handle::Runtime;
-    #[cfg(all(debug_assertions, not(miri)))]
-    use crate::task::join::JoinHandle;
 
     #[test]
     fn assert_builtin_traits() {
@@ -306,8 +308,9 @@ mod tests {
                 assert!(std::ptr::eq(clock, cx.clock()));
                 assert!(std::ptr::eq(simple_clock, cx.clock().as_ref()));
                 assert!(std::ptr::eq(sink, cx.sink()));
-                assert_eq!(scheduler.spawn(async |_| 42).await, 42);
-            });
+                assert_eq!(scheduler.spawn(async |_| 42).await.unwrap(), 42);
+            })
+            .unwrap();
     }
 
     #[cfg(all(debug_assertions, not(miri)))]
@@ -321,7 +324,8 @@ mod tests {
             .unwrap()
             .run(async |cx| {
                 let _ = cx.thread();
-            });
+            })
+            .unwrap();
 
         assert_eq!(
             processor
@@ -365,7 +369,7 @@ mod tests {
                     (cx, scheduler)
                 })
             })
-            .map(JoinHandle::wait)
+            .map(|handle| handle.wait().unwrap())
             .collect();
         let mut builtins = workers[0].0.clone();
         let source = builtins.thread.clone();
@@ -376,7 +380,8 @@ mod tests {
                 builtins.relocate(known_source.then_some(&source), &cx.thread);
                 let _ = builtins.thread();
             })
-            .wait();
+            .wait()
+            .unwrap();
         runtime.stop();
         runtime.wait();
 
@@ -399,17 +404,19 @@ mod tests {
             .build()
             .unwrap();
         let scheduler = runtime.task_scheduler();
-        let (actual, expected) = runtime.run(async move |cx| {
-            let tasks: Vec<_> = (0..count)
-                .map(|_| {
-                    scheduler.spawn_anywhere(cx.clone(), |worker: Builtins| async move {
-                        (worker.thread().id() == thread::current().id(), worker.local_scheduler().is_some())
+        let (actual, expected) = runtime
+            .run(async move |cx| {
+                let tasks: Vec<_> = (0..count)
+                    .map(|_| {
+                        scheduler.spawn_anywhere(cx.clone(), |worker: Builtins| async move {
+                            (worker.thread().id() == thread::current().id(), worker.local_scheduler().is_some())
+                        })
                     })
-                })
-                .collect();
-            let expected = vec![(true, true); tasks.len()];
-            (join_all(tasks).await, expected)
-        });
+                    .collect();
+                let expected = vec![(true, true); tasks.len()];
+                (join_all(tasks).await.into_iter().map(Result::unwrap).collect::<Vec<_>>(), expected)
+            })
+            .unwrap();
 
         assert_eq!(actual, expected);
     }

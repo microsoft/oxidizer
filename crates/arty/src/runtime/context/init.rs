@@ -62,7 +62,7 @@ impl CoreRuntimeBuiltins {
         sink: Sink,
     ) -> Self {
         Self {
-            local_scheduler: LocalTaskBinding::new(tasks, sink.clone()),
+            local_scheduler: LocalTaskBinding::new(tasks, sink.clone(), dispatcher.shutdown_signal()),
             dispatcher,
             processor_set,
             thread,

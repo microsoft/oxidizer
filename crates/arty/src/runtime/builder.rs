@@ -28,7 +28,9 @@ use crate::runtime::handle::Runtime;
 /// let runtime = Runtime::builder()
 ///     .processor_count(ProcessorCount::at_most(NonZeroUsize::new(4).unwrap()))
 ///     .build()?;
-/// runtime.run(async |_| {});
+/// runtime
+///     .run(async |_| {})
+///     .expect("the root task completes normally");
 /// # Ok::<(), Error>(())
 /// ```
 #[derive(Debug)]
@@ -98,11 +100,13 @@ impl RuntimeBuilder {
     ///
     /// let control = ClockControl::new().auto_advance_timers(true);
     /// let runtime = Runtime::builder().clock(control).build()?;
-    /// runtime.run(async |cx| {
-    ///     let watch = cx.clock().stopwatch();
-    ///     cx.clock().delay(Duration::from_secs(30)).await;
-    ///     assert_eq!(watch.elapsed(), Duration::from_secs(30));
-    /// });
+    /// runtime
+    ///     .run(async |cx| {
+    ///         let watch = cx.clock().stopwatch();
+    ///         cx.clock().delay(Duration::from_secs(30)).await;
+    ///         assert_eq!(watch.elapsed(), Duration::from_secs(30));
+    ///     })
+    ///     .expect("the controlled task completes normally");
     ///
     /// # Ok::<(), arty::runtime::Error>(())
     /// # })().unwrap();
@@ -246,9 +250,11 @@ mod tests {
     fn emitter_is_available_by_default() {
         let runtime = Runtime::builder().build().expect("Failed to create runtime");
 
-        runtime.run(async move |cx: Builtins| {
-            assert!(cx.sink().is_noop());
-        });
+        runtime
+            .run(async move |cx: Builtins| {
+                assert!(cx.sink().is_noop());
+            })
+            .unwrap();
     }
 
     #[cfg(not(miri))] // can't call foreign function `CreateIoCompletionPort` on OS `windows`
@@ -275,9 +281,11 @@ mod tests {
         let sink = Sink::new("test", vec![Arc::new(TestProcessor)], tick::SimpleClock::new_frozen());
         let runtime = Runtime::builder().sink(sink).build().expect("Failed to create runtime");
 
-        runtime.run(async move |cx: Builtins| {
-            assert!(!cx.sink().is_noop());
-            cx.sink().flush().unwrap();
-        });
+        runtime
+            .run(async move |cx: Builtins| {
+                assert!(!cx.sink().is_noop());
+                cx.sink().flush().unwrap();
+            })
+            .unwrap();
     }
 }

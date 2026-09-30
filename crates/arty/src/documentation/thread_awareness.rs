@@ -38,8 +38,14 @@
 //!     let cloned = cx.scheduler().clone();
 //!     let executed_on = cx
 //!         .scheduler()
-//!         .spawn_blocking(move || cloned.spawn(async |child| child.thread().id()).wait())
-//!         .await;
+//!         .spawn_blocking(move || {
+//!             cloned
+//!                 .spawn(async |child| child.thread().id())
+//!                 .wait()
+//!                 .unwrap()
+//!         })
+//!         .await
+//!         .expect("both tasks complete before the entry point returns");
 //!     assert_eq!(executed_on, home);
 //! }
 //! ```
@@ -68,10 +74,12 @@
 //!             let child = moved
 //!                 .scheduler()
 //!                 .spawn(async |child| child.thread().id())
-//!                 .await;
+//!                 .await
+//!                 .expect("the child completes before its parent");
 //!             assert_eq!(child, moved.thread().id());
 //!         })
-//!         .await;
+//!         .await
+//!         .expect("the relocated task completes before the entry point returns");
 //! }
 //! ```
 //!

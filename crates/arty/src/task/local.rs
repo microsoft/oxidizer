@@ -3,13 +3,15 @@
 
 use std::cell::RefCell;
 use std::marker::PhantomData;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use arty_executor::TaskSet;
 use observed::{Sink, emit};
 
-use crate::runtime::telemetry::events::{PlacementLabel, TaskSpawned};
+use crate::runtime::telemetry::events::{PlacementLabel, TaskPanicked, TaskSpawned};
 use crate::task::execution::prepare_local;
 use crate::task::join::LocalJoinHandle;
 
@@ -60,17 +62,18 @@ impl Drop for LocalTaskScope {
 pub(crate) struct LocalTaskBinding {
     identity: Arc<()>,
     sink: Sink,
+    shutdown: Arc<AtomicBool>,
 }
 
 impl LocalTaskBinding {
-    pub(crate) fn new(tasks: TaskSet, sink: Sink) -> Self {
+    pub(crate) fn new(tasks: TaskSet, sink: Sink, shutdown: Arc<AtomicBool>) -> Self {
         let identity = LOCAL_TASKS.with_borrow_mut(|registered| {
             let registered = registered.as_mut().expect("the worker owns a local executor scope");
             assert!(registered.tasks.is_none(), "local scheduler initialized more than once");
             registered.tasks = Some(tasks);
             Arc::clone(&registered.identity)
         });
-        Self { identity, sink }
+        Self { identity, sink, shutdown }
     }
 
     pub(crate) fn local_scheduler(&self) -> Option<LocalTaskScheduler> {
@@ -90,7 +93,8 @@ impl LocalTaskBinding {
 /// on the associated worker. The scheduler is neither [`Send`] nor [`Sync`].
 /// Cloning it does not keep the worker running.
 ///
-/// A cancelled or rejected local task leaves its join pending indefinitely.
+/// A cancelled or rejected local task returns [`JoinError`](crate::task::JoinError)
+/// with `is_shutdown() == true`.
 /// See the [documentation guides](crate#documentation) for choosing
 /// between local and cross-thread submission.
 ///
@@ -110,7 +114,8 @@ impl LocalTaskBinding {
 ///         .local_scheduler()
 ///         .expect("the task runs on its associated worker")
 ///         .spawn(async move || value)
-///         .await;
+///         .await
+///         .expect("the local task completes before the entry point returns");
 ///     assert_eq!(*result, 42);
 /// }
 /// # #[cfg(not(feature = "macros"))] fn main() {}
@@ -136,27 +141,33 @@ impl LocalTaskScheduler {
     /// Starts a local task, creating its future immediately on the current worker.
     #[doc = include_str!("../../docs/snippets/local_task.md")]
     ///
-    /// During shutdown, a still-valid token returns a pending, disconnected join
-    /// without invoking the factory. It does not return a cancellation error.
+    /// After shutdown starts, returns a join that is immediately ready with a
+    /// shutdown error, without invoking the factory.
     ///
     /// # Panics
     ///
-    /// Panics outside the token's own worker-local context. A panic in the
-    /// factory propagates immediately; a panic while polling its future is
-    /// transported to the join.
+    /// Panics outside the token's own worker-local context while the runtime is
+    /// running. Factory and future panics are returned through the join.
     pub fn spawn<FF, F, R>(&self, future_factory: FF) -> LocalJoinHandle<R>
     where
         FF: FnOnce() -> F + 'static,
         F: Future<Output = R> + 'static,
         R: 'static,
     {
+        if self.binding.shutdown.load(Ordering::Acquire) {
+            return LocalJoinHandle::shutdown();
+        }
         // Release the TLS borrow before invoking user code, which may spawn recursively.
         let Some(tasks) = self.tasks() else {
-            let (sender, receiver) = events_once::LocalEvent::boxed();
-            drop(sender);
-            return LocalJoinHandle::new(receiver);
+            return LocalJoinHandle::shutdown();
         };
-        let future = future_factory();
+        let future = match catch_unwind(AssertUnwindSafe(future_factory)) {
+            Ok(future) => future,
+            Err(payload) => {
+                emit!(&self.binding.sink, TaskPanicked);
+                return LocalJoinHandle::panicked(payload);
+            }
+        };
         let parent = self.binding.sink.transfer_context();
         let (future, handle) = prepare_local(future, parent, self.binding.sink.clone());
         emit!(
@@ -174,7 +185,6 @@ impl LocalTaskScheduler {
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
     use std::cell::Cell;
-    use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::thread;
 
     use super::*;
@@ -191,6 +201,7 @@ mod tests {
         LOCAL_TASKS.with_borrow(|registered| LocalTaskBinding {
             identity: Arc::clone(&registered.as_ref().unwrap().identity),
             sink: Sink::noop(),
+            shutdown: Arc::new(AtomicBool::new(false)),
         })
     }
 
