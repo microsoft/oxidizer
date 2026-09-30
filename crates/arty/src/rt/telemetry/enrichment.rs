@@ -20,6 +20,7 @@ use std::any::type_name;
 pub(crate) struct CapturedContext(observed::context::Transfer);
 
 impl std::fmt::Debug for CapturedContext {
+    #[cfg_attr(coverage_nightly, coverage(off))] // Never render captured enrichment data.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct(type_name::<Self>()).finish_non_exhaustive()
     }

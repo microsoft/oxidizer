@@ -215,9 +215,10 @@ where
             return;
         };
 
-        let Some(command_rx) = self.command_rx.as_ref() else {
-            unreachable!("guarded by thread_state Some check above - thread state and command channel are dropped together");
-        };
+        let command_rx = self
+            .command_rx
+            .as_ref()
+            .expect("thread state and command channel are dropped together");
 
         loop {
             match command_rx.try_recv() {
@@ -232,13 +233,10 @@ where
                     // Shutdown closes the command channel - no more commands can be received.
                     return;
                 }
-                Err(TryRecvError::Empty) => {
+                Err(error) => {
+                    // Every initialized worker retains its own dispatcher until shutdown.
+                    assert_eq!(error, TryRecvError::Empty, "async worker command channel disconnected without shutdown");
                     break;
-                }
-                Err(TryRecvError::Disconnected) => {
-                    // The runtime is self-referential - every worker knows how to send commands to
-                    // every other worker -, so it should be impossible for the sender to drop first.
-                    unreachable!("async worker command channel disconnected without shutdown");
                 }
             }
         }
@@ -269,6 +267,7 @@ impl<TS> Drop for AsyncWorker<TS>
 where
     TS: RuntimeThreadState,
 {
+    #[cfg_attr(coverage_nightly, coverage(off))] // Only enforces the executor shutdown invariant.
     #[cfg_attr(test, mutants::skip)] // Safety on drop is validated on multiple levels, so might panic even if this is mutated away.
     fn drop(&mut self) {
         if thread::panicking() {
@@ -282,6 +281,7 @@ where
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
     use events_once::{Event, IntoValueError};
     use observed::Sink;
@@ -496,5 +496,37 @@ mod tests {
 
         let completed_result = completed_rx.into_value();
         assert!(matches!(completed_result, Err(IntoValueError::Disconnected)));
+    }
+
+    #[test]
+    fn shutdown_before_initialization_discards_the_constructor() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let initialized = Arc::new(AtomicBool::new(false));
+        let observed = Arc::clone(&initialized);
+        let (_commands, receiver) = mpsc::channel();
+        let system_worker = SystemWorker::new(WorkerPool::new(None), Sink::noop());
+        // SAFETY: run completes the executor's shutdown before the worker is dropped.
+        let mut worker = unsafe {
+            AsyncWorker::new(
+                receiver,
+                async move |tasks, _| {
+                    observed.store(true, Ordering::Relaxed);
+                    Ok(TestTaskContext::new(tasks))
+                },
+                Arc::clone(&system_worker),
+                InactiveClock::default(),
+                Arc::new(WorkerSignal::default()),
+                Event::boxed().0,
+            )
+        };
+
+        worker.process_commands();
+        worker.begin_shutdown();
+        worker.process_commands();
+        worker.run();
+
+        assert!(!initialized.load(Ordering::Relaxed));
+        assert!(is_system_worker_shutting_down(&system_worker));
     }
 }

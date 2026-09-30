@@ -31,6 +31,16 @@ enum ThreadWaiterState {
     Completed,
 }
 
+impl ThreadWaiterState {
+    #[cfg_attr(coverage_nightly, coverage(off))] // Validates the joiner's state invariant.
+    fn waiting_senders(&mut self) -> &mut Vec<BoxedSender<()>> {
+        let Self::Waiting { completed_txs } = self else {
+            unreachable!("only the joiner can transition Waiting to Completed");
+        };
+        completed_txs
+    }
+}
+
 impl ThreadWaiter {
     pub(in crate::rt::runtime) fn new(threads: Vec<thread::JoinHandle<()>>) -> Self {
         Self {
@@ -47,12 +57,13 @@ impl WaitForShutdown for ThreadWaiter {
             let mut state = state_arc.lock().await;
 
             match &mut *state {
-                ThreadWaiterState::Initialized { .. } => {
+                ThreadWaiterState::Initialized { threads } => {
                     // We are the first waiter, so we need to wait for the threads to exit.
                     let (tx, rx) = Event::boxed();
 
+                    let threads = mem::take(threads);
                     let completed_txs = vec![tx];
-                    let initialized_state = mem::replace(&mut *state, ThreadWaiterState::Waiting { completed_txs });
+                    *state = ThreadWaiterState::Waiting { completed_txs };
 
                     // The waiting occurs in a new thread since it is a synchronous operation.
                     thread::Builder::new()
@@ -61,10 +72,6 @@ impl WaitForShutdown for ThreadWaiter {
                             let state = Arc::clone(&state_arc);
 
                             move || {
-                                let ThreadWaiterState::Initialized { threads } = initialized_state else {
-                                    unreachable!("we already matched this and know the state we are in");
-                                };
-
                                 // TODO: What to do if a thread panicked and this returns an error?
                                 // For now, we ignore it but we might want a more thought-through plan.
                                 for thread in threads {
@@ -74,11 +81,7 @@ impl WaitForShutdown for ThreadWaiter {
                                 // All threads have exited. Signal the waiters!
                                 let mut state = state.lock_blocking();
 
-                                let ThreadWaiterState::Waiting { completed_txs } = &mut *state else {
-                                    unreachable!("there is nothing else that could transition us out of the waiting state");
-                                };
-
-                                for tx in completed_txs.drain(..) {
+                                for tx in state.waiting_senders().drain(..) {
                                     tx.send(());
                                 }
 
@@ -116,6 +119,7 @@ impl WaitForShutdown for ThreadWaiter {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
     use core::task;
     use std::sync::Barrier;

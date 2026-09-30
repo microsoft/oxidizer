@@ -145,6 +145,7 @@ impl LocalTaskScheduler {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
     use std::cell::Cell;
     use std::panic::{AssertUnwindSafe, catch_unwind};

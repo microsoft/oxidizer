@@ -189,6 +189,7 @@ impl Drop for Runtime {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
     use std::cell::RefCell;
     use std::future::ready;

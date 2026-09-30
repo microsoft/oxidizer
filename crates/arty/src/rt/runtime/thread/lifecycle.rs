@@ -88,6 +88,7 @@ fn thread_fn(sink: &Sink, task: impl FnOnce() + Send + 'static) {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
     use std::sync::{Arc, Mutex};
 
@@ -123,32 +124,36 @@ mod tests {
 
     #[test]
     fn panicking_thread_emits_panic_event() {
-        let (sink, processor) = test_emitter(TEST_ID);
+        let cases: [(fn(), &str); 3] = [
+            (|| panic!("test test 123"), "test test 123"),
+            (|| std::panic::panic_any(String::from("owned message")), "owned message"),
+            (|| std::panic::panic_any(42u32), "unknown panic"),
+        ];
+        for (body, expected_message) in cases {
+            let (sink, processor) = test_emitter(TEST_ID);
+            let handle = spawn(&sink, "panicking-thread", None, body);
+            handle.join().unwrap_err();
 
-        let handle = spawn(&sink, "panicking-thread", None, || {
-            panic!("test test 123");
-        });
-        let _ = handle.join();
+            let events = processor.events();
+            let panic_event = events
+                .iter()
+                .find(|event| event.name() == "oxidizer.rt.thread.panic")
+                .expect("a panicking thread emits oxidizer.rt.thread.panic");
 
-        let events = processor.events();
-        let panic_event = events
-            .iter()
-            .find(|event| event.name() == "oxidizer.rt.thread.panic")
-            .expect("a panicking thread emits oxidizer.rt.thread.panic");
+            let attribute = |key: &str| -> Option<String> {
+                panic_event
+                    .dimensions()
+                    .into_iter()
+                    .find(|(k, _)| k == key)
+                    .and_then(|(_, v)| match v {
+                        Value::String(s) => Some(s.to_string()),
+                        _ => None,
+                    })
+            };
 
-        let attribute = |key: &str| -> Option<String> {
-            panic_event
-                .dimensions()
-                .into_iter()
-                .find(|(k, _)| k == key)
-                .and_then(|(_, v)| match v {
-                    Value::String(s) => Some(s.to_string()),
-                    _ => None,
-                })
-        };
-
-        assert_eq!(attribute("panic.message"), Some("test test 123".to_owned()));
-        assert_eq!(attribute("thread.name"), Some("panicking-thread".to_owned()));
+            assert_eq!(attribute("panic.message"), Some(expected_message.to_owned()));
+            assert_eq!(attribute("thread.name"), Some("panicking-thread".to_owned()));
+        }
     }
 
     #[test]

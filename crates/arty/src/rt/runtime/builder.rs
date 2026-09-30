@@ -149,6 +149,7 @@ impl RuntimeBuilder {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
     use std::num::NonZeroUsize;
     #[cfg(not(miri))]
@@ -273,6 +274,7 @@ mod tests {
 
         runtime.run(async move |cx: Builtins| {
             assert!(!cx.sink().is_noop());
+            cx.sink().flush().unwrap();
         });
     }
 }

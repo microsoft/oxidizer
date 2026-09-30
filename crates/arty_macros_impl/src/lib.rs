@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #![forbid(unsafe_code)]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 //! Implementation of [`arty_macros`](https://docs.rs/arty_macros).
 //!
@@ -86,6 +87,7 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
     use insta::assert_snapshot;
     use testing_aids::render_expansion;
@@ -183,6 +185,7 @@ mod tests {
     fn malformed_items_and_arguments_report_errors() {
         for (args, input) in [
             (TokenStream::new(), quote!(not a function)),
+            (quote!(@), quote!(async fn run(cx: Builtins) {})),
             (
                 quote!(runtime_path =),
                 quote!(

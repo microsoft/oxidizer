@@ -151,6 +151,7 @@ impl WorkerPool {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 pub(super) mod system_worker_tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc::channel;

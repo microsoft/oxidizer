@@ -156,12 +156,11 @@ impl Builtins {
 
 impl ThreadAware for Builtins {
     fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
-        // Foreign owners have no endpoints or service slots in this runtime. Retain the
-        // entire bundle so scheduling and worker-local services remain coherent.
-        if self.thread == *destination || self.thread.owner() != destination.owner() {
+        if self.thread == *destination {
             return;
         }
 
+        // The scheduler validates runtime ownership before resolving a worker.
         let Some(worker_index) = self.scheduler.resolve_worker_index(destination) else {
             return;
         };
@@ -256,6 +255,7 @@ pub(in crate::rt::runtime) struct InnerBuiltins {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
     use std::fmt::Debug;
     #[cfg(not(miri))]
@@ -281,6 +281,26 @@ mod tests {
     #[test]
     fn assert_builtin_traits() {
         static_assertions::assert_impl_all!(Builtins: AsRef<TaskScheduler>, AsRef<Clock>, Send, Sync, Clone, Debug);
+    }
+
+    #[cfg(not(miri))]
+    #[test]
+    fn borrowed_services_are_the_worker_services() {
+        Runtime::builder()
+            .processor_count(ProcessorCount::exactly(NonZeroUsize::MIN))
+            .build()
+            .unwrap()
+            .run(async |cx| {
+                let scheduler: &TaskScheduler = cx.as_ref();
+                let clock: &Clock = cx.as_ref();
+                let simple_clock: &SimpleClock = cx.as_ref();
+                let sink: &Sink = cx.as_ref();
+                assert!(std::ptr::eq(scheduler, cx.scheduler()));
+                assert!(std::ptr::eq(clock, cx.clock()));
+                assert!(std::ptr::eq(simple_clock, cx.clock().as_ref()));
+                assert!(std::ptr::eq(sink, cx.sink()));
+                assert_eq!(scheduler.spawn(async |_| 42).await, 42);
+            });
     }
 
     #[cfg(all(debug_assertions, not(miri)))]

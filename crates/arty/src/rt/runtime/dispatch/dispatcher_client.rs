@@ -50,6 +50,7 @@ impl DispatcherClient {
 }
 
 impl Debug for DispatcherClient {
+    #[cfg_attr(coverage_nightly, coverage(off))] // Opaque diagnostic formatting only.
     #[cfg_attr(test, mutants::skip)] // Debug formatting not tested
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct(type_name::<Self>()).finish()
@@ -92,6 +93,7 @@ impl DispatcherClient {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
     use std::sync::mpsc;
     use std::task::Waker;

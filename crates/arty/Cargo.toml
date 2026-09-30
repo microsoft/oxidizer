@@ -85,8 +85,8 @@ all_the_time = { workspace = true }
 arty_executor = { path = "../arty_executor", features = ["test-util"] }
 arty_macros = { path = "../arty_macros" }
 async-lock = { workspace = true, features = ["std"] }
-ctor = { workspace = true }
 criterion = { workspace = true }
+ctor = { workspace = true }
 data_privacy = { path = "../data_privacy" }
 derive_more = { workspace = true, features = ["debug"] }
 events_once = { workspace = true }

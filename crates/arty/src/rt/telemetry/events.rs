@@ -237,6 +237,7 @@ pub(crate) struct SystemWorkerPoolSaturated {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
     use observed::{Severity, emit};
     use observed_testing::{ExpectedEvent, TEST_ID, test_emitter};

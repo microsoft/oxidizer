@@ -94,6 +94,7 @@ impl Default for RuntimeConfig {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
     #[cfg(not(miri))]
     use many_cpus::SystemHardware;

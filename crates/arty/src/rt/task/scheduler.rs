@@ -159,11 +159,39 @@ impl AsRef<Self> for TaskScheduler {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
     use super::*;
 
     #[test]
     fn assert_send_sync() {
         static_assertions::assert_impl_all!(TaskScheduler: Send, Sync);
+    }
+
+    #[cfg(not(miri))]
+    #[test]
+    fn a_foreign_owner_cannot_rebind_a_registered_thread_id() {
+        struct RelocationSource(Option<Thread>);
+
+        impl ThreadAware for RelocationSource {
+            fn relocate(&mut self, source: Option<&Thread>, _: &Thread) {
+                self.0 = source.cloned();
+            }
+        }
+
+        let runtime = crate::rt::Runtime::builder()
+            .processor_count(crate::rt::config::ProcessorCount::exactly(std::num::NonZeroUsize::MIN))
+            .build()
+            .unwrap();
+        let (source, mut scheduler) = runtime.task_scheduler()
+            .spawn(async |cx| (cx.thread().clone(), cx.scheduler().clone()))
+            .wait();
+        let foreign = thread_aware::ThreadBuilder::default().build(source.id());
+        assert_ne!(source.owner(), foreign.owner());
+
+        scheduler.relocate(None, &foreign);
+        let scheduler: &TaskScheduler = scheduler.as_ref();
+        let actual = scheduler.spawn_anywhere(RelocationSource(None), |probe| async move { probe.0 }).wait();
+        assert_eq!(actual, Some(source));
     }
 }

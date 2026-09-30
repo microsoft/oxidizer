@@ -97,6 +97,7 @@ impl ThreadAware for RuntimeOperations {
 
 #[cfg(test)]
 #[cfg(not(miri))]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
     use std::num::NonZeroUsize;
     use std::sync::{Arc, OnceLock};
@@ -141,11 +142,13 @@ mod tests {
             })
             .wait();
         let unfamiliar = coordinates.build(thread::current().id());
+        let foreign = ThreadBuilder::default().build(source.id());
         assert_eq!(source.owner(), unfamiliar.owner());
         assert_ne!(source.id(), unfamiliar.id());
+        assert_ne!(source.owner(), foreign.owner());
         let system_thread = scheduler.spawn_system(|| thread::current().id()).wait();
 
-        for destination in [&source, &unfamiliar, &unfamiliar, &source] {
+        for destination in [&source, &unfamiliar, &foreign, &unfamiliar, &source] {
             operations.relocate(None, destination);
             scheduler.relocate(Some(destination), destination);
             builtins.relocate(Some(&source), destination);

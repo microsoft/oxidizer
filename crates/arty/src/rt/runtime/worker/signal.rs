@@ -41,6 +41,7 @@ impl Wake for WorkerSignal {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
     use std::sync::mpsc;
     use std::task::Waker;
@@ -79,7 +80,10 @@ mod tests {
     #[test]
     fn an_unnotified_wait_can_time_out() {
         let signal = WorkerSignal::default();
-        signal.wait(Duration::ZERO);
+        let timeout = Duration::from_millis(20);
+        let start = std::time::Instant::now();
+        signal.wait(timeout);
+        assert!(start.elapsed() >= timeout);
         assert!(!*signal.notified.lock().unwrap());
     }
 }

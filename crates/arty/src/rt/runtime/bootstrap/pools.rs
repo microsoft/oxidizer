@@ -28,6 +28,7 @@ impl WorkerPools {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
     use super::*;
 

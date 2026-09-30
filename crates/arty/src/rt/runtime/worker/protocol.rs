@@ -27,6 +27,7 @@ pub(in crate::rt::runtime) enum AsyncWorkerCommand<TS = Builtins> {
 }
 
 impl<TS> fmt::Debug for AsyncWorkerCommand<TS> {
+    #[cfg_attr(coverage_nightly, coverage(off))] // Command names are diagnostic text only.
     #[cfg_attr(test, mutants::skip)] // We have no contract to test here - can return anything.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
