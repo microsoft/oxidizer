@@ -744,6 +744,7 @@ mod tests {
         configure(false);
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))] // OS scheduling determines which valid concurrent states this assertion helper observes.
     fn assert_snapshot_consistent(value: TaskActivity, worker_id: WorkerId) {
         match value.state {
             TaskActivityState::Unknown | TaskActivityState::Waiting => {
