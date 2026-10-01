@@ -169,9 +169,11 @@ mod tests {
             &[("Affix", "/img-{id}.png"), ("Var", "/a/{x}")],
             &[("SingleRest", "/{a}/{b}/**")],
         ];
+        let checked_depths = if cfg!(miri) { 8 } else { 40 };
+        let very_deep_segments = if cfg!(miri) { 64 } else { 500 };
         for routes in route_sets {
             let router = RawResolver::new(routes.iter().map(|(name, pattern)| mk(name, pattern)));
-            for depth in 0..40 {
+            for depth in 0..checked_depths {
                 let mut path = String::from("/a");
                 for i in 0..depth {
                     let _ = write!(path, "/s{i}");
@@ -181,7 +183,7 @@ mod tests {
                 let _ = router.resolve("POST", &format!("{path}:verb"));
             }
             let mut very_deep = String::new();
-            for i in 0..500 {
+            for i in 0..very_deep_segments {
                 let _ = write!(very_deep, "/{i}");
             }
             let _ = router.resolve("GET", &very_deep);
@@ -272,7 +274,11 @@ mod tests {
         let grammar = Grammar::default();
         let mut routes = Vec::new();
         let mut wildcard_path = String::new();
-        for depth in 0..32 {
+        // Repeated fallback registration is the behavior under test. Eight
+        // levels retain non-head backtracking under Miri; native tests keep the
+        // 32-level breadth.
+        let depth_count = if cfg!(miri) { 8 } else { 32 };
+        for depth in 0..depth_count {
             let _ = write!(wildcard_path, "/{{value{depth}}}");
             routes.push(Route::new(
                 format!("DeadEnd{depth}"),
@@ -286,7 +292,7 @@ mod tests {
             PathTemplate::parse(&format!("{wildcard_path}/target"), grammar).expect("valid template"),
         ));
         let resolver = RawResolver::new(routes);
-        let request = format!("{}{}", "/value".repeat(32), "/missing");
+        let request = format!("{}{}", "/value".repeat(depth_count), "/missing");
 
         assert!(resolver.resolve("GET", &request).is_none());
     }

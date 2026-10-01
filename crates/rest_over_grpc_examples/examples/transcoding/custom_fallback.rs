@@ -17,11 +17,11 @@
 
 use http::HeaderMap;
 use rest_over_grpc::transcoding::{HttpResponse, Transcode, TranscodeResponse};
-use rest_over_grpc_examples::tonic_bridge::{LibraryService, Transcoder};
+use rest_over_grpc_examples::tonic_bridge::{LibraryRestBridge, LibraryService, Transcoder};
 
 /// Handles a request, adding a hand-written `/healthz` endpoint alongside the
 /// generated REST routes and a custom 404 for anything unmatched.
-async fn handle(library: &Transcoder<LibraryService>, method: &str, target: &str, headers: HeaderMap, body: &[u8]) -> TranscodeResponse {
+async fn handle(library: &impl Transcode, method: &str, target: &str, headers: HeaderMap, body: &[u8]) -> TranscodeResponse {
     let path = target.split('?').next().unwrap_or(target);
 
     if method == "GET" && path == "/healthz" {
@@ -44,7 +44,7 @@ fn custom_not_found() -> TranscodeResponse {
 }
 
 fn main() {
-    let library = Transcoder::new(LibraryService);
+    let library = Transcoder::new(LibraryRestBridge::externally_authenticated(LibraryService));
 
     let requests = [
         ("GET", "/v1/shelves/history"),

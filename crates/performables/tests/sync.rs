@@ -48,6 +48,26 @@ const TEST_DEADLINE: Duration = Duration::from_secs(2);
 const THREAD_POLL_INTERVAL: Duration = Duration::from_millis(10);
 #[cfg(not(miri))]
 const THREAD_POLL_INTERVAL: Duration = Duration::from_millis(1);
+#[cfg(miri)]
+const CONTENTION_ITERATIONS: usize = 8;
+#[cfg(not(miri))]
+const CONTENTION_ITERATIONS: usize = 1_000;
+#[cfg(miri)]
+const BARRIER_PARTICIPANTS: usize = 4;
+#[cfg(not(miri))]
+const BARRIER_PARTICIPANTS: usize = 16;
+#[cfg(miri)]
+const BARRIER_ROUNDS: usize = 4;
+#[cfg(not(miri))]
+const BARRIER_ROUNDS: usize = 100;
+#[cfg(miri)]
+const CANCELLATION_BARRIER_CAPACITY: usize = 8;
+#[cfg(not(miri))]
+const CANCELLATION_BARRIER_CAPACITY: usize = 64;
+#[cfg(miri)]
+const CANCELLED_BARRIER_WAITERS: usize = 4;
+#[cfg(not(miri))]
+const CANCELLED_BARRIER_WAITERS: usize = 32;
 
 #[derive(Default)]
 struct WakeCounter(AtomicUsize);
@@ -555,7 +575,7 @@ fn mutex_coordinates_executor_threads_under_contention() {
             let lock = Arc::clone(&lock);
             scope.spawn(move || {
                 block_on(async move {
-                    for _ in 0..1_000 {
+                    for _ in 0..CONTENTION_ITERATIONS {
                         *lock.lock().await += 1;
                     }
                 });
@@ -563,7 +583,7 @@ fn mutex_coordinates_executor_threads_under_contention() {
         }
     });
 
-    assert_eq!(*lock.try_lock().unwrap(), 4_000);
+    assert_eq!(*lock.try_lock().unwrap(), 4 * CONTENTION_ITERATIONS);
 }
 
 #[test]
@@ -574,7 +594,7 @@ fn rw_lock_coordinates_executor_threads_under_contention() {
             let lock = Arc::clone(&lock);
             scope.spawn(move || {
                 block_on(async move {
-                    for _ in 0..1_000 {
+                    for _ in 0..CONTENTION_ITERATIONS {
                         *lock.write().await += 1;
                     }
                 });
@@ -584,7 +604,7 @@ fn rw_lock_coordinates_executor_threads_under_contention() {
             let lock = Arc::clone(&lock);
             scope.spawn(move || {
                 block_on(async move {
-                    for _ in 0..1_000 {
+                    for _ in 0..CONTENTION_ITERATIONS {
                         std::hint::black_box(*lock.read().await);
                     }
                 });
@@ -592,7 +612,7 @@ fn rw_lock_coordinates_executor_threads_under_contention() {
         }
     });
 
-    assert_eq!(*lock.try_read().unwrap(), 2_000);
+    assert_eq!(*lock.try_read().unwrap(), 2 * CONTENTION_ITERATIONS);
 }
 
 #[test]
@@ -627,23 +647,23 @@ fn dropping_a_released_barrier_waiter_observes_the_new_generation() {
 
 #[test]
 fn barrier_handles_heavy_concurrent_arrival_and_cancellation() {
-    let barrier = StdArc::new(Barrier::new(16));
+    let barrier = StdArc::new(Barrier::new(BARRIER_PARTICIPANTS));
     std::thread::scope(|scope| {
-        for _ in 0..16 {
+        for _ in 0..BARRIER_PARTICIPANTS {
             let barrier = StdArc::clone(&barrier);
             scope.spawn(move || {
-                for _ in 0..100 {
+                for _ in 0..BARRIER_ROUNDS {
                     block_on(barrier.wait());
                 }
             });
         }
     });
 
-    let barrier = Barrier::new(64);
+    let barrier = Barrier::new(CANCELLATION_BARRIER_CAPACITY);
     let counter = StdArc::new(WakeCounter::default());
     let waker = waker(&counter);
     let mut context = Context::from_waker(&waker);
-    let waiters = (0..32)
+    let waiters = (0..CANCELLED_BARRIER_WAITERS)
         .map(|_| {
             let mut waiter = Box::pin(barrier.wait());
             assert!(waiter.as_mut().poll(&mut context).is_pending());

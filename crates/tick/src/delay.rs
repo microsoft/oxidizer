@@ -85,7 +85,9 @@ impl Delay {
         } else {
             // We have moved past the maximum instant value; this delay never completes.
             self.duration = Duration::MAX;
-            self.current_timer = None;
+            if let Some(key) = self.current_timer.take() {
+                self.clock.unregister_timer(key);
+            }
         }
 
         Poll::Pending
@@ -209,6 +211,22 @@ mod tests {
         assert_eq!(poll_delay(&mut delay), Poll::Pending);
         assert_eq!(delay.duration, Duration::MAX);
         assert!(delay.current_timer.is_none());
+    }
+
+    #[test]
+    fn overflowing_reregistration_unregisters_existing_timer() {
+        let clock = ClockControl::new().to_clock();
+        let mut delay = Delay::new(&clock, Duration::from_millis(1));
+        let waker = Waker::noop();
+        assert_eq!(delay.register_timer(waker), Poll::Pending);
+        assert!(delay.current_timer.is_some());
+        assert_eq!(clock.clock_state().timers_len(), 1);
+
+        delay.duration = Duration::MAX;
+        assert_eq!(delay.register_timer(waker), Poll::Pending);
+
+        assert_eq!(delay.current_timer, None);
+        assert_eq!(clock.clock_state().timers_len(), 0);
     }
 
     #[test]

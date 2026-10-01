@@ -11,6 +11,8 @@
 anvil-careful: anvil-careful-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
     $include = (& "{{ just_executable() }}" _anvil-impact-include affected)
+    $impactExit = $LASTEXITCODE
+    if ($impactExit -ne 0) { exit $impactExit }
     if ($include -eq '--skip') { Write-Host 'anvil-careful: no affected packages; skipping'; exit 0 }
     $pkg = @(if ($include) { -split $include } else { '--workspace' })
     # Guard against cargo-careful's stale-sysroot hazard. cargo-careful

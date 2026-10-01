@@ -3,6 +3,7 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![forbid(unsafe_code)]
 #![cfg_attr(
     not(feature = "app-err"),
     expect(rustdoc::broken_intra_doc_links, reason = "AppError is only available with the 'app-err' feature")

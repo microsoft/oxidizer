@@ -4,13 +4,16 @@
 //! The [`ThreadedReader`]: a frozen [`ThreadedLexicon`](crate::ThreadedLexicon), one flat blob per shard.
 
 use alloc::boxed::Box;
+use alloc::sync::{Arc, Weak};
 
 use crate::reader::Reader;
 use crate::shard_reader::ShardReader;
 use crate::sym::{NUM_SHARDS, Sym};
 
-/// A frozen [`ThreadedLexicon`](crate::ThreadedLexicon): one flat blob per shard,
-/// addressed by the `Sym`'s `[shard|local]` partition.
+/// A frozen, sharded [`ThreadedLexicon`](crate::ThreadedLexicon).
+///
+/// Each shard stores one flat blob, addressed by the `Sym`'s `[shard|local]`
+/// partition.
 ///
 /// Returned by [`ThreadedLexicon::freeze`](crate::ThreadedLexicon::freeze).
 ///
@@ -28,12 +31,25 @@ use crate::sym::{NUM_SHARDS, Sym};
 /// guarantees is what makes those tables possible.
 #[derive(Clone)]
 pub struct ThreadedReader {
-    shards: Box<[ShardReader; NUM_SHARDS]>,
+    shards: Arc<[ShardReader; NUM_SHARDS]>,
 }
 
 impl ThreadedReader {
-    pub(crate) fn new(shards: Box<[ShardReader; NUM_SHARDS]>) -> Self {
+    pub(crate) fn new(shards: [ShardReader; NUM_SHARDS]) -> Self {
+        Self { shards: Arc::new(shards) }
+    }
+
+    pub(crate) fn from_shared(shards: Arc<[ShardReader; NUM_SHARDS]>) -> Self {
         Self { shards }
+    }
+
+    pub(crate) fn downgrade(&self) -> Weak<[ShardReader; NUM_SHARDS]> {
+        Arc::downgrade(&self.shards)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn shares_storage_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.shards, &other.shards)
     }
 }
 

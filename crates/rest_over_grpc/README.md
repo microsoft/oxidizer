@@ -60,8 +60,8 @@ when you want to fall back to custom routing.
 The generated `<Service>` trait has one method per RPC, each taking the
 decoded request plus a mutable [`Context`][__link15].
 
-* `tonic`: the [`build`][__link16] module emits a blanket bridge so a `tonic`
-  implementation can serve REST too.
+* `tonic`: the [`build`][__link16] module emits a guarded bridge so a `tonic`
+  implementation can serve REST with an explicit authorization policy.
 * direct implementation: implement the generated trait yourself.
 * other gRPC stacks: write a small bridge that forwards into the generated
   trait.
@@ -170,11 +170,17 @@ impl library::library_server::Library for LibraryService {
     }
 }
 
-let transcoder = rest::Transcoder::new(LibraryService);
+let bridge = library::__rest_over_grpc_bridge_Library::LibraryRestBridge::with_guard(LibraryService, authorize_rest_metadata);
+let transcoder = rest::Transcoder::new(bridge);
 let service = rest_over_grpc::serving::RestService::new(transcoder)
     .with_max_body_bytes(1 << 20);
 ```
 
+`authorize_rest_metadata` is an application-provided guard that checks the
+REST request’s metadata before the tonic handler runs. Tonic transport
+interceptors do not execute on REST calls. If an upstream HTTP layer
+guarantees the same authorization, use the deliberately named
+`LibraryRestBridge::externally_authenticated` constructor on the namespaced bridge instead.
 The tonic bridge is emitted by default; call
 [`Generator::builder`][__link20] with
 [`emit_tonic_bridge(false)`][__link21] when
@@ -206,6 +212,7 @@ or allowed to exhaust the stack. The limit is fixed and not configurable: it
 bounds the recursion an untrusted request can drive, and a bound a caller
 could raise would not bound anything. It stays far above the nesting any
 real proto message uses.
+Query inputs also have a fixed aggregate pair and byte budget.
 
 ## Cargo features
 
@@ -226,7 +233,7 @@ as an Axum fallback service.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/rest_over_grpc">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbvTkfRkZSF74bFkiR2XTYsVUbNpV_rR9ivr4bQqiJonBozh9hZIOCZ2xheWVyZWRlMC4zLjeCbnJlc3Rfb3Zlcl9ncnBjZTAuMi4xg210b3dlci1zZXJ2aWNlZTAuMy4zbXRvd2VyX3NlcnZpY2U
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb0gNZS9ZRZXUbzHkst6844QsbNSx6Zzh4_wobdFDeeMI0szthZIOCZ2xheWVyZWRlMC4zLjeCbnJlc3Rfb3Zlcl9ncnBjZTAuMi4xg210b3dlci1zZXJ2aWNlZTAuMy4zbXRvd2VyX3NlcnZpY2U
  [__link0]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=handling::Status
  [__link1]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=serving::RestService::new
  [__link10]: https://docs.rs/rest_over_grpc/0.2.1/rest_over_grpc/?search=transcoding::Transcode::try_transcode

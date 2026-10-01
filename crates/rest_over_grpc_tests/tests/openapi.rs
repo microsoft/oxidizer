@@ -33,6 +33,38 @@ fn every_rpc_binding_is_a_path() {
 }
 
 #[test]
+fn reserved_multi_segment_capture_is_reported_without_a_misleading_path() {
+    let doc = spec();
+    let paths = doc["paths"].as_object().expect("paths object");
+    assert!(
+        !paths.contains_key("/v1/tree/{path}"),
+        "multi-segment capture is not a single path parameter"
+    );
+    assert_eq!(paths["/v1/shelves/{shelf}"]["get"]["operationId"], "GetShelf");
+    let omitted = doc["x-rest-over-grpc-omitted-operations"]
+        .as_array()
+        .expect("explicit omitted operations");
+    let tree = omitted
+        .iter()
+        .find(|operation| operation["operationId"] == "GetTree")
+        .expect("GetTree omission");
+    assert_eq!(tree["method"], "get");
+    assert_eq!(tree["path"], "/v1/tree/{path=**}");
+    assert!(tree["reason"].as_str().unwrap().contains("multiple segments"));
+}
+
+#[test]
+fn fixed_prefix_capture_resolves_to_the_runtime_route() {
+    use rest_over_grpc_tests::coverage::Route;
+
+    assert_eq!(
+        Route::resolve("GET", "/v1/lookup/items/42"),
+        Some(Route::GetFixedPrefix { name: "items/42" })
+    );
+    assert!(Route::resolve("GET", "/v1/lookup/other/42").is_none());
+}
+
+#[test]
 fn path_parameter_and_query_parameter_are_described() {
     let doc = spec();
 

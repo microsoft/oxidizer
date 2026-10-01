@@ -14,14 +14,17 @@ use crate::Reader;
 /// Serde entry point (`serde_json::to_string`, `collect_seq`, …).
 ///
 /// ```
+/// use internity::LocalLexicon;
 /// use internity::se::SerializeInWith;
-/// use internity::{LocalLexicon, Reader};
 ///
+/// # fn main() -> Result<(), serde_json::Error> {
 /// let mut lexicon = LocalLexicon::new();
 /// let sym = lexicon.intern("hello");
 /// let reader = lexicon.freeze();
-/// let json = serde_json::to_string(&SerializeInWith::new(&sym, &reader)).unwrap();
+/// let json = serde_json::to_string(&SerializeInWith::new(&sym, &reader))?;
 /// assert_eq!(json, r#""hello""#);
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Debug)]
 pub struct SerializeInWith<'a, T: ?Sized, R: Reader + ?Sized> {

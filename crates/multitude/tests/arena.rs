@@ -875,6 +875,15 @@ mod large_alloc {
         let arena = Arena::new();
         let mut v = arena.alloc_vec_with_capacity::<u8>(OVER_CHUNK);
         assert!(v.capacity() >= OVER_CHUNK);
+        #[cfg(miri)]
+        {
+            // Reservation reaches the unsafe >64-KiB chunk-recovery path.
+            // Bulk initialization avoids interpreting one safe push per byte.
+            v.extend_from_slice(&std::vec![0; OVER_CHUNK]);
+            v[CHUNK_BYTES] = (CHUNK_BYTES & 0xff) as u8;
+            v[OVER_CHUNK - 1] = ((OVER_CHUNK - 1) & 0xff) as u8;
+        }
+        #[cfg(not(miri))]
         for i in 0..OVER_CHUNK {
             v.push((i & 0xff) as u8);
         }
@@ -2075,8 +2084,9 @@ mod mutants_for_kill_boundaries {
     #[test]
     fn alloc_utf16_str_arc_at_boundary_takes_inner_path_not_outer_oversized() {
         use widestring::Utf16Str;
-        let arena: Arena = Arena::new();
-        let len = (MAX_NORMAL_ALLOC - PREFIX_BYTES) / 2;
+        let max_normal_alloc = if cfg!(miri) { 4 * 1024 } else { MAX_NORMAL_ALLOC };
+        let arena: Arena = Arena::builder().max_normal_alloc(max_normal_alloc).build();
+        let len = (max_normal_alloc - PREFIX_BYTES) / 2;
         let buf: Vec<u16> = vec![u16::from(b'z'); len];
         let src = Utf16Str::from_slice(&buf).unwrap();
         let arc = arena.alloc_utf16_str_arc(src);
@@ -2089,8 +2099,9 @@ mod mutants_for_kill_boundaries {
     #[test]
     fn alloc_utf16_str_arc_past_boundary_uses_oversized() {
         use widestring::Utf16Str;
-        let arena: Arena = Arena::new();
-        let len = (MAX_NORMAL_ALLOC - PREFIX_BYTES) / 2 + 16;
+        let max_normal_alloc = if cfg!(miri) { 4 * 1024 } else { MAX_NORMAL_ALLOC };
+        let arena: Arena = Arena::builder().max_normal_alloc(max_normal_alloc).build();
+        let len = (max_normal_alloc - PREFIX_BYTES) / 2 + 16;
         let buf: Vec<u16> = vec![u16::from(b'w'); len];
         let src = Utf16Str::from_slice(&buf).unwrap();
         let arc = arena.alloc_utf16_str_arc(src);
@@ -2947,7 +2958,8 @@ mod oversized_routing {
         let baseline = arena.stats().oversized_chunks_allocated;
         // `alloc_str_box` runs through the shared-chunk path
         // (`impl_alloc_str_box_prefixed_shared`).
-        let s: std::string::String = (0..12 * 1024).map(|_| 'a').collect();
+        let len = if cfg!(miri) { 5 * 1024 } else { 12 * 1024 };
+        let s: std::string::String = (0..len).map(|_| 'a').collect();
         let _ = arena.alloc_str_box(&s);
         let after = arena.stats().oversized_chunks_allocated;
         assert!(
@@ -3584,8 +3596,23 @@ mod oversized_paths_coverage {
     const OVERSIZED_DROP_LEN: usize = 513;
     #[cfg(not(miri))]
     const OVERSIZED_DROP_LEN: usize = 3000;
+    #[cfg(miri)]
+    const OVERSIZED_UTF16_LEN: usize = 2_049;
+    #[cfg(not(miri))]
+    const OVERSIZED_UTF16_LEN: usize = 10_000;
 
     fn oversized_drop_arena() -> Arena {
+        #[cfg(miri)]
+        {
+            Arena::builder().max_normal_alloc(4 * 1024).build()
+        }
+        #[cfg(not(miri))]
+        {
+            Arena::new()
+        }
+    }
+
+    fn oversized_utf16_arena() -> Arena {
         #[cfg(miri)]
         {
             Arena::builder().max_normal_alloc(4 * 1024).build()
@@ -3713,20 +3740,19 @@ mod oversized_paths_coverage {
     #[cfg(feature = "utf16")]
     #[test]
     fn alloc_utf16_str_arc_oversized() {
-        let arena = Arena::new();
-        // ~10 000 ASCII chars ⇒ 20 KiB of UTF-16 payload ⇒ oversized.
-        let s = "a".repeat(10_000);
+        let arena = oversized_utf16_arena();
+        let s = "a".repeat(OVERSIZED_UTF16_LEN);
         let u = arena.alloc_utf16_str_arc_from_str(&s);
-        assert_eq!(u.len(), 10_000);
+        assert_eq!(u.len(), OVERSIZED_UTF16_LEN);
     }
 
     #[cfg(feature = "utf16")]
     #[test]
     fn alloc_utf16_str_box_oversized() {
-        let arena = Arena::new();
-        let s = "b".repeat(10_000);
+        let arena = oversized_utf16_arena();
+        let s = "b".repeat(OVERSIZED_UTF16_LEN);
         let u = arena.alloc_utf16_str_box_from_str(&s);
-        assert_eq!(u.len(), 10_000);
+        assert_eq!(u.len(), OVERSIZED_UTF16_LEN);
     }
 
     #[test]
@@ -4241,8 +4267,9 @@ mod alloc_drop_behavior_2 {
     fn try_bump_fit_exact_aligned_succeeds() {
         let arena = multitude::Arena::new();
         // Many sequential u8 allocations stress the bump cursor.
-        let mut keep = Vec::with_capacity(4096);
-        for i in 0..4096_u32 {
+        let allocation_count = if cfg!(miri) { 512 } else { 4_096 };
+        let mut keep = Vec::with_capacity(allocation_count);
+        for i in 0..allocation_count {
             keep.push(arena.alloc(i as u8));
         }
         for (i, v) in keep.iter().enumerate() {
@@ -5071,6 +5098,10 @@ mod misc_alloc_behavior {
     #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 
+    #[cfg_attr(
+        miri,
+        ignore = "u16 length-boundary behavior is covered natively; smaller Miri tests exercise the same uninitialized Arc path"
+    )]
     #[test]
     fn alloc_uninit_slice_arc_non_drop_above_u16_max_succeeds() {
         let arena = Arena::new();

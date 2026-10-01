@@ -17,6 +17,11 @@ homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/routerama_build"
 
+# This package generates code rather than executing unsafe runtime code. Its
+# framework-neutral trie is interpreted by Miri through routerama's own tests.
+[package.metadata.anvil.miri]
+exclude = true
+
 [package.metadata.cargo_check_external_types]
 allowed_external_types = ["http_path_template::path_template::PathTemplate", "proc_macro2::TokenStream"]
 

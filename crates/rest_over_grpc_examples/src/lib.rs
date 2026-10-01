@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![forbid(unsafe_code)]
+
 //! Worked examples for [`rest_over_grpc`].
 //!
 //! The crate provides two service fixtures — both serving the *same*
@@ -12,8 +14,8 @@
 //!
 //! - [`tonic_bridge`] — the common case. You implement your service only against
 //!   `tonic`'s generated server trait, and `rest_over_grpc::build` emits a
-//!   blanket `impl` that makes it a `rest_over_grpc` service too, so one
-//!   implementation serves both gRPC and REST.
+//!   guarded adapter that makes it a `rest_over_grpc` service too, so one
+//!   implementation serves both gRPC and REST with explicit REST authorization.
 //! - [`custom`] — the hand-written path. You implement the generated service
 //!   trait directly (no `tonic`), decoded from a `prost` descriptor, and can
 //!   hand-write a bridge for another gRPC stack.

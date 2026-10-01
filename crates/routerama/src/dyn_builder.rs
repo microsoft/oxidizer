@@ -149,7 +149,7 @@ mod tests {
     use super::*;
 
     #[cfg(miri)]
-    const DEEP_TRIE_SEGMENTS: usize = 512;
+    const DEEP_TRIE_SEGMENTS: usize = 128;
     #[cfg(not(miri))]
     const DEEP_TRIE_SEGMENTS: usize = 4_096;
 

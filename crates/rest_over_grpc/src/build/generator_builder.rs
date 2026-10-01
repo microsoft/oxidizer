@@ -37,12 +37,16 @@ impl Default for GeneratorBuilder {
 }
 
 impl GeneratorBuilder {
-    /// Sets whether, for each service, a blanket
-    /// `impl <trait> for T where T: <tonic server trait>` is emitted, bridging a
-    /// `tonic`-generated server so the same implementation serves REST. Enabled
-    /// by default. This is generated source rather than a crate feature: the
-    /// consuming crate must provide the matching `tonic`-generated server trait.
-    /// Disable it when implementing the generated REST trait directly.
+    /// Sets whether each service emits a
+    /// `__rest_over_grpc_bridge_{Service}::{Service}RestBridge` wrapper around
+    /// its `tonic`-generated server trait. Enabled by default. The consuming
+    /// crate must provide the corresponding `tonic`-generated server trait.
+    /// Construct the bridge with `with_guard(service, guard)` to authenticate
+    /// REST request metadata before invoking a tonic method, or use
+    /// `externally_authenticated(service)` only when authorization is enforced
+    /// upstream of the transcoder. Tonic transport interceptors do not run on
+    /// this direct trait call. Disable the bridge when implementing the
+    /// generated REST trait directly or using a different gRPC stack.
     #[must_use]
     pub fn emit_tonic_bridge(mut self, emit: bool) -> Self {
         self.emit_tonic = emit;

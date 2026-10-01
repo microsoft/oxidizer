@@ -75,10 +75,38 @@ jobs:
       - name: Test isolated baseline no_std configuration
         run: just test-http-headers-simd-no-std-x86 --target "${{ matrix.target }}"
 
+  internity-32-bit-handles:
+    name: Internity 32-bit handle restoration
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/anvil-setup
+        with:
+          group: none
+      - name: Install Rust and 32-bit target
+        run: |
+          just anvil-toolchain-stable-install
+          rustup target add --toolchain 1.95 i686-pc-windows-msvc
+      - name: Test cross-width handle restoration
+        run: cargo +1.95 test --package internity --all-features --target i686-pc-windows-msvc --lib --test cross_width_handles --locked
+
+  internity-no-std-serde:
+    name: Internity no_std serde tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/anvil-setup
+        with:
+          group: none
+      - name: Install Rust
+        run: just anvil-toolchain-stable-install
+      - name: Test no_std with serde
+        run: cargo +1.95 test --package internity --no-default-features --features serde --test no_std_api --locked
+
   required-repository-checks:
     name: Required repository checks
     if: always()
-    needs: [release-script-tests, simd-no-std-arm, simd-no-std-x86]
+    needs: [release-script-tests, simd-no-std-arm, simd-no-std-x86, internity-32-bit-handles, internity-no-std-serde]
     runs-on: ubuntu-latest
     steps:
       - name: Verify repository checks
@@ -86,6 +114,8 @@ jobs:
           RELEASE_SCRIPT_TESTS: ${{ needs.release-script-tests.result }}
           SIMD_NO_STD_ARM: ${{ needs.simd-no-std-arm.result }}
           SIMD_NO_STD_X86: ${{ needs.simd-no-std-x86.result }}
+          INTERNITY_32_BIT_HANDLES: ${{ needs.internity-32-bit-handles.result }}
+          INTERNITY_NO_STD_SERDE: ${{ needs.internity-no-std-serde.result }}
         run: |
           if [[ "$RELEASE_SCRIPT_TESTS" != "success" ]]; then
             echo "::error::release-script-tests concluded $RELEASE_SCRIPT_TESTS"
@@ -97,5 +127,13 @@ jobs:
           fi
           if [[ "$SIMD_NO_STD_X86" != "success" ]]; then
             echo "::error::simd-no-std-x86 concluded $SIMD_NO_STD_X86"
+            exit 1
+          fi
+          if [[ "$INTERNITY_32_BIT_HANDLES" != "success" ]]; then
+            echo "::error::internity-32-bit-handles concluded $INTERNITY_32_BIT_HANDLES"
+            exit 1
+          fi
+          if [[ "$INTERNITY_NO_STD_SERDE" != "success" ]]; then
+            echo "::error::internity-no-std-serde concluded $INTERNITY_NO_STD_SERDE"
             exit 1
           fi

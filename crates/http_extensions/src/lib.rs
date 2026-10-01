@@ -256,4 +256,4 @@ pub use fake_handler::FakeHandler;
 pub(crate) mod testing;
 
 #[cfg(any(doc, test))]
-pub mod _documentation;
+pub mod documentation;

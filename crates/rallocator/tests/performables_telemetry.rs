@@ -8,6 +8,10 @@ use seismograph::recorder::event::EventKind;
 use seismograph::snapshot::{EventBufferDisposition, SnapshotOptions};
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "functional dependency-graph coverage runs natively; performables and seismograph retain direct Miri suites"
+)]
 fn example_dependency_graph_records_performables_events() {
     seismograph::recorder(seismograph::recorder::Configuration {
         general_events: seismograph::recorder::RecordingPolicy {

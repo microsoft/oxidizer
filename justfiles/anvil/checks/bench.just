@@ -13,6 +13,8 @@
 anvil-bench: anvil-bench-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
     $include = (& "{{ just_executable() }}" _anvil-impact-include affected)
+    $impactExit = $LASTEXITCODE
+    if ($impactExit -ne 0) { exit $impactExit }
     if ($include -eq '--skip') { Write-Host 'anvil-bench: no affected packages; skipping'; exit 0 }
     & cargo {{_anvil_stable_toolchain_args}} bench @(if ($include) { -split $include } else { '--workspace' }) --all-features --no-run
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

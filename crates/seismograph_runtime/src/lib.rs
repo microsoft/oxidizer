@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![forbid(unsafe_code)]
+
 //! Process-wide multi-runtime telemetry for [`seismograph`].
 //!
 //! One static source describes every logical runtime in the process. Runtime

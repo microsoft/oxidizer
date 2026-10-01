@@ -29,6 +29,8 @@
 anvil-udeps: anvil-udeps-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
     $include = (& "{{ just_executable() }}" _anvil-impact-include required)
+    $impactExit = $LASTEXITCODE
+    if ($impactExit -ne 0) { exit $impactExit }
     if ($include -eq '--skip') { Write-Host 'anvil-udeps: no affected packages; skipping'; exit 0 }
     $pkg = @(if ($include) { -split $include } else { '--workspace' })
     # Pass 1: default targets (lib + bins) -- surfaces [dependencies] that

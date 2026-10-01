@@ -244,7 +244,7 @@ mod tests {
         recorder(recorder::Configuration {
             general_events: recorder::RecordingPolicy::all(false),
             runtime_tasks: recorder::RecordingPolicy::all(false),
-            ..Default::default()
+            ..recorder::test_configuration()
         });
         let object_id = ObjectId::new(41);
         let general = record_session(recorder::event::EventClass::General, || {

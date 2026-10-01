@@ -108,6 +108,14 @@
 //! * A [`Sym`] is local to the interner that created it. A foreign handle is
 //!   range-checked, but an in-range numeric value can resolve to an unrelated
 //!   string. Persist or transmit handles together with the matching interner.
+//! * **32-bit migration:** the default [`ThreadedLexicon`] now emulates the
+//!   64-bit widening-multiply Fx shard hash on 32-bit targets. If an older
+//!   32-bit version persisted a threaded corpus together with raw [`Sym`]
+//!   handles, resolve those handles to strings using the old version before
+//!   upgrading, then restore the corpus with the new version and replace each
+//!   stored handle with the new handle for its string. Reusing the old raw
+//!   values can resolve to different strings. [`LocalLexicon`] handles are
+//!   unaffected.
 //! * The default Fx hasher is fast but not collision-attack resistant. Supply a
 //!   defensive `BuildHasher` when strings can be selected by an attacker.
 //! * Interners do not remove individual strings. Memory grows during the fill
@@ -194,6 +202,9 @@ mod local_reader;
 #[forbid(unsafe_code)]
 mod shard_reader;
 
+#[cfg(any(test, all(feature = "std", target_pointer_width = "32")))]
+#[forbid(unsafe_code)]
+mod stable_fx;
 mod storage;
 
 #[cfg(feature = "serde")]

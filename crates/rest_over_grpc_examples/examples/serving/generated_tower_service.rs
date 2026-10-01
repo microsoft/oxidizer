@@ -20,13 +20,14 @@ use bytes::Bytes;
 use http::{Method, Request};
 use http_body_util::{BodyExt as _, Full};
 use rest_over_grpc::serving::RestService;
-use rest_over_grpc_examples::tonic_bridge::{LibraryService, Transcoder};
+use rest_over_grpc_examples::tonic_bridge::{LibraryRestBridge, LibraryService, Transcoder};
 use tower_service::Service as _;
 
 const MAX_BODY_BYTES: usize = 1 << 20;
 
 fn main() {
-    let mut service = RestService::new(Transcoder::new(LibraryService)).with_max_body_bytes(MAX_BODY_BYTES);
+    let mut service =
+        RestService::new(Transcoder::new(LibraryRestBridge::externally_authenticated(LibraryService))).with_max_body_bytes(MAX_BODY_BYTES);
 
     for target in ["/v1/shelves/history", "/v1/shelves:stream", "/v1/nope"] {
         let request = Request::builder()

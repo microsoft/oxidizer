@@ -490,7 +490,11 @@ mod tests {
                 .wrapping_add(1_442_695_040_888_963_407);
             (state >> 33) as usize
         };
-        for _ in 0..2000 {
+        // Native tests retain the broad deterministic differential sweep.
+        // Miri checks representative clean, reserved, and multibyte paths
+        // without repeating the same safe encoder loop 2,000 times.
+        let cases = if cfg!(miri) { 64 } else { 2_000 };
+        for _ in 0..cases {
             let len = next() % 24;
             let s: String = (0..len).map(|_| ALPHABET[next() % ALPHABET.len()]).collect();
             assert_eq!(

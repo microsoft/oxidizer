@@ -143,11 +143,12 @@ _anvil-container-dockerfile:
 # Print the exec image reference for the current inputs, without building it.
 #
 # The tag is a SHA-256 over the image's declared inputs: the Dockerfile and its
-# ignore file, the pinned toolchain, the optional hook, the whole generated
-# recipe tree -- because the image installs its tools by running
-# `just anvil-setup`, whose dependency chain reaches the tier, group, check and
-# tool recipes alike -- and the declared root MSRV. Editing any of them can
-# change what the image contains, so any of them can rename it.
+# ignore file, the root toolchain file where the repository owns one, the
+# optional hook, the whole generated recipe tree -- because the image installs
+# its tools by running `just anvil-setup`, whose dependency chain reaches the
+# tier, group, check and tool recipes alike -- and the declared root MSRV.
+# Editing any of them can change what the image contains, so any of them can
+# rename it.
 #
 # This is the only recipe that computes the reference; everything else asks it.
 # It is public because a publisher needs the tag before there is an image to
@@ -175,22 +176,48 @@ anvil-container-tag:
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $rootMsrv = "$rootMsrv".Trim()
 
-    # Both named rather than left to the walk, so that either one going missing
-    # is a hard failure at the check below. The walk cannot notice an absent
-    # file, and the ignore file's absence is the worse of the two: the build
-    # still succeeds, but BuildKit falls back to a root ignore file or none, so
-    # the context widens to files the digest does not hash and the tag stops
-    # covering what `COPY` puts in the image.
-    $inputs = @('rust-toolchain.toml', "$dockerfile.dockerignore")
+    # The ignore file is named rather than left to the walk, so that it going
+    # missing is a hard failure at the check below. The walk cannot notice an
+    # absent file, and this absence is silent: the build still succeeds, but
+    # BuildKit falls back to a root ignore file or none, so the context widens
+    # to files the digest does not hash and the tag stops covering what `COPY`
+    # puts in the image.
+    $inputs = @("$dockerfile.dockerignore")
+
+    # A repository may pin its compiler by other means and own neither
+    # spelling, so absence is legal here. Both are checked because the context
+    # admits both.
+    #
+    # A directory at either path is refused rather than skipped. The ignore
+    # file re-includes it, so `COPY . ./` copies its whole subtree into the
+    # image, while the digest walks only `.anvil/container/` and
+    # `justfiles/anvil/` -- two images differing anywhere under it would share
+    # a tag.
+    $toolchainFiles = @()
+    foreach ($spelling in @('rust-toolchain.toml', 'rust-toolchain')) {
+        $candidate = Join-Path $repoRoot $spelling
+        if (-not (Test-Path -LiteralPath $candidate)) { continue }
+        if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+            Write-Error "anvil: '$spelling' must be a regular file, but this repository has a directory there. The build context admits it and the image copies it whole, while the tag hashes nothing inside it, so the image would not match its own reference."
+            exit 1
+        }
+        $toolchainFiles += $spelling
+    }
+    $inputs += $toolchainFiles
+
     $links = @()
-    # The declared input and every directory on the way to a walk root are
+    # The declared inputs and every directory on the way to a walk root are
     # checked here, because a walk only ever reports descendants: a link that
     # *is* a root, or that is a parent of one, is traversed through and never
-    # appears in its own output. `COPY justfiles ./justfiles` copies from
-    # `justfiles`, not from `justfiles/anvil`, so a link at the parent is copied
-    # as a link while everything here reads through it -- the same divergence
-    # this guard exists to refuse, reached one level up.
-    foreach ($declared in @('rust-toolchain.toml', '.anvil', '.anvil/container', 'justfiles', 'justfiles/anvil')) {
+    # appears in its own output. `COPY . ./` copies from the context root, so a
+    # link at `justfiles` is copied as a link while everything here reads
+    # through it -- the same divergence this guard exists to refuse, reached one
+    # level up.
+    #
+    # The root manifest is checked too, though the digest reads a value out of
+    # it rather than hashing it: the context copies the link, so the resolver
+    # inside the image would meet a target the ignore file never admitted.
+    foreach ($declared in @('rust-toolchain.toml', 'rust-toolchain', 'Cargo.toml', '.anvil', '.anvil/container', 'justfiles', 'justfiles/anvil')) {
         $item = Get-Item -LiteralPath (Join-Path $repoRoot $declared) -Force -ErrorAction SilentlyContinue
         if ($item -and ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
             $links += $item.FullName
@@ -351,7 +378,7 @@ anvil-container-tag:
     # file admits, so an unstaged `chmod` on one of those would refuse a build
     # it cannot affect.
     $indexMode = [System.Collections.Generic.Dictionary[string, string]]::new([System.StringComparer]::Ordinal)
-    $tracked = @('.anvil/container', 'justfiles/anvil', 'rust-toolchain.toml')
+    $tracked = @('.anvil/container', 'justfiles/anvil', 'rust-toolchain.toml', 'rust-toolchain')
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
         Write-Error 'anvil: git is required to compute the container image tag, because the image inputs are framed with the file modes git records. Without it two hosts would compute different tags for identical content. Install git, or set ANVIL_CONTAINER_ENGINE aside and build the image where git is available.'
         exit 1
@@ -541,7 +568,12 @@ _anvil-container-image:
                 . $hookPath
                 if (Get-Command Anvil-ResolveImage -CommandType Function -ErrorAction SilentlyContinue) {
                     [Console]::Error.WriteLine("anvil: running Anvil-ResolveImage from $hookRel")
-                    $resolved = @(Anvil-ResolveImage $image | Where-Object { $_ }) | Select-Object -Last 1
+                    $resolveArgs = @{}
+                    $parameters = (Get-Command Anvil-ResolveImage).Parameters
+                    if ($parameters.ContainsKey('Engine') -and $parameters.ContainsKey('EnginePrefix')) {
+                        $resolveArgs = @{ Engine = $engineExe; EnginePrefix = $enginePrefix }
+                    }
+                    $resolved = @(Anvil-ResolveImage $image @resolveArgs | Where-Object { $_ }) | Select-Object -Last 1
                 }
             } catch {
                 [Console]::Error.WriteLine("anvil: $hookRel failed: $($_.Exception.Message)")
@@ -1001,6 +1033,21 @@ anvil-container *command:
     # Forwarded by name and only when set, so an unset variable stays unset
     # rather than arriving as an empty string, which several of these treat as
     # a value.
+    # ANVIL_IMPACT_INPUT_DIR is deliberately NOT forwarded. `-e NAME` passes the
+    # host value unchanged, and the override is a host path that need not exist
+    # inside the container, so forwarding it cannot be made correct in general.
+    # Dropping it silently is worse: the container would fall back to
+    # target/anvil/impact and could scope off a different package list than the
+    # native run while still reporting green. Reject the combination instead --
+    # an explicit input that cannot be honored must fail, never fall back.
+    # Only under consume, because that is the only mode that reads the override;
+    # with ANVIL_IMPACT off or unset the variable is ignored, so a containerized
+    # run cannot diverge and there is nothing to reject.
+    if ($env:ANVIL_IMPACT -eq 'consume' -and (Test-Path -LiteralPath 'Env:ANVIL_IMPACT_INPUT_DIR') -and -not [string]::IsNullOrEmpty($env:ANVIL_IMPACT_INPUT_DIR)) {
+        Write-Error "anvil-container: ANVIL_IMPACT=consume and ANVIL_IMPACT_INPUT_DIR is set ($env:ANVIL_IMPACT_INPUT_DIR), but containerized checks cannot honor the override -- it names a host directory that need not exist inside the container, and forwarding it would let the run scope off a different cache than the native run. Unset it to run this check in a container, or run the check natively to use the injected cache."
+        exit 1
+    }
+
     foreach ($name in @(
         'PR_TITLE',
         'BASE_REF', 'GITHUB_BASE_REF', 'SYSTEM_PULLREQUEST_TARGETBRANCH',

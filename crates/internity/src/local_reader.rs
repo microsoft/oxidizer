@@ -12,8 +12,10 @@ use alloc::boxed::Box;
 use crate::reader::Reader;
 use crate::sym::{Sym, dense_index_of, dense_sym_at};
 
-/// A frozen [`LocalLexicon`](crate::LocalLexicon): every string in one contiguous
-/// buffer, addressed by a dense 0-based index.
+/// A frozen, densely indexed [`LocalLexicon`](crate::LocalLexicon).
+///
+/// Every string is stored in one contiguous buffer, addressed by a dense
+/// 0-based index.
 ///
 /// Returned by [`LocalLexicon::freeze`](crate::LocalLexicon::freeze). Dropping the
 /// dedup hash table is where the memory saving comes from, so this reader can
@@ -48,8 +50,7 @@ impl LocalReader {
         Self { offsets, buffer }
     }
 
-    /// Returns the 0-based position of `sym`, or `None` if it is out of range for
-    /// this reader.
+    /// Returns the 0-based position of `sym`, or `None` if out of range.
     ///
     /// See [`LocalLexicon::index_of`](crate::LocalLexicon::index_of) for what the
     /// index means and what it is useful for.
@@ -70,8 +71,7 @@ impl LocalReader {
         dense_index_of(self.len(), sym)
     }
 
-    /// Returns the handle at 0-based position `index`, or `None` if this reader
-    /// holds fewer than `index + 1` strings.
+    /// Returns the handle at `index`, or `None` if that position is empty.
     ///
     /// See [`LocalLexicon::sym_at`](crate::LocalLexicon::sym_at).
     ///

@@ -16,7 +16,7 @@ homepage = { workspace = true }
 include = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/http_extensions"
 
-# `uuid` is used only by a doctest in `src/_documentation/recipes.rs`, which
+# `uuid` is used only by a doctest in `src/documentation/recipes.rs`, which
 # cargo-machete does not scan; ignore it to avoid a false positive.
 [package.metadata.cargo-machete]
 ignored = ["uuid"]

@@ -7,7 +7,8 @@
 //! [`RestService`] integrates with `tower` or `layered`. Requests are buffered
 //! because JSON decoding requires contiguous bytes. Unary responses are
 //! buffered; server-streaming responses forward frames as they arrive.
-//! [`RestService::with_max_body_bytes`] adds an incremental request-size limit.
+//! All adapters enforce a 1 MiB request-body limit by default. The bounded
+//! variants and [`RestService::with_max_body_bytes`] override that limit.
 //!
 //! ```
 //! # fn main() {
@@ -41,7 +42,7 @@ use core::pin::Pin;
 use core::task::{Context, Poll};
 use std::error::Error;
 
-use bytes::{Bytes, BytesMut};
+use bytes::{Buf as _, BufMut as _, Bytes, BytesMut};
 use http::{HeaderMap, Method, Request, Response, StatusCode, Uri};
 use http_body::{Body, Frame, SizeHint};
 use http_body_util::combinators::UnsyncBoxBody;
@@ -52,6 +53,9 @@ use crate::transcoding::{HttpResponse, Transcode, TranscodeResponse};
 
 /// A boxed, `Send` body error carried by [`RestBody`]'s server-streaming variant.
 pub type BoxError = Box<dyn Error + Send + Sync>;
+
+/// Default maximum size of a buffered HTTP request body (1 MiB).
+pub const DEFAULT_MAX_BODY_BYTES: usize = 1024 * 1024;
 
 /// The response body of every serving adapter ([`serve_http`], [`serve_http_fn`],
 /// and [`RestService`]).
@@ -114,7 +118,9 @@ impl Body for RestBody {
 /// drives server-streaming content negotiation), and collected body bytes as
 /// [`Bytes`], and returns anything convertible into a
 /// [`TranscodeResponse`] (so returning a plain [`HttpResponse`] works too). A
-/// body that fails to read yields `400 Bad Request` without invoking `transcoder`.
+/// body that fails to read yields `400 Bad Request` without invoking `transcoder`;
+/// one exceeding [`DEFAULT_MAX_BODY_BYTES`] yields `413 Payload Too Large`.
+/// Use [`serve_http_fn_with_max_body_bytes`] to override the limit.
 ///
 /// # Examples
 ///
@@ -154,56 +160,65 @@ where
     Fut: Future<Output = R>,
     R: Into<TranscodeResponse>,
 {
+    serve_http_fn_with_max_body_bytes(request, DEFAULT_MAX_BODY_BYTES, transcoder).await
+}
+
+/// Like [`serve_http_fn`], with an explicit incremental body limit in bytes.
+/// An over-limit body returns `413` before the transcoder runs; a body read
+/// failure returns `400`.
+pub async fn serve_http_fn_with_max_body_bytes<B, D, Fut, R>(
+    request: Request<B>,
+    max_body_bytes: usize,
+    transcoder: D,
+) -> Response<RestBody>
+where
+    B: Body,
+    D: FnOnce(Method, Uri, HeaderMap, Bytes) -> Fut,
+    Fut: Future<Output = R>,
+    R: Into<TranscodeResponse>,
+{
     let (parts, body) = request.into_parts();
-    let Some(bytes) = read_body_uncapped(body).await else {
-        return transcode_response_into_http(body_read_failed().into());
+    let bytes = match collect_capped(body, max_body_bytes).await {
+        BodyRead::Ok(bytes) => bytes,
+        BodyRead::TooLarge => return transcode_response_into_http(body_too_large().into()),
+        BodyRead::Failed => return transcode_response_into_http(body_read_failed().into()),
     };
     transcode_response_into_http(transcoder(parts.method, parts.uri, parts.headers, bytes).await.into())
-}
-
-/// Reads a body in full with no size cap: `Some(bytes)` on success, `None` if the
-/// body stream errors. Used by the closure-taking helper, which exposes no size
-/// limit (so the capped [`BodyRead::TooLarge`] outcome cannot arise).
-async fn read_body_uncapped<B: Body>(body: B) -> Option<Bytes> {
-    match body.collect().await {
-        // `to_bytes()` yields a contiguous `Bytes`, avoiding a full-body copy.
-        Ok(collected) => Some(collected.to_bytes()),
-        Err(_) => None,
-    }
-}
-
-async fn collect_body<B: Body>(body: B, max: Option<usize>) -> BodyRead {
-    match max {
-        // Uncapped: keep the zero-copy `to_bytes()` fast path.
-        None => match read_body_uncapped(body).await {
-            Some(bytes) => BodyRead::Ok(bytes),
-            None => BodyRead::Failed,
-        },
-        Some(max) => collect_capped(body, max).await,
-    }
 }
 
 /// Reads `body` a frame at a time, bailing with [`BodyRead::TooLarge`] as soon
 /// as the accumulated length would exceed `max` — so an over-cap upload is
 /// rejected without first being buffered in full.
 async fn collect_capped<B: Body>(body: B, max: usize) -> BodyRead {
-    use bytes::{Buf as _, BufMut as _};
-
     let mut body = core::pin::pin!(body);
-    let mut buf = BytesMut::new();
+    let mut first: Option<Bytes> = None;
+    let mut combined: Option<BytesMut> = None;
+    let mut len = 0usize;
     while let Some(frame) = body.frame().await {
         let Ok(frame) = frame else {
             return BodyRead::Failed;
         };
         // Only data frames carry body bytes; trailer frames do not count.
-        if let Ok(data) = frame.into_data() {
-            if buf.len().saturating_add(data.remaining()) > max {
+        if let Ok(mut data) = frame.into_data() {
+            let frame_len = data.remaining();
+            if len.saturating_add(frame_len) > max {
                 return BodyRead::TooLarge;
             }
-            buf.put(data);
+            len += frame_len;
+            let data = data.copy_to_bytes(frame_len);
+            if let Some(buf) = &mut combined {
+                buf.put(data);
+            } else if let Some(initial) = first.take() {
+                let mut buf = BytesMut::with_capacity(len);
+                buf.put(initial);
+                buf.put(data);
+                combined = Some(buf);
+            } else {
+                first = Some(data);
+            }
         }
     }
-    BodyRead::Ok(buf.freeze())
+    BodyRead::Ok(combined.map_or_else(|| first.unwrap_or_default(), BytesMut::freeze))
 }
 
 /// The result of reading a request body for the adapters. Read failures are
@@ -211,7 +226,7 @@ async fn collect_capped<B: Body>(body: B, max: usize) -> BodyRead {
 /// aborted or truncated upload cannot masquerade as a legitimately empty request,
 /// and an over-cap body becomes a `413` rather than a phantom decode.
 enum BodyRead {
-    /// The full body, read successfully and within the cap (if any).
+    /// The full body, read successfully and within the cap.
     Ok(Bytes),
     /// The body exceeded the configured size cap → `413 Payload Too Large`.
     TooLarge,
@@ -229,7 +244,7 @@ fn body_read_failed() -> HttpResponse {
 }
 
 /// The `413 Payload Too Large` response returned when a body exceeds the cap
-/// configured via [`RestService::with_max_body_bytes`].
+/// configured for the adapter.
 fn body_too_large() -> HttpResponse {
     HttpResponse::json(
         StatusCode::PAYLOAD_TOO_LARGE,
@@ -282,8 +297,8 @@ fn transcode_response_into_http(response: TranscodeResponse) -> Response<RestBod
 /// you, so a raw handler (a `hyper` `service_fn`, one arm of an ad-hoc router)
 /// need not write the wiring closure by hand. Its closure-taking sibling is
 /// [`serve_http_fn`]. A body that fails to read yields `400 Bad Request`. This
-/// helper imposes no body-size limit; use [`RestService::with_max_body_bytes`]
-/// for an opt-in cap.
+/// helper enforces [`DEFAULT_MAX_BODY_BYTES`] incrementally; use
+/// [`serve_http_with_max_body_bytes`] for an explicit override.
 ///
 /// The response body is a [`RestBody`] (an [`http_body::Body`]), so the result
 /// can be returned straight from an `axum` handler or a `hyper` service, and a
@@ -328,20 +343,21 @@ where
     B: Body,
     D: Transcode,
 {
-    serve_http_capped(request, transcoder, None).await
+    serve_http_with_max_body_bytes(request, DEFAULT_MAX_BODY_BYTES, transcoder).await
 }
 
-/// [`serve_http`] with an optional request-body size cap. A `Some(max)` rejects
-/// a body longer than `max` bytes with `413 Payload Too Large`, streaming-checked
-/// so an over-cap body is never buffered in full; `None` is uncapped. Backs the
-/// [`RestService`] cap knob ([`with_max_body_bytes`](RestService::with_max_body_bytes)).
-async fn serve_http_capped<B, D>(request: Request<B>, transcoder: &D, max: Option<usize>) -> Response<RestBody>
+/// [`serve_http`] with an explicit request-body limit.
+///
+/// A body longer than `max_body_bytes` returns `413 Payload Too Large` before
+/// it is fully buffered; a read failure returns `400 Bad Request`. Also backs
+/// [`RestService::with_max_body_bytes`].
+pub async fn serve_http_with_max_body_bytes<B, D>(request: Request<B>, max_body_bytes: usize, transcoder: &D) -> Response<RestBody>
 where
     B: Body,
     D: Transcode,
 {
     let (parts, body) = request.into_parts();
-    let bytes = match collect_body(body, max).await {
+    let bytes = match collect_capped(body, max_body_bytes).await {
         BodyRead::Ok(bytes) => bytes,
         BodyRead::TooLarge => return transcode_response_into_http(body_too_large().into()),
         BodyRead::Failed => return transcode_response_into_http(body_read_failed().into()),
@@ -395,7 +411,7 @@ where
 #[derive(Debug, Clone)]
 pub struct RestService<T> {
     transcoder: T,
-    max_body_bytes: Option<usize>,
+    max_body_bytes: usize,
 }
 
 #[cfg(any(feature = "tower", feature = "layered"))]
@@ -403,12 +419,12 @@ impl<T> RestService<T> {
     /// Wraps a [`Transcode`] implementation
     /// (typically a generated `Transcoder`) as a service.
     ///
-    /// The request body is buffered without a size cap; call
-    /// [`with_max_body_bytes`](Self::with_max_body_bytes) to bound it.
+    /// Requests are incrementally capped at [`DEFAULT_MAX_BODY_BYTES`].
+    /// Call [`with_max_body_bytes`](Self::with_max_body_bytes) to override it.
     pub const fn new(transcoder: T) -> Self {
         Self {
             transcoder,
-            max_body_bytes: None,
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
         }
     }
 
@@ -416,8 +432,7 @@ impl<T> RestService<T> {
     /// `413 Payload Too Large` before it is fully buffered (the length is checked
     /// as the body streams in, so an over-cap upload cannot exhaust memory).
     ///
-    /// Uncapped by default, matching the neutral, policy-free contract of the
-    /// free [`serve_http`] helper. For finer control (an HTTP-level `415`, a
+    /// The default is [`DEFAULT_MAX_BODY_BYTES`]. For finer control (an HTTP-level `415`, a
     /// custom over-limit body), read the body yourself and call the generated
     /// `transcode` directly, as the `custom_body_handling` example shows. This
     /// bounds only the buffered request body; it does not cap a server-streaming
@@ -443,7 +458,7 @@ impl<T> RestService<T> {
     /// ```
     #[must_use]
     pub const fn with_max_body_bytes(mut self, max: usize) -> Self {
-        self.max_body_bytes = Some(max);
+        self.max_body_bytes = max;
         self
     }
 }
@@ -467,7 +482,7 @@ where
     fn call(&mut self, req: Request<B>) -> Self::Future {
         let transcoder = self.transcoder.clone();
         let max = self.max_body_bytes;
-        Box::pin(async move { Ok(serve_http_capped(req, &transcoder, max).await) })
+        Box::pin(async move { Ok(serve_http_with_max_body_bytes(req, max, &transcoder).await) })
     }
 }
 
@@ -482,11 +497,12 @@ where
     type Out = Response<RestBody>;
 
     fn execute(&self, input: Request<B>) -> impl Future<Output = Self::Out> + Send {
-        serve_http_capped(input, &self.transcoder, self.max_body_bytes)
+        serve_http_with_max_body_bytes(input, self.max_body_bytes, &self.transcoder)
     }
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 
@@ -501,6 +517,32 @@ mod tests {
     fn target_of_returns_path_and_query_when_present() {
         let uri: Uri = "/v1/x?a=1".parse().expect("origin-form uri");
         assert_eq!(target_of(&uri), "/v1/x?a=1");
+    }
+
+    #[test]
+    fn collect_capped_preserves_a_single_bytes_frame() {
+        let original = Bytes::from_static(b"hello");
+        let collected = futures::executor::block_on(collect_capped(Full::new(original.clone()), original.len()));
+        let BodyRead::Ok(collected) = collected else {
+            panic!("single in-limit frame must collect successfully");
+        };
+        assert_eq!(collected.as_ptr(), original.as_ptr());
+    }
+
+    #[test]
+    fn collect_capped_combines_multiple_frames() {
+        use core::convert::Infallible;
+
+        let frames = futures_util::stream::iter([
+            Ok::<_, Infallible>(Frame::data(Bytes::from_static(b"abc"))),
+            Ok(Frame::data(Bytes::from_static(b"def"))),
+            Ok(Frame::data(Bytes::from_static(b"ghi"))),
+        ]);
+        let collected = futures::executor::block_on(collect_capped(StreamBody::new(frames), 9));
+        let BodyRead::Ok(collected) = collected else {
+            panic!("in-limit frames must collect successfully");
+        };
+        assert_eq!(collected, b"abcdefghi".as_slice());
     }
 
     #[test]

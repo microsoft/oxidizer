@@ -38,7 +38,10 @@ fn main() {
         .add_method(get_shelf, "crate::pb::GetShelfRequest", "crate::pb::Shelf", None)
         .add_method(create_shelf, "crate::pb::CreateShelfRequest", "crate::pb::Shelf", None);
 
-    let (transcoder, generated) = Generator::new().add(library).generate();
+    let (transcoder, generated) = Generator::new()
+        .add(library)
+        .generate()
+        .expect("no OpenAPI conflicts in this example");
 
     for service in generated {
         let mut code = service.service_trait().clone();

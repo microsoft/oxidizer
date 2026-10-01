@@ -51,6 +51,8 @@ anvil-semver-check: anvil-semver-check-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
     $stableArgs = {{_anvil_stable_toolchain_args}}
     $include = (& "{{ just_executable() }}" _anvil-impact-include affected)
+    $impactExit = $LASTEXITCODE
+    if ($impactExit -ne 0) { exit $impactExit }
     $commentFile = 'target/anvil/comments/semver.md'
     if ($include -eq '--skip') {
         Write-Host 'anvil-semver-check: no affected packages; skipping'

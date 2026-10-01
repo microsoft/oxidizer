@@ -1,0 +1,33 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+syntax = "proto3";
+
+package bridge_paths;
+
+import "google/api/annotations.proto";
+import "other.proto";
+
+service ABCServiceX {
+  rpc SameName(ABCServiceXRestBridge) returns (ABCServiceXRestBridge) {
+    option (google.api.http) = { post: "/v1/same-name" body: "*" };
+  }
+
+  rpc CrossPackage(other.Thing) returns (other.Thing) {
+    option (google.api.http) = { post: "/v1/cross-package" body: "*" };
+  }
+}
+
+service Self {
+  rpc KeywordService(other.Thing) returns (other.Thing) {
+    option (google.api.http) = { post: "/v1/keyword-service" body: "*" };
+  }
+}
+
+message ABCServiceXRestBridge {
+  string value = 1;
+}
+
+message __rest_over_grpc_bridge_ABCServiceX {
+  string value = 1;
+}

@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![forbid(unsafe_code)]
+
 //! Generates the static routers exercised by this crate's benchmark and tests.
 //!
 //! Both are produced from route tables with `rest_over_grpc::build::generate_router`
@@ -37,6 +39,7 @@ fn main() {
         ("ArchiveBook", "POST", "/v1/books/{book}:archive"),
         ("GetItem", "GET", "/v1/items/{item.id}"),
         ("GetTree", "GET", "/v1/tree/{path=**}"),
+        ("GetFixedPrefix", "GET", "/v1/lookup/{name=items/*}"),
         ("SearchShelf", "GET", "/v1/search/{name=shelves/*}"),
         ("GetX", "GET", "/v1/x"),
         ("GetXY", "GET", "/v1/x/y"),
@@ -53,21 +56,52 @@ fn main() {
     // Each pipeline emits `transcoder.rest.rs`, so their output directories must differ.
     let proto_dir = manifest.join("proto");
     build_tonic_bridge(&proto_dir, &out_dir.join("tonic_bridge"));
+    build_bridge_path_fixture(&proto_dir, &out_dir.join("bridge_path_fixture"));
     build_custom(&proto_dir, &out_dir.join("custom"));
 
     println!("cargo:rerun-if-changed=bench_routes.rs");
     println!("cargo:rerun-if-changed=proto/greeter.proto");
+    println!("cargo:rerun-if-changed=proto/bridge_paths.proto");
+    println!("cargo:rerun-if-changed=proto/other.proto");
     println!("cargo:rerun-if-changed=proto/library.proto");
     println!("cargo:rerun-if-changed=proto/google/api/annotations.proto");
     println!("cargo:rerun-if-changed=proto/google/api/http.proto");
     println!("cargo:rerun-if-changed=build.rs");
 }
 
+/// Compiles a generated bridge whose acronym-bearing service uses both a
+/// same-name package message and a cross-package message.
+fn build_bridge_path_fixture(proto_dir: &std::path::Path, out_dir: &std::path::Path) {
+    fs::create_dir_all(out_dir).expect("the bridge path fixture output directory is created");
+
+    let mut compiler = protox::Compiler::new([proto_dir]).expect("protox compiler initializes");
+    compiler.include_imports(true);
+    compiler.open_file("bridge_paths.proto").expect("the bridge path fixture compiles");
+    let descriptor_bytes = compiler.encode_file_descriptor_set();
+
+    tonic_prost_build::configure()
+        .build_client(false)
+        .build_server(true)
+        .build_transport(false)
+        .out_dir(out_dir)
+        .compile_fds(compiler.file_descriptor_set())
+        .expect("tonic generates the bridge path fixture");
+
+    pbjson_build::Builder::new()
+        .register_descriptors(&descriptor_bytes)
+        .expect("pbjson registers the bridge path fixture descriptors")
+        .out_dir(out_dir)
+        .build(&[".bridge_paths", ".other"])
+        .expect("pbjson generates the bridge path fixture serde impls");
+
+    compile_fds(&descriptor_bytes, out_dir).expect("the bridge path fixture REST code is written");
+}
+
 /// The tonic-bridge modality: the greeter service.
 ///
 /// `tonic` generates the messages and the `greeter_server::Greeter` server
 /// trait; `rest_over_grpc::build` then emits the REST trait + transcoder and the
-/// blanket `tonic` bridge (on by default).
+/// guarded `tonic` bridge (on by default).
 fn build_tonic_bridge(proto_dir: &std::path::Path, out_dir: &std::path::Path) {
     fs::create_dir_all(out_dir).expect("the tonic_bridge output directory is created");
 

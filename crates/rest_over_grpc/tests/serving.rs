@@ -8,7 +8,9 @@
 use http::{Method, Request, Uri};
 use http_body_util::{BodyExt as _, Full};
 use rest_over_grpc::handling::Status;
-use rest_over_grpc::serving::{RestBody, RestService, serve_http_fn};
+use rest_over_grpc::serving::{
+    DEFAULT_MAX_BODY_BYTES, RestBody, RestService, serve_http_fn, serve_http_fn_with_max_body_bytes, serve_http_with_max_body_bytes,
+};
 use rest_over_grpc::transcoding::{HttpResponse, TranscodeResponse};
 
 /// Collects an adapter response body ([`RestBody`], an [`http_body::Body`]) into
@@ -38,6 +40,105 @@ fn serve_http_fn_collects_body_and_transcodes() {
     let response = futures::executor::block_on(serve_http_fn(request, echo_transcoder));
     assert_eq!(response.status(), http::StatusCode::OK);
     assert_eq!(body_bytes(response).as_ref(), b"hello");
+}
+
+/// The second poll would consume an upload beyond the cap, so reaching it
+/// means that the adapter failed to reject incrementally.
+struct FrameThenPanic(Option<bytes::Bytes>);
+
+impl http_body::Body for FrameThenPanic {
+    type Data = bytes::Bytes;
+    type Error = std::convert::Infallible;
+
+    fn poll_frame(
+        self: core::pin::Pin<&mut Self>,
+        _cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
+        let data = self.get_mut().0.take().expect("over-limit request must stop after first frame");
+        core::task::Poll::Ready(Some(Ok(http_body::Frame::data(data))))
+    }
+}
+
+struct FramesThenPanic(std::collections::VecDeque<bytes::Bytes>);
+
+impl http_body::Body for FramesThenPanic {
+    type Data = bytes::Bytes;
+    type Error = std::convert::Infallible;
+
+    fn poll_frame(
+        self: core::pin::Pin<&mut Self>,
+        _cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
+        let data = self
+            .get_mut()
+            .0
+            .pop_front()
+            .expect("over-limit request must stop after second frame");
+        core::task::Poll::Ready(Some(Ok(http_body::Frame::data(data))))
+    }
+}
+
+#[test]
+fn free_adapters_enforce_default_limit_before_reading_another_frame() {
+    use rest_over_grpc::serving::serve_http;
+
+    assert_eq!(DEFAULT_MAX_BODY_BYTES, 1 << 20);
+    let too_large = || FrameThenPanic(Some(bytes::Bytes::from(vec![b'x'; DEFAULT_MAX_BODY_BYTES + 1])));
+    let request = Request::builder().uri("/ok").body(too_large()).unwrap();
+    let response = futures::executor::block_on(serve_http(request, &EchoTranscode));
+    assert_eq!(response.status(), http::StatusCode::PAYLOAD_TOO_LARGE);
+
+    let request = Request::builder().uri("/ok").body(too_large()).unwrap();
+    let response = futures::executor::block_on(serve_http_fn(request, echo_transcoder));
+    assert_eq!(response.status(), http::StatusCode::PAYLOAD_TOO_LARGE);
+
+    let request = Request::builder()
+        .uri("/ok")
+        .body(Full::new(bytes::Bytes::from(vec![b'x'; DEFAULT_MAX_BODY_BYTES])))
+        .unwrap();
+    let response = futures::executor::block_on(serve_http(request, &EchoTranscode));
+    assert_eq!(response.status(), http::StatusCode::OK);
+    assert_eq!(body_bytes(response).len(), DEFAULT_MAX_BODY_BYTES);
+}
+
+#[test]
+fn free_adapters_allow_explicit_limit_overrides() {
+    let request = Request::builder()
+        .uri("/ok")
+        .body(Full::new(bytes::Bytes::from_static(b"hello")))
+        .unwrap();
+    let response = futures::executor::block_on(serve_http_with_max_body_bytes(request, 5, &EchoTranscode));
+    assert_eq!(body_bytes(response).as_ref(), b"hello");
+
+    let request = Request::builder()
+        .uri("/ok")
+        .body(Full::new(bytes::Bytes::from_static(b"hello!")))
+        .unwrap();
+    let response = futures::executor::block_on(serve_http_fn_with_max_body_bytes(request, 5, echo_transcoder));
+    assert_eq!(response.status(), http::StatusCode::PAYLOAD_TOO_LARGE);
+
+    let request = Request::builder()
+        .uri("/ok")
+        .body(FramesThenPanic(
+            [bytes::Bytes::from_static(b"abc"), bytes::Bytes::from_static(b"def")].into(),
+        ))
+        .unwrap();
+    let response = futures::executor::block_on(serve_http_with_max_body_bytes(request, 5, &EchoTranscode));
+    assert_eq!(response.status(), http::StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+#[cfg(feature = "tower")]
+#[test]
+fn tower_service_enforces_default_limit_incrementally() {
+    use tower_service::Service as _;
+
+    let mut service = RestService::new(EchoTranscode);
+    let request = Request::builder()
+        .uri("/ok")
+        .body(FrameThenPanic(Some(bytes::Bytes::from(vec![b'x'; DEFAULT_MAX_BODY_BYTES + 1]))))
+        .unwrap();
+    let response = futures::executor::block_on(service.call(request)).unwrap();
+    assert_eq!(response.status(), http::StatusCode::PAYLOAD_TOO_LARGE);
 }
 
 #[cfg(feature = "tower")]

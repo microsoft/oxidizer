@@ -29,6 +29,8 @@ use serde::de::DeserializeOwned;
 use serde::de::value::MapDeserializer;
 use serde_json::{from_slice, to_value, to_writer};
 
+use crate::path::{MAX_QUERY_BYTES, MAX_QUERY_KEY_BYTES, MAX_QUERY_PAIRS};
+
 /// Decodes an HTTP request body and query into a typed request message `T`.
 ///
 /// The message JSON is assembled by layering the body (per `body_kind`) and then
@@ -38,12 +40,17 @@ use serde_json::{from_slice, to_value, to_writer};
 /// they take highest precedence.
 ///
 /// Query-parameter values are percent-decoded before binding (treating `+` as a
-/// space); body JSON is used as-is.
+/// space); body JSON is used as-is. Every call, including calls that supply raw
+/// query pairs without [`QueryPairs::parse_limited`](crate::codegen_helpers::QueryPairs::parse_limited),
+/// rejects more than 128 pairs, 4096 aggregate raw key bytes, or 16 KiB of
+/// aggregate key/value bytes. The bounded raw-query parser also counts URI
+/// separators against its 16 KiB limit.
 ///
 /// # Errors
 ///
 /// Returns a [`TranscodeError`] if the body is not valid JSON, if the assembled
-/// value cannot form an object, or if it fails to deserialize into `T`.
+/// value cannot form an object, if it fails to deserialize into `T`, or if the
+/// query exceeds these limits. Exceeding a limit returns `Code::InvalidArgument`.
 ///
 /// # Examples
 ///
@@ -65,6 +72,7 @@ use serde_json::{from_slice, to_value, to_writer};
 /// # Ok::<(), rest_over_grpc::codegen_helpers::TranscodeError>(())
 /// ```
 pub fn decode_request<T: DeserializeOwned>(query: &[(&str, &str)], body: &[u8], body_kind: RequestBodyKind) -> Result<T, TranscodeError> {
+    validate_query_budget(query)?;
     if let Some(result) = try_decode_fast(&body_kind, query, body) {
         return result;
     }
@@ -75,6 +83,29 @@ pub fn decode_request<T: DeserializeOwned>(query: &[(&str, &str)], body: &[u8], 
 
     debug_assert!(matches!(body_kind, RequestBodyKind::Field(_)) && query.is_empty() && body.is_empty());
     from_slice(b"{}").map_err(TranscodeError::deserialize)
+}
+
+fn validate_query_budget(query: &[(&str, &str)]) -> Result<(), TranscodeError> {
+    if query.len() > MAX_QUERY_PAIRS {
+        return Err(TranscodeError::structure(
+            "query exceeds the parameter count or field-name size limit",
+        ));
+    }
+    let mut key_bytes = 0usize;
+    let mut total_bytes = 0usize;
+    for &(key, value) in query {
+        key_bytes = key_bytes.saturating_add(key.len());
+        if key_bytes > MAX_QUERY_KEY_BYTES {
+            return Err(TranscodeError::structure(
+                "query exceeds the parameter count or field-name size limit",
+            ));
+        }
+        total_bytes = total_bytes.saturating_add(key.len()).saturating_add(value.len());
+        if total_bytes > MAX_QUERY_BYTES {
+            return Err(TranscodeError::structure("query exceeds the request query size limit"));
+        }
+    }
+    Ok(())
 }
 
 /// Deserializes directly when no body/query merge is needed.

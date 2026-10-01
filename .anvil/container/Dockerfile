@@ -75,6 +75,12 @@ RUN curl -fsSLo /tmp/cargo-binstall.tgz \
 # <<< anvil-managed: anvil-container-tools
 
 # >>> anvil-managed: anvil-container-setup
+# The context is copied whole rather than input by input, because one of the
+# inputs is optional: a repository that pins its compiler by other means owns no
+# root toolchain file, and a `COPY` of a path that may not exist is not portable
+# across the engines anvil supports. `.anvil/container/` rides along as a
+# consequence; the image never reads it.
+#
 # The whole recipe tree is copied because `just` parses it to reach the install
 # recipes.
 #
@@ -91,24 +97,37 @@ RUN curl -fsSLo /tmp/cargo-binstall.tgz \
 # volume over each, and an engine seeds a new volume from the image path it
 # covers; a path that does not exist seeds as root-owned 0755, which the
 # `--user` mapping cannot write, so the first cargo fetch fails with EACCES.
-# The root manifest is copied for the MSRV, the one version `anvil-setup`
+# The root manifest is admitted for the MSRV, the one version `anvil-setup`
 # installs that is declared in repository source rather than pinned in
 # `versions.just`. `/opt/anvil` is the root the recipes already resolve against,
 # so the resolver reads it there with no container-specific path. The workspace
-# members it names are not copied and are not needed: the toolchain file selects
-# the compiler, which is the branch that skips workspace MSRV validation.
+# members it names are not admitted and are not needed: the one path that reads
+# them is workspace MSRV validation, which only
+# `anvil-tool-rustc-validate-prereqs` invokes, and nothing `anvil-setup`
+# reaches depends on it.
 #
 # It is deleted once the setup has read it, so it does not survive into the
 # finished image. The tag hashes the declared MSRV rather than the file, so an
 # unrelated dependency edit computes the same tag; a manifest left in place
 # would make that tag name two different filesystems, and a reused or published
 # image would carry a manifest that does not match any checkout.
+#
+# `rustup` was initialized with `--default-toolchain none`, so the image has no
+# default until something names one. Rustup sets it as a side effect of the
+# first `rustup toolchain install` that finds none set, which today is the
+# MSRV; that is an accident of the order `anvil-setup` reaches the install
+# recipes in, not something either side states. A checkout with a root
+# toolchain file never notices, because that file overrides the default. One
+# without has nothing else to select a compiler, so plain `cargo` in the
+# container would follow whichever toolchain the setup graph happened to
+# install first. The default is named here instead, from the same declared MSRV
+# the setup installs, while the manifest it is read from is still present.
 WORKDIR /opt/anvil
-COPY justfiles ./justfiles
-COPY rust-toolchain.toml ./
-COPY Cargo.toml ./
+COPY . ./
 RUN printf "import 'justfiles/anvil/mod.just'\n" > Justfile \
     && just anvil-setup binstall \
+    && msrv="$(just _anvil-resolve-stable root-msrv)" \
+    && if [ "${msrv}" != "none" ]; then rustup default "${msrv}"; fi \
     && rm -f Cargo.toml \
     && rm -rf "${CARGO_HOME}/registry/cache" "${CARGO_HOME}/registry/src" \
     && rm -f "${CARGO_HOME}/credentials" "${CARGO_HOME}/credentials.toml" "${HOME:-/root}/.netrc" /root/.netrc \

@@ -35,7 +35,7 @@ use std::time::{Duration, Instant};
 use criterion::{BatchSize, Criterion, Throughput};
 use foldhash::fast::FixedState;
 use gungraun::LibraryBenchmarkConfig;
-use internity::{LocalLexicon, Reader, Sym, ThreadedLexicon};
+use internity::{LocalLexicon, Reader, Sym, ThreadedLexicon, ThreadedReader};
 
 type Si = string_interner::StringInterner<string_interner::DefaultBackend>;
 type RodeoFixed = lasso::Rodeo<lasso::Spur, FixedState>;
@@ -47,6 +47,8 @@ const CORPUS_SIZE_ENV: &str = "INTERNITY_BENCH_CORPUS_SIZE";
 const INSERT_GROUP: &str = "internity_compare/insert";
 const REUSE_GROUP: &str = "internity_compare/reuse";
 const LOOKUP_GROUP: &str = "internity_compare/lookup";
+const FREEZE_GROUP: &str = "internity_compare/freeze";
+const FREEZE_CONCURRENT_GROUP: &str = "internity_compare/freeze-concurrent";
 const INSERT_CONCURRENT_GROUP: &str = "internity_compare/insert-concurrent";
 const REUSE_CONCURRENT_GROUP: &str = "internity_compare/reuse-concurrent";
 const LOOKUP_CONCURRENT_GROUP: &str = "internity_compare/lookup-concurrent";
@@ -152,6 +154,34 @@ where
     total
 }
 
+/// Times simultaneous shared freezes when no cached snapshot remains alive.
+fn concurrent_freeze(iters: u64, threads: usize, lexicon: &ThreadedLexicon) -> Duration {
+    let mut total = Duration::ZERO;
+    for _ in 0..iters {
+        let start_barrier = Barrier::new(threads + 1);
+        let end_barrier = Barrier::new(threads + 1);
+        let round = thread::scope(|scope| {
+            for _ in 0..threads {
+                let start_barrier = &start_barrier;
+                let end_barrier = &end_barrier;
+                let freezer = lexicon.clone();
+                scope.spawn(move || {
+                    start_barrier.wait();
+                    let reader = black_box(freezer.freeze());
+                    end_barrier.wait();
+                    black_box(reader);
+                });
+            }
+            start_barrier.wait();
+            let started = Instant::now();
+            end_barrier.wait();
+            started.elapsed()
+        });
+        total += round;
+    }
+    total
+}
+
 /// Times only the barrier-delimited parallel work with per-thread untimed setup.
 fn timed_parallel_with_setup<S>(iters: u64, threads: usize, setup: impl Fn() -> S + Sync, work: impl Fn(&mut S) + Sync) -> Duration {
     let mut total = Duration::ZERO;
@@ -225,6 +255,23 @@ fn populate_threaded() -> ThreadedLexicon {
     }
     interner.intern(KEY);
     interner
+}
+
+fn populate_threaded_shared() -> (ThreadedLexicon, ThreadedLexicon) {
+    let lexicon = populate_threaded();
+    (lexicon.clone(), lexicon)
+}
+
+fn populate_threaded_repeated() -> (ThreadedLexicon, ThreadedLexicon, ThreadedReader) {
+    let (first, retained) = populate_threaded_shared();
+    let previous = first.freeze();
+    (retained.clone(), retained, previous)
+}
+
+fn populate_threaded_frozen() -> (ThreadedReader, Sym) {
+    let interner = populate_threaded();
+    let sym = interner.get(KEY).expect("KEY is interned by populate_threaded");
+    (interner.freeze(), sym)
 }
 
 fn populate_frozen() -> (impl Reader, Sym) {
@@ -336,6 +383,18 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
             BatchSize::LargeInput,
         );
     });
+    insert.bench_function(INSERT_INTERNITY_THREADED_BYTES.benchmark_name(), |bencher| {
+        bencher.iter_batched(
+            ThreadedLexicon::new,
+            |interner| {
+                for string in &corpus {
+                    black_box(interner.intern_bytes(string.as_bytes()).expect("corpus strings are valid UTF-8"));
+                }
+                interner
+            },
+            BatchSize::LargeInput,
+        );
+    });
     insert.bench_function(INSERT_LASSO.benchmark_name(), |bencher| {
         bencher.iter_batched(
             lasso::Rodeo::default,
@@ -404,6 +463,20 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
             |mut results| {
                 for string in &corpus {
                     results.push(black_box(threaded.intern(string)));
+                }
+                results
+            },
+            BatchSize::LargeInput,
+        );
+    });
+    reuse.bench_function(REUSE_INTERNITY_THREADED_BYTES.benchmark_name(), |bencher| {
+        bencher.iter_batched(
+            || Vec::with_capacity(corpus.len()),
+            |mut results| {
+                for string in &corpus {
+                    results.push(black_box(
+                        threaded.intern_bytes(string.as_bytes()).expect("corpus strings are valid UTF-8"),
+                    ));
                 }
                 results
             },
@@ -521,6 +594,17 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
         });
     });
 
+    let threaded_frozen = ThreadedLexicon::new();
+    let threaded_frozen_syms: Vec<_> = corpus.iter().map(|string| threaded_frozen.intern(string)).collect();
+    let threaded_frozen = threaded_frozen.freeze();
+    lookup.bench_function(LOOKUP_INTERNITY_THREADED_FROZEN.benchmark_name(), |bencher| {
+        bencher.iter(|| {
+            for &index in &order {
+                black_box(threaded_frozen.resolve(threaded_frozen_syms[index]));
+            }
+        });
+    });
+
     let mut lasso = lasso::Rodeo::default();
     let lasso_syms: Vec<_> = corpus.iter().map(|string| lasso.get_or_intern(string)).collect();
     lookup.bench_function(LOOKUP_LASSO.benchmark_name(), |bencher| {
@@ -576,6 +660,32 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
         });
     });
     lookup.finish();
+
+    let mut freeze = criterion.benchmark_group(FREEZE_GROUP);
+    freeze.bench_function(FREEZE_SHARED_THREADED.benchmark_name(), |bencher| {
+        bencher.iter_batched(
+            populate_threaded_shared,
+            |(freezer, retained)| (retained, black_box(freezer.freeze())),
+            BatchSize::LargeInput,
+        );
+    });
+    freeze.bench_function(FREEZE_SHARED_THREADED_UNCHANGED.benchmark_name(), |bencher| {
+        bencher.iter_batched(
+            populate_threaded_repeated,
+            |(freezer, retained, previous)| (retained, previous, black_box(freezer.freeze())),
+            BatchSize::LargeInput,
+        );
+    });
+    freeze.finish();
+
+    let mut freeze_concurrent = criterion.benchmark_group(FREEZE_CONCURRENT_GROUP);
+    let (lexicon, _retained) = populate_threaded_shared();
+    for threads in [2usize, 4, 8] {
+        freeze_concurrent.bench_function(format!("internity/{threads}"), |bencher| {
+            bencher.iter_custom(|iters| concurrent_freeze(iters, threads, &lexicon));
+        });
+    }
+    freeze_concurrent.finish();
 
     let mut insert_concurrent = criterion.benchmark_group(INSERT_CONCURRENT_GROUP);
     for threads in [1usize, 2, 4, 8] {
@@ -1018,6 +1128,22 @@ fn insert_internity_threaded_hot(interner: ThreadedLexicon) -> (ThreadedLexicon,
     (interner, sym)
 }
 
+#[metabench::benchmark(
+    INSERT_INTERNITY_THREADED_BYTES,
+    INSERT_GROUP,
+    "internity-threaded-bytes",
+    gungraun_config = gungraun_default_config()
+)]
+#[bench::run(populate_threaded())]
+fn insert_internity_threaded_bytes_hot(interner: ThreadedLexicon) -> (ThreadedLexicon, Sym) {
+    let sym = black_box(
+        interner
+            .intern_bytes(black_box(NEW.as_bytes()))
+            .expect("benchmark string is valid UTF-8"),
+    );
+    (interner, sym)
+}
+
 #[metabench::benchmark(INSERT_LASSO, INSERT_GROUP, "lasso", gungraun_config = gungraun_default_config())]
 #[bench::run(populate_lasso())]
 fn insert_lasso_hot(mut rodeo: RodeoFixed) -> (RodeoFixed, lasso::Spur) {
@@ -1088,6 +1214,22 @@ fn reuse_internity_hot(mut interner: LocalLexicon) -> (LocalLexicon, Sym) {
 #[bench::run(populate_threaded())]
 fn reuse_internity_threaded_hot(interner: ThreadedLexicon) -> (ThreadedLexicon, Sym) {
     let sym = black_box(interner.intern(black_box(KEY)));
+    (interner, sym)
+}
+
+#[metabench::benchmark(
+    REUSE_INTERNITY_THREADED_BYTES,
+    REUSE_GROUP,
+    "internity-threaded-bytes",
+    gungraun_config = gungraun_default_config()
+)]
+#[bench::run(populate_threaded())]
+fn reuse_internity_threaded_bytes_hot(interner: ThreadedLexicon) -> (ThreadedLexicon, Sym) {
+    let sym = black_box(
+        interner
+            .intern_bytes(black_box(KEY.as_bytes()))
+            .expect("benchmark string is valid UTF-8"),
+    );
     (interner, sym)
 }
 
@@ -1166,6 +1308,45 @@ fn lookup_internity_frozen_hot<R: Reader>(input: (R, Sym)) -> (R, usize) {
     (reader, len)
 }
 
+#[metabench::benchmark(
+    LOOKUP_INTERNITY_THREADED_FROZEN,
+    LOOKUP_GROUP,
+    "internity-threaded-frozen",
+    gungraun_config = gungraun_default_config()
+)]
+#[bench::run(populate_threaded_frozen())]
+fn lookup_internity_threaded_frozen_hot(input: (ThreadedReader, Sym)) -> (ThreadedReader, usize) {
+    let (reader, sym) = input;
+    let len = black_box(reader.resolve(black_box(sym)).len());
+    (reader, len)
+}
+
+#[metabench::benchmark(
+    FREEZE_SHARED_THREADED,
+    FREEZE_GROUP,
+    "internity-threaded-shared",
+    gungraun_config = gungraun_default_config()
+)]
+#[bench::run(populate_threaded_shared())]
+fn freeze_shared_threaded_hot(input: (ThreadedLexicon, ThreadedLexicon)) -> (ThreadedLexicon, ThreadedReader) {
+    let (freezer, retained) = input;
+    (retained, black_box(freezer.freeze()))
+}
+
+#[metabench::benchmark(
+    FREEZE_SHARED_THREADED_UNCHANGED,
+    FREEZE_GROUP,
+    "internity-threaded-unchanged",
+    gungraun_config = gungraun_default_config()
+)]
+#[bench::run(populate_threaded_repeated())]
+fn freeze_shared_threaded_unchanged_hot(
+    input: (ThreadedLexicon, ThreadedLexicon, ThreadedReader),
+) -> (ThreadedLexicon, ThreadedReader, ThreadedReader) {
+    let (freezer, retained, previous) = input;
+    (retained, previous, black_box(freezer.freeze()))
+}
+
 #[metabench::benchmark(LOOKUP_LASSO, LOOKUP_GROUP, "lasso", gungraun_config = gungraun_default_config())]
 #[bench::run(populate_lasso_with_sym())]
 fn lookup_lasso_hot(input: (RodeoFixed, lasso::Spur)) -> (RodeoFixed, usize) {
@@ -1230,6 +1411,7 @@ metabench::main!(
             benchmarks = [
                 INSERT_INTERNITY,
                 INSERT_INTERNITY_THREADED,
+                INSERT_INTERNITY_THREADED_BYTES,
                 INSERT_LASSO,
                 INSERT_STRING_INTERNER,
                 INSERT_SYMBOL_TABLE,
@@ -1237,6 +1419,7 @@ metabench::main!(
                 INSERT_STRING_CACHE,
                 REUSE_INTERNITY,
                 REUSE_INTERNITY_THREADED,
+                REUSE_INTERNITY_THREADED_BYTES,
                 REUSE_LASSO,
                 REUSE_STRING_INTERNER,
                 REUSE_SYMBOL_TABLE,
@@ -1244,6 +1427,9 @@ metabench::main!(
                 REUSE_STRING_CACHE,
                 LOOKUP_INTERNITY,
                 LOOKUP_INTERNITY_FROZEN,
+                LOOKUP_INTERNITY_THREADED_FROZEN,
+                FREEZE_SHARED_THREADED,
+                FREEZE_SHARED_THREADED_UNCHANGED,
                 LOOKUP_LASSO,
                 LOOKUP_STRING_INTERNER,
                 LOOKUP_SYMBOL_TABLE,

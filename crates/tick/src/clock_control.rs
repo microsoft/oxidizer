@@ -225,12 +225,12 @@ impl ClockControl {
 
     /// Sets a limit on the total auto-advance duration.
     ///
-    /// When auto-advance is enabled via [`Self::auto_advance`], this method limits the total
-    /// amount of time that can be auto-advanced. Once the limit is reached, further calls to
-    /// access the current time will no longer auto-advance the clock.
+    /// This limit applies to the combined advancement from [`Self::auto_advance`] and
+    /// [`Self::auto_advance_timers`]. Once the limit is reached, neither reading the current
+    /// time nor firing pending timers will automatically advance the clock further.
     ///
-    /// > **Note**: This method only has an effect if [`Self::auto_advance`] has been called
-    /// > previously to set a non-zero auto-advance duration.
+    /// > **Note**: At least one automatic advancement mode must be enabled: a non-zero
+    /// > [`Self::auto_advance`] duration or [`Self::auto_advance_timers`] set to `true`.
     ///
     /// # Examples
     ///
@@ -321,6 +321,9 @@ impl ClockControl {
     /// In addition to advancing the current time, this method fires any registered timers
     /// that are scheduled to expire within the advanced period.
     ///
+    /// When [`Self::auto_advance_timers`] is enabled, the clock can then advance further
+    /// to fire pending timers, subject to [`Self::auto_advance_limit`].
+    ///
     /// # Examples
     ///
     /// ```
@@ -348,6 +351,9 @@ impl ClockControl {
     ///
     /// In addition to advancing the current time, this method fires any registered timers
     /// that are scheduled to expire within the advanced period.
+    ///
+    /// When [`Self::auto_advance_timers`] is enabled, the clock can then advance further
+    /// to fire pending timers, subject to [`Self::auto_advance_limit`].
     ///
     /// # Examples
     ///
@@ -590,8 +596,20 @@ static OUTSIDE_RANGE_MESSAGE: &str =
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::Wake;
+
     use super::*;
     use crate::fmt::UnixSeconds;
+
+    #[derive(Default)]
+    struct WakeCounter(AtomicUsize);
+
+    impl Wake for WakeCounter {
+        fn wake(self: Arc<Self>) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
 
     #[test]
     fn assert_types() {
@@ -747,6 +765,68 @@ mod tests {
 
         // assert
         assert_eq!(control.timers_len(), 0);
+    }
+
+    #[test]
+    fn manual_advance_evaluates_auto_advance_timers() {
+        let mut state = State {
+            auto_advance_timers: true,
+            ..State::default()
+        };
+        let start = state.instant;
+        state.timers.register(start + Duration::from_secs(2), Waker::noop().clone());
+
+        state.advance(Duration::from_secs(1), TimeFlow::Forward);
+
+        assert_eq!(state.instant.saturating_duration_since(start), Duration::from_secs(2));
+        assert_eq!(state.timers.len(), 0);
+    }
+
+    #[test]
+    fn auto_advanced_timer_consumes_limit() {
+        let control = ClockControl::new()
+            .auto_advance_timers(true)
+            .auto_advance(Duration::from_secs(1))
+            .auto_advance_limit(Duration::from_secs(2));
+        let clock = control.to_clock();
+        let start = clock.instant();
+
+        control.register_timer(start + Duration::from_secs(2), Waker::noop().clone());
+        let after_timer = clock.instant();
+        let after_limit = clock.instant();
+
+        assert_eq!(after_timer.saturating_duration_since(start), Duration::from_secs(2));
+        assert_eq!(after_limit, after_timer);
+    }
+
+    #[test]
+    fn advance_time_fires_ready_timers() {
+        let mut state = State::default();
+        let wakes = Arc::new(WakeCounter::default());
+        state
+            .timers
+            .register(state.instant + Duration::from_secs(1), Waker::from(Arc::clone(&wakes)));
+
+        state.advance_time(Duration::from_millis(500), TimeFlow::Forward);
+        assert_eq!(state.timers.len(), 1);
+        assert_eq!(wakes.0.load(Ordering::Relaxed), 0);
+
+        state.advance_time(Duration::from_millis(500), TimeFlow::Forward);
+        assert_eq!(state.timers.len(), 0);
+        assert_eq!(wakes.0.load(Ordering::Relaxed), 1);
+
+        state.advance_time(Duration::from_secs(1), TimeFlow::Forward);
+        assert_eq!(wakes.0.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn zero_advance_does_not_evaluate_timers() {
+        let mut state = State::default();
+        state.timers.register(state.instant, Waker::noop().clone());
+
+        state.advance_time(Duration::ZERO, TimeFlow::Forward);
+
+        assert_eq!(state.timers.len(), 1);
     }
 
     #[test]

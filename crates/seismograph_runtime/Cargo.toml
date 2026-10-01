@@ -17,6 +17,11 @@ homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/seismograph_runtime"
 
+# This safe integration layer delegates recording and snapshots to seismograph,
+# whose unsafe implementation retains direct Miri coverage.
+[package.metadata.anvil.miri]
+exclude = true
+
 [package.metadata.cargo_check_external_types]
 allowed_external_types = ["seismograph::*"]
 

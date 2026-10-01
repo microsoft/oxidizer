@@ -134,8 +134,29 @@ impl StreamEncoding {
     /// ```
     #[must_use]
     pub fn from_accept(accept: &str) -> Self {
+        Self::from_accept_values([accept])
+    }
+
+    /// Negotiates a streaming encoding across all values of an `Accept` header.
+    ///
+    /// Each header value may contain comma-separated media ranges. The supported
+    /// range with the highest quality wins; ties retain their order across
+    /// values. With no acceptable supported range, JSON is selected.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rest_over_grpc::transcoding::StreamEncoding;
+    ///
+    /// assert_eq!(
+    ///     StreamEncoding::from_accept_values(["application/json;q=0.1", "text/event-stream;q=1",]),
+    ///     StreamEncoding::Sse,
+    /// );
+    /// ```
+    #[must_use]
+    pub fn from_accept_values<'a>(values: impl IntoIterator<Item = &'a str>) -> Self {
         let mut selected = None;
-        for media in accept.split(',') {
+        for media in values.into_iter().flat_map(|value| value.split(',')) {
             let mut parts = media.split(';');
             let media_type = parts.next().unwrap_or("").trim();
             let encoding = if media_type.eq_ignore_ascii_case("text/event-stream") {
@@ -212,8 +233,9 @@ fn serialize_framed_item<T: Serialize>(
     first: bool,
     message: &T,
     response_body: ResponseBodyKind,
+    capacity_hint: usize,
 ) -> Result<Vec<u8>, Status> {
-    let mut frame = Vec::with_capacity(128 + 8);
+    let mut frame = Vec::with_capacity(capacity_hint);
     match encoding {
         StreamEncoding::JsonArray => frame.push(if first { b'[' } else { b',' }),
         StreamEncoding::NdJson => {}
@@ -243,14 +265,20 @@ struct FrameState<S> {
     first: bool,
     /// Set once the terminal frame has been emitted so the stream fuses.
     done: bool,
+    capacity_hint: usize,
 }
+
+const MIN_FRAME_CAPACITY: usize = 136;
+const MAX_FRAME_CAPACITY: usize = 65_536;
 
 /// Adapts a stream of server-streamed response messages into a stream of encoded
 /// byte frames in the chosen [`StreamEncoding`].
 ///
 /// Framing (JSON-array brackets and separators, NDJSON newlines, SSE `data:`
 /// envelopes) is applied incrementally, so a streaming transport can forward
-/// each yielded frame immediately.
+/// each yielded frame immediately. Buffer reservations adapt to the previous
+/// message size, capped at 64 KiB so an unusually large frame does not inflate
+/// later small frames.
 ///
 /// An input error is forwarded as the final item. JSON arrays remain incomplete
 /// so the transport cannot mistake a truncated response for valid JSON.
@@ -310,6 +338,7 @@ where
         encoding,
         first: true,
         done: false,
+        capacity_hint: MIN_FRAME_CAPACITY,
     };
 
     futures_util::stream::unfold(state, move |mut state| async move {
@@ -319,13 +348,16 @@ where
 
         match state.stream.next().await {
             Some(Ok(message)) => {
-                let frame = match serialize_framed_item(state.encoding, state.first, &message, response_body) {
+                let frame = match serialize_framed_item(state.encoding, state.first, &message, response_body, state.capacity_hint) {
                     Ok(frame) => frame,
                     Err(status) => {
                         state.done = true;
                         return Some((Err(status), state));
                     }
                 };
+                // Adapt to ordinary steady-state sizes, but avoid reserving a
+                // huge next frame after a rare oversized message.
+                state.capacity_hint = frame.len().clamp(MIN_FRAME_CAPACITY, MAX_FRAME_CAPACITY);
                 state.first = false;
                 Some((Ok(frame), state))
             }
@@ -497,6 +529,31 @@ mod tests {
         ] {
             assert_eq!(parse_quality(quality), expected, "{quality}");
         }
+    }
+
+    #[test]
+    fn from_accept_values_honors_quality_and_order_across_header_lines() {
+        assert_eq!(
+            StreamEncoding::from_accept_values(["application/json;q=0.1", "text/event-stream;q=1"]),
+            StreamEncoding::Sse
+        );
+        assert_eq!(
+            StreamEncoding::from_accept_values(["text/event-stream;q=0", "application/jsonl;q=0.5"]),
+            StreamEncoding::NdJson
+        );
+        assert_eq!(
+            StreamEncoding::from_accept_values(["application/jsonl;q=0.8", "text/event-stream;q=0.8"]),
+            StreamEncoding::NdJson
+        );
+        assert_eq!(
+            StreamEncoding::from_accept_values(["text/plain, application/json;q=0.1", "text/event-stream;q=0.9"]),
+            StreamEncoding::Sse
+        );
+        assert_eq!(
+            StreamEncoding::from_accept_values(["text/plain", "application/jsonl;q=0"]),
+            StreamEncoding::JsonArray
+        );
+        assert_eq!(StreamEncoding::from_accept_values(std::iter::empty()), StreamEncoding::JsonArray);
     }
 
     #[test]

@@ -158,9 +158,9 @@ high-duplication workloads interning targets, each distinct *valid* byte
 sequence is validated once (on its first insert) rather than on every
 occurrence. Invalid bytes are never stored, so a repeated invalid input stays a
 miss and re-validates each time. The output side is unchanged — handles still
-resolve to a checked `&str`. In the sharded engine the check runs while the
-upgradable read lock is still held, mirroring the `intern` miss path, so the
-miss atomically upgrades to insert with no re-probe.
+resolve to a checked `&str`. In the sharded engine a miss validates the bytes while holding an upgradable
+read guard, then atomically upgrades it to a write guard without a second
+dedup probe.
 
 ## `LocalLexicon` — the flat single-threaded engine
 
@@ -201,9 +201,9 @@ back to their pre-insert lengths if anything between the append and the
 successful table insertion unwinds, so a partially written string never leaks
 into the table.
 
-`LocalLexicon` also implements `Reader` directly, so it can resolve during the
-fill phase without freezing (handy when interning and lookups interleave). It
-still offers `freeze` to shed the dedup table and hasher for the read phase.
+`LocalLexicon` can resolve during the fill phase without freezing (handy when
+interning and lookups interleave) and implements `Reader` for generic lookups.
+`freeze` sheds the dedup table and hasher.
 
 ## `ThreadedLexicon` — the concurrent sharded engine
 
@@ -245,29 +245,25 @@ shape to `LocalLexicon`'s) behind a `RwLock`. Each shard is `repr(align(128))`,
 placing its lock in its own 128-byte region so neighboring locks do not falsely
 share a cache line on architectures with lines up to that size.
 
-Interning uses an **upgradable-read fast path**:
+Interning uses an **upgradable-read hit path**:
 
 ```mermaid
 flowchart TB
-    UP["take upgradable_read lock"] --> GET{"already interned?"}
-    GET -- yes --> HIT["return existing Sym<br/>(coexists with plain readers)"]
-    GET -- no --> UPG["atomically upgrade to write lock"]
-    UPG --> INS["insert_new: append + pack + dedup insert"]
+    RD["take upgradable read lock"] --> GET{"already interned?"}
+    GET -- yes --> HIT["return existing Sym"]
+    GET -- no --> WR["atomically upgrade to write lock"]
+    WR --> INS["insert_new: append + pack + dedup insert"]
 ```
 
-- A dedup **hit** resolves under an upgradable-read lock. That guard coexists
-  with other threads' plain `read()` locks (used by `get`), but `parking_lot`
-  permits only **one** upgradable guard per lock at a time, so two `intern`
-  calls on the *same* shard serialize against each other even when both are
-  dedup hits.
-- A **miss** atomically upgrades that same guard to the exclusive write lock.
-  Because the guard was held throughout, no other writer could have inserted the
-  same string in between, so two threads racing on a new string can never mint
-  two handles, and the insert skips re-probing.
+- An intern dedup **hit** holds the shard's one upgradable guard, so other
+  same-shard interners wait, but ordinary `get` readers can proceed.
+- A **miss** upgrades the same guard atomically. No other writer can insert
+  during that upgrade, so there is no second dedup probe.
 
 `intern` calls on *different* shards proceed fully independently; same-shard
-`intern` calls (hit or miss) serialize. Sharding therefore parallelizes
-interning across shards, not within a single shard. Each shard uses the same
+interners serialize while ordinary lookups share read access. Each dedup entry caches its hash,
+so table growth does not invoke a user-supplied hasher while holding the shard
+lock. Hashing the input occurs before locking. Each shard uses the same
 rollback-guard panic-safety scheme as the local engine. Since the engine is
 fill-then-freeze, the per-shard
 buffer may reallocate freely during the fill phase — no references into it are
@@ -291,19 +287,28 @@ last `Arc`:
 flowchart TB
     F["ThreadedLexicon::freeze"] --> TRY{"sole Arc owner?"}
     TRY -- yes --> MOVE["move each shard's (offsets, bytes) out<br/>— zero copy"]
-    TRY -- no --> COPY["read-guard all shards up front,<br/>then copy each (offsets, bytes)"]
+    TRY -- no --> CACHE{"unchanged retained snapshot?"}
+    CACHE -- yes --> REUSE["share immutable snapshot"]
+    CACHE -- no --> COPY["read-guard all shards up front,<br/>then copy each (offsets, bytes)"]
     MOVE --> SRr["ThreadedReader"]
+    REUSE --> SRr
     COPY --> SRr
 ```
 
-The snapshot path acquires read guards on **all** shards up front, before any
-blob is copied. While every guard is held no concurrent `intern` can commit (a
-miss cannot upgrade to the write lock while a reader is present), so the copied
-state is a single **point-in-time snapshot** even when other clones are still
-interning. Guards are taken in shard-index order and `intern` only ever locks
-one shard, so this cannot deadlock. Insertions that commit after the guards are
-released are naturally not reflected — quiesce all writers before freezing when
-the reader must contain every such insertion.
+The shared path keeps a weak reference to the most recent snapshot. A successful
+insert advances its shard-local generation while still holding that shard's
+write guard, so independent shard writers do not contend on a global invalidation
+counter. Only a live snapshot whose 64-generation vector is current can be
+reused without locking every shard. Otherwise the copy path acquires read guards
+on **all** shards up front, before any blob is copied. While every guard is held
+no concurrent `intern` can commit, so the copied state is a single
+**point-in-time snapshot**. The snapshot cache stays locked during this copy,
+coalescing simultaneous misses into one fill. Guards are taken in shard-index
+order and `intern` only ever locks one shard, so this cannot deadlock. Insertions
+that commit after that instant are not reflected — quiesce all writers before
+freezing when the reader must contain every such insertion. The frozen shard
+array is shared by cloned readers; the weak cache does not retain its payload
+after the last reader is dropped.
 
 ## The `Reader` trait
 
@@ -311,7 +316,10 @@ the reader must contain every such insertion.
 private supertrait), so it cannot be implemented downstream — which lets the
 crate add methods without a breaking change. Its core operations are
 `try_resolve` / `resolve`, `len`, `is_empty`, and `iter` (yielding
-`(Sym, &str)` pairs).
+`(Sym, &str)` pairs). `LocalLexicon` implements `Reader` for lookups while
+interning; the frozen `LocalReader` and `ThreadedReader` implement it too.
+The trait's iterator is boxed for object safety, including on concrete
+readers.
 
 Resolution is a pure CSR lookup with a range check, so it needs no locks or
 atomics. `LocalReader` resolves a dense index directly; `ThreadedReader` first
@@ -414,15 +422,28 @@ portable across processes and never leaks a lexicon-local handle onto the wire:
   ordinary `serde` impl. `serde`'s `skip_serializing_if` is rejected at
   compile time by `SerializeIn` (a runtime skip predicate would diverge from the
   type's ordinary wire schema); use `skip_serializing` to always omit a field.
+- The named-struct `DeserializeIn` field visitor uses one byte matcher for
+  string and byte identifiers (including aliases). A string identifier delegates
+  its UTF-8 bytes to that matcher; unknown byte identifiers are decoded only
+  when a strict unknown-field error needs the field name. Numeric identifiers
+  retain their separate index dispatch.
 - A whole corpus serializes via **`SerializeReader`**: freeze a lexicon into a
   `Reader`, then wrap it — it emits the **sequence of interned strings** in handle
   order. The live `ThreadedLexicon` is **deserialize-only** (re-interning a string
   sequence into a fresh engine); serialize its frozen `Reader` instead, which
   takes a single point-in-time snapshot rather than tearing across shards under a
   concurrent writer. Re-interning that sequence reproduces *identical* handles
-  only for the **default hasher**: dense handles follow insertion order, and
+  only for a **default-constructed** threaded engine: dense handles follow insertion order, and
   sharded handles additionally depend on how the hasher assigns shards, so
-  deserialization into a `ThreadedLexicon` is restricted to the default hasher.
+  deserialization into a `ThreadedLexicon` uses its default constructor.
+  That constructor reproduces the 64-bit widening-multiply Fx variant on
+  32-bit targets, preserving handles with most 64-bit targets. Native
+  `sparc64` and `wasm64` instead use a different Fx variant and do not
+  share those handles; explicitly passing `FxBuildHasher` on a 32-bit target
+  selects its native 32-bit output. Corpus sequences carry no layout/version
+  marker: older archives made with the
+  pointer-width-dependent 32-bit algorithm must remap persisted raw handles
+  before adopting the new default.
 
 ## Capacity and limits
 
@@ -454,12 +475,12 @@ keeps them honest about what the design actually promises: dedup identity,
 handle stability across `freeze`, iteration order, the `Lexicon`/`Reader` trait
 views (including `dyn` dispatch), `SymMap`/`SymSet`, and the byte-input path
 (including a forced hash collision, so the byte-wise comparison in the probe is
-load-bearing rather than incidentally correct). Two of them arm a hasher that
-panics mid-rehash and then assert the lexicon is still consistent — that is the
-direct test of the rollback guard described under
-[`LocalLexicon`](#locallexicon--the-flat-single-threaded-engine), for both
-engines. Another spawns a writer against a concurrent `freeze` and asserts the
-snapshot is a consistent prefix.
+load-bearing rather than incidentally correct). The local-engine test arms a
+hasher that panics mid-rehash to check its rollback guard; threaded-engine
+tests instead verify growth never rehashes through the supplied hasher, and
+that a reentrant hasher cannot deadlock a shard. A deterministic acquisition
+probe verifies that every shard remains write-blocked throughout a shared
+snapshot copy.
 
 **Property tests (`bolero`, run by `just anvil-bolero`).** Two properties matter most
 and neither is easy to reach with hand-written cases. The first feeds arbitrary
@@ -473,21 +494,19 @@ never be reached with an out-of-range index".
 **Model checks (`loom`, `just anvil-loom`) — and their precise scope.** The loom
 target is a `[[test]]` gated on the `loom` feature and compiled under
 `--cfg loom`. It deliberately models an *algorithm sketch*, not the production
-types: loom cannot instrument `parking_lot`, and `loom::sync::RwLock` has no
-upgradable-guard primitive, so the production transition — hold one upgradable
-guard, atomically upgrade it on a miss — is inexpressible in the model. The
-sketch instead uses the textbook `std`-style read, drop, write, re-check
-sequence, which needs the re-check precisely because it has the read-drop gap
-that the production path does not.
+types: loom cannot instrument `parking_lot`. Its read, drop, write, re-check sequence models a
+race-safe alternative to the production upgradable-lock protocol; the
+production path upgrades atomically and therefore needs no recheck. The
+sketch does not model the actual locks or the real storage implementation.
 
 What the models therefore prove is the *abstract* interning contract under
 exhaustive interleaving: racing equal strings collapse to a single handle,
 racing distinct strings all stay resolvable and distinct, and a concurrent
 snapshot observes a consistent prefix. What they do **not** prove is that the
-production upgradable-read implementation is correct — that rests on
-`parking_lot`'s documented guard semantics plus the behavioral and property
-tests above. Reading the loom results as model-checking the shipped lock would
-be a mistake, which is why the target is named for sketches.
+production lock implementation is correct — that rests on `parking_lot`'s
+documented guard semantics plus the behavioral and property tests above.
+Reading the loom results as model-checking the shipped lock would be a
+mistake, which is why the target is named for sketches.
 
 **Compile-fail tests (`trybuild`).** Three of the design's guarantees are
 *negative* — they are about what deliberately does **not** compile — and a
@@ -557,10 +576,9 @@ rest of the ecosystem.
   storage invariant into an *input*-side optimization: a dedup hit proves the
   input equals an already-validated string, so validation is skipped. Interning
   workloads are duplicate-heavy by definition, which is exactly when this pays.
-- **A dedup miss becomes an insert without re-probing.** The upgradable-read
-  guard is held continuously across the miss, so no other writer can slip in;
-  the insert is a known-unique insert. This removes both the re-probe and the
-  possibility of two handles for one string.
+- **A dedup hit takes an upgradable read lock.** Only one same-shard interner
+  holds it at a time, while lookups still share reads. A miss upgrades
+  atomically, so insertion needs no second probe.
 - **Serde that refuses the obvious thing.** A `Sym` has no plain `Serialize`
   precisely *because* the obvious implementation would be a silent correctness
   trap across processes.
@@ -596,35 +614,38 @@ rest of the ecosystem.
   provenance checking.
 - **Panic safety depends on the rollback guard.** Between appending a string's
   bytes and inserting its handle, the CSR state is momentarily "one string
-  ahead" of the dedup table, and the table insert can unwind (growth, rehash, or
-  a user `BuildHasher` that panics). Without the guard, an unwind would leave a
+  ahead" of the dedup table, and the table insert can unwind (growth, or a
+  local-engine `BuildHasher` that panics during rehash). Without the guard, an unwind would leave a
   partially written string recorded in `offsets`, so a later index would span
   the wrong bytes and `len` would over-count — a silently corrupt lexicon that
-  is still perfectly memory-safe, hence hard to notice. The guard truncates both
-  `offsets` and `bytes` back to their pre-insert lengths and is defused with
-  `mem::forget` only after the table insert has succeeded.
-- **Freeze snapshots have an explicit horizon.** The shared freeze path holds a
-  read guard on *every* shard before copying any of them, so the result is one
-  point-in-time snapshot rather than a per-shard-torn one. Two consequences
-  follow directly: insertions that commit after the guards are released are
-  silently absent (quiesce writers first if the reader must be complete), and
-  the no-deadlock argument rests on guards being taken in shard-index order
-  while `intern` only ever locks one shard. Any future operation that locks two
-  shards at once must respect that same order.
+  is still perfectly memory-safe, hence hard to notice. The local engine
+  rehashes through the supplied hasher; the threaded engine caches entry
+  hashes so rehashing under a shard lock cannot invoke that hasher. The guard
+  truncates both `offsets` and `bytes` back to their pre-insert lengths and is
+  defused with `mem::forget` only after table insertion succeeds.
+- **Freeze snapshots have an explicit horizon.** An unchanged live snapshot
+  can be reused by generation without locking the shards; otherwise shared
+  freeze holds a read guard on *every* shard before copying any of them, so
+  the result is one point-in-time snapshot rather than a per-shard-torn one.
+  Insertions committed after that instant are absent (quiesce writers first
+  if the reader must be complete). The no-deadlock argument for copying
+  rests on guards being taken in shard-index order while `intern` only ever
+  locks one shard. Any future operation that locks two shards at once must
+  respect that same order.
 - **Untrusted input is a DoS surface.** The default hasher is fast and
   non-cryptographic, so an adversary who controls interned strings can force
   hash collisions and degrade probes, and — because nothing is ever reclaimed —
   can grow storage until a [capacity limit](#capacity-and-limits) panics. The
   mitigations are external to the data structure: apply count and byte quotas
   before interning, and supply a DoS-resistant `BuildHasher`.
-- **Skewed keys serialize interning.** Sharding parallelizes across shards, not
-  within one: `parking_lot` allows a single upgradable-read guard per lock, so
-  two `intern` calls landing on the same shard serialize even when both are
-  dedup hits. A workload whose strings concentrate in a few shards therefore
-  degrades toward serialized interning. The multiply-mix shard selector keeps
-  the distribution good for well-distributed hashes, but it cannot rescue a
-  hasher that clusters. For read-heavy phases, `freeze` — not repeated `intern`
-  calls — is the answer.
+- **Same-shard interning serializes, including dedup hits.** Only one
+  upgradable read guard can be held per shard, so interners wait for one another
+  even on hits; ordinary `get` calls can share read access. Misses upgrade to
+  an exclusive write lock, so a workload whose *new* strings
+  concentrate in a few shards also degrades toward serialized insertion. The
+  multiply-mix selector keeps the distribution good for well-distributed
+  hashes, but cannot rescue a hasher that clusters. For read-heavy phases,
+  `freeze` — not repeated `intern` calls — is still the answer.
 - **Everything is `u32`-bounded, and the bound is checked at insert time.** The
   end offset is computed with a `checked_add` plus a `u32::try_from`, and the
   sharded engine additionally asserts the local index stays below the 26-bit

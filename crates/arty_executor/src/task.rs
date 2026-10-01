@@ -110,14 +110,14 @@ where
         // goes lost in the whole `UnsafeCell` and `Option` layering.
         let wake_signal = unsafe { Pin::new_unchecked(wake_signal) };
 
-        // SAFETY: After this, we are required to not drop the waker until `.is_inert()` is true.
+        // SAFETY: We must keep the wake signal alive until all cloned wakers have been dropped.
         // We enforce this via an equivalent safety requirement on the `Task::initialize()`.
-        let waker = unsafe { wake_signal.waker() };
+        let waker = unsafe { wake_signal.waker_ref() };
 
         // In debug builds, we wrap the waker with a diagnostic layer, as waker leaks are very
         // damaging due to blocking shutdown and we want to offer maximal debugging information.
         #[cfg(debug_assertions)]
-        let waker = DiagnosticWaker::with_inner_and_registry(waker, Arc::clone(&self.diagnostic_waker_registry));
+        let waker = DiagnosticWaker::with_inner_and_registry(waker.clone(), Arc::clone(&self.diagnostic_waker_registry));
 
         let mut cx = task::Context::from_waker(&waker);
 

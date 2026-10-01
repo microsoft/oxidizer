@@ -203,12 +203,49 @@ fn wide_tuples_round_trip_through_arity_sixteen() {
     let value = WideTuples { nine, sixteen };
     let reader = lexicon.freeze();
     let json = to_json(&value, &reader);
+    let expected = r#"{"nine":["t0","t1","t2","t3","t4","t5","t6","t7","t8"],"sixteen":["t100","t101","t102","t103","t104","t105","t106","t107","t108","t109","t110","t111","t112","t113","t114","t115"]}"#;
+    assert_eq!(json, expected);
 
-    let (restored, back): (LocalLexicon, WideTuples) = from_json(&json);
-    assert_eq!(restored.resolve(back.nine.0), "t0");
-    assert_eq!(restored.resolve(back.nine.8), "t8");
-    assert_eq!(restored.resolve(back.sixteen.0), "t100");
-    assert_eq!(restored.resolve(back.sixteen.15), "t115");
+    let (restored, back): (LocalLexicon, WideTuples) = from_json(expected);
+    let nine = [
+        back.nine.0,
+        back.nine.1,
+        back.nine.2,
+        back.nine.3,
+        back.nine.4,
+        back.nine.5,
+        back.nine.6,
+        back.nine.7,
+        back.nine.8,
+    ];
+    assert_eq!(
+        nine.map(|sym| restored.resolve(sym)),
+        ["t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8"]
+    );
+    let sixteen = [
+        back.sixteen.0,
+        back.sixteen.1,
+        back.sixteen.2,
+        back.sixteen.3,
+        back.sixteen.4,
+        back.sixteen.5,
+        back.sixteen.6,
+        back.sixteen.7,
+        back.sixteen.8,
+        back.sixteen.9,
+        back.sixteen.10,
+        back.sixteen.11,
+        back.sixteen.12,
+        back.sixteen.13,
+        back.sixteen.14,
+        back.sixteen.15,
+    ];
+    assert_eq!(
+        sixteen.map(|sym| restored.resolve(sym)),
+        [
+            "t100", "t101", "t102", "t103", "t104", "t105", "t106", "t107", "t108", "t109", "t110", "t111", "t112", "t113", "t114", "t115"
+        ]
+    );
 }
 
 #[test]
@@ -387,6 +424,32 @@ fn out_of_range_handle_is_a_serialize_error() {
     let reader = empty.freeze();
     let error = serde_json::to_string(&SerializeInWith::new(&foreign, &reader)).unwrap_err();
     assert!(error.to_string().contains("out of range"), "{error}");
+}
+
+#[test]
+fn invalid_nested_handle_fails_entire_serialization() {
+    let mut lexicon = LocalLexicon::new();
+    let name = lexicon.intern("root");
+    let valid = lexicon.intern("valid");
+    let invalid = Sym::from_u32(100).unwrap();
+    let aliases = vec![valid, invalid];
+    let record = Record {
+        name,
+        aliases: aliases.clone(),
+        parent: None,
+        count: 7,
+        plain: Plain {
+            label: "x".to_owned(),
+            weight: 2,
+        },
+    };
+    let reader = lexicon.freeze();
+
+    let direct_error = serde_json::to_string(&SerializeInWith::new(&aliases, &reader)).err().unwrap();
+    assert!(direct_error.to_string().contains("out of range"), "{direct_error}");
+
+    let record_error = serde_json::to_string(&SerializeInWith::new(&record, &reader)).err().unwrap();
+    assert!(record_error.to_string().contains("out of range"), "{record_error}");
 }
 
 #[test]

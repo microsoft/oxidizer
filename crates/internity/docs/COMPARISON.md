@@ -13,7 +13,9 @@ treated as a distinct row.
 > identifier-like strings on one dev box (`--release`, fat LTO). All timings are
 > wall-clock medians measured by Criterion; treat them as *relative signal on this
 > workload*, not universal constants — interner ranking shifts with string length,
-> corpus size, hit/miss ratio, and thread count.
+> corpus size, hit/miss ratio, and thread count. These historical measurements
+> predate cached hashes and reusable shared snapshots; do not treat them as
+> measurements of the current implementation.
 
 ---
 
@@ -22,8 +24,8 @@ treated as a distinct row.
 | Crate / Model | Handle type | Handle size | `Option` niche | `Copy` | Storage & dedup design | Threading model | Reclamation | `unsafe` | `no_std` | Interns |
 |---|---|---|---|:--:|---|---|---|:--:|:--:|---|
 | **internity** `LocalLexicon` (single-thread) | `Sym(NonZeroU32)` = dense 1-based index | **4 B** | ✅ 4 B | ✅ | One contiguous `String` buffer + `Vec<u32>` CSR offsets (start/end, branch-free resolve); `hashbrown::HashTable<Sym>` dedup (store handle, probe by hash) — flat & cache-coherent, à la `string-interner` `StringBackend` | single-thread (`&mut` intern, `&self` resolve) | leak-until-drop | contained (`storage`) | ✅ | `str` |
-| **internity** `ThreadedLexicon` (concurrent) | `Sym(NonZeroU32)` = `[shard:6\|local:26]` | **4 B** | ✅ 4 B | ✅ | 64 `align(128)` shards, each `RwLock<{ offsets:Vec<u32>, bytes:Vec<u8>, HashTable<Sym> }>`; upgradable-read hit path (cross-shard intern independent, same-shard intern serialized); **fill-then-freeze** (no live resolve); cheap `Clone` `Arc` handle | concurrent (`&self` intern, per-shard `RwLock`) | leak-until-drop | contained (`storage`) | ❌ (`std`) | `str` |
-| **internity** `Reader` (frozen) | `Sym(NonZeroU32)` (same) | **4 B** | ✅ 4 B | ✅ | `freeze()` → flat `(offsets:[u32], bytes:[u8])` blob (CSR start/end, branch-free) — one blob for `LocalLexicon`, per-shard for `ThreadedLexicon`; `Reader` is a sealed **trait**, `freeze` returns the concrete `LocalReader` / `ThreadedReader` (static dispatch, nameable and storable by value) | immutable, **lock-free + atomic-free** resolve | leak-until-drop | contained (`storage`) | ✅ flat / ❌ sharded | `str` |
+| **internity** `ThreadedLexicon` (concurrent) | `Sym(NonZeroU32)` = `[shard:6\|local:26]` | **4 B** | ✅ 4 B | ✅ | 64 `align(128)` shards, each `RwLock<{ offsets:Vec<u32>, bytes:Vec<u8>, HashTable<Entry { hash, sym }> }>`; upgradable-read dedup hits and atomically upgraded misses; **fill-then-freeze** (no live resolve); cheap `Clone` `Arc` handle | concurrent (`&self` intern, per-shard `RwLock`) | leak-until-drop | contained (`storage`) | ❌ (`std`) | `str` |
+| **internity** `Reader` (frozen) | `Sym(NonZeroU32)` (same) | **4 B** | ✅ 4 B | ✅ | `freeze()` → flat `(offsets:[u32], bytes:[u8])` blob (CSR start/end, branch-free) — one blob for `LocalLexicon`, per-shard for `ThreadedLexicon`; sealed `Reader` trait with boxed iteration | immutable, **lock-free + atomic-free** resolve | drop | contained (`storage`) | ✅ flat / ❌ sharded | `str` |
 | **lasso** `Rodeo` | `Spur`=`NonZeroU32` (Mini/Micro/Large: 1–8 B) | 4 B (1–8 B) | ✅ | ✅ | Doubling bump-arena buckets; hashbrown raw-entry (store key, probe by hash) | single-thread (`&mut`) | leak-until-drop | yes (`Key` trait) | ✅ | `str` |
 | **lasso** `ThreadedRodeo` | `Spur` (as above) | 4 B | ✅ | ✅ | **Two `DashMap`s** (str→key, key→str) + lock-free CAS arena | fully concurrent (`&self`) | leak-until-drop | yes | ✅ | `str` |
 | **lasso** `RodeoReader` | `Spur` | 4 B | ✅ | ✅ | Frozen: drops the str→key map, keeps both directions read-only | concurrent read (`Sync`) | frozen | yes | ✅ | `str` |
@@ -66,7 +68,7 @@ re-hash (and downstream maps can identity-hash the handle).
 | Crate / Model | Max distinct strings | Max single string | Cached hash | Other special features |
 |---|---|---|---|---|
 | **internity** `LocalLexicon` (single-thread) | `NonZeroU32` → **~4.29 B**, capped by a **≤ 4 GB** single buffer (`u32` offsets) | bounded by remaining buffer (≤ ~4 GB) | ❌ (recomputes on table resize) | flat dense-index resolve; `try_resolve` range-checks the numeric handle (out-of-range → `None`; in-range foreign handles may resolve to unrelated strings); `freeze()` → flat `Reader`; generic hasher (FxHash default); unchecked UTF-8 centralized in `storage`, Miri-clean; **`intern_bytes(&[u8])`** amortizes UTF-8 validation — checked once per distinct string, skipped on dedup hits — while still resolving to `&str` |
-| **internity** `ThreadedLexicon` (concurrent) | `[shard:6\|local:26]` → **~4.29 B** (≤ ~67 M per shard × 64) | bounded by its shard's **≤ 4 GB** buffer | ❌ | cheap `Clone` `Arc` handle; per-shard `RwLock` (cross-shard intern independent; same-shard intern serialized; plain reads coexist); **fill-then-freeze**; up to **~256 GB** aggregate bytes (64 × 4 GB shards); safe public API, Miri-clean; **`intern_bytes(&[u8])`** amortizes UTF-8 validation (checked once per distinct string, skipped on hits) |
+| **internity** `ThreadedLexicon` (concurrent) | `[shard:6\|local:26]` → **~4.29 B** (≤ ~67 M per shard × 64) | bounded by its shard's **≤ 4 GB** buffer | ✅ (per entry, used on resize) | cheap `Clone` `Arc` handle; per-shard `RwLock` (same-shard interners serialize under an upgradable read guard, while ordinary lookups share reads; misses atomically upgrade); default threaded handles are reproducible between 32-bit and 64-bit widening-multiply Fx targets (not native `sparc64`/`wasm64`); **fill-then-freeze** (unchanged shared snapshots can be reused); up to **~256 GB** aggregate bytes (64 × 4 GB shards); safe public API, Miri-clean; **`intern_bytes(&[u8])`** amortizes UTF-8 validation (checked once per distinct string, skipped on hits) |
 | **lasso** `Rodeo`/`ThreadedRodeo` | `Spur`=`NonZeroU32` → **~4.29 B** (`MiniSpur` 65 535 · `MicroSpur` 255 · `LargeSpur` `NonZeroUsize`) | bounded by memory / arena | ❌ | **`MemoryLimits`** (hard byte cap, fallible `try_get_or_intern`), `get_or_intern_static`, progressive freeze, custom `Key` widths/niches |
 | **string-interner** `StringBackend` | `SymbolU32`=`NonZeroU32` → **~4.29 B** (`u16`/`usize` keys selectable) | bounded by memory (`usize` end) | ❌ | swappable backends, serde by default, `iter()` |
 | **string-interner** `BufferBackend` | bounded by **~4 GB buffer** (symbol *is* a byte offset) | bounded by remaining buffer (varint len) | ❌ | smallest memory (varint packing, one allocation) |
@@ -79,11 +81,11 @@ re-hash (and downstream maps can identity-hash the handle).
 | **arc-interner** | unbounded (`Arc`; memory-bound) | bounded by memory | ❌ (value-hash O(n)) | generic `T`, Arc GC (unmaintained) |
 | **rustc `Symbol`** (ref) | `u32` → **~4.29 B** | bounded by arena | ❌ | `symbols!` pre-seeds keywords (range check, no hash), dropless bump arena, session-scoped |
 
-**Cached-hash takeaway:** only **ustr** and **string_cache** persist the string's
-hash in the handle/entry, which is why their repeated-lookup / map-key paths are so
-cheap (ustr's `resolve` is a handful of instructions; its maps skip re-hashing entirely).
-Index-handle interners (internity, lasso, string-interner, symbol_table) recompute
-the hash on each `intern` probe and on table growth.
+**Cached-hash takeaway:** **ustr** and **string_cache** persist a hash in the
+handle/entry for their map-key paths. Internity's threaded entries also cache
+their hashes for table growth, but its index handles do not carry those hashes:
+an `intern` probe still hashes its input. Other index-handle interners may
+recompute string hashes on growth.
 
 ---
 
@@ -163,12 +165,12 @@ win on top of the speed results above.
   a single-threaded **`LocalLexicon`** (flat `String` buffer + `Vec<u32>` CSR offsets,
   `&mut` intern) that leads `string-interner` on both insert and
   reuse, and a concurrent **`ThreadedLexicon`** (64 `align(128)` shards, per-shard
-  `RwLock` with an upgradable-read hit path, cheap `Clone` `Arc` handle) that
+  `RwLock` with upgradable-read interners, cheap `Clone` `Arc` handle) that
   leads `lasso` concurrent insert at every measured thread count and remains much
   faster than `symbol_table` for concurrent lookup.
-  Both are **fill-then-freeze**: `freeze()` yields a lock-free/atomic-free `Reader`
-  whose resolve is faster than the live interner's and costs a quarter of its index
-  memory. All unchecked UTF-8
+  Both are **fill-then-freeze**: `freeze()` yields a reader with lock-free,
+  atomic-free resolution. The historical frozen resolve measured
+  faster than the live interner at a quarter of its index memory. All unchecked UTF-8
   reconstruction is centralized in one `storage` module; every other module forbids `unsafe`.
   Miri-clean, range-checkable ids, generic hasher (FxHash default).
 - **lasso** — the concurrent workhorse with a **progressive-freezing pipeline**
@@ -231,7 +233,7 @@ win on top of the speed results above.
 | Solution | Great for | Ill-suited / avoid when |
 |---|---|---|
 | **internity** `LocalLexicon` (single-thread) | Single-threaded build-up of a symbol table with near-best insert/reuse, a 4-byte `Copy`, range-checkable handle, and unchecked UTF-8 isolated in one storage module; then `freeze()` for compact resolve | Concurrent interning (use `ThreadedLexicon`); resolve-heavy access **before** `freeze()`; a single corpus **> ~4 GB** of bytes |
-| **internity** `ThreadedLexicon` (concurrent) | Concurrent build-up from many threads (compilers, parsers, log/label ingestion); ahead of `lasso` at every measured insert thread count; frozen lookup is much faster than `symbol_table`; cross-shard dedup hits proceed independently; cheap `Clone` `Arc` handle | Needing to **resolve while still interning** — it's fill-then-freeze, so resolve happens on the frozen `Reader`; read-heavy repeated interning of values in one shard (one upgradable-read slot); retained-hit throughput at 8 threads on this workload (`lasso::ThreadedRodeo` leads); a single string **> ~4 GB** (its shard's buffer) |
+| **internity** `ThreadedLexicon` (concurrent) | Concurrent build-up from many threads (compilers, parsers, log/label ingestion); historically ahead of `lasso` at every measured insert thread count; frozen lookup historically faster than `symbol_table`; ordinary lookups share reads with upgradable-read interners; unchanged shared freezes reuse their snapshot; cheap `Clone` `Arc` handle | Needing to **resolve while still interning** — it's fill-then-freeze, so resolve happens on the frozen `Reader`; write-heavy skew toward one shard; historical retained-hit throughput at 8 threads favored `lasso::ThreadedRodeo`; a single string **> ~4 GB** (its shard's buffer) |
 | **internity** `Reader` (frozen) | Intern once, then resolve forever, lock-free and atomic-free, keeping existing `Sym`s valid; frozen `LocalLexicon` resolve is faster than the live interner's at ¼ its index memory | Any further interning (it's immutable); still behind `ustr`'s pointer-*is*-the-string resolve |
 | **lasso** `Rodeo` | Single-threaded interning with a clean, fallible API, tunable key width, and a **hard memory cap** | Concurrent writers (needs `ThreadedRodeo`); resolve-latency-critical paths where `ustr`/flat arrays win |
 | **lasso** `ThreadedRodeo` | Shared concurrent interner with both directions and fallible ops | **High core counts** — the dual-`DashMap` design scales poorly past ~24 threads and trails internity/symbol_table ~1.2–3× on concurrent insert; heaviest memory of the lasso family |
