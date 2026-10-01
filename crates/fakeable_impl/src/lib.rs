@@ -3,7 +3,7 @@
 
 //! Implementation details for the `fakeable` procedural macros.
 
-#![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 use proc_macro2::TokenStream;
 use quote::quote;
