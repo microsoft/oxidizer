@@ -706,6 +706,7 @@ fn launch_perf_worker(
 }
 
 #[cfg(not(target_os = "linux"))]
+#[cfg_attr(test, mutants::skip)] // `run_perf` rejects non-Linux hosts before this fallback can be called.
 fn launch_perf_worker(
     _executable: &Path,
     _native_arguments: &[OsString],
