@@ -18,9 +18,9 @@ use tick::Clock;
 use tick::runtime::{ClockDriver, InactiveClock};
 
 use crate::runtime::blocking_worker::BlockingWorker;
-use crate::runtime::context::Builtins;
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
 use crate::runtime::worker::signal::WorkerSignal;
+use crate::task::Builtins;
 use crate::task::local::LocalTaskScope;
 
 /// If we have nothing to do, we wait for something to happen for this long before executing

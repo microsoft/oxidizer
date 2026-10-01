@@ -32,7 +32,7 @@ cargo add arty --features macros
 ```
 
 ```rust
-use arty::runtime::Builtins;
+use arty::task::Builtins;
 
 #[arty::main]
 async fn main(cx: Builtins) -> Result<(), arty::task::JoinError> {
@@ -50,22 +50,23 @@ Await child work that must finish first; shutdown cancels pending asynchronous t
 * [`main`][__link2] and [`test`][__link3] start a runtime for an asynchronous entry point or test.
 * [`Runtime`][__link4] provides explicit configuration, ownership, and shutdown.
 * [`Builtins`][__link5] provides a task’s scheduler, clock, and worker coordinates.
-* [`TaskScheduler`][__link6] submits asynchronous and blocking work.
-  [`LocalTaskScheduler`][__link7] supports sharing non-`Send` state on one worker.
-* [`Clock`][__link8] provides timers and timeouts. [`ClockControl`][__link9] provides controlled test time.
-* [`Thread`][__link10] and [`ThreadAware`][__link11] describe
+* [`RuntimeScheduler`][__link6] distributes asynchronous and blocking work across workers.
+* [`TaskScheduler`][__link7] submits work to its associated worker.
+  [`LocalTaskScheduler`][__link8] supports sharing non-`Send` state on one worker.
+* [`Clock`][__link9] provides timers and timeouts. [`ClockControl`][__link10] provides controlled test time.
+* [`Thread`][__link11] and [`ThreadAware`][__link12] describe
   worker coordinates and explicitly relocatable values.
 
-The [guides][__link12] cover scheduling, thread awareness, shutdown, configuration, time, and telemetry.
+The [guides][__link13] cover scheduling, thread awareness, shutdown, configuration, time, and telemetry.
 
 ## Features
 
 No features are enabled by default.
 
 * **`rt`** - Enables the runtime and task APIs, and implies `time`.
-* **`macros`** - Enables [`main`][__link13] and [`test`][__link14], and implies `rt`.
+* **`macros`** - Enables [`main`][__link14] and [`test`][__link15], and implies `rt`.
 * **`time`** - Enables clocks, timers, and timeouts.
-* **`test-util`** - Enables testing utilities, including [`ClockControl`][__link15] with `time`.
+* **`test-util`** - Enables testing utilities, including [`ClockControl`][__link16] with `time`.
   Enable it in dev-dependencies, not production dependencies.
 
 
@@ -74,20 +75,21 @@ No features are enabled by default.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb2i7DQf3YWPIbnB4-qM4WlkkbFQ8i49jOjNMbScOrFlYjRqlhZIGCZGFydHllMC4zLjE
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbIPJwdYRb6PAbHaFlx38TJdIbd9uE2688xF8bH-87n-DVaTxhZIGCZGFydHllMC4zLjE
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link1]: https://docs.rs/arty/latest/arty/attr.main.html
- [__link10]: https://docs.rs/arty/0.3.1/arty/?search=core::Thread
- [__link11]: https://docs.rs/arty/0.3.1/arty/?search=core::ThreadAware
- [__link12]: https://docs.rs/arty/latest/arty/documentation/index.html
- [__link13]: https://docs.rs/arty/latest/arty/attr.main.html
- [__link14]: https://docs.rs/arty/latest/arty/attr.test.html
- [__link15]: https://docs.rs/arty/latest/arty/time/struct.ClockControl.html
+ [__link10]: https://docs.rs/arty/latest/arty/time/struct.ClockControl.html
+ [__link11]: https://docs.rs/arty/0.3.1/arty/?search=core::Thread
+ [__link12]: https://docs.rs/arty/0.3.1/arty/?search=core::ThreadAware
+ [__link13]: https://docs.rs/arty/latest/arty/documentation/index.html
+ [__link14]: https://docs.rs/arty/latest/arty/attr.main.html
+ [__link15]: https://docs.rs/arty/latest/arty/attr.test.html
+ [__link16]: https://docs.rs/arty/latest/arty/time/struct.ClockControl.html
  [__link2]: https://docs.rs/arty/latest/arty/attr.main.html
  [__link3]: https://docs.rs/arty/latest/arty/attr.test.html
  [__link4]: https://docs.rs/arty/latest/arty/runtime/struct.Runtime.html
- [__link5]: https://docs.rs/arty/latest/arty/runtime/struct.Builtins.html
- [__link6]: https://docs.rs/arty/latest/arty/task/struct.TaskScheduler.html
- [__link7]: https://docs.rs/arty/latest/arty/task/struct.LocalTaskScheduler.html
- [__link8]: https://docs.rs/arty/latest/arty/time/struct.Clock.html
- [__link9]: https://docs.rs/arty/latest/arty/time/struct.ClockControl.html
+ [__link5]: https://docs.rs/arty/latest/arty/task/struct.Builtins.html
+ [__link6]: https://docs.rs/arty/latest/arty/task/struct.RuntimeScheduler.html
+ [__link7]: https://docs.rs/arty/latest/arty/task/struct.TaskScheduler.html
+ [__link8]: https://docs.rs/arty/latest/arty/task/struct.LocalTaskScheduler.html
+ [__link9]: https://docs.rs/arty/latest/arty/time/struct.Clock.html

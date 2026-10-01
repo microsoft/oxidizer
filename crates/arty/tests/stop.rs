@@ -10,7 +10,7 @@ testing_aids::init_tracing!();
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use arty::runtime::Runtime;
+use arty::runtime::{Runtime, RuntimeOperations};
 use events_once::{BoxedReceiver, Event};
 use testing_aids::execute_or_abandon;
 
@@ -33,11 +33,10 @@ fn stop_via_runtime() {
 
         let (canary, started, observer) = canary();
 
-        runtime.task_scheduler().spawn(async |_| canary.await);
+        runtime.scheduler().spawn_anywhere(async |_| canary.await);
         futures::executor::block_on(started).unwrap();
 
         runtime.stop();
-        runtime.wait();
 
         // We expect the canary to have died. Otherwise, the runtime is still running!
         assert!(observer.upgrade().is_none());
@@ -52,15 +51,18 @@ fn stop_via_async_task() {
 
         let (canary, started, observer) = canary();
 
-        runtime.task_scheduler().spawn(async |_| canary.await);
+        runtime.scheduler().spawn_anywhere(async |_| canary.await);
 
         futures::executor::block_on(started).unwrap();
 
-        runtime.task_scheduler().spawn(async move |cx| {
-            cx.runtime_operations().stop();
+        let (requested, stop_requested) = Event::boxed();
+        runtime.scheduler().spawn_anywhere(async move |cx| {
+            RuntimeOperations::from(&cx).request_stop();
+            requested.send(());
         });
 
-        runtime.wait();
+        futures::executor::block_on(stop_requested).unwrap();
+        runtime.stop();
 
         // We expect the canary to have died. Otherwise, the runtime is still running!
         assert!(observer.upgrade().is_none());
@@ -86,7 +88,8 @@ fn stop_in_run() {
         move || {
             Runtime::new()
                 .unwrap()
-                .run(async move |_| {
+                .scheduler()
+                .block_on(async move |_| {
                     task_was_executed.store(true, Ordering::Relaxed);
                 })
                 .unwrap();

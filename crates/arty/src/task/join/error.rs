@@ -9,8 +9,8 @@ use std::sync::Mutex;
 /// A task failed to return its result.
 ///
 /// Returned by [`JoinHandle`](super::JoinHandle),
-/// [`LocalJoinHandle`](super::LocalJoinHandle), and the runtime's `run` and
-/// `block_on` methods. Use [`is_panic`](Self::is_panic) to identify a task panic
+/// [`LocalJoinHandle`](super::LocalJoinHandle), and as the source of a scheduler's
+/// `block_on` error. Use [`is_panic`](Self::is_panic) to identify a task panic
 /// or [`is_shutdown`](Self::is_shutdown) to identify cancellation or rejection.
 ///
 /// This is separate from an error returned by the task's own code. Joining a
@@ -23,18 +23,18 @@ use std::sync::Mutex;
 /// A submission after shutdown reports a task error without invoking its factory:
 ///
 /// ```
-/// use arty::runtime::Runtime;
+/// use arty::runtime::{Runtime, RuntimeOperations};
 ///
 /// let runtime = Runtime::new()?;
-/// let scheduler = runtime.task_scheduler();
-/// runtime.stop();
+/// let scheduler = runtime.scheduler();
+/// RuntimeOperations::from(&runtime).request_stop();
 /// let error = scheduler
-///     .spawn(async |_| 42)
+///     .spawn_anywhere(async |_| 42)
 ///     .wait()
 ///     .expect_err("submission follows shutdown");
 /// assert!(error.is_shutdown());
 /// assert!(!error.is_panic());
-/// runtime.wait();
+/// runtime.stop();
 /// # Ok::<(), arty::runtime::Error>(())
 /// ```
 pub struct JoinError {
@@ -53,7 +53,7 @@ impl JoinError {
     /// ```
     /// # #[cfg(feature = "macros")]
     /// #[arty::main]
-    /// async fn main(cx: arty::runtime::Builtins) -> Result<(), arty::task::JoinError> {
+    /// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
     ///     let result: Result<(), arty::task::JoinError> =
     ///         cx.scheduler().spawn(async |_| panic!("task failed")).await;
     ///     let error = result.expect_err("the task deliberately panics");
@@ -72,17 +72,17 @@ impl JoinError {
     /// # Examples
     ///
     /// ```
-    /// use arty::runtime::Runtime;
+    /// use arty::runtime::{Runtime, RuntimeOperations};
     ///
     /// let runtime = Runtime::new()?;
-    /// let scheduler = runtime.task_scheduler();
-    /// runtime.stop();
+    /// let scheduler = runtime.scheduler();
+    /// RuntimeOperations::from(&runtime).request_stop();
     /// let error = scheduler
-    ///     .spawn(async |_| 42)
+    ///     .spawn_anywhere(async |_| 42)
     ///     .wait()
     ///     .expect_err("submission follows shutdown");
     /// assert!(error.is_shutdown());
-    /// runtime.wait();
+    /// runtime.stop();
     /// # Ok::<(), arty::runtime::Error>(())
     /// ```
     #[must_use]

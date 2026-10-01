@@ -8,9 +8,9 @@ use std::sync::atomic::AtomicBool;
 use std::thread::ThreadId;
 
 use crate::runtime::blocking_worker::BlockingWorker;
-use crate::runtime::context::Builtins;
 use crate::runtime::dispatch::{DispatcherCore, WorkerIndex};
 use crate::runtime::thread::waiter::ThreadWaiter;
+use crate::task::Builtins;
 use crate::task::join::JoinHandle;
 
 /// Cheap shared access to one runtime's routing and shutdown state.
@@ -86,6 +86,16 @@ impl DispatcherClient {
         R: Send + 'static,
     {
         self.core.spawn(future_factory)
+    }
+
+    pub(crate) fn spawn_everywhere<M, FF, F, R>(&self, make_factory: M) -> Vec<JoinHandle<R>>
+    where
+        M: FnMut() -> FF,
+        FF: FnOnce(Builtins) -> F + Send + 'static,
+        F: Future<Output = R> + 'static,
+        R: Send + 'static,
+    {
+        self.core.spawn_everywhere(make_factory)
     }
 }
 

@@ -4,16 +4,24 @@
 use std::error::Error as StdError;
 use std::fmt::{self, Display};
 
-/// An error constructing a runtime.
+/// An error constructing or operating a runtime.
 ///
 /// [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build) returns this
 /// error when a processor count is zero or a policy cannot be satisfied, such
 /// as an exact count exceeding the available processors.
 ///
+/// [`RuntimeOperations::pin_to`](crate::runtime::RuntimeOperations::pin_to)
+/// returns this error for a worker coordinate that cannot provide affinity
+/// information for its runtime.
+///
+/// [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on)
+/// returns this error for an invalid calling context or a failed task. A task
+/// failure is retained as a [`JoinError`](crate::task::JoinError) source.
+///
 /// Format the error with [`Display`] and inspect [`StdError::source`] for
-/// diagnostics. Its message and concrete source type are not stable error
-/// classifications. Task failures are reported separately as
-/// [`JoinError`](crate::task::JoinError).
+/// diagnostics. Construction and affinity error messages and concrete source
+/// types are not stable error classifications. Task joins report
+/// [`JoinError`](crate::task::JoinError) directly.
 #[derive(Debug)]
 pub struct Error {
     source: Box<dyn StdError + Send + Sync>,
@@ -26,6 +34,11 @@ impl Error {
 
     pub(crate) fn insufficient_processors(requested: usize, available: usize) -> Self {
         Self::new(InsufficientProcessors { requested, available })
+    }
+
+    #[cfg(any(test, feature = "macros"))]
+    pub(crate) fn into_source(self) -> Box<dyn StdError + Send + Sync> {
+        self.source
     }
 }
 

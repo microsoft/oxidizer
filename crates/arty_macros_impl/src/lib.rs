@@ -92,7 +92,7 @@ fn worker_count(mut value: &Expr) -> syn::Result<&syn::LitInt> {
 /// let expanded = arty_macros_impl::main(
 ///     quote!(),
 ///     quote!(
-///         async fn main(cx: arty::runtime::Builtins) {}
+///         async fn main(cx: arty::task::Builtins) {}
 ///     ),
 /// );
 /// assert!(!expanded.is_empty());
@@ -120,7 +120,7 @@ pub fn main(args: TokenStream, item: TokenStream) -> TokenStream {
 /// let expanded = arty_macros_impl::test(
 ///     quote!(),
 ///     quote!(
-///         async fn checks_answer(cx: arty::runtime::Builtins) {
+///         async fn checks_answer(cx: arty::task::Builtins) {
 ///             assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
 ///         }
 ///     ),
@@ -184,6 +184,8 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
         return fail(syn::Error::new_spanned(extra, "unexpected arguments"));
     }
     let clock_binding = Ident::new("__arty_clock_control", Span::mixed_site());
+    let runtime_binding = Ident::new("__arty_runtime", Span::mixed_site());
+    let result_binding = Ident::new("__arty_result", Span::mixed_site());
     let runtime = match args.runtime(runtime_path, clock.as_ref().map(|_| &clock_binding)) {
         Ok(runtime) => runtime,
         Err(error) => return fail(error),
@@ -211,10 +213,13 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
         #(#attrs)*
         #visibility #sig {
             #setup
-            #runtime
-                .expect("failed to create the runtime for the entry point")
-                .run(async move |#state_ident: #state_type| #body)
-                .unwrap_or_else(|error| #runtime_path::__private::resume_join_error(error))
+            let #runtime_binding = #runtime
+                .expect("failed to create the runtime for the entry point");
+            let #result_binding = #runtime_binding
+                .scheduler()
+                .block_on(async move |#state_ident: #state_type| #body);
+            #runtime_binding.stop();
+            #result_binding.unwrap_or_else(|error| #runtime_path::__private::resume_error(error))
         }
     }
 }
@@ -232,17 +237,20 @@ mod tests {
         let expansion = main(
             TokenStream::new(),
             quote! {
-                pub async fn main(cx: arty::runtime::Builtins) -> Result<(), Error> {
+                pub async fn main(cx: arty::task::Builtins) -> Result<(), Error> {
                     run(cx).await
                 }
             },
         );
         assert_snapshot!(render_expansion(&expansion), @r#"
         pub fn main() -> Result<(), Error> {
-            ::arty::runtime::Runtime::new()
-                .expect("failed to create the runtime for the entry point")
-                .run(async move |cx: arty::runtime::Builtins| { run(cx).await })
-                .unwrap_or_else(|error| ::arty::runtime::__private::resume_join_error(error))
+            let __arty_runtime = ::arty::runtime::Runtime::new()
+                .expect("failed to create the runtime for the entry point");
+            let __arty_result = __arty_runtime
+                .scheduler()
+                .block_on(async move |cx: arty::task::Builtins| { run(cx).await });
+            __arty_runtime.stop();
+            __arty_result.unwrap_or_else(|error| ::arty::runtime::__private::resume_error(error))
         }
         "#);
     }
@@ -262,12 +270,15 @@ mod tests {
         #[should_panic(expected = "original payload")]
         #[::core::prelude::v1::test]
         fn fails() {
-            ::renamed::Runtime::new()
-                .expect("failed to create the runtime for the entry point")
-                .run(async move |mut cx: renamed::Builtins| {
+            let __arty_runtime = ::renamed::Runtime::new()
+                .expect("failed to create the runtime for the entry point");
+            let __arty_result = __arty_runtime
+                .scheduler()
+                .block_on(async move |mut cx: renamed::Builtins| {
                     fail(&mut cx).await;
-                })
-                .unwrap_or_else(|error| ::renamed::__private::resume_join_error(error))
+                });
+            __arty_runtime.stop();
+            __arty_result.unwrap_or_else(|error| ::renamed::__private::resume_error(error))
         }
         "#);
     }
@@ -284,12 +295,15 @@ mod tests {
         );
         let expected = quote! {
             pub fn run() -> AppResult {
-                ::renamed::Runtime::builder()
+                let __arty_runtime = ::renamed::Runtime::builder()
                     .processor_count(::renamed::ProcessorCount::at_most(4usize))
                     .build()
-                    .expect("failed to create the runtime for the entry point")
-                    .run(async move |cx: <App as Types>::Context| { run(cx).await })
-                    .unwrap_or_else(|error| ::renamed::__private::resume_join_error(error))
+                    .expect("failed to create the runtime for the entry point");
+                let __arty_result = __arty_runtime
+                    .scheduler()
+                    .block_on(async move |cx: <App as Types>::Context| { run(cx).await });
+                __arty_runtime.stop();
+                __arty_result.unwrap_or_else(|error| ::renamed::__private::resume_error(error))
             }
         };
         assert_eq!(expansion.to_string(), expected.to_string());
@@ -307,10 +321,13 @@ mod tests {
         );
         let expected = quote! {
             fn run() -> AppResult {
-                ::renamed::RuntimeBuilder::build(app_builder()?)
-                    .expect("failed to create the runtime for the entry point")
-                    .run(async move |cx: Context| { run(cx).await })
-                    .unwrap_or_else(|error| ::renamed::__private::resume_join_error(error))
+                let __arty_runtime = ::renamed::RuntimeBuilder::build(app_builder()?)
+                    .expect("failed to create the runtime for the entry point");
+                let __arty_result = __arty_runtime
+                    .scheduler()
+                    .block_on(async move |cx: Context| { run(cx).await });
+                __arty_runtime.stop();
+                __arty_result.unwrap_or_else(|error| ::renamed::__private::resume_error(error))
             }
         };
         assert_eq!(expansion.to_string(), expected.to_string());
@@ -334,18 +351,21 @@ mod tests {
             #[::core::prelude::v1::test]
             fn run() {
                 let __arty_clock_control = crate::renamed::__private::ClockControl::new();
-                crate::renamed::Runtime::builder()
+                let __arty_runtime = crate::renamed::Runtime::builder()
                     .processor_count(crate::renamed::ProcessorCount::at_most(1))
                     .clock(::core::clone::Clone::clone(&__arty_clock_control))
                     .build()
-                    .expect("failed to create the runtime for the entry point")
-                    .run(async move |cx: <App as Types>::Context| {
+                    .expect("failed to create the runtime for the entry point");
+                let __arty_result = __arty_runtime
+                    .scheduler()
+                    .block_on(async move |cx: <App as Types>::Context| {
                         let mut time: <App as Types>::Control = __arty_clock_control;
                         {
                             run(cx, &mut time).await;
                         }
-                    })
-                    .unwrap_or_else(|error| crate::renamed::__private::resume_join_error(error))
+                    });
+                __arty_runtime.stop();
+                __arty_result.unwrap_or_else(|error| crate::renamed::__private::resume_error(error))
             }
         };
         assert_eq!(expansion.to_string(), expected.to_string());

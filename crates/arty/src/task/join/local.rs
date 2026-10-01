@@ -28,7 +28,7 @@ use crate::task::execution::TaskResult;
 /// ```
 /// # #[cfg(feature = "macros")]
 /// #[arty::main]
-/// async fn main(cx: arty::runtime::Builtins) -> Result<(), arty::task::JoinError> {
+/// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
 ///     use std::rc::Rc;
 ///
 ///     let scheduler = cx

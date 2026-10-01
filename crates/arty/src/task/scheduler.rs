@@ -6,17 +6,16 @@ use std::sync::Arc;
 use thread_aware::{Thread, ThreadAware};
 
 use crate::runtime::blocking_worker::BlockingWorker;
-use crate::runtime::context::Builtins;
 use crate::runtime::dispatch::{DispatcherClient, WorkerIndex};
+use crate::task::Builtins;
 use crate::task::join::JoinHandle;
 
 /// A handle for submitting asynchronous and blocking tasks.
 ///
-/// Obtain a scheduler from
-/// [`Runtime::task_scheduler`](crate::runtime::Runtime::task_scheduler) to
-/// distribute work across workers, or from [`Builtins::scheduler`] to keep child
-/// tasks on the same worker. Clones preserve the association and do not keep the
-/// runtime running.
+/// Obtain this scheduler from [`Builtins::scheduler`] to keep child tasks on
+/// the same worker. Clones preserve the association and do not keep the runtime
+/// running. Use [`RuntimeScheduler`](crate::task::RuntimeScheduler) for
+/// runtime-wide submissions from synchronous code.
 ///
 /// [`spawn`](Self::spawn) sends a factory to a worker and creates its future
 /// there. The future can retain non-[`Send`] state, but captures sent to the worker
@@ -38,7 +37,7 @@ use crate::task::join::JoinHandle;
 /// ```
 /// # #[cfg(feature = "macros")]
 /// #[arty::main]
-/// async fn main(cx: arty::runtime::Builtins) -> Result<(), arty::task::JoinError> {
+/// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
 ///     let scheduler = cx.scheduler().clone();
 ///     let task = scheduler.spawn(async |_| 42);
 ///     assert_eq!(task.await?, 42);
@@ -48,8 +47,8 @@ use crate::task::join::JoinHandle;
 /// ```
 #[derive(Debug, Clone)]
 pub struct TaskScheduler {
-    dispatcher: DispatcherClient,
-    binding: Option<Binding>,
+    pub(crate) dispatcher: DispatcherClient,
+    binding: Binding,
 }
 
 #[derive(Debug, Clone)]
@@ -67,23 +66,16 @@ impl TaskScheduler {
         let blocking_worker = dispatcher.blocking_worker(worker_index);
         Self {
             dispatcher,
-            binding: Some(Binding {
+            binding: Binding {
                 thread: current,
                 worker_index,
                 blocking_worker,
-            }),
+            },
         }
     }
 
-    pub(crate) const fn detached(dispatcher: DispatcherClient) -> Self {
-        Self { dispatcher, binding: None }
-    }
-
     pub(crate) fn current_worker_index(&self) -> WorkerIndex {
-        self.binding
-            .as_ref()
-            .expect("worker initialization uses a bound scheduler")
-            .worker_index
+        self.binding.worker_index
     }
 
     pub(crate) fn resolve_worker_index(&self, thread: &Thread) -> Option<WorkerIndex> {
@@ -94,17 +86,16 @@ impl TaskScheduler {
     }
 
     pub(crate) fn relocate_to_worker(&mut self, destination: &Thread, worker_index: WorkerIndex) {
-        self.binding = Some(Binding {
+        self.binding = Binding {
             thread: destination.clone(),
             worker_index,
             blocking_worker: self.dispatcher.blocking_worker(worker_index),
-        });
+        };
     }
 
     /// Submits an asynchronous task to this scheduler's worker.
     ///
-    /// A detached scheduler selects workers round-robin. The factory runs on
-    /// the selected worker with owned [`Builtins`] and creates the future there,
+    /// The factory runs on the associated worker with owned [`Builtins`] and creates the future there,
     /// so the future itself need not be [`Send`]. Pass a factory, not an
     /// already-created future.
     ///
@@ -122,7 +113,7 @@ impl TaskScheduler {
     /// ```
     /// # #[cfg(feature = "macros")]
     /// #[arty::main]
-    /// async fn main(cx: arty::runtime::Builtins) -> Result<(), arty::task::JoinError> {
+    /// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
     ///     use std::rc::Rc;
     ///     use std::time::Duration;
     ///
@@ -147,18 +138,15 @@ impl TaskScheduler {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        match &self.binding {
-            Some(binding) => self.dispatcher.spawn_on_worker(binding.worker_index, future_factory),
-            None => self.dispatcher.spawn(future_factory),
-        }
+        self.dispatcher.spawn_on_worker(self.binding.worker_index, future_factory)
     }
 
     /// Distributes a task across workers and relocates its payload.
     ///
-    /// Selects a destination round-robin, even when this scheduler is worker-bound.
+    /// Selects a destination round-robin.
     /// On that worker, calls [`ThreadAware::relocate`] on `data` before invoking
-    /// `f`. The source coordinate is this scheduler's association, or `None` for
-    /// a detached scheduler. The destination may be the source worker.
+    /// `f`. The source coordinate is this scheduler's associated worker.
+    /// The destination may be the source worker.
     ///
     /// The factory is a function pointer: pass its input as `data`, rather than
     /// capturing it in a closure. The returned result is not relocated.
@@ -170,7 +158,7 @@ impl TaskScheduler {
     /// ```
     /// # #[cfg(feature = "macros")]
     /// #[arty::main]
-    /// async fn main(cx: arty::runtime::Builtins) -> Result<(), arty::task::JoinError> {
+    /// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
     ///     let answer = cx
     ///         .scheduler()
     ///         .spawn_anywhere(cx.clone(), |moved| async move {
@@ -186,15 +174,58 @@ impl TaskScheduler {
     /// ```
     pub fn spawn_anywhere<D, F, R>(&self, data: D, f: fn(D) -> F) -> JoinHandle<R>
     where
-        D: ThreadAware + Send + 'static,
+        D: ThreadAware + 'static,
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        let source = self.binding.as_ref().map(|binding| binding.thread.clone());
+        let source = self.binding.thread.clone();
         self.dispatcher.spawn(async move |cx| {
             let mut data = data;
-            data.relocate(source.as_ref(), cx.thread());
+            data.relocate(Some(&source), cx.thread());
             f(data).await
+        })
+    }
+
+    /// Submits one task to every worker and relocates a clone of its payload.
+    ///
+    /// Clones `data` once per worker and calls [`ThreadAware::relocate`] on each
+    /// clone before invoking `f`. The source is this scheduler's associated worker.
+    /// Each destination receives exactly one task, independently of concurrent
+    /// round-robin submissions.
+    ///
+    /// Returns joins in the runtime's worker order. Futures need not be [`Send`];
+    /// their results must be. Shutdown rejects submissions without invoking `f`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "macros")]
+    /// #[arty::main]
+    /// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+    ///     let tasks = cx
+    ///         .scheduler()
+    ///         .spawn_everywhere(cx.clone(), |worker| async move { worker.thread().id() });
+    ///     for task in tasks {
+    ///         let _worker = task.await?;
+    ///     }
+    ///     Ok(())
+    /// }
+    /// # #[cfg(not(feature = "macros"))] fn main() {}
+    /// ```
+    pub fn spawn_everywhere<D, F, R>(&self, data: D, f: fn(D) -> F) -> Vec<JoinHandle<R>>
+    where
+        D: ThreadAware + Clone + 'static,
+        F: Future<Output = R> + 'static,
+        R: Send + 'static,
+    {
+        let source = &self.binding.thread;
+        self.dispatcher.spawn_everywhere(|| {
+            let source = source.clone();
+            let mut data = data.clone();
+            async move |cx| {
+                data.relocate(Some(&source), cx.thread());
+                f(data).await
+            }
         })
     }
 
@@ -204,8 +235,7 @@ impl TaskScheduler {
     /// an asynchronous worker from polling tasks and advancing timers. The callback
     /// runs on a separate pool thread; its panic is reported through the join.
     ///
-    /// A bound scheduler uses its worker's pool; a detached scheduler selects a
-    /// worker's pool round-robin. Configure sharing and limits with
+    /// Uses the associated worker's pool. Configure sharing and limits with
     /// [`BlockingPoolPolicy`](crate::runtime::BlockingPoolPolicy).
     ///
     /// Shutdown rejects new callbacks and cancels queued ones before invocation.
@@ -220,7 +250,7 @@ impl TaskScheduler {
     /// # #[cfg(feature = "macros")]
     /// #[arty::main]
     /// async fn main(
-    ///     cx: arty::runtime::Builtins,
+    ///     cx: arty::task::Builtins,
     /// ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     ///     let contents = cx
     ///         .scheduler()
@@ -241,21 +271,18 @@ impl TaskScheduler {
         if self.dispatcher.is_shutting_down() {
             return JoinHandle::shutdown();
         }
-        match &self.binding {
-            Some(binding) => binding.blocking_worker.spawn_blocking(body),
-            None => self.dispatcher.next_blocking_worker().spawn_blocking(body),
-        }
+        self.binding.blocking_worker.spawn_blocking(body)
     }
 
     #[cfg(test)]
     pub(crate) fn blocking_worker(&self) -> &Arc<BlockingWorker> {
-        &self.binding.as_ref().unwrap().blocking_worker
+        &self.binding.blocking_worker
     }
 }
 
 impl ThreadAware for TaskScheduler {
     fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
-        if self.binding.as_ref().is_some_and(|binding| binding.thread == *destination) {
+        if self.binding.thread == *destination {
             return;
         }
         if let Some(index) = self.resolve_worker_index(destination) {
@@ -296,8 +323,8 @@ mod tests {
             .build()
             .unwrap();
         let (source, mut scheduler) = runtime
-            .task_scheduler()
-            .spawn(async |cx| (cx.thread().clone(), cx.scheduler().clone()))
+            .scheduler()
+            .spawn_anywhere(async |cx| (cx.thread().clone(), cx.scheduler().clone()))
             .wait()
             .unwrap();
         let foreign = thread_aware::ThreadBuilder::default().build(source.id());

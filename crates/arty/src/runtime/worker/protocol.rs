@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use crate::runtime::context::Builtins;
+use crate::task::Builtins;
 use crate::task::execution::BoxedRemoteFutureFactory;
 
 pub(in crate::runtime) enum AsyncWorkerCommand<TS = Builtins> {

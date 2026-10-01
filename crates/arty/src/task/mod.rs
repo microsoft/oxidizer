@@ -3,11 +3,11 @@
 
 //! Task scheduling and result handles.
 //!
-//! Use [`TaskScheduler`] to submit asynchronous or blocking work. A scheduler
-//! from [`Runtime::task_scheduler`](crate::runtime::Runtime::task_scheduler)
-//! distributes tasks across workers. A scheduler from
-//! [`Builtins::scheduler`](crate::runtime::Builtins::scheduler) keeps child tasks
-//! on the same worker.
+//! Borrow a [`RuntimeScheduler`] from
+//! [`Runtime::scheduler`](crate::runtime::Runtime::scheduler)
+//! to distribute work across workers. Each task receives [`Builtins`] containing
+//! its worker's services. [`Builtins::scheduler`] returns a [`TaskScheduler`]
+//! that keeps child tasks on the same worker.
 //!
 //! Pass a factory, such as `async |cx| { /* work */ }`, rather than an
 //! already-created future. Arty invokes it on the destination worker, so the
@@ -26,7 +26,7 @@
 //! ```
 //! # #[cfg(feature = "macros")]
 //! #[arty::main]
-//! async fn main(cx: arty::runtime::Builtins) -> Result<(), arty::task::JoinError> {
+//! async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
 //!     let task = cx.scheduler().spawn(async |_| 6 * 7);
 //!     assert_eq!(task.await?, 42);
 //!     Ok(())
@@ -38,14 +38,20 @@
 //! Dropping a join handle does not cancel its task. See the crate's
 //! [guides](crate#documentation) for local tasks, blocking work, and relocation.
 
+pub(crate) mod builtins;
 pub(crate) mod execution;
 pub(crate) mod join;
 pub(crate) mod local;
+mod runtime_scheduler;
 pub(crate) mod scheduler;
 
+#[doc(inline)]
+pub use builtins::Builtins;
 #[doc(inline)]
 pub use join::{JoinError, JoinHandle, LocalJoinHandle};
 #[doc(inline)]
 pub use local::LocalTaskScheduler;
+#[doc(inline)]
+pub use runtime_scheduler::RuntimeScheduler;
 #[doc(inline)]
 pub use scheduler::TaskScheduler;

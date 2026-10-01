@@ -28,6 +28,10 @@ pub(crate) fn assert_not_flagged() {
     });
 }
 
+pub(crate) fn is_flagged() -> bool {
+    IS_FLAGGED.with(Cell::get)
+}
+
 thread_local! {
     /// The functions in this module may be called from any thread (via `Runtime`) and do not have
     /// access to the Arty runtime task context, as the functions are not necessarily executing

@@ -36,8 +36,8 @@ fn stash_scheduler() {
     )]
     execute_or_terminate_process(move || {
         runtime
-            .task_scheduler()
-            .spawn(async move |cx| {
+            .scheduler()
+            .spawn_anywhere(async move |cx| {
                 // We store the scheduler in a thingy and try to use it from the thingy
                 // without having direct access to the task context.
                 let thingy = Thingy {
@@ -48,7 +48,7 @@ fn stash_scheduler() {
 
                 assert_eq!(pi, 3.0);
 
-                // It works even from a different task if we detach the scheduler.
+                // The stored worker-bound scheduler also works from a different task.
                 let thingy = Thingy {
                     scheduler: cx.scheduler().clone(),
                 };
@@ -67,8 +67,8 @@ fn stash_scheduler() {
             .unwrap();
 
         runtime
-            .task_scheduler()
-            .spawn(async move |cx| {
+            .scheduler()
+            .spawn_anywhere(async move |cx| {
                 // We store the scheduler in a thread-local variable.
                 THREAD_LOCAL_STASH.with_borrow_mut(|stash| {
                     *stash = Some(cx.scheduler().clone());

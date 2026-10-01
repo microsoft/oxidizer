@@ -5,6 +5,7 @@
 
 //! Task failure and shutdown are results, not unwinds or permanently pending joins.
 
+use std::error::Error as _;
 use std::future::{pending, ready};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::pin;
@@ -13,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll, Waker};
 
-use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime};
+use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime, RuntimeOperations};
 use arty::task::{JoinError, JoinHandle};
 use testing_aids::{TEST_TIMEOUT, execute_or_terminate_process};
 
@@ -31,10 +32,10 @@ fn runtime() -> Runtime {
 #[test]
 fn async_and_blocking_panics_do_not_unwind_the_joiner() {
     let runtime = runtime();
-    let scheduler = runtime.task_scheduler();
+    let scheduler = runtime.scheduler();
     let handles: [JoinHandle<()>; 3] = [
-        scheduler.spawn(|_| -> std::future::Ready<()> { panic!("factory panic") }),
-        scheduler.spawn(async |_| panic!("poll panic")),
+        scheduler.spawn_anywhere(|_| -> std::future::Ready<()> { panic!("factory panic") }),
+        scheduler.spawn_anywhere(async |_| panic!("poll panic")),
         scheduler.spawn_blocking(|| panic!("blocking panic")),
     ];
     for handle in handles {
@@ -43,13 +44,14 @@ fn async_and_blocking_panics_do_not_unwind_the_joiner() {
         assert!(error.is_panic());
         assert!(!error.is_shutdown());
     }
-    assert_eq!(scheduler.spawn(async |_| 42).wait().unwrap(), 42);
+    assert_eq!(scheduler.spawn_anywhere(async |_| 42).wait().unwrap(), 42);
 }
 
 #[test]
 fn local_factory_and_poll_panics_are_join_errors() {
     runtime()
-        .run(async |cx| {
+        .scheduler()
+        .block_on(async |cx| {
             let scheduler = cx.local_scheduler().unwrap();
             let factory = catch_unwind(AssertUnwindSafe(|| {
                 scheduler.spawn(|| -> std::future::Ready<()> { panic!("local factory panic") })
@@ -66,9 +68,10 @@ fn local_factory_and_poll_panics_are_join_errors() {
 #[test]
 fn stop_rejects_remote_blocking_and_local_factories_immediately() {
     runtime()
-        .run(async |cx| {
+        .scheduler()
+        .block_on(async |cx| {
             let local = cx.local_scheduler().unwrap();
-            cx.runtime_operations().stop();
+            RuntimeOperations::from(&cx).request_stop();
             let invoked = Arc::new(AtomicBool::new(false));
             let remote = cx.scheduler().spawn({
                 let invoked = Arc::clone(&invoked);
@@ -120,7 +123,7 @@ fn shutdown_cancels_pending_async_work_and_destroys_its_future() {
         let runtime = runtime();
         let (started, receive_start) = mpsc::channel();
         let (dropped, receive_drop) = mpsc::channel();
-        let task = runtime.task_scheduler().spawn(async move |_| {
+        let task = runtime.scheduler().spawn_anywhere(async move |_| {
             let guard = Dropped(dropped);
             started.send(()).unwrap();
             pending::<()>().await;
@@ -130,7 +133,6 @@ fn shutdown_cancels_pending_async_work_and_destroys_its_future() {
         runtime.stop();
         assert!(task.wait().unwrap_err().is_shutdown());
         receive_drop.recv_timeout(TEST_TIMEOUT).unwrap();
-        runtime.wait();
     });
 }
 
@@ -138,7 +140,8 @@ fn shutdown_cancels_pending_async_work_and_destroys_its_future() {
 fn queued_blocking_work_is_cancelled_but_running_work_finishes() {
     execute_or_terminate_process(|| {
         let runtime = runtime();
-        let scheduler = runtime.task_scheduler();
+        let operations = RuntimeOperations::from(&runtime);
+        let scheduler = runtime.scheduler();
         let (started, receive_start) = mpsc::channel();
         let (release, receive_release) = mpsc::channel();
         let running = scheduler.spawn_blocking(move || {
@@ -152,25 +155,45 @@ fn queued_blocking_work_is_cancelled_but_running_work_finishes() {
             let invoked = Arc::clone(&invoked);
             move || invoked.store(true, Ordering::Relaxed)
         });
-        runtime.stop();
+        operations.request_stop();
         assert!(scheduler.spawn_blocking(|| 7).wait().unwrap_err().is_shutdown());
         release.send(()).unwrap();
         assert_eq!(running.wait().unwrap(), 42);
         assert!(queued.wait().unwrap_err().is_shutdown());
         assert!(!invoked.load(Ordering::Relaxed));
-        runtime.wait();
+        runtime.stop();
     });
 }
 
 #[test]
 fn root_execution_returns_errors_and_preserves_borrowed_storage() {
     let runtime = runtime();
-    assert!(runtime.block_on(async |_| panic!("root panic")).unwrap_err().is_panic());
-    runtime.stop();
+    assert!(
+        runtime
+            .scheduler()
+            .block_on(async |_| panic!("root panic"))
+            .unwrap_err()
+            .source()
+            .unwrap()
+            .downcast_ref::<JoinError>()
+            .unwrap()
+            .is_panic()
+    );
+    RuntimeOperations::from(&runtime).request_stop();
     let mut value = 0;
-    assert!(runtime.block_on(async |_| value = 42).unwrap_err().is_shutdown());
+    assert!(
+        runtime
+            .scheduler()
+            .block_on(async |_| value = 42)
+            .unwrap_err()
+            .source()
+            .unwrap()
+            .downcast_ref::<JoinError>()
+            .unwrap()
+            .is_shutdown()
+    );
     assert_eq!(value, 0);
-    runtime.wait();
+    runtime.stop();
 }
 
 #[test]
@@ -181,7 +204,8 @@ fn join_error_is_a_thread_safe_error() {
 #[test]
 fn shutdown_discards_queued_async_factories_before_invocation() {
     let (queued, invoked) = runtime()
-        .run(async |cx| {
+        .scheduler()
+        .block_on(async |cx| {
             let invoked = Arc::new(AtomicBool::new(false));
             let queued = cx.scheduler().spawn({
                 let invoked = Arc::clone(&invoked);
@@ -190,7 +214,7 @@ fn shutdown_discards_queued_async_factories_before_invocation() {
                     ready(())
                 }
             });
-            cx.runtime_operations().stop();
+            RuntimeOperations::from(&cx).request_stop();
             (queued, invoked)
         })
         .unwrap();
@@ -201,18 +225,26 @@ fn shutdown_discards_queued_async_factories_before_invocation() {
 #[test]
 fn cancelling_the_root_returns_a_shutdown_error() {
     execute_or_terminate_process(|| {
-        let result = runtime().run(async |cx| {
-            cx.runtime_operations().stop();
+        let result = runtime().scheduler().block_on(async |cx| {
+            RuntimeOperations::from(&cx).request_stop();
             pending::<()>().await;
         });
-        assert!(result.unwrap_err().is_shutdown());
+        assert!(
+            result
+                .unwrap_err()
+                .source()
+                .unwrap()
+                .downcast_ref::<JoinError>()
+                .unwrap()
+                .is_shutdown()
+        );
     });
 }
 
 #[cfg(feature = "macros")]
 #[arty::test(workers = 1)]
 #[should_panic(expected = "runtime is shutting down")]
-async fn macro_boundary_reports_root_cancellation(cx: arty::runtime::Builtins) {
-    cx.runtime_operations().stop();
+async fn macro_boundary_reports_root_cancellation(cx: arty::task::Builtins) {
+    RuntimeOperations::from(&cx).request_stop();
     pending::<()>().await;
 }

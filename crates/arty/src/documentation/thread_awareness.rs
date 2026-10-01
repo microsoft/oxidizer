@@ -4,9 +4,8 @@
 //! Understanding worker associations, cloning, and explicit relocation.
 //!
 //! Once a task starts, its future stays on the same worker thread. The owned
-//! [`Builtins`](crate::runtime::Builtins) passed to the task contains capabilities
-//! associated with that worker: its scheduler, clock, telemetry sink, and runtime
-//! operations.
+//! [`Builtins`](crate::task::Builtins) passed to the task contains capabilities
+//! associated with that worker: its scheduler, clock, and telemetry sink.
 //!
 //! # A coordinate is not a thread handle
 //!
@@ -16,10 +15,12 @@
 //! runtime running. Reading or cloning a coordinate does not change which OS
 //! thread is executing your code.
 //!
-//! [`RuntimeOperations::pin_current_thread`](crate::runtime::RuntimeOperations::pin_current_thread)
-//! changes the current OS thread's processor affinity using a captured processor
-//! set. It does not turn that thread into an Arty worker or rebind a scheduler.
-//! The processor snapshot remains usable after the runtime stops; retaining it
+//! [`RuntimeOperations::pin_to`](crate::runtime::RuntimeOperations::pin_to)
+//! changes the current OS thread's affinity using an explicit worker coordinate.
+//! Operations can be created from `&Runtime` or `&Builtins`; they have no worker
+//! association and are not `ThreadAware`. Pinning does not turn the calling thread
+//! into an Arty worker or rebind a scheduler. Worker affinity information remains
+//! usable after the runtime stops; retaining it
 //! does not keep task execution or worker timer drivers running.
 //!
 //! # Cloning preserves the association
@@ -29,7 +30,7 @@
 //! work back to the original asynchronous worker:
 //!
 //! ```
-//! use arty::runtime::Builtins;
+//! use arty::task::Builtins;
 //!
 //! #[arty::main]
 //! async fn main(cx: Builtins) -> Result<(), arty::task::JoinError> {
@@ -61,8 +62,7 @@
 //! that must adapt to its destination.
 //!
 //! ```
-//! use arty::runtime::Builtins;
-//! use arty::task::JoinError;
+//! use arty::task::{Builtins, JoinError};
 //!
 //! #[arty::main]
 //! async fn main(cx: Builtins) -> Result<(), JoinError> {
@@ -94,7 +94,7 @@
 //! | An initialized, registered worker of the same runtime | Capabilities rebind coherently to that worker |
 //! | Another runtime, or a coordinate with no initialized worker services in the owner | The original association is retained |
 //!
-//! [`local_scheduler()`](crate::runtime::Builtins::local_scheduler) returns a
+//! [`local_scheduler()`](crate::task::Builtins::local_scheduler) returns a
 //! local scheduler only when called on the value's associated worker. Merely
 //! carrying `Builtins` to another thread does not grant local scheduling access.
 //!

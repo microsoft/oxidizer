@@ -8,7 +8,7 @@
 
 testing_aids::init_tracing!();
 
-use arty::runtime::Builtins;
+use arty::task::Builtins;
 use arty::test;
 
 // The macro boundary preserves root-task panic payloads, unlike ordinary task joins.

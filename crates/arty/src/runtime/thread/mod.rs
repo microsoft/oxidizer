@@ -7,6 +7,6 @@ mod blocking;
 mod lifecycle;
 pub(super) mod waiter;
 
-pub(crate) use blocking::assert_not_flagged;
 pub(super) use blocking::flag_current_thread;
+pub(crate) use blocking::{assert_not_flagged, is_flagged};
 pub(super) use lifecycle::spawn;

@@ -17,8 +17,7 @@ use tick::runtime::InactiveClock;
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::bootstrap::pools::BlockingPools;
 use crate::runtime::config::RuntimeConfig;
-use crate::runtime::context::Builtins;
-use crate::runtime::context::init::{CoreRuntimeBuiltins, RuntimeBuiltins, SharedState};
+use crate::runtime::context::{CoreRuntimeBuiltins, RuntimeBuiltins, SharedState};
 use crate::runtime::dispatch::{DispatcherClient, DispatcherCore, WorkerEndpoint};
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
@@ -30,6 +29,7 @@ use crate::runtime::thread::{flag_current_thread, spawn};
 use crate::runtime::worker::AsyncWorker;
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
 use crate::runtime::worker::signal::WorkerSignal;
+use crate::task::Builtins;
 
 pub(in crate::runtime) fn build(
     processor_config: RuntimeConfig,
@@ -137,7 +137,7 @@ pub(in crate::runtime) fn build(
         }
     );
 
-    Ok(Runtime::with_dispatcher(dispatcher_client))
+    Ok(Runtime::with_dispatcher(dispatcher_client, shared_state))
 }
 
 /// The data set required to start one async worker (the message channels and associated data).

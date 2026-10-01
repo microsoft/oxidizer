@@ -39,9 +39,8 @@ fn started_event_reports_processor_counts() {
         .build()
         .unwrap();
 
-    runtime.task_scheduler().spawn(async move |_| ()).wait().unwrap();
+    runtime.scheduler().spawn_anywhere(async move |_| ()).wait().unwrap();
     runtime.stop();
-    runtime.wait();
 
     let events = processor.events();
     let started = events_named(&events, "arty.rt.started");
@@ -65,9 +64,8 @@ fn each_async_worker_starts_and_stops() {
         .build()
         .unwrap();
 
-    runtime.task_scheduler().spawn(async move |_| ()).wait().unwrap();
+    runtime.scheduler().spawn_anywhere(async move |_| ()).wait().unwrap();
     runtime.stop();
-    runtime.wait();
 
     let events = processor.events();
     assert_eq!(events_named(&events, "arty.rt.async_worker.started").len(), PROCESSORS);
@@ -86,9 +84,8 @@ fn async_worker_os_threads_report_lifecycle() {
         .build()
         .unwrap();
 
-    runtime.task_scheduler().spawn(async move |_| ()).wait().unwrap();
+    runtime.scheduler().spawn_anywhere(async move |_| ()).wait().unwrap();
     runtime.stop();
-    runtime.wait();
 
     let events = processor.events();
     assert_eq!(
@@ -123,12 +120,11 @@ fn spawned_task_emits_spawned_and_completed() {
         .build()
         .unwrap();
 
-    let handles: Vec<_> = (0..TASKS).map(|_| runtime.task_scheduler().spawn(async move |_| ())).collect();
+    let handles: Vec<_> = (0..TASKS).map(|_| runtime.scheduler().spawn_anywhere(async move |_| ())).collect();
     for handle in handles {
         handle.wait().unwrap();
     }
     runtime.stop();
-    runtime.wait();
 
     let events = processor.events();
     let spawned = events_named(&events, "arty.rt.task.spawned");
@@ -150,12 +146,11 @@ fn panicking_task_emits_panicked_event() {
         .unwrap();
 
     let handle = runtime
-        .task_scheduler()
-        .spawn(async move |_| panic!("intentional panic for telemetry test"));
+        .scheduler()
+        .spawn_anywhere(async move |_| panic!("intentional panic for telemetry test"));
     // The panic propagates through `wait()`; swallow it so the test thread survives.
     assert!(handle.wait().unwrap_err().is_panic());
     runtime.stop();
-    runtime.wait();
 
     let events = processor.events();
     let panicked = events_named(&events, "arty.rt.task.panicked");
@@ -172,12 +167,11 @@ fn round_robin_submissions_emit_one_spawn_event_per_worker() {
         .build()
         .unwrap();
 
-    let handles: Vec<_> = (0..PROCESSORS).map(|_| runtime.task_scheduler().spawn(async |_| ())).collect();
+    let handles: Vec<_> = (0..PROCESSORS).map(|_| runtime.scheduler().spawn_anywhere(async |_| ())).collect();
     for handle in handles {
         handle.wait().unwrap();
     }
     runtime.stop();
-    runtime.wait();
 
     let events = processor.events();
     assert!(events_named(&events, "arty.rt.task.spawned").len() >= PROCESSORS);
@@ -194,8 +188,8 @@ fn local_task_emits_spawned_and_completed_with_local_placement() {
         .unwrap();
 
     runtime
-        .task_scheduler()
-        .spawn(async move |cx| {
+        .scheduler()
+        .spawn_anywhere(async move |cx| {
             cx.local_scheduler()
                 .expect("on the same thread as cx")
                 .spawn(async move || ())
@@ -205,7 +199,6 @@ fn local_task_emits_spawned_and_completed_with_local_placement() {
         .wait()
         .unwrap();
     runtime.stop();
-    runtime.wait();
 
     let events = processor.events();
     let spawned = events_named(&events, "arty.rt.task.spawned");
@@ -230,10 +223,11 @@ fn tasks_discarded_on_shutdown_do_not_emit_terminal_events() {
     // Spawn tasks that never complete, then tear down: no task completes or panics, so the
     // only terminal-state telemetry is the absence of completed/panicked.
     for _ in 0..TASKS {
-        _ = runtime.task_scheduler().spawn(async move |_| std::future::pending::<()>().await);
+        _ = runtime
+            .scheduler()
+            .spawn_anywhere(async move |_| std::future::pending::<()>().await);
     }
     runtime.stop();
-    runtime.wait();
 
     let events = processor.events();
     let spawned = events_named(&events, "arty.rt.task.spawned").len();

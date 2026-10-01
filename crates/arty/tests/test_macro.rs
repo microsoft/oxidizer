@@ -8,7 +8,7 @@
 
 testing_aids::init_tracing!();
 
-use arty::runtime::Builtins;
+use arty::task::Builtins;
 use arty::test;
 
 #[test]
@@ -79,7 +79,7 @@ mod controlled_time {
     use std::time::{Duration, UNIX_EPOCH};
 
     use arty as renamed_arty;
-    use arty::runtime::Builtins;
+    use arty::task::Builtins;
     use arty::time::ClockControl;
     use futures::FutureExt;
 

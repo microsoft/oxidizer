@@ -4,30 +4,32 @@
 //! Scheduling tasks and receiving their results.
 //!
 //! A [`Runtime`](crate::runtime::Runtime) owns the workers. A
-//! [`TaskScheduler`](crate::task::TaskScheduler) submits work without owning their
-//! lifetime. Keep the runtime alive until the tasks whose results you need have
+//! [`RuntimeScheduler`](crate::task::RuntimeScheduler) is borrowed from that owner.
+//! [`TaskScheduler`](crate::task::TaskScheduler) keeps child work on an associated worker.
+//! Keep the runtime alive until the tasks whose results you need have
 //! completed.
 //!
 //! # Choosing a scheduler
 //!
 //! | Operation | Where the work runs | What crosses the boundary |
 //! | --- | --- | --- |
-//! | [`spawn`](crate::task::TaskScheduler::spawn) on `Runtime::task_scheduler()` | Workers selected round-robin | A `Send` factory and a `Send` result |
+//! | [`RuntimeScheduler::spawn_anywhere`](crate::task::RuntimeScheduler::spawn_anywhere) | Workers selected round-robin | A `Send` factory and a `Send` result |
 //! | `spawn` on `Builtins::scheduler()` | That capability's associated worker | A `Send` factory and a `Send` result, even when called on the same worker |
 //! | [`LocalTaskScheduler::spawn`](crate::task::LocalTaskScheduler::spawn) | The calling worker | Nothing crosses threads; captures and results may be non-`Send` |
 //! | [`spawn_anywhere`](crate::task::TaskScheduler::spawn_anywhere) | Workers selected round-robin | An explicit `ThreadAware` payload, then a `Send` result |
+//! | [`spawn_everywhere`](crate::task::TaskScheduler::spawn_everywhere) | Each worker once | A cloneable `ThreadAware` payload, then one `Send` result per worker |
 //! | [`spawn_blocking`](crate::task::TaskScheduler::spawn_blocking) | A blocking pool | A `Send` synchronous closure and a `Send` result |
 //!
-//! Detached schedulers, including clones and separately obtained handles, share
-//! the runtime's round-robin selection sequence. Selection order is not execution
-//! or completion order. A bound scheduler stays bound when cloned or sent to
+//! Runtime-scheduler submissions share a round-robin selection sequence. That
+//! scheduler cannot be cloned or detached from the owner. Selection order is not
+//! execution or completion order. A worker-bound scheduler stays bound when cloned or sent to
 //! another OS thread. Use `spawn_anywhere` when new work should be distributed
 //! rather than remain with the bound worker.
 //!
 //! # Send the factory, create the future on the worker
 //!
 //! `spawn` takes a callback that receives owned
-//! [`Builtins`](crate::runtime::Builtins) and returns a future. The callback and
+//! [`Builtins`](crate::task::Builtins) and returns a future. The callback and
 //! its captures must be `Send + 'static`, but the future need not be `Send`:
 //! Arty constructs, polls, and destroys it on its destination worker.
 //!
@@ -38,7 +40,7 @@
 //! use std::rc::Rc;
 //! use std::time::Duration;
 //!
-//! use arty::runtime::Builtins;
+//! use arty::task::Builtins;
 //!
 //! #[arty::main]
 //! async fn main(cx: Builtins) -> Result<(), arty::task::JoinError> {
@@ -65,7 +67,7 @@
 //! # Share non-Send state between local tasks
 //!
 //! Obtain a [`LocalTaskScheduler`](crate::task::LocalTaskScheduler) from
-//! [`Builtins::local_scheduler`](crate::runtime::Builtins::local_scheduler)
+//! [`Builtins::local_scheduler`](crate::task::Builtins::local_scheduler)
 //! while executing on the associated worker. Its factory takes no arguments
 //! and is invoked immediately. Captures, futures, and results may all be
 //! non-`Send`, but must still be `'static`; local spawning is not scoped borrowing.
@@ -73,7 +75,7 @@
 //! ```
 //! use std::rc::Rc;
 //!
-//! use arty::runtime::Builtins;
+//! use arty::task::Builtins;
 //!
 //! #[arty::main]
 //! async fn main(cx: Builtins) -> Result<(), arty::task::JoinError> {
@@ -90,7 +92,7 @@
 //!
 //! Await local joins on their worker. Neither a local scheduler nor its join
 //! handle can be sent to another thread. For a task that borrows the synchronous
-//! caller's stack, use [`Runtime::block_on`](crate::runtime::Runtime::block_on)
+//! caller's stack, use [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on)
 //! instead.
 //!
 //! # Keep blocking work off asynchronous workers
@@ -101,7 +103,7 @@
 //! named `settings.toml` from its working directory:
 //!
 //! ```no_run
-//! use arty::runtime::Builtins;
+//! use arty::task::Builtins;
 //!
 //! #[arty::main]
 //! async fn main(cx: Builtins) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {

@@ -373,7 +373,11 @@ pub(super) mod blocking_worker_tests {
                 .processor_count(crate::runtime::ProcessorCount::exactly(1))
                 .build()
                 .unwrap();
-            let scheduler = runtime.task_scheduler().spawn(async |cx| cx.scheduler().clone()).wait().unwrap();
+            let scheduler = runtime
+                .scheduler()
+                .spawn_anywhere(async |cx| cx.scheduler().clone())
+                .wait()
+                .unwrap();
             let worker = Arc::clone(scheduler.blocking_worker());
             drop(runtime);
             assert!(worker.pool.pool.lock().unwrap().is_none());

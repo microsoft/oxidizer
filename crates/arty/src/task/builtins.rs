@@ -1,10 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Runtime capabilities, their guarded thread-affine state, and relocation.
-
-pub(in crate::runtime) mod init;
-pub(crate) mod operations;
+//! Task capabilities, their guarded thread-affine state, and relocation.
 
 use std::sync::Arc;
 
@@ -15,8 +12,7 @@ use observed::emit;
 use thread_aware::{Thread, ThreadAware};
 use tick::{Clock, SimpleClock};
 
-use crate::runtime::context::init::{RuntimeBuiltins, SharedState};
-use crate::runtime::context::operations::RuntimeOperations;
+use crate::runtime::context::{RuntimeBuiltins, SharedState};
 #[cfg(debug_assertions)]
 use crate::runtime::telemetry::events::{BacktraceText, BuiltinsThreadMismatch, ThreadName};
 use crate::task::local::{LocalTaskBinding, LocalTaskScheduler};
@@ -43,7 +39,7 @@ use crate::task::scheduler::TaskScheduler;
 /// ```
 /// # #[cfg(feature = "macros")]
 /// #[arty::main]
-/// async fn main(cx: arty::runtime::Builtins) -> Result<(), arty::task::JoinError> {
+/// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
 ///     let answer = cx
 ///         .scheduler()
 ///         .spawn(async |child| {
@@ -61,11 +57,10 @@ use crate::task::scheduler::TaskScheduler;
 /// ```
 #[derive(Debug, Clone)]
 pub struct Builtins {
-    scheduler: TaskScheduler,
-    runtime_operations: RuntimeOperations,
+    pub(crate) scheduler: TaskScheduler,
     thread: Thread,
     inner: Arc<InnerBuiltins>,
-    shared_state: SharedState,
+    pub(crate) shared_state: SharedState,
     clock: Clock,
     sink: Sink,
 }
@@ -82,7 +77,7 @@ impl Builtins {
     /// ```
     /// # #[cfg(feature = "macros")]
     /// #[arty::main]
-    /// async fn main(cx: arty::runtime::Builtins) -> Result<(), arty::task::JoinError> {
+    /// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
     ///     let parent_thread = cx.thread().id();
     ///     let child_thread = cx
     ///         .scheduler()
@@ -112,7 +107,7 @@ impl Builtins {
     /// ```
     /// # #[cfg(feature = "macros")]
     /// #[arty::main]
-    /// async fn main(cx: arty::runtime::Builtins) {
+    /// async fn main(cx: arty::task::Builtins) {
     ///     assert_eq!(cx.thread().id(), std::thread::current().id());
     /// }
     /// # #[cfg(not(feature = "macros"))] fn main() {}
@@ -136,7 +131,7 @@ impl Builtins {
     /// ```
     /// # #[cfg(feature = "macros")]
     /// #[arty::main]
-    /// async fn main(cx: arty::runtime::Builtins) {
+    /// async fn main(cx: arty::task::Builtins) {
     ///     let duration = std::time::Duration::from_millis(1);
     ///     let watch = cx.clock().stopwatch();
     ///     cx.clock().delay(duration).await;
@@ -170,7 +165,7 @@ impl Builtins {
     ///
     /// # #[cfg(feature = "macros")]
     /// #[arty::main]
-    /// async fn main(cx: arty::runtime::Builtins) {
+    /// async fn main(cx: arty::task::Builtins) {
     ///     observed::emit!(cx.sink(), TaskStarted);
     /// }
     /// # #[cfg(not(feature = "macros"))] fn main() {}
@@ -197,7 +192,7 @@ impl Builtins {
     /// ```rust
     /// # #[cfg(feature = "macros")]
     /// #[arty::main]
-    /// async fn main(cx: arty::runtime::Builtins) -> Result<(), arty::task::JoinError> {
+    /// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
     ///     use std::rc::Rc;
     ///
     ///     let local = cx
@@ -213,33 +208,6 @@ impl Builtins {
     #[inline]
     pub fn local_scheduler(&self) -> Option<LocalTaskScheduler> {
         self.inner.local_task_binding.local_scheduler()
-    }
-
-    /// Returns operations for requesting shutdown and pinning external threads.
-    ///
-    /// Clone the [`RuntimeOperations`] handle to use it from another thread.
-    /// Relocation within the owning runtime changes its associated processor set.
-    ///
-    /// # Examples
-    ///
-    /// Use a cloned handle from a blocking callback:
-    ///
-    /// ```
-    /// # #[cfg(feature = "macros")]
-    /// #[arty::main]
-    /// async fn main(cx: arty::runtime::Builtins) -> Result<(), arty::task::JoinError> {
-    ///     let operations = cx.runtime_operations().clone();
-    ///     cx.scheduler()
-    ///         .spawn_blocking(move || operations.pin_current_thread())
-    ///         .await?;
-    ///     Ok(())
-    /// }
-    /// # #[cfg(not(feature = "macros"))] fn main() {}
-    /// ```
-    #[must_use]
-    #[inline]
-    pub fn runtime_operations(&self) -> &RuntimeOperations {
-        &self.runtime_operations
     }
 
     #[cfg_attr(test, mutants::skip)]
@@ -291,7 +259,6 @@ impl ThreadAware for Builtins {
 
         // Reuse the validated slot index to keep all runtime services on the same worker.
         self.scheduler.relocate_to_worker(destination, worker_index);
-        self.runtime_operations.relocate_to_worker(destination, inner.processor_set.clone());
         self.inner = inner;
         self.thread = destination.clone();
         self.clock.relocate(Some(&source), destination);
@@ -300,14 +267,8 @@ impl ThreadAware for Builtins {
 }
 
 impl Builtins {
-    pub(in crate::runtime) fn sync_init(shared_state: &SharedState, builtins: RuntimeBuiltins) -> Self {
+    pub(crate) fn sync_init(shared_state: &SharedState, builtins: RuntimeBuiltins) -> Self {
         let thread = builtins.core.thread;
-        let runtime_operations = RuntimeOperations::new(
-            builtins.core.dispatcher,
-            thread.clone(),
-            builtins.core.processor_set.clone(),
-            Arc::clone(shared_state),
-        );
 
         let inner = Arc::new(InnerBuiltins {
             local_task_binding: builtins.core.local_scheduler,
@@ -324,7 +285,6 @@ impl Builtins {
 
         Self {
             scheduler: builtins.task_scheduler,
-            runtime_operations,
             thread,
             inner,
             shared_state: Arc::clone(shared_state),
@@ -360,8 +320,8 @@ impl AsRef<Sink> for Builtins {
 
 /// Immutable worker-local service bundle published once into its runtime's shared slots.
 #[derive(Debug)]
-pub(in crate::runtime) struct InnerBuiltins {
-    processor_set: ProcessorSet,
+pub(crate) struct InnerBuiltins {
+    pub(crate) processor_set: ProcessorSet,
     local_task_binding: LocalTaskBinding,
 }
 
@@ -381,9 +341,9 @@ mod tests {
 
     use super::*;
     #[cfg(not(miri))]
-    use crate::runtime::config::ProcessorCount;
+    use crate::runtime::Runtime;
     #[cfg(not(miri))]
-    use crate::runtime::handle::Runtime;
+    use crate::runtime::config::ProcessorCount;
 
     #[test]
     fn assert_builtin_traits() {
@@ -397,7 +357,8 @@ mod tests {
             .processor_count(ProcessorCount::exactly(1))
             .build()
             .unwrap()
-            .run(async |cx| {
+            .scheduler()
+            .block_on(async |cx| {
                 let scheduler: &TaskScheduler = cx.as_ref();
                 let clock: &Clock = cx.as_ref();
                 let simple_clock: &SimpleClock = cx.as_ref();
@@ -420,7 +381,8 @@ mod tests {
             .sink(sink)
             .build()
             .unwrap()
-            .run(async |cx| {
+            .scheduler()
+            .block_on(async |cx| {
                 let _ = cx.thread();
             })
             .unwrap();
@@ -462,7 +424,7 @@ mod tests {
             .unwrap();
         let workers: Vec<_> = (0..2)
             .map(|_| {
-                runtime.task_scheduler().spawn(async |cx| {
+                runtime.scheduler().spawn_anywhere(async |cx| {
                     let scheduler = cx.scheduler().clone();
                     (cx, scheduler)
                 })
@@ -481,7 +443,6 @@ mod tests {
             .wait()
             .unwrap();
         runtime.stop();
-        runtime.wait();
 
         assert_eq!(
             processor
@@ -498,9 +459,10 @@ mod tests {
     fn worker_services_are_ready_before_spawning() {
         let count = many_cpus::SystemHardware::current().processors().len().min(2);
         let runtime = Runtime::builder().processor_count(ProcessorCount::at_most(2)).build().unwrap();
-        let scheduler = runtime.task_scheduler();
         let (actual, expected) = runtime
-            .run(async move |cx| {
+            .scheduler()
+            .block_on(async move |cx| {
+                let scheduler = cx.scheduler();
                 let tasks: Vec<_> = (0..count)
                     .map(|_| {
                         scheduler.spawn_anywhere(cx.clone(), |worker: Builtins| async move {

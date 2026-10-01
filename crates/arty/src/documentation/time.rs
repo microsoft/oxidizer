@@ -9,7 +9,7 @@
 //!
 //! # Use the task's clock
 //!
-//! [`Builtins::clock`](crate::runtime::Builtins::clock) provides the clock
+//! [`Builtins::clock`](crate::task::Builtins::clock) provides the clock
 //! associated with the task's worker. Use a stopwatch for elapsed time and
 //! `system_time()` when an absolute wall-clock timestamp is needed. Wall-clock
 //! time can change independently of monotonic elapsed time.
@@ -18,7 +18,7 @@
 //! use std::future::pending;
 //! use std::time::Duration;
 //!
-//! use arty::runtime::Builtins;
+//! use arty::task::Builtins;
 //! use arty::time::FutureExt;
 //!
 //! #[arty::main]
@@ -59,7 +59,7 @@
 //! use std::task::Poll;
 //! use std::time::Duration;
 //!
-//! use arty::runtime::Builtins;
+//! use arty::task::Builtins;
 //! use arty::time::ClockControl;
 //!
 //! #[arty::test]

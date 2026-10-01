@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime};
-use arty::task::{JoinHandle, TaskScheduler};
+use arty::task::JoinHandle;
 use criterion::{BenchmarkId, Criterion, Throughput};
 use data_privacy::RedactionEngine;
 use observed::metadata::{EventDescription, FieldDescriptor};
@@ -61,8 +61,7 @@ fn runtime(sink: Sink) -> Runtime {
 
 #[derive(Debug)]
 struct Case {
-    _runtime: Runtime,
-    scheduler: TaskScheduler,
+    runtime: Runtime,
     handles: Vec<JoinHandle<()>>,
     count: usize,
 }
@@ -70,10 +69,8 @@ struct Case {
 impl Case {
     fn new(count: usize, active: bool) -> Self {
         let runtime = runtime(if active { active_sink() } else { Sink::noop() });
-        let scheduler = runtime.task_scheduler();
         let mut case = Self {
-            _runtime: runtime,
-            scheduler,
+            runtime,
             handles: Vec::with_capacity(count),
             count,
         };
@@ -84,7 +81,7 @@ impl Case {
     fn spawn(&mut self) {
         self.handles.clear();
         self.handles
-            .extend((0..self.count).map(|_| self.scheduler.spawn(async |_| black_box(()))));
+            .extend((0..self.count).map(|_| self.runtime.scheduler().spawn_anywhere(async |_| black_box(()))));
         for handle in &mut self.handles {
             futures::executor::block_on(black_box(handle)).expect("benchmark tasks finish before shutdown");
         }

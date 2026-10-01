@@ -15,6 +15,7 @@ fn capture_by_value() {
     let vec = vec![10, 11];
     let result = Runtime::new()
         .expect("Failed to create runtime")
+        .scheduler()
         .block_on(async move |_ctx| vec.len() + 10)
         .unwrap();
     assert_eq!(result, 12);
@@ -26,6 +27,7 @@ fn move_and_spawn() {
     let vec = vec![10, 11];
     let result = Runtime::new()
         .expect("Failed to create runtime")
+        .scheduler()
         .block_on(async move |ctx| {
             let res = vec.len() + 10;
             ctx.scheduler().spawn(async move |_ctx| vec.len() + 10);
@@ -40,6 +42,7 @@ fn capture_reference() {
     let vec = vec![10, 11];
     let result = Runtime::new()
         .expect("Failed to create runtime")
+        .scheduler()
         .block_on(async |_ctx| {
             let vec_ref = &vec;
             vec_ref.len() + 10
@@ -53,6 +56,7 @@ fn capture_mut_reference() {
     let mut vec = vec![10, 11];
     let result = Runtime::new()
         .expect("Failed to create runtime")
+        .scheduler()
         .block_on(async |_ctx| {
             let vec_ref = &mut vec;
             vec_ref.push(15);

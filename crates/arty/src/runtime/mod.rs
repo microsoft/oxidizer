@@ -8,10 +8,11 @@
 //! [`Runtime::builder`] lets you choose processors, blocking pools, clocks, and
 //! a telemetry sink before starting workers.
 //!
-//! Each task receives [`Builtins`] containing its worker's scheduler, clock,
-//! and runtime operations. [`Runtime::task_scheduler`] distributes submissions
-//! across workers, while [`Builtins::scheduler`] keeps children on their parent's
-//! worker. Submission and result handles are documented in [`crate::task`].
+//! Each task receives [`Builtins`](crate::task::Builtins) containing its worker's
+//! scheduler and clock. [`Runtime::scheduler`] distributes submissions
+//! across workers, while [`Builtins::scheduler`](crate::task::Builtins::scheduler)
+//! keeps children on their parent's worker. [`RuntimeOperations`] can request
+//! shutdown or pin an external thread to a worker's processors.
 //!
 //! Keep the runtime owner alive until required work completes. Shutdown cancels
 //! pending tasks and waits for blocking callbacks that have already started;
@@ -24,7 +25,7 @@
 //! ```
 //! # #[cfg(feature = "macros")]
 //! #[arty::main]
-//! async fn main(cx: arty::runtime::Builtins) -> Result<(), arty::task::JoinError> {
+//! async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
 //!     assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
 //!     Ok(())
 //! }
@@ -42,6 +43,7 @@ pub(crate) mod context;
 pub(crate) mod dispatch;
 mod error;
 mod handle;
+mod operations;
 pub(crate) mod telemetry;
 pub(crate) mod thread;
 mod worker;
@@ -51,13 +53,11 @@ pub use builder::RuntimeBuilder;
 #[doc(inline)]
 pub use config::{BlockingPoolPolicy, ProcessorCount};
 #[doc(inline)]
-pub use context::Builtins;
-#[doc(inline)]
-pub use context::operations::RuntimeOperations;
-#[doc(inline)]
 pub use error::Error;
 #[doc(inline)]
 pub use handle::Runtime;
+#[doc(inline)]
+pub use operations::RuntimeOperations;
 
 /// Implementation details for the runtime entry-point macros.
 #[cfg(feature = "macros")]
@@ -67,7 +67,10 @@ pub mod __private {
     pub use crate::time::ClockControl;
 
     /// Preserves an entry point's return type while reporting root-task failure.
-    pub fn resume_join_error(error: crate::task::JoinError) -> ! {
-        error.resume()
+    pub fn resume_error(error: super::Error) -> ! {
+        match error.into_source().downcast::<crate::task::JoinError>() {
+            Ok(error) => error.resume(),
+            Err(error) => panic!("{error}"),
+        }
     }
 }

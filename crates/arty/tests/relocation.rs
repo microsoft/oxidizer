@@ -9,7 +9,8 @@ testing_aids::init_tracing!();
 
 use std::thread::{self, ThreadId};
 
-use arty::runtime::{BlockingPoolPolicy, Builtins, ProcessorCount, Runtime};
+use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime};
+use arty::task::Builtins;
 use futures::future::join_all;
 use testing_aids::execute_or_terminate_process;
 use thread_aware::ThreadAware;
@@ -17,7 +18,7 @@ use thread_aware::ThreadAware;
 /// Identifies which thread-aware handle a relocation scenario should move.
 #[derive(Clone, Copy)]
 enum RelocationTarget {
-    /// Relocate a detached `TaskScheduler` clone directly.
+    /// Relocate a worker-bound `TaskScheduler` clone directly.
     Scheduler,
     /// Relocate a `Builtins` clone directly.
     Builtins,
@@ -49,11 +50,11 @@ fn relocate_and_observe(policy: BlockingPoolPolicy, target: RelocationTarget) ->
         .blocking_pool_policy(policy)
         .build()
         .expect("failed to build runtime");
-    let scheduler = runtime.task_scheduler();
-
     execute_or_terminate_process(move || {
         runtime
-            .run(async move |cx: Builtins| {
+            .scheduler()
+            .block_on(async move |cx: Builtins| {
+                let scheduler = cx.scheduler();
                 let origin = thread::current().id();
                 let here = cx.thread().clone();
 
@@ -185,11 +186,11 @@ fn relocating_builtins_uses_same_pool_when_shared() {
 fn foreign_owner_relocation_preserves_runtime_binding() {
     let source_runtime = Runtime::builder().processor_count(ProcessorCount::exactly(1)).build().unwrap();
     let destination_runtime = Runtime::builder().processor_count(ProcessorCount::exactly(1)).build().unwrap();
-    let mut builtins = source_runtime.task_scheduler().spawn(async |cx| cx).wait().unwrap();
+    let mut builtins = source_runtime.scheduler().spawn_anywhere(async |cx| cx).wait().unwrap();
     let source = builtins.thread().clone();
     let destination = destination_runtime
-        .task_scheduler()
-        .spawn(async |cx| cx.thread().clone())
+        .scheduler()
+        .spawn_anywhere(async |cx| cx.thread().clone())
         .wait()
         .unwrap();
     let blocking_thread = builtins.scheduler().spawn_blocking(|| thread::current().id()).wait().unwrap();
@@ -213,7 +214,7 @@ fn repeated_spawn_after_relocation_uses_destination() {
 
     let runtime = Runtime::builder().processor_count(ProcessorCount::exactly(2)).build().unwrap();
     let workers: Vec<_> = (0..2)
-        .map(|_| runtime.task_scheduler().spawn(async |cx| cx))
+        .map(|_| runtime.scheduler().spawn_anywhere(async |cx| cx))
         .map(|handle| handle.wait().unwrap())
         .collect();
     let mut scheduler = workers[0].scheduler().clone();
@@ -233,11 +234,11 @@ fn repeated_spawn_after_relocation_uses_destination() {
 fn foreign_owner_relocation_preserves_bare_scheduler_binding() {
     let source_runtime = Runtime::builder().processor_count(ProcessorCount::exactly(1)).build().unwrap();
     let destination_runtime = Runtime::builder().processor_count(ProcessorCount::exactly(1)).build().unwrap();
-    let builtins = source_runtime.task_scheduler().spawn(async |cx| cx).wait().unwrap();
+    let builtins = source_runtime.scheduler().spawn_anywhere(async |cx| cx).wait().unwrap();
     let mut scheduler = builtins.scheduler().clone();
     let destination = destination_runtime
-        .task_scheduler()
-        .spawn(async |cx| cx.thread().clone())
+        .scheduler()
+        .spawn_anywhere(async |cx| cx.thread().clone())
         .wait()
         .unwrap();
     let blocking_thread = scheduler.spawn_blocking(|| thread::current().id()).wait().unwrap();

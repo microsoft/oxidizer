@@ -24,7 +24,8 @@
 //! is built; creating a policy or setting it on the builder does not validate it.
 //!
 //! ```
-//! use arty::runtime::{BlockingPoolPolicy, Builtins, ProcessorCount, Runtime, RuntimeBuilder};
+//! use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime, RuntimeBuilder};
+//! use arty::task::Builtins;
 //!
 //! fn app_builder() -> RuntimeBuilder {
 //!     Runtime::builder()
@@ -100,6 +101,6 @@
 //! A future stays on its worker once started. Stable placement supports local
 //! state and processor locality, but does not automatically balance running
 //! tasks across workers. Distribute independent tasks with
-//! [`Runtime::task_scheduler`](crate::runtime::Runtime::task_scheduler) or
+//! [`Runtime::scheduler`](crate::runtime::Runtime::scheduler) or
 //! [`spawn_anywhere`](crate::task::TaskScheduler::spawn_anywhere), and measure the
 //! application's workload before choosing worker and pool limits.

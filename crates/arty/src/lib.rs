@@ -27,7 +27,7 @@
 //!
 //! ```rust
 //! # #[cfg(feature = "macros")]
-//! use arty::runtime::Builtins;
+//! use arty::task::Builtins;
 //!
 //! # #[cfg(feature = "macros")]
 //! #[arty::main]
@@ -48,7 +48,8 @@
 //! - [`main`] and [`test`] start a runtime for an asynchronous entry point or test.
 //! - [`Runtime`] provides explicit configuration, ownership, and shutdown.
 //! - [`Builtins`] provides a task's scheduler, clock, and worker coordinates.
-//! - [`TaskScheduler`] submits asynchronous and blocking work.
+//! - [`RuntimeScheduler`] distributes asynchronous and blocking work across workers.
+//! - [`TaskScheduler`] submits work to its associated worker.
 //!   [`LocalTaskScheduler`] supports sharing non-`Send` state on one worker.
 //! - [`Clock`] provides timers and timeouts. [`ClockControl`] provides controlled test time.
 //! - [`Thread`](core::Thread) and [`ThreadAware`](core::ThreadAware) describe
@@ -69,8 +70,9 @@
 //! [`main`]: https://docs.rs/arty/latest/arty/attr.main.html
 //! [`test`]: https://docs.rs/arty/latest/arty/attr.test.html
 //! [`Runtime`]: https://docs.rs/arty/latest/arty/runtime/struct.Runtime.html
-//! [`Builtins`]: https://docs.rs/arty/latest/arty/runtime/struct.Builtins.html
+//! [`Builtins`]: https://docs.rs/arty/latest/arty/task/struct.Builtins.html
 //! [`TaskScheduler`]: https://docs.rs/arty/latest/arty/task/struct.TaskScheduler.html
+//! [`RuntimeScheduler`]: https://docs.rs/arty/latest/arty/task/struct.RuntimeScheduler.html
 //! [`LocalTaskScheduler`]: https://docs.rs/arty/latest/arty/task/struct.LocalTaskScheduler.html
 //! [`Clock`]: https://docs.rs/arty/latest/arty/time/struct.Clock.html
 //! [`ClockControl`]: https://docs.rs/arty/latest/arty/time/struct.ClockControl.html
@@ -80,7 +82,7 @@ use arty_io_core as _;
 /// Runs an asynchronous entry point on an Arty runtime.
 ///
 /// Apply this attribute to an `async fn` taking one owned
-/// [`Builtins`](crate::runtime::Builtins) argument. It creates a synchronous,
+/// [`Builtins`](crate::task::Builtins) argument. It creates a synchronous,
 /// zero-argument entry point with the same visibility and return type. The
 /// asynchronous body runs on an Arty worker, not on the calling thread.
 /// Give the argument an identifier such as `cx` or `_cx`, rather than a wildcard
@@ -124,7 +126,7 @@ use arty_io_core as _;
 /// the calling thread. Errors returned by the body remain ordinary return values.
 ///
 /// Use [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build) and
-/// [`Runtime::run`](crate::runtime::Runtime::run) directly to handle construction
+/// [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on) directly to handle construction
 /// and task errors without the attribute converting them to panics. Worker
 /// creation and initialization can still panic.
 ///
@@ -135,7 +137,7 @@ use arty_io_core as _;
 /// ```
 /// # #[cfg(feature = "macros")]
 /// #[arty::main]
-/// async fn main(cx: arty::runtime::Builtins) {
+/// async fn main(cx: arty::task::Builtins) {
 ///     cx.clock().delay(std::time::Duration::from_millis(1)).await;
 ///     println!("Hello from Arty!");
 /// }
@@ -156,7 +158,7 @@ use arty_io_core as _;
 ///
 /// # #[cfg(feature = "macros")]
 /// #[arty::main(builder = app_builder())]
-/// async fn main(cx: arty::runtime::Builtins) -> Result<(), arty::task::JoinError> {
+/// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
 ///     let answer = cx.scheduler().spawn(async |_| 42).await?;
 ///     assert_eq!(answer, 42);
 ///     Ok(())
@@ -169,7 +171,7 @@ pub use arty_macros::main;
 /// Runs an asynchronous test on an Arty runtime.
 ///
 /// Apply this attribute to an `async fn` taking one owned
-/// [`Builtins`](crate::runtime::Builtins) argument. It creates a synchronous,
+/// [`Builtins`](crate::task::Builtins) argument. It creates a synchronous,
 /// zero-argument test and runs the body on a worker. Each invocation starts its
 /// own runtime and shuts it down when the body returns.
 /// Give the argument an identifier; use `_cx` when its value is not needed.
@@ -215,7 +217,7 @@ pub use arty_macros::main;
 /// ```test_harness
 /// # #[cfg(feature = "macros")]
 /// #[arty::test]
-/// async fn answer(cx: arty::runtime::Builtins) -> Result<(), arty::task::JoinError> {
+/// async fn answer(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
 ///     assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
 ///     Ok(())
 /// }
@@ -226,7 +228,7 @@ pub use arty_macros::main;
 /// ```test_harness
 /// # #[cfg(all(feature = "macros", feature = "test-util"))]
 /// #[arty::test]
-/// async fn simulated_delay(cx: arty::runtime::Builtins, control: arty::time::ClockControl) {
+/// async fn simulated_delay(cx: arty::task::Builtins, control: arty::time::ClockControl) {
 ///     use std::time::Duration;
 ///
 ///     let control = control.auto_advance_timers(true);
@@ -282,7 +284,7 @@ pub mod core {
 /// ```
 /// # #[cfg(feature = "macros")]
 /// #[arty::main]
-/// async fn main(cx: arty::runtime::Builtins) {
+/// async fn main(cx: arty::task::Builtins) {
 ///     let duration = std::time::Duration::from_millis(1);
 ///     let watch = cx.clock().stopwatch();
 ///     cx.clock().delay(duration).await;

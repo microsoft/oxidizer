@@ -8,7 +8,8 @@
 
 testing_aids::init_tracing!();
 
-use arty::runtime::{Builtins, Runtime};
+use arty::runtime::Runtime;
+use arty::task::Builtins;
 use observed::enrichment::EnrichFutureExt;
 use observed::{Enrichment, Sink};
 
@@ -87,7 +88,8 @@ fn enrichment_propagates_via_scheduler_spawn() {
     let runtime = runtime_with_emitter(&sink);
 
     let result = runtime
-        .run(async move |cx: Builtins| {
+        .scheduler()
+        .block_on(async move |cx: Builtins| {
             async {
                 let handle = cx.scheduler().spawn({
                     let e = sink.clone();
@@ -110,7 +112,8 @@ fn enrichment_propagates_via_spawn_anywhere() {
     let runtime = runtime_with_emitter(&sink);
 
     let result = runtime
-        .run(async move |cx: Builtins| {
+        .scheduler()
+        .block_on(async move |cx: Builtins| {
             async {
                 let handle = cx
                     .scheduler()
@@ -132,7 +135,8 @@ fn enrichment_propagates_via_local_scheduler_spawn() {
     let runtime = runtime_with_emitter(&sink);
 
     let result = runtime
-        .run(async move |cx: Builtins| {
+        .scheduler()
+        .block_on(async move |cx: Builtins| {
             async {
                 let local = cx.local_scheduler().expect("should be on the correct thread");
                 let handle = local.spawn({
@@ -156,7 +160,8 @@ fn no_enrichment_leak_without_context() {
     let runtime = runtime_with_emitter(&sink);
 
     let result = runtime
-        .run(async move |cx: Builtins| {
+        .scheduler()
+        .block_on(async move |cx: Builtins| {
             // No .enrich() here — spawn directly.
             let handle = cx.scheduler().spawn({
                 let e = sink.clone();
@@ -176,7 +181,8 @@ fn nested_spawn_preserves_enrichment_chain() {
     let runtime = runtime_with_emitter(&sink);
 
     let mut result = runtime
-        .run(async move |cx: Builtins| {
+        .scheduler()
+        .block_on(async move |cx: Builtins| {
             async {
                 // Spawn level-1 task.
                 let handle = cx.scheduler().spawn({
@@ -213,8 +219,8 @@ fn task_outcomes_keep_the_submission_context() {
             let (sink, processor) = observed_testing::test_emitter(observed_testing::TEST_ID);
             let runtime = runtime_with_emitter(&sink);
             let outcome = runtime
-                .task_scheduler()
-                .spawn({
+                .scheduler()
+                .spawn_anywhere({
                     let sink = sink.clone();
                     async move |cx| {
                         async {

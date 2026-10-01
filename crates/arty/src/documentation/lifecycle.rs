@@ -4,8 +4,8 @@
 //! Runtime ownership, completion, shutdown, and failure.
 //!
 //! [`Runtime`](crate::runtime::Runtime) starts its workers during construction
-//! and owns their lifetime. Schedulers and `Builtins` are capabilities, not
-//! additional runtime owners.
+//! and owns their lifetime. Worker-bound schedulers and `Builtins` are capabilities,
+//! not additional runtime owners.
 //!
 //! Prefer [`arty::main`](crate::main) and [`arty::test`](crate::test) for ordinary
 //! entry points. This guide uses explicit runtime construction to show ownership,
@@ -15,15 +15,14 @@
 //!
 //! | Operation | Ownership and completion |
 //! | --- | --- |
-//! | [`Runtime::run`](crate::runtime::Runtime::run) | Consumes the runtime; shuts down after the root finishes and returns its `Result<T, JoinError>` |
-//! | [`Runtime::block_on`](crate::runtime::Runtime::block_on) | Borrows the runtime and returns `Result<T, JoinError>` from a task that may borrow the caller's stack |
-//! | [`Runtime::stop`](crate::runtime::Runtime::stop) | Requests shutdown without blocking; repeated calls are allowed |
-//! | [`Runtime::wait`](crate::runtime::Runtime::wait) | Waits for shutdown; does not request it |
+//! | [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on) | Borrows the scheduler and returns `Result<T, runtime::Error>` from a task that may borrow the caller's stack |
+//! | [`Runtime::stop`](crate::runtime::Runtime::stop) | Consumes the owner, requests shutdown, and normally waits for it |
+//! | [`RuntimeOperations::request_stop`](crate::runtime::RuntimeOperations::request_stop) | Requests shutdown without blocking; repeated calls are allowed |
 //! | Dropping `Runtime` | Requests shutdown and normally waits for it, with the blocking-task exception below |
 //!
-//! Both `run` and `block_on` execute their callbacks on an Arty worker, not on
-//! the calling thread. `block_on` destroys its borrowing factory and future
-//! before returning success or failure. Its result must still be
+//! `block_on` executes its callback on an Arty worker, not on the calling thread.
+//! It destroys its borrowing factory and future before returning success or failure.
+//! Its result must still be
 //! `Send + 'static`; return owned data or mutate the borrowed caller-owned data.
 //!
 //! ```
@@ -31,18 +30,19 @@
 //!
 //! let runtime = Runtime::new()?;
 //! let mut message = String::from("Hello");
-//! runtime.block_on(async |_| message.push_str(", Arty"))?;
+//! runtime
+//!     .scheduler()
+//!     .block_on(async |_| message.push_str(", Arty"))?;
 //! assert_eq!(message, "Hello, Arty");
 //! runtime.stop();
-//! runtime.wait();
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
 //! # Cancellation and shutdown
 //!
 //! Await the joins whose results you need before requesting shutdown or letting
-//! `run`'s root return. Shutdown cancels asynchronous tasks and queued blocking
-//! callbacks; it does not wait for them to complete successfully.
+//! a macro entry point's body return. Shutdown cancels asynchronous tasks and queued
+//! blocking callbacks; it does not wait for them to complete successfully.
 //!
 //! Already-running blocking callbacks finish before shutdown completes. They
 //! cannot be interrupted, so a callback that never returns can prevent shutdown.
@@ -53,23 +53,23 @@
 //! work is cancelled on its worker; queued blocking work is discarded before its
 //! callback starts. A running callback may still return a successful result.
 //!
-//! `Runtime::wait()` observes worker shutdown and running blocking work, rather
-//! than replacing task joins.
+//! Stopping the owner waits for worker shutdown and running blocking work,
+//! rather than replacing task joins.
 //!
 //! A rejected submission can be handled immediately:
 //!
 //! ```
-//! use arty::runtime::Runtime;
+//! use arty::runtime::{Runtime, RuntimeOperations};
 //!
 //! let runtime = Runtime::new()?;
-//! let scheduler = runtime.task_scheduler();
-//! runtime.stop();
+//! let scheduler = runtime.scheduler();
+//! RuntimeOperations::from(&runtime).request_stop();
 //! let error = scheduler
-//!     .spawn(async |_| 42)
+//!     .spawn_anywhere(async |_| 42)
 //!     .wait()
 //!     .expect_err("submission follows shutdown");
 //! assert!(error.is_shutdown());
-//! runtime.wait();
+//! runtime.stop();
 //! # Ok::<(), arty::runtime::Error>(())
 //! ```
 //!
@@ -79,15 +79,14 @@
 //!
 //! # Blocking restrictions
 //!
-//! Do not call `run`, `block_on`, `wait`, or `JoinHandle::wait` from an
-//! asynchronous Arty worker. They reject that context. The same restriction
-//! applies to dropping the runtime owner there; retain the owner on a
-//! blocking-safe thread.
+//! `RuntimeScheduler::block_on` returns an error on asynchronous Arty workers,
+//! including workers of another runtime. `JoinHandle::wait` rejects that context
+//! by panicking. Stopping or dropping the runtime owner there also panics; retain it
+//! on a blocking-safe thread.
 //!
-//! A blocking task may wait for asynchronous work. It cannot explicitly wait
-//! for its own runtime to shut down: shutdown needs that blocking task to
-//! finish, so `Runtime::wait` rejects the call. Dropping its own runtime owner
-//! instead requests shutdown without waiting for itself. This exception does
+//! A blocking task may wait for asynchronous work. Stopping or dropping its own
+//! runtime owner requests shutdown without waiting for itself, because shutdown
+//! needs that callback to finish. This exception does
 //! not make destruction an unconditional shutdown-completion barrier.
 //!
 //! # Task failures
@@ -98,7 +97,8 @@
 //! returned by the task: a task returning `Result<T, E>` produces
 //! `Result<Result<T, E>, JoinError>` when joined.
 //!
-//! `Runtime::run` and `block_on` return the same outer failure result. Entry-point
+//! `RuntimeScheduler::block_on` wraps a task failure in `runtime::Error` with
+//! the `JoinError` retained as its source. Entry-point
 //! macros preserve the annotated function's declared return type: they return a
 //! successful root's value, resume its original panic payload on panic, and panic
 //! if shutdown cancels the root. Handle a join's `Result` in the task body when

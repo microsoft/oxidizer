@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use arty::runtime::Builtins;
+use arty::task::Builtins;
 
 #[arty::main]
 async fn main(cx: Builtins) {

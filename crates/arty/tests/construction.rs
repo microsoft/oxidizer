@@ -65,5 +65,5 @@ fn runtime_can_be_constructed_after_a_rejected_processor_request() {
 
     let runtime = Runtime::builder().processor_count(ProcessorCount::at_most(1)).build().unwrap();
 
-    assert_eq!(runtime.run(async |_| 42).unwrap(), 42);
+    assert_eq!(runtime.scheduler().block_on(async |_| 42).unwrap(), 42);
 }

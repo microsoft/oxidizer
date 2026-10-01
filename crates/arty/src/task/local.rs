@@ -91,13 +91,13 @@ impl LocalTaskBinding {
 ///
 /// Use this when tasks need to share non-[`Send`] values such as [`Rc`] or
 /// [`RefCell`](std::cell::RefCell). Obtain it through
-/// [`Builtins::local_scheduler`](crate::runtime::Builtins::local_scheduler) on
+/// [`Builtins::local_scheduler`](crate::task::Builtins::local_scheduler) on
 /// the associated worker. The scheduler is neither `Send` nor [`Sync`]; cloning
 /// it does not keep the worker running.
 ///
 /// Local factories and their futures run on that worker, and their results may
 /// be non-`Send`. They still cannot borrow caller-stack data; use
-/// [`Runtime::block_on`](crate::runtime::Runtime::block_on) for scoped borrowing.
+/// [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on) for scoped borrowing.
 ///
 /// Await required joins before shutdown. Cancelled and rejected tasks return
 /// [`JoinError`](crate::task::JoinError); dropping a join does not cancel its task.
@@ -107,7 +107,7 @@ impl LocalTaskBinding {
 /// ```
 /// # #[cfg(feature = "macros")]
 /// #[arty::main]
-/// async fn main(cx: arty::runtime::Builtins) -> Result<(), arty::task::JoinError> {
+/// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
 ///     use std::rc::Rc;
 ///
 ///     let value = Rc::new(42);
@@ -160,7 +160,7 @@ impl LocalTaskScheduler {
     /// ```
     /// # #[cfg(feature = "macros")]
     /// #[arty::main]
-    /// async fn main(cx: arty::runtime::Builtins) -> Result<(), arty::task::JoinError> {
+    /// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
     ///     use std::rc::Rc;
     ///
     ///     let value = Rc::new(String::from("worker-local"));

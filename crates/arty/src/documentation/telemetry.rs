@@ -6,7 +6,7 @@
 //! Arty uses [`observed`] for runtime events. The default sink is a no-op.
 //! Pass an application's configured [`observed::Sink`] to
 //! [`RuntimeBuilder::sink`](crate::runtime::RuntimeBuilder::sink) before
-//! construction. The task's [`Builtins::sink`](crate::runtime::Builtins::sink)
+//! construction. The task's [`Builtins::sink`](crate::task::Builtins::sink)
 //! returns that runtime's associated sink.
 //!
 //! Applications constructing a sink also need a direct dependency on
@@ -30,7 +30,7 @@
 //! struct TaskStarted;
 //!
 //! #[arty::main]
-//! async fn main(cx: arty::runtime::Builtins) {
+//! async fn main(cx: arty::task::Builtins) {
 //!     observed::emit!(cx.sink(), TaskStarted);
 //! }
 //! ```

@@ -31,7 +31,7 @@ use crate::task::execution::TaskResult;
 /// ```
 /// # #[cfg(feature = "macros")]
 /// #[arty::main]
-/// async fn main(cx: arty::runtime::Builtins) -> Result<(), arty::task::JoinError> {
+/// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
 ///     let task = cx.scheduler().spawn(async |_| 42);
 ///     assert_eq!(task.await?, 42);
 ///     Ok(())
@@ -66,8 +66,8 @@ where
     /// Blocks until the task's result is available.
     ///
     /// Use `.await` inside asynchronous code instead. This waits for one task,
-    /// not for runtime shutdown; [`Runtime::wait`](crate::runtime::Runtime::wait)
-    /// waits for workers to stop.
+    /// not for runtime shutdown. Stopping or dropping the runtime owner waits
+    /// for its workers to stop.
     ///
     /// # Errors
     ///
@@ -86,7 +86,7 @@ where
     /// use arty::runtime::Runtime;
     ///
     /// let runtime = Runtime::new()?;
-    /// let task = runtime.task_scheduler().spawn(async |_| 42);
+    /// let task = runtime.scheduler().spawn_anywhere(async |_| 42);
     /// assert_eq!(task.wait()?, 42);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -133,7 +133,7 @@ mod tests {
             .build()
             .expect("runtime");
 
-        let handle = runtime.task_scheduler().spawn(async |_cx| 123u32);
+        let handle = runtime.scheduler().spawn_anywhere(async |_cx| 123u32);
 
         assert_eq!(handle.wait().unwrap(), 123);
     }

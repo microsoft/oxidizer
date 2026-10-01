@@ -9,7 +9,8 @@ testing_aids::init_tracing!();
 
 use std::time::Duration;
 
-use arty::runtime::{Builtins, Runtime};
+use arty::runtime::Runtime;
+use arty::task::Builtins;
 use testing_aids::execute_or_terminate_process;
 use tick::FutureExt;
 
@@ -28,10 +29,11 @@ fn workers() -> usize {
 fn many_timers_with_relocation_ensure_advanced() {
     execute_or_terminate_process(|| {
         let runtime = Runtime::new().unwrap();
-        let scheduler = runtime.task_scheduler();
         let count = workers();
         runtime
+            .scheduler()
             .block_on(async move |builtins: Builtins| {
+                let scheduler = builtins.scheduler();
                 // ensure clock works across all threads
                 let handles: Vec<_> = (0..count)
                     .map(|_| {
@@ -67,8 +69,8 @@ fn many_timers_ensure_advanced() {
     let handles: Vec<_> = (0..count)
         .map(|_| {
             runtime
-                .task_scheduler()
-                .spawn(async |builtins| builtins.clock().delay(Duration::from_millis(1)).await)
+                .scheduler()
+                .spawn_anywhere(async |builtins| builtins.clock().delay(Duration::from_millis(1)).await)
         })
         .collect();
 
@@ -82,6 +84,7 @@ fn timer_with_relocated_builtins() {
     execute_or_terminate_process(|| {
         let runtime = Runtime::new().unwrap();
         runtime
+            .scheduler()
             .block_on(async |builtins: Builtins| {
                 builtins
                     .scheduler()

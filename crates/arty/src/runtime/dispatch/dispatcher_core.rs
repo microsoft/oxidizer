@@ -12,10 +12,10 @@ use observed::emit;
 use thread_aware::Thread;
 
 use crate::runtime::blocking_worker::BlockingWorker;
-use crate::runtime::context::Builtins;
 use crate::runtime::telemetry::events::{PlacementLabel, RuntimeStopped, RuntimeStopping, TaskSpawned};
 use crate::runtime::thread::waiter::WaitForShutdown;
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
+use crate::task::Builtins;
 use crate::task::execution::prepare_remote;
 use crate::task::join::JoinHandle;
 
@@ -135,6 +135,18 @@ impl<WFS> DispatcherCore<WFS> {
 
     pub(in crate::runtime) fn worker_index(&self, thread_id: ThreadId) -> Option<WorkerIndex> {
         self.worker_indices.get(&thread_id).copied()
+    }
+
+    pub(in crate::runtime) fn spawn_everywhere<M, FF, F, R>(&self, mut make_factory: M) -> Vec<JoinHandle<R>>
+    where
+        M: FnMut() -> FF,
+        FF: FnOnce(Builtins) -> F + Send + 'static,
+        F: Future<Output = R> + 'static,
+        R: Send + 'static,
+    {
+        (0..self.worker_endpoints.len())
+            .map(|index| self.enqueue(WorkerIndex(index), "any", make_factory()))
+            .collect()
     }
 
     pub(in crate::runtime) fn owns(&self, thread: &Thread) -> bool {

@@ -28,7 +28,7 @@ use crate::runtime::handle::Runtime;
 ///     .processor_count(ProcessorCount::at_most(4))
 ///     .blocking_pool_policy(BlockingPoolPolicy::shared(4))
 ///     .build()?;
-/// assert_eq!(runtime.run(async |_| 42)?, 42);
+/// assert_eq!(runtime.scheduler().block_on(async |_| 42)?, 42);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Debug)]
@@ -118,7 +118,7 @@ impl RuntimeBuilder {
     /// #[arty::test(builder = arty::runtime::Runtime::builder().clock(
     ///     arty::time::ClockControl::new().auto_advance_timers(true)
     /// ))]
-    /// async fn sequential_delay(cx: arty::runtime::Builtins) {
+    /// async fn sequential_delay(cx: arty::task::Builtins) {
     ///     let duration = std::time::Duration::from_secs(30);
     ///     let watch = cx.clock().stopwatch();
     ///     cx.clock().delay(duration).await;
@@ -140,7 +140,7 @@ impl RuntimeBuilder {
     /// The default is [`Sink::noop`]. Asynchronous tasks inherit enrichment
     /// active on the configured sink at submission, including their completion
     /// events. Retrieve the sink inside a task with
-    /// [`Builtins::sink`](crate::runtime::Builtins::sink).
+    /// [`Builtins::sink`](crate::task::Builtins::sink).
     ///
     /// # Examples
     ///
@@ -179,7 +179,7 @@ impl RuntimeBuilder {
     /// use arty::runtime::Runtime;
     ///
     /// let runtime = Runtime::builder().build()?;
-    /// assert_eq!(runtime.run(async |_| 42)?, 42);
+    /// assert_eq!(runtime.scheduler().block_on(async |_| 42)?, 42);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn build(self) -> Result<Runtime, Error> {
@@ -209,7 +209,7 @@ mod tests {
 
     use super::*;
     #[cfg(not(miri))]
-    use crate::runtime::context::Builtins;
+    use crate::task::Builtins;
 
     #[test]
     fn custom_clock_ok() {
@@ -304,7 +304,8 @@ mod tests {
         let runtime = Runtime::builder().build().expect("Failed to create runtime");
 
         runtime
-            .run(async move |cx: Builtins| {
+            .scheduler()
+            .block_on(async move |cx: Builtins| {
                 assert!(cx.sink().is_noop());
             })
             .unwrap();
@@ -335,7 +336,8 @@ mod tests {
         let runtime = Runtime::builder().sink(sink).build().expect("Failed to create runtime");
 
         runtime
-            .run(async move |cx: Builtins| {
+            .scheduler()
+            .block_on(async move |cx: Builtins| {
                 assert!(!cx.sink().is_noop());
                 cx.sink().flush().unwrap();
             })

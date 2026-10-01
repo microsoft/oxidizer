@@ -22,8 +22,8 @@ use std::task::{Context, Poll, Waker};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use arty::runtime::{BlockingPoolPolicy, Builtins, ProcessorCount, Runtime};
-use arty::task::{JoinHandle, TaskScheduler};
+use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime};
+use arty::task::{Builtins, JoinHandle};
 use criterion::{BenchmarkId, Criterion, Throughput};
 use metabench::benchmark;
 use tokio::task::{JoinHandle as TokioJoinHandle, LocalSet};
@@ -77,8 +77,7 @@ impl Workload {
 
 #[derive(Debug)]
 struct ArtyCase {
-    _runtime: Runtime,
-    scheduler: TaskScheduler,
+    runtime: Runtime,
     handles: Vec<JoinHandle<()>>,
     peer: WakePeer,
     workers: usize,
@@ -93,10 +92,8 @@ impl ArtyCase {
             .blocking_pool_policy(BlockingPoolPolicy::shared(BLOCKING_THREADS))
             .build()
             .expect("benchmark requires the selected number of available processors");
-        let scheduler = runtime.task_scheduler();
         let mut case = Self {
-            _runtime: runtime,
-            scheduler,
+            runtime,
             handles: Vec::with_capacity(count.max(workers)),
             peer: WakePeer::new(),
             workers,
@@ -115,10 +112,12 @@ impl ArtyCase {
         FF: FnOnce(Builtins) -> F + Clone + Send + 'static,
         F: Future<Output = ()> + 'static,
     {
+        let scheduler = self.runtime.scheduler();
         let start = Instant::now();
         for _ in 0..iterations {
             self.handles.clear();
-            self.handles.extend((0..self.count).map(|_| self.scheduler.spawn(factory.clone())));
+            self.handles
+                .extend((0..self.count).map(|_| scheduler.spawn_anywhere(factory.clone())));
             for handle in &mut self.handles {
                 futures::executor::block_on(black_box(handle)).expect("benchmark tasks finish before shutdown");
             }
@@ -138,9 +137,9 @@ impl ArtyCase {
                     .expect("requested benchmark operation count must fit in u64");
                 let start = Instant::now();
                 self.handles.clear();
-                // The detached scheduler round-robins, so consecutive spawns land one per worker.
+                // Round-robin submissions place one task on each worker.
                 self.handles.extend((0..self.workers).map(|_| {
-                    self.scheduler.spawn(async move |cx| {
+                    self.runtime.scheduler().spawn_anywhere(async move |cx| {
                         let clock = cx.clock().clone();
                         timeout_churn(operations, |timeout| clock.delay(timeout)).await;
                     })
@@ -155,8 +154,9 @@ impl ArtyCase {
                 self.remote(iterations, async move |_| RemoteWake::new(sender.clone()).await)
             }
             Workload::FromTask => self
-                .scheduler
-                .spawn(async move |cx| {
+                .runtime
+                .scheduler()
+                .spawn_anywhere(async move |cx| {
                     let mut handles = Vec::with_capacity(count);
                     let start = Instant::now();
                     for _ in 0..iterations {
@@ -171,8 +171,9 @@ impl ArtyCase {
                 .wait()
                 .expect("benchmark parent finishes before shutdown"),
             Workload::Local => self
-                .scheduler
-                .spawn(async move |cx| {
+                .runtime
+                .scheduler()
+                .spawn_anywhere(async move |cx| {
                     let scheduler = cx.local_scheduler().expect("local benchmark runs on its associated worker");
                     let mut handles = Vec::with_capacity(count);
                     let start = Instant::now();
@@ -192,7 +193,7 @@ impl ArtyCase {
                 for _ in 0..iterations {
                     self.handles.clear();
                     self.handles
-                        .extend((0..count).map(|_| self.scheduler.spawn_blocking(|| black_box(()))));
+                        .extend((0..count).map(|_| self.runtime.scheduler().spawn_blocking(|| black_box(()))));
                     for handle in &mut self.handles {
                         futures::executor::block_on(black_box(handle)).expect("benchmark tasks finish before shutdown");
                     }
