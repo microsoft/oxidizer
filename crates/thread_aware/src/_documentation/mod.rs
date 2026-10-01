@@ -26,7 +26,7 @@
 //! ## Prefer the derive
 //!
 //! In almost all cases, implement [`ThreadAware`](crate::ThreadAware) with
-//! [the derive macro](https://docs.rs/thread_aware/latest/thread_aware/derive.ThreadAware.html). It
+//! [the derive macro](derive@crate::ThreadAware). It
 //! generates a [`relocate`](crate::ThreadAware::relocate) that forwards the notification to every
 //! field, which is exactly what a compound type owes its parts:
 //!
@@ -76,16 +76,14 @@
 //! whose impl is a harmless no-op. Forwarding is free and stays correct if the field later gains
 //! affinity-bearing state; `skip` removes that safety net, so revisit each `skip` whenever the
 //! field type changes. When you instead want a non-`ThreadAware` value to read as explicitly inert
-//! in the type, wrap it in
-//! [`Unaware`](https://docs.rs/thread_aware/latest/thread_aware/struct.Unaware.html) rather than
-//! skipping.
+//! in the type, wrap it in [`Unaware`](crate::Unaware) rather than skipping.
 //!
 //! ## What the generated bounds mean
 //!
 //! You rarely need to reason about this: the derive adds exactly the `ThreadAware` bounds its
 //! generated body needs and no more, so a correct type "just derives". When it matters - a generic
 //! wrapper, or a marker field that should stay bound-free - the derive's
-//! [Generic Bounds](https://docs.rs/thread_aware/latest/thread_aware/derive.ThreadAware.html#generic-bounds)
+//! [Generic Bounds](derive@crate::ThreadAware#generic-bounds)
 //! reference has the rules.
 //!
 //! ## Implementing the trait by hand
@@ -104,7 +102,8 @@
 //! impl ThreadAware for PerCoreScratch {
 //!     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
 //!         // The scratch buffer belonged to the previous worker; drop it so the next use
-//!         // re-allocates in the destination's NUMA node instead of reaching across.
+//!         // re-allocates fresh, letting the destination's allocator place it in local
+//!         // memory instead of carrying the old worker's buffer across.
 //!         self.buffer = Vec::new();
 //!     }
 //! }
@@ -126,9 +125,10 @@
 //! ([`performables::arc::Arc`](https://docs.rs/performables/latest/performables/arc/struct.Arc.html);
 //! add it as a dependency). With the
 //! [`PerThread`](https://docs.rs/performables/latest/performables/arc/struct.PerThread.html)
-//! strategy, relocating to a destination worker that has no instance yet materializes a separate
-//! `T` for it *during* the `relocate` call; relocating back to a worker that already has one reuses
-//! it. Either way the sharing is per-worker instead of process-wide. Use
+//! strategy, each worker keeps its own value instead of sharing one process-wide: a worker that
+//! already has one reuses it, and a worker that does not is given one when it is relocated there
+//! (built from the pointer's factory, if it was constructed with one) *during* the `relocate` call,
+//! not lazily on first use. Use
 //! [`PerProcess`](https://docs.rs/performables/latest/performables/arc/struct.PerProcess.html), which
 //! behaves as a vanilla `Arc`, when one shared instance is what you want, and
 //! [`PerNuma`](https://docs.rs/performables/latest/performables/arc/struct.PerNuma.html) for one
@@ -141,11 +141,11 @@
 //! |---|---|---|
 //! | A compound of thread-aware fields | `#[derive(ThreadAware)]` | Forwards relocation to each field. |
 //! | A field with genuine per-core behavior | a hand-written impl | Only you know what "rebind" means. |
-//! | A foreign type that carries no affinity | [`Unaware<T>`](https://docs.rs/thread_aware/latest/thread_aware/struct.Unaware.html) | Implements relocation as a no-op; moves the wrapped value unchanged. |
-//! | Shared state that should differ per worker | [`performables::arc::Arc<T, PerThread>`](https://docs.rs/performables/latest/performables/arc/struct.Arc.html) | Materializes a separate `T` per destination. |
+//! | A foreign type that carries no affinity | [`Unaware<T>`](crate::Unaware) | Implements relocation as a no-op; moves the wrapped value unchanged. |
+//! | Shared state that should differ per worker | [`performables::arc::Arc<T, PerThread>`](https://docs.rs/performables/latest/performables/arc/struct.Arc.html) | Gives each worker its own `T`. |
 //! | Shared state that is the same everywhere | [`performables::arc::Arc<T, PerProcess>`](https://docs.rs/performables/latest/performables/arc/struct.Arc.html) | Behaves as a vanilla `Arc`. |
 //!
-//! [`Unaware`](https://docs.rs/thread_aware/latest/thread_aware/struct.Unaware.html) wraps a value
+//! [`Unaware`](crate::Unaware) wraps a value
 //! and satisfies `ThreadAware` without reacting to
 //! relocation - use it for inert, foreign, or allocation-free values that legitimately do not care
 //! which worker they are on. Wrapping a type that *does* implement the trait is discouraged: it
