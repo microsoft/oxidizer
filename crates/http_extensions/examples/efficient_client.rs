@@ -4,8 +4,8 @@
 //! Demonstrates that the `http` crate is viable for allocation-sensitive HTTP clients.
 //!
 //! The `http` types ([`Request`], [`Response`], [`HeaderMap`], [`HeaderValue`]) are often
-//! assumed to be allocation-heavy. This example shows that, used deliberately, they cost only
-//! two small heap allocations per request/response round trip - while a client using the
+//! assumed to be allocation-heavy. This example shows that, used deliberately, they cost a
+//! single small heap allocation per request/response round trip - while a client using the
 //! common convenience APIs makes dozens.
 //!
 //! A mocked HTTP/1.1 client sends a request and receives a response, each carrying 10 headers
@@ -26,8 +26,9 @@
 //!   The caller hands the response's map back for the next request, so the map is allocated once.
 //! - Returns the response body as a zero-copy [`BytesView`] over the receive buffer.
 //!
-//! The two remaining allocations are the unique per-request `x-request-id` value and the shared
-//! owner of the response head. A naive client is measured alongside for comparison.
+//! The one remaining allocation is the shared owner that turns the pooled response head into
+//! [`Bytes`], which is the only storage [`HeaderValue`] accepts. A naive client is measured
+//! alongside for comparison.
 
 use std::sync::Mutex;
 
@@ -35,7 +36,9 @@ use alloc_tracker::{Allocator, Session};
 use bytes::Bytes;
 use bytesbuf::mem::GlobalPool;
 use bytesbuf::{BytesBuf, BytesView};
-use http::header::{ACCEPT, ACCEPT_ENCODING, AUTHORIZATION, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, HOST, USER_AGENT};
+use http::header::{
+    ACCEPT, ACCEPT_ENCODING, ACCEPT_LANGUAGE, AUTHORIZATION, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, HOST, USER_AGENT,
+};
 use http::request::Parts;
 use http::{HeaderMap, HeaderName, HeaderValue, Method, Request, Response, StatusCode, Uri, Version};
 use http_extensions::{HttpBodyBuilder, HttpError, HttpRequest, HttpResponse};
@@ -56,7 +59,6 @@ const MEASURED_REQUESTS: u64 = 1_000;
 const RECEIVE_BUFFER_LEN: usize = 8 * 1024;
 
 // Custom header names are built once; cloning a name created from a static string never allocates.
-static X_REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
 static X_CORRELATION_ID: HeaderName = HeaderName::from_static("x-correlation-id");
 static X_CLIENT_VERSION: HeaderName = HeaderName::from_static("x-client-version");
 
@@ -94,7 +96,6 @@ async fn main() -> Result<(), ohno::AppError> {
                 &payload,
                 &authorization,
                 &correlation_id,
-                i,
                 std::mem::take(&mut recycled_headers),
             )?
         };
@@ -131,7 +132,7 @@ async fn main() -> Result<(), ohno::AppError> {
 
         let request = {
             let _span = measure.then(|| build_op.measure_thread().iterations(1));
-            build_naive_request(&body_builder, &payload, authorization, correlation_id, i)?
+            build_naive_request(&body_builder, &payload, authorization, correlation_id)?
         };
 
         let response = {
@@ -151,14 +152,12 @@ async fn main() -> Result<(), ohno::AppError> {
 /// Builds a request that reuses `headers` (and its capacity) from a previous response.
 ///
 /// Static values use [`HeaderValue::from_static`] and shared values use
-/// [`HeaderValue::from_maybe_shared`]; neither allocates. The per-request identifier is the only
-/// value that needs fresh storage.
+/// [`HeaderValue::from_maybe_shared`]; neither allocates.
 fn build_request(
     body_builder: &HttpBodyBuilder,
     payload: &BytesView,
     authorization: &Bytes,
     correlation_id: &Bytes,
-    request_id: u64,
     mut headers: HeaderMap,
 ) -> Result<HttpRequest, HttpError> {
     headers.clear();
@@ -168,6 +167,7 @@ fn build_request(
     headers.insert(USER_AGENT, HeaderValue::from_static("oxidizer-demo/1.0"));
     headers.insert(ACCEPT, HeaderValue::from_static("application/octet-stream"));
     headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
+    headers.insert(ACCEPT_LANGUAGE, HeaderValue::from_static("en-US"));
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/octet-stream"));
     headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
     headers.insert(X_CLIENT_VERSION.clone(), HeaderValue::from_static("1.0.0"));
@@ -175,13 +175,6 @@ fn build_request(
     // Cloning `Bytes` only bumps a reference count; `from_maybe_shared` validates without copying.
     headers.insert(AUTHORIZATION, shared_value(authorization.clone())?);
     headers.insert(X_CORRELATION_ID.clone(), shared_value(correlation_id.clone())?);
-
-    // A unique per-request value needs storage of its own: exactly one small allocation.
-    // `HeaderValue::from(request_id)` would make two, because it over-allocates a `BytesMut`
-    // and then needs a shared header when freezing it.
-    let mut digits = [0; 20];
-    let request_id = Bytes::copy_from_slice(format_decimal(request_id, &mut digits));
-    headers.insert(X_REQUEST_ID.clone(), shared_value(request_id)?);
 
     // Cloning a view shares the pooled payload memory; nothing is copied or allocated.
     let mut request = Request::new(body_builder.bytes(payload.clone()));
@@ -397,10 +390,8 @@ fn parse_head(head: &Bytes, headers: &mut HeaderMap) -> Result<StatusCode, HttpE
 
 /// Resolves a header name without allocating for standard and expected custom names.
 fn resolve_header_name(name: &[u8]) -> Result<HeaderName, HttpError> {
-    for known in [&X_REQUEST_ID, &X_CORRELATION_ID] {
-        if name.eq_ignore_ascii_case(known.as_str().as_bytes()) {
-            return Ok(known.clone());
-        }
+    if name.eq_ignore_ascii_case(X_CORRELATION_ID.as_str().as_bytes()) {
+        return Ok(X_CORRELATION_ID.clone());
     }
 
     // Standard names are recognized (case-insensitively) without allocating; other names are copied.
@@ -446,7 +437,6 @@ fn build_naive_request(
     payload: &BytesView,
     authorization: &str,
     correlation_id: &str,
-    request_id: u64,
 ) -> Result<HttpRequest, HttpError> {
     Request::builder()
         .method("POST")
@@ -455,12 +445,12 @@ fn build_naive_request(
         .header("user-agent", "oxidizer-demo/1.0")
         .header("accept", "application/octet-stream")
         .header("accept-encoding", "identity")
+        .header("accept-language", "en-US")
         .header("content-type", "application/octet-stream")
         .header("cache-control", "no-cache")
         .header("x-client-version", "1.0.0")
         .header("authorization", authorization)
         .header("x-correlation-id", correlation_id)
-        .header("x-request-id", request_id.to_string())
         .body(body_builder.bytes(payload.to_vec()))
         .map_err(malformed)
 }
@@ -567,7 +557,7 @@ impl MockConnection {
              ETag: \"5f3c-1a2b\"\r\n\
              Vary: Accept-Encoding\r\n\
              Connection: keep-alive\r\n\
-             X-Request-Id: 4f6c1e2a-9b8d-4c3e-a1f0-7d2e5b6c8a90\r\n\
+             Content-Language: en-US\r\n\
              X-Correlation-Id: 0b7e2d4c-1a3f-4e5d-9c8b-6a7f0e1d2c3b\r\n\
              \r\n"
         );
@@ -604,7 +594,7 @@ impl MockConnection {
 fn verify_response(status: StatusCode, headers: &HeaderMap, body_len: usize) {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(headers.len(), HEADER_COUNT);
-    assert_eq!(headers[&X_REQUEST_ID], "4f6c1e2a-9b8d-4c3e-a1f0-7d2e5b6c8a90");
+    assert_eq!(headers[&X_CORRELATION_ID], "0b7e2d4c-1a3f-4e5d-9c8b-6a7f0e1d2c3b");
     assert_eq!(body_len, BODY_LEN);
 }
 
