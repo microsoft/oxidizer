@@ -130,7 +130,7 @@ fn shutdown_cancels_pending_async_work_and_destroys_its_future() {
             drop(guard);
         });
         receive_start.recv_timeout(TEST_TIMEOUT).unwrap();
-        runtime.stop();
+        runtime.stop().unwrap();
         assert!(task.wait().unwrap_err().is_shutdown());
         receive_drop.recv_timeout(TEST_TIMEOUT).unwrap();
     });
@@ -161,7 +161,7 @@ fn queued_blocking_work_is_cancelled_but_running_work_finishes() {
         assert_eq!(running.wait().unwrap(), 42);
         assert!(queued.wait().unwrap_err().is_shutdown());
         assert!(!invoked.load(Ordering::Relaxed));
-        runtime.stop();
+        runtime.stop().unwrap();
     });
 }
 
@@ -193,7 +193,7 @@ fn root_execution_returns_errors_and_preserves_borrowed_storage() {
             .is_shutdown()
     );
     assert_eq!(value, 0);
-    runtime.stop();
+    runtime.stop().unwrap();
 }
 
 #[test]

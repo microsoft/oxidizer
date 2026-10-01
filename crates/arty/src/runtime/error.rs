@@ -18,6 +18,9 @@ use std::fmt::{self, Display};
 /// returns this error for an invalid calling context or a failed task. A task
 /// failure is retained as a [`JoinError`](crate::task::JoinError) source.
 ///
+/// [`Runtime::stop`](crate::runtime::Runtime::stop) returns this error when its
+/// caller cannot wait for shutdown or when a runtime worker panicked.
+///
 /// Format the error with [`Display`] and inspect [`StdError::source`] for
 /// diagnostics. Construction and affinity error messages and concrete source
 /// types are not stable error classifications. Task joins report

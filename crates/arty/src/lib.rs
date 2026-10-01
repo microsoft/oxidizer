@@ -121,7 +121,7 @@ use arty_io_core as _;
 ///
 /// # Panics
 ///
-/// Panics if runtime construction fails or shutdown cancels the root task.
+/// Panics if runtime construction or shutdown fails, or shutdown cancels the root task.
 /// If the asynchronous body panics, its original panic payload is resumed on
 /// the calling thread. Errors returned by the body remain ordinary return values.
 ///
@@ -206,7 +206,7 @@ pub use arty_macros::main;
 ///
 /// # Panics
 ///
-/// Panics if runtime construction fails or shutdown cancels the test body.
+/// Panics if runtime construction or shutdown fails, or shutdown cancels the test body.
 /// A panic in the body is resumed with its original payload, so
 /// `#[should_panic(expected = "...")]` can match the original message.
 ///

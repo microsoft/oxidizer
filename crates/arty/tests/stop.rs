@@ -36,7 +36,7 @@ fn stop_via_runtime() {
         runtime.scheduler().spawn_anywhere(async |_| canary.await);
         futures::executor::block_on(started).unwrap();
 
-        runtime.stop();
+        runtime.stop().unwrap();
 
         // We expect the canary to have died. Otherwise, the runtime is still running!
         assert!(observer.upgrade().is_none());
@@ -62,7 +62,7 @@ fn stop_via_async_task() {
         });
 
         futures::executor::block_on(stop_requested).unwrap();
-        runtime.stop();
+        runtime.stop().unwrap();
 
         // We expect the canary to have died. Otherwise, the runtime is still running!
         assert!(observer.upgrade().is_none());

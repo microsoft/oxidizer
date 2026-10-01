@@ -442,7 +442,7 @@ mod tests {
             })
             .wait()
             .unwrap();
-        runtime.stop();
+        runtime.stop().unwrap();
 
         assert_eq!(
             processor

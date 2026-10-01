@@ -16,7 +16,7 @@
 //! | Operation | Ownership and completion |
 //! | --- | --- |
 //! | [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on) | Borrows the scheduler and returns `Result<T, runtime::Error>` from a task that may borrow the caller's stack |
-//! | [`Runtime::stop`](crate::runtime::Runtime::stop) | Consumes the owner, requests shutdown, and normally waits for it |
+//! | [`Runtime::stop`](crate::runtime::Runtime::stop) | Consumes the owner, requests shutdown, and returns `Result<(), runtime::Error>` after waiting |
 //! | [`RuntimeOperations::request_stop`](crate::runtime::RuntimeOperations::request_stop) | Requests shutdown without blocking; repeated calls are allowed |
 //! | Dropping `Runtime` | Requests shutdown and normally waits for it, with the blocking-task exception below |
 //!
@@ -34,7 +34,7 @@
 //!     .scheduler()
 //!     .block_on(async |_| message.push_str(", Arty"))?;
 //! assert_eq!(message, "Hello, Arty");
-//! runtime.stop();
+//! runtime.stop()?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
@@ -69,7 +69,7 @@
 //!     .wait()
 //!     .expect_err("submission follows shutdown");
 //! assert!(error.is_shutdown());
-//! runtime.stop();
+//! runtime.stop()?;
 //! # Ok::<(), arty::runtime::Error>(())
 //! ```
 //!
@@ -81,13 +81,18 @@
 //!
 //! `RuntimeScheduler::block_on` returns an error on asynchronous Arty workers,
 //! including workers of another runtime. `JoinHandle::wait` rejects that context
-//! by panicking. Stopping or dropping the runtime owner there also panics; retain it
+//! by panicking. `Runtime::stop` requests shutdown but returns an error instead of
+//! waiting from a worker. Dropping the runtime owner there still panics; retain it
 //! on a blocking-safe thread.
 //!
-//! A blocking task may wait for asynchronous work. Stopping or dropping its own
-//! runtime owner requests shutdown without waiting for itself, because shutdown
-//! needs that callback to finish. This exception does
+//! A blocking task may wait for asynchronous work. Stopping its own runtime returns
+//! an error after requesting shutdown, because it cannot wait for itself.
+//! Dropping its owner requests shutdown without waiting for that callback. This exception does
 //! not make destruction an unconditional shutdown-completion barrier.
+//!
+//! Explicit `stop` reports worker panics after joining all workers. Implicit
+//! destruction retains the worker-entry diagnostics but cannot return an error.
+//! Use explicit shutdown when the caller needs to observe its outcome.
 //!
 //! # Task failures
 //!

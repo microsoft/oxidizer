@@ -34,7 +34,7 @@ use std::sync::Mutex;
 ///     .expect_err("submission follows shutdown");
 /// assert!(error.is_shutdown());
 /// assert!(!error.is_panic());
-/// runtime.stop();
+/// runtime.stop()?;
 /// # Ok::<(), arty::runtime::Error>(())
 /// ```
 pub struct JoinError {
@@ -82,7 +82,7 @@ impl JoinError {
     ///     .wait()
     ///     .expect_err("submission follows shutdown");
     /// assert!(error.is_shutdown());
-    /// runtime.stop();
+    /// runtime.stop()?;
     /// # Ok::<(), arty::runtime::Error>(())
     /// ```
     #[must_use]

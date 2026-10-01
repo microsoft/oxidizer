@@ -186,6 +186,8 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
     let clock_binding = Ident::new("__arty_clock_control", Span::mixed_site());
     let runtime_binding = Ident::new("__arty_runtime", Span::mixed_site());
     let result_binding = Ident::new("__arty_result", Span::mixed_site());
+    let shutdown_binding = Ident::new("__arty_shutdown", Span::mixed_site());
+    let value_binding = Ident::new("__arty_value", Span::mixed_site());
     let runtime = match args.runtime(runtime_path, clock.as_ref().map(|_| &clock_binding)) {
         Ok(runtime) => runtime,
         Err(error) => return fail(error),
@@ -218,8 +220,10 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
             let #result_binding = #runtime_binding
                 .scheduler()
                 .block_on(async move |#state_ident: #state_type| #body);
-            #runtime_binding.stop();
-            #result_binding.unwrap_or_else(|error| #runtime_path::__private::resume_error(error))
+            let #shutdown_binding = #runtime_binding.stop();
+            #result_binding
+                .and_then(|#value_binding| #shutdown_binding.map(|()| #value_binding))
+                .unwrap_or_else(|error| #runtime_path::__private::resume_error(error))
         }
     }
 }
@@ -249,8 +253,10 @@ mod tests {
             let __arty_result = __arty_runtime
                 .scheduler()
                 .block_on(async move |cx: arty::task::Builtins| { run(cx).await });
-            __arty_runtime.stop();
-            __arty_result.unwrap_or_else(|error| ::arty::runtime::__private::resume_error(error))
+            let __arty_shutdown = __arty_runtime.stop();
+            __arty_result
+                .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
+                .unwrap_or_else(|error| ::arty::runtime::__private::resume_error(error))
         }
         "#);
     }
@@ -277,8 +283,10 @@ mod tests {
                 .block_on(async move |mut cx: renamed::Builtins| {
                     fail(&mut cx).await;
                 });
-            __arty_runtime.stop();
-            __arty_result.unwrap_or_else(|error| ::renamed::__private::resume_error(error))
+            let __arty_shutdown = __arty_runtime.stop();
+            __arty_result
+                .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
+                .unwrap_or_else(|error| ::renamed::__private::resume_error(error))
         }
         "#);
     }
@@ -302,8 +310,10 @@ mod tests {
                 let __arty_result = __arty_runtime
                     .scheduler()
                     .block_on(async move |cx: <App as Types>::Context| { run(cx).await });
-                __arty_runtime.stop();
-                __arty_result.unwrap_or_else(|error| ::renamed::__private::resume_error(error))
+                let __arty_shutdown = __arty_runtime.stop();
+                __arty_result
+                    .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
+                    .unwrap_or_else(|error| ::renamed::__private::resume_error(error))
             }
         };
         assert_eq!(expansion.to_string(), expected.to_string());
@@ -326,8 +336,10 @@ mod tests {
                 let __arty_result = __arty_runtime
                     .scheduler()
                     .block_on(async move |cx: Context| { run(cx).await });
-                __arty_runtime.stop();
-                __arty_result.unwrap_or_else(|error| ::renamed::__private::resume_error(error))
+                let __arty_shutdown = __arty_runtime.stop();
+                __arty_result
+                    .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
+                    .unwrap_or_else(|error| ::renamed::__private::resume_error(error))
             }
         };
         assert_eq!(expansion.to_string(), expected.to_string());
@@ -364,8 +376,10 @@ mod tests {
                             run(cx, &mut time).await;
                         }
                     });
-                __arty_runtime.stop();
-                __arty_result.unwrap_or_else(|error| crate::renamed::__private::resume_error(error))
+                let __arty_shutdown = __arty_runtime.stop();
+                __arty_result
+                    .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
+                    .unwrap_or_else(|error| crate::renamed::__private::resume_error(error))
             }
         };
         assert_eq!(expansion.to_string(), expected.to_string());

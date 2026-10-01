@@ -11,6 +11,7 @@ use nonempty::NonEmpty;
 use observed::emit;
 use thread_aware::Thread;
 
+use crate::runtime::Error;
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::telemetry::events::{PlacementLabel, RuntimeStopped, RuntimeStopping, TaskSpawned};
 use crate::runtime::thread::waiter::WaitForShutdown;
@@ -232,11 +233,12 @@ where
     /// Waits for the runtime to shut down and all worker threads to exit.
     ///
     /// Safe to call multiple times.
-    pub(in crate::runtime) fn join(&self) {
-        self.wait_for_shutdown.wait();
+    pub(in crate::runtime) fn join(&self) -> Result<(), Error> {
+        let outcome = self.wait_for_shutdown.wait();
         if !self.stopped_reported.swap(true, Ordering::Relaxed) {
             emit!(&self.sink, RuntimeStopped);
         }
+        outcome
     }
 }
 

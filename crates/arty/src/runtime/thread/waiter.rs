@@ -1,12 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::error::Error as StdError;
+use std::fmt::{self, Display};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
-use std::thread;
+use std::thread::{self, ThreadId};
+
+use crate::runtime::Error;
 
 #[cfg_attr(test, mockall::automock)]
 pub(in crate::runtime) trait WaitForShutdown {
-    fn wait(&self);
+    fn wait(&self) -> Result<(), Error>;
 }
 
 /// Joins workers on one waiting caller; other callers wait for that join to finish.
@@ -19,7 +23,22 @@ pub(in crate::runtime) struct ThreadWaiter {
 enum State {
     Ready(Vec<thread::JoinHandle<()>>),
     Joining,
-    Completed,
+    Completed(Option<ThreadId>),
+}
+
+#[derive(Debug)]
+struct WorkerPanicked(ThreadId);
+
+impl Display for WorkerPanicked {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "runtime worker {:?} panicked", self.0)
+    }
+}
+
+impl StdError for WorkerPanicked {}
+
+fn completion_result(failed_worker: Option<ThreadId>) -> Result<(), Error> {
+    failed_worker.map_or(Ok(()), |worker| Err(Error::new(WorkerPanicked(worker))))
 }
 
 impl ThreadWaiter {
@@ -29,7 +48,7 @@ impl ThreadWaiter {
         }
     }
 
-    fn wait_locked<'a>(&'a self, mut state_guard: MutexGuard<'a, State>) {
+    fn wait_locked<'a>(&'a self, mut state_guard: MutexGuard<'a, State>) -> Result<(), Error> {
         let (state, completed) = &*self.shared;
         loop {
             match &mut *state_guard {
@@ -37,30 +56,34 @@ impl ThreadWaiter {
                     let threads = std::mem::take(threads);
                     *state_guard = State::Joining;
                     drop(state_guard);
+                    let mut failed_worker = None;
                     for worker in threads {
+                        let worker_id = worker.thread().id();
                         // Worker panic diagnostics are emitted by the thread entry wrapper.
-                        let _ = worker.join();
+                        if worker.join().is_err() && failed_worker.is_none() {
+                            failed_worker = Some(worker_id);
+                        }
                     }
-                    *state.lock().expect("shutdown state is never held while executing user code") = State::Completed;
+                    *state.lock().expect("shutdown state is never held while executing user code") = State::Completed(failed_worker);
                     completed.notify_all();
-                    return;
+                    return completion_result(failed_worker);
                 }
                 State::Joining => {
                     state_guard = completed
                         .wait(state_guard)
                         .expect("shutdown state is never held while executing user code");
                 }
-                State::Completed => return,
+                State::Completed(failed_worker) => return completion_result(*failed_worker),
             }
         }
     }
 }
 
 impl WaitForShutdown for ThreadWaiter {
-    fn wait(&self) {
+    fn wait(&self) -> Result<(), Error> {
         let (state, _) = &*self.shared;
         let state_guard = state.lock().expect("shutdown state is never held while executing user code");
-        self.wait_locked(state_guard);
+        self.wait_locked(state_guard)
     }
 }
 
@@ -76,8 +99,8 @@ mod tests {
     #[test]
     fn empty_and_repeated_waits_complete() {
         let waiter = ThreadWaiter::new(Vec::new());
-        waiter.wait();
-        waiter.wait();
+        waiter.wait().unwrap();
+        waiter.wait().unwrap();
     }
 
     #[test]
@@ -92,15 +115,15 @@ mod tests {
             let (state, completed) = &*shared;
             let mut state_guard = state.lock().unwrap();
             assert!(matches!(*state_guard, State::Joining));
-            *state_guard = State::Completed;
+            *state_guard = State::Completed(None);
             completed.notify_all();
         });
 
         // Completion cannot acquire the mutex until the condition-variable wait releases it.
-        waiter.wait_locked(state_guard);
+        waiter.wait_locked(state_guard).unwrap();
         completing.join().unwrap();
-        assert!(matches!(*state.lock().unwrap(), State::Completed));
-        waiter.wait();
+        assert!(matches!(*state.lock().unwrap(), State::Completed(None)));
+        waiter.wait().unwrap();
     }
 
     #[test]
@@ -113,7 +136,7 @@ mod tests {
             let waiter = Arc::clone(&waiter);
             let done = done.clone();
             thread::spawn(move || {
-                waiter.wait();
+                waiter.wait().unwrap();
                 done.send(()).unwrap();
             })
         });
@@ -125,13 +148,45 @@ mod tests {
         for joiner in joiners {
             joiner.join().unwrap();
         }
-        waiter.wait();
+        waiter.wait().unwrap();
     }
 
     #[test]
     fn worker_panic_does_not_strand_waiters() {
         let waiter = ThreadWaiter::new(vec![thread::spawn(|| panic!("worker already reported its panic"))]);
-        waiter.wait();
-        waiter.wait();
+        let first = waiter.wait().unwrap_err().to_string();
+        let repeated = waiter.wait().unwrap_err().to_string();
+        assert_eq!(first, repeated);
+        assert!(first.contains("panicked"));
+    }
+
+    #[test]
+    fn failed_shutdown_joins_remaining_workers_and_reports_the_same_result_to_waiters() {
+        let panicking = thread::spawn(|| panic!("first worker failed"));
+        let (release, receive) = mpsc::channel();
+        let (joined, complete) = mpsc::channel();
+        let remaining = thread::spawn(move || {
+            receive.recv().unwrap();
+            joined.send(()).unwrap();
+        });
+        let waiter = Arc::new(ThreadWaiter::new(vec![panicking, remaining]));
+        let (reported, outcomes) = mpsc::channel();
+        let callers: [_; 2] = std::array::from_fn(|_| {
+            let waiter = Arc::clone(&waiter);
+            let reported = reported.clone();
+            thread::spawn(move || {
+                reported.send(waiter.wait().unwrap_err().to_string()).unwrap();
+            })
+        });
+        assert!(outcomes.try_recv().is_err());
+        release.send(()).unwrap();
+        complete.recv_timeout(TEST_TIMEOUT).unwrap();
+        let first = outcomes.recv_timeout(TEST_TIMEOUT).unwrap();
+        let second = outcomes.recv_timeout(TEST_TIMEOUT).unwrap();
+        assert_eq!(first, second);
+        assert!(first.contains("panicked"));
+        for caller in callers {
+            caller.join().unwrap();
+        }
     }
 }

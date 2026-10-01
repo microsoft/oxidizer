@@ -110,7 +110,7 @@ fn closed_runtime_rejects_factories_with_an_immediate_shutdown_error() {
         .spawn_anywhere(async |cx| cx.scheduler().clone())
         .wait()
         .unwrap();
-    runtime.stop();
+    runtime.stop().unwrap();
     let invoked = Arc::new(AtomicBool::new(false));
     let captured = Arc::clone(&invoked);
     let mut join = Box::pin(scheduler.spawn(move |_: arty::task::Builtins| {
@@ -321,7 +321,7 @@ fn cancellation_cleanup_cannot_reenter_the_local_executor() {
             drop(cleanup);
         });
         start.recv_timeout(TEST_TIMEOUT).unwrap();
-        runtime.stop();
+        runtime.stop().unwrap();
         assert!(!drop_result.recv_timeout(TEST_TIMEOUT).unwrap());
         drop(handle);
     });
@@ -363,7 +363,7 @@ fn repeated_stop_requests_report_one_completed_shutdown() {
     let operations = RuntimeOperations::from(&runtime);
     operations.request_stop();
     operations.request_stop();
-    runtime.stop();
+    runtime.stop().unwrap();
     assert_eq!(
         processor.events().iter().filter(|event| event.name() == "arty.rt.stopped").count(),
         1

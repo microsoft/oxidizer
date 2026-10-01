@@ -89,7 +89,7 @@ impl RuntimeOperations {
     /// let runtime = Runtime::new()?;
     /// let operations = RuntimeOperations::from(&runtime);
     /// operations.request_stop();
-    /// runtime.stop();
+    /// runtime.stop()?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     #[cfg_attr(test, mutants::skip)] // It is impractical to test for "stuff not happening", so mutating this easily leads to timeouts.

@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::thread::ThreadId;
 
+use crate::runtime::Error;
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::{DispatcherCore, WorkerIndex};
 use crate::runtime::thread::waiter::ThreadWaiter;
@@ -108,8 +109,8 @@ impl DispatcherClient {
     // Impractical to test real waiting at this API layer. We test the real waiter implementation
     // but not the API layers that simply call the waiter, as it is hard to prove the wait failed.
     #[cfg_attr(test, mutants::skip)]
-    pub(crate) fn wait(&self) {
-        self.core.join();
+    pub(crate) fn wait(&self) -> Result<(), Error> {
+        self.core.join()
     }
 }
 

@@ -155,7 +155,7 @@ impl RuntimeScheduler {
     /// let runtime = Runtime::new()?;
     /// let task = runtime.scheduler().spawn_anywhere(async |_| 42);
     /// assert_eq!(task.wait()?, 42);
-    /// runtime.stop();
+    /// runtime.stop()?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn spawn_anywhere<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>

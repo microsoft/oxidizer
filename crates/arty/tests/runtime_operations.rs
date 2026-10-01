@@ -45,7 +45,7 @@ fn runtime_operations_are_available_off_worker() {
     .join()
     .unwrap();
 
-    runtime.stop();
+    runtime.stop().unwrap();
     assert_eq!(actual, expected);
 }
 
@@ -154,7 +154,7 @@ fn runtime_and_builtin_conversions_use_the_same_affinity_information() {
         (processor, processor),
     );
     operations.request_stop();
-    runtime.stop();
+    runtime.stop().unwrap();
 }
 
 #[test]

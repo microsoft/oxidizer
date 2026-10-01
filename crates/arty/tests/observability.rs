@@ -40,7 +40,7 @@ fn started_event_reports_processor_counts() {
         .unwrap();
 
     runtime.scheduler().spawn_anywhere(async move |_| ()).wait().unwrap();
-    runtime.stop();
+    runtime.stop().unwrap();
 
     let events = processor.events();
     let started = events_named(&events, "arty.rt.started");
@@ -65,7 +65,7 @@ fn each_async_worker_starts_and_stops() {
         .unwrap();
 
     runtime.scheduler().spawn_anywhere(async move |_| ()).wait().unwrap();
-    runtime.stop();
+    runtime.stop().unwrap();
 
     let events = processor.events();
     assert_eq!(events_named(&events, "arty.rt.async_worker.started").len(), PROCESSORS);
@@ -85,7 +85,7 @@ fn async_worker_os_threads_report_lifecycle() {
         .unwrap();
 
     runtime.scheduler().spawn_anywhere(async move |_| ()).wait().unwrap();
-    runtime.stop();
+    runtime.stop().unwrap();
 
     let events = processor.events();
     assert_eq!(
@@ -124,7 +124,7 @@ fn spawned_task_emits_spawned_and_completed() {
     for handle in handles {
         handle.wait().unwrap();
     }
-    runtime.stop();
+    runtime.stop().unwrap();
 
     let events = processor.events();
     let spawned = events_named(&events, "arty.rt.task.spawned");
@@ -150,7 +150,7 @@ fn panicking_task_emits_panicked_event() {
         .spawn_anywhere(async move |_| panic!("intentional panic for telemetry test"));
     // The panic propagates through `wait()`; swallow it so the test thread survives.
     assert!(handle.wait().unwrap_err().is_panic());
-    runtime.stop();
+    runtime.stop().unwrap();
 
     let events = processor.events();
     let panicked = events_named(&events, "arty.rt.task.panicked");
@@ -171,7 +171,7 @@ fn round_robin_submissions_emit_one_spawn_event_per_worker() {
     for handle in handles {
         handle.wait().unwrap();
     }
-    runtime.stop();
+    runtime.stop().unwrap();
 
     let events = processor.events();
     assert!(events_named(&events, "arty.rt.task.spawned").len() >= PROCESSORS);
@@ -198,7 +198,7 @@ fn local_task_emits_spawned_and_completed_with_local_placement() {
         })
         .wait()
         .unwrap();
-    runtime.stop();
+    runtime.stop().unwrap();
 
     let events = processor.events();
     let spawned = events_named(&events, "arty.rt.task.spawned");
@@ -227,7 +227,7 @@ fn tasks_discarded_on_shutdown_do_not_emit_terminal_events() {
             .scheduler()
             .spawn_anywhere(async move |_| std::future::pending::<()>().await);
     }
-    runtime.stop();
+    runtime.stop().unwrap();
 
     let events = processor.events();
     let spawned = events_named(&events, "arty.rt.task.spawned").len();

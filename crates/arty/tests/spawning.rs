@@ -230,5 +230,5 @@ fn spawn_everywhere_returns_shutdown_joins_without_invoking_factories() {
     for task in tasks {
         assert!(task.wait().unwrap_err().is_shutdown());
     }
-    runtime.stop();
+    runtime.stop().unwrap();
 }

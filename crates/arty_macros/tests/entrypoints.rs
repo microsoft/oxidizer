@@ -13,6 +13,7 @@ mod fixture {
         pub(super) static BUILDER_CALLS: Cell<usize> = const { Cell::new(0) };
         pub(super) static ENTRYPOINT_BODY_RAN: Cell<bool> = const { Cell::new(false) };
         pub(super) static STOP_CALLS: Cell<usize> = const { Cell::new(0) };
+        pub(super) static FAIL_SHUTDOWN: Cell<bool> = const { Cell::new(false) };
     }
 
     pub(super) mod __private {
@@ -64,9 +65,14 @@ mod fixture {
             &self.scheduler
         }
 
-        pub(super) fn stop(self) {
+        pub(super) fn stop(self) -> std::thread::Result<()> {
             STOP_CALLS.set(STOP_CALLS.get().saturating_add(1));
             drop(self);
+            if FAIL_SHUTDOWN.replace(false) {
+                Err(Box::new("forced shutdown failure"))
+            } else {
+                Ok(())
+            }
         }
     }
 
@@ -252,6 +258,22 @@ async fn original_panic_payload_is_preserved(cx: fixture::Builtins) {
 #[test]
 fn root_panic_stops_the_owner_before_resuming_its_payload() {
     fixture::STOP_CALLS.set(0);
+    let payload = std::panic::catch_unwind(original_panic_payload_is_preserved).unwrap_err();
+    assert_eq!(fixture::STOP_CALLS.get(), 1);
+    assert_eq!(*payload.downcast::<&'static str>().unwrap(), "original payload");
+}
+
+#[test]
+#[should_panic(expected = "forced shutdown failure")]
+fn shutdown_failure_is_reported_after_a_successful_root() {
+    fixture::FAIL_SHUTDOWN.set(true);
+    let _ = entrypoint();
+}
+
+#[test]
+fn root_panic_remains_primary_when_shutdown_also_fails() {
+    fixture::STOP_CALLS.set(0);
+    fixture::FAIL_SHUTDOWN.set(true);
     let payload = std::panic::catch_unwind(original_panic_payload_is_preserved).unwrap_err();
     assert_eq!(fixture::STOP_CALLS.get(), 1);
     assert_eq!(*payload.downcast::<&'static str>().unwrap(), "original payload");
