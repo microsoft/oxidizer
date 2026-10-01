@@ -15,7 +15,7 @@ use crate::task::RuntimeScheduler;
 /// worker until it finishes or is cancelled.
 ///
 /// Borrow its [`RuntimeScheduler`] through
-/// [`runtime_scheduler`](Self::scheduler) to submit work or block on
+/// [`scheduler`](Self::scheduler) to submit work or block on
 /// tasks that borrow caller-owned data. Consume the owner with [`stop`](Self::stop)
 /// when the required work has finished.
 ///

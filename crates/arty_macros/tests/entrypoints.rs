@@ -12,12 +12,13 @@ mod fixture {
         pub(super) static FAIL_CONSTRUCTION: Cell<bool> = const { Cell::new(false) };
         pub(super) static BUILDER_CALLS: Cell<usize> = const { Cell::new(0) };
         pub(super) static ENTRYPOINT_BODY_RAN: Cell<bool> = const { Cell::new(false) };
+        pub(super) static STOP_CALLS: Cell<usize> = const { Cell::new(0) };
     }
 
     pub(super) mod __private {
         pub(crate) use tick::ClockControl;
 
-        pub(crate) fn resume_join_error(payload: Box<dyn std::any::Any + Send + 'static>) -> ! {
+        pub(crate) fn resume_error(payload: Box<dyn std::any::Any + Send + 'static>) -> ! {
             std::panic::resume_unwind(payload)
         }
     }
@@ -36,6 +37,11 @@ mod fixture {
 
     #[derive(Debug)]
     pub(super) struct Runtime {
+        scheduler: RuntimeScheduler,
+    }
+
+    #[derive(Debug)]
+    pub(super) struct RuntimeScheduler {
         value: usize,
         workers: usize,
         clock: Option<Clock>,
@@ -54,13 +60,24 @@ mod fixture {
             }
         }
 
-        pub(super) fn run<F, Fut, R>(self, factory: F) -> std::thread::Result<R>
+        pub(super) fn scheduler(&self) -> &RuntimeScheduler {
+            &self.scheduler
+        }
+
+        pub(super) fn stop(self) {
+            STOP_CALLS.set(STOP_CALLS.get().saturating_add(1));
+            drop(self);
+        }
+    }
+
+    impl RuntimeScheduler {
+        pub(super) fn block_on<F, Fut, R>(&self, factory: F) -> std::thread::Result<R>
         where
             F: FnOnce(Builtins) -> Fut,
             Fut: Future<Output = R>,
         {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                futures::executor::block_on(factory(Builtins(self.value, self.workers, self.clock)))
+                futures::executor::block_on(factory(Builtins(self.value, self.workers, self.clock.clone())))
             }))
         }
     }
@@ -95,9 +112,11 @@ mod fixture {
                 Err("processor count must be greater than zero")
             } else {
                 Ok(Runtime {
-                    value: self.value,
-                    workers: self.workers,
-                    clock: self.clock,
+                    scheduler: RuntimeScheduler {
+                        value: self.value,
+                        workers: self.workers,
+                        clock: self.clock,
+                    },
                 })
             }
         }
@@ -141,10 +160,12 @@ async fn qualified_test(cx: <App as HasContext>::Context) {
 
 #[test]
 fn expanded_entry_points_exist_and_execute() {
+    fixture::STOP_CALLS.set(0);
     assert_eq!(entrypoint(), 42);
     runtime_test();
     assert_eq!(qualified_main(), 41);
     qualified_test();
+    assert_eq!(fixture::STOP_CALLS.get(), 4);
 }
 
 #[test]
@@ -228,6 +249,14 @@ async fn original_panic_payload_is_preserved(cx: fixture::Builtins) {
     panic!("original payload");
 }
 
+#[test]
+fn root_panic_stops_the_owner_before_resuming_its_payload() {
+    fixture::STOP_CALLS.set(0);
+    let payload = std::panic::catch_unwind(original_panic_payload_is_preserved).unwrap_err();
+    assert_eq!(fixture::STOP_CALLS.get(), 1);
+    assert_eq!(*payload.downcast::<&'static str>().unwrap(), "original payload");
+}
+
 #[arty_macros::test(runtime_path = crate::renamed)]
 async fn clock_injection_preserves_defaults(cx: fixture::Builtins, control: ClockControl) {
     assert_eq!(cx.1, 2);
@@ -246,6 +275,15 @@ async fn generated_names_do_not_shadow_arguments(
     __arty_builder = __arty_builder.auto_advance_timers(true);
     __arty_clock_control.delay(std::time::Duration::from_secs(5)).await;
     assert_eq!(__arty_builder.to_clock().system_time(), __arty_clock_control.system_time());
+}
+
+#[arty_macros::test(runtime_path = crate::renamed)]
+async fn generated_runtime_bindings_do_not_shadow_arguments(
+    __arty_runtime: <App as HasContext>::Context,
+    __arty_result: <App as HasContext>::Control,
+) {
+    assert_eq!(__arty_runtime.0, 41);
+    assert_eq!(__arty_result.to_clock().system_time(), std::time::UNIX_EPOCH);
 }
 
 #[arty_macros::test(
