@@ -110,11 +110,13 @@
 //! }
 //! ```
 //!
-//! [`relocate`](crate::ThreadAware::relocate) has no error channel and must not panic or block - it
-//! runs on the runtime's placement path. If the ideal adaptation is unavailable (a reconnect
-//! fails, a resource can't be rebuilt), keep the existing usable state, defer the work, or fall
-//! back to a slower path rather than unwinding; see the
-//! [trait contract](crate::ThreadAware::relocate) for the full requirements.
+//! [`relocate`](crate::ThreadAware::relocate) has no error channel and must not panic. Because it
+//! runs on the runtime's placement path, it also must not perform long or external blocking work -
+//! no contended lock, network or disk I/O, or waiting on external progress (brief in-memory
+//! coordination is fine). If the ideal adaptation is unavailable (a reconnect fails, a resource
+//! can't be rebuilt), keep the existing usable state, defer the work, or fall back to a slower path
+//! rather than unwinding; see the [trait contract](crate::ThreadAware::relocate) for the full
+//! requirements.
 //!
 //! ## Per-worker state with `Arc`
 //!

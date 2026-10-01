@@ -38,14 +38,13 @@
 //!   agree on before either can relocate a value defined by the other. It evolves
 //!   conservatively, reducing how much public APIs couple to changes in the utility crate.
 //! - **[`thread_aware`]** — the utilities that make relocation convenient: a
-//!   [`#[derive(ThreadAware)]`][derive] macro, closure adapters, wrappers for foreign types,
-//!   runtime coordinate construction, and strategy-partitioned [`Arc`][arc] storage. Free to
-//!   evolve, and not meant to appear in a public API. Its [authoring guide] is the how-to for
-//!   making your own types thread-aware.
+//!   [`#[derive(ThreadAware)]`][derive] macro, closure adapters, wrappers for foreign types, and
+//!   runtime coordinate construction. Free to evolve, and not meant to appear in a public API. Its
+//!   [authoring guide] is the how-to for making your own types thread-aware.
 //!
 //! [`thread_aware`]: https://docs.rs/thread_aware
 //! [derive]: https://docs.rs/thread_aware/latest/thread_aware/derive.ThreadAware.html
-//! [arc]: https://docs.rs/thread_aware/latest/thread_aware/struct.Arc.html
+//! [arc]: https://docs.rs/performables/latest/performables/arc/struct.Arc.html
 //! [authoring guide]: https://docs.rs/thread_aware/latest/thread_aware/_documentation/index.html
 //!
 //! Depend on this crate directly when all you need is the trait. It has no normal dependencies
@@ -136,8 +135,8 @@
 //! General references, sets, `Cow`, and `Arc` have no implementation because relocation would be
 //! ambiguous or could violate their invariants. The narrow reference exception is `&'static str`:
 //! immutable process-lifetime labels cannot dangle and carry no referent state to relocate.
-//! [`thread_aware`] provides wrappers for cases that need an explicit policy, including its
-//! strategy-partitioned [`Arc`][arc].
+//! [`thread_aware`] provides wrappers for cases that need an explicit policy, and the companion
+//! `performables` crate adds a strategy-partitioned [`Arc`][arc].
 //!
 //! # Features
 //!

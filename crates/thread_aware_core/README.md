@@ -38,14 +38,13 @@ the larger utility surface evolves independently.
   agree on before either can relocate a value defined by the other. It evolves
   conservatively, reducing how much public APIs couple to changes in the utility crate.
 * **[`thread_aware`][__link5]** — the utilities that make relocation convenient: a
-  [`#[derive(ThreadAware)]`][__link6] macro, closure adapters, wrappers for foreign types,
-  runtime coordinate construction, and strategy-partitioned [`Arc`][__link7] storage. Free to
-  evolve, and not meant to appear in a public API. Its [authoring guide][__link8] is the how-to for
-  making your own types thread-aware.
+  [`#[derive(ThreadAware)]`][__link6] macro, closure adapters, wrappers for foreign types, and
+  runtime coordinate construction. Free to evolve, and not meant to appear in a public API. Its
+  [authoring guide][__link7] is the how-to for making your own types thread-aware.
 
 Depend on this crate directly when all you need is the trait. It has no normal dependencies
-and works without `std`: with default features turned off, [`Thread`][__link9] loses its thread id
-component and keeps [`Owner`][__link10] and [`NumaNode`][__link11].
+and works without `std`: with default features turned off, [`Thread`][__link8] loses its thread id
+component and keeps [`Owner`][__link9] and [`NumaNode`][__link10].
 
 ## Why relocation exists
 
@@ -55,19 +54,19 @@ driver, and does not synchronize with other workers. When a value moves to anoth
 worker, what used to be close by is now in the wrong place: a cache line shared between
 threads, memory in a distant region, a handle to another thread’s driver.
 
-[`ThreadAware`][__link12] lets that state repair itself. The runtime moves the value, then calls
-[`relocate`][__link13] to report where it now lives. Relocation has two
+[`ThreadAware`][__link11] lets that state repair itself. The runtime moves the value, then calls
+[`relocate`][__link12] to report where it now lives. Relocation has two
 sides, and most code sits on only one of them.
 
 ## Library authors: implementing the trait
 
-**Library and application authors** implement [`ThreadAware`][__link14], usually through the
-[`#[derive(ThreadAware)]`][__link15] macro. They never call
-[`relocate`][__link16] and never construct a [`Thread`][__link17]; the runtime does
-both and then invokes the implementation. It is a callback, like [`Drop::drop`][__link18].
+**Library and application authors** implement [`ThreadAware`][__link13], usually through the
+[`#[derive(ThreadAware)]`][__link14] macro. They never call
+[`relocate`][__link15] and never construct a [`Thread`][__link16]; the runtime does
+both and then invokes the implementation. It is a callback, like [`Drop::drop`][__link17].
 
-The derive lives in [`thread_aware`][__link19], so a library that wants it depends on that crate.
-Only the trait, [`Thread`][__link20], and its component identifiers cross the public boundary, and all
+The derive lives in [`thread_aware`][__link18], so a library that wants it depends on that crate.
+Only the trait, [`Thread`][__link19], and its component identifiers cross the public boundary, and all
 come from here, so the dependency stays an implementation detail:
 
 ```rust
@@ -84,15 +83,15 @@ pub struct Encoder {
 
 The derive writes the forwarding implementation, calling `relocate` on `scratch` and
 `dictionary` in turn. Because a composed type forwards to its fields, one call at the top
-reaches everything below it. Callers of `Encoder` never name [`thread_aware`][__link21].
+reaches everything below it. Callers of `Encoder` never name [`thread_aware`][__link20].
 
 ## Runtime authors: driving relocation
 
-**Runtime authors** create a list of [`Thread`][__link22] values describing their workers. How that
+**Runtime authors** create a list of [`Thread`][__link21] values describing their workers. How that
 list is constructed is a runtime implementation detail and is not relevant to runtime
 consumers.
 
-After moving a value, the runtime calls [`relocate`][__link23], passing where
+After moving a value, the runtime calls [`relocate`][__link22], passing where
 the value came from and where it now runs.
 
 ## Performance, not correctness
@@ -110,18 +109,18 @@ call.
 ## What the ids mean
 
 * **Thread id** identifies a live OS thread.
-* **[`NumaNode`][__link24]** identifies nearby memory and is shared by threads in the same region.
+* **[`NumaNode`][__link23]** identifies nearby memory and is shared by threads in the same region.
   It is meaningful across runtimes only when they number regions identically.
-* **[`Owner`][__link25]** uniquely identifies the runtime a [`Thread`][__link26] belongs to.
+* **[`Owner`][__link24]** uniquely identifies the runtime a [`Thread`][__link25] belongs to.
 
 These ids are opaque and need not be consecutive. Use only the coordinate your state
 depends on, and store keyed state in a map rather than an indexed array.
 
 ## Relation to `Send`
 
-[`ThreadAware`][__link27] requires [`Send`][__link28], and in that order: a value is sent to another thread
-first, then told where it landed. [`Send`][__link29] is what makes the move safe, and
-[`ThreadAware`][__link30] adds nothing to it.
+[`ThreadAware`][__link26] requires [`Send`][__link27], and in that order: a value is sent to another thread
+first, then told where it landed. [`Send`][__link28] is what makes the move safe, and
+[`ThreadAware`][__link29] adds nothing to it.
 
 ## Provided implementations
 
@@ -131,13 +130,13 @@ relocation to their values, while map keys remain unchanged.
 General references, sets, `Cow`, and `Arc` have no implementation because relocation would be
 ambiguous or could violate their invariants. The narrow reference exception is `&'static str`:
 immutable process-lifetime labels cannot dangle and carry no referent state to relocate.
-[`thread_aware`][__link31] provides wrappers for cases that need an explicit policy, including its
-strategy-partitioned [`Arc`][__link32].
+[`thread_aware`][__link30] provides wrappers for cases that need an explicit policy, and the companion
+`performables` crate adds a strategy-partitioned [`Arc`][__link31].
 
 ## Features
 
-* **`std`** *(default)* - Adds runtime construction support and [`Thread::id`][__link33], which need
-  [`ThreadId`][__link34], and implements [`ThreadAware`][__link35] for standard library
+* **`std`** *(default)* - Adds runtime construction support and [`Thread::id`][__link32], which need
+  [`ThreadId`][__link33], and implements [`ThreadAware`][__link34] for standard library
   types such as `HashMap`, `Path` and `PathBuf`. Turn it off for `no_std`, which needs only
   `alloc` and pointer-width atomics.
 
@@ -147,40 +146,39 @@ strategy-partitioned [`Arc`][__link32].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbSZnONyJOJwIb2BxHmwWF9lob46XCiei0380bPr8T996eEh1hZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4x
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbmZMSr1CdOtQbji0VWctOlw0bg5-BcXSNHZQbrgPvE0UF_8FhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4x
  [__link0]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware
  [__link1]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware::relocate
- [__link10]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=Owner
- [__link11]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=NumaNode
- [__link12]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware
- [__link13]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware::relocate
- [__link14]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware
- [__link15]: https://docs.rs/thread_aware/latest/thread_aware/derive.ThreadAware.html
- [__link16]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware::relocate
- [__link17]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=Thread
- [__link18]: https://doc.rust-lang.org/stable/std/?search=ops::Drop::drop
- [__link19]: https://docs.rs/thread_aware
+ [__link10]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=NumaNode
+ [__link11]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware
+ [__link12]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware::relocate
+ [__link13]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware
+ [__link14]: https://docs.rs/thread_aware/latest/thread_aware/derive.ThreadAware.html
+ [__link15]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware::relocate
+ [__link16]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=Thread
+ [__link17]: https://doc.rust-lang.org/stable/std/?search=ops::Drop::drop
+ [__link18]: https://docs.rs/thread_aware
+ [__link19]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=Thread
  [__link2]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=Thread
- [__link20]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=Thread
- [__link21]: https://docs.rs/thread_aware
- [__link22]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=Thread
- [__link23]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware::relocate
- [__link24]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=NumaNode
- [__link25]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=Owner
- [__link26]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=Thread
- [__link27]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware
+ [__link20]: https://docs.rs/thread_aware
+ [__link21]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=Thread
+ [__link22]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware::relocate
+ [__link23]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=NumaNode
+ [__link24]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=Owner
+ [__link25]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=Thread
+ [__link26]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware
+ [__link27]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link28]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
- [__link29]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
+ [__link29]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware
  [__link3]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=Thread
- [__link30]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware
- [__link31]: https://docs.rs/thread_aware
- [__link32]: https://docs.rs/thread_aware/latest/thread_aware/struct.Arc.html
- [__link33]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=Thread::id
- [__link34]: https://doc.rust-lang.org/stable/std/?search=thread::ThreadId
- [__link35]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware
+ [__link30]: https://docs.rs/thread_aware
+ [__link31]: https://docs.rs/performables/latest/performables/arc/struct.Arc.html
+ [__link32]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=Thread::id
+ [__link33]: https://doc.rust-lang.org/stable/std/?search=thread::ThreadId
+ [__link34]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware
  [__link4]: https://doc.rust-lang.org/stable/std/?search=thread::Thread
  [__link5]: https://docs.rs/thread_aware
  [__link6]: https://docs.rs/thread_aware/latest/thread_aware/derive.ThreadAware.html
- [__link7]: https://docs.rs/thread_aware/latest/thread_aware/struct.Arc.html
- [__link8]: https://docs.rs/thread_aware/latest/thread_aware/_documentation/index.html
- [__link9]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=Thread
+ [__link7]: https://docs.rs/thread_aware/latest/thread_aware/_documentation/index.html
+ [__link8]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=Thread
+ [__link9]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=Owner
