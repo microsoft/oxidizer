@@ -183,6 +183,8 @@ use proc_macro::TokenStream;
 ///   it cannot generate a fake that matches the wrapper's delegated method set.
 /// - Mockall generation rejects consuming receivers, const methods, methods returning `Self`, and
 ///   signatures with multiple nested elided references; use a manual fake for those method shapes.
+/// - Mockall generation preserves method `cfg`/`cfg_attr` attributes and rejects nested elided
+///   references beneath implicit higher-ranked function-pointer or trait-object binders.
 /// - Mockall generation rejects generic impl blocks; use a manual fake for generic services.
 /// - Mockall generation rejects trait impl blocks; use a manual fake for trait implementations.
 /// - Unsafe impl blocks are rejected because the macro cannot establish their safety invariants for
@@ -210,6 +212,8 @@ use proc_macro::TokenStream;
 ///   different opaque concrete types.
 /// - Unsafe methods and signatures that use the concrete service type across the wrapper boundary
 ///   are rejected; use safe methods and direct `Self` returns.
+/// - Trait impl paths cannot use `Self` or the concrete service type in generic arguments because
+///   those names would resolve to different real and wrapper types.
 /// - Mockall generation rejects nested elided references beneath higher-ranked lifetime binders.
 /// - Struct derives are copied to the wrapper and internal enum. The fake type must satisfy their
 ///   bounds (for example, `Clone`), and derives that depend on struct shape or an enum default

@@ -949,18 +949,23 @@ fn fakeable_mockall_accepts_one_nested_elided_reference() {
 
 #[test]
 fn fakeable_mockall_accepts_bound_lifetime_without_nested_elision() {
-    let result = fakeable_impl::fakeable_impl(
-        quote! { generate_mockall_fake = true },
-        quote! {
-            impl MyService {
-                pub fn call(&self, callback: for<'value> fn(&'value str)) {
-                    callback("");
+    for parameter in [
+        quote! { callback: for<'value> fn(&'value str) },
+        quote! { callback: Box<dyn for<'value> Fn(&'value str)> },
+        quote! { values: Box<dyn Iterator<Item = &str>> },
+    ] {
+        let result = fakeable_impl::fakeable_impl(
+            quote! { generate_mockall_fake = true },
+            quote! {
+                impl MyService {
+                    pub fn call(&self, #parameter) {
+                    }
                 }
-            }
-        },
-    );
+            },
+        );
 
-    assert!(!result.to_string().contains("compile_error"));
+        assert!(!result.to_string().contains("compile_error"));
+    }
 }
 
 #[test]
@@ -999,6 +1004,63 @@ fn fakeable_on_generic_trait_impl_preserves_hidden_type_arguments() {
 
     let result = fakeable_impl::fakeable_impl(quote! {}, input);
     assert_expansion!(&result);
+}
+
+#[test]
+fn fakeable_rejects_wrapper_sensitive_trait_arguments() {
+    for input in [
+        quote! {
+            impl Service<MyService> for MyService {
+                fn value(&self) {}
+            }
+        },
+        quote! {
+            impl Service<Self> for MyService {
+                fn value(&self) {}
+            }
+        },
+    ] {
+        let result = fakeable_impl::fakeable_impl(quote! {}, input).to_string();
+        assert!(result.contains("trait impl paths cannot reference Self or the concrete service type"));
+    }
+}
+
+#[test]
+fn fakeable_mockall_rejects_implicit_higher_ranked_elision() {
+    for parameter in [
+        quote! { callback: fn(Option<&str>) },
+        quote! { callback: Box<dyn Fn(Option<&str>)> },
+    ] {
+        let result = fakeable_impl::fakeable_impl(
+            quote! { generate_mockall_fake = true },
+            quote! {
+                impl MyService {
+                    pub fn call(&self, #parameter) {}
+                }
+            },
+        )
+        .to_string();
+
+        assert!(result.contains("implicit higher-ranked function or trait-object binders"));
+    }
+}
+
+#[test]
+fn fakeable_mockall_preserves_method_cfg_attributes() {
+    let result = fakeable_impl::fakeable_impl(
+        quote! { generate_mockall_fake = true },
+        quote! {
+            impl MyService {
+                #[cfg(feature = "tls")]
+                #[cfg_attr(feature = "docs", doc = "TLS")]
+                pub fn connect(&self, config: TlsConfig) {}
+            }
+        },
+    );
+    let tokens = result.to_string();
+
+    assert_eq!(tokens.matches("\"tls\"").count(), 3);
+    assert_eq!(tokens.matches("\"docs\"").count(), 3);
 }
 
 #[test]

@@ -98,13 +98,20 @@ expectations. Signatures with nested elided references beneath higher-ranked lif
 multiple nested elided references, and methods returning `Self` are rejected
 rather than rewritten with changed lifetime or fake-type semantics. Consuming
 receivers and const methods are also rejected for generated Mockall fakes;
-manual fakes remain available for those method shapes.
+manual fakes remain available for those method shapes. Implicit higher-ranked
+function-pointer and trait-object elision is rejected for the same reason.
+Method-level `cfg` and `cfg_attr` attributes are preserved on generated Mockall
+declarations.
 
 Method forwarding rejects receiver/parameter/generic attributes, by-reference
 bindings, subpatterns, unsafe methods, `impl Trait` returns, and concrete
 service-type references in parameters, returns, or generic predicates. Public
 inherent associated constants and types are also rejected because they cannot
 be represented on the wrapper.
+
+Trait impl paths are rejected when their generic arguments reference `Self` or
+the concrete service type, because those names resolve to the hidden real type
+and visible wrapper type in different generated contexts.
 
 Mockall remains optional because manually implemented fakes are the primary
 mechanism and should not add a production dependency. The integration must be

@@ -258,6 +258,16 @@ fn process_impl(args: &FakeableArgs, item_impl: &ItemImpl) -> proc_macro2::Token
     };
     let struct_name = &struct_segment.ident;
 
+    if let Some((trait_path, _)) = &item_impl.trait_
+        && trait_path_contains_wrapper_sensitive_type(trait_path, struct_name)
+    {
+        return syn::Error::new_spanned(
+            trait_path,
+            "trait impl paths cannot reference Self or the concrete service type in generic arguments",
+        )
+        .into_compile_error();
+    }
+
     // Generate internal type names without prefix, to be placed in dedicated module
     let enum_name = syn::Ident::new("Enum", proc_macro2::Span::call_site());
     let helper_module_name = quote::format_ident!("__fakeable__{struct_name}");
@@ -1023,6 +1033,23 @@ fn generics_contain_concrete_service_name(generics: &syn::Generics, service_name
     visitor.found
 }
 
+fn trait_path_contains_wrapper_sensitive_type(path: &syn::Path, service_name: &proc_macro2::Ident) -> bool {
+    path.segments.iter().any(|segment| {
+        let mut self_visitor = BareSelfVisitor { found: false };
+        syn::visit::Visit::visit_path_arguments(&mut self_visitor, &segment.arguments);
+        if self_visitor.found {
+            return true;
+        }
+
+        let mut service_visitor = ConcreteServiceNameVisitor {
+            service_name,
+            found: false,
+        };
+        syn::visit::Visit::visit_path_arguments(&mut service_visitor, &segment.arguments);
+        service_visitor.found
+    })
+}
+
 /// Converts an async function signature to a non-async function with impl Future return type because
 /// for methods with impl Future return types, mockall supports futures to be returned by mocks, unlike
 /// for async methods, for which it only supports returning values that are wrapped in immediate futures.
@@ -1113,6 +1140,55 @@ fn type_contains_bound_lifetimes(ty: &syn::Type) -> bool {
     }
 
     let mut visitor = BoundLifetimeVisitor { found: false };
+    syn::visit::Visit::visit_type(&mut visitor, ty);
+    visitor.found
+}
+
+fn type_contains_implicit_higher_ranked_elision(ty: &syn::Type) -> bool {
+    struct ElidedReferenceVisitor {
+        found: bool,
+    }
+
+    impl<'ast> syn::visit::Visit<'ast> for ElidedReferenceVisitor {
+        fn visit_type_reference(&mut self, i: &'ast syn::TypeReference) {
+            if i.lifetime.is_none() {
+                self.found = true;
+                return;
+            }
+            syn::visit::visit_type_reference(self, i);
+        }
+    }
+
+    struct ImplicitHigherRankedElisionVisitor {
+        found: bool,
+    }
+
+    impl<'ast> syn::visit::Visit<'ast> for ImplicitHigherRankedElisionVisitor {
+        fn visit_type_fn_ptr(&mut self, i: &'ast syn::TypeFnPtr) {
+            if i.lifetimes.is_none() {
+                let mut visitor = ElidedReferenceVisitor { found: false };
+                syn::visit::Visit::visit_type_fn_ptr(&mut visitor, i);
+                self.found |= visitor.found;
+            }
+            syn::visit::visit_type_fn_ptr(self, i);
+        }
+
+        fn visit_trait_bound(&mut self, i: &'ast syn::TraitBound) {
+            if i.lifetimes.is_none()
+                && i.path
+                    .segments
+                    .last()
+                    .is_some_and(|segment| matches!(segment.ident.to_string().as_str(), "Fn" | "FnMut" | "FnOnce"))
+            {
+                let mut visitor = ElidedReferenceVisitor { found: false };
+                syn::visit::Visit::visit_trait_bound(&mut visitor, i);
+                self.found |= visitor.found;
+            }
+            syn::visit::visit_trait_bound(self, i);
+        }
+    }
+
+    let mut visitor = ImplicitHigherRankedElisionVisitor { found: false };
     syn::visit::Visit::visit_type(&mut visitor, ty);
     visitor.found
 }
@@ -1251,6 +1327,19 @@ fn generate_mockall_fake(
                     ));
                 }
 
+                if method.sig.inputs.iter().any(|input| {
+                    matches!(
+                        input,
+                        syn::FnArg::Typed(syn::PatType { ty, .. })
+                            if type_contains_implicit_higher_ranked_elision(ty)
+                    )
+                }) {
+                    return Err(syn::Error::new_spanned(
+                        &method.sig,
+                        "generate_mockall_fake does not support nested elided references beneath implicit higher-ranked function or trait-object binders",
+                    ));
+                }
+
                 let nested_elision_count = method
                     .sig
                     .inputs
@@ -1290,7 +1379,14 @@ fn generate_mockall_fake(
                 } else {
                     quote! { #sig_with_lifetimes }
                 };
-                mock_methods.push(quote! { pub #method_signature; });
+                let cfg_attrs = method
+                    .attrs
+                    .iter()
+                    .filter(|attr| attr.path().is_ident("cfg") || attr.path().is_ident("cfg_attr"));
+                mock_methods.push(quote! {
+                    #(#cfg_attrs)*
+                    pub #method_signature;
+                });
             }
         }
     }
