@@ -140,6 +140,7 @@ async fn entrypoint(cx: fixture::Builtins) -> usize {
 #[arty_macros::test(runtime_path = crate::fixture)]
 async fn runtime_test(cx: fixture::Builtins) {
     assert_eq!(cx.0, 41);
+    assert_eq!(cx.1, 1);
 }
 
 trait HasContext {
@@ -224,6 +225,7 @@ async fn configured_entrypoint(cx: <App as HasContext>::Context) -> AppResult {
 #[arty_macros::test(builder = fixture::Runtime::builder().value(7), runtime_path = crate::renamed)]
 async fn configured_test(cx: fixture::Builtins) {
     assert_eq!(cx.0, 7);
+    assert_eq!(cx.1, 2);
     assert!(cx.2.is_none());
 }
 
@@ -281,7 +283,7 @@ fn root_panic_remains_primary_when_shutdown_also_fails() {
 
 #[arty_macros::test(runtime_path = crate::renamed)]
 async fn clock_injection_preserves_defaults(cx: fixture::Builtins, control: ClockControl) {
-    assert_eq!(cx.1, 2);
+    assert_eq!(cx.1, 1);
     let clock = cx.2.unwrap();
     assert_eq!(clock.system_time(), std::time::UNIX_EPOCH);
     control.advance(std::time::Duration::from_secs(3));

@@ -182,7 +182,7 @@ pub use arty_macros::main;
 ///
 /// Enable the `macros` feature to use this attribute. The [`main`] attribute's
 /// `workers`, `builder`, and `runtime_path` options also apply. Omitting
-/// `workers` uses the automatic processor policy, not a single-worker runtime.
+/// `workers` uses one processor. Explicit `workers` or `builder` settings take precedence.
 ///
 /// # Simulated time
 ///

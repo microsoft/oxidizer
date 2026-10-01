@@ -85,9 +85,9 @@ impl RuntimeBuilder {
 
     /// Sets whether asynchronous workers share their blocking-task pool.
     ///
-    /// The default is [`BlockingPoolPolicy::isolated`], which gives each
-    /// asynchronous worker its own pool. A shared pool bounds blocking threads
-    /// across all workers independently of the asynchronous worker count.
+    /// The default shares one pool across all asynchronous workers, using the
+    /// default blocking-thread limit. A shared pool bounds blocking threads
+    /// independently of the asynchronous worker count.
     ///
     /// # Examples
     ///

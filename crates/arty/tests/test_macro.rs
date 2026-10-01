@@ -42,6 +42,16 @@ async fn root_and_children_keep_their_worker_affinity(cx: Builtins) {
     assert_eq!(child, worker);
 }
 
+#[test]
+async fn default_test_runtime_has_exactly_one_worker(cx: Builtins) {
+    let home = cx.thread().id();
+    let tasks = cx.scheduler().spawn_everywhere((), |()| async { std::thread::current().id() });
+    assert_eq!(tasks.len(), 1);
+    for task in tasks {
+        assert_eq!(task.await.unwrap(), home);
+    }
+}
+
 #[test(workers = 4_294_967_295usize)]
 async fn worker_limit_clamps_instead_of_failing_construction(cx: Builtins) {
     assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);

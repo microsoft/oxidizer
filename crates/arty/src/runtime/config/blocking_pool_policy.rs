@@ -12,11 +12,11 @@ use crate::runtime::bootstrap::pools::BlockingPools;
 ///
 /// # Choosing between isolated and shared
 ///
-/// [`isolated`](Self::isolated), the default, gives each asynchronous worker its
+/// [`isolated`](Self::isolated) gives each asynchronous worker its
 /// own pool. It separates blocking-task contention between workers, but the
 /// number of pools and their thread and stack costs grow with the worker count.
 ///
-/// [`shared`](Self::shared) gives all workers one pool with a common thread
+/// [`shared`](Self::shared), the default, gives all workers one pool with a common thread
 /// limit. It bounds that pool's threads independently of the asynchronous worker
 /// count, but all blocking tasks compete for those threads.
 ///
@@ -43,7 +43,7 @@ enum Mode {
 }
 
 impl BlockingPoolPolicy {
-    /// Creates the default policy with one pool per asynchronous worker.
+    /// Creates a policy with one pool per asynchronous worker.
     ///
     /// Each pool uses the runtime's default blocking-thread limit. The total
     /// blocking-thread resources therefore grow with the asynchronous worker count.
@@ -112,7 +112,7 @@ impl BlockingPoolPolicy {
 
 impl Default for BlockingPoolPolicy {
     fn default() -> Self {
-        Self::isolated()
+        Self::shared(None)
     }
 }
 
@@ -122,8 +122,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn isolated_is_default() {
-        assert_eq!(BlockingPoolPolicy::default(), BlockingPoolPolicy::isolated());
+    fn shared_is_default() {
+        assert_eq!(BlockingPoolPolicy::default(), BlockingPoolPolicy::shared(None));
     }
 
     #[test]

@@ -31,7 +31,7 @@ struct Args {
 }
 
 impl Args {
-    fn runtime(&self, runtime_path: &Path, clock: Option<&Ident>) -> syn::Result<TokenStream> {
+    fn runtime(&self, runtime_path: &Path, clock: Option<&Ident>, test: bool) -> syn::Result<TokenStream> {
         if let Some(builder) = &self.builder {
             if self.workers.is_some() {
                 return Err(syn::Error::new_spanned(builder, "`builder` cannot be combined with `workers`"));
@@ -44,15 +44,12 @@ impl Args {
             }
             return Ok(quote!(#runtime_path::RuntimeBuilder::build(#builder)));
         }
-        if self.workers.is_none() && clock.is_none() {
+        if self.workers.is_none() && clock.is_none() && !test {
             return Ok(quote!(#runtime_path::Runtime::new()));
         }
         let workers = self.workers.as_ref().map(worker_count).transpose()?;
-        let workers = workers.map(|count| {
-            quote! {
-                .processor_count(#runtime_path::ProcessorCount::at_most(#count))
-            }
-        });
+        let workers = workers.map(|count| quote!(#count)).or_else(|| test.then(|| quote!(1)));
+        let workers = workers.map(|count| quote!(.processor_count(#runtime_path::ProcessorCount::at_most(#count))));
         let clock = clock.map(|binding| quote!(.clock(::core::clone::Clone::clone(&#binding))));
         Ok(quote!(#runtime_path::Runtime::builder() #workers #clock .build()))
     }
@@ -188,7 +185,7 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
     let result_binding = Ident::new("__arty_result", Span::mixed_site());
     let shutdown_binding = Ident::new("__arty_shutdown", Span::mixed_site());
     let value_binding = Ident::new("__arty_value", Span::mixed_site());
-    let runtime = match args.runtime(runtime_path, clock.as_ref().map(|_| &clock_binding)) {
+    let runtime = match args.runtime(runtime_path, clock.as_ref().map(|_| &clock_binding), test) {
         Ok(runtime) => runtime,
         Err(error) => return fail(error),
     };
@@ -276,7 +273,9 @@ mod tests {
         #[should_panic(expected = "original payload")]
         #[::core::prelude::v1::test]
         fn fails() {
-            let __arty_runtime = ::renamed::Runtime::new()
+            let __arty_runtime = ::renamed::Runtime::builder()
+                .processor_count(::renamed::ProcessorCount::at_most(1))
+                .build()
                 .expect("failed to create the runtime for the entry point");
             let __arty_result = __arty_runtime
                 .scheduler()
@@ -386,7 +385,7 @@ mod tests {
     }
 
     #[test]
-    fn controlled_test_without_workers_keeps_default_processor_selection() {
+    fn controlled_test_without_workers_defaults_to_one_processor() {
         let expansion = test(
             TokenStream::new(),
             quote! {
@@ -398,7 +397,8 @@ mod tests {
         let expansion = expansion.to_string();
         assert!(expansion.contains(":: arty :: runtime :: Runtime :: builder"));
         assert!(expansion.contains(":: arty :: runtime :: __private :: ClockControl :: new"));
-        assert!(!expansion.contains("processor_count"));
+        assert!(expansion.contains("processor_count"));
+        assert!(expansion.contains("ProcessorCount :: at_most (1)"));
     }
 
     #[test]

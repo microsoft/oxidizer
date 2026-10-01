@@ -51,7 +51,7 @@ fn started_event_reports_processor_counts() {
         dimension(started[0], "processors.available").is_some(),
         "processors.available dimension should be present"
     );
-    assert_eq!(dimension(started[0], "blocking_worker_pool.mode"), Some("isolated".into()));
+    assert_eq!(dimension(started[0], "blocking_worker_pool.mode"), Some("shared".into()));
 }
 
 #[test]

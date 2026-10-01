@@ -51,9 +51,10 @@
 //! # Blocking pools
 //!
 //! [`BlockingPoolPolicy`](crate::runtime::BlockingPoolPolicy) is independent of the
-//! asynchronous worker count. The default `isolated()` policy gives each
-//! asynchronous worker its own blocking pool, separating contention but allowing
-//! thread and stack costs to grow with the number of workers.
+//! asynchronous worker count. The default shares one pool across all workers,
+//! using the runtime's default blocking-thread limit. `isolated()` gives each
+//! worker its own pool, separating contention but allowing thread and stack
+//! costs to grow with the number of workers.
 //!
 //! `shared(n)` uses one runtime-wide pool with a common thread limit. It bounds
 //! that pool's threads across all asynchronous workers, but combines their
@@ -63,8 +64,8 @@
 //!
 //! With the `macros` feature, `#[arty::main]` and
 //! `#[arty::test]` own construction and shutdown for an asynchronous
-//! function taking owned `Builtins`. They use the automatic processor policy
-//! by default, including in tests.
+//! function taking owned `Builtins`. `main` uses the automatic processor policy
+//! by default; `test` uses one processor unless `workers` or `builder` is supplied.
 //!
 //! `workers = N` is an upper bound, using the same `at_most` policy as the
 //! explicit builder. Use `builder = expression` for computed settings or a
