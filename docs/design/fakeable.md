@@ -105,7 +105,9 @@ declarations.
 
 Method forwarding rejects receiver/parameter/generic attributes, by-reference
 bindings, subpatterns, unsafe methods, `impl Trait` returns, and concrete
-service-type references in parameters, returns, or generic predicates. Public
+service-type references in parameters, returns, or generic predicates.
+Qualified paths ending in the service name are treated conservatively as the
+same boundary type because relocation changes their resolution context. Public
 inherent associated constants and types are also rejected because they cannot
 be represented on the wrapper.
 

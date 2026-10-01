@@ -1003,10 +1003,7 @@ struct ConcreteServiceNameVisitor<'a> {
 
 impl<'ast> syn::visit::Visit<'ast> for ConcreteServiceNameVisitor<'_> {
     fn visit_type_path(&mut self, i: &'ast syn::TypePath) {
-        if i.qself.is_none()
-            && i.path.segments.len() == 1
-            && i.path.segments.first().is_some_and(|segment| segment.ident == *self.service_name)
-        {
+        if i.qself.is_none() && i.path.segments.last().is_some_and(|segment| segment.ident == *self.service_name) {
             self.found = true;
             return;
         }

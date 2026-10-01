@@ -812,6 +812,7 @@ fn fakeable_rejects_unsafe_methods() {
 fn fakeable_rejects_concrete_service_type_at_wrapper_boundary() {
     for input in [
         quote! { impl MyService { pub fn merge(&self, other: Option<MyService>) {} } },
+        quote! { impl MyService { pub fn merge(&self, other: Option<crate::MyService>) {} } },
         quote! { impl MyService { pub fn clone_like(&self) -> Option<MyService> { None } } },
         quote! { impl MyService { pub fn value<T: Into<MyService>>(&self, value: T) {} } },
     ] {
@@ -952,6 +953,7 @@ fn fakeable_mockall_accepts_bound_lifetime_without_nested_elision() {
     for parameter in [
         quote! { callback: for<'value> fn(&'value str) },
         quote! { callback: Box<dyn for<'value> Fn(&'value str)> },
+        quote! { callback: Box<dyn Fn(&'static str)> },
         quote! { values: Box<dyn Iterator<Item = &str>> },
     ] {
         let result = fakeable_impl::fakeable_impl(

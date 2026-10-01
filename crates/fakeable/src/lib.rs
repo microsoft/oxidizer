@@ -210,8 +210,9 @@ use proc_macro::TokenStream;
 ///   and sub-patterns are rejected because forwarding could change under cfg or binding semantics.
 /// - `impl Trait` return types are rejected because real and fake implementations may choose
 ///   different opaque concrete types.
-/// - Unsafe methods and signatures that use the concrete service type across the wrapper boundary
-///   are rejected; use safe methods and direct `Self` returns.
+/// - Unsafe methods and signatures that use the concrete service type across the wrapper boundary,
+///   including qualified paths ending in the service name, are rejected; use safe methods and
+///   direct `Self` returns.
 /// - Trait impl paths cannot use `Self` or the concrete service type in generic arguments because
 ///   those names would resolve to different real and wrapper types.
 /// - Mockall generation rejects nested elided references beneath higher-ranked lifetime binders.
