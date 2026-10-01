@@ -94,14 +94,17 @@ rejected because the generated Mockall type cannot preserve their generic
 parameters and bounds. Trait impl blocks are rejected because their inherited
 method visibility would otherwise produce an incomplete mock API. Async methods
 are represented as methods returning `Future` so tests can provide asynchronous
-expectations. Signatures with nested elided references beneath higher-ranked
-lifetime binders are rejected rather than rewritten across the binder boundary.
-Consuming receivers and const methods are also rejected for generated Mockall
-fakes; manual fakes remain available for those method shapes.
+expectations. Signatures with nested elided references beneath higher-ranked lifetime binders,
+multiple nested elided references, and methods returning `Self` are rejected
+rather than rewritten with changed lifetime or fake-type semantics. Consuming
+receivers and const methods are also rejected for generated Mockall fakes;
+manual fakes remain available for those method shapes.
 
-Method forwarding rejects parameter/generic attributes, by-reference bindings,
-subpatterns, and `impl Trait` returns. Public inherent associated constants and
-types are also rejected because they cannot be represented on the wrapper.
+Method forwarding rejects receiver/parameter/generic attributes, by-reference
+bindings, subpatterns, unsafe methods, `impl Trait` returns, and concrete
+service-type references in parameters, returns, or generic predicates. Public
+inherent associated constants and types are also rejected because they cannot
+be represented on the wrapper.
 
 Mockall remains optional because manually implemented fakes are the primary
 mechanism and should not add a production dependency. The integration must be

@@ -739,16 +739,18 @@ fn fakeable_rejects_projected_self_type() {
 
 #[test]
 fn fakeable_rejects_impl_trait_return() {
-    let input = quote! {
-        impl MyService {
-            pub fn value(&self) -> impl core::fmt::Display {
-                42
+    for output in [quote! { impl core::fmt::Display }, quote! { (impl core::fmt::Display) }] {
+        let input = quote! {
+            impl MyService {
+                pub fn value(&self) -> #output {
+                    42
+                }
             }
-        }
-    };
+        };
 
-    let result = fakeable_impl::fakeable_impl(quote! {}, input).to_string();
-    assert!(result.contains("impl Trait return types are not supported"));
+        let result = fakeable_impl::fakeable_impl(quote! {}, input).to_string();
+        assert!(result.contains("impl Trait return types are not supported"));
+    }
 }
 
 #[test]
@@ -778,6 +780,44 @@ fn fakeable_rejects_parameter_and_generic_attributes() {
     )
     .to_string();
     assert!(generic.contains("attributes on method generic parameters are not supported"));
+
+    let receiver = fakeable_impl::fakeable_impl(quote! {}, quote! { impl MyService { pub fn value(#[cfg(any())] &self) {} } }).to_string();
+    assert!(receiver.contains("attributes on method receivers are not supported"));
+}
+
+#[test]
+fn fakeable_avoids_const_generic_binding_collisions() {
+    let result = fakeable_impl::fakeable_impl(
+        quote! {},
+        quote! {
+            impl MyService {
+                pub fn value<const __fakeable_real: usize, const __fakeable_fake: usize>(&self) -> usize {
+                    __fakeable_real + __fakeable_fake
+                }
+            }
+        },
+    );
+    let rendered = testing_aids::render_expansion(&result);
+    assert!(rendered.contains("Real(__fakeable_real_1)"));
+    assert!(rendered.contains("Fake(__fakeable_fake_1)"));
+}
+
+#[test]
+fn fakeable_rejects_unsafe_methods() {
+    let result = fakeable_impl::fakeable_impl(quote! {}, quote! { impl MyService { pub unsafe fn value(&self) {} } }).to_string();
+    assert!(result.contains("unsafe methods are not supported"));
+}
+
+#[test]
+fn fakeable_rejects_concrete_service_type_at_wrapper_boundary() {
+    for input in [
+        quote! { impl MyService { pub fn merge(&self, other: Option<MyService>) {} } },
+        quote! { impl MyService { pub fn clone_like(&self) -> Option<MyService> { None } } },
+        quote! { impl MyService { pub fn value<T: Into<MyService>>(&self, value: T) {} } },
+    ] {
+        let result = fakeable_impl::fakeable_impl(quote! {}, input).to_string();
+        assert!(result.contains("concrete service type is not supported"));
+    }
 }
 
 #[test]
@@ -860,6 +900,67 @@ fn fakeable_mockall_rejects_consuming_receiver() {
     let result = fakeable_impl::fakeable_impl(quote! { generate_mockall_fake = true }, input).to_string();
 
     assert!(result.contains("does not support consuming self receivers"));
+}
+
+#[test]
+fn fakeable_mockall_rejects_self_return() {
+    let result = fakeable_impl::fakeable_impl(
+        quote! { generate_mockall_fake = true },
+        quote! { impl MyService { pub fn duplicate(&self) -> Self { todo!() } } },
+    )
+    .to_string();
+
+    assert!(result.contains("does not support methods returning Self"));
+}
+
+#[test]
+fn fakeable_mockall_rejects_multiple_nested_elided_references() {
+    let result = fakeable_impl::fakeable_impl(
+        quote! { generate_mockall_fake = true },
+        quote! {
+            impl MyService {
+                pub fn compare(
+                    &self,
+                    left: core::cell::Cell<&str>,
+                    right: core::cell::Cell<&str>,
+                ) {
+                }
+            }
+        },
+    )
+    .to_string();
+
+    assert!(result.contains("does not support multiple nested elided references"));
+}
+
+#[test]
+fn fakeable_mockall_accepts_one_nested_elided_reference() {
+    let result = fakeable_impl::fakeable_impl(
+        quote! { generate_mockall_fake = true },
+        quote! {
+            impl MyService {
+                pub fn inspect(&self, value: core::cell::Cell<&str>) {}
+            }
+        },
+    );
+
+    assert!(!result.to_string().contains("compile_error"));
+}
+
+#[test]
+fn fakeable_mockall_accepts_bound_lifetime_without_nested_elision() {
+    let result = fakeable_impl::fakeable_impl(
+        quote! { generate_mockall_fake = true },
+        quote! {
+            impl MyService {
+                pub fn call(&self, callback: for<'value> fn(&'value str)) {
+                    callback("");
+                }
+            }
+        },
+    );
+
+    assert!(!result.to_string().contains("compile_error"));
 }
 
 #[test]

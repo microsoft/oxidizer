@@ -464,7 +464,21 @@ fn generate_delegation_method(
     let is_async = method_sig.asyncness.is_some();
     let receiver = method_sig.receiver();
 
+    if matches!(method_sig.safety, syn::Safety::Unsafe(_)) {
+        return Err(syn::Error::new_spanned(
+            method_sig,
+            "unsafe methods are not supported across the wrapper boundary",
+        ));
+    }
+
     if let Some(receiver) = receiver {
+        if !receiver.attrs.is_empty() {
+            return Err(syn::Error::new_spanned(
+                &receiver.attrs[0],
+                "attributes on method receivers are not supported",
+            ));
+        }
+
         if matches!(receiver.kind, syn::ReceiverKind::Typed(_, _)) {
             return Err(syn::Error::new_spanned(
                 method_sig,
@@ -502,6 +516,12 @@ fn generate_delegation_method(
                     "Self in method parameters is not supported across the wrapper boundary",
                 ));
             }
+            if type_contains_concrete_service_name(&pat_type.ty, &real_struct_segment.ident) {
+                return Err(syn::Error::new_spanned(
+                    &pat_type.ty,
+                    "the concrete service type is not supported in method parameters; use Self only as a direct return type",
+                ));
+            }
         }
     }
 
@@ -523,12 +543,28 @@ fn generate_delegation_method(
         ));
     }
 
+    if generics_contain_concrete_service_name(&method_sig.generics, &real_struct_segment.ident) {
+        return Err(syn::Error::new_spanned(
+            &method_sig.generics,
+            "the concrete service type is not supported in method generic bounds or where predicates",
+        ));
+    }
+
     if let syn::ReturnType::Type(_, ty) = &method_sig.output
-        && matches!(&**ty, syn::Type::ImplTrait(_))
+        && type_contains_impl_trait(ty)
     {
         return Err(syn::Error::new_spanned(
             ty,
             "impl Trait return types are not supported across real and fake implementations",
+        ));
+    }
+
+    if let syn::ReturnType::Type(_, ty) = &method_sig.output
+        && type_contains_concrete_service_name(ty, &real_struct_segment.ident)
+    {
+        return Err(syn::Error::new_spanned(
+            ty,
+            "the concrete service type is not supported in method return types; use a direct Self return",
         ));
     }
 
@@ -565,6 +601,7 @@ fn generate_delegation_method(
                 helper_module_name,
                 method_name,
                 &method_info.param_names,
+                &method_info.binding_names,
                 &method_info.generic_args,
                 is_async,
                 &fakes_cfg,
@@ -578,6 +615,7 @@ fn generate_delegation_method(
                 helper_module_name,
                 method_name,
                 &method_info.param_names,
+                &method_info.binding_names,
                 &method_info.generic_args,
                 is_async,
                 &fakes_cfg,
@@ -648,6 +686,7 @@ fn generate_method_body(
     helper_module_name: &proc_macro2::Ident,
     method_name: &proc_macro2::Ident,
     param_names: &[proc_macro2::Ident],
+    binding_names: &[proc_macro2::Ident],
     generic_args: &[proc_macro2::TokenStream],
     is_async: bool,
     fakes_cfg: &proc_macro2::TokenStream,
@@ -659,6 +698,7 @@ fn generate_method_body(
         helper_module_name,
         method_name,
         param_names,
+        binding_names,
         generic_args,
         is_async,
         receiver,
@@ -689,6 +729,7 @@ fn generate_method_with_self_return_body(
     helper_module_name: &proc_macro2::Ident,
     method_name: &proc_macro2::Ident,
     param_names: &[proc_macro2::Ident],
+    binding_names: &[proc_macro2::Ident],
     generic_args: &[proc_macro2::TokenStream],
     is_async: bool,
     fakes_cfg: &proc_macro2::TokenStream,
@@ -700,6 +741,7 @@ fn generate_method_with_self_return_body(
         helper_module_name,
         method_name,
         param_names,
+        binding_names,
         generic_args,
         is_async,
         receiver,
@@ -742,13 +784,14 @@ fn generate_delegation_calls(
     helper_module_name: &proc_macro2::Ident,
     method_name: &proc_macro2::Ident,
     param_names: &[proc_macro2::Ident],
+    binding_names: &[proc_macro2::Ident],
     generic_args: &[proc_macro2::TokenStream],
     is_async: bool,
     receiver: &syn::Receiver,
     trait_path: Option<&syn::Path>,
 ) -> DelegationCalls {
-    let real = fresh_binding("__fakeable_real", param_names);
-    let fake = fresh_binding("__fakeable_fake", param_names);
+    let real = fresh_binding("__fakeable_real", binding_names);
+    let fake = fresh_binding("__fakeable_fake", binding_names);
     let inner = receiver_inner(receiver);
     let await_suffix = is_async.then(|| quote! { .await });
     let turbofish = generic_turbofish(generic_args);
@@ -811,6 +854,8 @@ fn fresh_binding(base: &str, param_names: &[proc_macro2::Ident]) -> proc_macro2:
 struct MethodInfo {
     /// The names of the method's non-self parameters.
     param_names: Vec<proc_macro2::Ident>,
+    /// Value-namespace names that generated match bindings must not shadow.
+    binding_names: Vec<proc_macro2::Ident>,
     /// Type and const generic arguments forwarded by delegated calls.
     generic_args: Vec<proc_macro2::TokenStream>,
     /// Whether this method is a constructor (no self receiver, returns Self).
@@ -857,6 +902,11 @@ fn extract_method_info(sig: &syn::Signature) -> Result<MethodInfo, syn::Error> {
             }
         })
         .collect();
+    let mut binding_names = param_names.clone();
+    binding_names.extend(sig.generics.params.iter().filter_map(|param| match param {
+        syn::GenericParam::Const(param) => Some(param.ident.clone()),
+        syn::GenericParam::Lifetime(_) | syn::GenericParam::Type(_) => None,
+    }));
 
     // A method is considered a constructor if it doesn't have &self and returns Self
     let is_constructor = !has_self && returns_self_flag;
@@ -866,6 +916,7 @@ fn extract_method_info(sig: &syn::Signature) -> Result<MethodInfo, syn::Error> {
 
     Ok(MethodInfo {
         param_names,
+        binding_names,
         generic_args,
         is_constructor,
         returns_self_with_receiver,
@@ -915,6 +966,59 @@ fn type_contains_bare_self(ty: &syn::Type) -> bool {
 
 fn generics_contain_bare_self(generics: &syn::Generics) -> bool {
     let mut visitor = BareSelfVisitor { found: false };
+    syn::visit::Visit::visit_generics(&mut visitor, generics);
+    visitor.found
+}
+
+fn type_contains_impl_trait(ty: &syn::Type) -> bool {
+    struct ImplTraitVisitor {
+        found: bool,
+    }
+
+    impl<'ast> syn::visit::Visit<'ast> for ImplTraitVisitor {
+        fn visit_type_impl_trait(&mut self, _i: &'ast syn::TypeImplTrait) {
+            self.found = true;
+        }
+    }
+
+    let mut visitor = ImplTraitVisitor { found: false };
+    syn::visit::Visit::visit_type(&mut visitor, ty);
+    visitor.found
+}
+
+struct ConcreteServiceNameVisitor<'a> {
+    service_name: &'a proc_macro2::Ident,
+    found: bool,
+}
+
+impl<'ast> syn::visit::Visit<'ast> for ConcreteServiceNameVisitor<'_> {
+    fn visit_type_path(&mut self, i: &'ast syn::TypePath) {
+        if i.qself.is_none()
+            && i.path.segments.len() == 1
+            && i.path.segments.first().is_some_and(|segment| segment.ident == *self.service_name)
+        {
+            self.found = true;
+            return;
+        }
+
+        syn::visit::visit_type_path(self, i);
+    }
+}
+
+fn type_contains_concrete_service_name(ty: &syn::Type, service_name: &proc_macro2::Ident) -> bool {
+    let mut visitor = ConcreteServiceNameVisitor {
+        service_name,
+        found: false,
+    };
+    syn::visit::Visit::visit_type(&mut visitor, ty);
+    visitor.found
+}
+
+fn generics_contain_concrete_service_name(generics: &syn::Generics, service_name: &proc_macro2::Ident) -> bool {
+    let mut visitor = ConcreteServiceNameVisitor {
+        service_name,
+        found: false,
+    };
     syn::visit::Visit::visit_generics(&mut visitor, generics);
     visitor.found
 }
@@ -994,7 +1098,7 @@ fn add_explicit_lifetimes(sig: &syn::Signature) -> syn::Signature {
 
 /// Checks if a type contains references within generic arguments.
 fn contains_reference_in_generic(ty: &syn::Type) -> bool {
-    contains_nested_elided_reference(ty, false)
+    count_nested_elided_references(ty, false) > 0
 }
 
 fn type_contains_bound_lifetimes(ty: &syn::Type) -> bool {
@@ -1013,10 +1117,10 @@ fn type_contains_bound_lifetimes(ty: &syn::Type) -> bool {
     visitor.found
 }
 
-fn contains_nested_elided_reference(ty: &syn::Type, nested: bool) -> bool {
+fn count_nested_elided_references(ty: &syn::Type, nested: bool) -> usize {
     struct NestedReferenceVisitor {
         nested: bool,
-        found: bool,
+        count: usize,
     }
 
     impl<'ast> syn::visit::Visit<'ast> for NestedReferenceVisitor {
@@ -1025,8 +1129,7 @@ fn contains_nested_elided_reference(ty: &syn::Type, nested: bool) -> bool {
                 && self.nested
                 && reference.lifetime.is_none()
             {
-                self.found = true;
-                return;
+                self.count += 1;
             }
 
             let parent_nested = self.nested;
@@ -1036,9 +1139,9 @@ fn contains_nested_elided_reference(ty: &syn::Type, nested: bool) -> bool {
         }
     }
 
-    let mut visitor = NestedReferenceVisitor { nested, found: false };
+    let mut visitor = NestedReferenceVisitor { nested, count: 0 };
     syn::visit::Visit::visit_type(&mut visitor, ty);
-    visitor.found
+    visitor.count
 }
 
 /// Adds a lifetime to all elided references within generic type arguments.
@@ -1141,13 +1244,29 @@ fn generate_mockall_fake(
                     ));
                 }
 
-                let has_nested_elision = method.sig.inputs.iter().any(|input| {
-                    matches!(
-                        input,
-                        syn::FnArg::Typed(syn::PatType { ty, .. })
-                            if contains_reference_in_generic(ty)
-                    )
-                });
+                if returns_self(&method.sig.output) {
+                    return Err(syn::Error::new_spanned(
+                        &method.sig.output,
+                        "generate_mockall_fake does not support methods returning Self; use a manual fake implementation",
+                    ));
+                }
+
+                let nested_elision_count = method
+                    .sig
+                    .inputs
+                    .iter()
+                    .filter_map(|input| match input {
+                        syn::FnArg::Typed(syn::PatType { ty, .. }) => Some(count_nested_elided_references(ty, false)),
+                        syn::FnArg::Receiver(_) => None,
+                    })
+                    .sum::<usize>();
+                let has_nested_elision = nested_elision_count > 0;
+                if nested_elision_count > 1 {
+                    return Err(syn::Error::new_spanned(
+                        &method.sig,
+                        "generate_mockall_fake does not support multiple nested elided references because their independent lifetimes cannot be preserved",
+                    ));
+                }
                 let has_bound_lifetimes = method.sig.inputs.iter().any(|input| {
                     matches!(
                         input,
@@ -1310,7 +1429,7 @@ mod tests {
         let helper: proc_macro2::Ident = parse_quote!(__fakeable__Service);
         let method: proc_macro2::Ident = parse_quote!(take);
 
-        generate_delegation_calls(&real_segment, &helper, &method, &[], &[], false, receiver, None);
+        generate_delegation_calls(&real_segment, &helper, &method, &[], &[], &[], false, receiver, None);
     }
 
     #[test]

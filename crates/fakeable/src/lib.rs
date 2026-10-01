@@ -181,8 +181,8 @@ use proc_macro::TokenStream;
 ///
 /// - Mockall generation rejects mutable methods and methods with restricted visibility because
 ///   it cannot generate a fake that matches the wrapper's delegated method set.
-/// - Mockall generation rejects consuming receivers and const methods; use a manual fake for those
-///   method shapes.
+/// - Mockall generation rejects consuming receivers, const methods, methods returning `Self`, and
+///   signatures with multiple nested elided references; use a manual fake for those method shapes.
 /// - Mockall generation rejects generic impl blocks; use a manual fake for generic services.
 /// - Mockall generation rejects trait impl blocks; use a manual fake for trait implementations.
 /// - Unsafe impl blocks are rejected because the macro cannot establish their safety invariants for
@@ -204,10 +204,12 @@ use proc_macro::TokenStream;
 ///   access or struct-literal construction.
 /// - Public associated constants and types in inherent impls are rejected because the generated
 ///   wrapper cannot preserve them.
-/// - Attributes on method parameters or generic parameters, `ref`/`ref mut` bindings, and
-///   sub-patterns are rejected because forwarding could change under cfg or binding semantics.
+/// - Attributes on method receivers, parameters, or generic parameters, `ref`/`ref mut` bindings,
+///   and sub-patterns are rejected because forwarding could change under cfg or binding semantics.
 /// - `impl Trait` return types are rejected because real and fake implementations may choose
 ///   different opaque concrete types.
+/// - Unsafe methods and signatures that use the concrete service type across the wrapper boundary
+///   are rejected; use safe methods and direct `Self` returns.
 /// - Mockall generation rejects nested elided references beneath higher-ranked lifetime binders.
 /// - Struct derives are copied to the wrapper and internal enum. The fake type must satisfy their
 ///   bounds (for example, `Clone`), and derives that depend on struct shape or an enum default
