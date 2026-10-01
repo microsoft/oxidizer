@@ -55,7 +55,7 @@ pub(crate) struct CoreRuntimeBuiltins {
 impl CoreRuntimeBuiltins {
     pub(in crate::runtime) fn new(
         tasks: TaskSet,
-        dispatcher: DispatcherClient,
+        dispatcher: &DispatcherClient,
         thread: Thread,
         processor_set: ProcessorSet,
         sink: Sink,

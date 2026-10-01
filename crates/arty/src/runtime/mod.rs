@@ -70,7 +70,20 @@ pub mod __private {
     pub fn resume_error(error: super::Error) -> ! {
         match error.into_source().downcast::<crate::task::JoinError>() {
             Ok(error) => error.resume(),
-            Err(error) => panic!("{error}"),
+            Err(error) => std::panic::resume_unwind(Box::new(error.to_string())),
+        }
+    }
+
+    #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    mod tests {
+        #[test]
+        fn non_join_failure_preserves_its_diagnostic_payload() {
+            let payload = std::panic::catch_unwind(|| {
+                super::resume_error(crate::runtime::Error::new("runtime control failed"));
+            })
+            .unwrap_err();
+            assert_eq!(*payload.downcast::<String>().unwrap(), "runtime control failed");
         }
     }
 }

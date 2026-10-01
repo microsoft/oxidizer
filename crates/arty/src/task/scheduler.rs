@@ -219,14 +219,16 @@ impl TaskScheduler {
         R: Send + 'static,
     {
         let source = &self.binding.thread;
-        self.dispatcher.spawn_everywhere(|| {
+        let tasks = self.dispatcher.spawn_everywhere(|| {
             let source = source.clone();
             let mut data = data.clone();
             async move |cx| {
                 data.relocate(Some(&source), cx.thread());
                 f(data).await
             }
-        })
+        });
+        drop(data);
+        tasks
     }
 
     /// Submits a synchronous callback to a blocking-task pool.

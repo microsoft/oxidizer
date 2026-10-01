@@ -149,7 +149,7 @@ impl Default for RuntimeConfig {
             // Match Rust's Tier-1 thread-stack baseline instead of platform-native defaults.
             // The builder can override it; bootstrap also honors a larger RUST_MIN_STACK.
             stack_size: 2 * 1024 * 1024,
-            blocking_pool_policy: BlockingPoolPolicy::isolated(),
+            blocking_pool_policy: BlockingPoolPolicy::default(),
         }
     }
 }

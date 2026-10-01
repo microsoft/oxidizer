@@ -220,7 +220,7 @@ impl AsyncWorkerStartInfo {
 
         let thread_state_constructor = {
             async move |tasks, clock| {
-                let core_builtins = CoreRuntimeBuiltins::new(tasks, dispatcher.as_ref().clone(), current.clone(), processor, sink);
+                let core_builtins = CoreRuntimeBuiltins::new(tasks, dispatcher.as_ref(), current.clone(), processor, sink);
 
                 Builtins::sync_init(&shared_state, RuntimeBuiltins::new(&dispatcher, core_builtins, clock, current))
             }

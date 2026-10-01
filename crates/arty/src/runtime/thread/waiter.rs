@@ -178,7 +178,7 @@ mod tests {
                 reported.send(waiter.wait().unwrap_err().to_string()).unwrap();
             })
         });
-        assert!(outcomes.try_recv().is_err());
+        assert_eq!(outcomes.try_recv(), Err(mpsc::TryRecvError::Empty));
         release.send(()).unwrap();
         complete.recv_timeout(TEST_TIMEOUT).unwrap();
         let first = outcomes.recv_timeout(TEST_TIMEOUT).unwrap();
