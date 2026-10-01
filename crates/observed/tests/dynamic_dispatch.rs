@@ -211,6 +211,49 @@ fn an_earlier_query_does_not_reserve_dynamic_delivery() {
 }
 
 #[test]
+fn dynamic_selection_observes_initialization_on_later_emissions() {
+    for composite in [false, true] {
+        let initialized = Arc::new(OnceLock::new());
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let first = processor(
+            {
+                let initialized = Arc::clone(&initialized);
+                move |_| initialized.get().is_some()
+            },
+            {
+                let seen = Arc::clone(&seen);
+                move |_| seen.lock().unwrap().push("first")
+            },
+        );
+        let second = processor(
+            move |_| {
+                initialized.get_or_init(|| ());
+                true
+            },
+            {
+                let seen = Arc::clone(&seen);
+                move |_| seen.lock().unwrap().push("second")
+            },
+        );
+        let sink = if composite {
+            Sink::composite([leaf(vec![first]), leaf(vec![second])])
+        } else {
+            leaf(vec![first, second])
+        };
+
+        emit_dyn_event(&sink, &DynamicEvent::default());
+
+        // Dynamic routing does not revisit the first recipient's rejection,
+        // but that decision must not be cached for a subsequent emission.
+        assert_eq!(*seen.lock().unwrap(), ["second"]);
+
+        emit_dyn_event(&sink, &DynamicEvent::default());
+
+        assert_eq!(*seen.lock().unwrap(), ["second", "first", "second"]);
+    }
+}
+
+#[test]
 fn later_recipients_observe_initialization_from_earlier_processors() {
     for composite in [false, true] {
         for (before, after) in [(false, true), (true, false)] {

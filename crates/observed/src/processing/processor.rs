@@ -43,10 +43,14 @@ pub trait EventProcessor: Send + Sync {
     /// Also called by [`Sink::is_interested`](crate::Sink::is_interested),
     /// which aggregates processor interest independently of emission.
     ///
-    /// It is both the lazy-construction gate and the per-processor routing
-    /// decision: if **all** processors return `false` the event closure is
-    /// never invoked, and a processor that returns `false` never receives the
-    /// event even when a peer is interested.
+    /// Interest is advisory for the current check, not the processor's lifetime.
+    /// Initialization may change selection for subsequent emissions. Checks do
+    /// not form an atomic snapshot across processors, and earlier decisions
+    /// need not be revisited during the same emission.
+    ///
+    /// Interest gates lazy construction and selects recipients. If every
+    /// processor declines admission, the event closure is never invoked.
+    /// Routing can check interest independently of admission.
     fn is_interested(&self, description: &EventDescription) -> bool;
 
     /// Processes an event by pulling fields and enrichments from the view.

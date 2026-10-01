@@ -335,6 +335,8 @@ No-op sinks and sinks without processors are uninterested. The query does not co
 
 Processor interest depends only on the event description and state that changes at most once, such as initialization through a `OnceLock`.
 Initialization may change the answer in either direction. Callers query each candidate event rather than treating an answer as a lifetime cache entry.
+Interest checks do not form an atomic snapshot across processors, and earlier decisions need not be revisited during the same emission.
+Initialization may therefore affect selection for subsequent emissions without changing decisions already made.
 Interest is not a delivery guarantee: emission checks interest independently and remains subject to sampling and other delivery filters.
 
 The [interest-query implementation guide](docs/implementation.md) describes how the query and emission share the same routing logic.

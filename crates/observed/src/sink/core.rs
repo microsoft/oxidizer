@@ -418,8 +418,10 @@ impl Sink {
     /// or enrichments.
     ///
     /// This is current interest, not a delivery guarantee or a lifetime
-    /// filtering decision. Processor initialization may change the answer in
-    /// either direction, as permitted by [`EventProcessor::is_interested`].
+    /// filtering decision. Checks do not form an atomic snapshot across
+    /// processors. Initialization may change selection for subsequent emissions;
+    /// earlier decisions need not be revisited during the same emission.
+    /// See [`EventProcessor::is_interested`] for the processor contract.
     /// Query again for each candidate event rather than caching the result for
     /// the sink's lifetime. Emission checks interest independently and remains
     /// subject to sampling and other delivery filters.
