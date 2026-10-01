@@ -626,6 +626,35 @@ fn fakeable_rejects_relative_fake_paths() {
 }
 
 #[test]
+fn fakeable_rejects_relative_paths_in_moved_struct_fields() {
+    for input in [
+        quote! {
+            struct MyService {
+                backend: super::Backend,
+            }
+        },
+        quote! {
+            struct MyService(self::Config);
+        },
+    ] {
+        let result = fakeable_impl::fakeable_impl(quote! { fake_impl = FakeService }, input).to_string();
+        assert!(result.contains("field types containing self or super paths are not supported"));
+    }
+
+    let attributed = fakeable_impl::fakeable_impl(
+        quote! { fake_impl = FakeService },
+        quote! {
+            struct MyService {
+                #[codec(with = super::backend)]
+                value: String,
+            }
+        },
+    )
+    .to_string();
+    assert!(attributed.contains("field attributes containing self or super paths are not supported"));
+}
+
+#[test]
 fn fakeable_rejects_qualified_impl_targets() {
     let result = fakeable_impl::fakeable_impl(quote! {}, quote!(impl services::MyService {})).to_string();
 

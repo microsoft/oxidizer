@@ -202,6 +202,8 @@ use proc_macro::TokenStream;
 ///   layout and ABI.
 /// - Fake implementation paths beginning with `self` or `super`, and qualified impl targets, are
 ///   rejected because generated helper items live in a different module.
+/// - Struct field types and field attributes containing `self` or `super` paths are rejected because
+///   the real struct is relocated into that helper module.
 /// - Struct fields must be private because the visible wrapper does not preserve direct field
 ///   access or struct-literal construction.
 /// - Public associated constants and types in inherent impls are rejected because the generated

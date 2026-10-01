@@ -6,7 +6,7 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{ToTokens, quote};
 use syn::parse::Parser;
 use syn::punctuated::Punctuated;
 use syn::{ItemImpl, ItemStruct, Meta, Token, parse_quote};
@@ -108,6 +108,24 @@ fn process_struct(args: &FakeableArgs, item_struct: &ItemStruct) -> proc_macro2:
             "fakeable structs cannot expose fields because the generated wrapper stores only an internal enum",
         )
         .into_compile_error();
+    }
+
+    for field in &item_struct.fields {
+        if type_contains_relative_path(&field.ty) {
+            return syn::Error::new_spanned(
+                &field.ty,
+                "field types containing self or super paths are not supported because the real struct is moved into a helper module",
+            )
+            .into_compile_error();
+        }
+
+        if let Some(attr) = field.attrs.iter().find(|attr| attribute_contains_relative_path(attr)) {
+            return syn::Error::new_spanned(
+                attr,
+                "field attributes containing self or super paths are not supported because the real struct is moved into a helper module",
+            )
+            .into_compile_error();
+        }
     }
 
     let cfg_attrs: Vec<_> = struct_attrs.iter().filter(|attr| attr.path().is_ident("cfg")).collect();
@@ -333,6 +351,41 @@ fn process_impl(args: &FakeableArgs, item_impl: &ItemImpl) -> proc_macro2::Token
 
 fn cfg_attr_can_disable_item(attr: &syn::Attribute) -> bool {
     cfg_attr_applies_attribute(attr, "cfg")
+}
+
+fn type_contains_relative_path(ty: &syn::Type) -> bool {
+    struct RelativePathVisitor {
+        found: bool,
+    }
+
+    impl<'ast> syn::visit::Visit<'ast> for RelativePathVisitor {
+        fn visit_path(&mut self, i: &'ast syn::Path) {
+            if i.segments
+                .first()
+                .is_some_and(|segment| segment.ident == "self" || segment.ident == "super")
+            {
+                self.found = true;
+                return;
+            }
+            syn::visit::visit_path(self, i);
+        }
+    }
+
+    let mut visitor = RelativePathVisitor { found: false };
+    syn::visit::Visit::visit_type(&mut visitor, ty);
+    visitor.found
+}
+
+fn attribute_contains_relative_path(attr: &syn::Attribute) -> bool {
+    token_stream_contains_relative_path(attr.meta.to_token_stream())
+}
+
+fn token_stream_contains_relative_path(tokens: TokenStream) -> bool {
+    tokens.into_iter().any(|token| match token {
+        proc_macro2::TokenTree::Ident(ident) => ident == "self" || ident == "super",
+        proc_macro2::TokenTree::Group(group) => token_stream_contains_relative_path(group.stream()),
+        proc_macro2::TokenTree::Punct(_) | proc_macro2::TokenTree::Literal(_) => false,
+    })
 }
 
 fn cfg_attr_applies_attribute(attr: &syn::Attribute, attribute_name: &str) -> bool {
