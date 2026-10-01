@@ -65,7 +65,10 @@ where
     #[must_use]
     pub(crate) fn new(future: F, result_tx: RawLocalPooledSender<R>) -> Self {
         Self {
-            payload: UnsafeCell::new(Some(Payload { future, result_tx })),
+            payload: UnsafeCell::new(Some(Payload {
+                future,
+                result_tx: Some(result_tx),
+            })),
             wake_signal: UnsafeCell::new(None),
             #[cfg(debug_assertions)]
             diagnostic_waker_registry: Arc::new(DiagnosticWakerRegistry::new()),
@@ -140,13 +143,17 @@ where
 
         match poll_result {
             task::Poll::Ready(result) => {
-                let payload = maybe_payload.take().expect("we already validated above that there is a payload");
+                let result_tx = payload
+                    .result_tx
+                    .take()
+                    .expect("the result sender is present until this task completes");
 
                 // Dropping the completed future executes user code and therefore needs the same
                 // panic containment as polling it.
                 if let Err(panic) = catch_unwind(AssertUnwindSafe(|| {
-                    let Payload { future, result_tx } = payload;
-                    drop(future);
+                    // SAFETY: The payload is pinned with Task and only the executor accesses it.
+                    // Pin::set drops the future in place before clearing the payload.
+                    unsafe { Pin::new_unchecked(maybe_payload) }.set(None);
                     result_tx.send(result);
                 })) {
                     on_unhandled_task_panic(panic);
@@ -191,8 +198,11 @@ where
         // reference to this field.
         let payload = unsafe { self.payload.get().as_mut() }.expect("UnsafeCell pointer cannot be null");
 
-        let payload = payload.take();
-        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(payload))) {
+        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| {
+            // SAFETY: The payload is pinned with Task and only the executor accesses it.
+            // Cancellation must drop a polled future in place, just like completion.
+            unsafe { Pin::new_unchecked(payload) }.set(None);
+        })) {
             on_unhandled_task_panic(panic);
         }
     }
@@ -249,7 +259,7 @@ where
     /// The result sender/receiver use pooled event storage provided by the executor, which allows
     /// them to be allocation-free while still being safe by virtue of the executor's shutdown
     /// process, which will not complete until all join handles have been dropped.
-    result_tx: RawLocalPooledSender<R>,
+    result_tx: Option<RawLocalPooledSender<R>>,
 }
 
 pub(crate) trait TypeErasedTask {
@@ -312,6 +322,7 @@ pub(crate) trait TypeErasedTask {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
     use std::future::Ready;
     use std::pin::pin;
     use std::rc::Rc;
@@ -323,6 +334,80 @@ mod tests {
 
     use super::*;
     use crate::testing::TestSubjectFuture;
+
+    struct PinnedDropFuture {
+        polled_at: Cell<*const Self>,
+        dropped: Rc<Cell<bool>>,
+        completes: bool,
+        _pin: PhantomPinned,
+    }
+
+    impl Future for PinnedDropFuture {
+        type Output = u64;
+
+        fn poll(self: Pin<&mut Self>, _: &mut task::Context<'_>) -> task::Poll<Self::Output> {
+            self.polled_at.set(std::ptr::from_ref(self.as_ref().get_ref()));
+            if self.completes {
+                task::Poll::Ready(42)
+            } else {
+                task::Poll::Pending
+            }
+        }
+    }
+
+    impl Drop for PinnedDropFuture {
+        fn drop(&mut self) {
+            assert_eq!(self.polled_at.get(), std::ptr::from_ref(self));
+            self.dropped.set(true);
+        }
+    }
+
+    fn check_pinned_future_destruction(completes: bool) {
+        let event_pool = pin!(RawLocalEventPool::<u64>::new());
+        // SAFETY: The task and receiver are dropped before their event pool.
+        let (tx, mut rx) = unsafe { event_pool.as_ref().rent() };
+        let dropped = Rc::new(Cell::new(false));
+        let task = pin!(Task::new(
+            PinnedDropFuture {
+                polled_at: Cell::new(std::ptr::null()),
+                dropped: Rc::clone(&dropped),
+                completes,
+                _pin: PhantomPinned,
+            },
+            tx,
+        ));
+        let task = task.as_ref();
+        // SAFETY: The future retains no wakers, so the task is inert before destruction.
+        unsafe { task.initialize(WakeSignal::fake()) };
+
+        let result = task.poll();
+        if completes {
+            assert!(result.is_ready());
+        } else {
+            assert!(result.is_pending());
+            task.abort();
+        }
+        assert!(dropped.get());
+        assert!(task.is_inert());
+
+        let mut cx = task::Context::from_waker(Waker::noop());
+        let result = Pin::new(&mut rx).poll(&mut cx);
+        if completes {
+            assert_eq!(result, task::Poll::Ready(Ok(42)));
+        } else {
+            assert_eq!(result, task::Poll::Ready(Err(Disconnected)));
+        }
+    }
+
+    #[test]
+    fn completed_future_is_destroyed_at_its_pinned_address() {
+        check_pinned_future_destruction(true);
+    }
+
+    #[test]
+    fn cancelled_future_is_destroyed_at_its_pinned_address() {
+        check_pinned_future_destruction(false);
+    }
 
     struct PanicOnDropFuture(Ready<u64>);
 
