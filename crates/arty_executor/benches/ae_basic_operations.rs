@@ -15,6 +15,8 @@
 //! Use `--allocations --test` for one-shot allocation probes rather than full
 //! Criterion timing runs for every case.
 //! Spawn measurements include allocator instructions, not just scheduler work.
+//! `independent` cases use Arty's runtime waker-lifetime mode; `warm` preserves
+//! the executor's default mode. Both have matching Criterion/Gungraun inputs.
 
 #![allow(missing_docs, reason = "benchmark code")]
 #![expect(
@@ -77,6 +79,28 @@ fn executor_state() -> State {
     }
 }
 
+fn independent_executor_state() -> State {
+    // SAFETY: State drops external handles before the guard completes shutdown.
+    let executor = unsafe { Executor::builder().independent_wakers().build() };
+    let executor = scopeguard::guard(executor, finish_executor as fn(Executor));
+    let tasks = executor.tasks();
+    State {
+        wakers: Vec::new(),
+        added: None,
+        handles: Vec::new(),
+        tasks,
+        executor,
+    }
+}
+
+fn finish_executor(executor: Executor) {
+    executor.begin_shutdown();
+    while executor.execute_cycle() != CycleOutcome::Shutdown {
+        std::thread::yield_now();
+    }
+    drop(executor);
+}
+
 fn spawn_complete_once(state: &State) -> Poll<()> {
     // Stack-pin to avoid allocator noise on the measured path.
     let mut handle = pin!(state.tasks.add(async {}));
@@ -103,6 +127,24 @@ fn warmed_state() -> State {
 
 fn warmed_yield_state() -> State {
     let state = executor_state();
+    for _ in 0..WARM_UP_OPERATIONS {
+        assert_eq!(yield_once(&state), Poll::Ready(()));
+    }
+    assert_eq!(state.executor.execute_cycle(), CycleOutcome::Suspend);
+    state
+}
+
+fn independent_warmed_state() -> State {
+    let state = independent_executor_state();
+    for _ in 0..WARM_UP_OPERATIONS {
+        assert_eq!(spawn_complete_once(&state), Poll::Ready(()));
+    }
+    assert_eq!(state.executor.execute_cycle(), CycleOutcome::Suspend);
+    state
+}
+
+fn independent_warmed_yield_state() -> State {
+    let state = independent_executor_state();
     for _ in 0..WARM_UP_OPERATIONS {
         assert_eq!(yield_once(&state), Poll::Ready(()));
     }
@@ -220,6 +262,7 @@ fn overflow_cycle_state() -> State {
 #[metabench::benchmark(BASIC_NOOP, BASIC, "noop")]
 #[bench::cold(&executor_state())]
 #[bench::warm(&warmed_state())]
+#[bench::independent(&independent_warmed_state())]
 fn basic_noop(state: &State) -> CycleOutcome {
     state.executor.execute_cycle()
 }
@@ -277,12 +320,14 @@ fn decomposed_cycle_awakened(state: &State) -> CycleOutcome {
 
 #[metabench::benchmark(BASIC_SPAWN_AND_COMPLETE_ONE, BASIC, "spawn_and_complete_one")]
 #[bench::warm(&warmed_state())]
+#[bench::independent(&independent_warmed_state())]
 fn basic_spawn_and_complete_one(state: &State) -> Poll<()> {
     spawn_complete_once(state)
 }
 
 #[metabench::benchmark(BASIC_YIELD_ONE, BASIC, "yield_one")]
 #[bench::warm(&warmed_yield_state())]
+#[bench::independent(&independent_warmed_yield_state())]
 fn basic_yield_one(state: &State) -> Poll<()> {
     yield_once(state)
 }
@@ -352,20 +397,22 @@ fn slow_yield_10k(state: &mut State) -> usize {
     yield_burst(state)
 }
 
+macro_rules! repeated {
+    ($group:ident, $identity:ident, $case:literal, $setup:expr, $body:ident) => {
+        $group.bench_function(BenchmarkId::new($identity.benchmark_name(), $case), |bencher| {
+            let mut state = $setup;
+            bencher.iter(|| $body(black_box(&mut state)));
+        });
+    };
+}
+
 fn criterion_benchmarks(criterion: &mut Criterion) {
     let mut basic = criterion.benchmark_group(BASIC);
-    macro_rules! repeated {
-        ($group:ident, $identity:ident, $case:literal, $setup:expr, $body:ident) => {
-            $group.bench_function(BenchmarkId::new($identity.benchmark_name(), $case), |bencher| {
-                let mut state = $setup;
-                bencher.iter(|| $body(black_box(&mut state)));
-            });
-        };
-    }
     basic.bench_function(BenchmarkId::new(BASIC_NOOP.benchmark_name(), "cold"), |bencher| {
         bencher.iter_batched_ref(executor_state, |state| basic_noop(black_box(state)), BATCH_SIZE);
     });
     repeated!(basic, BASIC_NOOP, "warm", warmed_state(), basic_noop);
+    repeated!(basic, BASIC_NOOP, "independent", independent_warmed_state(), basic_noop);
     repeated!(
         basic,
         BASIC_SPAWN_AND_COMPLETE_ONE,
@@ -374,6 +421,20 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
         basic_spawn_and_complete_one
     );
     repeated!(basic, BASIC_YIELD_ONE, "warm", warmed_yield_state(), basic_yield_one);
+    repeated!(
+        basic,
+        BASIC_SPAWN_AND_COMPLETE_ONE,
+        "independent",
+        independent_warmed_state(),
+        basic_spawn_and_complete_one
+    );
+    repeated!(
+        basic,
+        BASIC_YIELD_ONE,
+        "independent",
+        independent_warmed_yield_state(),
+        basic_yield_one
+    );
     basic.finish();
 
     let mut decomposed = criterion.benchmark_group(DECOMPOSED);

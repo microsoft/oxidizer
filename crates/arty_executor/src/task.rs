@@ -220,7 +220,10 @@ where
 
         debug_assert!(maybe_wake_signal.is_none());
 
-        *maybe_wake_signal = Some(wake_signal);
+        // SAFETY: initialization is called once, so the slot contains None and
+        // owns no previous signal. Writing avoids generating drop glue for an
+        // impossible old Some value on every task registration.
+        unsafe { std::ptr::write(maybe_wake_signal, Some(wake_signal)) };
     }
 
     #[cfg(debug_assertions)]
