@@ -259,6 +259,7 @@ dependencies = [
  "events_once",
  "foldhash 0.2.0",
  "futures",
+ "gungraun",
  "many_cpus",
  "metabench",
  "mockall",
