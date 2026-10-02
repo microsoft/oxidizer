@@ -2659,12 +2659,13 @@ mod tests {
     fn recording_during_tls_teardown_ignores_destroyed_local_recorder() {
         let _test = TEST_LOCK.lock().unwrap();
         configure(Configuration {
-            general_events: RecordingPolicy {
+            allocations: RecordingPolicy {
                 enabled: true,
                 ..Default::default()
             },
             ..Default::default()
         });
+        drop(LateTelemetryUser);
 
         std::thread::spawn(|| {
             assert!(!is_suppressed());
@@ -3785,23 +3786,27 @@ mod tests {
         assert!(recording_enabled());
         assert!(recording_enabled_for(EventClass::General));
         let session = select_object(ObjectId::new(1)).unwrap();
+        let constructed = Cell::new(0);
+        let event = || {
+            constructed.set(constructed.get() + 1);
+            Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
+        };
+        assert!(record_in_session_classified(session, EventClass::General, event));
+        assert_eq!(constructed.get(), 1);
         {
             let _suppression = SuppressionGuard::enter();
             assert!(!recording_enabled());
             assert!(!recording_enabled_for(EventClass::General));
             assert_eq!(select_object(ObjectId::new(1)), None);
-            assert!(!record_in_session(session, || panic!("suppressed events must not be constructed")));
-            assert!(!record_in_session_classified(session, EventClass::General, || {
-                panic!("suppressed classified events must not be constructed")
-            }));
+            assert!(!record_in_session(session, event));
+            assert!(!record_in_session_classified(session, EventClass::General, event));
         }
         configure(Configuration::default());
         assert!(!recording_enabled());
         assert_eq!(select_object(ObjectId::new(1)), None);
-        assert!(!record_in_session(session, || panic!("disabled events must not be constructed")));
-        assert!(!record_in_session_classified(session, EventClass::General, || {
-            panic!("disabled classified events must not be constructed")
-        }));
+        assert!(!record_in_session(session, event));
+        assert!(!record_in_session_classified(session, EventClass::General, event));
+        assert_eq!(constructed.get(), 1);
     }
 
     #[test]
@@ -3835,17 +3840,21 @@ mod tests {
         ));
         // SAFETY: local_recorder returns this thread's process-lifetime recorder.
         assert!(!unsafe { &*local }.writer_active.load(Ordering::Acquire));
+        let constructed = Cell::new(0);
+        let event = || {
+            constructed.set(constructed.get() + 1);
+            Some(Record::object(EventKind::MutexAccess, selected))
+        };
+        assert!(record_in_session_classified(session, EventClass::General, event));
+        assert_eq!(constructed.get(), 1);
         configure(Configuration {
             general_events: RecordingPolicy::all(false),
             event_capacity_per_thread: EventBufferCapacity::new(128).unwrap(),
             ..Default::default()
         });
-        assert!(!record_in_session(session, || panic!(
-            "stale-session events must not be constructed"
-        )));
-        assert!(!record_in_session_classified(session, EventClass::General, || {
-            panic!("stale-session classified events must not be constructed")
-        }));
+        assert!(!record_in_session(session, event));
+        assert!(!record_in_session_classified(session, EventClass::General, event));
+        assert_eq!(constructed.get(), 1);
         configure(Configuration::default());
     }
 

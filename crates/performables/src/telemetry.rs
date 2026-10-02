@@ -127,11 +127,14 @@ mod tests {
     #[test]
     fn disabled_recording_does_not_evaluate_conditions() {
         let evaluated = Cell::new(false);
-        record_if(EventKind::ArcDrop, ptr::null(), || {
+        let condition = || {
             evaluated.set(true);
             true
-        });
+        };
+        record_if(EventKind::ArcDrop, ptr::null(), condition);
 
         assert!(!evaluated.get());
+        assert!(condition());
+        assert!(evaluated.get());
     }
 }
