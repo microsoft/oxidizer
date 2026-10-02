@@ -13,6 +13,14 @@ exclude_globs = [
     "crates/rallocator/src/hal/miri.rs",
     "crates/rest_over_grpc_examples/**",
     "crates/rest_over_grpc_tests/**",
+    # Seismograph terminal rendering, layout, mouse routing, and presentation-only formatting.
+    "crates/seismograph_cli/src/commands/monitor/help.rs",
+    "crates/seismograph_cli/src/commands/monitor/info_ui.rs",
+    "crates/seismograph_cli/src/commands/monitor/mouse.rs",
+    "crates/seismograph_cli/src/commands/monitor/panels.rs",
+    "crates/seismograph_cli/src/commands/monitor/runtime_ui.rs",
+    "crates/seismograph_cli/src/commands/monitor/task_events_ui.rs",
+    "crates/seismograph_cli/src/commands/monitor/ui.rs",
     "crates/testing_aids/**",
 
     # Windows host only.
