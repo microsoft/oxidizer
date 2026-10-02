@@ -83,6 +83,7 @@ azure_identity = { version = "1.0.0", default-features = false }
 azure_storage_blob = { version = "1.0.0", default-features = false }
 backtrace = { version = "0.3.76", default-features = false }
 base64 = { version = "0.23.0", default-features = false, features = ["alloc"] }
+bitflags = { version = "2.9.4", default-features = false }
 bolero = { version = "0.13.4", default-features = false }
 brotli = { version = "9.0.0", default-features = false }
 bumpalo = { version = "3.20.2", default-features = false }
@@ -311,6 +312,8 @@ xxhash-rust = { version = "0.8.15", default-features = false }
 zerocopy = { version = "0.8.26", default-features = false }
 zeroize = { version = "1.9.0", default-features = false }
 zstd-safe = { version = "8.0.0", default-features = false }
+zygote_control = { path = "crates/zygote_control", default-features = false, version = "0.1.0" }
+zygote_rt = { path = "crates/zygote_rt", default-features = false, version = "0.1.0" }
 
 # >>> anvil-managed: anvil-workspace-rust-lints
 [workspace.lints.rust]
@@ -393,6 +396,7 @@ unnecessary_safety_doc = "warn"
 unneeded_field_pattern = "warn"
 unused_result_ok = "warn"
 unwrap_used = "warn"
+too_long_first_doc_paragraph = "warn"
 # Literal braces are valid data in templates and structured-logging messages.
 literal_string_with_formatting_args = "allow"
 missing_const_for_fn = "allow"

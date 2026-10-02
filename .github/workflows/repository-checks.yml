@@ -103,10 +103,88 @@ jobs:
       - name: Test no_std with serde
         run: cargo +1.95 test --package internity --no-default-features --features serde --test no_std_api --locked
 
+  zygote-other-unix:
+    name: Zygote launch semantics (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/anvil-setup
+        with:
+          group: none
+      - name: Install Rust
+        run: just anvil-toolchain-stable-install
+      - name: Exercise native non-Linux Unix launch backend
+        run: cargo test --locked --package zygote_control --test launch_semantics --all-features
+
+  zygote-landlock:
+    name: Zygote Landlock enforcement (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/anvil-setup
+        with:
+          group: none
+      - name: Install Rust
+        run: just anvil-toolchain-stable-install
+      - name: Require Landlock support and denied-path enforcement
+        env:
+          ZYGOTE_REQUIRE_LANDLOCK: "1"
+        run: cargo test --locked --package zygote_control --test launch_semantics --all-features landlock_enforces_path_rules_or_is_explicitly_skipped -- --exact
+
+  zygote-linux-sandbox-capable:
+    name: Zygote privileged sandbox enforcement (Linux)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux, x64, zygote-sandbox]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/anvil-setup
+        with:
+          group: none
+      - name: Install Rust
+        run: just anvil-toolchain-stable-install
+      - name: Require namespace, cgroup, and capability enforcement
+        env:
+          ZYGOTE_REQUIRE_LINUX_SANDBOX: "1"
+        run: |
+          cargo test --locked --package zygote_control --test launch_semantics --all-features all_capability_sets_are_cleared_when_supported -- --exact
+          cargo test --locked --package zygote_control --test launch_semantics --all-features distinct_namespace_entry_is_applied_or_explicitly_skipped -- --exact
+          cargo test --locked --package zygote_control --test launch_semantics --all-features cgroup_membership_is_verified_or_explicitly_skipped -- --exact
+
+  zygote-windows-appcontainer-capable:
+    name: Zygote AppContainer child-token enforcement (Windows)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, windows, x64, zygote-appcontainer]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/anvil-setup
+        with:
+          group: none
+      - name: Install Rust
+        run: just anvil-toolchain-stable-install
+      - name: Require AppContainer token in the launched child
+        env:
+          ZYGOTE_TEST_APPCONTAINER: "1"
+        shell: pwsh
+        run: |
+          cargo test --manifest-path crates/zygote_control/test-fixtures/targets/Cargo.toml --lib token_label_can_be_read_from_deliberately_unaligned_storage -- --exact
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked --package zygote_control --test launch_semantics --all-features appcontainer_policy_is_visible_in_the_launched_child_token -- --exact
+
   required-repository-checks:
     name: Required repository checks
     if: always()
-    needs: [release-script-tests, simd-no-std-arm, simd-no-std-x86, internity-32-bit-handles, internity-no-std-serde]
+    needs:
+      [
+        release-script-tests,
+        simd-no-std-arm,
+        simd-no-std-x86,
+        internity-32-bit-handles,
+        internity-no-std-serde,
+        zygote-other-unix,
+        zygote-landlock,
+        zygote-linux-sandbox-capable,
+        zygote-windows-appcontainer-capable,
+      ]
     runs-on: ubuntu-latest
     steps:
       - name: Verify repository checks
@@ -116,6 +194,11 @@ jobs:
           SIMD_NO_STD_X86: ${{ needs.simd-no-std-x86.result }}
           INTERNITY_32_BIT_HANDLES: ${{ needs.internity-32-bit-handles.result }}
           INTERNITY_NO_STD_SERDE: ${{ needs.internity-no-std-serde.result }}
+          ZYGOTE_OTHER_UNIX: ${{ needs.zygote-other-unix.result }}
+          ZYGOTE_LANDLOCK: ${{ needs.zygote-landlock.result }}
+          ZYGOTE_LINUX_SANDBOX: ${{ needs.zygote-linux-sandbox-capable.result }}
+          ZYGOTE_WINDOWS_APPCONTAINER: ${{ needs.zygote-windows-appcontainer-capable.result }}
+          PRIVILEGED_CHECKS_REQUIRED: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
           if [[ "$RELEASE_SCRIPT_TESTS" != "success" ]]; then
             echo "::error::release-script-tests concluded $RELEASE_SCRIPT_TESTS"
@@ -135,5 +218,25 @@ jobs:
           fi
           if [[ "$INTERNITY_NO_STD_SERDE" != "success" ]]; then
             echo "::error::internity-no-std-serde concluded $INTERNITY_NO_STD_SERDE"
+            exit 1
+          fi
+          if [[ "$ZYGOTE_OTHER_UNIX" != "success" ]]; then
+            echo "::error::zygote-other-unix concluded $ZYGOTE_OTHER_UNIX"
+            exit 1
+          fi
+          if [[ "$ZYGOTE_LANDLOCK" != "success" ]]; then
+            echo "::error::zygote-landlock concluded $ZYGOTE_LANDLOCK"
+            exit 1
+          fi
+          expected_privileged_result="skipped"
+          if [[ "$PRIVILEGED_CHECKS_REQUIRED" == "true" ]]; then
+            expected_privileged_result="success"
+          fi
+          if [[ "$ZYGOTE_LINUX_SANDBOX" != "$expected_privileged_result" ]]; then
+            echo "::error::zygote-linux-sandbox-capable concluded $ZYGOTE_LINUX_SANDBOX"
+            exit 1
+          fi
+          if [[ "$ZYGOTE_WINDOWS_APPCONTAINER" != "$expected_privileged_result" ]]; then
+            echo "::error::zygote-windows-appcontainer-capable concluded $ZYGOTE_WINDOWS_APPCONTAINER"
             exit 1
           fi

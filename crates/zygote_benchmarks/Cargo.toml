@@ -1,0 +1,127 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "zygote_benchmarks"
+description = "Benchmark fixtures and metabench suites for zygote process launches."
+version = "0.0.0"
+publish = false
+autobins = false
+build = "build.rs"
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+
+# Benchmark-only package: its binaries are measured by Criterion and metabench,
+# not by the regular test suite, so it legitimately produces no coverage data.
+[package.metadata.coverage-gate]
+min-lines-percent = 0
+
+[[bin]]
+name = "zygote_bench_transparent"
+path = "src/bin/transparent_default.rs"
+test = false
+bench = false
+doc = false
+
+[[bin]]
+name = "zygote_bench_transparent_close_fallback_512"
+path = "src/bin/transparent_close_fallback_512.rs"
+test = false
+bench = false
+doc = false
+
+[[bin]]
+name = "zygote_bench_transparent_close_fallback_4096"
+path = "src/bin/transparent_close_fallback_4096.rs"
+test = false
+bench = false
+doc = false
+
+[[bin]]
+name = "zygote_bench_transparent_signals_ignored"
+path = "src/bin/transparent_signals_ignored.rs"
+test = false
+bench = false
+doc = false
+
+[[bin]]
+name = "zygote_bench_transparent_signals_custom"
+path = "src/bin/transparent_signals_custom.rs"
+test = false
+bench = false
+doc = false
+
+[[bin]]
+name = "zygote_bench_prepared_0"
+path = "src/bin/prepared_0.rs"
+test = false
+bench = false
+doc = false
+
+[[bin]]
+name = "zygote_bench_prepared_1m"
+path = "src/bin/prepared_1m.rs"
+test = false
+bench = false
+doc = false
+
+[[bin]]
+name = "zygote_bench_prepared_64m"
+path = "src/bin/prepared_64m.rs"
+test = false
+bench = false
+doc = false
+
+[dependencies]
+zygote_rt = { path = "../zygote_rt" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { workspace = true }
+
+[build-dependencies]
+zygote_rt = { path = "../zygote_rt", features = ["build"] }
+
+[dev-dependencies]
+criterion = { workspace = true }
+metabench = { workspace = true }
+prost = { workspace = true, features = ["std"] }
+serde_json = { workspace = true, features = ["std"] }
+zygote_control = { path = "../zygote_control" }
+zygote_rt = { path = "../zygote_rt", features = ["private-test-util"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+] }
+
+[[bench]]
+name = "zygote_benchmarks_launch"
+harness = false
+
+[[bench]]
+name = "zygote_benchmarks_scaling"
+harness = false
+
+[[bench]]
+name = "zygote_benchmarks_output"
+harness = false
+
+[[bench]]
+name = "zygote_benchmarks_specialization"
+harness = false
+
+[[bench]]
+name = "zygote_benchmarks_codec"
+harness = false
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints
