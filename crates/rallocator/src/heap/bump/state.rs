@@ -156,6 +156,15 @@ pub(crate) unsafe fn allocate_tracked(state: *mut BumpState, layout: Layout) -> 
         return ptr::null_mut();
     }
 
+    // `can_fit_tracked_in_chunk_segment` admits exactly the layouts that fit a
+    // fresh normal chunk's first segment, and every fresh segment `advance_chunk`
+    // produces (a chunk's roomier second segment, or a new/recycled normal chunk's
+    // first segment) has at least that capacity. An admitted layout therefore fits
+    // the first fresh segment reached, i.e. within a single `advance_chunk`. If a
+    // fit check fails immediately after advancing, the admission predicate and the
+    // placement have drifted apart - the defect that previously mapped a fresh
+    // chunk on every retry forever. Assert loudly here rather than spin silently.
+    let mut advanced_to_fresh_segment = false;
     loop {
         let cursor = unsafe { (*state).cursor };
         let alignment = layout.align().max(align_of::<TrackingHeader>());
@@ -181,9 +190,14 @@ pub(crate) unsafe fn allocate_tracked(state: *mut BumpState, layout: Layout) -> 
             return address;
         }
 
+        debug_assert!(
+            !advanced_to_fresh_segment,
+            "an admitted bump layout must fit the fresh segment produced by advance_chunk"
+        );
         if !unsafe { advance_chunk(state) } {
             return ptr::null_mut();
         }
+        advanced_to_fresh_segment = true;
     }
 }
 
@@ -486,13 +500,22 @@ pub(crate) unsafe fn release_handle(state: *mut BumpState) {
     unsafe { release_reference(state) };
 }
 
+/// Reports whether a tracked allocation can fit in a fresh chunk segment.
+///
+/// The bound must describe a segment the retry loop in [`allocate_tracked`]
+/// can actually reach, not the raw segment size: every segment begins after an
+/// allocator-owned prefix. Admitting a layout that no segment can hold would
+/// make each failed fit map another chunk and retry forever. A fresh chunk's
+/// first segment is the tightest such placement. Chunks are `BUMP_CHUNK_SIZE`
+/// aligned and alignments never exceed a segment, so aligning offsets here
+/// matches aligning the addresses [`chunk_start`] produces.
 fn can_fit_tracked_in_chunk_segment(layout: Layout) -> bool {
-    layout
-        .size()
-        .max(1)
-        .checked_add(size_of::<TrackingHeader>())
-        .and_then(|size| size.checked_add(layout.align().max(align_of::<TrackingHeader>()) - 1))
-        .is_some_and(|size| size <= BUMP_SEGMENT_SIZE)
+    let alignment = layout.align().max(align_of::<TrackingHeader>());
+    align_up(size_of::<BumpChunk>(), 16)
+        .and_then(|start| start.checked_add(size_of::<TrackingHeader>()))
+        .and_then(|header_end| align_up(header_end, alignment))
+        .and_then(|user| user.checked_add(layout.size().max(1)))
+        .is_some_and(|end| end <= BUMP_SEGMENT_SIZE)
 }
 
 unsafe fn release_reference(state: *mut BumpState) {
@@ -605,8 +628,16 @@ fn align_up(address: usize, alignment: usize) -> Option<usize> {
 
 #[cfg(test)]
 fn can_fit_in_chunk_segment(layout: Layout) -> bool {
-    let start = align_up(size_of::<BumpChunk>(), layout.align()).unwrap();
-    start <= BUMP_SEGMENT_SIZE && BUMP_SEGMENT_SIZE - start >= layout.size().max(1)
+    // Mirror the headerless placement in `allocate`: the cursor begins at
+    // `chunk_start` (the `BumpChunk` prefix aligned to 16), then the user pointer
+    // is aligned up to `layout.align()`. This is not a termination bug today - the
+    // headerless admitted maximum still fits a chunk's roomier second segment - but
+    // modelling the fresh normal first segment keeps it consistent with
+    // `can_fit_tracked_in_chunk_segment`.
+    align_up(size_of::<BumpChunk>(), 16)
+        .and_then(|start| align_up(start, layout.align()))
+        .and_then(|user| user.checked_add(layout.size().max(1)))
+        .is_some_and(|end| end <= BUMP_SEGMENT_SIZE)
 }
 
 fn allocate_bump_chunk(domain: *mut DomainState) -> *mut u8 {
@@ -978,5 +1009,77 @@ mod tests {
         });
         assert!(retries >= 1);
         GLOBAL_POOL.locked.store(false, Ordering::Release);
+    }
+
+    /// The capacity of a fresh normal chunk's first segment for `align`, derived
+    /// from the types exactly as [`allocate_tracked`] places the user pointer and
+    /// as [`can_fit_tracked_in_chunk_segment`] bounds admission: the `BumpChunk`
+    /// prefix aligned to 16, then the tracking header, then alignment to the user
+    /// request.
+    fn tracked_first_segment_capacity(align: usize) -> usize {
+        let alignment = align.max(align_of::<TrackingHeader>());
+        let start = align_up(size_of::<BumpChunk>(), 16).unwrap();
+        let user = align_up(start + size_of::<TrackingHeader>(), alignment).unwrap();
+        BUMP_SEGMENT_SIZE - user
+    }
+
+    #[test]
+    fn tracked_admission_stops_at_the_first_segment_capacity() {
+        // Pin the empirically verified align-16 boundary (capacity 32,688 with a
+        // 40-byte tracking header). A future change to the header size or the
+        // prefix arithmetic that moved this boundary is exactly the class of
+        // defect that previously admitted a layout no segment could hold.
+        assert_eq!(size_of::<TrackingHeader>(), 40);
+        assert_eq!(tracked_first_segment_capacity(16), 32_688);
+
+        for &align in &[1_usize, 16, 64, 4096] {
+            let capacity = tracked_first_segment_capacity(align);
+            let admitted = Layout::from_size_align(capacity, align).unwrap();
+            let rejected = Layout::from_size_align(capacity + 1, align).unwrap();
+            assert!(
+                can_fit_tracked_in_chunk_segment(admitted),
+                "the first-segment capacity must be admitted: align={align}, capacity={capacity}"
+            );
+            // Catches a regression to the pre-fix predicate loudly and without
+            // hanging: it admitted sizes past this capacity that fit no segment.
+            assert!(
+                !can_fit_tracked_in_chunk_segment(rejected),
+                "one byte past the first-segment capacity must be rejected: align={align}, capacity={capacity}"
+            );
+        }
+    }
+
+    #[test]
+    fn admitted_near_boundary_layouts_fit_within_bounded_chunk_growth() {
+        // The largest admitted layout per alignment must actually place, and each
+        // placement may map at most one new chunk - the "admitted implies fits
+        // within bounded advances" invariant the `advance_chunk` debug assertion
+        // also guards. A regressed predicate that admitted an unfittable size
+        // would trip that assertion instead of spinning.
+        let aligns: &[usize] = if cfg!(miri) { &[1, 16] } else { &[1, 16, 64, 4096] };
+        let allocations = if cfg!(miri) { 2 } else { 4 };
+        for &align in aligns {
+            let state = state(Options::new());
+            let capacity = tracked_first_segment_capacity(align);
+            let layout = Layout::from_size_align(capacity, align).unwrap();
+
+            let mut previous_chunks = unsafe { (*state).chunk_count };
+            let mut live = Vec::with_capacity(allocations);
+            for _ in 0..allocations {
+                let address = unsafe { allocate_tracked(state, layout) };
+                assert!(!address.is_null(), "an admitted near-boundary layout must allocate: align={align}");
+                let chunks = unsafe { (*state).chunk_count };
+                assert!(
+                    chunks <= previous_chunks + 1,
+                    "each admitted allocation must map at most one new chunk: align={align}, before={previous_chunks}, after={chunks}"
+                );
+                previous_chunks = chunks;
+                live.push(address);
+            }
+            for address in live {
+                unsafe { deallocate_tracked(state, address, layout, false) };
+            }
+            unsafe { release_handle(state) };
+        }
     }
 }
