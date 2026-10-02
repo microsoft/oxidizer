@@ -108,6 +108,9 @@ threadpool = { workspace = true }
 tick = { path = "../tick", features = ["test-util"] }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "time", "sync"] }
 
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+gungraun = { workspace = true, features = ["default"] }
+
 [[bench]]
 name = "arty_scheduling"
 harness = false

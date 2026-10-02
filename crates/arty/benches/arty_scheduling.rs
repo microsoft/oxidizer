@@ -25,6 +25,8 @@ use std::time::{Duration, Instant};
 use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime};
 use arty::task::{Builtins, JoinHandle};
 use criterion::{BenchmarkId, Criterion, Throughput};
+#[cfg(target_os = "linux")]
+use gungraun::{Callgrind, CallgrindMetrics, LibraryBenchmarkConfig};
 use metabench::benchmark;
 use thread_aware::Unaware;
 use tokio::task::{JoinHandle as TokioJoinHandle, LocalSet};
@@ -490,78 +492,96 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
 
 #[benchmark(ARTY, "arty_scheduling/tasks", "Arty")]
 #[bench::spawn_w1_n1(&mut ArtyCase::new(1, 1, Workload::Spawn), 1)]
-#[bench::spawn_w1_n100(&mut ArtyCase::new(1, 100, Workload::Spawn), 1)]
+#[bench::spawn_w1_n20(&mut ArtyCase::new(1, 20, Workload::Spawn), 1)]
 #[bench::spawn_w4_n1(&mut ArtyCase::new(4, 1, Workload::Spawn), 1)]
-#[bench::spawn_w4_n100(&mut ArtyCase::new(4, 100, Workload::Spawn), 1)]
+#[bench::spawn_w4_n20(&mut ArtyCase::new(4, 20, Workload::Spawn), 1)]
 #[bench::yield_w1_n1(&mut ArtyCase::new(1, 1, Workload::Yield), 1)]
-#[bench::yield_w1_n100(&mut ArtyCase::new(1, 100, Workload::Yield), 1)]
+#[bench::yield_w1_n20(&mut ArtyCase::new(1, 20, Workload::Yield), 1)]
 #[bench::yield_w4_n1(&mut ArtyCase::new(4, 1, Workload::Yield), 1)]
-#[bench::yield_w4_n100(&mut ArtyCase::new(4, 100, Workload::Yield), 1)]
+#[bench::yield_w4_n20(&mut ArtyCase::new(4, 20, Workload::Yield), 1)]
 #[bench::wake_w1_n1(&mut ArtyCase::new(1, 1, Workload::RemoteWake), 1)]
-#[bench::wake_w1_n100(&mut ArtyCase::new(1, 100, Workload::RemoteWake), 1)]
+#[bench::wake_w1_n20(&mut ArtyCase::new(1, 20, Workload::RemoteWake), 1)]
 #[bench::wake_w4_n1(&mut ArtyCase::new(4, 1, Workload::RemoteWake), 1)]
-#[bench::wake_w4_n100(&mut ArtyCase::new(4, 100, Workload::RemoteWake), 1)]
+#[bench::wake_w4_n20(&mut ArtyCase::new(4, 20, Workload::RemoteWake), 1)]
 #[bench::timer_w1_n1(&mut ArtyCase::new(1, 1, Workload::Timer), 1)]
-#[bench::timer_w1_n100(&mut ArtyCase::new(1, 100, Workload::Timer), 1)]
+#[bench::timer_w1_n20(&mut ArtyCase::new(1, 20, Workload::Timer), 1)]
 #[bench::timer_w4_n1(&mut ArtyCase::new(4, 1, Workload::Timer), 1)]
-#[bench::timer_w4_n100(&mut ArtyCase::new(4, 100, Workload::Timer), 1)]
+#[bench::timer_w4_n20(&mut ArtyCase::new(4, 20, Workload::Timer), 1)]
 #[bench::timeout_w1_n1(&mut ArtyCase::new(1, 1, Workload::Timeout), 1)]
-#[bench::timeout_w1_n100(&mut ArtyCase::new(1, 100, Workload::Timeout), 1)]
+#[bench::timeout_w1_n20(&mut ArtyCase::new(1, 20, Workload::Timeout), 1)]
 #[bench::timeout_w4_n1(&mut ArtyCase::new(4, 1, Workload::Timeout), 1)]
-#[bench::timeout_w4_n100(&mut ArtyCase::new(4, 100, Workload::Timeout), 1)]
+#[bench::timeout_w4_n20(&mut ArtyCase::new(4, 20, Workload::Timeout), 1)]
 #[bench::nested_w1_n1(&mut ArtyCase::new(1, 1, Workload::FromTask), 1)]
-#[bench::nested_w1_n100(&mut ArtyCase::new(1, 100, Workload::FromTask), 1)]
+#[bench::nested_w1_n20(&mut ArtyCase::new(1, 20, Workload::FromTask), 1)]
 #[bench::nested_w4_n1(&mut ArtyCase::new(4, 1, Workload::FromTask), 1)]
-#[bench::nested_w4_n100(&mut ArtyCase::new(4, 100, Workload::FromTask), 1)]
+#[bench::nested_w4_n20(&mut ArtyCase::new(4, 20, Workload::FromTask), 1)]
 #[bench::local_w1_n1(&mut ArtyCase::new(1, 1, Workload::Local), 1)]
-#[bench::local_w1_n100(&mut ArtyCase::new(1, 100, Workload::Local), 1)]
+#[bench::local_w1_n20(&mut ArtyCase::new(1, 20, Workload::Local), 1)]
 #[bench::local_w4_n1(&mut ArtyCase::new(4, 1, Workload::Local), 1)]
-#[bench::local_w4_n100(&mut ArtyCase::new(4, 100, Workload::Local), 1)]
+#[bench::local_w4_n20(&mut ArtyCase::new(4, 20, Workload::Local), 1)]
 #[bench::blocking_w1_n1(&mut ArtyCase::new(1, 1, Workload::Blocking), 1)]
-#[bench::blocking_w1_n100(&mut ArtyCase::new(1, 100, Workload::Blocking), 1)]
+#[bench::blocking_w1_n20(&mut ArtyCase::new(1, 20, Workload::Blocking), 1)]
 #[bench::blocking_w4_n1(&mut ArtyCase::new(4, 1, Workload::Blocking), 1)]
-#[bench::blocking_w4_n100(&mut ArtyCase::new(4, 100, Workload::Blocking), 1)]
+#[bench::blocking_w4_n20(&mut ArtyCase::new(4, 20, Workload::Blocking), 1)]
 fn arty_workload(state: &mut ArtyCase, iterations: u64) -> Duration {
     state.run(iterations)
 }
 
 #[benchmark(TOKIO, "arty_scheduling/tasks", "Tokio")]
 #[bench::spawn_w1_n1(&mut TokioCase::new(1, 1, Workload::Spawn), 1)]
-#[bench::spawn_w1_n100(&mut TokioCase::new(1, 100, Workload::Spawn), 1)]
+#[bench::spawn_w1_n20(&mut TokioCase::new(1, 20, Workload::Spawn), 1)]
 #[bench::spawn_w4_n1(&mut TokioCase::new(4, 1, Workload::Spawn), 1)]
-#[bench::spawn_w4_n100(&mut TokioCase::new(4, 100, Workload::Spawn), 1)]
+#[bench::spawn_w4_n20(&mut TokioCase::new(4, 20, Workload::Spawn), 1)]
 #[bench::yield_w1_n1(&mut TokioCase::new(1, 1, Workload::Yield), 1)]
-#[bench::yield_w1_n100(&mut TokioCase::new(1, 100, Workload::Yield), 1)]
+#[bench::yield_w1_n20(&mut TokioCase::new(1, 20, Workload::Yield), 1)]
 #[bench::yield_w4_n1(&mut TokioCase::new(4, 1, Workload::Yield), 1)]
-#[bench::yield_w4_n100(&mut TokioCase::new(4, 100, Workload::Yield), 1)]
+#[bench::yield_w4_n20(&mut TokioCase::new(4, 20, Workload::Yield), 1)]
 #[bench::wake_w1_n1(&mut TokioCase::new(1, 1, Workload::RemoteWake), 1)]
-#[bench::wake_w1_n100(&mut TokioCase::new(1, 100, Workload::RemoteWake), 1)]
+#[bench::wake_w1_n20(&mut TokioCase::new(1, 20, Workload::RemoteWake), 1)]
 #[bench::wake_w4_n1(&mut TokioCase::new(4, 1, Workload::RemoteWake), 1)]
-#[bench::wake_w4_n100(&mut TokioCase::new(4, 100, Workload::RemoteWake), 1)]
+#[bench::wake_w4_n20(&mut TokioCase::new(4, 20, Workload::RemoteWake), 1)]
 #[bench::timer_w1_n1(&mut TokioCase::new(1, 1, Workload::Timer), 1)]
-#[bench::timer_w1_n100(&mut TokioCase::new(1, 100, Workload::Timer), 1)]
+#[bench::timer_w1_n20(&mut TokioCase::new(1, 20, Workload::Timer), 1)]
 #[bench::timer_w4_n1(&mut TokioCase::new(4, 1, Workload::Timer), 1)]
-#[bench::timer_w4_n100(&mut TokioCase::new(4, 100, Workload::Timer), 1)]
+#[bench::timer_w4_n20(&mut TokioCase::new(4, 20, Workload::Timer), 1)]
 #[bench::timeout_w1_n1(&mut TokioCase::new(1, 1, Workload::Timeout), 1)]
-#[bench::timeout_w1_n100(&mut TokioCase::new(1, 100, Workload::Timeout), 1)]
+#[bench::timeout_w1_n20(&mut TokioCase::new(1, 20, Workload::Timeout), 1)]
 #[bench::timeout_w4_n1(&mut TokioCase::new(4, 1, Workload::Timeout), 1)]
-#[bench::timeout_w4_n100(&mut TokioCase::new(4, 100, Workload::Timeout), 1)]
+#[bench::timeout_w4_n20(&mut TokioCase::new(4, 20, Workload::Timeout), 1)]
 #[bench::nested_w1_n1(&mut TokioCase::new(1, 1, Workload::FromTask), 1)]
-#[bench::nested_w1_n100(&mut TokioCase::new(1, 100, Workload::FromTask), 1)]
+#[bench::nested_w1_n20(&mut TokioCase::new(1, 20, Workload::FromTask), 1)]
 #[bench::nested_w4_n1(&mut TokioCase::new(4, 1, Workload::FromTask), 1)]
-#[bench::nested_w4_n100(&mut TokioCase::new(4, 100, Workload::FromTask), 1)]
+#[bench::nested_w4_n20(&mut TokioCase::new(4, 20, Workload::FromTask), 1)]
 #[bench::local_w1_n1(&mut TokioCase::new(1, 1, Workload::Local), 1)]
-#[bench::local_w1_n100(&mut TokioCase::new(1, 100, Workload::Local), 1)]
+#[bench::local_w1_n20(&mut TokioCase::new(1, 20, Workload::Local), 1)]
 #[bench::local_w4_n1(&mut TokioCase::new(4, 1, Workload::Local), 1)]
-#[bench::local_w4_n100(&mut TokioCase::new(4, 100, Workload::Local), 1)]
+#[bench::local_w4_n20(&mut TokioCase::new(4, 20, Workload::Local), 1)]
 #[bench::blocking_w1_n1(&mut TokioCase::new(1, 1, Workload::Blocking), 1)]
-#[bench::blocking_w1_n100(&mut TokioCase::new(1, 100, Workload::Blocking), 1)]
+#[bench::blocking_w1_n20(&mut TokioCase::new(1, 20, Workload::Blocking), 1)]
 #[bench::blocking_w4_n1(&mut TokioCase::new(4, 1, Workload::Blocking), 1)]
-#[bench::blocking_w4_n100(&mut TokioCase::new(4, 100, Workload::Blocking), 1)]
+#[bench::blocking_w4_n20(&mut TokioCase::new(4, 20, Workload::Blocking), 1)]
 fn tokio_workload(state: &mut TokioCase, iterations: u64) -> Duration {
     state.run(iterations)
 }
 
+#[cfg(target_os = "linux")]
+metabench::main!(
+    criterion = {
+        factory = configured_criterion,
+        benchmarks = criterion_benchmarks,
+        unit = "ns",
+    },
+    gungraun = {
+        config = LibraryBenchmarkConfig::default().tool(
+            Callgrind::default()
+                .args(["--branch-sim=yes"])
+                .format([CallgrindMetrics::Default, CallgrindMetrics::BranchSim]),
+        );
+    },
+    benchmarks = [ARTY, TOKIO],
+);
+
+#[cfg(not(target_os = "linux"))]
 metabench::main!(
     criterion = {
         factory = configured_criterion,
