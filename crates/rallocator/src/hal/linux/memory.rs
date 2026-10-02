@@ -6,8 +6,10 @@
 
 use std::ffi::CStr;
 
-use super::super::MemoryStatus;
+use crate::hal::MemoryStatus;
 
+#[cfg(target_os = "linux")]
+#[cfg_attr(test, mutants::skip)] // Native procfs availability varies; injected-reader tests cover parsing and pressure policy.
 pub(crate) fn memory_status() -> Option<MemoryStatus> {
     memory_status_with(read_file)
 }
@@ -88,6 +90,7 @@ fn number(bytes: &[u8]) -> Option<usize> {
     found.then_some(value)
 }
 
+#[cfg(target_os = "linux")]
 #[cfg_attr(test, mutants::skip)] // Direct syscall mechanics are environment-dependent; parsing and policy use injected readers below.
 fn read_file(path: &CStr, output: &mut [u8]) -> Option<usize> {
     // SAFETY: a NUL-terminated path and a live writable buffer are supplied.
@@ -114,6 +117,7 @@ mod tests {
         assert_eq!(number(b"9999999999999999999999999"), None);
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn host_memory_query_reports_consistent_bounds() {
         let memory = memory_status().unwrap();
@@ -176,7 +180,9 @@ mod tests {
     #[test]
     fn oversized_cgroup_paths_preserve_host_memory_without_io() {
         let mut memory = MemoryStatus { total: 100, available: 40 };
-        apply_cgroup(&[b'a'; 800], &mut memory, &mut read_file);
+        apply_cgroup(&[b'a'; 800], &mut memory, &mut |_path, _output| {
+            panic!("an oversized cgroup path must be rejected before reading")
+        });
         assert_eq!((memory.total, memory.available), (100, 40));
     }
 }

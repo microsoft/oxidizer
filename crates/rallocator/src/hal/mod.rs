@@ -13,6 +13,11 @@ mod win64;
 #[cfg(all(not(miri), target_os = "linux"))]
 mod linux;
 
+// Exercise the injected procfs/cgroup parser on Windows as well as Linux.
+#[cfg(all(not(miri), any(target_os = "linux", test)))]
+#[path = "linux/memory.rs"]
+mod linux_memory;
+
 #[cfg(all(not(miri), target_os = "linux"))]
 use linux as platform;
 #[cfg(miri)]

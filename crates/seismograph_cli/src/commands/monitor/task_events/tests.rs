@@ -583,6 +583,36 @@ fn open_poll_requires_a_complete_retained_tail_at_the_source_observation() {
 }
 
 #[test]
+fn queued_activity_cannot_extend_a_retained_open_poll() {
+    let raw = events(vec![start(1, 1, 1, (1, 1)), operation(1, 2, 2, EventKind::MutexAccess, 7)]);
+    let mut source = active_source();
+    source.runtimes[0].tasks[0].activity.as_mut().unwrap().queued_since = Some(EventTimestamp::from_ticks(2));
+
+    let snapshot = TaskEventsSnapshot::from_events(&raw, &[], Some(&source));
+
+    assert_eq!(actors(&snapshot), vec![(1, 2, None, false)]);
+}
+
+#[test]
+fn open_poll_requires_monotonic_thread_timestamps() {
+    let raw = events(vec![start(1, 1, 1, (1, 1)), operation(1, 2, 0, EventKind::MutexAccess, 7)]);
+
+    let snapshot = TaskEventsSnapshot::from_events(&raw, &[], Some(&active_source()));
+
+    assert_eq!(actors(&snapshot), vec![(1, 2, None, false)]);
+}
+
+#[test]
+fn sampled_runtime_boundaries_cannot_prove_an_open_poll_actor() {
+    let mut raw = events(vec![start(1, 1, 1, (1, 1)), operation(1, 2, 2, EventKind::MutexAccess, 7)]);
+    raw.recording.runtime_tasks.event_sampling = seismograph::recorder::EventSampling::one_in(2).unwrap();
+
+    let snapshot = TaskEventsSnapshot::from_events(&raw, &[], Some(&active_source()));
+
+    assert_eq!(actors(&snapshot), vec![(1, 2, None, true)]);
+}
+
+#[test]
 fn incoherent_activity_or_unknown_poll_worker_cannot_extend_a_start() {
     let raw = events(vec![start(1, 1, 1, (1, 1)), operation(1, 2, 2, EventKind::MutexAccess, 7)]);
     let mut source = active_source();

@@ -404,9 +404,9 @@ fn decode_statistics(payload: &[u8]) -> Result<RecorderStatistics, Error> {
 }
 
 // Legacy statistics, cache policy, session, six class counts, and thread count.
-const ACTIVITY_HEADER_BYTES: usize = 82 + 6 + 8 + 6 * 8 + 4;
+const ACTIVITY_HEADER_BYTES: usize = 148;
 // Five counters, the retired flag, and the length prefix of an empty name.
-const ACTIVITY_THREAD_MIN_BYTES: usize = 5 * 8 + 1 + 2;
+const ACTIVITY_THREAD_MIN_BYTES: usize = 43;
 
 #[cfg_attr(test, mutants::skip)] // The only observable boundary requires constructing a payload larger than u32::MAX.
 fn activity_size(activity: &RecorderActivity) -> Result<usize, Error> {

@@ -3604,6 +3604,34 @@ mod tests {
     }
 
     #[test]
+    fn queued_statistics_are_discarded_during_capture() {
+        let mut app = connected_app(MonitorTab::Info);
+        app.recorder_statistics = Some(recorder_statistics_with_total(1));
+        app.recording_unknown = true;
+        let original_recording = connected_fields(&app.screen).unwrap().1;
+        let (_capture_sender, capture_receiver) = unbounded::<CaptureMessage>();
+        app.capture_receiver = Some(capture_receiver);
+        let (sender, receiver) = unbounded();
+        let mut stale = recorder_statistics_with_total(10);
+        stale.recording.io.enabled = !original_recording.io.enabled;
+        sender.send(Ok(stale.into())).unwrap();
+        app.statistics_receiver = Some(receiver);
+
+        app.poll_recorder_statistics();
+
+        assert_eq!(
+            (
+                app.statistics_receiver.is_none(),
+                app.recorder_statistics.map(|statistics| statistics.total_events),
+                app.recording_unknown,
+                connected_fields(&app.screen).unwrap().1,
+                app.activity_samples.len(),
+            ),
+            (true, Some(1), true, original_recording, 0)
+        );
+    }
+
+    #[test]
     fn recording_configuration_messages_update_the_connected_instance() {
         let mut app = connected_app(MonitorTab::Info);
         app.poll_recording_configuration();

@@ -2246,6 +2246,23 @@ mod tests {
     }
 
     #[test]
+    fn reporting_unmatched_allocation_retains_its_captured_stack() {
+        let mut allocation = seismograph_rallocator::callers::Event::default();
+        allocation.allocation_id = 1;
+        allocation.size = 1024;
+        allocation.call_stack = vec![0x1234, 0x5678];
+        let mut callers = Callers::default();
+        callers.events.push(allocation);
+        let mut html = String::new();
+
+        render_callers(&mut html, &callers, &[]);
+
+        assert!(html.contains(
+            "<summary>Stack trace · 2 frames</summary><div class=\"stack\"><div>0x0000000000001234</div><div>0x0000000000005678</div>"
+        ));
+    }
+
+    #[test]
     fn reporting_size_class_totals_are_explicitly_partial() {
         let mut snapshot = Snapshot::new(Version::new(0, 1, 0));
         snapshot.stats.live_bytes = 128;

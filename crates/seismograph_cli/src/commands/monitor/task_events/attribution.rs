@@ -292,9 +292,7 @@ fn open_poll(
         .indices
         .partition_point(|index| thread.events[*index].timestamp.ticks() < observed);
     let last = thread.indices.last().map(|index| thread.events[*index].sequence.get())?;
-    if end <= start {
-        return None;
-    }
+    debug_assert!(end > start, "ordered timestamps before observed include the retained start");
     if totals.get(&thread.id) != Some(&last) {
         return None;
     }
@@ -329,13 +327,16 @@ fn reject_concurrent_task_polls(polls: &mut [Poll]) {
         while first < indices.len() {
             let thread = polls[indices[first]].thread;
             let mut end_time = polls[indices[first]].finished_at;
-            let mut end = first + 1;
+            let mut end = first;
             let mut multiple_threads = false;
-            while end < indices.len() && polls[indices[end]].started_at <= end_time {
+            loop {
                 let next = &polls[indices[end]];
                 multiple_threads |= next.thread != thread;
                 end_time = end_time.max(next.finished_at);
                 end += 1;
+                if end == indices.len() || polls[indices[end]].started_at > end_time {
+                    break;
+                }
             }
             if multiple_threads {
                 for &index in &indices[first..end] {
@@ -437,6 +438,82 @@ mod tests {
         reject_crossing_polls(&mut polls);
 
         assert!(polls.iter().all(|poll| poll.valid));
+    }
+
+    #[test]
+    fn touching_poll_groups_do_not_share_crossing_rejection() {
+        let mut polls = [poll(0, 3), poll(3, 6), poll(4, 8)];
+
+        reject_crossing_polls(&mut polls);
+
+        assert_eq!(polls.map(|poll| poll.valid), [true, false, false]);
+    }
+
+    #[test]
+    fn nested_polls_with_a_shared_end_are_not_crossing() {
+        let mut polls = [poll(0, 5), poll(2, 5)];
+
+        reject_crossing_polls(&mut polls);
+
+        assert_eq!(polls.map(|poll| poll.valid), [true, true]);
+    }
+
+    #[test]
+    fn concurrent_task_rejection_is_limited_to_overlapping_groups() {
+        let mut other_thread = poll(4, 7);
+        other_thread.thread = 2;
+        let mut polls = [poll(0, 2), poll(3, 6), other_thread, poll(8, 10)];
+
+        reject_concurrent_task_polls(&mut polls);
+
+        assert_eq!(polls.map(|poll| poll.valid), [true, false, false, true]);
+    }
+
+    #[test]
+    fn task_polls_touching_in_time_on_distinct_threads_are_ambiguous() {
+        let mut other_thread = poll(2, 4);
+        other_thread.thread = 2;
+        let mut polls = [poll(0, 2), other_thread];
+
+        reject_concurrent_task_polls(&mut polls);
+
+        assert_eq!(polls.map(|poll| poll.valid), [false, false]);
+    }
+
+    #[test]
+    fn reversed_poll_time_does_not_block_later_task_polls() {
+        let mut reversed = poll(0, 2);
+        reversed.started_at = 3;
+        reversed.valid = false;
+        let mut polls = [reversed, poll(4, 6)];
+
+        reject_concurrent_task_polls(&mut polls);
+
+        assert_eq!(polls.map(|poll| poll.valid), [false, true]);
+    }
+
+    #[test]
+    fn empty_poll_interior_does_not_attribute_its_finish_boundary() {
+        let events = [
+            runtime_event(EventKind::TaskPollStarted, 100, 0),
+            runtime_event(EventKind::TaskPollFinished, 101, 1),
+        ];
+        let thread = Thread {
+            id: 1,
+            events: &events,
+            indices: vec![0, 1],
+            breaks: vec![0, 0],
+            ordered_time: true,
+        };
+        let poll = closed_poll(&thread, (1, 1), Some(0), 1, true).unwrap();
+        let mut evidence = vec![Evidence::default(); events.len()];
+
+        assign(&thread, &[poll], &[0], &mut evidence);
+
+        assert_eq!(
+            evidence.iter().map(|item| (item.task, item.ambiguous)).collect::<Vec<_>>(),
+            [(None, false), (None, false)]
+        );
     }
 
     #[test]

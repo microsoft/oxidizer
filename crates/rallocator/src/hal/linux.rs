@@ -11,8 +11,7 @@ use libc::{
 
 const ALLOCATION_ALIGNMENT: usize = 2 * 1024 * 1024;
 
-mod memory;
-pub(crate) use memory::memory_status;
+pub(crate) use super::linux_memory::memory_status;
 
 pub(crate) fn map(size: usize) -> *mut u8 {
     map_aligned(size, PROT_READ | PROT_WRITE)

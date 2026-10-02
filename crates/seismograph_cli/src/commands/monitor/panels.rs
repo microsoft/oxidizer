@@ -199,9 +199,8 @@ impl Panels {
                     Direction::Horizontal => (event.column, divider.parent.x, divider.parent.width, 12),
                     Direction::Vertical => (event.row, divider.parent.y, divider.parent.height, 3),
                 };
-                let Some(constraint) = dragged_constraint(position, start, length, minimum) else {
-                    return;
-                };
+                let constraint = dragged_constraint(position, start, length, minimum)
+                    .expect("arrange only emits dividers when both panes have nonzero width and height");
                 self.sizes[id as usize] = Some(constraint);
             }
             MouseEventKind::Up(MouseButton::Left) => self.dragging = None,

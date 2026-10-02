@@ -623,7 +623,11 @@ fn recorder_statistics_response_from(result: Result<crate::recorder::Statistics,
 }
 
 fn recorder_activity_response() -> Response {
-    let activity = match crate::recorder::try_activity() {
+    recorder_activity_response_from(crate::recorder::try_activity())
+}
+
+fn recorder_activity_response_from(result: Result<crate::recorder::Activity, crate::Error>) -> Response {
+    let activity = match result {
         Ok(activity) => activity,
         Err(error) => return Response::Error(error.to_string()),
     };
@@ -1116,6 +1120,13 @@ mod tests {
         assert_eq!(response, Response::Error("statistics unavailable".into()));
     }
 
+    #[test]
+    fn recorder_activity_failures_are_returned_to_the_client() {
+        let response = recorder_activity_response_from(Err(crate::Error::new("activity unavailable")));
+
+        assert_eq!(response, Response::Error("activity unavailable".into()));
+    }
+
     #[cfg_attr(miri, ignore)]
     #[test]
     fn expired_frame_deadline_does_not_consume_a_buffered_request() {
@@ -1549,6 +1560,7 @@ mod tests {
         ));
     }
 
+    #[cfg_attr(miri, ignore = "requires real TCP sockets; native and careful suites cover response deadlines")]
     #[test]
     fn response_write_deadline_is_absolute() {
         let (_client, mut server) = connected_pair();
@@ -1579,6 +1591,17 @@ mod tests {
             read_request_with_timeout(&mut server, &AtomicBool::new(true), Duration::from_secs(1), ReadTimeout::Idle),
             Err(ClientError::Stopped | ClientError::Disconnected)
         ));
+    }
+
+    #[cfg_attr(miri, ignore = "requires real TCP sockets; native and careful suites cover response deadlines")]
+    #[test]
+    fn response_flush_respects_the_absolute_deadline() {
+        let (_client, mut server) = connected_pair();
+        let mut writer = DeadlineWriter::new(&mut server, Duration::from_secs(1));
+        writer.flush().unwrap();
+        writer.deadline = Instant::now();
+
+        assert_eq!(writer.flush().unwrap_err().kind(), io::ErrorKind::TimedOut);
     }
 
     #[cfg_attr(miri, ignore)]

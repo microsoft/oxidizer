@@ -649,10 +649,9 @@ mod tests {
     #[test]
     fn spawned_task_preserves_nonzero_parent_identity() {
         let mut spawned = event(EventKind::TaskSpawned, None, 10, 1, 1);
-        let EventPayload::Runtime(runtime) = &mut spawned.payload else {
-            unreachable!();
-        };
-        runtime.related_id = 7;
+        if let EventPayload::Runtime(runtime) = &mut spawned.payload {
+            runtime.related_id = 7;
+        }
         let snapshot = RuntimeMonitorSnapshot::from_events(
             &Events {
                 events: vec![spawned],
@@ -681,6 +680,26 @@ mod tests {
         );
 
         assert!(snapshot.workers[0].tasks[0].spawn_stack.iter().any(|frame| frame.contains("1000")));
+    }
+
+    #[test]
+    fn ready_activity_requires_both_notification_and_queue_timestamps() {
+        for (ready_since, queued_since) in [(None, Some(90)), (Some(90), None)] {
+            let mut task = TaskBuilder::default();
+            apply_activity(
+                &mut task,
+                Some(TaskActivity {
+                    observed_at: EventTimestamp::from_ticks(100),
+                    state: TaskActivityState::Ready,
+                    ready_since: ready_since.map(EventTimestamp::from_ticks),
+                    poll_started_at: None,
+                    poll_worker_id: None,
+                    queued_since: queued_since.map(EventTimestamp::from_ticks),
+                }),
+            );
+
+            assert_eq!((task.row.activity, task.ready), (TaskActivitySummary::default(), Vec::new()));
+        }
     }
 
     #[test]

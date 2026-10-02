@@ -1129,12 +1129,16 @@ mod tests {
         assert_eq!(REMOTE_STRIPES * REMOTE_CAPACITY, BATCH_CAPACITY);
         assert_eq!(REMOTE_STRIPES * REMOTE_BYTES, LOCAL_CACHE_BYTES);
         for stride in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384] {
-            let mut counts = [0; REMOTE_STRIPES];
-            for index in 0..256 {
-                let address = ptr::without_provenance_mut(index * stride * MEDIUM_SLICE_SIZE);
-                counts[RemoteMailbox::lane(address)] += 1;
+            for base in [0, 256, 4096, 65536] {
+                for sample_count in [REMOTE_STRIPES, 256] {
+                    let mut counts = [0; REMOTE_STRIPES];
+                    for index in base..base + sample_count {
+                        let address = ptr::without_provenance_mut(index * stride * MEDIUM_SLICE_SIZE);
+                        counts[RemoteMailbox::lane(address)] += 1;
+                    }
+                    assert_eq!(counts, [sample_count / REMOTE_STRIPES; REMOTE_STRIPES]);
+                }
             }
-            assert_eq!(counts, [256 / REMOTE_STRIPES; REMOTE_STRIPES]);
         }
     }
 

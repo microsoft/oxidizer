@@ -533,6 +533,100 @@ mod tests {
     }
 
     #[test]
+    fn reopening_filter_preserves_exclusions_unknown_policy_and_stack_mode() {
+        let mut app = offline();
+        let spec = FilterSpec::parse(
+            "crate:app",
+            "  module:other::private, function:app::hidden  ",
+            true,
+            RuntimeStackMode::Spawn,
+        )
+        .unwrap();
+        app.start_filter(spec.clone()).unwrap();
+        wait_for_filter(&mut app);
+
+        app.open_filter_popup();
+
+        assert_eq!(app.filters.popup.as_ref().unwrap().parse().unwrap(), spec);
+    }
+
+    #[test]
+    fn applying_filter_resets_panel_positions_but_preserves_display_options() {
+        use super::super::app::{
+            CacheFocus, HeapFocus, IoFocus, PrimitiveFocus, RuntimeFocus, TaskEventsFocus, TaskHistogram, ThreadFocus,
+        };
+        use super::super::data::AllocationStackFilter;
+
+        let mut app = offline();
+        app.heap_view.stack_filter = AllocationStackFilter::All;
+        app.allocation_view.descending = false;
+        app.allocation_view.stack_filter = AllocationStackFilter::All;
+        app.primitive_view.descending = false;
+        app.primitive_view.stack_filter = AllocationStackFilter::All;
+        app.thread_view.stack_filter = AllocationStackFilter::All;
+        app.runtime_view.task_sort_descending = false;
+        app.runtime_view.task_histogram = TaskHistogram::Ready;
+        app.runtime_view.events.stack_filter = AllocationStackFilter::All;
+        let expected = (
+            app.heap_view,
+            app.allocation_view,
+            app.primitive_view,
+            app.thread_view,
+            app.runtime_view,
+            app.io_view,
+            app.cache_view,
+        );
+        app.heap_view.focus = HeapFocus::Hotspots;
+        app.heap_view.bucket_selected = 4;
+        app.heap_view.hotspot_selected = 3;
+        app.heap_view.stack_scroll = 2;
+        app.allocation_view.selected = 4;
+        app.allocation_view.stack_scroll = 2;
+        app.primitive_view.focus = PrimitiveFocus::Hotspots;
+        app.primitive_view.primitive_selected = 4;
+        app.primitive_view.operation_selected = 3;
+        app.primitive_view.hotspot_selected = 2;
+        app.primitive_view.stack_scroll = 1;
+        app.thread_view.focus = ThreadFocus::Objects;
+        app.thread_view.thread_selected = 4;
+        app.thread_view.operation_selected = 3;
+        app.thread_view.participant_selected = 2;
+        app.thread_view.object_selected = 1;
+        app.thread_view.stack_scroll = 2;
+        app.runtime_view.focus = RuntimeFocus::Events;
+        app.runtime_view.worker_selected = 4;
+        app.runtime_view.task_selected = 3;
+        app.runtime_view.activity_scroll = 2;
+        app.runtime_view.events.focus = TaskEventsFocus::Occurrences;
+        app.runtime_view.events.operation_selected = 4;
+        app.runtime_view.events.event_selected = 3;
+        app.runtime_view.events.stack_scroll = 2;
+        app.runtime_view.events.stack_horizontal_scroll = 1;
+        app.io_view.focus = IoFocus::Operations;
+        app.io_view.resource_selected = 4;
+        app.io_view.operation_selected = 3;
+        app.cache_view.focus = CacheFocus::Operations;
+        app.cache_view.tier_selected = 4;
+        app.cache_view.operation_selected = 3;
+
+        app.start_filter(include_app()).unwrap();
+        wait_for_filter(&mut app);
+
+        assert_eq!(
+            (
+                app.heap_view,
+                app.allocation_view,
+                app.primitive_view,
+                app.thread_view,
+                app.runtime_view,
+                app.io_view,
+                app.cache_view,
+            ),
+            expected
+        );
+    }
+
+    #[test]
     fn editing_covers_reverse_navigation_excludes_and_ignored_keys() {
         let mut popup = FilterPopup::new(&FilterSpec::default());
         popup.edit(KeyCode::BackTab);

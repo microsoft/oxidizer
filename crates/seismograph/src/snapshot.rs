@@ -2440,6 +2440,39 @@ mod tests {
     }
 
     #[test]
+    fn source_payload_retains_the_capture_observation() {
+        fn capture(context: SnapshotContext<'_>) -> Result<SourceData, Error> {
+            let observation = context.recording_observation().unwrap();
+            let mut payload = observation.session.get().to_le_bytes().to_vec();
+            payload.extend_from_slice(&observation.observed_at.ticks().to_le_bytes());
+            SourceData::copy_from(&payload)
+        }
+
+        let source = Source::new(SourceId::new(106), "observation", 1, capture);
+        let captured = capture_sources_from(
+            ptr::from_ref(&source).cast_mut(),
+            SnapshotContext {
+                events: &Events::default(),
+                observation: Some(recorder::RecordingObservation {
+                    session: recorder::RecordingSession::from_raw(17).unwrap(),
+                    observed_at: EventTimestamp::from_ticks(23),
+                }),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            captured,
+            vec![SourceSnapshot {
+                id: SourceId::new(106),
+                name: "observation".into(),
+                schema_version: 1,
+                data: [17_u64.to_le_bytes(), 23_u64.to_le_bytes()].concat(),
+            }]
+        );
+    }
+
+    #[test]
     fn local_source_chains_detect_duplicates_and_capture_failures() {
         fn capture(_context: SnapshotContext<'_>) -> Result<SourceData, Error> {
             SourceData::copy_from(b"ok")
