@@ -14,7 +14,8 @@ cancels pending tasks; their joins return a shutdown error, not a task panic.
 
 `RuntimeScheduler::block_on` reports task failure through `runtime::Error`,
 with the `JoinError` retained as its source. It returns an error, rather than
-panicking, if called from an asynchronous Arty worker.
+panicking, if called from an asynchronous Arty worker or inside an
+already-running `futures` executor.
 
 `Runtime::stop` consumes the owner and returns `Result<(), runtime::Error>`.
 Worker failures are returned after all workers have been joined. An asynchronous
@@ -41,3 +42,6 @@ body remains its return value.
 Explicit construction returns configuration errors, although worker-thread
 creation and initialization can still panic. Use explicit construction,
 `block_on`, and `stop` when the caller needs to handle returned runtime errors.
+
+Configured `observed` processors must not panic. Event delivery is synchronous,
+and Arty does not recover from panics in its telemetry delivery.
