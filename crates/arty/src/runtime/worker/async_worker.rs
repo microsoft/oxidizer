@@ -13,7 +13,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use arty_executor::{CycleOutcome, Executor, TaskSet};
-use events_once::BoxedSender;
 use tick::Clock;
 use tick::runtime::{ClockDriver, InactiveClock};
 
@@ -113,7 +112,7 @@ where
         blocking_worker: Arc<BlockingWorker>,
         clock: InactiveClock,
         signal: Arc<WorkerSignal>,
-        thread_state_constructed_tx: BoxedSender<()>,
+        thread_state_constructed_tx: mpsc::Sender<()>,
     ) -> Self
     where
         TSFF: FnOnce(TaskSet, Clock) -> TSF + 'static,
@@ -141,7 +140,7 @@ where
                     .set(ts)
                     .map_err(|__ts| ())
                     .expect("thread state initialized multiple times");
-                thread_state_constructed_tx.send(());
+                _ = thread_state_constructed_tx.send(());
             }
         });
 
@@ -332,7 +331,7 @@ mod tests {
                         Arc::clone(&blocking_worker),
                         InactiveClock::default(),
                         signal,
-                        Event::boxed().0,
+                        mpsc::channel().0,
                     )
                 };
                 execute_or_terminate_process(move || worker.run());
@@ -389,7 +388,7 @@ mod tests {
             // To verify tasks get executed.
             let (initial_completed_tx, initial_completed_rx) = Event::boxed();
             let (spawned_completed_tx, spawned_completed_rx) = Event::boxed();
-            let (constructed_tx, constructed_rx) = Event::boxed();
+            let (constructed_tx, constructed_rx) = mpsc::channel();
 
             let (command_tx, command_rx) = mpsc::channel();
             let worker_thread = thread::spawn(move || {
@@ -426,7 +425,7 @@ mod tests {
                 })
                 .unwrap();
 
-            constructed_rx.await.unwrap();
+            constructed_rx.recv().unwrap();
             spawned_completed_rx.await.unwrap();
             initial_completed_rx.into_value().unwrap();
 
@@ -463,7 +462,7 @@ mod tests {
                     BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
                     InactiveClock::default(),
                     signal,
-                    Event::boxed().0,
+                    mpsc::channel().0,
                 )
             };
             execute_or_terminate_process(move || worker.run());
@@ -510,7 +509,7 @@ mod tests {
                 Arc::clone(&blocking_worker),
                 InactiveClock::default(),
                 Arc::new(WorkerSignal::default()),
-                Event::boxed().0,
+                mpsc::channel().0,
             )
         };
 

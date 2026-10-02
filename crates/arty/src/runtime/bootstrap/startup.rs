@@ -7,7 +7,7 @@ use std::sync::{Arc, OnceLock, mpsc};
 use std::task::Waker;
 use std::thread;
 
-use events_once::{BoxedReceiver, BoxedSender, Event};
+use events_once::{BoxedReceiver, Event};
 use many_cpus::{ProcessorSet, SystemHardware};
 use nonempty::NonEmpty;
 use observed::{Sink, emit};
@@ -71,7 +71,7 @@ pub(in crate::runtime) fn build(
         let (command_tx, command_rx) = mpsc::channel();
         let (worker_endpoint_tx, worker_endpoint_rx) = mpsc::channel();
         let (start_tx, start_rx) = Event::boxed();
-        let (success_tx, success_rx) = Event::boxed();
+        let (success_tx, success_rx) = mpsc::channel();
 
         async_worker_start_txs.push(start_tx);
 
@@ -121,11 +121,9 @@ pub(in crate::runtime) fn build(
         });
     }
 
-    futures::executor::block_on(async {
-        for success_rx in async_worker_success_rxs {
-            success_rx.await.expect("failed to receive worker startup signal");
-        }
-    });
+    for success_rx in async_worker_success_rxs {
+        success_rx.recv().expect("failed to receive worker startup signal");
+    }
 
     emit!(
         runtime_sink,
@@ -147,7 +145,7 @@ struct AsyncWorkerStartInfo {
     command_rx: mpsc::Receiver<AsyncWorkerCommand>,
     stack_size: usize,
     start_rx: BoxedReceiver<StartWorker>,
-    success_tx: BoxedSender<()>,
+    success_tx: Sender<()>,
     shared_state: SharedState,
     inactive_clock: InactiveClock,
     processor: ProcessorSet,

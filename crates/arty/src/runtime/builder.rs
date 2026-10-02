@@ -161,7 +161,7 @@ impl RuntimeBuilder {
 
     /// Starts the configured workers and returns their runtime owner.
     ///
-    /// Workers are ready to receive tasks when this method returns.
+    /// Blocks the calling thread until workers are ready to receive tasks.
     ///
     /// # Errors
     ///
@@ -297,6 +297,26 @@ mod tests {
     #[should_panic(expected = "greater than zero")]
     fn zero_stack_size_panics() {
         let _ = Runtime::builder().stack_size(0);
+    }
+
+    #[test]
+    fn build_and_stop_inside_futures_executor() {
+        testing_aids::execute_or_terminate_process(|| {
+            futures::executor::block_on(async {
+                let runtime = Runtime::builder().processor_count(ProcessorCount::exactly(1)).build().unwrap();
+                assert!(runtime.shared_state.iter().all(|state| state.get().is_some()));
+
+                let (value, scheduler) = runtime
+                    .scheduler()
+                    .spawn_anywhere(async |cx| (42, cx.scheduler().clone()))
+                    .await
+                    .unwrap();
+                assert_eq!(value, 42);
+
+                runtime.stop().unwrap();
+                assert!(scheduler.spawn(async |_| ()).await.unwrap_err().is_shutdown());
+            });
+        });
     }
 
     #[cfg(not(miri))] // can't call foreign function `CreateIoCompletionPort` on OS `windows`
