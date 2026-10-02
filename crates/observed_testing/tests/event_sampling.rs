@@ -61,21 +61,21 @@ where
     }
 }
 
-fn probe_sampler<F>(decide: F) -> (Arc<dyn EventSampler>, Arc<AtomicUsize>)
+fn probe_sampler<F>(decide: F) -> (impl EventSampler, Arc<AtomicUsize>)
 where
     F: for<'a> Fn(&EventSamplingContext<'a>) -> EventSamplingDecision + Send + Sync + 'static,
 {
     let calls = Arc::new(AtomicUsize::new(0));
     (
-        Arc::new(ProbeSampler {
+        ProbeSampler {
             calls: Arc::clone(&calls),
             decide,
-        }),
+        },
         calls,
     )
 }
 
-fn constant_sampler(decision: EventSamplingDecision) -> (Arc<dyn EventSampler>, Arc<AtomicUsize>) {
+fn constant_sampler(decision: EventSamplingDecision) -> (impl EventSampler, Arc<AtomicUsize>) {
     probe_sampler(move |_| decision)
 }
 
