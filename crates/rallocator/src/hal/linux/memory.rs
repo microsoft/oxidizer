@@ -180,9 +180,13 @@ mod tests {
     #[test]
     fn oversized_cgroup_paths_preserve_host_memory_without_io() {
         let mut memory = MemoryStatus { total: 100, available: 40 };
-        apply_cgroup(&[b'a'; 800], &mut memory, &mut |_path, _output| {
-            panic!("an oversized cgroup path must be rejected before reading")
-        });
-        assert_eq!((memory.total, memory.available), (100, 40));
+        let mut queries = 0;
+        let mut read = |_path: &CStr, _output: &mut [u8]| {
+            queries += 1;
+            None
+        };
+        apply_cgroup(b"/sys/fs/cgroup", &mut memory, &mut read);
+        apply_cgroup(&[b'a'; 800], &mut memory, &mut read);
+        assert_eq!((memory.total, memory.available, queries), (100, 40, 2));
     }
 }
