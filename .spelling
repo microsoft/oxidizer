@@ -971,5 +971,6 @@ JIT
 CSV
 subcommands
 POSIX
+fakeable
 preflight
 predecoded
