@@ -4,7 +4,7 @@
 use std::pin::Pin;
 use std::task::{self, Poll};
 
-use performables::sync::channel::{OneshotReceiver, oneshot};
+use events_once::{BoxedReceiver, Event};
 use pin_project::pin_project;
 
 use super::JoinError;
@@ -46,24 +46,19 @@ where
 {
     #[debug(ignore)]
     #[pin]
-    result_rx: OneshotReceiver<TaskResult<R>>,
-    #[debug(ignore)]
-    completed: bool,
+    result_rx: BoxedReceiver<TaskResult<R>>,
 }
 
 impl<R> JoinHandle<R>
 where
     R: Send + 'static,
 {
-    pub(in crate::task) fn new(result_rx: OneshotReceiver<TaskResult<R>>) -> Self {
-        Self {
-            result_rx,
-            completed: false,
-        }
+    pub(in crate::task) fn new(result_rx: BoxedReceiver<TaskResult<R>>) -> Self {
+        Self { result_rx }
     }
 
     pub(crate) fn shutdown() -> Self {
-        let (sender, receiver) = oneshot();
+        let (sender, receiver) = Event::boxed();
         drop(sender);
         Self::new(receiver)
     }
@@ -110,13 +105,7 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        assert!(!*this.completed, "join handle polled after completion");
-
-        let result = this.result_rx.poll(cx);
-        if result.is_ready() {
-            *this.completed = true;
-        }
-        match result {
+        match this.result_rx.poll(cx) {
             Poll::Ready(Ok(result)) => match result {
                 TaskResult::Completed(value) => Poll::Ready(Ok(value)),
                 TaskResult::Panicked(panic) => Poll::Ready(Err(JoinError::panicked(panic))),

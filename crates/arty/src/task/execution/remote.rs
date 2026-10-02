@@ -5,9 +5,9 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
 use std::task::{self, Poll};
 
+use events_once::BoxedSender;
 use observed::context::Transfer;
 use observed::{Sink, emit};
-use performables::sync::channel::OneshotSender;
 use pin_project::{pin_project, pinned_drop};
 
 use crate::runtime::telemetry::events::{TaskPanicked, TaskSucceeded};
@@ -32,7 +32,7 @@ where
     sink: Sink,
 
     /// Becomes `None` once a result has been sent.
-    result_tx: Option<OneshotSender<TaskResult<R>>>,
+    result_tx: Option<BoxedSender<TaskResult<R>>>,
 }
 
 impl<F, R> RemoteTaskFuture<F, R>
@@ -40,7 +40,7 @@ where
     F: Future<Output = R> + 'static,
     R: Send + 'static,
 {
-    pub(super) fn new(inner: F, result_tx: OneshotSender<TaskResult<R>>, parent_task_enrichment: Transfer, sink: Sink) -> Self {
+    pub(super) fn new(inner: F, result_tx: BoxedSender<TaskResult<R>>, parent_task_enrichment: Transfer, sink: Sink) -> Self {
         Self {
             inner: TaskStorage::new(inner),
             parent_task_enrichment,
@@ -87,12 +87,10 @@ where
         let inner_poll_result = catch_unwind(AssertUnwindSafe(|| match this.inner.poll(cx) {
             Poll::Ready(result) => {
                 // An abandoned join destroys the result here, on the task's worker.
-                drop(
-                    this.result_tx
-                        .take()
-                        .expect("future polled after completion")
-                        .send(TaskResult::Completed(result)),
-                );
+                this.result_tx
+                    .take()
+                    .expect("future polled after completion")
+                    .send(TaskResult::Completed(result));
                 Poll::Ready(())
             }
             Poll::Pending => Poll::Pending,
@@ -107,7 +105,7 @@ where
             Err(panic) => {
                 if let Err(disposal) = catch_unwind(AssertUnwindSafe(|| {
                     if let Some(sender) = this.result_tx.take() {
-                        drop(sender.send(TaskResult::Panicked(panic)));
+                        sender.send(TaskResult::Panicked(panic));
                     }
                 })) {
                     discard_panic(disposal);

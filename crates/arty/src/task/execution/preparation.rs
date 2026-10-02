@@ -4,10 +4,9 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use arty_executor::TaskSet;
-use events_once::LocalEvent;
+use events_once::{Event, LocalEvent};
 use observed::Sink;
 use observed::context::Transfer;
-use performables::sync::channel::oneshot;
 
 use crate::task::execution::local::LocalTaskFuture;
 use crate::task::execution::remote::RemoteTaskFuture;
@@ -53,7 +52,7 @@ where
     F: Future<Output = R> + 'static,
     R: Send + 'static,
 {
-    let (result_tx, result_rx) = oneshot::<TaskResult<R>>();
+    let (result_tx, result_rx) = Event::<TaskResult<R>>::boxed();
     let future_factory = TaskFactory::new(future_factory, parent_task_enrichment, sink);
     let future_factory: BoxedRemoteFutureFactory<C> = Box::new(move |cx, tasks| {
         // Factory invocation belongs inside the same panic boundary as polling.
@@ -72,7 +71,7 @@ where
     F: FnOnce() -> R + Send + 'static,
     R: Send + 'static,
 {
-    let (result_tx, result_rx) = oneshot::<TaskResult<R>>();
+    let (result_tx, result_rx) = Event::<TaskResult<R>>::boxed();
     let task = move || {
         // We AssertUnwindSafe here because we consider the task completed on panic.
         // Whatever it did to its internal state is now irrelevant and if it corrupted
@@ -81,9 +80,11 @@ where
         let body_result = catch_unwind(AssertUnwindSafe(body));
 
         match body_result {
-            Ok(result) => drop(result_tx.send(TaskResult::Completed(result))),
+            Ok(result) => {
+                result_tx.send(TaskResult::Completed(result));
+            }
             Err(panic) => {
-                drop(result_tx.send(TaskResult::Panicked(panic)));
+                result_tx.send(TaskResult::Panicked(panic));
             }
         }
     };
