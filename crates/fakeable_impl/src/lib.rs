@@ -111,7 +111,7 @@ fn process_struct(args: &FakeableArgs, item_struct: &ItemStruct) -> proc_macro2:
     }
 
     for field in &item_struct.fields {
-        if type_contains_relative_path(&field.ty) {
+        if token_stream_contains_relative_path(field.ty.to_token_stream()) {
             return syn::Error::new_spanned(
                 &field.ty,
                 "field types containing self or super paths are not supported because the real struct is moved into a helper module",
@@ -126,6 +126,14 @@ fn process_struct(args: &FakeableArgs, item_struct: &ItemStruct) -> proc_macro2:
             )
             .into_compile_error();
         }
+    }
+
+    if struct_attrs.iter().any(attribute_contains_relative_path) || token_stream_contains_relative_path(struct_generics.to_token_stream()) {
+        return syn::Error::new_spanned(
+            struct_generics,
+            "struct declarations containing self or super paths are not supported because the real struct is moved into a helper module",
+        )
+        .into_compile_error();
     }
 
     let cfg_attrs: Vec<_> = struct_attrs.iter().filter(|attr| attr.path().is_ident("cfg")).collect();
@@ -353,37 +361,18 @@ fn cfg_attr_can_disable_item(attr: &syn::Attribute) -> bool {
     cfg_attr_applies_attribute(attr, "cfg")
 }
 
-fn type_contains_relative_path(ty: &syn::Type) -> bool {
-    struct RelativePathVisitor {
-        found: bool,
-    }
-
-    impl<'ast> syn::visit::Visit<'ast> for RelativePathVisitor {
-        fn visit_path(&mut self, i: &'ast syn::Path) {
-            if i.segments
-                .first()
-                .is_some_and(|segment| segment.ident == "self" || segment.ident == "super")
-            {
-                self.found = true;
-                return;
-            }
-            syn::visit::visit_path(self, i);
-        }
-    }
-
-    let mut visitor = RelativePathVisitor { found: false };
-    syn::visit::Visit::visit_type(&mut visitor, ty);
-    visitor.found
-}
-
 fn attribute_contains_relative_path(attr: &syn::Attribute) -> bool {
     token_stream_contains_relative_path(attr.meta.to_token_stream())
 }
 
 fn token_stream_contains_relative_path(tokens: TokenStream) -> bool {
+    token_stream_contains_ident(tokens.clone(), "self") || token_stream_contains_ident(tokens, "super")
+}
+
+fn token_stream_contains_ident(tokens: TokenStream, expected: &str) -> bool {
     tokens.into_iter().any(|token| match token {
-        proc_macro2::TokenTree::Ident(ident) => ident == "self" || ident == "super",
-        proc_macro2::TokenTree::Group(group) => token_stream_contains_relative_path(group.stream()),
+        proc_macro2::TokenTree::Ident(ident) => ident == expected,
+        proc_macro2::TokenTree::Group(group) => token_stream_contains_ident(group.stream(), expected),
         proc_macro2::TokenTree::Punct(_) | proc_macro2::TokenTree::Literal(_) => false,
     })
 }
@@ -486,7 +475,15 @@ fn generate_wrapper_impl(
                 )?;
                 delegation_methods.push(syn::ImplItem::Fn(delegation_method));
             }
-            _ if is_trait_impl => delegation_methods.push(item.clone()),
+            _ if is_trait_impl => {
+                if token_stream_contains_ident(item.to_token_stream(), "Self") {
+                    return Err(syn::Error::new_spanned(
+                        item,
+                        "trait associated items containing Self are not supported across the wrapper boundary",
+                    ));
+                }
+                delegation_methods.push(item.clone());
+            }
             syn::ImplItem::Const(item_const) if matches!(item_const.vis, syn::Visibility::Public(_) | syn::Visibility::Restricted(_)) => {
                 return Err(syn::Error::new_spanned(
                     item_const,

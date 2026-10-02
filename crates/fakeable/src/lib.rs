@@ -202,8 +202,9 @@ use proc_macro::TokenStream;
 ///   layout and ABI.
 /// - Fake implementation paths beginning with `self` or `super`, and qualified impl targets, are
 ///   rejected because generated helper items live in a different module.
-/// - Struct field types and field attributes containing `self` or `super` paths are rejected because
-///   the real struct is relocated into that helper module.
+/// - Struct declarations containing `self` or `super` paths, including generics, attributes, field
+///   types, and type-macro payloads, are rejected because the real struct is relocated into that
+///   helper module.
 /// - Struct fields must be private because the visible wrapper does not preserve direct field
 ///   access or struct-literal construction.
 /// - Public associated constants and types in inherent impls are rejected because the generated
@@ -217,6 +218,8 @@ use proc_macro::TokenStream;
 ///   direct `Self` returns.
 /// - Trait impl paths cannot use `Self` or the concrete service type in generic arguments because
 ///   those names would resolve to different real and wrapper types.
+/// - Trait associated items containing `Self` are rejected because copying them would give the
+///   hidden real implementation and wrapper different associated types or values.
 /// - Mockall generation rejects nested elided references beneath higher-ranked lifetime binders.
 /// - Struct derives are copied to the wrapper and internal enum. The fake type must satisfy their
 ///   bounds (for example, `Clone`), and derives that depend on struct shape or an enum default

@@ -58,9 +58,10 @@ Struct fields must be private because the wrapper replaces the original field
 layout with one internal enum. Layout `repr` attributes, including conditional
 `repr` through `cfg_attr`, are rejected for the same reason. Fake paths beginning
 with `self` or `super` and qualified impl targets are rejected because helper
-items live in a generated module. Relative `self` or `super` paths in struct
-field types and field attributes are rejected for the same reason: the real
-struct is moved into that helper module unchanged.
+items live in a generated module. Relative `self` or `super` paths anywhere in
+the struct declaration—including generics, struct/field attributes, field
+types, and type-macro payloads—are rejected for the same reason: the real struct
+is moved into that helper module unchanged.
 
 Conditional derives expressed through `cfg_attr` are rejected; derives must be
 applied directly so they can be copied consistently. Layout `repr` attributes
@@ -115,7 +116,9 @@ be represented on the wrapper.
 
 Trait impl paths are rejected when their generic arguments reference `Self` or
 the concrete service type, because those names resolve to the hidden real type
-and visible wrapper type in different generated contexts.
+and visible wrapper type in different generated contexts. Trait associated
+items containing `Self` are also rejected because cloning them into both impls
+would produce different associated types or values.
 
 Mockall remains optional because manually implemented fakes are the primary
 mechanism and should not add a production dependency. The integration must be

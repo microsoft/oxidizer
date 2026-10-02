@@ -652,6 +652,28 @@ fn fakeable_rejects_relative_paths_in_moved_struct_fields() {
     )
     .to_string();
     assert!(attributed.contains("field attributes containing self or super paths are not supported"));
+
+    for input in [
+        quote! {
+            struct MyService<T: super::Service> {
+                value: T,
+            }
+        },
+        quote! {
+            #[container(super::Config)]
+            struct MyService {
+                value: String,
+            }
+        },
+        quote! {
+            struct MyService {
+                value: field_type!(super::Backend),
+            }
+        },
+    ] {
+        let result = fakeable_impl::fakeable_impl(quote! { fake_impl = FakeService }, input).to_string();
+        assert!(result.contains("self or super paths are not supported"));
+    }
 }
 
 #[test]
@@ -1035,6 +1057,29 @@ fn fakeable_on_generic_trait_impl_preserves_hidden_type_arguments() {
 
     let result = fakeable_impl::fakeable_impl(quote! {}, input);
     assert_expansion!(&result);
+}
+
+#[test]
+fn fakeable_rejects_self_dependent_trait_associated_items() {
+    for item in [
+        quote! { type Output = Self; },
+        quote! { const DEFAULT: Option<Self> = None; },
+        quote! { type Output = Wrapper<Self::Item>; },
+    ] {
+        let result = fakeable_impl::fakeable_impl(
+            quote! {},
+            quote! {
+                impl Service for MyService {
+                    #item
+
+                    fn value(&self) {}
+                }
+            },
+        )
+        .to_string();
+
+        assert!(result.contains("trait associated items containing Self are not supported"));
+    }
 }
 
 #[test]
