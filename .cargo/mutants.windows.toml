@@ -48,6 +48,18 @@ exclude_re = [
     "impl data_privacy::RedactedDisplay",
     "impl data_privacy::RedactedToString",
 
+    # Known hanging mutations from PR #764. Keep other mutations in these functions.
+    'crates/performables/src/sync/condition.rs:\d+:\d+: replace Condvar<Sync>::notify_one with \(\)$',
+    'crates/performables/src/sync/wait_queue.rs:\d+:\d+: replace WaitQueue::wake_all with \(\)$',
+    'crates/rallocator/src/tuning_telemetry.rs:50:48: replace - with (\+|/)$',
+    'crates/rallocator/src/tuning_telemetry.rs:\d+:\d+: replace close_recording -> usize with 1$',
+    'crates/rallocator/src/allocator/medium.rs:\d+:\d+: replace - with \+ in MediumCache::refill_count$',
+    'crates/seismograph_cli/src/commands/monitor/client.rs:\d+:\d+: replace (handshake|recording_configuration) -> Result<RecordingConfiguration, Error> with Ok\(Default::default\(\)\)$',
+    'crates/seismograph_cli/src/commands/monitor/task_events/attribution.rs:215:19: replace < with (==|>) in reject_crossing_polls$',
+    'crates/seismograph_cli/src/commands/monitor/task_events/attribution.rs:215:52: replace \|\| with && in reject_crossing_polls$',
+    'crates/seismograph_cli/src/commands/monitor/task_events/attribution.rs:215:43: replace == with != in reject_crossing_polls$',
+    'crates/seismograph_cli/src/commands/monitor/task_events/attribution.rs:\d+:\d+: replace \+= with \*= in (reject_crossing_polls|reject_concurrent_task_polls|assign)$',
+
     # Windows host only.
     # Linux perf is unavailable on Windows. `run_perf` exits before entering
     # its Linux implementation, and the worker definitions share one name.
