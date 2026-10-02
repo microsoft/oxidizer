@@ -3,12 +3,11 @@
 
 //! Worker services and thread-aware relocation.
 
-use std::sync::Arc;
-
 use many_cpus::ProcessorSet;
 use observed::Sink;
 #[cfg(debug_assertions)]
 use observed::emit;
+use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
 use tick::{Clock, SimpleClock};
 

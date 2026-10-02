@@ -3,8 +3,11 @@
 
 use std::error::Error as StdError;
 use std::fmt::{self, Display};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, ThreadId};
+
+use performables::arc::Arc;
+use performables::sync::condition::Condvar;
+use performables::sync::mutex::{Mutex, MutexGuard};
 
 use crate::runtime::Error;
 
@@ -64,14 +67,12 @@ impl ThreadWaiter {
                             failed_worker = Some(worker_id);
                         }
                     }
-                    *state.lock().expect("shutdown state is never held while executing user code") = State::Completed(failed_worker);
+                    *state.lock_sync() = State::Completed(failed_worker);
                     completed.notify_all();
                     return completion_result(failed_worker);
                 }
                 State::Joining => {
-                    state_guard = completed
-                        .wait(state_guard)
-                        .expect("shutdown state is never held while executing user code");
+                    state_guard = completed.wait_sync(state_guard);
                 }
                 State::Completed(failed_worker) => return completion_result(*failed_worker),
             }
@@ -82,7 +83,7 @@ impl ThreadWaiter {
 impl WaitForShutdown for ThreadWaiter {
     fn wait(&self) -> Result<(), Error> {
         let (state, _) = &*self.shared;
-        let state_guard = state.lock().expect("shutdown state is never held while executing user code");
+        let state_guard = state.lock_sync();
         self.wait_locked(state_guard)
     }
 }
@@ -107,13 +108,13 @@ mod tests {
     fn joining_waits_for_completion_notification() {
         let waiter = ThreadWaiter::new(Vec::new());
         let (state, _) = &*waiter.shared;
-        let mut state_guard = state.lock().unwrap();
+        let mut state_guard = state.lock_sync();
         *state_guard = State::Joining;
 
         let shared = Arc::clone(&waiter.shared);
         let completing = thread::spawn(move || {
             let (state, completed) = &*shared;
-            let mut state_guard = state.lock().unwrap();
+            let mut state_guard = state.lock_sync();
             assert!(matches!(*state_guard, State::Joining));
             *state_guard = State::Completed(None);
             completed.notify_all();
@@ -122,7 +123,7 @@ mod tests {
         // Completion cannot acquire the mutex until the condition-variable wait releases it.
         waiter.wait_locked(state_guard).unwrap();
         completing.join().unwrap();
-        assert!(matches!(*state.lock().unwrap(), State::Completed(None)));
+        assert!(matches!(*state.lock_sync(), State::Completed(None)));
         waiter.wait().unwrap();
     }
 

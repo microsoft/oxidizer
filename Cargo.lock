@@ -267,6 +267,7 @@ dependencies = [
  "observed",
  "observed_testing",
  "ohno",
+ "performables",
  "pin-project",
  "scopeguard",
  "static_assertions",

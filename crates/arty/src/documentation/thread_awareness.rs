@@ -40,7 +40,8 @@
 //!
 //! #[arty::main]
 //! async fn main(cx: Builtins) -> Result<(), JoinError> {
-//!     let (worker, scheduler) = cx.scheduler()
+//!     let (worker, scheduler) = cx
+//!         .scheduler()
 //!         .spawn_anywhere(cx.clone(), |moved| async move {
 //!             assert_eq!(moved.thread().id(), std::thread::current().id());
 //!             assert!(moved.local_scheduler().is_some());

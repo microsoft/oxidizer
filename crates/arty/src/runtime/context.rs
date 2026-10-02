@@ -2,11 +2,12 @@
 // Licensed under the MIT License.
 
 use std::rc::Rc;
-use std::sync::{Arc, OnceLock};
 
 use arty_executor::TaskSet;
 use many_cpus::ProcessorSet;
 use observed::Sink;
+use performables::arc::Arc;
+use performables::sync::once::OnceLock;
 use thread_aware::Thread;
 use tick::Clock;
 

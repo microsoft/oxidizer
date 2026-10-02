@@ -4,7 +4,8 @@
 use std::any::Any;
 use std::error::Error;
 use std::fmt::{self, Debug, Display};
-use std::sync::Mutex;
+
+use performables::sync::mutex::Mutex;
 
 /// A task failed to return its result.
 ///
@@ -103,7 +104,7 @@ impl JoinError {
     #[cfg(feature = "macros")]
     pub(crate) fn resume(self) -> ! {
         let payload = match self.panic {
-            Some(payload) => payload.into_inner().expect("the panic payload mutex is never locked"),
+            Some(payload) => payload.into_inner(),
             None => Box::new("runtime is shutting down"),
         };
         std::panic::resume_unwind(payload)

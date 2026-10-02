@@ -3,9 +3,10 @@
 
 use std::any::type_name;
 use std::fmt::Debug;
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::thread::ThreadId;
+
+use performables::arc::Arc;
 
 use crate::runtime::Error;
 use crate::runtime::blocking_worker::BlockingWorker;
@@ -117,10 +118,10 @@ impl DispatcherClient {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
-    use std::sync::mpsc;
     use std::task::Waker;
 
     use observed::Sink;
+    use performables::sync::channel;
     use thread_aware::ThreadAware;
 
     use super::*;
@@ -130,7 +131,7 @@ mod tests {
 
     #[test]
     fn clients_observe_the_shared_shutdown_state() {
-        let (command_tx, _commands) = mpsc::channel();
+        let (command_tx, _commands) = channel::unbounded();
         let worker = WorkerEndpoint {
             command_tx,
             waker: Waker::noop().clone(),
@@ -154,8 +155,8 @@ mod tests {
     #[test]
     fn relocate_updates_task_placement() {
         // Create a dispatcher with 2 workers so we can verify which one receives tasks.
-        let (worker0_tx, worker0_rx) = mpsc::channel();
-        let (worker1_tx, worker1_rx) = mpsc::channel();
+        let (worker0_tx, worker0_rx) = channel::unbounded();
+        let (worker1_tx, worker1_rx) = channel::unbounded();
         let wfs = ThreadWaiter::new(vec![]);
         let threads = test_threads(2);
         let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
@@ -209,13 +210,13 @@ mod tests {
             ThreadWaiter::new(vec![]),
             nonempty::NonEmpty::from_vec(vec![
                 WorkerEndpoint {
-                    command_tx: mpsc::channel().0,
+                    command_tx: channel::unbounded().0,
                     waker: Waker::noop().clone(),
                     thread: threads[0].clone(),
                     blocking_worker: Arc::clone(&source_worker),
                 },
                 WorkerEndpoint {
-                    command_tx: mpsc::channel().0,
+                    command_tx: channel::unbounded().0,
                     waker: Waker::noop().clone(),
                     thread: threads[1].clone(),
                     blocking_worker: Arc::clone(&destination_worker),

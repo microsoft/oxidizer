@@ -5,9 +5,9 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
 use std::task::{self, Poll};
 
-use events_once::BoxedSender;
 use observed::context::Transfer;
 use observed::{Sink, emit};
+use performables::sync::channel::OneshotSender;
 use pin_project::pin_project;
 
 use crate::runtime::telemetry::events::{TaskPanicked, TaskSucceeded};
@@ -31,7 +31,7 @@ where
     sink: Sink,
 
     /// Becomes `None` once a result has been sent.
-    result_tx: Option<BoxedSender<TaskResult<R>>>,
+    result_tx: Option<OneshotSender<TaskResult<R>>>,
 }
 
 impl<F, R> RemoteTaskFuture<F, R>
@@ -39,7 +39,7 @@ where
     F: Future<Output = R> + 'static,
     R: Send + 'static,
 {
-    pub(super) fn new(inner: F, result_tx: BoxedSender<TaskResult<R>>, parent_task_enrichment: Transfer, sink: Sink) -> Self {
+    pub(super) fn new(inner: F, result_tx: OneshotSender<TaskResult<R>>, parent_task_enrichment: Transfer, sink: Sink) -> Self {
         Self {
             inner,
             parent_task_enrichment,
@@ -69,10 +69,13 @@ where
         match inner_poll_result {
             Ok(result) => match result {
                 Poll::Ready(inner_result) => {
-                    this.result_tx
-                        .take()
-                        .expect("future polled after completion")
-                        .send(TaskResult::Completed(inner_result));
+                    // A dropped join handle discards the result without cancelling the task.
+                    drop(
+                        this.result_tx
+                            .take()
+                            .expect("future polled after completion")
+                            .send(TaskResult::Completed(inner_result)),
+                    );
 
                     emit!(this.sink, TaskSucceeded);
 
@@ -81,10 +84,12 @@ where
                 Poll::Pending => Poll::Pending,
             },
             Err(panic) => {
-                this.result_tx
-                    .take()
-                    .expect("future polled after completion")
-                    .send(TaskResult::Panicked(panic));
+                drop(
+                    this.result_tx
+                        .take()
+                        .expect("future polled after completion")
+                        .send(TaskResult::Panicked(panic)),
+                );
 
                 emit!(this.sink, TaskPanicked);
 

@@ -2,10 +2,10 @@
 // Licensed under the MIT License.
 
 use std::pin::Pin;
-use std::sync::mpsc;
 use std::task::{Context, Poll};
 
 use futures::future::{FutureExt, LocalBoxFuture};
+use performables::sync::channel;
 use pin_project::pin_project;
 
 use crate::core::ThreadAware;
@@ -16,11 +16,11 @@ use crate::task::{Builtins, JoinHandle};
 
 type BoxedFutureFactory<'a, R> = Box<dyn (FnOnce(Builtins) -> LocalBoxFuture<'a, R>) + 'a + Send>;
 
-struct ScopedJoin(mpsc::Receiver<()>);
+struct ScopedJoin(channel::Receiver<()>);
 
 impl Drop for ScopedJoin {
     fn drop(&mut self) {
-        self.0.recv().expect_err("scoped storage signals destruction by disconnecting");
+        self.0.recv_sync().expect_err("scoped storage signals destruction by disconnecting");
     }
 }
 
@@ -29,7 +29,7 @@ struct ScopedStorage<T> {
     #[pin]
     inner: T,
     // Drop order matters: signal only after caller-borrowing storage is destroyed.
-    completion: mpsc::Sender<()>,
+    completion: channel::Sender<()>,
 }
 
 impl<FF> ScopedStorage<FF> {
@@ -128,7 +128,7 @@ impl RuntimeScheduler {
         }
         // Validate the ambient executor before any caller-borrowing work is submitted.
         drop(futures::executor::enter().map_err(Error::new)?);
-        let (completion, destroyed) = mpsc::channel();
+        let (completion, destroyed) = channel::unbounded();
         let _join = ScopedJoin(destroyed);
         let storage = ScopedStorage {
             inner: future_factory,
@@ -300,7 +300,6 @@ mod tests {
     use std::future::ready;
     use std::panic::{AssertUnwindSafe, catch_unwind, panic_any};
     use std::rc::Rc;
-    use std::sync::mpsc::TryRecvError;
     use std::sync::{Arc, Mutex};
     use std::task::Waker;
     use std::thread::{self, ThreadId};
@@ -321,15 +320,15 @@ mod tests {
     #[test]
     #[should_panic(expected = "scoped storage signals destruction by disconnecting")]
     fn scoped_join_rejects_a_completion_message() {
-        let (completion, destroyed) = mpsc::channel();
-        completion.send(()).unwrap();
+        let (completion, destroyed) = channel::unbounded();
+        completion.send_sync(()).unwrap();
         drop(ScopedJoin(destroyed));
     }
 
     fn check_storage_drop_order(panic_in_drop: bool) {
-        let (completion, destroyed) = mpsc::channel();
+        let (completion, destroyed) = channel::unbounded();
         let observations = RefCell::new(Vec::new());
-        let record = || observations.borrow_mut().push(destroyed.try_recv());
+        let record = || observations.borrow_mut().push(destroyed.try_recv().unwrap_err().is_empty());
         let storage = ScopedStorage {
             inner: (
                 DropAction(|| {
@@ -344,12 +343,12 @@ mod tests {
         };
         let outcome = catch_unwind(AssertUnwindSafe(|| drop(storage)));
         assert_eq!(
-            (outcome.is_err(), observations.into_inner(), destroyed.try_recv()),
             (
-                panic_in_drop,
-                vec![Err(TryRecvError::Empty), Err(TryRecvError::Empty)],
-                Err(TryRecvError::Disconnected),
+                outcome.is_err(),
+                observations.into_inner(),
+                destroyed.try_recv().unwrap_err().is_closed()
             ),
+            (panic_in_drop, vec![true, true], true,),
         );
     }
 
@@ -365,9 +364,9 @@ mod tests {
 
     #[test]
     fn queued_scoped_factory_disconnects_after_its_borrowed_capture_drops() {
-        let (completion, destroyed) = mpsc::channel();
+        let (completion, destroyed) = channel::unbounded();
         let mut observed = None;
-        let capture = DropAction(|| observed = Some(destroyed.try_recv()));
+        let capture = DropAction(|| observed = Some(destroyed.try_recv().unwrap_err().is_empty()));
         let storage = ScopedStorage {
             inner: move |_: Builtins| {
                 drop(capture);
@@ -377,10 +376,7 @@ mod tests {
         };
         let queued = move |cx| storage.into_future(cx);
         drop(queued);
-        assert_eq!(
-            (observed, destroyed.try_recv()),
-            (Some(Err(TryRecvError::Empty)), Err(TryRecvError::Disconnected)),
-        );
+        assert_eq!((observed, destroyed.try_recv().unwrap_err().is_closed()), (Some(true), true),);
     }
 
     #[derive(Debug, Default, PartialEq, Eq)]
@@ -418,7 +414,7 @@ mod tests {
 
     #[test]
     fn ready_scoped_future_keeps_completion_connected_until_destruction() {
-        let (completion, destroyed) = mpsc::channel();
+        let (completion, destroyed) = channel::unbounded();
         let mut record = DropRecord::default();
         let mut storage = Box::pin(ScopedStorage {
             inner: BorrowingFuture {
@@ -430,18 +426,18 @@ mod tests {
         });
         let outcome = storage.as_mut().poll(&mut Context::from_waker(Waker::noop()));
         assert_eq!(
-            (outcome, destroyed.try_recv()),
-            (Poll::Ready(SendOnlyResult), Err(TryRecvError::Empty))
+            (outcome, destroyed.try_recv().unwrap_err().is_empty()),
+            (Poll::Ready(SendOnlyResult), true)
         );
         drop(storage);
         assert_eq!(
-            (record, destroyed.try_recv()),
+            (record, destroyed.try_recv().unwrap_err().is_closed()),
             (
                 DropRecord {
                     text: "dropped".to_owned(),
                     thread: Some(thread::current().id())
                 },
-                Err(TryRecvError::Disconnected),
+                true,
             ),
         );
     }
@@ -449,24 +445,24 @@ mod tests {
     #[test]
     fn scoped_join_waits_for_storage_destruction_during_caller_unwind() {
         execute_or_terminate_process(|| {
-            let (completion, destroyed) = mpsc::channel();
+            let (completion, destroyed) = channel::unbounded();
             let record = Mutex::new(None);
             let payload = Arc::new(());
             let expected = Arc::clone(&payload);
             thread::scope(|scope| {
-                let (unwinding, unwind_started) = mpsc::channel();
+                let (unwinding, unwind_started) = channel::unbounded();
                 let storage = ScopedStorage {
                     inner: DropAction(|| *record.lock().unwrap() = Some(thread::current().id())),
                     completion,
                 };
                 let worker = scope.spawn(move || {
-                    unwind_started.recv_timeout(TEST_TIMEOUT).unwrap();
+                    unwind_started.recv_timeout_sync(TEST_TIMEOUT).unwrap();
                     drop(storage);
                 });
                 let worker_id = worker.thread().id();
                 let outcome = catch_unwind(AssertUnwindSafe(|| {
                     let _join = ScopedJoin(destroyed);
-                    let _unwind = DropAction(|| unwinding.send(()).unwrap());
+                    let _unwind = DropAction(|| unwinding.send_sync(()).unwrap());
                     panic_any(payload);
                 }));
                 let actual = outcome.unwrap_err().downcast::<Arc<()>>().unwrap();

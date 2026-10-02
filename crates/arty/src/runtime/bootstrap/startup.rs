@@ -2,15 +2,16 @@
 // Licensed under the MIT License.
 
 use std::rc::Rc;
-use std::sync::mpsc::Sender;
-use std::sync::{Arc, OnceLock, mpsc};
 use std::task::Waker;
 use std::thread;
 
-use events_once::{BoxedReceiver, Event};
 use many_cpus::{ProcessorSet, SystemHardware};
 use nonempty::NonEmpty;
 use observed::{Sink, emit};
+use performables::arc::Arc;
+use performables::sync::channel;
+use performables::sync::channel::{OneshotReceiver, Sender};
+use performables::sync::once::OnceLock;
 use thread_aware::{Thread, ThreadAware, ThreadBuilder};
 use tick::runtime::InactiveClock;
 
@@ -68,10 +69,10 @@ pub(in crate::runtime) fn build(
     let blocking_pools = processor_config.blocking_pool_policy.into_pools();
 
     for (worker_index, processor) in processors.into_iter().enumerate() {
-        let (command_tx, command_rx) = mpsc::channel();
-        let (worker_endpoint_tx, worker_endpoint_rx) = mpsc::channel();
-        let (start_tx, start_rx) = Event::boxed();
-        let (success_tx, success_rx) = mpsc::channel();
+        let (command_tx, command_rx) = channel::unbounded();
+        let (worker_endpoint_tx, worker_endpoint_rx) = channel::unbounded();
+        let (start_tx, start_rx) = channel::oneshot();
+        let (success_tx, success_rx) = channel::unbounded();
 
         async_worker_start_txs.push(start_tx);
 
@@ -94,7 +95,7 @@ pub(in crate::runtime) fn build(
         );
 
         let (waker, thread, blocking_worker) = worker_endpoint_rx
-            .recv()
+            .recv_sync()
             .expect("failed to receive the worker endpoint from the starting worker");
         async_worker_command_txs.push(WorkerEndpoint {
             command_tx,
@@ -116,13 +117,15 @@ pub(in crate::runtime) fn build(
     let dispatcher_client = DispatcherClient::new(dispatcher);
 
     for start_tx in async_worker_start_txs {
-        start_tx.send(StartWorker {
-            dispatcher: dispatcher_client.clone(),
-        });
+        start_tx
+            .send(StartWorker {
+                dispatcher: dispatcher_client.clone(),
+            })
+            .expect("a starting worker retains its start receiver");
     }
 
     for success_rx in async_worker_success_rxs {
-        success_rx.recv().expect("failed to receive worker startup signal");
+        success_rx.recv_sync().expect("failed to receive worker startup signal");
     }
 
     emit!(
@@ -142,9 +145,9 @@ pub(in crate::runtime) fn build(
 /// These are the inputs necessary to initialize one worker thread.
 #[derive(Debug)]
 struct AsyncWorkerStartInfo {
-    command_rx: mpsc::Receiver<AsyncWorkerCommand>,
+    command_rx: channel::Receiver<AsyncWorkerCommand>,
     stack_size: usize,
-    start_rx: BoxedReceiver<StartWorker>,
+    start_rx: OneshotReceiver<StartWorker>,
     success_tx: Sender<()>,
     shared_state: SharedState,
     inactive_clock: InactiveClock,
@@ -201,7 +204,7 @@ impl AsyncWorkerStartInfo {
         let signal = Arc::new(WorkerSignal::default());
 
         worker_endpoint_tx
-            .send((Waker::from(Arc::clone(&signal)), current.clone(), Arc::clone(&blocking_worker)))
+            .send_sync((WorkerSignal::waker(&signal), current.clone(), Arc::clone(&blocking_worker)))
             .expect("failed to send the worker endpoint to the runtime builder");
 
         // The start command is sent to all threads by bootstrap when all the threads have

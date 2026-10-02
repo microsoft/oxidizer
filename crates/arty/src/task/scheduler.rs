@@ -1,8 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::sync::Arc;
-
+use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
 
 use crate::runtime::blocking_worker::BlockingWorker;

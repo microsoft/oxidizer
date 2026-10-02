@@ -2,13 +2,14 @@
 // Licensed under the MIT License.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, mpsc};
 use std::task::Waker;
 use std::thread::ThreadId;
 
 use foldhash::HashMap;
 use nonempty::NonEmpty;
 use observed::emit;
+use performables::arc::Arc;
+use performables::sync::channel;
 use thread_aware::Thread;
 
 use crate::runtime::Error;
@@ -22,7 +23,7 @@ use crate::task::join::JoinHandle;
 
 #[derive(Debug)]
 pub(in crate::runtime) struct WorkerEndpoint {
-    pub(in crate::runtime) command_tx: mpsc::Sender<AsyncWorkerCommand>,
+    pub(in crate::runtime) command_tx: channel::Sender<AsyncWorkerCommand>,
     pub(in crate::runtime) waker: Waker,
     pub(in crate::runtime) thread: Thread,
     pub(in crate::runtime) blocking_worker: Arc<BlockingWorker>,
@@ -114,7 +115,7 @@ impl<WFS> DispatcherCore<WFS> {
             endpoint.blocking_worker.shutdown();
             // We ignore the result here because we do not care if the channel is already closed for
             // whatever reason (after all, that is relatively compatible with the "shut down" idea).
-            _ = endpoint.command_tx.send(AsyncWorkerCommand::Shutdown);
+            _ = endpoint.command_tx.send_sync(AsyncWorkerCommand::Shutdown);
             endpoint.waker.wake_by_ref();
         }
     }
@@ -210,7 +211,7 @@ impl<WFS> DispatcherCore<WFS> {
 
         // There is nothing we can really do if the worker is already gone and closed the channel.
         // That may be the case when we landed here when the runtime was already shutting down.
-        let send_result = endpoint.command_tx.send(AsyncWorkerCommand::EnqueueTask { future_factory });
+        let send_result = endpoint.command_tx.send_sync(AsyncWorkerCommand::EnqueueTask { future_factory });
 
         if send_result.is_ok() {
             emit!(
@@ -249,7 +250,6 @@ mod tests {
     use std::task;
     use std::task::Poll;
 
-    use mpsc::TryRecvError;
     use testing_aids::TEST_TIMEOUT;
 
     use super::*;
@@ -258,7 +258,7 @@ mod tests {
     use crate::runtime::thread::waiter::MockWaitForShutdown;
 
     #[cfg_attr(test, mutants::skip)]
-    fn endpoint(tx: mpsc::Sender<AsyncWorkerCommand>, thread: &Thread) -> WorkerEndpoint {
+    fn endpoint(tx: channel::Sender<AsyncWorkerCommand>, thread: &Thread) -> WorkerEndpoint {
         WorkerEndpoint {
             command_tx: tx,
             waker: Waker::noop().clone(),
@@ -272,8 +272,8 @@ mod tests {
     fn dispatcher_rejects_mixed_runtime_owners() {
         let first = test_threads(1).remove(0);
         let second = test_threads(1).remove(0);
-        let (first_tx, _first_rx) = mpsc::channel();
-        let (second_tx, _second_rx) = mpsc::channel();
+        let (first_tx, _first_rx) = channel::unbounded();
+        let (second_tx, _second_rx) = channel::unbounded();
 
         DispatcherCore::new(
             MockWaitForShutdown::new(),
@@ -286,7 +286,7 @@ mod tests {
     fn dispatch_spawn_single() {
         // We dispatch two tasks to the only worker.
 
-        let (worker_tx, worker_rx) = mpsc::channel();
+        let (worker_tx, worker_rx) = channel::unbounded();
         let wfs = MockWaitForShutdown::new();
         let threads = test_threads(1);
 
@@ -311,8 +311,8 @@ mod tests {
         // have to refactor this test to plug in a specific round-robin scheduling strategy to
         // accommodate the expectations (or perhaps move such a test to a test of the strategy).
 
-        let (worker1_tx, worker1_rx) = mpsc::channel();
-        let (worker2_tx, worker2_rx) = mpsc::channel();
+        let (worker1_tx, worker1_rx) = channel::unbounded();
+        let (worker2_tx, worker2_rx) = channel::unbounded();
         let wfs = MockWaitForShutdown::new();
         let threads = test_threads(2);
 
@@ -332,8 +332,8 @@ mod tests {
 
     #[test]
     fn round_robin_repeats_without_resetting() {
-        let (worker1_tx, worker1_rx) = mpsc::channel();
-        let (worker2_tx, worker2_rx) = mpsc::channel();
+        let (worker1_tx, worker1_rx) = channel::unbounded();
+        let (worker2_tx, worker2_rx) = channel::unbounded();
         let wfs = MockWaitForShutdown::new();
         let threads = test_threads(2);
 
@@ -354,8 +354,8 @@ mod tests {
     #[test]
     fn same_thread_placement_selects_matching_worker() {
         let threads = test_threads(2);
-        let (first_tx, first_rx) = mpsc::channel();
-        let (second_tx, second_rx) = mpsc::channel();
+        let (first_tx, first_rx) = channel::unbounded();
+        let (second_tx, second_rx) = channel::unbounded();
         let dispatcher = DispatcherCore::new(
             MockWaitForShutdown::new(),
             NonEmpty::from_vec(vec![endpoint(first_tx, &threads[0]), endpoint(second_tx, &threads[1])]).unwrap(),
@@ -371,7 +371,7 @@ mod tests {
     #[test]
     fn unregistered_thread_has_no_worker_index() {
         let threads = test_threads(2);
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = channel::unbounded();
         let dispatcher = DispatcherCore::new(
             MockWaitForShutdown::new(),
             NonEmpty::new(endpoint(tx, &threads[0])),
@@ -383,8 +383,8 @@ mod tests {
 
     #[test]
     fn dispatcher_stop_sends_one_stop_command_to_each_worker() {
-        let (worker1_tx, worker1_rx) = mpsc::channel();
-        let (worker2_tx, worker2_rx) = mpsc::channel();
+        let (worker1_tx, worker1_rx) = channel::unbounded();
+        let (worker2_tx, worker2_rx) = channel::unbounded();
         let wfs = MockWaitForShutdown::new();
         let threads = test_threads(2);
 
@@ -414,7 +414,7 @@ mod tests {
         // Once the worker has closed the command channel (e.g. because it is shutting down)
         // we ignore any further spawn requests (they simply return disconnected join handles).
 
-        let (worker_tx, worker_rx) = mpsc::channel();
+        let (worker_tx, worker_rx) = channel::unbounded();
         let wfs = MockWaitForShutdown::new();
         let threads = test_threads(1);
 
@@ -427,7 +427,7 @@ mod tests {
         dispatcher.stop();
 
         // Drain the shutdown command.
-        _ = worker_rx.recv_timeout(TEST_TIMEOUT).unwrap();
+        _ = worker_rx.recv_timeout_sync(TEST_TIMEOUT).unwrap();
 
         // Close the command channel.
         drop(worker_rx);
@@ -443,14 +443,16 @@ mod tests {
     }
 
     #[cfg_attr(test, mutants::skip)]
-    fn drain_rx(worker_rx: &mpsc::Receiver<AsyncWorkerCommand>) -> Vec<AsyncWorkerCommand> {
+    fn drain_rx(worker_rx: &channel::Receiver<AsyncWorkerCommand>) -> Vec<AsyncWorkerCommand> {
         let mut commands = Vec::new();
 
         loop {
             match worker_rx.try_recv() {
                 Ok(command) => commands.push(command),
-                Err(TryRecvError::Empty) => return commands,
-                Err(TryRecvError::Disconnected) => panic!("worker channel disconnected"),
+                Err(error) => {
+                    assert!(error.is_empty(), "worker channel disconnected");
+                    return commands;
+                }
             }
         }
     }

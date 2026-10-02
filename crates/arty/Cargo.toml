@@ -53,6 +53,7 @@ rt = [
     "dep:many_cpus",
     "dep:nonempty",
     "dep:observed",
+    "dep:performables",
     "dep:pin-project",
     "dep:thread_aware",
     "dep:threadpool",
@@ -72,6 +73,7 @@ futures = { workspace = true, features = ["executor"], optional = true }
 many_cpus = { workspace = true, optional = true }
 nonempty = { workspace = true, optional = true }
 observed = { workspace = true, optional = true }
+performables = { workspace = true, optional = true }
 pin-project = { workspace = true, optional = true }
 thread_aware = { workspace = true, features = ["std", "derive"], optional = true }
 thread_aware_core = { workspace = true, features = ["std"] }
@@ -96,6 +98,7 @@ nonempty = { workspace = true }
 observed = { path = "../observed", features = ["test-util"] }
 observed_testing = { path = "../observed_testing" }
 ohno = { workspace = true, features = ["app-err"] }
+performables = { workspace = true }
 pin-project = { workspace = true }
 scopeguard = { workspace = true }
 static_assertions = { workspace = true }

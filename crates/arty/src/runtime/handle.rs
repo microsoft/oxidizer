@@ -208,11 +208,12 @@ impl Drop for Runtime {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::sync::{Arc, mpsc};
     use std::task::Waker;
     use std::thread;
 
     use observed::Sink;
+    use performables::arc::Arc;
+    use performables::sync::channel;
     use testing_aids::TEST_TIMEOUT;
     use thread_aware::{ThreadBuilder, Unaware};
 
@@ -225,7 +226,7 @@ mod tests {
     fn explicit_stop_reports_a_worker_panic_after_joining() {
         let worker = thread::spawn(|| panic!("worker shutdown failure"));
         let endpoint = WorkerEndpoint {
-            command_tx: mpsc::channel().0,
+            command_tx: channel::unbounded().0,
             waker: Waker::noop().clone(),
             thread: ThreadBuilder::default().build(worker.thread().id()),
             blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
@@ -310,14 +311,14 @@ mod tests {
             .build()
             .unwrap();
         let dispatcher = runtime.scheduler.dispatcher.clone();
-        let (started, ready) = mpsc::channel();
-        let (release, released) = mpsc::channel();
+        let (started, ready) = channel::unbounded();
+        let (release, released) = channel::unbounded();
         let blocking = runtime.scheduler().spawn_blocking(move || {
-            started.send(()).unwrap();
-            released.recv_timeout(TEST_TIMEOUT).unwrap();
+            started.send_sync(()).unwrap();
+            released.recv_timeout_sync(TEST_TIMEOUT).unwrap();
             42
         });
-        ready.recv_timeout(TEST_TIMEOUT).unwrap();
+        ready.recv_timeout_sync(TEST_TIMEOUT).unwrap();
         assert!(
             caller
                 .scheduler()
@@ -333,7 +334,7 @@ mod tests {
             .unwrap();
 
         assert!(dispatcher.is_shutting_down());
-        release.send(()).unwrap();
+        release.send_sync(()).unwrap();
         assert_eq!(blocking.wait().unwrap(), 42);
         dispatcher.wait().unwrap();
         caller.stop().unwrap();

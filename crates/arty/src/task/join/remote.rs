@@ -4,7 +4,7 @@
 use std::pin::Pin;
 use std::task::{self, Poll};
 
-use events_once::{BoxedReceiver, Event};
+use performables::sync::channel::{OneshotReceiver, oneshot};
 use pin_project::pin_project;
 
 use super::JoinError;
@@ -46,19 +46,24 @@ where
 {
     #[debug(ignore)]
     #[pin]
-    result_rx: BoxedReceiver<TaskResult<R>>,
+    result_rx: OneshotReceiver<TaskResult<R>>,
+    #[debug(ignore)]
+    completed: bool,
 }
 
 impl<R> JoinHandle<R>
 where
     R: Send + 'static,
 {
-    pub(in crate::task) fn new(result_rx: BoxedReceiver<TaskResult<R>>) -> Self {
-        Self { result_rx }
+    pub(in crate::task) fn new(result_rx: OneshotReceiver<TaskResult<R>>) -> Self {
+        Self {
+            result_rx,
+            completed: false,
+        }
     }
 
     pub(crate) fn shutdown() -> Self {
-        let (sender, receiver) = Event::boxed();
+        let (sender, receiver) = oneshot();
         drop(sender);
         Self::new(receiver)
     }
@@ -105,8 +110,13 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
+        assert!(!*this.completed, "join handle polled after completion");
 
-        match this.result_rx.poll(cx) {
+        let result = this.result_rx.poll(cx);
+        if result.is_ready() {
+            *this.completed = true;
+        }
+        match result {
             Poll::Ready(Ok(result)) => match result {
                 TaskResult::Completed(value) => Poll::Ready(Ok(value)),
                 TaskResult::Panicked(panic) => Poll::Ready(Err(JoinError::panicked(panic))),
@@ -120,9 +130,37 @@ where
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::task::{Context, Waker};
 
+    use super::*;
     use crate::runtime::Runtime;
     use crate::runtime::config::ProcessorCount;
+
+    #[test]
+    fn oneshot_delivers_a_non_sync_result_and_rejects_repolling() {
+        static_assertions::assert_impl_all!(JoinHandle<std::cell::Cell<u32>>: Send);
+        let (sender, receiver) = oneshot();
+        sender.send(TaskResult::Completed(std::cell::Cell::new(42))).unwrap();
+        let mut handle = Box::pin(JoinHandle::new(receiver));
+        let mut context = Context::from_waker(Waker::noop());
+        let Poll::Ready(Ok(value)) = handle.as_mut().poll(&mut context) else {
+            panic!("the result was sent before polling");
+        };
+        assert_eq!(value.get(), 42);
+        assert!(catch_unwind(AssertUnwindSafe(|| handle.as_mut().poll(&mut context))).is_err());
+    }
+
+    #[test]
+    fn disconnected_oneshot_reports_shutdown_and_rejects_repolling() {
+        let mut handle = Box::pin(JoinHandle::<()>::shutdown());
+        let mut context = Context::from_waker(Waker::noop());
+        let Poll::Ready(Err(error)) = handle.as_mut().poll(&mut context) else {
+            panic!("the sender was dropped before polling");
+        };
+        assert!(error.is_shutdown());
+        assert!(catch_unwind(AssertUnwindSafe(|| handle.as_mut().poll(&mut context))).is_err());
+    }
 
     // Processor discovery uses native hardware APIs unavailable under Miri.
     #[cfg_attr(miri, ignore = "native runtime construction; result transport is tested independently")]

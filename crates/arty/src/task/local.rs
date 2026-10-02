@@ -5,11 +5,11 @@ use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use arty_executor::TaskSet;
 use observed::{Sink, emit};
+use performables::arc::Arc;
 
 use crate::runtime::telemetry::events::{PlacementLabel, TaskPanicked, TaskSpawned};
 use crate::task::execution::prepare_local;

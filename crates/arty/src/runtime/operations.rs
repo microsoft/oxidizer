@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::sync::{Arc, OnceLock};
-
+use performables::arc::Arc;
+use performables::sync::once::OnceLock;
 use thread_aware::Thread;
 
 use crate::runtime::context::SharedState;
