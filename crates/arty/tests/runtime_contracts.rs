@@ -10,7 +10,7 @@ use std::error::Error as _;
 use std::future::{pending, poll_fn};
 use std::panic::{AssertUnwindSafe, catch_unwind, panic_any};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll, Waker};
 use std::thread;
@@ -99,6 +99,83 @@ fn concurrent_schedulers_share_selection_without_losing_submissions() {
         assert_eq!(results.len(), 4 * tasks_per_producer);
         assert_eq!(results.iter().filter(|id| **id == first).count(), 2 * tasks_per_producer);
         assert_eq!(results.into_iter().collect::<std::collections::HashSet<_>>().len(), 2);
+    });
+}
+
+#[test]
+fn registered_work_and_timers_progress_while_producers_keep_submitting() {
+    struct InFlight(Arc<AtomicUsize>);
+
+    impl Drop for InFlight {
+        fn drop(&mut self) {
+            self.0.fetch_sub(1, Ordering::Release);
+        }
+    }
+
+    execute_or_terminate_process(|| {
+        let producer_count = if cfg!(miri) { 2 } else { 4 };
+        let capacity = if cfg!(miri) { 4 } else { 1024 };
+        let runtime = runtime(1);
+        let running = Arc::new(AtomicBool::new(true));
+        let in_flight = Arc::new(AtomicUsize::new(0));
+        let submissions = Arc::new(AtomicUsize::new(0));
+        let (task_go, task_gate) = events_once::Event::boxed();
+        let (timer_go, timer_gate) = events_once::Event::boxed();
+        let (finished, observed) = mpsc::channel();
+        let task_finished = finished.clone();
+        let task_running = Arc::clone(&running);
+        let timer_running = Arc::clone(&running);
+        let task = runtime.scheduler().spawn_anywhere(async move |_| {
+            task_gate.await.unwrap();
+            task_finished.send(task_running.load(Ordering::Acquire)).unwrap();
+        });
+        let timer = runtime.scheduler().spawn_anywhere(async move |cx| {
+            timer_gate.await.unwrap();
+            cx.clock().delay(Duration::from_millis(1)).await;
+            finished.send(timer_running.load(Ordering::Acquire)).unwrap();
+        });
+
+        thread::scope(|scope| {
+            let _stop = scopeguard::guard(Arc::clone(&running), |running| running.store(false, Ordering::Release));
+            let (started, producers_ready) = mpsc::channel();
+            for _ in 0..producer_count {
+                let scheduler = runtime.scheduler();
+                let running = Arc::clone(&running);
+                let in_flight = Arc::clone(&in_flight);
+                let submissions = Arc::clone(&submissions);
+                let started = started.clone();
+                scope.spawn(move || {
+                    started.send(()).unwrap();
+                    while running.load(Ordering::Acquire) {
+                        if in_flight
+                            .fetch_update(Ordering::AcqRel, Ordering::Relaxed, |count| (count < capacity).then_some(count + 1))
+                            .is_err()
+                        {
+                            thread::yield_now();
+                            continue;
+                        }
+                        let submission = InFlight(Arc::clone(&in_flight));
+                        drop(scheduler.spawn_anywhere(async move |_| drop(submission)));
+                        submissions.fetch_add(1, Ordering::Relaxed);
+                    }
+                });
+            }
+            for _ in 0..producer_count {
+                producers_ready.recv_timeout(TEST_TIMEOUT).unwrap();
+            }
+            while submissions.load(Ordering::Acquire) < producer_count {
+                thread::yield_now();
+            }
+            task_go.send(());
+            timer_go.send(());
+            assert!(observed.recv_timeout(TEST_TIMEOUT).unwrap());
+            assert!(observed.recv_timeout(TEST_TIMEOUT).unwrap());
+        });
+
+        task.wait().unwrap();
+        timer.wait().unwrap();
+        runtime.stop().unwrap();
+        assert_eq!(in_flight.load(Ordering::Acquire), 0);
     });
 }
 

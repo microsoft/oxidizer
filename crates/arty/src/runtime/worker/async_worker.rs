@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::any::type_name;
 use std::cell::OnceCell;
 use std::fmt::Debug;
 use std::marker::PhantomData;
@@ -9,7 +8,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::mpsc::{self, TryRecvError};
 use std::task::Waker;
-use std::thread;
 use std::time::{Duration, Instant};
 
 use arty_executor::{CycleOutcome, Executor, TaskSet};
@@ -25,6 +23,8 @@ use crate::task::local::LocalTaskScope;
 /// If we have nothing to do, we wait for something to happen for this long before executing
 /// another executor cycle (just in case something has showed up that we did not notice).
 const SUSPEND_SLEEP_DURATION: Duration = Duration::from_millis(1);
+
+const COMMANDS_PER_CYCLE: usize = 256;
 
 /// The async worker has exclusive use of a runtime thread, one per processor selected by
 /// the configured processor-count policy. The worker executes async tasks that are
@@ -162,22 +162,23 @@ where
     /// After this method returns, the thread will end.
     pub(in crate::runtime) fn run(mut self) {
         self.execute_phase();
-
-        // The execution phase has finished, so there is no reason to keep the executor around.
-        // Dropping it here enables additional sanity checks in shutdown operation ordering.
-        self.executor = None;
     }
 
     #[cfg_attr(test, mutants::skip)] // Critical for code execution to occur in async contexts.
     fn execute_phase(&mut self) {
         loop {
-            self.process_commands();
+            let batch_exhausted = self.process_commands();
 
             let cycle_outcome = self
                 .executor
                 .as_ref()
                 .expect("executor is not dropped until execute phase is finished")
                 .execute_cycle();
+
+            if matches!(cycle_outcome, CycleOutcome::Shutdown) {
+                // No task wakers remain; retire their storage before the final timer callbacks.
+                self.executor = None;
+            }
 
             // Advances the timers registered with the clock.
             _ = self.clock_driver.advance_timers(Instant::now());
@@ -186,29 +187,30 @@ where
                 CycleOutcome::Continue => {}
                 // Retain the donor's timer cadence, including externally controlled clocks.
                 // A notification arriving before this wait is retained by WorkerSignal.
-                CycleOutcome::Suspend => self.signal.wait(SUSPEND_SLEEP_DURATION),
+                CycleOutcome::Suspend if !batch_exhausted => self.signal.wait(SUSPEND_SLEEP_DURATION),
+                CycleOutcome::Suspend => {}
                 // This is the only way to exit the loop, guaranteeing safe shutdown of the
-                // executor. We do not make any calls meanwhile that user code could cause to panic.
+                // executor. The storage has already been retired before timer callbacks run.
                 CycleOutcome::Shutdown => break,
             }
         }
     }
 
     #[cfg_attr(test, mutants::skip)] // Mutation testing requires a fine level of control over what is in the channel, which is too bothersome just for mutation testing.
-    fn process_commands(&mut self) {
+    fn process_commands(&mut self) -> bool {
         let Some(thread_state) = self.thread_state.as_ref() else {
             debug_assert!(self.command_rx.is_none());
 
             // We are shutting down and have dropped the thread state.
             // The command channel is also closed, so no more commands can be received.
-            return;
+            return false;
         };
 
         let Some(thread_state) = thread_state.get() else {
             // The initialization hasn't fully finished yet, we cannot process commands at this point. Because the initialization
             // task doesn't get access to the dispatcher, we are sure it can finish without commands needing to be processed (unless
             // the user blocks on a task spawned on the main scheduler, but that's clearly their issue and is documented).
-            return;
+            return false;
         };
 
         let command_rx = self
@@ -216,7 +218,7 @@ where
             .as_ref()
             .expect("thread state and command channel are dropped together");
 
-        loop {
+        for _ in 0..COMMANDS_PER_CYCLE {
             match command_rx.try_recv() {
                 Ok(AsyncWorkerCommand::EnqueueTask { future_factory }) => {
                     // This will never be reached during shutdown because as soon as shutdown
@@ -227,7 +229,7 @@ where
                     self.begin_shutdown();
 
                     // Shutdown closes the command channel - no more commands can be received.
-                    return;
+                    return false;
                 }
                 Err(error) => {
                     // Every initialized worker retains its own dispatcher until shutdown.
@@ -236,10 +238,12 @@ where
                         TryRecvError::Empty,
                         "async worker command channel disconnected without shutdown"
                     );
-                    break;
+                    return false;
                 }
             }
         }
+        // An exhausted batch may leave commands queued; do not park before checking again.
+        true
     }
 
     #[cfg_attr(test, mutants::skip)] // If mutated, shutdown process will never finish - will hang.
@@ -273,22 +277,28 @@ where
     #[cfg_attr(coverage_nightly, coverage(off))] // Only enforces the executor shutdown invariant.
     #[cfg_attr(test, mutants::skip)] // Safety on drop is validated on multiple levels, so might panic even if this is mutated away.
     fn drop(&mut self) {
-        if thread::panicking() {
-            // We skip the assertions if we are already panicking because a double panic more often
-            // does not help anything and may even obscure the initial panic in test runs.
-            return;
+        if self.executor.is_some() {
+            // Unwinding cannot release storage still referenced by escaped task wakers.
+            // Timer callbacks can poison clock state, so restarting shutdown is not safe here.
+            std::process::abort();
         }
-
-        assert!(self.executor.is_none(), "{} dropped without proper shutdown", type_name::<Self>());
     }
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
+    #[cfg(not(miri))]
+    use std::pin::Pin;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    #[cfg(not(miri))]
+    use std::task::Wake;
+    use std::thread;
+
     use events_once::{Event, IntoValueError};
     use observed::Sink;
     use testing_aids::{async_test, execute_or_terminate_process};
+    use tick::ClockControl;
 
     use super::*;
     use crate::runtime::blocking_worker::BlockingPool;
@@ -309,6 +319,111 @@ mod tests {
                     .unwrap(),
             }
         }
+    }
+
+    fn replenishing_command(sender: mpsc::Sender<AsyncWorkerCommand<()>>, processed: Arc<AtomicUsize>) -> AsyncWorkerCommand<()> {
+        AsyncWorkerCommand::EnqueueTask {
+            future_factory: Box::new(move |(), _| {
+                processed.fetch_add(1, Ordering::Relaxed);
+                sender.send(replenishing_command(sender.clone(), Arc::clone(&processed))).unwrap();
+            }),
+        }
+    }
+
+    #[test]
+    fn a_never_empty_command_queue_allows_registered_tasks_and_timers_to_progress() {
+        execute_or_terminate_process(|| {
+            let (command_tx, command_rx) = mpsc::channel();
+            let (ready_tx, ready_rx) = mpsc::channel();
+            let (proceed, progress) = Event::boxed();
+            let control = ClockControl::new();
+            let task_done = Arc::new(AtomicBool::new(false));
+            let timer_done = Arc::new(AtomicBool::new(false));
+            let processed = Arc::new(AtomicUsize::new(0));
+            let task_observer = Arc::clone(&task_done);
+            let timer_observer = Arc::clone(&timer_done);
+            let shutdown = command_tx.clone();
+
+            // SAFETY: run drives this worker to complete shutdown before it is dropped.
+            let worker = unsafe {
+                AsyncWorker::new(
+                    command_rx,
+                    async move |tasks, clock| {
+                        drop(tasks.add(async move {
+                            progress.await.unwrap();
+                            task_observer.store(true, Ordering::Relaxed);
+                        }));
+                        drop(tasks.add(async move {
+                            clock.delay(Duration::from_secs(1)).await;
+                            timer_observer.store(true, Ordering::Relaxed);
+                            shutdown.send(AsyncWorkerCommand::Shutdown).unwrap();
+                        }));
+                    },
+                    BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+                    control.clone().into(),
+                    Arc::new(WorkerSignal::default()),
+                    ready_tx,
+                )
+            };
+            let executor = worker.executor.as_ref().unwrap();
+            let _ = executor.execute_cycle();
+            ready_rx.recv().unwrap();
+            let _ = executor.execute_cycle();
+            assert!(!task_done.load(Ordering::Relaxed));
+            assert!(!timer_done.load(Ordering::Relaxed));
+
+            command_tx
+                .send(replenishing_command(command_tx.clone(), Arc::clone(&processed)))
+                .unwrap();
+            proceed.send(());
+            control.advance(Duration::from_secs(1));
+            worker.run();
+
+            assert!(task_done.load(Ordering::Relaxed));
+            assert!(timer_done.load(Ordering::Relaxed));
+            assert!((COMMANDS_PER_CYCLE..=2 * COMMANDS_PER_CYCLE + 1).contains(&processed.load(Ordering::Relaxed)));
+        });
+    }
+
+    #[cfg(not(miri))]
+    #[test]
+    fn final_timer_panic_after_completed_shutdown_does_not_trigger_the_lifecycle_guard() {
+        struct PanicWake;
+
+        impl Wake for PanicWake {
+            fn wake(self: Arc<Self>) {
+                panic!("final timer callback");
+            }
+        }
+
+        let (command_tx, command_rx) = mpsc::channel();
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (clock_tx, clock_rx) = mpsc::channel();
+        // SAFETY: run reaches Shutdown and retires the executor before the final timer callback.
+        let worker = unsafe {
+            AsyncWorker::new(
+                command_rx,
+                async move |_, clock| clock_tx.send(clock).unwrap(),
+                BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+                InactiveClock::default(),
+                Arc::new(WorkerSignal::default()),
+                ready_tx,
+            )
+        };
+        let _ = worker.executor.as_ref().unwrap().execute_cycle();
+        ready_rx.recv().unwrap();
+        let _ = worker.executor.as_ref().unwrap().execute_cycle();
+        let clock = clock_rx.recv().unwrap();
+        let mut timer = clock.delay(Duration::from_millis(1));
+        let waker = Waker::from(Arc::new(PanicWake));
+        assert!(Pin::new(&mut timer).poll(&mut std::task::Context::from_waker(&waker)).is_pending());
+        // Forgetting a timer is legal and avoids a second panic from the poisoned timer lock.
+        std::mem::forget(timer);
+        thread::sleep(Duration::from_millis(2));
+        command_tx.send(AsyncWorkerCommand::Shutdown).unwrap();
+
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| worker.run()));
+        assert_eq!(*outcome.unwrap_err().downcast::<&str>().unwrap(), "final timer callback");
     }
 
     #[test]

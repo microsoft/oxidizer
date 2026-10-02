@@ -4,6 +4,8 @@
 //! Runtime events, task enrichment, and data classification.
 //!
 //! Arty uses [`observed`] for runtime events. The default sink is a no-op.
+//! Configure processors that do not panic: event delivery is synchronous and
+//! Arty does not recover from telemetry-processor panics.
 //! Pass an application's configured [`observed::Sink`] to
 //! [`RuntimeBuilder::sink`](crate::runtime::RuntimeBuilder::sink) before
 //! construction. The task's [`Builtins::sink`](crate::task::Builtins::sink)

@@ -99,7 +99,8 @@ impl RuntimeScheduler {
     /// Rejection does not invoke the factory.
     ///
     /// Calling this from any asynchronous Arty worker returns an error, including
-    /// a worker belonging to another runtime.
+    /// a worker belonging to another runtime. It also returns an error from
+    /// inside an already-running `futures` executor, before submitting the task.
     ///
     /// # Examples
     ///
@@ -123,6 +124,8 @@ impl RuntimeScheduler {
         if is_flagged() {
             return Err(Error::new("block_on cannot be called from an asynchronous Arty worker"));
         }
+        // Validate the ambient executor before any caller-borrowing work is submitted.
+        drop(futures::executor::enter().map_err(Error::new)?);
         let (completion, destroyed) = mpsc::channel();
         let _join = ScopedJoin(destroyed);
         let storage = ScopedStorage {
@@ -207,6 +210,20 @@ mod tests {
     fn scheduler_is_shareable_but_not_cloneable() {
         static_assertions::assert_impl_all!(RuntimeScheduler: Send, Sync);
         static_assertions::assert_not_impl_any!(RuntimeScheduler: Clone, thread_aware::ThreadAware);
+    }
+
+    #[test]
+    fn nested_external_executor_is_rejected_before_the_factory_is_invoked() {
+        let runtime = crate::runtime::Runtime::builder()
+            .processor_count(crate::runtime::ProcessorCount::exactly(1))
+            .build()
+            .unwrap();
+        let mut invoked = false;
+        let result = futures::executor::block_on(async { runtime.scheduler().block_on(async |_| invoked = true) });
+        result.unwrap_err();
+        assert!(!invoked);
+        assert_eq!(runtime.scheduler().block_on(async |_| 42).unwrap(), 42);
+        runtime.stop().unwrap();
     }
 
     #[test]

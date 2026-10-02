@@ -244,17 +244,23 @@ impl AsyncWorkerStartInfo {
         );
         emit!(worker_sink, AsyncWorkerActive { delta: 1 });
 
-        worker.run();
-
-        emit!(
-            worker_sink,
-            AsyncWorkerStopped {
-                processor_index: worker_index.into(),
-            }
-        );
+        // Incomplete executor teardown fails closed. A panic after safe retirement still
+        // needs to join the blocking pool before the worker's failure is reported.
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| worker.run()));
+        if outcome.is_ok() {
+            emit!(
+                worker_sink,
+                AsyncWorkerStopped {
+                    processor_index: worker_index.into(),
+                }
+            );
+        }
         emit!(worker_sink, AsyncWorkerActive { delta: -1 });
 
         blocking_worker.join();
+        if let Err(panic) = outcome {
+            std::panic::resume_unwind(panic);
+        }
     }
 }
 

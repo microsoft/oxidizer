@@ -5,6 +5,10 @@ callback panics through `JoinError`. Receiving that error does not resume the
 panic or repair the task's application state. With `panic = "abort"`, a panic
 aborts the process instead.
 
+A panic that escapes task handling while the runtime still owns live task
+storage stops the process rather than risking memory corruption. This safety
+boundary is not permission to continue using panic-damaged state.
+
 Dropping a join neither resumes a panic nor cancels the task. Runtime shutdown
 cancels pending tasks; their joins return a shutdown error, not a task panic.
 

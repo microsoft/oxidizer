@@ -142,6 +142,9 @@ impl RuntimeBuilder {
     /// events. Retrieve the sink inside a task with
     /// [`Builtins::sink`](crate::task::Builtins::sink).
     ///
+    /// Configured event processors must not panic. Runtime events are emitted
+    /// synchronously; Arty does not provide telemetry-panic recovery.
+    ///
     /// # Examples
     ///
     /// Pass a sink configured by the application:
