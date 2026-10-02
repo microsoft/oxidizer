@@ -5,10 +5,12 @@
 
 //! Task failure and shutdown are results, not unwinds or permanently pending joins.
 
+use std::cell::Cell;
 use std::error::Error as _;
 use std::future::{pending, ready};
+use std::marker::PhantomPinned;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::pin::pin;
+use std::pin::{Pin, pin};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
@@ -63,6 +65,61 @@ fn local_factory_and_poll_panics_are_join_errors() {
             assert_eq!(*value, 42);
         })
         .unwrap();
+}
+
+#[test]
+fn local_future_destructor_panic_preserves_runtime_usability() {
+    struct ReadyDropPanic {
+        dropped: Rc<Cell<bool>>,
+        _pinned: PhantomPinned,
+    }
+
+    impl Future for ReadyDropPanic {
+        type Output = Rc<u32>;
+
+        fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+            Poll::Ready(Rc::new(42))
+        }
+    }
+
+    impl Drop for ReadyDropPanic {
+        fn drop(&mut self) {
+            self.dropped.set(true);
+            panic!("local future destructor panic");
+        }
+    }
+
+    execute_or_terminate_process(|| {
+        let runtime = runtime();
+        runtime
+            .scheduler()
+            .block_on(async |cx| {
+                let scheduler = cx.local_scheduler().unwrap();
+                let invoked = Rc::new(Cell::new(false));
+                let dropped = Rc::new(Cell::new(false));
+                let task = scheduler.spawn({
+                    let invoked = Rc::clone(&invoked);
+                    let dropped = Rc::clone(&dropped);
+                    move || {
+                        invoked.set(true);
+                        ReadyDropPanic {
+                            dropped,
+                            _pinned: PhantomPinned,
+                        }
+                    }
+                });
+                assert!(invoked.get());
+                let error = task.await.unwrap_err();
+                assert!(error.is_panic());
+                assert!(!error.is_shutdown());
+                assert!(dropped.get());
+                let value = scheduler.spawn(async || Rc::new(7)).await.unwrap();
+                assert_eq!(*value, 7);
+            })
+            .unwrap();
+        assert_eq!(runtime.scheduler().spawn_anywhere(async |_| 42).wait().unwrap(), 42);
+        runtime.stop().unwrap();
+    });
 }
 
 #[test]

@@ -36,7 +36,9 @@ where
     R: 'static,
 {
     let (result_tx, result_rx) = LocalEvent::boxed();
-    let future = LocalTaskFuture::new(future, result_tx, parent_task_enrichment, sink);
+    // Drop a completed future inside the polling panic boundary, before publishing its result.
+    let inner = async move { future.await };
+    let future = LocalTaskFuture::new(inner, result_tx, parent_task_enrichment, sink);
     (future, LocalJoinHandle::new(result_rx))
 }
 
