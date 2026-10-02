@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg(test)]
+
 use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime};
 
 pub(crate) fn runtime() -> Runtime {
