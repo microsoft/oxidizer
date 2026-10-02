@@ -39,7 +39,7 @@ fn started_event_reports_processor_counts() {
         .build()
         .unwrap();
 
-    runtime.scheduler().spawn_anywhere(async move |_| ()).wait().unwrap();
+    runtime.scheduler().spawn_anywhere((), |_, ()| async {}).wait().unwrap();
     runtime.stop().unwrap();
 
     let events = processor.events();
@@ -64,7 +64,7 @@ fn each_async_worker_starts_and_stops() {
         .build()
         .unwrap();
 
-    runtime.scheduler().spawn_anywhere(async move |_| ()).wait().unwrap();
+    runtime.scheduler().spawn_anywhere((), |_, ()| async {}).wait().unwrap();
     runtime.stop().unwrap();
 
     let events = processor.events();
@@ -84,7 +84,7 @@ fn async_worker_os_threads_report_lifecycle() {
         .build()
         .unwrap();
 
-    runtime.scheduler().spawn_anywhere(async move |_| ()).wait().unwrap();
+    runtime.scheduler().spawn_anywhere((), |_, ()| async {}).wait().unwrap();
     runtime.stop().unwrap();
 
     let events = processor.events();
@@ -120,7 +120,9 @@ fn spawned_task_emits_spawned_and_completed() {
         .build()
         .unwrap();
 
-    let handles: Vec<_> = (0..TASKS).map(|_| runtime.scheduler().spawn_anywhere(async move |_| ())).collect();
+    let handles: Vec<_> = (0..TASKS)
+        .map(|_| runtime.scheduler().spawn_anywhere((), |_, ()| async {}))
+        .collect();
     for handle in handles {
         handle.wait().unwrap();
     }
@@ -147,7 +149,7 @@ fn panicking_task_emits_panicked_event() {
 
     let handle = runtime
         .scheduler()
-        .spawn_anywhere(async move |_| panic!("intentional panic for telemetry test"));
+        .spawn_anywhere::<(), _, ()>((), |_, ()| async { panic!("intentional panic for telemetry test") });
     // The panic propagates through `wait()`; swallow it so the test thread survives.
     assert!(handle.wait().unwrap_err().is_panic());
     runtime.stop().unwrap();
@@ -167,7 +169,9 @@ fn round_robin_submissions_emit_one_spawn_event_per_worker() {
         .build()
         .unwrap();
 
-    let handles: Vec<_> = (0..PROCESSORS).map(|_| runtime.scheduler().spawn_anywhere(async |_| ())).collect();
+    let handles: Vec<_> = (0..PROCESSORS)
+        .map(|_| runtime.scheduler().spawn_anywhere((), |_, ()| async {}))
+        .collect();
     for handle in handles {
         handle.wait().unwrap();
     }
@@ -189,7 +193,7 @@ fn local_task_emits_spawned_and_completed_with_local_placement() {
 
     runtime
         .scheduler()
-        .spawn_anywhere(async move |cx| {
+        .spawn_anywhere((), |cx, ()| async move {
             cx.local_scheduler()
                 .expect("on the same thread as cx")
                 .spawn(async move || ())
@@ -225,7 +229,7 @@ fn tasks_discarded_on_shutdown_do_not_emit_terminal_events() {
     for _ in 0..TASKS {
         _ = runtime
             .scheduler()
-            .spawn_anywhere(async move |_| std::future::pending::<()>().await);
+            .spawn_anywhere((), |_, ()| async { std::future::pending::<()>().await });
     }
     runtime.stop().unwrap();
 

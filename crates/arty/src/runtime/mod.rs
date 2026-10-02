@@ -3,14 +3,14 @@
 
 //! Runtime construction, configuration, and task capabilities.
 //!
-//! Use [`Runtime`] to run asynchronous work from synchronous code and control
+//! Use [`Runtime`] to run async work from synchronous code and control
 //! when workers stop. [`Runtime::new`] starts the default configuration;
-//! [`Runtime::builder`] lets you choose processors, blocking pools, clocks, and
-//! a telemetry sink before starting workers.
+//! [`Runtime::builder`] lets you choose workers, blocking pools, clocks, and
+//! a telemetry sink before they start.
 //!
-//! Each task receives [`Builtins`](crate::task::Builtins) containing its worker's
-//! scheduler and clock. [`Runtime::scheduler`] distributes submissions
-//! across workers, while [`Builtins::scheduler`](crate::task::Builtins::scheduler)
+//! Each task receives [`Builtins`](crate::task::Builtins) with its worker's
+//! scheduler and clock. [`Runtime::scheduler`] lets the runtime place new
+//! tasks, while [`Builtins::scheduler`](crate::task::Builtins::scheduler)
 //! keeps children on their parent's worker. [`RuntimeOperations`] can request
 //! shutdown or pin an external thread to a worker's processors.
 //!
@@ -23,17 +23,17 @@
 //! Let the entry-point attribute manage the runtime's lifetime:
 //!
 //! ```
-//! # #[cfg(feature = "macros")]
+//! # #[cfg(all(feature = "macros", feature = "rt"))]
 //! #[arty::main]
 //! async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
 //!     assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
 //!     Ok(())
 //! }
-//! # #[cfg(not(feature = "macros"))] fn main() {}
+//! # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 //! ```
 //!
-//! See the crate's [guides](crate#documentation) for configuration and shutdown
-//! patterns, or use its entry-point attributes to manage ownership automatically.
+//! See the [configuration](crate::documentation::configuration) and
+//! [shutdown](crate::documentation::shutdown) guides for more.
 
 pub(crate) mod blocking_worker;
 mod bootstrap;

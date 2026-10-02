@@ -12,6 +12,7 @@ use arty::runtime::Runtime;
 use arty::task::Builtins;
 use observed::enrichment::EnrichFutureExt;
 use observed::{Enrichment, Sink};
+use thread_aware::Unaware;
 
 #[derive(Enrichment)]
 struct RequestCtx {
@@ -220,9 +221,9 @@ fn task_outcomes_keep_the_submission_context() {
             let runtime = runtime_with_emitter(&sink);
             let outcome = runtime
                 .scheduler()
-                .spawn_anywhere({
-                    let sink = sink.clone();
-                    async move |cx| {
+                .spawn_anywhere(
+                    Unaware((sink.clone(), local, panics)),
+                    |cx, Unaware((sink, local, panics))| async move {
                         async {
                             if local {
                                 let task = cx.local_scheduler().unwrap().spawn(async move || {
@@ -238,12 +239,13 @@ fn task_outcomes_keep_the_submission_context() {
                         }
                         .enrich(&sink, RequestCtx::new(42))
                         .await
-                    }
-                })
+                        .map_err(Unaware)
+                    },
+                )
                 .wait()
                 .unwrap();
             assert_eq!(outcome.is_err(), panics);
-            if let Err(error) = outcome {
+            if let Err(Unaware(error)) = outcome {
                 assert!(error.is_panic());
             }
             drop(runtime);

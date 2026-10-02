@@ -19,7 +19,7 @@ Enable Arty’s `macros` feature and use `#[arty::main]` or `#[arty::test]`.
 You do not need to depend on this companion crate directly.
 
 Both attributes start a runtime, pass its worker capabilities to an
-asynchronous function, and shut down when that function returns. Options
+async function, and shut down when that function returns. Options
 select a worker limit, a custom runtime builder, or a renamed runtime module.
 
 The application-facing references are

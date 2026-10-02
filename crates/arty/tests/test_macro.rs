@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Runtime test attributes preserve asynchronous bodies and return values.
+//! Runtime test attributes preserve async bodies and return values.
 
 #![cfg(feature = "rt")]
 #![cfg(feature = "macros")]

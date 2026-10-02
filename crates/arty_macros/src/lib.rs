@@ -9,7 +9,7 @@
 //! You do not need to depend on this companion crate directly.
 //!
 //! Both attributes start a runtime, pass its worker capabilities to an
-//! asynchronous function, and shut down when that function returns. Options
+//! async function, and shut down when that function returns. Options
 //! select a worker limit, a custom runtime builder, or a renamed runtime module.
 //!
 //! The application-facing references are
@@ -19,7 +19,7 @@
 
 use proc_macro::TokenStream;
 
-/// Runs an asynchronous entry point on an Arty runtime.
+/// Runs an async entry point on an Arty runtime.
 ///
 /// See [`arty::main`](https://docs.rs/arty/latest/arty/attr.main.html) for the
 /// required signature, configuration, examples, and panic behavior.
@@ -29,7 +29,7 @@ pub fn main(args: TokenStream, item: TokenStream) -> TokenStream {
     arty_macros_impl::main(args.into(), item.into()).into()
 }
 
-/// Runs an asynchronous test on an Arty runtime.
+/// Runs an async test on an Arty runtime.
 ///
 /// See [`arty::test`](https://docs.rs/arty/latest/arty/attr.test.html) for the
 /// required signature, configuration, controlled-time examples, and panic behavior.

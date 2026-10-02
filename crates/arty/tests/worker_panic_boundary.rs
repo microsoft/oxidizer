@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use arty::runtime::{ProcessorCount, Runtime};
 use testing_aids::TEST_TIMEOUT;
+use thread_aware::Unaware;
 
 const CHILD: &str = "ARTY_WORKER_PANIC_BOUNDARY_CHILD";
 const MESSAGE: &str = "timer callback crossed the task boundary";
@@ -48,22 +49,24 @@ fn timer_panic_cannot_unwind_past_live_executor_storage() {
         let runtime = Runtime::builder().processor_count(ProcessorCount::exactly(1)).build().unwrap();
         let (sent, received) = mpsc::channel();
         let (exited, worker_exited) = mpsc::channel();
-        let _task = runtime.scheduler().spawn_anywhere(async move |cx| {
-            EXIT.with_borrow_mut(|exit| *exit = Some(WorkerExited(exited)));
-            let mut sent = Some(sent);
-            poll_fn(move |context| {
-                if let Some(sent) = sent.take() {
-                    sent.send(context.waker().clone()).unwrap();
-                    let mut timer = cx.clock().delay(Duration::from_millis(1));
-                    let waker = Waker::from(Arc::new(PanicWake));
-                    assert!(Pin::new(&mut timer).poll(&mut Context::from_waker(&waker)).is_pending());
-                    // A poisoned timer lock would make its destructor mask the lifecycle failure.
-                    std::mem::forget(timer);
-                }
-                Poll::<()>::Pending
-            })
-            .await;
-        });
+        let _task = runtime
+            .scheduler()
+            .spawn_anywhere(Unaware((sent, exited)), |cx, Unaware((sent, exited))| async move {
+                EXIT.with_borrow_mut(|exit| *exit = Some(WorkerExited(exited)));
+                let mut sent = Some(sent);
+                poll_fn(move |context| {
+                    if let Some(sent) = sent.take() {
+                        sent.send(context.waker().clone()).unwrap();
+                        let mut timer = cx.clock().delay(Duration::from_millis(1));
+                        let waker = Waker::from(Arc::new(PanicWake));
+                        assert!(Pin::new(&mut timer).poll(&mut Context::from_waker(&waker)).is_pending());
+                        // A poisoned timer lock would make its destructor mask the lifecycle failure.
+                        std::mem::forget(timer);
+                    }
+                    Poll::<()>::Pending
+                })
+                .await;
+            });
         let retained = received.recv_timeout(TEST_TIMEOUT).unwrap();
         worker_exited.recv_timeout(TEST_TIMEOUT).unwrap();
         // The boundary must terminate before TLS teardown. Do not dereference a stale waker.

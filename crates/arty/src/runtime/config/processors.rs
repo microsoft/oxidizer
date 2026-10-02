@@ -8,9 +8,9 @@ use many_cpus::ProcessorSet;
 use crate::runtime::config::BlockingPoolPolicy;
 use crate::runtime::error::Error;
 
-/// A processor-count policy for asynchronous runtime workers.
+/// A processor-count policy for async runtime workers.
 ///
-/// The runtime starts one asynchronous worker per selected processor. Pass a
+/// The runtime starts one async worker per selected processor. Pass a
 /// policy to
 /// [`RuntimeBuilder::processor_count`](crate::runtime::RuntimeBuilder::processor_count).
 /// The default, [`auto`](Self::auto), lets Arty choose the count. Use
@@ -166,6 +166,11 @@ mod tests {
     fn default_count_is_automatic() {
         const AUTOMATIC: ProcessorCount = ProcessorCount::auto();
         assert_eq!(ProcessorCount::default(), AUTOMATIC);
+    }
+
+    #[test]
+    fn default_runtime_shares_blocking_pool() {
+        assert_eq!(RuntimeConfig::default().blocking_pool_policy, BlockingPoolPolicy::shared(None));
     }
 
     #[cfg(not(miri))]

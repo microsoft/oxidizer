@@ -10,7 +10,7 @@
 //! [`arty_macros`](https://docs.rs/arty_macros). Application code should enable
 //! Arty's `macros` feature and use its `main` and `test` attributes instead.
 //!
-//! [`main()`] expands an asynchronous entry point; [`test()`] additionally registers
+//! [`main()`] expands an async entry point; [`test()`] additionally registers
 //! the function with Rust's test harness. Invalid input produces compiler
 //! diagnostic tokens rather than a runtime error.
 
@@ -71,10 +71,10 @@ fn worker_count(mut value: &Expr) -> syn::Result<&syn::LitInt> {
     ))
 }
 
-/// Expands an asynchronous entry-point function into synchronous runtime setup.
+/// Expands an async entry-point function into synchronous runtime setup.
 ///
 /// `args` contains the attribute's configuration tokens, and `item` contains the
-/// annotated asynchronous function. The returned tokens define the entry point
+/// annotated async function. The returned tokens define the entry point
 /// or report invalid syntax with compiler diagnostics.
 ///
 /// This is the implementation hook for `arty_macros::main`, not an application
@@ -99,10 +99,10 @@ pub fn main(args: TokenStream, item: TokenStream) -> TokenStream {
     entrypoint(args, item, false)
 }
 
-/// Expands an asynchronous function into a runtime-backed synchronous test.
+/// Expands an async function into a runtime-backed synchronous test.
 ///
 /// `args` contains the attribute's configuration tokens, and `item` contains the
-/// annotated asynchronous function. The returned tokens register a test with
+/// annotated async function. The returned tokens register a test with
 /// Rust's test harness or report invalid syntax with compiler diagnostics.
 ///
 /// This is the implementation hook for `arty_macros::test`. See

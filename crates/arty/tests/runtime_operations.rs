@@ -13,7 +13,7 @@ use std::thread;
 use arty::core::Thread;
 use arty::runtime::{ProcessorCount, Runtime, RuntimeOperations};
 use many_cpus::{ProcessorId, SystemHardware};
-use thread_aware::ThreadAware;
+use thread_aware::{ThreadAware, Unaware};
 
 #[cfg(test)]
 fn pinned_processor(operations: RuntimeOperations, worker: Thread) -> ProcessorId {
@@ -32,7 +32,9 @@ fn runtime_operations_are_available_off_worker() {
     let runtime = Runtime::builder().processor_count(ProcessorCount::at_most(1)).build().unwrap();
     let (worker, builtins, expected) = runtime
         .scheduler()
-        .spawn_anywhere(async |cx| (cx.thread().clone(), cx, SystemHardware::current().current_processor_id()))
+        .spawn_anywhere((), |cx, ()| async move {
+            (cx.thread().clone(), cx, SystemHardware::current().current_processor_id())
+        })
         .wait()
         .unwrap();
 
@@ -60,7 +62,7 @@ fn explicit_targets_select_workers_without_relocating_operations() {
         .map(|_| {
             runtime
                 .scheduler()
-                .spawn_anywhere(async |cx| (cx, SystemHardware::current().current_processor_id()))
+                .spawn_anywhere((), |cx, ()| async move { (cx, SystemHardware::current().current_processor_id()) })
         })
         .map(|handle| handle.wait().unwrap())
         .collect();
@@ -87,11 +89,11 @@ fn explicit_targets_select_workers_without_relocating_operations() {
 fn operations_reject_foreign_workers_without_changing_runtime_identity() {
     let source_runtime = Runtime::builder().processor_count(ProcessorCount::at_most(1)).build().unwrap();
     let other_runtime = Runtime::builder().processor_count(ProcessorCount::at_most(1)).build().unwrap();
-    let (operations, source, processor) = source_runtime
+    let (Unaware(operations), source, processor) = source_runtime
         .scheduler()
-        .spawn_anywhere(async |cx| {
+        .spawn_anywhere((), |cx, ()| async move {
             (
-                RuntimeOperations::from(&cx),
+                Unaware(RuntimeOperations::from(&cx)),
                 cx.thread().clone(),
                 SystemHardware::current().current_processor_id(),
             )
@@ -100,7 +102,7 @@ fn operations_reject_foreign_workers_without_changing_runtime_identity() {
         .unwrap();
     let destination = other_runtime
         .scheduler()
-        .spawn_anywhere(async |cx| cx.thread().clone())
+        .spawn_anywhere((), |cx, ()| async move { cx.thread().clone() })
         .wait()
         .unwrap();
 
@@ -140,7 +142,7 @@ fn runtime_and_builtin_conversions_use_the_same_affinity_information() {
     let operations = RuntimeOperations::from(&runtime);
     let (builtins, worker, processor) = runtime
         .scheduler()
-        .spawn_anywhere(async |cx| {
+        .spawn_anywhere((), |cx, ()| async move {
             let worker = cx.thread().clone();
             (cx, worker, SystemHardware::current().current_processor_id())
         })
@@ -165,7 +167,7 @@ fn maximum_processors_clamps_to_available_processors() {
         .build()
         .unwrap();
     let workers: std::collections::HashSet<_> = (0..available)
-        .map(|_| runtime.scheduler().spawn_anywhere(async |_| thread::current().id()))
+        .map(|_| runtime.scheduler().spawn_anywhere((), |_, ()| async { thread::current().id() }))
         .map(|handle| handle.wait().unwrap())
         .collect();
 

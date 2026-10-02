@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Retained asynchronous, local, and blocking task submission behavior.
+//! Retained async, local, and blocking task submission behavior.
 
 #![cfg(feature = "rt")]
 
@@ -16,6 +16,7 @@ use arty::task::TaskScheduler;
 #[cfg(not(miri))]
 use many_cpus::SystemHardware;
 use testing_aids::{YieldFuture, execute_or_terminate_process};
+use thread_aware::Unaware;
 
 testing_aids::init_tracing!();
 
@@ -27,7 +28,7 @@ fn spawn_some_tasks() {
         #[cfg(miri)]
         let builder = builder.processor_count(arty::runtime::ProcessorCount::exactly(2));
         let runtime = builder.build().unwrap();
-        let async_task = runtime.scheduler().spawn_anywhere(async |cx| {
+        let async_task = runtime.scheduler().spawn_anywhere((), |cx, ()| async move {
             YieldFuture::default().await;
             let child1 = cx.scheduler().spawn(async |_| 1111);
             let child2 = cx.scheduler().spawn_anywhere((), |()| async { 2222 });
@@ -40,7 +41,7 @@ fn spawn_some_tasks() {
             );
         });
 
-        let single_threaded_actions = runtime.scheduler().spawn_anywhere(async |cx| {
+        let single_threaded_actions = runtime.scheduler().spawn_anywhere((), |cx, ()| async move {
             let canary = Rc::new("I am a little bird who only lives on one thread".to_owned());
             let length = cx
                 .local_scheduler()
@@ -59,7 +60,7 @@ fn spawn_some_tasks() {
 
         runtime
             .scheduler()
-            .spawn_anywhere(async |cx| {
+            .spawn_anywhere((), |cx, ()| async move {
                 YieldFuture::default().await;
                 cx.local_scheduler()
                     .unwrap()
@@ -74,10 +75,13 @@ fn spawn_some_tasks() {
 
         runtime
             .scheduler()
-            .spawn_anywhere(async move |_| {
-                async_task.await.unwrap();
-                single_threaded_actions.await.unwrap();
-            })
+            .spawn_anywhere(
+                Unaware((async_task, single_threaded_actions)),
+                |_, Unaware((async_task, single_threaded_actions))| async move {
+                    async_task.await.unwrap();
+                    single_threaded_actions.await.unwrap();
+                },
+            )
             .wait()
             .unwrap();
     });
@@ -93,12 +97,12 @@ fn test_worker_affinity() {
     let runtime = Runtime::builder().processor_count(ProcessorCount::exactly(6)).build().unwrap();
     let (thread1, scheduler1) = runtime
         .scheduler()
-        .spawn_anywhere(async |cx| (thread::current().id(), cx.scheduler().clone()))
+        .spawn_anywhere((), |cx, ()| async move { (thread::current().id(), cx.scheduler().clone()) })
         .wait()
         .unwrap();
     let (thread2, scheduler2) = runtime
         .scheduler()
-        .spawn_anywhere(async |cx| (thread::current().id(), cx.scheduler().clone()))
+        .spawn_anywhere((), |cx, ()| async move { (thread::current().id(), cx.scheduler().clone()) })
         .wait()
         .unwrap();
     let thread3 = scheduler1.spawn(async |_| thread::current().id()).wait().unwrap();
@@ -114,7 +118,7 @@ fn remote_factories_create_non_send_futures_on_the_worker() {
     let runtime = Runtime::new().unwrap();
     let (created, polled, associated) = runtime
         .scheduler()
-        .spawn_anywhere(|cx: arty::task::Builtins| {
+        .spawn_anywhere((), |cx: arty::task::Builtins, ()| {
             let value = Rc::new(thread::current().id());
             let associated = cx.thread().id();
             async move {
@@ -128,13 +132,49 @@ fn remote_factories_create_non_send_futures_on_the_worker() {
 }
 
 #[test]
-fn remote_results_do_not_require_thread_awareness() {
+fn runtime_spawn_anywhere_relocates_payload_with_unknown_source() {
+    struct Probe {
+        source: Option<Thread>,
+        destination: Option<Thread>,
+    }
+
+    impl ThreadAware for Probe {
+        fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+            self.source = source.cloned();
+            self.destination = Some(destination.clone());
+        }
+    }
+
+    let runtime = Runtime::new().unwrap();
+    let (source, destination, worker, executed_on) = runtime
+        .scheduler()
+        .spawn_anywhere(
+            Probe {
+                source: None,
+                destination: None,
+            },
+            |cx, probe| async move { (probe.source, probe.destination, cx.thread().clone(), thread::current().id()) },
+        )
+        .wait()
+        .unwrap();
+    assert!(source.is_none());
+    assert_eq!(destination, Some(worker.clone()));
+    assert_eq!(worker.id(), executed_on);
+}
+
+#[test]
+fn worker_bound_spawn_results_do_not_require_thread_awareness() {
     struct ResultValue(u32);
 
     static_assertions::assert_not_impl_any!(ResultValue: thread_aware::ThreadAware);
     let runtime = Runtime::new().unwrap();
-    assert_eq!(runtime.scheduler().spawn_anywhere(async |_| ResultValue(42)).wait().unwrap().0, 42);
-    assert_eq!(runtime.scheduler().spawn_anywhere(async |_| ResultValue(43)).wait().unwrap().0, 43);
+    let scheduler = runtime
+        .scheduler()
+        .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
+        .wait()
+        .unwrap();
+    assert_eq!(scheduler.spawn(async |_| ResultValue(42)).wait().unwrap().0, 42);
+    assert_eq!(scheduler.spawn(async |_| ResultValue(43)).wait().unwrap().0, 43);
 }
 
 struct EverywhereProbe {
@@ -225,11 +265,11 @@ fn spawn_everywhere_returns_shutdown_joins_without_invoking_factories() {
         .unwrap();
     let scheduler = runtime
         .scheduler()
-        .spawn_anywhere(async |cx| cx.scheduler().clone())
+        .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
         .wait()
         .unwrap();
     arty::runtime::RuntimeOperations::from(&runtime).request_stop();
-    let tasks = scheduler.spawn_everywhere((), |()| async { panic!("rejected factories must not run") });
+    let tasks = scheduler.spawn_everywhere::<(), _, ()>((), |()| async { panic!("rejected factories must not run") });
     assert!(!tasks.is_empty());
     for task in tasks {
         assert!(task.wait().unwrap_err().is_shutdown());

@@ -81,7 +81,7 @@ impl Case {
     fn spawn(&mut self) {
         self.handles.clear();
         self.handles
-            .extend((0..self.count).map(|_| self.runtime.scheduler().spawn_anywhere(async |_| black_box(()))));
+            .extend((0..self.count).map(|_| self.runtime.scheduler().spawn_anywhere((), |_, ()| async { black_box(()) })));
         for handle in &mut self.handles {
             futures::executor::block_on(black_box(handle)).expect("benchmark tasks finish before shutdown");
         }

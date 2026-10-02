@@ -1,71 +1,23 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Runtime events, task enrichment, and data classification.
+//! Runtime telemetry through [`observed`].
 //!
-//! Arty uses [`observed`] for runtime events. The default sink is a no-op.
+//! Arty emits runtime events through an [`observed::Sink`]. The default sink is
+//! a no-op; supply one with [`RuntimeBuilder::sink`](crate::runtime::RuntimeBuilder::sink)
+//! before starting the runtime. Tasks can access it through
+//! [`Builtins::sink`](crate::task::Builtins::sink).
 //! Configure processors that do not panic: event delivery is synchronous and
 //! Arty does not recover from telemetry-processor panics.
-//! Pass an application's configured [`observed::Sink`] to
-//! [`RuntimeBuilder::sink`](crate::runtime::RuntimeBuilder::sink) before
-//! construction. The task's [`Builtins::sink`](crate::task::Builtins::sink)
-//! returns that runtime's associated sink.
 //!
-//! Applications constructing a sink also need a direct dependency on
-//! `observed`. This helper accepts that configured sink rather than prescribing
-//! a particular processor or exporter, returning a builder for an entry point's
-//! `builder` option:
+//! Applications configuring a sink or emitting their own events need a direct
+//! dependency on [`observed`]. See its documentation for event definitions,
+//! enrichment, processing, and redaction.
 //!
-//! ```
-//! fn app_builder(sink: observed::Sink) -> arty::runtime::RuntimeBuilder {
-//!     arty::runtime::Runtime::builder().sink(sink)
-//! }
-//! ```
+//! Async tasks inherit the enrichment active when submitted and restore it
+//! while polling. Blocking callbacks and unrelated threads do not inherit that
+//! context automatically. A task cancelled at shutdown need not emit an outcome
+//! event, so task events are not an exactly-once completion record.
 //!
-//! # Emit application events
-//!
-//! Use the task's sink to emit application events alongside runtime events:
-//!
-//! ```
-//! #[observed::event("app.task.started")]
-//! #[info("task started")]
-//! struct TaskStarted;
-//!
-//! #[arty::main]
-//! async fn main(cx: arty::task::Builtins) {
-//!     observed::emit!(cx.sink(), TaskStarted);
-//! }
-//! ```
-//!
-//! Configure a sink to observe the event; the default no-op sink discards it.
-//!
-//! # Enrichment and task outcomes
-//!
-//! Asynchronous submission captures the enrichment active at the submission
-//! site. Remote and local tasks restore it while polling; their success and
-//! panic events retain that context. This includes tasks submitted through
-//! `spawn_anywhere`. Do not assume that an unrelated OS thread or a blocking
-//! callback inherits the same asynchronous-task context.
-//!
-//! A dropped join does not prevent a task's panic event from being emitted.
-//! However, an asynchronous task discarded during shutdown need not emit a
-//! success or panic event. Do not treat spawn/outcome events as an exactly-once
-//! completion accounting protocol. The runtime's `arty.rt.stopped` event
-//! is emitted once when shutdown is observed complete, not for each waiter.
-//!
-//! # Classification and wire names
-//!
-//! Runtime-classified fields use
-//! `data_privacy::DataClass::new("arty", "SystemMetadata")`. Configure a
-//! processor's redaction policy using that identifier. Applications configuring
-//! that policy also need a direct dependency on `data_privacy`.
-//!
-//! Event names use the `arty.rt` prefix. Blocking-pool saturation is
-//! reported by the `arty.rt.blocking_worker.pool_saturated` event and
-//! counter. Pool configuration uses `blocking_worker_pool.mode` and
-//! `blocking_worker_pool.max_threads`; blocking-pool OS threads are named
-//! `arty-blocking`. Numeric metric values remain unredacted numbers.
-//!
-//! Opaque Rust thread identifiers are strings under `arty.thread.id`, not the
-//! integer-valued OpenTelemetry `thread.id` attribute. Do not parse that string
-//! as a portable OS thread identifier.
+//! Classified runtime fields use the `arty` / `SystemMetadata` identifier
+//! when configuring redaction.

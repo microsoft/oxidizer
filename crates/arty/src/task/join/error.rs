@@ -29,7 +29,7 @@ use std::sync::Mutex;
 /// let scheduler = runtime.scheduler();
 /// RuntimeOperations::from(&runtime).request_stop();
 /// let error = scheduler
-///     .spawn_anywhere(async |_| 42)
+///     .spawn_anywhere((), |_, ()| async { 42 })
 ///     .wait()
 ///     .expect_err("submission follows shutdown");
 /// assert!(error.is_shutdown());
@@ -45,13 +45,13 @@ pub struct JoinError {
 impl JoinError {
     /// Returns `true` if the task panicked.
     ///
-    /// This includes panics in a factory, an asynchronous future, or a blocking
+    /// This includes panics in a factory, an async future, or a blocking
     /// callback when unwinding is enabled.
     ///
     /// # Examples
     ///
     /// ```
-    /// # #[cfg(feature = "macros")]
+    /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// #[arty::main]
     /// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
     ///     let result: Result<(), arty::task::JoinError> =
@@ -60,7 +60,7 @@ impl JoinError {
     ///     assert!(error.is_panic());
     ///     Ok(())
     /// }
-    /// # #[cfg(not(feature = "macros"))] fn main() {}
+    /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
     /// ```
     #[must_use]
     pub const fn is_panic(&self) -> bool {
@@ -78,7 +78,7 @@ impl JoinError {
     /// let scheduler = runtime.scheduler();
     /// RuntimeOperations::from(&runtime).request_stop();
     /// let error = scheduler
-    ///     .spawn_anywhere(async |_| 42)
+    ///     .spawn_anywhere((), |_, ()| async { 42 })
     ///     .wait()
     ///     .expect_err("submission follows shutdown");
     /// assert!(error.is_shutdown());

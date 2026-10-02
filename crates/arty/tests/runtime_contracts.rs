@@ -19,7 +19,7 @@ use std::time::Duration;
 use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime, RuntimeOperations};
 use arty::task::JoinError;
 use testing_aids::{TEST_TIMEOUT, execute_or_terminate_process};
-use thread_aware::ThreadAware;
+use thread_aware::{ThreadAware, Unaware};
 use tick::{ClockControl, FutureExt};
 
 testing_aids::init_tracing!();
@@ -41,11 +41,15 @@ fn borrowed_runtime_scheduler_shares_round_robin_but_bound_handles_retain_affini
         let another = runtime.scheduler();
         assert!(std::ptr::eq(first, another));
         let (a, bound) = first
-            .spawn_anywhere(async |cx| (thread::current().id(), cx.scheduler().clone()))
+            .spawn_anywhere((), |cx, ()| async move { (thread::current().id(), cx.scheduler().clone()) })
             .wait()
             .unwrap();
-        let b = another.spawn_anywhere(async |_| thread::current().id()).wait().unwrap();
-        let a_again = runtime.scheduler().spawn_anywhere(async |_| thread::current().id()).wait().unwrap();
+        let b = another.spawn_anywhere((), |_, ()| async { thread::current().id() }).wait().unwrap();
+        let a_again = runtime
+            .scheduler()
+            .spawn_anywhere((), |_, ()| async { thread::current().id() })
+            .wait()
+            .unwrap();
         assert_ne!(a, b);
         assert_eq!(a, a_again);
         let bound_clone = bound.clone();
@@ -54,15 +58,22 @@ fn borrowed_runtime_scheduler_shares_round_robin_but_bound_handles_retain_affini
             .unwrap();
         assert_eq!(cloned_result, a);
         assert_eq!(bound.spawn(async |_| thread::current().id()).wait().unwrap(), a);
-        assert_eq!(first.spawn_anywhere(async |_| thread::current().id()).wait().unwrap(), b);
+        assert_eq!(
+            first.spawn_anywhere((), |_, ()| async { thread::current().id() }).wait().unwrap(),
+            b
+        );
     });
 }
 
 #[test]
 fn relocation_rebinds_only_the_notified_worker_scheduler_clone() {
     let runtime = runtime(2);
-    let source = runtime.scheduler().spawn_anywhere(async |cx| cx).wait().unwrap();
-    let destination = runtime.scheduler().spawn_anywhere(async |cx| cx.thread().clone()).wait().unwrap();
+    let source = runtime.scheduler().spawn_anywhere((), |cx, ()| async move { cx }).wait().unwrap();
+    let destination = runtime
+        .scheduler()
+        .spawn_anywhere((), |cx, ()| async move { cx.thread().clone() })
+        .wait()
+        .unwrap();
     let original = source.scheduler().clone();
     let mut bound = original.clone();
     bound.relocate(None, &destination);
@@ -86,7 +97,12 @@ fn concurrent_schedulers_share_selection_without_losing_submissions() {
             let producers = std::array::from_fn::<_, 4, _>(|_| {
                 scope.spawn(move || {
                     (0..tasks_per_producer)
-                        .map(|_| scheduler.spawn_anywhere(async |_| thread::current().id()).wait().unwrap())
+                        .map(|_| {
+                            scheduler
+                                .spawn_anywhere((), |_, ()| async { thread::current().id() })
+                                .wait()
+                                .unwrap()
+                        })
                         .collect::<Vec<_>>()
                 })
             });
@@ -125,15 +141,21 @@ fn registered_work_and_timers_progress_while_producers_keep_submitting() {
         let task_finished = finished.clone();
         let task_running = Arc::clone(&running);
         let timer_running = Arc::clone(&running);
-        let task = runtime.scheduler().spawn_anywhere(async move |_| {
-            task_gate.await.unwrap();
-            task_finished.send(task_running.load(Ordering::Acquire)).unwrap();
-        });
-        let timer = runtime.scheduler().spawn_anywhere(async move |cx| {
-            timer_gate.await.unwrap();
-            cx.clock().delay(Duration::from_millis(1)).await;
-            finished.send(timer_running.load(Ordering::Acquire)).unwrap();
-        });
+        let task = runtime.scheduler().spawn_anywhere(
+            Unaware((task_gate, task_finished, task_running)),
+            |_, Unaware((task_gate, task_finished, task_running))| async move {
+                task_gate.await.unwrap();
+                task_finished.send(task_running.load(Ordering::Acquire)).unwrap();
+            },
+        );
+        let timer = runtime.scheduler().spawn_anywhere(
+            Unaware((timer_gate, finished, timer_running)),
+            |cx, Unaware((timer_gate, finished, timer_running))| async move {
+                timer_gate.await.unwrap();
+                cx.clock().delay(Duration::from_millis(1)).await;
+                finished.send(timer_running.load(Ordering::Acquire)).unwrap();
+            },
+        );
 
         thread::scope(|scope| {
             let _stop = scopeguard::guard(Arc::clone(&running), |running| running.store(false, Ordering::Release));
@@ -155,7 +177,7 @@ fn registered_work_and_timers_progress_while_producers_keep_submitting() {
                             continue;
                         }
                         let submission = InFlight(Arc::clone(&in_flight));
-                        drop(scheduler.spawn_anywhere(async move |_| drop(submission)));
+                        drop(scheduler.spawn_anywhere(Unaware(submission), |_, Unaware(submission)| async move { drop(submission) }));
                         submissions.fetch_add(1, Ordering::Relaxed);
                     }
                 });
@@ -184,7 +206,7 @@ fn closed_runtime_rejects_factories_with_an_immediate_shutdown_error() {
     let runtime = runtime(1);
     let scheduler = runtime
         .scheduler()
-        .spawn_anywhere(async |cx| cx.scheduler().clone())
+        .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
         .wait()
         .unwrap();
     runtime.stop().unwrap();
@@ -214,7 +236,7 @@ fn blocking_tasks_leave_the_async_worker_responsive() {
             42
         });
         ready.recv_timeout(TEST_TIMEOUT).unwrap();
-        assert_eq!(runtime.scheduler().spawn_anywhere(async |_| 17).wait().unwrap(), 17);
+        assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 17 }).wait().unwrap(), 17);
         release.send(()).unwrap();
         assert_eq!(blocking.wait().unwrap(), 42);
     });
@@ -227,20 +249,22 @@ fn pending_future_is_woken_from_an_unrelated_thread() {
         let (send, receive) = mpsc::channel();
         let ready = Arc::new(AtomicBool::new(false));
         let ready_task = Arc::clone(&ready);
-        let task = runtime.scheduler().spawn_anywhere(async move |_| {
-            let mut send = Some(send);
-            poll_fn(move |cx| {
-                if ready_task.load(Ordering::Acquire) {
-                    Poll::Ready(42)
-                } else {
-                    if let Some(send) = send.take() {
-                        send.send(cx.waker().clone()).unwrap();
+        let task = runtime
+            .scheduler()
+            .spawn_anywhere(Unaware((send, ready_task)), |_, Unaware((send, ready_task))| async move {
+                let mut send = Some(send);
+                poll_fn(move |cx| {
+                    if ready_task.load(Ordering::Acquire) {
+                        Poll::Ready(42)
+                    } else {
+                        if let Some(send) = send.take() {
+                            send.send(cx.waker().clone()).unwrap();
+                        }
+                        Poll::Pending
                     }
-                    Poll::Pending
-                }
-            })
-            .await
-        });
+                })
+                .await
+            });
         let waker = receive.recv_timeout(TEST_TIMEOUT).unwrap();
         thread::spawn(move || {
             ready.store(true, Ordering::Release);
@@ -282,13 +306,13 @@ fn factory_and_poll_panics_return_errors_and_preserve_runtime_usability() {
         panic_any(Payload(1))
     }
     let runtime = runtime(1);
-    let factory = runtime.scheduler().spawn_anywhere(panic_factory);
-    let polling = runtime.scheduler().spawn_anywhere(async |_| panic_any(Payload(2)));
+    let factory = runtime.scheduler().spawn_anywhere((), |cx, ()| panic_factory(cx));
+    let polling = runtime.scheduler().spawn_anywhere((), |_, ()| async { panic_any(Payload(2)) });
     for task in [factory, polling] {
         let outcome = catch_unwind(AssertUnwindSafe(|| task.wait())).unwrap();
         assert!(outcome.unwrap_err().is_panic());
     }
-    assert_eq!(runtime.scheduler().spawn_anywhere(async |_| 42).wait().unwrap(), 42);
+    assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 }).wait().unwrap(), 42);
 }
 
 #[test]
@@ -339,7 +363,7 @@ fn local_non_send_state_is_destroyed_on_its_worker() {
     let runtime = runtime(1);
     let portable = runtime
         .scheduler()
-        .spawn_anywhere(async |cx| {
+        .spawn_anywhere((), |cx, ()| async move {
             let dropped = Rc::new(Cell::new(false));
             let value = LocalDrop {
                 owner: thread::current().id(),
@@ -388,15 +412,17 @@ fn cancellation_cleanup_cannot_reenter_the_local_executor() {
         let runtime = runtime(1);
         let (started, start) = mpsc::channel();
         let (dropped, drop_result) = mpsc::channel();
-        let handle = runtime.scheduler().spawn_anywhere(async move |cx| {
-            let cleanup = Cleanup {
-                scheduler: cx.local_scheduler().unwrap(),
-                dropped,
-            };
-            started.send(()).unwrap();
-            pending::<()>().await;
-            drop(cleanup);
-        });
+        let handle = runtime
+            .scheduler()
+            .spawn_anywhere(Unaware((started, dropped)), |cx, Unaware((started, dropped))| async move {
+                let cleanup = Cleanup {
+                    scheduler: cx.local_scheduler().unwrap(),
+                    dropped,
+                };
+                started.send(()).unwrap();
+                pending::<()>().await;
+                drop(cleanup);
+            });
         start.recv_timeout(TEST_TIMEOUT).unwrap();
         runtime.stop().unwrap();
         assert!(!drop_result.recv_timeout(TEST_TIMEOUT).unwrap());
@@ -415,7 +441,7 @@ fn a_blocking_task_can_drop_its_runtime_without_joining_itself() {
                 .unwrap();
             let scheduler = runtime
                 .scheduler()
-                .spawn_anywhere(async |cx| cx.scheduler().clone())
+                .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
                 .wait()
                 .unwrap();
             let (finished, receive) = mpsc::channel();

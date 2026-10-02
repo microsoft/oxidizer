@@ -16,8 +16,8 @@ use crate::runtime::handle::Runtime;
 /// then call [`build`](Self::build) to start the workers. Setters replace earlier
 /// values for the same setting; configuring a builder does not start threads.
 ///
-/// The defaults are [`ProcessorCount::auto`], 2 MiB asynchronous-worker stacks,
-/// one shared blocking pool, a real-time clock, and a no-op telemetry sink.
+/// The defaults are [`ProcessorCount::auto`], 2 MiB async-worker stacks,
+/// a shared blocking pool, a real-time clock, and a no-op telemetry sink.
 ///
 /// # Examples
 ///
@@ -39,9 +39,9 @@ pub struct RuntimeBuilder {
 }
 
 impl RuntimeBuilder {
-    /// Sets the processor policy for asynchronous workers.
+    /// Sets the processor policy for async workers.
     ///
-    /// The runtime starts one asynchronous worker per selected processor.
+    /// The runtime starts one async worker per selected processor.
     /// The default is [`ProcessorCount::auto`]. This does not set blocking-pool
     /// limits; use [`blocking_pool_policy`](Self::blocking_pool_policy) for those.
     /// A zero count is rejected by [`build`](Self::build), not by this setter.
@@ -59,7 +59,7 @@ impl RuntimeBuilder {
         self
     }
 
-    /// Sets each asynchronous worker thread's stack size in bytes.
+    /// Sets each async worker thread's stack size in bytes.
     ///
     /// The default is 2 MiB. A larger value of the `RUST_MIN_STACK` environment
     /// variable takes precedence. This setting does not change blocking-pool
@@ -83,11 +83,11 @@ impl RuntimeBuilder {
         self
     }
 
-    /// Sets whether asynchronous workers share their blocking-task pool.
+    /// Sets whether async workers share their blocking-task pool.
     ///
-    /// The default shares one pool across all asynchronous workers, using the
-    /// default blocking-thread limit. A shared pool bounds blocking threads
-    /// independently of the asynchronous worker count.
+    /// The default shares one pool across async workers. Use
+    /// [`BlockingPoolPolicy::shared`] to set a runtime-wide thread limit, or
+    /// [`BlockingPoolPolicy::isolated`] to give each worker its own pool.
     ///
     /// # Examples
     ///
@@ -114,7 +114,7 @@ impl RuntimeBuilder {
     /// waiting for real time:
     ///
     /// ```test_harness
-    /// # #[cfg(all(feature = "macros", feature = "test-util"))]
+    /// # #[cfg(all(feature = "macros", feature = "rt", feature = "test-util"))]
     /// #[arty::test(builder = arty::runtime::Runtime::builder().clock(
     ///     arty::time::ClockControl::new().auto_advance_timers(true)
     /// ))]
@@ -128,7 +128,7 @@ impl RuntimeBuilder {
     ///
     /// Automatic timer advancement occurs eagerly on timer registration or time
     /// reads. Use manual advancement when concurrent timers' relative order
-    /// matters; see the crate's [time guide](crate#documentation).
+    /// matters; see the [time guide](crate::documentation::time).
     #[must_use]
     pub fn clock(mut self, clock: impl Into<InactiveClock>) -> Self {
         self.clock = clock.into();
@@ -137,7 +137,7 @@ impl RuntimeBuilder {
 
     /// Sets the telemetry sink for runtime events and task enrichment.
     ///
-    /// The default is [`Sink::noop`]. Asynchronous tasks inherit enrichment
+    /// The default is [`Sink::noop`]. Async tasks inherit enrichment
     /// active on the configured sink at submission, including their completion
     /// events. Retrieve the sink inside a task with
     /// [`Builtins::sink`](crate::task::Builtins::sink).
@@ -311,7 +311,7 @@ mod tests {
 
                 let (value, scheduler) = runtime
                     .scheduler()
-                    .spawn_anywhere(async |cx| (42, cx.scheduler().clone()))
+                    .spawn_anywhere((), |cx, ()| async move { (42, cx.scheduler().clone()) })
                     .await
                     .unwrap();
                 assert_eq!(value, 42);

@@ -1,17 +1,16 @@
 # Design
 
-Arty uses single-threaded execution for each asynchronous task. A runtime can
-have several worker threads, but a task stays on the worker that creates its
-future. It can keep thread-local and non-`Send` state across asynchronous waits.
+An Arty runtime can use several workers, but each async task stays on the
+worker that creates its future. This lets the task keep thread-local and
+non-`Send` state across awaits.
 
-A cross-thread submission sends a factory to a worker, where the factory creates
-the future. Local submissions also support non-`Send` captures and results.
-Blocking callbacks run in a separate pool so they do not stall asynchronous work.
+For new work, Arty creates the future on the worker where it will run.
+Local tasks can also have non-`Send` captures and results. Blocking calls
+run in a separate pool so they do not stall async tasks.
 
-Thread-aware values carry worker coordinates. Explicit relocation can update
-those coordinates when submitting new work elsewhere; it does not move a
-running task or its returned value.
+Thread-aware values can relocate worker-bound state when new work starts
+elsewhere. Relocation does not move a running task or its result.
 
 The runtime owner controls shutdown. Scheduler and capability handles do not
-keep it alive. Shutdown rejects new submissions, cancels pending asynchronous
+keep it alive. Shutdown rejects new submissions, cancels pending async
 work, and waits for already-running blocking callbacks.

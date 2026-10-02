@@ -4,14 +4,13 @@
 //! Choosing worker counts, blocking pools, and runtime services.
 //!
 //! Use [`Runtime::builder`](crate::runtime::Runtime::builder) when the defaults
-//! do not fit the application. Pass the builder to an entry-point attribute or
-//! call [`build`](crate::runtime::RuntimeBuilder::build) yourself. Construction
-//! starts the workers, so configure the builder first.
+//! do not fit your application. Set your options before calling
+//! [`build`](crate::runtime::RuntimeBuilder::build), which starts the workers.
 //!
-//! # Asynchronous workers
+//! # Async workers
 //!
 //! [`ProcessorCount`](crate::runtime::ProcessorCount) selects processors, with
-//! one asynchronous worker per selected processor:
+//! one async worker per selected processor:
 //!
 //! | Policy | Meaning |
 //! | --- | --- |
@@ -20,8 +19,7 @@
 //! | `at_most(n)` | Use no more than `n`, clamping to available processors |
 //! | `exactly(n)` | Require `n`; return `runtime::Error` if fewer are available |
 //!
-//! `n` is a `usize`. Both count-based policies reject zero when the runtime
-//! is built; creating a policy or setting it on the builder does not validate it.
+//! The runtime rejects a count of zero when it is built.
 //!
 //! ```
 //! use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime, RuntimeBuilder};
@@ -40,68 +38,56 @@
 //! }
 //! ```
 //!
-//! This requests at most two asynchronous workers and a separate shared blocking
-//! pool capped at four threads. It does not request exactly two processors or
-//! limit the whole process to four threads.
+//! This requests at most two async workers and a shared pool of up to four
+//! blocking threads. The pool limit does not limit the whole process.
 //!
-//! Asynchronous worker stacks default to 2 MiB. [`stack_size`](crate::runtime::RuntimeBuilder::stack_size)
-//! changes that size; a larger `RUST_MIN_STACK` takes precedence. This setting
-//! does not configure blocking-pool stacks.
+//! Async worker stacks default to 2 MiB. Use
+//! [`stack_size`](crate::runtime::RuntimeBuilder::stack_size) to change them;
+//! a larger `RUST_MIN_STACK` takes precedence. Blocking-pool stacks are separate.
 //!
 //! # Blocking pools
 //!
-//! [`BlockingPoolPolicy`](crate::runtime::BlockingPoolPolicy) is independent of the
-//! asynchronous worker count. The default shares one pool across all workers,
-//! using the runtime's default blocking-thread limit. `isolated()` gives each
-//! worker its own pool, separating contention but allowing thread and stack
-//! costs to grow with the number of workers.
-//!
-//! `shared(n)` uses one runtime-wide pool with a common thread limit. It bounds
-//! that pool's threads across all asynchronous workers, but combines their
-//! blocking work. Neither policy promises higher throughput for every workload.
+//! Blocking work runs off the async workers. By default, they share one pool.
+//! Use [`BlockingPoolPolicy::shared`](crate::runtime::BlockingPoolPolicy::shared)
+//! to set a runtime-wide thread limit, or
+//! [`isolated`](crate::runtime::BlockingPoolPolicy::isolated) to give each
+//! worker its own pool. Isolated pools can use more threads in total.
+//! Choose based on your workload rather than assuming one policy is faster.
 //!
 //! # Entry-point attributes
 //!
-//! With the `macros` feature, `#[arty::main]` and
-//! `#[arty::test]` own construction and shutdown for an asynchronous
-//! function taking owned `Builtins`. `main` uses the automatic processor policy
-//! by default; `test` uses one processor unless `workers` or `builder` is supplied.
+//! With `macros` enabled, `#[arty::main]` and `#[arty::test]` create and stop
+//! the runtime for you. By default, `main` chooses workers automatically and
+//! `test` uses one worker.
 //!
-//! `workers = N` is an upper bound, using the same `at_most` policy as the
-//! explicit builder. Use `builder = expression` for computed settings or a
-//! different processor policy. These options cannot be combined. The builder
-//! expression runs once on the synchronous caller, before workers start.
+//! Use `workers = N` to cap the worker count or `builder = expression` for
+//! custom settings; they cannot be combined. The builder expression runs
+//! before workers start.
 //!
-//! The [`main`](crate::main) and [`test`](crate::test) attribute reference describes
-//! the complete syntax, including `runtime_path = ::renamed_arty::runtime` for
-//! renamed dependencies. Prefer the explicit builder when construction errors
-//! need to be returned rather than panicked, or when lifecycle ownership needs
-//! to remain outside the entry point.
+//! See [`main`](crate::main) and [`test`](crate::test) for all options. Build
+//! the runtime yourself if you need to handle construction errors or own
+//! its shutdown.
 //!
 //! # Clocks and telemetry
 //!
-//! The default clock follows real time. [`RuntimeBuilder::clock`](crate::runtime::RuntimeBuilder::clock)
-//! accepts an inactive clock or a test `ClockControl`; the runtime activates
-//! worker clocks and advances their timers. The [time guide](super::time)
-//! explains controlled time without changing task scheduling semantics.
+//! The default clock follows real time. Use
+//! [`RuntimeBuilder::clock`](crate::runtime::RuntimeBuilder::clock) for a
+//! custom clock; see [time](super::time) for controlled-time tests.
 //!
-//! Telemetry uses a no-op sink by default. Configure
+//! The default telemetry sink discards events. Configure
 //! [`RuntimeBuilder::sink`](crate::runtime::RuntimeBuilder::sink) to receive
-//! runtime events and propagate enrichment; see [telemetry](super::telemetry).
+//! events; see [telemetry](super::telemetry).
 //!
-//! # Asynchronous I/O
+//! # Async I/O
 //!
-//! Arty drives task wakeups and timers, but does not provide an asynchronous
-//! I/O driver. Use [`spawn_blocking`](crate::task::TaskScheduler::spawn_blocking)
-//! for synchronous I/O, or a library that supplies its own compatible driver.
-//! Submitting a future does not supply another runtime's services: libraries
-//! requiring Tokio's I/O or timer drivers still need those drivers.
+//! Arty does not provide an async I/O driver. Use
+//! [`spawn_blocking`](crate::task::TaskScheduler::spawn_blocking) for synchronous
+//! I/O; libraries requiring another runtime's I/O driver still need that driver.
 //!
 //! # Worker placement
 //!
-//! A future stays on its worker once started. Stable placement supports local
-//! state and processor locality, but does not automatically balance running
-//! tasks across workers. Distribute independent tasks with
-//! [`Runtime::scheduler`](crate::runtime::Runtime::scheduler) or
-//! [`spawn_anywhere`](crate::task::TaskScheduler::spawn_anywhere), and measure the
-//! application's workload before choosing worker and pool limits.
+//! A task stays on its worker once started. For
+//! [`RuntimeScheduler::spawn_anywhere`](crate::task::RuntimeScheduler::spawn_anywhere)
+//! and [`TaskScheduler::spawn_anywhere`](crate::task::TaskScheduler::spawn_anywhere),
+//! the runtime chooses where new work starts; it does not move running tasks
+//! between workers. Measure your workload before choosing worker and pool limits.

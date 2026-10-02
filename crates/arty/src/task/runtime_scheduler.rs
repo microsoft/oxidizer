@@ -8,6 +8,7 @@ use std::task::{Context, Poll};
 use futures::future::{FutureExt, LocalBoxFuture};
 use pin_project::pin_project;
 
+use crate::core::ThreadAware;
 use crate::runtime::Error;
 use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::thread::is_flagged;
@@ -60,7 +61,8 @@ impl<F: Future> Future for ScopedStorage<F> {
 /// It cannot be cloned or retained independently of the runtime owner.
 /// For worker-affine child tasks, use [`Builtins::scheduler`] instead.
 ///
-/// Worker selection is round-robin and does not imply execution or completion order.
+/// The runtime chooses where new work starts. Submission order does not imply
+/// execution or completion order.
 /// Complete required joins before stopping the runtime.
 #[derive(Debug)]
 pub struct RuntimeScheduler {
@@ -72,7 +74,7 @@ impl RuntimeScheduler {
         Self { dispatcher }
     }
 
-    /// Reports whether the caller is on one of this runtime's asynchronous workers.
+    /// Reports whether the caller is on one of this runtime's async workers.
     ///
     /// Returns `false` on external threads, blocking-pool threads, and workers
     /// belonging to another runtime.
@@ -82,11 +84,11 @@ impl RuntimeScheduler {
         self.dispatcher.worker_index(std::thread::current().id()).is_some()
     }
 
-    /// Runs a borrowing task and blocks until it finishes.
+    /// Runs a task that borrows caller-owned data and waits for it to finish.
     ///
-    /// Allows `future_factory` and its future to borrow caller-owned data. The factory
-    /// runs on a worker, not on the calling thread. Both the factory and future
-    /// are destroyed before the method returns, on success or failure.
+    /// The factory runs on a worker, not on the calling thread. Both the
+    /// factory and future are destroyed before this method returns, even if
+    /// the task fails or is cancelled.
     ///
     /// Return owned data or modify borrowed data in place; results cannot borrow
     /// the caller's stack. Captures and results are not automatically relocated.
@@ -98,7 +100,7 @@ impl RuntimeScheduler {
     /// if the factory or future panics, or if shutdown cancels or rejects the task.
     /// Rejection does not invoke the factory.
     ///
-    /// Calling this from any asynchronous Arty worker returns an error, including
+    /// Calling this from any async Arty worker returns an error, including
     /// a worker belonging to another runtime. It also returns an error from
     /// inside an already-running `futures` executor, before submitting the task.
     ///
@@ -122,7 +124,7 @@ impl RuntimeScheduler {
         R: Send + 'static,
     {
         if is_flagged() {
-            return Err(Error::new("block_on cannot be called from an asynchronous Arty worker"));
+            return Err(Error::new("block_on cannot be called from an async Arty worker"));
         }
         // Validate the ambient executor before any caller-borrowing work is submitted.
         drop(futures::executor::enter().map_err(Error::new)?);
@@ -137,17 +139,22 @@ impl RuntimeScheduler {
         // is destroyed. The final sender is dropped after those fields, including on
         // cancellation or panic. Receiving the result alone is not a destruction guarantee.
         let factory = unsafe { std::mem::transmute::<BoxedFutureFactory<'a, R>, BoxedFutureFactory<'static, R>>(factory) };
-        self.spawn_anywhere(factory).wait().map_err(Error::new)
+        self.dispatcher.spawn(factory).wait().map_err(Error::new)
     }
 
-    /// Submits an asynchronous task to the next worker.
+    /// Lets the runtime place an async task and relocates its payload.
     ///
-    /// The factory runs on the selected worker with owned [`Builtins`] and creates
-    /// its future there. The future need not be [`Send`], but the factory's captures
-    /// and the returned result must be `Send`. Captured values and returned results
-    /// are not automatically relocated.
+    /// Before starting the task, Arty relocates `data` to the chosen worker.
+    /// The source worker is unknown because this scheduler can be used from
+    /// outside the runtime. The function pointer receives [`Builtins`] and
+    /// the relocated data. Its future need not be [`Send`], but its result must
+    /// implement [`ThreadAware`] (which includes `Send`). The result is not relocated.
     ///
-    /// Shutdown rejects submissions without invoking their factories.
+    /// Use `()` for work without a payload. For values that do not implement
+    /// `ThreadAware`, see [`Unaware`](thread_aware::Unaware) and its guidance
+    /// before wrapping them.
+    ///
+    /// Shutdown rejects submissions without relocating data or invoking the factory.
     /// Factory and future panics are reported through the returned [`JoinHandle`].
     ///
     /// # Examples
@@ -156,24 +163,40 @@ impl RuntimeScheduler {
     /// use arty::runtime::Runtime;
     ///
     /// let runtime = Runtime::new()?;
-    /// let task = runtime.scheduler().spawn_anywhere(async |_| 42);
-    /// assert_eq!(task.wait()?, 42);
+    /// let task = runtime
+    ///     .scheduler()
+    ///     .spawn_anywhere(String::from("Arty"), |_, name| async move { name.len() });
+    /// assert_eq!(task.wait()?, 4);
     /// runtime.stop()?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn spawn_anywhere<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
+    ///
+    /// A `Send` result without `ThreadAware` is not accepted:
+    ///
+    /// ```compile_fail
+    /// use arty::runtime::Runtime;
+    ///
+    /// struct SendOnly;
+    /// let runtime = Runtime::new().unwrap();
+    /// runtime.scheduler().spawn_anywhere((), |_, ()| async { SendOnly });
+    /// ```
+    pub fn spawn_anywhere<D, F, R>(&self, data: D, future_factory: fn(Builtins, D) -> F) -> JoinHandle<R>
     where
-        FF: FnOnce(Builtins) -> F + Send + 'static,
+        D: ThreadAware + 'static,
         F: Future<Output = R> + 'static,
-        R: Send + 'static,
+        R: ThreadAware + 'static,
     {
-        self.dispatcher.spawn(future_factory)
+        self.dispatcher.spawn(async move |cx| {
+            let mut data = data;
+            data.relocate(None, cx.thread());
+            future_factory(cx, data).await
+        })
     }
 
     /// Submits a synchronous callback to a blocking-task pool.
     ///
-    /// Selects a worker's pool round-robin. Use this for synchronous I/O and
-    /// other blocking work that would stall an asynchronous worker.
+    /// Uses a pool chosen by the runtime for synchronous I/O or other work
+    /// that would stall an async worker.
     /// The callback's panic is reported through its join.
     ///
     /// Shutdown rejects new callbacks and cancels queued callbacks before they
@@ -240,7 +263,7 @@ mod tests {
         let other_scheduler = other.scheduler();
         assert!(!scheduler.is_on_worker());
         // Detect a missing worker flag before entering the borrowing call that must reject it.
-        assert!(scheduler.spawn_anywhere(async |_| is_flagged()).wait().unwrap());
+        assert!(scheduler.spawn_anywhere((), |_, ()| async { is_flagged() }).wait().unwrap());
         let observed = scheduler
             .block_on(async |_| {
                 (

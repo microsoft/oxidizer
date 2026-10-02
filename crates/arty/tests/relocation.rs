@@ -186,11 +186,15 @@ fn relocating_builtins_uses_same_pool_when_shared() {
 fn foreign_owner_relocation_preserves_runtime_binding() {
     let source_runtime = Runtime::builder().processor_count(ProcessorCount::exactly(1)).build().unwrap();
     let destination_runtime = Runtime::builder().processor_count(ProcessorCount::exactly(1)).build().unwrap();
-    let mut builtins = source_runtime.scheduler().spawn_anywhere(async |cx| cx).wait().unwrap();
+    let mut builtins = source_runtime
+        .scheduler()
+        .spawn_anywhere((), |cx, ()| async move { cx })
+        .wait()
+        .unwrap();
     let source = builtins.thread().clone();
     let destination = destination_runtime
         .scheduler()
-        .spawn_anywhere(async |cx| cx.thread().clone())
+        .spawn_anywhere((), |cx, ()| async move { cx.thread().clone() })
         .wait()
         .unwrap();
     let blocking_thread = builtins.scheduler().spawn_blocking(|| thread::current().id()).wait().unwrap();
@@ -214,7 +218,7 @@ fn repeated_spawn_after_relocation_uses_destination() {
 
     let runtime = Runtime::builder().processor_count(ProcessorCount::exactly(2)).build().unwrap();
     let workers: Vec<_> = (0..2)
-        .map(|_| runtime.scheduler().spawn_anywhere(async |cx| cx))
+        .map(|_| runtime.scheduler().spawn_anywhere((), |cx, ()| async move { cx }))
         .map(|handle| handle.wait().unwrap())
         .collect();
     let mut scheduler = workers[0].scheduler().clone();
@@ -234,11 +238,15 @@ fn repeated_spawn_after_relocation_uses_destination() {
 fn foreign_owner_relocation_preserves_bare_scheduler_binding() {
     let source_runtime = Runtime::builder().processor_count(ProcessorCount::exactly(1)).build().unwrap();
     let destination_runtime = Runtime::builder().processor_count(ProcessorCount::exactly(1)).build().unwrap();
-    let builtins = source_runtime.scheduler().spawn_anywhere(async |cx| cx).wait().unwrap();
+    let builtins = source_runtime
+        .scheduler()
+        .spawn_anywhere((), |cx, ()| async move { cx })
+        .wait()
+        .unwrap();
     let mut scheduler = builtins.scheduler().clone();
     let destination = destination_runtime
         .scheduler()
-        .spawn_anywhere(async |cx| cx.thread().clone())
+        .spawn_anywhere((), |cx, ()| async move { cx.thread().clone() })
         .wait()
         .unwrap();
     let blocking_thread = scheduler.spawn_blocking(|| thread::current().id()).wait().unwrap();

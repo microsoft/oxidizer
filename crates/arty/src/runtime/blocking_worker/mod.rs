@@ -45,7 +45,6 @@ impl Drop for BlockingTaskScope {
 /// Worker for blocking tasks. Meant to be created for each async worker thread to allow for scheduling of blocking tasks.
 #[derive(Debug)]
 pub(crate) struct BlockingWorker {
-    // Naive implementation using a per-async-worker thread pool
     pool: BlockingPool,
     is_shutting_down: Arc<AtomicBool>,
     sink: Sink,
@@ -332,7 +331,7 @@ pub(super) mod blocking_worker_tests {
     fn blocking_pool_grow_to_maximum() {
         let blocking_pool = BlockingPool::new(Some(5));
 
-        // It says "max" but it is effectively the "current" count because it grows asynchronously.
+        // It says "max" but it is effectively the "current" count because growth is async.
         assert_eq!(blocking_pool.pool.lock().unwrap().as_ref().unwrap().max_count(), 1);
         assert!(blocking_pool.grow()); // 2
         assert!(blocking_pool.grow()); // 3
@@ -340,7 +339,7 @@ pub(super) mod blocking_worker_tests {
         assert!(blocking_pool.grow()); // 5
         assert!(!blocking_pool.grow()); // 5 - should not grow further
 
-        // It says "max" but it is effectively the "current" count because it grows asynchronously.
+        // It says "max" but it is effectively the "current" count because growth is async.
         assert_eq!(blocking_pool.pool.lock().unwrap().as_ref().unwrap().max_count(), 5);
     }
 
@@ -375,7 +374,7 @@ pub(super) mod blocking_worker_tests {
                 .unwrap();
             let scheduler = runtime
                 .scheduler()
-                .spawn_anywhere(async |cx| cx.scheduler().clone())
+                .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
                 .wait()
                 .unwrap();
             let worker = Arc::clone(scheduler.blocking_worker());

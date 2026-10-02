@@ -105,7 +105,7 @@ impl LocalTaskBinding {
 /// # Examples
 ///
 /// ```
-/// # #[cfg(feature = "macros")]
+/// # #[cfg(all(feature = "macros", feature = "rt"))]
 /// #[arty::main]
 /// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
 ///     use std::rc::Rc;
@@ -120,7 +120,7 @@ impl LocalTaskBinding {
 ///     assert!(Rc::ptr_eq(&value, &returned));
 ///     Ok(())
 /// }
-/// # #[cfg(not(feature = "macros"))] fn main() {}
+/// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
 #[derive(Debug, Clone)]
 pub struct LocalTaskScheduler {
@@ -158,7 +158,7 @@ impl LocalTaskScheduler {
     /// # Examples
     ///
     /// ```
-    /// # #[cfg(feature = "macros")]
+    /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// #[arty::main]
     /// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
     ///     use std::rc::Rc;
@@ -172,7 +172,7 @@ impl LocalTaskScheduler {
     ///     assert!(Rc::ptr_eq(&value, &returned));
     ///     Ok(())
     /// }
-    /// # #[cfg(not(feature = "macros"))] fn main() {}
+    /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
     /// ```
     pub fn spawn<FF, F, R>(&self, future_factory: FF) -> LocalJoinHandle<R>
     where

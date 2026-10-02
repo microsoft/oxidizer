@@ -75,9 +75,10 @@ fn many_timers_ensure_advanced() {
     let count = workers();
     let handles: Vec<_> = (0..count)
         .map(|_| {
-            runtime
-                .scheduler()
-                .spawn_anywhere(async |builtins| builtins.clock().delay(Duration::from_millis(1)).await)
+            runtime.scheduler().spawn_anywhere(
+                (),
+                |builtins, ()| async move { builtins.clock().delay(Duration::from_millis(1)).await },
+            )
         })
         .collect();
 

@@ -11,14 +11,14 @@ use super::JoinError;
 use crate::runtime::thread::assert_not_flagged;
 use crate::task::execution::TaskResult;
 
-/// A handle for receiving an asynchronous or blocking task's result.
+/// A handle for receiving an async or blocking task's result.
 ///
-/// Await the handle inside asynchronous code, or call [`wait`](Self::wait) from
+/// Await the handle inside async code, or call [`wait`](Self::wait) from
 /// synchronous code. Completion produces `Ok(result)`. A task panic or shutdown
 /// cancellation produces [`JoinError`] without unwinding the joining caller.
 ///
 /// Dropping the handle does not cancel its task or rethrow a task panic.
-/// The runtime must remain running for pending asynchronous work to complete.
+/// The runtime must remain running for pending async work to complete.
 /// If the task returns its own `Result<T, E>`, joining it produces
 /// `Result<Result<T, E>, JoinError>`.
 ///
@@ -29,14 +29,14 @@ use crate::task::execution::TaskResult;
 /// # Examples
 ///
 /// ```
-/// # #[cfg(feature = "macros")]
+/// # #[cfg(all(feature = "macros", feature = "rt"))]
 /// #[arty::main]
 /// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
 ///     let task = cx.scheduler().spawn(async |_| 42);
 ///     assert_eq!(task.await?, 42);
 ///     Ok(())
 /// }
-/// # #[cfg(not(feature = "macros"))] fn main() {}
+/// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
 #[derive(derive_more::Debug)]
 #[pin_project]
@@ -65,7 +65,7 @@ where
 
     /// Blocks until the task's result is available.
     ///
-    /// Use `.await` inside asynchronous code instead. This waits for one task,
+    /// Use `.await` inside async code instead. This waits for one task,
     /// not for runtime shutdown. Stopping or dropping the runtime owner waits
     /// for its workers to stop.
     ///
@@ -77,7 +77,7 @@ where
     /// # Panics
     ///
     /// Panics if the result has already been received by polling the handle.
-    /// Also panics if called from an asynchronous Arty worker, even if the
+    /// Also panics if called from an async Arty worker, even if the
     /// result is already ready.
     ///
     /// # Examples
@@ -86,7 +86,7 @@ where
     /// use arty::runtime::Runtime;
     ///
     /// let runtime = Runtime::new()?;
-    /// let task = runtime.scheduler().spawn_anywhere(async |_| 42);
+    /// let task = runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 });
     /// assert_eq!(task.wait()?, 42);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -133,7 +133,7 @@ mod tests {
             .build()
             .expect("runtime");
 
-        let handle = runtime.scheduler().spawn_anywhere(async |_cx| 123u32);
+        let handle = runtime.scheduler().spawn_anywhere((), |_, ()| async { 123u32 });
 
         assert_eq!(handle.wait().unwrap(), 123);
     }

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Task capabilities, their guarded thread-affine state, and relocation.
+//! Worker services and thread-aware relocation.
 
 use std::sync::Arc;
 
@@ -18,26 +18,25 @@ use crate::runtime::telemetry::events::{BacktraceText, BuiltinsThreadMismatch, T
 use crate::task::local::{LocalTaskBinding, LocalTaskScheduler};
 use crate::task::scheduler::TaskScheduler;
 
-/// Worker-bound services supplied to an asynchronous task.
+/// Services supplied to an async task on its worker.
 ///
 /// Use [`scheduler`](Self::scheduler) for child tasks,
 /// [`local_scheduler`](Self::local_scheduler) for non-[`Send`] captures and results,
 /// and [`clock`](Self::clock) for delays and timeouts. Runtime task factories
 /// receive this value by ownership.
 ///
-/// When starting work on another worker, prefer the `Builtins` supplied to that
-/// task's factory. Cloning or moving an existing value preserves its association;
-/// it does not keep the original runtime running.
+/// New tasks receive their own `Builtins`. Cloning or moving an existing value
+/// does not change its worker or keep its runtime running.
 ///
-/// [`TaskScheduler::spawn_anywhere`] explicitly relocates a payload. For `Builtins`,
-/// relocation to an initialized worker of the same runtime rebinds all services
-/// together. A foreign or unregistered destination leaves them unchanged.
-/// Local scheduling is available only on the value's associated worker.
+/// [`TaskScheduler::spawn_anywhere`] can relocate an existing `Builtins` to
+/// another ready worker of the same runtime. A worker from another runtime, or
+/// one that is not ready, leaves its association unchanged. Local scheduling
+/// is available only on the associated worker.
 ///
 /// # Examples
 ///
 /// ```
-/// # #[cfg(feature = "macros")]
+/// # #[cfg(all(feature = "macros", feature = "rt"))]
 /// #[arty::main]
 /// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
 ///     let answer = cx
@@ -53,7 +52,7 @@ use crate::task::scheduler::TaskScheduler;
 ///     assert_eq!(answer, 42);
 ///     Ok(())
 /// }
-/// # #[cfg(not(feature = "macros"))] fn main() {}
+/// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
 #[derive(Debug, Clone)]
 pub struct Builtins {
@@ -68,14 +67,14 @@ pub struct Builtins {
 impl Builtins {
     /// Returns a scheduler that creates tasks on the associated worker.
     ///
-    /// Cloning the scheduler or using it from another thread preserves that
-    /// worker association. Use [`TaskScheduler::spawn_anywhere`] to distribute
-    /// new work across workers instead.
+    /// A clone still targets the same worker, even if used from another
+    /// thread. Use [`TaskScheduler::spawn_anywhere`] to let the runtime choose
+    /// a worker for new work instead.
     ///
     /// # Examples
     ///
     /// ```
-    /// # #[cfg(feature = "macros")]
+    /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// #[arty::main]
     /// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
     ///     let parent_thread = cx.thread().id();
@@ -86,7 +85,7 @@ impl Builtins {
     ///     assert_eq!(child_thread, parent_thread);
     ///     Ok(())
     /// }
-    /// # #[cfg(not(feature = "macros"))] fn main() {}
+    /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
     /// ```
     #[must_use]
     #[inline]
@@ -105,12 +104,12 @@ impl Builtins {
     /// # Examples
     ///
     /// ```
-    /// # #[cfg(feature = "macros")]
+    /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// #[arty::main]
     /// async fn main(cx: arty::task::Builtins) {
     ///     assert_eq!(cx.thread().id(), std::thread::current().id());
     /// }
-    /// # #[cfg(not(feature = "macros"))] fn main() {}
+    /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
     /// ```
     #[must_use]
     #[inline]
@@ -129,7 +128,7 @@ impl Builtins {
     /// # Examples
     ///
     /// ```
-    /// # #[cfg(feature = "macros")]
+    /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// #[arty::main]
     /// async fn main(cx: arty::task::Builtins) {
     ///     let duration = std::time::Duration::from_millis(1);
@@ -137,7 +136,7 @@ impl Builtins {
     ///     cx.clock().delay(duration).await;
     ///     assert!(watch.elapsed() >= duration);
     /// }
-    /// # #[cfg(not(feature = "macros"))] fn main() {}
+    /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
     /// ```
     #[must_use]
     #[inline]
@@ -158,17 +157,17 @@ impl Builtins {
     /// An application that also depends on `observed` can emit its own event:
     ///
     /// ```
-    /// # #[cfg(feature = "macros")]
+    /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// #[observed::event("app.task.started")]
     /// #[info("task started")]
     /// struct TaskStarted;
     ///
-    /// # #[cfg(feature = "macros")]
+    /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// #[arty::main]
     /// async fn main(cx: arty::task::Builtins) {
     ///     observed::emit!(cx.sink(), TaskStarted);
     /// }
-    /// # #[cfg(not(feature = "macros"))] fn main() {}
+    /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
     /// ```
     #[must_use]
     #[inline]
@@ -190,7 +189,7 @@ impl Builtins {
     /// # Examples
     ///
     /// ```rust
-    /// # #[cfg(feature = "macros")]
+    /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// #[arty::main]
     /// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
     ///     use std::rc::Rc;
@@ -202,7 +201,7 @@ impl Builtins {
     ///     assert_eq!(*result, 42);
     ///     Ok(())
     /// }
-    /// # #[cfg(not(feature = "macros"))] fn main() {}
+    /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
     /// ```
     #[must_use]
     #[inline]
@@ -424,7 +423,7 @@ mod tests {
             .unwrap();
         let workers: Vec<_> = (0..2)
             .map(|_| {
-                runtime.scheduler().spawn_anywhere(async |cx| {
+                runtime.scheduler().spawn_anywhere((), |cx, ()| async move {
                     let scheduler = cx.scheduler().clone();
                     (cx, scheduler)
                 })

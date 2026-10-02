@@ -1,40 +1,36 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Scheduling tasks and receiving their results.
+//! Start tasks, choose where they run, and await their results.
 //!
-//! A [`Runtime`](crate::runtime::Runtime) owns the workers. A
-//! [`RuntimeScheduler`](crate::task::RuntimeScheduler) is borrowed from that owner.
-//! [`TaskScheduler`](crate::task::TaskScheduler) keeps child work on an associated worker.
-//! Keep the runtime alive until the tasks whose results you need have
-//! completed.
+//! Keep the [`Runtime`](crate::runtime::Runtime) alive until the work you need
+//! has finished. Scheduler handles do not keep it running.
 //!
-//! # Choosing a scheduler
+//! # Choose where work runs
 //!
-//! | Operation | Where the work runs | What crosses the boundary |
-//! | --- | --- | --- |
-//! | [`RuntimeScheduler::spawn_anywhere`](crate::task::RuntimeScheduler::spawn_anywhere) | Workers selected round-robin | A `Send` factory and a `Send` result |
-//! | `spawn` on `Builtins::scheduler()` | That capability's associated worker | A `Send` factory and a `Send` result, even when called on the same worker |
-//! | [`LocalTaskScheduler::spawn`](crate::task::LocalTaskScheduler::spawn) | The calling worker | Nothing crosses threads; captures and results may be non-`Send` |
-//! | [`spawn_anywhere`](crate::task::TaskScheduler::spawn_anywhere) | Workers selected round-robin | An explicit `ThreadAware` payload, then a `Send` result |
-//! | [`spawn_everywhere`](crate::task::TaskScheduler::spawn_everywhere) | Each worker once | A cloneable `ThreadAware` payload, then one `Send` result per worker |
-//! | [`spawn_blocking`](crate::task::TaskScheduler::spawn_blocking) | A blocking pool | A `Send` synchronous closure and a `Send` result |
+//! Borrow a [`RuntimeScheduler`](crate::task::RuntimeScheduler) from the runtime
+//! to let it place a new task. A [`TaskScheduler`](crate::task::TaskScheduler)
+//! from [`Builtins`](crate::task::Builtins) keeps child tasks on its worker,
+//! even when cloned.
 //!
-//! Runtime-scheduler submissions share a round-robin selection sequence. That
-//! scheduler cannot be cloned or detached from the owner. Selection order is not
-//! execution or completion order. A worker-bound scheduler stays bound when cloned or sent to
-//! another OS thread. Use `spawn_anywhere` when new work should be distributed
-//! rather than remain with the bound worker.
+//! Use [`spawn_anywhere`](crate::task::TaskScheduler::spawn_anywhere) to let the
+//! runtime choose a worker for a new task and relocate a `ThreadAware` value;
+//! [`spawn_everywhere`](crate::task::TaskScheduler::spawn_everywhere) starts one
+//! task per worker. The runtime-wide `spawn_anywhere` also relocates its
+//! `ThreadAware` input. Pass that input separately to a non-capturing function,
+//! rather than capturing it in a closure. The order in which you submit tasks
+//! does not determine when they finish.
 //!
-//! # Send the factory, create the future on the worker
+//! Results from `spawn_anywhere` and `spawn_everywhere` must also implement
+//! [`ThreadAware`](crate::core::ThreadAware), which includes `Send`. Joining does
+//! not relocate them; relocate returned values explicitly when needed.
 //!
-//! `spawn` takes a callback that receives owned
-//! [`Builtins`](crate::task::Builtins) and returns a future. The callback and
-//! its captures must be `Send + 'static`, but the future need not be `Send`:
-//! Arty constructs, polls, and destroys it on its destination worker.
+//! # Create local state on a worker
 //!
-//! Here the `Rc` is created inside the factory, not captured from the caller.
-//! It stays on the worker across an asynchronous wait.
+//! [`TaskScheduler::spawn`](crate::task::TaskScheduler::spawn) calls your
+//! factory on the destination worker. This lets its future create and retain
+//! non-`Send` state across awaits. The factory's captures and the task's result
+//! must still be `Send` to cross threads. Here the `Rc` is created on the worker:
 //!
 //! ```
 //! use std::rc::Rc;
@@ -59,18 +55,14 @@
 //! }
 //! ```
 //!
-//! An async closure such as `async |cx| { ... }` is another way to write this
-//! factory. An `async { ... }` block by itself is already a future and is not a
-//! factory. Ordinary captures and results are not automatically relocated.
-//! Results need `Send`, not [`ThreadAware`](crate::core::ThreadAware).
+//! Pass a factory, not an already-created future. Ordinary captures and
+//! results are not relocated automatically.
 //!
 //! # Share non-Send state between local tasks
 //!
-//! Obtain a [`LocalTaskScheduler`](crate::task::LocalTaskScheduler) from
-//! [`Builtins::local_scheduler`](crate::task::Builtins::local_scheduler)
-//! while executing on the associated worker. Its factory takes no arguments
-//! and is invoked immediately. Captures, futures, and results may all be
-//! non-`Send`, but must still be `'static`; local spawning is not scoped borrowing.
+//! Use [`Builtins::local_scheduler`](crate::task::Builtins::local_scheduler)
+//! on a worker when captures or results are also non-`Send`. Local tasks stay
+//! on that worker, but must still own what they capture:
 //!
 //! ```
 //! use std::rc::Rc;
@@ -90,17 +82,15 @@
 //! }
 //! ```
 //!
-//! Await local joins on their worker. Neither a local scheduler nor its join
-//! handle can be sent to another thread. For a task that borrows the synchronous
-//! caller's stack, use [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on)
-//! instead.
+//! Await local joins on their worker; local schedulers and joins cannot cross
+//! threads. To borrow data from a synchronous caller, use
+//! [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on).
 //!
-//! # Keep blocking work off asynchronous workers
+//! # Keep blocking work off async workers
 //!
-//! A long synchronous call prevents an asynchronous worker from polling its
-//! other tasks and advancing timers. Use `spawn_blocking` for synchronous
-//! operating-system or library calls. For example, this program reads a file
-//! named `settings.toml` from its working directory:
+//! A long synchronous call stops an async worker from polling other tasks.
+//! Use `spawn_blocking` for work such as reading a file. This example reads
+//! `settings.toml` from the current directory:
 //!
 //! ```no_run
 //! use arty::task::Builtins;
@@ -116,22 +106,18 @@
 //! }
 //! ```
 //!
-//! The first `?` handles task failure (`JoinError`); the second handles the file
-//! operation's `io::Error`. This runs blocking file I/O on another thread; it
-//! does not add an asynchronous I/O driver. The pools are intended for blocking
-//! calls, not general CPU-parallel workloads. Their
-//! [configuration](super::configuration#blocking-pools) is separate from the
-//! number of asynchronous workers.
+//! The first `?` handles task failure; the second handles the file error.
+//! This runs I/O on a blocking thread, not an async I/O driver. Configure
+//! [blocking pools](super::configuration#blocking-pools) separately from
+//! async workers.
 //!
 //! # Observe completion before shutdown
 //!
-//! A [`JoinHandle`](crate::task::JoinHandle) yields `Result<T, JoinError>`.
-//! Use [`JoinError::is_panic`](crate::task::JoinError::is_panic) to identify a task
-//! panic and [`is_shutdown`](crate::task::JoinError::is_shutdown) to identify
-//! cancellation or rejection. Use `.await` inside asynchronous tasks and
-//! `wait()` only from a blocking-safe thread. Dropping the handle does not cancel
-//! the task.
+//! Await a [`JoinHandle`](crate::task::JoinHandle) inside an async task, or
+//! call `wait()` from a thread allowed to block. A
+//! [`JoinError`](crate::task::JoinError) reports a panic or shutdown;
+//! dropping the handle does not cancel the task.
 //!
 //! Shutdown cancels pending tasks and rejects new submissions without invoking
-//! their factories. See [lifecycle](super::lifecycle) for the difference between
-//! receiving task results and stopping workers.
+//! their factories. See [shutdown](super::shutdown) for what happens to pending
+//! and running work when the runtime stops.

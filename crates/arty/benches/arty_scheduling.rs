@@ -26,6 +26,7 @@ use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime};
 use arty::task::{Builtins, JoinHandle};
 use criterion::{BenchmarkId, Criterion, Throughput};
 use metabench::benchmark;
+use thread_aware::Unaware;
 use tokio::task::{JoinHandle as TokioJoinHandle, LocalSet};
 
 const BLOCKING_THREADS: usize = 4;
@@ -107,17 +108,15 @@ impl ArtyCase {
         case
     }
 
-    fn remote<FF, F>(&mut self, iterations: u64, factory: FF) -> Duration
+    fn remote<F>(&mut self, iterations: u64, factory: fn(Builtins, ()) -> F) -> Duration
     where
-        FF: FnOnce(Builtins) -> F + Clone + Send + 'static,
         F: Future<Output = ()> + 'static,
     {
         let scheduler = self.runtime.scheduler();
         let start = Instant::now();
         for _ in 0..iterations {
             self.handles.clear();
-            self.handles
-                .extend((0..self.count).map(|_| scheduler.spawn_anywhere(factory.clone())));
+            self.handles.extend((0..self.count).map(|_| scheduler.spawn_anywhere((), factory)));
             for handle in &mut self.handles {
                 futures::executor::block_on(black_box(handle)).expect("benchmark tasks finish before shutdown");
             }
@@ -128,9 +127,9 @@ impl ArtyCase {
     fn run(&mut self, iterations: u64) -> Duration {
         let count = self.count;
         match self.workload {
-            Workload::Spawn => self.remote(iterations, async |_| black_box(())),
-            Workload::Yield => self.remote(iterations, async |_| YieldOnce::default().await),
-            Workload::Timer => self.remote(iterations, async |cx| cx.clock().delay(Duration::from_millis(1)).await),
+            Workload::Spawn => self.remote(iterations, |_, ()| async { black_box(()) }),
+            Workload::Yield => self.remote(iterations, |_, ()| async { YieldOnce::default().await }),
+            Workload::Timer => self.remote(iterations, |cx, ()| async move { cx.clock().delay(Duration::from_millis(1)).await }),
             Workload::Timeout => {
                 let operations = iterations
                     .checked_mul(u64::try_from(count).expect("benchmark counts fit in u64"))
@@ -139,7 +138,7 @@ impl ArtyCase {
                 self.handles.clear();
                 // Round-robin submissions place one task on each worker.
                 self.handles.extend((0..self.workers).map(|_| {
-                    self.runtime.scheduler().spawn_anywhere(async move |cx| {
+                    self.runtime.scheduler().spawn_anywhere(operations, |cx, operations| async move {
                         let clock = cx.clock().clone();
                         timeout_churn(operations, |timeout| clock.delay(timeout)).await;
                     })
@@ -151,12 +150,26 @@ impl ArtyCase {
             }
             Workload::RemoteWake => {
                 let sender = self.peer.sender();
-                self.remote(iterations, async move |_| RemoteWake::new(sender.clone()).await)
+                let scheduler = self.runtime.scheduler();
+                let start = Instant::now();
+                for _ in 0..iterations {
+                    self.handles.clear();
+                    self.handles.extend((0..self.count).map(|_| {
+                        // This workload intentionally shares one wake channel across workers.
+                        scheduler.spawn_anywhere(Unaware(sender.clone()), |_, Unaware(sender)| async move {
+                            RemoteWake::new(sender.clone()).await
+                        })
+                    }));
+                    for handle in &mut self.handles {
+                        futures::executor::block_on(black_box(handle)).expect("benchmark tasks finish before shutdown");
+                    }
+                }
+                start.elapsed()
             }
             Workload::FromTask => self
                 .runtime
                 .scheduler()
-                .spawn_anywhere(async move |cx| {
+                .spawn_anywhere((iterations, count), |cx, (iterations, count)| async move {
                     let mut handles = Vec::with_capacity(count);
                     let start = Instant::now();
                     for _ in 0..iterations {
@@ -173,7 +186,7 @@ impl ArtyCase {
             Workload::Local => self
                 .runtime
                 .scheduler()
-                .spawn_anywhere(async move |cx| {
+                .spawn_anywhere((iterations, count), |cx, (iterations, count)| async move {
                     let scheduler = cx.local_scheduler().expect("local benchmark runs on its associated worker");
                     let mut handles = Vec::with_capacity(count);
                     let start = Instant::now();

@@ -10,8 +10,8 @@ use crate::task::RuntimeScheduler;
 
 /// Owns an Arty runtime's workers and their shutdown.
 ///
-/// Use this type to run asynchronous work from synchronous code. Construction
-/// starts one asynchronous worker per selected processor. A task stays on its
+/// Use this type to run async work from synchronous code. Construction
+/// starts one async worker per selected processor. A task stays on its
 /// worker until it finishes or is cancelled.
 ///
 /// Borrow its [`RuntimeScheduler`] through
@@ -22,7 +22,7 @@ use crate::task::RuntimeScheduler;
 /// # Drop
 ///
 /// Dropping the owner requests shutdown and normally waits for workers to stop. Pending
-/// asynchronous tasks and queued blocking callbacks are cancelled; blocking
+/// async tasks and queued blocking callbacks are cancelled; blocking
 /// callbacks already running are allowed to finish. A blocking callback that
 /// never returns can therefore prevent shutdown from completing.
 ///
@@ -45,7 +45,7 @@ use crate::task::RuntimeScheduler;
 /// use arty::runtime::Runtime;
 ///
 /// let runtime = Runtime::new()?;
-/// let task = runtime.scheduler().spawn_anywhere(async |_| 42);
+/// let task = runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 });
 /// assert_eq!(task.wait()?, 42);
 /// runtime.stop()?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -101,8 +101,9 @@ impl Runtime {
 
     /// Borrows the runtime's scheduler for runtime-wide submissions.
     ///
-    /// Use it to submit work from outside the runtime or distribute independent
-    /// tasks across workers. In contrast, [`Builtins::scheduler`](crate::task::Builtins::scheduler) keeps child
+    /// Use it to submit work from outside the runtime and let the runtime
+    /// choose a worker. In contrast,
+    /// [`Builtins::scheduler`](crate::task::Builtins::scheduler) keeps child
     /// tasks on their parent's worker.
     ///
     /// The scheduler cannot be cloned or retained independently of this runtime.
@@ -115,8 +116,8 @@ impl Runtime {
     ///
     /// let runtime = Runtime::new()?;
     /// let scheduler = runtime.scheduler();
-    /// let first = scheduler.spawn_anywhere(async |_| 20);
-    /// let second = scheduler.spawn_anywhere(async |_| 22);
+    /// let first = scheduler.spawn_anywhere((), |_, ()| async { 20 });
+    /// let second = scheduler.spawn_anywhere((), |_, ()| async { 22 });
     /// assert_eq!(first.wait()? + second.wait()?, 42);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -128,7 +129,7 @@ impl Runtime {
 
     /// Consumes this runtime, requests shutdown, and waits for its workers to stop.
     ///
-    /// Cancels pending asynchronous and local tasks and prevents queued blocking
+    /// Cancels pending async and local tasks and prevents queued blocking
     /// callbacks from starting. Already-running blocking callbacks are allowed to
     /// finish. Shutdown is still requested when the calling context cannot wait.
     /// `Ok(())` means shutdown has completed. A calling-context error does not
@@ -139,7 +140,7 @@ impl Runtime {
     ///
     /// # Errors
     ///
-    /// Returns an [`Error`] if called from an asynchronous Arty worker or one of
+    /// Returns an [`Error`] if called from an async Arty worker or one of
     /// this runtime's blocking callbacks, because those contexts cannot wait for
     /// shutdown. In those cases the owner is consumed without waiting.
     ///
@@ -155,7 +156,7 @@ impl Runtime {
     /// let runtime = Runtime::new()?;
     /// let scheduler = runtime
     ///     .scheduler()
-    ///     .spawn_anywhere(async |cx| cx.scheduler().clone())
+    ///     .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
     ///     .wait()?;
     /// runtime.stop()?;
     /// let error = scheduler
@@ -173,7 +174,7 @@ impl Runtime {
 
     fn wait(&self) -> Result<(), Error> {
         if is_flagged() {
-            return Err(Error::new("an asynchronous Arty worker cannot wait for runtime shutdown"));
+            return Err(Error::new("an async Arty worker cannot wait for runtime shutdown"));
         }
         if self.scheduler.dispatcher.is_current_blocking_task() {
             return Err(Error::new("a runtime blocking callback cannot wait for its own shutdown"));
@@ -213,7 +214,7 @@ mod tests {
 
     use observed::Sink;
     use testing_aids::TEST_TIMEOUT;
-    use thread_aware::ThreadBuilder;
+    use thread_aware::{ThreadBuilder, Unaware};
 
     use super::*;
     use crate::runtime::blocking_worker::{BlockingPool, BlockingWorker};
@@ -246,13 +247,13 @@ mod tests {
             .unwrap();
         let scheduler = runtime
             .scheduler()
-            .spawn_anywhere(async |cx| cx.scheduler().clone())
+            .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
             .wait()
             .unwrap();
         // Check admission before moving the owner into code that would self-join if the guard failed.
         assert!(scheduler.spawn(async |_| is_flagged()).wait().unwrap());
         let outcome = scheduler.spawn(async move |_| runtime.stop()).wait().unwrap();
-        assert!(outcome.unwrap_err().to_string().contains("asynchronous Arty worker"));
+        assert!(outcome.unwrap_err().to_string().contains("async Arty worker"));
     }
 
     #[test]
@@ -263,7 +264,7 @@ mod tests {
             .unwrap();
         let scheduler = runtime
             .scheduler()
-            .spawn_anywhere(async |cx| cx.scheduler().clone())
+            .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
             .wait()
             .unwrap();
         let dispatcher = runtime.scheduler.dispatcher.clone();
@@ -286,7 +287,7 @@ mod tests {
         let dispatcher = runtime.scheduler.dispatcher.clone();
         let scheduler = runtime
             .scheduler()
-            .spawn_anywhere(async |cx| cx.scheduler().clone())
+            .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
             .wait()
             .unwrap();
         assert!(scheduler.spawn(async |_| is_flagged()).wait().unwrap());
@@ -317,9 +318,19 @@ mod tests {
             42
         });
         ready.recv_timeout(TEST_TIMEOUT).unwrap();
-        assert!(caller.scheduler().spawn_anywhere(async |_| is_flagged()).wait().unwrap());
+        assert!(
+            caller
+                .scheduler()
+                .spawn_anywhere((), |_, ()| async { is_flagged() })
+                .wait()
+                .unwrap()
+        );
 
-        caller.scheduler().spawn_anywhere(async move |_| drop(runtime)).wait().unwrap();
+        caller
+            .scheduler()
+            .spawn_anywhere(Unaware(runtime), |_, Unaware(runtime)| async move { drop(runtime) })
+            .wait()
+            .unwrap();
 
         assert!(dispatcher.is_shutting_down());
         release.send(()).unwrap();

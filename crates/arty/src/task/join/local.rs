@@ -26,7 +26,7 @@ use crate::task::execution::TaskResult;
 /// # Examples
 ///
 /// ```
-/// # #[cfg(feature = "macros")]
+/// # #[cfg(all(feature = "macros", feature = "rt"))]
 /// #[arty::main]
 /// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
 ///     use std::rc::Rc;
@@ -38,7 +38,7 @@ use crate::task::execution::TaskResult;
 ///     assert_eq!(*task.await?, 42);
 ///     Ok(())
 /// }
-/// # #[cfg(not(feature = "macros"))] fn main() {}
+/// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
 #[derive(derive_more::Debug)]
 #[pin_project]

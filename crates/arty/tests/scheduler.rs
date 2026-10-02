@@ -41,7 +41,7 @@ fn stash_scheduler() {
     execute_or_terminate_process(move || {
         runtime
             .scheduler()
-            .spawn_anywhere(async move |cx| {
+            .spawn_anywhere((), |cx, ()| async move {
                 // We store the scheduler in a thingy and try to use it from the thingy
                 // without having direct access to the task context.
                 let thingy = Thingy {
@@ -72,7 +72,7 @@ fn stash_scheduler() {
 
         runtime
             .scheduler()
-            .spawn_anywhere(async move |cx| {
+            .spawn_anywhere((), |cx, ()| async move {
                 // We store the scheduler in a thread-local variable.
                 THREAD_LOCAL_STASH.with_borrow_mut(|stash| {
                     *stash = Some(cx.scheduler().clone());

@@ -557,7 +557,7 @@ mod tests {
     fn task_after_shutdown_is_ignored() {
         // The executor will panic if you try to schedule a task after shutdown. However, it is
         // entirely possible that we have some "new task" commands in the async worker queue even
-        // after starting the shutdown process, due to the asynchronous nature of task scheduling.
+        // after starting the shutdown process, due to the async nature of task scheduling.
         //
         // While we cannot honor these commands, we must still do something and ensure that all
         // resources are properly managed. What we do is simply drop the tasks on the floor and

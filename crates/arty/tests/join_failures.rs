@@ -19,6 +19,7 @@ use std::task::{Context, Poll, Waker};
 use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime, RuntimeOperations};
 use arty::task::{JoinError, JoinHandle};
 use testing_aids::{TEST_TIMEOUT, execute_or_terminate_process};
+use thread_aware::Unaware;
 
 testing_aids::init_tracing!();
 
@@ -36,8 +37,8 @@ fn async_and_blocking_panics_do_not_unwind_the_joiner() {
     let runtime = runtime();
     let scheduler = runtime.scheduler();
     let handles: [JoinHandle<()>; 3] = [
-        scheduler.spawn_anywhere(|_| -> std::future::Ready<()> { panic!("factory panic") }),
-        scheduler.spawn_anywhere(async |_| panic!("poll panic")),
+        scheduler.spawn_anywhere((), |_, ()| -> std::future::Ready<()> { panic!("factory panic") }),
+        scheduler.spawn_anywhere((), |_, ()| async { panic!("poll panic") }),
         scheduler.spawn_blocking(|| panic!("blocking panic")),
     ];
     for handle in handles {
@@ -46,7 +47,7 @@ fn async_and_blocking_panics_do_not_unwind_the_joiner() {
         assert!(error.is_panic());
         assert!(!error.is_shutdown());
     }
-    assert_eq!(scheduler.spawn_anywhere(async |_| 42).wait().unwrap(), 42);
+    assert_eq!(scheduler.spawn_anywhere((), |_, ()| async { 42 }).wait().unwrap(), 42);
 }
 
 #[test]
@@ -117,7 +118,7 @@ fn local_future_destructor_panic_preserves_runtime_usability() {
                 assert_eq!(*value, 7);
             })
             .unwrap();
-        assert_eq!(runtime.scheduler().spawn_anywhere(async |_| 42).wait().unwrap(), 42);
+        assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 }).wait().unwrap(), 42);
         runtime.stop().unwrap();
     });
 }
@@ -180,12 +181,14 @@ fn shutdown_cancels_pending_async_work_and_destroys_its_future() {
         let runtime = runtime();
         let (started, receive_start) = mpsc::channel();
         let (dropped, receive_drop) = mpsc::channel();
-        let task = runtime.scheduler().spawn_anywhere(async move |_| {
-            let guard = Dropped(dropped);
-            started.send(()).unwrap();
-            pending::<()>().await;
-            drop(guard);
-        });
+        let task = runtime
+            .scheduler()
+            .spawn_anywhere(Unaware((started, dropped)), |_, Unaware((started, dropped))| async move {
+                let guard = Dropped(dropped);
+                started.send(()).unwrap();
+                pending::<()>().await;
+                drop(guard);
+            });
         receive_start.recv_timeout(TEST_TIMEOUT).unwrap();
         runtime.stop().unwrap();
         assert!(task.wait().unwrap_err().is_shutdown());

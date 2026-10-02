@@ -124,7 +124,7 @@ mod tests {
 
     use many_cpus::SystemHardware;
     use observed::Sink;
-    use thread_aware::{ThreadAware, ThreadBuilder};
+    use thread_aware::{ThreadAware, ThreadBuilder, Unaware};
     use tick::runtime::InactiveClock;
 
     use super::*;
@@ -152,7 +152,11 @@ mod tests {
     #[test]
     fn pinning_rejects_a_foreign_owner_with_a_registered_thread_id() {
         let (runtime, _) = runtime_with_coordinates(1);
-        let worker = runtime.scheduler().spawn_anywhere(async |cx| cx.thread().clone()).wait().unwrap();
+        let worker = runtime
+            .scheduler()
+            .spawn_anywhere((), |cx, ()| async move { cx.thread().clone() })
+            .wait()
+            .unwrap();
         let foreign = ThreadBuilder::default().build(worker.id());
         let operations = RuntimeOperations::from(&runtime);
         assert!(thread::spawn(move || operations.pin_to(&foreign)).join().unwrap().is_err());
@@ -169,7 +173,11 @@ mod tests {
     #[test]
     fn pinning_reports_unavailable_worker_services() {
         let (mut runtime, _) = runtime_with_coordinates(1);
-        let worker = runtime.scheduler().spawn_anywhere(async |cx| cx.thread().clone()).wait().unwrap();
+        let worker = runtime
+            .scheduler()
+            .spawn_anywhere((), |cx, ()| async move { cx.thread().clone() })
+            .wait()
+            .unwrap();
         runtime.shared_state = vec![OnceLock::new()].into();
         assert!(RuntimeOperations::from(&runtime).pin_to(&worker).is_err());
     }
@@ -177,13 +185,13 @@ mod tests {
     #[test]
     fn repeated_and_unfamiliar_relocation_preserves_worker_services_and_explicit_pinning() {
         let (runtime, coordinates) = runtime_with_coordinates(1);
-        let (source, mut scheduler, operations, processor, mut builtins) = runtime
+        let (source, mut scheduler, Unaware(operations), processor, mut builtins) = runtime
             .scheduler()
-            .spawn_anywhere(async |cx| {
+            .spawn_anywhere((), |cx, ()| async move {
                 (
                     cx.thread().clone(),
                     cx.scheduler().clone(),
-                    RuntimeOperations::from(&cx),
+                    Unaware(RuntimeOperations::from(&cx)),
                     SystemHardware::current().current_processor_id(),
                     cx.clone(),
                 )
@@ -229,7 +237,11 @@ mod tests {
         }
         let (runtime, _) = runtime_with_coordinates(2);
         let workers: Vec<_> = (0..2)
-            .map(|_| runtime.scheduler().spawn_anywhere(async |cx| (cx.thread().clone(), cx)))
+            .map(|_| {
+                runtime
+                    .scheduler()
+                    .spawn_anywhere((), |cx, ()| async move { (cx.thread().clone(), cx) })
+            })
             .map(|handle| handle.wait().unwrap())
             .collect();
         let source = &workers[0].0;

@@ -6,25 +6,17 @@ use std::fmt::{self, Display};
 
 /// An error constructing or operating a runtime.
 ///
-/// [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build) returns this
-/// error when a processor count is zero or a policy cannot be satisfied, such
-/// as an exact count exceeding the available processors.
+/// You may receive this error when building a runtime with an invalid worker
+/// count, pinning to an unavailable worker, waiting from an async worker, or
+/// stopping a runtime whose worker panicked.
 ///
-/// [`RuntimeOperations::pin_to`](crate::runtime::RuntimeOperations::pin_to)
-/// returns this error for a worker coordinate that cannot provide affinity
-/// information for its runtime.
-///
-/// [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on)
-/// returns this error for an invalid calling context or a failed task. A task
-/// failure is retained as a [`JoinError`](crate::task::JoinError) source.
-///
-/// [`Runtime::stop`](crate::runtime::Runtime::stop) returns this error when its
-/// caller cannot wait for shutdown or when a runtime worker panicked.
+/// When [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on)
+/// fails because a task panicked or was cancelled, its source is a
+/// [`JoinError`](crate::task::JoinError).
 ///
 /// Format the error with [`Display`] and inspect [`StdError::source`] for
-/// diagnostics. Construction and affinity error messages and concrete source
-/// types are not stable error classifications. Task joins report
-/// [`JoinError`](crate::task::JoinError) directly.
+/// diagnostics. Do not depend on specific messages or source types to classify
+/// construction or affinity failures. Task joins report `JoinError` directly.
 #[derive(Debug)]
 pub struct Error {
     source: Box<dyn StdError + Send + Sync>,

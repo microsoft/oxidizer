@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use arty::runtime::{Runtime, RuntimeOperations};
 use events_once::{BoxedReceiver, Event};
 use testing_aids::execute_or_abandon;
+use thread_aware::Unaware;
 
 fn canary() -> (impl Future<Output = ()>, BoxedReceiver<()>, std::sync::Weak<()>) {
     let lifetime = Arc::new(());
@@ -33,7 +34,9 @@ fn stop_via_runtime() {
 
         let (canary, started, observer) = canary();
 
-        runtime.scheduler().spawn_anywhere(async |_| canary.await);
+        runtime
+            .scheduler()
+            .spawn_anywhere(Unaware(canary), |_, Unaware(canary)| async move { canary.await });
         futures::executor::block_on(started).unwrap();
 
         runtime.stop().unwrap();
@@ -51,15 +54,19 @@ fn stop_via_async_task() {
 
         let (canary, started, observer) = canary();
 
-        runtime.scheduler().spawn_anywhere(async |_| canary.await);
+        runtime
+            .scheduler()
+            .spawn_anywhere(Unaware(canary), |_, Unaware(canary)| async move { canary.await });
 
         futures::executor::block_on(started).unwrap();
 
         let (requested, stop_requested) = Event::boxed();
-        runtime.scheduler().spawn_anywhere(async move |cx| {
-            RuntimeOperations::from(&cx).request_stop();
-            requested.send(());
-        });
+        runtime
+            .scheduler()
+            .spawn_anywhere(Unaware(requested), |cx, Unaware(requested)| async move {
+                RuntimeOperations::from(&cx).request_stop();
+                requested.send(());
+            });
 
         futures::executor::block_on(stop_requested).unwrap();
         runtime.stop().unwrap();

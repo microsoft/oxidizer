@@ -8,20 +8,18 @@ use crate::runtime::bootstrap::pools::BlockingPools;
 /// Pass a policy to
 /// [`RuntimeBuilder::blocking_pool_policy`](crate::runtime::RuntimeBuilder::blocking_pool_policy).
 /// These pools run [`spawn_blocking`](crate::task::TaskScheduler::spawn_blocking)
-/// callbacks separately from asynchronous workers.
+/// callbacks separately from async workers.
 ///
 /// # Choosing between isolated and shared
 ///
-/// [`isolated`](Self::isolated) gives each asynchronous worker its
-/// own pool. It separates blocking-task contention between workers, but the
-/// number of pools and their thread and stack costs grow with the worker count.
+/// [`isolated`](Self::isolated) gives each async worker its own pool. This
+/// separates blocking work between workers, but can use more threads as
+/// the number of workers grows.
 ///
-/// [`shared`](Self::shared), the default, gives all workers one pool with a common thread
-/// limit. It bounds that pool's threads independently of the asynchronous worker
-/// count, but all blocking tasks compete for those threads.
+/// [`shared`](Self::shared), the default, gives all workers one pool with a
+/// common thread limit. Use `shared(n)` to cap that pool's threads.
 ///
-/// Choose using the workload's contention and thread-memory costs. Neither
-/// policy is faster for every workload.
+/// Choose based on your workload; neither policy is faster in every case.
 ///
 /// # Examples
 ///
@@ -43,10 +41,10 @@ enum Mode {
 }
 
 impl BlockingPoolPolicy {
-    /// Creates a policy with one pool per asynchronous worker.
+    /// Creates a policy with one pool per async worker.
     ///
     /// Each pool uses the runtime's default blocking-thread limit. The total
-    /// blocking-thread resources therefore grow with the asynchronous worker count.
+    /// blocking-thread resources therefore grow with the async worker count.
     ///
     /// # Examples
     ///
@@ -63,11 +61,11 @@ impl BlockingPoolPolicy {
         }
     }
 
-    /// Creates a policy sharing one blocking pool across all asynchronous workers.
+    /// Creates a policy sharing one blocking pool across all async workers.
     ///
     /// `max_workers` limits the pool's threads. Pass a positive count, or `None`
     /// to use the runtime's default limit. This limit is separate from the
-    /// asynchronous worker count.
+    /// async worker count.
     ///
     /// # Panics
     ///
