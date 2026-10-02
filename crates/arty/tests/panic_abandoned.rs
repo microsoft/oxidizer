@@ -7,9 +7,8 @@
 
 mod panic_support;
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 
 use panic_support::{isolated, runtime};
 use testing_aids::TEST_TIMEOUT;
@@ -69,10 +68,7 @@ fn abandoned_local_result_drop_is_contained() {
                 let task = cx.local_scheduler().unwrap().spawn(async move || {
                     gate.await.unwrap();
                     done.send(());
-                    ResultDropPanic {
-                        drops: captured,
-                        dropped,
-                    }
+                    ResultDropPanic { drops: captured, dropped }
                 });
                 drop(task);
                 release.send(());
@@ -98,10 +94,7 @@ fn abandoned_blocking_result_drop_is_contained() {
         let task = runtime.scheduler().spawn_blocking(move || {
             started.send(()).unwrap();
             gate.recv_timeout(TEST_TIMEOUT).unwrap();
-            ResultDropPanic {
-                drops: captured,
-                dropped,
-            }
+            ResultDropPanic { drops: captured, dropped }
         });
         ready.recv_timeout(TEST_TIMEOUT).unwrap();
         drop(task);
