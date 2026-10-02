@@ -34,8 +34,10 @@ naturally (with the future returning `Poll::Ready`) or for the executor to be sh
 only is there no “remove” function but similarly, there is no “cancel” function - once a task
 has started executing, the only thing that can terminate it is the task itself, by completing.
 
-In a steady state, the executor is allocation-free, as all memory used by the executor is
-reused for new tasks when old ones complete.
+By default, task and wake storage is pooled and reused without steady-state allocations.
+[`ExecutorBuilder::independent_wakers`][__link1] trades lazily allocated wake metadata for cloned
+wakers that can outlive tasks and executor shutdown. Arty enables this mode for its safe
+application APIs; the executor’s default retains its existing storage-lifetime contract.
 
 
 <hr/>
@@ -43,5 +45,6 @@ reused for new tasks when old ones complete.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_executor">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbVwz61IbZe5QbF4vbEa1LIsAbVDxflkNvtrIbD-TpXycN1glhZIGCakpvaW5IYW5kbGX2
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbW-sCqiqRrqYbJycqcRAFGY4btN67sVwdEVsbIJMqNkLiIsthZIKCb0V4ZWN1dG9yQnVpbGRlcvaCakpvaW5IYW5kbGX2
  [__link0]: https://crates.io/crates/JoinHandle
+ [__link1]: https://docs.rs/ExecutorBuilder/latest/ExecutorBuilder/?search=independent_wakers

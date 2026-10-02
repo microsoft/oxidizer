@@ -4,6 +4,7 @@
 //! A dropped join neither cancels its task nor transfers task panics to the caller.
 
 #![cfg(feature = "rt")]
+#![cfg(test)]
 
 mod panic_support;
 

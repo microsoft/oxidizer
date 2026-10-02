@@ -44,9 +44,7 @@ impl Future for RacingPanic {
         if let Some(first) = self.first.take() {
             first.send(cx.waker().clone()).unwrap();
         }
-        if self.ready.load(Ordering::SeqCst) {
-            panic!("task poll racing stop");
-        }
+        assert!(!self.ready.load(Ordering::SeqCst), "task poll racing stop");
         Poll::Pending
     }
 }

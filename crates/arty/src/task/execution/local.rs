@@ -8,22 +8,23 @@ use std::task::{self, Poll};
 use events_once::BoxedLocalSender;
 use observed::context::Transfer;
 use observed::{Sink, emit};
-use pin_project::pin_project;
+use pin_project::{pin_project, pinned_drop};
 
 use crate::runtime::telemetry::events::{TaskPanicked, TaskSucceeded};
 use crate::task::execution::TaskResult;
+use crate::task::execution::storage::{TaskStorage, discard_panic};
 
 /// Wraps an inner future to be executed as a local task.
 ///
 /// We use this wrapper to add standard functionality to all tasks (e.g. panic handling).
-#[pin_project]
+#[pin_project(PinnedDrop)]
 pub(super) struct LocalTaskFuture<F, R>
 where
     F: Future<Output = R>,
     R: 'static,
 {
     #[pin]
-    inner: F,
+    inner: TaskStorage<F>,
 
     parent_task_enrichment: Transfer,
 
@@ -41,10 +42,29 @@ where
 {
     pub(super) fn new(inner: F, result_tx: BoxedLocalSender<TaskResult<R>>, parent_task_enrichment: Transfer, sink: Sink) -> Self {
         Self {
-            inner,
+            inner: TaskStorage::new(inner),
             parent_task_enrichment,
             sink,
             result_tx: Some(result_tx),
+        }
+    }
+}
+
+#[pinned_drop]
+impl<F, R> PinnedDrop for LocalTaskFuture<F, R>
+where
+    F: Future<Output = R>,
+    R: 'static,
+{
+    fn drop(self: Pin<&mut Self>) {
+        let this = self.project();
+        if !this.inner.is_live() {
+            return;
+        }
+        let _guard = this.parent_task_enrichment.apply_current_thread();
+        if let Err(panic) = this.inner.destroy_pinned() {
+            emit!(this.sink, TaskPanicked);
+            discard_panic(panic);
         }
     }
 }
@@ -64,27 +84,32 @@ where
         // it will never be polled again - whatever it did to its internal state is now
         // irrelevant and if it corrupted some shared state, that is not really something we
         // can do anything about (a conscientious service will abort on panic to avoid that).
-        let inner_poll_result = catch_unwind(AssertUnwindSafe(|| this.inner.poll(cx)));
-
-        match inner_poll_result {
-            Ok(result) => match result {
-                Poll::Ready(inner_result) => {
-                    this.result_tx
-                        .take()
-                        .expect("future polled after completion")
-                        .send(TaskResult::Completed(inner_result));
-
-                    emit!(this.sink, TaskSucceeded);
-
-                    Poll::Ready(())
-                }
-                Poll::Pending => Poll::Pending,
-            },
-            Err(panic) => {
+        let inner_poll_result = catch_unwind(AssertUnwindSafe(|| match this.inner.poll(cx) {
+            Poll::Ready(result) => {
+                // An abandoned local join destroys its result on this worker.
                 this.result_tx
                     .take()
                     .expect("future polled after completion")
-                    .send(TaskResult::Panicked(panic));
+                    .send(TaskResult::Completed(result));
+                Poll::Ready(())
+            }
+            Poll::Pending => Poll::Pending,
+        }));
+
+        match inner_poll_result {
+            Ok(Poll::Ready(())) => {
+                emit!(this.sink, TaskSucceeded);
+                Poll::Ready(())
+            }
+            Ok(Poll::Pending) => Poll::Pending,
+            Err(panic) => {
+                if let Err(disposal) = catch_unwind(AssertUnwindSafe(|| {
+                    if let Some(sender) = this.result_tx.take() {
+                        sender.send(TaskResult::Panicked(panic));
+                    }
+                })) {
+                    discard_panic(disposal);
+                }
 
                 emit!(this.sink, TaskPanicked);
 

@@ -79,13 +79,13 @@ fn owner_unwind(blocking: bool) {
 #[test]
 fn async_owner_drop_during_user_panic_requests_independent_shutdown() {
     isolated("async_owner_drop_during_user_panic_requests_independent_shutdown", || {
-        owner_unwind(false)
+        owner_unwind(false);
     });
 }
 
 #[test]
 fn blocking_owner_drop_during_user_panic_requests_independent_shutdown() {
     isolated("blocking_owner_drop_during_user_panic_requests_independent_shutdown", || {
-        owner_unwind(true)
+        owner_unwind(true);
     });
 }

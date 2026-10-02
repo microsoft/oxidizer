@@ -148,9 +148,9 @@ impl RuntimeScheduler {
     /// The source worker is unknown because this scheduler can be used from
     /// outside the runtime. The function pointer receives [`Builtins`] and
     /// the relocated data. Its future need not be [`Send`], but its result must
-    /// implement [`ThreadAware`] (which includes `Send`). The result is not relocated.
+    /// be `Send`. The result is not relocated and need not implement `ThreadAware`.
     ///
-    /// Use `()` for work without a payload. For values that do not implement
+    /// Use `()` for work without a payload. For payloads that do not implement
     /// `ThreadAware`, see [`Unaware`](thread_aware::Unaware) and its guidance
     /// before wrapping them.
     ///
@@ -171,20 +171,26 @@ impl RuntimeScheduler {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     ///
-    /// A `Send` result without `ThreadAware` is not accepted:
+    /// Results can contain ordinary `Send` values without thread awareness:
     ///
-    /// ```compile_fail
+    /// ```
     /// use arty::runtime::Runtime;
     ///
-    /// struct SendOnly;
-    /// let runtime = Runtime::new().unwrap();
-    /// runtime.scheduler().spawn_anywhere((), |_, ()| async { SendOnly });
+    /// struct SendOnly(u32);
+    /// let runtime = Runtime::new()?;
+    /// let result = runtime
+    ///     .scheduler()
+    ///     .spawn_anywhere((), |_, ()| async { SendOnly(42) })
+    ///     .wait()?;
+    /// assert_eq!(result.0, 42);
+    /// runtime.stop()?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn spawn_anywhere<D, F, R>(&self, data: D, future_factory: fn(Builtins, D) -> F) -> JoinHandle<R>
     where
         D: ThreadAware + 'static,
         F: Future<Output = R> + 'static,
-        R: ThreadAware + 'static,
+        R: Send + 'static,
     {
         self.dispatcher.spawn(async move |cx| {
             let mut data = data;
@@ -227,75 +233,6 @@ impl RuntimeScheduler {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::*;
-
-    #[test]
-    fn scheduler_is_shareable_but_not_cloneable() {
-        static_assertions::assert_impl_all!(RuntimeScheduler: Send, Sync);
-        static_assertions::assert_not_impl_any!(RuntimeScheduler: Clone, thread_aware::ThreadAware);
-    }
-
-    #[test]
-    fn nested_external_executor_is_rejected_before_the_factory_is_invoked() {
-        let runtime = crate::runtime::Runtime::builder()
-            .processor_count(crate::runtime::ProcessorCount::exactly(1))
-            .build()
-            .unwrap();
-        let mut invoked = false;
-        let result = futures::executor::block_on(async { runtime.scheduler().block_on(async |_| invoked = true) });
-        result.unwrap_err();
-        assert!(!invoked);
-        assert_eq!(runtime.scheduler().block_on(async |_| 42).unwrap(), 42);
-        runtime.stop().unwrap();
-    }
-
-    #[test]
-    fn worker_context_is_reported_and_blocking_calls_return_errors() {
-        let runtime = crate::runtime::Runtime::builder()
-            .processor_count(crate::runtime::ProcessorCount::exactly(1))
-            .build()
-            .unwrap();
-        let other = crate::runtime::Runtime::builder()
-            .processor_count(crate::runtime::ProcessorCount::exactly(1))
-            .build()
-            .unwrap();
-        let scheduler = runtime.scheduler();
-        let other_scheduler = other.scheduler();
-        assert!(!scheduler.is_on_worker());
-        // Detect a missing worker flag before entering the borrowing call that must reject it.
-        assert!(scheduler.spawn_anywhere((), |_, ()| async { is_flagged() }).wait().unwrap());
-        let observed = scheduler
-            .block_on(async |_| {
-                (
-                    scheduler.is_on_worker(),
-                    other_scheduler.is_on_worker(),
-                    scheduler.block_on(async |_| 42).is_err(),
-                    other_scheduler.block_on(async |_| 42).is_err(),
-                )
-            })
-            .unwrap();
-        assert_eq!(observed, (true, false, true, true));
-    }
-
-    #[test]
-    fn blocking_pool_threads_can_block_on_worker_tasks() {
-        let runtime = Arc::new(
-            crate::runtime::Runtime::builder()
-                .processor_count(crate::runtime::ProcessorCount::exactly(1))
-                .build()
-                .unwrap(),
-        );
-        let captured = Arc::clone(&runtime);
-        let observed = runtime
-            .scheduler()
-            .spawn_blocking(move || {
-                let scheduler = captured.scheduler();
-                (scheduler.is_on_worker(), scheduler.block_on(async |_| 42).unwrap())
-            })
-            .wait()
-            .unwrap();
-        assert_eq!(observed, (false, 42));
-    }
     use std::cell::RefCell;
     use std::future::ready;
     use std::panic::{AssertUnwindSafe, catch_unwind, panic_any};
@@ -306,6 +243,7 @@ mod tests {
 
     use testing_aids::{TEST_TIMEOUT, execute_or_terminate_process};
 
+    use super::*;
     use crate::runtime::Runtime;
     use crate::task::JoinError;
 

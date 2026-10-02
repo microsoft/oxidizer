@@ -34,9 +34,7 @@ fn stop_via_runtime() {
 
         let (canary, started, observer) = canary();
 
-        runtime
-            .scheduler()
-            .spawn_anywhere(Unaware(canary), |_, Unaware(canary)| async move { canary.await });
+        runtime.scheduler().spawn_anywhere(Unaware(canary), |_, Unaware(canary)| canary);
         futures::executor::block_on(started).unwrap();
 
         runtime.stop().unwrap();
@@ -54,9 +52,7 @@ fn stop_via_async_task() {
 
         let (canary, started, observer) = canary();
 
-        runtime
-            .scheduler()
-            .spawn_anywhere(Unaware(canary), |_, Unaware(canary)| async move { canary.await });
+        runtime.scheduler().spawn_anywhere(Unaware(canary), |_, Unaware(canary)| canary);
 
         futures::executor::block_on(started).unwrap();
 

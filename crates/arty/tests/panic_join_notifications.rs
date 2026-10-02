@@ -21,12 +21,12 @@ testing_aids::init_tracing!();
 
 struct PanicWake {
     notified: Arc<AtomicBool>,
-    wakes: Arc<AtomicUsize>,
+    notifications: Arc<AtomicUsize>,
 }
 
 impl Wake for PanicWake {
     fn wake(self: Arc<Self>) {
-        self.wakes.fetch_add(1, Ordering::SeqCst);
+        self.notifications.fetch_add(1, Ordering::SeqCst);
         self.notified.store(true, Ordering::SeqCst);
         assert!(!std::thread::panicking());
         panic!("join receiver notification");
@@ -44,10 +44,10 @@ fn remote_panicking_join_waker_preserves_published_result() {
         });
         let mut join = pin!(join);
         let notified = Arc::new(AtomicBool::new(false));
-        let wakes = Arc::new(AtomicUsize::new(0));
+        let notifications = Arc::new(AtomicUsize::new(0));
         let waker = Waker::from(Arc::new(PanicWake {
             notified: Arc::clone(&notified),
-            wakes: Arc::clone(&wakes),
+            notifications: Arc::clone(&notifications),
         }));
         assert!(join.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
         release.send(());
@@ -58,7 +58,7 @@ fn remote_panicking_join_waker_preserves_published_result() {
         }
         assert_eq!(futures::executor::block_on(join).unwrap(), 42);
         assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 7 }).wait().unwrap(), 7);
-        assert_eq!(wakes.load(Ordering::SeqCst), 1);
+        assert_eq!(notifications.load(Ordering::SeqCst), 1);
         runtime.stop().unwrap();
     });
 }
@@ -77,10 +77,10 @@ fn local_panicking_join_waker_preserves_published_result() {
                 });
                 let mut join = pin!(join);
                 let notified = Arc::new(AtomicBool::new(false));
-                let wakes = Arc::new(AtomicUsize::new(0));
+                let notifications = Arc::new(AtomicUsize::new(0));
                 let waker = Waker::from(Arc::new(PanicWake {
                     notified: Arc::clone(&notified),
-                    wakes: Arc::clone(&wakes),
+                    notifications: Arc::clone(&notifications),
                 }));
                 assert!(join.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
                 release.send(());
@@ -94,7 +94,7 @@ fn local_panicking_join_waker_preserves_published_result() {
                 })
                 .await;
                 assert_eq!(*join.await.unwrap(), 42);
-                assert_eq!(wakes.load(Ordering::SeqCst), 1);
+                assert_eq!(notifications.load(Ordering::SeqCst), 1);
                 assert_eq!(*cx.local_scheduler().unwrap().spawn(async || std::rc::Rc::new(7)).await.unwrap(), 7);
             })
             .unwrap();

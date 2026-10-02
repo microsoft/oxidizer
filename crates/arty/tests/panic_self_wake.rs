@@ -34,7 +34,8 @@ impl Future for SelfWakePanic {
         self.polls.fetch_add(1, Ordering::SeqCst);
         for _ in 0..8 {
             cx.waker().wake_by_ref();
-            cx.waker().clone().wake();
+            let consuming = cx.waker().clone();
+            consuming.wake();
         }
         panic!("self-waking task poll");
     }

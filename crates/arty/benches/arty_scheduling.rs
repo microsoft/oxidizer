@@ -157,7 +157,7 @@ impl ArtyCase {
                     self.handles.extend((0..self.count).map(|_| {
                         // This workload intentionally shares one wake channel across workers.
                         scheduler.spawn_anywhere(Unaware(sender.clone()), |_, Unaware(sender)| async move {
-                            RemoteWake::new(sender.clone()).await
+                            RemoteWake::new(sender.clone()).await;
                         })
                     }));
                     for handle in &mut self.handles {

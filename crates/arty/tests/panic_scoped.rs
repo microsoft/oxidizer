@@ -33,9 +33,7 @@ impl Future for BorrowedTask<'_> {
     fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<u32> {
         let this = self.as_ref().get_ref();
         this.address.set(Some(std::ptr::from_ref(this).addr()));
-        if this.panic_poll {
-            panic!("borrowed pinned task poll");
-        }
+        assert!(!this.panic_poll, "borrowed pinned task poll");
         Poll::Ready(42)
     }
 }
@@ -44,9 +42,7 @@ impl Drop for BorrowedTask<'_> {
     fn drop(&mut self) {
         assert_eq!(Some(std::ptr::from_ref(self).addr()), self.address.get());
         self.drops.fetch_add(1, Ordering::SeqCst);
-        if self.panic_drop {
-            panic!("borrowed pinned task destructor");
-        }
+        assert!(!self.panic_drop, "borrowed pinned task destructor");
     }
 }
 

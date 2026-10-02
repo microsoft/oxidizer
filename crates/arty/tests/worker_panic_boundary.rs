@@ -4,6 +4,7 @@
 //! Escaped timer callbacks cannot release storage referenced by live task wakers.
 
 #![cfg(feature = "rt")]
+#![cfg(test)]
 #![cfg(not(miri))] // The regression isolates intentional process termination in a native child.
 
 testing_aids::init_tracing!();

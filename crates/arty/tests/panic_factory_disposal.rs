@@ -35,6 +35,10 @@ fn queued_remote_factory_drop_panic_does_not_interrupt_shutdown() {
         let invoked = Arc::new(AtomicUsize::new(0));
         let capture = CaptureDropPanic(Arc::clone(&drops));
         let captured_invoked = Arc::clone(&invoked);
+        #[expect(
+            clippy::async_yields_async,
+            reason = "the join must be observed after root destruction and shutdown, not awaited inside the root"
+        )]
         let queued = runtime
             .scheduler()
             .block_on(async move |cx| {

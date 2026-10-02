@@ -326,7 +326,6 @@ pub(crate) struct InnerBuiltins {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
-    use std::fmt::Debug;
     #[cfg(not(miri))]
     use std::thread;
 
@@ -342,33 +341,6 @@ mod tests {
     use crate::runtime::Runtime;
     #[cfg(not(miri))]
     use crate::runtime::config::ProcessorCount;
-
-    #[test]
-    fn assert_builtin_traits() {
-        static_assertions::assert_impl_all!(Builtins: AsRef<TaskScheduler>, AsRef<Clock>, Send, Sync, Clone, Debug);
-    }
-
-    #[cfg(not(miri))]
-    #[test]
-    fn borrowed_services_are_the_worker_services() {
-        Runtime::builder()
-            .processor_count(ProcessorCount::exactly(1))
-            .build()
-            .unwrap()
-            .scheduler()
-            .block_on(async |cx| {
-                let scheduler: &TaskScheduler = cx.as_ref();
-                let clock: &Clock = cx.as_ref();
-                let simple_clock: &SimpleClock = cx.as_ref();
-                let sink: &Sink = cx.as_ref();
-                assert!(std::ptr::eq(scheduler, cx.scheduler()));
-                assert!(std::ptr::eq(clock, cx.clock()));
-                assert!(std::ptr::eq(simple_clock, cx.clock().as_ref()));
-                assert!(std::ptr::eq(sink, cx.sink()));
-                assert_eq!(scheduler.spawn(async |_| 42).await.unwrap(), 42);
-            })
-            .unwrap();
-    }
 
     #[cfg(all(debug_assertions, not(miri)))]
     #[test]

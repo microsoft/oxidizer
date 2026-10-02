@@ -67,14 +67,14 @@ impl Drop for CancellationTimer {
 #[test]
 fn final_timer_panic_reports_worker_failure_after_joining_blocking_work() {
     isolated("final_timer_panic_reports_worker_failure_after_joining_blocking_work", || {
-        timer_case(true)
+        timer_case(true);
     });
 }
 
 #[test]
 fn final_timer_without_escaped_task_waker_reports_joined_worker_failure() {
     isolated("final_timer_without_escaped_task_waker_reports_joined_worker_failure", || {
-        timer_case(false)
+        timer_case(false);
     });
 }
 
@@ -115,7 +115,8 @@ fn timer_case(retain_waker: bool) {
     assert!(task.wait().unwrap_err().is_shutdown());
     if let Some(retained) = retained {
         retained.wake_by_ref();
-        retained.clone().wake();
+        let consuming = retained.clone();
+        consuming.wake();
         drop(retained);
     }
 }

@@ -21,9 +21,11 @@
 //! rather than capturing it in a closure. The order in which you submit tasks
 //! does not determine when they finish.
 //!
-//! Results from `spawn_anywhere` and `spawn_everywhere` must also implement
-//! [`ThreadAware`](crate::core::ThreadAware), which includes `Send`. Joining does
-//! not relocate them; relocate returned values explicitly when needed.
+//! Results from worker-bound `TaskScheduler::spawn_anywhere` and
+//! `spawn_everywhere` must also implement [`ThreadAware`](crate::core::ThreadAware),
+//! which includes `Send`. Runtime-wide `RuntimeScheduler::spawn_anywhere` accepts
+//! any `Send` result. Joining does not relocate results; relocate worker-aware
+//! returned values explicitly when needed.
 //!
 //! # Create local state on a worker
 //!

@@ -124,7 +124,12 @@ where
         // We guarantee this via our own safety requirement (it happens in `run()`). We know that
         // the caller has the chance to fulfill their safety guarantee because none of the code
         // between this point and end of the current function can panic.
-        let executor = unsafe { Executor::builder().owner_waker(WorkerSignal::waker(&signal)).build() };
+        let executor = unsafe {
+            Executor::builder()
+                .owner_waker(WorkerSignal::waker(&signal))
+                .independent_wakers()
+                .build()
+        };
         let tasks = executor.tasks();
 
         let thread_state = Rc::new(OnceCell::new());
@@ -183,11 +188,10 @@ where
             _ = self.clock_driver.advance_timers(Instant::now());
 
             match cycle_outcome {
-                CycleOutcome::Continue => {}
                 // Retain the donor's timer cadence, including externally controlled clocks.
                 // A notification arriving before this wait is retained by WorkerSignal.
                 CycleOutcome::Suspend if !batch_exhausted => self.signal.wait(SUSPEND_SLEEP_DURATION),
-                CycleOutcome::Suspend => {}
+                CycleOutcome::Continue | CycleOutcome::Suspend => {}
                 // This is the only way to exit the loop, guaranteeing safe shutdown of the
                 // executor. The storage has already been retired before timer callbacks run.
                 CycleOutcome::Shutdown => break,

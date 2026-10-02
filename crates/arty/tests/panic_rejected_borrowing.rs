@@ -41,7 +41,7 @@ fn stopped_borrowing_factory_is_destroyed_before_its_drop_unwind_escapes() {
                 std::future::ready(())
             })
         }));
-        assert!(result.is_err());
+        result.unwrap_err();
         assert_eq!(drops.load(Ordering::SeqCst), 1);
         assert_eq!(invoked.load(Ordering::SeqCst), 0);
         runtime.stop().unwrap();
@@ -65,7 +65,7 @@ fn nested_borrowing_factory_drop_unwind_does_not_submit_work() {
                 })
             }))
         });
-        assert!(result.is_err());
+        result.unwrap_err();
         assert_eq!(drops.load(Ordering::SeqCst), 1);
         assert_eq!(invoked.load(Ordering::SeqCst), 0);
         assert_eq!(runtime.scheduler().block_on(async |_| 42).unwrap(), 42);

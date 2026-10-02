@@ -40,9 +40,10 @@ It includes `Send`, so moving the value must be safe even without relocation.
 Moving or cloning alone does not change its worker association.
 
 `spawn_anywhere` and `spawn_everywhere` relocate their explicit input to the
-destination worker before starting the task. Their results must also be
-`ThreadAware`, but joining does not relocate them. Ordinary `spawn` and
-`block_on` do not relocate captures or results.
+destination worker before starting the task. On a worker's `TaskScheduler`,
+their results must also be `ThreadAware`. Runtime-wide `spawn_anywhere` accepts
+any `Send` result. Joining does not relocate results; ordinary `spawn` and
+`block_on` do not relocate captures or results either.
 
 Relocation does not transfer Arty's worker-bound handles to another runtime.
 See the

@@ -117,8 +117,7 @@ where
         // We enforce this via an equivalent safety requirement on the `Task::initialize()`.
         let waker = unsafe { wake_signal.waker_ref() };
 
-        // In debug builds, we wrap the waker with a diagnostic layer, as waker leaks are very
-        // damaging due to blocking shutdown and we want to offer maximal debugging information.
+        // In debug builds, a diagnostic layer records where wakers were cloned.
         #[cfg(debug_assertions)]
         let waker = DiagnosticWaker::with_inner_and_registry(waker.clone(), Arc::clone(&self.diagnostic_waker_registry));
 
@@ -143,6 +142,7 @@ where
 
         match poll_result {
             task::Poll::Ready(result) => {
+                wake_signal.retire();
                 let result_tx = payload
                     .result_tx
                     .take()
@@ -193,6 +193,11 @@ where
 
     #[cfg_attr(test, mutants::skip)] // Mutation causes resources not to be released, leading to executor shutdown never happening.
     fn abort(self: Pin<&Self>) {
+        // SAFETY: initialized wake metadata is only retired by the task's owner.
+        let signal = unsafe { &*self.wake_signal.get() };
+        if let Some(signal) = signal {
+            signal.retire();
+        }
         // SAFETY: The `Task` is single-threaded and we only ever create temporary references
         // to `payload` that do not escape `Task` methods, so we know there cannot be a conflicting
         // reference to this field.
@@ -284,10 +289,8 @@ pub(crate) trait TypeErasedTask {
     /// may be the owner of memory referenced by other entities in the process, so cannot be
     /// dropped while such resources are still in use by anyone.
     ///
-    /// When `abort()` has been called or `poll()` has indicated task completion, there is nothing
-    /// else the owner of the task can do to bring this to a value of `true` - we rely on external
-    /// parties related to this task (e.g. being awaited by it) to release their resources on their
-    /// own initiative when they see the task is no longer executing (e.g. via a dropped future).
+    /// Completion and cancellation retire the wake metadata so external wakers
+    /// cannot retain or access this task's storage.
     fn is_inert(&self) -> bool;
 
     /// Swaps the task's "is awakened" flag to false and returns its previous value.
@@ -300,8 +303,7 @@ pub(crate) trait TypeErasedTask {
     /// Clears the inner state of the task, entering a form where no further polling is possible
     /// and any future-specific state is dropped.
     ///
-    /// The resources owned by the task may still remain in use - this has no implications with
-    /// regard to what `is_inert()` is expected to return.
+    /// Independently owned wake metadata may remain alive, but is inert.
     fn abort(self: Pin<&Self>);
 
     /// Initializes the task, providing it the wake signal that it needs to enable polling

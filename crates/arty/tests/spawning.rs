@@ -177,6 +177,25 @@ fn worker_bound_spawn_results_do_not_require_thread_awareness() {
     assert_eq!(scheduler.spawn(async |_| ResultValue(43)).wait().unwrap().0, 43);
 }
 
+#[test]
+fn runtime_spawn_anywhere_accepts_send_only_non_sync_results() {
+    struct ResultValue(std::cell::Cell<u32>);
+
+    static_assertions::assert_impl_all!(ResultValue: Send);
+    static_assertions::assert_not_impl_any!(ResultValue: Sync, ThreadAware);
+    let runtime = Runtime::builder()
+        .processor_count(arty::runtime::ProcessorCount::at_most(1))
+        .build()
+        .unwrap();
+    let result = runtime
+        .scheduler()
+        .spawn_anywhere((), |_, ()| async { ResultValue(std::cell::Cell::new(42)) })
+        .wait()
+        .unwrap();
+    assert_eq!(result.0.get(), 42);
+    runtime.stop().unwrap();
+}
+
 struct EverywhereProbe {
     scheduler: TaskScheduler,
     source: Option<Thread>,

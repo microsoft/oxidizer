@@ -31,7 +31,7 @@ impl Drop for Payload {
     }
 }
 
-fn check(runtime: arty::runtime::Runtime, drops: &AtomicUsize, received: mpsc::Receiver<()>) {
+fn check(runtime: arty::runtime::Runtime, drops: &AtomicUsize, received: &mpsc::Receiver<()>) {
     received.recv_timeout(TEST_TIMEOUT).unwrap();
     assert_eq!(drops.load(Ordering::SeqCst), 1);
     assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 }).wait().unwrap(), 42);
@@ -55,7 +55,7 @@ fn abandoned_remote_factory_payload_drop_is_contained() {
                 drop(join);
             })
             .unwrap();
-        check(runtime, &drops, received);
+        check(runtime, &drops, &received);
     });
 }
 
@@ -76,7 +76,7 @@ fn abandoned_remote_poll_payload_drop_is_contained() {
                 drop(join);
             })
             .unwrap();
-        check(runtime, &drops, received);
+        check(runtime, &drops, &received);
     });
 }
 
@@ -97,7 +97,7 @@ fn abandoned_local_poll_payload_drop_is_contained() {
                 drop(join);
             })
             .unwrap();
-        check(runtime, &drops, received);
+        check(runtime, &drops, &received);
     });
 }
 
@@ -121,6 +121,6 @@ fn abandoned_blocking_payload_drop_is_contained() {
         ready.recv_timeout(TEST_TIMEOUT).unwrap();
         drop(join);
         release.send(()).unwrap();
-        check(runtime, &drops, received);
+        check(runtime, &drops, &received);
     });
 }

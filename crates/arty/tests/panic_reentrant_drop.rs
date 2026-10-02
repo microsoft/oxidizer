@@ -31,9 +31,7 @@ impl Future for Cleanup {
     type Output = u32;
 
     fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<u32> {
-        if self.panic_poll {
-            panic!("task poll before local cleanup submission");
-        }
+        assert!(!self.panic_poll, "task poll before local cleanup submission");
         Poll::Ready(42)
     }
 }

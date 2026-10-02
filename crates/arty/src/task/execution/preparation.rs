@@ -12,6 +12,7 @@ use performables::sync::channel::oneshot;
 use crate::task::execution::local::LocalTaskFuture;
 use crate::task::execution::remote::RemoteTaskFuture;
 use crate::task::execution::result::TaskResult;
+use crate::task::execution::storage::TaskFactory;
 use crate::task::join::{JoinHandle, LocalJoinHandle};
 
 /// A future factory for a remote future scheduled from a different thread. The future factory
@@ -37,9 +38,7 @@ where
     R: 'static,
 {
     let (result_tx, result_rx) = LocalEvent::boxed();
-    // Drop a completed future inside the polling panic boundary, before publishing its result.
-    let inner = async move { future.await };
-    let future = LocalTaskFuture::new(inner, result_tx, parent_task_enrichment, sink);
+    let future = LocalTaskFuture::new(future, result_tx, parent_task_enrichment, sink);
     (future, LocalJoinHandle::new(result_rx))
 }
 
@@ -55,9 +54,10 @@ where
     R: Send + 'static,
 {
     let (result_tx, result_rx) = oneshot::<TaskResult<R>>();
+    let future_factory = TaskFactory::new(future_factory, parent_task_enrichment.clone(), sink.clone());
     let future_factory: BoxedRemoteFutureFactory<C> = Box::new(move |cx, tasks| {
         // Factory invocation belongs inside the same panic boundary as polling.
-        let inner = async move { future_factory(cx).await };
+        let inner = async move { future_factory.into_inner()(cx).await };
 
         // The executor join handle is not used - the task delivers its result through the
         // channel above, which unlike the executor's join handle can cross thread boundaries.

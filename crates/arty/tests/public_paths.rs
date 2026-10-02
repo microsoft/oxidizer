@@ -20,7 +20,8 @@ use thread_aware::ThreadAware;
 assert_impl_all!(Runtime: Send, Sync, Debug);
 assert_not_impl_any!(Runtime: ThreadAware);
 assert_impl_all!(RuntimeBuilder: Debug);
-assert_impl_all!(Builtins: Send, Sync, Clone, Debug, ThreadAware);
+assert_impl_all!(Builtins: Send, Sync, Clone, Debug, ThreadAware,
+    AsRef<TaskScheduler>, AsRef<arty::time::Clock>, AsRef<arty::time::SimpleClock>, AsRef<observed::Sink>);
 assert_impl_all!(TaskScheduler: Send, Sync, Clone, Debug);
 assert_not_impl_any!(TaskScheduler: UnwindSafe, RefUnwindSafe);
 assert_impl_all!(JoinHandle<()>: Future, Send);

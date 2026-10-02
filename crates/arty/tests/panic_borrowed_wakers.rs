@@ -39,9 +39,7 @@ impl Future for Borrowed<'_> {
         if let Some(sent) = self.sent.take() {
             sent.send(cx.waker().clone()).unwrap();
         }
-        if self.panic_poll {
-            panic!("borrowed root poll");
-        }
+        assert!(!self.panic_poll, "borrowed root poll");
         Poll::Ready(self.text.len())
     }
 }
@@ -83,7 +81,8 @@ fn scoped_wakers_remain_valid_after_caller_storage_is_destroyed() {
             std::thread::spawn(move || {
                 for _ in 0..8 {
                     retained.wake_by_ref();
-                    retained.clone().wake();
+                    let consuming = retained.clone();
+                    consuming.wake();
                 }
             })
             .join()

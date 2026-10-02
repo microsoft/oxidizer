@@ -5,6 +5,20 @@ callback panics through `JoinError`. Receiving that error does not resume the
 panic or repair the task's application state. With `panic = "abort"`, a panic
 aborts the process instead.
 
+Async result delivery is also covered when Arty discards a result or panic
+payload because its join was dropped. A panicking join-notification callback
+does not discard an already-delivered result. Destroying a value or error
+already owned by the caller is the caller's responsibility.
+
+During shutdown, Arty contains sole destructor panics in cancelled async
+futures and accepted queued factories, then continues cleanup. Their joins
+still report cancellation. This does not repair shared state or make a panic
+during another unwind recoverable.
+
+Discarding a panic payload can itself panic. Repeated disposal failures are a
+last-resort termination case, not a guarantee of recovery from arbitrary
+programming errors.
+
 A panic that escapes task handling while the runtime still owns live task
 storage stops the process rather than risking memory corruption. This safety
 boundary is not permission to continue using panic-damaged state.

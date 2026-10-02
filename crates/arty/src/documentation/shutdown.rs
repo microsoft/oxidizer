@@ -61,3 +61,7 @@
 //!
 //! Explicit `stop` waits for all workers before reporting a worker failure.
 //! Dropping the owner cannot return that error.
+//!
+//! Cloned task wakers do not delay shutdown. Once their task completes or is
+//! cancelled, they remain valid but no longer schedule work, even after the
+//! runtime has stopped.
