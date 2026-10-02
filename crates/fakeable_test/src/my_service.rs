@@ -16,6 +16,9 @@ pub struct MyService {
 
 #[fakeable::fakeable]
 impl MyService {
+    #[cfg(any())]
+    pub unsafe fn disabled_unsafe(&self) {}
+
     #[must_use]
     pub const fn new(value: String, other_value: i32) -> Self {
         Self { value, other_value }

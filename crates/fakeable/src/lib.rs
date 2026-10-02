@@ -185,6 +185,7 @@ use proc_macro::TokenStream;
 ///   signatures with multiple nested elided references; use a manual fake for those method shapes.
 /// - Mockall generation preserves method `cfg`/`cfg_attr` attributes and rejects nested elided
 ///   references beneath implicit higher-ranked function-pointer or trait-object binders.
+///   Diagnostics for unsupported cfg-gated methods carry the same gating attributes.
 /// - Mockall generation rejects generic impl blocks; use a manual fake for generic services.
 /// - Mockall generation rejects trait impl blocks; use a manual fake for trait implementations.
 /// - Unsafe impl blocks are rejected because the macro cannot establish their safety invariants for
@@ -202,6 +203,8 @@ use proc_macro::TokenStream;
 ///   layout and ABI.
 /// - Fake implementation paths beginning with `self` or `super`, and qualified impl targets, are
 ///   rejected because generated helper items live in a different module.
+/// - Impl blocks containing `self::` or `super::` paths, or concrete service references in impl
+///   generic bounds and where predicates, are rejected because the real impl is relocated.
 /// - Struct declarations containing `self` or `super` paths, including generics, attributes, field
 ///   types, and type-macro payloads, are rejected because the real struct is relocated into that
 ///   helper module.

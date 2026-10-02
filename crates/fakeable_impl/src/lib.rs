@@ -20,6 +20,14 @@ fn fakes_cfg_attr(fakes_attribute: &str) -> proc_macro2::TokenStream {
     quote! { #[cfg(any(feature = #fakes_attribute, test))] }
 }
 
+fn method_gating_attrs(method: &syn::ImplItemFn) -> Vec<&syn::Attribute> {
+    method
+        .attrs
+        .iter()
+        .filter(|attr| attr.path().is_ident("cfg") || cfg_attr_can_disable_item(attr))
+        .collect()
+}
+
 /// Helper function to generate a method call with optional await
 fn generate_method_call(
     target: &proc_macro2::Ident,
@@ -128,7 +136,13 @@ fn process_struct(args: &FakeableArgs, item_struct: &ItemStruct) -> proc_macro2:
         }
     }
 
-    if struct_attrs.iter().any(attribute_contains_relative_path) || token_stream_contains_relative_path(struct_generics.to_token_stream()) {
+    if struct_attrs.iter().any(attribute_contains_relative_path)
+        || token_stream_contains_relative_path(struct_generics.to_token_stream())
+        || struct_generics
+            .where_clause
+            .as_ref()
+            .is_some_and(|where_clause| token_stream_contains_relative_path(where_clause.to_token_stream()))
+    {
         return syn::Error::new_spanned(
             struct_generics,
             "struct declarations containing self or super paths are not supported because the real struct is moved into a helper module",
@@ -284,6 +298,22 @@ fn process_impl(args: &FakeableArgs, item_impl: &ItemImpl) -> proc_macro2::Token
     };
     let struct_name = &struct_segment.ident;
 
+    if token_stream_contains_relative_path(item_impl.to_token_stream()) {
+        return syn::Error::new_spanned(
+            item_impl,
+            "impl blocks containing self or super paths are not supported because the real impl is moved into a helper module",
+        )
+        .into_compile_error();
+    }
+
+    if generics_contain_concrete_service_name(&item_impl.generics, struct_name) {
+        return syn::Error::new_spanned(
+            &item_impl.generics,
+            "the concrete service type is not supported in impl generic bounds or where predicates",
+        )
+        .into_compile_error();
+    }
+
     if let Some((trait_path, _)) = &item_impl.trait_
         && trait_path_contains_wrapper_sensitive_type(trait_path, struct_name)
     {
@@ -366,7 +396,20 @@ fn attribute_contains_relative_path(attr: &syn::Attribute) -> bool {
 }
 
 fn token_stream_contains_relative_path(tokens: TokenStream) -> bool {
-    token_stream_contains_ident(tokens.clone(), "self") || token_stream_contains_ident(tokens, "super")
+    let tokens: Vec<_> = tokens.into_iter().collect();
+    tokens
+        .iter()
+        .any(|token| matches!(token, proc_macro2::TokenTree::Group(group) if token_stream_contains_relative_path(group.stream())))
+        || tokens.windows(3).any(|tokens| {
+            matches!(
+                tokens,
+                [
+                    proc_macro2::TokenTree::Ident(ident),
+                    proc_macro2::TokenTree::Punct(first),
+                    proc_macro2::TokenTree::Punct(second)
+                ] if (ident == "self" || ident == "super") && first.as_char() == ':' && second.as_char() == ':'
+            )
+        })
 }
 
 fn token_stream_contains_ident(tokens: TokenStream, expected: &str) -> bool {
@@ -472,8 +515,21 @@ fn generate_wrapper_impl(
                     real_struct_segment,
                     helper_module_name,
                     trait_path,
-                )?;
-                delegation_methods.push(syn::ImplItem::Fn(delegation_method));
+                );
+                match delegation_method {
+                    Ok(method) => delegation_methods.push(syn::ImplItem::Fn(method)),
+                    Err(error) => {
+                        let gating_attrs = method_gating_attrs(method);
+                        if gating_attrs.is_empty() {
+                            return Err(error);
+                        }
+                        let compile_error = error.into_compile_error();
+                        delegation_methods.push(syn::ImplItem::Verbatim(quote! {
+                            #(#gating_attrs)*
+                            #compile_error
+                        }));
+                    }
+                }
             }
             _ if is_trait_impl => {
                 if token_stream_contains_ident(item.to_token_stream(), "Self") {
@@ -1298,11 +1354,109 @@ fn add_lifetime_to_nested_references(ty: &mut syn::Type, lifetime: &syn::Lifetim
     syn::visit_mut::VisitMut::visit_type_mut(&mut visitor, ty);
 }
 
+fn validate_mockall_method(method: &syn::ImplItemFn, is_delegated: bool) -> Result<(), syn::Error> {
+    if !is_delegated {
+        return Ok(());
+    }
+
+    let is_mut = method.sig.inputs.iter().any(|input| {
+        matches!(
+            input,
+            syn::FnArg::Receiver(receiver)
+                if receiver.mutability.is_some()
+                    || matches!(
+                        receiver.kind,
+                        syn::ReceiverKind::Reference(_, _, Some(_))
+                    )
+        )
+    });
+
+    if method
+        .sig
+        .receiver()
+        .is_some_and(|receiver| matches!(receiver.kind, syn::ReceiverKind::Value))
+    {
+        return Err(syn::Error::new_spanned(
+            &method.sig,
+            "generate_mockall_fake does not support consuming self receivers; use a manual fake implementation",
+        ));
+    }
+
+    if is_mut {
+        return Err(syn::Error::new_spanned(
+            &method.sig,
+            "generate_mockall_fake does not support mutable receiver methods; use a manual fake implementation",
+        ));
+    }
+
+    if matches!(method.vis, syn::Visibility::Restricted(_)) {
+        return Err(syn::Error::new_spanned(
+            &method.vis,
+            "generate_mockall_fake does not support restricted method visibility; use `pub` or a manual fake implementation",
+        ));
+    }
+
+    if method.sig.constness.is_some() {
+        return Err(syn::Error::new_spanned(
+            &method.sig,
+            "generate_mockall_fake does not support const methods; use a manual fake implementation",
+        ));
+    }
+
+    if returns_self(&method.sig.output) {
+        return Err(syn::Error::new_spanned(
+            &method.sig.output,
+            "generate_mockall_fake does not support methods returning Self; use a manual fake implementation",
+        ));
+    }
+
+    if method.sig.inputs.iter().any(|input| {
+        matches!(
+            input,
+            syn::FnArg::Typed(syn::PatType { ty, .. })
+                if type_contains_implicit_higher_ranked_elision(ty)
+        )
+    }) {
+        return Err(syn::Error::new_spanned(
+            &method.sig,
+            "generate_mockall_fake does not support nested elided references beneath implicit higher-ranked function or trait-object binders",
+        ));
+    }
+
+    let nested_elision_count = method
+        .sig
+        .inputs
+        .iter()
+        .filter_map(|input| match input {
+            syn::FnArg::Typed(syn::PatType { ty, .. }) => Some(count_nested_elided_references(ty, false)),
+            syn::FnArg::Receiver(_) => None,
+        })
+        .sum::<usize>();
+    if nested_elision_count > 1 {
+        return Err(syn::Error::new_spanned(
+            &method.sig,
+            "generate_mockall_fake does not support multiple nested elided references because their independent lifetimes cannot be preserved",
+        ));
+    }
+
+    let has_bound_lifetimes = method.sig.inputs.iter().any(|input| {
+        matches!(
+            input,
+            syn::FnArg::Typed(syn::PatType { ty, .. })
+                if type_contains_bound_lifetimes(ty)
+        )
+    });
+    if nested_elision_count > 0 && has_bound_lifetimes {
+        return Err(syn::Error::new_spanned(
+            &method.sig,
+            "generate_mockall_fake does not support nested elided references beneath higher-ranked lifetime binders",
+        ));
+    }
+
+    Ok(())
+}
+
 /// Generates a mockall mock! macro for the given impl block.
-#[expect(
-    clippy::too_many_lines,
-    reason = "Validation and signature conversion are kept together for one generated mock block"
-)]
 fn generate_mockall_fake(
     item_impl: &ItemImpl,
     fake_name: &str,
@@ -1314,6 +1468,7 @@ fn generate_mockall_fake(
 
     // Extract methods from the impl block
     let mut mock_methods = Vec::new();
+    let mut mock_errors = Vec::new();
 
     for item in &item_impl.items {
         if let syn::ImplItem::Fn(method) = item {
@@ -1321,102 +1476,20 @@ fn generate_mockall_fake(
             let has_self = method.sig.inputs.iter().any(|input| matches!(input, syn::FnArg::Receiver(_)));
             let is_delegated = has_self && matches!(method.vis, syn::Visibility::Public(_) | syn::Visibility::Restricted(_));
 
-            let is_mut = method.sig.inputs.iter().any(|input| {
-                matches!(
-                    input,
-                    syn::FnArg::Receiver(receiver)
-                        if receiver.mutability.is_some()
-                            || matches!(
-                                receiver.kind,
-                                syn::ReceiverKind::Reference(_, _, Some(_))
-                            )
-                )
-            });
-
-            if is_delegated
-                && method
-                    .sig
-                    .receiver()
-                    .is_some_and(|receiver| matches!(receiver.kind, syn::ReceiverKind::Value))
-            {
-                return Err(syn::Error::new_spanned(
-                    &method.sig,
-                    "generate_mockall_fake does not support consuming self receivers; use a manual fake implementation",
-                ));
-            }
-
-            if is_delegated && is_mut {
-                return Err(syn::Error::new_spanned(
-                    &method.sig,
-                    "generate_mockall_fake does not support mutable receiver methods; use a manual fake implementation",
-                ));
-            }
-
-            if is_delegated && matches!(method.vis, syn::Visibility::Restricted(_)) {
-                return Err(syn::Error::new_spanned(
-                    &method.vis,
-                    "generate_mockall_fake does not support restricted method visibility; use `pub` or a manual fake implementation",
-                ));
+            if let Err(error) = validate_mockall_method(method, is_delegated) {
+                let gating_attrs = method_gating_attrs(method);
+                if gating_attrs.is_empty() {
+                    return Err(error);
+                }
+                let compile_error = error.into_compile_error();
+                mock_errors.push(quote! {
+                    #(#gating_attrs)*
+                    #compile_error
+                });
+                continue;
             }
 
             if is_delegated {
-                if method.sig.constness.is_some() {
-                    return Err(syn::Error::new_spanned(
-                        &method.sig,
-                        "generate_mockall_fake does not support const methods; use a manual fake implementation",
-                    ));
-                }
-
-                if returns_self(&method.sig.output) {
-                    return Err(syn::Error::new_spanned(
-                        &method.sig.output,
-                        "generate_mockall_fake does not support methods returning Self; use a manual fake implementation",
-                    ));
-                }
-
-                if method.sig.inputs.iter().any(|input| {
-                    matches!(
-                        input,
-                        syn::FnArg::Typed(syn::PatType { ty, .. })
-                            if type_contains_implicit_higher_ranked_elision(ty)
-                    )
-                }) {
-                    return Err(syn::Error::new_spanned(
-                        &method.sig,
-                        "generate_mockall_fake does not support nested elided references beneath implicit higher-ranked function or trait-object binders",
-                    ));
-                }
-
-                let nested_elision_count = method
-                    .sig
-                    .inputs
-                    .iter()
-                    .filter_map(|input| match input {
-                        syn::FnArg::Typed(syn::PatType { ty, .. }) => Some(count_nested_elided_references(ty, false)),
-                        syn::FnArg::Receiver(_) => None,
-                    })
-                    .sum::<usize>();
-                let has_nested_elision = nested_elision_count > 0;
-                if nested_elision_count > 1 {
-                    return Err(syn::Error::new_spanned(
-                        &method.sig,
-                        "generate_mockall_fake does not support multiple nested elided references because their independent lifetimes cannot be preserved",
-                    ));
-                }
-                let has_bound_lifetimes = method.sig.inputs.iter().any(|input| {
-                    matches!(
-                        input,
-                        syn::FnArg::Typed(syn::PatType { ty, .. })
-                            if type_contains_bound_lifetimes(ty)
-                    )
-                });
-                if has_nested_elision && has_bound_lifetimes {
-                    return Err(syn::Error::new_spanned(
-                        &method.sig,
-                        "generate_mockall_fake does not support nested elided references beneath higher-ranked lifetime binders",
-                    ));
-                }
-
                 // Add explicit lifetimes to avoid mockall compilation errors
                 let sig_with_lifetimes = add_explicit_lifetimes(&method.sig);
 
@@ -1444,6 +1517,7 @@ fn generate_mockall_fake(
         // Generate in current module
         Ok(quote! {
             #fakes_cfg
+            #(#mock_errors)*
             ::mockall::mock! {
                 #[derive(Debug)]
                 pub #fake_ident {
@@ -1456,6 +1530,7 @@ fn generate_mockall_fake(
         let module_ident = quote::format_ident!("{}", fake_module);
         Ok(quote! {
             #fakes_cfg
+            #(#mock_errors)*
             #[allow(clippy::all)]
             #[allow(clippy::pedantic)]
             #[allow(clippy::style)]

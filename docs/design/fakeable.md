@@ -63,6 +63,10 @@ the struct declaration—including generics, struct/field attributes, field
 types, and type-macro payloads—are rejected for the same reason: the real struct
 is moved into that helper module unchanged.
 
+The real impl block is relocated into the same helper module. Relative
+`self::`/`super::` paths anywhere in that impl are therefore rejected, as are
+concrete service-type references in impl generic bounds and where predicates.
+
 Conditional derives expressed through `cfg_attr` are rejected; derives must be
 applied directly so they can be copied consistently. Layout `repr` attributes
 are rejected because the wrapper's single enum field does not preserve the
@@ -104,7 +108,9 @@ receivers and const methods are also rejected for generated Mockall fakes;
 manual fakes remain available for those method shapes. Implicit higher-ranked
 function-pointer and trait-object elision is rejected for the same reason.
 Method-level `cfg` and `cfg_attr` attributes are preserved on generated Mockall
-declarations.
+declarations. When a cfg-gated method has an unsupported signature, its
+diagnostic is emitted with the same gating attributes so a disabled API does
+not fail the build.
 
 Method forwarding rejects receiver/parameter/generic attributes, by-reference
 bindings, subpatterns, unsafe methods, `impl Trait` returns, and concrete

@@ -660,6 +660,14 @@ fn fakeable_rejects_relative_paths_in_moved_struct_fields() {
             }
         },
         quote! {
+            struct MyService<T>
+            where
+                T: super::Service,
+            {
+                value: T,
+            }
+        },
+        quote! {
             #[container(super::Config)]
             struct MyService {
                 value: String,
@@ -681,6 +689,86 @@ fn fakeable_rejects_qualified_impl_targets() {
     let result = fakeable_impl::fakeable_impl(quote! {}, quote!(impl services::MyService {})).to_string();
 
     assert!(result.contains("qualified impl targets are not supported"));
+}
+
+#[test]
+fn fakeable_rejects_relative_paths_in_moved_impls() {
+    for input in [
+        quote! {
+            impl MyService {
+                pub fn value(&self) {
+                    super::helper();
+                }
+            }
+        },
+        quote! {
+            impl<T: super::Service> MyService<T> {
+                pub fn value(&self) {}
+            }
+        },
+        quote! {
+            impl super::Service for MyService {
+                fn value(&self) {}
+            }
+        },
+    ] {
+        let result = fakeable_impl::fakeable_impl(quote! {}, input).to_string();
+        assert!(result.contains("impl blocks containing self or super paths are not supported"));
+    }
+}
+
+#[test]
+fn fakeable_rejects_concrete_service_type_in_impl_predicates() {
+    let result = fakeable_impl::fakeable_impl(
+        quote! {},
+        quote! {
+            impl<T> MyService<T>
+            where
+                MyService<T>: Service,
+            {
+                pub fn value(&self) {}
+            }
+        },
+    )
+    .to_string();
+
+    assert!(result.contains("concrete service type is not supported in impl generic bounds"));
+}
+
+#[test]
+fn fakeable_gates_validation_errors_with_method_cfg() {
+    for input in [
+        quote! {
+            impl MyService {
+                #[cfg(any())]
+                pub unsafe fn disabled(&self) {}
+            }
+        },
+        quote! {
+            impl MyService {
+                #[cfg_attr(not(any()), cfg(any()))]
+                pub unsafe fn disabled(&self) {}
+            }
+        },
+    ] {
+        let result = fakeable_impl::fakeable_impl(quote! {}, input);
+        let tokens = result.to_string();
+
+        assert_eq!(tokens.matches("compile_error").count(), 1);
+        assert!(tokens.contains("cfg"));
+    }
+
+    let mockall = fakeable_impl::fakeable_impl(
+        quote! { generate_mockall_fake = true },
+        quote! {
+            impl MyService {
+                #[cfg(any())]
+                pub fn consume(self) {}
+            }
+        },
+    )
+    .to_string();
+    assert_eq!(mockall.matches("compile_error").count(), 1);
 }
 
 #[test]
@@ -1065,6 +1153,7 @@ fn fakeable_rejects_self_dependent_trait_associated_items() {
         quote! { type Output = Self; },
         quote! { const DEFAULT: Option<Self> = None; },
         quote! { type Output = Wrapper<Self::Item>; },
+        quote! { const VALUE: usize = value!(Self); },
     ] {
         let result = fakeable_impl::fakeable_impl(
             quote! {},

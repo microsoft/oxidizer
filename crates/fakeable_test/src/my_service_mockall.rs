@@ -17,6 +17,9 @@ pub struct MyService {
 
 #[fakeable::fakeable(generate_mockall_fake = true)]
 impl MyService {
+    #[cfg(any())]
+    pub fn disabled_consume(self) {}
+
     pub const fn new(value: String, other_value: i32) -> Self {
         Self { value, other_value }
     }
