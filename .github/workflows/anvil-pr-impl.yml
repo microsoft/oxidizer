@@ -154,13 +154,13 @@ jobs:
       # has opted into sending write tokens to fork workflows.
       - name: Upsert anvil-semver advisory
         if: always() && github.event_name == 'pull_request' && matrix.os == 'linux' && github.event.pull_request.head.repo.full_name == github.repository && hashFiles('target/anvil/comments/semver.md') != ''
-        uses: marocchino/sticky-pull-request-comment@v3.0.5 # pinned by tag: this release is an immutable release (GitHub locks the tag to a commit)
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # pinned by tag: this release is an immutable release (GitHub locks the tag to a commit)
         with:
           header: anvil-semver
           path: target/anvil/comments/semver.md
       - name: Clear anvil-semver advisory
         if: always() && github.event_name == 'pull_request' && matrix.os == 'linux' && github.event.pull_request.head.repo.full_name == github.repository && hashFiles('target/anvil/comments/semver.md') == ''
-        uses: marocchino/sticky-pull-request-comment@v3.0.5 # pinned by tag: this release is an immutable release (GitHub locks the tag to a commit)
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # pinned by tag: this release is an immutable release (GitHub locks the tag to a commit)
         with:
           header: anvil-semver
           delete: true
