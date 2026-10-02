@@ -1512,12 +1512,21 @@ fn generate_mockall_fake(
     }
 
     let fakes_cfg = fakes_cfg_attr(fakes_attribute);
+    let gated_mock_errors: Vec<_> = mock_errors
+        .into_iter()
+        .map(|error| {
+            quote! {
+                #fakes_cfg
+                #error
+            }
+        })
+        .collect();
 
     if fake_module == "." {
         // Generate in current module
         Ok(quote! {
+            #(#gated_mock_errors)*
             #fakes_cfg
-            #(#mock_errors)*
             ::mockall::mock! {
                 #[derive(Debug)]
                 pub #fake_ident {
@@ -1529,8 +1538,8 @@ fn generate_mockall_fake(
         // Generate in specified module
         let module_ident = quote::format_ident!("{}", fake_module);
         Ok(quote! {
+            #(#gated_mock_errors)*
             #fakes_cfg
-            #(#mock_errors)*
             #[allow(clippy::all)]
             #[allow(clippy::pedantic)]
             #[allow(clippy::style)]
@@ -1575,46 +1584,29 @@ fn transform_expect_to_allow(attr: &syn::Attribute) -> syn::Attribute {
     attr
 }
 
-/// Rewrite occurrences of `expect(...)` → `allow(...)` inside a token stream
+/// Rewrite `expect(...)` metadata directly contained by a `cfg_attr`.
 fn rewrite_expect_in_tokens(tokens: TokenStream) -> TokenStream {
-    use proc_macro2::TokenTree;
+    let Ok(mut metas) = Punctuated::<Meta, Token![,]>::parse_terminated.parse2(tokens.clone()) else {
+        return tokens;
+    };
 
-    let mut output = TokenStream::new();
-    let mut iter = tokens.into_iter().peekable();
-
-    while let Some(tt) = iter.next() {
-        match &tt {
-            TokenTree::Ident(ident) if ident == "expect" => {
-                // Look ahead: expect ( ... )
-                if let Some(TokenTree::Group(group)) = iter.peek()
-                    && group.delimiter() == proc_macro2::Delimiter::Parenthesis
-                {
-                    let group = group.clone();
-                    let _ = iter.next();
-
-                    // rewrite: expect(...) → allow(...)
-                    let new_ident = syn::Ident::new("allow", ident.span());
-                    let rewritten_group =
-                        proc_macro2::Group::new(proc_macro2::Delimiter::Parenthesis, rewrite_expect_in_tokens(group.stream()));
-
-                    output.extend([TokenTree::Ident(new_ident), TokenTree::Group(rewritten_group)]);
-                    continue;
-                }
-
-                // Plain "expect" not followed by "(...)"
-                output.extend([tt]);
-            }
-
-            TokenTree::Group(group) => {
-                let new_group = proc_macro2::Group::new(group.delimiter(), rewrite_expect_in_tokens(group.stream()));
-                output.extend([TokenTree::Group(new_group)]);
-            }
-
-            _ => output.extend([tt]),
-        }
+    for meta in metas.iter_mut().skip(1) {
+        rewrite_expect_meta(meta);
     }
 
-    output
+    quote! { #metas }
+}
+
+fn rewrite_expect_meta(meta: &mut Meta) {
+    let Meta::List(list) = meta else {
+        return;
+    };
+
+    if list.path.is_ident("expect") {
+        list.path = parse_quote!(allow);
+    } else if list.path.is_ident("cfg_attr") {
+        list.tokens = rewrite_expect_in_tokens(list.tokens.clone());
+    }
 }
 
 #[cfg(all(test, feature = "mockall"))]
@@ -1744,23 +1736,38 @@ mod tests {
 
     #[test]
     fn rewrites_expect_inside_nested_groups() {
-        let rewritten = rewrite_expect_in_tokens(quote!([expect(dead_code)]));
+        let rewritten = rewrite_expect_in_tokens(quote!(
+            test,
+            expect(dead_code),
+            cfg_attr(feature = "nested", expect(unused)),
+            some_attr(expect(clippy::panic))
+        ))
+        .to_string();
 
-        assert_eq!(rewritten.to_string(), "[allow (dead_code)]");
+        assert!(rewritten.contains("allow (dead_code)"));
+        assert!(rewritten.contains("cfg_attr (feature = \"nested\" , allow (unused))"));
+        assert!(rewritten.contains("some_attr (expect (clippy :: panic))"));
     }
 
     #[test]
     fn leaves_other_attributes_unchanged() {
-        let rewritten = rewrite_expect_in_tokens(quote!(deny(dead_code)));
+        let rewritten = rewrite_expect_in_tokens(quote!(test, deny(dead_code)));
 
-        assert_eq!(rewritten.to_string(), "deny (dead_code)");
+        assert_eq!(rewritten.to_string(), "test , deny (dead_code)");
     }
 
     #[test]
     fn leaves_plain_expect_identifier_unchanged() {
-        let rewritten = rewrite_expect_in_tokens(quote!(expect));
+        let rewritten = rewrite_expect_in_tokens(quote!(test, expect));
 
-        assert_eq!(rewritten.to_string(), "expect");
+        assert_eq!(rewritten.to_string(), "test , expect");
+    }
+
+    #[test]
+    fn leaves_unparseable_cfg_attr_tokens_unchanged() {
+        let rewritten = rewrite_expect_in_tokens(quote!([expect(dead_code)]));
+
+        assert_eq!(rewritten.to_string(), "[expect (dead_code)]");
     }
 
     #[test]

@@ -769,6 +769,7 @@ fn fakeable_gates_validation_errors_with_method_cfg() {
     )
     .to_string();
     assert_eq!(mockall.matches("compile_error").count(), 1);
+    assert_eq!(mockall.matches("\"test-util\"").count(), 3);
 }
 
 #[test]
