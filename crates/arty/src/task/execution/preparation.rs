@@ -54,10 +54,11 @@ where
     R: Send + 'static,
 {
     let (result_tx, result_rx) = oneshot::<TaskResult<R>>();
-    let future_factory = TaskFactory::new(future_factory, parent_task_enrichment.clone(), sink.clone());
+    let future_factory = TaskFactory::new(future_factory, parent_task_enrichment, sink);
     let future_factory: BoxedRemoteFutureFactory<C> = Box::new(move |cx, tasks| {
         // Factory invocation belongs inside the same panic boundary as polling.
-        let inner = async move { future_factory.into_inner()(cx).await };
+        let (future_factory, parent_task_enrichment, sink) = future_factory.into_parts();
+        let inner = async move { future_factory(cx).await };
 
         // The executor join handle is not used - the task delivers its result through the
         // channel above, which unlike the executor's join handle can cross thread boundaries.

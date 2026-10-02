@@ -94,21 +94,27 @@ impl<T> Drop for TaskStorage<T> {
 
 pub(super) struct TaskFactory<F> {
     inner: Option<F>,
-    enrichment: Transfer,
-    sink: Sink,
+    enrichment: Option<Transfer>,
+    sink: Option<Sink>,
 }
 
 impl<F> TaskFactory<F> {
     pub(super) fn new(inner: F, enrichment: Transfer, sink: Sink) -> Self {
         Self {
             inner: Some(inner),
-            enrichment,
-            sink,
+            enrichment: Some(enrichment),
+            sink: Some(sink),
         }
     }
 
-    pub(super) fn into_inner(mut self) -> F {
-        self.inner.take().expect("a queued factory is consumed exactly once")
+    pub(super) fn into_parts(mut self) -> (F, Transfer, Sink) {
+        (
+            self.inner.take().expect("a queued factory is consumed exactly once"),
+            self.enrichment
+                .take()
+                .expect("a queued factory retains enrichment until invocation"),
+            self.sink.take().expect("a queued factory retains its sink until invocation"),
+        )
     }
 }
 
@@ -117,9 +123,16 @@ impl<F> Drop for TaskFactory<F> {
         let Some(factory) = self.inner.take() else {
             return;
         };
-        let _guard = self.enrichment.apply_current_thread();
+        let _guard = self
+            .enrichment
+            .as_ref()
+            .expect("a queued factory retains enrichment until disposal")
+            .apply_current_thread();
         if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(factory))) {
-            emit!(&self.sink, TaskPanicked);
+            emit!(
+                self.sink.as_ref().expect("a queued factory retains its sink until disposal"),
+                TaskPanicked
+            );
             discard_panic(panic);
         }
     }
