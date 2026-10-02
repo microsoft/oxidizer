@@ -5,7 +5,7 @@ use crate::runtime::builder::RuntimeBuilder;
 use crate::runtime::context::SharedState;
 use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::error::Error;
-use crate::runtime::thread::{assert_not_flagged, is_flagged};
+use crate::runtime::thread::is_flagged;
 use crate::task::RuntimeScheduler;
 
 /// Owns an Arty runtime's workers and their shutdown.
@@ -29,13 +29,13 @@ use crate::task::RuntimeScheduler;
 /// Implicit cleanup cannot return shutdown errors. Worker panic diagnostics are
 /// still emitted; use [`stop`](Self::stop) to receive the shutdown outcome.
 ///
-/// Dropping the owner from one of its own blocking callbacks requests shutdown
-/// without waiting for that callback to finish. Worker-bound schedulers and
-/// [`Builtins`](crate::task::Builtins) do not keep the runtime running after its owner is dropped.
+/// On any asynchronous Arty worker or one of this runtime's blocking callbacks,
+/// dropping the owner only requests shutdown and returns without waiting.
+/// The workers complete their cleanup independently; destruction in those
+/// contexts is not a shutdown-completion barrier.
 ///
-/// Dropping the owner on an asynchronous Arty worker panics. This destructor
-/// restriction is separate from [`stop`](Self::stop), which returns an error
-/// in that context. Keep the owner on a thread where blocking is allowed.
+/// Worker-bound schedulers and [`Builtins`](crate::task::Builtins) do not keep
+/// the runtime running after its owner is dropped.
 ///
 /// # Examples
 ///
@@ -197,8 +197,7 @@ impl Drop for Runtime {
         }
 
         self.scheduler.dispatcher.stop();
-        if !self.scheduler.dispatcher.is_current_blocking_task() {
-            assert_not_flagged();
+        if !is_flagged() && !self.scheduler.dispatcher.is_current_blocking_task() {
             // Worker entry wrappers report panic diagnostics; only explicit stop can return errors.
             let _ = self.wait();
         }
@@ -213,6 +212,7 @@ mod tests {
     use std::thread;
 
     use observed::Sink;
+    use testing_aids::TEST_TIMEOUT;
     use thread_aware::ThreadBuilder;
 
     use super::*;
@@ -275,5 +275,56 @@ mod tests {
         );
         let outcome = scheduler.spawn_blocking(move || runtime.stop()).wait().unwrap();
         assert!(outcome.unwrap_err().to_string().contains("blocking callback"));
+    }
+
+    #[test]
+    fn dropping_the_owner_on_its_async_worker_requests_shutdown_without_unwinding() {
+        let runtime = Runtime::builder()
+            .processor_count(crate::runtime::ProcessorCount::exactly(1))
+            .build()
+            .unwrap();
+        let dispatcher = runtime.scheduler.dispatcher.clone();
+        let scheduler = runtime
+            .scheduler()
+            .spawn_anywhere(async |cx| cx.scheduler().clone())
+            .wait()
+            .unwrap();
+        assert!(scheduler.spawn(async |_| is_flagged()).wait().unwrap());
+
+        scheduler.spawn(async move |_| drop(runtime)).wait().unwrap();
+
+        assert!(dispatcher.is_shutting_down());
+        dispatcher.wait().unwrap();
+        assert!(scheduler.spawn(async |_| 42).wait().unwrap_err().is_shutdown());
+    }
+
+    #[test]
+    fn dropping_another_runtime_on_a_worker_does_not_wait_for_blocking_work() {
+        let runtime = Runtime::builder()
+            .processor_count(crate::runtime::ProcessorCount::exactly(1))
+            .build()
+            .unwrap();
+        let caller = Runtime::builder()
+            .processor_count(crate::runtime::ProcessorCount::exactly(1))
+            .build()
+            .unwrap();
+        let dispatcher = runtime.scheduler.dispatcher.clone();
+        let (started, ready) = mpsc::channel();
+        let (release, released) = mpsc::channel();
+        let blocking = runtime.scheduler().spawn_blocking(move || {
+            started.send(()).unwrap();
+            released.recv_timeout(TEST_TIMEOUT).unwrap();
+            42
+        });
+        ready.recv_timeout(TEST_TIMEOUT).unwrap();
+        assert!(caller.scheduler().spawn_anywhere(async |_| is_flagged()).wait().unwrap());
+
+        caller.scheduler().spawn_anywhere(async move |_| drop(runtime)).wait().unwrap();
+
+        assert!(dispatcher.is_shutting_down());
+        release.send(()).unwrap();
+        assert_eq!(blocking.wait().unwrap(), 42);
+        dispatcher.wait().unwrap();
+        caller.stop().unwrap();
     }
 }

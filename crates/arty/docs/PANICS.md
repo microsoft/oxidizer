@@ -19,8 +19,10 @@ calling `stop` there requests shutdown but returns an error without waiting.
 
 Dropping the runtime owner requests shutdown and normally waits for it. It
 cannot return a shutdown error; worker failures remain available through their
-diagnostics. Dropping it from its own blocking callback does not wait for that
-callback. Dropping it on an asynchronous Arty worker panics.
+diagnostics. On any asynchronous Arty worker or the runtime's own blocking
+callback, dropping the owner requests shutdown without waiting or panicking.
+Workers finish their cleanup independently, so `drop` in those contexts does
+not guarantee that shutdown has completed.
 
 `JoinHandle::wait` still panics on an asynchronous Arty worker. Polling a join
 again after receiving its result, or using a local scheduler outside its

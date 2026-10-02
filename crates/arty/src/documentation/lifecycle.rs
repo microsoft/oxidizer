@@ -83,13 +83,14 @@
 //! `RuntimeScheduler::block_on` returns an error on asynchronous Arty workers,
 //! including workers of another runtime. `JoinHandle::wait` rejects that context
 //! by panicking. `Runtime::stop` requests shutdown but returns an error instead of
-//! waiting from a worker. Dropping the runtime owner there still panics; retain it
-//! on a blocking-safe thread.
+//! waiting from a worker. Dropping the owner on any asynchronous Arty worker
+//! requests shutdown without waiting or panicking.
 //!
 //! A blocking task may wait for asynchronous work. Stopping its own runtime returns
 //! an error after requesting shutdown, because it cannot wait for itself.
-//! Dropping its owner requests shutdown without waiting for that callback. This exception does
-//! not make destruction an unconditional shutdown-completion barrier.
+//! Dropping its owner requests shutdown without waiting for that callback.
+//! Neither this case nor destruction on an asynchronous worker guarantees that
+//! shutdown has completed when `drop` returns.
 //!
 //! Explicit `stop` reports worker panics after joining all workers. Implicit
 //! destruction retains the worker-entry diagnostics but cannot return an error.

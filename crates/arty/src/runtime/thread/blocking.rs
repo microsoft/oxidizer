@@ -4,7 +4,8 @@
 //! Tracks asynchronous worker threads where public blocking calls must not wait.
 //!
 //! `RuntimeScheduler::block_on` and `Runtime::stop` return errors in this context.
-//! `JoinHandle::wait` and implicit runtime destruction use a panic-on-misuse guard.
+//! `JoinHandle::wait` uses a panic-on-misuse guard. Implicit runtime destruction
+//! requests shutdown without waiting when this flag is set.
 //! Runtime internals may still wait for their own coordination notifications.
 
 use std::cell::Cell;
