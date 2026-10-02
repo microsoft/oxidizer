@@ -792,7 +792,7 @@ pub(crate) fn record_now(
     backtrace: BacktraceCapture,
 ) {
     seismograph::record(EventClass::RuntimeTask, || {
-        runtime_record(
+        Some(runtime_record(
             EventTimestamp::now(),
             control.id,
             worker_id,
@@ -802,7 +802,7 @@ pub(crate) fn record_now(
             value_0,
             value_1,
             backtrace,
-        )
+        ))
     });
 }
 
@@ -823,9 +823,9 @@ pub(crate) fn record_at(
     backtrace: BacktraceCapture,
 ) {
     seismograph::record(EventClass::RuntimeTask, || {
-        runtime_record(
+        Some(runtime_record(
             timestamp, control.id, worker_id, kind, subject_id, related_id, value_0, value_1, backtrace,
-        )
+        ))
     });
 }
 

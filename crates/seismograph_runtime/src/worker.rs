@@ -186,7 +186,7 @@ impl WorkerHandle {
         self.worker.current_task.store(task_id.get(), Ordering::Release);
         if let Some(session) = session {
             seismograph::recorder::record_in_session_classified(session, EventClass::RuntimeTask, || {
-                crate::runtime_record(
+                Some(crate::runtime_record(
                     started_at,
                     self.runtime.id(),
                     Some(self.id()),
@@ -196,7 +196,7 @@ impl WorkerHandle {
                     queued_since.map_or(0, |queued| duration_nanos(started_at, queued)),
                     if queued_since.is_some() { 2 } else { 0 },
                     BacktraceCapture::Never,
-                )
+                ))
             });
         }
         TaskPoll {

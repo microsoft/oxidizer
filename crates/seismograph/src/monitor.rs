@@ -982,8 +982,10 @@ mod tests {
             ..Default::default()
         });
         crate::recorder::clear_event_buffers().unwrap();
-        crate::record(EventClass::General, || Record::object(EventKind::MutexAccess, ObjectId::new(1)));
-        crate::record(EventClass::Cache, || Record::object(EventKind::CacheHit, ObjectId::new(1)));
+        crate::record(EventClass::General, || {
+            Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
+        });
+        crate::record(EventClass::Cache, || Some(Record::object(EventKind::CacheHit, ObjectId::new(1))));
         let thread_id = crate::recorder::current_thread_id().get();
         let before = crate::recorder::try_activity().unwrap();
         let _snapshot = SnapshotRequestGuard::acquire().unwrap();
@@ -1055,7 +1057,7 @@ mod tests {
             Response::Acknowledged
         );
         crate::record(EventClass::RuntimeTask, || {
-            Record::runtime(
+            Some(Record::runtime(
                 EventTimestamp::now(),
                 EventKind::TaskPollStarted,
                 RuntimeEvent {
@@ -1067,7 +1069,7 @@ mod tests {
                     value_1: 0,
                 },
                 BacktraceCapture::Never,
-            )
+            ))
         });
         assert_eq!(
             authenticated_response(&Request::SetRecording(RecordingConfiguration::default())),
@@ -1341,10 +1343,10 @@ mod tests {
             (4, Response::CacheRecording(cache_policy))
         );
         crate::record(crate::recorder::event::EventClass::ArcDereference, || {
-            crate::recorder::event::Record::object(
+            Some(crate::recorder::event::Record::object(
                 crate::recorder::event::EventKind::ArcDeref,
                 crate::recorder::event::ObjectId::new(42),
-            )
+            ))
         });
 
         seismograph_protocol::write_request(&mut stream, 5, &Request::ReadRecorderStatistics).unwrap();
@@ -1529,12 +1531,12 @@ mod tests {
         };
         crate::recorder::configure(configuration);
         crate::record(crate::recorder::event::EventClass::General, || {
-            Record::object(EventKind::MutexAccess, ObjectId::new(1))
+            Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
         });
         assert_eq!(authenticated_response(&Request::ClearEventBuffers), Response::Acknowledged);
         assert_eq!(crate::recorder::configuration(), configuration);
         crate::record(crate::recorder::event::EventClass::General, || {
-            Record::object(EventKind::MutexAccess, ObjectId::new(2))
+            Some(Record::object(EventKind::MutexAccess, ObjectId::new(2)))
         });
         let bytes = snapshot_bytes(authenticated_response(&Request::CaptureSnapshotAndStop));
         let decoded = crate::snapshot::decode(&bytes).unwrap();

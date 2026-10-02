@@ -200,7 +200,7 @@ impl Operation {
             let resource_id = resource.id();
             let buffer = buffer();
             started = Some((operation_id, resource_id, buffer.id, buffer.len, buffer.span_count));
-            Record::io(
+            Some(Record::io(
                 start_kind,
                 IoEvent {
                     operation_id,
@@ -213,7 +213,7 @@ impl Operation {
                     resource_kind: resource.kind,
                     outcome: IoOutcome::Pending,
                 },
-            )
+            ))
         });
         let recorded = session
             .zip(started)
@@ -253,7 +253,7 @@ fn record_finish(recorded: RecordedOperation, completed_bytes: u64, outcome: IoO
             },
             |buffer| buffer(),
         );
-        Record::io(
+        Some(Record::io(
             recorded.finish_kind,
             IoEvent {
                 operation_id: recorded.operation_id,
@@ -266,7 +266,7 @@ fn record_finish(recorded: RecordedOperation, completed_bytes: u64, outcome: IoO
                 resource_kind: recorded.resource_kind,
                 outcome,
             },
-        )
+        ))
     });
 }
 

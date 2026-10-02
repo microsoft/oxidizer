@@ -922,9 +922,9 @@ where
     S: Strategy<T>,
 {
     fn drop(&mut self) {
-        if S::strong_count(&self.state) == 1 {
-            telemetry::record(EventKind::ArcDrop, Self::as_ptr(self).cast::<()>());
-        }
+        telemetry::record_if(EventKind::ArcDrop, Self::as_ptr(self).cast::<()>(), || {
+            S::strong_count(&self.state) == 1
+        });
     }
 }
 

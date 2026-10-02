@@ -36,7 +36,7 @@ seismograph::recorder(Configuration {
     ..Default::default()
 });
 seismograph::record(EventClass::ArcDereference, || {
-    Record::object(EventKind::ArcDeref, ObjectId::new(42))
+    Some(Record::object(EventKind::ArcDeref, ObjectId::new(42)))
 });
 
 let encoded = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
@@ -68,7 +68,7 @@ let _monitor = seismograph::monitor::Monitor::builder()
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seismograph">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQba8vLwhLxDMIbGQgrEZssFxwbyNAiTQZeXIUbsjEoqApD3exhZIGCa3NlaXNtb2dyYXBoZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbnIjY07yDBCMb5dOQTY4yGVUbIqi6d2b0sygbtiUL_gUfWH9hZIGCa3NlaXNtb2dyYXBoZTAuMS4w
  [__link0]: https://docs.rs/seismograph/0.1.0/seismograph/fn.snapshot.html
  [__link1]: https://docs.rs/seismograph/0.1.0/seismograph/?search=snapshot::EventBufferDisposition::Stop
  [__link2]: https://docs.rs/seismograph/0.1.0/seismograph/?search=recorder::clear_event_buffers

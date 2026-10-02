@@ -97,10 +97,10 @@ fn snapshot_html_reads_native_seismograph_capture() {
         ..Default::default()
     });
     seismograph::record(seismograph::recorder::event::EventClass::ArcDereference, || {
-        seismograph::recorder::event::Record::object(
+        Some(seismograph::recorder::event::Record::object(
             seismograph::recorder::event::EventKind::ArcDeref,
             seismograph::recorder::event::ObjectId::new(42),
-        )
+        ))
     });
     seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default())
         .unwrap()

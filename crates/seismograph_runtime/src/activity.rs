@@ -128,7 +128,7 @@ impl Activity {
             // A notifier is not a worker. The runtime ID avoids both an Arc
             // cycle and per-wake registry lookups.
             seismograph::recorder::record_in_session_classified(session, EventClass::RuntimeTask, || {
-                runtime_record(
+                Some(runtime_record(
                     at,
                     task.runtime_id,
                     None,
@@ -138,7 +138,7 @@ impl Activity {
                     0,
                     0,
                     BacktraceCapture::Never,
-                )
+                ))
             });
         }
     }

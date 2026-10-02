@@ -1396,7 +1396,7 @@ pub(crate) fn begin_allocation() -> Option<PendingTracking> {
 impl PendingTracking {
     pub(crate) fn commit(self, address: *mut u8, layout: Layout, heap_id: usize, heap_kind: HeapKind) -> TrackingAllocation {
         let recorded = seismograph::record_in_session_classified(self.recording_session, runtime_event::EventClass::Allocation, || {
-            runtime_event::Record::allocation(runtime_alloc::Allocation {
+            Some(runtime_event::Record::allocation(runtime_alloc::Allocation {
                 allocation_id: runtime_alloc::AllocationId::new(self.allocation_id as u64),
                 event_thread_id: runtime_alloc::EventThreadId::new(crate::allocator::tracking_thread_token() as u64),
                 heap_id: runtime_alloc::HeapId::new(heap_id as u64),
@@ -1405,7 +1405,7 @@ impl PendingTracking {
                 address: runtime_event::Address::from_ptr(address),
                 size: layout.size() as u64,
                 alignment: layout.align() as u64,
-            })
+            }))
         });
         if !recorded {
             return TrackingAllocation::NONE;
@@ -1427,7 +1427,7 @@ pub(crate) fn record_deallocation(allocation: TrackingAllocation, address: *mut 
         return;
     };
     let _recorded = seismograph::record_in_session_classified(recording_session, runtime_event::EventClass::Allocation, || {
-        runtime_event::Record::deallocation(runtime_alloc::Allocation {
+        Some(runtime_event::Record::deallocation(runtime_alloc::Allocation {
             allocation_id: runtime_alloc::AllocationId::new(allocation.allocation_id as u64),
             event_thread_id: runtime_alloc::EventThreadId::new(crate::allocator::tracking_thread_token() as u64),
             heap_id: runtime_alloc::HeapId::new(allocation.heap_id as u64),
@@ -1436,7 +1436,7 @@ pub(crate) fn record_deallocation(allocation: TrackingAllocation, address: *mut 
             address: runtime_event::Address::from_ptr(address),
             size: layout.size() as u64,
             alignment: layout.align() as u64,
-        })
+        }))
     });
 }
 

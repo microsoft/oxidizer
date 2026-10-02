@@ -27,12 +27,16 @@ fn clear_skips_sources_and_a_later_source_failure_does_not_undo_stop() {
         ..Default::default()
     };
     seismograph::recorder(configuration);
-    seismograph::record(EventClass::General, || Record::object(EventKind::MutexAccess, ObjectId::new(1)));
+    seismograph::record(EventClass::General, || {
+        Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
+    });
     seismograph::recorder::clear_event_buffers().unwrap();
     assert_eq!(SOURCE_CALLS.load(Ordering::Relaxed), 0);
     assert!(seismograph::recorder::recording_enabled_for(EventClass::General));
     assert!(seismograph::recorder::recording_enabled_for(EventClass::Cache));
-    seismograph::record(EventClass::General, || Record::object(EventKind::MutexAccess, ObjectId::new(2)));
+    seismograph::record(EventClass::General, || {
+        Some(Record::object(EventKind::MutexAccess, ObjectId::new(2)))
+    });
     let error = seismograph::snapshot(SnapshotOptions {
         event_buffers: EventBufferDisposition::Stop,
     })

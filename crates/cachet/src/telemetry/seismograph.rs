@@ -8,7 +8,7 @@ pub(super) fn record_event(tier_name: CacheName, fallback: bool, kind: seismogra
 
     seismograph::record(EventClass::Cache, || {
         let tier_id = ObjectId::new(cache_name_id(tier_name));
-        Record::object_measurement(kind, tier_id, u64::from(fallback))
+        Some(Record::object_measurement(kind, tier_id, u64::from(fallback)))
     });
 }
 

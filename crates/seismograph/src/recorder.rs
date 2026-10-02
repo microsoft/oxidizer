@@ -596,14 +596,18 @@ fn read_activity(include_threads: bool) -> Result<Activity, crate::Error> {
 }
 
 /// Lazily constructs and records an event in a known class.
+///
+/// The builder may return `None` to omit the event without initializing a recorder.
 #[inline]
-pub(crate) fn record(class: EventClass, event: impl FnOnce() -> Record) {
+pub(crate) fn record(class: EventClass, event: impl FnOnce() -> Option<Record>) {
     let _ = record_session(class, event);
 }
 
 /// Lazily constructs an event and returns the session that accepted it.
+///
+/// A builder returning `None` intentionally omits the event and returns no session.
 #[inline]
-pub(crate) fn record_session(class: EventClass, event: impl FnOnce() -> Record) -> Option<RecordingSession> {
+pub(crate) fn record_session(class: EventClass, event: impl FnOnce() -> Option<Record>) -> Option<RecordingSession> {
     let policy = policy_atomic(class).load(Ordering::Relaxed);
     if !policy_enabled(policy) || is_suppressed() {
         return None;
@@ -612,7 +616,7 @@ pub(crate) fn record_session(class: EventClass, event: impl FnOnce() -> Record) 
     if session == 0 {
         return None;
     }
-    let record = event();
+    let record = event()?;
     if record.class() != class {
         return None;
     }
@@ -625,20 +629,27 @@ pub(crate) fn record_session(class: EventClass, event: impl FnOnce() -> Record) 
 }
 
 /// Records an event only while its originating session remains active.
+///
+/// A builder returning `None` intentionally omits the event and returns `false`.
 #[inline]
-pub(crate) fn record_in_session(session: RecordingSession, event: impl FnOnce() -> Record) -> bool {
+pub(crate) fn record_in_session(session: RecordingSession, event: impl FnOnce() -> Option<Record>) -> bool {
     record_in_session_classified(session, EventClass::General, event)
 }
 
 /// Records a classified event only while its originating session remains active.
+///
+/// A builder returning `None` intentionally omits the event and returns `false`
+/// without initializing a recorder.
 #[inline]
 #[doc(hidden)]
-pub fn record_in_session_classified(session: RecordingSession, class: EventClass, event: impl FnOnce() -> Record) -> bool {
+pub fn record_in_session_classified(session: RecordingSession, class: EventClass, event: impl FnOnce() -> Option<Record>) -> bool {
     let policy = policy_atomic(class).load(Ordering::Relaxed);
     if !policy_enabled(policy) || is_suppressed() || ACTIVE_SESSION.load(Ordering::Relaxed) != session.get() {
         return false;
     }
-    let record = event();
+    let Some(record) = event() else {
+        return false;
+    };
     if record.class() != class {
         return false;
     }
@@ -1713,7 +1724,7 @@ mod tests {
         clear_event_buffers().unwrap();
         for (index, (class, kind)) in ACTIVITY_CLASSES.into_iter().enumerate() {
             for _ in 0..=index {
-                record(class, || Record::object(kind, ObjectId::new(1)));
+                record(class, || Some(Record::object(kind, ObjectId::new(1))));
             }
             let _suppression = SuppressionGuard::enter();
             record(class, || panic!("suppressed events must not be constructed"));
@@ -1757,13 +1768,13 @@ mod tests {
         let selected = (1..100).map(ObjectId::new).find(|id| sampling.includes(*id)).unwrap();
         let skipped = (1..100).map(ObjectId::new).find(|id| !sampling.includes(*id)).unwrap();
         for (class, kind) in ACTIVITY_CLASSES {
-            record(class, || Record::object(kind, skipped));
+            record(class, || Some(Record::object(kind, skipped)));
         }
         let excluded = try_activity().unwrap();
         for (class, kind) in ACTIVITY_CLASSES {
-            record(class, || Record::object(kind, selected));
+            record(class, || Some(Record::object(kind, selected)));
         }
-        record(EventClass::General, || Record::object(EventKind::ArcDeref, selected));
+        record(EventClass::General, || Some(Record::object(EventKind::ArcDeref, selected)));
         let included = try_activity().unwrap();
         assert_eq!(
             (
@@ -1790,7 +1801,9 @@ mod tests {
             clear_event_buffers().unwrap();
             let thread_id = current_thread_id();
             for count in 1..=capacity + 3 {
-                record(EventClass::General, || Record::object(EventKind::MutexAccess, ObjectId::new(1)));
+                record(EventClass::General, || {
+                    Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
+                });
                 if [31, capacity, capacity + 3].contains(&count) {
                     let activity = try_activity().unwrap();
                     let thread = &activity.threads[0];
@@ -1841,7 +1854,7 @@ mod tests {
             crate::snapshot::EventBufferDisposition::Release,
             crate::snapshot::EventBufferDisposition::Stop,
         ] {
-            record(EventClass::Cache, || Record::object(EventKind::CacheHit, ObjectId::new(1)));
+            record(EventClass::Cache, || Some(Record::object(EventKind::CacheHit, ObjectId::new(1))));
             let before = try_activity().unwrap();
             if disposition == crate::snapshot::EventBufferDisposition::Clear {
                 clear_event_buffers().unwrap();
@@ -1859,7 +1872,7 @@ mod tests {
             } else {
                 assert_eq!(configuration(), enabled);
             }
-            record(EventClass::Cache, || Record::object(EventKind::CacheMiss, ObjectId::new(1)));
+            record(EventClass::Cache, || Some(Record::object(EventKind::CacheMiss, ObjectId::new(1))));
             let restarted = try_activity().unwrap();
             assert_ne!(restarted.session_id, before.session_id);
             assert_eq!((restarted.class_events, restarted.threads[0].total_events), ([0, 0, 0, 0, 0, 1], 1));
@@ -1869,7 +1882,9 @@ mod tests {
             event_capacity_per_thread: EventBufferCapacity::new(128).unwrap(),
             ..enabled
         });
-        record(EventClass::General, || Record::object(EventKind::MutexAccess, ObjectId::new(1)));
+        record(EventClass::General, || {
+            Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
+        });
         let resized = try_activity().unwrap();
         assert_eq!((resized.class_events, resized.threads[0].event_capacity), ([0, 1, 0, 0, 0, 0], 128));
         configure(Configuration::default());
@@ -1881,7 +1896,9 @@ mod tests {
         let _test = TEST_LOCK.lock().unwrap();
         configure(timeout_configuration());
         clear_event_buffers().unwrap();
-        record(EventClass::General, || Record::object(EventKind::MutexAccess, ObjectId::new(1)));
+        record(EventClass::General, || {
+            Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
+        });
         // SAFETY: this thread owns the process-lifetime recorder and its writer context.
         let recorder = unsafe { &*local_recorder() };
         let before = try_activity().unwrap();
@@ -1908,7 +1925,9 @@ mod tests {
         let worker = std::thread::Builder::new()
             .name("activity-worker".into())
             .spawn(move || {
-                record(EventClass::General, || Record::object(EventKind::MutexAccess, ObjectId::new(1)));
+                record(EventClass::General, || {
+                    Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
+                });
                 ready_tx.send(current_thread_id()).unwrap();
                 exit_rx.recv().unwrap();
             })
@@ -1974,7 +1993,7 @@ mod tests {
         let emit_classes = || {
             std::thread::spawn(|| {
                 for (class, kind) in ACTIVITY_CLASSES {
-                    record(class, || Record::object(kind, ObjectId::new(1)));
+                    record(class, || Some(Record::object(kind, ObjectId::new(1))));
                 }
                 current_thread_id()
             })
@@ -1986,7 +2005,9 @@ mod tests {
         assert_eq!(before.class_events, [1; 6]);
         let retained_id = emit_classes();
         for _ in 0..10 {
-            record(EventClass::General, || Record::object(EventKind::MutexAccess, ObjectId::new(1)));
+            record(EventClass::General, || {
+                Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
+            });
         }
         let after = try_activity().unwrap();
         let evicted = after.threads.iter().find(|thread| thread.thread_id == evicted_id).unwrap();
@@ -2029,10 +2050,16 @@ mod tests {
         let _test = TEST_LOCK.lock().unwrap();
         configure(timeout_configuration());
         clear_event_buffers().unwrap();
-        record(EventClass::General, || Record::object(EventKind::MutexAccess, ObjectId::new(1)));
-        std::thread::spawn(|| record(EventClass::General, || Record::object(EventKind::MutexAccess, ObjectId::new(2))))
-            .join()
-            .unwrap();
+        record(EventClass::General, || {
+            Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
+        });
+        std::thread::spawn(|| {
+            record(EventClass::General, || {
+                Some(Record::object(EventKind::MutexAccess, ObjectId::new(2)))
+            });
+        })
+        .join()
+        .unwrap();
         let before = try_activity().unwrap();
         let source_session = recording_observation().unwrap().session;
         // SAFETY: this thread owns the process-lifetime recorder.
@@ -2051,7 +2078,9 @@ mod tests {
             (true, [0, 2, 0, 0, 0, 0], [0, 1, 0, 0, 0, 0], source_session)
         );
         assert_ne!(after.session_id, before.session_id);
-        record(EventClass::General, || Record::object(EventKind::MutexAccess, ObjectId::new(3)));
+        record(EventClass::General, || {
+            Some(Record::object(EventKind::MutexAccess, ObjectId::new(3)))
+        });
         let resumed = try_activity().unwrap();
         assert_eq!((resumed.session_id, resumed.class_events), (after.session_id, [0, 2, 0, 0, 0, 0]));
         configure(Configuration::default());
@@ -2063,7 +2092,9 @@ mod tests {
         let _test = TEST_LOCK.lock().unwrap();
         configure(timeout_configuration());
         clear_event_buffers().unwrap();
-        record(EventClass::General, || Record::object(EventKind::MutexAccess, ObjectId::new(1)));
+        record(EventClass::General, || {
+            Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
+        });
         let before = try_activity().unwrap();
         // SAFETY: this thread owns the process-lifetime recorder.
         let recorder = unsafe { &*local_recorder() };
@@ -2118,14 +2149,14 @@ mod tests {
             ..Default::default()
         });
         let event = Record::object(EventKind::MutexAccess, ObjectId::new(1));
-        let session = record_session(EventClass::General, || event).unwrap();
+        let session = record_session(EventClass::General, || Some(event)).unwrap();
         // SAFETY: this thread owns the process-lifetime recorder and its writer context.
         let recorder = unsafe { &*local_recorder() };
         let slot = recorder.ring().unwrap().slots[1].lock_until(wait_deadline()).unwrap();
-        let accepted = record_in_session(session, || event);
+        let accepted = record_in_session(session, || Some(event));
         drop(slot);
         let writer_active = recorder.writer_active.load(Ordering::Acquire);
-        let resumed = record_in_session(session, || event);
+        let resumed = record_in_session(session, || Some(event));
         let activity = try_activity().unwrap();
         let captured = snapshot(crate::snapshot::EventBufferDisposition::Release).unwrap();
         configure(Configuration::default());
@@ -2210,7 +2241,9 @@ mod tests {
         let error = destructive_snapshot(crate::snapshot::EventBufferDisposition::Release).unwrap_err();
         drop(writer);
         let restored = (configuration(), ACTIVE_SESSION.load(Ordering::Acquire));
-        let resumed = record_session(EventClass::General, || Record::object(EventKind::MutexAccess, ObjectId::new(1)));
+        let resumed = record_session(EventClass::General, || {
+            Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
+        });
         configure(Configuration::default());
         assert_eq!(
             (error.to_string(), restored, resumed.map(RecordingSession::get)),
@@ -2228,14 +2261,14 @@ mod tests {
         let expected = timeout_configuration();
         configure(expected);
         let event = Record::object(EventKind::MutexAccess, ObjectId::new(1));
-        let session = record_session(EventClass::General, || event).unwrap();
+        let session = record_session(EventClass::General, || Some(event)).unwrap();
         // SAFETY: this thread owns the process-lifetime recorder.
         let recorder = unsafe { &*local_recorder() };
         let ring = recorder.ring_lock();
         let error = destructive_snapshot(crate::snapshot::EventBufferDisposition::Release).unwrap_err();
         drop(ring);
         let restored = (configuration(), ACTIVE_SESSION.load(Ordering::Acquire));
-        let resumed = record_in_session(session, || event);
+        let resumed = record_in_session(session, || Some(event));
         let captured = snapshot(crate::snapshot::EventBufferDisposition::Release).unwrap();
         configure(Configuration::default());
         assert_eq!(
@@ -2265,7 +2298,9 @@ mod tests {
         let error = destructive_snapshot(crate::snapshot::EventBufferDisposition::Clear).unwrap_err();
         drop(ring);
         let restored = (configuration(), ACTIVE_SESSION.load(Ordering::Acquire));
-        let resumed = record_session(EventClass::General, || Record::object(EventKind::MutexAccess, ObjectId::new(1)));
+        let resumed = record_session(EventClass::General, || {
+            Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
+        });
         configure(Configuration::default());
         assert_eq!(
             (error.to_string(), restored, resumed.map(RecordingSession::get)),
@@ -2419,12 +2454,116 @@ mod tests {
 
     impl Drop for LateTelemetryUser {
         fn drop(&mut self) {
-            record(EventClass::Allocation, || Record::object(EventKind::Deallocation, ObjectId::new(1)));
+            record(EventClass::Allocation, || {
+                Some(Record::object(EventKind::Deallocation, ObjectId::new(1)))
+            });
         }
     }
 
     thread_local! {
         static LATE_TELEMETRY_USER: LateTelemetryUser = const { LateTelemetryUser };
+    }
+
+    #[test]
+    fn omitted_event_builders_do_not_initialize_recorders_and_allow_later_events() {
+        let _test = TEST_LOCK.lock().unwrap();
+        configure(timeout_configuration());
+        clear_event_buffers().unwrap();
+        let before = try_activity().unwrap().statistics;
+        std::thread::spawn(move || {
+            let registered = RECORDERS.load(Ordering::Acquire);
+            let constructed = Cell::new(0);
+            record(EventClass::General, || {
+                constructed.set(constructed.get() + 1);
+                None
+            });
+            let omitted_session = record_session(EventClass::General, || {
+                constructed.set(constructed.get() + 1);
+                None
+            });
+            let after = try_activity().unwrap();
+            assert_eq!(
+                (
+                    constructed.get(),
+                    omitted_session,
+                    LOCAL_RECORDER.with(|local| local.recorder.get().is_null()),
+                    RECORDERS.load(Ordering::Acquire),
+                    after.statistics,
+                    after.class_events,
+                    after.threads.len(),
+                ),
+                (2, None, true, registered, before, [0; 6], 0)
+            );
+
+            record(EventClass::General, || {
+                Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
+            });
+            assert_eq!(
+                record_session(EventClass::General, || Some(Record::object(
+                    EventKind::MutexAccess,
+                    ObjectId::new(2)
+                ))),
+                active_recording_session()
+            );
+        })
+        .join()
+        .unwrap();
+        let captured = snapshot(crate::snapshot::EventBufferDisposition::Release).unwrap();
+        configure(Configuration::default());
+        assert_eq!(
+            captured.events.iter().filter_map(Event::object_id).collect::<Vec<_>>(),
+            vec![ObjectId::new(1), ObjectId::new(2)]
+        );
+    }
+
+    #[test]
+    fn omitted_session_bound_builders_do_not_initialize_recorders_and_allow_later_events() {
+        let _test = TEST_LOCK.lock().unwrap();
+        configure(timeout_configuration());
+        clear_event_buffers().unwrap();
+        let session = active_recording_session().unwrap();
+        let before = try_activity().unwrap().statistics;
+        std::thread::spawn(move || {
+            let registered = RECORDERS.load(Ordering::Acquire);
+            let constructed = Cell::new(0);
+            let omitted = record_in_session(session, || {
+                constructed.set(constructed.get() + 1);
+                None
+            });
+            let omitted_classified = record_in_session_classified(session, EventClass::Cache, || {
+                constructed.set(constructed.get() + 1);
+                None
+            });
+            let after = try_activity().unwrap();
+            assert_eq!(
+                (
+                    constructed.get(),
+                    omitted,
+                    omitted_classified,
+                    LOCAL_RECORDER.with(|local| local.recorder.get().is_null()),
+                    RECORDERS.load(Ordering::Acquire),
+                    after.statistics,
+                    after.class_events,
+                    after.threads.len(),
+                ),
+                (2, false, false, true, registered, before, [0; 6], 0)
+            );
+
+            assert!(record_in_session(session, || {
+                Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
+            }));
+            assert!(record_in_session_classified(session, EventClass::Cache, || {
+                Some(Record::object(EventKind::CacheHit, ObjectId::new(2)))
+            }));
+        })
+        .join()
+        .unwrap();
+        let captured = snapshot(crate::snapshot::EventBufferDisposition::Release).unwrap();
+        configure(Configuration::default());
+        assert_eq!(
+            captured.events.iter().map(|event| event.kind).collect::<Vec<_>>(),
+            vec![EventKind::MutexAccess, EventKind::CacheHit]
+        );
     }
 
     #[test]
@@ -2435,13 +2574,13 @@ mod tests {
         configure(Configuration::default());
         record(EventClass::ArcDereference, || {
             constructed.fetch_add(1, Ordering::Relaxed);
-            Record::object(EventKind::ArcDeref, ObjectId::new(42))
+            Some(Record::object(EventKind::ArcDeref, ObjectId::new(42)))
         });
         GENERAL_POLICY.store(encode_policy(RecordingPolicy::all(false)), Ordering::Release);
         ACTIVE_SESSION.store(0, Ordering::Release);
         record(EventClass::General, || {
             constructed.fetch_add(1, Ordering::Relaxed);
-            Record::object(EventKind::MutexAccess, ObjectId::new(42))
+            Some(Record::object(EventKind::MutexAccess, ObjectId::new(42)))
         });
         configure(Configuration::default());
         assert_eq!(constructed.load(Ordering::Relaxed), 0);
@@ -2457,9 +2596,9 @@ mod tests {
             },
             ..test_configuration()
         });
-        record(EventClass::General, || Record::object(EventKind::ArcClone, ObjectId::new(42)));
+        record(EventClass::General, || Some(Record::object(EventKind::ArcClone, ObjectId::new(42))));
         record(EventClass::ArcDereference, || {
-            Record::object(EventKind::ArcDeref, ObjectId::new(42))
+            Some(Record::object(EventKind::ArcDeref, ObjectId::new(42)))
         });
 
         let captured = snapshot(crate::snapshot::EventBufferDisposition::Release).unwrap();
@@ -2482,7 +2621,7 @@ mod tests {
         let session = RecordingSession::from_raw(ACTIVE_SESSION.load(Ordering::Acquire)).unwrap();
 
         record(EventClass::General, || {
-            Record::runtime(
+            Some(Record::runtime(
                 EventTimestamp::from_ticks(1),
                 EventKind::TaskSpawned,
                 runtime::RuntimeEvent {
@@ -2494,10 +2633,10 @@ mod tests {
                     value_1: 0,
                 },
                 BacktraceCapture::Never,
-            )
+            ))
         });
         assert!(!record_in_session_classified(session, EventClass::General, || {
-            Record::runtime(
+            Some(Record::runtime(
                 EventTimestamp::from_ticks(2),
                 EventKind::TaskSpawned,
                 runtime::RuntimeEvent {
@@ -2509,7 +2648,7 @@ mod tests {
                     value_1: 0,
                 },
                 BacktraceCapture::Never,
-            )
+            ))
         }));
 
         assert!(snapshot(crate::snapshot::EventBufferDisposition::Release).is_none_or(|captured| captured.events.is_empty()));
@@ -2550,7 +2689,7 @@ mod tests {
             ..test_configuration()
         });
         record(EventClass::ArcDereference, || {
-            Record::object(EventKind::ArcDeref, ObjectId::new(42))
+            Some(Record::object(EventKind::ArcDeref, ObjectId::new(42)))
         });
 
         let snapshot = snapshot(crate::snapshot::EventBufferDisposition::Retain).unwrap();
@@ -2581,7 +2720,7 @@ mod tests {
             ..Default::default()
         });
         record(EventClass::RuntimeTask, || {
-            Record::runtime(
+            Some(Record::runtime(
                 event::EventTimestamp::now(),
                 EventKind::TaskPollStarted,
                 runtime::RuntimeEvent {
@@ -2593,10 +2732,10 @@ mod tests {
                     value_1: 0,
                 },
                 BacktraceCapture::Never,
-            )
+            ))
         });
         record(EventClass::RuntimeTask, || {
-            Record::runtime(
+            Some(Record::runtime(
                 event::EventTimestamp::now(),
                 EventKind::TaskSpawned,
                 runtime::RuntimeEvent {
@@ -2608,7 +2747,7 @@ mod tests {
                     value_1: 0,
                 },
                 BacktraceCapture::Always,
-            )
+            ))
         });
 
         let captured = snapshot(crate::snapshot::EventBufferDisposition::Release).unwrap();
@@ -2874,15 +3013,15 @@ mod tests {
             ..Default::default()
         });
         let thread_count = statistics().thread_count;
-        std::thread::spawn(move || record(EventClass::General, || Record::object(EventKind::ArcClone, skipped)))
+        std::thread::spawn(move || record(EventClass::General, || Some(Record::object(EventKind::ArcClone, skipped))))
             .join()
             .unwrap();
         assert_eq!(statistics().thread_count, thread_count);
 
-        record(EventClass::General, || Record::object(EventKind::ArcClone, sampled));
-        record(EventClass::General, || Record::object(EventKind::ArcDrop, sampled));
-        record(EventClass::General, || Record::object(EventKind::ArcClone, skipped));
-        record(EventClass::General, || Record::object(EventKind::ArcDrop, skipped));
+        record(EventClass::General, || Some(Record::object(EventKind::ArcClone, sampled)));
+        record(EventClass::General, || Some(Record::object(EventKind::ArcDrop, sampled)));
+        record(EventClass::General, || Some(Record::object(EventKind::ArcClone, skipped)));
+        record(EventClass::General, || Some(Record::object(EventKind::ArcDrop, skipped)));
         let captured = snapshot(crate::snapshot::EventBufferDisposition::Release).unwrap();
 
         assert_eq!(
@@ -2917,7 +3056,7 @@ mod tests {
 
         for subject_id in [sampled, skipped] {
             record(EventClass::RuntimeTask, || {
-                Record::runtime(
+                Some(Record::runtime(
                     EventTimestamp::from_ticks(subject_id),
                     EventKind::TaskSpawned,
                     runtime::RuntimeEvent {
@@ -2929,7 +3068,7 @@ mod tests {
                         value_1: 0,
                     },
                     BacktraceCapture::Never,
-                )
+                ))
             });
         }
         let captured = snapshot(crate::snapshot::EventBufferDisposition::Release).unwrap();
@@ -2960,11 +3099,15 @@ mod tests {
         });
         let _initial = snapshot(crate::snapshot::EventBufferDisposition::Release);
 
-        record(EventClass::ArcDereference, || Record::object(EventKind::ArcDeref, ObjectId::new(1)));
+        record(EventClass::ArcDereference, || {
+            Some(Record::object(EventKind::ArcDeref, ObjectId::new(1)))
+        });
         let active_bytes = statistics().allocated_bytes;
         let cleared = snapshot(crate::snapshot::EventBufferDisposition::Clear).unwrap();
         let cleared_statistics = statistics();
-        record(EventClass::ArcDereference, || Record::object(EventKind::ArcDeref, ObjectId::new(2)));
+        record(EventClass::ArcDereference, || {
+            Some(Record::object(EventKind::ArcDeref, ObjectId::new(2)))
+        });
         let released = snapshot(crate::snapshot::EventBufferDisposition::Release).unwrap();
         let released_statistics = statistics();
 
@@ -2987,7 +3130,9 @@ mod tests {
         let _test = TEST_LOCK.lock().unwrap();
         let expected = timeout_configuration();
         configure(expected);
-        record(EventClass::General, || Record::object(EventKind::MutexAccess, ObjectId::new(1)));
+        record(EventClass::General, || {
+            Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
+        });
         let captured = try_snapshot(crate::snapshot::EventBufferDisposition::Stop).unwrap().unwrap();
         let stopped = configuration();
         assert_eq!(captured.events.len(), 1);
@@ -3029,7 +3174,9 @@ mod tests {
         let _test = TEST_LOCK.lock().unwrap();
         let enabled = timeout_configuration();
         configure(enabled);
-        record(EventClass::General, || Record::object(EventKind::MutexAccess, ObjectId::new(1)));
+        record(EventClass::General, || {
+            Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
+        });
         let before = statistics().allocated_bytes;
         assert_eq!(
             try_snapshot(crate::snapshot::EventBufferDisposition::Retain)
@@ -3040,7 +3187,9 @@ mod tests {
             1
         );
         assert_eq!((configuration(), statistics().allocated_bytes), (enabled, before));
-        record(EventClass::General, || Record::object(EventKind::MutexAccess, ObjectId::new(2)));
+        record(EventClass::General, || {
+            Some(Record::object(EventKind::MutexAccess, ObjectId::new(2)))
+        });
         configure(Configuration::default());
         assert_eq!(
             try_snapshot(crate::snapshot::EventBufferDisposition::Retain)
@@ -3071,14 +3220,18 @@ mod tests {
             ..timeout_configuration()
         };
         configure(enabled);
-        record(EventClass::General, || Record::object(EventKind::MutexAccess, ObjectId::new(1)));
+        record(EventClass::General, || {
+            Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
+        });
         let before = statistics().allocated_bytes;
         clear_event_buffers().unwrap();
         assert_eq!(
             (configuration(), statistics().retained_events, statistics().allocated_bytes),
             (enabled, 0, before)
         );
-        record(EventClass::General, || Record::object(EventKind::MutexAccess, ObjectId::new(2)));
+        record(EventClass::General, || {
+            Some(Record::object(EventKind::MutexAccess, ObjectId::new(2)))
+        });
         assert_eq!(statistics().retained_events, 1);
         configure(Configuration::default());
         clear_event_buffers().unwrap();
@@ -3114,7 +3267,9 @@ mod tests {
     fn stop_release_timeout_keeps_all_recording_disabled() {
         let _test = TEST_LOCK.lock().unwrap();
         configure(timeout_configuration());
-        record(EventClass::General, || Record::object(EventKind::MutexAccess, ObjectId::new(1)));
+        record(EventClass::General, || {
+            Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
+        });
         configure(Configuration::default());
         // Start a new session without touching this ring, so capture skips it and
         // only the release phase encounters its reader lock.
@@ -3137,7 +3292,9 @@ mod tests {
         let _test = TEST_LOCK.lock().unwrap();
         for stop in [false, true] {
             configure(timeout_configuration());
-            record(EventClass::General, || Record::object(EventKind::MutexAccess, ObjectId::new(1)));
+            record(EventClass::General, || {
+                Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
+            });
             // SAFETY: this thread owns the process-lifetime recorder.
             let recorder = unsafe { &*local_recorder() };
             recorder.writer_active.store(true, Ordering::SeqCst);
@@ -3181,7 +3338,7 @@ mod tests {
             .spawn(|| {
                 for object_id in 1..=70 {
                     record(EventClass::General, || {
-                        Record::object(EventKind::MutexAccess, ObjectId::new(object_id))
+                        Some(Record::object(EventKind::MutexAccess, ObjectId::new(object_id)))
                     });
                 }
             })
@@ -3262,7 +3419,9 @@ mod tests {
         };
         configure(expected_configuration);
         let before = ACTIVE_SESSION.load(Ordering::Acquire);
-        record(EventClass::General, || Record::object(EventKind::MutexAccess, ObjectId::new(3)));
+        record(EventClass::General, || {
+            Some(Record::object(EventKind::MutexAccess, ObjectId::new(3)))
+        });
 
         let captured = snapshot(crate::snapshot::EventBufferDisposition::Clear).unwrap();
         let after = ACTIVE_SESSION.load(Ordering::Acquire);
@@ -3489,7 +3648,9 @@ mod tests {
         let (active_sender, active_receiver) = std::sync::mpsc::channel();
         let (exit_sender, exit_receiver) = std::sync::mpsc::channel();
         let thread = std::thread::spawn(move || {
-            record(EventClass::ArcDereference, || Record::object(EventKind::ArcDeref, ObjectId::new(3)));
+            record(EventClass::ArcDereference, || {
+                Some(Record::object(EventKind::ArcDeref, ObjectId::new(3)))
+            });
             active_sender.send(statistics().allocated_bytes).unwrap();
             exit_receiver.recv().unwrap();
         });
@@ -3522,7 +3683,7 @@ mod tests {
         for object_id in [1, 2] {
             std::thread::spawn(move || {
                 record(EventClass::ArcDereference, || {
-                    Record::object(EventKind::ArcDeref, ObjectId::new(object_id))
+                    Some(Record::object(EventKind::ArcDeref, ObjectId::new(object_id)))
                 });
             })
             .join()
@@ -3629,14 +3790,18 @@ mod tests {
             assert!(!recording_enabled());
             assert!(!recording_enabled_for(EventClass::General));
             assert_eq!(select_object(ObjectId::new(1)), None);
-            let event = Record::object(EventKind::MutexAccess, ObjectId::new(1));
-            assert!(!record_in_session(session, || event));
+            assert!(!record_in_session(session, || panic!("suppressed events must not be constructed")));
+            assert!(!record_in_session_classified(session, EventClass::General, || {
+                panic!("suppressed classified events must not be constructed")
+            }));
         }
         configure(Configuration::default());
         assert!(!recording_enabled());
         assert_eq!(select_object(ObjectId::new(1)), None);
-        let event = Record::object(EventKind::MutexAccess, ObjectId::new(1));
-        assert!(!record_in_session(session, || event));
+        assert!(!record_in_session(session, || panic!("disabled events must not be constructed")));
+        assert!(!record_in_session_classified(session, EventClass::General, || {
+            panic!("disabled classified events must not be constructed")
+        }));
     }
 
     #[test]
@@ -3657,7 +3822,7 @@ mod tests {
         let selected = (1..100).map(ObjectId::new).find(|object| sampling.includes(*object)).unwrap();
         let session = select_object(selected).unwrap();
         let skipped_event = Record::object(EventKind::MutexAccess, skipped);
-        assert!(!record_in_session(session, || skipped_event));
+        assert!(!record_in_session(session, || Some(skipped_event)));
         let local = local_recorder();
         let policy = GENERAL_POLICY.load(Ordering::Relaxed);
         let capacity = EVENT_CAPACITY.load(Ordering::Relaxed);
@@ -3675,7 +3840,12 @@ mod tests {
             event_capacity_per_thread: EventBufferCapacity::new(128).unwrap(),
             ..Default::default()
         });
-        assert!(!record_in_session(session, || { Record::object(EventKind::MutexAccess, selected) }));
+        assert!(!record_in_session(session, || panic!(
+            "stale-session events must not be constructed"
+        )));
+        assert!(!record_in_session_classified(session, EventClass::General, || {
+            panic!("stale-session classified events must not be constructed")
+        }));
         configure(Configuration::default());
     }
 

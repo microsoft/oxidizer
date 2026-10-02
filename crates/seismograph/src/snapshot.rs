@@ -1391,7 +1391,7 @@ mod tests {
             ..recorder::test_configuration()
         });
         recorder::record(recorder::event::EventClass::ArcDereference, || {
-            recorder::event::Record::object(EventKind::ArcDeref, ObjectId::new(42))
+            Some(recorder::event::Record::object(EventKind::ArcDeref, ObjectId::new(42)))
         });
 
         let snapshot = snapshot(SnapshotOptions::default()).unwrap();
