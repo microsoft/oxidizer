@@ -17,7 +17,7 @@ use crate::runtime::handle::Runtime;
 /// values for the same setting; configuring a builder does not start threads.
 ///
 /// The defaults are [`ProcessorCount::auto`], 2 MiB asynchronous-worker stacks,
-/// isolated blocking pools, a real-time clock, and a no-op telemetry sink.
+/// one shared blocking pool, a real-time clock, and a no-op telemetry sink.
 ///
 /// # Examples
 ///
@@ -172,6 +172,7 @@ impl RuntimeBuilder {
     /// # Panics
     ///
     /// Panics if worker-thread creation or worker initialization fails.
+    /// These startup failures are not configuration errors returned by this method.
     ///
     /// # Examples
     ///

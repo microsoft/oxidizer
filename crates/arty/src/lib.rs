@@ -121,14 +121,16 @@ use arty_io_core as _;
 ///
 /// # Panics
 ///
-/// Panics if runtime construction or shutdown fails, or shutdown cancels the root task.
-/// If the asynchronous body panics, its original panic payload is resumed on
-/// the calling thread. Errors returned by the body remain ordinary return values.
+/// Runtime construction errors, root-task cancellation, and shutdown errors
+/// become panics. The runtime is stopped before returning the body's value or
+/// resuming its original panic on the calling thread. A root-task failure takes
+/// precedence if shutdown also fails.
 ///
-/// Use [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build) and
-/// [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on) directly to handle construction
-/// and task errors without the attribute converting them to panics. Worker
-/// creation and initialization can still panic.
+/// An application error returned by the body remains its return value; it is
+/// not converted to a panic. Use [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build),
+/// [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on), and
+/// [`Runtime::stop`](crate::runtime::Runtime::stop) directly to handle returned
+/// runtime errors. Worker-thread creation and initialization can still panic.
 ///
 /// # Examples
 ///
@@ -206,9 +208,16 @@ pub use arty_macros::main;
 ///
 /// # Panics
 ///
-/// Panics if runtime construction or shutdown fails, or shutdown cancels the test body.
-/// A panic in the body is resumed with its original payload, so
+/// Runtime construction errors, test-body cancellation, and shutdown errors
+/// become panics. The runtime is stopped before reporting the test's outcome.
+/// A panic in the body takes precedence over a shutdown error and is resumed
+/// with its original payload, so
 /// `#[should_panic(expected = "...")]` can match the original message.
+///
+/// An application error returned by the body remains its return value. Use
+/// explicit runtime construction, [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on),
+/// and [`Runtime::stop`](crate::runtime::Runtime::stop) when runtime errors
+/// should be handled without the attribute converting them to panics.
 ///
 /// # Examples
 ///

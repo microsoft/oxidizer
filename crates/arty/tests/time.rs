@@ -17,7 +17,7 @@ use tick::FutureExt;
 fn workers() -> usize {
     #[cfg(miri)]
     {
-        6
+        2
     }
     #[cfg(not(miri))]
     {
@@ -28,7 +28,11 @@ fn workers() -> usize {
 #[test]
 fn many_timers_with_relocation_ensure_advanced() {
     execute_or_terminate_process(|| {
-        let runtime = Runtime::new().unwrap();
+        let builder = Runtime::builder();
+        // Two workers preserve cross-worker timer relocation under the interpreter.
+        #[cfg(miri)]
+        let builder = builder.processor_count(arty::runtime::ProcessorCount::exactly(workers()));
+        let runtime = builder.build().unwrap();
         let count = workers();
         runtime
             .scheduler()
@@ -63,7 +67,10 @@ fn many_timers_with_relocation_ensure_advanced() {
 
 #[test]
 fn many_timers_ensure_advanced() {
-    let runtime = Runtime::new().unwrap();
+    let builder = Runtime::builder();
+    #[cfg(miri)]
+    let builder = builder.processor_count(arty::runtime::ProcessorCount::exactly(workers()));
+    let runtime = builder.build().unwrap();
 
     let count = workers();
     let handles: Vec<_> = (0..count)

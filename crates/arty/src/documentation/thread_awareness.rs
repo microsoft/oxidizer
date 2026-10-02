@@ -101,9 +101,9 @@
 //! # Relocation is not automatic task migration
 //!
 //! `spawn_anywhere` places a new task; it does not move an existing task.
-//! Ordinary `spawn`, `run`, and `block_on` do not relocate captured values or
-//! results. Receiving a `Builtins` value as a result does not rebind it to the
-//! receiver.
+//! `TaskScheduler::spawn`, `RuntimeScheduler::spawn_anywhere`, and `block_on`
+//! do not relocate captured values or results. Receiving a `Builtins` value
+//! as a result does not rebind it to the receiver.
 //!
 //! `Send` permits a value to cross threads. `ThreadAware` describes how a
 //! transferable value adapts after an explicit move; it does not make a

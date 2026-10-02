@@ -1,18 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! There exist some Arty runtime APIs that block. These APIs are intended for compatibility and
-//! convenience purposes when called from a non-runtime thread. They are not safe to call from
-//! threads that are marked as non-blocking threads and attempting to do so will panic.
+//! Tracks asynchronous worker threads where public blocking calls must not wait.
 //!
-//! Arty marks all asynchronous worker threads as non-blocking threads. Runtime internals may
-//! wait for notifications, but public API entry points meant for intentional
-//! blocking on results are forbidden on these threads.
+//! `RuntimeScheduler::block_on` and `Runtime::stop` return errors in this context.
+//! `JoinHandle::wait` and implicit runtime destruction use a panic-on-misuse guard.
+//! Runtime internals may still wait for their own coordination notifications.
 
 use std::cell::Cell;
 
-/// Flags the current thread as a non-blocking thread. Attempting to call blocking Arty runtime
-/// APIs on this thread will result in a panic.
+/// Flags the current thread so public APIs reject waits that would stall a worker.
 pub(in crate::runtime) fn flag_current_thread() {
     IS_FLAGGED.with(|x| {
         x.set(true);

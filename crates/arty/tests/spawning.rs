@@ -22,7 +22,11 @@ testing_aids::init_tracing!();
 #[test]
 fn spawn_some_tasks() {
     execute_or_terminate_process(|| {
-        let runtime = Runtime::new().unwrap();
+        let builder = Runtime::builder();
+        // Keep cross-worker submission under Miri without repeating it over every fake processor.
+        #[cfg(miri)]
+        let builder = builder.processor_count(arty::runtime::ProcessorCount::exactly(2));
+        let runtime = builder.build().unwrap();
         let async_task = runtime.scheduler().spawn_anywhere(async |cx| {
             YieldFuture::default().await;
             let child1 = cx.scheduler().spawn(async |_| 1111);

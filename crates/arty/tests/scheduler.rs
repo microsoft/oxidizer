@@ -28,7 +28,11 @@ fn stash_scheduler() {
         }
     }
 
-    let runtime = Runtime::new().expect("Failed to create runtime");
+    let builder = Runtime::builder();
+    // One worker retains all local-scheduling transitions without interpreter idle-worker overhead.
+    #[cfg(miri)]
+    let builder = builder.processor_count(arty::runtime::ProcessorCount::exactly(1));
+    let runtime = builder.build().unwrap();
 
     #[expect(
         clippy::float_cmp,

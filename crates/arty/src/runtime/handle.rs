@@ -19,21 +19,23 @@ use crate::task::RuntimeScheduler;
 /// tasks that borrow caller-owned data. Consume the owner with [`stop`](Self::stop)
 /// when the required work has finished.
 ///
-/// # Shutdown
+/// # Drop
 ///
-/// Dropping the owner requests shutdown and waits for workers to stop. Pending
+/// Dropping the owner requests shutdown and normally waits for workers to stop. Pending
 /// asynchronous tasks and queued blocking callbacks are cancelled; blocking
 /// callbacks already running are allowed to finish. A blocking callback that
 /// never returns can therefore prevent shutdown from completing.
+///
+/// Implicit cleanup cannot return shutdown errors. Worker panic diagnostics are
+/// still emitted; use [`stop`](Self::stop) to receive the shutdown outcome.
 ///
 /// Dropping the owner from one of its own blocking callbacks requests shutdown
 /// without waiting for that callback to finish. Worker-bound schedulers and
 /// [`Builtins`](crate::task::Builtins) do not keep the runtime running after its owner is dropped.
 ///
-/// # Panics
-///
-/// Dropping the owner on an asynchronous Arty worker panics. Keep ownership on
-/// a thread where blocking is allowed.
+/// Dropping the owner on an asynchronous Arty worker panics. This destructor
+/// restriction is separate from [`stop`](Self::stop), which returns an error
+/// in that context. Keep the owner on a thread where blocking is allowed.
 ///
 /// # Examples
 ///
@@ -129,6 +131,8 @@ impl Runtime {
     /// Cancels pending asynchronous and local tasks and prevents queued blocking
     /// callbacks from starting. Already-running blocking callbacks are allowed to
     /// finish. Shutdown is still requested when the calling context cannot wait.
+    /// `Ok(())` means shutdown has completed. A calling-context error does not
+    /// mean the workers have stopped.
     ///
     /// Use [`RuntimeOperations::request_stop`](crate::runtime::RuntimeOperations::request_stop)
     /// to request shutdown without consuming the owner or blocking the caller.
@@ -137,8 +141,11 @@ impl Runtime {
     ///
     /// Returns an [`Error`] if called from an asynchronous Arty worker or one of
     /// this runtime's blocking callbacks, because those contexts cannot wait for
-    /// shutdown. Also returns an error if a worker panicked. All workers are
-    /// joined before reporting a worker failure.
+    /// shutdown. In those cases the owner is consumed without waiting.
+    ///
+    /// Also returns an error if a worker panicked. All workers are joined before
+    /// reporting a worker failure; task failures must be observed through their
+    /// own join handles.
     ///
     /// # Examples
     ///
@@ -242,6 +249,8 @@ mod tests {
             .spawn_anywhere(async |cx| cx.scheduler().clone())
             .wait()
             .unwrap();
+        // Check admission before moving the owner into code that would self-join if the guard failed.
+        assert!(scheduler.spawn(async |_| is_flagged()).wait().unwrap());
         let outcome = scheduler.spawn(async move |_| runtime.stop()).wait().unwrap();
         assert!(outcome.unwrap_err().to_string().contains("asynchronous Arty worker"));
     }
@@ -257,6 +266,13 @@ mod tests {
             .spawn_anywhere(async |cx| cx.scheduler().clone())
             .wait()
             .unwrap();
+        let dispatcher = runtime.scheduler.dispatcher.clone();
+        assert!(
+            scheduler
+                .spawn_blocking(move || dispatcher.is_current_blocking_task())
+                .wait()
+                .unwrap()
+        );
         let outcome = scheduler.spawn_blocking(move || runtime.stop()).wait().unwrap();
         assert!(outcome.unwrap_err().to_string().contains("blocking callback"));
     }

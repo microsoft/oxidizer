@@ -16,7 +16,7 @@
 //! | Operation | Ownership and completion |
 //! | --- | --- |
 //! | [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on) | Borrows the scheduler and returns `Result<T, runtime::Error>` from a task that may borrow the caller's stack |
-//! | [`Runtime::stop`](crate::runtime::Runtime::stop) | Consumes the owner, requests shutdown, and returns `Result<(), runtime::Error>` after waiting |
+//! | [`Runtime::stop`](crate::runtime::Runtime::stop) | Consumes the owner and requests shutdown; `Ok(())` means it completed |
 //! | [`RuntimeOperations::request_stop`](crate::runtime::RuntimeOperations::request_stop) | Requests shutdown without blocking; repeated calls are allowed |
 //! | Dropping `Runtime` | Requests shutdown and normally waits for it, with the blocking-task exception below |
 //!
@@ -53,8 +53,9 @@
 //! work is cancelled on its worker; queued blocking work is discarded before its
 //! callback starts. A running callback may still return a successful result.
 //!
-//! Stopping the owner waits for worker shutdown and running blocking work,
-//! rather than replacing task joins.
+//! A successful `stop` waits for worker shutdown and running blocking work,
+//! rather than replacing task joins. Calling it from a context that cannot
+//! wait still requests shutdown, but returns an error without waiting.
 //!
 //! A rejected submission can be handled immediately:
 //!
@@ -103,11 +104,14 @@
 //! `Result<Result<T, E>, JoinError>` when joined.
 //!
 //! `RuntimeScheduler::block_on` wraps a task failure in `runtime::Error` with
-//! the `JoinError` retained as its source. Entry-point
-//! macros preserve the annotated function's declared return type: they return a
-//! successful root's value, resume its original panic payload on panic, and panic
-//! if shutdown cancels the root. Handle a join's `Result` in the task body when
-//! failure should be recoverable instead.
+//! the `JoinError` retained as its source. Entry-point macros stop their runtime
+//! before returning the root's value or resuming its original panic payload.
+//! Construction errors, root cancellation, and shutdown errors become panics.
+//! A root failure takes precedence if shutdown also fails.
+//!
+//! An application error returned by the body remains its ordinary return value.
+//! Handle task joins in the body, or use explicit `build`, `block_on`, and `stop`
+//! when returned runtime errors should be handled instead of converted to panics.
 //!
 //! # Panics
 //!

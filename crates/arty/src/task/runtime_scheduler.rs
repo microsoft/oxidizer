@@ -222,6 +222,8 @@ mod tests {
         let scheduler = runtime.scheduler();
         let other_scheduler = other.scheduler();
         assert!(!scheduler.is_on_worker());
+        // Detect a missing worker flag before entering the borrowing call that must reject it.
+        assert!(scheduler.spawn_anywhere(async |_| is_flagged()).wait().unwrap());
         let observed = scheduler
             .block_on(async |_| {
                 (

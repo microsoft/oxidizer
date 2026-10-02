@@ -54,8 +54,8 @@ const SUSPEND_SLEEP_DURATION: Duration = Duration::from_millis(1);
 /// 4. Dead - the worker has completed its shutdown process and the thread has terminated.
 ///
 /// Once in the Running state, workers keep running until they receive a stop command (i.e. until
-/// something calls [`stop()`][crate::runtime::RuntimeOperations::stop] on one of the runtime-related
-/// context objects).
+/// something calls [`request_stop()`][crate::runtime::RuntimeOperations::request_stop]
+/// or stops or drops the runtime owner).
 ///
 /// # Thread safety
 ///
