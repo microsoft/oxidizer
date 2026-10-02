@@ -4,6 +4,7 @@
 //! A completed task's destructor is still part of task panic containment.
 
 #![cfg(feature = "rt")]
+#![cfg(test)]
 
 mod panic_support;
 
