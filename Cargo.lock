@@ -247,11 +247,37 @@ checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 
 [[package]]
 name = "arty"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
+ "arty_executor",
  "arty_io_core",
+ "arty_macros",
+ "criterion",
+ "ctor",
+ "data_privacy",
+ "derive_more",
+ "events_once",
+ "foldhash 0.2.0",
+ "futures",
+ "gungraun",
+ "many_cpus",
+ "metabench",
+ "mockall",
+ "mutants",
+ "nonempty",
+ "observed",
+ "observed_testing",
+ "ohno",
+ "performables",
+ "pin-project",
+ "scopeguard",
+ "static_assertions",
+ "testing_aids",
+ "thread_aware",
  "thread_aware_core",
+ "threadpool",
  "tick",
+ "tokio",
 ]
 
 [[package]]
@@ -280,6 +306,27 @@ dependencies = [
 [[package]]
 name = "arty_io_core"
 version = "0.2.0"
+
+[[package]]
+name = "arty_macros"
+version = "0.3.1"
+dependencies = [
+ "arty_macros_impl",
+ "futures",
+ "tick",
+]
+
+[[package]]
+name = "arty_macros_impl"
+version = "0.3.1"
+dependencies = [
+ "darling",
+ "insta",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.5",
+ "testing_aids",
+]
 
 [[package]]
 name = "asn1-rs"
@@ -938,7 +985,7 @@ dependencies = [
  "futures-core",
  "mutants",
  "new_zealand",
- "ohno 0.5.2",
+ "ohno",
  "testing_aids",
  "trait-variant",
 ]
@@ -984,7 +1031,7 @@ dependencies = [
  "foldhash 0.2.0",
  "moka",
  "mutants",
- "ohno 0.5.2",
+ "ohno",
  "performables",
  "thread_aware",
  "tokio",
@@ -1004,7 +1051,7 @@ name = "cachet_tier"
 version = "0.5.1"
 dependencies = [
  "dynosaur",
- "ohno 0.5.2",
+ "ohno",
  "parking_lot",
  "recoverable",
  "tick",
@@ -1338,7 +1385,7 @@ checksum = "4c486bbc92a4c933fed0f062b7922927f646a8b986e147710eace6cf0713fee6"
 dependencies = [
  "itertools 0.15.0",
  "new_zealand",
- "ohno 0.5.0",
+ "ohno",
 ]
 
 [[package]]
@@ -1856,7 +1903,7 @@ dependencies = [
  "layered",
  "mutants",
  "native-tls",
- "ohno 0.5.2",
+ "ohno",
  "opentelemetry",
  "opentelemetry-semantic-conventions",
  "opentelemetry-stdout",
@@ -1924,7 +1971,7 @@ dependencies = [
  "layered",
  "mutants",
  "native-tls",
- "ohno 0.5.2",
+ "ohno",
  "opentelemetry",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
@@ -1960,7 +2007,7 @@ dependencies = [
  "insta",
  "mutants",
  "native-tls",
- "ohno 0.5.2",
+ "ohno",
  "rstest",
  "rustls",
  "rustls-pki-types",
@@ -1986,7 +2033,7 @@ dependencies = [
  "http-body-util",
  "http_extensions",
  "observed",
- "ohno 0.5.2",
+ "ohno",
  "testing_aids",
  "tick",
  "tokio",
@@ -2015,7 +2062,7 @@ dependencies = [
  "mutants",
  "observed",
  "observed_testing",
- "ohno 0.5.2",
+ "ohno",
  "plurality",
  "quinn",
  "rcgen",
@@ -2596,7 +2643,7 @@ dependencies = [
  "layered",
  "mime",
  "mutants",
- "ohno 0.5.2",
+ "ohno",
  "seatbelt",
  "smallvec",
  "testing_aids",
@@ -2621,7 +2668,7 @@ dependencies = [
  "hyper-util",
  "layered",
  "mutants",
- "ohno 0.5.2",
+ "ohno",
  "pin-project",
  "recoverable",
  "serde",
@@ -3604,7 +3651,7 @@ version = "0.1.1"
 dependencies = [
  "cc",
  "mutants",
- "ohno 0.5.2",
+ "ohno",
 ]
 
 [[package]]
@@ -3842,7 +3889,7 @@ dependencies = [
  "criterion",
  "data_privacy",
  "observed_macros",
- "ohno 0.5.2",
+ "ohno",
  "opentelemetry",
  "opentelemetry-stdout",
  "opentelemetry_sdk",
@@ -3901,22 +3948,12 @@ dependencies = [
 
 [[package]]
 name = "ohno"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6f03365c20a62c82c5da4cd93abf43cec7115c7d9f84a55ea827e2b56d704a5"
-dependencies = [
- "ohno_macros 0.5.0",
- "typeid",
-]
-
-[[package]]
-name = "ohno"
 version = "0.5.2"
 dependencies = [
  "futures",
  "insta",
  "mutants",
- "ohno_macros 0.5.2",
+ "ohno_macros",
  "regex",
  "testing_aids",
  "tokio",
@@ -3926,30 +3963,10 @@ dependencies = [
 
 [[package]]
 name = "ohno_macros"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a4ce72614cf218523160501f1c275d718c80083697d62d54186e41512429ba9"
-dependencies = [
- "ohno_macros_impl 0.5.1",
-]
-
-[[package]]
-name = "ohno_macros"
 version = "0.5.2"
 dependencies = [
  "mutants",
- "ohno_macros_impl 0.5.2",
-]
-
-[[package]]
-name = "ohno_macros_impl"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a2711e52bb0de91b2d6a3c60636bac1827fb109003e235ed827dc9021287d0d"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.5",
+ "ohno_macros_impl",
 ]
 
 [[package]]
@@ -4868,7 +4885,7 @@ name = "recoverable"
 version = "0.2.0"
 dependencies = [
  "insta",
- "ohno 0.5.2",
+ "ohno",
  "static_assertions",
  "testing_aids",
 ]
@@ -5279,7 +5296,7 @@ dependencies = [
  "jiff",
  "layered",
  "mutants",
- "ohno 0.5.2",
+ "ohno",
  "opentelemetry",
  "opentelemetry-stdout",
  "opentelemetry_sdk",
@@ -5307,7 +5324,7 @@ dependencies = [
  "http_extensions",
  "layered",
  "mutants",
- "ohno 0.5.2",
+ "ohno",
  "seatbelt",
  "templated_uri",
  "tick",
@@ -5799,7 +5816,7 @@ dependencies = [
  "gungraun",
  "http",
  "mutants",
- "ohno 0.5.2",
+ "ohno",
  "serde",
  "serde_json",
  "static_assertions",
@@ -5825,7 +5842,7 @@ dependencies = [
  "darling",
  "insta",
  "mutants",
- "ohno 0.5.2",
+ "ohno",
  "prettyplease 0.3.0",
  "proc-macro2",
  "quote",
@@ -5952,6 +5969,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "threadpool"
+version = "1.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d050e60b33d41c19108b32cea32164033a9013fe3b46cbd4457559bfbf77afaa"
+dependencies = [
+ "num_cpus",
+]
+
+[[package]]
 name = "tick"
 version = "0.7.0"
 dependencies = [
@@ -5965,7 +5991,7 @@ dependencies = [
  "jiff",
  "libc",
  "mutants",
- "ohno 0.5.2",
+ "ohno",
  "performables",
  "pin-project-lite",
  "serde",

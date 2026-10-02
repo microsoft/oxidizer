@@ -3,8 +3,8 @@
 
 [package]
 name = "arty"
-description = "Single-threaded, thread-aware application runtime."
-version = "0.3.0"
+description = "Thread-aware, thread-per-core application runtime."
+version = "0.3.1"
 readme = "README.md"
 keywords = ["arty", "async", "runtime"]
 categories = ["asynchronous"]
@@ -18,6 +18,9 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/arty"
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
+    "arty_macros::main",
+    "arty_macros::test",
+    "observed::sink::core::Sink",
     "thread_aware_core::thread::NumaNode",
     "thread_aware_core::thread::Owner",
     "thread_aware_core::thread::Thread",
@@ -27,6 +30,7 @@ allowed_external_types = [
     "tick::delay::Delay",
     "tick::future_ext::FutureExt",
     "tick::periodic_timer::PeriodicTimer",
+    "tick::runtime::inactive_clock::InactiveClock",
     "tick::simple_clock::SimpleClock",
     "tick::stopwatch::Stopwatch",
     "tick::timeout::Timeout",
@@ -35,23 +39,95 @@ allowed_external_types = [
 [package.metadata.docs.rs]
 all-features = true
 
-# Facade-only crate: its public surface consists of re-exports, so it has no
-# instrumented source lines for the per-package coverage gate.
-[package.metadata.coverage-gate]
-min-lines-percent = 0
-
 [features]
 default = []
+macros = ["rt", "dep:arty_macros"]
+rt = [
+    "time",
+    "dep:arty_executor",
+    "dep:data_privacy",
+    "dep:derive_more",
+    "dep:events_once",
+    "dep:foldhash",
+    "dep:futures",
+    "dep:many_cpus",
+    "dep:nonempty",
+    "dep:observed",
+    "dep:performables",
+    "dep:pin-project",
+    "dep:thread_aware",
+    "dep:threadpool",
+]
 time = ["dep:tick"]
-test-util = ["tick?/test-util"]
+test-util = ["tick?/test-util", "many_cpus?/test-util"]
 
 [dependencies]
+arty_executor = { workspace = true, optional = true }
 arty_io_core = { workspace = true }
+arty_macros = { workspace = true, optional = true }
+data_privacy = { workspace = true, optional = true }
+derive_more = { workspace = true, features = ["debug"], optional = true }
+events_once = { workspace = true, optional = true }
+foldhash = { workspace = true, features = ["std"], optional = true }
+futures = { workspace = true, features = ["executor"], optional = true }
+many_cpus = { workspace = true, optional = true }
+nonempty = { workspace = true, optional = true }
+observed = { workspace = true, optional = true }
+performables = { workspace = true, optional = true }
+pin-project = { workspace = true, optional = true }
+thread_aware = { workspace = true, features = ["std", "derive"], optional = true }
 thread_aware_core = { workspace = true, features = ["std"] }
+threadpool = { workspace = true, optional = true }
 tick = { workspace = true, optional = true }
 
 [dev-dependencies]
+arty_executor = { path = "../arty_executor", features = ["test-util"] }
+arty_macros = { path = "../arty_macros" }
+criterion = { workspace = true }
+ctor = { workspace = true }
+data_privacy = { path = "../data_privacy" }
+derive_more = { workspace = true, features = ["debug"] }
+events_once = { workspace = true }
+foldhash = { workspace = true, features = ["std"] }
+futures = { workspace = true, features = ["executor", "async-await"] }
+many_cpus = { workspace = true, features = ["test-util"] }
+metabench = { path = "../metabench" }
+mockall = { workspace = true }
+mutants = { workspace = true }
+nonempty = { workspace = true }
+observed = { path = "../observed", features = ["test-util"] }
+observed_testing = { path = "../observed_testing" }
+ohno = { workspace = true, features = ["app-err"] }
+performables = { workspace = true }
+pin-project = { workspace = true }
+scopeguard = { workspace = true }
+static_assertions = { workspace = true }
+testing_aids = { path = "../testing_aids" }
+thread_aware = { path = "../thread_aware", features = ["std", "derive", "test-utils"] }
+threadpool = { workspace = true }
 tick = { path = "../tick", features = ["test-util"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "time", "sync"] }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+gungraun = { workspace = true, features = ["default"] }
+
+[[bench]]
+name = "arty_scheduling"
+harness = false
+required-features = ["rt"]
+
+[[bench]]
+name = "arty_telemetry"
+harness = false
+required-features = ["rt"]
+
+[[example]]
+name = "arty_advanced"
+required-features = ["rt"]
+
+[[example]]
+name = "arty_basic"
+required-features = ["macros"]
 
 # >>> anvil-managed: anvil-lints
 [lints]

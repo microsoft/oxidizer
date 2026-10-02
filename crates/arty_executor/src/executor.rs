@@ -50,8 +50,12 @@ use crate::{CycleOutcome, ExecutorBuilder, ExecutorCore, TaskSet};
 /// 2. Keep calling [`execute_cycle()`][Self::execute_cycle] until it returns [`CycleOutcome::Shutdown`].
 /// 3. Drop the executor.
 ///
-/// The executor will only return [`CycleOutcome::Shutdown`] when none of its resources are
-/// referenced any more (e.g. all join handles have been dropped).
+/// The executor returns [`CycleOutcome::Shutdown`] after task cleanup and when its pooled
+/// result channels are no longer borrowed (e.g. all join handles have been dropped).
+/// By default, cloned task wakers must also be dropped. With
+/// [`ExecutorBuilder::independent_wakers`][crate::ExecutorBuilder::independent_wakers],
+/// they become inert on completion or cancellation and remain valid after shutdown without
+/// retaining task storage.
 ///
 /// ## Troubleshooting shutdown failure
 ///
@@ -60,8 +64,6 @@ use crate::{CycleOutcome, ExecutorBuilder, ExecutorCore, TaskSet};
 ///
 /// Potential causes include:
 ///
-/// * Some future awaited by a task failed to cancel an ongoing `await` operation when the future
-///   was dropped. This suggests a resource management defect in the future.
 /// * A [`JoinHandle`][1] remains alive somewhere with an independent lifetime (e.g. in
 ///   a `thread_local!` variable). This suggests a resource management defect in whatever logic
 ///   placed the [`JoinHandle`][1] there.

@@ -16,6 +16,7 @@ use infinity_pool::{DropPolicy, RawBlindPool};
 use nm::{Event, Magnitude, MetricsPusher, Push};
 use tick::SimpleClock;
 
+use crate::wake::{AwakenedQueue, WakeNotification};
 use crate::{
     BuildPointerHasher, CycleOutcome, ERR_POISONED_LOCK, JoinHandle, RawPooledCastTypeErasedTask, ShutdownTimeoutBehavior, Task, TaskRef,
     WakeSignal,
@@ -67,9 +68,8 @@ struct ReentrancySafeState {
     /// task itself knowing the specific type of the future and the type of the result it produces.
     task_storage: RawBlindPool,
 
-    /// In shutdown mode (`Some`), all tasks are considered completed and the only thing we do is
-    /// wait for them to become inert (which may be driven by uncontrollable actions of foreign
-    /// threads). New tasks can no longer be scheduled in this mode (a panic will occur). If the
+    /// In shutdown mode (`Some`), all tasks are cancelled and we wait for borrowed pooled
+    /// results to be released. New tasks can no longer be scheduled in this mode (a panic will occur). If the
     /// deadline is reached without a successful shutdown, we terminate the process and try to report
     /// the underlying reasons.
     shutdown_deadline: Option<Instant>,
@@ -98,9 +98,7 @@ struct ExclusiveState {
     /// that `TaskRef` is a thin wrapper around a pointer.
     inactive: HashSet<TaskRef, BuildPointerHasher>,
 
-    /// These tasks have completed and we are waiting for them to become inert before we can release
-    /// their resources. Tasks can sit here forever, although that suggests some resource leak and
-    /// will degrade executor cycle performance. These tasks block the shutdown process.
+    /// Completed tasks whose retired wake metadata permits releasing their pooled storage.
     completed: VecDeque<TaskRef>,
 
     /// Used to measure the time spent during/between executor cycle processing and during shutdown.
@@ -129,7 +127,7 @@ struct SharedState {
     ///
     /// This is a `VecDeque` because we need to be able to preallocate the capacity (insertions are
     /// always allocation-free because they may come from a different thread, so we cannot allocate).
-    awakened: Arc<Mutex<VecDeque<TaskRef>>>,
+    awakened: AwakenedQueue,
 
     /// When a waker cannot lock the `awakened` queue or when the queue is full, it will set this
     /// flag to indicate that the awakened status of every inactive task should be directly probed.
@@ -138,6 +136,7 @@ struct SharedState {
     /// This is used to wake up the owner of the executor when more work has
     /// been enqueued for the executor and calling `execute_cycle()` is desirable.
     owner_waker: task::Waker,
+    independent_wakers: bool,
 
     /// If the executor fails to shut down after this much time has passed from the start of the
     /// shutdown process, we panic and report whatever debug information we have available.
@@ -174,6 +173,7 @@ impl ExecutorCore {
         owner_waker: task::Waker,
         shutdown_timeout: Duration,
         shutdown_timeout_behavior: ShutdownTimeoutBehavior,
+        independent_wakers: bool,
     ) -> Self {
         Self {
             reentrancy_safe: RefCell::new(ReentrancySafeState {
@@ -193,6 +193,7 @@ impl ExecutorCore {
                 awakened: Arc::new(Mutex::new(VecDeque::with_capacity(AWAKENED_CAPACITY))),
                 probe_embedded_wake_signals: Arc::new(AtomicBool::new(false)),
                 owner_waker,
+                independent_wakers,
                 shutdown_timeout,
                 shutdown_timeout_behavior,
             },
@@ -234,7 +235,8 @@ impl ExecutorCore {
             Arc::clone(&self.shared.probe_embedded_wake_signals),
             self.shared.owner_waker.clone(),
             task_ref,
-        );
+        )
+        .independent_wakers(self.shared.independent_wakers);
 
         // SAFETY: The task is alive (we own it and just created it) and we are on the thread
         // where it was created (because we just created it). The executor is the only thing that
@@ -344,7 +346,17 @@ impl ExecutorCore {
                 // Process each contiguous slice in FIFO order, avoiding per-task ring-buffer
                 // bookkeeping. TaskRef is Copy, so clearing once also avoids drain cleanup.
                 for slice in <[_; 2]>::from(awakened.as_slices()) {
-                    for &task_ref in slice {
+                    for notification in slice {
+                        let task_ref = match notification {
+                            WakeNotification::Inline(task_ref) => *task_ref,
+                            WakeNotification::Independent(notification) => {
+                                let Some(signal) = notification.upgrade().filter(|signal| signal.is_active()) else {
+                                    TASKS_ACTIVATED_SPURIOUS.with(Event::observe_once);
+                                    continue;
+                                };
+                                signal.task_ref()
+                            }
+                        };
                         // It is theoretically possible for a completed task to be awakened, in which case
                         // we do nothing. We detect this by ensuring that the task was in the "inactive" set
                         // before we react to the wake notification. This also eliminates spurious wakes.
@@ -409,11 +421,7 @@ impl ExecutorCore {
 
             match task.poll() {
                 task::Poll::Ready(()) => {
-                    // The task has completed, so we can move it to the completed list.
-                    // It will sit there until it signals `is_inert()` at which point it is dropped.
-                    // It may sit in the `completed` list essentially forever, for example if
-                    // something is still holding its waker. We generally hope this is not the
-                    // case, though, since that would be wasteful, but we allow it technically.
+                    // Completion retires wake metadata before this storage is released.
                     state_exclusive.completed.push_back(task_ref);
                 }
                 task::Poll::Pending => {
@@ -528,12 +536,8 @@ impl ExecutorCore {
                 .expect("shutdown timeout must be representable as an Instant after shutdown starts"),
         );
 
-        // We call `abort()` on all tasks that we are canceling. This will drop the maximum amount
-        // of internal state such as any captured variables that may be holding on to join handles
-        // and/or wakers, making it possible to start dropping the tasks. Not all tasks become inert
-        // because of this - there may also be callers on other threads holding on to our wakers, in
-        // which case the shutdown process will take longer (up to infinity/timeout, e.g. if some
-        // external thread is holding on to a waker forever).
+        // Cancellation retires wake metadata and drops futures in place. Externally
+        // retained wakers keep only metadata, not task storage or worker lifetime.
 
         // Needed for split borrowing.
         let state_exclusive_real: &mut ExclusiveState = &mut state_exclusive;
