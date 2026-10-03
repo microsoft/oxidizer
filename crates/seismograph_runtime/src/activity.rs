@@ -231,6 +231,8 @@ impl Activity {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use seismograph::recorder::runtime::{TaskId, TypeDescriptorId};
     use seismograph::recorder::{Configuration, EventBufferCapacity, RecordingPolicy, recording_observation};
     use seismograph::snapshot::{EventBufferDisposition, SnapshotOptions};
@@ -360,10 +362,14 @@ mod tests {
         let worker = worker.handle();
         let other = runtime.handle().register_task(TypeDescriptorId::from_raw(1).unwrap(), None);
         let task = runtime.handle().register_task(TypeDescriptorId::from_raw(2).unwrap(), None);
+        let owners = Arc::strong_count(&task.task);
 
         let poll = task.poll_started(&worker);
+        assert!(Arc::ptr_eq(poll.task.as_ref().unwrap(), &task.task));
+        assert_eq!(Arc::strong_count(&task.task), owners + 1);
         assert_eq!(state(&task).state, TaskActivityState::Running);
         worker.task_poll_finished(poll);
+        assert_eq!(Arc::strong_count(&task.task), owners);
         let waiting = state(&task);
         assert_eq!(waiting.state, TaskActivityState::Waiting);
         assert_eq!(waiting.poll_started_at, None);
@@ -391,9 +397,12 @@ mod tests {
         let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
         let task = runtime.handle().register_task(TypeDescriptorId::from_raw(1).unwrap(), None);
         let before = format!("{:?}", task.task.activity);
+        let owners = Arc::strong_count(&task.task);
         for _ in 0..10 {
             task.woken();
             let poll = task.poll_started(&worker.handle());
+            assert!(poll.task.is_none());
+            assert_eq!(Arc::strong_count(&task.task), owners);
             task.poll_finished(&worker.handle(), poll);
         }
         assert_eq!(format!("{:?}", task.task.activity), before);

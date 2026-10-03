@@ -55,7 +55,9 @@ impl TaskHandle {
     fn poll_started_recorded(&self, worker: &WorkerHandle) -> TaskPoll {
         let (started_at, ready_since, queued_since, session) = self.task.activity.poll_started(&self.task, worker.id());
         self.update_poll_metrics(worker, started_at, ready_since);
-        worker.task_poll_started_recorded(self.id(), started_at, queued_since, session)
+        let mut poll = worker.task_poll_started_recorded(self.id(), started_at, queued_since, session);
+        poll.task = session.map(|_| Arc::clone(&self.task));
+        poll
     }
 
     // The assembly probe confirms these factored lifetime operations otherwise
@@ -117,4 +119,5 @@ pub struct TaskPoll {
     pub(crate) task_id: TaskId,
     pub(crate) started_at: EventTimestamp,
     pub(crate) session: Option<RecordingSession>,
+    pub(crate) task: Option<Arc<TaskControl>>,
 }
