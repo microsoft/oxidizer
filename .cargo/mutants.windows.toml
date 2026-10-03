@@ -61,6 +61,8 @@ exclude_re = [
     'crates/seismograph_cli/src/commands/monitor/task_events/attribution.rs:\d+:\d+: replace \+= with \*= in (reject_crossing_polls|reject_concurrent_task_polls|assign)$',
 
     # Windows host only.
+    # Reversing the size-class shift timed out in the Windows PR mutation run.
+    'crates/rallocator/src/allocator/medium.rs:\d+:\d+: replace << with >> in MediumCache::refill_count$',
     # Linux perf is unavailable on Windows. `run_perf` exits before entering
     # its Linux implementation, and the worker definitions share one name.
     "\\brun_perf\\b",
