@@ -56,6 +56,8 @@ exclude_re = [
     'crates/rallocator/src/allocator/medium.rs:\d+:\d+: replace - with \+ in MediumCache::refill_count$',
     # Reversing the size-class shift timed out on both Linux and Windows.
     'crates/rallocator/src/allocator/medium.rs:\d+:\d+: replace << with >> in MediumCache::refill_count$',
+    # Multiplying the remaining cache budget by block size timed out on Linux.
+    'crates/rallocator/src/allocator/medium.rs:\d+:\d+: replace / with \* in MediumCache::refill_count$',
     'crates/seismograph_cli/src/commands/monitor/client.rs:\d+:\d+: replace (handshake|recording_configuration) -> Result<RecordingConfiguration, Error> with Ok\(Default::default\(\)\)$',
     'crates/seismograph_cli/src/commands/monitor/task_events/attribution.rs:215:19: replace < with (==|>) in reject_crossing_polls$',
     'crates/seismograph_cli/src/commands/monitor/task_events/attribution.rs:215:52: replace \|\| with && in reject_crossing_polls$',
