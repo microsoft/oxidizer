@@ -42,7 +42,8 @@ fn memory_status_with(mut read: impl FnMut(&CStr, &mut [u8]) -> Option<usize>) -
         path[root.len()..root.len() + relative.len()].copy_from_slice(relative);
         let mut length = root.len() + relative.len();
         // Read parent limits as well: a leaf's "max" does not remove an ancestor cap.
-        for _ in 0..32 {
+        // Each iteration shortens the path, bounded by the membership buffer.
+        loop {
             apply_cgroup(&path[..length], &mut status, &mut read);
             let separator = path[..length]
                 .iter()
@@ -159,22 +160,26 @@ mod tests {
 
     #[test]
     fn deeply_nested_cgroups_bound_ancestor_queries() {
-        let membership = format!("0::{}\n", "/a".repeat(40));
-        let mut limit_queries = 0;
-        let memory = memory_status_with(|path, output| {
-            let contents = match path.to_bytes() {
-                b"/proc/meminfo" => b"MemTotal: 8 kB\nMemAvailable: 4 kB\n".as_slice(),
-                b"/proc/self/cgroup" => membership.as_bytes(),
-                _ => {
+        for depth in [40, 253] {
+            let membership = format!("0::{}\n", "/a".repeat(depth));
+            let mut limit_queries = 0;
+            let memory = memory_status_with(|path, output| {
+                if path.to_bytes().starts_with(b"/sys/fs/cgroup") {
                     limit_queries += 1;
-                    return None;
                 }
-            };
-            output[..contents.len()].copy_from_slice(contents);
-            Some(contents.len())
-        })
-        .unwrap();
-        assert_eq!((memory.total, memory.available, limit_queries), (8192, 4096, 2 + 32 * 2));
+                let contents = match path.to_bytes() {
+                    b"/proc/meminfo" => b"MemTotal: 8 kB\nMemAvailable: 4 kB\n".as_slice(),
+                    b"/proc/self/cgroup" => membership.as_bytes(),
+                    b"/sys/fs/cgroup/a/memory.max" => b"2048\n",
+                    b"/sys/fs/cgroup/a/memory.current" => b"1984\n",
+                    _ => return None,
+                };
+                output[..contents.len()].copy_from_slice(contents);
+                Some(contents.len())
+            })
+            .unwrap();
+            assert_eq!((memory.total, memory.available, limit_queries), (2048, 64, 2 + depth * 2));
+        }
     }
 
     #[test]
