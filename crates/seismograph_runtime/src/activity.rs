@@ -352,6 +352,37 @@ mod tests {
     }
 
     #[test]
+    fn worker_finish_updates_recorded_task_activity_and_counters() {
+        let _test = crate::tests::test_lock();
+        configure(true);
+        let runtime = register_runtime(RuntimeMetadata::new("worker-finish", 1));
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let worker = worker.handle();
+        let other = runtime.handle().register_task(TypeDescriptorId::from_raw(1).unwrap(), None);
+        let task = runtime.handle().register_task(TypeDescriptorId::from_raw(2).unwrap(), None);
+
+        let poll = task.poll_started(&worker);
+        assert_eq!(state(&task).state, TaskActivityState::Running);
+        worker.task_poll_finished(poll);
+        let waiting = state(&task);
+        assert_eq!(waiting.state, TaskActivityState::Waiting);
+        assert_eq!(waiting.poll_started_at, None);
+        assert_eq!(waiting.poll_worker_id, None);
+        assert_eq!(task.task.poll_count.load(Ordering::Relaxed), 1);
+        assert_eq!(other.task.poll_count.load(Ordering::Relaxed), 0);
+
+        let poll = task.poll_started(&worker);
+        task.woken();
+        worker.task_poll_finished(poll);
+        let ready = state(&task);
+        assert_eq!(ready.state, TaskActivityState::Ready);
+        assert_eq!(ready.poll_started_at, None);
+        assert_eq!(ready.poll_worker_id, None);
+        assert_eq!(task.task.poll_count.load(Ordering::Relaxed), 2);
+        configure(false);
+    }
+
+    #[test]
     fn disabled_hooks_leave_recording_state_and_event_buffers_untouched() {
         let _test = crate::tests::test_lock();
         configure(false);

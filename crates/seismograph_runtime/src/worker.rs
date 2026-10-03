@@ -213,7 +213,20 @@ impl WorkerHandle {
         reason = "consuming the token prevents callers from finishing one poll twice"
     )]
     pub fn task_poll_finished(&self, poll: TaskPoll) {
+        if poll.session.is_some() {
+            self.task_poll_finished_recorded(&poll);
+            return;
+        }
         self.task_poll_finished_with_control(&poll, None);
+    }
+
+    #[cold]
+    fn task_poll_finished_recorded(&self, poll: &TaskPoll) {
+        let task = crate::lock(&self.runtime.control.tasks)
+            .iter()
+            .find(|task| task.id == poll.task_id)
+            .cloned();
+        self.task_poll_finished_with_control(poll, task.as_deref());
     }
 
     pub(crate) fn task_poll_finished_with_control(&self, poll: &TaskPoll, task: Option<&TaskControl>) {
