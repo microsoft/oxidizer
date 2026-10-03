@@ -53,7 +53,7 @@ impl TaskHandle {
 
     #[cold]
     fn poll_started_recorded(&self, worker: &WorkerHandle) -> TaskPoll {
-        let (started_at, ready_since, queued_since, session) = self.task.activity.poll_started(&self.task, worker.id());
+        let (started_at, ready_since, queued_since, session) = self.task.activity.poll_started(worker.id(), || self.task.poll_timestamps());
         self.update_poll_metrics(worker, started_at, ready_since);
         let mut poll = worker.task_poll_started_recorded(self.id(), started_at, queued_since, session);
         poll.task = session.map(|_| Arc::clone(&self.task));

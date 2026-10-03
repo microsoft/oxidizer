@@ -146,12 +146,12 @@ impl Activity {
     #[cold]
     pub(crate) fn poll_started(
         &self,
-        task: &TaskControl,
         worker_id: WorkerId,
+        timestamps: impl FnOnce() -> (EventTimestamp, u64),
     ) -> (EventTimestamp, u64, Option<EventTimestamp>, Option<RecordingSession>) {
         let session = active_recording_session();
         let mut data = self.begin(session);
-        let (at, ready) = task.poll_timestamps();
+        let (at, ready) = timestamps();
         if data.is_none() && session.is_some() {
             self.missed.fetch_add(1, Ordering::AcqRel);
         }
@@ -643,7 +643,7 @@ mod tests {
 
         let (_, _, queued_since, session) = std::thread::scope(|scope| {
             scope
-                .spawn(|| task.task.activity.poll_started(&task.task, worker.id()))
+                .spawn(|| task.task.activity.poll_started(worker.id(), || task.task.poll_timestamps()))
                 .join()
                 .unwrap()
         });
@@ -652,6 +652,46 @@ mod tests {
         assert_eq!(task.task.activity.missed.load(Ordering::Acquire), 2);
         drop(guard);
         assert_eq!(state(&task).state, TaskActivityState::Unknown);
+        configure(false);
+    }
+
+    #[test]
+    fn poll_start_invalidated_during_timestamp_capture_discards_queue_sample() {
+        let _test = crate::tests::test_lock();
+        configure(true);
+        let runtime = register_runtime(RuntimeMetadata::new("invalidated-start", 1));
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let task = runtime.handle().register_task(TypeDescriptorId::from_raw(1).unwrap(), None);
+        task.woken();
+        assert_eq!(state(&task).state, TaskActivityState::Ready);
+
+        let (_, _, queued_since, _) = task.task.activity.poll_started(worker.id(), || {
+            // A concurrent wake cannot acquire the activity lock and invalidates it.
+            task.woken();
+            task.task.poll_timestamps()
+        });
+
+        assert_eq!(queued_since, None);
+        assert_eq!(state(&task).state, TaskActivityState::Unknown);
+        configure(false);
+    }
+
+    #[test]
+    fn contended_wake_before_poll_finish_does_not_claim_waiting() {
+        let _test = crate::tests::test_lock();
+        configure(true);
+        let runtime = register_runtime(RuntimeMetadata::new("invalidated-finish", 1));
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let task = runtime.handle().register_task(TypeDescriptorId::from_raw(1).unwrap(), None);
+        let poll = task.poll_started(&worker.handle());
+        let guard = task.task.activity.data.lock().unwrap();
+        task.woken();
+        drop(guard);
+
+        worker.handle().task_poll_finished(poll);
+
+        assert_eq!(state(&task).state, TaskActivityState::Unknown);
+        assert_eq!(task.task.poll_count.load(Ordering::Relaxed), 1);
         configure(false);
     }
 
