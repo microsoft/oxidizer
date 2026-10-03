@@ -69,7 +69,11 @@ fn concurrent_threads_allocate_mixed_sizes() {
                 let layout = Layout::from_size_align(size, 8).unwrap();
                 let address = unsafe { allocator.alloc(layout) };
                 assert!(!address.is_null());
-                unsafe { allocator.dealloc(address, layout) };
+                unsafe {
+                    address.write(u8::try_from(iteration & 0xFF).unwrap());
+                    address.add(size - 1).write(u8::try_from(thread_index & 0xFF).unwrap());
+                    allocator.dealloc(address, layout);
+                }
             }
         }));
     }
