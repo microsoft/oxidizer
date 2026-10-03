@@ -1,6 +1,32 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Opt-in allocator tuning counters for controlled diagnostics.
+//!
+//! Enabling the `tuning-telemetry` Cargo feature does **not** start recording.
+//! Call [`TuningTelemetry::enable`] explicitly, observe the active session with
+//! [`TuningTelemetry::snapshot_if_active`], then call [`TuningTelemetry::disable`].
+//! Control applies to one linked copy of this crate: its allocator values and
+//! threads share a session.
+//! Starting a session replaces the previous session and resets its counters.
+//!
+//! Observations allocate no memory, do not pause recording or drain recorders,
+//! and do not reset counters. Session identity is stabilized against concurrent
+//! control operations, but counter fields are independently sampled: they are
+//! neither transactional process totals nor exact allocation latency.
+//!
+//! Small-class counters are shared by class index across allocator personalities,
+//! not partitioned by personality or layout. Public class-size labels use
+//! [`StandardSizeClasses`] and are valid only when all participating personalities
+//! use that layout. Custom layouts are not detected or filtered: mixing them can
+//! combine different sizes under one standard label. Do not interpret public
+//! small-class observations as per-size data in such a session. Medium counters
+//! are not labeled by small size class.
+//!
+//! Active instrumentation can perturb performance. Collect these diagnostics
+//! separately from timing comparisons. These are cumulative event counters, not
+//! queue/bin occupancy or resident-memory measurements.
+
 use std::fmt;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
@@ -8,34 +34,55 @@ use crate::config::{MAX_SIZE_CLASSES, SizeClassLayout, StandardSizeClasses};
 
 static ACTIVE_SESSION: AtomicUsize = AtomicUsize::new(0);
 static TRANSITION: std::sync::Mutex<()> = std::sync::Mutex::new(());
-static RECORDERS: AtomicUsize = AtomicUsize::new(0);
+static RECORDERS: AtomicUsize = AtomicUsize::new(RECORDING_CLOSED);
 static NEXT_SESSION: AtomicUsize = AtomicUsize::new(1);
 static LAST_SESSION: AtomicUsize = AtomicUsize::new(0);
 static CLASS_COUNTERS: [ClassCounters; MAX_SIZE_CLASSES] = [const { ClassCounters::new() }; MAX_SIZE_CLASSES];
 static MEDIUM_COUNTERS: MediumCounters = MediumCounters::new();
 static PARTIAL_SCAN_LIMIT: AtomicU64 = AtomicU64::new(0);
 
-pub(crate) struct TuningTelemetry;
+// Closing and admission modify the SAME atomic word: an admission either
+// precedes close and contributes to its drain count, or observes the closed bit
+// and fails. Counter writes are released by guard departure and acquired by
+// drain. This does not rely on store->load ordering across separate atomics.
+const RECORDING_CLOSED: usize = 1 << (usize::BITS - 1);
+#[cfg_attr(test, mutants::skip)] // Mutating the count mask can make recorder draining non-terminating; its boundaries are tested directly.
+const RECORDER_COUNT: usize = RECORDING_CLOSED - 1;
+
+/// Controls explicitly enabled tuning sessions for this linked copy of the crate.
+#[derive(Debug)]
+pub struct TuningTelemetry;
 
 impl TuningTelemetry {
-    pub(crate) fn enable() -> usize {
+    /// Starts a new session, resetting the previous counters, and returns its ID.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a previous control operation poisoned the transition lock.
+    pub fn enable() -> usize {
         let _transition = TRANSITION.lock().unwrap();
-        ACTIVE_SESSION.store(0, Ordering::Release);
+        close_recording();
         wait_for_recorders();
         reset();
         let session_id = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
         LAST_SESSION.store(session_id, Ordering::Release);
-        ACTIVE_SESSION.store(session_id, Ordering::Release);
+        open_recording(session_id);
         session_id
     }
 
-    pub(crate) fn disable() {
+    /// Stops recording while preserving the completed session's counters.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a previous control operation poisoned the transition lock.
+    pub fn disable() {
         let _transition = TRANSITION.lock().unwrap();
-        ACTIVE_SESSION.store(0, Ordering::Release);
+        close_recording();
         wait_for_recorders();
     }
 
-    pub(crate) fn is_enabled() -> bool {
+    /// Returns whether tuning recording is currently enabled.
+    pub fn is_enabled() -> bool {
         ACTIVE_SESSION.load(Ordering::Acquire) != 0
     }
 
@@ -45,38 +92,48 @@ impl TuningTelemetry {
 
     pub(crate) fn collect_for<L: SizeClassLayout>() -> TuningTelemetryReport {
         let _transition = TRANSITION.lock().unwrap();
-        let active_session = ACTIVE_SESSION.swap(0, Ordering::AcqRel);
+        Self::collect_locked::<L>()
+    }
+
+    /// Observes an explicitly enabled session without pausing or resetting it.
+    /// Counters are independently read, not a transactional process snapshot.
+    ///
+    /// Returns `None` when inactive, rather than a zero-filled measured record.
+    /// Small-class labels assume every participating personality uses
+    /// [`StandardSizeClasses`]; custom layouts are neither detected nor separated.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a previous control operation poisoned the transition lock.
+    pub fn snapshot_if_active() -> Option<TuningTelemetryObservation> {
+        let _transition = TRANSITION.lock().unwrap();
+        let session_id = ACTIVE_SESSION.load(Ordering::Acquire);
+        if session_id == 0 {
+            return None;
+        }
+        Some(TuningTelemetryObservation {
+            session_id,
+            classes: std::array::from_fn(|class_index| {
+                // Unused tail entries are private and excluded by classes().
+                let block_size = StandardSizeClasses::SIZES.get(class_index).copied().unwrap_or(0);
+                read_class(class_index, block_size)
+            }),
+            medium: read_medium(),
+        })
+    }
+
+    // Legacy collection holds TRANSITION while quiescing recorders. The active
+    // observation above deliberately does not use this pausing path.
+    fn collect_locked<L: SizeClassLayout>() -> TuningTelemetryReport {
+        let active_session = close_recording();
         wait_for_recorders();
         let classes = CLASS_COUNTERS
             .iter()
             .take(L::SIZES.len())
             .enumerate()
-            .map(|(class_index, counters)| ClassTuningTelemetry {
-                class_index,
-                block_size: L::SIZES[class_index],
-                allocations: counters.allocations.load(Ordering::Relaxed),
-                tls_cache_hits: counters.tls_cache_hits.load(Ordering::Relaxed),
-                recycled_batch_hits: counters.recycled_batch_hits.load(Ordering::Relaxed),
-                recycled_word_refills: counters.recycled_word_refills.load(Ordering::Relaxed),
-                recycled_single_hits: counters.recycled_single_hits.load(Ordering::Relaxed),
-                fresh_hits: counters.fresh_hits.load(Ordering::Relaxed),
-                slab_refills: counters.slab_refills.load(Ordering::Relaxed),
-                partial_scan_calls: counters.partial_scan_calls.load(Ordering::Relaxed),
-                partial_slabs_scanned: counters.partial_slabs_scanned.load(Ordering::Relaxed),
-                partial_limit_hits: counters.partial_limit_hits.load(Ordering::Relaxed),
-                local_frees: counters.local_frees.load(Ordering::Relaxed),
-                bitmap_spills: counters.bitmap_spills.load(Ordering::Relaxed),
-                remote_frees: counters.remote_frees.load(Ordering::Relaxed),
-            })
+            .map(|(class_index, _)| read_class(class_index, L::SIZES[class_index]))
             .collect::<Vec<_>>();
-        let medium = MediumTuningTelemetry {
-            tls_cache_hits: MEDIUM_COUNTERS.tls_cache_hits.load(Ordering::Relaxed),
-            global_cache_hits: MEDIUM_COUNTERS.global_cache_hits.load(Ordering::Relaxed),
-            fresh_commits: MEDIUM_COUNTERS.fresh_commits.load(Ordering::Relaxed),
-            cached_frees: MEDIUM_COUNTERS.cached_frees.load(Ordering::Relaxed),
-            global_frees: MEDIUM_COUNTERS.global_frees.load(Ordering::Relaxed),
-            purged_spans: MEDIUM_COUNTERS.purged_spans.load(Ordering::Relaxed),
-        };
+        let medium = read_medium();
         let partial_scan_limit = PARTIAL_SCAN_LIMIT.load(Ordering::Relaxed) as usize;
         let recommendations = recommendations(&classes, &medium, partial_scan_limit);
         let report = TuningTelemetryReport {
@@ -86,9 +143,111 @@ impl TuningTelemetry {
             recommendations,
         };
         if active_session != 0 {
-            ACTIVE_SESSION.store(active_session, Ordering::Release);
+            open_recording(active_session);
         }
         report
+    }
+}
+
+/// Allocation-free observation of the active tuning session's existing counters.
+#[derive(Clone, Eq, PartialEq)]
+pub struct TuningTelemetryObservation {
+    /// Identifier of the explicitly enabled session these counters belong to.
+    pub session_id: usize,
+    classes: [ClassTuningTelemetry; MAX_SIZE_CLASSES],
+    /// Cumulative medium-span events recorded in this session.
+    pub medium: MediumTuningTelemetry,
+}
+
+impl TuningTelemetryObservation {
+    /// Observed class counters with the built-in standard class-size labels.
+    ///
+    /// Counters combine all participating personalities by class index. These
+    /// labels are not valid per-size observations if any uses a custom layout.
+    #[must_use]
+    pub fn classes(&self) -> &[ClassTuningTelemetry] {
+        &self.classes[..StandardSizeClasses::SIZES.len()]
+    }
+}
+
+impl fmt::Debug for TuningTelemetryObservation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TuningTelemetryObservation")
+            .field("session_id", &self.session_id)
+            .field("classes", &self.classes())
+            .field("medium", &self.medium)
+            .finish()
+    }
+}
+
+impl fmt::Display for TuningTelemetryObservation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(formatter, "tuning_session_id={}", self.session_id)?;
+        writeln!(
+            formatter,
+            "medium tls_allocation_hits={} recycled_spans={} fresh_spans={} local_cached_frees={} shared_span_returns={} purged_spans={}",
+            self.medium.tls_cache_hits,
+            self.medium.global_cache_hits,
+            self.medium.fresh_commits,
+            self.medium.cached_frees,
+            self.medium.global_frees,
+            self.medium.purged_spans
+        )?;
+        for class in self.classes() {
+            writeln!(
+                formatter,
+                "class index={} block_bytes={} allocations={} tls_hits={} recycled_batch_hits={} recycled_word_refills={} recycled_single_hits={} fresh_hits={} slab_refills={} partial_scan_calls={} partial_slabs_scanned={} partial_limit_hits={} local_frees={} bitmap_spills={} remote_frees={}",
+                class.class_index,
+                class.block_size,
+                class.allocations,
+                class.tls_cache_hits,
+                class.recycled_batch_hits,
+                class.recycled_word_refills,
+                class.recycled_single_hits,
+                class.fresh_hits,
+                class.slab_refills,
+                class.partial_scan_calls,
+                class.partial_slabs_scanned,
+                class.partial_limit_hits,
+                class.local_frees,
+                class.bitmap_spills,
+                class.remote_frees
+            )?;
+        }
+        Ok(())
+    }
+}
+
+fn read_class(class_index: usize, block_size: usize) -> ClassTuningTelemetry {
+    let counters = &CLASS_COUNTERS[class_index];
+    ClassTuningTelemetry {
+        class_index,
+        block_size,
+        allocations: counters.allocations.load(Ordering::Relaxed),
+        tls_cache_hits: counters.tls_cache_hits.load(Ordering::Relaxed),
+        recycled_batch_hits: counters.recycled_batch_hits.load(Ordering::Relaxed),
+        recycled_word_refills: counters.recycled_word_refills.load(Ordering::Relaxed),
+        recycled_single_hits: counters.recycled_single_hits.load(Ordering::Relaxed),
+        fresh_hits: counters.fresh_hits.load(Ordering::Relaxed),
+        slab_refills: counters.slab_refills.load(Ordering::Relaxed),
+        partial_scan_calls: counters.partial_scan_calls.load(Ordering::Relaxed),
+        partial_slabs_scanned: counters.partial_slabs_scanned.load(Ordering::Relaxed),
+        partial_limit_hits: counters.partial_limit_hits.load(Ordering::Relaxed),
+        local_frees: counters.local_frees.load(Ordering::Relaxed),
+        bitmap_spills: counters.bitmap_spills.load(Ordering::Relaxed),
+        remote_frees: counters.remote_frees.load(Ordering::Relaxed),
+    }
+}
+
+fn read_medium() -> MediumTuningTelemetry {
+    MediumTuningTelemetry {
+        tls_cache_hits: MEDIUM_COUNTERS.tls_cache_hits.load(Ordering::Relaxed),
+        global_cache_hits: MEDIUM_COUNTERS.global_cache_hits.load(Ordering::Relaxed),
+        fresh_commits: MEDIUM_COUNTERS.fresh_commits.load(Ordering::Relaxed),
+        cached_frees: MEDIUM_COUNTERS.cached_frees.load(Ordering::Relaxed),
+        global_frees: MEDIUM_COUNTERS.global_frees.load(Ordering::Relaxed),
+        purged_spans: MEDIUM_COUNTERS.purged_spans.load(Ordering::Relaxed),
     }
 }
 
@@ -101,31 +260,55 @@ pub(crate) struct TuningTelemetryReport {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct ClassTuningTelemetry {
+/// Cumulative small-allocation path events for one standard size class.
+pub struct ClassTuningTelemetry {
+    /// Index into the standard size-class table.
     pub class_index: usize,
+    /// Usable block size of the standard class, in bytes.
     pub block_size: usize,
+    /// Recorded allocation events.
     pub allocations: u64,
+    /// Allocations served by the thread-local cache.
     pub tls_cache_hits: u64,
+    /// Recorded allocations served by a recycled bitmap batch.
     pub recycled_batch_hits: u64,
+    /// Recorded recycled-bitmap word refill operations.
     pub recycled_word_refills: u64,
+    /// Recorded allocations served by single recycled slots.
     pub recycled_single_hits: u64,
+    /// Recorded allocations served by fresh slab slots.
     pub fresh_hits: u64,
+    /// Recorded slab refill operations.
     pub slab_refills: u64,
+    /// Recorded partial-slab search operations.
     pub partial_scan_calls: u64,
+    /// Total partial slabs visited by those searches.
     pub partial_slabs_scanned: u64,
+    /// Searches that reached the configured scan limit.
     pub partial_limit_hits: u64,
+    /// Recorded owner-local frees.
     pub local_frees: u64,
+    /// Recorded local-cache spills into recycled bitmaps.
     pub bitmap_spills: u64,
+    /// Recorded remote frees.
     pub remote_frees: u64,
 }
 
+/// Cumulative medium-span path events, not bytes, occupancy, or syscall counts.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct MediumTuningTelemetry {
+pub struct MediumTuningTelemetry {
+    /// Allocations served from a heap-local batch.
     pub tls_cache_hits: u64,
+    /// Recycled spans transferred from shared backing, including batch prefetch.
     pub global_cache_hits: u64,
+    /// Fresh spans committed, including batch prefetch; not OS syscall count.
     pub fresh_commits: u64,
+    /// Frees accepted by a heap-local cache, including frees that evict a batch.
     pub cached_frees: u64,
+    /// Spans transferred to shared backing, including mailbox publication and
+    /// local-cache eviction batches; not current bin or mailbox occupancy.
     pub global_frees: u64,
+    /// Successfully reclaimed spans before coalescing; not OS syscall count.
     pub purged_spans: u64,
 }
 
@@ -279,7 +462,7 @@ impl RecordingGuard {
         if session == 0 {
             return None;
         }
-        RECORDERS.fetch_add(1, Ordering::Acquire);
+        RECORDERS.fetch_update(Ordering::AcqRel, Ordering::Acquire, admitted_count).ok()?;
         after_start();
         if ACTIVE_SESSION.load(Ordering::Acquire) != session {
             RECORDERS.fetch_sub(1, Ordering::Release);
@@ -295,12 +478,35 @@ impl Drop for RecordingGuard {
     }
 }
 
+#[cfg_attr(test, mutants::skip)] // Admission boundaries are tested directly; corrupting this gate can strand active recorder counts.
+fn admitted_count(state: usize) -> Option<usize> {
+    // Exhaustion is a rejected diagnostic event, never a carry into the gate.
+    if state & RECORDING_CLOSED != 0 || state == RECORDER_COUNT {
+        None
+    } else {
+        Some(state + 1)
+    }
+}
+
+fn close_recording() -> usize {
+    RECORDERS.fetch_or(RECORDING_CLOSED, Ordering::AcqRel);
+    ACTIVE_SESSION.swap(0, Ordering::AcqRel)
+}
+
+fn open_recording(session: usize) {
+    // TRANSITION is held and the closed gate has drained. Publish the session
+    // and any reset counters before permitting a successful admission CAS.
+    ACTIVE_SESSION.store(session, Ordering::Release);
+    RECORDERS.store(0, Ordering::Release);
+}
+
 fn wait_for_recorders() {
     wait_for_recorders_with(|| {});
 }
 
+#[cfg_attr(test, mutants::skip)] // The injected wait test covers the exit predicate; mutations can make every telemetry transition spin forever.
 fn wait_for_recorders_with(mut on_wait: impl FnMut()) {
-    while RECORDERS.load(Ordering::Acquire) != 0 {
+    while RECORDERS.load(Ordering::Acquire) & RECORDER_COUNT != 0 {
         on_wait();
         std::hint::spin_loop();
     }
@@ -496,6 +702,36 @@ mod tests {
         }
     }
 
+    fn observation() -> TuningTelemetryObservation {
+        TuningTelemetryObservation {
+            session_id: 7,
+            classes: std::array::from_fn(|index| indexed_class(index, 64)),
+            medium: medium(),
+        }
+    }
+
+    #[test]
+    fn observation_debug_includes_session_and_visible_counters() {
+        let observation = observation();
+        let classes = &observation.classes[..StandardSizeClasses::SIZES.len()];
+        let medium = observation.medium;
+        assert_eq!(
+            format!("{observation:?}"),
+            format!("TuningTelemetryObservation {{ session_id: 7, classes: {classes:?}, medium: {medium:?} }}")
+        );
+    }
+
+    #[test]
+    fn observation_display_propagates_each_write_failure() {
+        let observation = observation();
+        let rendered = observation.to_string();
+        let boundaries = [0, rendered.find("medium ").unwrap(), rendered.find("class index=").unwrap()];
+        assert_eq!(
+            boundaries.map(|remaining| fmt::write(&mut FailAfter { remaining }, format_args!("{observation}"))),
+            [Err(fmt::Error); 3]
+        );
+    }
+
     #[test]
     fn allocator_paths_produce_tuning_recommendations() {
         let _test = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -531,6 +767,64 @@ mod tests {
         assert!(class.recycled_batch_hits + class.recycled_word_refills != 0);
         assert_eq!(report.recommendations.partial_slab_scan_limit, None);
         assert!(report.to_string().contains("partial_scan=no-data"));
+    }
+
+    #[test]
+    fn active_snapshot_preserves_session_and_does_not_activate_or_reset_counters() {
+        let _test = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        TuningTelemetry::disable();
+        assert!(TuningTelemetry::snapshot_if_active().is_none());
+        assert!(!TuningTelemetry::is_enabled());
+
+        let session = TuningTelemetry::enable();
+        {
+            let _transition = TRANSITION.lock().unwrap();
+            record_medium(MediumEvent::GlobalCacheHit, 7);
+        }
+        let first = TuningTelemetry::snapshot_if_active().unwrap();
+        assert_eq!(first.session_id, session);
+        assert_eq!(first.classes().len(), StandardSizeClasses::SIZES.len());
+        assert!(first.medium.global_cache_hits >= 7);
+        let rendered = first.to_string();
+        assert!(rendered.contains(&format!("tuning_session_id={session}")));
+        assert!(rendered.contains("fresh_spans="));
+        assert!(rendered.contains("shared_span_returns="));
+        {
+            let _transition = TRANSITION.lock().unwrap();
+            assert!(TuningTelemetry::is_enabled());
+            record_medium(MediumEvent::GlobalCacheHit, 11);
+        }
+        let second = TuningTelemetry::snapshot_if_active().unwrap();
+        assert_eq!(second.session_id, session);
+        assert!(second.medium.global_cache_hits >= first.medium.global_cache_hits + 11);
+        {
+            let _transition = TRANSITION.lock().unwrap();
+            assert!(TuningTelemetry::is_enabled());
+        }
+
+        TuningTelemetry::disable();
+        assert!(TuningTelemetry::snapshot_if_active().is_none());
+        assert!(!TuningTelemetry::is_enabled());
+    }
+
+    #[test]
+    fn active_snapshot_does_not_drain_in_flight_recorders() {
+        let _test = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let session = TuningTelemetry::enable();
+        let recording = RecordingGuard::begin().unwrap();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            sender
+                .send(TuningTelemetry::snapshot_if_active().map(|observation| observation.session_id))
+                .unwrap();
+        });
+        let observed = receiver.recv_timeout(std::time::Duration::from_secs(2));
+        // Release the guard before joining even if a regression made observation
+        // wait for quiescence, so that failure is bounded rather than a deadlock.
+        drop(recording);
+        worker.join().unwrap();
+        TuningTelemetry::disable();
+        assert_eq!(observed.unwrap(), Some(session));
     }
 
     #[test]
@@ -683,6 +977,7 @@ mod tests {
     #[test]
     fn recorder_transition_and_wait_retries_are_deterministic() {
         let _test = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        RECORDERS.store(0, Ordering::Release);
         ACTIVE_SESSION.store(1, Ordering::Release);
         assert!(
             RecordingGuard::begin_with(|| {
@@ -699,6 +994,15 @@ mod tests {
             RECORDERS.store(0, Ordering::Release);
         });
         assert_eq!(waits, 1);
+    }
+
+    #[test]
+    fn admission_never_carries_into_or_clears_the_closed_bit() {
+        assert_eq!(admitted_count(0), Some(1));
+        assert_eq!(admitted_count(RECORDER_COUNT - 1), Some(RECORDER_COUNT));
+        assert_eq!(admitted_count(RECORDER_COUNT), None);
+        assert_eq!(admitted_count(RECORDING_CLOSED), None);
+        assert_eq!(admitted_count(usize::MAX), None);
     }
 
     #[test]

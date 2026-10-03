@@ -40,6 +40,7 @@ const COMPOSITE_ID: SinkId = SinkId::new("<composite>");
 /// for a usage example.
 #[derive(Clone, thread_aware::ThreadAware)]
 pub struct Sink {
+    #[thread_aware(skip)] // Sink state intentionally stays shared across all threads.
     inner: PerformableArc<SinkInner, PerProcess>,
 }
 
