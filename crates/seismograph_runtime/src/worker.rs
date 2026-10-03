@@ -219,7 +219,13 @@ impl WorkerHandle {
     }
 
     pub(crate) fn task_poll_finished_with_control(&self, poll: &TaskPoll, task: Option<&TaskControl>) {
-        let finished_at = EventTimestamp::now();
+        let finished_at = if let Some(task) = task
+            && poll.session.is_some()
+        {
+            task.activity.poll_finished(poll.session, poll.started_at, EventTimestamp::now)
+        } else {
+            EventTimestamp::now()
+        };
         let duration_nanos = duration_nanos(finished_at, poll.started_at);
         self.runtime.control.counters.poll_count.fetch_add(1, Ordering::Relaxed);
         self.runtime
@@ -232,9 +238,6 @@ impl WorkerHandle {
             task.poll_duration_nanos.fetch_add(duration_nanos, Ordering::Relaxed);
             task.max_poll_duration_nanos.fetch_max(duration_nanos, Ordering::Relaxed);
             task.last_poll_finished_at.store(finished_at.ticks().max(1), Ordering::Release);
-            if poll.session.is_some() {
-                task.activity.poll_finished(poll.session, poll.started_at, finished_at);
-            }
         }
         self.worker.current_task.store(0, Ordering::Release);
         self.record_at(

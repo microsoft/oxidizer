@@ -178,8 +178,17 @@ impl Activity {
     }
 
     #[cold]
-    pub(crate) fn poll_finished(&self, session: Option<RecordingSession>, started_at: EventTimestamp, finished_at: EventTimestamp) {
-        if let Some(mut data) = self.begin(session) {
+    pub(crate) fn poll_finished(
+        &self,
+        session: Option<RecordingSession>,
+        started_at: EventTimestamp,
+        finish: impl FnOnce() -> EventTimestamp,
+    ) -> EventTimestamp {
+        // Lock or invalidate before sampling completion, so Stop cannot capture
+        // the previous Running state after this poll's finish timestamp.
+        let data = self.begin(session);
+        let finished_at = finish();
+        if let Some(mut data) = data {
             if data.value.poll_started_at == Some(started_at) {
                 data.value.poll_started_at = None;
                 data.value.poll_worker_id = None;
@@ -197,6 +206,7 @@ impl Activity {
             data.updated_at = EventTimestamp::from_ticks(data.updated_at.ticks().max(finished_at.ticks()));
             self.validate(&data);
         }
+        finished_at
     }
 
     pub(crate) fn snapshot(&self, observation: Option<RecordingObservation>) -> TaskActivity {
@@ -686,6 +696,51 @@ mod tests {
         assert_eq!(frozen.state, TaskActivityState::Running);
         assert!(frozen.ready_since.is_some() && frozen.poll_started_at.is_some());
         assert_eq!(frozen.queued_since, None);
+        configure(false);
+    }
+
+    #[test]
+    fn stop_during_poll_finish_does_not_capture_stale_running_activity() {
+        let _test = crate::tests::test_lock();
+        configure(true);
+        let runtime = register_runtime(RuntimeMetadata::new("stop-during-finish", 1));
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let task = runtime.handle().register_task(TypeDescriptorId::from_raw(1).unwrap(), None);
+        let poll = task.poll_started(&worker.handle());
+        let (sampled, timestamp) = std::sync::mpsc::channel();
+        let (resume, paused) = std::sync::mpsc::channel();
+
+        std::thread::scope(|scope| {
+            let activity = &task.task.activity;
+            let finish = scope.spawn(move || {
+                activity.poll_finished(poll.session, poll.started_at, || {
+                    let at = EventTimestamp::now();
+                    sampled.send(at).unwrap();
+                    paused.recv().unwrap();
+                    at
+                })
+            });
+            let finished_at = timestamp.recv().unwrap();
+            let stopped = seismograph::snapshot(SnapshotOptions {
+                event_buffers: EventBufferDisposition::Stop,
+            });
+            // Release the worker before unwrapping or asserting snapshot data.
+            resume.send(()).unwrap();
+            assert_eq!(finish.join().unwrap(), finished_at);
+            let stopped = seismograph::snapshot::decode(stopped.unwrap().as_bytes()).unwrap();
+            let source = stopped
+                .sources
+                .iter()
+                .find(|source| source.id == crate::snapshot::source::ID)
+                .unwrap();
+            let decoded = crate::snapshot::decode(&source.data).unwrap();
+            let activity = decoded.runtimes.iter().find(|item| item.id == runtime.id()).unwrap().tasks[0]
+                .activity
+                .unwrap();
+            assert!(activity.observed_at.ticks() >= finished_at.ticks());
+            assert_eq!(activity.state, TaskActivityState::Unknown);
+        });
+        assert_eq!(state(&task).state, TaskActivityState::Unknown);
         configure(false);
     }
 
