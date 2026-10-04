@@ -101,4 +101,17 @@ mod tests {
         assert_eq!(reader.u8().unwrap(), 1);
         assert!(matches!(reader.finish(), Err(Error::InvalidDescriptor)));
     }
+
+    #[test]
+    fn reader_rejects_truncated_overflowing_and_invalid_utf8_strings() {
+        let mut truncated = SliceReader::new(&[3, 0, b'a', b'b']);
+        assert!(matches!(truncated.string(), Err(Error::InvalidDescriptor)));
+
+        let mut invalid_utf8 = SliceReader::new(&[1, 0, 0xff]);
+        assert!(matches!(invalid_utf8.string(), Err(Error::InvalidDescriptor)));
+
+        let mut overflowing = SliceReader::new(&[0]);
+        overflowing.u8().unwrap();
+        assert!(matches!(overflowing.take(usize::MAX), Err(Error::InvalidDescriptor)));
+    }
 }

@@ -56,6 +56,7 @@ where
 {
     // TODO: Eventually we can support different strategies here.
     // For now we use a PerProcess cache since it supports concurrency.
+    #[thread_aware(skip)] // Relocation must preserve the process-wide cache.
     inner: Arc<Cache<K, CacheEntry<V>, H>, PerProcess>,
 }
 

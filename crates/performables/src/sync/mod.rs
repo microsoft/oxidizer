@@ -14,6 +14,8 @@ pub mod channel;
 pub mod condition;
 /// Reader-writer synchronization.
 pub mod lock;
+/// Compile-time blocking and asynchronous synchronization strategies.
+pub mod mode;
 /// Mutual-exclusion synchronization.
 pub mod mutex;
 /// One-time and lazy initialization.

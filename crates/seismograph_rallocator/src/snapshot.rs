@@ -2,6 +2,10 @@
 // Licensed under the MIT License.
 
 //! Rallocator snapshot model types.
+//!
+//! Statistics section version 2 identifies the raw peak value's scope through
+//! [`PeakLiveBytesScope`]. Only version 2 is supported; version 1 snapshots are
+//! rejected because the statistics section is required.
 
 /// Version of the snapshot producer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -59,7 +63,42 @@ impl Estimate {
     }
 }
 
-/// Process-wide allocator counters.
+/// Collection scope of the raw [`Stats::peak_live_bytes`] value.
+///
+/// A maximum over occasional counter reads cannot recover a lifetime peak:
+/// allocations may be created and freed between those reads.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum PeakLiveBytesScope {
+    /// No trustworthy interpretation of the raw peak value was supplied.
+    #[default]
+    Unavailable,
+    /// Maximum of live-byte totals observed when aggregate statistics were queried.
+    ///
+    /// Queries read independent counters and are not transactional. This is neither
+    /// a lifetime high-water mark nor a guaranteed bound on one.
+    SnapshotSamples,
+    /// Producer explicitly tracked the live requested-byte lifetime high-water mark.
+    Lifetime,
+}
+
+impl std::fmt::Display for PeakLiveBytesScope {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Unavailable => "unavailable",
+            Self::SnapshotSamples => "aggregate-query samples",
+            Self::Lifetime => "lifetime",
+        })
+    }
+}
+
+/// Process-wide allocator counters for one linked allocator instance.
+///
+/// Cumulative counters are not reset at recorder-session boundaries. Independently
+/// read counters do not form a transactional snapshot, and a final snapshot alone
+/// cannot isolate the allocations performed by one workload or recording session.
+/// The collection-start epoch and general counter availability are not encoded;
+/// zero values alone do not prove that no allocator activity occurred.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct Stats {
@@ -69,8 +108,12 @@ pub struct Stats {
     pub deallocated_bytes: u64,
     /// Currently live requested bytes.
     pub live_bytes: u64,
-    /// Highest observed live requested bytes.
+    /// Raw high-water-mark value; interpret only through [`Self::peak_live_bytes_scope`].
+    ///
+    /// Use [`Self::lifetime_peak_live_bytes`] when a true lifetime peak is required.
     pub peak_live_bytes: u64,
+    /// Whether the raw peak is unavailable, an aggregate-query sample maximum, or a lifetime peak.
+    pub peak_live_bytes_scope: PeakLiveBytesScope,
     /// Currently mapped allocator bytes.
     pub mapped_bytes: u64,
     /// Operating-system mappings performed.
@@ -81,13 +124,28 @@ pub struct Stats {
     pub allocations: u64,
     /// Deallocation operations.
     pub deallocations: u64,
-    /// Cross-thread deallocation operations.
+    /// Cumulative cross-thread deallocation operations reported by the allocator.
+    ///
+    /// Current rallocator producers fold relaxed counter shards; a concurrent
+    /// observation need not represent a common-instant scalar total.
     pub remote_frees: u64,
-    /// Remote blocks awaiting reclamation.
+    /// Remote returns not yet logically claimed for owner processing.
+    ///
+    /// This can include begun but unpublished returns. Normal slab drains claim
+    /// a detached list before recycling its nodes; zero is not a quiescence proof.
     pub pending_remote_blocks: u64,
     /// Remote push operations in progress.
+    ///
+    /// Current rallocator producers fold relaxed per-actor gauges. This observes
+    /// a distributed interval, not a common instant; zero is not a quiescence
+    /// proof. After producers synchronize and stop, the gauges balance to zero.
+    /// Heap-retirement admission is independent of this diagnostic value.
     pub remote_pushes_in_progress: u64,
-    /// Remote blocks reclaimed by owners.
+    /// Cumulative remote blocks logically claimed by owners, not physical reclamation.
+    ///
+    /// Current rallocator producers fold relaxed counter shards independently
+    /// of the other fields. Historical captures retain their original values;
+    /// decoding does not establish a physical-recycling boundary.
     pub drained_remote_blocks: u64,
 }
 
@@ -133,6 +191,7 @@ impl Stats {
             deallocated_bytes,
             live_bytes,
             peak_live_bytes,
+            peak_live_bytes_scope: PeakLiveBytesScope::Unavailable,
             mapped_bytes,
             os_mappings,
             os_unmappings,
@@ -142,6 +201,24 @@ impl Stats {
             pending_remote_blocks,
             remote_pushes_in_progress,
             drained_remote_blocks,
+        }
+    }
+
+    /// Returns a lifetime peak only when the producer explicitly supplied that scope.
+    #[must_use]
+    pub const fn lifetime_peak_live_bytes(&self) -> Option<u64> {
+        match self.peak_live_bytes_scope {
+            PeakLiveBytesScope::Lifetime => Some(self.peak_live_bytes),
+            _ => None,
+        }
+    }
+
+    /// Returns the maximum observed at aggregate queries, not a lifetime high-water mark.
+    #[must_use]
+    pub const fn sampled_peak_live_bytes(&self) -> Option<u64> {
+        match self.peak_live_bytes_scope {
+            PeakLiveBytesScope::SnapshotSamples => Some(self.peak_live_bytes),
+            _ => None,
         }
     }
 }
@@ -348,7 +425,12 @@ pub struct Metadata {
     pub telemetry_schema_version: u16,
     /// Version of the snapshot producer.
     pub producer_version: Version,
-    /// Time spent collecting the snapshot.
+    /// Time spent collecting source state and resolving in-capture symbol information.
+    ///
+    /// Symbol-cache prewarming, final sizing/encoding, destruction and file I/O
+    /// are excluded. This is a
+    /// partial collection duration, not end-to-end snapshot latency. A containing
+    /// process snapshot can supply its own collection duration to a report.
     pub capture_duration_nanos: u64,
 }
 
