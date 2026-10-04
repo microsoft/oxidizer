@@ -10,7 +10,7 @@ use super::app::{App, MonitorTab, RuntimeFocus, Screen};
 
 pub(super) const TABS: [(MonitorTab, &str); 8] = [
     (MonitorTab::Info, "  Info  "),
-    (MonitorTab::Heaps, "  Heaps  "),
+    (MonitorTab::Heaps, " Native v4 "),
     (MonitorTab::Allocations, "  Allocations  "),
     (MonitorTab::Primitives, "  Primitives  "),
     (MonitorTab::Threads, "  Threads  "),

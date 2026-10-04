@@ -1,248 +1,172 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#[cfg(miri)]
-mod miri;
+//! Platform memory operations. All unsafe calls require caller-owned ranges;
+//! this module never allocates through Rust's global allocator.
 
-#[cfg(not(miri))]
-mod native;
-
-#[cfg(all(not(miri), target_os = "windows"))]
-mod win64;
-
-#[cfg(all(not(miri), target_os = "linux"))]
+#[cfg(target_os = "linux")]
 mod linux;
+#[cfg(target_os = "windows")]
+mod win64;
+mod x86_64;
 
-// Exercise the injected procfs/cgroup parser on Windows as well as Linux.
-#[cfg(all(not(miri), any(target_os = "linux", test)))]
-#[path = "linux/memory.rs"]
-mod linux_memory;
+#[cfg(test)]
+use std::cell::Cell;
 
-#[cfg(all(not(miri), target_os = "linux"))]
+#[cfg(target_os = "linux")]
 use linux as platform;
-#[cfg(miri)]
-pub(crate) use miri::{
-    MEDIUM_MAX_SLICES, MEDIUM_REGION_SIZE, align_down, allocation_prefix_for_read, allocation_prefix_for_write, commit,
-    commit_locality_segment, commit_locality_slab, decommit, initialize_storage, map, monotonic_millis, read_free_next,
-    read_free_requested, release_free_metadata, release_storage, reserve, write_free_next, write_free_requested,
-};
-#[cfg(not(miri))]
-pub(crate) use native::{
-    MEDIUM_MAX_SLICES, MEDIUM_REGION_SIZE, allocation_prefix_for_write, initialize_storage, read_free_next, read_free_requested,
-    release_free_metadata, release_storage, write_free_next, write_free_requested,
-};
-#[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
-pub(crate) use platform::{current_processor_location, monotonic_millis};
-#[cfg(all(not(miri), target_os = "windows"))]
+pub(crate) use platform::{PAGE, RESERVE_MIN, release, wait, wake_one};
+#[cfg(target_os = "windows")]
 use win64 as platform;
+pub(crate) use x86_64::{pause, prefetch};
 
-#[derive(Clone, Copy)]
-pub(crate) struct MemoryStatus {
-    pub(crate) total: usize,
-    pub(crate) available: usize,
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Failure {
+    Reserve,
+    Commit,
+    Decommit,
 }
 
-#[cfg(not(miri))]
-pub(crate) use platform::memory_status;
-
-#[cfg(miri)]
-#[cfg_attr(test, mutants::skip)] // Native mutation runs enumerate this Miri-only deterministic fixture.
-pub(crate) const fn memory_status() -> Option<MemoryStatus> {
-    Some(MemoryStatus {
-        total: 256 * 1024 * 1024 * 1024,
-        available: 128 * 1024 * 1024 * 1024,
-    })
+#[cfg(test)]
+std::thread_local! {
+    static FAILURE: Cell<Option<Failure>> = const { Cell::new(None) };
 }
 
-#[cfg(miri)]
-#[cfg_attr(test, mutants::skip)] // Native mutation runs enumerate this Miri-only deterministic fixture.
-pub(crate) const fn current_processor_location() -> (usize, usize) {
-    (0, 0)
+#[cfg(test)]
+pub(crate) fn fail_next(failure: Failure) {
+    FAILURE.with(|slot| {
+        assert_eq!(slot.replace(Some(failure)), None, "only one HAL failure may be armed at a time");
+    });
 }
 
-#[cfg(all(test, not(miri)))]
-mod faults {
-    use std::cell::Cell;
-
-    pub(super) const MAP: u32 = 1 << 0;
-    pub(super) const RESERVE: u32 = 1 << 1;
-    pub(super) const COMMIT: u32 = 1 << 2;
-    pub(super) const COMMIT_LOCALITY_SEGMENT: u32 = 1 << 3;
-    pub(super) const COMMIT_LOCALITY_SLAB: u32 = 1 << 4;
-    pub(super) const DECOMMIT: u32 = 1 << 5;
-    pub(super) const ALIGN_OFFSET: u32 = 1 << 6;
-    pub(super) const COMMIT_LOCALITY_SLAB_ZERO: u32 = 1 << 7;
-    pub(super) const COMMIT_LOCALITY_SLAB_FULL: u32 = 1 << 8;
-
-    thread_local! {
-        static NEXT: Cell<u32> = const { Cell::new(0) };
-    }
-
-    pub(super) fn fail_next(operation: u32) {
-        NEXT.set(NEXT.get() | operation);
-    }
-
-    pub(super) fn take(operation: u32) -> bool {
-        NEXT.get() & operation != 0 && {
-            NEXT.set(NEXT.get() & !operation);
-            true
-        }
-    }
+#[cfg(test)]
+fn should_fail(failure: Failure) -> bool {
+    FAILURE.with(|slot| slot.get() == Some(failure) && slot.replace(None).is_some())
 }
 
-#[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
-pub(crate) fn map(size: usize) -> *mut u8 {
-    #[cfg(test)]
-    if faults::take(faults::MAP) {
+/// Reserves inaccessible, suitably aligned address space without `GlobalAlloc`.
+pub(crate) fn reserve(size: usize, alignment: usize) -> *mut u8 {
+    if size == 0 || !size.is_multiple_of(RESERVE_MIN) || !alignment.is_power_of_two() {
         return std::ptr::null_mut();
     }
-    platform::map(size)
-}
-
-#[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
-pub(crate) fn reserve(size: usize) -> *mut u8 {
     #[cfg(test)]
-    if faults::take(faults::RESERVE) {
+    if should_fail(Failure::Reserve) {
         return std::ptr::null_mut();
     }
-    platform::reserve(size)
+    platform::reserve(size, alignment)
 }
 
-#[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
+/// # Safety
+/// The page-aligned range lies within a live caller-owned reservation.
+/// Committing already accessible pages preserves their contents.
 pub(crate) unsafe fn commit(address: *mut u8, size: usize) -> bool {
     #[cfg(test)]
-    COMMIT_COUNT.set(COMMIT_COUNT.get() + 1);
-    #[cfg(test)]
-    if faults::take(faults::COMMIT) {
+    if should_fail(Failure::Commit) {
         return false;
     }
+    // SAFETY: Forward the caller's exclusive reservation and page-granular bounds.
     unsafe { platform::commit(address, size) }
 }
 
-#[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
-pub(crate) unsafe fn commit_locality_segment(address: *mut u8, segment_size: usize, slab_size: usize) -> Option<usize> {
-    #[cfg(test)]
-    if faults::take(faults::COMMIT_LOCALITY_SEGMENT) {
-        return None;
-    }
-    unsafe { platform::commit_locality_segment(address, segment_size, slab_size) }
-}
-
-#[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
-pub(crate) unsafe fn commit_locality_slab(address: *mut u8, slab_size: usize) -> Option<usize> {
-    #[cfg(test)]
-    if faults::take(faults::COMMIT_LOCALITY_SLAB) {
-        return None;
-    }
-    #[cfg(test)]
-    if faults::take(faults::COMMIT_LOCALITY_SLAB_ZERO) {
-        return Some(0);
-    }
-    #[cfg(test)]
-    if faults::take(faults::COMMIT_LOCALITY_SLAB_FULL) {
-        return Some(slab_size);
-    }
-    unsafe { platform::commit_locality_slab(address, slab_size) }
-}
-
-#[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
+/// # Safety
+/// The page-aligned, caller-owned range has no live objects or remaining accesses.
+/// Success discards its backing pages; Linux retains writable virtual mappings.
 pub(crate) unsafe fn decommit(address: *mut u8, size: usize) -> bool {
     #[cfg(test)]
-    DECOMMIT_COUNT.set(DECOMMIT_COUNT.get() + 1);
-    #[cfg(test)]
-    if faults::take(faults::DECOMMIT) {
+    if should_fail(Failure::Decommit) {
         return false;
     }
+    // SAFETY: The caller has retired all objects in its reserved range.
     unsafe { platform::decommit(address, size) }
 }
 
-#[cfg(miri)]
-pub(crate) unsafe fn unmap(address: *mut u8, size: usize) {
-    unsafe { miri::unmap(address, size) };
-}
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicU32, Ordering};
 
-#[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
-pub(crate) unsafe fn unmap(address: *mut u8, size: usize) {
-    unsafe { platform::unmap(address, size) };
-    #[cfg(test)]
-    UNMAP_COUNT.set(UNMAP_COUNT.get() + 1);
-}
+    use super::*;
 
-#[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
-pub(crate) fn align_offset(address: *mut u8, alignment: usize) -> usize {
-    #[cfg(test)]
-    if faults::take(faults::ALIGN_OFFSET) {
-        return usize::MAX;
+    #[test]
+    fn reserve_commit_decommit_recommit_zero() {
+        let size = 2 * RESERVE_MIN;
+        let ptr = reserve(size, size);
+        assert!(!ptr.is_null());
+        assert_eq!(ptr.addr() % size, 0);
+        // SAFETY: The test exclusively owns the reservation through its release.
+        assert!(unsafe { commit(ptr, PAGE) });
+        // SAFETY: The committed page is exclusively writable.
+        unsafe { ptr.write_bytes(0x5a, PAGE) };
+        // SAFETY: Idempotent commit preserves this owned page.
+        assert!(unsafe { commit(ptr, PAGE) });
+        // SAFETY: The first byte remains committed and initialized.
+        assert_eq!(unsafe { *ptr }, 0x5a, "idempotent commit must preserve contents");
+        // SAFETY: No reference into the page survives.
+        assert!(unsafe { decommit(ptr, PAGE) });
+        // SAFETY: The reservation still belongs to the test.
+        assert!(unsafe { commit(ptr, PAGE) });
+        // SAFETY: The entire recommitted page is readable.
+        assert!(unsafe { std::slice::from_raw_parts(ptr, PAGE) }.iter().all(|&b| b == 0));
+        // SAFETY: The test has finished accessing its complete reservation.
+        unsafe { release(ptr, size) };
     }
-    address.align_offset(alignment)
-}
 
-#[cfg(miri)]
-pub(crate) fn align_offset(address: *mut u8, alignment: usize) -> usize {
-    address.align_offset(alignment)
-}
+    #[test]
+    fn injected_failures_are_single_use() {
+        fail_next(Failure::Reserve);
+        assert!(reserve(RESERVE_MIN, RESERVE_MIN).is_null());
+        let ptr = reserve(RESERVE_MIN, RESERVE_MIN);
+        assert!(!ptr.is_null());
+        fail_next(Failure::Commit);
+        // SAFETY: The test owns this page-aligned reservation.
+        assert!(!unsafe { commit(ptr, PAGE) });
+        // SAFETY: The injected failure was consumed and the reservation remains valid.
+        assert!(unsafe { commit(ptr, PAGE) });
+        fail_next(Failure::Decommit);
+        // SAFETY: Failed decommit leaves the owned page committed.
+        assert!(!unsafe { decommit(ptr, PAGE) });
+        // SAFETY: A subsequent real decommit can retire the untouched page.
+        assert!(unsafe { decommit(ptr, PAGE) });
+        // SAFETY: No access remains into the reservation.
+        unsafe { release(ptr, RESERVE_MIN) };
+    }
 
-#[cfg(all(test, not(miri)))]
-pub(crate) fn fail_next_map() {
-    faults::fail_next(faults::MAP);
-}
+    #[test]
+    fn decommit_does_not_discard_neighboring_live_pages() {
+        let ptr = reserve(RESERVE_MIN, RESERVE_MIN);
+        assert!(!ptr.is_null());
+        // SAFETY: The complete reservation belongs to the test.
+        assert!(unsafe { commit(ptr, 3 * PAGE) });
+        // SAFETY: All three committed pages are exclusively writable.
+        unsafe { ptr.write_bytes(0x5a, 3 * PAGE) };
+        // SAFETY: PAGE is within the owned reservation.
+        let middle = unsafe { ptr.add(PAGE) };
+        // SAFETY: No access to the middle page is retained during decommit.
+        assert!(unsafe { decommit(middle, PAGE) });
+        // SAFETY: Committing the whole range must preserve the two live neighbors.
+        assert!(unsafe { commit(ptr, 3 * PAGE) });
+        // SAFETY: All three pages are accessible and initialized.
+        let contents = unsafe { std::slice::from_raw_parts(ptr, 3 * PAGE) };
+        assert!(contents[..PAGE].iter().all(|&b| b == 0x5a));
+        assert!(contents[PAGE..2 * PAGE].iter().all(|&b| b == 0));
+        assert!(contents[2 * PAGE..].iter().all(|&b| b == 0x5a));
+        // SAFETY: No slice is used after releasing the complete reservation.
+        unsafe { release(ptr, RESERVE_MIN) };
+    }
 
-#[cfg(all(test, not(miri)))]
-pub(crate) fn fail_next_reserve() {
-    faults::fail_next(faults::RESERVE);
+    #[test]
+    fn wait_rechecks_the_word_and_wakes_without_lost_notifications() {
+        let word = AtomicU32::new(0);
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                word.store(1, Ordering::Release);
+                wake_one(std::ptr::from_ref(&word).cast());
+            });
+            wait(&word, 0);
+        });
+        assert_eq!(word.load(Ordering::Acquire), 1);
+        // A notification that preceded wait must not send this caller to sleep.
+        wait(&word, 0);
+    }
 }
-
-#[cfg(all(test, not(miri)))]
-pub(crate) fn fail_next_commit() {
-    faults::fail_next(faults::COMMIT);
-}
-
-#[cfg(all(test, not(miri)))]
-pub(crate) fn fail_next_commit_locality_segment() {
-    faults::fail_next(faults::COMMIT_LOCALITY_SEGMENT);
-}
-
-#[cfg(all(test, not(miri)))]
-pub(crate) fn fail_next_commit_locality_slab() {
-    faults::fail_next(faults::COMMIT_LOCALITY_SLAB);
-}
-
-#[cfg(all(test, not(miri)))]
-pub(crate) fn zero_next_commit_locality_slab() {
-    faults::fail_next(faults::COMMIT_LOCALITY_SLAB_ZERO);
-}
-
-#[cfg(all(test, not(miri)))]
-pub(crate) fn fully_commit_next_locality_slab() {
-    faults::fail_next(faults::COMMIT_LOCALITY_SLAB_FULL);
-}
-
-#[cfg(all(test, not(miri)))]
-pub(crate) fn fail_next_decommit() {
-    faults::fail_next(faults::DECOMMIT);
-}
-
-#[cfg(all(test, not(miri)))]
-pub(crate) fn fail_next_align_offset() {
-    faults::fail_next(faults::ALIGN_OFFSET);
-}
-
-#[cfg(all(test, not(miri)))]
-thread_local! {
-    static UNMAP_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    static COMMIT_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    static DECOMMIT_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-#[cfg(all(test, not(miri)))]
-pub(crate) fn medium_os_counts() -> (usize, usize) {
-    (COMMIT_COUNT.get(), DECOMMIT_COUNT.get())
-}
-
-#[cfg(all(test, not(miri)))]
-pub(crate) fn unmap_count() -> usize {
-    UNMAP_COUNT.get()
-}
-
-#[cfg(all(not(miri), not(any(target_os = "windows", target_os = "linux"))))]
-compile_error!("rallocator currently supports only Windows and Linux");

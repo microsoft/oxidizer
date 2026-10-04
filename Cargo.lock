@@ -4699,21 +4699,9 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 name = "rallocator"
 version = "0.1.0"
 dependencies = [
- "allocation_hints",
- "allocator-api2 0.2.21",
- "backtrace",
- "criterion",
- "hashbrown 0.17.1",
  "libc",
- "loom",
- "mimalloc",
- "multitude",
- "mutants",
- "performables",
  "seismograph",
  "seismograph_rallocator",
- "seismograph_runtime",
- "windows-sys 0.61.2",
 ]
 
 [[package]]

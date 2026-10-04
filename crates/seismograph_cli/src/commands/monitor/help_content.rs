@@ -28,8 +28,8 @@ pub(super) const fn title(context: Context) -> &'static str {
     match context {
         Context::Browser => "Applications",
         Context::Info => "Info and activity",
-        Context::HeapBuckets => "Heaps: summary, tiers and buckets",
-        Context::HeapHotspots => "Heaps: allocation locations and stack",
+        Context::HeapBuckets => "Native v4: global backend, owners and coverage",
+        Context::HeapHotspots => "Native v4: owner structures and returns",
         Context::Allocations => "Allocation hotspots and stack",
         Context::PrimitiveTypes => "Primitive types",
         Context::PrimitiveOperations => "Primitive operations",
@@ -64,8 +64,7 @@ pub(super) fn document(context: Context, offline: bool) -> Vec<&'static Section>
                 &[INFO, ACTIVITY, LIVE_THREADS, CAPTURE_SCOPE]
             }
         }
-        Context::HeapBuckets => &[HEAP_BUCKETS, HEAP_SUMMARY],
-        Context::HeapHotspots => &[HEAP_HOTSPOTS, STACK],
+        Context::HeapBuckets | Context::HeapHotspots => &[HEAP_BUCKETS, HEAP_SUMMARY, HEAP_HOTSPOTS],
         Context::Allocations => &[ALLOCATIONS, STACK],
         Context::PrimitiveTypes => &[PRIMITIVE_TYPES],
         Context::PrimitiveOperations => &[PRIMITIVE_OPERATIONS],
@@ -158,9 +157,9 @@ const LIVE_THREADS: &Section = section!("LIVE THREAD ACTIVITY";
 const CAPTURE_SCOPE: &Section = section!("CAPTURE METRIC SCOPE";
     "Accepted / overwritten" => "Counts exclude suppressed, sampled-out, disabled and non-producing activity. Source accepted/overwritten counters span event classes; they are not allocation populations.",
     "Unmatched allocations" => "Unmatched retained allocations are not proven live allocations or leaks, even with zero overwrites.",
-    "General counters" => "Availability/start epoch are unencoded; cumulative totals are not session/workload deltas.",
-    "Memory / classes" => "Region assignment is virtual; mapped/backing bytes are not portable committed memory or RSS. Published-class totals cover small classes only; class estimates are not per-segment occupancy.",
-    "Sampled maxima" => "Sampled live maxima use independent counter reads and are not guaranteed lifetime bounds.",
+    "Native capacity" => "Outstanding native ranges and slab capacity are not application-live memory. Global caches are not guaranteed physically decommitted.",
+    "Native coverage" => "Unobserved and busy owners are unknown, not zero. Lease/session/round freshness is explicit; bounded inventories can be partial.",
+    "Native returns" => "Remaining batching budget is not pending bytes; sampled incoming front != back means potential work only, not guaranteed ready links or queue depth. Equality does not prove emptiness.",
 );
 
 const OFFLINE_INFO: &Section = section!("SNAPSHOT FILE";
@@ -171,47 +170,39 @@ const OFFLINE_INFO: &Section = section!("SNAPSHOT FILE";
     "Offline" => "There is no live activity polling or process connection. Scope notes apply to saved data.",
 );
 
-const HEAP_SUMMARY: &Section = section!("HEAP SUMMARY / TOPOLOGY / PEAKS";
-    "Live" => "Allocator-reported live bytes / reported mapped bytes.",
-    "Lifetime peak" => "Peak live bytes / current mapped bytes, only when the source explicitly provides lifetime scope.",
-    "Max sampled live" => "Maximum of snapshot samples, not a guaranteed lifetime upper bound. Independent counter reads further limit consistency.",
-    "Peak scope unavailable" => "The capture omitted peak scope; a lifetime interpretation is not justified.",
-    "Gauge fill" => "Clamped to 0-100%; displayed values retain their actual numerator and denominator.",
-    "Reported mapped (not RSS/committed)" => "Mapped bytes / reserved virtual bytes. Neither is portable committed memory or resident set size.",
-    "Virtual regions" => "Region count, reserved bytes, slice size, and counts of small, medium, bump and other assigned slices.",
-    "Rn / assigned / free" => "Region ID, reserved bytes and assigned/total virtual slices. Assignment is virtual, not physical residency.",
-    "cumulative allocations" => "Counter epoch and coverage are unknown; not a session/workload delta. Availability is unencoded, so zero is not proof of no allocations.",
-    "Filters" => "Whole-process counters and heap topology remain unfiltered.",
+const HEAP_SUMMARY: &Section = section!("NATIVE GLOBAL BACKEND / COVERAGE";
+    "Reservations" => "Cumulative successful native object-range reservations, excluding the pagemap; not retained or application-live bytes.",
+    "Pagemap VA" => "Sparse pagemap virtual address reservation, not resident or committed memory.",
+    "Growth" => "Local range-cache boundary and global refill ceiling. Individual requests can exceed the refill ceiling.",
+    "Global cached range capacity" => "Power-of-two cached ranges. Physical residency is unknown: discard failures prevent a guaranteed decommit claim.",
+    "Owners" => "Captured endpoints / total inventoried endpoints. PARTIAL means bounded collection omitted owners.",
+    "Current / idle inspected / unknown / busy" => "Same-round published state, fresh collector inspection, missing observations, and busy slots. Busy overlaps observation freshness.",
+    "Session / round / capture" => "Recorder session, requested observation round and process-relative monotonic time. Not a globally atomic snapshot.",
+    "Publication" => "Self-publication defaults enabled, but only accepted recorded allocation/free events can trigger it. Recording remains off by default.",
+    "Filters" => "Native owner/backend inventory remains unfiltered.",
 );
 
-const HEAP_BUCKETS: &Section = section!("ALLOCATION TIERS / SIZE DISTRIBUTION";
-    "Small / Medium / Large / Direct (inferred)" => "Allocation routing tiers. Large/Direct is inferred from size/alignment, not confirmed route metadata.",
-    "Size" => "Allocation size or inclusive size range, in B/KiB/MiB/GiB.",
-    "Retained" => "Retained allocation-event count in the bucket.",
-    "Bytes" => "Sum of requested allocation bytes, not resident memory.",
-    "Hotspots" => "Number of captured stack groups.",
-    "Est. live" => "Small-tier published class live-allocation estimate when available; otherwise unmatched retained allocations.",
-    "Est. class" => "Estimated live blocks / class capacity when available. Otherwise falls back to this bucket's retained allocation count / largest bucket count.",
-    "Unmatched" => "Medium/Direct retained allocations without a matched retained free; not proven process-live allocations or leaks.",
-    "Event share" => "Bucket retained allocation count / largest bucket count in the tier, NOT a percentage of the tier total.",
-    "reported current" => "Small class count/byte estimates or Medium topology values. Small published classes do not cover all tiers; class estimates are not per-segment occupancy.",
-    "Medium details" => "Virtual slice spans; overhead = usable minus requested bytes; largest = largest requested allocation.",
-    "unmatched retained / retained" => "Direct current title values are unmatched retained count/bytes. retained title values sum allocation events, independently of topology.",
-    "[ / ]" => "Change tier.",
-    "Up/Down / Enter" => "Select a bucket / enter its locations. Nonfocusable summary and stack help appears on this same page.",
-    "Missing events" => "No retained allocation events does not imply an empty heap.",
+const HEAP_BUCKETS: &Section = section!("NATIVE OWNER STRUCTURES";
+    "Endpoint / lease" => "Persistent native endpoint address and current lease generation. Active means leased, not attributed to a known current thread.",
+    "Freshness" => "Contributed this round, fresh idle inspection, stale lease/session, older round, newer than capture, busy, unobserved or Unavailable (System publication-slot allocation failed). Matching rounds are not an exact current census; a first round can predate polling. Age is shown at capture. Missing state is unknown, not zero.",
+    "Publication coverage" => "Only accepted recorded allocation/free operations publish after the native operation completes. Sampled-out events and merely enabled attempts do not contribute. Polling requests the next round after collection; explicit app requests also work. No timers or background workers.",
+    "Last contributor" => "Recorder thread that last published this observation. It is not the current lease holder, especially for reused leases.",
+    "Object / slab / capacity" => "Rounded object size, one slab's backing bytes and one slab's object capacity; not app-live memory.",
+    "Available / empty / observed / fast" => "Native available-list slabs, reusable empty slabs, slabs found by bounded walks, and whether the fast list has an object.",
+    "Bars" => "Observed slab counts relative to the largest class count, or range counts relative to the largest bin. They are not utilization gauges.",
+    "Large outstanding" => "Native outstanding large ranges, not application-live ranges. Queued remote returns can still be outstanding.",
+    "Local backend / metadata" => "Reusable object and metadata ranges by base-two size exponent. Incomplete walks show observed capacity only.",
+    "Requested growth" => "Cumulative local refill growth state, not retained bytes.",
+    "Up/Down / Home/End" => "Select global backend or an owner, or jump to the first/last row. Mouse clicks select the exact rendered owner.",
+    "PgUp/PgDn" => "Scroll the selected structure detail.",
 );
 
-const HEAP_HOTSPOTS: &Section = section!("ALLOCATION LOCATIONS";
-    "Events" => "Retained allocation count at this stack, within the selected size bucket.",
-    "Bytes" => "Sum of requested allocation bytes at this stack.",
-    "Unmatched" => "Count without paired retained frees. Even with zero overwrites, sampling, recording boundaries and missing frees prevent a process-live/leak conclusion.",
-    "Location" => "First displayed frame of the captured stack.",
-    "unmatched retained" => "Bucket-wide unmatched count/bytes in the title.",
-    "class estimate" => "Estimated live blocks / class capacity from topology, not filtered stack totals.",
-    "requested / waste" => "Estimated requested bytes / usable minus requested bytes.",
-    "Up/Down / Backspace" => "Select a location and its stack / return to the size distribution.",
-    "f / PgUp/PgDn" => "Toggle application/all frames / scroll the stack.",
+const HEAP_HOTSPOTS: &Section = section!("NATIVE RETURNS / LIMITATIONS";
+    "Outgoing returns" => "Open rings/objects and bounded message-bucket/list walks, including class-rounded message bytes. PARTIAL means nodes were omitted.",
+    "Batching budget" => "Remaining native batching budget, NOT pending or queued bytes.",
+    "Incoming atomic queue" => "Independently sampled front/back addresses, never dereferenced or traversed. Queue depth and emptiness remain unknown.",
+    "Capture consistency" => "Owners and the global backend are independent observations. Active slots may be busy, unobserved or stale.",
+    "Missing observations" => "Never-observed endpoints remain visible; they are not zero-capacity owners.",
 );
 
 const ALLOCATIONS: &Section = section!("ALLOCATION HOTSPOTS";
@@ -226,6 +217,9 @@ const ALLOCATIONS: &Section = section!("ALLOCATION HOTSPOTS";
     "Up/Down" => "Select a hotspot.",
     "[ / ] / r" => "Change sort column / reverse sort.",
     "f / PgUp/PgDn" => "Toggle application/all frames / scroll the stack.",
+    "e" => "Switch hotspots / individual allocation-free records. Records include actor names, requested sizes, addresses, operation stacks and view-local lifetime IDs.",
+    "Orphan free" => "No retained allocation origin in the original capture. Filtering does not create orphan status or recompute lifetime IDs.",
+    "Repeated addresses" => "View-local IDs distinguish each retained lifetime. Source keys/addresses may repeat and missing events prevent global lifetime reconstruction.",
 );
 
 const STACK: &Section = section!("STACK TRACE";
@@ -465,7 +459,7 @@ const FILTERS: &Section = section!("STACK FILTERS - WHOLE RECORDS";
     "Runtime stack" => "Select event stack or spawn provenance. Spawn attribution does not imply execution at the spawn site.",
     "Events / Allocations / Tasks" => "Filter banner shown/total counts describe retained indexed populations. unknown counts incomplete attribution, not source loss.",
     "Background filtering" => "Current view remains available until rebuilding finishes. Help keeps its original topic even when completion resets focus.",
-    "Unfiltered values" => "Source accepted/overwritten counters, whole-process counters and heap topology remain unfiltered.",
+    "Unfiltered values" => "Source accepted/overwritten counters and native owner/backend inventory remain unfiltered.",
     "f versus F" => "Lowercase f only changes displayed stack frames; uppercase F filters whole records.",
     "Tab / Up/Down" => "Select a field.",
     "Typing / Backspace / Delete" => "Append Include/Exclude text / remove its last character.",
@@ -512,7 +506,7 @@ const COMMON: &Section = section!("UNITS / SCOPE / MISSING DATA";
     "Loss percentage" => "Overwritten / accepted is ring loss, not sampling rate or percentage of all application work.",
     "Zero loss" => "Does not prove complete history.",
     "Zero / '-' / unavailable" => "Zero may mean no samples, disabled recording or unavailable counter coverage. '-' and unavailable messages explicitly mean missing data.",
-    "Global versus filtered" => "Whole-process counters and heap topology remain unfiltered. Record totals can change with F filters; compare only matching scope and denominator.",
+    "Global versus filtered" => "Native owner/backend inventory remains unfiltered. Record totals can change with F filters; compare only matching scope and denominator.",
 );
 
 const HELP_CONTROLS: &Section = section!("HELP CONTROLS";
@@ -638,8 +632,8 @@ mod tests {
     #[test]
     fn focused_help_excludes_focusable_siblings_and_keeps_passive_children() {
         for (context, sections) in [
-            (Context::HeapBuckets, vec![HEAP_BUCKETS, HEAP_SUMMARY]),
-            (Context::HeapHotspots, vec![HEAP_HOTSPOTS, STACK]),
+            (Context::HeapBuckets, vec![HEAP_BUCKETS, HEAP_SUMMARY, HEAP_HOTSPOTS]),
+            (Context::HeapHotspots, vec![HEAP_BUCKETS, HEAP_SUMMARY, HEAP_HOTSPOTS]),
             (Context::Allocations, vec![ALLOCATIONS, STACK]),
             (Context::PrimitiveTypes, vec![PRIMITIVE_TYPES]),
             (Context::PrimitiveOperations, vec![PRIMITIVE_OPERATIONS, PRIMITIVE_VALUES]),
@@ -687,25 +681,25 @@ mod tests {
         (
             Context::HeapBuckets,
             &[
-                "Size",
-                "Retained",
-                "Bytes",
-                "Hotspots",
-                "Est. live",
-                "Est. class",
-                "Unmatched",
-                "Event share",
-                "Live",
-                "Lifetime peak",
-                "Max sampled live",
-                "Reported mapped (not RSS/committed)",
-                "Virtual regions",
-                "cumulative allocations",
+                "Endpoint / lease",
+                "Freshness",
+                "Last contributor",
+                "Object / slab / capacity",
+                "Large outstanding",
+                "Local backend / metadata",
+                "Reservations",
+                "Owners",
+                "Publication",
             ],
         ),
         (
             Context::HeapHotspots,
-            &["Events", "Bytes", "Unmatched", "Location", "class estimate"],
+            &[
+                "Outgoing returns",
+                "Batching budget",
+                "Incoming atomic queue",
+                "Capture consistency",
+            ],
         ),
         (
             Context::Allocations,
@@ -826,10 +820,10 @@ mod tests {
             (
                 Context::HeapBuckets,
                 &[
-                    "not a guaranteed lifetime",
-                    "not per-segment occupancy",
-                    "not physical residency",
-                    "NOT a percentage of the tier total",
+                    "not app-live memory",
+                    "not the current lease holder",
+                    "unknown, not zero",
+                    "NOT pending or queued bytes",
                 ][..],
             ),
             (

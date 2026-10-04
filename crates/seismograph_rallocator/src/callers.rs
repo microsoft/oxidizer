@@ -1,6 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![expect(
+    clippy::struct_field_names,
+    reason = "Recorder-log and actor identifiers retain explicit event-view names"
+)]
+
 //! Retained caller and symbol model types.
 
 /// Per-thread retained event-log summary.
@@ -81,13 +86,18 @@ pub enum HeapKind {
 #[non_exhaustive]
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Event {
+    /// Whether this record has a retained allocation origin in the source capture.
+    ///
+    /// Preserved through filtering so hiding an allocation does not create an
+    /// apparent orphan free. Projection identities are local to one capture.
+    pub allocation_recorded: bool,
     /// Owning thread-log identifier.
     pub thread_log_id: u64,
     /// Thread that recorded this event.
     pub event_thread_id: u64,
     /// Sequence number within the log.
     pub sequence: u64,
-    /// Stable allocation identifier.
+    /// View-local allocation lifetime identifier, not the repeated address key.
     pub allocation_id: u64,
     /// Allocation or deallocation kind.
     pub kind: EventKind,
@@ -143,6 +153,7 @@ impl Event {
             call_stack,
         } = fields;
         Self {
+            allocation_recorded: kind == EventKind::Allocated,
             thread_log_id,
             event_thread_id,
             sequence,

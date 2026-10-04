@@ -14,6 +14,40 @@
 //! Rallocator payloads use the built-in schema-specific renderer; unknown
 //! sources remain visible in the source inventory.
 //!
+//! **Native v4**, immediately left of Allocations, explores the global backend
+//! and every inventoried owner endpoint, including active never-observed owners.
+//! Up/Down selects global state or an owner; Home/End jumps to the first/last
+//! row and PgUp/PgDn scrolls class slabs, large ranges, local range/metadata
+//! caches, outgoing returns and incoming atomic queue endpoints.
+//! Green rows contributed this round or are fresh idle inspections; other rows
+//! explicitly identify old leases, sessions, rounds, busy slots and unknown state.
+//! Red Unavailable rows identify System publication-slot allocation failure,
+//! distinct from a never-observed endpoint; neither is measured zero.
+//! Last-contributor IDs do not identify the current lease holder. Bounded walks
+//! and independently sampled state are not a transactional heap census.
+//! A matching round is not an exact current census; the first round can predate
+//! polling. Observation age at capture is shown even for matching rounds.
+//! Large outstanding ranges include pending/retained frees, not app-live objects.
+//! Sampled incoming front != back means potential work, not a guaranteed ready
+//! link or queue depth; equality does not establish emptiness.
+//! Native capacity is not application-live memory, batching budget is not pending
+//! bytes, and global cached ranges are not guaranteed physically decommitted.
+//! Self-publication defaults on but costs nothing with recording off. Capture
+//! requests the next publication round only after collection. Operations publish
+//! only after an accepted recorded allocation/free event and the native operation
+//! completes; sampled-out events and merely enabled attempts do not contribute.
+//! Explicit app-side requests also work, without timers or background workers.
+//! Offline files never request new publications.
+//!
+//! In **Allocations**, press `e` to switch between grouped hotspots and individual
+//! allocation/free records, including actor names, operation stacks, requested
+//! sizes, addresses, view-local lifetime IDs and explicit orphan frees.
+//! Address reuse does not merge retained lifetimes; filtering preserves original
+//! correlation IDs and whether a free had a retained allocation origin.
+//! Export the same native inventory with
+//! `seismograph snapshot html capture.seismograph report.html`.
+//! Schema 3 is required; older allocator payload schemas are rejected.
+//!
 //! Run `seismograph monitor` to capture a running application, or
 //! `seismograph view "C:\captures\capture.seismograph"` to inspect a native
 //! snapshot in the same interactive tabs without connecting to a process.
@@ -90,11 +124,11 @@
 //! captures. Only one filter worker runs at a time; newer requests replace the
 //! queued request while the current worker finishes, including after reconnect.
 //! Filtering never rewrites the original file; source accepted/overwritten
-//! counters, whole-process counters, and heap topology remain unfiltered, as
+//! counters and native owner/backend inventory remain unfiltered, as
 //! indicated in the filter banner.
 //!
 //! Drag a shared panel border with the left mouse button to resize the panes.
-//! Click a tab header (Info, Heaps, and so on) to select that tab.
+//! Click a tab header (Info, Native v4, and so on) to select that tab.
 //! Click a list row to select and activate it, as with keyboard selection and Enter.
 //! Sizes are retained per tab for the current monitor or viewer session.
 //! The Threads tab includes same-thread object activity, marked `(self)`.
@@ -166,7 +200,10 @@
 //! `Poll::Pending`. Waiting or Ready can briefly appear between the poll-exit
 //! hook and terminal retirement after completion or panic.
 
+mod allocator_topology;
+mod allocator_view;
 mod commands;
+mod native_view;
 mod report;
 
 use std::ffi::OsString;

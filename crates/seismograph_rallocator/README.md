@@ -1,52 +1,59 @@
-<div align="center">
- <img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="Seismograph Rallocator Logo" width="96">
+# seismograph_rallocator ![License: MIT](https://img.shields.io/badge/license-MIT-blue) [![seismograph_rallocator on crates.io](https://img.shields.io/crates/v/seismograph_rallocator)](https://crates.io/crates/seismograph_rallocator) [![seismograph_rallocator on docs.rs](https://docs.rs/seismograph_rallocator/badge.svg)](https://docs.rs/seismograph_rallocator) [![Source Code Repository](https://img.shields.io/badge/Code-On%20GitHub-blue?logo=GitHub)](https://github.com/microsoft/oxidizer/tree/main/crates/seismograph_rallocator) [![Rust Version: 1.95.0](https://img.shields.io/badge/rustc-1.95.0-orange.svg)](https://github.com/rust-lang/rust/releases/tag/1.95.0)
 
-# Seismograph Rallocator
+Native v4 allocator observations for Seismograph.
 
-[![crate.io](https://img.shields.io/crates/v/seismograph_rallocator.svg)](https://crates.io/crates/seismograph_rallocator)
-[![docs.rs](https://docs.rs/seismograph_rallocator/badge.svg)](https://docs.rs/seismograph_rallocator)
-[![MSRV](https://img.shields.io/crates/msrv/seismograph_rallocator)](https://crates.io/crates/seismograph_rallocator)
-[![CI](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml/badge.svg)](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml)
-[![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/microsoft/oxidizer/blob/main/LICENSE)
-<a href="https://github.com/microsoft/oxidizer"><img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
+[`native::Snapshot`][__link0] inventories persistent owners, including never-observed
+active endpoints, and an independently collected global backend. Owner state
+is bounded and may be stale: compare session, lease generation and round.
+Idle inspection is fresh under the pool lock; busy, unobserved and slot
+allocation failure (`Unavailable`) are explicitly unknown. Native capacity is not application-live
+memory, remote batching budget is not pending bytes, and globally cached
+ranges are not guaranteed physically decommitted.
+Matching rounds mean contributed this round, not an exact current census:
+the first round can predate polling. Consumers show observation age at capture.
+Outstanding allocator ranges include pending/retained frees, not app-live
+object counts. Incoming front/back inequality means potential work only,
+not guaranteed ready links or queue depth; equality does not prove emptiness.
 
-</div>
+[`encoded_len`][__link1], [`encode`][__link2] and [`decode`][__link3] implement schema 3 exclusively.
+The decoder bounds allocation by both the payload length and [`MAX_OWNERS`][__link4],
+rejects invalid flags, duplicates, inconsistent inventory and trailing bytes.
+Application allocation events remain in the unchanged Seismograph container.
+[`encoded_len_with_owners`][__link5] and [`encode_with_owners`][__link6] accept borrowed owner
+rows, ignoring the metadata snapshot’s vector. Both use fixed stack scratch
+and never allocate, so a producer can keep inventory and output System-backed
+without native allocator activity perturbing the observations it collects.
+[`events::callers`][__link7] projects these into view-local correlation identities,
+preserving stacks, actor names, orphan frees and repeated addresses.
 
-Rallocator snapshot source for seismograph.
+Self-publication defaults on, but recording defaults off. Polling requests
+another observation round without a background thread or per-operation clock
+check. Controls belong to this plugin, not the allocator’s public API.
+Only contributing accepted recorded allocation/free operations publish, after
+the native operation ends; sampled-out events and merely enabled attempts do
+not contribute. Collectors request the next round after collection, and apps
+may use [`native::request_observation`][__link8] to schedule requests explicitly.
 
-Rallocator contributes this payload to the process-wide [`seismograph`][__link0]
-snapshot. Snapshot data is organized into [`snapshot`][__link1], [`topology`][__link2], and
-[`callers`][__link3].
+## Explore a sample capture
 
-## Compatibility contract
+```text
+cargo +1.95.0 run -p seismograph_rallocator --example native_snapshot
+cargo +1.95.0 run -p seismograph_cli -- view native-demo.seismograph
+cargo +1.95.0 run -p seismograph_cli -- snapshot html native-demo.seismograph
+```
 
-A snapshot has three layers with independent versions:
-
-* The private wire layer owns the little-endian container header and
-  length-prefixed section framing. A framing change increments the wire
-  version, and readers reject unknown wire versions.
-* This crate owns the telemetry schema named by the header. A change that
-  reinterprets the snapshot as a whole increments that schema; readers
-  reject unsupported schema versions.
-* Each section owns its payload version. Compatible extensions increment
-  only that section version. Unknown sections and unsupported optional
-  section versions are skipped and reported through
-  [`snapshot::Snapshot::skipped_sections`][__link4].
-
-Metadata and statistics sections are required. Statistics must use the current
-section version; legacy statistics payloads are not supported. Producers must
-not change the meaning or byte order of an existing version.
+The example uses synthetic native state and real recorder events, including
+address reuse and an orphan free. It does not install the native allocator.
+Its capture callback encodes borrowed stack rows into System-backed `SourceData`.
 
 
-<hr/>
-<sub>
-This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seismograph_rallocator">source code</a>.
-</sub>
-
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbEcLzBLld0bkb1MkXB7BgGAUb_SG7uw5pXb4bEk90SYhdPJVhZIKCa3NlaXNtb2dyYXBoZTAuMS4wgnZzZWlzbW9ncmFwaF9yYWxsb2NhdG9yZTAuMS4w
- [__link0]: https://crates.io/crates/seismograph/0.1.0
- [__link1]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/snapshot/index.html
- [__link2]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/topology/index.html
- [__link3]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/callers/index.html
- [__link4]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/?search=snapshot::Snapshot::skipped_sections
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb2o_SNWoR6AAb3_T-k0ODPHwbnQW7uS_D2XsbjVFFtK-lC3BhYvVhcoQbAXJgUeSXjZMbZaYTfsaEXvQbE_CfSnnGi2AbpPgIGakgPdthZIGCdnNlaXNtb2dyYXBoX3JhbGxvY2F0b3JlMC4xLjA
+ [__link0]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/?search=native::Snapshot
+ [__link1]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/?search=encoded_len
+ [__link2]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/?search=encode
+ [__link3]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/?search=decode
+ [__link4]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/?search=MAX_OWNERS
+ [__link5]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/?search=encoded_len_with_owners
+ [__link6]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/?search=encode_with_owners
+ [__link7]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/?search=events::callers
+ [__link8]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/?search=native::request_observation

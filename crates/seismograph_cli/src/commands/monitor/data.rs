@@ -8,6 +8,7 @@ use std::time::{Instant, SystemTime};
 pub(super) use super::runtime::{RuntimeMonitorSnapshot, RuntimeTaskSort, RuntimeTaskSummary, RuntimeWorkerSummary, runtime_task_id};
 
 pub(super) struct CapturedSnapshot {
+    pub(super) native: Option<Arc<seismograph_rallocator::native::Snapshot>>,
     pub(super) memory: Option<MemorySnapshot>,
     pub(super) allocations: Option<AllocationSnapshot>,
     pub(super) heap_error: Option<String>,
@@ -449,11 +450,64 @@ pub(super) const fn cache_event_label(kind: seismograph::recorder::event::EventK
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct AllocationSnapshot {
+    pub(super) records: Vec<AllocationRecord>,
     pub(super) thread_count: u64,
     pub(super) total_events: u64,
     pub(super) retained_events: u64,
     pub(super) lost_events: u64,
     pub(super) hotspots: Vec<AllocationHotspot>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct AllocationRecord {
+    operation: &'static str,
+    correlation: &'static str,
+    actor_id: u64,
+    actor_name: Arc<str>,
+    sequence: u64,
+    lifetime_id: u64,
+    origin_log: u64,
+    address: u64,
+    size: u64,
+    alignment: u64,
+    heap_key: u64,
+    application_stack: Arc<[String]>,
+    complete_stack: Arc<[String]>,
+}
+
+impl AllocationRecord {
+    pub(super) fn label(&self) -> String {
+        format!(
+            "{} · {} #{} · {} B @ 0x{:x} · view #{} · {}",
+            self.operation, self.actor_name, self.actor_id, self.size, self.address, self.lifetime_id, self.correlation
+        )
+    }
+
+    pub(super) fn details(&self) -> Vec<String> {
+        vec![
+            format!(
+                "Operation: {} · actor recorder thread {} ({}) · sequence {}",
+                self.operation, self.actor_id, self.actor_name, self.sequence
+            ),
+            format!(
+                "View-local lifetime #{} · origin recorder log {} · {}",
+                self.lifetime_id, self.origin_log, self.correlation
+            ),
+            format!(
+                "Address 0x{:x} · requested {} B · alignment {} B · recorded heap key {}",
+                self.address, self.size, self.alignment, self.heap_key
+            ),
+            "Addresses and source correlation keys may repeat. Pairing uses original captured event order, not global lifetime identity."
+                .into(),
+        ]
+    }
+
+    pub(super) fn stack(&self, filter: AllocationStackFilter) -> &[String] {
+        match filter {
+            AllocationStackFilter::Application => &self.application_stack,
+            AllocationStackFilter::All => &self.complete_stack,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1718,7 +1772,7 @@ impl AllocationSort {
 pub(super) struct MemorySnapshot {
     pub(super) live_bytes: u64,
     pub(super) peak_live_bytes: u64,
-    pub(super) peak_live_bytes_scope: seismograph_rallocator::snapshot::PeakLiveBytesScope,
+    pub(super) peak_live_bytes_scope: crate::allocator_view::PeakLiveBytesScope,
     pub(super) mapped_bytes: u64,
     pub(super) allocations: u64,
     pub(super) reserved_bytes: u64,
@@ -1771,22 +1825,6 @@ pub(super) enum MemoryTier {
 impl MemoryTier {
     const ALL: [Self; 3] = [Self::Small, Self::Medium, Self::Direct];
 
-    pub(super) const fn index(self) -> usize {
-        match self {
-            Self::Small => 0,
-            Self::Medium => 1,
-            Self::Direct => 2,
-        }
-    }
-
-    pub(super) const fn label(self) -> &'static str {
-        match self {
-            Self::Small => "Small",
-            Self::Medium => "Medium",
-            Self::Direct => "Direct",
-        }
-    }
-
     pub(super) const fn next(self) -> Self {
         match self {
             Self::Small => Self::Medium,
@@ -1810,16 +1848,6 @@ pub(super) struct MemoryTierData {
     pub(super) current_allocations: u64,
     pub(super) current_bytes: u64,
     pub(super) buckets: Vec<MemoryBucket>,
-}
-
-impl MemoryTierData {
-    pub(super) fn retained_allocations(&self) -> u64 {
-        self.buckets.iter().map(|bucket| bucket.allocations).sum()
-    }
-
-    pub(super) fn retained_bytes(&self) -> u64 {
-        self.buckets.iter().map(|bucket| bucket.allocated_bytes).sum()
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1856,14 +1884,11 @@ struct MemoryBucketTotal<'a> {
 
 impl MemorySnapshot {
     #[cfg(test)]
-    pub(super) fn from_snapshot(snapshot: &seismograph_rallocator::snapshot::Snapshot) -> Self {
+    pub(super) fn from_snapshot(snapshot: &crate::allocator_view::Snapshot) -> Self {
         Self::from_snapshot_with_deallocated(snapshot, &deallocated_allocations(snapshot))
     }
 
-    pub(super) fn from_snapshot_with_deallocated(
-        snapshot: &seismograph_rallocator::snapshot::Snapshot,
-        deallocated: &HashSet<(u64, u64)>,
-    ) -> Self {
+    pub(super) fn from_snapshot_with_deallocated(snapshot: &crate::allocator_view::Snapshot, deallocated: &HashSet<(u64, u64)>) -> Self {
         Self::from_snapshot_with_events(
             snapshot,
             deallocated,
@@ -1872,7 +1897,7 @@ impl MemorySnapshot {
     }
 
     pub(super) fn from_snapshot_with_events(
-        snapshot: &seismograph_rallocator::snapshot::Snapshot,
+        snapshot: &crate::allocator_view::Snapshot,
         deallocated: &HashSet<(u64, u64)>,
         events: &[seismograph_rallocator::callers::Event],
     ) -> Self {
@@ -1883,8 +1908,8 @@ impl MemorySnapshot {
         let mut medium_allocations = MediumAllocations::default();
         for slice in snapshot.topology.iter().flat_map(|region| &region.slices) {
             match slice.kind {
-                seismograph_rallocator::topology::SliceKind::Small => small_slices += 1,
-                seismograph_rallocator::topology::SliceKind::Medium => {
+                crate::allocator_topology::SliceKind::Small => small_slices += 1,
+                crate::allocator_topology::SliceKind::Medium => {
                     medium_slices += 1;
                     medium_allocations.count += 1;
                     medium_allocations.requested_bytes = medium_allocations.requested_bytes.saturating_add(slice.requested_bytes);
@@ -1892,9 +1917,8 @@ impl MemorySnapshot {
                     medium_allocations.span_slices = medium_allocations.span_slices.saturating_add(u64::from(slice.span_slices));
                     medium_allocations.largest_requested_bytes = medium_allocations.largest_requested_bytes.max(slice.requested_bytes);
                 }
-                seismograph_rallocator::topology::SliceKind::MediumContinuation => medium_slices += 1,
-                seismograph_rallocator::topology::SliceKind::Bump => bump_slices += 1,
-                seismograph_rallocator::topology::SliceKind::Unknown => unknown_slices += 1,
+                crate::allocator_topology::SliceKind::Bump => bump_slices += 1,
+                crate::allocator_topology::SliceKind::Unknown => unknown_slices += 1,
             }
         }
         let mut size_classes = snapshot
@@ -1938,7 +1962,7 @@ impl MemorySnapshot {
                 .regions
                 .iter()
                 .map(|region| MemoryRegion {
-                    index: region.region_index,
+                    index: region.index,
                     reserved_bytes: region.reserved_bytes,
                     used_slices: region.used_slices,
                     free_slices: region.free_slices,
@@ -1952,7 +1976,7 @@ impl MemorySnapshot {
 }
 
 fn memory_tiers(
-    snapshot: &seismograph_rallocator::snapshot::Snapshot,
+    snapshot: &crate::allocator_view::Snapshot,
     size_classes: &[MemorySizeClass],
     medium_allocations: &MediumAllocations,
     deallocated: &HashSet<(u64, u64)>,
@@ -2021,7 +2045,7 @@ fn memory_tiers(
 }
 
 fn retained_memory_totals<'a>(
-    snapshot: &seismograph_rallocator::snapshot::Snapshot,
+    snapshot: &crate::allocator_view::Snapshot,
     size_classes: &[MemorySizeClass],
     deallocated: &HashSet<(u64, u64)>,
     events: &'a [seismograph_rallocator::callers::Event],
@@ -2144,7 +2168,7 @@ fn memory_bucket(
     }
 }
 
-pub(super) fn deallocated_allocations(snapshot: &seismograph_rallocator::snapshot::Snapshot) -> HashSet<(u64, u64)> {
+pub(super) fn deallocated_allocations(snapshot: &crate::allocator_view::Snapshot) -> HashSet<(u64, u64)> {
     // Remote frees carry the allocating owner's key but the freeing thread's sequence,
     // so the encoded order does not guarantee that allocations precede deallocations.
     snapshot
@@ -2156,16 +2180,65 @@ pub(super) fn deallocated_allocations(snapshot: &seismograph_rallocator::snapsho
         .collect()
 }
 
+fn allocation_records(
+    events: &[seismograph_rallocator::callers::Event],
+    callers: &seismograph_rallocator::callers::Callers,
+    deallocated: &HashSet<(u64, u64)>,
+    lookups: &HashMap<u64, &seismograph_rallocator::callers::AddressLookup>,
+) -> Vec<AllocationRecord> {
+    use seismograph_rallocator::callers::EventKind;
+
+    let names = callers
+        .thread_names
+        .iter()
+        .map(|thread| (thread.thread_id, Arc::<str>::from(thread.name.as_str())))
+        .collect::<HashMap<_, _>>();
+    let unnamed = Arc::<str>::from("unnamed");
+    let mut record_stacks = HashMap::<&[u64], (Arc<[String]>, Arc<[String]>)>::new();
+    events
+        .iter()
+        .map(|event| {
+            let actor = names.get(&event.event_thread_id).unwrap_or(&unnamed);
+            let operation = if event.kind == EventKind::Allocated { "alloc" } else { "free" };
+            let correlation = if event.kind == EventKind::Deallocated && !event.allocation_recorded {
+                "orphan free (no retained allocation)"
+            } else if deallocated.contains(&(event.thread_log_id, event.allocation_id)) {
+                "matched retained allocation/free pair (source capture)"
+            } else {
+                "unmatched allocation evidence (NOT proven live)"
+            };
+            let (application, complete) = record_stacks.entry(&event.call_stack).or_insert_with(|| {
+                (
+                    hotspot_stack(&event.call_stack, lookups, AllocationStackFilter::Application).into(),
+                    hotspot_stack(&event.call_stack, lookups, AllocationStackFilter::All).into(),
+                )
+            });
+            AllocationRecord {
+                operation,
+                correlation,
+                actor_id: event.event_thread_id,
+                actor_name: Arc::clone(actor),
+                sequence: event.sequence,
+                lifetime_id: event.allocation_id,
+                origin_log: event.thread_log_id,
+                address: event.address,
+                size: event.size,
+                alignment: event.align,
+                heap_key: event.heap_id,
+                application_stack: Arc::clone(application),
+                complete_stack: Arc::clone(complete),
+            }
+        })
+        .collect()
+}
+
 impl AllocationSnapshot {
     #[cfg(test)]
-    pub(super) fn from_snapshot(snapshot: &seismograph_rallocator::snapshot::Snapshot) -> Self {
+    pub(super) fn from_snapshot(snapshot: &crate::allocator_view::Snapshot) -> Self {
         Self::from_snapshot_with_deallocated(snapshot, &deallocated_allocations(snapshot))
     }
 
-    pub(super) fn from_snapshot_with_deallocated(
-        snapshot: &seismograph_rallocator::snapshot::Snapshot,
-        deallocated: &HashSet<(u64, u64)>,
-    ) -> Self {
+    pub(super) fn from_snapshot_with_deallocated(snapshot: &crate::allocator_view::Snapshot, deallocated: &HashSet<(u64, u64)>) -> Self {
         Self::from_snapshot_with_events(
             snapshot,
             deallocated,
@@ -2174,7 +2247,7 @@ impl AllocationSnapshot {
     }
 
     pub(super) fn from_snapshot_with_events(
-        snapshot: &seismograph_rallocator::snapshot::Snapshot,
+        snapshot: &crate::allocator_view::Snapshot,
         deallocated: &HashSet<(u64, u64)>,
         events: &[seismograph_rallocator::callers::Event],
     ) -> Self {
@@ -2190,6 +2263,7 @@ impl AllocationSnapshot {
 
         let Some(callers) = &snapshot.callers else {
             return Self {
+                records: Vec::new(),
                 thread_count: 0,
                 total_events: 0,
                 retained_events: 0,
@@ -2212,6 +2286,7 @@ impl AllocationSnapshot {
             .iter()
             .map(|lookup| (lookup.address, lookup))
             .collect::<HashMap<_, _>>();
+        let records = allocation_records(events, callers, deallocated, &lookups);
         let mut hotspots = totals
             .into_iter()
             .map(|(stack, total)| {
@@ -2235,6 +2310,7 @@ impl AllocationSnapshot {
                 .then_with(|| right.live_bytes.cmp(&left.live_bytes))
         });
         Self {
+            records,
             thread_count: u64::try_from(callers.threads.len()).unwrap_or(u64::MAX),
             total_events: callers.total_events,
             retained_events: u64::try_from(events.len()).unwrap_or(u64::MAX),
@@ -2401,16 +2477,11 @@ mod tests {
             ]
         );
         assert_eq!(
-            [MemoryTier::Small, MemoryTier::Medium, MemoryTier::Direct,].map(|tier| (
-                tier.index(),
-                tier.label(),
-                tier.next(),
-                tier.previous()
-            )),
+            [MemoryTier::Small, MemoryTier::Medium, MemoryTier::Direct,].map(|tier| (tier.next(), tier.previous())),
             [
-                (0, "Small", MemoryTier::Medium, MemoryTier::Direct),
-                (1, "Medium", MemoryTier::Direct, MemoryTier::Small),
-                (2, "Direct", MemoryTier::Small, MemoryTier::Medium),
+                (MemoryTier::Medium, MemoryTier::Direct),
+                (MemoryTier::Direct, MemoryTier::Small),
+                (MemoryTier::Small, MemoryTier::Medium),
             ]
         );
         assert_eq!(
@@ -3005,6 +3076,7 @@ mod tests {
             complete_stack: Vec::new(),
         };
         let allocations = AllocationSnapshot {
+            records: Vec::new(),
             thread_count: 0,
             total_events: 0,
             retained_events: 0,
@@ -3077,45 +3149,10 @@ mod tests {
 
     #[test]
     fn retained_memory_totals_and_task_ids_handle_missing_inputs() {
-        let snapshot = seismograph_rallocator::snapshot::Snapshot::new(seismograph_rallocator::snapshot::Version::new(1, 0, 0));
+        let snapshot = crate::allocator_view::Snapshot::new(crate::allocator_view::Version::new(1, 0, 0));
         assert!(retained_memory_totals(&snapshot, &[], &HashSet::new(), &[]).is_empty());
-        let tier = MemoryTierData {
-            kind: MemoryTier::Small,
-            current_allocations: 0,
-            current_bytes: 0,
-            buckets: vec![
-                MemoryBucket {
-                    lower_bytes: 1,
-                    upper_bytes: 8,
-                    allocations: 2,
-                    allocated_bytes: 20,
-                    live_allocations: 1,
-                    live_bytes: 10,
-                    topology_live_allocations: None,
-                    capacity_blocks: None,
-                    requested_bytes: None,
-                    usable_bytes: None,
-                    hotspots: Vec::new(),
-                },
-                MemoryBucket {
-                    lower_bytes: 9,
-                    upper_bytes: 16,
-                    allocations: 3,
-                    allocated_bytes: 60,
-                    live_allocations: 2,
-                    live_bytes: 40,
-                    topology_live_allocations: None,
-                    capacity_blocks: None,
-                    requested_bytes: None,
-                    usable_bytes: None,
-                    hotspots: Vec::new(),
-                },
-            ],
-        };
         assert_eq!(
             (
-                tier.retained_allocations(),
-                tier.retained_bytes(),
                 runtime_task_id(RuntimeEventKind::TaskSpawned, 1, 0),
                 runtime_task_id(RuntimeEventKind::TaskPollFinished, 2, 0),
                 runtime_task_id(RuntimeEventKind::TaskReady, 8, 9),
@@ -3125,7 +3162,7 @@ mod tests {
                 runtime_task_id(RuntimeEventKind::ArcClone, 6, 7),
                 runtime_task_id(RuntimeEventKind::TaskCanceled, 0, 0),
             ),
-            (5, 80, Some(1), Some(2), Some(8), Some(3), Some(4), Some(5), None, None)
+            (Some(1), Some(2), Some(8), Some(3), Some(4), Some(5), None, None)
         );
     }
 
@@ -3305,10 +3342,11 @@ mod tests {
 
     #[test]
     fn allocation_snapshot_without_callers_and_unmatched_deallocation_is_empty() {
-        let mut snapshot = seismograph_rallocator::snapshot::Snapshot::new(seismograph_rallocator::snapshot::Version::new(1, 0, 0));
+        let mut snapshot = crate::allocator_view::Snapshot::new(crate::allocator_view::Version::new(1, 0, 0));
         assert_eq!(
             AllocationSnapshot::from_snapshot(&snapshot),
             AllocationSnapshot {
+                records: Vec::new(),
                 thread_count: 0,
                 total_events: 0,
                 retained_events: 0,
@@ -3433,30 +3471,35 @@ mod tests {
         reason = "the single assertion compares the complete memory snapshot fixture"
     )]
     fn memory_snapshot_summarizes_regions_and_slices() {
-        let mut snapshot = seismograph_rallocator::snapshot::Snapshot::new(seismograph_rallocator::snapshot::Version::new(0, 1, 0));
+        let mut snapshot = crate::allocator_view::Snapshot::new(crate::allocator_view::Version::new(0, 1, 0));
         snapshot.stats.live_bytes = 10;
         snapshot.stats.peak_live_bytes = 20;
         snapshot.stats.mapped_bytes = 30;
         snapshot.stats.allocations = 40;
-        let mut region = seismograph_rallocator::snapshot::Region::default();
-        region.reserved_bytes = 1_024;
-        region.used_slices = 3;
-        region.free_slices = 13;
-        snapshot.regions.push(region);
-        let mut topology = seismograph_rallocator::topology::TopologyRegion::default();
-        topology.slice_bytes = 64 * 1024;
+        snapshot.regions.push(crate::allocator_view::Region {
+            reserved_bytes: 1_024,
+            used_slices: 3,
+            free_slices: 13,
+            ..crate::allocator_view::Region::default()
+        });
+        let mut topology = crate::allocator_topology::TopologyRegion {
+            slice_bytes: 64 * 1024,
+            ..crate::allocator_topology::TopologyRegion::default()
+        };
         for kind in [
-            seismograph_rallocator::topology::SliceKind::Small,
-            seismograph_rallocator::topology::SliceKind::Medium,
-            seismograph_rallocator::topology::SliceKind::MediumContinuation,
-            seismograph_rallocator::topology::SliceKind::Bump,
+            crate::allocator_topology::SliceKind::Small,
+            crate::allocator_topology::SliceKind::Medium,
+            crate::allocator_topology::SliceKind::Medium,
+            crate::allocator_topology::SliceKind::Bump,
         ] {
-            let mut slice = seismograph_rallocator::topology::Slice::default();
-            slice.kind = kind;
-            if kind == seismograph_rallocator::topology::SliceKind::Small {
-                slice.segments.push(seismograph_rallocator::topology::Segment::from_fields(
-                    seismograph_rallocator::topology::SegmentFields {
-                        segment_index: 0,
+            let mut slice = crate::allocator_topology::Slice {
+                kind,
+                ..crate::allocator_topology::Slice::default()
+            };
+            if kind == crate::allocator_topology::SliceKind::Small {
+                slice.segments.push(crate::allocator_topology::Segment::from_fields(
+                    crate::allocator_topology::SegmentFields {
+                        index: 0,
                         class_index: 2,
                         context: false,
                         live_blocks: 0,
@@ -3465,7 +3508,7 @@ mod tests {
                     },
                 ));
             }
-            if kind == seismograph_rallocator::topology::SliceKind::Medium {
+            if kind == crate::allocator_topology::SliceKind::Medium {
                 slice.span_slices = 2;
                 slice.requested_bytes = 80_000;
                 slice.usable_bytes = 96_000;
@@ -3473,25 +3516,21 @@ mod tests {
             topology.slices.push(slice);
         }
         snapshot.topology.push(topology);
-        snapshot.size_classes.push(seismograph_rallocator::snapshot::SizeClass::from_fields(
-            seismograph_rallocator::snapshot::SizeClassFields {
+        snapshot.size_classes.push(crate::allocator_view::SizeClass::from_fields(
+            crate::allocator_view::SizeClassFields {
                 class_index: 2,
                 block_bytes: 64,
-                live_allocations: seismograph_rallocator::snapshot::Estimate::from_fields(
-                    seismograph_rallocator::snapshot::EstimateFields {
-                        value: 25,
-                        lower_bound: 24,
-                        upper_bound: 26,
-                    },
-                ),
-                requested_bytes: seismograph_rallocator::snapshot::Estimate::from_fields(
-                    seismograph_rallocator::snapshot::EstimateFields {
-                        value: 1_200,
-                        lower_bound: 1_100,
-                        upper_bound: 1_300,
-                    },
-                ),
-                usable_bytes: seismograph_rallocator::snapshot::Estimate::from_fields(seismograph_rallocator::snapshot::EstimateFields {
+                live_allocations: crate::allocator_view::Estimate::from_fields(crate::allocator_view::EstimateFields {
+                    value: 25,
+                    lower_bound: 24,
+                    upper_bound: 26,
+                }),
+                requested_bytes: crate::allocator_view::Estimate::from_fields(crate::allocator_view::EstimateFields {
+                    value: 1_200,
+                    lower_bound: 1_100,
+                    upper_bound: 1_300,
+                }),
+                usable_bytes: crate::allocator_view::Estimate::from_fields(crate::allocator_view::EstimateFields {
                     value: 1_600,
                     lower_bound: 1_536,
                     upper_bound: 1_664,
@@ -3504,7 +3543,7 @@ mod tests {
             MemorySnapshot {
                 live_bytes: 10,
                 peak_live_bytes: 20,
-                peak_live_bytes_scope: seismograph_rallocator::snapshot::PeakLiveBytesScope::Unavailable,
+                peak_live_bytes_scope: crate::allocator_view::PeakLiveBytesScope::Unavailable,
                 mapped_bytes: 30,
                 allocations: 40,
                 reserved_bytes: 1_024,
@@ -3529,10 +3568,10 @@ mod tests {
                     usable_bytes: 1_600,
                 }],
                 medium_allocations: MediumAllocations {
-                    count: 1,
-                    requested_bytes: 80_000,
-                    usable_bytes: 96_000,
-                    span_slices: 2,
+                    count: 2,
+                    requested_bytes: 160_000,
+                    usable_bytes: 192_000,
+                    span_slices: 4,
                     largest_requested_bytes: 80_000,
                 },
                 tiers: vec![
@@ -3556,8 +3595,8 @@ mod tests {
                     },
                     MemoryTierData {
                         kind: MemoryTier::Medium,
-                        current_allocations: 1,
-                        current_bytes: 80_000,
+                        current_allocations: 2,
+                        current_bytes: 160_000,
                         buckets: Vec::new(),
                     },
                     MemoryTierData {
@@ -3577,23 +3616,23 @@ mod tests {
         reason = "the single assertion covers every retained allocation routing boundary"
     )]
     fn memory_snapshot_groups_retained_allocations_by_routing_shape() {
-        let mut snapshot = seismograph_rallocator::snapshot::Snapshot::new(seismograph_rallocator::snapshot::Version::new(0, 1, 0));
-        snapshot.size_classes.push(seismograph_rallocator::snapshot::SizeClass::from_fields(
-            seismograph_rallocator::snapshot::SizeClassFields {
+        let mut snapshot = crate::allocator_view::Snapshot::new(crate::allocator_view::Version::new(0, 1, 0));
+        snapshot.size_classes.push(crate::allocator_view::SizeClass::from_fields(
+            crate::allocator_view::SizeClassFields {
                 class_index: 0,
                 block_bytes: 64,
-                live_allocations: seismograph_rallocator::snapshot::Estimate::default(),
-                requested_bytes: seismograph_rallocator::snapshot::Estimate::default(),
-                usable_bytes: seismograph_rallocator::snapshot::Estimate::default(),
+                live_allocations: crate::allocator_view::Estimate::default(),
+                requested_bytes: crate::allocator_view::Estimate::default(),
+                usable_bytes: crate::allocator_view::Estimate::default(),
             },
         ));
-        snapshot.size_classes.push(seismograph_rallocator::snapshot::SizeClass::from_fields(
-            seismograph_rallocator::snapshot::SizeClassFields {
+        snapshot.size_classes.push(crate::allocator_view::SizeClass::from_fields(
+            crate::allocator_view::SizeClassFields {
                 class_index: 1,
                 block_bytes: 4_096,
-                live_allocations: seismograph_rallocator::snapshot::Estimate::default(),
-                requested_bytes: seismograph_rallocator::snapshot::Estimate::default(),
-                usable_bytes: seismograph_rallocator::snapshot::Estimate::default(),
+                live_allocations: crate::allocator_view::Estimate::default(),
+                requested_bytes: crate::allocator_view::Estimate::default(),
+                usable_bytes: crate::allocator_view::Estimate::default(),
             },
         ));
         let event = |allocation_id, size, align, address| {
@@ -3746,7 +3785,7 @@ mod tests {
 
     #[test]
     fn allocation_liveness_pairs_remote_frees_before_allocations_by_owner_and_id() {
-        let mut snapshot = seismograph_rallocator::snapshot::Snapshot::new(seismograph_rallocator::snapshot::Version::new(0, 1, 0));
+        let mut snapshot = crate::allocator_view::Snapshot::new(crate::allocator_view::Version::new(0, 1, 0));
         let event = |owner, thread, sequence, kind, size, stack| {
             Event::from_fields(EventFields {
                 thread_log_id: owner,
@@ -3788,7 +3827,7 @@ mod tests {
 
     #[test]
     fn allocation_snapshot_ranks_hotspots_by_count_then_bytes() {
-        let mut snapshot = seismograph_rallocator::snapshot::Snapshot::new(seismograph_rallocator::snapshot::Version::new(0, 1, 0));
+        let mut snapshot = crate::allocator_view::Snapshot::new(crate::allocator_view::Version::new(0, 1, 0));
         let event = |allocation_id, kind, size, call_stack| {
             Event::from_fields(EventFields {
                 thread_log_id: 1,
@@ -3840,9 +3879,13 @@ mod tests {
             column: None,
         }));
 
+        let mut actual = AllocationSnapshot::from_snapshot(&snapshot);
+        assert_eq!(actual.records.len(), 4);
+        actual.records.clear();
         assert_eq!(
-            AllocationSnapshot::from_snapshot(&snapshot),
+            actual,
             AllocationSnapshot {
+                records: Vec::new(),
                 thread_count: 0,
                 total_events: 4,
                 retained_events: 4,

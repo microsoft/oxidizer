@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use seismograph_rallocator::snapshot::Snapshot;
+use seismograph_rallocator::native::Snapshot;
 use seismograph_rallocator::{encode, encoded_len};
 
 static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);

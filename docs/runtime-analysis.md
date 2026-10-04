@@ -73,12 +73,12 @@ The following package-level exclusions are intentional:
 - `rest_over_grpc` keeps its runtime transcoding tests under Miri, but omits
   build-time descriptor and code-generation unit tests. The build half is safe
   Rust and remains covered by native tests and `cargo careful`.
-- `rallocator` keeps its library and allocator integration suites under Miri,
-  but omits `tests/telemetry.rs` and `tests/performables_telemetry.rs`. Those
-  binaries repeatedly capture and decode process-wide snapshots or validate a
-  safe dependency graph; direct Miri tests in the library, `performables`, and
-  `seismograph` cover the unsafe internals, while native tests and
-  `cargo careful` retain the end-to-end assertions.
+- `rallocator` uses v4 backends for Windows x64 MSVC and Linux x64. Its native
+  allocator and event-bridge suites run on both platforms, including Linux
+  runtime analysis. Miri is not a supported allocator backend; the old v1
+  Miri backend and telemetry test binaries are removed.
+  `seismograph` retains its independent portable runtime-analysis coverage,
+  and the event-only `seismograph_rallocator` schema is platform-independent.
 - `templated_uri` remains selected because it is a consumer-facing integration
   surface, but deterministic pseudo-fuzz breadth is reduced under Miri.
 - `internity` keeps unchecked storage and resolution paths under Miri. Native

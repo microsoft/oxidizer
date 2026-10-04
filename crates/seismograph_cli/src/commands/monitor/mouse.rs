@@ -10,15 +10,12 @@ use ratatui::widgets::{Block, Borders};
 use super::app::{
     App, CacheFocus, HeapFocus, IoFocus, MonitorTab, PrimitiveFocus, RuntimeFocus, Screen, TaskEventsFocus, TaskHistogram, ThreadFocus,
 };
-use super::data::MemoryTier;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ListTarget {
     Applications,
     InfoThreads,
-    HeapTier(MemoryTier),
     HeapBuckets,
-    HeapHotspots,
     Allocations,
     PrimitiveTypes,
     PrimitiveOperations,
@@ -44,7 +41,7 @@ impl ListTarget {
         match self {
             Self::Applications => None,
             Self::InfoThreads => Some(MonitorTab::Info),
-            Self::HeapTier(_) | Self::HeapBuckets | Self::HeapHotspots => Some(MonitorTab::Heaps),
+            Self::HeapBuckets => Some(MonitorTab::Heaps),
             Self::Allocations => Some(MonitorTab::Allocations),
             Self::PrimitiveTypes | Self::PrimitiveOperations | Self::PrimitiveHotspots => Some(MonitorTab::Primitives),
             Self::Threads | Self::ThreadOperations | Self::ThreadParticipants | Self::ThreadObjects => Some(MonitorTab::Threads),
@@ -150,13 +147,6 @@ impl App {
             self.info_thread_selected = index.min(self.live_activity.threads.len().saturating_sub(1));
             return;
         }
-        if let ListTarget::HeapTier(tier) = target {
-            while self.heap_view.tier != tier {
-                self.handle_key(KeyCode::Char(']'));
-            }
-            self.handle_key(KeyCode::Enter);
-            return;
-        }
         if target == ListTarget::RuntimeActivity {
             self.runtime_view.focus = RuntimeFocus::Activity;
             self.runtime_view.activity_scroll = index;
@@ -176,10 +166,6 @@ impl App {
             ListTarget::HeapBuckets => {
                 self.heap_view.focus = HeapFocus::Buckets;
                 &mut self.heap_view.bucket_selected
-            }
-            ListTarget::HeapHotspots => {
-                self.heap_view.focus = HeapFocus::Hotspots;
-                &mut self.heap_view.hotspot_selected
             }
             ListTarget::Allocations => &mut self.allocation_view.selected,
             ListTarget::PrimitiveTypes => {
@@ -245,11 +231,7 @@ impl App {
                 self.cache_view.focus = CacheFocus::Operations;
                 &mut self.cache_view.operation_selected
             }
-            ListTarget::Applications
-            | ListTarget::InfoThreads
-            | ListTarget::HeapTier(_)
-            | ListTarget::RuntimeActivity
-            | ListTarget::RuntimeHistogram(_) => return,
+            ListTarget::Applications | ListTarget::InfoThreads | ListTarget::RuntimeActivity | ListTarget::RuntimeHistogram(_) => return,
         };
         // Reuse keyboard selection (including dependent selections and scroll resets),
         // then the exact same Enter action as keyboard navigation.
@@ -331,7 +313,6 @@ mod tests {
         for target in [
             ListTarget::Applications,
             ListTarget::InfoThreads,
-            ListTarget::HeapTier(MemoryTier::Small),
             ListTarget::RuntimeActivity,
             ListTarget::RuntimeHistogram(TaskHistogram::Poll),
         ] {

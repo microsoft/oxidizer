@@ -4,6 +4,13 @@
 use super::data::{AllocationSnapshot, CapturedSnapshot, MemorySnapshot, RuntimeSnapshot, deallocated_allocations};
 use super::filter_index::FilterIndex;
 
+pub(super) fn heap_error(allocator: Option<&crate::allocator_view::Snapshot>) -> Option<String> {
+    allocator
+        .and_then(|snapshot| snapshot.native.as_ref())
+        .is_none()
+        .then(|| "Native allocator source unavailable; container allocation events remain available.".into())
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Phase {
     Read,
@@ -37,12 +44,18 @@ pub(super) fn prepare_with_progress(
     let mut runtime_source = None;
     for source in std::mem::take(&mut decoded.sources) {
         if source.id == seismograph_rallocator::source::ID {
+            if allocator.is_some() {
+                return Err("duplicate native allocator source".into());
+            }
             progress(Phase::DecodeAllocator);
-            let mut snapshot = seismograph_rallocator::decode(&source.data)
+            let native = seismograph_rallocator::decode(&source.data)
                 .map_err(super::Error::MemorySnapshot)
                 .map_err(|error| error.to_string())?;
-            // The container owns the authoritative runtime events, not an optional legacy copy.
-            snapshot.runtime_events = None;
+            if source.schema_version != seismograph_rallocator::source::SCHEMA_VERSION {
+                return Err(format!("unsupported allocator source schema {}", source.schema_version));
+            }
+            let mut snapshot = crate::allocator_view::Snapshot::event_only(crate::allocator_view::Version::new(0, 1, 0));
+            snapshot.native = Some(std::sync::Arc::new(native));
             allocator = Some(snapshot);
         } else if source.id == seismograph_runtime::snapshot::source::ID {
             progress(Phase::DecodeRuntime);
@@ -50,18 +63,18 @@ pub(super) fn prepare_with_progress(
                 Some(seismograph_runtime::snapshot::decode(&source.data).map_err(|error| format!("invalid runtime snapshot: {error}"))?);
         }
     }
+    // Application events do not depend on the presence of an allocator source.
+    let view = allocator.get_or_insert_with(|| crate::allocator_view::Snapshot::event_only(crate::allocator_view::Version::new(0, 1, 0)));
+    view.callers = Some(seismograph_rallocator::events::callers(&decoded.events));
 
     progress(Phase::AllocationIndex);
     let deallocated = allocator.as_ref().map(deallocated_allocations).unwrap_or_default();
     progress(Phase::Heaps);
     let memory = allocator
         .as_ref()
+        .filter(|snapshot| snapshot.allocator_state_available)
         .map(|snapshot| MemorySnapshot::from_snapshot_with_deallocated(snapshot, &deallocated));
-    progress(Phase::Allocations);
-    let allocations = allocator
-        .as_ref()
-        .map(|snapshot| AllocationSnapshot::from_snapshot_with_deallocated(snapshot, &deallocated));
-    let heap_error = allocator.is_none().then(|| super::Error::MissingMemorySource.to_string());
+    let heap_error = heap_error(allocator.as_ref());
     progress(Phase::Symbols);
     let mut addresses = allocator
         .iter()
@@ -83,8 +96,16 @@ pub(super) fn prepare_with_progress(
         }
     }
     let addresses = addresses.into_values().collect::<Vec<_>>();
+    if let Some(view) = &mut allocator {
+        view.addresses.clone_from(&addresses);
+    }
+    progress(Phase::Allocations);
+    let allocations = allocator
+        .as_ref()
+        .map(|snapshot| AllocationSnapshot::from_snapshot_with_deallocated(snapshot, &deallocated));
     let runtime = RuntimeSnapshot::from_events_with_progress(&decoded, &addresses, runtime_source.as_ref(), progress);
     progress(Phase::IndexStacks);
+    let native = allocator.as_ref().and_then(|snapshot| snapshot.native.clone());
     let filter_index = std::sync::Arc::new(FilterIndex::with_task_events(
         decoded,
         allocator,
@@ -96,6 +117,7 @@ pub(super) fn prepare_with_progress(
     let filter_summary = filter_index.unfiltered_summary();
     progress(Phase::Ready);
     Ok(Box::new(CapturedSnapshot {
+        native,
         memory,
         allocations,
         heap_error,
@@ -151,19 +173,19 @@ fn release_chunks<T>(chunks: impl Iterator<Item = T>, mut release: impl FnMut(T)
 #[cfg(test)]
 mod tests {
     use seismograph::recorder::event::{Address, Event, EventKind, EventPayload, EventSequence, EventTimestamp, Events, ObjectId};
-    use seismograph::recorder::thread::{ThreadId, ThreadLog};
+    use seismograph::recorder::thread::ThreadId;
     use seismograph::snapshot::{DecodedSnapshot, SourceSnapshot};
-    use seismograph_rallocator::callers::{AddressLookup, Callers};
+    use seismograph_rallocator::callers::AddressLookup;
 
     use super::{prepare, release_chunks, release_stacks};
 
-    fn allocator_source(snapshot: &seismograph_rallocator::snapshot::Snapshot) -> SourceSnapshot {
+    fn allocator_source(snapshot: &seismograph_rallocator::native::Snapshot) -> SourceSnapshot {
         let mut data = vec![0; seismograph_rallocator::encoded_len(snapshot).unwrap()];
         seismograph_rallocator::encode(snapshot, &mut data).unwrap();
         SourceSnapshot {
             id: seismograph_rallocator::source::ID,
             name: "allocator".into(),
-            schema_version: 1,
+            schema_version: 3,
             data,
         }
     }
@@ -192,23 +214,10 @@ mod tests {
 
     #[test]
     fn preparation_uses_container_events_and_runtime_symbols_over_legacy_copies() {
-        let mut allocator = seismograph_rallocator::snapshot::Snapshot::new(seismograph_rallocator::snapshot::Version::new(0, 1, 0));
-        allocator.callers = Some(Callers::default());
-        allocator.runtime_events = Some(Events {
-            clock: seismograph::recorder::event::EventClock::ProcessMonotonic,
-            total_events: 99,
-            threads: vec![ThreadLog {
-                thread_id: ThreadId::new(2),
-                name: "legacy".into(),
-                total_events: 99,
-                lost_events: 0,
-            }],
-            ..Default::default()
-        });
+        let allocator = seismograph_rallocator::native::Snapshot::default();
         let mut lookup = AddressLookup::default();
         lookup.address = 16;
         lookup.symbol = Some("application::allocator".into());
-        allocator.addresses.push(lookup.clone());
         let decoded = DecodedSnapshot {
             events: Events {
                 total_events: 1,
@@ -241,6 +250,29 @@ mod tests {
     }
 
     #[test]
+    fn native_source_and_unknown_inventory_survive_event_filtering() {
+        let allocator = seismograph_rallocator::native::Snapshot::default();
+        let snapshot = prepare(DecodedSnapshot {
+            sources: vec![allocator_source(&allocator)],
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(snapshot.memory.is_none());
+        assert!(snapshot.allocations.is_some());
+        assert!(snapshot.heap_error.is_none());
+        assert_eq!(snapshot.native.as_deref(), Some(&allocator));
+        let filtered = snapshot
+            .filter_index
+            .as_ref()
+            .unwrap()
+            .render(&super::super::filter::FilterSpec::default());
+        assert!(filtered.memory.is_none());
+        assert!(filtered.allocations.is_some());
+        assert_eq!(filtered.heap_error, snapshot.heap_error);
+        assert_eq!(filtered.native, snapshot.native);
+    }
+
+    #[test]
     fn runtime_only_source_keeps_symbols_without_inventing_heap_data() {
         let snapshot = prepare(DecodedSnapshot {
             sources: vec![runtime_source()],
@@ -249,7 +281,132 @@ mod tests {
         .unwrap();
         assert_eq!(
             (snapshot.memory.is_none(), snapshot.allocations.is_none(), snapshot.heap_error),
-            (true, true, Some(super::super::Error::MissingMemorySource.to_string()),),
+            (
+                true,
+                false,
+                Some("Native allocator source unavailable; container allocation events remain available.".into()),
+            ),
+        );
+    }
+
+    fn allocation_capture() -> DecodedSnapshot {
+        use seismograph::recorder::alloc::{Allocation, AllocationId, EventThreadId, HeapId, HeapKind};
+        let operations = [
+            (EventKind::Allocation, 1, 0x100, 16),
+            (EventKind::Deallocation, 2, 0x100, 32),
+            (EventKind::Allocation, 2, 0x100, 16),
+            (EventKind::Deallocation, 1, 0x100, 32),
+            (EventKind::Deallocation, 2, 0x200, 32),
+            (EventKind::Allocation, 1, 0x100, 16),
+        ];
+        DecodedSnapshot {
+            events: Events {
+                total_events: 6,
+                threads: vec![
+                    seismograph::recorder::thread::ThreadLog {
+                        thread_id: ThreadId::new(1),
+                        name: "owner".into(),
+                        total_events: 3,
+                        lost_events: 0,
+                    },
+                    seismograph::recorder::thread::ThreadLog {
+                        thread_id: ThreadId::new(2),
+                        name: "remote".into(),
+                        total_events: 3,
+                        lost_events: 0,
+                    },
+                ],
+                events: operations
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, (kind, thread, address, stack))| Event {
+                        thread_id: ThreadId::new(thread),
+                        sequence: EventSequence::new(index as u64 + 1),
+                        timestamp: EventTimestamp::from_ticks(index as u64 + 1),
+                        kind,
+                        payload: EventPayload::Allocation(Allocation {
+                            allocation_id: AllocationId::new(address),
+                            event_thread_id: EventThreadId::new(0),
+                            heap_id: HeapId::new(0),
+                            heap_kind: HeapKind::General,
+                            freed_after_heap_release: false,
+                            address: Address::new(address),
+                            size: 32,
+                            alignment: 8,
+                        }),
+                        call_stack: vec![Address::new(stack)],
+                    })
+                    .collect(),
+                ..Events::default()
+            },
+            sources: vec![runtime_source()],
+            ..DecodedSnapshot::default()
+        }
+    }
+
+    #[test]
+    fn allocation_records_keep_actors_stacks_orphans_and_repeated_addresses_without_a_native_source() {
+        let capture = prepare(allocation_capture()).unwrap();
+        let allocations = capture.allocations.as_ref().unwrap();
+        assert_eq!(allocations.records.len(), 6);
+        assert!(allocations.records[0].label().contains("owner #1"));
+        assert!(allocations.records[1].label().contains("remote #2"));
+        assert!(allocations.records[0].label().contains("view #1"));
+        assert!(allocations.records[1].label().contains("view #1"));
+        assert!(allocations.records[2].label().contains("view #3"));
+        assert!(allocations.records[3].label().contains("view #3"));
+        assert!(allocations.records[4].label().contains("view #5"));
+        assert!(allocations.records[4].label().contains("orphan free"));
+        assert!(allocations.records[5].label().contains("view #6"));
+        assert_eq!(
+            allocations.records[0].stack(super::super::data::AllocationStackFilter::All),
+            ["application::runtime"]
+        );
+        assert!(capture.native.is_none());
+    }
+
+    #[test]
+    fn native_coverage_and_original_event_correlations_survive_stack_filters() {
+        use super::super::filter::{FilterSpec, RuntimeStackMode};
+        let native = crate::native_view::fixture::snapshot();
+        let mut decoded = allocation_capture();
+        decoded.sources.push(allocator_source(&native));
+        let capture = prepare(decoded).unwrap();
+        let index = capture.filter_index.as_ref().unwrap();
+        let allocations = index.render(&FilterSpec::parse("crate:application", "", false, RuntimeStackMode::Event).unwrap());
+        let records = &allocations.allocations.as_ref().unwrap().records;
+        assert_eq!(records.len(), 3);
+        assert!(records[0].label().contains("view #1") && records[0].label().contains("matched"));
+        assert!(records[1].label().contains("view #3") && records[1].label().contains("matched"));
+        assert!(records[2].label().contains("view #6") && records[2].label().contains("unmatched"));
+        assert_eq!(allocations.native.as_deref(), Some(&native));
+        let frees = index.render(&FilterSpec::parse("", "crate:application", true, RuntimeStackMode::Event).unwrap());
+        let records = &frees.allocations.as_ref().unwrap().records;
+        assert_eq!(records.len(), 3);
+        assert!(!records[0].label().contains("orphan"));
+        assert!(!records[1].label().contains("orphan"));
+        assert!(records[2].label().contains("orphan free"));
+        assert_eq!(frees.native.as_deref(), Some(&native));
+    }
+
+    #[test]
+    fn duplicate_or_malformed_native_source_is_not_silently_replaced() {
+        let native = seismograph_rallocator::native::Snapshot::default();
+        assert!(
+            prepare(DecodedSnapshot {
+                sources: vec![allocator_source(&native), allocator_source(&native)],
+                ..Default::default()
+            })
+            .is_err()
+        );
+        let mut source = allocator_source(&native);
+        source.data.pop();
+        assert!(
+            prepare(DecodedSnapshot {
+                sources: vec![source],
+                ..Default::default()
+            })
+            .is_err()
         );
     }
 

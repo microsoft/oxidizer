@@ -178,7 +178,6 @@ pub(crate) enum Error {
     MemorySnapshot(seismograph_rallocator::Error),
     Remote(String),
     Clock(String),
-    MissingMemorySource,
     UnexpectedResponse,
     SnapshotFile { path: PathBuf, message: String },
 }
@@ -200,7 +199,6 @@ impl fmt::Display for Error {
             Self::MemorySnapshot(error) => write!(formatter, "invalid rallocator snapshot: {error}"),
             Self::Remote(message) => write!(formatter, "monitor rejected the request: {message}"),
             Self::Clock(message) => write!(formatter, "system clock failed: {message}"),
-            Self::MissingMemorySource => formatter.write_str("Heap telemetry not provided by this application."),
             Self::UnexpectedResponse => formatter.write_str("monitor returned an unexpected response"),
             Self::SnapshotFile { path, message } => write!(formatter, "failed to load snapshot '{}': {message}", path.display()),
         }
@@ -213,7 +211,7 @@ impl std::error::Error for Error {
             Self::Io(error) => Some(error),
             Self::Protocol(error) => Some(error),
             Self::MemorySnapshot(error) => Some(error),
-            Self::Remote(_) | Self::Clock(_) | Self::MissingMemorySource | Self::UnexpectedResponse | Self::SnapshotFile { .. } => None,
+            Self::Remote(_) | Self::Clock(_) | Self::UnexpectedResponse | Self::SnapshotFile { .. } => None,
         }
     }
 }
@@ -246,14 +244,12 @@ mod tests {
                 Error::Io(io::Error::from(io::ErrorKind::PermissionDenied)).to_string(),
                 Error::Remote("denied".into()).to_string(),
                 Error::Clock("before epoch".into()).to_string(),
-                Error::MissingMemorySource.to_string(),
                 Error::UnexpectedResponse.to_string(),
             ],
             [
                 "permission denied",
                 "monitor rejected the request: denied",
                 "system clock failed: before epoch",
-                "Heap telemetry not provided by this application.",
                 "monitor returned an unexpected response",
             ]
         );
@@ -271,7 +267,6 @@ mod tests {
         assert!(!memory.to_string().is_empty());
         assert!(Error::Remote("denied".into()).source().is_none());
         assert!(Error::Clock("before epoch".into()).source().is_none());
-        assert!(Error::MissingMemorySource.source().is_none());
         assert!(Error::UnexpectedResponse.source().is_none());
     }
 

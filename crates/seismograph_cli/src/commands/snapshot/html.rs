@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use std::{fs, io};
 
 use clap::Args;
-use seismograph_rallocator::snapshot::{Snapshot, Version};
+
+use crate::allocator_view::{Snapshot, Version};
 
 #[derive(Args)]
 pub(crate) struct VerbArgs {
@@ -49,18 +50,48 @@ fn decode_snapshot(bytes: &[u8]) -> Result<(Snapshot, Vec<seismograph::snapshot:
         Ok(snapshot) => snapshot,
         Err(seismograph_error) => {
             return seismograph_rallocator::decode(bytes)
-                .map(|snapshot| (snapshot, Vec::new()))
-                .map_err(|legacy_error| Error::DecodeContainer {
+                .map(|native| {
+                    let mut snapshot = empty_allocator_snapshot();
+                    snapshot.native = Some(std::sync::Arc::new(native));
+                    (snapshot, Vec::new())
+                })
+                .map_err(|native_error| Error::DecodeContainer {
                     seismograph: seismograph_error,
-                    legacy: legacy_error,
+                    native: native_error,
                 });
         }
     };
 
-    let mut snapshot = match allocator_source(&seismograph.sources) {
-        Some(source) => seismograph_rallocator::decode(&source.data).map_err(Error::DecodeAllocator)?,
-        None => empty_allocator_snapshot(),
-    };
+    let mut snapshot = empty_allocator_snapshot();
+    if let Some(source) = allocator_source(&seismograph.sources)? {
+        if source.schema_version != seismograph_rallocator::source::SCHEMA_VERSION {
+            return Err(Error::UnsupportedSchema(source.schema_version));
+        }
+        snapshot.native = Some(std::sync::Arc::new(
+            seismograph_rallocator::decode(&source.data).map_err(Error::DecodeAllocator)?,
+        ));
+    }
+    snapshot.callers = Some(seismograph_rallocator::events::callers(&seismograph.events));
+    if let Some(source) = seismograph
+        .sources
+        .iter()
+        .find(|source| source.id == seismograph_runtime::snapshot::source::ID)
+    {
+        let runtime = seismograph_runtime::snapshot::decode(&source.data).map_err(Error::DecodeRuntime)?;
+        snapshot.addresses = runtime
+            .addresses
+            .into_iter()
+            .map(|lookup| {
+                seismograph_rallocator::callers::AddressLookup::from_fields(seismograph_rallocator::callers::AddressLookupFields {
+                    address: lookup.address,
+                    symbol: lookup.symbol,
+                    filename: lookup.filename,
+                    line: lookup.line,
+                    column: lookup.column,
+                })
+            })
+            .collect();
+    }
     if contains_runtime_events(&seismograph.events) {
         snapshot.runtime_events = Some(seismograph.events);
     }
@@ -68,8 +99,13 @@ fn decode_snapshot(bytes: &[u8]) -> Result<(Snapshot, Vec<seismograph::snapshot:
     Ok((snapshot, seismograph.sources))
 }
 
-fn allocator_source(sources: &[seismograph::snapshot::SourceSnapshot]) -> Option<&seismograph::snapshot::SourceSnapshot> {
-    sources.iter().find(|source| source.id == seismograph_rallocator::source::ID)
+fn allocator_source(sources: &[seismograph::snapshot::SourceSnapshot]) -> Result<Option<&seismograph::snapshot::SourceSnapshot>, Error> {
+    let mut matching = sources.iter().filter(|source| source.id == seismograph_rallocator::source::ID);
+    let source = matching.next();
+    if matching.next().is_some() {
+        return Err(Error::DuplicateAllocatorSource);
+    }
+    Ok(source)
 }
 
 fn contains_runtime_events(events: &seismograph::recorder::event::Events) -> bool {
@@ -77,7 +113,7 @@ fn contains_runtime_events(events: &seismograph::recorder::event::Events) -> boo
 }
 
 fn empty_allocator_snapshot() -> Snapshot {
-    Snapshot::new(Version::new(0, 1, 0))
+    Snapshot::event_only(Version::new(0, 1, 0))
 }
 
 fn paths_refer_to_same_file(input: &Path, output: &Path) -> io::Result<bool> {
@@ -104,9 +140,12 @@ pub(crate) enum Error {
     Io(io::Error),
     DecodeContainer {
         seismograph: seismograph::Error,
-        legacy: seismograph_rallocator::Error,
+        native: seismograph_rallocator::Error,
     },
     DecodeAllocator(seismograph_rallocator::Error),
+    DecodeRuntime(seismograph_runtime::snapshot::Error),
+    UnsupportedSchema(u16),
+    DuplicateAllocatorSource,
     SamePath(PathBuf),
     OutputExists(PathBuf),
 }
@@ -115,13 +154,16 @@ impl std::fmt::Display for Error {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Io(error) => write!(formatter, "{error}"),
-            Self::DecodeContainer { seismograph, legacy } => {
+            Self::DecodeContainer { seismograph, native } => {
                 write!(
                     formatter,
-                    "invalid snapshot: {seismograph}; legacy allocator snapshot decode also failed: {legacy}"
+                    "invalid snapshot: {seismograph}; native allocator snapshot decode also failed: {native}"
                 )
             }
             Self::DecodeAllocator(error) => write!(formatter, "invalid allocator snapshot: {error}"),
+            Self::DecodeRuntime(error) => write!(formatter, "invalid runtime snapshot: {error}"),
+            Self::UnsupportedSchema(schema) => write!(formatter, "unsupported allocator source schema {schema}"),
+            Self::DuplicateAllocatorSource => write!(formatter, "multiple native allocator sources make the inventory ambiguous"),
             Self::SamePath(path) => write!(formatter, "input and output refer to the same path: {}", path.display()),
             Self::OutputExists(path) => write!(formatter, "refusing to overwrite existing output: {}", path.display()),
         }
@@ -136,22 +178,22 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::{fs, io};
 
-    use seismograph_rallocator::snapshot::{SkippedSection, SkippedSectionFields, Snapshot, Version};
     use seismograph_rallocator::{encode, encoded_len};
 
     use super::{
         Error, VerbArgs, allocator_source, contains_runtime_events, decode_snapshot, empty_allocator_snapshot, map_create_error,
         paths_refer_to_same_file, verb,
     };
+    use crate::allocator_view::{SkippedSection, SkippedSectionFields, Snapshot, Version};
 
     static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
     static ALLOCATOR_SOURCE: seismograph::snapshot::Source =
-        seismograph::snapshot::Source::new(seismograph_rallocator::source::ID, "test-rallocator", 1, capture_allocator_source);
+        seismograph::snapshot::Source::new(seismograph_rallocator::source::ID, "test-rallocator", 3, capture_allocator_source);
 
     fn capture_allocator_source(
         _context: seismograph::snapshot::SnapshotContext<'_>,
     ) -> Result<seismograph::snapshot::SourceData, seismograph::Error> {
-        let snapshot = Snapshot::new(Version::new(0, 1, 0));
+        let snapshot = seismograph_rallocator::native::Snapshot::default();
         let mut data = seismograph::snapshot::SourceData::zeroed(encoded_len(&snapshot).unwrap())?;
         encode(&snapshot, data.as_mut_bytes()).unwrap();
         Ok(data)
@@ -166,7 +208,7 @@ mod tests {
     }
 
     fn write_snapshot(path: &Path) {
-        let snapshot = Snapshot::new(Version::new(0, 1, 0));
+        let snapshot = seismograph_rallocator::native::Snapshot::default();
         let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
         encode(&snapshot, &mut bytes).unwrap();
         fs::write(path, bytes).unwrap();
@@ -352,8 +394,10 @@ mod tests {
     }
 
     #[test]
-    fn native_snapshot_without_allocator_source_uses_empty_memory_snapshot() {
-        assert_eq!(empty_allocator_snapshot().metadata.telemetry_schema_version, 1);
+    fn native_snapshot_without_allocator_source_marks_memory_unavailable() {
+        let snapshot = empty_allocator_snapshot();
+        assert_eq!(snapshot.metadata.telemetry_schema_version, 3);
+        assert!(!snapshot.allocator_state_available);
     }
 
     #[test]
@@ -371,7 +415,7 @@ mod tests {
                 snapshot.metadata.telemetry_schema_version,
                 sources.iter().any(|source| source.id == seismograph_rallocator::source::ID),
             ),
-            (1, true)
+            (3, true)
         );
     }
 
@@ -409,13 +453,31 @@ mod tests {
 
         assert_eq!(
             (
-                allocator_source(std::slice::from_ref(&allocator)).map(|source| source.name.as_str()),
-                allocator_source(std::slice::from_ref(&other)).map(|source| source.name.as_str()),
+                allocator_source(std::slice::from_ref(&allocator))
+                    .unwrap()
+                    .map(|source| source.name.as_str()),
+                allocator_source(std::slice::from_ref(&other))
+                    .unwrap()
+                    .map(|source| source.name.as_str()),
                 contains_runtime_events(&empty),
                 contains_runtime_events(&threads),
                 contains_runtime_events(&events),
             ),
             (Some("allocator"), None, false, true, true)
         );
+    }
+
+    #[test]
+    fn duplicate_native_sources_are_rejected_instead_of_selecting_one() {
+        let source = seismograph::snapshot::SourceSnapshot {
+            id: seismograph_rallocator::source::ID,
+            name: "native".into(),
+            schema_version: 3,
+            data: Vec::new(),
+        };
+        assert!(matches!(
+            allocator_source(&[source.clone(), source]),
+            Err(Error::DuplicateAllocatorSource)
+        ));
     }
 }

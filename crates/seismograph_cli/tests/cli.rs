@@ -8,11 +8,11 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-use seismograph_rallocator::snapshot::{Snapshot, Version};
+use seismograph_rallocator::native::Snapshot;
 use seismograph_rallocator::{encode, encoded_len};
 
 fn encoded_snapshot() -> Vec<u8> {
-    let snapshot = Snapshot::new(Version::new(0, 1, 0));
+    let snapshot = Snapshot::default();
     let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
     encode(&snapshot, &mut bytes).unwrap();
     bytes
@@ -189,7 +189,7 @@ fn snapshot_html_requires_force_to_replace_output() {
 
 #[test]
 #[cfg_attr(miri, ignore = "filesystem and subprocess rendering is exercised by native tests")]
-fn snapshot_html_renders_skipped_section_warning() {
+fn snapshot_html_rejects_trailing_obsolete_sections() {
     let directory = directory("skipped");
     fs::create_dir_all(&directory).unwrap();
     let input = directory.join("capture.rallocator");
@@ -200,12 +200,8 @@ fn snapshot_html_renders_skipped_section_warning() {
         .arg(&input)
         .output()
         .unwrap();
-    assert!(result.status.success());
-    let html = fs::read_to_string(directory.join("capture.html")).unwrap();
-    assert!(html.contains("Compatibility warning"));
-    assert!(html.contains("999 (version 1)"));
-    assert!(html.contains("unknown identifiers or versions unsupported by this decoder"));
-    assert!(html.contains("compatible seismograph version"));
+    assert_eq!(result.status.code(), Some(2));
+    assert!(!directory.join("capture.html").exists());
 
     fs::remove_dir_all(directory).unwrap();
 }

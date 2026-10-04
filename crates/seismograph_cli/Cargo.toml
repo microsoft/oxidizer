@@ -31,7 +31,7 @@ chrono = { workspace = true, features = ["clock"] }
 clap = { workspace = true, features = ["color", "derive", "error-context", "help", "std", "suggestions", "usage"] }
 crossterm.workspace = true
 performables = { workspace = true, features = ["seismograph"] }
-ratatui.workspace = true
+ratatui = { workspace = true, features = ["unstable-rendered-line-info"] }
 same-file.workspace = true
 seismograph.workspace = true
 seismograph_protocol.workspace = true

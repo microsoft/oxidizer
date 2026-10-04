@@ -445,6 +445,7 @@ fn advance_selection(selected: usize, item_count: usize) -> usize {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct AllocationViewState {
+    pub(super) events: bool,
     pub(super) sort: AllocationSort,
     pub(super) descending: bool,
     pub(super) selected: usize,
@@ -455,6 +456,7 @@ pub(super) struct AllocationViewState {
 impl AllocationViewState {
     const fn new() -> Self {
         Self {
+            events: false,
             sort: AllocationSort::Allocations,
             descending: true,
             selected: 0,
@@ -1650,9 +1652,13 @@ fn handle_allocation_key(code: KeyCode, view: &mut AllocationViewState, snapshot
             view.stack_scroll = 0;
         }
         KeyCode::Down => {
-            let hotspot_count = snapshot
-                .and_then(|capture| capture.allocations.as_ref())
-                .map_or(0, |allocations| allocations.hotspots.len());
+            let hotspot_count = snapshot.and_then(|capture| capture.allocations.as_ref()).map_or(0, |allocations| {
+                if view.events {
+                    allocations.records.len()
+                } else {
+                    allocations.hotspots.len()
+                }
+            });
             view.selected = advance_selection(view.selected, hotspot_count);
             view.stack_scroll = 0;
         }
@@ -1674,6 +1680,10 @@ fn handle_allocation_key(code: KeyCode, view: &mut AllocationViewState, snapshot
             view.stack_filter = view.stack_filter.toggle();
             view.stack_scroll = 0;
         }
+        KeyCode::Char('e') => {
+            view.events = !view.events;
+            view.reset_position();
+        }
         _ => return false,
     }
     true
@@ -1685,6 +1695,30 @@ fn tier_with_kind(tiers: &[MemoryTierData], kind: MemoryTier) -> Option<&MemoryT
 
 #[cfg_attr(test, mutants::skip)] // Terminal navigation is excluded from mutation testing.
 fn handle_heap_key(code: KeyCode, view: &mut HeapViewState, snapshot: Option<&CapturedSnapshot>) -> bool {
+    if let Some(native) = snapshot.and_then(|capture| capture.native.as_deref()) {
+        match code {
+            KeyCode::Up => {
+                view.bucket_selected = view.bucket_selected.saturating_sub(1);
+                view.stack_scroll = 0;
+            }
+            KeyCode::Down => {
+                view.bucket_selected = advance_selection(view.bucket_selected, native.owners.len() + 1);
+                view.stack_scroll = 0;
+            }
+            KeyCode::Home => {
+                view.bucket_selected = 0;
+                view.stack_scroll = 0;
+            }
+            KeyCode::End => {
+                view.bucket_selected = native.owners.len();
+                view.stack_scroll = 0;
+            }
+            KeyCode::PageUp => view.stack_scroll = view.stack_scroll.saturating_sub(5),
+            KeyCode::PageDown => view.stack_scroll = view.stack_scroll.saturating_add(5),
+            _ => return false,
+        }
+        return true;
+    }
     let memory = snapshot.and_then(|snapshot| snapshot.memory.as_ref());
     let tier = memory.and_then(|memory| tier_with_kind(&memory.tiers, view.tier));
     let bucket = tier.and_then(|tier| tier.buckets.get(view.bucket_selected));
@@ -2176,6 +2210,7 @@ mod tests {
 
     fn empty_capture() -> Box<CapturedSnapshot> {
         Box::new(CapturedSnapshot {
+            native: None,
             memory: None,
             allocations: None,
             heap_error: None,
@@ -3079,6 +3114,7 @@ mod tests {
         assert_eq!(
             view,
             AllocationViewState {
+                events: false,
                 sort: AllocationSort::AllocatedBytes,
                 descending: true,
                 selected: 0,
