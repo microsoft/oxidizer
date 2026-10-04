@@ -8,6 +8,15 @@
 //! Instrumented crates record bounded events while registered sources contribute
 //! point-in-time state to a portable [`snapshot()`].
 //!
+//! Snapshot capture defaults to retaining active-thread buffers and recording
+//! policy. [`snapshot::EventBufferDisposition::Stop`] captures the retained
+//! events, disables all six recording classes, and releases event-ring storage.
+//! Unlike legacy `Release`, it does not restart recording. Later source/encoding
+//! failures do not undo completed cleanup. [`recorder::clear_event_buffers()`]
+//! independently empties event rings without copying a snapshot or invoking
+//! sources, preserving recording policies and active-thread allocations.
+//! These operations leave process-lifetime recorder metadata registered.
+//!
 //! ```
 //! use seismograph::recorder::event::{EventClass, EventKind, ObjectId, Record};
 //! use seismograph::recorder::{Configuration, RecordingPolicy};
@@ -17,7 +26,7 @@
 //!     ..Default::default()
 //! });
 //! seismograph::record(EventClass::ArcDereference, || {
-//!     Record::object(EventKind::ArcDeref, ObjectId::new(42))
+//!     Some(Record::object(EventKind::ArcDeref, ObjectId::new(42)))
 //! });
 //!
 //! let encoded = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
@@ -153,31 +162,41 @@ pub fn recorder(configuration: recorder::Configuration) {
 }
 
 /// Lazily constructs and records an event in an independently configured class.
-pub fn record(class: recorder::event::EventClass, event: impl FnOnce() -> recorder::event::Record) {
+///
+/// The closure runs only while recording for this class is active and not
+/// suppressed. Return `None` to skip the event conditionally. Object sampling
+/// is checked after the closure constructs a record.
+pub fn record(class: recorder::event::EventClass, event: impl FnOnce() -> Option<recorder::event::Record>) {
     recorder::record(class, event);
 }
 
 /// Lazily constructs an event and returns the session that accepted it.
+///
+/// Returns `None` when the closure skips the event or no event is accepted.
 #[doc(hidden)]
 pub fn record_session(
     class: recorder::event::EventClass,
-    event: impl FnOnce() -> recorder::event::Record,
+    event: impl FnOnce() -> Option<recorder::event::Record>,
 ) -> Option<recorder::RecordingSession> {
     recorder::record_session(class, event)
 }
 
 /// Records an event only while its originating session remains active.
+///
+/// Returns `false` when the closure skips the event or no event is accepted.
 #[doc(hidden)]
-pub fn record_in_session(session: recorder::RecordingSession, event: impl FnOnce() -> recorder::event::Record) -> bool {
+pub fn record_in_session(session: recorder::RecordingSession, event: impl FnOnce() -> Option<recorder::event::Record>) -> bool {
     recorder::record_in_session(session, event)
 }
 
 /// Records a classified event only while its originating session remains active.
+///
+/// Returns `false` when the closure skips the event or no event is accepted.
 #[doc(hidden)]
 pub fn record_in_session_classified(
     session: recorder::RecordingSession,
     class: recorder::event::EventClass,
-    event: impl FnOnce() -> recorder::event::Record,
+    event: impl FnOnce() -> Option<recorder::event::Record>,
 ) -> bool {
     recorder::record_in_session_classified(session, class, event)
 }
@@ -248,16 +267,18 @@ mod tests {
         });
         let object_id = ObjectId::new(41);
         let general = record_session(recorder::event::EventClass::General, || {
-            Record::object(EventKind::MutexAccess, object_id)
+            Some(Record::object(EventKind::MutexAccess, object_id))
         })
         .unwrap();
         let runtime = recorder::select_object_for(recorder::event::EventClass::RuntimeTask, object_id).unwrap();
 
-        assert!(record_in_session(general, || { Record::object(EventKind::MutexAccess, object_id) }));
+        assert!(record_in_session(general, || {
+            Some(Record::object(EventKind::MutexAccess, object_id))
+        }));
         assert!(record_in_session_classified(
             runtime,
             recorder::event::EventClass::RuntimeTask,
-            || Record::runtime(
+            || Some(Record::runtime(
                 recorder::event::EventTimestamp::now(),
                 EventKind::RuntimeCreated,
                 recorder::runtime::RuntimeEvent {
@@ -269,21 +290,21 @@ mod tests {
                     value_1: 0,
                 },
                 recorder::event::BacktraceCapture::Never,
-            )
+            ))
         ));
         recorder(recorder::Configuration::default());
 
         let constructed = AtomicUsize::new(0);
         assert!(!record_in_session(general, || {
             constructed.fetch_add(1, Ordering::Relaxed);
-            Record::object(EventKind::MutexAccess, object_id)
+            Some(Record::object(EventKind::MutexAccess, object_id))
         }));
         assert!(!record_in_session_classified(
             runtime,
             recorder::event::EventClass::RuntimeTask,
             || {
                 constructed.fetch_add(1, Ordering::Relaxed);
-                Record::runtime(
+                Some(Record::runtime(
                     recorder::event::EventTimestamp::now(),
                     EventKind::RuntimeCreated,
                     recorder::runtime::RuntimeEvent {
@@ -295,7 +316,7 @@ mod tests {
                         value_1: 0,
                     },
                     recorder::event::BacktraceCapture::Never,
-                )
+                ))
             }
         ));
         assert_eq!(constructed.load(Ordering::Relaxed), 0);

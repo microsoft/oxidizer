@@ -4,7 +4,7 @@
 use std::collections::VecDeque;
 use std::pin::pin;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::task::{Context, Poll, Wake, Waker};
 use std::time::{Duration, Instant};
 
@@ -93,11 +93,120 @@ impl Waiter {
 
 #[derive(Debug)]
 pub(super) struct WaitQueue {
+    state: OnceLock<Box<EagerWaitQueue>>,
+    initialization: Mutex<()>,
+}
+
+impl WaitQueue {
+    pub(super) const fn new() -> Self {
+        Self {
+            state: OnceLock::new(),
+            initialization: Mutex::new(()),
+        }
+    }
+
+    fn state(&self) -> &EagerWaitQueue {
+        if let Some(state) = self.state.get() {
+            return state;
+        }
+        // Empty notifications and first registration share this lock, so a
+        // notification cannot miss publication while registration misses it.
+        let _initialization = self.initialization.lock().unwrap_or_else(PoisonError::into_inner);
+        self.state.get_or_init(|| Box::new(EagerWaitQueue::new()))
+    }
+
+    fn with_existing_state<R>(&self, operation: impl FnOnce(Option<&EagerWaitQueue>) -> R) -> R {
+        if let Some(state) = self.state.get() {
+            return operation(Some(state));
+        }
+        let initialization = self.initialization.lock().unwrap_or_else(PoisonError::into_inner);
+        self.with_existing_state_after_initialization(initialization, operation)
+    }
+
+    fn with_existing_state_after_initialization<R>(
+        &self,
+        initialization: std::sync::MutexGuard<'_, ()>,
+        operation: impl FnOnce(Option<&EagerWaitQueue>) -> R,
+    ) -> R {
+        if let Some(state) = self.state.get() {
+            drop(initialization);
+            operation(Some(state))
+        } else {
+            // Keep an empty marked clear serialized with first publication.
+            operation(None)
+        }
+    }
+
+    pub(super) fn enqueue_if_needed(&self, waiter: &Arc<Waiter>, retry: impl FnOnce() -> bool) -> bool {
+        self.state().enqueue_if_needed(waiter, retry)
+    }
+
+    pub(super) fn enqueue_if_needed_marked(
+        &self,
+        waiter: &Arc<Waiter>,
+        mark_waiting: impl FnOnce(),
+        retry: impl FnOnce() -> bool,
+        clear_waiting: impl FnOnce(),
+    ) -> bool {
+        self.state().enqueue_if_needed_marked(waiter, mark_waiting, retry, clear_waiting)
+    }
+
+    pub(super) fn wake_one(&self) {
+        // Conditions need the queue lock to order notification against the
+        // generation recheck; the eager channel queue has a separate fast hint.
+        self.wake_one_marked(|| {});
+    }
+
+    pub(super) fn wake_one_marked(&self, clear_waiting: impl FnOnce()) {
+        self.with_existing_state(|state| {
+            if let Some(state) = state {
+                state.wake_one_marked(clear_waiting);
+            } else {
+                clear_waiting();
+            }
+        });
+    }
+
+    pub(super) fn cancel(&self, waiter: &Arc<Waiter>) -> bool {
+        self.cancel_marked(waiter, || {})
+    }
+
+    pub(super) fn cancel_marked(&self, waiter: &Arc<Waiter>, clear_waiting: impl FnOnce()) -> bool {
+        waiter.deactivate();
+        let removed = self.with_existing_state(|state| {
+            if let Some(state) = state {
+                state.cancel_marked(waiter, clear_waiting)
+            } else {
+                clear_waiting();
+                false
+            }
+        });
+        drop(waiter.take_waker());
+        removed
+    }
+
+    pub(super) fn wake_all(&self) {
+        self.wake_all_marked(|| {});
+    }
+
+    pub(super) fn wake_all_marked(&self, clear_waiting: impl FnOnce()) {
+        self.with_existing_state(|state| {
+            if let Some(state) = state {
+                state.wake_all_marked(clear_waiting);
+            } else {
+                clear_waiting();
+            }
+        });
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct EagerWaitQueue {
     has_waiters: AtomicBool,
     waiters: Mutex<VecDeque<Arc<Waiter>>>,
 }
 
-impl WaitQueue {
+impl EagerWaitQueue {
     pub(super) const fn new() -> Self {
         Self {
             has_waiters: AtomicBool::new(false),
@@ -195,6 +304,10 @@ impl WaitQueue {
         removed
     }
 
+    pub(super) fn wake_all(&self) {
+        self.wake_all_marked(|| {});
+    }
+
     pub(super) fn wake_all_marked(&self, clear_waiting: impl FnOnce()) {
         let wakers = {
             let mut waiters = self.waiters.lock().unwrap_or_else(PoisonError::into_inner);
@@ -263,8 +376,8 @@ mod tests {
         assert!(!queue.enqueue_if_needed(&waiter, || false));
 
         assert!(queue.enqueue_if_needed(&waiter, || true));
-        assert!(!queue.has_waiters.load(Ordering::Acquire));
-        assert!(queue.waiters.lock().unwrap().is_empty());
+        assert!(!queue.state().has_waiters.load(Ordering::Acquire));
+        assert!(queue.state().waiters.lock().unwrap().is_empty());
         assert!(!queue.cancel(&waiter));
     }
 
@@ -281,17 +394,17 @@ mod tests {
         assert!(!queue.enqueue_if_needed(&active, || false));
         queue.wake_one();
 
-        assert!(!queue.has_waiters.load(Ordering::Acquire));
+        assert!(!queue.state().has_waiters.load(Ordering::Acquire));
     }
 
     #[test]
     fn wake_one_tolerates_a_stale_waiter_hint() {
         let queue = WaitQueue::new();
-        queue.has_waiters.store(true, Ordering::Release);
+        queue.state().has_waiters.store(true, Ordering::Release);
 
         queue.wake_one();
 
-        assert!(!queue.has_waiters.load(Ordering::Acquire));
+        assert!(!queue.state().has_waiters.load(Ordering::Acquire));
     }
 
     #[test]
@@ -318,7 +431,7 @@ mod tests {
         assert!(!queue.enqueue_if_needed(&waiter, || false));
         assert!(!queue.enqueue_if_needed(&waiter, || false));
 
-        assert_eq!(queue.waiters.lock().unwrap().len(), 1);
+        assert_eq!(queue.state().waiters.lock().unwrap().len(), 1);
     }
 
     #[test]
@@ -336,6 +449,72 @@ mod tests {
         queue.wake_all_marked(|| {});
 
         assert_eq!((first.0.load(Ordering::Relaxed), second.0.load(Ordering::Relaxed)), (1, 1));
+    }
+
+    #[test]
+    fn idle_unmarked_operations_do_not_allocate_queue_storage() {
+        let queue = WaitQueue::new();
+        let waiter = Arc::new(Waiter::new());
+        waiter.register(Waker::noop());
+        queue.wake_one();
+        queue.wake_all();
+        assert!(!queue.cancel(&waiter));
+
+        assert_eq!(
+            (
+                queue.state.get().is_none(),
+                waiter.active.load(Ordering::Acquire),
+                waiter.take_waker().is_none(),
+            ),
+            (true, false, true),
+        );
+    }
+
+    #[test]
+    fn empty_marked_clears_serialize_with_first_publication_without_allocating() {
+        let queue = WaitQueue::new();
+        let clears = AtomicUsize::new(0);
+        queue.wake_one_marked(|| {
+            queue.initialization.try_lock().unwrap_err();
+            clears.fetch_add(1, Ordering::Relaxed);
+        });
+        queue.wake_all_marked(|| {
+            queue.initialization.try_lock().unwrap_err();
+            clears.fetch_add(1, Ordering::Relaxed);
+        });
+        let waiter = Arc::new(Waiter::new());
+        assert!(!queue.cancel_marked(&waiter, || {
+            queue.initialization.try_lock().unwrap_err();
+            clears.fetch_add(1, Ordering::Relaxed);
+        }));
+
+        assert_eq!(clears.load(Ordering::Relaxed), 3);
+        assert!(queue.state.get().is_none());
+    }
+
+    #[test]
+    fn publication_after_an_empty_operation_starts_is_observed() {
+        let queue = WaitQueue::new();
+        let initialization = queue.initialization.lock().unwrap();
+        queue.state.set(Box::new(super::EagerWaitQueue::new())).unwrap();
+
+        assert!(queue.with_existing_state_after_initialization(initialization, |state| state.is_some()));
+    }
+
+    #[test]
+    fn contention_reuses_one_queue_allocation() {
+        let queue = WaitQueue::new();
+        let first = Arc::new(Waiter::new());
+        first.register(Waker::noop());
+        assert!(!queue.enqueue_if_needed(&first, || false));
+        let storage = std::ptr::from_ref(queue.state());
+        queue.wake_one();
+        let second = Arc::new(Waiter::new());
+        second.register(Waker::noop());
+        assert!(!queue.enqueue_if_needed(&second, || false));
+
+        assert_eq!(std::ptr::from_ref(queue.state()), storage);
+        queue.wake_one();
     }
 
     #[test]

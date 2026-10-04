@@ -38,10 +38,18 @@ pub(crate) enum EventKind {
 
 #[inline]
 pub(crate) fn record(kind: EventKind, object: *const ()) {
+    record_if(kind, object, || true);
+}
+
+#[inline]
+pub(crate) fn record_if(kind: EventKind, object: *const (), condition: impl FnOnce() -> bool) {
     #[cfg(feature = "seismograph")]
     seismograph::record(kind.class(), || {
         use seismograph::recorder::event::{EventKind as SeismographEventKind, ObjectId, Record};
 
+        if !condition() {
+            return None;
+        }
         let kind = match kind {
             EventKind::ArcCreate => SeismographEventKind::ArcCreate,
             EventKind::ArcDrop => SeismographEventKind::ArcDrop,
@@ -75,11 +83,11 @@ pub(crate) fn record(kind: EventKind, object: *const ()) {
             EventKind::LockPoisonObserved => SeismographEventKind::LockPoisonObserved,
             EventKind::LockPoisonCleared => SeismographEventKind::LockPoisonCleared,
         };
-        Record::object(kind, ObjectId::from_ptr(object))
+        Some(Record::object(kind, ObjectId::from_ptr(object)))
     });
 
     #[cfg(not(feature = "seismograph"))]
-    let _ = (kind, object);
+    let _ = (kind, object, condition);
 }
 
 #[cfg(feature = "seismograph")]
@@ -98,13 +106,35 @@ pub(crate) fn record_channel_high_watermark(object: *const (), high_watermark: u
     seismograph::record(seismograph::recorder::event::EventClass::General, || {
         use seismograph::recorder::event::{EventKind, ObjectId, Record};
 
-        Record::object_measurement(
+        Some(Record::object_measurement(
             EventKind::ChannelHighWatermark,
             ObjectId::from_ptr(object),
             u64::try_from(high_watermark).unwrap_or(u64::MAX),
-        )
+        ))
     });
 
     #[cfg(not(feature = "seismograph"))]
     let _ = (object, high_watermark);
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::ptr;
+
+    use super::*;
+
+    #[test]
+    fn disabled_recording_does_not_evaluate_conditions() {
+        let evaluated = Cell::new(false);
+        let condition = || {
+            evaluated.set(true);
+            true
+        };
+        record_if(EventKind::ArcDrop, ptr::null(), condition);
+
+        assert!(!evaluated.get());
+        assert!(condition());
+        assert!(evaluated.get());
+    }
 }
