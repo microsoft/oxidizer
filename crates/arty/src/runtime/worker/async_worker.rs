@@ -5,6 +5,7 @@ use std::cell::OnceCell;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use arty_executor::{CycleOutcome, Executor, TaskSet};
@@ -69,6 +70,10 @@ where
     // made to send them.
     command_rx: Option<channel::Receiver<AsyncWorkerCommand<TS>>>,
 
+    // Published by the dispatcher before it queues shutdown, so pending factories can be
+    // discarded without waiting for a FIFO shutdown command behind them.
+    shutdown_signal: Arc<AtomicBool>,
+
     // Thread state initialization may require tasks to be executed, so we store the thread state in
     // a once cell. Before it's filled, we can only process tasks that don't depend on thread state.
     // We set this to None when we start shutdown - no more tasks can be enqueued after that and
@@ -111,6 +116,7 @@ where
         blocking_worker: Arc<BlockingWorker>,
         clock: InactiveClock,
         signal: Arc<WorkerSignal>,
+        shutdown_signal: Arc<AtomicBool>,
         thread_state_constructed_tx: channel::Sender<()>,
     ) -> Self
     where
@@ -150,6 +156,7 @@ where
 
         Self {
             command_rx: Some(command_rx),
+            shutdown_signal,
             thread_state: Some(thread_state),
             executor: Some(executor),
             tasks,
@@ -224,8 +231,10 @@ where
         for _ in 0..COMMANDS_PER_CYCLE {
             match command_rx.try_recv() {
                 Ok(AsyncWorkerCommand::EnqueueTask { future_factory }) => {
-                    // This will never be reached during shutdown because as soon as shutdown
-                    // starts, we close the command channel.
+                    if self.shutdown_signal.load(Ordering::Acquire) {
+                        self.begin_shutdown();
+                        return false;
+                    }
                     future_factory(thread_state.clone(), &self.tasks);
                 }
                 Ok(AsyncWorkerCommand::Shutdown) => {
@@ -289,7 +298,7 @@ where
 mod tests {
     #[cfg(not(miri))]
     use std::pin::Pin;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::atomic::AtomicUsize;
     #[cfg(not(miri))]
     use std::task::{Wake, Waker};
     use std::thread;
@@ -361,6 +370,7 @@ mod tests {
                     BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
                     control.clone().into(),
                     Arc::new(WorkerSignal::default()),
+                    Arc::new(AtomicBool::new(false)),
                     ready_tx,
                 )
             };
@@ -406,6 +416,7 @@ mod tests {
                 BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
                 InactiveClock::default(),
                 Arc::new(WorkerSignal::default()),
+                Arc::new(AtomicBool::new(false)),
                 ready_tx,
             )
         };
@@ -445,6 +456,7 @@ mod tests {
                         Arc::clone(&blocking_worker),
                         InactiveClock::default(),
                         signal,
+                        Arc::new(AtomicBool::new(false)),
                         channel::unbounded().0,
                     )
                 };
@@ -520,6 +532,7 @@ mod tests {
                         BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
                         InactiveClock::default(),
                         signal,
+                        Arc::new(AtomicBool::new(false)),
                         constructed_tx,
                     )
                 };
@@ -576,6 +589,7 @@ mod tests {
                     BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
                     InactiveClock::default(),
                     signal,
+                    Arc::new(AtomicBool::new(false)),
                     channel::unbounded().0,
                 )
             };
@@ -605,9 +619,44 @@ mod tests {
     }
 
     #[test]
-    fn shutdown_before_initialization_discards_the_constructor() {
-        use std::sync::atomic::{AtomicBool, Ordering};
+    fn shutdown_signal_prevents_queued_factories_from_starting() {
+        let (command_tx, command_rx) = channel::unbounded();
+        let (ready_tx, ready_rx) = channel::unbounded();
+        let shutdown_signal = Arc::new(AtomicBool::new(false));
+        let invoked = Arc::new(AtomicBool::new(false));
+        let invoked_by_factory = Arc::clone(&invoked);
 
+        // SAFETY: run completes the executor's shutdown before the worker is dropped.
+        let worker = unsafe {
+            AsyncWorker::new(
+                command_rx,
+                async |_, _| (),
+                BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+                InactiveClock::default(),
+                Arc::new(WorkerSignal::default()),
+                Arc::clone(&shutdown_signal),
+                ready_tx,
+            )
+        };
+        let _ = worker.executor.as_ref().unwrap().execute_cycle();
+        ready_rx.recv().unwrap();
+
+        command_tx
+            .send(AsyncWorkerCommand::EnqueueTask {
+                future_factory: Box::new(move |_, _| {
+                    invoked_by_factory.store(true, Ordering::Relaxed);
+                }),
+            })
+            .unwrap();
+        shutdown_signal.store(true, Ordering::Release);
+
+        worker.run();
+
+        assert!(!invoked.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn shutdown_before_initialization_discards_the_constructor() {
         let initialized = Arc::new(AtomicBool::new(false));
         let observed = Arc::clone(&initialized);
         let (_commands, receiver) = channel::unbounded();
@@ -623,6 +672,7 @@ mod tests {
                 Arc::clone(&blocking_worker),
                 InactiveClock::default(),
                 Arc::new(WorkerSignal::default()),
+                Arc::new(AtomicBool::new(false)),
                 channel::unbounded().0,
             )
         };

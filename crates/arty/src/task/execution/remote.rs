@@ -84,20 +84,17 @@ where
         // it will never be polled again - whatever it did to its internal state is now
         // irrelevant and if it corrupted some shared state, that is not really something we
         // can do anything about (a conscientious service will abort on panic to avoid that).
-        let inner_poll_result = catch_unwind(AssertUnwindSafe(|| match this.inner.poll(cx) {
-            Poll::Ready(result) => {
-                // An abandoned join destroys the result here, on the task's worker.
-                this.result_tx
-                    .take()
-                    .expect("future polled after completion")
-                    .send(TaskResult::Completed(result));
-                Poll::Ready(())
-            }
-            Poll::Pending => Poll::Pending,
-        }));
+        let inner_poll_result = catch_unwind(AssertUnwindSafe(|| this.inner.poll(cx)));
 
         match inner_poll_result {
-            Ok(Poll::Ready(())) => {
+            Ok(Poll::Ready(result)) => {
+                // An abandoned join destroys the result here, on the task's worker.
+                let sender = this.result_tx.take().expect("future polled after completion");
+                if let Err(panic) = catch_unwind(AssertUnwindSafe(|| sender.send(TaskResult::Completed(result)))) {
+                    // The task completed successfully; a receiver notification panic must not
+                    // change that outcome or its telemetry classification.
+                    discard_panic(panic);
+                }
                 emit!(this.sink, TaskSucceeded);
                 Poll::Ready(())
             }

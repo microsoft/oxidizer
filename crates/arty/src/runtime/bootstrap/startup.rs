@@ -218,6 +218,7 @@ impl AsyncWorkerStartInfo {
         });
 
         let dispatcher = Rc::new(start_signal.dispatcher);
+        let shutdown_signal = dispatcher.shutdown_signal();
 
         let thread_state_constructor = {
             async move |tasks, clock| {
@@ -235,6 +236,7 @@ impl AsyncWorkerStartInfo {
                 Arc::clone(&blocking_worker),
                 clock,
                 signal,
+                shutdown_signal,
                 success_tx,
             )
         };
