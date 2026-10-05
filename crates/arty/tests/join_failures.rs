@@ -60,8 +60,12 @@ fn blocking_callback_cannot_wait_for_blocking_work() {
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
     let nested_scheduler = scheduler.clone();
     let outer = scheduler.spawn_blocking(move || {
-        let inner = nested_scheduler.spawn_blocking(|| 7);
-        catch_unwind(AssertUnwindSafe(|| inner.wait())).is_err()
+        let mut inner = Vec::with_capacity(6);
+        for _ in 0..6 {
+            inner.push(nested_scheduler.spawn_blocking(|| 7));
+        }
+        let first = inner.into_iter().next().unwrap();
+        catch_unwind(AssertUnwindSafe(|| first.wait())).is_err()
     });
 
     assert!(outer.wait().unwrap());

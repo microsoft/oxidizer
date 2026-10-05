@@ -27,7 +27,7 @@ impl WorkerSignal {
             }
             let (guard, elapsed) = self.ready.wait_timeout(notified, remaining);
             notified = guard;
-            if elapsed.timed_out() {
+            if elapsed.timed_out() && start.elapsed() >= timeout {
                 break;
             }
         }

@@ -40,6 +40,15 @@ where
     shutdown_signal: Option<Arc<AtomicBool>>,
 }
 
+fn dispose_sender<F>(drop_sender: F)
+where
+    F: FnOnce(),
+{
+    if let Err(panic) = catch_unwind(AssertUnwindSafe(drop_sender)) {
+        discard_panic(panic);
+    }
+}
+
 impl<F, R> RemoteTaskFuture<F, R>
 where
     F: Future<Output = R> + 'static,
@@ -82,10 +91,8 @@ where
                 discard_panic(panic);
             }
         }
-        if let Some(sender) = result_tx
-            && let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(sender)))
-        {
-            discard_panic(panic);
+        if let Some(sender) = result_tx {
+            dispose_sender(|| drop(sender));
         }
     }
 }
@@ -102,11 +109,7 @@ where
         let _guard = this.parent_task_enrichment.apply_current_thread();
 
         if this.shutdown_signal.as_ref().is_some_and(|signal| signal.load(Ordering::Acquire)) {
-            if let Some(sender) = this.result_tx.take()
-                && let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(sender)))
-            {
-                discard_panic(panic);
-            }
+            let _ = this.result_tx.take().map(|sender| dispose_sender(|| drop(sender)));
             return Poll::Ready(());
         }
 
@@ -143,5 +146,39 @@ where
                 Poll::Ready(())
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::pin::pin;
+    use std::task::{Context, Waker};
+
+    use events_once::Event;
+
+    use super::*;
+
+    #[test]
+    fn sender_disposal_panic_is_contained() {
+        std::panic::catch_unwind(AssertUnwindSafe(|| {
+            dispose_sender(|| panic!("sender drop"));
+        }))
+        .unwrap();
+    }
+
+    #[test]
+    fn shutdown_signal_discards_a_direct_task_result() {
+        let sink = Sink::noop();
+        let (sender, _receiver) = Event::<TaskResult<u32>>::boxed();
+        let signal = Arc::new(AtomicBool::new(true));
+        let mut task = pin!(RemoteTaskFuture::new_with_shutdown(
+            std::future::ready(42),
+            sender,
+            sink.transfer_context(),
+            sink,
+            Some(signal),
+        ));
+
+        assert_eq!(task.as_mut().poll(&mut Context::from_waker(Waker::noop())), Poll::Ready(()));
     }
 }
