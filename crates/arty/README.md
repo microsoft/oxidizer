@@ -92,7 +92,7 @@ The [guides][__link14] explain Arty’s capabilities in more detail:
   and links to [`observed`][__link21] for further details.
 
 The `documentation` module is included only for docs.rs builds and
-doctest collection with all documentation features, including `test-util`;
+doc-test collection with all documentation features, including `test-util`;
 it is not part of the public API available to applications.
 
 ## Features
@@ -111,7 +111,7 @@ The default feature set enables `rt` and `macros`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbfsEP0dYtbwsbcc9_0syQ188bhqJy5_e6OGMb8DmhGx1pk4JhZIOCZGFydHllMC4zLjGCa2FydHlfbWFjcm9zZTAuMy4xgmhvYnNlcnZlZGYwLjI2LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbtSljwYR0MeEb8HAyuZca6B0b-q6-1uLDDIsbQ-pdCMewxX1hZIOCZGFydHllMC4zLjGCa2FydHlfbWFjcm9zZTAuMy4xgmhvYnNlcnZlZGYwLjI2LjA
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link1]: https://docs.rs/arty_macros/0.3.1/arty_macros/?search=main
  [__link10]: https://docs.rs/arty/0.3.1/arty/?search=time::Clock
