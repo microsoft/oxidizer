@@ -26,6 +26,8 @@ use std::time::{Duration, Instant};
 use arty::runtime::{ProcessorCount, Runtime};
 use arty::task::Builtins;
 use criterion::{BenchmarkId, Criterion, Throughput};
+#[cfg(target_os = "linux")]
+use gungraun::{Callgrind, CallgrindMetrics, LibraryBenchmarkConfig};
 use metabench::benchmark;
 use performables::arc::{Arc, PerThread};
 use performables::sync::mutex::Mutex;
@@ -62,11 +64,6 @@ impl Cache {
             value
         };
         black_box(value)
-    }
-
-    fn checksum(&self) -> u64 {
-        let state = self.inner.lock_result().expect("benchmark cache mutex is never poisoned");
-        state.entries.iter().copied().fold(0, u64::wrapping_add)
     }
 }
 
@@ -116,12 +113,11 @@ impl ArtyCase {
             black_box(handle.wait().expect("benchmark outer task finishes before shutdown"));
         }
         let elapsed = start.elapsed();
-        black_box(self.cache.checksum());
         elapsed
     }
 }
 
-async fn arty_outer(cx: Builtins, cache: Cache) -> Cache {
+async fn arty_outer(cx: Builtins, cache: Cache) {
     let scheduler = cx.scheduler().clone();
     let mut handles = std::array::from_fn::<_, INNER_OPERATIONS, _>(|_| None);
     for (operation, handle) in handles.iter_mut().enumerate() {
@@ -135,7 +131,6 @@ async fn arty_outer(cx: Builtins, cache: Cache) -> Cache {
         };
         handle.await.expect("benchmark inner task finishes before shutdown");
     }
-    cache
 }
 
 #[derive(Debug)]
@@ -173,12 +168,11 @@ impl TokioCase {
             black_box(futures::executor::block_on(black_box(handle)).expect("benchmark outer task finishes before shutdown"));
         }
         let elapsed = start.elapsed();
-        black_box(self.cache.checksum());
         elapsed
     }
 }
 
-async fn tokio_outer(cache: Cache) -> Cache {
+async fn tokio_outer(cache: Cache) {
     let mut handles = std::array::from_fn::<_, INNER_OPERATIONS, _>(|_| None);
     for (operation, handle) in handles.iter_mut().enumerate() {
         let cache = cache.clone();
@@ -191,7 +185,6 @@ async fn tokio_outer(cache: Cache) -> Cache {
         };
         handle.await.expect("benchmark inner task finishes before shutdown");
     }
-    cache
 }
 
 fn configured_criterion() -> Criterion {
@@ -246,6 +239,24 @@ fn tokio_workload(case: &mut TokioCase, concurrency: u64) -> Duration {
     case.run(usize::try_from(concurrency).expect("benchmark concurrency fits in usize"))
 }
 
+#[cfg(target_os = "linux")]
+metabench::main!(
+    criterion = {
+        factory = configured_criterion,
+        benchmarks = criterion_benchmarks,
+        unit = "ns",
+    },
+    gungraun = {
+        config = LibraryBenchmarkConfig::default().tool(
+            Callgrind::default()
+                .args(["--branch-sim=yes"])
+                .format([CallgrindMetrics::Default, CallgrindMetrics::BranchSim]),
+        );
+    },
+    benchmarks = [ARTY, TOKIO],
+);
+
+#[cfg(not(target_os = "linux"))]
 metabench::main!(
     criterion = {
         factory = configured_criterion,
