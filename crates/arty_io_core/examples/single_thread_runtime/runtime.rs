@@ -111,13 +111,13 @@ impl Runtime {
         self.run(move |worker, spawner, drivers| {
             let mut provider = C::provider(ProviderOptions::new());
             let options = driver_options(worker, spawner, drivers);
-            let permitted_role = options.role();
+            let primary_permitted = options.allowed_roles().contains(&DriverRole::Primary);
             provider.relocate(None, options.thread());
             let result = provider.create(options).and_then(|creation| {
                 let role = creation.role;
                 let driver = creation.driver;
                 let context = creation.context;
-                if role == DriverRole::Primary && permitted_role != DriverRole::Primary {
+                if role == DriverRole::Primary && !primary_permitted {
                     return Err(DriverError::from_message("driver selected primary without permission"));
                 }
                 let mut driver = driver;
@@ -168,12 +168,12 @@ fn run_worker(worker: &Thread, spawner: &SystemTaskSpawner, commands: &mpsc::Rec
 }
 
 fn driver_options(worker: &Thread, spawner: &SystemTaskSpawner, drivers: &DriverStore) -> DriverOptions {
-    let role = if drivers.iter().any(|driver| driver.role() == DriverRole::Primary) {
-        DriverRole::Secondary
+    let allowed_roles = if drivers.iter().any(|driver| driver.role() == DriverRole::Primary) {
+        vec![DriverRole::Secondary]
     } else {
-        DriverRole::Primary
+        vec![DriverRole::Primary, DriverRole::Secondary]
     };
-    DriverOptions::new(worker.clone(), spawner.clone(), role)
+    DriverOptions::new(worker.clone(), spawner.clone(), allowed_roles)
 }
 
 fn register_driver<D: Driver>(drivers: &mut DriverStore, driver: D, role: DriverRole) {

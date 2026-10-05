@@ -19,7 +19,7 @@
 //! selected role for each runtime worker. The driver processes submissions and completions in
 //! bounded calls to [`Driver::execute_cycle`].
 //!
-//! The runtime supplies a role permission through [`DriverOptions::role`]. The provider records
+//! The runtime supplies role permissions through [`DriverOptions::allowed_roles`]. The provider records
 //! the driver's selected role in [`DriverInstance::role`]. A driver also supplies its notification
 //! path through [`Driver::waker`].
 //!

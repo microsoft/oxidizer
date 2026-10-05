@@ -41,7 +41,8 @@ Before publishing it, the runtime runs a non-blocking initialization cycle.
 The request returns only when all workers are ready, so application code cannot
 see a half-initialized driver.
 
-The runtime passes `DriverOptions::role()` as a role permission to the provider.
+The runtime passes `DriverOptions::allowed_roles()` as a role permission set to
+the provider.
 The returned `DriverInstance::role` is the driver's selected role; it is not a
 second runtime assignment. The runtime accepts only a selection permitted by
 the worker's capacity and the provider's permission. Later requests reuse the

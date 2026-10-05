@@ -35,7 +35,7 @@ impl DriverProvider for SampleProvider {
     type Driver = SampleDriver;
 
     fn create(self, options: DriverOptions) -> Result<DriverInstance<Self::Driver, Self::Context>, DriverError> {
-        println!("initializing sample driver with {:?} permission", options.role());
+        println!("initializing sample driver with {:?} permission", options.allowed_roles());
         Ok(DriverInstance::new(SampleDriver, SampleContext, DriverRole::Primary))
     }
 }
@@ -84,7 +84,7 @@ impl DriverProvider for EchoProvider {
     type Driver = EchoDriver;
 
     fn create(self, options: DriverOptions) -> Result<DriverInstance<Self::Driver, Self::Context>, DriverError> {
-        println!("initializing echo driver with {:?} permission", options.role());
+        println!("initializing echo driver with {:?} permission", options.allowed_roles());
         Ok(DriverInstance::new(EchoDriver, EchoContext, DriverRole::Secondary))
     }
 }

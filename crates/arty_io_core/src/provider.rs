@@ -24,7 +24,8 @@ pub trait DriverProvider: Clone + ThreadAware + Sized + 'static {
     ///
     /// Returns a [`DriverInstance`] whose role must be
     /// [`DriverRole::Secondary`](crate::DriverRole::Secondary), or
-    /// [`DriverRole::Primary`](crate::DriverRole::Primary) when `options.role()` permits it.
+    /// [`DriverRole::Primary`](crate::DriverRole::Primary) when
+    /// `options.allowed_roles()` permits it.
     /// The provider must not publish the context. The runtime first completes a zero-wait
     /// [`Driver::execute_cycle`] to establish notification and finish initialization.
     ///

@@ -6,7 +6,7 @@ use crate::DriverRole;
 /// One worker-local driver, its consumer context, and the role selected by the driver.
 ///
 /// The driver chooses its role from the permission supplied by
-/// [`DriverOptions::role`](crate::DriverOptions::role). A driver may choose
+/// [`DriverOptions::allowed_roles`](crate::DriverOptions::allowed_roles). A driver may choose
 /// [`DriverRole::Secondary`] when the runtime permits [`DriverRole::Primary`], but the runtime
 /// rejects a primary driver when primary execution was not permitted.
 #[derive(Debug)]

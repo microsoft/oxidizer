@@ -25,7 +25,7 @@ creates a [`DriverInstance`][__link2] containing a context, a worker-local [`Dri
 selected role for each runtime worker. The driver processes submissions and completions in
 bounded calls to [`Driver::execute_cycle`][__link4].
 
-The runtime supplies a role permission through [`DriverOptions::role`][__link5]. The provider records
+The runtime supplies role permissions through [`DriverOptions::allowed_roles`][__link5]. The provider records
 the driver’s selected role in [`DriverInstance::role`][__link6]. A driver also supplies its notification
 path through [`Driver::waker`][__link7].
 
@@ -71,7 +71,7 @@ above.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbCTMTfb_7VDQb7q-PibVkLx8bGwzLbXciOScbRFAqBRLWddVhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbMuG80Str6V0b1BYECLELUJ4bkM9NXozntwAb5Q5G3z_CzgxhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
  [__link0]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=IoContext
  [__link1]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverProvider
  [__link10]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverRole::Secondary
@@ -87,7 +87,7 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link2]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverInstance
  [__link3]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver
  [__link4]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::execute_cycle
- [__link5]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverOptions::role
+ [__link5]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverOptions::allowed_roles
  [__link6]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverInstance::role
  [__link7]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::waker
  [__link8]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverRole::Primary

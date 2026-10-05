@@ -27,7 +27,8 @@ describes the lifecycle; the no-op example wakers do not implement coordination.
 - The runtime clones and relocates each provider before consuming it on the
   owning worker. `DriverOptions` supplies that worker, a role permission, and
   the system task spawner.
-- `DriverOptions::role()` is the runtime's permission, not the final role.
+- `DriverOptions::allowed_roles()` is the runtime's permission set, not the
+  final role.
   The provider returns the driver's selected role in
   `DriverInstance::role`. A worker has at most one primary, and the runtime
   enforces the permission and primary-capacity rules for that selection.

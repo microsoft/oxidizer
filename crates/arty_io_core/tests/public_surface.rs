@@ -55,12 +55,12 @@ fn public_options_expose_runtime_facilities() {
         task();
     });
     let worker = worker_thread();
-    let options = DriverOptions::new(worker.clone(), spawner, DriverRole::Primary);
+    let options = DriverOptions::new(worker.clone(), spawner, vec![DriverRole::Primary, DriverRole::Secondary]);
 
     options.spawner().spawn(|| {});
 
     assert_eq!(options.thread(), &worker);
-    assert_eq!(options.role(), DriverRole::Primary);
+    assert_eq!(options.allowed_roles(), &[DriverRole::Primary, DriverRole::Secondary]);
     assert_eq!(accepted.load(Ordering::Relaxed), 1);
     assert!(format!("{options:?}").contains("DriverOptions"));
     assert!(format!("{:?}", ProviderOptions::new()).contains("ProviderOptions"));
@@ -460,7 +460,11 @@ impl Driver for LeaseDriver {
 }
 
 fn driver_options() -> DriverOptions {
-    DriverOptions::new(worker_thread(), SystemTaskSpawner::from_fn(|task| task()), DriverRole::Secondary)
+    DriverOptions::new(
+        worker_thread(),
+        SystemTaskSpawner::from_fn(|task| task()),
+        vec![DriverRole::Secondary],
+    )
 }
 
 fn worker_thread() -> Thread {
