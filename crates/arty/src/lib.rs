@@ -94,7 +94,7 @@
 //!   and links to [`observed`] for further details.
 //!
 //! The `documentation` module is included only for docs.rs builds and
-//! doctest collection with all documentation features, including `test-util`;
+//! doc-test collection with all documentation features, including `test-util`;
 //! it is not part of the public API available to applications.
 //!
 //! # Features
