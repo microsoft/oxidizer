@@ -151,6 +151,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
     use std::pin::pin;
     use std::task::{Context, Waker};
 
@@ -160,10 +161,15 @@ mod tests {
 
     #[test]
     fn sender_disposal_panic_is_contained() {
+        let invoked = Cell::new(false);
         std::panic::catch_unwind(AssertUnwindSafe(|| {
-            dispose_sender(|| panic!("sender drop"));
+            dispose_sender(|| {
+                invoked.set(true);
+                panic!("sender drop");
+            });
         }))
         .unwrap();
+        assert!(invoked.get());
     }
 
     #[test]
