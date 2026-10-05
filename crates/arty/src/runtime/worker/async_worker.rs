@@ -643,7 +643,7 @@ mod tests {
 
         command_tx
             .send(AsyncWorkerCommand::EnqueueTask {
-                future_factory: Box::new(move |_, _| {
+                future_factory: Box::new(move |(), _| {
                     invoked_by_factory.store(true, Ordering::Relaxed);
                 }),
             })
